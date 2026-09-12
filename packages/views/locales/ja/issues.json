@@ -111,6 +111,12 @@
     "blocked": "ブロック中",
     "cancelled": "キャンセル済み"
   },
+  "status_category": {
+    "unstarted": "未着手",
+    "started": "開始済み",
+    "done": "完了",
+    "closed": "終了"
+  },
   "priority": {
     "urgent": "緊急",
     "high": "高",

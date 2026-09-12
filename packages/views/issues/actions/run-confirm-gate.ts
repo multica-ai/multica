@@ -1,6 +1,6 @@
 import type { Issue, IssueStatusCategory, UpdateIssueRequest } from "@multica/core/types";
 import { issueStatusCategory } from "@multica/core/issues";
-import { isIssueStatusCategory, type IssueStatusCatalog } from "@multica/core/issue-statuses";
+import { normalizeIssueStatusCategory, type IssueStatusCatalog } from "@multica/core/issue-statuses";
 
 /** The issue fields the gate reads. */
 export type GateIssue = Pick<
@@ -28,13 +28,13 @@ export type RunConfirmIntent =
  * The category a status KEY belongs to — or `null` when nothing can answer.
  *
  * Three states, not two. `catalog.categoryOf` collapses "unknown custom key"
- * into `todo`, which is indistinguishable from a real `todo` and is exactly
+ * into `unstarted`, which is indistinguishable from a real lifecycle category and is exactly
  * the guess this gate must not make: it decides whether a write may start an
  * agent, so an unresolvable key has to stay unresolved and let the caller fail
  * safe. (MUL-6463)
  *
- * Resolution order mirrors the server (`issuestatus.Effective`): a category the
- * payload already carries wins, a BUILT-IN key is its own category, and only a
+ * Resolves lifecycle classification, not special built-in behavior: a category the
+ * payload already carries wins, a BUILT-IN key maps to its lifecycle category, and only a
  * custom key needs the workspace catalog.
  */
 export function resolveStatusCategory(
@@ -45,11 +45,11 @@ export function resolveStatusCategory(
   const carried = issueStatusCategory({ status: statusKey, status_category: carriedCategory });
   if (carried) return carried;
   const category = catalog.entryOf(statusKey)?.category;
-  return category && isIssueStatusCategory(category) ? category : null;
+  return category ? normalizeIssueStatusCategory(category) : null;
 }
 
 /** Categories a promotion can land in without starting a run. */
-const NEVER_STARTS = ["backlog", "done", "cancelled"];
+const NEVER_STARTS: IssueStatusCategory[] = ["done", "closed"];
 
 /**
  * Which confirmation, if any, an issue write needs before it is applied.
@@ -59,13 +59,12 @@ const NEVER_STARTS = ["backlog", "done", "cancelled"];
  * routes on one answer instead of re-deriving it (MUL-6463).
  *
  * - **assign**: giving the issue an agent/squad owner. Skipped only when the
- *   issue is KNOWN to be parked, because assigning into the backlog category
+ *   issue is on the fixed backlog key, because assigning into that status
  *   never starts a run (`server/internal/service/issue_trigger.go`) and the
  *   dialog would promise something that cannot happen.
- * - **promote**: moving an already-owned issue out of the backlog category.
+ * - **promote**: moving an already-owned issue out of the fixed backlog status.
  *   That status change alone starts the run (`RunSourceStatus`), so it earns
- *   the same dialog — for built-in `todo` and every custom Todo-category
- *   status alike.
+ *   the same dialog when the target is not terminal, including custom statuses.
  *
  * Unresolvable categories fail toward confirming: a dialog the user dismisses
  * costs a click, a silent start costs an unwanted agent run.
@@ -76,7 +75,7 @@ export function runConfirmIntent(
   catalog: Pick<IssueStatusCatalog, "entryOf">,
 ): RunConfirmIntent | null {
   const issueCategory = resolveStatusCategory(issue.status, issue.status_category, catalog);
-  const parked = issueCategory === "backlog";
+  const parked = issue.status === "backlog";
 
   if (
     (updates.assignee_type === "agent" || updates.assignee_type === "squad") &&
@@ -102,7 +101,7 @@ export function runConfirmIntent(
   ) {
     const target = resolveStatusCategory(updates.status, undefined, catalog);
     // An unresolvable TARGET is possibly-active for the same reason.
-    if (target === null || !NEVER_STARTS.includes(target)) {
+    if (updates.status !== "backlog" && (target === null || !NEVER_STARTS.includes(target))) {
       return {
         issueIds: [issue.id],
         mode: "promote",

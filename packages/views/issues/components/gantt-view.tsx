@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import type { GanttZoom } from "@multica/core/issues/stores/view-store";
@@ -296,13 +297,10 @@ function BackgroundLayer({
 // lookup `undefined` for every custom key, so the bar lost its color entirely.
 // (MUL-6243)
 const STATUS_BAR_BG: Record<IssueStatusCategory, string> = {
-  backlog: "bg-muted-foreground/60",
-  todo: "bg-muted-foreground/70",
-  in_progress: "bg-warning",
-  in_review: "bg-success",
+  unstarted: "bg-muted-foreground/70",
+  started: "bg-warning",
   done: "bg-info",
-  blocked: "bg-destructive",
-  cancelled: "bg-muted-foreground/40",
+  closed: "bg-muted-foreground/40",
 };
 
 // ---------------------------------------------------------------------------
@@ -324,6 +322,7 @@ function ScheduledRow({
   const locale = useLocale();
   const p = useWorkspacePaths();
   const wsId = useWorkspaceId();
+  const { colorOf, iconOf } = useIssueStatuses(wsId);
   const { data: projects = [] } = useQuery({
     ...projectListOptions(wsId),
     enabled: !!issue.project_id,
@@ -378,6 +377,8 @@ function ScheduledRow({
         >
           <StatusIcon
             status={issue.status}
+            color={colorOf(issue.status)}
+            icon={iconOf(issue.status)}
             category={issueStatusCategory(issue) ?? undefined}
             className="h-3.5 w-3.5"
           />
@@ -413,7 +414,7 @@ function ScheduledRow({
                       bar.isMarker
                         ? "h-3 w-3 rotate-45 rounded-[2px]"
                         : "h-5 rounded-md",
-                      STATUS_BAR_BG[issueStatusCategory(issue) ?? "todo"],
+                      STATUS_BAR_BG[issueStatusCategory(issue) ?? "unstarted"],
                       inverted && "ring-2 ring-destructive ring-offset-1 ring-offset-background",
                     )}
                     style={{ left: bar.left, width: bar.width }}

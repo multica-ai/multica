@@ -77,7 +77,7 @@ export function InboxDetailLabel({
   const { getName } = useActorLookup();
   // `details.to` is a status KEY and may be a custom one, so its name, colour
   // and glyph all resolve through the workspace catalog. (MUL-6243)
-  const { categoryOf, colorOf, labelOf } = useIssueStatuses();
+  const { categoryOf, colorOf, labelOf, iconOf } = useIssueStatuses();
   const details = item.details ?? {};
 
   // Cases with inline icons → Row layout.
@@ -89,7 +89,7 @@ export function InboxDetailLabel({
         <StatusIcon
           status={status}
           category={categoryOf(status)}
-          color={colorOf(status)}
+          icon={iconOf(status)} color={colorOf(status)}
           size={12}
         />
         <Text className="text-xs text-muted-foreground" numberOfLines={1}>

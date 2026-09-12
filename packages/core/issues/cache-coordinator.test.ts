@@ -151,7 +151,7 @@ function makeIssue(idx: number, overrides: Partial<Issue> = {}): Issue {
     due_date: null,
     labels: [],
     metadata: {},
-  properties: {},
+    properties: {},
     created_at: "2025-01-01T00:00:00Z",
     updated_at: "2025-01-01T00:00:00Z",
     ...overrides,
@@ -161,11 +161,11 @@ function makeIssue(idx: number, overrides: Partial<Issue> = {}): Issue {
 function bucketed(issues: Issue[], extraTotal = 0): ListIssuesCache {
   return {
     byStatus: {
-      todo: {
+      unstarted: {
         issues: issues.filter((i) => i.status === "todo"),
         total: issues.filter((i) => i.status === "todo").length + extraTotal,
       },
-      in_progress: {
+      started: {
         issues: issues.filter((i) => i.status === "in_progress"),
         total: issues.filter((i) => i.status === "in_progress").length,
       },
@@ -173,12 +173,12 @@ function bucketed(issues: Issue[], extraTotal = 0): ListIssuesCache {
   };
 }
 
-function ids(qc: QueryClient, key: readonly unknown[], status: "todo" | "in_progress") {
+function ids(qc: QueryClient, key: readonly unknown[], status: "unstarted" | "started") {
   const cache = qc.getQueryData<ListIssuesCache>(key);
   return (cache?.byStatus[status]?.issues ?? []).map((i) => i.id);
 }
 
-function total(qc: QueryClient, key: readonly unknown[], status: "todo" | "in_progress") {
+function total(qc: QueryClient, key: readonly unknown[], status: "unstarted" | "started") {
   return qc.getQueryData<ListIssuesCache>(key)?.byStatus[status]?.total;
 }
 
@@ -208,7 +208,7 @@ describe("applyIssueChange", () => {
 
     for (const key of [wsKey, myAssignedKey, involvedKey]) {
       const cache = qc.getQueryData<ListIssuesCache>(key);
-      expect(cache?.byStatus.todo?.issues[0]?.title).toBe("renamed");
+      expect(cache?.byStatus.unstarted?.issues[0]?.title).toBe("renamed");
     }
     expect(qc.getQueryData<Issue>(issueKeys.detail(WS_ID, "issue-1"))?.title).toBe(
       "renamed",
@@ -325,8 +325,8 @@ describe("applyIssueChange", () => {
     });
 
     // The card is patched in place in both (no status/position move).
-    expect(ids(qc, wsKey, "todo")).toEqual(["issue-1"]);
-    expect(ids(qc, wsUpdatedKey, "todo")).toEqual(["issue-1"]);
+    expect(ids(qc, wsKey, "unstarted")).toEqual(["issue-1"]);
+    expect(ids(qc, wsUpdatedKey, "unstarted")).toEqual(["issue-1"]);
     // Only the updated_at-sorted board is marked for a server re-sort; the
     // edit advanced updated_at so its loaded slot drifted.
     const stale = result.staleKeys.map(hashKey);
@@ -414,17 +414,17 @@ describe("applyIssueChange", () => {
       baseIssue: issue(),
     });
 
-    expect(ids(qc, wsKey, "todo")).toEqual([]);
-    expect(ids(qc, wsKey, "in_progress")).toEqual(["issue-1"]);
+    expect(ids(qc, wsKey, "unstarted")).toEqual([]);
+    expect(ids(qc, wsKey, "started")).toEqual(["issue-1"]);
     expect(
       qc.getQueryData<InboxItem[]>(inboxKey)?.[0]?.issue_status,
     ).toBe("in_progress");
 
     // Off-window count arithmetic: todo 3 → 2, in_progress 0 → 1, loaded
     // arrays untouched (never hard-insert).
-    expect(total(qc, projectP1Key, "todo")).toBe(2);
-    expect(total(qc, projectP1Key, "in_progress")).toBe(1);
-    expect(ids(qc, projectP1Key, "todo")).toEqual([]);
+    expect(total(qc, projectP1Key, "unstarted")).toBe(2);
+    expect(total(qc, projectP1Key, "started")).toBe(1);
+    expect(ids(qc, projectP1Key, "unstarted")).toEqual([]);
 
     const staleHashes = result.staleKeys.map(hashKey);
     // The moved list IS flagged stale: the row now counted in in_progress
@@ -507,7 +507,7 @@ describe("applyIssueChange", () => {
       baseIssue: issue(),
     });
 
-    expect(total(qc, myAssignedKey, "todo")).toBe(1);
+    expect(total(qc, myAssignedKey, "unstarted")).toBe(1);
     expect(result.staleKeys).toEqual([]);
   });
 
@@ -522,7 +522,7 @@ describe("applyIssueChange", () => {
       baseIssue: issue(),
     });
 
-    expect(total(qc, membersKey, "todo")).toBe(5);
+    expect(total(qc, membersKey, "unstarted")).toBe(5);
     expect(result.staleKeys).toEqual([]);
   });
 
@@ -535,7 +535,7 @@ describe("applyIssueChange", () => {
       changed: issueChangedDims(patch, issue()),
       baseIssue: issue(),
     });
-    expect(total(qc, projectP1Key, "todo")).toBe(2);
+    expect(total(qc, projectP1Key, "unstarted")).toBe(2);
 
     rollbackIssueChange(qc, WS_ID, "issue-1", result);
     expect(qc.getQueryData<ListIssuesCache>(projectP1Key)).toEqual(snapshot);
@@ -556,14 +556,14 @@ describe("applyIssueChange", () => {
 
     // The bug this fixes: the card must LEAVE my-assigned immediately —
     // no WS echo, no refetch needed.
-    expect(ids(qc, myAssignedKey, "todo")).toEqual([]);
-    expect(total(qc, myAssignedKey, "todo")).toBe(0);
+    expect(ids(qc, myAssignedKey, "unstarted")).toEqual([]);
+    expect(total(qc, myAssignedKey, "unstarted")).toBe(0);
     // Workspace board and members tab (bob is still a member) keep the card,
     // with the new assignee patched in.
-    expect(ids(qc, wsKey, "todo")).toEqual(["issue-1"]);
-    expect(ids(qc, membersKey, "todo")).toEqual(["issue-1"]);
+    expect(ids(qc, wsKey, "unstarted")).toEqual(["issue-1"]);
+    expect(ids(qc, membersKey, "unstarted")).toEqual(["issue-1"]);
     expect(
-      qc.getQueryData<ListIssuesCache>(membersKey)?.byStatus.todo?.issues[0]
+      qc.getQueryData<ListIssuesCache>(membersKey)?.byStatus.unstarted?.issues[0]
         ?.assignee_id,
     ).toBe("bob");
 
@@ -592,10 +592,10 @@ describe("applyIssueChange", () => {
       baseIssue: issue(),
     });
 
-    expect(ids(qc, membersKey, "todo")).toEqual([]);
+    expect(ids(qc, membersKey, "unstarted")).toEqual([]);
     // Never hard-insert into the agents tab — the right page/slot is server
     // knowledge; the loaded list is flagged for refetch instead.
-    expect(ids(qc, agentsKey, "todo")).toEqual([]);
+    expect(ids(qc, agentsKey, "unstarted")).toEqual([]);
     expect(result.staleKeys.map(hashKey)).toContain(hashKey(agentsKey));
   });
 
@@ -611,11 +611,11 @@ describe("applyIssueChange", () => {
       baseIssue: issue(),
     });
 
-    expect(ids(qc, projectP1Key, "todo")).toEqual([]);
-    expect(total(qc, projectP1Key, "todo")).toBe(0);
-    expect(ids(qc, wsKey, "todo")).toEqual(["issue-1"]);
+    expect(ids(qc, projectP1Key, "unstarted")).toEqual([]);
+    expect(total(qc, projectP1Key, "unstarted")).toBe(0);
+    expect(ids(qc, wsKey, "unstarted")).toEqual(["issue-1"]);
     // Assignee list membership is untouched by a project move.
-    expect(ids(qc, myAssignedKey, "todo")).toEqual(["issue-1"]);
+    expect(ids(qc, myAssignedKey, "unstarted")).toEqual(["issue-1"]);
 
     const staleHashes = result.staleKeys.map(hashKey);
     expect(staleHashes).toContain(hashKey(projectP2Key));
@@ -662,7 +662,7 @@ describe("applyIssueChange", () => {
       changed: issueChangedDims(patch, issue()),
       baseIssue: issue(),
     });
-    expect(ids(qc, myAssignedKey, "todo")).toEqual([]);
+    expect(ids(qc, myAssignedKey, "unstarted")).toEqual([]);
 
     rollbackIssueChange(qc, WS_ID, "issue-1", result);
 

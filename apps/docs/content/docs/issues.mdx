@@ -40,7 +40,16 @@ Assignment does not bypass an agent's Access; when assigning to a squad, the lea
 
 ## Status
 
-Every workspace starts with seven built-in statuses. They are also the seven **categories** — the fixed set of behaviors Multica knows about — so each built-in status names its own category.
+Every workspace starts with seven built-in statuses, grouped into four lifecycle categories:
+
+| Category | Built-in statuses | Meaning |
+|---|---|---|
+| `unstarted` | `backlog`, `todo` | Work that has not started, whether planned or deferred. |
+| `started` | `in_progress`, `in_review`, `blocked` | Work has started, is awaiting review, or cannot continue for now. |
+| `done` | `done` | Successfully finished; terminal. |
+| `closed` | `cancelled` | No longer pursued; terminal, not successful completion. |
+
+Categories keep boards, lists, and filters simple. Concrete statuses still preserve the more specific workflow behavior agents and automations rely on.
 
 | Status | Meaning |
 |---|---|
@@ -65,26 +74,23 @@ Two changes are made by the system:
 
 ### Custom statuses
 
-A workspace owner or admin can add statuses of their own under **Settings → Issue Statuses** — `Code Review`, `QA`, `Rework`. Each new status picks one of the seven categories and inherits that category's behavior in full:
+A workspace owner or admin can add statuses under **Settings → Issue Statuses** — `Code Review`, `QA`, `Rework`. Every status belongs to one of four lifecycle categories:
 
-| Category | What every status in it does |
+| Category | Lifecycle meaning |
 |---|---|
-| `backlog` | Parked: assigning an agent never starts a run. Moving the issue out of this category is what starts one, unless the target is `done` or `cancelled`. |
-| `todo` | Queued to start. Unlike `backlog`, assigning an agent to an issue here starts a run right away. |
-| `in_progress` | Counts as actively worked on: a run that fails with nothing else in flight rolls the issue back to `todo`. |
-| `in_review` | Counts as delivered and waiting on review: it finalizes an [autopilot](/autopilots) run, and past run-failure notifications are archived automatically. |
-| `done` | Counts as finished: it closes out a sub-issue stage and counts toward the parent's progress. |
-| `blocked` | Stalled on something external; nothing resumes on its own. |
-| `cancelled` | No longer pursued, record kept; also terminal for a sub-issue stage. |
+| `unstarted` | Not started. Includes built-in Backlog and Todo. |
+| `started` | Ongoing, including review and waiting. |
+| `done` | Successfully completed; terminal. |
+| `closed` | Cancelled or no longer pursued; terminal, not successful completion. |
 
-So a `Code Review` status in the `in_review` category ends an autopilot run exactly like `in_review` does, and moving an issue out of `backlog` into a `Rework` status in the `todo` category starts the assigned agent exactly like moving it to `todo` would.
+Custom statuses inherit lifecycle semantics only. They do not inherit built-in Backlog parking, In Review autopilot completion, Blocked failure, or In Progress recovery. Use the fixed built-in status when that behavior is required. Historical custom statuses follow the same rules: Awaiting Response is ongoing work, not automatic review completion. Assignment and creation still follow the general agent trigger rules.
 
-The name is what your team reads; the category is what the platform acts on. Wherever the rest of this documentation says a status triggers something, that rule belongs to the category, so a custom status inside it is covered too. It does not work in reverse: when the platform sets a status itself — the rollback to `todo` or the `done` on a merged PR above — it writes the built-in status, never a custom one from that category.
+For installed clients, existing API category fields retain the seven-value wire enum. New clients normalize that representation into four categories; wire values never grant behavior inheritance. The database stores only the four lifecycle values.
 
 Four things follow from that model:
 
-- **A status's category is fixed once the status exists.** Changing it later would silently rewrite what the platform does with every issue already sitting on that status, so the editor keeps it read-only. Choose the behavior first, then name it.
-- **Board columns are categories, not statuses.** Adding a status never adds a column — there is one column per category. A custom status sits in its category's column, and its cards carry a small chip with the status name, so `Code Review` and `QA` stay distinguishable inside In Review.
+- **A status's category is fixed once the status exists.** Changing it later would change the lifecycle behavior of every issue already sitting on that status, so the editor keeps it read-only. Choose the lifecycle stage first, then name it.
+- **Status grouping uses individual statuses.** Board columns, List sections, and Swimlane status columns each distinguish built-in and custom statuses. `Code Review` and `QA` have separate columns even though both belong to Started. Categories are internal lifecycle classifications, not replacement column names.
 - **Built-in statuses are locked.** Their names, colors, and categories cannot be changed, and they cannot be archived — a workspace that never opens the page keeps exactly the board it had.
 - **Archiving retires a status, it does not delete it.** Issues already on it keep it, keep its name and color, and keep behaving the same. It only stops being offered the next time someone sets a status.
 

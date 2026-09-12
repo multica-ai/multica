@@ -183,8 +183,8 @@ Current behavior:
   — on those paths the protocol instead carries an explicit "do not change this
   issue's status".
 
-The status names above are category rules: a custom status inherits its
-category's behavior in full.
+The status names above are fixed built-in keys. Custom statuses share only
+lifecycle semantics, not built-in parking, review, failure or recovery behavior.
 
 Assignment validation rejects a missing type/id pair, non-existent squad,
 archived squad, archived leader, and private leader when the actor cannot access

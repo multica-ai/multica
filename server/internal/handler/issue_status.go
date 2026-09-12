@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -33,6 +34,7 @@ type IssueStatusResponse struct {
 	Description string  `json:"description"`
 	Category    string  `json:"category"`
 	Color       string  `json:"color"`
+	Icon        string  `json:"icon"`
 	IsSystem    bool    `json:"is_system"`
 	Position    float64 `json:"position"`
 	ArchivedAt  *string `json:"archived_at"`
@@ -45,20 +47,22 @@ type IssueStatusResponse struct {
 // predicates instead of resolving the category once per issue row.
 func (h *Handler) terminalIssueStatusKeys(ctx context.Context, workspaceID pgtype.UUID) ([]string, error) {
 	return issuestatus.ExpandCategories(ctx, h.Queries, workspaceID, []string{
-		issuestatus.Done,
-		issuestatus.Cancelled,
+		issuestatus.CategoryDone,
+		issuestatus.CategoryClosed,
 	})
 }
 
 func issueStatusToResponse(s db.IssueStatus) IssueStatusResponse {
+	category := issuestatus.WireCategory(s.Key, s.Category)
 	return IssueStatusResponse{
 		ID:          uuidToString(s.ID),
 		WorkspaceID: uuidToString(s.WorkspaceID),
 		Key:         s.Key,
 		Name:        s.Name,
 		Description: s.Description,
-		Category:    s.Category,
+		Category:    category,
 		Color:       s.Color,
+		Icon:        s.Icon,
 		IsSystem:    s.IsSystem,
 		Position:    s.Position,
 		ArchivedAt:  timestampToPtr(s.ArchivedAt),
@@ -75,6 +79,7 @@ type CreateIssueStatusRequest struct {
 	Description string `json:"description"`
 	Category    string `json:"category"`
 	Color       string `json:"color"`
+	Icon        string `json:"icon"`
 }
 
 // UpdateIssueStatusRequest deliberately has no Key or Category field. Both are
@@ -84,6 +89,7 @@ type UpdateIssueStatusRequest struct {
 	Name        *string  `json:"name"`
 	Description *string  `json:"description"`
 	Color       *string  `json:"color"`
+	Icon        *string  `json:"icon"`
 	Position    *float64 `json:"position"`
 }
 
@@ -156,8 +162,14 @@ func (h *Handler) CreateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "description must be at most 256 characters")
 		return
 	}
-	if !issuestatus.IsCategory(req.Category) {
-		writeError(w, http.StatusBadRequest, "category must be one of: "+strings.Join(issuestatus.Canonical(), ", "))
+	category, validCategory := issuestatus.ParseCategory(req.Category)
+	if !validCategory {
+		writeError(w, http.StatusBadRequest, "category must be one of: "+strings.Join(issuestatus.Categories(), ", "))
+		return
+	}
+	req.Category = category
+	if !validIssueStatusIcon(req.Icon) {
+		writeError(w, http.StatusBadRequest, "invalid status icon")
 		return
 	}
 	color, err := normalizeColor(req.Color)
@@ -179,13 +191,14 @@ func (h *Handler) CreateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	entry, badRequest, err := h.createIssueStatusEntry(r.Context(), wsUUID, db.CreateIssueStatusEntryParams{
+	entry, badRequest, err := h.createIssueStatusEntry(r.Context(), wsUUID, req.Category, db.CreateIssueStatusEntryParams{
 		WorkspaceID: wsUUID,
 		Key:         explicitKey,
 		Name:        name,
 		Description: req.Description,
-		Category:    req.Category,
+		Category:    category,
 		Color:       strings.ToLower(color),
+		Icon:        req.Icon,
 	})
 	if badRequest != "" {
 		writeError(w, http.StatusBadRequest, badRequest)
@@ -209,21 +222,21 @@ func (h *Handler) CreateIssueStatus(w http.ResponseWriter, r *http.Request) {
 //
 // Derivation READS the catalog to choose a key nothing already owns, so the
 // read and the insert have to be a single atomic step: two admins creating a
-// Chinese-named in_review status at the same instant would otherwise both
-// compute `in_review_2`, and the loser would be told a key they never typed was
+// Chinese-named Started status at the same instant would otherwise both
+// compute `started_2`, and the loser would be told a key they never typed was
 // already taken. The EXCLUSIVE catalog lock — the same one archive takes —
 // serializes them.
 //
 // EVERY create takes that lock, including one that supplies its own key.
 // Excluding those would leave the race half-closed: an explicit-key insert of
-// `in_review_2` could still land between a derive's catalog read and its
+// `started_2` could still land between a derive's catalog read and its
 // insert, and the derive — a UI request with no key field to blame — would come
 // back 409. The lock is only contended by catalog writes, which are rare admin
 // actions, so serializing them costs nothing worth keeping the hole for.
 //
 // A non-empty second return is a caller error the handler reports as 400,
 // distinct from a nil-error success and from an infrastructure failure.
-func (h *Handler) createIssueStatusEntry(ctx context.Context, workspaceID pgtype.UUID, arg db.CreateIssueStatusEntryParams) (db.IssueStatus, string, error) {
+func (h *Handler) createIssueStatusEntry(ctx context.Context, workspaceID pgtype.UUID, publicCategory string, arg db.CreateIssueStatusEntryParams) (db.IssueStatus, string, error) {
 	tx, err := h.TxStarter.Begin(ctx)
 	if err != nil {
 		return db.IssueStatus{}, "", err
@@ -250,7 +263,7 @@ func (h *Handler) createIssueStatusEntry(ctx context.Context, workspaceID pgtype
 		for _, e := range entries {
 			taken[e.Key] = true
 		}
-		key, err := issuestatus.DeriveKey(arg.Name, arg.Category, taken)
+		key, err := issuestatus.DeriveKey(arg.Name, publicCategory, taken)
 		if err != nil {
 			return db.IssueStatus{}, err.Error(), nil
 		}
@@ -317,6 +330,14 @@ func (h *Handler) UpdateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		color = pgtype.Text{String: strings.ToLower(normalized), Valid: true}
 	}
+	var icon pgtype.Text
+	if req.Icon != nil {
+		if !validIssueStatusIcon(*req.Icon) {
+			writeError(w, http.StatusBadRequest, "invalid status icon")
+			return
+		}
+		icon = pgtype.Text{String: *req.Icon, Valid: true}
+	}
 	var position pgtype.Float8
 	if req.Position != nil {
 		position = pgtype.Float8{Float64: *req.Position, Valid: true}
@@ -328,6 +349,7 @@ func (h *Handler) UpdateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		Name:        name,
 		Description: description,
 		Color:       color,
+		Icon:        icon,
 		Position:    position,
 	})
 	if err != nil {
@@ -349,10 +371,18 @@ func (h *Handler) UpdateIssueStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, issueStatusToResponse(updated))
 }
 
-// ArchiveIssueStatus retires a custom status from FUTURE assignment. Issues
-// already on it are deliberately left alone — see the note on the transaction
-// below, which is also what makes "no new issue can be assigned an archived
-// status" exact rather than approximate.
+// These identifiers describe geometry, not workflow semantics. Empty selects
+// the category default. Unknown values are rejected on writes, not on reads.
+func validIssueStatusIcon(icon string) bool {
+	switch icon {
+	case "", "dotted", "circle", "half", "three_quarters", "check", "slash", "cross":
+		return true
+	default:
+		return false
+	}
+}
+
+// ArchiveIssueStatus retires an empty custom status from future assignment.
 func (h *Handler) ArchiveIssueStatus(w http.ResponseWriter, r *http.Request) {
 	entry, wsUUID, member, ok := h.loadIssueStatusForAdmin(w, r)
 	if !ok {
@@ -368,17 +398,9 @@ func (h *Handler) ArchiveIssueStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Archiving retires a status from FUTURE use and deliberately leaves issues
-	// already on it untouched: they keep their status, keep rendering, and keep
-	// resolving to their category's behavior (issuestatus.Effective ignores
-	// archived_at on purpose). Forcing a migration first would mean rewriting
-	// history to retire a label.
-	//
-	// The EXCLUSIVE catalog lock is still taken, and it is what makes "no NEW
-	// issue can be assigned an archived status" exact rather than approximate:
-	// an issue write targeting a custom status re-resolves it under the SHARED
-	// side of this lock (assertIssueStatusStillActive), so a write can never
-	// interleave between this archive and its own status check. (MUL-6243)
+	// Count and archive under the EXCLUSIVE catalog lock. Custom-status writers
+	// re-resolve under its SHARED side, so no assignment can enter between the
+	// empty check and the archive commit. Migration is a separate user action.
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		slog.Warn("ArchiveIssueStatus begin failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -391,6 +413,23 @@ func (h *Handler) ArchiveIssueStatus(w http.ResponseWriter, r *http.Request) {
 	if err := qtx.LockIssueStatusCatalog(r.Context(), wsUUID); err != nil {
 		slog.Warn("ArchiveIssueStatus lock failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to archive issue status")
+		return
+	}
+	count, err := qtx.CountIssuesUsingStatusKey(r.Context(), db.CountIssuesUsingStatusKeyParams{
+		WorkspaceID: wsUUID,
+		Key:         entry.Key,
+	})
+	if err != nil {
+		slog.Warn("ArchiveIssueStatus count failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to check issues using status")
+		return
+	}
+	if count > 0 {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":       fmt.Sprintf("cannot archive status: %d issues still use it; move them to another status first", count),
+			"code":        "issue_status_in_use",
+			"issue_count": count,
+		})
 		return
 	}
 
@@ -465,23 +504,19 @@ func (h *Handler) publishIssueStatusChanged(workspaceID string, actor db.Member,
 	})
 }
 
-// ReorderIssueStatusesRequest carries one category's custom statuses in their
-// new order. Reordering is scoped to a category because position is
-// intra-category: a status can only move relative to its own column.
-//
-// `ids` must name EVERY active custom status in the category. A partial order
-// is rejected rather than applied, because positions are assigned from the
-// array index: reordering a subset would write positions that collide with the
-// rows left out of it.
+// ReorderIssueStatusesRequest orders a category's active statuses. IncludeSystem
+// opts into the complete set; omitted/false preserves the custom-only API used
+// by installed clients. Partial sets are rejected in either mode.
 type ReorderIssueStatusesRequest struct {
-	Category string   `json:"category"`
-	IDs      []string `json:"ids"`
+	Category      string   `json:"category"`
+	IDs           []string `json:"ids"`
+	IncludeSystem bool     `json:"include_system"`
 }
 
-// ReorderIssueStatuses rewrites the intra-category order of a category's custom
+// ReorderIssueStatuses rewrites the intra-category order of a category's
 // statuses, atomically.
 //
-// Everything happens inside ONE transaction holding the catalog's SHARED lock,
+// Everything happens inside ONE transaction holding the catalog's EXCLUSIVE lock,
 // which is the archive path's counterpart. That is not decoration:
 //
 //   - Validating outside the transaction leaves a window. "Validate A and B →
@@ -507,8 +542,9 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if !issuestatus.IsCategory(req.Category) {
-		writeError(w, http.StatusBadRequest, "category must be one of: "+strings.Join(issuestatus.Canonical(), ", "))
+	category, validCategory := issuestatus.ParseCategory(req.Category)
+	if !validCategory {
+		writeError(w, http.StatusBadRequest, "category must be one of: "+strings.Join(issuestatus.Categories(), ", "))
 		return
 	}
 	if len(req.IDs) == 0 {
@@ -540,27 +576,30 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
-	// SHARED side of the catalog lock: it does not block other reorders or
-	// issue writes, only the EXCLUSIVE archive path. That is what closes the
-	// validate-then-write window.
-	if err := qtx.LockIssueStatusCatalogShared(r.Context(), wsUUID); err != nil {
+	// Serialize reorders as well as create/archive, including legacy requests
+	// that reuse custom rows' existing slots among movable built-ins.
+	if err := qtx.LockIssueStatusCatalog(r.Context(), wsUUID); err != nil {
 		slog.Warn("ReorderIssueStatuses lock failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to reorder issue statuses")
 		return
 	}
 
-	// The authoritative set, read under the lock. Comparing the payload against
-	// it covers every rejection case at once: a built-in, an archived status,
-	// another category's status, another workspace's row, and — the case a
-	// per-id check misses — an active status the payload simply left out.
-	active, err := qtx.ListActiveCustomIssueStatusEntries(r.Context(), db.ListActiveCustomIssueStatusEntriesParams{
-		WorkspaceID: wsUUID,
-		Category:    req.Category,
+	// Read the authoritative set under the lock, including built-ins only when
+	// the caller opts in. No schema or response change is needed.
+	catalog, err := qtx.ListIssueStatusEntries(r.Context(), db.ListIssueStatusEntriesParams{
+		WorkspaceID:     wsUUID,
+		IncludeArchived: false,
 	})
 	if err != nil {
 		slog.Warn("ReorderIssueStatuses list failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to reorder issue statuses")
 		return
+	}
+	active := make([]db.IssueStatus, 0, len(catalog))
+	for _, entry := range catalog {
+		if entry.Category == category && (req.IncludeSystem || !entry.IsSystem) {
+			active = append(active, entry)
+		}
 	}
 	activeIDs := make(map[string]struct{}, len(active))
 	for _, entry := range active {
@@ -584,11 +623,11 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 		case err != nil:
 			slog.Warn("load issue status for reorder failed", append(logger.RequestAttrs(r), "error", err)...)
 			writeError(w, http.StatusInternalServerError, "failed to reorder issue statuses")
-		case entry.IsSystem:
-			writeError(w, http.StatusForbidden, "built-in statuses cannot be reordered")
+		case entry.IsSystem && !req.IncludeSystem:
+			writeError(w, http.StatusForbidden, "include_system is required to reorder built-in statuses")
 		case entry.ArchivedAt.Valid:
 			writeError(w, http.StatusConflict, "archived statuses cannot be reordered")
-		case entry.Category != req.Category:
+		case entry.Category != category:
 			writeError(w, http.StatusBadRequest, "ids must all belong to the requested category")
 		default:
 			writeError(w, http.StatusConflict, "issue status catalog changed during reorder")
@@ -599,13 +638,25 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 	// Applying it would assign positions from the array index and collide with
 	// the omitted row, so the whole request is refused.
 	if len(active) != len(ids) {
-		writeError(w, http.StatusConflict, "ids must name every active custom status in the category")
+		writeError(w, http.StatusConflict, "ids must name every active status in the requested reorder scope")
 		return
 	}
 
+	positions := make([]float64, len(ids))
+	for i := range ids {
+		if req.IncludeSystem {
+			positions[i] = float64(i + 1)
+		} else {
+			// Old clients reorder only the custom slots, without moving built-ins
+			// or colliding with their newly configurable positions.
+			positions[i] = active[i].Position
+		}
+	}
 	affected, err := qtx.ReorderIssueStatusEntries(r.Context(), db.ReorderIssueStatusEntriesParams{
-		Ids:         ids,
-		WorkspaceID: wsUUID,
+		Ids:           ids,
+		WorkspaceID:   wsUUID,
+		Positions:     positions,
+		IncludeSystem: req.IncludeSystem,
 	})
 	if err != nil {
 		slog.Warn("ReorderIssueStatuses failed", append(logger.RequestAttrs(r), "error", err)...)

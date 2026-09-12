@@ -80,6 +80,9 @@ func (f *fakeQuerier) ListIssueStatusKeysByCategories(_ context.Context, arg db.
 }
 
 func custom(key, category string) db.IssueStatus {
+	if normalized, ok := ParseCategory(category); ok {
+		category = normalized
+	}
 	return db.IssueStatus{Key: key, Category: category, WorkspaceID: testWorkspace}
 }
 
@@ -107,10 +110,10 @@ func TestEffectiveMapsCustomStatusToItsCategory(t *testing.T) {
 	)
 
 	cases := map[string]string{
-		"human_review":        InReview,
-		"rework":              Todo,
+		"human_review":        "human_review",
+		"rework":              "rework",
 		"gate_approved":       Done,
-		"waiting_on_customer": Blocked,
+		"waiting_on_customer": "waiting_on_customer",
 	}
 	for key, want := range cases {
 		if got := Effective(context.Background(), q, testWorkspace, key); got != want {
@@ -158,7 +161,8 @@ func TestResolveAcceptsBuiltInsWithoutACatalogRow(t *testing.T) {
 			t.Errorf("Resolve(%q) with an empty catalog failed: %v", key, err)
 			continue
 		}
-		if entry.Key != key || entry.Category != key {
+		category, _ := CategoryForBehavior(key)
+		if entry.Key != key || entry.Category != category {
 			t.Errorf("synthesized entry for %q = {key:%q category:%q}, want both %q",
 				key, entry.Key, entry.Category, key)
 		}
@@ -188,28 +192,28 @@ func TestResolveRejectsUnknownAndArchived(t *testing.T) {
 	}
 }
 
-// Every category must be the key of a built-in, and every built-in the name of
-// a category. This one-to-one correspondence is what lets Effective return
-// entry.Category directly as a status key, with no mapping step.
-func TestCategoriesAndBuiltInsAreTheSameSet(t *testing.T) {
-	for _, key := range Canonical() {
-		if !IsCategory(key) {
-			t.Errorf("built-in %q is not a valid category", key)
-		}
-	}
+func TestCategoriesCollapseBuiltInsIntoFourLifecycleGroups(t *testing.T) {
 	if len(Canonical()) != 7 {
 		t.Fatalf("expected 7 canonical statuses, got %d", len(Canonical()))
 	}
+	want := map[string]string{
+		Backlog: CategoryUnstarted, Todo: CategoryUnstarted,
+		InProgress: CategoryStarted, InReview: CategoryStarted, Blocked: CategoryStarted,
+		Done: CategoryDone, Cancelled: CategoryClosed,
+	}
+	for status, category := range want {
+		if got, ok := CategoryForBehavior(status); !ok || got != category {
+			t.Errorf("CategoryForBehavior(%q) = %q, %v; want %q, true", status, got, ok, category)
+		}
+	}
 }
 
-// The display order is shared with the frontend board and keeps actionable
-// Blocked work before the completed column.
-func TestCategoryRankMatchesBoardStatusOrder(t *testing.T) {
-	want := []string{"backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"}
-	got := Canonical()
+func TestCategoryRankUsesFourLifecycleOrder(t *testing.T) {
+	want := []string{"unstarted", "started", "done", "closed"}
+	got := Categories()
 	for i := range want {
 		if got[i] != want[i] {
-			t.Fatalf("Canonical()[%d] = %q, want %q (order matches frontend STATUS_ORDER)", i, got[i], want[i])
+			t.Fatalf("Categories()[%d] = %q, want %q", i, got[i], want[i])
 		}
 		if CategoryRank(want[i]) != i {
 			t.Errorf("CategoryRank(%q) = %d, want %d", want[i], CategoryRank(want[i]), i)
@@ -224,6 +228,11 @@ func TestValidateKeyRejectsReservedAndMalformed(t *testing.T) {
 	for _, key := range Canonical() {
 		if _, err := ValidateKey(key); err == nil {
 			t.Errorf("built-in key %q must be reserved against reuse", key)
+		}
+	}
+	for _, category := range Categories() {
+		if _, err := ValidateKey(category); err == nil {
+			t.Errorf("category key %q must be reserved against reuse", category)
 		}
 	}
 	for _, key := range []string{"", "  ", "In Review", "in-review", "_leading", "Ünicode", strings.Repeat("a", 33)} {
@@ -261,7 +270,7 @@ func TestDeriveKeyKeepsTheSlugForSluggableNames(t *testing.T) {
 		"Waiting — 客户":   "waiting",
 	}
 	for name, want := range cases {
-		got, err := DeriveKey(name, InReview, takenSet())
+		got, err := DeriveKey(name, CategoryStarted, takenSet())
 		if err != nil {
 			t.Errorf("DeriveKey(%q) failed: %v", name, err)
 			continue
@@ -283,32 +292,32 @@ func TestDeriveKeyKeepsTheSlugForSluggableNames(t *testing.T) {
 // 2 because the category's own built-in already owns the bare key.
 func TestDeriveKeyFallsBackToCategoryForNonLatinNames(t *testing.T) {
 	for _, name := range []string{"客户确认", "고객 확인", "確認待ち", "تأكيد العميل", "客戶確認"} {
-		got, err := DeriveKey(name, InReview, takenSet())
+		got, err := DeriveKey(name, CategoryStarted, takenSet())
 		if err != nil {
 			t.Fatalf("DeriveKey(%q) failed: %v", name, err)
 		}
-		if got != "in_review_2" {
-			t.Errorf("DeriveKey(%q) = %q, want %q", name, got, "in_review_2")
+		if got != "started_2" {
+			t.Errorf("DeriveKey(%q) = %q, want %q", name, got, "started_2")
 		}
 	}
 
 	// A second non-Latin status in the same category takes the next ordinal
 	// rather than colliding with the first.
-	got, err := DeriveKey("供应商确认", InReview, takenSet("in_review_2"))
+	got, err := DeriveKey("供应商确认", CategoryStarted, takenSet("started_2"))
 	if err != nil {
 		t.Fatalf("DeriveKey on a second non-Latin name failed: %v", err)
 	}
-	if got != "in_review_3" {
-		t.Errorf("second non-Latin in_review status = %q, want %q", got, "in_review_3")
+	if got != "started_3" {
+		t.Errorf("second non-Latin started status = %q, want %q", got, "started_3")
 	}
 
 	// The ordinal is per category, so a different category starts over.
-	got, err = DeriveKey("待排期", Todo, takenSet("in_review_2", "in_review_3"))
+	got, err = DeriveKey("待排期", CategoryUnstarted, takenSet("started_2", "started_3"))
 	if err != nil {
 		t.Fatalf("DeriveKey in another category failed: %v", err)
 	}
-	if got != "todo_2" {
-		t.Errorf("first non-Latin todo status = %q, want %q", got, "todo_2")
+	if got != "unstarted_2" {
+		t.Errorf("first non-Latin unstarted status = %q, want %q", got, "unstarted_2")
 	}
 }
 
@@ -318,7 +327,7 @@ func TestDeriveKeyFallsBackToCategoryForNonLatinNames(t *testing.T) {
 // built-in — and let it shadow one. Built-ins count as occupied regardless of
 // what the workspace reports.
 func TestDeriveKeyEvenWhenTheWorkspaceIsUnseeded(t *testing.T) {
-	got, err := DeriveKey("客户确认", InReview, takenSet())
+	got, err := DeriveKey("客户确认", CategoryStarted, takenSet())
 	if err != nil {
 		t.Fatalf("DeriveKey on an unseeded workspace failed: %v", err)
 	}
@@ -382,7 +391,7 @@ func TestDeriveKeyStillRefusesABuiltInSlug(t *testing.T) {
 // builds the key OUT of the category, so an unvalidated one would mint a key
 // that the storage CHECK may not even accept.
 func TestDeriveKeyRejectsAnUnknownCategory(t *testing.T) {
-	if _, err := DeriveKey("客户确认", "started", takenSet()); err == nil {
+	if _, err := DeriveKey("客户确认", "not_a_category", takenSet()); err == nil {
 		t.Error("a non-Latin name in an unknown category should be rejected")
 	}
 }
@@ -436,14 +445,14 @@ func TestDeriveKeyScanIsBoundedByTheCatalogNotAConstant(t *testing.T) {
 	// Same for the non-Latin fallback: the ordinal walks past any fixed cap.
 	keys = nil
 	for n := 2; n <= 1100; n++ {
-		keys = append(keys, "todo_"+strconv.Itoa(n))
+		keys = append(keys, "unstarted_"+strconv.Itoa(n))
 	}
-	got, err = DeriveKey("待排期", Todo, takenSet(keys...))
+	got, err = DeriveKey("待排期", CategoryUnstarted, takenSet(keys...))
 	if err != nil {
 		t.Fatalf("non-Latin fallback gave up on a large catalog: %v", err)
 	}
-	if got != "todo_1101" {
-		t.Errorf("non-Latin fallback = %q, want %q", got, "todo_1101")
+	if got != "unstarted_1101" {
+		t.Errorf("non-Latin fallback = %q, want %q", got, "unstarted_1101")
 	}
 }
 
@@ -472,7 +481,7 @@ func TestResolverAmortizesTheCatalogRead(t *testing.T) {
 
 	// Custom keys: the catalog is read once and reused.
 	for range 50 {
-		if got := r.Effective(ctx, q, "human_review"); got != InReview {
+		if got := r.Effective(ctx, q, "human_review"); got != "human_review" {
 			t.Fatalf("Effective(human_review) = %q, want %q", got, InReview)
 		}
 		if got := r.Effective(ctx, q, "gate_approved"); got != Done {
@@ -526,7 +535,7 @@ func TestResolverReportsCachedLoadFailure(t *testing.T) {
 		t.Fatalf("failure was not cached: status=%q, err=%v, reads=%d", got, r.Err(), q.lists)
 	}
 	fresh := NewResolver(testWorkspace)
-	if got := fresh.Effective(ctx, q, "parked"); got != Backlog || fresh.Err() != nil || q.lists != 2 {
+	if got := fresh.Effective(ctx, q, "parked"); got != "parked" || fresh.Err() != nil || q.lists != 2 {
 		t.Fatalf("fresh resolver did not recover: status=%q, err=%v, reads=%d", got, fresh.Err(), q.lists)
 	}
 	if got := fresh.Effective(ctx, q, "unknown"); got != "unknown" || fresh.Err() != nil || q.lists != 2 {
@@ -540,24 +549,24 @@ func TestResolverReportsCachedLoadFailure(t *testing.T) {
 func TestExpandCategories(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("no catalog rows still yields the canonical keys", func(t *testing.T) {
-		got, err := ExpandCategories(ctx, newFakeQuerier(), testWorkspace, []string{"blocked"})
+	t.Run("no catalog rows still yields every built-in behavior", func(t *testing.T) {
+		got, err := ExpandCategories(ctx, newFakeQuerier(), testWorkspace, []string{CategoryStarted})
 		if err != nil {
 			t.Fatalf("expand: %v", err)
 		}
-		if len(got) != 1 || got[0] != "blocked" {
-			t.Errorf("expand(blocked) on an empty catalog = %v, want [blocked]", got)
+		if strings.Join(got, ",") != "in_progress,in_review,blocked" {
+			t.Errorf("expand(started) on an empty catalog = %v", got)
 		}
 	})
 
 	t.Run("includes custom keys and never duplicates the canonical one", func(t *testing.T) {
 		q := newFakeQuerier(custom("in_review", InReview), custom("human_review", InReview))
-		got, err := ExpandCategories(ctx, q, testWorkspace, []string{"in_review"})
+		got, err := ExpandCategories(ctx, q, testWorkspace, []string{CategoryStarted})
 		if err != nil {
 			t.Fatalf("expand: %v", err)
 		}
-		if len(got) != 2 {
-			t.Fatalf("expand(in_review) = %v, want exactly 2 keys with no duplicate", got)
+		if len(got) != 4 {
+			t.Fatalf("expand(started) = %v, want 3 built-ins plus custom with no duplicate", got)
 		}
 	})
 

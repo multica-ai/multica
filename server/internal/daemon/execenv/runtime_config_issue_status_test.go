@@ -13,7 +13,7 @@ const legacyStatusLine = "- `multica issue status <id> <status> [--no-start]` �
 
 // catalogBridgeBullet is the workflow-section bridge from category rules to a
 // concrete key choice; it must appear exactly when a catalog is present.
-const catalogBridgeBullet = "- The status rules above are category rules — every status in this workspace's catalog (`## Available Commands`) inherits them from its category. When a category holds more than one status, pick the specific one by its name/description or your instructions.\n"
+const catalogBridgeBullet = "- The workflow rules above name fixed built-in statuses, not categories. Custom statuses inherit only lifecycle semantics: done is successful completion; closed is cancellation. A custom started status does not replace in_review or blocked. Use the built-in key when its special workflow behavior is required.\n"
 
 func TestBriefStatusCatalogAbsentKeepsLegacyLine(t *testing.T) {
 	t.Parallel()
@@ -48,11 +48,11 @@ func TestBriefStatusCatalogRendered(t *testing.T) {
 		t.Errorf("catalog brief must replace the legacy seven-value enumeration")
 	}
 	for _, want := range []string{
-		"- `multica issue status <id> <status> [--no-start]` — flip status. This workspace's statuses by category — a custom status inherits its category's platform behavior in full:\n",
-		"  - `backlog`: `backlog` (built-in), `later` (Later — Deferred on purpose)\n",
-		"  - `todo`: `todo` (built-in), `rework` (Rework)\n",
-		"  - `in_review`: `in_review` (built-in), `human_review` (Human Review — Awaiting human acceptance)\n",
-		"  - Built-in key only: `in_progress`, `done`, `blocked`, `cancelled`.\n",
+		"- `multica issue status <id> <status> [--no-start]` — flip status. Categories describe lifecycle only; custom statuses do not inherit built-in parking, review, failure, or recovery behavior. Built-in status keys are fixed:\n",
+		"  - `unstarted`: `backlog`, `todo` (built-in), `later` (Later — Deferred on purpose), `rework` (Rework)\n",
+		"  - `done`: `done` (built-in)\n",
+		"  - `started`: `in_progress`, `in_review`, `blocked` (built-in), `human_review` (Human Review — Awaiting human acceptance)\n",
+		"  - `closed`: `cancelled` (built-in)\n",
 		catalogBridgeBullet,
 	} {
 		if !strings.Contains(out, want) {
@@ -80,8 +80,8 @@ func TestBriefStatusCatalogSanitizesAndDiscloses(t *testing.T) {
 	}
 	out := buildMetaSkillContent("claude", ctx)
 	for _, want := range []string{
-		`  - ` + "`in_review`: `in_review`" + ` (built-in), ` + "`qa`" + ` (QA \*bold\* # Heading — line1 line2 \[x\])` + "\n",
-		"  - Built-in key only: `backlog`, `todo`, `in_progress`, `done`, `blocked`, `cancelled`.\n",
+		`  - ` + "`started`: `in_progress`, `in_review`, `blocked`" + ` (built-in), ` + "`qa`" + ` (QA \*bold\* # Heading — line1 line2 \[x\])` + "\n",
+		"  - `unstarted`: `backlog`, `todo` (built-in)\n",
 		"  - …and 4 more custom statuses not listed; an invalid status errors with the full valid list.\n",
 	} {
 		if !strings.Contains(out, want) {

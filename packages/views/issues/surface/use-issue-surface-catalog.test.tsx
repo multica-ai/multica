@@ -22,8 +22,7 @@ import { useIssueSurfaceController } from "./use-issue-surface-controller";
  * - A CUSTOM status filter cannot be routed to a column until the catalog
  *   answers. Fetching zero branches meanwhile renders an empty board with no
  *   spinner; failing renders one permanently, with no way to retry.
- * - `status_category` is a server contract this feature introduced, so it must
- *   not be sent until the catalog proves this workspace has a custom status.
+ * - Each concrete status becomes a branch only after catalog resolution.
  */
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
@@ -34,7 +33,7 @@ const QA_ENTRY: IssueStatusEntry = {
   key: "qa",
   name: "QA",
   description: "",
-  category: "in_review",
+  category: "started",
   color: "#ff0000",
   is_system: false,
   position: 1,
@@ -142,7 +141,7 @@ describe("useIssueSurfaceController — custom status filter vs a late catalog",
     });
 
     // Once the catalog answers, the filter routes to the column `qa` behaves as.
-    await waitFor(() => expect(result.current.visibleStatuses).toEqual(["in_review"]));
+    await waitFor(() => expect(result.current.visibleStatuses).toEqual(["qa"]));
     await waitFor(() => expect(result.current.isLoading).toBe(false));
   });
 
@@ -173,7 +172,7 @@ describe("useIssueSurfaceController — custom status filter vs a late catalog",
 });
 
 describe("useIssueSurfaceController — swimlane protocol", () => {
-  it("keeps the swimlane on the original contract with no custom statuses", async () => {
+  it("uses the category axis with no custom statuses", async () => {
     installApi(async () => ({ statuses: [], categories: [], total: 0 }));
     const { store, Wrapper } = makeWrapper(qc, "workspace:swimlane-plain");
     act(() => store.getState().setViewMode("swimlane"));
@@ -188,8 +187,7 @@ describe("useIssueSurfaceController — swimlane protocol", () => {
     );
 
     await waitFor(() => expect(groupRequests.length).toBeGreaterThan(0));
-    // Every request, not just the first: a new Web build must never send a
-    // group kind an un-upgraded backend would reject.
+    // Every request uses lifecycle grouping, even for built-in-only catalogs.
     for (const request of groupRequests) {
       expect(request.group).toMatchObject({ kind: "compound", secondary: "status" });
     }
@@ -198,7 +196,7 @@ describe("useIssueSurfaceController — swimlane protocol", () => {
     }
   });
 
-  it("upgrades the swimlane to the category axis once a custom status exists", async () => {
+  it("keeps the category axis when a custom status exists", async () => {
     installApi(async () => ({ statuses: [QA_ENTRY], categories: [], total: 1 }));
     const { store, Wrapper } = makeWrapper(qc, "workspace:swimlane-custom");
     act(() => store.getState().setViewMode("swimlane"));
@@ -215,7 +213,7 @@ describe("useIssueSurfaceController — swimlane protocol", () => {
     await waitFor(() =>
       expect(
         groupRequests.some((request) =>
-          request.group.kind === "compound" && request.group.secondary === "status_category",
+          request.group.kind === "compound" && request.group.secondary === "status",
         ),
       ).toBe(true),
     );

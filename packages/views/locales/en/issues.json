@@ -113,6 +113,12 @@
     "blocked": "Blocked",
     "cancelled": "Cancelled"
   },
+  "status_category": {
+    "unstarted": "Unstarted",
+    "started": "Started",
+    "done": "Done",
+    "closed": "Closed"
+  },
   "priority": {
     "urgent": "Urgent",
     "high": "High",

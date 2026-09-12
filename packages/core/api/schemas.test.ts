@@ -2088,8 +2088,8 @@ describe("issue status catalog schemas", () => {
       total: 1,
     });
     expect(parsed.statuses[0]?.key).toBe("human_review");
-    expect(parsed.statuses[0]?.category).toBe("in_review");
-    expect(parsed.categories).toHaveLength(7);
+    expect(parsed.statuses[0]?.category).toBe("started");
+    expect(parsed.categories).toHaveLength(4);
   });
 
   it("falls back to the built-in categories on a malformed response", () => {
@@ -2100,9 +2100,9 @@ describe("issue status catalog schemas", () => {
       { endpoint: "GET /api/issue-statuses" },
     );
     expect(parsed).toEqual(EMPTY_LIST_ISSUE_STATUSES_RESPONSE);
-    // The fallback still names all 7 categories, so a client talking to a
-    // server that predates this endpoint can still render every built-in.
-    expect(parsed.categories).toHaveLength(7);
+    // The fallback still names all 5 lifecycle categories, so a malformed
+    // response cannot leave grouped issue surfaces without columns.
+    expect(parsed.categories).toHaveLength(4);
     expect(parsed.statuses).toEqual([]);
   });
 
@@ -2113,6 +2113,12 @@ describe("issue status catalog schemas", () => {
     expect(parsed.is_system).toBe(false);
     expect(parsed.position).toBe(0);
     expect(parsed.archived_at).toBeNull();
+  });
+
+  it.each([undefined, null, "", "three_quarters", "future-icon"])("keeps catalog readable with icon %s", (icon) => {
+    const parsed = IssueStatusEntrySchema.parse({ ...baseStatus, icon });
+    expect(parsed.key).toBe(baseStatus.key);
+    expect(parsed.icon).toBe(icon);
   });
 
   // PATCH /api/issue-statuses/reorder returns the same catalog shape as the

@@ -241,17 +241,14 @@ export type AssigneeGroupedIssuesFilter = Omit<
 export const ISSUE_PAGE_SIZE = 50;
 
 /**
- * CATEGORIES fetched and paginated into the list/board cache — all 7,
- * `cancelled` included. `cancelled` is a first-class default (MUL-4290), so it
- * lives in the cache and renders like any other column; there is no separate
+ * CATEGORIES fetched and paginated into the list/board cache — all four,
+ * `closed` included. It lives in the cache even when hidden by the surface's
+ * display preferences; there is no separate
  * "visible board" subset. This constant governs fetch/cache membership.
  *
- * Keyed on category, not on status key (MUL-6243). A workspace can define any
- * number of custom statuses, and bucketing by status would mean one more
- * parallel `listIssues` request on every board load per status added. Bucketing
- * by category keeps the fan-out fixed at 7 forever; a custom status appears in
- * the column of the category it inherits, and the card's own badge is what
- * shows which specific status it is on.
+ * These are internal legacy cache buckets, not user-facing columns.
+ * Board/List use independently paged exact-key table branches; Swimlane uses
+ * compound status branches. Never derive visible column identity from this cache.
  */
 export const PAGINATED_CATEGORIES: readonly IssueStatusCategory[] = ALL_STATUSES;
 

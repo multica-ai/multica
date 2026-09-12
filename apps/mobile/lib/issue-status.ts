@@ -1,12 +1,9 @@
 /**
  * Issue status resolution for mobile (MUL-6243).
  *
- * A workspace always has the 7 built-in statuses and may define custom ones.
- * Every status — built-in or custom — belongs to exactly one of the 7
- * CATEGORIES, and the category IS the behavior: a custom status in `in_review`
- * carries In Review's platform semantics, renders In Review's glyph, and sits
- * in In Review's section. So the value stored on an issue is a status KEY, and
- * nothing may group, label or draw it before resolving that key to a category.
+ * A workspace always has seven built-in status keys and may define custom
+ * ones. Every status belongs to one of four lifecycle categories. Concrete
+ * built-ins keep distinct behavior and glyphs inside those groups.
  *
  * Mirrored from `packages/core/issues/status-category.ts` and
  * `packages/core/issue-statuses/queries.ts` rather than imported: those modules
@@ -17,6 +14,7 @@
  * on behavior either.
  */
 import type {
+  BuiltInIssueStatus,
   Issue,
   IssuePriority,
   IssueStatus,
@@ -25,10 +23,17 @@ import type {
 } from "@multica/core/types";
 
 /**
- * The 7 categories in canonical display order. Mirrors `ALL_STATUSES` in
+ * The four categories in canonical display order. Mirrors `ALL_STATUSES` in
  * packages/core/issues/config/status.ts.
  */
 export const STATUS_CATEGORIES: IssueStatusCategory[] = [
+  "unstarted",
+  "started",
+  "done",
+  "closed",
+];
+
+export const BUILT_IN_STATUS_ORDER: BuiltInIssueStatus[] = [
   "backlog",
   "todo",
   "in_progress",
@@ -38,9 +43,19 @@ export const STATUS_CATEGORIES: IssueStatusCategory[] = [
   "cancelled",
 ];
 
+export const BUILT_IN_STATUS_CATEGORY: Record<BuiltInIssueStatus, IssueStatusCategory> = {
+  backlog: "unstarted",
+  todo: "unstarted",
+  in_progress: "started",
+  in_review: "started",
+  blocked: "started",
+  done: "done",
+  cancelled: "closed",
+};
+
 /**
  * The categories that get a section in mobile's grouped issue lists —
- * `cancelled` excluded, which is a documented mobile divergence (see
+ * `canceled` excluded, which is a documented mobile divergence (see
  * `components/project/project-related-issues.tsx`).
  *
  * These are CATEGORIES, not status keys: a workspace's custom statuses live
@@ -49,7 +64,7 @@ export const STATUS_CATEGORIES: IssueStatusCategory[] = [
  * the bucket existed but no section ever read it.
  */
 export const BOARD_CATEGORIES: IssueStatusCategory[] = STATUS_CATEGORIES.filter(
-  (category) => category !== "cancelled",
+  (category) => category !== "closed",
 );
 
 /**
@@ -58,7 +73,7 @@ export const BOARD_CATEGORIES: IssueStatusCategory[] = STATUS_CATEGORIES.filter(
  * its labels, exactly as web resolves built-ins through i18n and only custom
  * statuses through the catalog (`useStatusLabel`).
  */
-export const STATUS_LABEL: Record<IssueStatusCategory, string> = {
+export const STATUS_LABEL: Record<BuiltInIssueStatus, string> = {
   backlog: "Backlog",
   todo: "Todo",
   in_progress: "In Progress",
@@ -66,6 +81,13 @@ export const STATUS_LABEL: Record<IssueStatusCategory, string> = {
   done: "Done",
   blocked: "Blocked",
   cancelled: "Cancelled",
+};
+
+export const CATEGORY_LABEL: Record<IssueStatusCategory, string> = {
+  unstarted: "Unstarted",
+  started: "Started",
+  done: "Done",
+  closed: "Closed",
 };
 
 export const PRIORITY_LABEL: Record<IssuePriority, string> = {
@@ -77,27 +99,40 @@ export const PRIORITY_LABEL: Record<IssuePriority, string> = {
 };
 
 const CATEGORY_SET = new Set<string>(STATUS_CATEGORIES);
+const BUILT_IN_SET = new Set<string>(BUILT_IN_STATUS_ORDER);
 
 export function isIssueStatusCategory(value: string): value is IssueStatusCategory {
   return CATEGORY_SET.has(value);
 }
 
+export function isBuiltInIssueStatus(value: string): value is BuiltInIssueStatus {
+  return BUILT_IN_SET.has(value);
+}
+
+/** Accepts current categories and previous API response spellings. */
+export function normalizeIssueStatusCategory(value: string): IssueStatusCategory | null {
+  if (value === "completed") return "done";
+  if (value === "canceled") return "closed";
+  if (isIssueStatusCategory(value)) return value;
+  return isBuiltInIssueStatus(value) ? BUILT_IN_STATUS_CATEGORY[value] : null;
+}
+
 /**
  * Category for a bare status KEY, for render paths that hold only the string
  * and no catalog. Exact for the 7 built-ins — which is every status that exists
- * until an admin defines a custom one. A custom key answers `todo` so a lookup
+ * until an admin defines a custom one. A custom key answers `unstarted` so a lookup
  * always resolves to something renderable; surfaces that must show the real
  * status resolve through the catalog instead.
  */
 export function statusCategoryOfKey(statusKey: string): IssueStatusCategory {
-  return isIssueStatusCategory(statusKey) ? statusKey : "todo";
+  if (isBuiltInIssueStatus(statusKey)) return BUILT_IN_STATUS_CATEGORY[statusKey];
+  return normalizeIssueStatusCategory(statusKey) ?? "unstarted";
 }
 
 /**
  * The category an issue's status belongs to, or null when this payload cannot
  * answer. Reads the server-resolved `status_category` first and otherwise falls
- * back to the rule that makes that field optional — a built-in key IS its own
- * category.
+ * back to the fixed built-in key mapping.
  *
  * Pure: no catalog, so list grouping never has to wait on a fetch and never
  * guesses a category while one is in flight.
@@ -106,19 +141,22 @@ export function issueStatusCategory(
   issue: Pick<Issue, "status" | "status_category">,
 ): IssueStatusCategory | null {
   const fromServer = issue.status_category;
-  if (fromServer && isIssueStatusCategory(fromServer)) return fromServer;
-  if (isIssueStatusCategory(issue.status)) return issue.status;
+  if (fromServer) {
+    const normalized = normalizeIssueStatusCategory(fromServer);
+    if (normalized) return normalized;
+  }
+  if (isBuiltInIssueStatus(issue.status)) return BUILT_IN_STATUS_CATEGORY[issue.status];
   return null;
 }
 
 /**
  * The section an issue renders in — always an answer, never null.
  *
- * The unresolved fallback lands in `todo` rather than nowhere: a row in a
+ * The unresolved fallback lands in `unstarted` rather than nowhere: a row in a
  * possibly-wrong section is recoverable, a row in no section is invisible, and
  * invisible is the bug this exists to prevent ("counts and visibility must
  * agree", apps/mobile/CLAUDE.md). Unreachable in practice — the server sends a
- * category on every issue payload, and a built-in key is its own category.
+ * category on every issue payload, and every built-in key has a fixed category.
  */
 export function issueColumnCategory(
   issue: Pick<Issue, "status" | "status_category">,
@@ -127,11 +165,11 @@ export function issueColumnCategory(
 }
 
 /**
- * Whether an issue BEHAVES as a given category (MUL-6243).
+ * Whether an issue belongs to a given lifecycle category (MUL-6243).
  *
  * The one question every status-coupled product rule actually asks. Comparing
  * `issue.status` to a built-in key answers it only for a workspace with no
- * custom statuses: a custom status in the `done` category IS done, and code
+ * custom statuses: a custom status in the `completed` category is done, and code
  * that checks `status === "done"` silently disagrees.
  *
  * An unresolved custom key answers `false`, and that direction is deliberate —
@@ -145,7 +183,7 @@ export function issueBehavesAs(
   return issueStatusCategory(issue) === category;
 }
 
-/** True when the issue behaves as any of the given categories. */
+/** True when the issue belongs to any of the given categories. */
 export function issueBehavesAsAny(
   issue: Pick<Issue, "status" | "status_category">,
   categories: readonly IssueStatusCategory[],
@@ -155,7 +193,7 @@ export function issueBehavesAsAny(
 }
 
 /** The categories that mean "this issue is closed" — done or cancelled. */
-export const CLOSED_CATEGORIES: readonly IssueStatusCategory[] = ["done", "cancelled"];
+export const CLOSED_CATEGORIES: readonly IssueStatusCategory[] = ["done", "closed"];
 
 /**
  * The `#rrggbb` a surface must paint one catalog entry with, or null when it
@@ -187,7 +225,7 @@ export interface IssueStatusCatalog {
   statuses: IssueStatusEntry[];
   /** Assignable statuses — `statuses` minus archived ones. */
   activeStatuses: IssueStatusEntry[];
-  /** Category for a status key; the key itself when built-in, else `todo`. */
+  /** Category for a status key; exact when built-in, else `unstarted`. */
   categoryOf: (statusKey: string) => IssueStatusCategory;
   /** Label for a status key: mobile's copy for built-ins, the catalog's `name`
    *  for custom statuses, the raw key when neither resolves. */
@@ -196,6 +234,7 @@ export interface IssueStatusCatalog {
   entryOf: (statusKey: string) => IssueStatusEntry | undefined;
   /** See {@link issueStatusColor} — null keeps the category's token colour. */
   colorOf: (statusKey: string) => string | null;
+  iconOf: (statusKey: string) => string | null;
   /** ACTIVE statuses in one category, in display order. */
   inCategory: (category: IssueStatusCategory) => IssueStatusEntry[];
   /** True once the catalog has loaded; false while it is still in flight. */
@@ -217,19 +256,26 @@ export function buildIssueStatusCatalog(
     activeStatuses: list.filter((entry) => !entry.archived_at),
     categoryOf: (statusKey) => {
       const category = byKey.get(statusKey)?.category;
-      if (category && isIssueStatusCategory(category)) return category;
+      if (category) {
+        const normalized = normalizeIssueStatusCategory(category);
+        if (normalized) return normalized;
+      }
       return statusCategoryOfKey(statusKey);
     },
     entryOf: (statusKey) => byKey.get(statusKey),
     colorOf: (statusKey) => issueStatusColor(byKey.get(statusKey)),
+    iconOf: (statusKey) => byKey.get(statusKey)?.icon ?? null,
     labelOf: (statusKey) => {
       // Built-in first, so a workspace that never opened status settings reads
       // exactly as it did before the catalog existed.
-      if (isIssueStatusCategory(statusKey)) return STATUS_LABEL[statusKey];
+      if (isBuiltInIssueStatus(statusKey)) return STATUS_LABEL[statusKey];
       return byKey.get(statusKey)?.name ?? statusKey;
     },
     inCategory: (category) =>
-      list.filter((entry) => entry.category === category && !entry.archived_at),
+      list.filter(
+        (entry) =>
+          normalizeIssueStatusCategory(entry.category) === category && !entry.archived_at,
+      ),
     isLoaded: entries !== undefined,
   };
 }
@@ -250,11 +296,27 @@ export function isCustomStatus(
   // `is_system` is the authority. The key comparison is the backstop for a
   // server that does not send it — the schema defaults it to false, and a
   // built-in must stay silent either way.
-  return entry.is_system !== true && statusKey !== catalog.categoryOf(statusKey);
+  return entry.is_system !== true && !isBuiltInIssueStatus(statusKey);
+}
+
+const ICON_STATUS: Record<string, BuiltInIssueStatus> = {
+  dotted: "backlog", circle: "todo", half: "in_progress", three_quarters: "in_review",
+  check: "done", slash: "blocked", cross: "cancelled",
+};
+const CATEGORY_ICON_STATUS: Record<IssueStatusCategory, BuiltInIssueStatus> = {
+  unstarted: "todo", started: "in_progress", done: "done", closed: "cancelled",
+};
+
+/** Geometry only: custom shapes never change lifecycle or built-in behavior. */
+export function statusIconRenderer(status: string, category: IssueStatusCategory, icon?: string | null): BuiltInIssueStatus {
+  if (isBuiltInIssueStatus(status)) return status;
+  if (icon && Object.hasOwn(ICON_STATUS, icon)) return ICON_STATUS[icon];
+  return CATEGORY_ICON_STATUS[category] ?? "todo";
 }
 
 /** One row in the status picker / status filter. */
 export interface StatusOption {
+  icon: string | null;
   key: IssueStatus;
   /** The category this status behaves as — drives its glyph. */
   category: IssueStatusCategory;
@@ -281,13 +343,22 @@ export function statusOptions(catalog: IssueStatusCatalog): StatusOption[] {
   return STATUS_CATEGORIES.flatMap<StatusOption>((category) => {
     const entries = catalog.inCategory(category);
     if (entries.length === 0) {
-      return [{ key: category, category, label: STATUS_LABEL[category], color: null }];
+      return BUILT_IN_STATUS_ORDER.filter(
+        (status) => BUILT_IN_STATUS_CATEGORY[status] === category,
+      ).map((status) => ({
+        key: status,
+        category,
+        label: STATUS_LABEL[status],
+        color: null,
+        icon: null,
+      }));
     }
     return entries.map((entry) => ({
       key: entry.key,
       category,
       label: catalog.labelOf(entry.key),
       color: issueStatusColor(entry),
+      icon: entry.icon ?? null,
     }));
   });
 }

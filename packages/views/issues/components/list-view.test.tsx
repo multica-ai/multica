@@ -3,7 +3,8 @@ import { render, screen, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
-import type { Issue, IssueStatus, IssueStatusCategory } from "@multica/core/types";
+import { issueStatusKeys } from "@multica/core/issue-statuses/queries";
+import type { Issue, IssueStatus, IssueStatusEntry } from "@multica/core/types";
 import { ListView } from "./list-view";
 import { IssueContextMenuProvider } from "../actions";
 import { ScrollRestorationProvider } from "../../platform";
@@ -72,7 +73,7 @@ const mockViewState: {
   cardPropertyIds: string[];
   listCollapsedStatuses: IssueStatus[];
   toggleListCollapsed: (status: IssueStatus) => void;
-  showStatus: (status: IssueStatusCategory) => void;
+  showStatus: (status: IssueStatus) => void;
 } = {
   sortBy: "position",
   sortDirection: "asc",
@@ -114,13 +115,15 @@ vi.mock("./priority-icon", () => ({
 let lastOnDragStart: any = null;
 let lastOnDragCancel: any = null;
 let lastOnDragEnd: any = null;
+let lastOnDragOver: any = null;
 const stableSetNodeRef = () => {};
 
 vi.mock("@dnd-kit/core", () => ({
-  DndContext: ({ children, onDragStart, onDragCancel, onDragEnd }: any) => {
+  DndContext: ({ children, onDragStart, onDragCancel, onDragEnd, onDragOver }: any) => {
     lastOnDragStart = onDragStart;
     lastOnDragCancel = onDragCancel;
     lastOnDragEnd = onDragEnd;
+    lastOnDragOver = onDragOver;
     return children;
   },
   DragOverlay: () => null,
@@ -198,18 +201,21 @@ const emptyPage = {
 
 const PAGINATION = {
   todo: { ...emptyPage, total: 2 },
-  in_review: { ...emptyPage, total: 1 },
+  in_progress: { ...emptyPage, total: 1 },
   cancelled: { ...emptyPage, total: 1 },
 } as unknown as IssueStatusPagination;
 
 function renderListView(
   issues: Issue[] = ISSUES,
-  visibleStatuses: IssueStatusCategory[] = ["todo"],
-  hiddenStatuses: IssueStatusCategory[] = [],
+  visibleStatuses: IssueStatus[] = ["todo"],
+  hiddenStatuses: IssueStatus[] = [],
+  onMoveIssue = vi.fn(),
+  statuses: IssueStatusEntry[] = [],
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
+  queryClient.setQueryData(issueStatusKeys.list("ws-1"), { statuses });
   return render(
     <QueryClientProvider client={queryClient}>
       <I18nProvider resources={TEST_RESOURCES} locale="en">
@@ -220,7 +226,7 @@ function renderListView(
               visibleStatuses={visibleStatuses}
               hiddenStatuses={hiddenStatuses}
               statusPagination={PAGINATION}
-              onMoveIssue={vi.fn()}
+              onMoveIssue={onMoveIssue}
             />
           </ScrollRestorationProvider>
         </IssueContextMenuProvider>
@@ -311,23 +317,41 @@ describe("ListView status header collapse", () => {
   });
 });
 
-// Sections are CATEGORIES, cards carry concrete status KEYS. Bucketing a card
-// by its key gave a custom status a section id no section has, so the card was
-// dropped: filtering the surface down to that status left the section rendering
-// "no issues" beside a non-zero header count (MUL-6409). The category mapping
-// itself is covered in utils/drag-utils.test.ts.
+// Custom statuses remain visible in independent sections.
 describe("ListView custom statuses", () => {
-  it("renders a custom-status issue in its category's section", () => {
+  it.each([false, true])("only allows dropping into an active custom status (archived=%s)", (archived) => {
+    const onMove = vi.fn();
+    const status = {
+      key: "awaiting_response", name: "Awaiting Response", category: "started",
+      is_system: false, archived_at: archived ? "2026-01-01" : null,
+    } as IssueStatusEntry;
+    mockViewState.sortBy = "position";
+    mockViewState.listCollapsedStatuses = [];
+    renderListView(ISSUES, ["todo", "awaiting_response"], [], onMove, [status]);
+    act(() => lastOnDragStart({ active: { id: "issue-1" } }));
+    act(() => lastOnDragOver({
+      active: { id: "issue-1" },
+      over: { id: "status:awaiting_response" },
+    }));
+    act(() => lastOnDragEnd({
+      active: { id: "issue-1" },
+      over: { id: "status:awaiting_response" },
+    }));
+    if (archived) expect(onMove).not.toHaveBeenCalled();
+    else expect(onMove).toHaveBeenCalledWith("issue-1", expect.objectContaining({ status: "awaiting_response" }), expect.any(Function));
+  });
+
+  it("renders a custom-status issue in its own status section", () => {
     const custom = {
       ...ISSUES[0]!,
       id: "issue-custom",
       identifier: "MUL-3",
       title: "Waiting on the reporter",
       status: "awaiting_response",
-      status_category: "in_review",
+      status_category: "started",
     } as Issue;
 
-    renderListView([custom], ["in_review"]);
+    renderListView([custom], ["awaiting_response"]);
 
     expect(screen.getByText("Waiting on the reporter")).toBeInTheDocument();
   });

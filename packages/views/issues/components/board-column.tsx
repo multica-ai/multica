@@ -8,7 +8,7 @@ import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import type {
   Issue,
   IssueAssigneeType,
-  IssueStatusCategory,
+  IssueStatus,
   Project,
 } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -18,6 +18,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { useViewBaseline } from "../surface/view-baseline-context";
@@ -75,8 +77,8 @@ const EMPTY_VIRTUOSO_COMPONENTS = {};
 export interface BoardColumnGroup {
   id: string;
   title: string;
-  /** Board columns are CATEGORIES, never raw status keys. (MUL-6243) */
-  status?: IssueStatusCategory;
+  /** Status columns carry exact built-in or custom status keys. */
+  status?: IssueStatus;
   assigneeType?: IssueAssigneeType | null;
   assigneeId?: string | null;
   /** Project id for this column; null = the "No project" column. Set only
@@ -119,8 +121,12 @@ export const BoardColumn = memo(function BoardColumn({
   sortLabel?: string | null;
 }) {
   const status = group.status;
-  const cfg = status ? STATUS_CONFIG[status] : null;
-  const { setNodeRef, isOver } = useDroppable({ id: group.id });
+  const wsId = useWorkspaceId();
+  const { categoryOf, entryOf } = useIssueStatuses(wsId);
+  const archived = !!status && !!entryOf(status)?.archived_at;
+  const cfg = status ? STATUS_CONFIG[categoryOf(status)] : null;
+  const { setNodeRef, isOver: droppableIsOver } = useDroppable({ id: group.id });
+  const isOver = droppableIsOver && !archived;
   const viewStoreApi = useViewStoreApi();
   // A status fixed by the open saved view cannot be hidden from the board —
   // that would silently strip one of the view's own conditions.
@@ -228,7 +234,7 @@ export const BoardColumn = memo(function BoardColumn({
               )}
             </DeferredPopup>
           )}
-          {onCreateIssue && (
+          {onCreateIssue && !archived && (
             <DeferredTooltip
               content={t(($) => $.board.add_issue_tooltip)}
               trigger={

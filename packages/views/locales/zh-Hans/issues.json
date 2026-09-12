@@ -111,6 +111,12 @@
     "blocked": "已阻塞",
     "cancelled": "已取消"
   },
+  "status_category": {
+    "unstarted": "未开始",
+    "started": "已开始",
+    "done": "已完成",
+    "closed": "已关闭"
+  },
   "priority": {
     "urgent": "紧急",
     "high": "高",

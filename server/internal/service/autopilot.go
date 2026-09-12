@@ -1072,9 +1072,8 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 
 	wsID := util.UUIDToString(issue.WorkspaceID)
 
-	// A custom status finalizes the run exactly like the canonical status it
-	// inherits. Built-in keys resolve to themselves without a query, so this
-	// is a no-op for every workspace that has not defined a custom status.
+	// Custom statuses only finalize terminal lifecycle (done/closed). Review
+	// completion and blocked failure remain exclusive to the fixed built-in keys.
 	// The failure reason below deliberately keeps issue.Status, not the
 	// normalized key, so the audit trail names the status a human actually
 	// chose. (MUL-6243)

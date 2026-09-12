@@ -6,16 +6,23 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // insertCustomStatus adds one custom status directly, returning its id.
 func insertCustomStatus(t *testing.T, key, category string, position int, archived bool) string {
 	t.Helper()
 	var id string
+	category, ok := issuestatus.ParseCategory(category)
+	if !ok {
+		t.Fatalf("invalid fixture category %q", category)
+	}
 	archivedAt := "NULL"
 	if archived {
 		archivedAt = "now()"
@@ -63,14 +70,13 @@ func TestReorderIssueStatusesWritesIntraCategoryPositionsFromOne(t *testing.T) {
 	first := insertCustomStatus(t, fmt.Sprintf("qa_a_%d", suffix), "in_review", 1, false)
 	second := insertCustomStatus(t, fmt.Sprintf("qa_b_%d", suffix), "in_review", 2, false)
 
-	rec := reorderVia(t, "in_review", []string{second, first})
+	rec := reorderVia(t, "started", []string{second, first})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("reorder status = %d: %s", rec.Code, rec.Body.String())
 	}
 
 	positions := positionsByID(t, first, second)
-	// Positions start at 1: the category's built-in is seeded at 0 and never
-	// moves, so it stays at the head of its column.
+	// Legacy custom-only requests reuse these custom slots (initially 1 and 2).
 	if positions[second] != 1 || positions[first] != 2 {
 		t.Fatalf("positions = %#v, want second=1 first=2", positions)
 	}
@@ -98,7 +104,7 @@ func TestReorderIssueStatusesRejectsArchivedWithoutPartialWrite(t *testing.T) {
 
 	before := positionsByID(t, first, second, archived)
 
-	rec := reorderVia(t, "in_review", []string{second, archived, first})
+	rec := reorderVia(t, "started", []string{second, archived, first})
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("reorder status = %d, want 409: %s", rec.Code, rec.Body.String())
 	}
@@ -134,11 +140,11 @@ func TestReorderIssueStatusesRejectsForeignInputs(t *testing.T) {
 		ids      []string
 		want     int
 	}{
-		{"a built-in cannot be reordered", "in_review", []string{builtInID}, http.StatusForbidden},
-		{"ids must belong to the named category", "in_review", []string{inReview, inTodo}, http.StatusBadRequest},
-		{"duplicate ids are rejected", "in_review", []string{inReview, inReview}, http.StatusBadRequest},
-		{"an empty order is rejected", "in_review", nil, http.StatusBadRequest},
-		{"the category must be one of the seven", "nope", []string{inReview}, http.StatusBadRequest},
+		{"legacy requests must opt in to built-in ordering", "started", []string{builtInID}, http.StatusForbidden},
+		{"ids must belong to the named category", "started", []string{inReview, inTodo}, http.StatusBadRequest},
+		{"duplicate ids are rejected", "started", []string{inReview, inReview}, http.StatusBadRequest},
+		{"an empty order is rejected", "started", nil, http.StatusBadRequest},
+		{"the category must be one of the four", "nope", []string{inReview}, http.StatusBadRequest},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -158,7 +164,7 @@ func TestReorderIssueStatusesRejectsForeignInputs(t *testing.T) {
 // active-set check would catch that even with the lock deleted, because the
 // archive is already visible by the time the handler reads anything.
 //
-// Verified by deleting the LockIssueStatusCatalogShared call: the reorder then
+// Without the LockIssueStatusCatalog call, the reorder
 // reads the catalog before the archive commits, sees both rows active, and
 // commits a reorder that includes a row archived underneath it.
 func TestReorderIssueStatusesSerializesAgainstConcurrentArchive(t *testing.T) {
@@ -183,11 +189,11 @@ func TestReorderIssueStatusesSerializesAgainstConcurrentArchive(t *testing.T) {
 	}
 
 	done := make(chan int, 1)
-	go func() { done <- reorderVia(t, "in_review", []string{second, first}).Code }()
+	go func() { done <- reorderVia(t, "started", []string{second, first}).Code }()
 
 	select {
 	case code := <-done:
-		t.Fatalf("reorder completed (%d) before the archive released the lock — it never took the shared lock", code)
+		t.Fatalf("reorder completed (%d) before the archive released the catalog lock", code)
 	case <-time.After(400 * time.Millisecond):
 		// Parked on the lock, as required.
 	}
@@ -231,7 +237,7 @@ func TestReorderIssueStatusesRejectsAPartialSet(t *testing.T) {
 
 	before := positionsByID(t, first, second)
 
-	rec := reorderVia(t, "in_review", []string{second})
+	rec := reorderVia(t, "started", []string{second})
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("reorder status = %d, want 409: %s", rec.Code, rec.Body.String())
 	}
@@ -248,4 +254,91 @@ func TestReorderIssueStatusesRejectsAPartialSet(t *testing.T) {
 	if after[second] != before[second] {
 		t.Fatalf("partial payload still rewrote a position: %#v", after)
 	}
+}
+
+func TestReorderIssueStatusesIncludesBuiltInsAndPreservesLegacySlots(t *testing.T) {
+	ws := dbfx.Workspace(t, "Status ordering", fmt.Sprintf("status-order-%d", time.Now().UnixNano()))
+	dbfx.Member(t, ws, testUserID, "owner")
+	insert := func(key string, system bool, position int) string {
+		return dbfx.Insert(t, "issue_status", testutil.Cols{
+			"workspace_id": ws, "key": key, "name": key, "description": "",
+			"category": "started", "color": "#123456", "is_system": system, "position": position,
+		})
+	}
+	progress := insert("in_progress", true, 0)
+	review := insert("in_review", true, 0)
+	qa := insert("qa", false, 1)
+	uat := insert("uat", false, 2)
+	call := func(ids []string, includeSystem bool, want int) {
+		req := newRequest(http.MethodPatch, "/api/issue-statuses/reorder", ReorderIssueStatusesRequest{
+			Category: "started", IDs: ids, IncludeSystem: includeSystem,
+		})
+		req.Header.Set("X-Workspace-ID", ws)
+		testutil.Call(t, testHandler.ReorderIssueStatuses, req).Want(want)
+	}
+	order := []string{review, qa, progress, uat}
+	call(order, true, http.StatusOK)
+	for i, id := range order {
+		if got := positionsByID(t, id)[id]; got != i+1 {
+			t.Fatalf("position of %s = %d, want %d", id, got, i+1)
+		}
+	}
+	// A fresh catalog read must return the same order as the write.
+	entries, err := testHandler.Queries.ListIssueStatusEntries(context.Background(), db.ListIssueStatusEntriesParams{WorkspaceID: parseUUID(ws)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := make([]string, len(entries))
+	for i, entry := range entries {
+		keys[i] = entry.Key
+	}
+	if !reflect.DeepEqual(keys, []string{"in_review", "qa", "in_progress", "uat"}) {
+		t.Fatalf("catalog order = %v", keys)
+	}
+	// Installed clients omit include_system. Their custom-only writes continue
+	// to succeed, using the existing slots 2 and 4 rather than moving built-ins.
+	call([]string{uat, qa}, false, http.StatusOK)
+	want := map[string]int{review: 1, uat: 2, progress: 3, qa: 4}
+	if got := positionsByID(t, review, uat, progress, qa); !reflect.DeepEqual(got, want) {
+		t.Fatalf("legacy reorder = %v, want %v", got, want)
+	}
+	call([]string{review, qa}, true, http.StatusConflict)
+	if got := positionsByID(t, review, uat, progress, qa); !reflect.DeepEqual(got, want) {
+		t.Fatalf("partial full-catalog reorder changed positions: %v", got)
+	}
+	// Reordering is not permission to edit or archive a built-in definition.
+	edit := newRequest(http.MethodPatch, "/api/issue-statuses/"+review, UpdateIssueStatusRequest{Name: ptr("Changed")})
+	edit.Header.Set("X-Workspace-ID", ws)
+	edit = withURLParam(edit, "id", review)
+	testutil.Call(t, testHandler.UpdateIssueStatus, edit).Want(http.StatusForbidden)
+	archive := withURLParam(newRequest(http.MethodDelete, "/api/issue-statuses/"+review, nil), "id", review)
+	archive.Header.Set("X-Workspace-ID", ws)
+	testutil.Call(t, testHandler.ArchiveIssueStatus, archive).Want(http.StatusForbidden)
+
+	foreign := dbfx.Insert(t, "issue_status", testutil.Cols{
+		"workspace_id": testWorkspaceID, "key": "foreign_order", "name": "Foreign",
+		"category": "started", "color": "#123456", "position": 1,
+	})
+	call([]string{review, uat, progress, foreign}, true, http.StatusNotFound)
+	archived := dbfx.Insert(t, "issue_status", testutil.Cols{
+		"workspace_id": ws, "key": "archived_order", "name": "Archived",
+		"category": "started", "color": "#123456", "position": 5, "archived_at": time.Now(),
+	})
+	call([]string{review, uat, progress, qa, archived}, true, http.StatusConflict)
+	otherCategory := dbfx.Insert(t, "issue_status", testutil.Cols{
+		"workspace_id": ws, "key": "other_category", "name": "Other category",
+		"category": "done", "color": "#123456", "position": 1,
+	})
+	call([]string{review, uat, progress, qa, otherCategory}, true, http.StatusBadRequest)
+	if got := positionsByID(t, review, uat, progress, qa); !reflect.DeepEqual(got, want) {
+		t.Fatalf("rejected reorder changed positions: %v", got)
+	}
+
+	memberWS := dbfx.Workspace(t, "Member ordering", fmt.Sprintf("member-order-%d", time.Now().UnixNano()))
+	dbfx.Member(t, memberWS, testUserID, "member")
+	req := newRequest(http.MethodPatch, "/api/issue-statuses/reorder", ReorderIssueStatusesRequest{
+		Category: "started", IDs: order, IncludeSystem: true,
+	})
+	req.Header.Set("X-Workspace-ID", memberWS)
+	testutil.Call(t, testHandler.ReorderIssueStatuses, req).Want(http.StatusForbidden)
 }

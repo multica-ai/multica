@@ -61,7 +61,7 @@ export function IssueRow({ issue, onPress, showStatus = false }: Props) {
           <StatusIcon
             status={issue.status}
             category={issueColumnCategory(issue)}
-            color={catalog.colorOf(issue.status)}
+            icon={catalog.iconOf(issue.status)} color={catalog.colorOf(issue.status)}
             size={14}
           />
         ) : null}

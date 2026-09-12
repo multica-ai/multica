@@ -37,6 +37,9 @@ func seedTestCatalog(t *testing.T) {
 // the test, so catalog state cannot leak between tests in the shared workspace.
 func createTestCustomStatus(t *testing.T, key, category string) db.IssueStatus {
 	t.Helper()
+	if normalized, ok := issuestatus.ParseCategory(category); ok {
+		category = normalized
+	}
 	seedTestCatalog(t)
 	entry, err := testHandler.Queries.CreateIssueStatusEntry(context.Background(), db.CreateIssueStatusEntryParams{
 		WorkspaceID: parseUUID(testWorkspaceID),
@@ -83,14 +86,16 @@ func TestEnsureIsIdempotent(t *testing.T) {
 	// Every built-in must be its own category's canonical — the invariant that
 	// makes Effective an identity function on built-in keys.
 	for key, entry := range systemByKey {
-		if entry.Category != key {
+		category, _ := issuestatus.CategoryForBehavior(key)
+		if entry.Category != category {
 			t.Errorf("built-in %q has category %q; a built-in must be its own category's canonical", key, entry.Category)
 		}
 	}
 }
 
-// TestCatalogOrderMatchesBoardStatusOrder pins the default board order.
-func TestCatalogOrderMatchesBoardStatusOrder(t *testing.T) {
+// TestCatalogOrderMatchesLifecycleGroups pins the concrete status order within
+// the four lifecycle groups.
+func TestCatalogOrderMatchesLifecycleGroups(t *testing.T) {
 	seedTestCatalog(t)
 	entries, err := testHandler.Queries.ListIssueStatusEntries(context.Background(), db.ListIssueStatusEntriesParams{
 		WorkspaceID: parseUUID(testWorkspaceID),
@@ -109,6 +114,47 @@ func TestCatalogOrderMatchesBoardStatusOrder(t *testing.T) {
 	for i := range want {
 		if i >= len(gotSystem) || gotSystem[i] != want[i] {
 			t.Fatalf("built-in order = %v, want %v (frontend STATUS_ORDER)", gotSystem, want)
+		}
+	}
+}
+
+func TestListIssueStatusesPreservesLegacyWireCategories(t *testing.T) {
+	seedTestCatalog(t)
+	rec := httptest.NewRecorder()
+	testHandler.ListIssueStatuses(rec, newRequest(http.MethodGet, "/api/issue-statuses", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Statuses   []IssueStatusResponse `json:"statuses"`
+		Categories []string              `json:"categories"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	wantCategories := issuestatus.Canonical()
+	if !slices.Equal(resp.Categories, wantCategories) {
+		t.Fatalf("categories = %v, want %v", resp.Categories, wantCategories)
+	}
+
+	wantSystemCategories := map[string]string{
+		"backlog": "backlog", "todo": "todo",
+		"in_progress": "in_progress", "in_review": "in_review", "blocked": "blocked",
+		"done": "done", "cancelled": "cancelled",
+	}
+	gotSystemCategories := make(map[string]string, len(wantSystemCategories))
+	for _, status := range resp.Statuses {
+		if status.IsSystem {
+			gotSystemCategories[status.Key] = status.Category
+		}
+	}
+	if len(gotSystemCategories) != len(wantSystemCategories) {
+		t.Fatalf("system statuses = %v, want exactly seven", gotSystemCategories)
+	}
+	for key, want := range wantSystemCategories {
+		if got := gotSystemCategories[key]; got != want {
+			t.Errorf("status %q category = %q, want %q", key, got, want)
 		}
 	}
 }
@@ -165,8 +211,12 @@ func TestCustomStatusInheritsItsCategoryBehavior(t *testing.T) {
 	for _, tc := range cases {
 		createTestCustomStatus(t, tc.key, tc.category)
 		got := issuestatus.Effective(ctx, testHandler.Queries, parseUUID(testWorkspaceID), tc.key)
-		if got != tc.category {
-			t.Errorf("Effective(%q) = %q, want %q", tc.key, got, tc.category)
+		want := tc.key
+		if tc.category == issuestatus.Done {
+			want = issuestatus.Done
+		}
+		if got != want {
+			t.Errorf("Effective(%q) = %q, want %q", tc.key, got, want)
 		}
 	}
 }
@@ -288,17 +338,43 @@ func TestBuiltInStatusesAreImmutable(t *testing.T) {
 	})
 }
 
-// TestArchiveRetiresStatusWithoutTouchingExistingIssues pins the archive rule:
-// archiving retires a status from FUTURE use only. Issues already on it keep it
-// and keep behaving as their category prescribes — retiring a label must not
-// rewrite history.
-func TestArchiveRetiresStatusWithoutTouchingExistingIssues(t *testing.T) {
+// In-use statuses cannot be archived, including successful and canceled work.
+func TestArchiveRequiresMovingExistingIssues(t *testing.T) {
+	for _, category := range issuestatus.Categories() {
+		t.Run(category, func(t *testing.T) {
+			entry := createTestCustomStatus(t, "archive_used_"+category, category)
+			issueID := dbfx.Issue(t, "archive occupied", testutil.Cols{"status": entry.Key})
+			req := withURLParam(newRequest(http.MethodDelete, "/api/issue-statuses/"+uuidToString(entry.ID), nil), "id", uuidToString(entry.ID))
+			var conflict struct {
+				Code  string `json:"code"`
+				Count int64  `json:"issue_count"`
+			}
+			testutil.Call(t, testHandler.ArchiveIssueStatus, req).Want(http.StatusConflict).JSON(&conflict)
+			if conflict.Code != "issue_status_in_use" || conflict.Count != 1 {
+				t.Fatalf("unexpected conflict: %+v", conflict)
+			}
+			var archived bool
+			if err := testPool.QueryRow(context.Background(), "SELECT archived_at IS NOT NULL FROM issue_status WHERE id = $1", entry.ID).Scan(&archived); err != nil || archived {
+				t.Fatalf("in-use status archived: %v, %v", archived, err)
+			}
+			// Move through the public update path, preserving the lifecycle category.
+			target := map[string]string{"unstarted": "todo", "started": "in_progress", "done": "done", "closed": "cancelled"}[category]
+			move := withURLParam(newRequest(http.MethodPatch, "/api/issues/"+issueID, map[string]any{"status": target}), "id", issueID)
+			testutil.Call(t, testHandler.UpdateIssue, move).Want(http.StatusOK)
+			testutil.Call(t, testHandler.ArchiveIssueStatus, req).Want(http.StatusOK)
+			testutil.Call(t, testHandler.ArchiveIssueStatus, req).Want(http.StatusOK)
+		})
+	}
+}
+
+// Historical archived entries remain resolvable even under the new empty-only rule.
+func TestPreviouslyArchivedStatusRemainsReadable(t *testing.T) {
 	ctx := context.Background()
 	entry := createTestCustomStatus(t, "in_use_a", issuestatus.InProgress)
 	issueID := mustCreateIssue(t, "occupies the status", "in_use_a")
 
-	if code := archiveStatusVia(t, entry); code != http.StatusOK {
-		t.Fatalf("archiving an in-use status should succeed, got %d", code)
+	if _, err := testHandler.Queries.ArchiveIssueStatusEntry(ctx, db.ArchiveIssueStatusEntryParams{ID: entry.ID, WorkspaceID: entry.WorkspaceID}); err != nil {
+		t.Fatal(err)
 	}
 
 	// The existing issue keeps the archived status verbatim.
@@ -312,8 +388,8 @@ func TestArchiveRetiresStatusWithoutTouchingExistingIssues(t *testing.T) {
 
 	// And it still resolves to its category, so its platform behavior is
 	// unchanged — Effective deliberately ignores archived_at.
-	if got := issuestatus.Effective(ctx, testHandler.Queries, parseUUID(testWorkspaceID), "in_use_a"); got != issuestatus.InProgress {
-		t.Errorf("Effective on an archived status = %q, want %q", got, issuestatus.InProgress)
+	if got := issuestatus.Effective(ctx, testHandler.Queries, parseUUID(testWorkspaceID), "in_use_a"); got != "in_use_a" {
+		t.Errorf("Effective on an archived status = %q, want in_use_a", got)
 	}
 
 	// But nothing NEW can be assigned to it.
@@ -335,12 +411,12 @@ func TestCreateIssueStatusValidation(t *testing.T) {
 		body map[string]any
 		want int
 	}{
-		{"reserved built-in key", map[string]any{"name": "Mine", "key": "in_review", "category": "in_review", "color": "#123456"}, http.StatusBadRequest},
-		{"name slugifying onto a built-in", map[string]any{"name": "In Review", "category": "in_review", "color": "#123456"}, http.StatusBadRequest},
-		{"unknown category", map[string]any{"name": "Weird", "category": "started", "color": "#123456"}, http.StatusBadRequest},
+		{"reserved built-in key", map[string]any{"name": "Mine", "key": "in_review", "category": "started", "color": "#123456"}, http.StatusBadRequest},
+		{"name slugifying onto a built-in", map[string]any{"name": "In Review", "category": "started", "color": "#123456"}, http.StatusBadRequest},
+		{"unknown category", map[string]any{"name": "Weird", "category": "not_a_category", "color": "#123456"}, http.StatusBadRequest},
 		{"missing category", map[string]any{"name": "Weird2", "color": "#123456"}, http.StatusBadRequest},
-		{"bad color", map[string]any{"name": "Weird3", "category": "todo", "color": "red"}, http.StatusBadRequest},
-		{"empty name", map[string]any{"name": "  ", "category": "todo", "color": "#123456"}, http.StatusBadRequest},
+		{"bad color", map[string]any{"name": "Weird3", "category": "unstarted", "color": "red"}, http.StatusBadRequest},
+		{"empty name", map[string]any{"name": "  ", "category": "unstarted", "color": "#123456"}, http.StatusBadRequest},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -364,7 +440,7 @@ func TestCreateIssueStatusIsNotGatedOnRollout(t *testing.T) {
 	var created IssueStatusResponse
 	testutil.Call(t, testHandler.CreateIssueStatus,
 		newRequest(http.MethodPost, "/api/issue-statuses", map[string]any{
-			"name": "Human Review", "category": issuestatus.InReview, "color": "#123456",
+			"name": "Human Review", "category": issuestatus.CategoryStarted, "color": "#123456",
 		})).Want(http.StatusCreated).JSON(&created)
 	dbfx.Cleanup(t, `DELETE FROM issue_status WHERE id = $1`, parseUUID(created.ID))
 }
@@ -428,7 +504,7 @@ func TestCustomTerminalStatusCountsAsTerminalInSQL(t *testing.T) {
 		ctx,
 		testHandler.Queries,
 		parseUUID(testWorkspaceID),
-		[]string{issuestatus.Done, issuestatus.Cancelled},
+		[]string{issuestatus.CategoryDone, issuestatus.CategoryClosed},
 	)
 	if err != nil {
 		t.Fatalf("expand terminal status categories: %v", err)
@@ -685,12 +761,10 @@ func TestWritesRejectAnArchivedStatus(t *testing.T) {
 
 }
 
-// TestArchiveSucceedsAfterACommittedWrite is the other ordering: an issue
-// committed on the status does not block archiving it, because archiving only
-// retires it from future use.
-func TestArchiveSucceedsAfterACommittedWrite(t *testing.T) {
+// A committed writer must be counted by the archive's locked precondition.
+func TestArchiveRejectsAfterACommittedWrite(t *testing.T) {
 	ctx := context.Background()
-	t.Run("writer wins: archive still succeeds and leaves the issue alone", func(t *testing.T) {
+	t.Run("writer wins: archive is rejected and leaves the issue alone", func(t *testing.T) {
 		entry := createTestCustomStatus(t, "race_b_writer", issuestatus.InProgress)
 
 		rec := httptest.NewRecorder()
@@ -706,8 +780,8 @@ func TestArchiveSucceedsAfterACommittedWrite(t *testing.T) {
 		json.Unmarshal(rec.Body.Bytes(), &created)
 		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, parseUUID(created.ID)) })
 
-		if code := archiveStatusVia(t, entry); code != http.StatusOK {
-			t.Fatalf("archive after a committed write = %d, want 200", code)
+		if code := archiveStatusVia(t, entry); code != http.StatusConflict {
+			t.Fatalf("archive after a committed write = %d, want 409", code)
 		}
 		var status string
 		if err := testPool.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1`,
@@ -1007,8 +1081,8 @@ func TestChildrenResponseCarriesStatusCategory(t *testing.T) {
 	if payload.Issues[0].Status != "children_done_s" {
 		t.Errorf("status = %q, want the custom key", payload.Issues[0].Status)
 	}
-	if payload.Issues[0].StatusCategory != "done" {
-		t.Errorf("status_category = %q, want %q", payload.Issues[0].StatusCategory, "done")
+	if payload.Issues[0].StatusCategory != issuestatus.CategoryDone {
+		t.Errorf("status_category = %q, want %q", payload.Issues[0].StatusCategory, issuestatus.CategoryDone)
 	}
 }
 
@@ -1022,20 +1096,21 @@ func TestCategoryFilterExpandsToIndexedStatusKeys(t *testing.T) {
 	seedTestCatalog(t)
 	ws := parseUUID(testWorkspaceID)
 
-	t.Run("built-in category expands to exactly its own key", func(t *testing.T) {
-		keys, err := issuestatus.ExpandCategories(ctx, testHandler.Queries, ws, []string{"blocked"})
+	t.Run("started category expands to every built-in behavior", func(t *testing.T) {
+		keys, err := issuestatus.ExpandCategories(ctx, testHandler.Queries, ws, []string{issuestatus.CategoryStarted})
 		if err != nil {
 			t.Fatalf("expand: %v", err)
 		}
-		if len(keys) != 1 || keys[0] != "blocked" {
-			t.Errorf("expand(blocked) = %v, want exactly [blocked] — a workspace with no "+
-				"custom statuses must produce the pre-feature query", keys)
+		for _, key := range []string{issuestatus.InProgress, issuestatus.InReview, issuestatus.Blocked} {
+			if !slices.Contains(keys, key) {
+				t.Errorf("expand(started) = %v, want built-in %q", keys, key)
+			}
 		}
 	})
 
 	t.Run("category includes its custom statuses", func(t *testing.T) {
 		createTestCustomStatus(t, "human_review_x", issuestatus.InReview)
-		keys, err := issuestatus.ExpandCategories(ctx, testHandler.Queries, ws, []string{"in_review"})
+		keys, err := issuestatus.ExpandCategories(ctx, testHandler.Queries, ws, []string{issuestatus.CategoryStarted})
 		if err != nil {
 			t.Fatalf("expand: %v", err)
 		}
@@ -1051,7 +1126,7 @@ func TestCategoryFilterExpandsToIndexedStatusKeys(t *testing.T) {
 		if code := archiveStatusVia(t, entry); code != http.StatusOK {
 			t.Fatalf("archive: %d", code)
 		}
-		keys, err := issuestatus.ExpandCategories(ctx, testHandler.Queries, ws, []string{"done"})
+		keys, err := issuestatus.ExpandCategories(ctx, testHandler.Queries, ws, []string{issuestatus.CategoryDone})
 		if err != nil {
 			t.Fatalf("expand: %v", err)
 		}
@@ -1067,12 +1142,12 @@ func TestCategoryFilterExpandsToIndexedStatusKeys(t *testing.T) {
 			t.Fatalf("clear catalog: %v", err)
 		}
 		t.Cleanup(func() { seedTestCatalog(t) })
-		keys, err := issuestatus.ExpandCategories(ctx, testHandler.Queries, ws, []string{"todo", "done"})
+		keys, err := issuestatus.ExpandCategories(ctx, testHandler.Queries, ws, []string{issuestatus.CategoryUnstarted, issuestatus.CategoryDone})
 		if err != nil {
 			t.Fatalf("expand: %v", err)
 		}
-		if len(keys) != 2 || !slices.Contains(keys, "todo") || !slices.Contains(keys, "done") {
-			t.Errorf("expand on an unseeded workspace = %v, want [todo done]", keys)
+		if len(keys) != 3 || !slices.Contains(keys, "backlog") || !slices.Contains(keys, "todo") || !slices.Contains(keys, "done") {
+			t.Errorf("expand on an unseeded workspace = %v, want [backlog todo done]", keys)
 		}
 	})
 }
@@ -1087,7 +1162,7 @@ func TestListFilterByCategoryReturnsCustomStatusIssues(t *testing.T) {
 	_ = ctx
 
 	rec := httptest.NewRecorder()
-	testHandler.ListIssues(rec, newRequest(http.MethodGet, "/api/issues?status_category=in_review&limit=100", nil))
+	testHandler.ListIssues(rec, newRequest(http.MethodGet, "/api/issues?status_category=started&limit=100", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
 	}
@@ -1106,18 +1181,18 @@ func TestListFilterByCategoryReturnsCustomStatusIssues(t *testing.T) {
 		got[i.ID] = i.StatusCategory
 	}
 	if _, ok := got[uuidToString(customID)]; !ok {
-		t.Error("the in_review category must include issues on a custom in_review status")
+		t.Error("the started category must include issues on a custom review status")
 	}
 	if _, ok := got[uuidToString(builtinID)]; !ok {
-		t.Error("the in_review category must include issues on the built-in status")
+		t.Error("the started category must include issues on the built-in review status")
 	}
 	if _, ok := got[uuidToString(otherID)]; ok {
-		t.Error("the in_review category must not include a todo issue")
+		t.Error("the started category must not include a todo issue")
 	}
 	// Every row carries an authoritative category, custom statuses included —
 	// this is what the client buckets and caches by.
-	if c := got[uuidToString(customID)]; c != "in_review" {
-		t.Errorf("custom-status row status_category = %q, want %q", c, "in_review")
+	if c := got[uuidToString(customID)]; c != issuestatus.InProgress {
+		t.Errorf("custom-status row status_category = %q, want %q", c, issuestatus.InProgress)
 	}
 }
 
@@ -1151,8 +1226,8 @@ func TestCreateEventCarriesCustomStatusCategory(t *testing.T) {
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, parseUUID(created.ID))
 	})
-	if created.StatusCategory != "in_review" {
-		t.Errorf("HTTP response status_category = %q, want in_review", created.StatusCategory)
+	if created.StatusCategory != issuestatus.InProgress {
+		t.Errorf("HTTP response status_category = %q, want in_progress (wire)", created.StatusCategory)
 	}
 
 	select {
@@ -1165,8 +1240,8 @@ func TestCreateEventCarriesCustomStatusCategory(t *testing.T) {
 		if !ok {
 			t.Fatalf("event issue shape: %T", payload["issue"])
 		}
-		if issue.StatusCategory != "in_review" {
-			t.Errorf("event status_category = %q, want in_review — other tabs cannot "+
+		if issue.StatusCategory != issuestatus.InProgress {
+			t.Errorf("event status_category = %q, want in_progress (wire) — other tabs cannot "+
 				"bucket the new issue without it", issue.StatusCategory)
 		}
 	case <-time.After(3 * time.Second):
@@ -1186,7 +1261,7 @@ func TestListEndpointsCarryStatusCategory(t *testing.T) {
 
 	t.Run("list carries category for every custom row", func(t *testing.T) {
 		rec := httptest.NewRecorder()
-		testHandler.ListIssues(rec, newRequest(http.MethodGet, "/api/issues?status_category=in_review&limit=100", nil))
+		testHandler.ListIssues(rec, newRequest(http.MethodGet, "/api/issues?status_category=started&limit=100", nil))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
 		}
@@ -1201,13 +1276,13 @@ func TestListEndpointsCarryStatusCategory(t *testing.T) {
 		for _, i := range payload.Issues {
 			if i.Status == "human_review_n" {
 				seen++
-				if i.StatusCategory != "in_review" {
-					t.Errorf("custom row status_category = %q, want in_review", i.StatusCategory)
+				if i.StatusCategory != issuestatus.InProgress {
+					t.Errorf("custom row status_category = %q, want in_progress (wire)", i.StatusCategory)
 				}
 			}
 		}
 		if seen < 3 {
-			t.Errorf("expected the 3 custom-status rows in the in_review category, saw %d", seen)
+			t.Errorf("expected the 3 custom-status rows in the started category, saw %d", seen)
 		}
 	})
 
@@ -1226,8 +1301,8 @@ func TestListEndpointsCarryStatusCategory(t *testing.T) {
 		r := issuestatus.NewResolver(parseUUID(testWorkspaceID))
 		ctx := context.Background()
 		for range 10 {
-			if got := r.Effective(ctx, testHandler.Queries, "human_review_n"); got != "in_review" {
-				t.Fatalf("Effective = %q, want in_review", got)
+			if got := r.Effective(ctx, testHandler.Queries, "human_review_n"); got != "human_review_n" {
+				t.Fatalf("Effective = %q, want human_review_n", got)
 			}
 		}
 	})
@@ -1244,8 +1319,8 @@ func TestListEndpointsCarryStatusCategory(t *testing.T) {
 			StatusCategory string `json:"status_category"`
 		}
 		json.Unmarshal(rec.Body.Bytes(), &got)
-		if got.StatusCategory != "in_review" {
-			t.Errorf("GetIssue status_category = %q, want in_review", got.StatusCategory)
+		if got.StatusCategory != issuestatus.InProgress {
+			t.Errorf("GetIssue status_category = %q, want in_progress (wire)", got.StatusCategory)
 		}
 	})
 }
@@ -1273,8 +1348,8 @@ func TestBackgroundEventCarriesCustomStatusCategory(t *testing.T) {
 	}
 
 	authoritative := service.IssueToMapResolved(ctx, testHandler.Queries, issue, "MUL")
-	if authoritative["status_category"] != "in_review" {
-		t.Errorf("IssueToMapResolved status_category = %v, want in_review",
+	if authoritative["status_category"] != issuestatus.InProgress {
+		t.Errorf("IssueToMapResolved status_category = %v, want in_progress (wire)",
 			authoritative["status_category"])
 	}
 	if authoritative["status"] != "human_review_bg" {
@@ -1338,7 +1413,7 @@ func TestCatalogWritesAnnounceThemselves(t *testing.T) {
 	var created IssueStatusResponse
 	testutil.Call(t, testHandler.CreateIssueStatus,
 		newRequest(http.MethodPost, "/api/issue-statuses", map[string]any{
-			"name": "Realtime Gate", "category": issuestatus.InReview, "color": "#123456",
+			"name": "Realtime Gate", "category": issuestatus.CategoryStarted, "color": "#123456",
 		})).Want(http.StatusCreated).JSON(&created)
 	dbfx.Cleanup(t, `DELETE FROM issue_status WHERE id = $1`, parseUUID(created.ID))
 	expectChange(t, "created")
@@ -1353,7 +1428,7 @@ func TestCatalogWritesAnnounceThemselves(t *testing.T) {
 	// another test would otherwise turn this into a 409.
 	active, err := testHandler.Queries.ListActiveCustomIssueStatusEntries(ctx, db.ListActiveCustomIssueStatusEntriesParams{
 		WorkspaceID: parseUUID(testWorkspaceID),
-		Category:    issuestatus.InReview,
+		Category:    issuestatus.CategoryStarted,
 	})
 	if err != nil {
 		t.Fatalf("list active custom statuses: %v", err)
@@ -1362,7 +1437,7 @@ func TestCatalogWritesAnnounceThemselves(t *testing.T) {
 	for i, entry := range active {
 		ids[i] = uuidToString(entry.ID)
 	}
-	if code := reorderVia(t, issuestatus.InReview, ids).Code; code != http.StatusOK {
+	if code := reorderVia(t, issuestatus.CategoryStarted, ids).Code; code != http.StatusOK {
 		t.Fatalf("reorder: %d", code)
 	}
 	expectChange(t, "reordered")
@@ -1408,9 +1483,9 @@ func TestCreateIssueStatusAcceptsANonLatinName(t *testing.T) {
 		return created
 	}
 
-	first := create(t, "客户确认", issuestatus.InReview)
-	if first.Key != "in_review_2" {
-		t.Errorf("derived key = %q, want %q", first.Key, "in_review_2")
+	first := create(t, "客户确认", issuestatus.CategoryStarted)
+	if first.Key != "started_2" {
+		t.Errorf("derived key = %q, want %q", first.Key, "started_2")
 	}
 	if first.Name != "客户确认" {
 		t.Errorf("display name = %q, want it stored verbatim", first.Name)
@@ -1418,13 +1493,13 @@ func TestCreateIssueStatusAcceptsANonLatinName(t *testing.T) {
 
 	// A second one in the same category takes the next ordinal instead of
 	// colliding with the first.
-	second := create(t, "供应商确认", issuestatus.InReview)
-	if second.Key != "in_review_3" {
-		t.Errorf("second derived key = %q, want %q", second.Key, "in_review_3")
+	second := create(t, "供应商确认", issuestatus.CategoryStarted)
+	if second.Key != "started_3" {
+		t.Errorf("second derived key = %q, want %q", second.Key, "started_3")
 	}
 
 	// A name that CAN be slugged is untouched by the fallback.
-	english := create(t, "Human Review Zh", issuestatus.InReview)
+	english := create(t, "Human Review Zh", issuestatus.CategoryStarted)
 	if english.Key != "human_review_zh" {
 		t.Errorf("sluggable name derived %q, want %q", english.Key, "human_review_zh")
 	}
@@ -1443,7 +1518,7 @@ func TestCreateIssueStatusDisambiguatesCollidingSlugs(t *testing.T) {
 		var created IssueStatusResponse
 		testutil.Call(t, testHandler.CreateIssueStatus,
 			newRequest(http.MethodPost, "/api/issue-statuses", map[string]any{
-				"name": name, "category": issuestatus.Todo, "color": "#123456",
+				"name": name, "category": issuestatus.CategoryUnstarted, "color": "#123456",
 			})).Want(http.StatusCreated).JSON(&created)
 		t.Cleanup(func() {
 			testPool.Exec(context.Background(), `DELETE FROM issue_status WHERE id = $1`, parseUUID(created.ID))
@@ -1475,7 +1550,7 @@ func TestDerivedKeyAvoidsAnArchivedKey(t *testing.T) {
 	var created IssueStatusResponse
 	testutil.Call(t, testHandler.CreateIssueStatus,
 		newRequest(http.MethodPost, "/api/issue-statuses", map[string]any{
-			"name": "Zzarchived", "category": issuestatus.Todo, "color": "#123456",
+			"name": "Zzarchived", "category": issuestatus.CategoryUnstarted, "color": "#123456",
 		})).Want(http.StatusCreated).JSON(&created)
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM issue_status WHERE id = $1`, parseUUID(created.ID))
@@ -1500,7 +1575,7 @@ func TestUnknownStatusErrorNamesCustomStatuses(t *testing.T) {
 		Key:         "in_review_9",
 		Name:        "客户确认",
 		Description: "",
-		Category:    issuestatus.InReview,
+		Category:    issuestatus.CategoryStarted,
 		Color:       "#123456",
 	})
 	if err != nil {
@@ -1539,7 +1614,7 @@ func TestIssueResponseCarriesCustomStatusName(t *testing.T) {
 		Key:         "in_review_8",
 		Name:        "客户确认",
 		Description: "",
-		Category:    issuestatus.InReview,
+		Category:    issuestatus.CategoryStarted,
 		Color:       "#123456",
 	})
 	if err != nil {
@@ -1560,8 +1635,8 @@ func TestIssueResponseCarriesCustomStatusName(t *testing.T) {
 	if custom.StatusName != "客户确认" {
 		t.Errorf("status_name = %q, want %q", custom.StatusName, "客户确认")
 	}
-	if custom.StatusCategory != issuestatus.InReview {
-		t.Errorf("status_category = %q, want %q", custom.StatusCategory, issuestatus.InReview)
+	if custom.StatusCategory != issuestatus.InProgress {
+		t.Errorf("status_category = %q, want %q", custom.StatusCategory, issuestatus.InProgress)
 	}
 
 	// A built-in carries no name: every client renders those from the key
@@ -1607,7 +1682,7 @@ func TestExplicitKeyCreateAlsoTakesTheCatalogLock(t *testing.T) {
 	go func() {
 		rec := httptest.NewRecorder()
 		testHandler.CreateIssueStatus(rec, newRequest(http.MethodPost, "/api/issue-statuses", map[string]any{
-			"name": "Zzlockprobe", "key": "zzlockprobe", "category": issuestatus.Todo, "color": "#123456",
+			"name": "Zzlockprobe", "key": "zzlockprobe", "category": issuestatus.CategoryUnstarted, "color": "#123456",
 		}))
 		done <- rec
 	}()
@@ -1702,15 +1777,15 @@ func TestConcurrentDerivedCreatesNeverConflict(t *testing.T) {
 				name := bases[i] + strings.Repeat("确", round+1)
 				wg.Add(1)
 				go post(true, name, map[string]any{
-					"name": name, "category": issuestatus.Blocked, "color": "#123456",
+					"name": name, "category": issuestatus.CategoryStarted, "color": "#123456",
 				})
 			}
 			// Explicit writers aiming straight at the ordinals the derives want.
-			for _, key := range []string{"blocked_2", "blocked_3"} {
+			for _, key := range []string{"started_2", "started_3"} {
 				wg.Add(1)
 				go post(false, key, map[string]any{
 					"name": fmt.Sprintf("Zz %s %d", key, round), "key": key,
-					"category": issuestatus.Blocked, "color": "#123456",
+					"category": issuestatus.CategoryStarted, "color": "#123456",
 				})
 			}
 
@@ -1720,7 +1795,7 @@ func TestConcurrentDerivedCreatesNeverConflict(t *testing.T) {
 
 			t.Cleanup(func() {
 				testPool.Exec(context.Background(),
-					`DELETE FROM issue_status WHERE workspace_id = $1 AND category = 'blocked' AND is_system = FALSE`,
+					`DELETE FROM issue_status WHERE workspace_id = $1 AND category = 'started' AND is_system = FALSE`,
 					parseUUID(testWorkspaceID))
 			})
 
@@ -1755,7 +1830,7 @@ func TestConcurrentDerivedCreatesNeverConflict(t *testing.T) {
 					// Pins the PREMISE: a derived name that slugs to anything at
 					// all takes the slug path and contends with nothing, which
 					// would leave this test green while exercising nothing.
-					if !strings.HasPrefix(r.key, issuestatus.Blocked+"_") {
+					if !strings.HasPrefix(r.key, issuestatus.CategoryStarted+"_") {
 						t.Errorf("derived create %q produced key %q; the name must slug to nothing "+
 							"so it lands on the <category>_<n> fallback these writers contend for",
 							r.label, r.key)
@@ -1784,7 +1859,7 @@ func TestCustomStatusPayloadsAgreeAcrossRenderings(t *testing.T) {
 		Key:         "in_review_7",
 		Name:        "客户确认",
 		Description: "",
-		Category:    issuestatus.InReview,
+		Category:    issuestatus.CategoryStarted,
 		Color:       "#123456",
 	})
 	if err != nil {
@@ -1811,7 +1886,7 @@ func TestCustomStatusPayloadsAgreeAcrossRenderings(t *testing.T) {
 
 	for field, want := range map[string]string{
 		"status":          "in_review_7",
-		"status_category": issuestatus.InReview,
+		"status_category": issuestatus.InProgress,
 		"status_name":     "客户确认",
 	} {
 		got, ok := fromEvent[field].(string)

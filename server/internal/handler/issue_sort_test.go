@@ -10,6 +10,28 @@ import (
 	"time"
 )
 
+func TestListIssuesStatusSortCountsCustomStatuses(t *testing.T) {
+	const key = "sort_custom_started"
+	createTestCustomStatus(t, key, "started")
+	mustCreateIssue(t, "Custom sorting first", key)
+	mustCreateIssue(t, "Custom sorting second", key)
+	w := httptest.NewRecorder()
+	testHandler.ListIssues(w, newRequest(http.MethodGet, "/api/issues?status="+key+"&sort=status&limit=1", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status sort: %d %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Issues []IssueResponse
+		Total  int
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Total != 2 || len(response.Issues) != 1 {
+		t.Fatalf("total/rows = %d/%d", response.Total, len(response.Issues))
+	}
+}
+
 func TestListIssuesSortsByStatusAndUpdatedAt(t *testing.T) {
 	ctx := context.Background()
 	suffix := time.Now().UnixNano()

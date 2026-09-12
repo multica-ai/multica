@@ -4560,9 +4560,8 @@ func TestIssueGCChecksReportCategoryNotRawCustomStatus(t *testing.T) {
 			t.Errorf("done-category custom status reported as %q, want %q — the daemon would keep this workdir forever",
 				byID[doneID], issuestatus.Done)
 		}
-		if byID[openID] != issuestatus.InReview {
-			t.Errorf("in_review-category custom status reported as %q, want %q",
-				byID[openID], issuestatus.InReview)
+		if byID[openID] != "gc_human_review" {
+			t.Errorf("nonterminal custom status reported as %q, want gc_human_review", byID[openID])
 		}
 	})
 
@@ -4636,8 +4635,8 @@ func TestBatchIssueGCCheckReadsCatalogOnceForManyCustomStatuses(t *testing.T) {
 		}
 	}
 	for _, id := range ids[2:4] {
-		if byID[id] != issuestatus.InReview {
-			t.Fatalf("issue %s reported %q, want %q", id, byID[id], issuestatus.InReview)
+		if byID[id] != "gc_batch_review" {
+			t.Fatalf("issue %s reported %q, want gc_batch_review", id, byID[id])
 		}
 	}
 

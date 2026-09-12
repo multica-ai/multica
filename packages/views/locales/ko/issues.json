@@ -111,6 +111,12 @@
     "blocked": "막힘",
     "cancelled": "취소됨"
   },
+  "status_category": {
+    "unstarted": "시작 전",
+    "started": "시작됨",
+    "done": "완료",
+    "closed": "종료"
+  },
   "priority": {
     "urgent": "긴급",
     "high": "높음",

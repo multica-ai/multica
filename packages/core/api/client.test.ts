@@ -10,6 +10,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("ApiClient status reorder", () => {
+  it("opts into built-in ordering and tolerates malformed responses", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ statuses: "invalid" }), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    const result = await client.reorderIssueStatuses("started", ["review", "qa", "progress"], true);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      category: "started", ids: ["review", "qa", "progress"], include_system: true,
+    });
+    expect(result.statuses).toEqual([]);
+  });
+});
+
 describe("ApiClient agent conversation-starter compatibility", () => {
   const prompt = {
     label: "Review a PR",

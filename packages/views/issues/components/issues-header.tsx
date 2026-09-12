@@ -1548,6 +1548,7 @@ export function IssueFilterMenu({
                         status={option.key}
                         category={option.category}
                         color={option.color}
+                        icon={option.icon}
                         className="h-3.5 w-3.5"
                       />
                       {option.label}

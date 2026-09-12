@@ -25,7 +25,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createStore } from "zustand/vanilla";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
-import { STATUS_ORDER } from "@multica/core/issues/config";
+import {
+  BUILT_IN_STATUS_CATEGORY,
+  BUILT_IN_STATUS_ORDER,
+} from "@multica/core/issues/config";
 import {
   type IssueViewState,
   viewStoreSlice,
@@ -46,7 +49,7 @@ function entry(overrides: Partial<IssueStatusEntry>): IssueStatusEntry {
     key: "todo",
     name: "Todo",
     description: "",
-    category: "todo",
+    category: "unstarted",
     color: "#888888",
     is_system: true,
     position: 0,
@@ -57,15 +60,15 @@ function entry(overrides: Partial<IssueStatusEntry>): IssueStatusEntry {
   } as IssueStatusEntry;
 }
 
-/** What the server seeds every workspace with: one built-in per category. */
-const BUILT_INS = STATUS_ORDER.map((category) =>
-  entry({ key: category, name: category, category, is_system: true }),
+/** What the server seeds every workspace with: seven concrete built-ins. */
+const BUILT_INS = BUILT_IN_STATUS_ORDER.map((key) =>
+  entry({ key, name: key, category: BUILT_IN_STATUS_CATEGORY[key], is_system: true }),
 );
 
 const HUMAN_REVIEW = entry({
   key: "human_review",
   name: "Human Review",
-  category: "in_review",
+  category: "started",
   color: "#8b5cf6",
   is_system: false,
   position: 1,
@@ -133,8 +136,8 @@ describe("IssueFilterMenu status section", () => {
       "Todo",
       "In Progress",
       "In Review",
-      "Human Review",
       "Blocked",
+      "Human Review",
       "Done",
       "Cancelled",
     ]);
@@ -148,6 +151,6 @@ describe("IssueFilterMenu status section", () => {
     expect(
       document.querySelector("[data-slot='dropdown-menu-label']"),
     ).toBeNull();
-    expect(screen.getAllByRole("menuitemcheckbox")).toHaveLength(STATUS_ORDER.length);
+    expect(screen.getAllByRole("menuitemcheckbox")).toHaveLength(BUILT_IN_STATUS_ORDER.length);
   });
 });
