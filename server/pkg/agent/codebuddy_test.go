@@ -450,7 +450,9 @@ func TestCodebuddyHandleUserToolResult(t *testing.T) {
 		}),
 	}
 
-	b.handleUser(msg, ch)
+	if saw := b.handleUser(msg, ch); saw {
+		t.Fatal("ordinary tool_result must not report async launch")
+	}
 
 	select {
 	case m := <-ch:
@@ -518,5 +520,161 @@ func TestCodebuddyHandleControlRequestApprovesInCodebuddyShape(t *testing.T) {
 	}
 	if updatedInput["command"] != "ls" {
 		t.Fatalf("expected the original tool input to be preserved, got %v", updatedInput["command"])
+	}
+}
+
+func TestCodebuddyTerminalReasonFailure(t *testing.T) {
+	t.Parallel()
+
+	got := codebuddyTerminalReasonFailure("prompt_too_long", "Prompt is too long")
+	if got == "" {
+		t.Fatal("expected prompt_too_long to produce a failure")
+	}
+	if !strings.Contains(got, "codebuddy") || !strings.Contains(got, "prompt_too_long") {
+		t.Fatalf("unexpected failure text: %q", got)
+	}
+	if codebuddyTerminalReasonFailure("completed", "") != "" {
+		t.Fatal("ordinary terminal_reason must not fail")
+	}
+}
+
+func TestCodebuddyHandleUserDetectsAsyncLaunch(t *testing.T) {
+	t.Parallel()
+
+	b := &codebuddyBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+	msg := codebuddySDKMessage{
+		Type: "user",
+		Message: mustMarshal(t, codebuddyMessageContent{
+			Role: "user",
+			Content: []codebuddyContentBlock{
+				{
+					Type:      "tool_result",
+					ToolUseID: "call-async",
+					Content:   mustMarshal(t, map[string]any{"status": "async_launched", "message": "background"}),
+				},
+			},
+		}),
+	}
+	if !b.handleUser(msg, ch) {
+		t.Fatal("expected async_launched tool_result to be detected")
+	}
+	<-ch
+}
+
+func TestCodebuddyControlRequestForcesForeground(t *testing.T) {
+	t.Parallel()
+
+	b := &codebuddyBackend{cfg: Config{Logger: slog.Default()}}
+	var written bytes.Buffer
+	msg := codebuddySDKMessage{
+		Type:      "control_request",
+		RequestID: "req-bg",
+		Request: mustMarshal(t, codebuddyControlRequestPayload{
+			Subtype:  "tool_use",
+			ToolName: "Bash",
+			Input:    mustMarshal(t, map[string]any{"command": "sleep 60", "run_in_background": true}),
+		}),
+	}
+	b.handleControlRequest(msg, &written)
+
+	var resp map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(written.Bytes()), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	inner := resp["response"].(map[string]any)["response"].(map[string]any)
+	updated := inner["updatedInput"].(map[string]any)
+	if updated["run_in_background"] != false {
+		t.Fatalf("expected run_in_background forced to false, got %v", updated["run_in_background"])
+	}
+}
+
+func TestCodebuddyExecuteResumeRejectedFromStderr(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "codebuddy")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		"echo \"No conversation found with session ID: sess-dead\" >&2\n" +
+		"exit 1\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	b := &codebuddyBackend{cfg: Config{ExecutablePath: fakePath, Logger: slog.Default()}}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := b.Execute(ctx, "prompt", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "sess-dead",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected failed, got %q (%q)", result.Status, result.Error)
+		}
+		if !result.ResumeRejected {
+			t.Fatalf("expected ResumeRejected when stderr reports missing session, got %+v", result)
+		}
+		if result.SessionID != "" {
+			t.Fatalf("expected empty SessionID after resume rejection, got %q", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestCodebuddyExecuteFailsOnPromptTooLong(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "codebuddy")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		`printf '%s\n' '{"type":"result","subtype":"success","is_error":true,"terminal_reason":"prompt_too_long","session_id":"sess-full","result":"Prompt is too long"}'` + "\n" +
+		"exit 0\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	b := &codebuddyBackend{cfg: Config{ExecutablePath: fakePath, Logger: slog.Default()}}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := b.Execute(ctx, "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected failed for prompt_too_long, got %q (%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "prompt_too_long") {
+			t.Fatalf("expected prompt_too_long in error, got %q", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
 	}
 }

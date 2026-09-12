@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // codebuddyBackend implements Backend by spawning the CodeBuddy CLI
@@ -201,6 +203,8 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		var finalResultText string
 		sawResult := false
 		resultIsError := false
+		var terminalReasonError string
+		sawAsyncLaunch := false
 		var sessionID string
 		usage := make(map[string]TokenUsage)
 		eventCount := 0
@@ -241,7 +245,9 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 				}
 				lastAssistantText = turn.resolveFallback(lastAssistantText)
 			case "user":
-				b.handleUser(msg, msgCh)
+				if b.handleUser(msg, msgCh) {
+					sawAsyncLaunch = true
+				}
 			case "system":
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
@@ -251,6 +257,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 				sawResult = true
 				finalResultText = msg.ResultText
 				resultIsError = msg.IsError
+				terminalReasonError = codebuddyTerminalReasonFailure(msg.TerminalReason, msg.ResultText)
 				sessionID = msg.SessionID
 				if resultUsage := codebuddyResultUsage(msg, opts.Model); len(resultUsage) > 0 {
 					usage = resultUsage
@@ -286,6 +293,10 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		// broken pipe, or been unblocked by the kill that ended cmd.
 		writeErr := <-writeDone
 
+		completionGuardError := ""
+		if sawAsyncLaunch {
+			completionGuardError = "codebuddy launched an async background task; Multica-managed runs require foreground execution"
+		}
 		finalStatus, finalOutput, finalError := finalizeStreamResult(
 			"codebuddy",
 			timeout,
@@ -294,17 +305,21 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			exitErr,
 			sessionID,
 			streamTerminalState{
-				lastAssistantText: lastAssistantText,
-				finalResultText:   finalResultText,
-				sawResult:         sawResult,
-				resultIsError:     resultIsError,
-				scanErr:           scanErr,
+				lastAssistantText:   lastAssistantText,
+				finalResultText:     finalResultText,
+				sawResult:           sawResult,
+				resultIsError:       resultIsError,
+				scanErr:             scanErr,
+				terminalReasonError: terminalReasonError,
 			},
-			"",
+			completionGuardError,
 		)
 
+		// cmd.Wait() has returned — stderrBuf.Tail() is complete. Resume
+		// rejection phrases often land only on stderr (mirror Claude MUL-4966).
+		stderrTail := stderrBuf.Tail()
 		if finalError != "" {
-			finalError = withAgentStderr(finalError, "codebuddy", stderrBuf.Tail())
+			finalError = withAgentStderr(finalError, "codebuddy", stderrTail)
 		}
 		logStreamProtocolObservation(b.cfg.Logger, streamProtocolObservation{
 			provider:                   "codebuddy",
@@ -326,8 +341,8 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 
 		b.cfg.Logger.Info("codebuddy finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
-		resumeRejected := resumeWasRejected(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError)
-		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError)
+		resumeRejected := resumeWasRejected(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError, stderrTail)
+		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError, stderrTail)
 		if resumeRejected {
 			b.cfg.Logger.Info("codebuddy resume was rejected; dropping session id and signalling fresh-session retry",
 				"requested_resume", opts.ResumeSessionID,
@@ -406,17 +421,23 @@ func (b *codebuddyBackend) handleAssistant(msg codebuddySDKMessage, ch chan<- Me
 	return turn
 }
 
-func (b *codebuddyBackend) handleUser(msg codebuddySDKMessage, ch chan<- Message) {
+func (b *codebuddyBackend) handleUser(msg codebuddySDKMessage, ch chan<- Message) bool {
 	var content codebuddyMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
-		return
+		return false
 	}
 
+	sawAsyncLaunch := false
 	for _, block := range content.Content {
 		if block.Type == "tool_result" {
 			resultStr := ""
 			if block.Content != nil {
 				resultStr = string(block.Content)
+				// Same stream-json tool_result shape as Claude Code; reuse the
+				// shared detector so background Bash cannot silently "complete".
+				if claudeToolResultHasAsyncLaunch(block.Content) {
+					sawAsyncLaunch = true
+				}
 			}
 			trySend(ch, Message{
 				Type:   MessageToolResult,
@@ -425,6 +446,7 @@ func (b *codebuddyBackend) handleUser(msg codebuddySDKMessage, ch chan<- Message
 			})
 		}
 	}
+	return sawAsyncLaunch
 }
 
 func (b *codebuddyBackend) handleControlRequest(msg codebuddySDKMessage, stdin interface{ Write([]byte) (int, error) }) {
@@ -440,6 +462,12 @@ func (b *codebuddyBackend) handleControlRequest(msg codebuddySDKMessage, stdin i
 	}
 	if inputMap == nil {
 		inputMap = map[string]any{}
+	}
+	if forceClaudeToolInputForeground(inputMap) {
+		b.cfg.Logger.Info("codebuddy: forced foreground tool execution",
+			"request_id", msg.RequestID,
+			"tool", req.ToolName,
+		)
 	}
 
 	response := map[string]any{
@@ -494,6 +522,21 @@ func writeCodebuddyInput(w io.Writer, prompt string) error {
 	return nil
 }
 
+// codebuddyTerminalReasonFailure mirrors claudeTerminalReasonFailure for the
+// Claude-Code-fork stream-json contract: only prompt_too_long is treated as a
+// silent-success failure that must surface as an error (GH #6402 class).
+func codebuddyTerminalReasonFailure(terminalReason, resultText string) string {
+	if strings.TrimSpace(terminalReason) != taskfailure.TerminalReasonPromptTooLong {
+		return ""
+	}
+	msg := "codebuddy ended the turn with terminal_reason=" + taskfailure.TerminalReasonPromptTooLong +
+		": the session's context window is exhausted and compaction could not recover it"
+	if detail := strings.TrimSpace(resultText); detail != "" {
+		msg += " (" + detail + ")"
+	}
+	return msg
+}
+
 // ── Codebuddy SDK JSON types ──
 
 type codebuddySDKMessage struct {
@@ -504,12 +547,16 @@ type codebuddySDKMessage struct {
 	Model     string          `json:"model,omitempty"`
 
 	// result fields
-	ResultText string                               `json:"result,omitempty"`
-	IsError    bool                                 `json:"is_error,omitempty"`
-	DurationMs float64                              `json:"duration_ms,omitempty"`
-	NumTurns   int                                  `json:"num_turns,omitempty"`
-	Usage      *codebuddyUsage                      `json:"usage,omitempty"`
-	ModelUsage map[string]codebuddyResultModelUsage `json:"modelUsage,omitempty"`
+	ResultText string `json:"result,omitempty"`
+	IsError    bool   `json:"is_error,omitempty"`
+	// TerminalReason mirrors Claude Code's structured end-of-turn reason.
+	// CodeBuddy is a Claude Code fork and emits the same field; see
+	// codebuddyTerminalReasonFailure for the prompt_too_long mapping.
+	TerminalReason string                               `json:"terminal_reason,omitempty"`
+	DurationMs     float64                              `json:"duration_ms,omitempty"`
+	NumTurns       int                                  `json:"num_turns,omitempty"`
+	Usage          *codebuddyUsage                      `json:"usage,omitempty"`
+	ModelUsage     map[string]codebuddyResultModelUsage `json:"modelUsage,omitempty"`
 
 	// log fields
 	Log *codebuddyLogEntry `json:"log,omitempty"`
