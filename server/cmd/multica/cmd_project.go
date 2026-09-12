@@ -58,6 +58,13 @@ var projectStatusCmd = &cobra.Command{
 	RunE:  runProjectStatus,
 }
 
+var projectTreeCmd = &cobra.Command{
+	Use:   "tree <id>",
+	Short: "Show the project tree (parent and all descendants)",
+	Args:  exactArgs(1),
+	RunE:  runProjectTree,
+}
+
 var projectResourceCmd = &cobra.Command{
 	Use:   "resource",
 	Short: "Manage resources attached to a project",
@@ -114,6 +121,7 @@ func init() {
 	projectCmd.AddCommand(projectUpdateCmd)
 	projectCmd.AddCommand(projectDeleteCmd)
 	projectCmd.AddCommand(projectStatusCmd)
+	projectCmd.AddCommand(projectTreeCmd)
 	projectCmd.AddCommand(projectResourceCmd)
 
 	projectResourceCmd.AddCommand(projectResourceListCmd)
@@ -125,6 +133,8 @@ func init() {
 	projectListCmd.Flags().String("output", "table", "Output format: table or json")
 	projectListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 	projectListCmd.Flags().String("status", "", "Filter by status")
+	projectListCmd.Flags().Bool("top-level", false, "Show only top-level projects (no parent)")
+	projectListCmd.Flags().String("parent", "", "Show only direct children of this project (id or prefix)")
 
 	// project get
 	projectGetCmd.Flags().String("output", "json", "Output format: table or json")
@@ -137,6 +147,7 @@ func init() {
 	projectCreateCmd.Flags().String("lead", "", "Lead name (member or agent)")
 	projectCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
 	projectCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
+	projectCreateCmd.Flags().String("parent", "", "Parent project (id or prefix); makes this a sub-project")
 	projectCreateCmd.Flags().StringArray("repo", nil, "Attach a github_repo resource by URL (may be repeated)")
 	projectCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -184,6 +195,7 @@ func init() {
 	projectUpdateCmd.Flags().String("lead", "", "New lead name (member or agent)")
 	projectUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	projectUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD; pass empty string to clear)")
+	projectUpdateCmd.Flags().String("parent", "", "New parent project (id or prefix); pass empty string to clear parent and make top-level")
 	projectUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// project delete
@@ -191,6 +203,9 @@ func init() {
 
 	// project status
 	projectStatusCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// project tree
+	projectTreeCmd.Flags().String("output", "json", "Output format: json or tree")
 }
 
 // ---------------------------------------------------------------------------
@@ -212,6 +227,18 @@ func runProjectList(cmd *cobra.Command, _ []string) error {
 	}
 	if v, _ := cmd.Flags().GetString("status"); v != "" {
 		params.Set("status", v)
+	}
+	// --top-level and --parent are mutually exclusive parent filters (RFC
+	// #3104). --top-level sends parent_id=null; --parent resolves the project
+	// ref and sends parent_id=<uuid>.
+	if topLevel, _ := cmd.Flags().GetBool("top-level"); topLevel {
+		params.Set("parent_id", "null")
+	} else if parentRef, _ := cmd.Flags().GetString("parent"); parentRef != "" {
+		resolved, resolveErr := resolveProjectID(ctx, client, parentRef)
+		if resolveErr != nil {
+			return fmt.Errorf("resolve parent project: %w", resolveErr)
+		}
+		params.Set("parent_id", resolved.ID)
 	}
 
 	path := "/api/projects"
@@ -344,6 +371,13 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("due-date"); v != "" {
 		body["due_date"] = v
 	}
+	if parentRef, _ := cmd.Flags().GetString("parent"); parentRef != "" {
+		resolved, resolveErr := resolveProjectID(ctx, client, parentRef)
+		if resolveErr != nil {
+			return fmt.Errorf("resolve parent project: %w", resolveErr)
+		}
+		body["parent_project_id"] = resolved.ID
+	}
 
 	// Bundle resources into the create payload so the server attaches them in
 	// the same transaction; this avoids leaving a half-attached project on
@@ -439,9 +473,23 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("due-date")
 		body["due_date"] = v
 	}
+	// --parent follows the Changed() contract: an explicit --parent "" clears
+	// the parent (makes the project top-level), mirroring --start-date / --due-date.
+	if cmd.Flags().Changed("parent") {
+		v, _ := cmd.Flags().GetString("parent")
+		if v == "" {
+			body["parent_project_id"] = nil
+		} else {
+			resolved, resolveErr := resolveProjectID(ctx, client, v)
+			if resolveErr != nil {
+				return fmt.Errorf("resolve parent project: %w", resolveErr)
+			}
+			body["parent_project_id"] = resolved.ID
+		}
+	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --start-date, --due-date")
+		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --start-date, --due-date, --parent")
 	}
 
 	var result map[string]any
@@ -520,6 +568,65 @@ func runProjectStatus(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Project tree
+// ---------------------------------------------------------------------------
+
+func runProjectTree(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+
+	var tree map[string]any
+	if err := client.GetJSON(ctx, "/api/projects/"+projectRef.ID+"/tree", &tree); err != nil {
+		return fmt.Errorf("get project tree: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, tree)
+	}
+
+	// Indented tree view for human readability.
+	printProjectTreeIndent(os.Stdout, tree, 0)
+	return nil
+}
+
+// printProjectTreeIndent prints a project tree with indentation, showing the
+// title, status, and issue count at each level.
+func printProjectTreeIndent(w *os.File, node map[string]any, depth int) {
+	indent := strings.Repeat("  ", depth)
+	title := strVal(node, "title")
+	status := strVal(node, "status")
+	id := strVal(node, "id")
+	issueCount := int64(0)
+	if n, ok := node["issue_count"].(float64); ok {
+		issueCount = int64(n)
+	}
+	parentID := strVal(node, "parent_project_id")
+	if parentID != "" && depth > 0 {
+		fmt.Fprintf(w, "%s├─ %s [%s] (%d issues, %s)\n", indent, title, status, issueCount, id)
+	} else {
+		fmt.Fprintf(w, "%s%s [%s] (%d issues, %s)\n", indent, title, status, issueCount, id)
+	}
+	if children, ok := node["children"].([]any); ok {
+		for _, c := range children {
+			if child, ok := c.(map[string]any); ok {
+				printProjectTreeIndent(w, child, depth+1)
+			}
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
