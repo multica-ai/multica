@@ -1046,6 +1046,7 @@ type PersonalAccessToken struct {
 	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
 	Revoked     bool               `json:"revoked"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 }
 
 type PinnedItem struct {
