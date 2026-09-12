@@ -196,22 +196,20 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// stay ahead of anything that consumes or mutates WeCom-side state for the
 	// turn, because an answer that must not reach the room must not take over
 	// the room's message either.
+	//
+	// Asked BEFORE the delivery row is looked up, rather than after it. The two
+	// are both reads and the gate's verdict does not depend on the row, so the
+	// order is free — and putting the gate first is what lets a missing row
+	// mean something. Behind it, every turn that reaches the lookup is one the
+	// channel ingested, so a row that is not there is a channel turn nobody can
+	// address; ahead of it, the same branch also catches every question ever
+	// typed in the Multica web UI, and an exit shared with those can only be
+	// silent.
 	taskID, ok := chatDoneTaskID(e)
 	if !ok {
 		o.dropped(ctx, e, dropTaskMissing, nil)
 		return nil
 	}
-	delivery, err := o.q.GetChannelTaskDelivery(ctx, taskID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		return fmt.Errorf("wecom: lookup task delivery: %w", err)
-	}
-	if delivery.ChannelType != channelTypeWecom {
-		return nil
-	}
-	binding := wecomBindingFromTaskDelivery(delivery)
 	task, err := o.q.GetAgentTask(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -229,6 +227,29 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		o.skipped(ctx, e, skipOriginNotChannel)
 		return nil
 	}
+	delivery, err := o.q.GetChannelTaskDelivery(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// No route was recorded for a turn whose input DID come in over a
+			// channel — the origin gate has already established that much. In
+			// a steady-state deployment there is no such turn: the delivery
+			// row is written inside the same transaction that enqueues a
+			// channel task. What produces one is an upgrade, and the answer it
+			// belongs to is going nowhere, so the branch is counted and warned
+			// about rather than left as a quiet return. See skipNoDeliveryRow.
+			o.skipped(ctx, e, skipNoDeliveryRow)
+			return nil
+		}
+		return fmt.Errorf("wecom: lookup task delivery: %w", err)
+	}
+	if delivery.ChannelType != channelTypeWecom {
+		// Not a wecom turn (Slack / Lark). Named rather than silent so it does
+		// not share an exit with the branch above it: the two are one quiet
+		// return from outside, and one of them means somebody is waiting.
+		o.skipped(ctx, e, skipNotWecomTurn)
+		return nil
+	}
+	binding := wecomBindingFromTaskDelivery(delivery)
 	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
 		ID:          binding.InstallationID,
 		ChannelType: channelTypeWecom,

@@ -158,19 +158,85 @@ func TestDeliveredIsCounted(t *testing.T) {
 // TestNonWecomSessionIsNotADrop — this subscriber sees every chat:done in the
 // deployment, including Slack's and the web UI's. Those are not this adapter's
 // to answer and must not inflate the drop rate.
+//
+// The three of them leave by three different exits, and which one fired is the
+// whole question an operator brings here: "the answer is in Multica and the
+// chat stayed quiet" is a report about somebody waiting when the turn had a
+// route and nobody can name it, and a non-event when it was Slack's turn all
+// along.
+//
+// REVERSE VERIFICATION: return nil from either of the two branches in
+// processEvent instead of naming a skip reason, and the counters for the two
+// exits collapse to zero while the drop rate stays at zero either way — which
+// is exactly the indistinguishability this pins. Build and vet stay silent.
 func TestNonWecomSessionIsNotADrop(t *testing.T) {
 	t.Parallel()
-	q := deliverableTurn(t)
-	q.sessionErr = pgx.ErrNoRows
-	r := newOutcomeRig(t, q, true)
+	for _, tc := range []struct {
+		name       string
+		reason     skipReason
+		actionable bool
+		setup      func(q *fakeOutboundQueries)
+	}{
+		{
+			// Slack's or Lark's turn, on the bus this subscriber shares.
+			name: "another platform's delivery row", reason: skipNotWecomTurn,
+			setup: func(q *fakeOutboundQueries) { q.deliveryChannelType = "slack" },
+		},
+		{
+			// Asked in the Multica web UI on a session that originated in a
+			// room. There is no room waiting.
+			name: "asked in the web UI", reason: skipOriginNotChannel,
+			setup: func(q *fakeOutboundQueries) { q.channelIngested = askedInTheWebUI() },
+		},
+		{
+			// Asked in the Multica web UI on a session that never touched a
+			// channel, which is every ordinary turn in the deployment: no
+			// delivery row, and none was ever owed. It has to leave by the web
+			// UI's exit and not the missing-route one, or the loudest line in
+			// the log fires once per web message.
+			name: "asked in the web UI with no delivery row", reason: skipOriginNotChannel,
+			setup: func(q *fakeOutboundQueries) {
+				q.channelIngested = askedInTheWebUI()
+				q.sessionErr = pgx.ErrNoRows
+			},
+		},
+		{
+			// A channel turn whose route was never recorded. Somebody asked in
+			// a room and nothing here can say which one, so this is the one an
+			// operator has to act on.
+			name: "a channel turn with no delivery row", reason: skipNoDeliveryRow, actionable: true,
+			setup: func(q *fakeOutboundQueries) { q.sessionErr = pgx.ErrNoRows },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			q := deliverableTurn(t)
+			tc.setup(q)
+			r := newOutcomeRig(t, q, true)
 
-	r.o.handleEvent(outcomeEvent())
+			r.o.handleEvent(outcomeEvent())
 
-	if got := r.mx.get("outbound_dropped"); got != 0 {
-		t.Errorf("dropped = %d; another platform's session is not a WeCom drop", got)
-	}
-	if r.logs.Len() != 0 {
-		t.Errorf("logged something for another platform's session:\n%s", r.logs.String())
+			if got := r.mx.get("outbound_dropped"); got != 0 {
+				t.Errorf("dropped = %d; a turn this adapter never owed is not a WeCom drop", got)
+			}
+			if got := r.mx.get("outbound_skipped:" + string(tc.reason)); got != 1 {
+				t.Fatalf("outbound_skipped:%s = %d, want 1 — this exit is unnamed from outside. log:\n%s",
+					tc.reason, got, r.logs.String())
+			}
+			if n := r.frames(); n != 0 {
+				t.Errorf("frames = %d, want 0 — nothing was owed to this chat", n)
+			}
+			out := r.logs.String()
+			if !strings.Contains(out, "reason="+string(tc.reason)) {
+				t.Errorf("log does not name the reason:\n%s", out)
+			}
+			// The actionable one is a WARN an operator can alert on; the
+			// ordinary two stay at DEBUG, where they are a rate rather than a
+			// page.
+			if warned := strings.Contains(out, "level=WARN"); warned != tc.actionable {
+				t.Errorf("level=WARN present = %v, want %v:\n%s", warned, tc.actionable, out)
+			}
+		})
 	}
 }
 
