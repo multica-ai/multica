@@ -77,6 +77,13 @@ type wsSender struct {
 	ackMu   sync.Mutex
 	replies map[string]*replyWaiter
 
+	// quota holds this connection's aibot_send_msg allowance, per target chat,
+	// and retryBackoff is what a throttled push waits before its one retry.
+	// One quota per socket is the whole accounting — see rate_limit.go for why
+	// that is the right scope and where the numbers come from.
+	quota        *sendQuota
+	retryBackoff time.Duration
+
 	// seq numbers outbound frames in the order they reach the socket.
 	// Guarded by mu, so it is the wire order by construction, and it is what
 	// pairs a traced send attempt with its outcome — req_id cannot do that
@@ -89,7 +96,13 @@ func newWSSender(conn wsConn, log *slog.Logger) *wsSender {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &wsSender{conn: conn, log: log, replies: make(map[string]*replyWaiter)}
+	return &wsSender{
+		conn:         conn,
+		log:          log,
+		replies:      make(map[string]*replyWaiter),
+		quota:        newSendQuota(),
+		retryBackoff: sendRetryBackoff,
+	}
 }
 
 // ackTimeout caps the wait for a verdict. WeCom answers in a few hundred
@@ -299,6 +312,5 @@ func (s *wsSender) sendTextCtx(ctx context.Context, chatID string, chatTypeInt i
 	if err != nil {
 		return err
 	}
-	_, err = s.request(ctx, cmdSendMsg, body)
-	return err
+	return s.sendMsgFrame(ctx, chatID, body)
 }
