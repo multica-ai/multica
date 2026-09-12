@@ -32,3 +32,4 @@ func TestSupportedTypesLockstepWithNew(t *testing.T) {
 		t.Errorf("New(%q) succeeded, want error for an unsupported type", bogus)
 	}
 }
+
