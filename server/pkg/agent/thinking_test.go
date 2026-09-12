@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -132,15 +133,14 @@ func TestProjectClaudeLevels_PerModelSubset(t *testing.T) {
 //
 // Elon's PR1 review found that `codex debug models --output json` is
 // rejected by codex-cli 0.131.0 — there is no `--output` flag on the
-// subcommand. The fix was to drop the flag and add `--bundled` (which
-// just skips network refresh). These two tests pin the contract:
+// subcommand, so discovery must pass a clean `debug models`.
 //
-//   - TestCodexDebugModelsArgs_Pinned asserts the literal argv we pass
-//     so a future "let's add a flag" refactor breaks loudly instead of
-//     silently swallowing the discovery output.
-//   - TestRunCodexDebugModels_ArgvSeenByBinary plugs a fake `codex`
-//     binary on PATH and verifies that what *actually* reaches the
-//     process matches the pinned argv, not just what the var holds.
+// `--bundled` was later dropped too (#8177): it reports the binary's
+// baked-in native catalog and ignores a configured `model_catalog_json`,
+// so discovery must read the effective catalog instead. TestRunCodexDebugModels_ArgvSeenByBinary
+// pins the contract by plugging a fake `codex` binary and verifying what
+// *actually* reaches the process — one argument per element, no `--output`
+// and no `--bundled`.
 
 // TestRunCodexDebugModels_ArgvSeenByBinary executes runCodexDebugModels
 // against a shell-script stand-in for `codex` that records its argv to
@@ -176,7 +176,7 @@ func TestRunCodexDebugModels_ArgvSeenByBinary(t *testing.T) {
 		t.Fatalf("read argv file: %v", err)
 	}
 	got := splitNonEmptyLines(string(data))
-	want := []string{"debug", "models", "--bundled"}
+	want := []string{"debug", "models"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("fake codex received argv %v, want %v", got, want)
 	}
@@ -343,7 +343,7 @@ func TestDiscoverCodexModelsVersionGateAndFallback(t *testing.T) {
 		t.Skip("shell-script fake binary requires a POSIX shell")
 	}
 
-	t.Run("supported version uses bundled catalog", func(t *testing.T) {
+	t.Run("supported version uses discovered catalog", func(t *testing.T) {
 		dir := t.TempDir()
 		fake := filepath.Join(dir, "codex")
 		script := `#!/bin/sh
@@ -398,6 +398,108 @@ echo '{"models":[{"slug":"runtime-model","display_name":"Runtime Model","visibil
 			t.Fatalf("supported Codex version must retain explicit-standard capability through catalog fallback: %+v", got[0])
 		}
 	})
+}
+
+// TestListModelsCodexUsesEffectiveCatalog is the #8177 regression. Codex model
+// discovery must read the runtime command's EFFECTIVE catalog (the configured
+// model_catalog_json), not the binary's bundled native catalog. The stand-in
+// codex returns a DIFFERENT payload for `debug models --bundled` (bundled
+// native IDs only) than for a plain `debug models` (the configured catalog,
+// which adds a custom `gateway/custom-codex` model advertising reasoning `high`
+// and a `priority`/Fast service tier). The old `--bundled` argv would surface
+// the bundled catalog and drop the custom model + its Fast/effort capabilities;
+// this asserts ListModels now receives the configured model instead, for both a
+// plain runtime command and a `-c model_catalog_json=…` runtime prefix.
+func TestListModelsCodexUsesEffectiveCatalog(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+
+	writeFake := func(t *testing.T, argvFile string) string {
+		t.Helper()
+		dir := t.TempDir()
+		fake := filepath.Join(dir, "codex")
+		// Bundled branch: native IDs only, no custom model. Configured branch
+		// (no --bundled): adds gateway/custom-codex with high + priority/Fast.
+		// The version probe (DetectVersion) may carry the runtime prefix, so
+		// `--version` can appear at any argv position — scan for it, don't
+		// assume $1. The bundled branch (old code) omits the custom model; the
+		// plain `debug models` branch returns the effective/configured catalog.
+		script := "#!/bin/sh\n" +
+			"for a in \"$@\"; do\n" +
+			"  if [ \"$a\" = \"--version\" ]; then echo 'codex-cli 0.144.1'; exit 0; fi\n" +
+			"done\n" +
+			"printf '%s\\n' \"$@\" > '" + argvFile + "'\n" +
+			"for a in \"$@\"; do\n" +
+			"  if [ \"$a\" = \"--bundled\" ]; then\n" +
+			"    echo '{\"models\":[{\"slug\":\"gpt-5.6-sol\",\"visibility\":\"list\",\"default_reasoning_level\":\"high\",\"supported_reasoning_levels\":[{\"effort\":\"high\"}]}]}'\n" +
+			"    exit 0\n" +
+			"  fi\n" +
+			"done\n" +
+			"echo '{\"models\":[{\"slug\":\"gateway/custom-codex\",\"display_name\":\"Custom Codex\",\"visibility\":\"list\",\"default_reasoning_level\":\"high\",\"supported_reasoning_levels\":[{\"effort\":\"high\"}],\"service_tiers\":[{\"id\":\"priority\",\"name\":\"Fast\",\"description\":\"1.5x speed\"}]}]}'\n"
+		writeTestExecutable(t, fake, []byte(script))
+		return fake
+	}
+
+	assertCustomModel := func(t *testing.T, catalog Catalog) {
+		t.Helper()
+		var custom *Model
+		for i := range catalog.Models {
+			if catalog.Models[i].ID == "gateway/custom-codex" {
+				custom = &catalog.Models[i]
+				break
+			}
+		}
+		if custom == nil {
+			t.Fatalf("effective custom model missing; got bundled catalog %+v", catalog.Models)
+		}
+		if custom.Thinking == nil || !hasThinkingLevel(custom.Thinking, "high") {
+			t.Errorf("custom model lost its reasoning catalog: %+v", custom.Thinking)
+		}
+		if len(custom.ServiceTiers) != 1 || custom.ServiceTiers[0].ID != "priority" {
+			t.Errorf("custom model lost its Fast/priority service tier: %+v", custom.ServiceTiers)
+		}
+	}
+
+	t.Run("plain runtime config", func(t *testing.T) {
+		argv := filepath.Join(t.TempDir(), "argv.txt")
+		fake := writeFake(t, argv)
+		catalog, err := ListModels(context.Background(), "codex", Command{Path: fake})
+		if err != nil {
+			t.Fatalf("ListModels: %v", err)
+		}
+		assertCustomModel(t, catalog)
+		if strings.Contains(readFileString(t, argv), "--bundled") {
+			t.Errorf("discovery passed --bundled, which ignores the configured catalog")
+		}
+	})
+
+	t.Run("model_catalog_json runtime prefix", func(t *testing.T) {
+		argv := filepath.Join(t.TempDir(), "argv.txt")
+		fake := writeFake(t, argv)
+		cmd := NewCommand(fake, []string{"-c", "model_catalog_json=/tmp/catalog.json"})
+		catalog, err := ListModels(context.Background(), "codex", cmd)
+		if err != nil {
+			t.Fatalf("ListModels: %v", err)
+		}
+		assertCustomModel(t, catalog)
+		gotArgv := readFileString(t, argv)
+		if strings.Contains(gotArgv, "--bundled") {
+			t.Errorf("discovery passed --bundled, which ignores the configured catalog: %q", gotArgv)
+		}
+		if !strings.Contains(gotArgv, "model_catalog_json=/tmp/catalog.json") {
+			t.Errorf("runtime prefix not forwarded to codex: %q", gotArgv)
+		}
+	})
+}
+
+func readFileString(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(data)
 }
 
 func TestValidateThinkingLevelCodexPerModelFallbackCatalog(t *testing.T) {
@@ -976,7 +1078,7 @@ func writeFakeClaudePreEffortHelpBinary(t *testing.T) string {
 }
 
 // writeFakeCodexModelsBinary writes a stand-in `codex` that answers
-// `debug models --bundled` with a Codex 0.144.1-shaped gpt-5.6 catalog
+// `debug models` with a Codex 0.144.1-shaped gpt-5.6 catalog
 // (sol/terra advertise max+ultra, luna tops out at max) and prints a version
 // string for any other invocation (DetectVersion's probe). Used to exercise
 // ValidateThinkingLevel against a real per-model catalog without a codex install.
