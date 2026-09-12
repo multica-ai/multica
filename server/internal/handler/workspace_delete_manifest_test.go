@@ -76,6 +76,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"issue_property":                     workspaceDelete,
 	"issue_pull_request":                 workspaceDelete,
 	"issue_reaction":                     workspaceDelete,
+	"issue_scheduled_trigger":            workspaceDelete,
 	"issue_source_context":               workspaceDelete,
 	"issue_source_context_object_intent": workspaceDeleteSettle,
 	"issue_status":                       workspaceDelete,

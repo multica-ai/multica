@@ -206,6 +206,11 @@ type Handler struct {
 	// Entitlements supplies workspace-scoped commercial gates. A nil provider
 	// preserves self-hosted behavior without extra reads.
 	Entitlements entitlement.Provider
+	// IssueScheduleService owns one-time issue-scheduled-trigger CRUD and
+	// dispatch (#5927). Dispatch is also called from the scheduler job
+	// (server/internal/scheduler/jobs_issue_schedule.go), registered in
+	// cmd/server/main.go.
+	IssueScheduleService *service.IssueScheduleService
 	// SeatCapacity executes Cloud's pre-purchased human-seat protocol. Nil or
 	// disabled preserves self-hosted behavior.
 	SeatCapacity          seatcapacity.Executor
@@ -477,6 +482,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		TaskService:                  taskSvc,
 		PluginService:                service.NewPluginService(queries, txStarter),
 		IssueService:                 service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
+		IssueScheduleService:         service.NewIssueScheduleService(queries, txStarter, taskSvc),
 		AutopilotService:             service.NewAutopilotService(queries, txStarter, bus, taskSvc),
 		EmailService:                 emailService,
 		UpdateStore:                  NewInMemoryUpdateStore(),

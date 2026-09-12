@@ -1896,6 +1896,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/active-task", h.GetActiveTaskForIssue)
 					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
 					r.Post("/rerun", h.RerunIssue)
+					// One-time scheduled run (#5927).
+					r.Post("/schedule", h.CreateIssueSchedule)
+					r.Get("/schedule", h.GetIssueSchedule)
+					r.Delete("/schedule", h.CancelIssueSchedule)
 					r.Post("/quick-actions/{quickActionId}/run", h.RunQuickAction)
 					r.Post("/quick-actions/{quickActionId}/render", h.RenderQuickAction)
 					r.Get("/task-runs", h.ListTasksByIssue)
