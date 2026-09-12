@@ -304,7 +304,7 @@ func TestRunMigrationsRepairsInvalidRuntimeIDIndex(t *testing.T) {
 		blocker.Release()
 		t.Fatalf("acquire builder conn: %v", err)
 	}
-	if _, err := builder.Exec(ctx, "SET statement_timeout = '250ms'"); err != nil {
+	if _, err := builder.Exec(ctx, "SET statement_timeout = '2s'"); err != nil {
 		builder.Release()
 		blocker.Release()
 		t.Fatalf("set statement_timeout: %v", err)

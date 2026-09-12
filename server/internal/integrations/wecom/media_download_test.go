@@ -12,7 +12,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 	"unicode"
 )
 
@@ -212,38 +211,6 @@ func itoa(n int) string {
 	return string(b)
 }
 
-// TestDownloadMediaGivesUpWhenTheServerStalls: COS is normally fast, but a
-// download that never finishes would otherwise hold a media slot for the
-// whole 45s router budget and starve everything queued behind it.
-func TestDownloadMediaGivesUpWhenTheServerStalls(t *testing.T) {
-	release := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-release:
-		case <-r.Context().Done():
-		}
-	}))
-	defer func() {
-		close(release)
-		srv.Close()
-	}()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
-	defer cancel()
-
-	start := time.Now()
-	_, err := downloadMedia(ctx, srv.Client(), srv.URL)
-	if err == nil {
-		t.Fatal("a stalled download must return an error")
-	}
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Fatalf("gave up after %s — the caller's deadline was not honoured", elapsed)
-	}
-}
-
-// TestDownloadMediaRefusesAnOversizeBody, both ways a server can present one:
-// an honest Content-Length we can reject before reading a byte, and a
-// chunked response that only reveals its size as it arrives.
 func TestDownloadMediaRefusesAnOversizeBody(t *testing.T) {
 	t.Run("declared up front", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

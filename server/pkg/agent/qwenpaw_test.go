@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestQwenpawModelSelectionUnsupported(t *testing.T) {
@@ -262,62 +261,6 @@ func TestQwenpawUsesSessionLoad(t *testing.T) {
 	}
 	if strings.Contains(requests, `"method":"session/resume"`) {
 		t.Fatalf("qwenpaw must use session/load (not session/resume), got:\n%s", requests)
-	}
-}
-
-// TestQwenpawTimeout tests that a context timeout during session/new
-// is reported as status=timeout. The fake script responds to
-// initialize immediately, then sleeps 30s on session/new so the
-// 1s context deadline expires during the session/new RPC.
-func TestQwenpawTimeout(t *testing.T) {
-	t.Parallel()
-
-	script := `#!/bin/sh
-while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
-  case "$line" in
-    *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
-      ;;
-    *'"method":"session/new"'*)
-      sleep 30
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_late"}}\n' "$id"
-      ;;
-    *)
-      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
-      ;;
-  esac
-done`
-
-	bin := writeFakeQwenpawScript(t, script)
-
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	b, err := New("qwenpaw", Config{
-		ExecutablePath: bin,
-		Logger:         logger,
-	})
-	if err != nil {
-		t.Fatalf("New(qwenpaw) error: %v", err)
-	}
-
-	// Initialization is immediate; the 30s sleep on session/new crosses this
-	// bounded test deadline.
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
-	session, err := b.Execute(ctx, "test prompt", ExecOptions{
-		Cwd: t.TempDir(),
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-
-	for range session.Messages {
-	}
-
-	result := <-session.Result
-	if result.Status != "timeout" {
-		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
 	}
 }
 

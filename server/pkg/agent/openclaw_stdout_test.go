@@ -51,9 +51,7 @@ cat <<'JSON'
 JSON
 ` + tail + `
 `
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatalf("write openclaw stub: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(script))
 	return bin
 }
 
@@ -212,9 +210,7 @@ cat <<'JSON'
 JSON
 exit 0
 `
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatalf("write openclaw stub: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(script))
 	b, logs := newOpenclawTestBackendWithLog(bin)
 
 	session, err := b.Execute(context.Background(), "hi", ExecOptions{})

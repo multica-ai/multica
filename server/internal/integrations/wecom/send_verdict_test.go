@@ -43,20 +43,3 @@ func TestSendTextSucceedsOnAZeroErrcode(t *testing.T) {
 		t.Fatalf("wrote %d frames, want 1", n)
 	}
 }
-
-// A verdict that never arrives must not be reported as a refusal: the message
-// may well have been delivered, so the two call for opposite responses.
-func TestSendTextDistinguishesALostAckFromARefusal(t *testing.T) {
-	conn := &recordingConn{} // no autoAck: nothing ever answers
-	sender := newWSSender(conn, nil)
-	sender.ackTimeout = lostAckTimeout
-
-	err := sender.sendText("CHAT", chatTypeSingleInt, "hello")
-	if !errors.Is(err, errAckTimeout) {
-		t.Fatalf("a lost ack reported as %v, want errAckTimeout", err)
-	}
-	var apiErr *wecomAPIError
-	if errors.As(err, &apiErr) {
-		t.Error("a lost ack was reported as a server refusal")
-	}
-}

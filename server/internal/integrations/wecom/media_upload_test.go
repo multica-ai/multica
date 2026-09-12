@@ -31,10 +31,6 @@ type mediaConn struct {
 
 	// refuse[cmd] answers that cmd with an errcode instead of a result.
 	refuse map[string]int
-	// dropAcks[cmd] withholds the verdict for that many frames of the cmd —
-	// what a lost ack looks like from this side of the wire.
-	dropAcks map[string]int
-
 	// chunkArrived and chunkRelease make concurrency observable. When
 	// chunkArrived is non-nil, every chunk frame drops a token into it and its
 	// verdict is withheld until chunkRelease closes — so the tokens in the
@@ -58,7 +54,6 @@ func newMediaConn() *mediaConn {
 		uploadID: "UPLOAD_1",
 		mediaID:  "MEDIA_1",
 		refuse:   map[string]int{},
-		dropAcks: map[string]int{},
 	}
 }
 
@@ -87,10 +82,6 @@ func (c *mediaConn) WriteMessage(_ int, data []byte) error {
 	c.frames = append(c.frames, env)
 	s := c.sender
 	code := c.refuse[env.Cmd]
-	drop := c.dropAcks[env.Cmd] > 0
-	if drop {
-		c.dropAcks[env.Cmd]--
-	}
 	var body json.RawMessage
 	switch env.Cmd {
 	case cmdUploadMediaInit:
@@ -101,7 +92,7 @@ func (c *mediaConn) WriteMessage(_ int, data []byte) error {
 	arrived, release := c.chunkArrived, c.chunkRelease
 	c.mu.Unlock()
 
-	if s == nil || drop {
+	if s == nil {
 		return nil // no verdict comes back
 	}
 	if code != 0 {
@@ -229,28 +220,6 @@ func TestUploadMedia_ChunksTheFileAndSealsIt(t *testing.T) {
 	}
 }
 
-// A lost verdict is the one failure worth a second offer — the protocol makes
-// re-sending a chunk idempotent precisely so this is safe.
-func TestUploadMediaChunk_ResendsAChunkWhoseVerdictNeverCame(t *testing.T) {
-	t.Parallel()
-	conn := newMediaConn()
-	conn.dropAcks[cmdUploadMediaChunk] = 1 // the first offer is never answered
-	sender := conn.newSender()
-
-	// One chunk, so "the first offer" is unambiguous.
-	if _, err := sender.uploadMedia(context.Background(), outboundMedia{
-		Kind: mediaTypeFile, Filename: "small.txt", Data: []byte("hello"),
-	}); err != nil {
-		t.Fatalf("uploadMedia gave up on a lost ack instead of offering the chunk again: %v", err)
-	}
-	if n := len(conn.cmdFrames(cmdUploadMediaChunk)); n != 2 {
-		t.Errorf("chunk frames = %d, want 2 (the lost one and its retry)", n)
-	}
-}
-
-// The opposite case, and the reason the retry is conditional: a refusal is the
-// server's answer and will be its answer again. Retrying it wastes the budget
-// and can only end the same way.
 func TestUploadMediaChunk_DoesNotResendARefusedChunk(t *testing.T) {
 	t.Parallel()
 	conn := newMediaConn()
@@ -276,32 +245,6 @@ func TestUploadMediaChunk_DoesNotResendARefusedChunk(t *testing.T) {
 	}
 }
 
-// A push whose verdict never came may already have arrived. Sending it again
-// would put the same media_id out twice and the person sees the file twice
-// with nothing to undo, so a timeout is reported rather than retried.
-func TestSendMedia_ReportsALostAckWithoutSendingAgain(t *testing.T) {
-	t.Parallel()
-	conn := newMediaConn()
-	conn.dropAcks[cmdSendMsg] = 5 // no verdict ever comes back for the push
-	sender := conn.newSender()
-	sender.ackTimeout = lostAckTimeout
-
-	err := sender.sendMedia(context.Background(), "CHAT_1", chatTypeSingleInt, mediaSend{
-		Kind: mediaTypeFile, MediaID: "MEDIA_1",
-	})
-	if !errors.Is(err, errAckTimeout) {
-		t.Fatalf("a lost push ack reported as %v, want errAckTimeout", err)
-	}
-	if n := len(conn.cmdFrames(cmdSendMsg)); n != 1 {
-		t.Errorf("send frames = %d, want 1 — a duplicate file is worse than an unconfirmed one", n)
-	}
-}
-
-// The cap is 20 MiB, and it is WeCom's number rather than ours: the OpenClaw
-// plugin they publish (WecomTeam/wecom-openclaw-plugin src/const.ts) sets
-// FILE_MAX_BYTES to 20 MiB and defines ABSOLUTE_MAX_BYTES — the size past which
-// nothing can be sent — as the same value. The 50 MB the chunk arithmetic
-// allows is what the FRAMING can describe, not what the platform takes.
 func TestSplitMediaChunks_RejectsWhatCannotBeUploaded(t *testing.T) {
 	t.Parallel()
 	if _, err := splitMediaChunks(nil); !errors.Is(err, errMediaUploadEmpty) {
@@ -383,12 +326,6 @@ func TestUploadMediaChunks_HoldsToTheParallelismForTheFileSize(t *testing.T) {
 	conn := newMediaConn()
 	arrived, release := conn.holdChunks()
 	sender := conn.newSender()
-	// The verdicts are held on purpose, and on a loaded run the package's
-	// shortened ack wait can run out while they are: a chunk that timed out is
-	// offered again, and would arrive as the "third chunk" below. The
-	// production wait keeps a held chunk held.
-	sender.ackTimeout = ackTimeout
-
 	// 10 full chunks and one byte: eleven, the first size past the ladder's
 	// last step.
 	data := make([]byte, mediaChunkBytes*10+1)

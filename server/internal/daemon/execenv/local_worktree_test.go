@@ -1839,3 +1839,46 @@ func TestIsolatedPrepareCarriesTheStateFinalizeNeeds(t *testing.T) {
 		t.Errorf("turn two does not carry turn one's work: %v", err)
 	}
 }
+
+// A read-only turn drops its branch after the daemon removes its own sidecars.
+// This path is intentionally separate from the continuation case above: it
+// proves the JSON helper boundary preserves createdBranch through cleanup and
+// that Finalize deletes the ref when no user change remains.
+func TestIsolatedPrepareKeepsTheReadOnlyBranchDrop(t *testing.T) {
+	repo := newTestRepo(t)
+	workspacesRoot := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	env, err := PrepareIsolated(ctx, preparationHelperTestCommand(), PrepareParams{
+		WorkspacesRoot:  workspacesRoot,
+		WorkspaceID:     testBranchOwner.WorkspaceID,
+		TaskID:          turnOneTask,
+		IssueIdentifier: "MUL-6881",
+		Provider:        "claude",
+		AgentName:       "J",
+		Task: TaskContextForEnv{
+			IssueID: testBranchOwner.ConversationID,
+			AgentID: testBranchOwner.AgentID,
+		},
+		LocalWorktree: &LocalWorktreeParams{LocalPath: repo},
+	}, worktreeTestLogger())
+	if err != nil {
+		t.Fatalf("PrepareIsolated: %v", err)
+	}
+
+	if err := CleanupRuntimeConfig(env.WorkDir, "claude"); err != nil {
+		t.Fatalf("CleanupRuntimeConfig: %v", err)
+	}
+	if err := CleanupSidecars(env.RootDir); err != nil {
+		t.Fatalf("CleanupSidecars: %v", err)
+	}
+
+	outcome := finalizeOK(t, env.LocalWorktree)
+	if outcome.Branch != "" {
+		t.Errorf("read-only turn reported branch %q", outcome.Branch)
+	}
+	if _, err := gitTry(t, repo, "rev-parse", "--verify", "agent/j/mul-6881"); err == nil {
+		t.Error("a turn that changed nothing left its branch behind")
+	}
+}

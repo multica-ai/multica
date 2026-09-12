@@ -51,9 +51,7 @@ echo $! > "` + pidFile + `"
 echo "` + output + `"
 exit 0
 `
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatalf("write fake cli: %v", err)
-	}
+	writeTestExecutable(t, script, []byte(body))
 	return script
 }
 
@@ -195,9 +193,7 @@ func TestRunCollectSurfacesStderrAndExitStatus(t *testing.T) {
 	dir := t.TempDir()
 	cli := filepath.Join(dir, "failing-cli")
 	body := "#!/bin/sh\necho 'boom' >&2\nexit 7\n"
-	if err := os.WriteFile(cli, []byte(body), 0o755); err != nil {
-		t.Fatalf("write cli: %v", err)
-	}
+	writeTestExecutable(t, cli, []byte(body))
 
 	_, stderr, _, err := RunCollectQuiet(context.Background(), nil, 0, nil, cli)
 	if err == nil {

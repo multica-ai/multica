@@ -44,18 +44,14 @@ echo $! > "` + helperPidFile + `"
 # The defining behaviour: answer delivered, process refuses to exit.
 sleep 300
 `
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatalf("write fake cli: %v", err)
-	}
+	writeTestExecutable(t, script, []byte(body))
 	return script
 }
 
 func writeCLI(t *testing.T, body string) string {
 	t.Helper()
 	script := filepath.Join(t.TempDir(), "fake-cli")
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatalf("write fake cli: %v", err)
-	}
+	writeTestExecutable(t, script, []byte(body))
 	return script
 }
 

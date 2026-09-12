@@ -86,10 +86,10 @@ func TestHighestClosedBatchStageRandomizedEquivalence(t *testing.T) {
 	rng := rand.New(rand.NewPCG(23, 8192))
 	stages := []int32{0, 1, 2, 7, 20, math.MaxInt32}
 	statuses := []string{"backlog", "todo", "in_progress", "done", "cancelled"}
-	// The edge cases are pinned by TestHighestClosedBatchStage; this sweep only
-	// has to hit a broad spread of random shapes, and every iteration pays for a
-	// quadratic oracle plus two reflect.DeepEqual passes under -race.
-	for iteration := range 100 {
+	// The edge cases are pinned by TestHighestClosedBatchStage; 500 iterations
+	// retain strong coverage of uncommon combinations while keeping the
+	// quadratic oracle well below the old 2,000-iteration cost under -race.
+	for iteration := range 500 {
 		children := make([]db.Issue, rng.IntN(40))
 		for i := range children {
 			children[i] = child(stages[rng.IntN(len(stages))], statuses[rng.IntN(len(statuses))])

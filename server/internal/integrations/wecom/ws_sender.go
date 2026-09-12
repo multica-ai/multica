@@ -67,10 +67,9 @@ type gorillaWSConn struct {
 // wsSender serializes writes to one WebSocket connection. Instantiated per
 // Connect() call and dropped when the connection ends.
 type wsSender struct {
-	conn       wsConn
-	mu         sync.Mutex
-	log        *slog.Logger
-	ackTimeout time.Duration
+	conn wsConn
+	mu   sync.Mutex
+	log  *slog.Logger
 
 	// replies holds the callers waiting on a server verdict, keyed by the
 	// req_id they wrote. Only the read loop delivers into these, which is why
@@ -90,23 +89,13 @@ func newWSSender(conn wsConn, log *slog.Logger) *wsSender {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &wsSender{
-		conn:       conn,
-		log:        log,
-		ackTimeout: newWSSenderAckTimeout,
-		replies:    make(map[string]*replyWaiter),
-	}
+	return &wsSender{conn: conn, log: log, replies: make(map[string]*replyWaiter)}
 }
 
 // ackTimeout caps the wait for a verdict. WeCom answers in a few hundred
 // milliseconds; past this we assume the ack was lost rather than the frame
 // refused, which matters because the two call for opposite responses.
 const ackTimeout = 5 * time.Second
-
-// newWSSenderAckTimeout is a constructor seam for package tests. Production
-// senders always inherit ackTimeout; tests shorten only the wait for a verdict
-// that their fake connection deliberately withholds.
-var newWSSenderAckTimeout = ackTimeout
 
 // errAckTimeout — the frame went out and no verdict came back. Distinct from a
 // refusal: the message may well have been delivered, so a caller retries at
@@ -217,7 +206,7 @@ func (s *wsSender) request(ctx context.Context, cmd string, body map[string]any)
 		return nil, err
 	}
 
-	timer := time.NewTimer(s.ackTimeout)
+	timer := time.NewTimer(ackTimeout)
 	defer timer.Stop()
 	select {
 	case res := <-w.ch:
