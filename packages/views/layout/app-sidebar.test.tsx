@@ -274,6 +274,20 @@ describe("PinRow", () => {
   });
 });
 
+describe("navigation typography", () => {
+  it("uses the body type step for every navigation row", () => {
+    const { container } = renderWithI18n(<AppSidebar />);
+    const navButtons = container.querySelectorAll<HTMLButtonElement>(
+      'button[data-href="/acme/inbox"], button[data-href="/acme/chat"], button[data-href="/acme/my-issues"], button[data-href="/acme/issues"], button[data-href="/acme/projects"], button[data-href="/acme/autopilots"], button[data-href="/acme/agents"], button[data-href="/acme/squads"], button[data-href="/acme/usage"], button[data-href="/acme/runtimes"], button[data-href="/acme/skills"], button[data-href="/acme/settings"]',
+    );
+
+    expect(navButtons).toHaveLength(12);
+    for (const button of navButtons) {
+      expect(button).toHaveClass("text-body");
+    }
+  });
+});
+
 // On a phone the sidebar is a Sheet laid over the page, so a nav tap that
 // leaves it open renders the destination underneath and reads as a dead tap.
 describe("mobile sheet dismissal", () => {
