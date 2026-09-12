@@ -196,6 +196,15 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// stay ahead of anything that consumes or mutates WeCom-side state for the
 	// turn, because an answer that must not reach the room must not take over
 	// the room's message either.
+	//
+	// Asked BEFORE the delivery row is looked up, rather than after it. The two
+	// are both reads and the gate's verdict does not depend on the row, so the
+	// order is free — and putting the gate first is what lets a missing row
+	// mean something. Behind it, every turn that reaches the lookup is one the
+	// channel ingested, so a row that is not there is a channel turn nobody can
+	// address; ahead of it, the same branch also catches every question ever
+	// typed in the Multica web UI, and an exit shared with those can only be
+	// silent.
 	taskID, ok := chatDoneTaskID(e)
 	if !ok {
 		o.dropped(ctx, e, dropTaskMissing, nil)
@@ -204,31 +213,52 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	delivery, err := o.q.GetChannelTaskDelivery(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			// No route recorded for this turn. Whether that is worth a word
+			// depends on where the question was asked, so the origin gate is
+			// asked HERE rather than ahead of the lookup: every question typed
+			// in the Multica web UI reaches this same branch, and warning
+			// about those would bury the one case that matters under the
+			// ordinary traffic of a shared bus. Asking here also keeps the
+			// common path — a turn whose row exists — at the one query it
+			// costs today, which matters because every channel's chat:done
+			// passes through this subscriber.
+			//
+			// Behind the gate, a missing row means a turn the channel DID
+			// ingest and nobody can now address. In a steady-state deployment
+			// there is no such turn: the row is written inside the same
+			// transaction that enqueues a channel task. What produces one is
+			// an upgrade, and the answer it belongs to is going nowhere — so
+			// it is counted and warned about rather than left as a quiet
+			// return. See skipNoDeliveryRow.
+			ingested, gateErr := o.channelIngested(ctx, taskID)
+			if gateErr != nil {
+				return gateErr
+			}
+			if !ingested {
+				o.skipped(ctx, e, skipOriginNotChannel)
+				return nil
+			}
+			o.skipped(ctx, e, skipNoDeliveryRow)
 			return nil
 		}
 		return fmt.Errorf("wecom: lookup task delivery: %w", err)
 	}
 	if delivery.ChannelType != channelTypeWecom {
+		// Not a wecom turn (Slack / Lark). Named rather than silent so it does
+		// not share an exit with the branch above it: the two are one quiet
+		// return from outside, and one of them means somebody is waiting.
+		o.skipped(ctx, e, skipNotWecomTurn)
 		return nil
 	}
-	binding := wecomBindingFromTaskDelivery(delivery)
-	task, err := o.q.GetAgentTask(ctx, taskID)
+	ingested, err := o.channelIngested(ctx, taskID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			// Cancelled and deleted while its completion was in flight.
-			o.dropped(ctx, e, dropTaskMissing, nil)
-			return nil
-		}
-		return fmt.Errorf("wecom: load agent task: %w", err)
+		return err
 	}
-	deliver, err := engine.TaskInputIsChannelIngested(ctx, o.q, task)
-	if err != nil {
-		return fmt.Errorf("wecom: classify task input origin: %w", err)
-	}
-	if !deliver {
+	if !ingested {
 		o.skipped(ctx, e, skipOriginNotChannel)
 		return nil
 	}
+	binding := wecomBindingFromTaskDelivery(delivery)
 	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
 		ID:          binding.InstallationID,
 		ChannelType: channelTypeWecom,
@@ -393,6 +423,28 @@ func chatDoneContent(payload any) string {
 // On any miss — non-member recipient, no wecom binding, no live sender,
 // send failure — the handler is a no-op and the member simply receives the
 // notification through the in-app inbox as usual.
+// channelIngested is the origin gate: was this run's input typed in the room,
+// or in the Multica web UI? A question asked in a browser can reuse a session
+// that originated in WeCom, and its answer belongs only in Multica — in a
+// group, sending it would put a private answer in front of everyone.
+//
+// Fails closed: an origin that cannot be established is not delivered.
+func (o *Outbound) channelIngested(ctx context.Context, taskID pgtype.UUID) (bool, error) {
+	task, err := o.q.GetAgentTask(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Cancelled and deleted while its completion was in flight.
+			return false, nil
+		}
+		return false, fmt.Errorf("wecom: load agent task: %w", err)
+	}
+	ingested, err := engine.TaskInputIsChannelIngested(ctx, o.q, task)
+	if err != nil {
+		return false, fmt.Errorf("wecom: classify task input origin: %w", err)
+	}
+	return ingested, nil
+}
+
 func (o *Outbound) handleInboxNew(e events.Event) {
 	payload, ok := e.Payload.(map[string]any)
 	if !ok {
