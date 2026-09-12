@@ -3281,10 +3281,9 @@ func TestVerifyCodexHomeRootRejectsSymlinkedHome(t *testing.T) {
 // already a link to an outside directory, the referenced-file copy must fail
 // instead of provisioning through the link.
 //
-// Deliberately not asserted: that nothing at all lands in the link target.
-// Earlier steps in prepareCodexHomeWithOpts (config.toml, sessions/, plugin
-// cache) still address codexHome by path and run before this check, so making
-// the whole prepare root-handle safe is a separate, larger change (MUL-5647).
+// Native configuration now checks the task home before referenced-file copies,
+// so this rejects at that earlier guard. Making every prepare operation
+// root-handle safe against concurrent replacement remains separate (MUL-5647).
 func TestPrepareCodexHomeRefusesReferencedFileWriteThroughSymlinkedCodexHome(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
@@ -3311,8 +3310,8 @@ func TestPrepareCodexHomeRefusesReferencedFileWriteThroughSymlinkedCodexHome(t *
 	if err == nil {
 		t.Fatal("expected prepareCodexHome to refuse a symlinked codex home")
 	}
-	if !strings.Contains(err.Error(), "model_instructions_file") {
-		t.Fatalf("error %q does not name the offending key", err)
+	if !strings.Contains(err.Error(), "native configuration") || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("error %q does not report the early native configuration symlink guard", err)
 	}
 
 	data, readErr := os.ReadFile(sentinel)

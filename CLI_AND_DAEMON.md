@@ -240,6 +240,29 @@ You need at least one installed. The daemon registers each detected CLI as an av
 4. Heartbeats are sent periodically (default: 15s) so the server knows the daemon is alive
 5. On shutdown, all runtimes are deregistered
 
+### Codex configuration inheritance
+
+Each task has an isolated `CODEX_HOME`. The daemon copies global `AGENTS.md`,
+`AGENTS.override.md`, and direct `agents/*.toml` native role definitions from its
+own `CODEX_HOME` (or `~/.codex` when unset). Contents are copied unchanged; Codex
+continues to decide instruction precedence, including `AGENTS.override.md`.
+Task edits to these copies do not modify the host files.
+
+On prepare and reuse, the shared source is authoritative: instruction files and
+matching native roles are refreshed, and missing shared instruction files remove
+their task copies. A task-local `.multica-inherited-agents.json` manifest tracks
+copied roles so removed host roles are deleted while unrelated task role files
+remain. Source read errors and invalid manifests fail preparation rather than
+silently continuing with incomplete inheritance.
+
+This copies native role definitions only; it does not recursively copy assets
+referenced by those definitions or install hooks. Native subagent execution still
+uses the existing daemon opt-in, `MULTICA_CODEX_MULTI_AGENT=1`, which stops Multica
+from forcing `features.multi_agent=false` and preserves the user's Codex setting.
+Set it in the daemon environment before starting a new task. The parent agent
+must await its children before finishing because task completion follows the
+parent's lifecycle.
+
 ### Configuration
 
 Daemon behavior is configured via flags or environment variables:
