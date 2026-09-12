@@ -19,6 +19,17 @@ type AgentEntry struct {
 	// Daemon.resolveAgentEntry and MUL-4486.
 	Command string
 	Model   string // model override (optional)
+	// LaunchPrefix is the argv prefix that belongs to Path itself — tokens
+	// that must sit between the executable and any protocol flags. Today only
+	// the WorkBuddy-bundled CLI sets it: on Windows the bundle's CLI is a
+	// shebang script that cannot be spawned directly, so Path is the Node
+	// runtime WorkBuddy stages and LaunchPrefix carries the script path
+	// ("<node.exe> <cli script> -p …"). Carrying it per entry — never by
+	// mutating the daemon process environment — keeps unrelated agent
+	// launches unaffected. Heal re-resolution (resolveAgentEntryWithHeal)
+	// deliberately re-resolves Path only; LaunchPrefix is data about the
+	// launch shape and stays attached to the entry.
+	LaunchPrefix []string
 }
 
 // Runtime represents a registered daemon runtime.
