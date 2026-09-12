@@ -301,6 +301,8 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 			path = filepath.Join(stateDir, "openclaw.json")
 		}
 		key, format = "mcp.servers", "json"
+	case "pi", "omp":
+		return map[string]any{}, true, nil
 	default:
 		return map[string]any{}, false, nil
 	}
@@ -446,6 +448,8 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 		// providers already make and avoids sending full tool-chain state over
 		// the wire.
 		path, key, source, format = filepath.Join(home, ".omp", "agent", "mcp.json"), "mcpServers", "User config", "json"
+	case "pi":
+		path, key, source, format = filepath.Join(home, ".pi", "agent", "mcp.json"), "mcpServers", "User config", "json"
 	default:
 		return []runtimeLocalMcpServerSummary{}, false, nil
 	}
