@@ -4214,6 +4214,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// the parent/stage notification is evaluated once against the final state
 	// after the loop (MUL-4155) rather than per-child mid-batch.
 	var childDoneCompleted []db.Issue
+	// Transition checks share their own lazy catalog. Keep it separate from
+	// response filling and the later notification pass, whose rows may be newer.
+	resolveTransition := h.childStatusResolver(r.Context())
+	skippedChildDoneParents := make(map[pgtype.UUID]bool)
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
 		if err != nil {
@@ -4449,16 +4453,31 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// comparison here left childDoneCompleted empty and silently skipped
 		// notifyParentsOfBatchChildDone entirely. (MUL-6243)
 		if statusChanged && issue.ParentIssueID.Valid {
-			prevTerminal := isTerminalChildStatus(
-				issuestatus.Effective(r.Context(), h.Queries, prevIssue.WorkspaceID, prevIssue.Status))
-			nowTerminal := isTerminalChildStatus(
-				issuestatus.Effective(r.Context(), h.Queries, issue.WorkspaceID, issue.Status))
-			if !prevTerminal && nowTerminal {
+			prevStatus, prevErr := resolveTransition(prevIssue)
+			nowStatus, nowErr := resolveTransition(issue)
+			if err := errors.Join(prevErr, nowErr); err != nil {
+				// Earlier or later candidates cannot safely stand in for this
+				// parent's whole batch when any transition is unresolved.
+				skippedChildDoneParents[issue.ParentIssueID] = true
+				slog.Warn("batch child done: failed to resolve child transition",
+					"error", err, "workspace_id", workspaceID,
+					"child_id", uuidToString(issue.ID), "parent_id", uuidToString(issue.ParentIssueID))
+			} else if !isTerminalChildStatus(prevStatus) && isTerminalChildStatus(nowStatus) {
 				childDoneCompleted = append(childDoneCompleted, issue)
 			}
 		}
 
 		updated++
+	}
+
+	if len(skippedChildDoneParents) > 0 {
+		trusted := childDoneCompleted[:0]
+		for _, child := range childDoneCompleted {
+			if !skippedChildDoneParents[child.ParentIssueID] {
+				trusted = append(trusted, child)
+			}
+		}
+		childDoneCompleted = trusted
 	}
 
 	// Aggregate parent/stage notification over the whole batch's final state so
