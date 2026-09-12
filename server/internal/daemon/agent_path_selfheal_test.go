@@ -323,6 +323,29 @@ func TestResolveAgentEntry_NoCommandNoHeal(t *testing.T) {
 	}
 }
 
+func TestProbeBuiltinRuntime_UsesPairedMiseEnvironment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "codex")
+	writeExecStub(t, path)
+	d := newSelfHealTestDaemon()
+	d.setAgentVersion("codex", "0.144.1")
+
+	orig := detectAgentVersion
+	detectAgentVersion = func(_ context.Context, runtimeCmd agent.Command) (string, error) {
+		if got := runtimeCmd.Env["PATH"]; got != "/mise/node/bin:/usr/bin:/bin" {
+			t.Fatalf("version probe PATH = %q, want paired mise environment", got)
+		}
+		return "0.144.1", nil
+	}
+	t.Cleanup(func() { detectAgentVersion = orig })
+
+	version, reason, verdict := d.probeBuiltinRuntime(context.Background(), "codex", AgentEntry{
+		Path: path, MiseEnv: map[string]string{"PATH": "/mise/node/bin:/usr/bin:/bin"},
+	})
+	if verdict != builtinProbeOK || reason != "" || version != "0.144.1" {
+		t.Fatalf("probe result = (%q, %q, %v), want successful paired probe", version, reason, verdict)
+	}
+}
+
 // TestRefreshHealedVersion_KeepsHealedPairCurrentAfterInPlaceUpgrade covers the
 // gap the hot-refresh path opened.
 //
@@ -339,7 +362,10 @@ func TestRefreshHealedVersion_KeepsHealedPairCurrentAfterInPlaceUpgrade(t *testi
 	writeExecStub(t, healed)
 
 	// State after a self-heal: path + the version detected for it at that time.
-	d.resolvedPaths["codex"] = healedAgent{path: healed, version: "1.0.0"}
+	runtimePath := filepath.Join(t.TempDir(), "mise-node-bin")
+	d.resolvedPaths["codex"] = healedAgent{
+		path: healed, version: "1.0.0", miseEnv: map[string]string{"PATH": runtimePath},
+	}
 	d.setAgentVersion("codex", "1.0.0")
 
 	entry := AgentEntry{Path: "/gone/codex", Command: "codex"}
@@ -358,6 +384,9 @@ func TestRefreshHealedVersion_KeepsHealedPairCurrentAfterInPlaceUpgrade(t *testi
 	}
 	if gotEntry.Path != healed {
 		t.Errorf("resolveAgentEntry path = %q, want the healed path %q", gotEntry.Path, healed)
+	}
+	if gotEntry.MiseEnv["PATH"] != runtimePath {
+		t.Errorf("resolveAgentEntry mise PATH = %q, want %q", gotEntry.MiseEnv["PATH"], runtimePath)
 	}
 }
 

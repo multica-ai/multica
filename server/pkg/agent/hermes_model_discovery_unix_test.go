@@ -149,6 +149,25 @@ func TestDiscoverHermesModelsStillReturnsACatalogOnSuccess(t *testing.T) {
 	}
 }
 
+func TestDiscoverACPModelsPreservesCommandEnvironment(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	script := "#!/bin/sh\n" +
+		"[ \"$MISE_RUNTIME_MARKER\" = paired ] || exit 44\n" +
+		strings.TrimPrefix(hermesACPCatalogScript(), "#!/bin/sh\n")
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	models, err := discoverHermesModels(context.Background(),
+		NewCommand(fakePath, nil).WithEnv(map[string]string{"MISE_RUNTIME_MARKER": "paired"}))
+	if err != nil {
+		t.Fatalf("discover models with paired command environment: %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("models = %+v, want catalog from environment-aware ACP process", models)
+	}
+}
+
 // TestACPDiscoveryTimeoutIsPerProvider covers the knob hermes needs: a provider
 // that sets no timeout keeps the shared default, and one that sets a short
 // timeout is actually cut off by it.

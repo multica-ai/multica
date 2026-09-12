@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -83,6 +84,10 @@ type openclawDiscoveryFingerprint struct {
 	// OpenClaw's active config out from under us. Values are compared, not
 	// hashed: they are paths, not secrets.
 	Env string `json:"env"`
+	// CommandEnvHash covers the complete version-manager overlay without
+	// persisting values that may contain credentials. The overlay can affect
+	// interpreter identity and config interpolation even when BinPath is stable.
+	CommandEnvHash string `json:"command_env_hash,omitempty"`
 	// Active config stat, keyed to the path discovery reported.
 	ConfigPath        string `json:"config_path"`
 	ConfigSize        int64  `json:"config_size"`
@@ -116,12 +121,23 @@ var openclawDiscoveryEnvVars = []string{
 	"USERPROFILE",
 }
 
-func openclawDiscoveryEnvFingerprint() string {
+func openclawDiscoveryEnvFingerprint(env map[string]string) string {
 	parts := make([]string, 0, len(openclawDiscoveryEnvVars))
 	for _, key := range openclawDiscoveryEnvVars {
-		parts = append(parts, key+"="+os.Getenv(key))
+		parts = append(parts, key+"="+openclawEnvValue(env, key))
 	}
 	return strings.Join(parts, "\x00")
+}
+
+func openclawCommandEnvFingerprint(env map[string]string) string {
+	if len(env) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(env)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(raw))
 }
 
 // resolveOpenclawBinPath expands a bare command name through PATH so the
@@ -170,7 +186,7 @@ func openclawDiscoveryCachePath(dir string) string {
 // configPath. It returns an error when either file cannot be stat'ed, which
 // callers treat as "do not cache / do not trust the cache" rather than as a
 // task failure.
-func buildOpenclawDiscoveryFingerprint(bin, configPath string) (openclawDiscoveryFingerprint, error) {
+func buildOpenclawDiscoveryFingerprint(bin string, env map[string]string, configPath string) (openclawDiscoveryFingerprint, error) {
 	binPath := resolveOpenclawBinPath(bin)
 	binInfo, err := os.Stat(binPath)
 	if err != nil {
@@ -185,7 +201,8 @@ func buildOpenclawDiscoveryFingerprint(bin, configPath string) (openclawDiscover
 		BinPath:           binPath,
 		BinSize:           binInfo.Size(),
 		BinModTimeNano:    binInfo.ModTime().UnixNano(),
-		Env:               openclawDiscoveryEnvFingerprint(),
+		Env:               openclawDiscoveryEnvFingerprint(env),
+		CommandEnvHash:    openclawCommandEnvFingerprint(env),
 		ConfigPath:        configPath,
 		ConfigSize:        cfgInfo.Size(),
 		ConfigModTimeNano: cfgInfo.ModTime().UnixNano(),
@@ -199,7 +216,7 @@ func buildOpenclawDiscoveryFingerprint(bin, configPath string) (openclawDiscover
 // edited config — is a plain miss: the caller re-runs the CLI and stays
 // fail-closed. Errors are never propagated, because a bad cache must degrade
 // to "slow", never to "task failed".
-func loadOpenclawDiscoveryCache(cachePath, bin string, now time.Time) (openclawDiscoveryCacheEntry, bool) {
+func loadOpenclawDiscoveryCache(cachePath, bin string, env map[string]string, now time.Time) (openclawDiscoveryCacheEntry, bool) {
 	if cachePath == "" {
 		return openclawDiscoveryCacheEntry{}, false
 	}
@@ -233,7 +250,7 @@ func loadOpenclawDiscoveryCache(cachePath, bin string, now time.Time) (openclawD
 	if age < -openclawDiscoveryCacheFutureSkew || age > openclawDiscoveryCacheTTL {
 		return openclawDiscoveryCacheEntry{}, false
 	}
-	current, err := buildOpenclawDiscoveryFingerprint(bin, entry.ActiveConfigPath)
+	current, err := buildOpenclawDiscoveryFingerprint(bin, env, entry.ActiveConfigPath)
 	if err != nil {
 		return openclawDiscoveryCacheEntry{}, false
 	}
@@ -258,14 +275,14 @@ func loadOpenclawDiscoveryCache(cachePath, bin string, now time.Time) (openclawD
 // either the old entry or the new one, never a half-written file. Two tasks
 // racing to store simply leave the later winner in place — both entries are
 // equally valid.
-func storeOpenclawDiscoveryCache(cachePath, bin, activeConfigPath string, agentsList []any, agentsFromRegistry bool, now time.Time) error {
+func storeOpenclawDiscoveryCache(cachePath, bin string, env map[string]string, activeConfigPath string, agentsList []any, agentsFromRegistry bool, now time.Time) error {
 	if cachePath == "" {
 		return nil
 	}
 	if activeConfigPath == "" {
 		return nil
 	}
-	fingerprint, err := buildOpenclawDiscoveryFingerprint(bin, activeConfigPath)
+	fingerprint, err := buildOpenclawDiscoveryFingerprint(bin, env, activeConfigPath)
 	if err != nil {
 		return err
 	}

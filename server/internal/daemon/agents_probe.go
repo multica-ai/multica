@@ -76,6 +76,23 @@ func cachedShellResolvedAgents() map[string]string {
 	return shellResolveCache
 }
 
+// cachedShellResolvedExecutables adds daemon-specific version-manager
+// resolution to the login shell's invocation paths. Keeping this outside the
+// shell cache preserves its cheap path-only contract while still pairing a
+// mise target with the environment selected from the trusted root.
+func cachedShellResolvedExecutables() map[string]executableResolution {
+	paths := cachedShellResolvedAgents()
+	resolved := make(map[string]executableResolution, len(paths))
+	for name, path := range paths {
+		entry, _, err := resolveMiseDiscoveredExecutable(path, name)
+		if err != nil {
+			continue
+		}
+		resolved[name] = entry
+	}
+	return resolved
+}
+
 // probeAgentCLIs discovers which built-in agent CLIs are installed on this
 // machine and returns one AgentEntry per provider that resolved.
 //
@@ -114,14 +131,29 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// is almost always at least one uninstalled provider to miss on. The TTL
 	// still lets a CLI installed into a login-shell-only PATH dir (nvm, fnm,
 	// ~/.local/bin via ~/.zshrc) be discovered without a restart (MUL-5439).
-	getShellResolved := cachedShellResolvedAgents
+	// A probe checks many provider names. Resolve the login-shell snapshot's
+	// richer launch contracts at most once for this round: the path snapshot is
+	// cached, but mise path/environment resolution intentionally is not, and
+	// repeating it once per missing provider would multiply its two-second
+	// deadline across the whole provider list.
+	var (
+		shellResolvedOnce sync.Once
+		shellResolved     map[string]executableResolution
+	)
+	getShellResolved := func() map[string]executableResolution {
+		shellResolvedOnce.Do(func() {
+			shellResolved = cachedShellResolvedExecutables()
+		})
+		return shellResolved
+	}
 	probe := func(envVar, defaultCmd, modelEnv string) (AgentEntry, bool) {
 		cmd := envOrDefault(envVar, defaultCmd)
-		if path, err := resolveAgentExecutablePath(cmd); err == nil {
+		if resolved, err := resolveAgentExecutable(cmd); err == nil {
 			return AgentEntry{
-				Path:    path,
+				Path:    resolved.Path,
 				Command: cmd,
 				Model:   strings.TrimSpace(os.Getenv(modelEnv)),
+				MiseEnv: resolved.Env,
 			}, true
 		}
 		// The shell fallback only rescues bare command names. An operator
@@ -131,11 +163,12 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 		if strings.ContainsAny(cmd, "/\\") {
 			return AgentEntry{}, false
 		}
-		if path, ok := getShellResolved()[cmd]; ok {
+		if resolved, ok := getShellResolved()[cmd]; ok {
 			return AgentEntry{
-				Path:    path,
+				Path:    resolved.Path,
 				Command: cmd,
 				Model:   strings.TrimSpace(os.Getenv(modelEnv)),
+				MiseEnv: resolved.Env,
 			}, true
 		}
 		if defaultCmd == "codex" && cmd == defaultCmd {
@@ -433,11 +466,17 @@ func parseDshProbeFrame(output string) (dshProbeFrame, bool) {
 // Scoped to the caller's context as well as its own timeout: `--probe` boots a
 // whole DSH process, and a round abandoned by a shutting-down daemon should not
 // go on holding one for the rest of the timeout — once per retry, per provider.
-func probeDshMulticaProfile(ctx context.Context, executablePath string) dshProbeVerdict {
+func probeDshMulticaProfile(ctx context.Context, executablePath string, runtimeEnv map[string]string) dshProbeVerdict {
 	parent := ctx
 	ctx, cancel := context.WithTimeout(parent, dshProbeTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, executablePath, "--profile", dshMulticaProfileName, "--probe")
+	if len(runtimeEnv) > 0 {
+		cmd.Env = os.Environ()
+		for key, value := range runtimeEnv {
+			cmd.Env = append(cmd.Env, key+"="+value)
+		}
+	}
 	// processtree, not cmd.Output: `--probe` boots a whole DSH profile, so the
 	// process it starts is a tree. Killing only the direct child leaves
 	// grandchildren holding the stdout pipe open — which is both a leaked

@@ -25,6 +25,7 @@ type modelListFixture struct {
 	listedProvider string
 	listedPath     string
 	listedPrefix   []string
+	listedEnv      map[string]string
 	listCalls      int
 	report         map[string]any
 }
@@ -56,6 +57,10 @@ func newModelListFixture(t *testing.T) *modelListFixture {
 		fx.listedProvider = provider
 		fx.listedPath = runtimeCmd.Path
 		fx.listedPrefix = append([]string(nil), runtimeCmd.Prefix...)
+		fx.listedEnv = make(map[string]string, len(runtimeCmd.Env))
+		for key, value := range runtimeCmd.Env {
+			fx.listedEnv[key] = value
+		}
 		fx.listCalls++
 		fx.mu.Unlock()
 		return agent.Catalog{Models: []agent.Model{{
@@ -97,7 +102,9 @@ func TestHandleModelList_CustomProfileEnumeratesProfileBinary(t *testing.T) {
 	d := fx.daemon
 
 	builtinPath := fakeExecutable(t, "hermes")
-	d.cfg.Agents = map[string]AgentEntry{"hermes": {Path: builtinPath}}
+	d.cfg.Agents = map[string]AgentEntry{"hermes": {
+		Path: builtinPath, MiseEnv: map[string]string{"PATH": "/mise/hermes/bin"},
+	}}
 	d.runtimeIndex["rt-custom"] = Runtime{ID: "rt-custom", Provider: "hermes", ProfileID: "prof-1"}
 	d.profileLaunchSpecs["prof-1"] = profileLaunchSpec{path: "/usr/local/bin/jcode", version: "1.2.3"}
 
@@ -112,6 +119,12 @@ func TestHandleModelList_CustomProfileEnumeratesProfileBinary(t *testing.T) {
 	}
 	if path != "/usr/local/bin/jcode" {
 		t.Fatalf("discovery path = %q, want the profile's command path", path)
+	}
+	fx.mu.Lock()
+	customEnv := len(fx.listedEnv)
+	fx.mu.Unlock()
+	if customEnv != 0 {
+		t.Fatal("custom profile model discovery inherited the built-in mise environment")
 	}
 	if got := report["status"]; got != "completed" {
 		t.Fatalf("report status = %v, want completed (report: %v)", got, report)
@@ -158,7 +171,9 @@ func TestHandleModelList_BuiltinRuntimeUnaffected(t *testing.T) {
 	d := fx.daemon
 
 	builtinPath := fakeExecutable(t, "codex")
-	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: builtinPath}}
+	d.cfg.Agents = map[string]AgentEntry{"codex": {
+		Path: builtinPath, MiseEnv: map[string]string{"PATH": "/mise/node/bin:/usr/bin:/bin"},
+	}}
 	d.runtimeIndex["rt-builtin"] = Runtime{ID: "rt-builtin", Provider: "codex"}
 	// A custom profile for a different runtime must not leak into this lookup.
 	d.runtimeIndex["rt-custom"] = Runtime{ID: "rt-custom", Provider: "codex", ProfileID: "prof-1"}
@@ -172,6 +187,12 @@ func TestHandleModelList_BuiltinRuntimeUnaffected(t *testing.T) {
 	}
 	if path != builtinPath {
 		t.Fatalf("discovery path = %q, want the built-in entry path %q", path, builtinPath)
+	}
+	fx.mu.Lock()
+	listedPathEnv := fx.listedEnv["PATH"]
+	fx.mu.Unlock()
+	if listedPathEnv != "/mise/node/bin:/usr/bin:/bin" {
+		t.Fatalf("discovery PATH = %q, want the built-in mise environment", listedPathEnv)
 	}
 	if got := report["status"]; got != "completed" {
 		t.Fatalf("report status = %v, want completed (report: %v)", got, report)

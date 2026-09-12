@@ -130,7 +130,7 @@ func TestProbeDshMulticaProfile(t *testing.T) {
 		path := dshProbeFixture(t, `exec sleep 30`, false)
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		if got := probeDshMulticaProfile(ctx, path); got != dshProbeUnavailable {
+		if got := probeDshMulticaProfile(ctx, path, nil); got != dshProbeUnavailable {
 			t.Fatalf("probeDshMulticaProfile() = %v, want %v", got, dshProbeUnavailable)
 		}
 	})
@@ -138,7 +138,7 @@ func TestProbeDshMulticaProfile(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			path := dshProbeFixture(t, tc.body, tc.manifest)
-			if got := probeDshMulticaProfile(context.Background(), path); got != tc.want {
+			if got := probeDshMulticaProfile(context.Background(), path, nil); got != tc.want {
 				t.Fatalf("probeDshMulticaProfile() = %v, want %v", got, tc.want)
 			}
 		})
@@ -483,5 +483,88 @@ func TestNewRuntimeVerdict_DshProfileCarriesAStructuredCause(t *testing.T) {
 	if demotableBuiltinProbeVerdict(builtinProbeIncompatibleProfile) {
 		t.Fatal("an incompatible profile can demote a live runtime; " +
 			"the daemon may be the stale side of that protocol skew")
+	}
+}
+
+func TestProbeAgentCLIsMiseManagedDshUsesPairedEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+
+	root := t.TempDir()
+	shimDir := filepath.Join(root, "shims")
+	trustedBin := filepath.Join(root, "trusted-bin")
+	hostileBin := filepath.Join(root, "hostile-bin")
+	for _, dir := range []string{shimDir, trustedBin, hostileBin} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	target := filepath.Join(root, "dsh-target")
+	if err := os.WriteFile(target, []byte("#!/usr/bin/env node\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(trustedBin, "node"), []byte("#!/bin/sh\ncase \"$*\" in *--version*) printf '%s\\n' '0.1.2-rc.1'; exit 0 ;; esac\nprintf '%s\\n' '{\"v\":1,\"type\":\"probe\",\"runtime\":\"dsh\",\"protocol_version\":1}'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hostileBin, "node"), []byte("#!/bin/sh\nexit 91\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	manager := filepath.Join(root, "mise")
+	managerBody := "#!/bin/sh\nset -eu\ncase \"$1\" in\n  which) printf '%s\\n' \"$TEST_DSH_TARGET\" ;;\n  env) printf '{\"PATH\":\"%s:/usr/bin:/bin\"}\\n' \"$TEST_DSH_TRUSTED_BIN\" ;;\n  *) exit 2 ;;\nesac\n"
+	if err := os.WriteFile(manager, []byte(managerBody), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(manager, filepath.Join(shimDir, "dsh")); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("TEST_DSH_TARGET", target)
+	t.Setenv("TEST_DSH_TRUSTED_BIN", trustedBin)
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+hostileBin+string(os.PathListSeparator)+"/usr/bin:/bin")
+	t.Setenv("MULTICA_DSH_PATH", "")
+	t.Setenv("SHELL", filepath.Join(root, "unsupported-shell"))
+	t.Setenv("DSH_HOME", t.TempDir())
+	t.Setenv(dshProfileBundleEnv, "")
+	resetShellResolveCacheForTest(t)
+
+	entry, ok := probeAgentCLIs()["dsh"]
+	if !ok {
+		t.Fatal("mise-managed DSH was dropped after its path and environment resolved")
+	}
+	canonicalTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Path != canonicalTarget || entry.MiseEnv["PATH"] == "" {
+		t.Fatalf("dsh entry = %+v, want paired target and environment", entry)
+	}
+	d := &Daemon{
+		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		agentVersions: map[string]string{},
+	}
+	if version, reason, verdict := d.probeBuiltinRuntime(context.Background(), "dsh", entry); verdict != builtinProbeOK || version == "" {
+		t.Fatalf("mise DSH probe = (%q, %q, %v), want a healthy version and profile", version, reason, verdict)
+	}
+	if got := probeDshMulticaProfile(context.Background(), entry.Path, nil); got == dshProbeOK {
+		t.Fatal("unpaired profile probe unexpectedly used the trusted interpreter")
+	}
+	t.Setenv(dshProfileBundleEnv, "@multica-ai/dsh-runtime")
+	t.Setenv(dshPluginPathEnv, hostileBin)
+	installer := "#!/bin/sh\nset -eu\ntest \"$TEST_MISE_INSTALL\" = paired\nmkdir -p \"$DSH_HOME/profiles/multica\"\nprintf '{}\\n' > \"$DSH_HOME/profiles/multica/package.json\"\n"
+	if err := os.WriteFile(filepath.Join(trustedBin, "node"), []byte(installer), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	entry.MiseEnv["TEST_MISE_INSTALL"] = "paired"
+	if err := provisionDshMulticaProfile(context.Background(), entry.Path, nil, d.logger); err == nil {
+		t.Fatal("unpaired install unexpectedly succeeded")
+	}
+	if err := provisionDshMulticaProfile(context.Background(), entry.Path, entry.MiseEnv, d.logger); err != nil {
+		t.Fatalf("paired install failed: %v", err)
+	}
+	if !dshMulticaProfilePresent() {
+		t.Fatal("paired install did not create the profile")
 	}
 }

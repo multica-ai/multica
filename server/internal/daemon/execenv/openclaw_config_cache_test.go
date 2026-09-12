@@ -313,13 +313,44 @@ func TestOpenclawDiscoveryCacheFutureDatedEntry(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newOpenclawCacheFixture(t)
 			readerNow := time.Now()
-			if err := storeOpenclawDiscoveryCache(f.cachePath(), f.bin, f.configPath, []any{map[string]any{"id": "scout"}}, false, readerNow.Add(tc.ahead)); err != nil {
+			if err := storeOpenclawDiscoveryCache(f.cachePath(), f.bin, nil, f.configPath, []any{map[string]any{"id": "scout"}}, false, readerNow.Add(tc.ahead)); err != nil {
 				t.Fatalf("store: %v", err)
 			}
-			if _, ok := loadOpenclawDiscoveryCache(f.cachePath(), f.bin, readerNow); ok != tc.want {
+			if _, ok := loadOpenclawDiscoveryCache(f.cachePath(), f.bin, nil, readerNow); ok != tc.want {
 				t.Fatalf("entry dated %v ahead of the reader: hit = %t, want %t", tc.ahead, ok, tc.want)
 			}
 		})
+	}
+}
+
+func TestOpenclawDiscoveryCacheInvalidatesOnCommandEnvironmentChange(t *testing.T) {
+	f := newOpenclawCacheFixture(t)
+	now := time.Now()
+	envA := map[string]string{
+		"PATH":               "/mise/node-a/bin:/usr/bin:/bin",
+		"OPENCLAW_API_TOKEN": "cache-secret",
+	}
+	envASame := map[string]string{
+		"OPENCLAW_API_TOKEN": "cache-secret",
+		"PATH":               "/mise/node-a/bin:/usr/bin:/bin",
+	}
+	envB := map[string]string{
+		"PATH":               "/mise/node-b/bin:/usr/bin:/bin",
+		"OPENCLAW_API_TOKEN": "cache-secret",
+	}
+	if err := storeOpenclawDiscoveryCache(f.cachePath(), f.bin, envA, f.configPath, nil, false, now); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if raw, err := os.ReadFile(f.cachePath()); err != nil {
+		t.Fatalf("read cache: %v", err)
+	} else if strings.Contains(string(raw), "cache-secret") {
+		t.Fatal("cache persisted a raw value from the paired command environment")
+	}
+	if _, ok := loadOpenclawDiscoveryCache(f.cachePath(), f.bin, envASame, now); !ok {
+		t.Fatal("cache missed with the same paired command environment")
+	}
+	if _, ok := loadOpenclawDiscoveryCache(f.cachePath(), f.bin, envB, now); ok {
+		t.Fatal("cache hit after the paired command environment changed")
 	}
 }
 
@@ -349,13 +380,13 @@ func TestOpenclawDiscoveryCacheConcurrentPreparations(t *testing.T) {
 			// Each worker gets its own stub-free path into discovery: the
 			// shared stub is not goroutine-safe, so drive the cache directly
 			// with the same store/load pair preparation uses.
-			if err := storeOpenclawDiscoveryCache(f.cachePath(), f.bin, f.configPath, []any{map[string]any{"id": "scout"}}, false, time.Now()); err != nil {
+			if err := storeOpenclawDiscoveryCache(f.cachePath(), f.bin, nil, f.configPath, []any{map[string]any{"id": "scout"}}, false, time.Now()); err != nil {
 				mu.Lock()
 				failures = append(failures, err)
 				mu.Unlock()
 				return
 			}
-			if _, ok := loadOpenclawDiscoveryCache(f.cachePath(), f.bin, time.Now()); !ok {
+			if _, ok := loadOpenclawDiscoveryCache(f.cachePath(), f.bin, nil, time.Now()); !ok {
 				mu.Lock()
 				failures = append(failures, errors.New("cache load failed under concurrency"))
 				mu.Unlock()
