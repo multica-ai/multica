@@ -804,6 +804,47 @@ func TestOnboardingSkillIsScopedToMika(t *testing.T) {
 	}
 }
 
+// TestPlatformSkillCoversRecurringWorkRouting pins the GitHub issue #6417
+// gap-1 fix: an agent about to delegate a recurring ask (a cron schedule,
+// "every N minutes", a periodic check) via sub-issue must be routed to an
+// autopilot instead. The runtime brief carries only a one-line pointer to
+// references/issues.md (see TestSubIssueCreationSectionIsUnconditional in
+// package execenv); the full routing rationale, the CLI, and the cron-floor
+// limits live in that reference file.
+func TestPlatformSkillCoversRecurringWorkRouting(t *testing.T) {
+	skill, ok := findSkill(t, "multica-platform")
+	if !ok {
+		return
+	}
+	body := ""
+	for _, f := range skill.Files {
+		if f.Path == "references/issues.md" {
+			body = f.Content
+			break
+		}
+	}
+
+	mustContain := []string{
+		"Recurring work → autopilot, not a sub-issue",
+		"A sub-issue is a single run",
+		"multica autopilot create",
+		"--mode run_only",
+		"multica autopilot trigger-add",
+		"--kind schedule",
+		// The cron-floor limits Bohan spelled out on the issue thread: no
+		// sub-minute cadence, and run_only over create_issue at that
+		// frequency so the autopilot doesn't spam ~1440 issues a day.
+		"One minute is the finest granularity",
+		"Use `run_only`, not `create_issue`, for anything frequent",
+		"multica-autopilots",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(body, want) {
+			t.Errorf("multica-platform references/issues.md missing recurring-work routing content %q", want)
+		}
+	}
+}
+
 // containsUnwrapped matches an anchor against prose that Markdown has hard
 // wrapped. These anchors pin a claim, not a line layout — matching raw bytes
 // made every reflow of a paragraph look like a deleted contract, which trains
