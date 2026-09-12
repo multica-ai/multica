@@ -1,8 +1,11 @@
 import { autoUpdater, type UpdateDownloadedEvent } from "electron-updater";
 import { app, type BrowserWindow, ipcMain } from "electron";
+import { checkWindowsUpdateInstall } from "./update-install-guard";
 import type {
   ManualUpdateCheckResult,
   UpdaterPreferences,
+  UpdateInstallCheck,
+  UpdateInstallState,
 } from "../shared/updater-types";
 import {
   DEFAULT_UPDATER_PREFERENCES,
@@ -57,7 +60,8 @@ const PERIODIC_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 type RendererChannel =
   | "updater:update-available"
   | "updater:download-progress"
-  | "updater:update-downloaded";
+  | "updater:update-downloaded"
+  | "updater:install-state";
 
 function isDestroyedObjectError(err: unknown): boolean {
   return err instanceof Error && err.message.includes("Object has been destroyed");
@@ -109,7 +113,109 @@ function checkForUpdatesOnce(): Promise<unknown> {
   return p;
 }
 
-export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): void {
+export function setupAutoUpdater(
+  getMainWindow: () => BrowserWindow | null,
+  checkInstall: () => Promise<UpdateInstallCheck> = checkWindowsUpdateInstall,
+  guardedWindowsInstall = process.platform === "win32",
+): void {
+  let installState: UpdateInstallState = { status: "idle" };
+  let installCheck: Promise<UpdateInstallState> | null = null;
+  let quitRequested = false;
+  let resumingQuit = false;
+  type QuitMode = "restart" | "quit" | null;
+  let validatedQuit: QuitMode = null;
+  let finalQuit: {
+    mode: Exclude<QuitMode, null>;
+    event: { readonly defaultPrevented: boolean };
+  } | null = null;
+
+  const publishInstallState = (state: UpdateInstallState): void => {
+    installState = state;
+    try {
+      sendToLiveRenderer(getMainWindow(), "updater:install-state", state);
+    } catch {
+      // Renderer delivery must not swallow a requested quit or start an install.
+      console.warn("[updater] install-state delivery failed");
+    }
+  };
+  const resumeQuit = (mode: QuitMode): void => {
+    validatedQuit = mode;
+    // app.quit emits before-quit synchronously. Scope this permit to that one
+    // call, not the app lifetime: another listener can still cancel quitting.
+    resumingQuit = true;
+    try {
+      app.quit();
+    } finally {
+      resumingQuit = false;
+    }
+  };
+  const requestInstall = (fromQuit: boolean): Promise<UpdateInstallState> => {
+    if (fromQuit) quitRequested = true;
+    if (installCheck) return installCheck;
+    if (installState.status === "idle") return Promise.resolve(installState);
+    const version = installState.version;
+    publishInstallState({ status: "checking", version });
+    const pending = (async () => {
+      let result: UpdateInstallCheck;
+      try {
+        result = await checkInstall();
+      } catch {
+        console.warn("[updater] install deferred: probe_failed");
+        result = { allowed: false, reason: "probe_failed", diagnostic: "probe_failed" };
+      }
+      // A newer cached download may arrive during the probe. The process check
+      // covers the installed bundled path, independent of the target version.
+      const latestVersion = installState.version;
+      const shouldQuit = quitRequested;
+      quitRequested = false;
+      // Other quit listeners may schedule another attempt during app.quit.
+      // Release the probe latch before that re-entry, not in a later finally.
+      installCheck = null;
+      if (result.allowed) {
+        publishInstallState({ status: "ready", version: latestVersion });
+        resumeQuit(shouldQuit ? "quit" : "restart");
+      } else {
+        publishInstallState({ status: "deferred", version: latestVersion, ...result });
+        if (shouldQuit) resumeQuit(null);
+      }
+      return installState;
+    })().finally(() => {
+      if (installCheck === pending) installCheck = null;
+    });
+    installCheck = pending;
+    return pending;
+  };
+  if (guardedWindowsInstall) {
+    // The built-in quit handler cannot await a process probe. Own the decision
+    // here instead, and never let an unknown/busy runtime trigger an installer.
+    autoUpdater.autoInstallOnAppQuit = false;
+    app.on("before-quit", (event) => {
+      if (resumingQuit) return;
+      validatedQuit = null;
+      if (installState.status === "idle") return;
+      event.preventDefault();
+      void requestInstall(true);
+    });
+    app.on("will-quit", (event) => {
+      const authorization = validatedQuit === null ? null : { mode: validatedQuit, event };
+      finalQuit = authorization;
+      validatedQuit = null;
+      // will-quit can still be vetoed. Only its synchronous successful quit
+      // event may use this authorization; app.exit after a veto must not.
+      setImmediate(() => {
+        if (finalQuit === authorization) finalQuit = null;
+      });
+    });
+    app.on("quit", (_event, exitCode) => {
+      const authorization = finalQuit;
+      finalQuit = null;
+      if (exitCode !== 0 || authorization === null || authorization.event.defaultPrevented) return;
+      // Same final phase as electron-updater's install-on-quit handler. Its
+      // public method dispatches the installer synchronously; the extra queued
+      // app.quit inside the library is irrelevant once this quit completes.
+      autoUpdater.quitAndInstall(authorization.mode === "quit", authorization.mode === "restart");
+    });
+  }
   const preferencesFilePath = updaterPreferencesPath(app.getPath("userData"));
   let automaticUpdatesEnabled =
     DEFAULT_UPDATER_PREFERENCES.automaticUpdates;
@@ -185,6 +291,7 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
   });
 
   autoUpdater.on("update-downloaded", (info: UpdateDownloadedEvent) => {
+    publishInstallState({ status: installCheck ? "checking" : "ready", version: info.version });
     sendToLiveRenderer(getMainWindow(), "updater:update-downloaded", {
       version: info.version,
       releaseNotes: info.releaseNotes,
@@ -201,8 +308,11 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
     return autoUpdater.downloadUpdate();
   });
 
-  ipcMain.handle("updater:install", () => {
+  ipcMain.handle("updater:get-install-state", (): UpdateInstallState => installState);
+  ipcMain.handle("updater:install", async (): Promise<UpdateInstallState> => {
+    if (guardedWindowsInstall) return requestInstall(false);
     autoUpdater.quitAndInstall(false, true);
+    return installState;
   });
 
   ipcMain.handle(

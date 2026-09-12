@@ -68,6 +68,10 @@ Updates are distributed per OS and CPU architecture:
 - on Linux, auto-update only works for `.AppImage`; update `.deb` and `.rpm` by installing a new package over the old one;
 - if auto-update fails, likewise install over the top with the matching installer from the downloads page.
 
+On Windows, installation waits while the bundled runtime is running or its status cannot be checked. Finish active runs, then open **Runtimes**, select this computer and choose **Stop** before retrying installation. Closing Desktop can leave the runtime running under its existing preferences; the update check never stops it.
+
+If the notification says runtime status could not be checked, use **Download installer** to open the official downloads page. Finish active runs and stop this computer's runtime first, download the installer matching your architecture, quit Multica, then run that installer over the existing installation. This recovery path remains available when the automatic runtime check is unavailable.
+
 ## Connecting to a self-hosted instance
 
 Desktop connects to Multica Cloud by default. To connect to a self-hosted instance, create `desktop.json` inside the `.multica` directory of your home directory:
