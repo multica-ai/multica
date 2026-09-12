@@ -242,6 +242,7 @@ export function ManualCreatePanel({
   const setActiveMode = useIssueDraftStore((s) => s.setActiveMode);
   const clearDraft = useIssueDraftStore((s) => s.clearDraft);
   const setLastAssignee = useIssueDraftStore((s) => s.setLastAssignee);
+  const setLastProject = useIssueDraftStore((s) => s.setLastProject);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
@@ -424,12 +425,11 @@ export function ManualCreatePanel({
     setLabelIds([]);
     setPropertyValues({});
     setCustomPropertyPickerId(null);
-    setProjectId(undefined);
     setParentIssueId(undefined);
     setStage(null);
     setChildIssues([]);
-    // Keep the just-used assignee for the next issue in the batch; reset
-    // everything else across the manual + shared slots.
+    // Keep the just-used assignee and project for the next issue in the batch;
+    // reset everything else across the manual + shared slots.
     setManual({
       title: "",
       description: "",
@@ -442,7 +442,6 @@ export function ManualCreatePanel({
     });
     setShared({
       priority: "none",
-      projectId: undefined,
       dueDate: null,
       attachments: [],
     });
@@ -739,6 +738,7 @@ export function ManualCreatePanel({
       // These preferences derive from the SUBMITTED values, not the live
       // draft — an issue was created, so record them regardless of the guard.
       setLastAssignee(assigneeType, assigneeId);
+      setLastProject(projectId);
       setLastMode("manual");
       // Success may only consume the draft it submitted (MUL-5181 P0): any
       // edit after the submit snapshot — typing while the request is in
