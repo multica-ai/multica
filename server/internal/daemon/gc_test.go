@@ -331,7 +331,7 @@ func TestShouldCleanTaskDir_DoneIssueOverTTL(t *testing.T) {
 		CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
 	})
 
-	action := d.shouldCleanTaskDir(context.Background(), taskDir)
+	action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 	if action != gcActionClean {
 		t.Fatalf("expected gcActionClean, got %d", action)
 	}
@@ -357,7 +357,7 @@ func TestShouldCleanTaskDir_CancelledIssueOverTTL(t *testing.T) {
 		CompletedAt: time.Now(),
 	})
 
-	action := d.shouldCleanTaskDir(context.Background(), taskDir)
+	action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 	if action != gcActionClean {
 		t.Fatalf("expected gcActionClean, got %d", action)
 	}
@@ -383,7 +383,7 @@ func TestShouldCleanTaskDir_OpenIssueSkipped(t *testing.T) {
 		CompletedAt: time.Now(),
 	})
 
-	action := d.shouldCleanTaskDir(context.Background(), taskDir)
+	action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 	if action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip for open issue, got %d", action)
 	}
@@ -409,7 +409,7 @@ func TestShouldCleanTaskDir_DoneButRecentSkipped(t *testing.T) {
 		CompletedAt: time.Now(),
 	})
 
-	action := d.shouldCleanTaskDir(context.Background(), taskDir)
+	action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 	if action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip for recently-done issue, got %d", action)
 	}
@@ -422,7 +422,7 @@ func TestShouldCleanTaskDir_NoMetaRecentSkipped(t *testing.T) {
 	// No meta, fresh directory — should skip.
 	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "task5", nil)
 
-	action := d.shouldCleanTaskDir(context.Background(), taskDir)
+	action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 	if action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip for recent orphan, got %d", action)
 	}
@@ -435,7 +435,7 @@ func TestShouldCleanTaskDir_NoMetaOldOrphan(t *testing.T) {
 	d.cfg.GCOrphanTTL = 0 // treat all orphans as expired
 	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "task6", nil)
 
-	action := d.shouldCleanTaskDir(context.Background(), taskDir)
+	action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 	if action != gcActionOrphan {
 		t.Fatalf("expected gcActionOrphan, got %d", action)
 	}
@@ -458,7 +458,7 @@ func TestShouldCleanTaskDir_APIErrorSkipped(t *testing.T) {
 		CompletedAt: time.Now().Add(-2 * time.Hour),
 	})
 
-	action := d.shouldCleanTaskDir(context.Background(), taskDir)
+	action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 	if action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip on API error despite completed-task TTL, got %d", action)
 	}
@@ -482,7 +482,7 @@ func TestShouldCleanTaskDir_Issue404OldOrphan(t *testing.T) {
 		CompletedAt: time.Now(),
 	})
 
-	action := d.shouldCleanTaskDir(context.Background(), taskDir)
+	action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 	if action != gcActionOrphan {
 		t.Fatalf("expected gcActionOrphan for unreachable issue past TTL, got %d", action)
 	}
@@ -510,7 +510,7 @@ func TestShouldCleanTaskDir_Issue404RecentSkipped(t *testing.T) {
 		CompletedAt: time.Now(),
 	})
 
-	action := d.shouldCleanTaskDir(context.Background(), taskDir)
+	action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 	if action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip for recent 404 (cross-workspace safety), got %d", action)
 	}
@@ -526,7 +526,7 @@ func TestCleanTaskDir_RemovesDirectory(t *testing.T) {
 		t.Fatal("task dir should exist before cleanup")
 	}
 
-	if bytes, removed := d.cleanTaskDir(taskDir); !removed || bytes < 64 {
+	if bytes, removed := d.cleanTaskDir(d.cfg.WorkspacesRoot, taskDir); !removed || bytes < 64 {
 		t.Fatalf("reclaimed bytes = %d, want at least payload size", bytes)
 	}
 
@@ -597,7 +597,7 @@ func TestApplyGCAction_RefusesEveryMutationWithoutOwner(t *testing.T) {
 			}
 
 			stats := &gcStats{byPattern: map[string]int{}}
-			if removed := d.applyGCAction(taskDir, tc.action, stats); removed != 0 {
+			if removed := d.applyGCAction(d.cfg.WorkspacesRoot, taskDir, tc.action, stats); removed != 0 {
 				t.Fatalf("applyGCAction reported %d removals on an unowned directory", removed)
 			}
 			if stats.cleaned != 0 || stats.orphaned != 0 || stats.artifactDirs != 0 || stats.bytesReclaimed != 0 {
@@ -633,7 +633,7 @@ func TestCleanTaskDir_RefusesOwnerPathMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if bytes, removed := d.cleanTaskDir(taskDir); removed || bytes != 0 {
+	if bytes, removed := d.cleanTaskDir(d.cfg.WorkspacesRoot, taskDir); removed || bytes != 0 {
 		t.Fatalf("cleanTaskDir removed owner/path mismatch: removed=%v bytes=%d", removed, bytes)
 	}
 	if _, err := os.Stat(survivor); err != nil {
@@ -663,7 +663,7 @@ func TestCleanTaskDir_AcceptsLegacyOwnerWithGCWorkspaceIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, removed := d.cleanTaskDir(taskDir); !removed {
+	if _, removed := d.cleanTaskDir(d.cfg.WorkspacesRoot, taskDir); !removed {
 		t.Fatal("legacy task owner with matching GC workspace identity was not removed")
 	}
 	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
@@ -689,7 +689,7 @@ func TestCleanTaskDir_RemovesStableRootRecord(t *testing.T) {
 	}
 	original := env.RootDir
 	d := &Daemon{cfg: Config{WorkspacesRoot: root}, logger: slog.Default()}
-	if bytes, removed := d.cleanTaskDir(original); !removed || bytes <= 0 {
+	if bytes, removed := d.cleanTaskDir(d.cfg.WorkspacesRoot, original); !removed || bytes <= 0 {
 		t.Fatalf("reclaimed bytes = %d, want owner metadata bytes", bytes)
 	}
 
@@ -729,7 +729,7 @@ func TestGcWorkspace_CleansEmptyWorkspaceDir(t *testing.T) {
 		CompletedAt: time.Now(),
 	})
 
-	d.gcWorkspace(context.Background(), wsDir, &gcStats{byPattern: map[string]int{}})
+	d.gcWorkspace(context.Background(), d.cfg.WorkspacesRoot, wsDir, &gcStats{byPattern: map[string]int{}})
 
 	if _, err := os.Stat(wsDir); !os.IsNotExist(err) {
 		t.Fatal("empty workspace dir should be removed after all tasks cleaned")
@@ -779,7 +779,7 @@ func TestGCWorkspace_BatchesAndDeduplicatesIssueChecks(t *testing.T) {
 	})
 
 	stats := &gcStats{byPattern: map[string]int{}}
-	d.gcWorkspace(context.Background(), wsDir, stats)
+	d.gcWorkspace(context.Background(), d.cfg.WorkspacesRoot, wsDir, stats)
 
 	if batchRequests != 1 || legacyRequests != 0 {
 		t.Fatalf("requests: batch=%d legacy=%d, want batch=1 legacy=0", batchRequests, legacyRequests)
@@ -821,7 +821,7 @@ func TestGCWorkspace_CompletedTaskTTLRemovesOpenIssue(t *testing.T) {
 	writeFile(t, filepath.Join(taskDir, "workdir", "checkout.bin"), 128)
 
 	stats := &gcStats{byPattern: map[string]int{}}
-	d.gcWorkspace(context.Background(), wsDir, stats)
+	d.gcWorkspace(context.Background(), d.cfg.WorkspacesRoot, wsDir, stats)
 
 	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
 		t.Fatalf("completed open-issue task dir should be removed, stat error = %v", err)
@@ -857,7 +857,7 @@ func TestGCWorkspace_OldServerFallbackIsCached(t *testing.T) {
 		taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, tc.workspace, fmt.Sprintf("task-%d", i), &execenv.GCMeta{
 			IssueID: tc.issueID, WorkspaceID: tc.workspace, CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
 		})
-		d.gcWorkspace(context.Background(), wsDir, &gcStats{byPattern: map[string]int{}})
+		d.gcWorkspace(context.Background(), d.cfg.WorkspacesRoot, wsDir, &gcStats{byPattern: map[string]int{}})
 		if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
 			t.Fatalf("legacy fallback did not clean %s", taskDir)
 		}
@@ -894,7 +894,7 @@ func TestGCWorkspace_BatchFailureDoesNotFanOutOrClean(t *testing.T) {
 		IssueID: issueID, WorkspaceID: "ws-fail", CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
 	})
 	stats := &gcStats{byPattern: map[string]int{}}
-	d.gcWorkspace(context.Background(), wsDir, stats)
+	d.gcWorkspace(context.Background(), d.cfg.WorkspacesRoot, wsDir, stats)
 
 	if batchRequests != 1 || legacyRequests != 0 {
 		t.Fatalf("requests: batch=%d legacy=%d, want batch=1 legacy=0", batchRequests, legacyRequests)
@@ -946,7 +946,7 @@ func TestGCWorkspace_ReclaimsLegacyCodexSandboxWithoutConfiguredPatterns(t *test
 	}
 
 	stats := &gcStats{byPattern: map[string]int{}}
-	d.gcWorkspace(context.Background(), wsDir, stats)
+	d.gcWorkspace(context.Background(), d.cfg.WorkspacesRoot, wsDir, stats)
 
 	if _, err := os.Stat(filepath.Join(taskDir, "codex-home/.sandbox-bin")); !os.IsNotExist(err) {
 		t.Fatalf("managed Codex sandbox should be removed, stat err=%v", err)
@@ -993,7 +993,7 @@ func TestShouldCleanTaskDir_OpenIssueArtifactCleanup(t *testing.T) {
 		CompletedAt: time.Now().Add(-24 * time.Hour),
 	})
 
-	action := d.shouldCleanTaskDir(context.Background(), taskDir)
+	action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 	if action != gcActionCleanArtifacts {
 		t.Fatalf("expected gcActionCleanArtifacts for old completed task on open issue, got %d", action)
 	}
@@ -1022,7 +1022,7 @@ func TestShouldCleanTaskDir_CompletedTaskTTLRemovesOpenIssue(t *testing.T) {
 		CompletedAt: time.Now().Add(-25 * time.Hour),
 	})
 
-	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionClean {
+	if action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); action != gcActionClean {
 		t.Fatalf("expected completed-task TTL to clean open issue env, got %d", action)
 	}
 
@@ -1032,7 +1032,7 @@ func TestShouldCleanTaskDir_CompletedTaskTTLRemovesOpenIssue(t *testing.T) {
 		WorkspaceID: "ws1",
 		CompletedAt: time.Now().Add(-23 * time.Hour),
 	})
-	if action := d.shouldCleanTaskDir(context.Background(), recentTaskDir); action != gcActionSkip {
+	if action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, recentTaskDir); action != gcActionSkip {
 		t.Fatalf("expected completed-task TTL to preserve a recent open-issue env, got %d", action)
 	}
 }
@@ -1058,7 +1058,7 @@ func TestShouldCleanTaskDir_CompletedTaskTTLUnknownIssueStatusFailsClosed(t *tes
 		CompletedAt: time.Now().Add(-2 * time.Hour),
 	})
 
-	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+	if action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); action != gcActionSkip {
 		t.Fatalf("expected unknown issue status to fail closed, got %d", action)
 	}
 }
@@ -1080,7 +1080,7 @@ func TestShouldCleanTaskDir_CompletedTaskTTLRequiresCompletionTime(t *testing.T)
 		Kind: execenv.GCKindIssue, IssueID: issueID, WorkspaceID: "ws1",
 	})
 
-	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+	if action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); action != gcActionSkip {
 		t.Fatalf("expected task without completed_at to remain, got %d", action)
 	}
 }
@@ -1106,7 +1106,7 @@ func TestShouldCleanTaskDir_CompletedTaskTTLKeepsLocalDirectoryArtifactTTLSepara
 		LocalDirectory: true,
 	})
 
-	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+	if action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); action != gcActionSkip {
 		t.Fatalf("expected completed-task TTL not to accelerate local_directory artifact cleanup, got %d", action)
 	}
 
@@ -1117,7 +1117,7 @@ func TestShouldCleanTaskDir_CompletedTaskTTLKeepsLocalDirectoryArtifactTTLSepara
 		CompletedAt:    time.Now().Add(-13 * time.Hour),
 		LocalDirectory: true,
 	})
-	if action := d.shouldCleanTaskDir(context.Background(), artifactEligibleDir); action != gcActionCleanArtifacts {
+	if action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, artifactEligibleDir); action != gcActionCleanArtifacts {
 		t.Fatalf("expected existing artifact TTL to remain effective for local_directory env, got %d", action)
 	}
 }
@@ -1142,7 +1142,7 @@ func TestShouldCleanTaskDir_CompletedTaskTTLPreservesActiveEnv(t *testing.T) {
 	d.markActiveEnvRoot(taskDir)
 	defer d.unmarkActiveEnvRoot(taskDir)
 
-	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+	if action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); action != gcActionSkip {
 		t.Fatalf("expected active env to remain despite completed-task TTL, got %d", action)
 	}
 }
@@ -1167,7 +1167,7 @@ func TestShouldCleanTaskDir_OpenIssueRecentTaskSkipped(t *testing.T) {
 		CompletedAt: time.Now().Add(-1 * time.Minute),
 	})
 
-	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+	if action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip for fresh completed_at, got %d", action)
 	}
 }
@@ -1193,7 +1193,7 @@ func TestShouldCleanTaskDir_LegacyMetaUsesManagedOnlyFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionCleanManagedArtifacts {
+	if action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); action != gcActionCleanManagedArtifacts {
 		t.Fatalf("expected managed-only fallback for stale legacy meta, got %d", action)
 	}
 
@@ -1205,7 +1205,7 @@ func TestShouldCleanTaskDir_LegacyMetaUsesManagedOnlyFallback(t *testing.T) {
 	if err := os.Chtimes(recentDir, old, old); err != nil {
 		t.Fatal(err)
 	}
-	if action := d.shouldCleanTaskDir(context.Background(), recentDir); action != gcActionSkip {
+	if action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, recentDir); action != gcActionSkip {
 		t.Fatalf("expected recent legacy meta to remain untouched, got %d", action)
 	}
 }
@@ -1233,7 +1233,7 @@ func TestShouldCleanTaskDir_ActiveEnvRootSkipsArtifactCleanup(t *testing.T) {
 	d.markActiveEnvRoot(taskDir)
 	defer d.unmarkActiveEnvRoot(taskDir)
 
-	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+	if action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip while task is active, got %d", action)
 	}
 }
@@ -1266,7 +1266,7 @@ func TestShouldCleanTaskDir_ActiveEnvRootSkipsFullCleanup(t *testing.T) {
 	d.markActiveEnvRoot(taskDir)
 	defer d.unmarkActiveEnvRoot(taskDir)
 
-	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+	if action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip on active env root with done+stale issue, got %d", action)
 	}
 }
@@ -1292,7 +1292,7 @@ func TestShouldCleanTaskDir_ActiveEnvRootSkipsOrphan404(t *testing.T) {
 	d.markActiveEnvRoot(taskDir)
 	defer d.unmarkActiveEnvRoot(taskDir)
 
-	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+	if action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip on active env root with 404 issue, got %d", action)
 	}
 }
@@ -1307,7 +1307,7 @@ func TestShouldCleanTaskDir_ActiveEnvRootSkipsNoMetaOrphan(t *testing.T) {
 	d.markActiveEnvRoot(taskDir)
 	defer d.unmarkActiveEnvRoot(taskDir)
 
-	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+	if action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip on active env root with no-meta orphan, got %d", action)
 	}
 }
@@ -1333,7 +1333,7 @@ func TestShouldCleanTaskDir_ArtifactTTLDisabled(t *testing.T) {
 		CompletedAt: time.Now().Add(-100 * 24 * time.Hour),
 	})
 
-	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+	if action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip when artifact GC disabled, got %d", action)
 	}
 }
@@ -1354,7 +1354,7 @@ func TestShouldCleanTaskDir_ArtifactTTLDisabledSkipsLocalOrphanManagedCleanup(t 
 		Kind: execenv.GCKindIssue, IssueID: issueID, WorkspaceID: "ws1", LocalDirectory: true,
 	})
 
-	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+	if action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); action != gcActionSkip {
 		t.Fatalf("expected artifact TTL zero to disable managed local orphan cleanup, got %d", action)
 	}
 }
@@ -2225,7 +2225,7 @@ func TestShouldCleanTaskDir_KindDispatch(t *testing.T) {
 			}
 			d := newGCTestDaemon(t, mux)
 			taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", tc.name, tc.meta)
-			got := d.shouldCleanTaskDir(context.Background(), taskDir)
+			got := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 			if got != tc.want {
 				t.Fatalf("kind dispatch %q: want %d, got %d", tc.name, tc.want, got)
 			}
@@ -2278,7 +2278,7 @@ func TestShouldCleanTaskDir_EmptyParentIDFallsBackToOrphanMTime(t *testing.T) {
 			d.cfg.GCOrphanTTL = 365 * 24 * time.Hour
 			taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", tc.name, tc.meta)
 
-			got := d.shouldCleanTaskDir(context.Background(), taskDir)
+			got := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 			if got != gcActionSkip {
 				t.Fatalf("empty parent id should skip while under orphan TTL, got %d", got)
 			}
@@ -2290,7 +2290,7 @@ func TestShouldCleanTaskDir_EmptyParentIDFallsBackToOrphanMTime(t *testing.T) {
 			if err := os.Chtimes(taskDir, old, old); err != nil {
 				t.Fatalf("chtimes: %v", err)
 			}
-			got = d.shouldCleanTaskDir(context.Background(), taskDir)
+			got = d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 			if got != gcActionOrphan {
 				t.Fatalf("empty parent id over orphan TTL should orphan, got %d", got)
 			}
@@ -2371,7 +2371,7 @@ func TestShouldCleanTaskDir_ChatHardDeletedFreshMtime(t *testing.T) {
 	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", "hard-deleted-chat", meta)
 	// taskDir mtime is now-ish — well within any sane GCOrphanTTL.
 
-	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionClean {
+	if got := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); got != gcActionClean {
 		t.Fatalf("hard-deleted chat with fresh mtime must clean immediately, got %d", got)
 	}
 }
@@ -2415,11 +2415,11 @@ func TestShouldCleanTaskDir_ChatActiveResistsOldMtime(t *testing.T) {
 		t.Fatalf("chtimes: %v", err)
 	}
 
-	action := d.shouldCleanTaskDir(context.Background(), taskDir)
+	action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 	if action == gcActionClean || action == gcActionOrphan {
 		t.Fatalf("active chat session's directory must never be removed, got action %d", action)
 	}
-	d.applyGCAction(taskDir, action, &gcStats{byPattern: map[string]int{}})
+	d.applyGCAction(d.cfg.WorkspacesRoot, taskDir, action, &gcStats{byPattern: map[string]int{}})
 
 	for _, rel := range []string{".", "logs/run.log", "output/result.md", ".gc_meta.json"} {
 		if _, err := os.Stat(filepath.Join(taskDir, rel)); err != nil {
@@ -2527,7 +2527,7 @@ func TestShouldCleanTaskDir_LocalDirectoryNeverClean(t *testing.T) {
 		LocalDirectory: true,
 	})
 
-	got := d.shouldCleanTaskDir(context.Background(), taskDir)
+	got := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 	if got == gcActionClean {
 		t.Fatalf("expected local_directory task to never return gcActionClean, got gcActionClean")
 	}
@@ -2559,7 +2559,7 @@ func TestShouldCleanTaskDir_LocalDirectoryOrphanUsesManagedOnly(t *testing.T) {
 		LocalDirectory: true,
 	})
 
-	got := d.shouldCleanTaskDir(context.Background(), taskDir)
+	got := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 	if got != gcActionCleanManagedArtifacts {
 		t.Fatalf("expected local_directory orphan to use managed-only cleanup, got %d", got)
 	}
@@ -2590,7 +2590,7 @@ func TestShouldCleanTaskDir_LocalDirectoryFalsePreservesNormalClean(t *testing.T
 		// LocalDirectory unset (false).
 	})
 
-	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionClean {
+	if got := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); got != gcActionClean {
 		t.Fatalf("expected gcActionClean for normal task, got %d", got)
 	}
 }

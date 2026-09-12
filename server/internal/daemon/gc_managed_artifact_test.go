@@ -76,11 +76,11 @@ func TestManagedArtifact_IdleActiveChatReclaimsSandboxBin(t *testing.T) {
 	writeFile(t, filepath.Join(taskDir, "workdir/repo/.sandbox-bin/user-owned"), 32)
 
 	stats := &gcStats{byPattern: map[string]int{}}
-	action := d.shouldCleanTaskDir(context.Background(), taskDir)
+	action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 	if action != gcActionCleanManagedArtifacts {
 		t.Fatalf("want gcActionCleanManagedArtifacts, got %d", action)
 	}
-	d.applyGCAction(taskDir, action, stats)
+	d.applyGCAction(d.cfg.WorkspacesRoot, taskDir, action, stats)
 
 	assertGone(t, taskDir, sandboxBinRel)
 	assertKept(t, taskDir,
@@ -113,7 +113,7 @@ func TestManagedArtifact_FreshActiveChatKeepsSandboxBin(t *testing.T) {
 	})
 	writeFile(t, filepath.Join(taskDir, sandboxBinRel, "codex"), 4096)
 
-	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionSkip {
+	if got := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); got != gcActionSkip {
 		t.Fatalf("want gcActionSkip inside the TTL, got %d", got)
 	}
 	assertKept(t, taskDir, sandboxBinRel+"/codex")
@@ -135,7 +135,7 @@ func TestManagedArtifact_ArtifactTTLZeroDisablesFallback(t *testing.T) {
 	})
 	writeFile(t, filepath.Join(taskDir, sandboxBinRel, "codex"), 4096)
 
-	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionSkip {
+	if got := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); got != gcActionSkip {
 		t.Fatalf("want gcActionSkip with artifact TTL disabled, got %d", got)
 	}
 	assertKept(t, taskDir, sandboxBinRel+"/codex")
@@ -155,7 +155,7 @@ func TestManagedArtifact_ZeroCompletedAtIsLeftAlone(t *testing.T) {
 	})
 	writeFile(t, filepath.Join(taskDir, sandboxBinRel, "codex"), 4096)
 
-	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionSkip {
+	if got := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); got != gcActionSkip {
 		t.Fatalf("want gcActionSkip for zero completed_at, got %d", got)
 	}
 	assertKept(t, taskDir, sandboxBinRel+"/codex")
@@ -208,11 +208,11 @@ func TestManagedArtifact_NonTerminalAutopilotAndQuickCreate(t *testing.T) {
 		taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", tc.name, tc.meta)
 		writeFile(t, filepath.Join(taskDir, sandboxBinRel, "codex"), 4096)
 
-		action := d.shouldCleanTaskDir(context.Background(), taskDir)
+		action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 		if action != gcActionCleanManagedArtifacts {
 			t.Fatalf("%s: want gcActionCleanManagedArtifacts, got %d", tc.name, action)
 		}
-		d.applyGCAction(taskDir, action, &gcStats{byPattern: map[string]int{}})
+		d.applyGCAction(d.cfg.WorkspacesRoot, taskDir, action, &gcStats{byPattern: map[string]int{}})
 		assertGone(t, taskDir, sandboxBinRel)
 		assertKept(t, taskDir, ".gc_meta.json")
 	}
@@ -234,7 +234,7 @@ func TestManagedArtifact_ActiveEnvRootKeepsSandboxBin(t *testing.T) {
 	writeFile(t, filepath.Join(taskDir, sandboxBinRel, "codex"), 4096)
 
 	d.markActiveEnvRoot(taskDir)
-	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionSkip {
+	if got := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); got != gcActionSkip {
 		t.Fatalf("want gcActionSkip for an active env root, got %d", got)
 	}
 	assertKept(t, taskDir, sandboxBinRel+"/codex")
@@ -257,11 +257,11 @@ func TestManagedArtifact_LocalDirectoryChatReclaimsSandboxBin(t *testing.T) {
 	writeFile(t, filepath.Join(taskDir, sandboxBinRel, "codex"), 4096)
 	writeFile(t, filepath.Join(taskDir, "logs/run.log"), 32)
 
-	action := d.shouldCleanTaskDir(context.Background(), taskDir)
+	action := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 	if action != gcActionCleanManagedArtifacts {
 		t.Fatalf("want gcActionCleanManagedArtifacts, got %d", action)
 	}
-	d.applyGCAction(taskDir, action, &gcStats{byPattern: map[string]int{}})
+	d.applyGCAction(d.cfg.WorkspacesRoot, taskDir, action, &gcStats{byPattern: map[string]int{}})
 	assertGone(t, taskDir, sandboxBinRel)
 	assertKept(t, taskDir, "logs/run.log", ".gc_meta.json")
 }
@@ -283,22 +283,22 @@ func TestManagedArtifact_SecondCycleIsANoOp(t *testing.T) {
 	})
 	writeFile(t, filepath.Join(taskDir, sandboxBinRel, "codex"), 4096)
 
-	first := d.shouldCleanTaskDir(context.Background(), taskDir)
+	first := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir)
 	if first != gcActionCleanManagedArtifacts {
 		t.Fatalf("first cycle: want gcActionCleanManagedArtifacts, got %d", first)
 	}
-	d.applyGCAction(taskDir, first, &gcStats{byPattern: map[string]int{}})
+	d.applyGCAction(d.cfg.WorkspacesRoot, taskDir, first, &gcStats{byPattern: map[string]int{}})
 	assertGone(t, taskDir, sandboxBinRel)
 
 	for cycle := 2; cycle <= 3; cycle++ {
-		if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionSkip {
+		if got := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); got != gcActionSkip {
 			t.Fatalf("cycle %d: want gcActionSkip once the cache is gone, got %d", cycle, got)
 		}
 	}
 
 	// A later Codex run re-provisions the cache; the GC must notice it again.
 	writeFile(t, filepath.Join(taskDir, sandboxBinRel, "codex"), 4096)
-	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionCleanManagedArtifacts {
+	if got := d.shouldCleanTaskDir(context.Background(), d.cfg.WorkspacesRoot, taskDir); got != gcActionCleanManagedArtifacts {
 		t.Fatalf("want reclaim after re-provision, got %d", got)
 	}
 }
@@ -391,7 +391,7 @@ func TestManagedArtifact_UnreachableIssueStillReclaimsCache(t *testing.T) {
 	writeFile(t, filepath.Join(taskDir, "output/result.md"), 32)
 
 	stats := &gcStats{byPattern: map[string]int{}}
-	d.gcWorkspaceIssues(context.Background(), "ws", []issueGCCandidate{{taskDir: taskDir, meta: meta}}, stats)
+	d.gcWorkspaceIssues(context.Background(), d.cfg.WorkspacesRoot, "ws", []issueGCCandidate{{taskDir: taskDir, meta: meta}}, stats)
 
 	assertGone(t, taskDir, sandboxBinRel)
 	assertKept(t, taskDir, "output/result.md", ".gc_meta.json")
