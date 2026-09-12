@@ -1987,11 +1987,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     baseMarkdown: string;
     attachmentIds: string[];
   } | null>(null);
-  // Keep the description editor mounted from the start. Unlike the empty
-  // composer shells, a long rendered description cannot swap between
-  // react-markdown and ProseMirror without small per-block height differences
-  // accumulating into a visible scroll/layout jump. The chunked Markdown path
-  // keeps this single eager editor affordable; title and composers stay lazy.
+  // IssueDetail alone opts into an eager, continuously mounted description
+  // editor. Title and composer hosts retain ContentEditor's deferred default.
   const titleEditorRef = useRef<TitleEditorRef>(null);
   const titleBaseRef = useRef<string | undefined>(issue?.title);
   const [titleConflictDraft, setTitleConflictDraft] = useState<string | null>(null);
@@ -3023,6 +3020,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           )}
 
           <div
+            data-testid="issue-description"
             {...descDropZoneProps}
             {...descriptionAnnotations.captureProps}
             ref={descriptionAnnotations.cardRef}
@@ -3043,6 +3041,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <ContentEditor
                 ref={descEditorRef}
                 key={id}
+                eagerClientRender
                 value={issue.description ?? ""}
                 placeholder={t(($) => $.detail.desc_placeholder)}
                 onUpdate={(md, baseMarkdown) => {

@@ -225,10 +225,16 @@ interface ContentEditorBaseProps {
    */
   flushPendingOnUnmount?: boolean;
   /**
-   * Called once when the Tiptap instance exists and its initial content is
-   * set (creation is deferred past first paint by `immediatelyRender: false`).
-   * Readonly-first hosts such as comment and reply composers use this as the
-   * signal to swap their static shell for the live editor.
+   * Create the ProseMirror view during the first client render. This is opt-in
+   * because most editor hosts preserve their existing deferred creation; the
+   * issue description uses it to keep its populated surface continuous on
+   * cached re-entry.
+   */
+  eagerClientRender?: boolean;
+  /**
+   * Called once the initial document is usable in the connected editor DOM.
+   * This also waits for the client commit when hydrating. Readonly-first
+   * hosts use this to swap their static shell for the live editor.
    */
   onReady?: () => void;
 }
@@ -381,6 +387,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       quickActionMenu,
       attachments,
       flushPendingOnUnmount = false,
+      eagerClientRender = false,
       onReady,
     },
     ref,
@@ -553,43 +560,38 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           cdnDomain: configStore.getState().cdnDomain,
         })
       : "";
-    // With `immediatelyRender: false` the Tiptap instance is created after
-    // mount, so an imperative `focus()` fired on the same tick (e.g. chat
-    // auto-focusing a brand-new conversation) would hit a null editor and no-op.
-    // Latch the intent here and honor it in `onCreate` once the editor exists.
+    // Hydration uses Tiptap's null server snapshot. Latch imperative focus
+    // until that snapshot has been replaced with the client editor.
     const focusOnReadyRef = useRef(false);
     // Large markdown is parsed in chunks to dodge marked's O(n²) tokenizer (see
     // parseMarkdownChunked). Small docs stay on the single-parse fast path.
     const mountChunked = initialContent.length > MARKDOWN_CHUNK_THRESHOLD;
 
     const editor = useEditor({
-      immediatelyRender: false,
+      // Keep deferred creation as the default for existing hosts. IssueDetail
+      // opts in so a cached description first-paints as one populated editor.
+      immediatelyRender: eagerClientRender && typeof window !== "undefined",
       // Explicit for clarity — the real perf win is useEditorState in BubbleMenu.
       shouldRerenderOnTransaction: false,
-      onCreate: ({ editor: ed }) => {
-        // For large docs we mount empty (below) and parse in chunks here, so the
-        // O(n²) marked tokenizer never sees the whole document at once.
+      onBeforeCreate: ({ editor: ed }) => {
+        // Markdown's beforeCreate hook has initialized the manager, but
+        // Tiptap has not constructed its document or view yet. Build the
+        // initial JSON here: onCreate runs in a later task, after an empty
+        // view could paint or accept edits/uploads that setContent would erase.
         if (mountChunked) {
-          const manager = (
-            ed.storage as { markdown?: { manager?: MarkdownManagerLike } }
-          ).markdown?.manager;
-          if (manager) {
-            ed.commands.setContent(
-              parseMarkdownChunked(manager, initialContent),
-              { emitUpdate: false },
-            );
-          } else {
-            ed.commands.setContent(initialContent, {
-              emitUpdate: false,
-              contentType: "markdown",
-            });
-          }
+          ed.options.content = parseMarkdownChunked(ed.storage.markdown.manager, initialContent);
         }
+      },
+      onMount: ({ editor: ed }) => {
+        // Normalize the detached view and establish the save baseline before
+        // it accepts input. The later create task must not reset either one.
         // A markdown draft ending in an empty list item (e.g. `"1. \n\n"` left
         // after typing `1.`) parses into a caretless, schema-invalid item;
         // repair it so the mounted editor has a real cursor in the list.
         repairEmptyListItems(ed);
         lastEmittedRef.current = normalizeEditorMarkdown(ed);
+      },
+      onCreate: ({ editor: ed }) => {
         if (focusOnReadyRef.current) {
           focusOnReadyRef.current = false;
           ed.commands.focus("end");
@@ -687,14 +689,20 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       },
     });
 
-    // Signal hosts that the deferred editor instance now exists. Fired from a
-    // passive effect (not `onCreate`) so it runs after the commit in which
-    // <EditorContent> attached the editor DOM — callers can measure/focus it.
+    // Subscribe after EditorContent has committed its DOM. During hydration
+    // the create task can precede that commit, so handle both orderings without
+    // a readiness setState/render in every editor (including non-consumers).
     const readyFiredRef = useRef(false);
     useEffect(() => {
-      if (!editor || readyFiredRef.current) return;
-      readyFiredRef.current = true;
-      onReadyRef.current?.();
+      if (!editor || !onReadyRef.current || readyFiredRef.current) return;
+      const ready = () => {
+        if (editor.isDestroyed || readyFiredRef.current) return;
+        readyFiredRef.current = true;
+        onReadyRef.current?.();
+      };
+      if (editor.isInitialized) ready();
+      else editor.on("create", ready);
+      return () => { editor.off("create", ready); };
     }, [editor]);
 
     // Publish upload-queue transitions to the host so it can gate submit.
@@ -834,7 +842,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       lastSyncedValueRef.current = value;
 
       // The initial value was already parsed through useEditor's
-      // `content` option (or in onCreate for the chunked path). Comparing that
+      // `content` option (or in onBeforeCreate for the chunked path). Comparing that
       // source Markdown to Tiptap's canonical serialization can differ even
       // when they represent the same document, and used to cause an immediate
       // second full parse. Only later prop changes belong to this sync effect.
