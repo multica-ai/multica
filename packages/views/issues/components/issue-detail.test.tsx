@@ -724,6 +724,29 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.getProject.mockReset();
   });
 
+  it("refreshes idle activity, comment, and reply timestamps without refetching (#7899)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-01-18T00:04:45Z"));
+    const created_at = "2026-01-18T00:00:00Z";
+    mockApiObj.listTimeline.mockResolvedValue([
+      { ...mockTimeline[0], id: "idle-root", created_at },
+      { ...mockTimeline[1], id: "idle-reply", parent_id: "idle-root", created_at },
+      { type: "activity", id: "idle-activity", actor_type: "member", actor_id: "user-1",
+        action: "priority_changed", details: { from: "low", to: "high" }, created_at },
+    ]);
+    const view = renderIssueDetail();
+    try {
+      await waitFor(() => expect(screen.getAllByText("4m ago")).toHaveLength(3));
+      const fetches = mockApiObj.listTimeline.mock.calls.length;
+      act(() => vi.advanceTimersByTime(30_000));
+      expect(screen.getAllByText("5m ago")).toHaveLength(3);
+      expect(mockApiObj.listTimeline).toHaveBeenCalledTimes(fetches);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
   it("opens source-context creation from both a root comment and a reply", async () => {
     mockApiObj.listTimeline.mockResolvedValue([
       { ...mockTimeline[0], id: "source-root", parent_id: null },

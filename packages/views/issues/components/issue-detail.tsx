@@ -125,7 +125,8 @@ import { useIssueTimeline } from "../hooks/use-issue-timeline";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
 import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
-import { useLocale, useTimeAgo } from "../../i18n";
+import { useLocale } from "../../i18n";
+import { RelativeTime } from "./relative-time";
 import {
   useRestoredScrollOffset,
   useRestoredScrollRef,
@@ -536,7 +537,6 @@ function ActivityBlock({
   resolveStatusCategory,
   resolveStatusColor,
   t,
-  timeAgo,
   locale,
 }: {
   entries: TimelineEntry[];
@@ -554,7 +554,6 @@ function ActivityBlock({
   /** A custom status's own `#rrggbb`; null for built-ins and unknown keys. */
   resolveStatusColor: (statusKey: string) => string | null;
   t: ActivityT;
-  timeAgo: (dateStr: string) => string;
   locale: string;
 }) {
   if (!expanded) {
@@ -664,7 +663,7 @@ function ActivityBlock({
                 <TooltipTrigger
                   render={
                     <span className="ml-auto shrink-0 cursor-default">
-                      {timeAgo(entry.created_at)}
+                      <RelativeTime dateTime={entry.created_at} />
                     </span>
                   }
                 />
@@ -1138,7 +1137,6 @@ export function IssueDetailSkeleton({ leading }: { leading?: ReactNode } = {}) {
 export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, leadingAction }: IssueDetailProps) {
   const { t } = useT("issues");
   const locale = useLocale();
-  const timeAgo = useTimeAgo();
   const id = issueId;
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
@@ -2703,7 +2701,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         resolveStatusCategory={resolveStatusCategory}
         resolveStatusColor={resolveStatusColor}
         t={t}
-        timeAgo={timeAgo}
         locale={locale}
       />
     );
