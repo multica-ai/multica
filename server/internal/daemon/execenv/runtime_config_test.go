@@ -855,6 +855,22 @@ func TestConnectedAppsBlockLivesOutsideBrief(t *testing.T) {
 	}
 }
 
+func TestConnectedAppsBlockAddsFeishuDocumentSafetyGuidanceOnlyWhenMounted(t *testing.T) {
+	app := runtimeapps.ConnectedApp{
+		Provider: "feishu", ServerName: "feishu-documents", ToolkitSlug: "feishu-documents",
+	}
+	block := BuildConnectedAppsBlock([]runtimeapps.ConnectedApp{app})
+	for _, want := range []string{"current Agent's connected Feishu bot identity", "explicit Feishu document URL", "permission_denied", "Preview destructive or large edits"} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("Feishu guidance missing %q\n---\n%s", want, block)
+		}
+	}
+	ordinary := BuildConnectedAppsBlock([]runtimeapps.ConnectedApp{{Provider: "composio", ServerName: "composio", ToolkitSlug: "notion"}})
+	if strings.Contains(ordinary, "permission_denied") {
+		t.Fatalf("Feishu-only guidance leaked into ordinary app block\n---\n%s", ordinary)
+	}
+}
+
 func TestConnectedAppsHeadingSkippedWhenEmpty(t *testing.T) {
 	t.Parallel()
 	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"})

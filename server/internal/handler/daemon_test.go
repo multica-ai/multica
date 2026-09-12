@@ -15,12 +15,15 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
@@ -4670,5 +4673,173 @@ func TestBatchIssueGCCheckReadsNoCatalogForBuiltInStatuses(t *testing.T) {
 	if counter.entryReads != 0 || counter.keyReads != 0 {
 		t.Fatalf("built-in batch read the catalog (%d entry, %d key), want 0 — a built-in key IS its own category",
 			counter.entryReads, counter.keyReads)
+	}
+}
+
+type fakeClaimFeishuDocumentsStore struct {
+	installations map[string]lark.Installation
+	err           error
+	calls         int
+}
+
+func (s *fakeClaimFeishuDocumentsStore) GetActiveLarkInstallationForAgent(_ context.Context, _, agentID pgtype.UUID) (lark.Installation, error) {
+	s.calls++
+	if s.err != nil {
+		return lark.Installation{}, s.err
+	}
+	installation, ok := s.installations[util.UUIDToString(agentID)]
+	if !ok {
+		return lark.Installation{}, pgx.ErrNoRows
+	}
+	return installation, nil
+}
+
+func claimFeishuInstallation(id, workspaceID, agentID pgtype.UUID, revision int64) lark.Installation {
+	return lark.Installation{
+		ID: id, WorkspaceID: workspaceID, AgentID: agentID, Status: "active",
+		UpdatedAt: pgtype.Timestamptz{Time: time.Unix(0, revision), Valid: true},
+	}
+}
+
+func newFeishuDocumentsClaimHandler(store *fakeClaimFeishuDocumentsStore) *Handler {
+	h := &Handler{
+		LarkDocumentInstallations: store,
+		LarkDocuments:             &fakeFeishuDocumentExecutor{},
+	}
+	h.cfg.PublicURL = "https://agents.example.com"
+	return h
+}
+
+func remoteMCPClaimRequest() *http.Request {
+	request := httptest.NewRequest(http.MethodPost, "/claim", nil)
+	request.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilityRemoteMCPV1)
+	return request
+}
+
+func TestClaimAddsAgentScopedFeishuDocumentsForEveryTaskSource(t *testing.T) {
+	workspaceID := util.MustParseUUID("10000000-0000-4000-8000-000000000011")
+	agentID := util.MustParseUUID("30000000-0000-4000-8000-000000000011")
+	runtimeID := util.MustParseUUID("40000000-0000-4000-8000-000000000011")
+	installation := claimFeishuInstallation(util.MustParseUUID("50000000-0000-4000-8000-000000000011"), workspaceID, agentID, 1_700_000_000_000_000_011)
+	store := &fakeClaimFeishuDocumentsStore{installations: map[string]lark.Installation{util.UUIDToString(agentID): installation}}
+	h := newFeishuDocumentsClaimHandler(store)
+	agent := db.Agent{ID: agentID, WorkspaceID: workspaceID, RuntimeID: runtimeID}
+
+	for _, source := range []string{"feishu-chat", "web-chat", "issue"} {
+		t.Run(source, func(t *testing.T) {
+			task := db.AgentTaskQueue{ID: util.MustParseUUID("20000000-0000-4000-8000-000000000011"), AgentID: agentID, RuntimeID: runtimeID}
+			response := AgentTaskResponse{}
+			h.mountAgentScopedFeishuDocuments(remoteMCPClaimRequest(), task, agent, &response)
+			if len(response.RemoteMCPConnections) != 1 || response.RemoteMCPConnections[0].InstallationID != util.UUIDToString(installation.ID) {
+				t.Fatalf("source %s connections=%+v", source, response.RemoteMCPConnections)
+			}
+			if len(response.ConnectedApps) != 1 || response.ConnectedApps[0].ToolkitSlug != "feishu-documents" {
+				t.Fatalf("source %s connected_apps=%+v", source, response.ConnectedApps)
+			}
+		})
+	}
+}
+
+func TestSharedRuntimeClaimsUseEachAgentsOwnInstallation(t *testing.T) {
+	workspaceID := util.MustParseUUID("10000000-0000-4000-8000-000000000021")
+	runtimeID := util.MustParseUUID("40000000-0000-4000-8000-000000000021")
+	pikachuID := util.MustParseUUID("30000000-0000-4000-8000-000000000021")
+	maimaiID := util.MustParseUUID("30000000-0000-4000-8000-000000000022")
+	pikachuInstallation := claimFeishuInstallation(util.MustParseUUID("50000000-0000-4000-8000-000000000021"), workspaceID, pikachuID, 1_700_000_000_000_000_021)
+	maimaiInstallation := claimFeishuInstallation(util.MustParseUUID("50000000-0000-4000-8000-000000000022"), workspaceID, maimaiID, 1_700_000_000_000_000_022)
+	store := &fakeClaimFeishuDocumentsStore{installations: map[string]lark.Installation{
+		util.UUIDToString(pikachuID): pikachuInstallation,
+		util.UUIDToString(maimaiID):  maimaiInstallation,
+	}}
+	h := newFeishuDocumentsClaimHandler(store)
+	connectionFor := func(agentID pgtype.UUID) remotemcp.Connection {
+		response := AgentTaskResponse{}
+		h.mountAgentScopedFeishuDocuments(remoteMCPClaimRequest(),
+			db.AgentTaskQueue{ID: util.MustParseUUID("20000000-0000-4000-8000-000000000021"), AgentID: agentID, RuntimeID: runtimeID},
+			db.Agent{ID: agentID, WorkspaceID: workspaceID, RuntimeID: runtimeID}, &response)
+		if len(response.RemoteMCPConnections) != 1 {
+			t.Fatalf("agent %s connections=%+v", util.UUIDToString(agentID), response.RemoteMCPConnections)
+		}
+		return response.RemoteMCPConnections[0]
+	}
+	if connectionFor(pikachuID).InstallationID == connectionFor(maimaiID).InstallationID {
+		t.Fatal("shared runtime reused one Agent's Feishu installation")
+	}
+}
+
+func TestClaimOmitsFeishuDocumentsWhenUnsupportedUnboundRevokedOrUnavailable(t *testing.T) {
+	workspaceID := util.MustParseUUID("10000000-0000-4000-8000-000000000031")
+	agentID := util.MustParseUUID("30000000-0000-4000-8000-000000000031")
+	runtimeID := util.MustParseUUID("40000000-0000-4000-8000-000000000031")
+	active := claimFeishuInstallation(util.MustParseUUID("50000000-0000-4000-8000-000000000031"), workspaceID, agentID, 1_700_000_000_000_000_031)
+	revoked := active
+	revoked.Status = "revoked"
+	tests := []struct {
+		name         string
+		request      *http.Request
+		installation *lark.Installation
+		err          error
+	}{
+		{name: "unsupported daemon", request: httptest.NewRequest(http.MethodPost, "/claim", nil), installation: &active},
+		{name: "unbound", request: remoteMCPClaimRequest()},
+		{name: "revoked", request: remoteMCPClaimRequest(), installation: &revoked},
+		{name: "store unavailable", request: remoteMCPClaimRequest(), err: errors.New("database unavailable")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			installations := map[string]lark.Installation{}
+			if tc.installation != nil {
+				installations[util.UUIDToString(agentID)] = *tc.installation
+			}
+			store := &fakeClaimFeishuDocumentsStore{installations: installations, err: tc.err}
+			h := newFeishuDocumentsClaimHandler(store)
+			response := AgentTaskResponse{}
+			h.mountAgentScopedFeishuDocuments(tc.request,
+				db.AgentTaskQueue{ID: util.MustParseUUID("20000000-0000-4000-8000-000000000031"), AgentID: agentID, RuntimeID: runtimeID},
+				db.Agent{ID: agentID, WorkspaceID: workspaceID, RuntimeID: runtimeID}, &response)
+			if len(response.RemoteMCPConnections) != 0 || len(response.ConnectedApps) != 0 {
+				t.Fatalf("mounted revoked or unavailable documents: response=%+v", response)
+			}
+			if tc.name == "unsupported daemon" && store.calls != 0 {
+				t.Fatalf("unsupported daemon caused %d installation lookups", store.calls)
+			}
+		})
+	}
+}
+
+func TestReconnectingFeishuBotChangesOnlyTheNextClaim(t *testing.T) {
+	workspaceID := util.MustParseUUID("10000000-0000-4000-8000-000000000041")
+	agentID := util.MustParseUUID("30000000-0000-4000-8000-000000000041")
+	runtimeID := util.MustParseUUID("40000000-0000-4000-8000-000000000041")
+	task := db.AgentTaskQueue{
+		ID:      util.MustParseUUID("20000000-0000-4000-8000-000000000041"),
+		AgentID: agentID, RuntimeID: runtimeID,
+	}
+	agent := db.Agent{ID: agentID, WorkspaceID: workspaceID, RuntimeID: runtimeID}
+	oldInstallation := claimFeishuInstallation(
+		util.MustParseUUID("50000000-0000-4000-8000-000000000041"), workspaceID, agentID, 1_700_000_000_000_000_041)
+	store := &fakeClaimFeishuDocumentsStore{installations: map[string]lark.Installation{
+		util.UUIDToString(agentID): oldInstallation,
+	}}
+	h := newFeishuDocumentsClaimHandler(store)
+	oldClaim := AgentTaskResponse{}
+	h.mountAgentScopedFeishuDocuments(remoteMCPClaimRequest(), task, agent, &oldClaim)
+	if len(oldClaim.RemoteMCPConnections) != 1 {
+		t.Fatalf("old claim connections=%+v", oldClaim.RemoteMCPConnections)
+	}
+
+	newInstallation := claimFeishuInstallation(
+		util.MustParseUUID("50000000-0000-4000-8000-000000000042"), workspaceID, agentID, 1_700_000_000_000_000_042)
+	store.installations[util.UUIDToString(agentID)] = newInstallation
+	newClaim := AgentTaskResponse{}
+	h.mountAgentScopedFeishuDocuments(remoteMCPClaimRequest(), task, agent, &newClaim)
+	if len(newClaim.RemoteMCPConnections) != 1 || newClaim.RemoteMCPConnections[0].InstallationID != util.UUIDToString(newInstallation.ID) {
+		t.Fatalf("new claim did not use reconnected installation: %+v", newClaim.RemoteMCPConnections)
+	}
+	if oldClaim.RemoteMCPConnections[0].InstallationID != util.UUIDToString(oldInstallation.ID) {
+		t.Fatalf("existing claim was mutated after reconnect: %+v", oldClaim.RemoteMCPConnections)
+	}
+	if oldClaim.RemoteMCPConnections[0].ContributionID == newClaim.RemoteMCPConnections[0].ContributionID {
+		t.Fatal("reconnect did not produce a new pinned contribution")
 	}
 }

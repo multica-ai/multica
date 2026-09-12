@@ -23,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -2174,6 +2175,68 @@ func claimResponseAgentIdentityMatches(resp AgentTaskResponse) bool {
 	return resp.AgentID != "" && resp.Agent != nil && resp.Agent.ID == resp.AgentID
 }
 
+func claimFeishuInstallationMatchesAgent(installation lark.Installation, agent db.Agent) bool {
+	if !installation.ID.Valid || !installation.UpdatedAt.Valid || installation.UpdatedAt.Time.UnixNano() <= 0 ||
+		installation.Status != "active" || installation.WorkspaceID != agent.WorkspaceID || installation.AgentID != agent.ID {
+		return false
+	}
+	switch lark.Region(installation.Region) {
+	case "", lark.RegionFeishu, lark.RegionLark:
+		return true
+	default:
+		return false
+	}
+}
+
+func hasConnectedApp(apps []ConnectedAppData, serverName string) bool {
+	for _, app := range apps {
+		if app.ServerName == serverName {
+			return true
+		}
+	}
+	return false
+}
+
+// mountAgentScopedFeishuDocuments appends a built-in Remote MCP connection
+// only for a daemon that advertises the broker protocol and only from the
+// active installation owned by the freshly loaded Agent. Lookup and connection
+// construction failures deliberately degrade to no document tools: an optional
+// integration must not cancel otherwise runnable work.
+func (h *Handler) mountAgentScopedFeishuDocuments(r *http.Request, task db.AgentTaskQueue, agent db.Agent, response *AgentTaskResponse) {
+	if response == nil || !requestHasClientCapability(r, protocol.DaemonCapabilityRemoteMCPV1) ||
+		h.LarkDocumentInstallations == nil || h.LarkDocuments == nil ||
+		!task.ID.Valid || task.AgentID != agent.ID || task.RuntimeID != agent.RuntimeID ||
+		!agent.ID.Valid || !agent.WorkspaceID.Valid || agent.ArchivedAt.Valid {
+		return
+	}
+	installation, err := h.LarkDocumentInstallations.GetActiveLarkInstallationForAgent(r.Context(), agent.WorkspaceID, agent.ID)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("daemon claim: Feishu document installation lookup failed; omitting tools",
+				"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID), "error", err)
+		}
+		return
+	}
+	if !claimFeishuInstallationMatchesAgent(installation, agent) {
+		return
+	}
+	connection, err := FeishuDocumentsConnection(h.cfg.PublicURL, uuidToString(task.ID), installation)
+	if err != nil {
+		slog.Warn("daemon claim: Feishu document connection unavailable; omitting tools",
+			"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID))
+		return
+	}
+	response.RemoteMCPConnections = append(response.RemoteMCPConnections, connection)
+	if !hasConnectedApp(response.ConnectedApps, "feishu-documents") {
+		response.ConnectedApps = append(response.ConnectedApps, ConnectedAppData{
+			Provider:    "feishu",
+			ServerName:  "feishu-documents",
+			ToolkitSlug: "feishu-documents",
+			ToolkitName: "Feishu Documents",
+		})
+	}
+}
+
 // buildClaimedTaskResponse assembles the full daemon claim payload for a
 // single already-claimed task and computes the exact comment ids embedded in
 // it (deliveredCommentIDs). Shared by the per-runtime handler
@@ -2285,6 +2348,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			taskfailure.ReasonInvalidTaskIdentity,
 			"error_runtime_access_denied", http.StatusForbidden, "private runtime does not permit task agent",
 		)
+	}
+	if uuidToString(agent.WorkspaceID) == runtimeWorkspaceID {
+		h.mountAgentScopedFeishuDocuments(r, *task, agent, &resp)
 	}
 	useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
 	// A daemon older than the multica-platform merge assembles a brief that

@@ -204,6 +204,7 @@ func BuildConnectedAppsBlock(apps []runtimeapps.ConnectedApp) string {
 	}
 	var b strings.Builder
 	var lines strings.Builder
+	hasFeishuDocuments := false
 	for _, app := range apps {
 		serverName := sanitizeBriefCodeToken(app.ServerName)
 		toolkitSlug := sanitizeBriefCodeToken(app.ToolkitSlug)
@@ -217,6 +218,9 @@ func BuildConnectedAppsBlock(apps []runtimeapps.ConnectedApp) string {
 		if name == "" {
 			name = toolkitSlug
 		}
+		if serverName == "feishu-documents" && toolkitSlug == "feishu-documents" {
+			hasFeishuDocuments = true
+		}
 		fmt.Fprintf(&lines, "- %s (`%s`) via MCP server `%s`\n", name, toolkitSlug, serverName)
 	}
 	if lines.Len() == 0 {
@@ -225,6 +229,9 @@ func BuildConnectedAppsBlock(apps []runtimeapps.ConnectedApp) string {
 	b.WriteString("## Connected Apps\n\n")
 	b.WriteString(lines.String())
 	b.WriteString("\nUse the listed MCP server when the task asks to read or act in one of these apps.\n\n")
+	if hasFeishuDocuments {
+		b.WriteString("For Feishu Documents, use the current Agent's connected Feishu bot identity and only an explicit Feishu document URL. If a tool returns `permission_denied`, ask the user to grant that bot access to the document. Preview destructive or large edits and get explicit confirmation before applying them.\n\n")
+	}
 	return b.String()
 }
 

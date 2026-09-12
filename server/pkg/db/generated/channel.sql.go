@@ -1237,6 +1237,41 @@ func (q *Queries) FindReusableChannelUserBinding(ctx context.Context, arg FindRe
 	return i, err
 }
 
+const getActiveChannelInstallationForAgent = `-- name: GetActiveChannelInstallationForAgent :one
+SELECT id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at FROM channel_installation
+WHERE workspace_id = $1
+  AND agent_id = $2
+  AND channel_type = $3
+  AND status = 'active'
+LIMIT 1
+`
+
+type GetActiveChannelInstallationForAgentParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+	ChannelType string      `json:"channel_type"`
+}
+
+func (q *Queries) GetActiveChannelInstallationForAgent(ctx context.Context, arg GetActiveChannelInstallationForAgentParams) (ChannelInstallation, error) {
+	row := q.db.QueryRow(ctx, getActiveChannelInstallationForAgent, arg.WorkspaceID, arg.AgentID, arg.ChannelType)
+	var i ChannelInstallation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.ChannelType,
+		&i.Config,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstallerUserID,
+		&i.InstalledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getChannelChatContextGeneration = `-- name: GetChannelChatContextGeneration :one
 SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at, last_message_id, last_thread_id, last_sender_id FROM channel_chat_context_generation
 WHERE chat_session_id = $1
