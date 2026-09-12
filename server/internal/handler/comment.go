@@ -2788,22 +2788,22 @@ func (h *Handler) routeConversationOwnersForRoot(ctx context.Context, issue db.I
 		return []commentAgentTrigger{trigger}, true
 	}
 
-	rootID := uuidToString(root.ID)
-	excludedID := uuidToString(opts.ExcludeTriggerCommentID)
-
-	tasks, err := h.Queries.ListTasksByIssue(ctx, issue.ID)
+	// Excluding the root excludes every historical owner in this branch.
+	// Explicit mentions above retain their existing precedence.
+	if opts.ExcludeTriggerCommentID == root.ID {
+		return nil, false
+	}
+	tasks, err := h.Queries.ListTaskRoutingByIssueAndTriggerComment(ctx, db.ListTaskRoutingByIssueAndTriggerCommentParams{
+		WorkspaceID:      issue.WorkspaceID,
+		IssueID:          issue.ID,
+		TriggerCommentID: root.ID,
+	})
 	if err != nil {
 		return nil, false
 	}
 	routedAgents := make(map[string]conversationRoutedAgentInfo)
 	for _, task := range tasks {
-		if !task.TriggerCommentID.Valid || !task.AgentID.Valid {
-			continue
-		}
-		if excludedID != "" && uuidToString(task.TriggerCommentID) == excludedID {
-			continue
-		}
-		if uuidToString(task.TriggerCommentID) != rootID {
+		if !task.AgentID.Valid {
 			continue
 		}
 		agentID := uuidToString(task.AgentID)

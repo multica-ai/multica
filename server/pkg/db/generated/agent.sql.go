@@ -6128,6 +6128,51 @@ func (q *Queries) ListQueuedClaimCandidatesByRuntimes(ctx context.Context, runti
 	return items, nil
 }
 
+const listTaskRoutingByIssueAndTriggerComment = `-- name: ListTaskRoutingByIssueAndTriggerComment :many
+SELECT t.agent_id, t.squad_id
+FROM agent_task_queue t
+JOIN issue i ON i.id = t.issue_id
+WHERE i.workspace_id = $1::uuid
+  AND t.issue_id = $2::uuid
+  AND t.trigger_comment_id = $3::uuid
+ORDER BY t.created_at DESC
+`
+
+type ListTaskRoutingByIssueAndTriggerCommentParams struct {
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	IssueID          pgtype.UUID `json:"issue_id"`
+	TriggerCommentID pgtype.UUID `json:"trigger_comment_id"`
+}
+
+type ListTaskRoutingByIssueAndTriggerCommentRow struct {
+	AgentID pgtype.UUID `json:"agent_id"`
+	SquadID pgtype.UUID `json:"squad_id"`
+}
+
+// Conversation continuation only needs the agents and historical squad roles
+// for this root comment, not every run's result/context on the issue. Keep the
+// same newest-first order as ListTasksByIssue: the caller selects the newest
+// non-NULL squad per agent, which need not belong to that agent's newest run.
+func (q *Queries) ListTaskRoutingByIssueAndTriggerComment(ctx context.Context, arg ListTaskRoutingByIssueAndTriggerCommentParams) ([]ListTaskRoutingByIssueAndTriggerCommentRow, error) {
+	rows, err := q.db.Query(ctx, listTaskRoutingByIssueAndTriggerComment, arg.WorkspaceID, arg.IssueID, arg.TriggerCommentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTaskRoutingByIssueAndTriggerCommentRow{}
+	for rows.Next() {
+		var i ListTaskRoutingByIssueAndTriggerCommentRow
+		if err := rows.Scan(&i.AgentID, &i.SquadID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTasksByIssue = `-- name: ListTasksByIssue :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name FROM agent_task_queue
 WHERE issue_id = $1

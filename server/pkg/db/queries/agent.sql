@@ -2714,6 +2714,19 @@ SELECT * FROM agent_task_queue
 WHERE issue_id = $1
 ORDER BY created_at DESC;
 
+-- name: ListTaskRoutingByIssueAndTriggerComment :many
+-- Conversation continuation only needs the agents and historical squad roles
+-- for this root comment, not every run's result/context on the issue. Keep the
+-- same newest-first order as ListTasksByIssue: the caller selects the newest
+-- non-NULL squad per agent, which need not belong to that agent's newest run.
+SELECT t.agent_id, t.squad_id
+FROM agent_task_queue t
+JOIN issue i ON i.id = t.issue_id
+WHERE i.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND t.issue_id = sqlc.arg('issue_id')::uuid
+  AND t.trigger_comment_id = sqlc.arg('trigger_comment_id')::uuid
+ORDER BY t.created_at DESC;
+
 -- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()
 WHERE id = $1
