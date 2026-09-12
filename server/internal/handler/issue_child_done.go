@@ -2,16 +2,18 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -152,7 +154,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 		slog.Warn("child done: failed to resolve sibling statuses", "error", err, "parent_id", uuidToString(parent.ID))
 		return
 	}
-	if !stageBarrierClosed(children, issue, isTerminal) {
+	if len(currentStageCompletions(children, []db.Issue{issue}, isTerminal)) == 0 || !stageBarrierClosed(children, issue, isTerminal) {
 		return
 	}
 	staged := siblingsAreStaged(children)
@@ -245,14 +247,18 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 			continue
 		}
 		batch := len(g.children) > 1
+		current := currentStageCompletions(children, g.children, isTerminal)
+		if len(current) == 0 {
+			continue
+		}
 		if !siblingsAreStaged(children) {
 			// Unstaged: one implicit stage. Fire once iff every child is terminal
 			// in the final state. stageBarrierClosed ignores `completed` on the
 			// unstaged path, so any completed child stands in for the barrier check.
-			if !stageBarrierClosed(children, g.children[0], isTerminal) {
+			if !stageBarrierClosed(children, current[0], isTerminal) {
 				continue
 			}
-			h.postChildDoneComment(ctx, parent, g.children[0], children, false, 0, batch, isTerminal)
+			h.postChildDoneComment(ctx, parent, current[0], children, false, 0, batch, isTerminal)
 			continue
 		}
 
@@ -264,7 +270,7 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 		// reality rather than a mid-batch snapshot. A lower closed stage would
 		// re-introduce the stale "advance the next stage" instruction the bug was
 		// about.
-		rep, found := highestClosedBatchStage(children, g.children, isTerminal)
+		rep, found := highestClosedBatchStage(children, current, isTerminal)
 		if !found {
 			continue
 		}
@@ -371,7 +377,7 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 	// byte value and the column is NOT NULL; frontend code should branch on
 	// author_type === 'system' rather than on the UUID value.
 	created, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
-		ID:          dbid.NewV7(),
+		ID:          childDoneNotificationID(parent, children, staged, closedStage),
 		IssueID:     parent.ID,
 		WorkspaceID: parent.WorkspaceID,
 		AuthorType:  "system",
@@ -381,6 +387,13 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 		ParentID:    pgtype.UUID{Valid: false},
 	})
 	if err != nil {
+		// CreateComment touches the issue and inserts the comment atomically.
+		// A concurrent/late publisher of this same closure loses the primary-key
+		// insert, rolls back the touch, and must neither publish nor dispatch.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "comment_pkey" {
+			return
+		}
 		slog.Warn("child done: create system comment failed",
 			"error", err,
 			"child_id", childID,
@@ -405,6 +418,46 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 	// title inert and gives the platform a single place to apply the loop
 	// and idempotency guards.
 	h.dispatchParentAssigneeTrigger(ctx, parent, comment)
+}
+
+// currentStageCompletions rejects delayed callbacks after a child was
+// reopened or moved. Indexing the sibling snapshot keeps a batch linear.
+func currentStageCompletions(children, completed []db.Issue, isTerminal func(db.Issue) bool) []db.Issue {
+	byID := make(map[pgtype.UUID]db.Issue, len(children))
+	for _, child := range children {
+		byID[child.ID] = child
+	}
+	current := make([]db.Issue, 0, len(completed))
+	for _, candidate := range completed {
+		child, ok := byID[candidate.ID]
+		if ok && child.ParentIssueID == candidate.ParentIssueID && child.Stage == candidate.Stage &&
+			child.StageGeneration == candidate.StageGeneration && isTerminal(child) {
+			current = append(current, child)
+		}
+	}
+	return current
+}
+
+// childDoneNotificationID identifies one completion of one stage membership.
+// The representative child, batch wording, ordinary issue revision, and later
+// stages do not identify the event. Reopening or moving a participant advances
+// its persisted generation, so completing the new membership can notify again.
+// Sorting makes independent and batch requests agree regardless of row order.
+// The comment's primary key is the atomic claim: only its creator dispatches.
+// This is intentionally an idempotency-derived UUID, not a fresh row identity.
+func childDoneNotificationID(parent db.Issue, children []db.Issue, staged bool, closedStage int32) pgtype.UUID {
+	members := make([]string, 0, len(children))
+	for _, child := range children {
+		if staged && (!child.Stage.Valid || child.Stage.Int32 != closedStage) {
+			continue
+		}
+		members = append(members, fmt.Sprintf("%s:%d", uuidToString(child.ID), child.StageGeneration))
+	}
+	sort.Strings(members)
+	key := fmt.Sprintf("multica/child-done/v1/%s/%s/%t/%d/%s",
+		uuidToString(parent.WorkspaceID), uuidToString(parent.ID), staged, closedStage, strings.Join(members, ","))
+	id := uuid.NewSHA1(uuid.NameSpaceOID, []byte(key))
+	return pgtype.UUID{Bytes: [16]byte(id), Valid: true}
 }
 
 // isTerminalChildStatus reports whether a child issue status counts as

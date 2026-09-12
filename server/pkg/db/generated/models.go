@@ -790,6 +790,7 @@ type Issue struct {
 	Properties         []byte             `json:"properties"`
 	Revision           int64              `json:"revision"`
 	LastActivityAt     pgtype.Timestamptz `json:"last_activity_at"`
+	StageGeneration    int64              `json:"stage_generation"`
 }
 
 type IssueDependency struct {

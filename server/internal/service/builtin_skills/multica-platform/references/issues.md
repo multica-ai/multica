@@ -351,6 +351,15 @@ A completion that does not close a stage is silent (no comment, no wake). A
 sibling set with **no** stages is one implicit stage, so the parent is woken
 once when the *last* sub-issue finishes — not on every child.
 
+Concurrent completions of the same stage membership share one system notification,
+including a batch racing an individual update. Reopening a child, adding another
+child to that stage, or moving a child between parents/stages changes the completion
+identity; a later completion can notify again. Title/comment edits and moves between
+terminal statuses do not start a new completion. Later stages and unstaged siblings
+are excluded from an explicit stage's identity. Deduplication lasts while the
+notification comment is retained; deleting it removes that record. Failed
+notifications are still not automatically replayed.
+
 Advancement is agent-driven: the server only detects the closed barrier and
 wakes the parent assignee, who then decides whether to promote the next stage's
 `backlog` sub-issues to `todo`.
