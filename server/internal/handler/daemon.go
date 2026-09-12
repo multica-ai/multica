@@ -4105,8 +4105,8 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 //
 // Scope + loop safety:
 //   - MEMBER comments keep their full routing. AGENT comments qualify through
-//     explicit mentions, or the worker-to-assigned-leader route when the input
-//     was already accepted and recorded in this run's plan. Timestamp-only
+//     explicit mentions, or a worker-to-leader route when the input was already
+//     accepted and recorded in this run's plan. Timestamp-only
 //     implicit agent replies are excluded: completion must not invent a new
 //     conversation. Current invocation permissions and self-trigger guards
 //     still apply to every replay.
@@ -4214,6 +4214,7 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		}
 		triggers, _ := h.computeCommentAgentTriggers(ctx, issue, c.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 			ExcludeTriggerCommentID: c.ID,
+			AuthoringTaskID:         c.SourceTaskID,
 			OriginatorUserID:        originatorUserID,
 		})
 		// Agent replies discovered only by timestamp must not start a new
@@ -4281,7 +4282,7 @@ func keepReplayableAgentTriggers(triggers []commentAgentTrigger, planned bool) [
 		switch trigger.Source {
 		case commentTriggerSourceMentionAgent, commentTriggerSourceMentionSquadLeader:
 			filtered = append(filtered, trigger)
-		case commentTriggerSourceIssueAssignee:
+		case commentTriggerSourceIssueAssignee, commentTriggerSourceThreadParent:
 			if planned && trigger.NonLeaderAgentReply {
 				filtered = append(filtered, trigger)
 			}
