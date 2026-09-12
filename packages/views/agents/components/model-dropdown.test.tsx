@@ -101,6 +101,34 @@ describe("ModelDropdown", () => {
     expect(onChange).toHaveBeenCalledWith("gpt-5.6-terra");
   });
 
+  it("keeps an exact label match available as a verbatim custom model id", async () => {
+    const qualifiedId = "commandcode/deepseek/deepseek-v4.1-flash";
+    discovery = async () => ({
+      models: [
+        {
+          id: "deepseek/deepseek-v4.1-flash",
+          label: qualifiedId,
+          provider: "commandcode",
+        },
+      ],
+      supported: true,
+    });
+
+    const { container, onChange } = renderDropdown();
+    openDropdown(container);
+    fireEvent.change(
+      await screen.findByPlaceholderText(
+        enAgents.pickers.model_search_placeholder,
+      ),
+      { target: { value: qualifiedId } },
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: `Use "${qualifiedId}"` }),
+    );
+    expect(onChange).toHaveBeenCalledWith(qualifiedId);
+  });
+
   it("offers an explicit refresh that requests the runtime's live catalog", async () => {
     const { container } = renderDropdown();
     openDropdown(container);
