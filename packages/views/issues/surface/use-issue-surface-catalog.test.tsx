@@ -56,11 +56,15 @@ function deferred<T>() {
 let groupRequests: IssueTableGroupsRequest[] = [];
 let rowRequests: IssueTableRowsRequest[] = [];
 
-function installApi(listIssueStatuses: () => Promise<unknown>) {
+function installApi(
+  listIssueStatuses: () => Promise<unknown>,
+  listProjects: () => Promise<unknown> = async () => ({ projects: [], total: 0 }),
+) {
   groupRequests = [];
   rowRequests = [];
   setApiInstance({
     listIssueStatuses,
+    listProjects,
     listIssueTableGroups: async (request: IssueTableGroupsRequest) => {
       groupRequests.push(request);
       return { query_fingerprint: "test", total: 0, groups: [], next_cursor: null };
@@ -79,7 +83,6 @@ function installApi(listIssueStatuses: () => Promise<unknown>) {
     },
     listIssueTableFacets: async () => ({ query_fingerprint: "test", total: 0, facets: [] }),
     listIssues: async () => ({ issues: [], total: 0 }),
-    listProjects: async () => ({ projects: [], total: 0 }),
     getWorkspaceWorkingAgents: async () => [],
     getChildIssueProgress: async () => ({ progress: [] }),
     getAgentTaskSnapshot: async () => ({ tasks: [] }),
@@ -169,6 +172,78 @@ describe("useIssueSurfaceController — custom status filter vs a late catalog",
     await waitFor(() => expect(result.current.isStatusCatalogError).toBe(true));
     // Not "no issues" — the surface cannot answer the question that was asked.
     expect(result.current.isEmpty).toBe(false);
+  });
+});
+
+// The project-status filter is evaluated client-side on Gantt and
+// the swimlane extra-children merge, against the project catalog. An
+// unresolved catalog is not "no filter": returning UNFILTERED rows under an
+// active chip is as wrong as blanking the surface, and a failed request would
+// leave it that way for good.
+describe("useIssueSurfaceController — project-status filter vs a late catalog", () => {
+  function renderGantt(surfaceKey: string, projects: () => Promise<unknown>) {
+    installApi(async () => ({ statuses: [], categories: [], total: 0 }), projects);
+    const { store, Wrapper } = makeWrapper(qc, surfaceKey);
+    act(() => {
+      store.getState().setViewMode("gantt");
+      store.getState().toggleProjectStatusFilter("in_progress");
+    });
+    return renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "workspace", actorKind: "all" },
+          modes: ["gantt"],
+        }),
+      { wrapper: Wrapper },
+    );
+  }
+
+  it("stays loading while the project catalog is in flight", async () => {
+    const projects = deferred<{ projects: never[]; total: number }>();
+    const { result } = renderGantt("workspace:pstatus-pending", () => projects.promise);
+
+    await waitFor(() => expect(result.current.isLoading).toBe(true));
+
+    await act(async () => {
+      projects.resolve({ projects: [], total: 0 });
+      await projects.promise;
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+  });
+
+  it("surfaces a retryable error when the project catalog fails", async () => {
+    const projects = deferred<never>();
+    const { result } = renderGantt("workspace:pstatus-failed", () => projects.promise);
+
+    await act(async () => {
+      projects.reject(new Error("projects unavailable"));
+      await projects.promise.catch(() => {});
+    });
+
+    await waitFor(() => expect(result.current.isStatusCatalogError).toBe(true));
+    expect(result.current.isEmpty).toBe(false);
+  });
+
+  it("does not hold the surface when no project-status filter is active", async () => {
+    const projects = deferred<{ projects: never[]; total: number }>();
+    installApi(
+      async () => ({ statuses: [], categories: [], total: 0 }),
+      () => projects.promise,
+    );
+    const { store, Wrapper } = makeWrapper(qc, "workspace:pstatus-inactive");
+    act(() => store.getState().setViewMode("gantt"));
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "workspace", actorKind: "all" },
+          modes: ["gantt"],
+        }),
+      { wrapper: Wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.isStatusCatalogError).toBe(false);
   });
 });
 
