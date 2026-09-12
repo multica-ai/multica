@@ -76,6 +76,7 @@ type gcStats struct {
 	repoCachesReclaimed           int            // bare repo caches under .repos evicted past their TTL
 	taskTempDirsReclaimed         int            // per-task temp dirs under the temp base reclaimed after their owning execution ended
 	taskRootIndexEntriesReclaimed int            // abandoned stable-root records and unpublished entries reclaimed past the orphan TTL
+	finalizedWorktreesReclaimed   int            // committed local worktrees whose transient cleanup failure was retried
 	bytesReclaimed                int64          // total bytes freed in this cycle
 	byPattern                     map[string]int // configured basename or managed path label -> reclaim count
 }
@@ -173,7 +174,7 @@ func (d *Daemon) runGC(ctx context.Context) {
 		}
 	}
 
-	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 || stats.storesReclaimed > 0 || stats.hermesMemoryStoresReclaimed > 0 || stats.hermesSessionStoresReclaimed > 0 || stats.repoCachesReclaimed > 0 || stats.taskTempDirsReclaimed > 0 || stats.taskRootIndexEntriesReclaimed > 0 {
+	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 || stats.storesReclaimed > 0 || stats.hermesMemoryStoresReclaimed > 0 || stats.hermesSessionStoresReclaimed > 0 || stats.repoCachesReclaimed > 0 || stats.taskTempDirsReclaimed > 0 || stats.taskRootIndexEntriesReclaimed > 0 || stats.finalizedWorktreesReclaimed > 0 {
 		d.logger.Info("gc: cycle complete",
 			"cleaned", stats.cleaned,
 			"orphaned", stats.orphaned,
@@ -185,6 +186,7 @@ func (d *Daemon) runGC(ctx context.Context) {
 			"hermes_session_stores_reclaimed", stats.hermesSessionStoresReclaimed,
 			"repo_caches_reclaimed", stats.repoCachesReclaimed,
 			"task_temp_dirs_reclaimed", stats.taskTempDirsReclaimed,
+			"finalized_worktrees_reclaimed", stats.finalizedWorktreesReclaimed,
 			"task_root_index_entries_reclaimed", stats.taskRootIndexEntriesReclaimed,
 			"bytes_reclaimed", stats.bytesReclaimed,
 			"by_pattern", stats.byPattern,
@@ -213,6 +215,12 @@ func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string, stats *gcStats) 
 		if d.isActiveEnvRoot(taskDir) {
 			stats.skipped++
 			continue
+		}
+		if cleaned, cleanupErr := d.retryFinalizedWorktreeCleanup(taskDir); cleanupErr != nil {
+			d.logger.Warn("gc: retry finalized worktree cleanup failed", "dir", taskDir, "error", cleanupErr)
+		} else if cleaned {
+			stats.finalizedWorktreesReclaimed++
+			d.logger.Info("gc: finalized worktree cleanup completed", "dir", taskDir)
 		}
 		meta, metaErr := execenv.ReadGCMeta(taskDir)
 		if metaErr == nil && meta.Kind == execenv.GCKindIssue && strings.TrimSpace(meta.IssueID) != "" {
@@ -243,6 +251,27 @@ func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string, stats *gcStats) 
 			os.Remove(wsDir)
 		}
 	}
+}
+
+// retryFinalizedWorktreeCleanup applies the same ownership and exclusion
+// guarantees as every other GC mutation. The durable marker controls which
+// worktree and branch to clean, but it is not proof that the surrounding task
+// directory belongs to this daemon.
+func (d *Daemon) retryFinalizedWorktreeCleanup(taskDir string) (bool, error) {
+	if _, err := d.gcTaskDirOwner(taskDir); err != nil {
+		return false, fmt.Errorf("refusing pending cleanup for unowned task directory: %w", err)
+	}
+	release, ok := d.reserveEnvRootForGC(taskDir)
+	if !ok {
+		return false, nil
+	}
+	defer release()
+	// Re-check after taking the exclusion lock so a concurrent reset cannot
+	// replace the proven directory before the cleanup mutates its worktree.
+	if _, err := d.gcTaskDirOwner(taskDir); err != nil {
+		return false, fmt.Errorf("task ownership changed before pending cleanup: %w", err)
+	}
+	return execenv.RetryPendingLocalWorktreeCleanup(taskDir, d.logger)
 }
 
 const issueGCBatchSize = 500

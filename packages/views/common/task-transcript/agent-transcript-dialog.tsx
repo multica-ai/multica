@@ -239,7 +239,10 @@ function RunDetailRow({
   copied?: boolean;
   copyTitle?: string;
 }) {
-  const valueClass = cn("min-w-0 select-text break-all text-foreground", mono && "font-mono");
+  const valueClass = cn(
+    "min-w-0 select-text whitespace-pre-wrap break-all text-foreground",
+    mono && "font-mono",
+  );
   if (onCopy) {
     return (
       <button
@@ -853,12 +856,14 @@ export function AgentTranscriptDialog({
     task.status === "failed"
       ? failureReasonLabel(task.failure_reason, t)
       : cancelReasonLabel(task, t);
+  const taskWarnings = task.warnings ?? [];
   const hasRunDetails =
     !!runtimeInfo ||
     !!workdirCopyTarget?.relativePath ||
     !!task.branch_name ||
     !!reasonLabel ||
     !!task.error ||
+    taskWarnings.length > 0 ||
     !!createdLabel ||
     !!startedLabel ||
     !!completedLabel ||
@@ -1014,6 +1019,15 @@ export function AgentTranscriptDialog({
                           label={t(($) => $.transcript.details_reason)}
                           value={reasonLabel}
                         />
+                      )}
+                      {taskWarnings.length > 0 && (
+                        <>
+                          <div className="my-2 h-px bg-border" />
+                          <RunDetailRow
+                            label={t(($) => $.transcript.details_warnings)}
+                            value={taskWarnings.join("\n")}
+                          />
+                        </>
                       )}
                       {createdLabel && (
                         <RunDetailRow label={t(($) => $.transcript.details_created)} value={createdLabel} />
