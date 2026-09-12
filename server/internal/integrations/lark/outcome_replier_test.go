@@ -66,6 +66,13 @@ func (s *stubAPIClientWithRecorder) SendTextMessage(ctx context.Context, p SendT
 	return "lark-text-msg-id", nil
 }
 
+func (s *stubAPIClientWithRecorder) SendTextToOpenID(ctx context.Context, p SendOpenIDTextParams) (string, error) {
+	if s.textErr != nil {
+		return "", s.textErr
+	}
+	return "lark-open-id-msg-id", nil
+}
+
 func (s *stubAPIClientWithRecorder) SendMarkdownCard(ctx context.Context, p SendMarkdownCardParams) (string, error) {
 	return "lark-md-msg-id", nil
 }

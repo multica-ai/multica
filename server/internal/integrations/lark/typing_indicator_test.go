@@ -42,6 +42,9 @@ func (f *fakeTypingAPIClient) PatchInteractiveCard(context.Context, PatchCardPar
 func (f *fakeTypingAPIClient) SendTextMessage(context.Context, SendTextParams) (string, error) {
 	return "", nil
 }
+func (f *fakeTypingAPIClient) SendTextToOpenID(context.Context, SendOpenIDTextParams) (string, error) {
+	return "", nil
+}
 func (f *fakeTypingAPIClient) SendMarkdownCard(context.Context, SendMarkdownCardParams) (string, error) {
 	return "", nil
 }

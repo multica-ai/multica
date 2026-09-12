@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -74,6 +75,70 @@ func newNotificationBus(t *testing.T, queries *db.Queries) *events.Bus {
 	registerSubscriberListeners(bus, testPool)
 	registerNotificationListeners(bus, queries)
 	return bus
+}
+
+func TestInboxItemFromEvent(t *testing.T) {
+	issueID := "85be4a73-5c40-4e61-98bd-1aa8df1486dc"
+	e := events.Event{
+		Type: protocol.EventInboxNew,
+		Payload: map[string]any{
+			"item": map[string]any{
+				"id":             "8fe9a7cd-2b2e-4ca2-9e31-b1a85ed395c6",
+				"recipient_type": "member",
+				"recipient_id":   "f3135284-0ed9-4d52-8493-c7808eb251a5",
+				"type":           "new_comment",
+				"severity":       "info",
+				"issue_id":       &issueID,
+				"title":          "Review requested",
+				"body":           "A teammate left a comment.",
+			},
+		},
+	}
+
+	item, ok := inboxItemFromEvent(e)
+	if !ok {
+		t.Fatal("expected inbox item to be parsed")
+	}
+	if item.ID != "8fe9a7cd-2b2e-4ca2-9e31-b1a85ed395c6" {
+		t.Fatalf("unexpected item id %q", item.ID)
+	}
+	if item.RecipientType != "member" || item.RecipientID != "f3135284-0ed9-4d52-8493-c7808eb251a5" {
+		t.Fatalf("unexpected recipient %q/%q", item.RecipientType, item.RecipientID)
+	}
+	if item.IssueID != issueID {
+		t.Fatalf("expected pointer issue id %q, got %q", issueID, item.IssueID)
+	}
+	if item.Type != "new_comment" || item.Severity != "info" || item.Title == "" || item.Body == "" {
+		t.Fatalf("unexpected parsed item: %+v", item)
+	}
+}
+
+func TestFeishuInboxNotificationText(t *testing.T) {
+	longBody := strings.Repeat("内容", 400)
+	text := feishuInboxNotificationText(inboxEventItem{
+		Type:    "new_comment",
+		IssueID: "85be4a73-5c40-4e61-98bd-1aa8df1486dc",
+		Title:   "Review requested",
+		Body:    longBody,
+	}, "http://localhost:3000/")
+
+	checks := []string{
+		"Multica 通知",
+		"Review requested",
+		"类型：new_comment",
+		"http://localhost:3000/issues/85be4a73-5c40-4e61-98bd-1aa8df1486dc",
+	}
+	for _, want := range checks {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected notification text to contain %q, got %q", want, text)
+		}
+	}
+	if !strings.Contains(text, "...") {
+		t.Fatalf("expected long body to be truncated, got %q", text)
+	}
+	if strings.Contains(text, "localhost:3000//issues") {
+		t.Fatalf("expected app URL to be normalized, got %q", text)
+	}
 }
 
 // TestNotification_IssueCreated_AssigneeNotified verifies that when an issue is
