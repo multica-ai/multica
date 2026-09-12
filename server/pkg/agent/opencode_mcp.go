@@ -64,11 +64,9 @@ type opencodeMCPOAuth struct {
 // OPENCODE_CONFIG_CONTENT is OpenCode's general inline-config injection
 // mechanism — it accepts any subset of OpenCode's schema (model, agent,
 // mode, plugin, mcp, …), not just MCP. This function is scoped to MCP
-// because that's the agent.mcp_config field this PR plumbs through; if a
-// future Multica field needs to project into the same env var (e.g. an
-// agent-level model override), the assemble-and-inject step would move
-// up a layer and merge multiple slices into one OPENCODE_CONFIG_CONTENT
-// value. For now, MCP is the only consumer.
+// because that's the agent.mcp_config field this helper translates. The
+// caller combines its output with other daemon-managed slices, such as an
+// OpenAI-compatible provider catalog, through mergeOpenCodeConfigContents.
 //
 // Why env-var injection vs writing <workdir>/opencode.json: the task workdir
 // is reused across turns for the same (agent, issue), and the agent itself
@@ -107,6 +105,44 @@ func buildOpenCodeMCPConfigContent(raw json.RawMessage) (string, error) {
 		return "", fmt.Errorf("opencode mcp_config: marshal: %w", err)
 	}
 	return string(data), nil
+}
+
+// mergeOpenCodeConfigContents deep-merges partial OpenCode configuration
+// objects in order. Later parts win on scalar conflicts while sibling maps are
+// preserved. This lets daemon-managed provider discovery and MCP settings
+// share OPENCODE_CONFIG_CONTENT without erasing user-owned configuration.
+func mergeOpenCodeConfigContents(parts ...string) (string, error) {
+	merged := map[string]any{}
+	for _, part := range parts {
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
+		var next map[string]any
+		if err := json.Unmarshal([]byte(part), &next); err != nil {
+			return "", fmt.Errorf("opencode config content: parse: %w", err)
+		}
+		deepMergeOpenCodeConfig(merged, next)
+	}
+	if len(merged) == 0 {
+		return "", nil
+	}
+	data, err := json.Marshal(merged)
+	if err != nil {
+		return "", fmt.Errorf("opencode config content: marshal: %w", err)
+	}
+	return string(data), nil
+}
+
+func deepMergeOpenCodeConfig(dst, src map[string]any) {
+	for key, value := range src {
+		srcMap, srcOK := value.(map[string]any)
+		dstMap, dstOK := dst[key].(map[string]any)
+		if srcOK && dstOK {
+			deepMergeOpenCodeConfig(dstMap, srcMap)
+			continue
+		}
+		dst[key] = value
+	}
 }
 
 // translateMCPConfigForOpenCode converts an agent.mcp_config payload into the
