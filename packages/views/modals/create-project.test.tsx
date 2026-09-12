@@ -133,6 +133,7 @@ vi.mock("@multica/ui/components/ui/popover", () => ({
 }));
 
 vi.mock("@multica/ui/components/ui/tooltip", () => ({
+  TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
   TooltipContent: ({ children }: { children: React.ReactNode }) => (
@@ -146,13 +147,26 @@ vi.mock("@multica/ui/components/ui/button", () => ({
     disabled,
     onClick,
     type = "button",
+    className,
+    "aria-disabled": ariaDisabled,
+    "aria-busy": ariaBusy,
   }: {
     children: React.ReactNode;
     disabled?: boolean;
     onClick?: () => void;
     type?: "button" | "submit" | "reset";
+    className?: string;
+    "aria-disabled"?: boolean;
+    "aria-busy"?: boolean;
   }) => (
-    <button type={type} disabled={disabled} onClick={onClick}>
+    <button
+      type={type}
+      disabled={disabled}
+      onClick={onClick}
+      className={className}
+      aria-disabled={ariaDisabled}
+      aria-busy={ariaBusy}
+    >
       {children}
     </button>
   ),
@@ -177,6 +191,32 @@ vi.mock("sonner", () => ({
 import { CreateProjectModal } from "./create-project";
 
 describe("CreateProjectModal", () => {
+  it("explains why Create Project is unavailable when the title is empty", () => {
+    renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
+
+    const createButton = screen.getByRole("button", { name: "Create Project" });
+
+    expect(createButton).toHaveAttribute("aria-disabled", "true");
+    expect(createButton).not.toBeDisabled();
+    expect(createButton.className).toContain("aria-disabled:opacity-50");
+    expect(createButton.className).toContain("aria-disabled:cursor-not-allowed");
+    expect(createButton.className).not.toContain("aria-disabled:pointer-events-none");
+    createButton.focus();
+    expect(createButton).toHaveFocus();
+    expect(screen.getByRole("tooltip", { name: "Enter a title to create" })).toBeInTheDocument();
+  });
+
+  it("enables Create Project and removes the missing-title hint after typing a title", async () => {
+    const user = userEvent.setup();
+    renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Project title"), "Website refresh");
+
+    const createButton = screen.getByRole("button", { name: "Create Project" });
+    expect(createButton).not.toHaveAttribute("aria-disabled");
+    expect(screen.queryByRole("tooltip", { name: "Enter a title to create" })).toBeNull();
+  });
+
   it("exposes full repository URLs in the repository picker", () => {
     render(<CreateProjectModal onClose={vi.fn()} />);
 

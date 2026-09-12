@@ -111,6 +111,7 @@
     "members_group": "Members",
     "agents_group": "Agents",
     "no_results": "No results",
+    "title_required": "Enter a title to create",
     "submit": "Create Project",
     "submitting": "Creating...",
     "toast_created": "Project created",

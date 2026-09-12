@@ -110,6 +110,7 @@
     "members_group": "メンバー",
     "agents_group": "エージェント",
     "no_results": "結果なし",
+    "title_required": "作成するにはタイトルを入力してください",
     "submit": "プロジェクトを作成",
     "submitting": "作成中...",
     "toast_created": "プロジェクトを作成しました",
