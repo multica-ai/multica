@@ -16,6 +16,7 @@ import { slackInstallationsOptions } from "@multica/core/slack";
 import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
 import { wecomInstallationsOptions } from "@multica/core/wecom";
 import { telegramInstallationsOptions } from "@multica/core/telegram";
+import { sharecrmInstallationsOptions } from "@multica/core/sharecrm";
 import { vcsConnectionsOptions } from "@multica/core/vcs";
 import { useConfigStore, useFeatureEnabled } from "@multica/core/config";
 import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
@@ -29,6 +30,7 @@ import { DingTalkTab } from "./dingtalk-tab";
 import { VCSTab } from "./vcs-tab";
 import { WecomTab } from "./wecom-tab";
 import { TelegramTab } from "./telegram-tab";
+import { ShareCRMTab } from "./sharecrm-tab";
 import { GitHubTab } from "./github-tab";
 import { GitHubMark } from "./github-mark";
 import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
@@ -95,6 +97,11 @@ export function IntegrationsTab() {
   });
   const telegram = useQuery({
     ...telegramInstallationsOptions(wsId),
+    enabled: canView,
+    select: (data) => (data.installations?.length ?? 0) > 0,
+  });
+  const sharecrm = useQuery({
+    ...sharecrmInstallationsOptions(wsId),
     enabled: canView,
     select: (data) => (data.installations?.length ?? 0) > 0,
   });
@@ -183,6 +190,14 @@ export function IntegrationsTab() {
           icon: <IntegrationChannelIcon channel="telegram" />,
           content: <TelegramTab />,
           state: telegram,
+        },
+        {
+          id: "sharecrm",
+          label: t(($) => $.sharecrm.section_title),
+          description: t(($) => $.sharecrm.page_description),
+          icon: <IntegrationChannelIcon channel="sharecrm" />,
+          content: <ShareCRMTab />,
+          state: sharecrm,
         },
       ],
     },

@@ -519,6 +519,27 @@ func TestBuildChatPromptAttachmentIDsCanBeBoundToCreatedIssues(t *testing.T) {
 			t.Errorf("chat prompt missing %q\n--- output ---\n%s", want, out)
 		}
 	}
+
+	t.Run("external session guidance is opt-in and does not expose the value", func(t *testing.T) {
+		out := buildChatPrompt(Task{
+			ChatSessionID:     "sess-1",
+			ExternalSessionID: "gateway-session-1",
+			ChatMessage:       "hello",
+		})
+		if !strings.Contains(out, "MULTICA_EXTERNAL_SESSION_ID") {
+			t.Fatalf("prompt missing external session environment guidance:\n%s", out)
+		}
+		if strings.Contains(out, "gateway-session-1") {
+			t.Fatalf("prompt exposed external session value:\n%s", out)
+		}
+	})
+
+	t.Run("external session guidance is omitted without a value", func(t *testing.T) {
+		out := buildChatPrompt(Task{ChatSessionID: "sess-1", ChatMessage: "hello"})
+		if strings.Contains(out, "MULTICA_EXTERNAL_SESSION_ID") {
+			t.Fatalf("prompt unexpectedly mentioned external session environment:\n%s", out)
+		}
+	})
 }
 
 func TestBuildChatPromptChannelAwareness(t *testing.T) {
@@ -567,6 +588,7 @@ func TestBuildChatPromptChannelAwareness(t *testing.T) {
 		execenv.ChannelTypeFeishu,
 		execenv.ChannelTypeWecom,
 		execenv.ChannelTypeDingtalk,
+		execenv.ChannelTypeSharecrm,
 	} {
 		t.Run(channelType+" transcript prompt does not contradict itself", func(t *testing.T) {
 			out := buildChatPrompt(Task{

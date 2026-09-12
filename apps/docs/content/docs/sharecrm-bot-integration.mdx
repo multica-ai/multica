@@ -1,0 +1,134 @@
+---
+title: ShareCRM Bot integration
+description: Connect a Multica agent to your own ShareCRM bot — create bot credentials on the ShareCRM open platform, paste the App ID and App Secret into Multica, then DM it, @-mention it in a group, or type /issue from inside ShareCRM.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Connect any [agent](/agents) to a ShareCRM bot and your team can work with it from inside ShareCRM — DM the bot, @-mention it in a group, or type `/issue` to file a [Multica issue](/issues) without opening the app.
+
+ShareCRM support is [community-maintained](/community-maintained): it ships in every release, but it carries no official support SLA. Report problems in [GitHub issues](https://github.com/multica-ai/multica/issues).
+
+ShareCRM uses a **bring-your-own-app (BYO)** model: a workspace admin creates bot credentials on the ShareCRM open platform and pastes them into Multica. Each agent gets **its own** ShareCRM bot — so several agents can each have a distinct, separately @-mentionable bot in the same organization. (This differs from [Lark](/lark-bot-integration), where binding is a scan-to-install flow.)
+
+The whole setup is below and takes about five minutes. You'll end up with two credentials to paste into Multica:
+
+- an **App ID** — the bot application's client id
+- an **App Secret** — the bot application's client secret
+
+Optionally, private-cloud deployments can also set a custom **API base URL** (defaults to `https://open.fxiaoke.com`).
+
+## Set up your ShareCRM bot
+
+### 1. Create bot credentials on the ShareCRM open platform
+
+1. Open the [ShareCRM open platform](https://open.fxiaoke.com) (or your private-cloud console) with an admin account.
+2. Create (or open) the bot application that Multica will connect as.
+3. Copy the application's **App ID** and **App Secret**.
+4. Confirm the bot can receive messages (DM and group @-mentions) and send replies. Multica connects **out** over a long-lived SSE session — you do **not** configure a public webhook URL for chat.
+
+This is everything Multica needs at the platform level:
+
+| Setting | Why it's there |
+|---|---|
+| **Bot application** | Issues the App ID / App Secret Multica uses to authenticate. |
+| **Receive messages** | So the bot gets 1:1 messages and group messages that @-mention it (ShareCRM filters group delivery before Multica sees the event). |
+| **Send messages** | Lets the bot post agent replies and proactive notices back into the same chat. |
+| **SSE long connection** | Multica dials out and keeps a push connection — **no public webhook / URL needed** for inbound chat. |
+
+There is **no Multica-side webhook URL and no OAuth redirect URL**, because Multica connects out over SSE and BYO does not use OAuth.
+
+<Callout type="info">
+ShareCRM has no native typing indicator, so — like DingTalk — the bot posts a short "working on it" acknowledgement when it starts, and the full reply follows once the agent is done. A quick burst of messages is coalesced into a single acknowledgement.
+</Callout>
+
+### 2. Connect it in Multica
+
+1. Open the agent in **Agents → _your agent_** → the **Integrations** tab (or the **Integrations** section in the left sidebar).
+2. Click **Connect ShareCRM**.
+3. Paste the **App ID** and the **App Secret**. Leave **API base URL** empty for the public cloud, or set your private-cloud host if needed.
+4. Click **Connect**. Multica validates the credentials by minting a token against the API base URL.
+5. The agent shows **Connected to ShareCRM**. The bot is now listening over its own SSE connection.
+
+<Callout type="warning">
+Both credentials must be from the **same** ShareCRM bot application, and that application maps to exactly **one** agent. Connecting an App ID that's already connected to a different agent or workspace is refused. To move a bot to another agent, disconnect it first; re-connecting an agent with a **new** App ID updates that agent's bot in place.
+</Callout>
+
+<Callout type="info">
+Setting this up for **multiple agents**? Repeat the whole flow once per agent — each agent gets its own App ID / App Secret, and they show up as separate bots.
+</Callout>
+
+## What the integration does
+
+| Surface | Behavior |
+|---|---|
+| **Agent → Integrations** | Owners and admins see **Connect ShareCRM**; once connected it flips to a **Connected to ShareCRM** badge with a **Disconnect** control. |
+| **DM the bot** | A workspace member messages the bot in a 1:1 chat. The conversation becomes a Multica [chat](/chat) session with the agent; every message is read. |
+| **@-mention in a group** | Add the bot to the group and @-mention it. Only messages that ShareCRM delivers to the bot are read — the bot does not listen to the whole group. |
+| **Images** | Direct messages and group chats can include images (PNG, JPEG, GIF, WebP, BMP). Files and voice are not passed to the agent. |
+| **`/issue` command** | Starting a message with `/issue <title>` creates a Multica issue directly from your input, attributed to you, and posts the issue ID and title back into the same conversation. Put the description on following lines. Images in the same message are also added to the issue as attachments. The command itself does not appear in Multica Chat; the created issue is the result recorded in Multica. |
+| **`/new` command** | Send `/new` to create a new empty Multica Chat and route later ShareCRM messages to it. Send `/new <your message>` to create the Chat and use that message as its first turn. The previous Chat remains stored and usable in Multica. |
+| **`/clear` command** | Send `/clear` to keep the current Multica Chat while applying a fresh agent-visible context to the next message. Send `/clear <your message>` to use that message as the first turn after the boundary. The complete Chat history remains visible in Multica. |
+| **Reply** | The agent's answer is posted back into the same 1:1 chat or group as plain text (Markdown is stripped for delivery). |
+
+## Use the bot (members)
+
+### First message: link your account
+
+The first time you **DM** the bot, it replies with a **link your account** prompt pointing at the in-product **/sharecrm/bind** page. Open the link, sign in to Multica, and your ShareCRM identity is bound to your Multica membership — this is what lets the agent act as you (e.g. `/issue` files under your name). The link is single-use and expires in about 15 minutes. Messaging again inside about a minute points you back at the link already sent rather than minting a new one; after the window, message again for a fresh link. Binding links are never posted in groups — open a 1:1 first.
+
+If you first @-mention the bot in a **group** while unbound, it replies in the group asking you to open a 1:1 chat. Binding links are never posted into groups (they are bearer credentials; only the 1:1 conversation receives the URL).
+
+<Callout type="warning">
+Only **members of the workspace** can use the bot. If you aren't a member, or you skip the identity link, the bot won't run — your message is dropped (recorded for audit, without its contents).
+</Callout>
+
+### Chat and commands
+
+- **In a group** — add the bot to the group, then `@your-bot <your message>`. Re-mention it for each follow-up (the bot only receives messages ShareCRM routes to it).
+- **In a 1:1 chat** — open the bot and message it directly; no mention needed, every message is read.
+- **Send images** — attach PNG, JPEG, GIF, WebP, or BMP images in a DM or group @-mention (up to 8 images, 10 MB each). Files and voice are not supported. Agent replies stay plain text.
+- **File an issue** — send `/issue the login redirect is broken on Safari`; add the description on following lines if needed. Images in the same message are attached to the issue. Multica creates the issue synchronously and posts its ID and title back into the chat.
+- **Start a new Chat** — send `/new` to create a new empty Multica Chat and route later ShareCRM messages to it, or `/new <your message>` to use that message as the first turn. The previous Chat remains stored and usable in Multica.
+- **Clear context** — send `/clear` to keep the current Multica Chat while applying a fresh agent-visible context to the next message, or `/clear <your message>` to use that message as the first turn after the boundary. The complete Chat history remains visible in Multica.
+
+## Manage and disconnect
+
+Workspace-wide management lives in **Settings → Integrations**:
+
+- **Connected bots** lists every bot in the workspace and the agent each is bound to (visible to all members).
+- **Disconnect** is **owner / admin only**. It stops the bot from receiving ShareCRM messages and tears down its connection; the installation record is kept for audit, and you can re-connect later.
+
+## Permissions
+
+- **Connect / disconnect** require workspace **owner** or **admin**.
+- **Talking to the bot** requires being a workspace member with a linked ShareCRM identity. Everyone else is dropped.
+- Message bodies for dropped messages are never stored — only a drop reason, for audit.
+
+## Self-host setup
+
+On Multica Cloud the integration is already available — skip this section.
+
+For self-host, ShareCRM is **off until you set an at-rest encryption key**. The key encrypts each bot's App Secret before it reaches the database; the App ID remains the installation's non-secret routing identifier. BYO needs **no** OAuth client id/secret at the deployment level — each installation uses the credentials the admin pastes.
+
+1. Generate a 32-byte key and set it on the API server:
+
+   ```dotenv
+   MULTICA_SHARECRM_SECRET_KEY=<base64-encoded 32-byte key>
+   ```
+
+   For example: `openssl rand -base64 32`.
+
+2. Restart the API. Until the key is set, **Settings → Integrations** shows a "ShareCRM integration not enabled" notice and the **Connect ShareCRM** entry points stay hidden.
+
+<Callout type="info">
+The key must decode to exactly 32 bytes — `openssl rand -base64 32` does this. Treat it as a long-lived secret: rotating or losing it makes already-stored credentials undecryptable, forcing every bot to reconnect. The "link your account" link is built from your web app URL (`MULTICA_APP_URL`, falling back to `FRONTEND_ORIGIN`) — a normal deployment already sets this, so there's nothing extra to configure for chat. Members must be able to open that URL from their browser when redeeming the bind link.
+</Callout>
+
+One App ID may hold only **one** active SSE connection at a time. Multica's channel supervisor leases each installation so a single backend replica owns the connection; if you run multiple replicas, only the lease holder keeps the stream.
+
+## Next
+
+- [Chat integrations](/channels) — how the channel engine, sessions, and authorization work
+- [Agents](/agents) · [Chat](/chat) · [Issues](/issues)
+- [Environment variables](/environment-variables) — full self-host configuration reference

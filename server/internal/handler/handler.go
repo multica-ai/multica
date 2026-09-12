@@ -30,6 +30,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
+	"github.com/multica-ai/multica/server/internal/integrations/sharecrm"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
@@ -318,6 +319,11 @@ type Handler struct {
 	DingTalkInstall *dingtalk.InstallService
 	// DingTalkBindingTokens mints and redeems the single-use account-link tokens.
 	DingTalkBindingTokens *dingtalk.BindingTokenService
+	// ShareCRMInstall owns the bring-your-own-app ShareCRM lifecycle. It is nil
+	// unless MULTICA_SHARECRM_SECRET_KEY is configured.
+	ShareCRMInstall *sharecrm.InstallService
+	// ShareCRMBindingTokens mints and redeems the single-use account-link tokens.
+	ShareCRMBindingTokens *sharecrm.BindingTokenService
 	// SlackHistory backs the agent-facing `multica chat history` command: it
 	// reads a chat session's bound Slack conversation on demand (MUL-3871). Nil
 	// unless Slack is configured; GetChatChannelHistory then reports "no channel
@@ -376,7 +382,8 @@ type Handler struct {
 	// in the same branch that passes the storage to the adapter, so the two
 	// cannot drift), read-only from then on. Nil means no channel delivers
 	// files, which is what a deployment with no storage configured gets.
-	channelFileDelivery map[string]bool
+	channelFileDelivery               map[string]bool
+	channelExternalSessionIDResolvers map[string]func([]byte) string
 	// LLM is the basic LLM API layer (MUL-4238): a thin wrapper over the
 	// OpenAI Go SDK backing server-internal one-shot LLM helpers such as chat
 	// title generation. The generic passthrough endpoints were removed in
@@ -679,6 +686,18 @@ func parseUUIDSliceOrBadRequest(w http.ResponseWriter, ids []string, fieldName s
 		uuids[i] = u
 	}
 	return uuids, true
+}
+
+// RegisterChannelExternalSessionIDResolver registers an adapter-owned parser
+// for optional external session context in task delivery snapshots.
+func (h *Handler) RegisterChannelExternalSessionIDResolver(channelType string, resolver func([]byte) string) {
+	if channelType == "" || resolver == nil {
+		return
+	}
+	if h.channelExternalSessionIDResolvers == nil {
+		h.channelExternalSessionIDResolvers = map[string]func([]byte) string{}
+	}
+	h.channelExternalSessionIDResolvers[channelType] = resolver
 }
 
 // DeclareChannelFileDelivery records that this deployment can put a file the
