@@ -150,6 +150,14 @@ type outboundMedia struct {
 	Filename string
 
 	Data []byte
+
+	// BeforeChunk, when set, is asked before EACH chunk is dispatched. A
+	// non-nil error stops the upload with no further frames. It exists for
+	// the one caller that must stop mid-file: an installation revoked while
+	// the upload is in flight is a person withdrawing the connection, and
+	// chunks sent after that are writes into a chat that said no. The ws
+	// layer only runs the hook — what it checks is the caller's policy.
+	BeforeChunk func(context.Context) error
 }
 
 func (m outboundMedia) validate() error {
@@ -210,7 +218,7 @@ func (s *wsSender) uploadMedia(ctx context.Context, m outboundMedia) (string, er
 	if err != nil {
 		return "", err
 	}
-	if err := s.uploadMediaChunks(ctx, uploadID, chunks); err != nil {
+	if err := s.uploadMediaChunks(ctx, uploadID, chunks, m.BeforeChunk); err != nil {
 		return "", err
 	}
 	return s.uploadMediaFinish(ctx, uploadID)
@@ -246,11 +254,17 @@ func (s *wsSender) uploadMediaInit(ctx context.Context, m outboundMedia, chunks 
 
 // uploadMediaChunks sends every slice, a few at a time. The first failure
 // cancels the rest: there is no partial upload worth finishing.
-func (s *wsSender) uploadMediaChunks(ctx context.Context, uploadID string, chunks [][]byte) error {
+func (s *wsSender) uploadMediaChunks(ctx context.Context, uploadID string, chunks [][]byte, beforeChunk func(context.Context) error) error {
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(mediaChunkParallelism(len(chunks)))
 	for i, chunk := range chunks {
-		g.Go(func() error { return s.uploadMediaChunk(gctx, uploadID, i, chunk) })
+		// Nothing new is offered once a sibling has failed. The goroutine
+		// would refuse it on the same cancelled context anyway; a group
+		// already ending has no use for the slot.
+		if gctx.Err() != nil {
+			break
+		}
+		g.Go(func() error { return s.uploadMediaChunk(gctx, uploadID, i, chunk, beforeChunk) })
 	}
 	return g.Wait()
 }
@@ -260,7 +274,7 @@ func (s *wsSender) uploadMediaChunks(ctx context.Context, uploadID string, chunk
 // chunk_index goes on the wire as a number. The field table in the document
 // calls it a string and the worked example beside it passes a number; WeCom's
 // own SDK sends a number, so that is what the server is known to accept.
-func (s *wsSender) uploadMediaChunk(ctx context.Context, uploadID string, index int, chunk []byte) error {
+func (s *wsSender) uploadMediaChunk(ctx context.Context, uploadID string, index int, chunk []byte, beforeChunk func(context.Context) error) error {
 	body := map[string]any{
 		"upload_id":   uploadID,
 		"chunk_index": index,
@@ -268,6 +282,23 @@ func (s *wsSender) uploadMediaChunk(ctx context.Context, uploadID string, index 
 	}
 	var lastErr error
 	for attempt := 0; attempt < mediaChunkAttempts; attempt++ {
+		// Asked here, immediately before the write, and again before the
+		// retry — because a verdict is only as good as the moment it was
+		// given, and this chunk has two waits between the dispatch loop and
+		// the wire. errgroup.Go blocks while the group is at its limit, so a
+		// yes taken out there can sit behind the slowest chunk ahead of it;
+		// and a lost verdict buys the second offer a whole ackTimeout later.
+		// Both are long enough for someone to take the connection back.
+		//
+		// Refusing from in here is also what cancels the siblings. g.Wait()
+		// from the dispatch loop does not: it waits for the in-flight
+		// goroutines FIRST and cancels afterwards, which is after the thing
+		// it was meant to stop.
+		if beforeChunk != nil {
+			if err := beforeChunk(ctx); err != nil {
+				return err
+			}
+		}
 		_, err := s.request(ctx, cmdUploadMediaChunk, body)
 		if err == nil {
 			return nil
