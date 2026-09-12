@@ -44,6 +44,11 @@ type TaskService struct {
 	Analytics analytics.Client
 	Metrics   *obsmetrics.BusinessMetrics
 	Wakeup    TaskWakeupNotifier
+	// OnCompletionComment hands a newly synthesized success comment to the
+	// handler's worker-reply routing. Failed runs and repeated terminal callbacks
+	// do not invoke it. Wired by Handler.New; no routing is installed in isolated
+	// services that only persist task outcomes.
+	OnCompletionComment func(context.Context, db.Issue, db.Comment)
 	// Entitlements supplies Cloud's workspace-scoped issue-count instruction.
 	// Nil keeps self-hosted and isolated test services unlimited.
 	Entitlements entitlement.Provider
@@ -7249,6 +7254,9 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 		},
 	})
 	s.AutoUnresolveThreadOnReply(ctx, rootComment, util.UUIDToString(issue.WorkspaceID), "agent", util.UUIDToString(agentID))
+	if commentType == "comment" && s.OnCompletionComment != nil {
+		s.OnCompletionComment(ctx, issue, comment)
+	}
 }
 
 // AutoUnresolveThreadOnReply clears resolved_at on the thread root when a

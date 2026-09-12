@@ -200,6 +200,18 @@ the leader's current run started before the reply arrived, the reply is
 delivered in a follow-up run after that run completes, so the worker does not
 need to mention the leader again.
 
+The same handoff applies when a distinct worker finishes a run triggered by the
+assigned squad leader's delegation and the server synthesizes its plain final
+output as a reply. The replied-to comment's source run must still identify that
+squad's current leader role. The result uses the worker run's human delegation
+lineage and the current assigned squad's
+invocation rules; it can merge into a queued leader run or wait for an already
+claimed leader to finish. Repeated worker completion callbacks do not dispatch
+that synthesized result again. This does not add fallback routing for explicit
+mentions or guest squads, and it does not synthesize an additional result when
+the worker already posted a comment during the run. Failure diagnostics and the
+leader's own synthesized output do not enter this worker-result handoff.
+
 Squad mention format:
 
 ```md
