@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { Copy, GitBranch, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
@@ -117,10 +118,9 @@ export function VCSTab() {
   }
 
   async function copy(value: string) {
-    try {
-      await navigator.clipboard.writeText(value);
+    if (await copyText(value)) {
       toast.success(t(($) => $.vcs.copied));
-    } catch {
+    } else {
       toast.error(t(($) => $.vcs.copy_failed));
     }
   }
