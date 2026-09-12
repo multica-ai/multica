@@ -8,6 +8,10 @@ vi.mock("@multica/core/agents", () => ({
   useAgentPresenceDetail: () => ({ availability: "online", workload: "idle" }),
 }));
 
+vi.mock("@multica/core/api", () => ({
+  api: { getBaseUrl: () => "https://api.example.test" },
+}));
+
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ id: "ws-1" }),
 }));
@@ -50,6 +54,23 @@ describe("CommentTriggerChips", () => {
 
     fireEvent.click(chip);
     expect(onToggle).toHaveBeenCalledWith("agent-1");
+  });
+
+  it("resolves a single agent's uploaded avatar against the API origin", () => {
+    // URL edge cases belong to core/workspace/avatar-url.test.ts; this guards
+    // the trigger preview's wiring to the real avatar and URL resolver.
+    renderWithI18n(
+      <CommentTriggerChips
+        agents={[{ ...walt, avatar_url: "/uploads/agent-custom-avatar.png" }]}
+        suppressedAgentIds={new Set()}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "Walt" })).toHaveAttribute(
+      "src",
+      "https://api.example.test/uploads/agent-custom-avatar.png",
+    );
   });
 
   it("dims a suppressed single agent into the skip state", () => {
