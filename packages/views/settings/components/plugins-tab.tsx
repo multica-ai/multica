@@ -141,6 +141,7 @@ function scopeDescription(scope: string, t: Translate): string {
     case "members:read": return t(($) => $.plugins.scopes.members_read);
     case "storage:user": return t(($) => $.plugins.scopes.storage_user);
     case "storage:workspace": return t(($) => $.plugins.scopes.storage_workspace);
+    case "channels:send": return t(($) => $.plugins.scopes.channels_send);
     default: return t(($) => $.plugins.scopes.unknown);
   }
 }

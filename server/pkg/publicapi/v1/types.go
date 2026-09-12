@@ -101,3 +101,16 @@ type StorageValueResponse struct {
 type PutStorageValueRequest struct {
 	Value string `json:"value"`
 }
+
+// SendChannelMessageRequest addresses a workspace member by Multica user id.
+// The host maps that to the member's linked platform identity; a plugin never
+// names a platform chat or user id directly.
+type SendChannelMessageRequest struct {
+	UserID string `json:"user_id"`
+	Text   string `json:"text"`
+}
+
+type SendChannelMessageResponse struct {
+	Delivered   bool   `json:"delivered"`
+	ChannelType string `json:"channel_type"`
+}

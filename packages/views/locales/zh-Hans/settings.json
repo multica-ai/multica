@@ -420,6 +420,7 @@
       "members_read": "读取成员列表",
       "storage_user": "为每位成员单独存储数据",
       "storage_workspace": "存储工作区共享数据",
+      "channels_send": "通过成员已关联的聊天渠道（Telegram、Slack 等）向其发送消息",
       "net": "向 {{domain}} 发送数据",
       "unknown": "无法识别的权限 — 请勿安装"
     },

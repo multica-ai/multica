@@ -421,6 +421,7 @@
       "members_read": "Read the member list",
       "storage_user": "Store data for each member individually",
       "storage_workspace": "Store data shared by the workspace",
+      "channels_send": "Message members on chat channels they have linked (Telegram, Slack, …)",
       "net": "Send data to {{domain}}",
       "unknown": "Unrecognized access — do not install"
     },

@@ -420,6 +420,7 @@
       "members_read": "メンバー一覧を読み取る",
       "storage_user": "メンバーごとにデータを保存する",
       "storage_workspace": "ワークスペース共有のデータを保存する",
+      "channels_send": "メンバーが連携したチャットチャンネル（Telegram、Slack など）にメッセージを送信する",
       "net": "{{domain}} にデータを送信する",
       "unknown": "認識できない権限です — インストールしないでください"
     },

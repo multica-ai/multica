@@ -25,6 +25,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/dbreader"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
@@ -294,6 +295,12 @@ type Handler struct {
 	// cleanly when the DB is healthy without blocking process exit if the
 	// pool is frozen — at worst the next replica waits the full TTL.
 	ChannelSupervisor *engine.Supervisor
+	// ChannelRegistry maps a channel type to the Factory that builds its
+	// adapter. The Plugin Action API uses it for one-shot outbound sends
+	// (SendPluginChannelMessage): it builds an adapter for the member's bound
+	// installation without an inbound handler and calls Send. Nil when no
+	// channel engine was wired, which turns the endpoint into a 503.
+	ChannelRegistry *channel.Registry
 	// ChannelRouter is the channel-agnostic inbound pipeline (the shared
 	// handler the Supervisor injects into every Channel). main.go calls
 	// Drain on it during shutdown, after the Supervisor has stopped
