@@ -244,6 +244,7 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud は `true`、セルフホストは `false` | CLI の更新を自動でチェックして適用するか |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 更新チェックの間隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 帯域外で置き換えられた `multica` バイナリ（`brew upgrade`、再ダウンロード、ローカルビルド）へ再起動して追従するかどうか。`MULTICA_DAEMON_AUTO_UPDATE` とは独立 |
+| `MULTICA_DAEMON_RUNTIME_MCP` | `true` | Multica が管理する `mcp_config` を持つエージェントが、このホスト自身の MCP サーバー（`~/.claude.json`、`~/.cursor/mcp.json`、`$CODEX_HOME/config.toml` など）も継承するかどうか。個人の MCP 設定をすべての実行に渡すべきでないマシンでは `false` にします。各エージェントは自身の設定が宣言したサーバーだけを見るようになり、モデルのコンテキストに載るツールスキーマも減ります。管理された `mcp_config` を持たないエージェントは影響を受けず、ランタイム本来の継承のままです |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 実行用作業ディレクトリのルート |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | Linux/macOS 専用。作業ごとのプライベート一時ディレクトリの親ディレクトリ。既存かつ書き込み可能な絶対パスである必要があり、無効な値の場合は `/tmp` にフォールバックせず作業の開始に失敗します。短いパスを選んでください。子ツールがその配下に AF_UNIX ソケットを作成する場合があり、`sun_path` の上限は Linux で 108 バイト、macOS で 104 バイトです |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | デバッグ用に実行ディレクトリを保持 |

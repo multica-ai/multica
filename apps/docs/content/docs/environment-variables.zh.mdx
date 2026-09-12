@@ -244,6 +244,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`；自托管 `false` | 是否自动检查并更新 CLI |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 检查更新的间隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 是否在 `multica` 二进制被带外替换（`brew upgrade`、重新下载、本地构建）后重启到新二进制。与 `MULTICA_DAEMON_AUTO_UPDATE` 相互独立 |
+| `MULTICA_DAEMON_RUNTIME_MCP` | `true` | 带有 Multica 托管 `mcp_config` 的 Agent 是否同时继承本机自己的 MCP server（`~/.claude.json`、`~/.cursor/mcp.json`、`$CODEX_HOME/config.toml` 等）。若本机的个人 MCP 配置不该暴露给每次运行，设为 `false`：此时每个 Agent 只能看到自身配置声明的 server，模型上下文里的工具 schema 也随之减少。未配置托管 `mcp_config` 的 Agent 不受影响，仍走运行时原生的继承逻辑 |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 执行工作目录的根目录 |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | 仅适用于 Linux/macOS。每次运行的私有临时目录的父目录；必须是现有、可写的绝对路径，无效值会使运行启动失败，不会回退到 `/tmp`。请选择较短的路径——子工具可能会在其中绑定 AF_UNIX socket；Linux 的 `sun_path` 上限为 108 字节，macOS 为 104 字节 |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | 保留运行目录用于调试 |

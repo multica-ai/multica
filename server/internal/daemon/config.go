@@ -129,6 +129,7 @@ type Config struct {
 	AutoUpdateEnabled              bool                  // periodically check for a newer CLI release and self-update when idle (default: true on Multica Cloud, false on self-host)
 	AutoUpdateCheckInterval        time.Duration         // how often the auto-update loop polls for a new release (default: 6h)
 	AutoReloadEnabled              bool                  // restart when the multica binary on disk no longer matches the running version (default: true for CLI-launched daemons)
+	RuntimeMcpInheritEnabled       bool                  // fold the host's own MCP servers (~/.claude.json, ~/.cursor/mcp.json, CODEX_HOME/config.toml, ...) into the config of every agent that has a managed mcp_config (default: true)
 	PollInterval                   time.Duration
 	WSClaimPollInterval            time.Duration // upper bound for healthy WS batch-claim safety polls; actual sleeps use downward-only jitter
 	HeartbeatInterval              time.Duration
@@ -196,6 +197,10 @@ type Overrides struct {
 	// Single-direction for the same reason as DisableAutoUpdate: the
 	// env/default already resolves to enabled.
 	DisableAutoReload bool
+	// DisableRuntimeMcpInherit, when true, stops folding the host's own MCP
+	// servers into agents that carry a managed mcp_config. Single-direction
+	// like the two above: the default already resolves to enabled.
+	DisableRuntimeMcpInherit bool
 }
 
 // LoadConfig builds the daemon configuration from environment variables
@@ -616,6 +621,23 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// operator who installed a build by hand wants the daemon to run it.
 	// Default on for every CLI-launched daemon; Desktop opts out at the loop.
 	autoReloadEnabled := boolFromEnv("MULTICA_DAEMON_AUTO_RELOAD", true)
+	// Runtime MCP inheritance. On by default: the merge exists so that adding
+	// one managed server to an agent does not silently disable the operator's
+	// unrelated ones, and taking that away by default would break every
+	// deployment that relies on it.
+	//
+	// Off is for the host whose own MCP configuration is not the agents'
+	// business — #6283's report is a machine whose user-global config carried
+	// 1,301 tools across 14 servers, one of them pointing at an unrelated
+	// client's production database, all of it reachable from every run. It is a
+	// host-level switch because that is the scope of what it withholds: these
+	// servers come from the machine, not from any workspace, so no per-agent
+	// field can be the honest place to refuse them.
+	runtimeMcpInherit := boolFromEnv("MULTICA_DAEMON_RUNTIME_MCP", true)
+	if overrides.DisableRuntimeMcpInherit {
+		runtimeMcpInherit = false
+	}
+
 	if overrides.DisableAutoReload {
 		autoReloadEnabled = false
 	}
@@ -646,6 +668,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		AutoUpdateEnabled:               autoUpdateEnabled,
 		AutoUpdateCheckInterval:         autoUpdateInterval,
 		AutoReloadEnabled:               autoReloadEnabled,
+		RuntimeMcpInheritEnabled:        runtimeMcpInherit,
 		HealthPort:                      healthPort,
 		MaxConcurrentTasks:              maxConcurrentTasks,
 		PollInterval:                    pollInterval,

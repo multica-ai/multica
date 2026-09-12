@@ -33,9 +33,23 @@ type runtimeLocalMcpServerSummary struct {
 // A present config (including an empty mcpServers map) opts into the merged,
 // task-local config so adding one managed server no longer disables unrelated
 // runtime servers.
-func mergeRuntimeAndAgentMcpConfig(provider string, agentConfig json.RawMessage) (json.RawMessage, error) {
+//
+// inheritRuntimeServers is the host's answer to whether that base layer should
+// exist at all. It is false when the operator turned runtime MCP inheritance
+// off (see Config.RuntimeMcpInheritEnabled), which makes the agent's declared
+// set the whole set — the shape #6283 asked for and could not get, because
+// `--strict-mcp-config` is applied to the config this function returns and so
+// enforces whatever the merge already folded in.
+func mergeRuntimeAndAgentMcpConfig(provider string, agentConfig json.RawMessage, inheritRuntimeServers bool) (json.RawMessage, error) {
 	trimmed := bytes.TrimSpace(agentConfig)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return agentConfig, nil
+	}
+	if !inheritRuntimeServers {
+		// Returning the agent's config verbatim, rather than re-marshalling an
+		// empty base into it, keeps the no-inheritance path byte-identical to
+		// what the operator saved — including provider-native shapes such as
+		// OpenCode's top-level `mcp` map, which the merge below would rewrite.
 		return agentConfig, nil
 	}
 

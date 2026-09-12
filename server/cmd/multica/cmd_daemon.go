@@ -108,6 +108,7 @@ func init() {
 	f.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	f.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	f.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
+	f.Bool("no-runtime-mcp", false, "Do not expose this host's own MCP servers to agents that carry a managed mcp_config (env: MULTICA_DAEMON_RUNTIME_MCP=false)")
 
 	daemonLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 	daemonLogsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
@@ -131,6 +132,7 @@ func init() {
 	rf.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	rf.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	rf.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
+	rf.Bool("no-runtime-mcp", false, "Do not expose this host's own MCP servers to agents that carry a managed mcp_config (env: MULTICA_DAEMON_RUNTIME_MCP=false)")
 
 	df := daemonDiskUsageCmd.Flags()
 	df.Bool("by-workspace", false, "Aggregate output by workspace instead of by run")
@@ -1056,6 +1058,12 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	noAutoReloadFlag, _ := cmd.Flags().GetBool("no-auto-reload")
 	if resolveDaemonDisableSignal(noAutoReloadFlag, "MULTICA_DAEMON_AUTO_RELOAD", fileCfg.DisableAutoReload) {
 		overrides.DisableAutoReload = true
+	}
+	// Same shape again for runtime MCP inheritance (GH #6283): a host whose own
+	// MCP configuration should not be handed to every agent it runs.
+	noRuntimeMcpFlag, _ := cmd.Flags().GetBool("no-runtime-mcp")
+	if resolveDaemonDisableSignal(noRuntimeMcpFlag, "MULTICA_DAEMON_RUNTIME_MCP", fileCfg.DisableRuntimeMcpInherit) {
+		overrides.DisableRuntimeMcpInherit = true
 	}
 	autoUpdateFlag, _ := cmd.Flags().GetDuration("auto-update-interval")
 	autoUpdateOverride, err := resolveDaemonDurationOverride(autoUpdateFlag, "MULTICA_DAEMON_AUTO_UPDATE_INTERVAL", fileCfg.AutoUpdateCheckInterval)

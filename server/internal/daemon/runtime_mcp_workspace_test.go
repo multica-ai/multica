@@ -23,7 +23,7 @@ func effectiveServerNames(t *testing.T, provider string, bound []handler.Workspa
 	if err != nil {
 		t.Fatalf("ResolveAgentMcpConfig: %v", err)
 	}
-	merged, err := mergeRuntimeAndAgentMcpConfig(provider, resolved)
+	merged, err := mergeRuntimeAndAgentMcpConfig(provider, resolved, true)
 	if err != nil {
 		t.Fatalf("mergeRuntimeAndAgentMcpConfig: %v", err)
 	}

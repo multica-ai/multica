@@ -45,6 +45,7 @@ var configSetSupportedKeys = []string{
 	"disable_auto_update",
 	"auto_update_check_interval",
 	"disable_auto_reload",
+	"disable_runtime_mcp_inherit",
 }
 
 var configSetCmd = &cobra.Command{
@@ -55,18 +56,21 @@ var configSetCmd = &cobra.Command{
 		"device_name, runtime_name, workspaces_root, max_concurrent_tasks, poll_interval, ws_claim_poll_interval, " +
 		"heartbeat_interval, agent_timeout, " +
 		"codex_semantic_inactivity_timeout, codex_handshake_timeout, " +
-		"disable_auto_update, auto_update_check_interval, disable_auto_reload.\n\n" +
+		"disable_auto_update, auto_update_check_interval, disable_auto_reload, " +
+		"disable_runtime_mcp_inherit.\n\n" +
 		"The daemon keys (device_name, runtime_name, workspaces_root, max_concurrent_tasks, " +
 		"poll_interval, ws_claim_poll_interval, heartbeat_interval, agent_timeout, " +
 		"codex_semantic_inactivity_timeout, codex_handshake_timeout, " +
-		"disable_auto_update, auto_update_check_interval, disable_auto_reload) mirror their " +
+		"disable_auto_update, auto_update_check_interval, disable_auto_reload, " +
+		"disable_runtime_mcp_inherit) mirror their " +
 		"--flag / env counterparts and are read by `daemon start` when " +
 		"neither the flag nor the env var is set. " +
 		"Precedence: --flag > MULTICA_… env > config.json > built-in default. " +
 		"Duration keys take a positive Go duration (e.g. '10s', '500ms', '1m30s'); " +
 		"'0s' and negative values are rejected — except agent_timeout, where " +
 		"'0s' is meaningful and explicitly disables the wall-clock cap. " +
-		"disable_auto_update and disable_auto_reload take 'true' or 'false' " +
+		"disable_auto_update, disable_auto_reload and disable_runtime_mcp_inherit " +
+		"take 'true' or 'false' " +
 		"(single-direction: setting one to 'true' turns that behavior off, " +
 		"'false' clears the override so env/default decides). Pass an empty " +
 		"string to clear a persisted " +
@@ -111,6 +115,7 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(os.Stdout, "%-34s %t\n", "disable_auto_update:", cfg.DisableAutoUpdate)
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "auto_update_check_interval:", valueOrDefault(cfg.AutoUpdateCheckInterval, "(not set)"))
 	fmt.Fprintf(os.Stdout, "%-34s %t\n", "disable_auto_reload:", cfg.DisableAutoReload)
+	fmt.Fprintf(os.Stdout, "%-34s %t\n", "disable_runtime_mcp_inherit:", cfg.DisableRuntimeMcpInherit)
 	return nil
 }
 
@@ -252,6 +257,10 @@ func applyConfigSet(cfg *cli.CLIConfig, key, value string) error {
 		}
 	case "disable_auto_reload":
 		if err := assignBool(&cfg.DisableAutoReload, key, value); err != nil {
+			return err
+		}
+	case "disable_runtime_mcp_inherit":
+		if err := assignBool(&cfg.DisableRuntimeMcpInherit, key, value); err != nil {
 			return err
 		}
 	default:
