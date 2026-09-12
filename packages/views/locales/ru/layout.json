@@ -1,0 +1,63 @@
+{
+  "nav": {
+    "inbox": "Входящие",
+    "chat": "Чат",
+    "my_issues": "Мои задачи",
+    "issues": "Задачи",
+    "projects": "Проекты",
+    "autopilots": "Автопилот",
+    "agents": "Агенты",
+    "squads": "Команды",
+    "usage": "Аналитика",
+    "runtimes": "Среды выполнения",
+    "skills": "Навыки",
+    "settings": "Настройки"
+  },
+  "tab": {
+    "issue": "Задача",
+    "project": "Проект",
+    "autopilot": "Автопилот",
+    "agent": "Агент",
+    "member": "Участник",
+    "squad": "Команда",
+    "skill": "Навык",
+    "machine": "Машина",
+    "runtime": "Среда выполнения",
+    "attachment": "Вложение",
+    "create_agent": "Создать агента",
+    "unknown": "Неизвестная страница"
+  },
+  "help": {
+    "trigger": "Помощь",
+    "download_desktop": "Приложение для рабочего стола",
+    "docs": "Документация",
+    "changelog": "История изменений",
+    "discord": "Discord",
+    "feedback": "Обратная связь",
+    "server_version": "Версия сервера {{version}}"
+  },
+  "workspace_loader": {
+    "loading_workspace": "Загрузка рабочего пространства…",
+    "loading_named_prefix": "Загрузка"
+  },
+  "sidebar": {
+    "unpin_tooltip": "Открепить",
+    "workspaces_label": "Рабочие пространства",
+    "create_workspace": "Создать рабочее пространство",
+    "pending_invitations_label": "Ожидающие приглашения",
+    "invitation_workspace_fallback": "Рабочее пространство",
+    "invitation_join": "Присоединиться",
+    "invitation_decline": "Отклонить",
+    "log_out": "Выйти",
+    "new_issue": "Новая задача",
+    "new_issue_shortcut": "C",
+    "pinned_label": "Закреплённые",
+    "workspace_group": "Рабочее пространство",
+    "configure_group": "Настройка",
+    "unread_overflow": "99+",
+    "discord_card": {
+      "title": "Присоединяйтесь к нашему Discord",
+      "dismiss": "Скрыть"
+    }
+  }
+}
