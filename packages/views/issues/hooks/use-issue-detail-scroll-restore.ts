@@ -29,10 +29,46 @@ export function useIssueDetailScrollRestore({
   overrideTop,
 }: UseIssueDetailScrollRestoreArgs) {
   const restoredKeyRef = useRef<string | null>(null);
+  const userScrolledBeforeReadyKeyRef = useRef<string | null>(null);
 
   useLayoutEffect(() => {
     restoredKeyRef.current = null;
+    userScrolledBeforeReadyKeyRef.current = null;
   }, [restoreKey]);
+
+  useLayoutEffect(() => {
+    if (!scrollContainerEl || disabled) return;
+    if (restoredKeyRef.current === restoreKey) return;
+
+    const target = overrideTop ?? scrollPositions.get(restoreKey) ?? 0;
+    if (target > 1) return;
+
+    // Establish a top-of-page target as soon as a new container/key is
+    // available. Waiting for the async timeline to become ready leaves a
+    // window where the user can start scrolling, only to be pulled back to
+    // zero when `ready` flips to true.
+    scrollContainerEl.scrollTop = target;
+  }, [scrollContainerEl, restoreKey, disabled, overrideTop]);
+
+  useLayoutEffect(() => {
+    if (!scrollContainerEl || disabled || ready) return;
+
+    const markUserScroll = () => {
+      userScrolledBeforeReadyKeyRef.current = restoreKey;
+    };
+
+    scrollContainerEl.addEventListener("wheel", markUserScroll, {
+      passive: true,
+    });
+    scrollContainerEl.addEventListener("touchmove", markUserScroll, {
+      passive: true,
+    });
+
+    return () => {
+      scrollContainerEl.removeEventListener("wheel", markUserScroll);
+      scrollContainerEl.removeEventListener("touchmove", markUserScroll);
+    };
+  }, [scrollContainerEl, restoreKey, ready, disabled]);
 
   useLayoutEffect(() => {
     if (!scrollContainerEl || disabled || !ready) return;
@@ -61,7 +97,9 @@ export function useIssueDetailScrollRestore({
 
     const target = overrideTop ?? scrollPositions.get(restoreKey) ?? 0;
     if (target <= 1) {
-      scrollContainerEl.scrollTop = target;
+      if (userScrolledBeforeReadyKeyRef.current !== restoreKey) {
+        scrollContainerEl.scrollTop = target;
+      }
       return;
     }
 
