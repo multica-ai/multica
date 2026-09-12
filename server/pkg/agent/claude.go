@@ -39,6 +39,14 @@ type claudeBackend struct {
 }
 
 func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
+	if err := validateClaudePluginCopyArgs(opts); err != nil {
+		return nil, err
+	}
+	if len(opts.ClaudePluginDirs) > 0 {
+		if err := validateClaudePluginPolicyArgs(b.cfg.LaunchPrefix); err != nil {
+			return nil, err
+		}
+	}
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
 		execPath = "claude"
@@ -711,6 +719,27 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 	"--effort": blockedWithValue,
 }
 
+func validateClaudePluginCopyArgs(opts ExecOptions) error {
+	if len(opts.ClaudePluginDirs) == 0 {
+		return nil
+	}
+	return validateClaudePluginPolicyArgs(opts.ExtraArgs, opts.CustomArgs)
+}
+
+func validateClaudePluginPolicyArgs(regions ...[]string) error {
+	for _, args := range regions {
+		for _, arg := range args {
+			arg = unshellQuoteArg(arg)
+			flag, _, _ := strings.Cut(arg, "=")
+			switch flag {
+			case "--plugin-dir", "--plugin-url", "--setting-sources", "--bare", "--worktree", "-w", "--restricted", "--safe-mode":
+				return fmt.Errorf("Claude plugin skill filtering cannot be combined with custom %s; remove the conflicting launch option to use runtime skill controls", flag)
+			}
+		}
+	}
+	return nil
+}
+
 func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{
 		"-p",
@@ -767,6 +796,9 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args = append(args, filterCustomArgs(opts.CustomArgs, blockedArgs, logger)...)
 	if opts.ClaudeSettingsPath != "" {
 		args = append(args, "--settings", opts.ClaudeSettingsPath)
+	}
+	for _, path := range opts.ClaudePluginDirs {
+		args = append(args, "--plugin-dir", path)
 	}
 	return args
 }

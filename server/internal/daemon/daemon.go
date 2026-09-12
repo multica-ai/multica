@@ -8134,6 +8134,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		}
 	}
+	defer func() {
+		if err := env.CleanupClaudePluginCopies(); err != nil {
+			taskLog.Warn("execenv: cleanup Claude plugin copies failed", "error", err)
+		}
+	}()
 	phaseRecorder.Mark(taskPhaseEnvironmentReady)
 	// Belt-and-suspenders: also mark whatever root we ended up with, in case
 	// future changes diverge from ResolveRootDir.
@@ -8471,7 +8476,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// families go through New. This is the single production boundary — the
 	// daemon never calls agent.New or agent.NewRuntime directly, so the two
 	// factories stay meaning exactly one thing each.
-	backend, err := agent.ResolveBackend(provider, agent.Config{
+	backendConfig := agent.Config{
 		ExecutablePath: entry.Path,
 		LaunchPrefix:   profileFixedArgs,
 		CLIVersion:     resolvedVersion,
@@ -8482,7 +8487,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		DaemonVersion:  d.cfg.CLIVersion,
 		CodexVersion:   codexVersion,
 		BuiltinRuntime: !usesCustomProfileCommand,
-	})
+	}
+	backend, err := agent.ResolveBackend(provider, backendConfig)
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
 	}
@@ -8584,7 +8590,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ServiceTier:            serviceTier,
 		OpenclawMode:           openclawMode,
 		ClaudeSettingsPath:     env.ClaudeSettingsPath,
+		ClaudePluginDirs:       env.ClaudePluginDirs,
 		QwenpawWorkspace:       env.QwenpawWorkspace,
+	}
+	if provider == "claude" {
+		if err := d.prepareTaskClaudePlugins(ctx, backendConfig, execOpts, env, taskCtx.DisabledRuntimeSkills); err != nil {
+			return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("prepare Claude plugin skills: %w", err))
+		}
+		execOpts.ClaudePluginDirs = env.ClaudePluginDirs
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:

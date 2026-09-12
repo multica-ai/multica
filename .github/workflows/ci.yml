@@ -797,6 +797,11 @@ jobs:
         # outside this PR; the normal backend job still runs the full package.
         run: go test ./internal/daemon/execenv -run '^TestPrepareIsolated_WindowsKillsDescendantBeforeRetry$' -count=1 -timeout=5m
 
+      - name: Test Windows Claude plugin policy and preparation
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        working-directory: server
+        run: go test ./internal/daemon/execenv ./internal/daemon ./pkg/agent -v -run '^Test(ClaudePluginPolicy|TaskClaudePlugin|ClaudePluginCopiesIsolated|ClaudeConfigDirectory|ParseClaudePluginInventory|QueryClaudePlugins)' -count=1 -timeout=5m
+
       - name: Test Windows agent launcher argv/stdin handling
         if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
