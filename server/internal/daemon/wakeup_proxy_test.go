@@ -40,6 +40,7 @@ func TestTaskWakeupDialUsesEnvironmentProxy(t *testing.T) {
 		dialWakeupThroughEnvProxy(t)
 		return
 	}
+	t.Parallel()
 
 	// Stand-in CONNECT proxy: one line of the request is all we need to know
 	// whether the dial was routed through it.
@@ -69,6 +70,10 @@ func TestTaskWakeupDialUsesEnvironmentProxy(t *testing.T) {
 	cmd.Env = append(environWithoutProxyVars(),
 		wakeupProxyChildEnv+"=1",
 		"HTTPS_PROXY=http://"+ln.Addr().String(),
+		// A -race child otherwise sleeps a full second in the race runtime's
+		// exit hook. Appended to any inherited GORACE so its options still
+		// apply; the last setting of an option wins.
+		"GORACE="+strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"),
 	)
 	out, runErr := cmd.CombinedOutput()
 

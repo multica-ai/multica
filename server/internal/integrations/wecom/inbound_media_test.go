@@ -50,6 +50,10 @@ func dispatchOne(t *testing.T, env frameEnvelope) (channel.InboundMessage, bool,
 
 // dispatchOneAs is dispatchOne with the bot's configured display name — the
 // one thing stripLeadingMentions has to match a group's addressing against.
+//
+// The socket acknowledges what it is sent. A receipt's verdict only reaches a
+// debug log, and a socket that never answered made every receipt wait out the
+// ack timeout.
 func dispatchOneAs(t *testing.T, env frameEnvelope, botDisplayName string) (channel.InboundMessage, bool, *recordingConn) {
 	t.Helper()
 	var got channel.InboundMessage
@@ -60,7 +64,7 @@ func dispatchOneAs(t *testing.T, env frameEnvelope, botDisplayName string) (chan
 	})
 	c.botDisplayName = botDisplayName
 	conn := &recordingConn{}
-	if err := c.dispatchFrame(context.Background(), env, newWSSender(conn, slog.Default()), slog.Default()); err != nil {
+	if err := c.dispatchFrame(context.Background(), env, conn.autoAck(newWSSender(conn, slog.Default())), slog.Default()); err != nil {
 		t.Fatalf("dispatchFrame: %v", err)
 	}
 	return got, called, conn

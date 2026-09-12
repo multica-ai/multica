@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -364,9 +365,7 @@ IFS= read -r _
 printf '%s\n' '{"type":"system","session_id":"session-leader-reuse"}'
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"session-leader-reuse","result":"done"}'
 `
-	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake agent: %v", err)
-	}
+	writeTestExecutable(t, fakeBin, []byte(script))
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -673,7 +672,9 @@ func TestLockReusablePriorEnvRootWaitsOutTheDyingPredecessor(t *testing.T) {
 		t.Fatal("could not set up the predecessor's claim")
 	}
 
-	const exitAfter = 300 * time.Millisecond
+	// Short of one lock retry interval, so the successor has to wait through a
+	// retry to get the lock.
+	const exitAfter = 100 * time.Millisecond
 	go func() {
 		time.Sleep(exitAfter)
 		predecessor.Release()
@@ -709,7 +710,7 @@ func TestLockReusablePriorEnvRootStopsWaitingWhenTheLockNeverFrees(t *testing.T)
 	task := leaderReuseTestTask("task-reuse")
 	task.PriorWorkDir = workDir
 
-	const budget = 300 * time.Millisecond
+	const budget = 100 * time.Millisecond
 	d := &Daemon{logger: discardLogger(), envRootBusyWait: budget}
 	d.cfg.WorkspacesRoot = root
 
@@ -752,11 +753,9 @@ func TestLockReusablePriorEnvRootStopsWaitingWhenTheContextEnds(t *testing.T) {
 	}
 	defer held.Release()
 
+	// End the context once the successor is waiting on the held lock.
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		cancel()
-	}()
+	d.logger = slog.New(slog.NewTextHandler(&cancelOnLogWriter{trigger: []byte("prior workdir is still held by the previous run"), cancel: cancel}, nil))
 	start := time.Now()
 	second, _, _, ok, err := d.lockReusablePriorEnvRoot(ctx, task, nil, "")
 	if ok {
@@ -783,6 +782,8 @@ func TestLockReusablePriorEnvRootStopsWaitingWhenTheContextEnds(t *testing.T) {
 // cancellation under "budget exhausted" in the very logs the 15s budget is
 // meant to be judged by.
 func TestRunTaskCancelledWaitingForThePriorWorkdirStopsInsteadOfPreparing(t *testing.T) {
+	t.Parallel()
+
 	d, _, cleanup := newLeaderReuseTestDaemon(t)
 	defer cleanup()
 
@@ -803,15 +804,13 @@ func TestRunTaskCancelledWaitingForThePriorWorkdirStopsInsteadOfPreparing(t *tes
 	}
 	defer held.Release()
 
-	var logs bytes.Buffer
-	d.logger = slog.New(slog.NewTextHandler(&logs, nil))
-
+	// Cancel the moment the run starts waiting for the prior workdir: that is
+	// the wait under test, and a cancel that landed any earlier would end the
+	// run somewhere else.
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(150 * time.Millisecond)
-		cancel()
-	}()
 	defer cancel()
+	logs := &cancelOnLogWriter{trigger: []byte("prior workdir is still held by the previous run"), cancel: cancel}
+	d.logger = slog.New(slog.NewTextHandler(logs, nil))
 
 	if _, err = d.runTask(ctx, second, "claude", 0, d.logger); !errors.Is(err, context.Canceled) {
 		t.Fatalf("runTask returned %v, want the cancellation that ended the wait", err)
@@ -837,6 +836,31 @@ func TestRunTaskCancelledWaitingForThePriorWorkdirStopsInsteadOfPreparing(t *tes
 	if !strings.Contains(got, "the run was cancelled") {
 		t.Fatalf("the cancellation went unlogged:\n%s", got)
 	}
+}
+
+// cancelOnLogWriter collects log output and cancels a run as soon as a record
+// containing trigger is written, so a test can act on a state the code under
+// test only announces through its log.
+type cancelOnLogWriter struct {
+	mu      sync.Mutex
+	buf     bytes.Buffer
+	trigger []byte
+	cancel  context.CancelFunc
+}
+
+func (w *cancelOnLogWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if bytes.Contains(p, w.trigger) {
+		w.cancel()
+	}
+	return w.buf.Write(p)
+}
+
+func (w *cancelOnLogWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
 }
 
 // TestLockReusablePriorEnvRootSurvivesRetargetAfterValidation is the TOCTOU

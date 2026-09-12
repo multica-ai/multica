@@ -504,11 +504,11 @@ func pingFrame(reqID string) map[string]any {
 }
 
 // traceParkBudget bounds how long the ordering test holds one writer inside
-// its trace emission. It is only ever paid in full when the recording happens
-// under the writer mutex — that is the case where the second writer is parked
-// on the mutex and can never signal, so the budget is what releases the first.
-// When the recording happens outside the mutex the second writer completes in
-// microseconds and the budget is not reached.
+// its trace emission. It is only a backstop now: the recording that happens
+// under the writer mutex is released at once — the second writer could only
+// ever be parked on that mutex, never able to signal — and the recording that
+// happens outside it is released as soon as the second writer completes, which
+// takes microseconds. The budget is reached only if that writer never runs.
 const traceParkBudget = 750 * time.Millisecond
 
 // TestTraceOutOrderIsTheWireOrder is the deterministic guard for the ordering
@@ -521,8 +521,9 @@ const traceParkBudget = 750 * time.Millisecond
 // and then both orders are compared.
 //
 //   - Recording under the writer mutex (correct): A holds the mutex while it
-//     is parked, B blocks on the mutex before recording anything, and the park
-//     ends on the budget. A is recorded first and reaches the socket first.
+//     records, so B can only block on the mutex before recording anything, and
+//     the hook sees the mutex taken and lets A go on at once. A is recorded
+//     first and reaches the socket first.
 //
 //   - Recording before the mutex (the reviewed defect): A holds nothing while
 //     it is parked. B records, takes the mutex, writes, and finishes — so A is
@@ -535,6 +536,7 @@ func TestTraceOutOrderIsTheWireOrder(t *testing.T) {
 	bDone := make(chan struct{})
 
 	h := &hookHandler{}
+	var s *wsSender
 	h.after = func(l traceLine) {
 		if l.fields["dir"] != "out" || l.fields["req_id"] != "A" {
 			return
@@ -542,6 +544,15 @@ func TestTraceOutOrderIsTheWireOrder(t *testing.T) {
 		// A has just recorded its send attempt and has not written yet.
 		// Give B a whole write() and hold A here while it runs.
 		close(startB)
+		// Unless A is holding the writer mutex as it records: then B can only
+		// queue behind it and there is nothing to wait for, so the passing case
+		// does not pay the budget. The probe cannot hide the defect — with the
+		// mutex free it is released at once and A waits for B as before, and
+		// with B already inside it A still reaches the socket second.
+		if !s.mu.TryLock() {
+			return
+		}
+		s.mu.Unlock()
 		select {
 		case <-bDone:
 		case <-time.After(traceParkBudget):
@@ -549,7 +560,7 @@ func TestTraceOutOrderIsTheWireOrder(t *testing.T) {
 	}
 
 	conn := &wireConn{}
-	s := newWSSender(conn, slog.New(h))
+	s = newWSSender(conn, slog.New(h))
 
 	go func() {
 		<-startB

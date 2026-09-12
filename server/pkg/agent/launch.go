@@ -177,10 +177,12 @@ func runOwned(cmd *exec.Cmd, logger *slog.Logger) error {
 }
 
 // probeWaitDelay bounds how long a finished probe waits on output pipes its
-// descendants left open. It matches the bound detectCLIVersion already sets by
-// hand. The timer only starts once the child has exited or the context is
+// descendants left open. detectCLIVersion sets the same bound on its own
+// command. The timer only starts once the child has exited or the context is
 // done, so a healthy probe never pays it.
-const probeWaitDelay = 2 * time.Second
+// Package tests shorten it while preserving the delayed-descendant ordering;
+// production never reassigns it.
+var probeWaitDelay = 2 * time.Second
 
 // outputOwned is cmd.Output() over an owned process tree. It matches the
 // stdlib's contract — stdout returned, a failed run's stderr attached to the

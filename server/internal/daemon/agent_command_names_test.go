@@ -10,6 +10,8 @@ import (
 )
 
 func TestAgentCLIGuardDetectsSwallowedFailure(t *testing.T) {
+	t.Parallel()
+
 	if runtime.GOOS == "windows" {
 		t.Skip("the full guarded backend suite runs on Linux/macOS")
 	}
@@ -28,6 +30,8 @@ func TestAgentCLIGuardDetectsSwallowedFailure(t *testing.T) {
 }
 
 func TestAgentCLIGuardFailsClosedWhenSetupFails(t *testing.T) {
+	t.Parallel()
+
 	if runtime.GOOS == "windows" {
 		t.Skip("the full guarded backend suite runs on Linux/macOS")
 	}

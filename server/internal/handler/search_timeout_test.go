@@ -69,12 +69,12 @@ func TestRunSearchQuery_StatementTimeoutFires(t *testing.T) {
 	if testPool == nil {
 		t.Skip("DATABASE_URL not set; skipping live-Postgres search timeout test")
 	}
-	// Override the search timeout for this test only: 200 ms is short
-	// enough that pg_sleep(2) is guaranteed to hit it, and this keeps
-	// the test snappy. We restore the constant via t.Cleanup so other
+	// Override the search timeout for this test only: pg_sleep(2) is
+	// guaranteed to hit 50 ms, and the test waits the whole timeout out,
+	// so it stays short. We restore the constant via t.Cleanup so other
 	// tests keep the production value.
 	oldTimeout := searchStatementTimeout
-	setSearchStatementTimeoutForTest(t, 200*time.Millisecond)
+	setSearchStatementTimeoutForTest(t, 50*time.Millisecond)
 	t.Cleanup(func() { setSearchStatementTimeoutForTest(t, oldTimeout) })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

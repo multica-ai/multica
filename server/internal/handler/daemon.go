@@ -1034,7 +1034,9 @@ type DaemonHeartbeatRequest struct {
 // cleanly un-run from the client side if the context expires mid-script. We
 // therefore only invoke PopPending after HasPending confirms there is work
 // to claim, so we never start a claim we might have to abort.
-const heartbeatHasPendingTimeout = 1 * time.Second
+// Kept as a variable so the slow-probe test can preserve this relationship
+// without paying the production timeout; production never reassigns it.
+var heartbeatHasPendingTimeout = 1 * time.Second
 
 // maxLocalSkillImportBatch is how many pending import requests the heartbeat
 // handler pops per cycle. Higher values let the daemon process more imports

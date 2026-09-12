@@ -464,6 +464,8 @@ func TestLocalPathLockerSerializes(t *testing.T) {
 }
 
 func TestLocalPathLockerCtxCancel(t *testing.T) {
+	t.Parallel()
+
 	locker := NewLocalPathLocker()
 	const path = "/some/path"
 

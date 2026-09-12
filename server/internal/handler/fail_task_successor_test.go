@@ -509,18 +509,23 @@ func TestPromoteDueDeferred_ToleratesConcurrentUncommittedEnqueue(t *testing.T) 
 		t.Fatalf("insert uncommitted competitor: %v", err)
 	}
 
-	// Commit the competitor shortly after promotion starts, so promotion is
-	// already blocked on the index and is handed 23505 when the lock releases.
-	committed := make(chan error, 1)
+	// Commit the competitor only once some backend is waiting on its
+	// transaction, so promotion is handed 23505 when the lock releases. In this
+	// test only promotion writes the contended index entry, so that waiter is
+	// promotion parked on it; a fixed delay could elapse before promotion even
+	// reached the index and pass without exercising the race.
+	holderPID := holderBackendPID(t, ctx, tx)
+	promoted := make(chan error, 1)
 	go func() {
-		time.Sleep(150 * time.Millisecond)
-		committed <- tx.Commit(context.Background())
+		promoted <- testHandler.TaskService.PromoteDueDeferredTasksForRuntime(ctx, parseUUID(runtimeID))
 	}()
-
-	if err := testHandler.TaskService.PromoteDueDeferredTasksForRuntime(ctx, parseUUID(runtimeID)); err != nil {
-		t.Fatalf("a single contended row must not fail the claim: %v", err)
+	if !waitForWaiterBlockedBy(t, holderPID, 10*time.Second) {
+		t.Fatal("promotion never blocked on the uncommitted competitor's index entry")
 	}
-	if err := <-committed; err != nil {
+	if err := tx.Commit(context.Background()); err != nil {
 		t.Fatalf("commit competitor: %v", err)
+	}
+	if err := <-promoted; err != nil {
+		t.Fatalf("a single contended row must not fail the claim: %v", err)
 	}
 }

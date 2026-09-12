@@ -687,13 +687,14 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 			if !ok {
 				t.Fatalf("platform skill does not ship %q", tc.file)
 			}
+			unwrapped := collapseSpace(content)
 			for _, want := range tc.want {
-				if !containsUnwrapped(content, want) {
+				if !containsUnwrapped(unwrapped, want) {
 					t.Errorf("%s missing %q", tc.file, want)
 				}
 			}
 			for _, forbidden := range tc.notWant {
-				if containsUnwrapped(content, forbidden) {
+				if containsUnwrapped(unwrapped, forbidden) {
 					t.Errorf("%s carries banned content %q", tc.file, forbidden)
 				}
 			}
@@ -808,8 +809,12 @@ func TestOnboardingSkillIsScopedToMika(t *testing.T) {
 // wrapped. These anchors pin a claim, not a line layout — matching raw bytes
 // made every reflow of a paragraph look like a deleted contract, which trains
 // authors to fix the test instead of the text.
-func containsUnwrapped(content, want string) bool {
-	return strings.Contains(collapseSpace(content), collapseSpace(want))
+//
+// unwrapped is content already passed through collapseSpace: callers collapse
+// each file once, because re-collapsing a whole reference per anchor made this
+// the slowest test in the package.
+func containsUnwrapped(unwrapped, want string) bool {
+	return strings.Contains(unwrapped, collapseSpace(want))
 }
 
 var whitespaceRun = regexp.MustCompile(`\s+`)

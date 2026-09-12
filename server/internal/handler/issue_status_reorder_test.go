@@ -181,15 +181,20 @@ func TestReorderIssueStatusesSerializesAgainstConcurrentArchive(t *testing.T) {
 		parseUUID(testWorkspaceID)); err != nil {
 		t.Fatalf("take exclusive lock: %v", err)
 	}
+	var holderPID int32
+	if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&holderPID); err != nil {
+		t.Fatalf("read lock-holder pid: %v", err)
+	}
 
 	done := make(chan int, 1)
 	go func() { done <- reorderVia(t, "in_review", []string{second, first}).Code }()
 
+	// Parked on the lock, as required.
+	waitForCatalogLockWaiter(t, ctx, holderPID)
 	select {
 	case code := <-done:
 		t.Fatalf("reorder completed (%d) before the archive released the lock — it never took the shared lock", code)
-	case <-time.After(400 * time.Millisecond):
-		// Parked on the lock, as required.
+	default:
 	}
 
 	// Archive inside the held lock and commit: from the reorder's point of view

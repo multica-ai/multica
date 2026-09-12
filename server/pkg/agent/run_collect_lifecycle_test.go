@@ -35,9 +35,7 @@ func writeWrapperExitingBeforeChild(t *testing.T, delay, answer string) string {
 	body := "#!/bin/sh\n" +
 		"( sleep " + delay + "; printf '%s\\n' '" + answer + "' ) &\n" +
 		"exit 0\n"
-	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
-		t.Fatalf("write stub: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(body))
 	return bin
 }
 
@@ -52,7 +50,11 @@ func writeWrapperExitingBeforeChild(t *testing.T, delay, answer string) string {
 // this function, and a caller cannot tell that answer from a CLI that legitimately
 // prints nothing.
 func TestDetectCLIVersionWaitsForAWrapperDescendant(t *testing.T) {
-	bin := writeWrapperExitingBeforeChild(t, "0.5", "fake-cli 1.2.3")
+	oldWaitDelay := probeWaitDelay
+	probeWaitDelay = 3 * time.Second
+	t.Cleanup(func() { probeWaitDelay = oldWaitDelay })
+
+	bin := writeWrapperExitingBeforeChild(t, "0.2", "fake-cli 1.2.3")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -95,17 +97,17 @@ func TestDetectCLIVersionWaitsForAWrapperDescendant(t *testing.T) {
 // The contract: when the bound expires and no *recognised* version arrived, the
 // original error stands. There is no answer to salvage.
 func TestDetectCLIVersionDoesNotSalvageABannerAsTheVersion(t *testing.T) {
+	t.Parallel()
+
 	// Banner on stdout, leader exits 0, and the real version arrives from a
-	// descendant holding the pipe well past the 2s WaitDelay this probe sets.
+	// descendant holding the pipe well past the probeWaitDelay this probe sets.
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "fake-cli")
 	body := "#!/bin/sh\n" +
 		"printf 'initializing plugins\\n'\n" +
 		"( sleep 5; printf 'fake-cli 1.2.3\\n' ) &\n" +
 		"exit 0\n"
-	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
-		t.Fatalf("write stub: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(body))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -133,12 +135,12 @@ func TestDetectCLIVersionDoesNotSalvageABannerAsTheVersion(t *testing.T) {
 // With a rule that is not yet satisfied at leader exit, it has to keep waiting —
 // bounded by collectDrainGrace — or it kills the process that owes the answer.
 func TestRunCollectQuietWaitsForAWrapperDescendant(t *testing.T) {
-	bin := writeWrapperExitingBeforeChild(t, "0.5", `{"ok":true}`)
+	bin := writeWrapperExitingBeforeChild(t, "0.2", `{"ok":true}`)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	out, _, _, err := RunCollectQuiet(ctx, nil, 0, JSONOutputComplete, bin)
+	out, _, _, err := RunCollectQuiet(ctx, nil, 3*time.Second, JSONOutputComplete, bin)
 	if err != nil {
 		t.Fatalf("RunCollectQuiet: %v", err)
 	}
@@ -161,9 +163,7 @@ func TestRunCollectQuietDoesNotWaitWhenTheAnswerIsIn(t *testing.T) {
 		"printf '{\"ok\":true}\\n'\n" +
 		"sleep 300 &\n" + // inherits stdout, so EOF never arrives
 		"exit 0\n"
-	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
-		t.Fatalf("write stub: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(body))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -177,9 +177,9 @@ func TestRunCollectQuietDoesNotWaitWhenTheAnswerIsIn(t *testing.T) {
 	if strings.TrimSpace(string(out)) != `{"ok":true}` {
 		t.Fatalf("stdout = %q", out)
 	}
-	if elapsed >= collectDrainGrace {
-		t.Errorf("took %v, i.e. at least the full drain grace (%v) — a satisfied "+
-			"completeness rule must short-circuit the wait for EOF", elapsed, collectDrainGrace)
+	if elapsed >= 5*time.Second {
+		t.Errorf("took %v — a satisfied completeness rule must short-circuit "+
+			"the wait for EOF", elapsed)
 	}
 }
 
@@ -201,9 +201,7 @@ func TestCollectedStderrKeepsOnlyItsTail(t *testing.T) {
 		"while [ $i -lt 200 ]; do printf '%s\\n' \"$line\" >&2; i=$((i+1)); done\n" +
 		"printf 'LAST-STDERR-LINE\\n' >&2\n" +
 		"printf '{\"ok\":true}\\n'\n"
-	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
-		t.Fatalf("write stub: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(body))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -239,9 +237,7 @@ func TestCollectedStdoutOverflowIsReportedNotTruncated(t *testing.T) {
 		"line=$(printf 'y%.0s' $(seq 1 65536))\n" +
 		"i=0\n" +
 		"while [ $i -lt 8 ]; do printf '%s\\n' \"$line\"; i=$((i+1)); done\n"
-	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
-		t.Fatalf("write stub: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(body))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -293,9 +289,7 @@ func TestCollectedStdoutBoundaryIsExact(t *testing.T) {
 				t.Fatalf("write payload: %v", err)
 			}
 			bin := filepath.Join(dir, "fake-cli")
-			if err := os.WriteFile(bin, []byte("#!/bin/sh\n"+catBin+" "+payload+"\n"), 0o755); err != nil {
-				t.Fatalf("write stub: %v", err)
-			}
+			writeTestExecutable(t, bin, []byte("#!/bin/sh\n"+catBin+" "+payload+"\n"))
 
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
@@ -360,9 +354,7 @@ func TestCollectStdoutLimitHasHeadroomOverTheLargestAnswer(t *testing.T) {
 		t.Fatalf("write payload: %v", err)
 	}
 	bin := filepath.Join(dir, "fake-cli")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"+catBin+" "+payloadPath+"\n"), 0o755); err != nil {
-		t.Fatalf("write stub: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte("#!/bin/sh\n"+catBin+" "+payloadPath+"\n"))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

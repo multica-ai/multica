@@ -1011,7 +1011,9 @@ const loginShellResolveTimeout = 3 * time.Second
 // once this delay elapses, so the total daemon-startup penalty caused by a
 // pathological rc file is bounded by `timeout + waitDelay`, not by however
 // long the user's background processes happen to run.
-const loginShellResolveWaitDelay = 2 * time.Second
+//
+// A var so tests can prove the ceiling holds without waiting it out.
+var loginShellResolveWaitDelay = 2 * time.Second
 
 // supportedLoginShells limits which interpreters we will invoke via
 // `<shell> -ilc <script>`. Sticking to POSIX-compatible shells means the

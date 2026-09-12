@@ -1138,7 +1138,7 @@ func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	// still applied (MUL-6260).
 	cmd := runtimeCmd.exec(ctx, "--version")
 	hideAgentWindow(cmd)
-	cmd.WaitDelay = 2 * time.Second
+	cmd.WaitDelay = probeWaitDelay
 	data, err := outputOwned(cmd, runtimeCmd.logger)
 	version, recognised := extractVersionLine(string(data))
 	if err != nil {

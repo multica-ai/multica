@@ -41,7 +41,9 @@ func TestDeleteWorkspace_FailsFastWhenRollupLockHeld(t *testing.T) {
 	// the same database, and its own 4246 tests read the lock's state (MUL-3980).
 	lockRollupSingleton(t)
 
-	setWorkspaceDeleteLockTimeoutForTest(t, 500*time.Millisecond)
+	// The request waits this budget out in full on 4246, which is never
+	// released, so it only has to be long enough to be a real wait.
+	setWorkspaceDeleteLockTimeoutForTest(t, 100*time.Millisecond)
 
 	// Hold 4246 on a pinned connection for the duration of the request, the
 	// way a running rollup tick (or a leaked one) holds it in production.

@@ -232,8 +232,10 @@ func TestClaim_ChannelOriginChatWithoutTaskDeliveryIsPrivateMulticaTurn(t *testi
 // the daemon with it. Without it the per-turn prompt has no way to know that one
 // chat_session is a room shared by many people, and it described every chat run
 // as a private 1:1 — the agent then had no input from which to weigh a wider
-// audience. Asserted per channel because the column is written by the shared
-// session service for all of them (channel/engine/session.go).
+// audience. The column is written by the shared session service for every
+// channel (channel/engine/session.go) and the claim copies it the same way for
+// all of them, so each shape is asserted once, on different channels; the
+// channel type itself is pinned by the ChannelType tests above.
 func TestClaim_BoundSessionReportsRoomShape(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -244,11 +246,7 @@ func TestClaim_BoundSessionReportsRoomShape(t *testing.T) {
 		channelType string
 		chatType    string
 	}{
-		{"slack", "group"},
-		{"slack", "p2p"},
 		{"feishu", "group"},
-		{"feishu", "p2p"},
-		{"wecom", "group"},
 		{"wecom", "p2p"},
 	} {
 		name := tc.channelType + "/" + tc.chatType
