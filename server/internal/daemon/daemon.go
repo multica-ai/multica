@@ -8318,6 +8318,10 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						}()
 					}
 				case agent.MessageToolUse:
+					if strings.TrimSpace(msg.Tool) == "" {
+						taskLog.Warn("dropping malformed tool_use without tool name", "call_id", msg.CallID)
+						continue
+					}
 					n := toolCount.Add(1)
 					inFlightTools.Add(1)
 					taskLog.Info(fmt.Sprintf("tool #%d: %s", n, msg.Tool))
@@ -8359,16 +8363,20 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 							break
 						}
 					}
-					s := msgSeq.Add(1)
-					output := msg.Output
-					if len(output) > 8192 {
-						output = output[:8192]
-					}
 					toolName := msg.Tool
 					if toolName == "" && msg.CallID != "" {
 						mu.Lock()
 						toolName = callIDToTool[msg.CallID]
 						mu.Unlock()
+					}
+					if strings.TrimSpace(toolName) == "" {
+						taskLog.Warn("dropping malformed tool_result without tool name", "call_id", msg.CallID)
+						continue
+					}
+					s := msgSeq.Add(1)
+					output := msg.Output
+					if len(output) > 8192 {
+						output = output[:8192]
 					}
 					taskLog.Info("tool_result observed", "seq", s, "tool", toolName, "call_id", msg.CallID)
 					mu.Lock()

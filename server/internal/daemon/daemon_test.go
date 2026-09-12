@@ -2360,6 +2360,37 @@ func TestExecuteAndDrain_FlushesTranscriptBeforeReturningResult(t *testing.T) {
 	}
 }
 
+type malformedToolTranscriptBackend struct{}
+
+func (malformedToolTranscriptBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message, 3)
+	msgCh <- agent.Message{Type: agent.MessageToolUse, Tool: "", CallID: "", Input: map[string]any{"command": "pwd"}}
+	msgCh <- agent.Message{Type: agent.MessageToolResult, Tool: "", CallID: "", Output: "ToolNotFoundError"}
+	msgCh <- agent.Message{Type: agent.MessageText, Content: "kept"}
+	close(msgCh)
+	resCh := make(chan agent.Result, 1)
+	resCh <- agent.Result{Status: "completed", Output: "done"}
+	close(resCh)
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func TestExecuteAndDrain_DropsMalformedToolTranscriptMessages(t *testing.T) {
+	t.Parallel()
+
+	d, rec := newTranscriptRecorder(t)
+	_, tools, err := d.executeAndDrain(context.Background(), malformedToolTranscriptBackend{}, "p", agent.ExecOptions{}, slog.Default(), "task-malformed-tools", "", new(atomic.Int32))
+	if err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+	if tools != 0 {
+		t.Fatalf("tools = %d, want 0 for dropped malformed tool_use", tools)
+	}
+	got := rec.snapshot()
+	if len(got) != 1 || got[0].Type != "text" || got[0].Content != "kept" {
+		t.Fatalf("reported transcript = %+v, want only the valid text message", got)
+	}
+}
+
 // TestExecuteAndDrain_SeqContinuesAcrossRetry pins the transcript's ordering
 // key: the server sorts a task's messages by seq alone, so a same-task resume
 // retry must keep numbering upwards instead of restarting at 1 and

@@ -22,6 +22,8 @@ const (
 	dshTerminateGrace  = 2 * time.Second
 )
 
+const dshMalformedToolStreamPrefix = "dsh gateway emitted malformed tool call stream"
+
 // dshBackend drives the Multica DSH bundle over its versioned JSONL
 // stdio protocol. The adapter is intentionally independent of ACP: DSH owns
 // the agent loop, session store, model catalog, tools, and MCP clients, while
@@ -316,6 +318,14 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 			}
 			state.frameCount++
 			handleDshFrame(frame, requestID, msgCh, &state)
+			if state.protocolError != "" {
+				signalProcessGroup(cmd, syscall.SIGTERM)
+				if !waitProcessGroupGone(cmd, dshTerminateGrace) {
+					signalProcessGroup(cmd, syscall.SIGKILL)
+				}
+				_ = stdout.Close()
+				break
+			}
 		}
 		scanErr := scanner.Err()
 		if scanErr != nil {
@@ -392,12 +402,20 @@ func handleDshFrame(frame dshFrame, requestID string, ch chan<- Message, state *
 			trySend(ch, Message{Type: MessageThinking, Content: frame.Content})
 		}
 	case "tool_call":
+		if frame.CallID == "" || frame.Name == "" {
+			state.setProtocolError(dshMalformedToolFrameError("tool_call", frame))
+			return
+		}
 		input := map[string]any{}
 		if frame.Arguments != "" && json.Unmarshal([]byte(frame.Arguments), &input) != nil {
 			input = map[string]any{"raw": frame.Arguments}
 		}
 		trySend(ch, Message{Type: MessageToolUse, Tool: frame.Name, CallID: frame.CallID, Input: input})
 	case "tool_result":
+		if frame.CallID == "" {
+			state.setProtocolError(dshMalformedToolFrameError("tool_result", frame))
+			return
+		}
 		trySend(ch, Message{Type: MessageToolResult, Tool: frame.Name, CallID: frame.CallID, Output: frame.Output})
 	case "usage":
 		key := frame.Model
@@ -413,20 +431,48 @@ func handleDshFrame(frame dshFrame, requestID string, ch chan<- Message, state *
 			state.usage[key] = usage
 		}
 	case "protocol_error":
-		state.protocolError = strings.TrimSpace(frame.Code + ": " + frame.Message)
+		state.setProtocolError(strings.TrimSpace(frame.Code + ": " + frame.Message))
 	case "result":
 		errorText := ""
 		if frame.Error != nil {
 			errorText = strings.TrimSpace(frame.Error.Code + ": " + frame.Error.Message)
 		}
+		status := frame.Status
+		if state.protocolError != "" {
+			status = "failed"
+			if errorText == "" {
+				errorText = state.protocolError
+			} else {
+				errorText = state.protocolError + "; " + errorText
+			}
+		}
 		state.result = &Result{
-			Status: frame.Status, Output: frame.Output, Error: errorText,
+			Status: status, Output: frame.Output, Error: errorText,
 			SessionID: frame.SessionID, Usage: state.usage, ResumeRejected: frame.ResumeRejected,
 		}
 		if state.result.SessionID == "" {
 			state.result.SessionID = state.sessionID
 		}
 	}
+}
+
+func (s *dshRunState) setProtocolError(message string) {
+	message = strings.TrimSpace(message)
+	if message == "" || s.protocolError != "" {
+		return
+	}
+	s.protocolError = message
+}
+
+func dshMalformedToolFrameError(frameType string, frame dshFrame) string {
+	missing := []string{}
+	if frame.CallID == "" {
+		missing = append(missing, "call_id")
+	}
+	if frameType == "tool_call" && frame.Name == "" {
+		missing = append(missing, "name")
+	}
+	return fmt.Sprintf("%s: %s missing %s; Console Go/opencode gateway responses must preserve streamed tool_calls id and function.name, or reject requests missing x-opencode-session instead of forwarding argument-only deltas", dshMalformedToolStreamPrefix, frameType, strings.Join(missing, " and "))
 }
 
 func discoverDshModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {

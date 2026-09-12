@@ -211,6 +211,16 @@ func TestClassifyPoisonedError(t *testing.T) {
 			wantReason: FailureReasonAPIInvalidRequest,
 		},
 		{
+			// GH #8268: the DSH/opencode gateway forwarded tool_call
+			// argument deltas without id/function.name. The resulting
+			// transcript cannot be resumed safely, because DSH validation
+			// rejects tool results with no source on the next start.
+			name:       "dsh gateway malformed tool stream",
+			errMsg:     "dsh gateway emitted malformed tool call stream: tool_call missing call_id and name; Console Go/opencode gateway responses must preserve streamed tool_calls id and function.name, or reject requests missing x-opencode-session instead of forwarding argument-only deltas",
+			wantOK:     true,
+			wantReason: FailureReasonAPIInvalidRequest,
+		},
+		{
 			// The narrowness guard: an emptiness complaint with no locator
 			// into the message history is some tool's validation error, and
 			// discarding a healthy session over it would lose real context.

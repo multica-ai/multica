@@ -155,6 +155,9 @@ func classifyPoisonedError(errMsg string) (string, bool) {
 	if strings.Contains(lowered, "invalid_request_error") && strings.Contains(lowered, "400") {
 		return FailureReasonAPIInvalidRequest, true
 	}
+	if strings.Contains(lowered, "dsh gateway emitted malformed tool call stream") {
+		return FailureReasonAPIInvalidRequest, true
+	}
 	// The same defect reported by a provider that words it differently.
 	// The clause above only fires on the Anthropic shape, so an empty
 	// message baked into the transcript by any other backend used to fall

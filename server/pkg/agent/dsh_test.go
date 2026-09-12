@@ -101,6 +101,46 @@ printf '%s\n' '{"v":1,"type":"result","request_id":"task-1","status":"completed"
 	}
 }
 
+func TestDshBackendRejectsGatewayToolCallWithoutIdentity(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	bin := writeDshFixture(t, `
+printf '%s\n' '{"v":1,"type":"ready","runtime":"dsh","plugin_version":"test","capabilities":{}}'
+IFS= read -r command
+case "$command" in *'"type":"execute"'*) ;; *) exit 8 ;; esac
+printf '%s\n' '{"v":1,"type":"session","request_id":"task-bad","session_id":"session-bad","resumed":false}'
+printf '%s\n' '{"v":1,"type":"tool_call","request_id":"task-bad","arguments":"{\"command\":\"pwd\"}"}'
+while :; do sleep 1; done
+`)
+	b, err := New("dsh", Config{ExecutablePath: bin, TaskID: "task-bad", Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := b.Execute(context.Background(), "use a tool", ExecOptions{Cwd: t.TempDir(), Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var messages []Message
+	for message := range session.Messages {
+		messages = append(messages, message)
+	}
+	result := <-session.Result
+	if result.Status != "failed" {
+		t.Fatalf("status = %q, want failed (result: %#v)", result.Status, result)
+	}
+	for _, want := range []string{dshMalformedToolStreamPrefix, "missing call_id and name", "x-opencode-session"} {
+		if !strings.Contains(result.Error, want) {
+			t.Fatalf("result error = %q, want %q", result.Error, want)
+		}
+	}
+	for _, message := range messages {
+		if message.Type == MessageToolUse || message.Type == MessageToolResult {
+			t.Fatalf("malformed gateway tool frame was forwarded: %#v", messages)
+		}
+	}
+}
+
 func TestDshBackendCancellationUsesProtocol(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture")
