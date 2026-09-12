@@ -420,6 +420,7 @@
       "members_read": "멤버 목록 읽기",
       "storage_user": "멤버별로 데이터 저장",
       "storage_workspace": "워크스페이스 공유 데이터 저장",
+      "channels_send": "멤버가 연결한 채팅 채널(Telegram, Slack 등)로 메시지 보내기",
       "net": "{{domain}}(으)로 데이터 전송",
       "unknown": "알 수 없는 권한 — 설치하지 마세요"
     },

@@ -165,6 +165,37 @@ paths:
           description: Deleted
         default:
           $ref: "#/components/responses/Problem"
+  /channels/{channel_type}/send:
+    parameters:
+      - $ref: "#/components/parameters/ChannelType"
+    post:
+      operationId: sendPluginChannelMessage
+      summary: Message a workspace member over a chat channel they have linked
+      description: >-
+        Delivers a text message to the member as the channel's bot. The host
+        resolves the member's channel binding in the installation's workspace;
+        the Plugin never sees bot credentials or the member's platform
+        identity. A member who has not linked the channel yields
+        `binding_not_found`; a channel type not configured on this deployment
+        yields `channel_not_found`; a platform-side failure yields
+        `delivery_failed`.
+      x-multica-contract: plugin_extension
+      x-multica-scope: channels:send
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendChannelMessageRequest"
+      responses:
+        "200":
+          description: Delivered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendChannelMessageResponse"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   securitySchemes:
     pluginBearer:
@@ -193,6 +224,13 @@ components:
       schema:
         type: string
         maxLength: 1024
+    ChannelType:
+      name: channel_type
+      in: path
+      required: true
+      description: Channel platform slug such as telegram or slack
+      schema:
+        type: string
     IfMatch:
       name: If-Match
       in: header
@@ -402,3 +440,18 @@ components:
       required: [value]
       properties:
         value: { type: string, maxLength: 102400 }
+    SendChannelMessageRequest:
+      type: object
+      required: [user_id, text]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: Multica user id of a member of the installation's workspace
+        text: { type: string, minLength: 1, maxLength: 4096 }
+    SendChannelMessageResponse:
+      type: object
+      required: [delivered, channel_type]
+      properties:
+        delivered: { type: boolean }
+        channel_type: { type: string }

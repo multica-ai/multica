@@ -4,12 +4,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -739,4 +743,111 @@ func (h *Handler) DeletePluginStorage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Channels ---
+
+// maxPluginChannelMessageChars bounds one outbound message. 4096 is Telegram's
+// hard cap for a single sendMessage and comfortably inside every other
+// platform's limit; adapters that need to chunk below it already do.
+const maxPluginChannelMessageChars = 4096
+
+// SendPluginChannelMessage — POST /v1/channels/{channel_type}/send
+//
+// Lets a plugin reach a member on a chat channel the member has already linked
+// to this workspace, without ever seeing the bot token or the member's platform
+// identity. The plugin names a Multica user; the host resolves the binding
+// (FindChannelBindingForMember, the same lookup the WeCom inbox push uses),
+// builds the adapter for the bound installation, and speaks to the platform
+// itself. The binding's channel_user_id is what the adapters address for a
+// direct message: on Telegram a private chat id is the user id, and Slack's
+// chat.postMessage opens the DM when handed a user id.
+//
+// Both actors are allowed on purpose. An event hook that wants to page someone
+// about a failed task has no person behind it, and a surface acting for a
+// member is bounded the same way: the binding is looked up in the
+// installation's workspace, so the reach is exactly the members of that
+// workspace who linked this channel.
+func (h *Handler) SendPluginChannelMessage(w http.ResponseWriter, r *http.Request) {
+	caller, _, ok := h.pluginCaller(w, r, plugincontract.ScopeChannelsSend)
+	if !ok {
+		return
+	}
+	if h.ChannelRegistry == nil {
+		publicapiv1.WriteProblem(w, r, http.StatusServiceUnavailable, "channels_unavailable", "chat channel integrations are not enabled")
+		return
+	}
+	channelType := channel.Type(strings.TrimSpace(chi.URLParam(r, "channel_type")))
+	if _, ok := h.ChannelRegistry.Lookup(channelType); !ok {
+		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "channel_not_found", "no channel integration of this type is configured")
+		return
+	}
+
+	var req publicapiv1.SendChannelMessageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	userID, err := util.ParseUUID(strings.TrimSpace(req.UserID))
+	if err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "user_id must be a valid UUID")
+		return
+	}
+	text := strings.TrimSpace(sanitizeNullBytes(req.Text))
+	if text == "" {
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "text is required")
+		return
+	}
+	if utf8.RuneCountInString(text) > maxPluginChannelMessageChars {
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "text is too long")
+		return
+	}
+
+	// A member who never linked this channel is a 404, not a failure: the
+	// plugin is expected to fall back to another route (inbox, email). The
+	// query already skips revoked installations.
+	binding, err := h.Queries.FindChannelBindingForMember(r.Context(), db.FindChannelBindingForMemberParams{
+		WorkspaceID:   caller.WorkspaceID,
+		MulticaUserID: userID,
+		ChannelType:   string(channelType),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "binding_not_found", "the member has not linked this channel in this workspace")
+		return
+	}
+	if err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to look up the channel binding")
+		return
+	}
+	installation, err := h.Queries.GetChannelInstallation(r.Context(), db.GetChannelInstallationParams{
+		ID:          binding.InstallationID,
+		ChannelType: string(channelType),
+	})
+	if err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to load the channel installation")
+		return
+	}
+
+	// Outbound only: no inbound handler, so the adapter is a client around the
+	// installation's credentials and nothing more. The factories have no side
+	// effects at build time; the receive loop starts in Connect, which is never
+	// called here.
+	ch, err := h.ChannelRegistry.Build(channel.Config{
+		Type: channelType,
+		ID:   installation.ID,
+		Raw:  installation.Config,
+	})
+	if err != nil {
+		slog.WarnContext(r.Context(), "plugin channel send: build adapter failed",
+			"channel_type", channelType, "installation_id", uuidToString(installation.ID), "error", err)
+		publicapiv1.WriteProblem(w, r, http.StatusBadGateway, "channel_unavailable", "the channel integration could not be initialized")
+		return
+	}
+	if _, err := ch.Send(r.Context(), channel.OutboundMessage{ChatID: binding.ChannelUserID, Text: text}); err != nil {
+		slog.WarnContext(r.Context(), "plugin channel send: delivery failed",
+			"channel_type", channelType, "installation_id", uuidToString(installation.ID), "error", err)
+		publicapiv1.WriteProblem(w, r, http.StatusBadGateway, "delivery_failed", "the channel did not accept the message")
+		return
+	}
+	writeJSON(w, http.StatusOK, publicapiv1.SendChannelMessageResponse{Delivered: true, ChannelType: string(channelType)})
 }
