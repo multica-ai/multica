@@ -206,8 +206,9 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `MULTICA_LLM_BASE_URL` | 空 | OpenAI 兼容 endpoint |
 | `MULTICA_LLM_DEFAULT_MODEL` | `gpt-5.6-luna` | 请求未指定模型时使用 |
 | `MULTICA_LLM_MAX_RETRIES` | `2` | 单次调用的重试上限；`0` 表示禁用重试，`1`–`5` 表示最多重试 N 次 |
+| `MULTICA_LLM_DISABLE_THINKING` | 空（`false`） | 兼容网关专用的 thinking 关闭 opt-in；只接受 `true`/`false`，其它值会导致启动失败 |
 
-`MULTICA_LLM_MAX_RETRIES` 是重试策略的唯一配置源。不设置时使用默认的 2 次；设为 `0` 表示每次调用只发一个请求；设为 1–5 表示最多重试这么多次。它是上限而不是配额：只有可重试的失败才会消耗它，请求成功或调用方自身的超时都会让调用提前结束。其它取值（负数、非数字、大于 5）会让服务启动失败，而不是被静默纠正。上限是一个延迟预算：退避从 0.5s 开始翻倍，上限 8s，更大的预算会超出调用方自身的超时，把可重试的失败变成超时失败。重试覆盖连接失败以及 HTTP 408、409、429 和 5xx；其余 4xx 直接返回。服务启动时会以 `llm retry policy` 打印生效策略，其中不包含任何凭据。
+`MULTICA_LLM_MAX_RETRIES` 是重试策略的唯一配置源。不设置时使用默认的 2 次；设为 `0` 表示每次调用只发一个请求；设为 1–5 表示最多重试这么多次。它是上限而不是配额：只有可重试的失败才会消耗它，请求成功或调用方自身的超时都会让调用提前结束。其它取值（负数、非数字、大于 5）会让服务启动失败，而不是被静默纠正。上限是一个延迟预算：退避从 0.5s 开始翻倍，上限 8s，更大的预算会超出调用方自身的超时，把可重试的失败变成超时失败。重试覆盖连接失败以及 HTTP 408、409、429 和 5xx；其余 4xx 直接返回。服务启动时会以 `llm retry policy` 打印生效策略，其中不包含任何凭据。`MULTICA_LLM_DISABLE_THINKING` 默认留空（`false`），此时请求与之前按字节完全一致。设为 `true` 后，每次 assist 层 Chat Completions 请求都会带上 `{"chat_template_kwargs": {"enable_thinking": false}}`。只接受 `true`/`false`，其它值（`1`、`TRUE`、`yes` 等）会导致启动失败。它是只有兼容的 OpenAI 风格网关（如 GLM/Qwen 类路由）才理解的 opt-in body 扩展，不是 provider-neutral 的 OpenAI API 字段：在拒绝该字段的网关上，请求会直接失败，而不会静默地重新打开 thinking 并重试。它只覆盖上面两个功能（assist 层），不会传到智能体运行时。
 
 有两个功能会使用这一层，它们都会把聊天内容发送到你配置的 endpoint：
 

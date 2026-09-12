@@ -195,6 +195,28 @@ func parseLLMMaxRetries(raw string) (*llm.RetryOverride, error) {
 	return override, nil
 }
 
+// parseLLMDisableThinking turns the raw MULTICA_LLM_DISABLE_THINKING value
+// into the bool llm.Config.DisableThinking expects: false for unset (the
+// default — standard OpenAI endpoints see byte-identical requests), true only
+// for an explicit "true". Only "true"/"false" are accepted: strconv.ParseBool
+// would additionally allow 1, t, TRUE and friends, which this contract
+// excludes. Surrounding whitespace is tolerated like the other LLM parsers.
+// Anything else fails the boot next to parseLLMMaxRetries.
+func parseLLMDisableThinking(raw string) (bool, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false, nil
+	}
+	switch raw {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("must be \"true\" or \"false\", got %q", raw)
+	}
+}
+
 func envPositiveInt64(name string, def int64) int64 {
 	raw := os.Getenv(name)
 	if raw == "" {
@@ -645,6 +667,11 @@ func main() {
 	if dbRoutingMetrics != nil {
 		readRecorder = dbRoutingMetrics
 	}
+	llmDisableThinking, err := parseLLMDisableThinking(os.Getenv("MULTICA_LLM_DISABLE_THINKING"))
+	if err != nil {
+		slog.Error("invalid MULTICA_LLM_DISABLE_THINKING", "error", err)
+		os.Exit(1)
+	}
 
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
 		HTTPMetrics:         httpMetrics,
@@ -659,6 +686,7 @@ func main() {
 		FeatureFlags:        flags,
 		HeartbeatScheduler:  heartbeatScheduler,
 		LLMMaxRetries:       llmMaxRetries,
+		LLMDisableThinking:  llmDisableThinking,
 	})
 	var replicaQueries *db.Queries
 	if replicaPool != nil {
