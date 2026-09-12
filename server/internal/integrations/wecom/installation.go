@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -61,6 +62,18 @@ type InstallationService struct {
 	// WeCom at install time gets a 503 and retries, it does not get to install
 	// unverified credentials over somebody else's row.
 	probe CredentialProbe
+
+	// logger is only ever used to say what a bot swap threw away. Nil-safe
+	// through log() below, the same shape channel_media_reconciler.go uses, so
+	// a struct built in a test does not have to supply one.
+	logger *slog.Logger
+}
+
+func (s *InstallationService) log() *slog.Logger {
+	if s.logger == nil {
+		return slog.Default()
+	}
+	return s.logger
 }
 
 // InstallationOption configures the service at construction.
@@ -94,10 +107,11 @@ func NewInstallationService(queries *db.Queries, tx engine.TxStarter, box *secre
 		return nil, errors.New("wecom: InstallationService requires a non-nil secretbox.Box")
 	}
 	svc := &InstallationService{
-		store: NewStore(queries),
-		tx:    tx,
-		box:   box,
-		probe: NewHandshakeProbe(nil, ""),
+		store:  NewStore(queries),
+		tx:     tx,
+		box:    box,
+		probe:  NewHandshakeProbe(nil, ""),
+		logger: slog.Default(),
 	}
 	for _, o := range opts {
 		o(svc)
@@ -221,6 +235,50 @@ func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) 
 	if err != nil {
 		return Installation{}, err
 	}
+	// A bot SWAP on an existing installation: the row and its id are reused —
+	// UpsertChannelInstallation conflicts on (workspace_id, agent_id,
+	// channel_type) and only rewrites config — so every dependent row keyed on
+	// installation_id would otherwise survive into a bot it does not belong to.
+	//
+	// They are not merely stale. A WeCom aibot userid is anonymized per (bot,
+	// user), which is the premise the whole binding flow rests on (binding.go),
+	// so a carried-over channel_user_binding holds an id from a namespace the
+	// new bot does not share. Outbound.tryDeliverInbox looks that binding up by
+	// (workspace, member, channel_type) — not by bot — resolves the sender by
+	// its installation_id, which is now the LIVE NEW bot, and addresses the OLD
+	// bot's userid over it. A p2p chat binding carries the same userid as its
+	// channel_chat_id, and a queued task delivery carries it again.
+	//
+	// Runs in this transaction, before the upsert, so a swap that fails later
+	// leaves the old bot's rows intact rather than half-cleared. (#6547)
+	//
+	// The sweep is not airtight, and cannot be from here. The slot lock taken
+	// above is the NEW bot's; the OLD bot's socket stays live until the
+	// Supervisor tears it down, so an inbound message arriving under it between
+	// this DELETE and the COMMIT re-inserts a binding that outlives the sweep.
+	// The window is short and self-healing — that binding is the old bot's
+	// namespace, so the next delivery over it fails to address and the user
+	// re-binds — and closing it properly means a second clear once the old
+	// connection is confirmed down, which this transaction cannot observe.
+	if carried.ID.Valid && carried.BotID != "" && carried.BotID != p.BotID {
+		cleared, err := qtx.Queries.ClearChannelInstallationBotScopedRows(ctx, carried.ID)
+		if err != nil {
+			return Installation{}, fmt.Errorf("wecom: clear previous bot's rows: %w", err)
+		}
+		// A queued task delivery is a RUNNING task's answer. Dropping it is
+		// right — its address is the old bot's userid, unreachable from the new
+		// connection either way — but processEvent then finds no row and
+		// returns nil, with no counter and no line of its own, so this is the
+		// only place that can say where the answer went.
+		s.log().InfoContext(ctx, "wecom: bot swap cleared the previous bot's rows",
+			"installation_id", uuidStringPub(carried.ID),
+			"previous_bot_id", carried.BotID,
+			"user_bindings", cleared.UserBindings,
+			"chat_session_bindings", cleared.ChatSessionBindings,
+			"queued_task_deliveries_dropped", cleared.TaskDeliveries,
+		)
+	}
+
 	// The chat name is optional in the dialog, so an admin rotating a leaked
 	// secret leaves it blank — and blanking it would put group slash commands
 	// back to the whitespace guess that this field exists to replace. Keep what
