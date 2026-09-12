@@ -351,6 +351,12 @@ A completion that does not close a stage is silent (no comment, no wake). A
 sibling set with **no** stages is one implicit stage, so the parent is woken
 once when the *last* sub-issue finishes — not on every child.
 
+Each stage-completion system comment has its own conversation thread. An
+unrelated pending run on the parent does not absorb or suppress that signal:
+the notification queues its own run, still serialized with other runs for the
+same parent and agent. Re-dispatch of the same notification is deduplicated
+while its run is queued or dispatched.
+
 Advancement is agent-driven: the server only detects the closed barrier and
 wakes the parent assignee, who then decides whether to promote the next stage's
 `backlog` sub-issues to `todo`.
