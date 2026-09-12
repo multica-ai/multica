@@ -479,12 +479,12 @@ func mentionOpenID(binding ChatSessionBinding) string {
 //     binding-prompt template — just a single markdown block, no
 //     header / icon / CTA buttons.
 //
-// Empty content is silently dropped: we'd rather show nothing than
-// "Done." (the prior card fallback that confused Bohan in the live
-// dev env). In practice an empty Content means the daemon completed
-// the task without producing visible output, which only happens for
-// edge cases like a chat task that just acknowledged a system event;
-// not emitting a message there is the right product call.
+// Empty content skips the REPLY, not the delivery. An agent that produced
+// only files writes a real 'message' outcome with empty text — task.go's
+// pendingAttachments branch exists precisely for that shape, "the
+// attachment cards ARE the response". Returning before the attachment hop
+// would make the one case where the files are the whole answer the one case
+// the user hears nothing at all.
 //
 // mentionOpenID, when non-empty, prefixes the body with a native mention of
 // that member (see mention.go). The wire shape is chosen from the agent's own
@@ -492,9 +492,6 @@ func mentionOpenID(binding ChatSessionBinding) string {
 // prose answer onto the card path.
 func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentials, binding ChatSessionBinding, mentionOpenID string, workspaceID pgtype.UUID, payload any) error {
 	content := chatDoneContent(payload)
-	if content == "" {
-		return nil
-	}
 	if topicSendWithoutTrigger(binding) {
 		p.cfg.Logger.Warn("lark: no trigger for a topic-isolated session; skipping reply rather than posting it to the parent group",
 			"chat_session_id", uuidString(binding.ChatSessionID),
@@ -502,6 +499,13 @@ func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentia
 		return nil
 	}
 	target := threadReplyTarget(binding)
+	if content == "" {
+		// Nothing to say, but there may be something to show. The
+		// delivery path no-ops on its own when the reply carried no
+		// files, so this costs one lookup and never a stray message.
+		p.deliverAttachmentsAsync(creds, binding, target, workspaceID, payload)
+		return nil
+	}
 	markdown := containsMarkdown(content)
 
 	// used records the target the send actually went out on. The whole

@@ -408,6 +408,37 @@ func TestChatReplyDoesNotDeliverWhenReplyFails(t *testing.T) {
 	}
 }
 
+// TestChatReplyDeliversAttachmentOnlyReply covers the shape task.go calls
+// "the attachment cards ARE the response": an agent that produced a file and
+// no prose writes an empty-text outcome. The reply send is skipped; the
+// delivery is not. Without this the one case where the files are the whole
+// answer is the one case the user hears nothing.
+func TestChatReplyDeliversAttachmentOnlyReply(t *testing.T) {
+	p, q, api := newMediaTestPatcher(t)
+	p.SetAttachments(fakeObjectStore{objects: map[string][]byte{"chart.png": pngBytes}})
+
+	messageID := uuidFromString(t, "dddd9999-dddd-dddd-dddd-dddddddddddd")
+	taskID := uuidFromString(t, "ee999999-ee99-ee99-ee99-eeeeeeeeeeee")
+	q.task = db.AgentTaskQueue{ChatInputTaskID: taskID}
+	q.taskChannelIngested = true
+	q.attachments = []db.Attachment{imageRow(t, "aaaa2222-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "chart.png")}
+
+	// Empty content: the attachment is the whole reply.
+	p.handleEvent(newChatDoneEvent(t, taskID, q.binding.ChatSessionID, messageID, ""))
+
+	waitFor(t, func() bool {
+		api.mu.Lock()
+		defer api.mu.Unlock()
+		return len(api.imagesOut) == 1
+	}, "attachment-only delivery")
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 0 {
+		t.Errorf("empty content must not produce a text message; textSent=%+v", api.textSent)
+	}
+}
+
 // waitFor polls cond until it holds or the budget runs out. The delivery
 // path is deliberately asynchronous, so a test cannot assert on it without
 // waiting for the thing it is asserting on.
