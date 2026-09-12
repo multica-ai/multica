@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -23,10 +24,16 @@ func TestHealthHandlerReportsCLIVersionAndTaskCounts(t *testing.T) {
 
 	d := &Daemon{
 		cfg: Config{
-			CLIVersion:    "v9.9.9",
-			DaemonID:      "daemon-test",
-			DeviceName:    "dev",
-			ServerBaseURL: "http://localhost:8080",
+			CLIVersion:         "v9.9.9",
+			DaemonID:           "daemon-test",
+			DeviceName:         "dev",
+			ServerBaseURL:      "http://localhost:8080",
+			GCEnabled:          true,
+			GCTTL:              72 * time.Hour,
+			GCCompletedTaskTTL: 14 * 24 * time.Hour,
+			GCOrphanTTL:        7 * 24 * time.Hour,
+			GCArtifactTTL:      12 * time.Hour,
+			WorkspacesRoot:     filepath.Join("relative", "..", "daemon-workspaces"),
 		},
 		workspaces: map[string]*workspaceState{},
 		logger:     slog.Default(),
@@ -69,11 +76,33 @@ func TestHealthHandlerReportsCLIVersionAndTaskCounts(t *testing.T) {
 	if got, want := raw["status"], "running"; got != want {
 		t.Errorf("status key: got %v, want %q", got, want)
 	}
+	wantRoot, err := filepath.Abs("daemon-workspaces")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := raw["workspaces_root"]; got != wantRoot {
+		t.Errorf("workspaces_root key: got %v, want %q", got, wantRoot)
+	}
 	// The desktop relies on the `os` key (runtime.GOOS) to detect a daemon it
 	// can't manage (e.g. Linux-in-WSL behind a Windows desktop). A rename or
 	// drop would silently re-break #3916, so lock both the key and its value.
 	if got, want := raw["os"], runtime.GOOS; got != want {
 		t.Errorf("os key: got %v, want %q", got, want)
+	}
+	policy, ok := raw["gc_policy"].(map[string]any)
+	if !ok {
+		t.Fatalf("gc_policy = %#v, want object", raw["gc_policy"])
+	}
+	for key, want := range map[string]any{
+		"enabled":                    true,
+		"ttl_seconds":                float64((72 * time.Hour) / time.Second),
+		"completed_task_ttl_seconds": float64((14 * 24 * time.Hour) / time.Second),
+		"orphan_ttl_seconds":         float64((7 * 24 * time.Hour) / time.Second),
+		"artifact_ttl_seconds":       float64((12 * time.Hour) / time.Second),
+	} {
+		if got := policy[key]; got != want {
+			t.Errorf("gc_policy.%s = %v, want %v", key, got, want)
+		}
 	}
 
 	// Also round-trip into the typed struct as a separate check that the
@@ -93,6 +122,9 @@ func TestHealthHandlerReportsCLIVersionAndTaskCounts(t *testing.T) {
 	}
 	if resp.ResourceWaitTaskCount != 1 {
 		t.Errorf("ResourceWaitTaskCount: got %d, want 1", resp.ResourceWaitTaskCount)
+	}
+	if resp.WorkspacesRoot != wantRoot {
+		t.Errorf("WorkspacesRoot: got %q, want %q", resp.WorkspacesRoot, wantRoot)
 	}
 }
 

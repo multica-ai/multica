@@ -216,7 +216,7 @@ Do not set `MULTICA_DAEMON_PORT` in the host shell, Compose service, or containe
 
 When the CLI runs inside a daemon-managed agent task, it does not load or modify these human-owned profile files. Multica API commands authenticate with the task-scoped credential injected by the daemon. `config show` and `config set` use private task-local state; human/local commands such as `login`, `logout`, `setup`, `workspace switch`, local runtime profile path changes, `daemon start` / `stop` / `restart`, `daemon logs`, and `daemon probe-runtimes` are unavailable. `auth status` does not print token material in this context.
 
-`daemon status` and `daemon disk-usage` stay available so an agent can inspect the runtime hosting it, scoped to that runtime: `status` probes the health port the daemon injected, and `disk-usage` scans the workspaces root the daemon injected. Neither accepts `--profile`, `disk-usage` also rejects `--all-profiles` and `--workspaces-root`, and its STATUS column is blank because resolving it would require the human's stored token. Use `du` and `df` for anything outside that scope.
+`daemon status` and `daemon disk-usage` stay available so an agent can inspect the runtime hosting it, scoped to that runtime: `status` probes the health port the daemon injected, and `disk-usage` scans the workspaces root the daemon injected. Neither accepts `--profile`, and `disk-usage` also rejects `--all-profiles` and `--workspaces-root`. Its STATUS and RESUME columns are blank because resolving them would require the human's stored token; retention estimates use the hosting daemon's effective GC policy only when its health endpoint confirms that it owns the scanned root. Use `du` and `df` for anything outside that scope.
 
 This protects implicit Multica CLI profile resolution while preserving the normal `HOME` and XDG variables used by other provider tools. It is not an OS filesystem boundary: processes running as the same system user may still open an explicitly known path. Use a dedicated user, container, VM, or equivalent isolation when that stronger guarantee is required.
 
@@ -288,7 +288,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | `daemon` | `start` | Start the local daemon | `--foreground`, `--device-name`, `--runtime-name`, `--workspaces-root`, `--poll-interval`, `--heartbeat-interval`, `--agent-timeout` (`0` means no limit), `--max-concurrent-tasks`, `--no-auto-update`; each has a matching `MULTICA_*` environment variable |
 | | `stop` / `status` / `restart` | Stop, check status, restart (`restart` takes the same flags as `start`) | |
 | | `logs` | View daemon logs | `--follow`, `--lines` |
-| | `disk-usage` | View local disk usage | `--by-workspace`, `--by-task`, `--top` |
+| | `disk-usage` | View local disk usage and task-environment retention | `--by-workspace`, `--by-task`, `--top`, `--output` |
 | `runtime` | `list/usage/activity/update/rename/delete` | View and manage runtimes | `delete`: `--cascade` (unbinds bound agents, preserves their data, and cancels their runs) |
 | | `profile list/create/update/delete` | Manage custom runtime profiles | |
 | | `profile set-path/unset-path <profile-id>` | Pin a local executable path (local only, never uploaded to the server) | |

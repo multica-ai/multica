@@ -20,16 +20,39 @@ import (
 // ResolveParentStatuses fills it in, because ScanDiskUsage itself is purely
 // local and .gc_meta.json does not persist a status.
 type TaskDiskUsage struct {
-	WorkspaceID       string `json:"workspace_id"`
-	WorkspaceShort    string `json:"workspace_short"`
-	TaskShort         string `json:"task_short"`
-	Path              string `json:"path"`
-	Kind              string `json:"kind"`
-	ParentID          string `json:"parent_id,omitempty"`
-	ParentStatus      string `json:"parent_status"`
-	AgeSeconds        int64  `json:"age_seconds"`
-	SizeBytes         int64  `json:"size_bytes"`
-	ArtifactSizeBytes int64  `json:"artifact_size_bytes"`
+	WorkspaceID        string     `json:"workspace_id"`
+	WorkspaceShort     string     `json:"workspace_short"`
+	TaskShort          string     `json:"task_short"`
+	TaskID             string     `json:"task_id,omitempty"`
+	Path               string     `json:"path"`
+	Kind               string     `json:"kind"`
+	ParentID           string     `json:"parent_id,omitempty"`
+	ParentStatus       string     `json:"parent_status"`
+	ParentUpdatedAt    *time.Time `json:"parent_updated_at,omitempty"`
+	CompletedAt        *time.Time `json:"completed_at,omitempty"`
+	LocalDirectory     *bool      `json:"local_directory"`
+	ResumeCandidate    *bool      `json:"resume_candidate"`
+	RetentionReason    string     `json:"retention_reason"`
+	EstimatedCleanupAt *time.Time `json:"estimated_cleanup_at,omitempty"`
+	AgeSeconds         int64      `json:"age_seconds"`
+	SizeBytes          int64      `json:"size_bytes"`
+	ArtifactSizeBytes  int64      `json:"artifact_size_bytes"`
+	parentFound        *bool
+	orphanAgeSeconds   int64
+	orphanAgeKnown     bool
+	managedWorkDirSeen *bool
+}
+
+// GCPolicySnapshot is the non-secret portion of the running daemon's effective
+// garbage-collection configuration. Disk-usage never reconstructs it from the
+// caller's environment: a background daemon may have been launched by Desktop
+// or with different environment variables, so only /health is authoritative.
+type GCPolicySnapshot struct {
+	Enabled                 bool  `json:"enabled"`
+	TTLSeconds              int64 `json:"ttl_seconds"`
+	CompletedTaskTTLSeconds int64 `json:"completed_task_ttl_seconds"`
+	OrphanTTLSeconds        int64 `json:"orphan_ttl_seconds"`
+	ArtifactTTLSeconds      int64 `json:"artifact_ttl_seconds"`
 }
 
 // WorkspaceDiskUsage aggregates per-workspace footprint across all tasks.
@@ -62,6 +85,7 @@ type DiskUsageReport struct {
 	TotalSizeBytes          int64                `json:"total_size_bytes"`
 	TotalArtifactSizeBytes  int64                `json:"total_artifact_size_bytes"`
 	TotalArtifactRatio      float64              `json:"total_artifact_ratio"`
+	GCPolicy                *GCPolicySnapshot    `json:"gc_policy,omitempty"`
 	// RepoCacheSizeBytes is the bare-repo cache (.repos) footprint. It is a
 	// sibling of the task directories, not one of them, so it is reported
 	// separately and deliberately excluded from Total*: those totals describe
@@ -312,6 +336,15 @@ func buildTaskUsage(taskDir, wsID, taskShort string, matcher artifactMatcher) Ta
 		Path:           taskDir,
 		Kind:           DiskUsageKindUnknown,
 	}
+	if info, err := os.Stat(taskDir); err == nil {
+		usage.orphanAgeSeconds = int64(time.Since(info.ModTime()).Seconds())
+		usage.orphanAgeKnown = true
+	}
+	managedWorkDirSeen := false
+	if info, err := os.Lstat(filepath.Join(taskDir, "workdir")); err == nil && info.IsDir() {
+		managedWorkDirSeen = true
+	}
+	usage.managedWorkDirSeen = &managedWorkDirSeen
 
 	metaPresent := false
 	if provenance, err := execenv.ReadManagedEnvProvenance(taskDir); err == nil && provenance != nil {
@@ -325,6 +358,9 @@ func buildTaskUsage(taskDir, wsID, taskShort string, matcher artifactMatcher) Ta
 			usage.WorkspaceID = workspaceID
 			usage.WorkspaceShort = ShortID(workspaceID)
 		}
+		if taskID := strings.TrimSpace(owner.TaskID); taskID != "" {
+			usage.TaskID = taskID
+		}
 	}
 	if meta, err := execenv.ReadGCMeta(taskDir); err == nil && meta != nil {
 		metaPresent = true
@@ -333,8 +369,22 @@ func buildTaskUsage(taskDir, wsID, taskShort string, matcher artifactMatcher) Ta
 			usage.WorkspaceShort = ShortID(workspaceID)
 		}
 		usage.Kind = string(meta.Kind)
+		if taskID := strings.TrimSpace(meta.TaskID); taskID != "" {
+			usage.TaskID = taskID
+		}
 		usage.ParentID = parentIDForMeta(meta)
+		localDirectory := meta.LocalDirectory
+		usage.LocalDirectory = &localDirectory
+		if localDirectory {
+			// A local_directory task root is never the managed environment reused
+			// by a follow-up. The project path may be used again, but the daemon
+			// deliberately provisions a fresh env root around it.
+			resumeCandidate := false
+			usage.ResumeCandidate = &resumeCandidate
+		}
 		if !meta.CompletedAt.IsZero() {
+			completedAt := meta.CompletedAt.UTC()
+			usage.CompletedAt = &completedAt
 			usage.AgeSeconds = int64(time.Since(meta.CompletedAt).Seconds())
 		} else if age, ok := gcMetaFileAge(taskDir); ok {
 			usage.AgeSeconds = int64(age.Seconds())
@@ -344,9 +394,7 @@ func buildTaskUsage(taskDir, wsID, taskShort string, matcher artifactMatcher) Ta
 	// Legacy readable metadata without completed_at uses its own file mtime,
 	// matching gcDecisionIssueResult's managed-only fallback.
 	if usage.AgeSeconds <= 0 && !metaPresent {
-		if info, err := os.Stat(taskDir); err == nil {
-			usage.AgeSeconds = int64(time.Since(info.ModTime()).Seconds())
-		}
+		usage.AgeSeconds = usage.orphanAgeSeconds
 	}
 
 	usage.SizeBytes, usage.ArtifactSizeBytes = taskSize(taskDir, matcher)
@@ -371,15 +419,15 @@ func parentIDForMeta(meta *execenv.GCMeta) string {
 	}
 }
 
-// ParentStatusFetcher resolves a batch of issue ids in one workspace to their
-// current status. Ids the server does not return (deleted, or invisible to
-// this token) must be omitted from the result rather than mapped to a
-// placeholder, so callers can tell "unresolved" from a real status.
-type ParentStatusFetcher func(ctx context.Context, workspaceID string, issueIDs []string) (map[string]string, error)
+// ParentStatusFetcher resolves a batch of issue ids and optional task ids in
+// one workspace to current issue state and resume-candidate state. Missing
+// issues remain explicit Found=false results; an omitted result means the
+// answer was unavailable (for example, against an older server).
+type ParentStatusFetcher func(ctx context.Context, workspaceID string, issueIDs, taskIDs []string) (map[string]IssueGCCheckResult, map[string]TaskEnvironmentGCCheckResult, error)
 
-// ResolveParentStatuses fills in ParentStatus on every issue-kind task in the
-// report. ScanDiskUsage is deliberately network-free — this is the opt-in
-// second pass that turns the STATUS column into real data.
+// ResolveParentStatuses fills in parent and resume state on every issue-kind
+// task in the report. ScanDiskUsage is deliberately network-free — this is the
+// opt-in second pass that turns the STATUS and RESUME columns into real data.
 //
 // Only issue-kind tasks are resolved: they are the overwhelming majority of
 // task dirs and the only kind with a batch reconciliation endpoint. Chat,
@@ -396,10 +444,14 @@ func ResolveParentStatuses(ctx context.Context, report *DiskUsageReport, fetch P
 	}
 
 	idsByWorkspace := map[string][]string{}
+	taskIDsByWorkspace := map[string][]string{}
 	seen := map[string]map[string]bool{}
 	for _, task := range report.Tasks {
 		if task.Kind != string(execenv.GCKindIssue) || task.ParentID == "" {
 			continue
+		}
+		if task.TaskID != "" && (task.LocalDirectory == nil || !*task.LocalDirectory) {
+			taskIDsByWorkspace[task.WorkspaceID] = append(taskIDsByWorkspace[task.WorkspaceID], task.TaskID)
 		}
 		if seen[task.WorkspaceID] == nil {
 			seen[task.WorkspaceID] = map[string]bool{}
@@ -417,14 +469,21 @@ func ResolveParentStatuses(ctx context.Context, report *DiskUsageReport, fetch P
 	}
 
 	var firstErr error
-	statuses := make(map[string]map[string]string, len(idsByWorkspace))
+	statuses := make(map[string]map[string]IssueGCCheckResult, len(idsByWorkspace))
+	resumeCandidates := make(map[string]map[string]TaskEnvironmentGCCheckResult, len(idsByWorkspace))
 	for workspaceID, ids := range idsByWorkspace {
-		resolved := make(map[string]string, len(ids))
+		resolved := make(map[string]IssueGCCheckResult, len(ids))
+		resolvedCandidates := make(map[string]TaskEnvironmentGCCheckResult)
+		allTaskIDs := taskIDsByWorkspace[workspaceID]
 		// Same chunk size the GC loop uses, so one oversized root cannot trip
 		// the server's batch cap.
-		for start := 0; start < len(ids); start += issueGCBatchSize {
+		batchCount := max(len(ids), len(allTaskIDs))
+		for start := 0; start < batchCount; start += issueGCBatchSize {
 			end := min(start+issueGCBatchSize, len(ids))
-			chunk, err := fetch(ctx, workspaceID, ids[start:end])
+			taskStart := min(start, len(allTaskIDs))
+			taskEnd := min(start+issueGCBatchSize, len(allTaskIDs))
+			issueStart := min(start, len(ids))
+			chunk, candidateChunk, err := fetch(ctx, workspaceID, ids[issueStart:end], allTaskIDs[taskStart:taskEnd])
 			if err != nil {
 				if firstErr == nil {
 					firstErr = err
@@ -434,8 +493,12 @@ func ResolveParentStatuses(ctx context.Context, report *DiskUsageReport, fetch P
 			for id, status := range chunk {
 				resolved[id] = status
 			}
+			for id, candidate := range candidateChunk {
+				resolvedCandidates[id] = candidate
+			}
 		}
 		statuses[workspaceID] = resolved
+		resumeCandidates[workspaceID] = resolvedCandidates
 	}
 
 	for i := range report.Tasks {
@@ -443,11 +506,136 @@ func ResolveParentStatuses(ctx context.Context, report *DiskUsageReport, fetch P
 		if task.Kind != string(execenv.GCKindIssue) || task.ParentID == "" {
 			continue
 		}
-		if status, ok := statuses[task.WorkspaceID][task.ParentID]; ok {
-			task.ParentStatus = status
+		if status, ok := statuses[task.WorkspaceID][task.ParentID]; ok && status.Err == nil {
+			found := status.Found
+			task.parentFound = &found
+			if status.Found {
+				task.ParentStatus = status.Status
+				if !status.UpdatedAt.IsZero() {
+					updatedAt := status.UpdatedAt.UTC()
+					task.ParentUpdatedAt = &updatedAt
+				}
+			}
+		}
+		if candidate, ok := resumeCandidates[task.WorkspaceID][task.TaskID]; ok && candidate.Found {
+			value := candidate.ResumeCandidate
+			// The server identifies the canonical prior_work_dir row, while the
+			// local scan can prove that the standard managed workdir is already
+			// gone. Both must agree before calling an environment resumable.
+			if value && task.managedWorkDirSeen != nil && !*task.managedWorkDirSeen {
+				value = false
+			}
+			task.ResumeCandidate = &value
 		}
 	}
 	return firstErr
+}
+
+const (
+	RetentionPolicyUnavailable       = "policy_unavailable"
+	RetentionGCDisabled              = "gc_disabled"
+	RetentionLocalDirectory          = "local_directory"
+	RetentionMetadataUnavailable     = "metadata_unavailable"
+	RetentionParentNotAccessible     = "parent_not_accessible"
+	RetentionParentStatusUnavailable = "parent_status_unavailable"
+	RetentionParentActive            = "parent_active"
+	RetentionTerminalParentGrace     = "terminal_parent_grace"
+	RetentionCompletedTaskGrace      = "completed_task_grace"
+	RetentionCleanupEligible         = "cleanup_eligible"
+	RetentionKindPolicyUnavailable   = "kind_policy_unavailable"
+)
+
+// ApplyDiskUsageRetentionPolicy explains whole-environment retention without
+// changing it. Estimates deliberately cover full task-root cleanup only;
+// artifact cleanup follows a separate policy and must not be presented as if
+// the environment itself will disappear. The issue branch mirrors
+// gcDecisionIssueResult's ordering and fail-closed gates.
+func ApplyDiskUsageRetentionPolicy(report *DiskUsageReport, policy *GCPolicySnapshot, now time.Time) {
+	if report == nil {
+		return
+	}
+	report.GCPolicy = policy
+	for i := range report.Tasks {
+		task := &report.Tasks[i]
+		task.RetentionReason = RetentionKindPolicyUnavailable
+		task.EstimatedCleanupAt = nil
+
+		if task.LocalDirectory != nil && *task.LocalDirectory {
+			resumeCandidate := false
+			task.ResumeCandidate = &resumeCandidate
+			task.RetentionReason = RetentionLocalDirectory
+			continue
+		}
+		if policy == nil {
+			task.RetentionReason = RetentionPolicyUnavailable
+			continue
+		}
+		if !policy.Enabled {
+			task.RetentionReason = RetentionGCDisabled
+			continue
+		}
+		if task.Kind == DiskUsageKindUnknown || task.ParentID == "" {
+			applyOrphanEstimate(task, report.GeneratedAt, policy.OrphanTTLSeconds, now, RetentionMetadataUnavailable)
+			continue
+		}
+		if task.Kind != string(execenv.GCKindIssue) {
+			continue
+		}
+		if task.parentFound != nil && !*task.parentFound {
+			applyOrphanEstimate(task, report.GeneratedAt, policy.OrphanTTLSeconds, now, RetentionParentNotAccessible)
+			continue
+		}
+		if !isKnownIssueStatus(task.ParentStatus) {
+			task.RetentionReason = RetentionParentStatusUnavailable
+			continue
+		}
+
+		var eligibleAt *time.Time
+		retentionReason := RetentionParentActive
+		terminal := task.ParentStatus == "done" || task.ParentStatus == "cancelled"
+		if terminal && task.ParentUpdatedAt != nil {
+			deadline := task.ParentUpdatedAt.Add(time.Duration(policy.TTLSeconds) * time.Second)
+			eligibleAt = timePtr(deadline)
+			retentionReason = RetentionTerminalParentGrace
+		}
+		if policy.CompletedTaskTTLSeconds > 0 && task.CompletedAt != nil {
+			deadline := task.CompletedAt.Add(time.Duration(policy.CompletedTaskTTLSeconds) * time.Second)
+			if eligibleAt == nil || deadline.Before(*eligibleAt) {
+				eligibleAt = timePtr(deadline)
+				retentionReason = RetentionCompletedTaskGrace
+			}
+		}
+		if terminal && eligibleAt == nil {
+			task.RetentionReason = RetentionParentStatusUnavailable
+			continue
+		}
+		task.RetentionReason = retentionReason
+		task.EstimatedCleanupAt = eligibleAt
+		if eligibleAt != nil && !eligibleAt.After(now) {
+			task.RetentionReason = RetentionCleanupEligible
+		}
+	}
+}
+
+func applyOrphanEstimate(task *TaskDiskUsage, generatedAt time.Time, orphanTTLSeconds int64, now time.Time, reason string) {
+	ageSeconds := task.orphanAgeSeconds
+	if !task.orphanAgeKnown {
+		// Hand-built reports and legacy callers do not carry the private mtime
+		// age. AgeSeconds is the same signal for metadata-free rows and remains
+		// the safest available fallback for an inaccessible parent.
+		ageSeconds = task.AgeSeconds
+	}
+	eligibleAt := generatedAt.Add(time.Duration(orphanTTLSeconds-ageSeconds) * time.Second)
+	if !eligibleAt.After(now) {
+		reason = RetentionCleanupEligible
+	}
+	task.RetentionReason = reason
+	task.EstimatedCleanupAt = timePtr(eligibleAt)
+}
+
+func timePtr(value time.Time) *time.Time {
+	value = value.UTC()
+	return &value
 }
 
 // taskSize walks taskDir and returns (totalBytes, artifactBytes). It never

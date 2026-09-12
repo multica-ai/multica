@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
@@ -1241,6 +1242,400 @@ func TestBatchIssueGCCheck_WithDaemonToken(t *testing.T) {
 	}, "00000000-0000-0000-0000-000000000000", "attacker-daemon")
 	req = withURLParam(req, "workspaceId", testWorkspaceID)
 	w = testutil.Call(t, testHandler.BatchIssueGCCheck, req).Want(http.StatusNotFound)
+}
+
+func TestBatchIssueGCCheck_ReportsCurrentResumeCandidate(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := handlerTestRuntimeID(t)
+	agentID := dbfx.Agent(t, "disk usage resume candidate agent", runtimeID)
+	issueID := dbfx.Issue(t, "disk usage resume candidate issue")
+	olderTaskID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id":     issueID,
+		"runtime_id":   runtimeID,
+		"status":       "completed",
+		"session_id":   uuid.NewString(),
+		"work_dir":     "/tmp/multica-older/workdir",
+		"completed_at": testutil.Raw("now() - interval '2 hours'"),
+	})
+	currentTaskID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id":     issueID,
+		"runtime_id":   runtimeID,
+		"status":       "completed",
+		"session_id":   uuid.NewString(),
+		"work_dir":     "/tmp/multica-current/workdir",
+		"completed_at": testutil.Raw("now() - interval '1 hour'"),
+	})
+	localIssueID := dbfx.Issue(t, "disk usage finalized local worktree issue")
+	localWorktreeTaskID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id":         localIssueID,
+		"runtime_id":       runtimeID,
+		"status":           "completed",
+		"session_id":       uuid.NewString(),
+		"work_dir":         "/tmp/multica-local-worktree/worktree",
+		"durable_work_dir": "/tmp/multica-user-project",
+		"completed_at":     testutil.Raw("now() - interval '30 minutes'"),
+	})
+	missingTaskID := "00000000-0000-0000-0000-000000000099"
+
+	req := newDaemonTokenRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check", map[string]any{
+		"issue_ids": []string{issueID, localIssueID},
+		"task_ids":  []string{olderTaskID, currentTaskID, localWorktreeTaskID, missingTaskID},
+	}, testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "workspaceId", testWorkspaceID)
+	w := testutil.Call(t, testHandler.BatchIssueGCCheck, req).Want(http.StatusOK)
+
+	var resp struct {
+		TaskEnvironments []struct {
+			TaskID          string `json:"task_id"`
+			Found           bool   `json:"found"`
+			ResumeCandidate bool   `json:"resume_candidate"`
+		} `json:"task_environments"`
+	}
+	w.JSON(&resp)
+	if len(resp.TaskEnvironments) != 4 {
+		t.Fatalf("task_environments length = %d, want 4: %s", len(resp.TaskEnvironments), w.Body.String())
+	}
+	want := map[string]struct {
+		found     bool
+		candidate bool
+	}{
+		olderTaskID:         {found: true, candidate: false},
+		currentTaskID:       {found: true, candidate: true},
+		localWorktreeTaskID: {found: true, candidate: false},
+		missingTaskID:       {found: false, candidate: false},
+	}
+	for _, item := range resp.TaskEnvironments {
+		expected, ok := want[item.TaskID]
+		if !ok {
+			t.Fatalf("unexpected task environment result: %+v", item)
+		}
+		if item.Found != expected.found || item.ResumeCandidate != expected.candidate {
+			t.Errorf("task environment %s = found:%v candidate:%v, want found:%v candidate:%v",
+				item.TaskID, item.Found, item.ResumeCandidate, expected.found, expected.candidate)
+		}
+	}
+}
+
+func TestListIssueTaskEnvironmentSubjectsMatchesCanonicalSessionSelection(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := handlerTestRuntimeID(t)
+	agentID := dbfx.Agent(t, "bulk resume equivalence agent", runtimeID)
+	type scope struct {
+		name        string
+		issue       string
+		taskID      string
+		wantWorkDir string
+	}
+	scopes := make([]scope, 0, 24)
+
+	healthyIssue := dbfx.Issue(t, "bulk resume equivalence healthy")
+	dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": healthyIssue, "runtime_id": runtimeID, "status": "completed",
+		"session_id": "healthy-old", "work_dir": "/tmp/equivalence-healthy-old/workdir",
+		"completed_at": testutil.Raw("now() - interval '2 hours'"),
+	})
+	healthyTask := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": healthyIssue, "runtime_id": runtimeID, "status": "completed",
+		"session_id": "healthy-current", "work_dir": "/tmp/equivalence-healthy-current/workdir",
+		"completed_at": testutil.Raw("now() - interval '1 hour'"),
+	})
+	scopes = append(scopes, scope{"healthy latest session", healthyIssue, healthyTask, "/tmp/equivalence-healthy-current/workdir"})
+
+	poisonIssue := dbfx.Issue(t, "bulk resume equivalence poisoned")
+	poisonFallback := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": poisonIssue, "runtime_id": runtimeID, "status": "completed",
+		"session_id": "poison-fallback", "work_dir": "/tmp/equivalence-poison-fallback/workdir",
+		"completed_at": testutil.Raw("now() - interval '3 hours'"),
+	})
+	dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": poisonIssue, "runtime_id": runtimeID, "status": "completed",
+		"session_id": "poisoned-session", "work_dir": "/tmp/equivalence-poisoned/workdir",
+		"completed_at": testutil.Raw("now() - interval '2 hours'"),
+	})
+	dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": poisonIssue, "runtime_id": runtimeID, "status": "failed",
+		"session_id": "poisoned-session", "work_dir": "/tmp/equivalence-poisoned/workdir",
+		"failure_reason": "api_invalid_request", "error": "400 invalid_request_error",
+		"completed_at": testutil.Raw("now() - interval '1 hour'"),
+	})
+	scopes = append(scopes, scope{"poisoned latest state", poisonIssue, poisonFallback, "/tmp/equivalence-poison-fallback/workdir"})
+
+	retiredIssue := dbfx.Issue(t, "bulk resume equivalence retired")
+	retiredFallback := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": retiredIssue, "runtime_id": runtimeID, "status": "completed",
+		"session_id": "retired-fallback", "work_dir": "/tmp/equivalence-retired-fallback/workdir",
+		"completed_at": testutil.Raw("now() - interval '3 hours'"),
+	})
+	dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": retiredIssue, "runtime_id": runtimeID, "status": "completed",
+		"session_id": "explicitly-retired", "work_dir": "/tmp/equivalence-retired/workdir",
+		"completed_at": testutil.Raw("now() - interval '2 hours'"),
+	})
+	dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": retiredIssue, "runtime_id": runtimeID, "status": "completed",
+		"session_id": nil, "retired_session_id": "explicitly-retired",
+		"completed_at": testutil.Raw("now() - interval '1 hour'"),
+	})
+	scopes = append(scopes, scope{"explicitly retired session", retiredIssue, retiredFallback, "/tmp/equivalence-retired-fallback/workdir"})
+
+	overflowIssue := dbfx.Issue(t, "bulk resume equivalence overflow")
+	overflowTask := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": overflowIssue, "runtime_id": runtimeID, "status": "completed",
+		"session_id": "overflowed-session", "work_dir": "/tmp/equivalence-overflow/workdir",
+		"completed_at": testutil.Raw("now() - interval '2 hours'"),
+	})
+	dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": overflowIssue, "runtime_id": runtimeID, "status": "failed",
+		"session_id": nil, "failure_reason": "codex_resume_oversized",
+		"error":        "thread/resume failed: token too long",
+		"completed_at": testutil.Raw("now() - interval '1 hour'"),
+	})
+	scopes = append(scopes, scope{"resume overflow cutoff", overflowIssue, overflowTask, ""})
+
+	unsafeReasons := []string{
+		"iteration_limit",
+		"agent_fallback_message",
+		"api_invalid_request",
+		"codex_semantic_inactivity",
+		"agent_error.context_overflow",
+		"codex_resume_oversized",
+	}
+	for i, reason := range unsafeReasons {
+		issueID := dbfx.Issue(t, "bulk resume equivalence reason "+reason)
+		fallbackDir := fmt.Sprintf("/tmp/equivalence-reason-%d-fallback/workdir", i)
+		fallbackTask := dbfx.Task(t, agentID, testutil.Cols{
+			"issue_id": issueID, "runtime_id": runtimeID, "status": "completed",
+			"session_id": fmt.Sprintf("reason-%d-fallback", i), "work_dir": fallbackDir,
+			"completed_at": testutil.Raw("now() - interval '3 hours'"),
+		})
+		dbfx.Task(t, agentID, testutil.Cols{
+			"issue_id": issueID, "runtime_id": runtimeID, "status": "failed",
+			"session_id":     fmt.Sprintf("reason-%d-poisoned", i),
+			"work_dir":       fmt.Sprintf("/tmp/equivalence-reason-%d-poisoned/workdir", i),
+			"failure_reason": reason,
+			"completed_at":   testutil.Raw("now() - interval '1 hour'"),
+		})
+		wantWorkDir := fallbackDir
+		if reason == "codex_resume_oversized" {
+			// This reason also establishes the scope-wide time cutoff, so every
+			// older session is ineligible even when it is otherwise healthy.
+			wantWorkDir = ""
+		}
+		scopes = append(scopes, scope{"unsafe reason " + reason, issueID, fallbackTask, wantWorkDir})
+	}
+
+	textCases := []struct {
+		name       string
+		errorText  string
+		wantPoison bool
+	}{
+		{"legacy invalid request", "provider returned 400 invalid_request_error", true},
+		{"invalid request needs both markers", "provider returned status 400", false},
+		{"legacy oversized image", "image dimensions exceed max allowed size at image.source.base64.data", true},
+		{"oversized image needs both markers", "image dimensions exceed max allowed size", false},
+		{"unresolved authentication", "Could not resolve authentication method for provider", true},
+		{"empty assistant history", "message at position 7 with role 'assistant' must not be empty", true},
+		{"empty error needs history locator", "validation field must not be empty", false},
+	}
+	for i, tc := range textCases {
+		issueID := dbfx.Issue(t, "bulk resume equivalence text "+tc.name)
+		fallbackDir := fmt.Sprintf("/tmp/equivalence-text-%d-fallback/workdir", i)
+		fallbackTask := dbfx.Task(t, agentID, testutil.Cols{
+			"issue_id": issueID, "runtime_id": runtimeID, "status": "completed",
+			"session_id": fmt.Sprintf("text-%d-fallback", i), "work_dir": fallbackDir,
+			"completed_at": testutil.Raw("now() - interval '3 hours'"),
+		})
+		candidateDir := fmt.Sprintf("/tmp/equivalence-text-%d-current/workdir", i)
+		dbfx.Task(t, agentID, testutil.Cols{
+			"issue_id": issueID, "runtime_id": runtimeID, "status": "failed",
+			"session_id": fmt.Sprintf("text-%d-current", i), "work_dir": candidateDir,
+			"failure_reason": "agent_error.unknown", "error": tc.errorText,
+			"completed_at": testutil.Raw("now() - interval '1 hour'"),
+		})
+		wantWorkDir := candidateDir
+		if tc.wantPoison {
+			wantWorkDir = fallbackDir
+		}
+		scopes = append(scopes, scope{tc.name, issueID, fallbackTask, wantWorkDir})
+	}
+
+	benignIssue := dbfx.Issue(t, "bulk resume equivalence benign failure")
+	benignTask := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": benignIssue, "runtime_id": runtimeID, "status": "failed",
+		"session_id": "benign-current", "work_dir": "/tmp/equivalence-benign-current/workdir",
+		"failure_reason": "agent_error.provider_network", "error": "connection reset",
+		"completed_at": testutil.Raw("now() - interval '1 hour'"),
+	})
+	scopes = append(scopes, scope{"benign failed session", benignIssue, benignTask, "/tmp/equivalence-benign-current/workdir"})
+
+	cancelledIssue := dbfx.Issue(t, "bulk resume equivalence cancelled")
+	cancelledTask := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": cancelledIssue, "runtime_id": runtimeID, "status": "cancelled",
+		"session_id": "cancelled-current", "work_dir": "/tmp/equivalence-cancelled-current/workdir",
+		"completed_at": testutil.Raw("now() - interval '1 hour'"),
+	})
+	scopes = append(scopes, scope{"cancelled session", cancelledIssue, cancelledTask, "/tmp/equivalence-cancelled-current/workdir"})
+
+	recoveredIssue := dbfx.Issue(t, "bulk resume equivalence recovered session")
+	recoveredTask := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": recoveredIssue, "runtime_id": runtimeID, "status": "completed",
+		"session_id": "recovered-session", "work_dir": "/tmp/equivalence-recovered/workdir",
+		"completed_at": testutil.Raw("now() - interval '3 hours'"),
+	})
+	dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": recoveredIssue, "runtime_id": runtimeID, "status": "failed",
+		"session_id": "recovered-session", "work_dir": "/tmp/equivalence-recovered/workdir",
+		"failure_reason": "api_invalid_request", "completed_at": testutil.Raw("now() - interval '2 hours'"),
+	})
+	dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": recoveredIssue, "runtime_id": runtimeID, "status": "completed",
+		"session_id": "recovered-session", "work_dir": "/tmp/equivalence-recovered/workdir",
+		"completed_at": testutil.Raw("now() - interval '1 hour'"),
+	})
+	scopes = append(scopes, scope{"same session recovers", recoveredIssue, recoveredTask, "/tmp/equivalence-recovered/workdir"})
+
+	postOverflowIssue := dbfx.Issue(t, "bulk resume equivalence post overflow")
+	postOverflowTask := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": postOverflowIssue, "runtime_id": runtimeID, "status": "completed",
+		"session_id": "pre-overflow", "work_dir": "/tmp/equivalence-pre-overflow/workdir",
+		"completed_at": testutil.Raw("now() - interval '3 hours'"),
+	})
+	dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": postOverflowIssue, "runtime_id": runtimeID, "status": "failed",
+		"session_id": nil, "failure_reason": "codex_resume_oversized",
+		"completed_at": testutil.Raw("now() - interval '2 hours'"),
+	})
+	dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": postOverflowIssue, "runtime_id": runtimeID, "status": "completed",
+		"session_id": "post-overflow", "work_dir": "/tmp/equivalence-post-overflow/workdir",
+		"completed_at": testutil.Raw("now() - interval '1 hour'"),
+	})
+	scopes = append(scopes, scope{"fresh session after overflow", postOverflowIssue, postOverflowTask, "/tmp/equivalence-post-overflow/workdir"})
+
+	taskIDs := make([]pgtype.UUID, 0, len(scopes))
+	for _, item := range scopes {
+		taskIDs = append(taskIDs, parseUUID(item.taskID))
+	}
+	rows, err := testHandler.Queries.ListIssueTaskEnvironmentSubjects(ctx, db.ListIssueTaskEnvironmentSubjectsParams{
+		WorkspaceID: parseUUID(testWorkspaceID),
+		TaskIds:     taskIDs,
+	})
+	if err != nil {
+		t.Fatalf("ListIssueTaskEnvironmentSubjects: %v", err)
+	}
+	bulkByTask := make(map[string]pgtype.Text, len(rows))
+	for _, row := range rows {
+		bulkByTask[uuidToString(row.ID)] = row.CanonicalWorkDir
+	}
+
+	for _, item := range scopes {
+		t.Run(item.name, func(t *testing.T) {
+			bulk, found := bulkByTask[item.taskID]
+			if !found {
+				t.Fatalf("bulk query omitted requested task %s", item.taskID)
+			}
+			single, singleErr := testHandler.Queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+				AgentID: parseUUID(agentID),
+				IssueID: parseUUID(item.issue),
+			})
+			if errors.Is(singleErr, pgx.ErrNoRows) {
+				if bulk.Valid {
+					t.Fatalf("bulk canonical workdir = %q, single-scope query found no candidate", bulk.String)
+				}
+				if item.wantWorkDir != "" {
+					t.Fatalf("single-scope query found no candidate, want %q", item.wantWorkDir)
+				}
+				return
+			}
+			if singleErr != nil {
+				t.Fatalf("GetLastTaskSession: %v", singleErr)
+			}
+			if bulk.Valid != single.WorkDir.Valid || bulk.String != single.WorkDir.String {
+				t.Fatalf("bulk canonical workdir = %+v, single-scope workdir = %+v", bulk, single.WorkDir)
+			}
+			if !single.WorkDir.Valid || single.WorkDir.String != item.wantWorkDir {
+				t.Fatalf("canonical workdir = %+v, want %q", single.WorkDir, item.wantWorkDir)
+			}
+		})
+	}
+}
+
+func TestBatchIssueGCCheckHandlesMaximumDistinctTaskScopes(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := handlerTestRuntimeID(t)
+	agentID := dbfx.Agent(t, "maximum batch resume agent", runtimeID)
+	const titlePrefix = "maximum batch resume scope "
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id IN (SELECT id FROM issue WHERE workspace_id = $1 AND title LIKE $2)`, testWorkspaceID, titlePrefix+"%")
+		_, _ = testPool.Exec(ctx, `DELETE FROM issue WHERE workspace_id = $1 AND title LIKE $2`, testWorkspaceID, titlePrefix+"%")
+	})
+
+	rows, err := testPool.Query(ctx, `
+		WITH created_issues AS (
+			INSERT INTO issue (
+				workspace_id, title, status, priority, creator_type, creator_id, position, number
+			)
+			SELECT $1, $2 || n::text, 'todo', 'none', 'member', $3, 0, -2000000000 + n
+			FROM generate_series(1, $4::integer) AS n
+			RETURNING id, number
+		), created_tasks AS (
+			INSERT INTO agent_task_queue (
+				agent_id, issue_id, runtime_id, status, priority, session_id, work_dir, completed_at
+			)
+			SELECT $5, id, $6, 'completed', 0, gen_random_uuid()::text,
+			       '/tmp/multica-maximum-batch-' || number::text || '/workdir', now()
+			FROM created_issues
+			RETURNING id
+		)
+		SELECT id FROM created_tasks
+	`, testWorkspaceID, titlePrefix, testUserID, maxIssueGCBatchSize, agentID, runtimeID)
+	if err != nil {
+		t.Fatalf("create maximum batch fixtures: %v", err)
+	}
+	defer rows.Close()
+	taskIDs := make([]string, 0, maxIssueGCBatchSize)
+	for rows.Next() {
+		var taskID string
+		if err := rows.Scan(&taskID); err != nil {
+			t.Fatalf("scan task id: %v", err)
+		}
+		taskIDs = append(taskIDs, taskID)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read maximum batch fixtures: %v", err)
+	}
+	if len(taskIDs) != maxIssueGCBatchSize {
+		t.Fatalf("created %d task scopes, want %d", len(taskIDs), maxIssueGCBatchSize)
+	}
+
+	req := newDaemonTokenRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check", map[string]any{
+		"task_ids": taskIDs,
+	}, testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "workspaceId", testWorkspaceID)
+	w := testutil.Call(t, testHandler.BatchIssueGCCheck, req).Want(http.StatusOK)
+	var resp struct {
+		TaskEnvironments []batchIssueTaskEnvironmentItem `json:"task_environments"`
+	}
+	w.JSON(&resp)
+	if len(resp.TaskEnvironments) != maxIssueGCBatchSize {
+		t.Fatalf("task environments = %d, want %d", len(resp.TaskEnvironments), maxIssueGCBatchSize)
+	}
+	for _, item := range resp.TaskEnvironments {
+		if !item.Found || !item.ResumeCandidate {
+			t.Fatalf("task environment %s = found:%v candidate:%v, want true/true", item.TaskID, item.Found, item.ResumeCandidate)
+		}
+	}
 }
 
 // withURLParams merges the given chi URL parameters into the request context.

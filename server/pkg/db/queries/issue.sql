@@ -77,6 +77,86 @@ FROM issue
 WHERE workspace_id = sqlc.arg('workspace_id')
   AND id = ANY(sqlc.arg('issue_ids')::uuid[]);
 
+-- name: ListIssueTaskEnvironmentSubjects :many
+-- Resolve task ids supplied by a local daemon diagnostic to their trusted
+-- environment and the canonical resumable workdir for its (agent, issue)
+-- scope. The workspace join is the authorization boundary: callers cannot use
+-- a task id to inspect another workspace. Selection below is the set-based
+-- equivalent of GetLastTaskSession; keep its poison, retirement, and overflow
+-- filters in sync with that query.
+WITH requested AS (
+    SELECT t.id, t.agent_id, t.issue_id, t.work_dir, t.durable_work_dir
+    FROM agent_task_queue t
+    JOIN issue i ON i.id = t.issue_id
+    WHERE i.workspace_id = sqlc.arg('workspace_id')
+      AND t.id = ANY(sqlc.arg('task_ids')::uuid[])
+), scopes AS (
+    SELECT DISTINCT agent_id, issue_id
+    FROM requested
+), retired_sessions AS (
+    SELECT DISTINCT r.agent_id, r.issue_id, r.retired_session_id AS session_id
+    FROM agent_task_queue r
+    JOIN scopes s ON s.agent_id = r.agent_id AND s.issue_id = r.issue_id
+    WHERE r.retired_session_id IS NOT NULL
+), resume_overflow_at AS (
+    SELECT t.agent_id, t.issue_id,
+           MAX(COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at)) AS at
+    FROM agent_task_queue t
+    JOIN scopes s ON s.agent_id = t.agent_id AND s.issue_id = t.issue_id
+    WHERE t.status = 'failed'
+      AND (
+        COALESCE(t.failure_reason, '') = 'codex_resume_oversized'
+        OR (COALESCE(t.error, '') ILIKE '%thread/resume failed%' AND COALESCE(t.error, '') ILIKE '%token too long%')
+      )
+    GROUP BY t.agent_id, t.issue_id
+), latest_per_session AS (
+    SELECT DISTINCT ON (t.agent_id, t.issue_id, t.session_id)
+        t.agent_id, t.issue_id, t.session_id, t.work_dir, t.status,
+        t.failure_reason, t.error,
+        COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) AS terminal_at
+    FROM agent_task_queue t
+    JOIN scopes s ON s.agent_id = t.agent_id AND s.issue_id = t.issue_id
+    WHERE t.session_id IS NOT NULL
+      AND t.status IN ('completed', 'failed', 'cancelled')
+    ORDER BY t.agent_id, t.issue_id, t.session_id,
+             COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) DESC
+), eligible_sessions AS (
+    SELECT l.agent_id, l.issue_id, l.work_dir,
+           ROW_NUMBER() OVER (
+               PARTITION BY l.agent_id, l.issue_id
+               ORDER BY l.terminal_at DESC
+           ) AS candidate_rank
+    FROM latest_per_session l
+    LEFT JOIN retired_sessions r
+      ON r.agent_id = l.agent_id
+     AND r.issue_id = l.issue_id
+     AND r.session_id = l.session_id
+    LEFT JOIN resume_overflow_at o
+      ON o.agent_id = l.agent_id AND o.issue_id = l.issue_id
+    WHERE r.session_id IS NULL
+      AND (
+        l.status IN ('completed', 'cancelled')
+        OR (
+          l.status = 'failed'
+          AND COALESCE(l.failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized')
+          AND NOT (COALESCE(l.error, '') ILIKE '%400%' AND COALESCE(l.error, '') ILIKE '%invalid_request_error%')
+          AND NOT (COALESCE(l.error, '') ILIKE '%image dimensions exceed max allowed size%' AND COALESCE(l.error, '') ILIKE '%image.source.base64.data%')
+          AND NOT (COALESCE(l.error, '') ILIKE '%could not resolve authentication method%')
+          AND NOT (COALESCE(l.error, '') ~* 'must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty'
+                   AND COALESCE(l.error, '') ~* 'role[^a-z0-9]{0,2}assistant|assistant message|message at position|messages\.[0-9]|messages\[[0-9]')
+        )
+      )
+      AND (o.at IS NULL OR l.terminal_at > o.at)
+), canonical AS (
+    SELECT agent_id, issue_id, work_dir
+    FROM eligible_sessions
+    WHERE candidate_rank = 1
+)
+SELECT q.id, q.agent_id, q.issue_id, q.work_dir, q.durable_work_dir,
+       c.work_dir AS canonical_work_dir
+FROM requested q
+LEFT JOIN canonical c ON c.agent_id = q.agent_id AND c.issue_id = q.issue_id;
+
 -- name: GetIssueInWorkspace :one
 SELECT * FROM issue
 WHERE id = $1 AND workspace_id = $2;
