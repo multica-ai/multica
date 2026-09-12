@@ -797,6 +797,14 @@ jobs:
         # outside this PR; the normal backend job still runs the full package.
         run: go test ./internal/daemon/execenv -run '^TestPrepareIsolated_WindowsKillsDescendantBeforeRetry$' -count=1 -timeout=5m
 
+      - name: Test Windows daemon local-skill discovery
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        working-directory: server
+        # These fixtures must redirect both the Windows user profile and the
+        # platform-native Hermes home; otherwise discovery scans the runner's
+        # real skills instead of the test directories.
+        run: go test ./internal/daemon -v -run '^(TestListRuntimeLocalSkills_HermesFollowsTaskHome|TestLocalSkills_DiscoversACPProviderRoots)$' -count=1 -timeout=5m
+
       - name: Test Windows agent launcher argv/stdin handling
         if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
