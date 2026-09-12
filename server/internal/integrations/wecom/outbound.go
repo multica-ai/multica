@@ -286,7 +286,17 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// noise the user has to scroll past.
 	if content != "" {
 		if err := sender.sendTextCtx(ctx, binding.ChannelChatID, chatType, content); err != nil {
-			return err
+			if !errors.Is(err, errPartiallySent) {
+				return err
+			}
+			// An earlier piece of this answer is already in the chat. Neither
+			// ending the caller would otherwise pick is right: returning the
+			// error records a drop, and an operator reading that as "resend
+			// it" would print the opening a second time. Some of the words
+			// did reach the person, so it counts as delivered and the log
+			// says how much did not.
+			o.logger.WarnContext(ctx, "wecom outbound: only part of a long answer reached the chat",
+				"error", err, "chat_session_id", e.ChatSessionID)
 		}
 		o.delivered()
 	}

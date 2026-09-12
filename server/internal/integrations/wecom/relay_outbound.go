@@ -1339,6 +1339,11 @@ func provablyNotSent(err error) bool {
 	switch {
 	case err == nil:
 		return false
+	case errors.Is(err, errPartiallySent):
+		// An answer past the cap goes out as several frames, and a failure on
+		// the second says nothing about the first, which the user is already
+		// reading. Retrying such a send would repeat what landed.
+		return false
 	case errors.As(err, &apiErr):
 		return false
 	case errors.Is(err, errAckTimeout):
