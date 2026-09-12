@@ -35,7 +35,7 @@ import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import type { IssueFilters } from "../utils/filter";
 import type { ChildProgress } from "../components/list-row";
 import { IssueTableExportIntegrityError } from "../components/table-view-model";
-import type { IssueSurfaceMode } from "./types";
+import { PLAN_VIEW_MODES, type IssueSurfaceMode } from "./types";
 import type { IssueSurfaceActions } from "./actions-context";
 import {
   type IssueSurfaceSelection,
@@ -69,6 +69,11 @@ export interface IssueSurfaceController {
   createDefaults: IssueCreateDefaults;
   viewMode: IssueSurfaceMode;
   allowGantt: boolean;
+  /** Whether the header may offer the three Plan view modes. Mirrors
+   *  `allowGantt`: true only when the hosting surface opted the plan modes
+   *  into its `modes` list AND the surface has a project context — a plan
+   *  is meaningless on my-issues or the actor panel. */
+  allowPlanViews: boolean;
   surfaceIssues: Issue[];
   projectIssues: Issue[];
   issues: Issue[];
@@ -834,6 +839,8 @@ export function useIssueSurfaceController({
     createDefaults: resolvedCreateDefaults,
     viewMode: effectiveViewMode,
     allowGantt: allowedModes.has("gantt") && !!projectId,
+    allowPlanViews:
+      PLAN_VIEW_MODES.some((mode) => allowedModes.has(mode)) && !!projectId,
     ...surfaceData,
     workingAgents,
     hasActiveFilters,

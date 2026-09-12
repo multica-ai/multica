@@ -23,6 +23,7 @@ import type {
 import { useIssueSurfaceController } from "./use-issue-surface-controller";
 import { IssueTableExportIntegrityError } from "../components/table-view-model";
 import { statusTableMethodsFromLegacy } from "./status-table-test-api";
+import type { IssueSurfaceMode } from "./types";
 
 function makeIssue(
   overrides: Partial<Issue> & Pick<Issue, "id" | "status">,
@@ -1745,5 +1746,50 @@ describe("useIssueSurfaceController", () => {
       "gantt-open",
     ]);
     expect(getAgentTaskSnapshot).not.toHaveBeenCalled();
+  });
+
+  // A persisted Plan mode must fall back — and correct
+  // the STORE's own viewMode, not just this hook's derived value — the moment
+  // it is read on a surface whose `modes` no longer include it. That is what
+  // happens both when the project_plans flag rolls back and when the same
+  // surface key is ever read from a project-less context such as my-issues
+  // or the actor panel, which never put plan kinds in their `modes` list.
+  it("falls back a persisted Plan mode once the surface's modes stop including it", async () => {
+    const store = getIssueSurfaceViewStore("project:plan-fallback");
+    act(() => store.getState().setViewMode("plan_document"));
+
+    let modes: IssueSurfaceMode[] = [
+      "board",
+      "list",
+      "table",
+      "swimlane",
+      "gantt",
+      "plan_document",
+      "plan_pipeline",
+      "plan_coverage",
+    ];
+    const { result, rerender } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes,
+        }),
+      { wrapper: makeWrapper(qc, "project:plan-fallback") },
+    );
+
+    expect(result.current.viewMode).toBe("plan_document");
+    expect(result.current.allowPlanViews).toBe(true);
+
+    // Narrow `modes` the way my-issues/the actor panel already do, or the way
+    // project detail would once the flag turns back off.
+    modes = ["board", "list", "table", "swimlane", "gantt"];
+    rerender();
+
+    await waitFor(() => expect(result.current.viewMode).toBe("board"));
+    expect(result.current.allowPlanViews).toBe(false);
+    // The header's trigger icon reads `viewMode` straight off the store, not
+    // this hook's clamped value — the correction has to land there too, or
+    // the icon would still show Plan Document over a Board pane.
+    expect(store.getState().viewMode).toBe("board");
   });
 });

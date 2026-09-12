@@ -1052,6 +1052,25 @@ func lockWorkspaceTaskOwners(ctx context.Context, qtx *db.Queries, workspaceID p
 	return nil
 }
 
+func deleteWorkspaceProjectPlans(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID) error {
+	if err := qtx.DeleteWorkspaceProjectPlanDependencies(ctx, workspaceID); err != nil {
+		return fmt.Errorf("delete project plan dependencies: %w", err)
+	}
+	if err := qtx.DeleteWorkspaceProjectPlanMemberships(ctx, workspaceID); err != nil {
+		return fmt.Errorf("delete project plan memberships: %w", err)
+	}
+	if err := qtx.DeleteWorkspaceProjectPlanParts(ctx, workspaceID); err != nil {
+		return fmt.Errorf("delete project plan parts: %w", err)
+	}
+	if err := qtx.DeleteWorkspaceProjectPlanPhases(ctx, workspaceID); err != nil {
+		return fmt.Errorf("delete project plan phases: %w", err)
+	}
+	if err := qtx.DeleteWorkspaceProjectPlans(ctx, workspaceID); err != nil {
+		return fmt.Errorf("delete project plans: %w", err)
+	}
+	return nil
+}
+
 func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "id")
 
@@ -1235,6 +1254,13 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		{
 			name: "delete comments",
 			run:  func() error { return qtx.DeleteWorkspaceComments(ctx, requester.WorkspaceID) },
+		},
+		{
+			// Plan structure has no foreign keys or cascades. Remove only its
+			// mapping rows and structural nodes while linked issues still exist,
+			// then let the ordinary workspace issue sweep handle issue ownership.
+			name: "delete project plans",
+			run:  func() error { return deleteWorkspaceProjectPlans(ctx, qtx, requester.WorkspaceID) },
 		},
 		// Keep source-context object intents after the workspace row is gone.
 		// They are the durable retry ledger for an upload that began before the

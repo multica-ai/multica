@@ -218,12 +218,18 @@
     "tooltip_table": "表格视图",
     "tooltip_gantt": "甘特图",
     "tooltip_swimlane": "泳道视图",
+    "tooltip_plan_document": "计划文档视图",
+    "tooltip_plan_pipeline": "计划流程视图",
+    "tooltip_plan_coverage": "计划覆盖率视图",
     "section": "视图",
     "board": "看板",
     "list": "列表",
     "table": "表格",
     "gantt": "甘特图",
-    "swimlane": "泳道"
+    "swimlane": "泳道",
+    "plan_document": "计划文档",
+    "plan_pipeline": "计划流程",
+    "plan_coverage": "计划覆盖率"
   },
   "table": {
     "select_all": "选择所有可见任务",
@@ -592,6 +598,172 @@
     "title": "没有符合筛选条件的任务",
     "hint": "调整或清除筛选条件，就能看到这个视图里的任务。",
     "clear_button": "清除筛选"
+  },
+  "plan_empty": {
+    "title": "暂无计划",
+    "hint": "此项目还没有计划。创建计划后，文档、流程和覆盖率视图才会显示实际内容。"
+  },
+  "plan": {
+    "error": {
+      "title": "计划加载失败",
+      "hint": "请求失败了。计划可能仍然存在——请重试。",
+      "retry": "重试"
+    },
+    "coverage_state": {
+      "complete": "已完成",
+      "in_progress": "进行中",
+      "not_started": "未开始",
+      "no_tasks_yet": "暂无任务",
+      "covered_no_active_tasks": "已覆盖·无活跃任务"
+    },
+    "coverage_hint": {
+      "no_tasks_yet": "已在计划中识别，但尚未创建任务。",
+      "covered_no_active_tasks": "关联的任务都已取消或删除，此部分未在当前工作中体现。"
+    },
+    "phase_rollup": "{{done}}/{{total}} 个任务 · {{percent}}%",
+    "part_gap_more_other": "还有 {{count}} 个缺口",
+    "superseded_banner": "此计划版本已于 {{date}} 被取代。下方的任务状态为实时状态，而非快照。",
+    "document": {
+      "subtitle": "第 {{version}} 版 · {{phaseCount}} 个阶段",
+      "stat_percent": "已完成",
+      "stat_tasks": "个任务已完成",
+      "stat_gaps": "个部分尚未拆解"
+    },
+    "pipeline": {
+      "stat_percent": "已完成",
+      "stat_tasks": "个任务",
+      "stat_gaps": "个部分未拆解",
+      "gate_covered": "关口：{{total}} 个部分中已覆盖 {{covered}} 个",
+      "blocked_on_phase": "被 {{title}} 阻塞",
+      "blocked_on_part": "被 {{title}}（{{phase}}）阻塞",
+      "blocked_missing": "被一个已不存在的依赖项阻塞",
+      "lane_status": {
+        "complete": "已完成",
+        "blocked": "已阻塞",
+        "in_progress": "进行中",
+        "not_started": "未开始"
+      }
+    },
+    "coverage": {
+      "tile_percent": "计划完成度",
+      "tile_tasks": "个任务已完成",
+      "tile_parts_covered": "个部分已覆盖",
+      "tile_gaps": "个部分暂无任务",
+      "risk_banner_title_other": "{{total}} 个计划部分中有 {{count}} 个尚未拆解为任务",
+      "risk_banner_hint": "这些内容已在计划中识别，但目前在任务跟踪器中不可见。",
+      "risk_chip_more_other": "还有 {{count}} 个",
+      "col_part": "计划部分",
+      "col_coverage": "覆盖状态",
+      "col_progress": "进度",
+      "col_assignees": "负责人",
+      "not_decomposed": "——尚未拆解——",
+      "no_assignees": "——"
+    },
+    "authoring": {
+      "cancel": "取消",
+      "save": "保存",
+      "saving": "保存中…",
+      "done": "完成",
+      "rename": "重命名",
+      "move_up": "上移",
+      "move_down": "下移",
+      "edit_plan_trigger": "编辑计划",
+      "plan_menu_label": "计划操作",
+      "phase_menu_label": "阶段 {{title}} 的操作",
+      "part_menu_label": "部分 {{title}} 的操作",
+      "field": {
+        "plan_title": "计划标题",
+        "phase_title": "阶段标题",
+        "part_title": "部分标题",
+        "description": "描述",
+        "acceptance_criteria": "验收标准"
+      },
+      "create_plan": {
+        "title": "创建计划",
+        "description": "为该项目新建一个空计划，然后手动添加阶段和部分。",
+        "title_placeholder": "例如：Q3 发布计划",
+        "submit": "创建计划"
+      },
+      "edit_plan": {
+        "title": "编辑计划信息",
+        "description": "直接修改当前版本，阶段、部分和已关联的任务不受影响。"
+      },
+      "supersede": {
+        "title": "创建新版本",
+        "description": "归档版本 {{version}}，并将版本 {{next}} 设为当前计划。",
+        "consequences": "阶段、部分、任务关联和依赖关系都会复制到新版本。版本 {{version}} 仍可查看，并标记为已归档。",
+        "submit": "创建新版本",
+        "confirm_title": "确认创建新版本？"
+      },
+      "delete_plan": {
+        "title": "删除计划",
+        "description": "删除“{{title}}”及其中的所有阶段和部分？",
+        "consequences": "已关联的任务只会解除关联，任务本身不会被删除。此操作无法撤销。",
+        "submit": "删除计划"
+      },
+      "add_phase": {
+        "title": "添加阶段",
+        "description": "阶段用于把一起交付的部分归为一组。",
+        "title_placeholder": "例如：阶段 1 — 基础建设",
+        "submit": "添加阶段"
+      },
+      "edit_phase": {
+        "title": "编辑阶段",
+        "description": "只重命名该阶段，其下的部分及任务关联保持不变。"
+      },
+      "delete_phase": {
+        "title": "删除阶段",
+        "description": "删除“{{title}}”？",
+        "consequences_other": "其下的 {{count}} 个部分也会被删除，关联的任务会解除关联，任务本身不会被删除。",
+        "submit": "删除阶段",
+        "consequences_empty": "该阶段目前没有任何部分，不会影响其他内容。此操作无法撤销。"
+      },
+      "add_part": {
+        "title": "添加部分",
+        "description": "{{phase}} 中的一个部分 —— 需要由任务覆盖的一项工作。",
+        "title_placeholder": "例如：数据库结构迁移",
+        "coverage_note": "在关联任务之前，该部分会显示为“尚无任务”，既不是已完成，也不是 0%。",
+        "submit": "添加部分",
+        "trigger_label": "向 {{title}} 添加部分"
+      },
+      "edit_part": {
+        "title": "编辑部分",
+        "description": "只修改该部分自身的字段，已关联的任务不受影响。"
+      },
+      "delete_part": {
+        "title": "删除部分",
+        "description": "删除“{{title}}”？",
+        "consequences": "关联到该部分的任务只会解除关联，任务本身不会被删除。",
+        "submit": "删除部分"
+      },
+      "link_issues": {
+        "title": "关联任务",
+        "description": "覆盖“{{part}}”的任务。",
+        "linked_heading": "已关联的任务",
+        "search_heading": "从本项目中添加",
+        "search_placeholder": "搜索本项目的任务…",
+        "searching": "搜索中…",
+        "no_candidates": "本项目中没有匹配的任务。",
+        "unlink_label": "解除关联 {{identifier}}",
+        "deleted_issue": "已删除",
+        "load_failed": "无法搜索本项目的任务",
+        "load_failed_hint": "请求失败，因此该列表并不完整，不代表没有结果。",
+        "retry": "重试"
+      },
+      "error": {
+        "conflict_title": "该计划已被改动",
+        "failed_title": "保存失败",
+        "conflict": "其他人改动了该计划，请重新加载后再试。",
+        "active_plan_exists": "该项目已有一个进行中的计划。",
+        "issue_already_linked": "该任务已关联到本计划的某个部分。",
+        "not_found": "该计划条目已不存在，或该工作区已关闭项目计划功能。",
+        "not_active": "只能编辑当前生效的计划版本。",
+        "invalid": "计划服务拒绝了这些内容。",
+        "disabled": "该工作区已关闭项目计划功能。",
+        "unavailable": "请求未送达计划服务，未保存任何内容。"
+      },
+      "continue_label": "继续"
+    }
   },
   "agent_live": {
     "is_working": "{{name}} 在工作",

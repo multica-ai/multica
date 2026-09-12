@@ -8,7 +8,22 @@ import type { IssueStatus, IssueStatusCategory, IssuePriority, PropertyFilterVal
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
-export type ViewMode = "board" | "list" | "table" | "gantt" | "swimlane";
+/**
+ * `plan_document` / `plan_pipeline` / `plan_coverage` are the three Plan
+ * view modes: alternative views of the same project tasks, so
+ * they are flat peers of board/list/table, not nested under a single
+ * "Plan" entry. Gated to project-scoped surfaces behind the
+ * `project_plans` flag — see `IssueSurfaceMode` and `allowPlanViews`.
+ */
+export type ViewMode =
+  | "board"
+  | "list"
+  | "table"
+  | "gantt"
+  | "swimlane"
+  | "plan_document"
+  | "plan_pipeline"
+  | "plan_coverage";
 export type GanttZoom = "day" | "week" | "month";
 /**
  * Board grouping. Besides the three built-ins, a select-type custom property

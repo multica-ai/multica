@@ -218,12 +218,18 @@
     "tooltip_table": "테이블 보기",
     "tooltip_gantt": "간트 보기",
     "tooltip_swimlane": "스윔레인 보기",
+    "tooltip_plan_document": "계획 문서 보기",
+    "tooltip_plan_pipeline": "계획 파이프라인 보기",
+    "tooltip_plan_coverage": "계획 커버리지 보기",
     "section": "보기",
     "board": "보드",
     "list": "리스트",
     "table": "테이블",
     "gantt": "간트",
-    "swimlane": "스윔레인"
+    "swimlane": "스윔레인",
+    "plan_document": "계획 문서",
+    "plan_pipeline": "계획 파이프라인",
+    "plan_coverage": "계획 커버리지"
   },
   "table": {
     "select_all": "표시된 모든 태스크 선택",
@@ -592,6 +598,172 @@
     "title": "필터 조건에 맞는 태스크가 없습니다",
     "hint": "필터를 조정하거나 해제하면 이 보기의 태스크가 표시됩니다.",
     "clear_button": "필터 해제"
+  },
+  "plan": {
+    "error": {
+      "title": "계획을 불러오지 못했습니다",
+      "hint": "요청이 실패했습니다. 계획은 여전히 존재할 수 있습니다 — 다시 시도해 주세요.",
+      "retry": "다시 시도"
+    },
+    "coverage_state": {
+      "complete": "완료",
+      "in_progress": "진행 중",
+      "not_started": "시작 전",
+      "no_tasks_yet": "작업 없음",
+      "covered_no_active_tasks": "커버됨 · 활성 작업 없음"
+    },
+    "coverage_hint": {
+      "no_tasks_yet": "계획에서 식별되었지만 아직 이슈가 생성되지 않았습니다.",
+      "covered_no_active_tasks": "연결된 모든 이슈가 취소되거나 삭제되었습니다. 이 부분은 현재 작업에 반영되어 있지 않습니다."
+    },
+    "phase_rollup": "{{done}}/{{total}} 작업 · {{percent}}%",
+    "part_gap_more_other": "공백 {{count}}개 더 보기",
+    "superseded_banner": "이 계획 버전은 {{date}}에 대체되었습니다. 아래 이슈 상태는 스냅샷이 아닌 실시간 상태입니다.",
+    "document": {
+      "subtitle": "버전 {{version}} · {{phaseCount}}개 단계",
+      "stat_percent": "완료",
+      "stat_tasks": "작업 완료",
+      "stat_gaps": "부분이 아직 분해되지 않음"
+    },
+    "pipeline": {
+      "stat_percent": "완료",
+      "stat_tasks": "작업",
+      "stat_gaps": "부분이 분해되지 않음",
+      "gate_covered": "게이트: 전체 {{total}}개 부분 중 {{covered}}개 커버됨",
+      "blocked_on_phase": "{{title}}에 의해 차단됨",
+      "blocked_on_part": "{{title}}({{phase}})에 의해 차단됨",
+      "blocked_missing": "더 이상 존재하지 않는 종속 항목에 의해 차단됨",
+      "lane_status": {
+        "complete": "완료",
+        "blocked": "차단됨",
+        "in_progress": "진행 중",
+        "not_started": "시작 전"
+      }
+    },
+    "coverage": {
+      "tile_percent": "계획 완료율",
+      "tile_tasks": "작업 완료",
+      "tile_parts_covered": "부분 커버됨",
+      "tile_gaps": "부분에 작업 없음",
+      "risk_banner_title_other": "전체 {{total}}개 중 {{count}}개 계획 부분이 아직 작업으로 분해되지 않았습니다",
+      "risk_banner_hint": "이 항목들은 계획에서 식별되었지만 현재 이슈 트래커에는 표시되지 않습니다.",
+      "risk_chip_more_other": "{{count}}개 더 보기",
+      "col_part": "계획 부분",
+      "col_coverage": "커버리지",
+      "col_progress": "진행률",
+      "col_assignees": "담당자",
+      "not_decomposed": "— 미분해 —",
+      "no_assignees": "—"
+    },
+    "authoring": {
+      "cancel": "취소",
+      "save": "저장",
+      "saving": "저장 중…",
+      "done": "완료",
+      "rename": "이름 변경",
+      "move_up": "위로 이동",
+      "move_down": "아래로 이동",
+      "edit_plan_trigger": "계획 편집",
+      "plan_menu_label": "계획 작업",
+      "phase_menu_label": "{{title}} 단계 작업",
+      "part_menu_label": "{{title}} 파트 작업",
+      "field": {
+        "plan_title": "계획 제목",
+        "phase_title": "단계 제목",
+        "part_title": "파트 제목",
+        "description": "설명",
+        "acceptance_criteria": "완료 조건"
+      },
+      "create_plan": {
+        "title": "계획 만들기",
+        "description": "이 프로젝트에 빈 계획을 만들고 단계와 파트를 직접 추가합니다.",
+        "title_placeholder": "예: 3분기 출시 계획",
+        "submit": "계획 만들기"
+      },
+      "edit_plan": {
+        "title": "계획 정보 편집",
+        "description": "현재 버전을 그대로 수정합니다. 단계, 파트, 연결된 이슈는 그대로 유지됩니다."
+      },
+      "supersede": {
+        "title": "새 버전으로 교체",
+        "description": "버전 {{version}}을 보관하고 버전 {{next}}을 활성 계획으로 만듭니다.",
+        "consequences": "단계, 파트, 이슈 연결, 의존 관계가 새 버전으로 복사됩니다. 버전 {{version}}은 계속 조회할 수 있으며 교체됨으로 표시됩니다.",
+        "submit": "교체하기",
+        "confirm_title": "이 계획을 교체할까요?"
+      },
+      "delete_plan": {
+        "title": "계획 삭제",
+        "description": "'{{title}}'과 그 안의 모든 단계와 파트를 삭제할까요?",
+        "consequences": "연결된 이슈는 연결만 해제되며 이슈 자체는 삭제되지 않습니다. 이 작업은 취소할 수 없습니다.",
+        "submit": "계획 삭제"
+      },
+      "add_phase": {
+        "title": "단계 추가",
+        "description": "단계는 함께 배포되는 파트를 묶는 단위입니다.",
+        "title_placeholder": "예: 1단계 — 기반 작업",
+        "submit": "단계 추가"
+      },
+      "edit_phase": {
+        "title": "단계 편집",
+        "description": "단계 이름만 변경합니다. 파트와 이슈 연결은 그대로입니다."
+      },
+      "delete_phase": {
+        "title": "단계 삭제",
+        "description": "'{{title}}'을 삭제할까요?",
+        "consequences_other": "포함된 파트 {{count}}개도 함께 삭제되고, 연결된 이슈는 연결이 해제됩니다. 이슈 자체는 삭제되지 않습니다.",
+        "submit": "단계 삭제",
+        "consequences_empty": "이 단계에는 아직 파트가 없어 다른 항목에는 영향이 없습니다. 이 작업은 취소할 수 없습니다."
+      },
+      "add_part": {
+        "title": "파트 추가",
+        "description": "{{phase}}의 파트 — 이슈로 커버해야 하는 하나의 작업 단위입니다.",
+        "title_placeholder": "예: 스키마 마이그레이션",
+        "coverage_note": "이슈를 연결하기 전까지 이 파트는 '작업 없음'으로 표시됩니다. 완료도 0%도 아닙니다.",
+        "submit": "파트 추가",
+        "trigger_label": "{{title}}에 파트 추가"
+      },
+      "edit_part": {
+        "title": "파트 편집",
+        "description": "파트 자체의 항목만 변경합니다. 연결된 이슈는 영향을 받지 않습니다."
+      },
+      "delete_part": {
+        "title": "파트 삭제",
+        "description": "'{{title}}'을 삭제할까요?",
+        "consequences": "이 파트에 연결된 이슈는 연결만 해제되며 이슈 자체는 삭제되지 않습니다.",
+        "submit": "파트 삭제"
+      },
+      "link_issues": {
+        "title": "이슈 연결",
+        "description": "'{{part}}'을 커버하는 이슈입니다.",
+        "linked_heading": "연결된 이슈",
+        "search_heading": "이 프로젝트에서 추가",
+        "search_placeholder": "이 프로젝트의 이슈 검색…",
+        "searching": "검색 중…",
+        "no_candidates": "이 프로젝트에 일치하는 이슈가 없습니다.",
+        "unlink_label": "{{identifier}} 연결 해제",
+        "deleted_issue": "삭제됨",
+        "load_failed": "이 프로젝트의 이슈를 검색하지 못했습니다",
+        "load_failed_hint": "요청이 실패해 목록이 불완전합니다. 검색 결과가 아닙니다.",
+        "retry": "다시 시도"
+      },
+      "error": {
+        "conflict_title": "이 계획이 변경되었습니다",
+        "failed_title": "저장하지 못했습니다",
+        "conflict": "다른 사람이 이 계획을 변경했습니다. 다시 불러온 뒤 시도하세요.",
+        "active_plan_exists": "이 프로젝트에는 이미 활성 계획이 있습니다.",
+        "issue_already_linked": "해당 이슈는 이미 이 계획의 파트에 연결되어 있습니다.",
+        "not_found": "해당 계획 항목이 더 이상 존재하지 않거나, 이 워크스페이스에서 프로젝트 계획이 꺼졌습니다.",
+        "not_active": "활성 계획 버전만 편집할 수 있습니다.",
+        "invalid": "계획 서비스가 이 값을 거부했습니다.",
+        "disabled": "이 워크스페이스에서는 프로젝트 계획이 꺼져 있습니다.",
+        "unavailable": "요청이 계획 서비스에 도달하지 않았습니다. 아무것도 저장되지 않았습니다."
+      },
+      "continue_label": "계속"
+    }
+  },
+  "plan_empty": {
+    "title": "아직 계획이 없습니다",
+    "hint": "이 프로젝트에는 아직 계획이 없습니다. 계획이 생성되면 문서, 파이프라인, 커버리지 보기에 실제 내용이 표시됩니다."
   },
   "agent_live": {
     "is_working": "{{name}} 작업 중",
