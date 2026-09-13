@@ -748,8 +748,8 @@ const (
 	// framed every thirty seconds was refused with exactly this code, and the
 	// server's own errmsg named the reason — "stream message update expired
 	// (>10 minutes), cannot update". The published global errcode table
-	// defines it the same way. The window it implies is streamMaxAge; see
-	// stream_store.go for the numbers and what else the probe settled.
+	// defines it the same way, and so does the aibot page itself: 需在 10 分钟
+	// 内完成所有刷新并设置 finish=true，否则消息将自动结束 (doc 101463).
 	errcodeStreamExpired = 846608
 
 	// errcodeStreamBadReqID — this req_id may not carry a stream.
