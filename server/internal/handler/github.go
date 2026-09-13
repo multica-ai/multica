@@ -30,15 +30,31 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// githubAPIBase is the base URL for GitHub's REST API. Mutable so tests can
-// point App-authenticated calls at an httptest server without touching GitHub.
-var githubAPIBase = "https://api.github.com"
+// githubAPIBase is the base URL for GitHub's REST API, resolved once at
+// startup. Operators whose App lives on a GitHub Enterprise Server instance
+// (or who must reach GitHub through an internal proxy) point it elsewhere with
+// GITHUB_API_URL; unset keeps api.github.com. Mutable so tests can point
+// App-authenticated calls at an httptest server without touching GitHub.
+var githubAPIBase = githubAPIBaseFromEnv()
 
 const (
 	githubReturnToGitHub       = "github"
 	githubReturnToRepositories = "repositories"
 	githubAPIResponseLimit     = 4 << 20
+	githubAPIBaseEnv           = "GITHUB_API_URL"
+	githubAPIBaseDefault       = "https://api.github.com"
 )
+
+// githubAPIBaseFromEnv reads the configured REST API root, falling back to
+// api.github.com when the variable is unset or blank. A trailing slash is
+// dropped so the value concatenates cleanly with endpoint paths.
+func githubAPIBaseFromEnv() string {
+	configured := strings.TrimSpace(os.Getenv(githubAPIBaseEnv))
+	if configured == "" {
+		return githubAPIBaseDefault
+	}
+	return strings.TrimRight(configured, "/")
+}
 
 // ── Response shapes ─────────────────────────────────────────────────────────
 
