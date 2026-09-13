@@ -6,15 +6,14 @@ import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useT } from "../../i18n";
+import { ProgressRing } from "./progress-ring";
 
 // ---------------------------------------------------------------------------
-// ThreadMinimap — quick-jump rail with a complete thread outline.
+// ThreadMinimap — quick-jump rail with a complete issue outline.
 // The rail shows viewport position; hovering or focusing any tick opens one
-// stationary, scrollable list of every thread title. Rows jump to the same
-// timeline anchors as the ticks, including folded resolved threads.
-
-/** Minimum number of threads before the rail is worth its pixels. */
-const MIN_THREADS = 2;
+// stationary, scrollable list of the description, sub-issues, and threads.
+// Rows jump to the same timeline anchors as the ticks, including folded
+// resolved threads.
 
 /** Intent delay before the card first appears; gliding afterwards is instant. */
 const PREVIEW_OPEN_DELAY_MS = 150;
@@ -102,7 +101,10 @@ export interface ThreadMinimapThread {
 }
 
 interface ThreadMinimapProps {
+  description: { targetId: string; title: string; onJump: () => void };
   threads: ThreadMinimapThread[];
+  /** One destination for the whole sub-issues overview, independent of threads. */
+  subIssues?: { targetId: string; done: number; total: number; onJump: () => void };
   /** The issue detail scroll container; null until its callback ref populates. */
   scrollContainerEl: HTMLElement | null;
   onJump: (threadId: string) => void;
@@ -111,10 +113,10 @@ interface ThreadMinimapProps {
 }
 
 // ---------------------------------------------------------------------------
-// useVisibleThreadIds — "which comment threads are on screen right now"
+// useVisibleTargetIds — "which issue sections are on screen right now"
 // ---------------------------------------------------------------------------
 //
-// Which threads intersect the scroll viewport, so the rail can darken their
+// Which sections intersect the scroll viewport, so the rail can darken their
 // ticks. Deliberately the rail's alone: "on screen" is a set, not a point, and
 // only a column of ticks can show a span without suggesting multiple selection.
 //
@@ -129,8 +131,8 @@ function sameIdSet(a: Set<string>, b: Set<string>): boolean {
   return true;
 }
 
-function useVisibleThreadIds(
-  threadIds: readonly string[],
+function useVisibleTargetIds(
+  targetIds: readonly string[],
   scrollContainerEl: HTMLElement | null,
 ): Set<string> {
   const [visibleIds, setVisibleIds] = useState<Set<string>>(() => new Set());
@@ -144,8 +146,8 @@ function useVisibleThreadIds(
       raf = 0;
       const rect = container.getBoundingClientRect();
       const next = new Set<string>();
-      for (const id of threadIds) {
-        const el = document.getElementById(`comment-${id}`);
+      for (const id of targetIds) {
+        const el = document.getElementById(id);
         if (!el) continue;
         const r = el.getBoundingClientRect();
         if (r.bottom > rect.top && r.top < rect.bottom) next.add(id);
@@ -168,22 +170,24 @@ function useVisibleThreadIds(
       ro.disconnect();
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [threadIds, scrollContainerEl]);
+  }, [targetIds, scrollContainerEl]);
 
   return visibleIds;
 }
 
-/** The thread currently highlighted in the outline and rail. */
+/** Stable identity keeps inserted or removed sub-issues from shifting focus. */
 interface PreviewAnchor {
-  index: number;
+  targetId: string;
 }
 
 function MinimapTick({
+  targetId,
   label,
   inViewport,
   isHighlighted,
   onClick,
 }: {
+  targetId: string;
   label: string;
   inViewport: boolean;
   /** The corresponding outline row is active. */
@@ -193,6 +197,7 @@ function MinimapTick({
   return (
     <button
       type="button"
+      data-target-id={targetId}
       aria-label={label}
       onClick={onClick}
       // 20px wide, tick flushed to the right end: with the rail inset 12px
@@ -227,6 +232,8 @@ function MinimapTick({
 }
 
 export function ThreadMinimap({
+  description,
+  subIssues,
   threads,
   scrollContainerEl,
   onJump,
@@ -234,8 +241,14 @@ export function ThreadMinimap({
 }: ThreadMinimapProps) {
   const { t } = useT("issues");
   const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
-  const threadIds = useMemo(() => threads.map((th) => th.id), [threads]);
-  const visibleIds = useVisibleThreadIds(threadIds, scrollContainerEl);
+  const descriptionTargetId = description.targetId;
+  const subIssuesTargetId = subIssues?.targetId;
+  const targetIds = useMemo(() => [
+    descriptionTargetId,
+    ...(subIssuesTargetId ? [subIssuesTargetId] : []),
+    ...threads.map((th) => `comment-${th.id}`),
+  ], [descriptionTargetId, subIssuesTargetId, threads]);
+  const visibleIds = useVisibleTargetIds(targetIds, scrollContainerEl);
 
   // Flattened previews, cached per thread by content so an unrelated timeline
   // update (reaction, new reply elsewhere) doesn't re-flatten every comment.
@@ -254,6 +267,31 @@ export function ThreadMinimap({
     prevPreviewsRef.current = next;
     return arr;
   }, [threads]);
+
+  const targets = threads.map((thread, i) => ({
+    id: `comment-${thread.id}`,
+    title: previews[i]!.title || thread.entry.actor_name ||
+      getActorName(thread.entry.actor_type, thread.entry.actor_id),
+    resolved: thread.resolved,
+    participants: thread.participants,
+    onJump: () => onJump(thread.id),
+  }));
+  if (subIssues) {
+    targets.unshift({
+      id: subIssues.targetId,
+      title: t(($) => $.detail.sub_issues_label),
+      resolved: false,
+      participants: [],
+      onJump: subIssues.onJump,
+    });
+  }
+  targets.unshift({
+    id: descriptionTargetId,
+    title: description.title.slice(0, PREVIEW_TITLE_MAX),
+    resolved: false,
+    participants: [],
+    onJump: description.onJump,
+  });
 
   const shimRef = useRef<HTMLDivElement | null>(null);
   const navRef = useRef<HTMLElement | null>(null);
@@ -276,7 +314,7 @@ export function ThreadMinimap({
   const showPreview = useCallback((anchor: PreviewAnchor | null) => {
     previewRef.current = anchor;
     setPreview((prev) =>
-      prev?.index === anchor?.index ? prev : anchor,
+      prev?.targetId === anchor?.targetId ? prev : anchor,
     );
   }, []);
 
@@ -295,6 +333,19 @@ export function ThreadMinimap({
       closeTimerRef.current = null;
     }
   }, []);
+
+  useEffect(() => {
+    if (!preview || targetIds.includes(preview.targetId)) return;
+    // Removing a focused row does not reliably emit blur in the browser.
+    cancelClose();
+    if (openTimerRef.current !== null) {
+      window.clearTimeout(openTimerRef.current);
+      openTimerRef.current = null;
+    }
+    pendingAnchorRef.current = null;
+    showPreview(null);
+  }, [preview, targetIds, cancelClose, showPreview]);
+
   const scheduleClose = useCallback(() => {
     cancelClose();
     if (openTimerRef.current !== null) {
@@ -307,7 +358,7 @@ export function ThreadMinimap({
     }, PREVIEW_CLOSE_DELAY_MS);
   }, [cancelClose, showPreview]);
 
-  const handleJump = useCallback((threadId: string, event: React.MouseEvent<HTMLButtonElement>) => {
+  const handleJump = useCallback((jump: () => void, event: React.MouseEvent<HTMLButtonElement>) => {
     // Mouse clicks must not pin a hover outline through leftover button focus.
     // Keyboard activation keeps focus so the reader can continue navigating.
     if (event.detail > 0) {
@@ -315,8 +366,8 @@ export function ThreadMinimap({
       // Blur schedules a close; keep the card until the pointer actually leaves.
       cancelClose();
     }
-    onJump(threadId);
-  }, [cancelClose, onJump]);
+    jump();
+  }, [cancelClose]);
 
   const runWave = useCallback(() => {
     waveRafRef.current = 0;
@@ -352,7 +403,9 @@ export function ThreadMinimap({
 
     if (y === null || !nearest) return;
     const { index } = nearest as { index: number };
-    const anchor: PreviewAnchor = { index };
+    const targetId = buttons[index]?.dataset.targetId;
+    if (!targetId) return;
+    const anchor: PreviewAnchor = { targetId };
     pendingAnchorRef.current = anchor;
     if (previewRef.current) {
       // Already open: gliding highlights the matching row without moving the card.
@@ -390,10 +443,9 @@ export function ThreadMinimap({
       const btn = (e.target as HTMLElement).closest("button");
       if (!nav || !shim || !btn) return;
       cancelClose();
-      const buttons = [...nav.querySelectorAll<HTMLButtonElement>("button")];
-      const index = buttons.indexOf(btn as HTMLButtonElement);
-      if (index < 0) return;
-      showPreview({ index });
+      const targetId = btn.dataset.targetId;
+      if (!nav.contains(btn) || !targetId) return;
+      showPreview({ targetId });
     },
     [cancelClose, showPreview],
   );
@@ -404,7 +456,8 @@ export function ThreadMinimap({
     // Rail navigation should reveal its row in a long outline. Moving within
     // the list itself must leave its scroll position under the reader's control.
     if (pointerYRef.current === null && !navRef.current?.contains(document.activeElement)) return;
-    const row = card.querySelectorAll("li")[preview.index];
+    const row = [...card.querySelectorAll("li")]
+      .find((element) => element.dataset.targetId === preview.targetId);
     if (!row) return;
     if (row.offsetTop < card.scrollTop) card.scrollTop = row.offsetTop;
     else if (row.offsetTop + row.offsetHeight > card.scrollTop + card.clientHeight) {
@@ -412,7 +465,8 @@ export function ThreadMinimap({
     }
   }, [preview]);
 
-  if (threads.length < MIN_THREADS) return null;
+  // A description on its own needs no rail; one other destination is useful.
+  if (targets.length < 2) return null;
 
   return (
     // Positioning shim; only the nav and the card take pointer events so the
@@ -423,9 +477,10 @@ export function ThreadMinimap({
         if (event.key !== "Escape") return;
         event.preventDefault();
         event.stopPropagation();
-        const activeIndex = previewRef.current?.index;
-        if (cardRef.current?.contains(document.activeElement) && activeIndex !== undefined) {
-          navRef.current?.querySelectorAll("button")[activeIndex]?.focus();
+        const activeTargetId = previewRef.current?.targetId;
+        if (cardRef.current?.contains(document.activeElement) && activeTargetId) {
+          [...(navRef.current?.querySelectorAll("button") ?? [])]
+            .find((button) => button.dataset.targetId === activeTargetId)?.focus();
         }
         cancelClose();
         if (openTimerRef.current !== null) {
@@ -438,7 +493,7 @@ export function ThreadMinimap({
     >
       <nav
         ref={navRef}
-        aria-label={t(($) => $.detail.thread_nav_label)}
+        aria-label={t(($) => $.detail.quick_jump_label)}
         onPointerMove={handleWaveMove}
         onPointerLeave={handleWaveLeave}
         onFocusCapture={handleFocus}
@@ -447,29 +502,29 @@ export function ThreadMinimap({
         // flex compresses the spacing (down to min-h) instead of overflowing.
         className="pointer-events-auto flex max-h-full flex-col overflow-hidden"
       >
-        {threads.map((thread, i) => {
-          const title =
-            previews[i]!.title ||
-            thread.entry.actor_name ||
-            getActorName(thread.entry.actor_type, thread.entry.actor_id);
+        {targets.map((target) => {
+          const { title } = target;
           return (
             <MinimapTick
-              key={thread.id}
+              key={target.id}
+              targetId={target.id}
               // Announce resolution on the tick as well as in the outline.
               label={
-                thread.resolved
-                  ? t(($) => $.detail.thread_nav_resolved_label, { title })
-                  : title
+                target.id === descriptionTargetId
+                  ? t(($) => $.detail.description_nav_label)
+                  : target.resolved
+                    ? t(($) => $.detail.thread_nav_resolved_label, { title })
+                    : title
               }
-              inViewport={visibleIds.has(thread.id)}
-              isHighlighted={preview?.index === i}
-              onClick={(event) => handleJump(thread.id, event)}
+              inViewport={visibleIds.has(target.id)}
+              isHighlighted={preview?.targetId === target.id}
+              onClick={(event) => handleJump(target.onJump, event)}
             />
           );
         })}
       </nav>
 
-      {preview && (
+      {preview && targetIds.includes(preview.targetId) && (
         <div
           ref={cardRef}
           onPointerEnter={cancelClose}
@@ -479,66 +534,87 @@ export function ThreadMinimap({
           className="pointer-events-auto absolute right-8 top-1/2 max-h-[calc(100%-3rem)] w-80 max-w-[calc(100vw-4rem)] -translate-y-1/2 overflow-y-auto overscroll-contain rounded-xl bg-popover p-2 text-body text-popover-foreground shadow-lg ring-1 ring-foreground/10"
         >
           <ul>
-            {threads.map((thread, index) => {
-              const title = previews[index]!.title || thread.entry.actor_name ||
-                getActorName(thread.entry.actor_type, thread.entry.actor_id);
-              const participantNames = thread.participants.map((participant) =>
+            {targets.map((target) => {
+              const { title } = target;
+              const participantNames = target.participants.map((participant) =>
                 participant.actor_name || getActorName(participant.actor_type, participant.actor_id),
               );
               return (
-                <li key={thread.id}>
+                <li key={target.id} data-target-id={target.id}>
                   <button
                     type="button"
-                    onPointerEnter={() => showPreview({ index })}
-                    onFocus={() => showPreview({ index })}
-                    onClick={(event) => handleJump(thread.id, event)}
-                    data-active={preview.index === index || undefined}
-                    aria-label={thread.resolved
-                      ? t(($) => $.detail.thread_nav_resolved_label, { title })
-                      : title}
-                    aria-description={participantNames.join(", ") || undefined}
+                    onPointerEnter={() => showPreview({ targetId: target.id })}
+                    onFocus={() => showPreview({ targetId: target.id })}
+                    onClick={(event) => handleJump(target.onJump, event)}
+                    data-active={preview.targetId === target.id || undefined}
+                    aria-label={target.id === descriptionTargetId
+                      ? t(($) => $.detail.description_nav_label)
+                      : target.resolved
+                        ? t(($) => $.detail.thread_nav_resolved_label, { title })
+                        : title}
+                    aria-description={subIssues && target.id === subIssues.targetId
+                      ? t(($) => $.detail.sub_issues_nav_progress, { done: subIssues.done, total: subIssues.total })
+                      : participantNames.join(", ") || undefined}
                     className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-body text-muted-foreground transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-active:font-medium data-active:text-brand"
                   >
                     <span className="flex min-w-0 flex-1 items-center gap-1.5">
                       <span className="truncate">{title}</span>
-                      {thread.resolved && (
+                      {target.resolved && (
                         <CheckCircle2
                           className="size-3.5 shrink-0 text-success"
                           aria-label={t(($) => $.comment.resolve.thread_resolved_badge)}
                         />
                       )}
                     </span>
-                    <span className="inline-flex shrink-0 items-center -space-x-1.5" aria-hidden="true">
-                      {thread.participants.slice(0, 3).map((participant, participantIndex) => {
-                        const name = participantNames[participantIndex]!;
-                        const avatarUrl = participant.actor_avatar_url?.startsWith("/")
-                          ? resolvePublicFileUrl(participant.actor_avatar_url)
-                          : participant.actor_avatar_url ?? getActorAvatarUrl(participant.actor_type, participant.actor_id);
-                        return (
+                    {subIssues && target.id === subIssues.targetId && (
+                      <span
+                        role="progressbar"
+                        aria-label={t(($) => $.detail.sub_issues_label)}
+                        aria-valuemin={0}
+                        aria-valuemax={subIssues.total}
+                        aria-valuenow={subIssues.done}
+                        aria-valuetext={t(($) => $.detail.sub_issues_nav_progress, {
+                          done: subIssues.done, total: subIssues.total,
+                        })}
+                        className="inline-flex shrink-0 items-center gap-1.5 text-caption tabular-nums text-muted-foreground"
+                      >
+                        <ProgressRing done={subIssues.done} total={subIssues.total} />
+                        <span>{subIssues.done}/{subIssues.total}</span>
+                      </span>
+                    )}
+                    {target.participants.length > 0 && (
+                      <span className="inline-flex shrink-0 items-center -space-x-1.5" aria-hidden="true">
+                        {target.participants.slice(0, 3).map((participant, participantIndex) => {
+                          const name = participantNames[participantIndex]!;
+                          const avatarUrl = participant.actor_avatar_url?.startsWith("/")
+                            ? resolvePublicFileUrl(participant.actor_avatar_url)
+                            : participant.actor_avatar_url ?? getActorAvatarUrl(participant.actor_type, participant.actor_id);
+                          return (
+                            <span
+                              key={`${participant.actor_type}:${participant.actor_id}`}
+                              title={name}
+                              className="inline-flex rounded-full ring-2 ring-popover"
+                            >
+                              <ActorAvatar
+                                name={name}
+                                initials={getActorInitials(participant.actor_type, participant.actor_id, name)}
+                                avatarUrl={avatarUrl}
+                                isAgent={participant.actor_type === "agent"}
+                                size="sm"
+                              />
+                            </span>
+                          );
+                        })}
+                        {target.participants.length > 3 && (
                           <span
-                            key={`${participant.actor_type}:${participant.actor_id}`}
-                            title={name}
-                            className="inline-flex rounded-full ring-2 ring-popover"
+                            title={participantNames.slice(3).join(", ")}
+                            className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-0.5 text-micro font-medium tabular-nums text-muted-foreground ring-2 ring-popover"
                           >
-                            <ActorAvatar
-                              name={name}
-                              initials={getActorInitials(participant.actor_type, participant.actor_id, name)}
-                              avatarUrl={avatarUrl}
-                              isAgent={participant.actor_type === "agent"}
-                              size="sm"
-                            />
+                            +{target.participants.length - 3}
                           </span>
-                        );
-                      })}
-                      {thread.participants.length > 3 && (
-                        <span
-                          title={participantNames.slice(3).join(", ")}
-                          className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-0.5 text-micro font-medium tabular-nums text-muted-foreground ring-2 ring-popover"
-                        >
-                          +{thread.participants.length - 3}
-                        </span>
-                      )}
-                    </span>
+                        )}
+                      </span>
+                    )}
                   </button>
                 </li>
               );

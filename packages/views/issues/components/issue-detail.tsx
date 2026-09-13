@@ -9,7 +9,7 @@ import {
 import { useStatusLabel } from "../utils/status-label";
 import { priorityLabel } from "../utils/priority-label";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, useId, Fragment, type ReactNode } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink, useBackOrReplace } from "../../navigation";
@@ -1848,6 +1848,26 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [issueId, setSubIssuesCollapsedFor],
   );
 
+  const descriptionSectionId = useId();
+  const subIssuesSectionId = useId();
+  const subIssuesSectionRef = useRef<HTMLDivElement>(null);
+  const subIssuesJumpFrame = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(subIssuesJumpFrame.current), [issueId]);
+  const jumpToSubIssues = useCallback(() => {
+    setSubIssuesCollapsed(false);
+    cancelAnimationFrame(subIssuesJumpFrame.current);
+    // Wait for expansion so the section can be reached even when a collapsed
+    // list left too little scrollable content below it.
+    subIssuesJumpFrame.current = requestAnimationFrame(() => {
+      const section = subIssuesSectionRef.current;
+      const container = scrollContainerEl;
+      if (!section || !container) return;
+      container.scrollTop = Math.max(0, container.scrollTop +
+        section.getBoundingClientRect().top - container.getBoundingClientRect().top - 16);
+    });
+  }, [setSubIssuesCollapsed, scrollContainerEl]);
+  const doneChildCount = childIssues.filter((child) => issueBehavesAs(child, "done")).length;
+
   // Selection store is global (workspace-scoped); clear it whenever this
   // issue detail is mounted or switched, so leftover selections from the
   // main list view (or another sub-issue list) don't leak into this one.
@@ -2872,6 +2892,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             `useStickyComposer`), so it lands here — right where the launcher
             floats — once the reader scrolls to the bottom. */}
         <div className="mx-auto w-full max-w-4xl px-3 py-6 max-md:pb-chat-launcher md:px-8 md:py-8">
+          <div id={descriptionSectionId}>
           {titleLazy.active && (
             <div className={titleLazy.ready ? undefined : "hidden"}>
               <TitleEditor
@@ -3100,6 +3121,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             {descDragOver && <FileDropOverlay />}
           </div>
 
+          </div>
+
           {/* Sub-issues — Linear-style */}
           {childIssues.length === 0 && (
             <div className="mt-6">
@@ -3114,12 +3137,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </div>
           )}
           {childIssues.length > 0 && (() => {
-            const doneCount = childIssues.filter((c) => issueBehavesAs(c, "done")).length;
             return (
               // Provider hosts the shared right-click actions menu the rows
               // delegate to (one singleton menu, not one per row).
               <IssueContextMenuProvider>
-              <div className="mt-10 group/sub-issues">
+              <div ref={subIssuesSectionRef} id={subIssuesSectionId} className="mt-10 group/sub-issues">
                 {/* Header */}
                 <div className="flex items-center gap-2 mb-2">
                   <button
@@ -3136,9 +3158,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                     <span>{t(($) => $.detail.sub_issues_label)}</span>
                   </button>
                   <div className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5">
-                    <ProgressRing done={doneCount} total={childIssues.length} size={11} />
+                    <ProgressRing done={doneChildCount} total={childIssues.length} size={11} />
                     <span className="text-micro text-muted-foreground tabular-nums font-medium">
-                      {doneCount}/{childIssues.length}
+                      {doneChildCount}/{childIssues.length}
                     </span>
                   </div>
                   {/* issue.id, not the route param — the endpoint takes a
@@ -3464,11 +3486,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             column's px-8 padding when the gutter is 0 (overlay scrollbars),
             so it covers neither the scrollbar nor body text. It also clears
             the resize handle's 4px drag strip at the panel edge. Hover
-            previews a thread, click jumps to it. Hidden on mobile: no
-            hover, and the gutter is too tight. */}
+            opens the outline; clicking jumps to a section or thread. Hidden on
+            mobile: no hover, and the gutter is too tight. */}
         {!isMobile && (
           <ThreadMinimap
             threads={minimapThreads}
+            description={{
+              targetId: descriptionSectionId,
+              title: issue.title,
+              onJump: () => {
+                if (scrollContainerEl) scrollContainerEl.scrollTop = 0;
+              },
+            }}
+            subIssues={childIssues.length > 0 ? {
+              targetId: subIssuesSectionId,
+              done: doneChildCount,
+              total: childIssues.length,
+              onJump: jumpToSubIssues,
+            } : undefined}
             scrollContainerEl={scrollContainerEl}
             onJump={jumpToThread}
             className="absolute bottom-0 right-3 top-12"
