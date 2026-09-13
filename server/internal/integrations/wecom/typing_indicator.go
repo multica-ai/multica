@@ -19,6 +19,15 @@ package wecom
 //     bubble from the chat-done subscriber in outbound.go, which is the only
 //     place that has the answer to close it with.
 //
+// WHICH RUN A BUBBLE IS WAITING FOR COMES OFF THE BUS. The engine tells this
+// notifier that a message was ingested and nothing else — not which messages
+// the debouncer collected together, not the task the flush created — so the run
+// announces itself instead, on the task:queued every enqueue path already
+// publishes (Register, handleTaskQueued). A bubble pairs with the run queued
+// for its session while it was the one waiting, and from that binding every
+// later ending matches by task id. The alternative was for the engine to carry
+// two more facts through the Router for one platform's benefit.
+//
 // The bubble is a CACHE and nothing more (stream_store.go). A closer that
 // finds one writes into it; one that does not says its words as an ordinary
 // message where the words are worth saying — a failed run's notice — and stays
@@ -200,22 +209,21 @@ func (m *TypingIndicatorManager) Wiring() TypingIndicatorWiring {
 	}
 }
 
-// OnIngested paints a "working on it" bubble for the run this message belongs
-// to and records what it takes to come back and fill it in. Which run that is
-// comes from batch — the engine debouncer's own verdict, decided under the
-// lock that arms the window — so the first message of a run paints a bubble
-// and the rest join it, and a message the debouncer gave a run of its own gets
-// a bubble of its own immediately, because a wait with nothing on screen reads
-// as a message that was lost. The bubble carries no words while it waits: the
-// think tag renders as the client's own animated dots, which is the receipt,
-// and words would need a language before there is anything to say.
+// OnIngested paints a "working on it" bubble for the round this message
+// belongs to and records what it takes to come back and fill it in. A message
+// arriving while a round is still waiting for its run joins that round; one
+// arriving when there is none opens a bubble of its own immediately, because a
+// wait with nothing on screen reads as a message that was lost. The bubble
+// carries no words while it waits: the think tag renders as the client's own
+// animated dots, which is the receipt, and words would need a language before
+// there is anything to say.
 //
 // The Router calls this on a detached goroutine with its own deadline, so
 // nothing here needs to be quick for the ACK's sake — but everything here is
 // best-effort: a bubble that fails to open costs the user a few seconds of
 // uncertainty, and the answer still arrives as a plain message.
-func (m *TypingIndicatorManager) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID, batch engine.RunBatchID) {
-	if m.senders == nil || m.streams == nil || !sessionID.Valid || batch == 0 {
+func (m *TypingIndicatorManager) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID) {
+	if m.senders == nil || m.streams == nil || !sessionID.Valid {
 		return
 	}
 	// A standalone /issue is answered by the replier and deliberately never
@@ -256,11 +264,11 @@ func (m *TypingIndicatorManager) OnIngested(ctx context.Context, inst engine.Res
 		// this goroutine is gone.
 		Locale: localeFor(ctx, m.languages, inst.ID, chatType, msg.Source.SenderID),
 	}
-	if m.streams.open(sessionID, batch, h) != roundOpened {
-		// roundJoined — the batcher folded this message into a run whose
-		// bubble is already on screen, and that bubble is this message's
-		// receipt too. roundFinished — this goroutine outlived the run it was
-		// painting for, and a bubble now would be one nothing ever closes.
+	seq, verdict := m.streams.open(sessionID, h)
+	if verdict != roundOpened {
+		// roundJoined — a round is already on screen waiting for the run that
+		// will answer this message too, and that bubble is this message's
+		// receipt. A second one would be a bubble nothing ever closes.
 		return
 	}
 
@@ -289,7 +297,7 @@ func (m *TypingIndicatorManager) OnIngested(ctx context.Context, inst engine.Res
 			m.log.DebugContext(ctx, "wecom typing: opening frame did not land, keeping the handle",
 				"chat_session_id", util.UUIDToString(sessionID), "error", err)
 		default:
-			m.streams.drop(sessionID, batch)
+			m.streams.drop(sessionID, seq)
 			m.log.WarnContext(ctx, "wecom typing: opening frame refused",
 				"chat_session_id", util.UUIDToString(sessionID), "error", err)
 			return
@@ -301,21 +309,6 @@ func (m *TypingIndicatorManager) OnIngested(ctx context.Context, inst engine.Res
 	m.senders.recordOpened()
 }
 
-// OnRunStarted files the task the debounced flush created for this run. It is
-// the binding every later ending is matched on: the answer, the failure and
-// the cancellation all name a task, and this is what turns that name into "the
-// bubble this question opened" without reading anything off arrival order.
-//
-// It can arrive before OnIngested has painted the bubble — the Router detaches
-// the ingest goroutine and the flush runs on the batcher's timer — so the
-// store files the run either way and the bubble attaches to it when it lands.
-func (m *TypingIndicatorManager) OnRunStarted(_ context.Context, sessionID pgtype.UUID, batch engine.RunBatchID, taskID pgtype.UUID) {
-	if m.streams == nil || !sessionID.Valid || !taskID.Valid {
-		return
-	}
-	m.streams.bind(sessionID, batch, util.UUIDToString(taskID))
-}
-
 // OnSettled closes the bubble of a round that never became a run — agent
 // offline or archived, or an enqueue that failed. This is the only chance to
 // stop that spinner: with no task there is no task lifecycle event, so neither
@@ -323,35 +316,85 @@ func (m *TypingIndicatorManager) OnRunStarted(_ context.Context, sessionID pgtyp
 // is deliberately thin because the replier's own notice follows as a separate
 // message with the reason.
 //
-// batch names which bubble: the flush that settled reports the run it was
-// answering, so a session with several rounds open closes the right one
-// instead of whichever happens to be newest.
+// It closes the session's oldest round that never became a run, which is the
+// one the settled flush was answering: a round ahead of it in the list has its
+// own run and its own ending coming, and a round behind it is a later
+// question's. The Router passes no other name — a flush that started no task
+// has none to give.
 //
 // No bubble, nothing to say: the replier's notice is the whole of what the
 // user is told, and there is no round left to address a second line to.
-func (m *TypingIndicatorManager) OnSettled(ctx context.Context, sessionID pgtype.UUID, batch engine.RunBatchID) {
+func (m *TypingIndicatorManager) OnSettled(ctx context.Context, sessionID pgtype.UUID) {
 	if m.senders == nil || m.streams == nil || !sessionID.Valid {
 		return
 	}
-	t, ok := m.streams.take(ctx, sessionID, byBatch(batch), nil)
+	t, ok := m.streams.takeOldestUnbound(sessionID)
 	if !ok || !t.HasBubble {
 		return
 	}
 	m.writeClosing(ctx, sessionID, t.Handle, copyFor(t.Handle.Locale).StreamNotStarted, "settled")
 }
 
-// Register subscribes the manager to the two ways a run ends without an
-// answer. Both have to be here or the bubble outlives its run: a failure and a
-// cancellation each publish nothing the outbound subscriber reads, so nothing
-// else would ever seal that stream.
+// Register subscribes the manager to the run lifecycle: the one event that
+// says a bubble now has a run to wait for, and the two ways a run ends without
+// an answer. All three have to be here or a bubble outlives its run — a
+// failure and a cancellation each publish nothing the outbound subscriber
+// reads, so nothing else would ever seal that stream, and without task:queued
+// no ending would know which bubble it belongs to at all.
 //
 // EventChatDone is deliberately NOT subscribed here: the answer belongs in the
 // bubble, and only the outbound subscriber holds the answer. Registering for
 // it here would close the bubble first and leave the reply to arrive
 // underneath it.
 func (m *TypingIndicatorManager) Register(bus *events.Bus) {
+	bus.Subscribe(protocol.EventTaskQueued, m.handleTaskQueued)
 	bus.Subscribe(protocol.EventTaskFailed, m.handleTaskFailed)
 	bus.Subscribe(protocol.EventTaskCancelled, m.handleTaskCancelled)
+}
+
+// handleTaskQueued binds a run to the bubble that is waiting for one. It is
+// what replaces the flush reporting its own task id: the engine's Router says
+// nothing about the run it created, so the run says it itself, on the bus every
+// enqueue path already publishes to (service.TaskService.FinalizeChatTaskEnqueue
+// for the debounced flush, and the deferred sweeper for a turn that waited on
+// its media).
+//
+// EVERYTHING HERE IS AN IN-MEMORY MAP OPERATION, deliberately. events.Bus
+// dispatches synchronously on the publisher's own goroutine, so a database read
+// here would be charged to whoever enqueued the task — the daemon's HTTP
+// handler, a sweeper tick — and a slow pool would hold up the enqueue itself.
+// The two things this needs are both on the event.
+//
+// Two kinds of run reach this subscriber and only one owns a bubble:
+//
+//   - A chat run has a chat_session_id and a NULL issue_id (CreateChatTask
+//     inserts issue_id as NULL), so an empty issue_id on the payload is what
+//     says "this is a turn in a conversation".
+//   - Everything else — /issue, autopilot, a rerun from the web UI — carries an
+//     issue id. Those runs answer somewhere else entirely, and one of them
+//     taking a WeCom bubble would seal a stranger's question with an answer
+//     nobody in the room asked for, and leave the real turn with nowhere to
+//     land.
+func (m *TypingIndicatorManager) handleTaskQueued(e events.Event) {
+	if m.streams == nil {
+		return
+	}
+	payload, ok := e.Payload.(map[string]any)
+	if !ok {
+		return
+	}
+	if issueID, _ := payload["issue_id"].(string); issueID != "" {
+		return
+	}
+	sessionID, ok := sessionIDFromEvent(e)
+	if !ok {
+		return // an issue / autopilot run, with no chat session and no bubble
+	}
+	taskID := taskIDFromEvent(e)
+	if taskID == "" {
+		return
+	}
+	m.streams.bindNext(sessionID, taskID)
 }
 
 // handleTaskFailed says a run died, in the bubble if there still is one and as
@@ -385,10 +428,17 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 	// withholds the error text, and dingtalk's outbound already honours it.
 	// Closing the bubble here would tell the user "这次没跑通" about an attempt
 	// whose replacement is already queued, and the retry's answer would then
-	// land underneath a bubble that had declared failure. The round stays open
-	// for the attempt that reports the real outcome; the retry clone's own
-	// events find it through the batch owner it inherited (roundTaker).
+	// land underneath a bubble that had declared failure.
+	//
+	// So the bubble stays, and the round gives up the dead attempt's id and
+	// goes back to waiting for a run (retryUnbind). That is what makes the
+	// clone's own task:queued land HERE rather than on the next question's
+	// bubble — the clone is a new task row with a new id, and nothing else on
+	// the event distinguishes it from a fresh turn.
 	if retryPending(e) {
+		if sessionID, ok := sessionIDFromEvent(e); ok {
+			m.streams.retryUnbind(sessionID, taskIDFromEvent(e))
+		}
 		return
 	}
 	if m.deliveries == nil && !m.streams.holding() {
@@ -401,6 +451,11 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 		return // an issue / autopilot run, with no chat session and no bubble
 	}
 	taskID := taskIDFromEvent(e)
+	// This run is over whatever the gates below decide. Drop it from the queue
+	// of runs waiting for a bubble before anything can return early, or the
+	// next question's bubble binds itself to a run that has already ended and
+	// spins with nothing left to close it.
+	m.streams.forget(sessionID, taskID)
 
 	// Everything this handler asks a database runs on the goroutine that
 	// published the event, so it gets the subscriber's own budget rather than
@@ -415,8 +470,8 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 	// way — see the block above the gate in outbound.go's processEvent.
 	//
 	// A round on this session's open list is local proof and costs nothing:
-	// it was opened by a message this adapter ingested and named by the flush
-	// that answered it. Everything else is decided by the database, cheapest
+	// it was opened by a message this adapter ingested and bound to this run
+	// by the session's own task:queued. Everything else is decided by the database, cheapest
 	// first. task:failed fires for every run in the deployment — Slack's,
 	// Lark's, DingTalk's, the web UI's — so the delivery row is read before
 	// the task row: a run with no WeCom route is another channel's and never
@@ -542,7 +597,7 @@ func (m *TypingIndicatorManager) refuseUnknownOrigin(ctx context.Context, sessio
 // task:failed, so without this the bubble spins until the server's window
 // runs out on it. A session with several rounds open gets one closing frame
 // per cancelled run, each on its own bubble, because the round is matched by
-// the task id the flush bound to it.
+// the task id bindNext bound to it.
 //
 // This handler is only ever as complete as its publishers. It sees a cancelled
 // run when service.TaskService broadcasts task:cancelled for the row —

@@ -239,9 +239,22 @@ type RouterOptions struct {
 	// WecomMetrics is the WeCom adapter's health sink. Nil discards every
 	// counter, which is what a deployment with /metrics turned off gets.
 	WecomMetrics *obsmetrics.WecomMetrics
-	DaemonHub    *daemonws.Hub
-	DaemonWakeup service.TaskWakeupNotifier
-	FeatureFlags *featureflag.Service
+
+	// WecomResolverSetBuilt, when set, is handed the WeCom resolver set this
+	// boot block assembled, as it is registered.
+	//
+	// It exists because every optional piece in that set narrows WeCom
+	// SILENTLY when it goes missing: drop the stream-bubble manager, or one of
+	// the four dependencies it takes, and nothing panics, nothing logs, the
+	// bus subscriptions still register, and the only symptom is a spinner in
+	// somebody's chat that never resolves. That makes "did boot wire it"
+	// unfalsifiable from outside the process, so the boot-wiring guard needs
+	// what boot actually built rather than something a test assembled itself.
+	// Nil everywhere but that guard.
+	WecomResolverSetBuilt func(engine.ResolverSet)
+	DaemonHub             *daemonws.Hub
+	DaemonWakeup          service.TaskWakeupNotifier
+	FeatureFlags          *featureflag.Service
 	// HeartbeatScheduler, when non-nil, replaces the default synchronous
 	// passthrough scheduler on the constructed Handler. main.go injects a
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
@@ -1041,9 +1054,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						slog.Default(),
 					)
 				}
-				channelRouter.Register(wecom.TypeWecom, wecom.NewResolverSet(
-					wecomStore, wecomSession, wecomReplier, wecomMedia, wecomTyping,
-				))
+				wecomSet := wecom.NewResolverSet(wecomStore, wecomSession, wecomReplier, wecomMedia)
+				// The bubble IS this platform's typing indicator, so the
+				// notifier slot the other adapters leave empty is the one that
+				// opens it. NewResolverSet does not take it: the set is shaped
+				// by the engine, and the engine's own tests build a WeCom set
+				// without one.
+				wecomSet.Typing = wecomTyping
+				if opts.WecomResolverSetBuilt != nil {
+					opts.WecomResolverSetBuilt(wecomSet)
+				}
+				channelRouter.Register(wecom.TypeWecom, wecomSet)
 
 				// EventChatDone subscriber: pushes the agent's chat reply
 				// back over the same aibot WebSocket the inbound loop owns —

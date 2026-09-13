@@ -201,7 +201,7 @@ func TestAWecomRunsFailureStillClosesTheBubbleItOpened(t *testing.T) {
 	t.Parallel()
 	rig := newBoundRoomRig(t)
 	rig.askedInTheRoom(t, "task-1")
-	rig.ran(t, "REQ-1", 1, "task-1")
+	rig.ran(t, "REQ-1", "task-1")
 
 	rig.failed(t, "task-1", false)
 
@@ -219,7 +219,7 @@ func TestAWebUIRunsFailureLeavesTheRoomsOwnBubbleAlone(t *testing.T) {
 	t.Parallel()
 	rig := newBoundRoomRig(t)
 	rig.askedInTheRoom(t, "task-1")
-	rig.ran(t, "REQ-1", 1, "task-1") // the room's own question, still running
+	rig.ran(t, "REQ-1", "task-1") // the room's own question, still running
 	rig.askedInTheBrowser(t, "task-2")
 
 	rig.failed(t, "task-2", false)
@@ -307,7 +307,7 @@ func TestAnUnreadableOriginRefusesTheFailure(t *testing.T) {
 func TestAnOpenRoundIsProofEnoughOfOrigin(t *testing.T) {
 	t.Parallel()
 	rig := newBoundRoomRig(t)
-	rig.ran(t, "REQ-1", 1, "task-1")
+	rig.ran(t, "REQ-1", "task-1")
 	rig.q.taskErr = errors.New("connection refused")
 	rig.q.originErr = errors.New("connection refused")
 
@@ -418,7 +418,7 @@ func TestAWebRunsUndeliveredAnswerDoesNotBuyItTheRoomsVoice(t *testing.T) {
 
 	// The room asked something earlier and read its answer.
 	rig.askedInTheRoom(t, "task-1")
-	rig.ran(t, "REQ-1", 1, "task-1")
+	rig.ran(t, "REQ-1", "task-1")
 	rig.answer(t, "42", "task-1")
 
 	// Now the installer asks the same session something in a browser. No

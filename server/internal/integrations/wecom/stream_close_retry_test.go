@@ -45,7 +45,7 @@ func retryRig(t *testing.T) (*bubbleRig, *countingMetrics) {
 func TestAClosingFrameWhoseAckWasLostIsWrittenAgain(t *testing.T) {
 	t.Parallel()
 	rig, mx := retryRig(t)
-	rig.ran(t, "REQ-RETRY", 1, "task-1")
+	rig.ran(t, "REQ-RETRY", "task-1")
 	dropped := rig.conn
 
 	var next *bubbleConn
@@ -101,7 +101,7 @@ func TestAClosingFrameNobodyAcksIsRetriedThenSaidAsAMessage(t *testing.T) {
 	t.Parallel()
 	rig, mx := retryRig(t)
 	rig.conn.loseClosingAcks = 1 << 20 // every one of them
-	rig.ran(t, "REQ-NOACK", 1, "task-1")
+	rig.ran(t, "REQ-NOACK", "task-1")
 
 	rig.answer(t, "the agent reply", "task-1")
 
@@ -138,7 +138,7 @@ func TestARefusedClosingFrameIsNotRetried(t *testing.T) {
 	t.Parallel()
 	rig, mx := retryRig(t)
 	rig.conn.refuseClosingCode = errcodeStreamExpired
-	rig.ran(t, "REQ-REFUSED", 1, "task-1")
+	rig.ran(t, "REQ-REFUSED", "task-1")
 
 	rig.answer(t, "the agent reply", "task-1")
 
@@ -161,7 +161,7 @@ func TestClosingFrameRetriesStopWhenTheContextEnds(t *testing.T) {
 	rig, _ := retryRig(t)
 	rig.conn.loseClosingAcks = 1 << 20
 	rig.streams.closeRetryDelay = time.Hour // any retry would wait forever
-	rig.ran(t, "REQ-CTX", 1, "task-1")
+	rig.ran(t, "REQ-CTX", "task-1")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -202,7 +202,7 @@ func TestATakeThatThenFailsIsOneCountedDropAndNothingMore(t *testing.T) {
 	mx := newCountingMetrics()
 	rig.out = NewOutbound(rig.q, rig.senders, rig.streams, nil, WithOutboundMetrics(mx))
 	rig.askedInTheRoom(t, "task-1")
-	rig.ran(t, "REQ-DROP", 1, "task-1")
+	rig.ran(t, "REQ-DROP", "task-1")
 
 	rig.senders.clear(rig.instID, rig.conn.sender)
 	done := events.Event{
@@ -261,7 +261,7 @@ func TestATakeThatThenFailsIsOneCountedDropAndNothingMore(t *testing.T) {
 func TestAClosingFrameTheSocketRefusesToTakeGoesOutAsAMessageOnce(t *testing.T) {
 	t.Parallel()
 	rig, mx := retryRig(t)
-	rig.ran(t, "REQ-BROKEN", 1, "task-1")
+	rig.ran(t, "REQ-BROKEN", "task-1")
 	rig.conn.failClosingWrite = errors.New("write: broken pipe")
 
 	rig.answer(t, "the agent reply", "task-1")

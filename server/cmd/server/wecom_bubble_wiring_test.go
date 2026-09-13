@@ -7,6 +7,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
@@ -46,7 +47,10 @@ func TestWecomBubbleClosersAreWiredOnTheRealBootPath(t *testing.T) {
 
 	t.Setenv("MULTICA_WECOM_SECRET_KEY", base64.StdEncoding.EncodeToString(key))
 	withWecom := events.New()
-	_, h := NewRouterWithOptions(nil, realtime.NewHub(), withWecom, analytics.NoopClient{}, nil, RouterOptions{})
+	var wecomSet engine.ResolverSet
+	NewRouterWithOptions(nil, realtime.NewHub(), withWecom, analytics.NoopClient{}, nil, RouterOptions{
+		WecomResolverSetBuilt: func(set engine.ResolverSet) { wecomSet = set },
+	})
 
 	// Anti-vacuity: if the WeCom block did not run at all, nothing below can
 	// fail for the reason it names. chat:done is the subscription that has
@@ -57,31 +61,48 @@ func TestWecomBubbleClosersAreWiredOnTheRealBootPath(t *testing.T) {
 			"Re-point this guard at wherever WeCom is wired now", got, base)
 	}
 
-	for _, event := range []string{protocol.EventTaskFailed, protocol.EventTaskCancelled} {
-		with := withWecom.SubscriberCount(event)
-		without := withoutWecom.SubscriberCount(event)
+	for _, sub := range []struct {
+		event       string
+		consequence string
+	}{
+		{
+			event: protocol.EventTaskQueued,
+			consequence: "no bubble is ever bound to the run that will answer it, so every ending — the answer " +
+				"included — finds nothing to close and arrives as a plain message under a spinner that " +
+				"runs until the server's window expires",
+		},
+		{
+			event: protocol.EventTaskFailed,
+			consequence: "a run that fails publishes no chat:done, so the bubble it opened is never closed and " +
+				"the user watches a spinner for an answer nobody is producing",
+		},
+		{
+			event: protocol.EventTaskCancelled,
+			consequence: "a cancelled run publishes no chat:done and no task:failed, so its bubble spins until " +
+				"the server's window runs out on a run the user stopped themselves",
+		},
+	} {
+		with := withWecom.SubscriberCount(sub.event)
+		without := withoutWecom.SubscriberCount(sub.event)
 		if with <= without {
-			t.Errorf("nothing in the WeCom boot path subscribes to %s (%d listeners with WeCom enabled, %d without). "+
-				"A run that ends on %s publishes no chat:done, so the bubble it opened is never closed and the user "+
-				"watches a spinner for an answer nobody is producing. Check TypingIndicatorManager.Register.",
-				event, with, without, event)
+			t.Errorf("nothing in the WeCom boot path subscribes to %s (%d listeners with WeCom enabled, %d without): %s. "+
+				"Check TypingIndicatorManager.Register.",
+				sub.event, with, without, sub.consequence)
 		}
 	}
 
 	// The other half: the manager behind those subscriptions has to be able to
-	// act on them. Read it back off the channel router, which is where the
-	// boot block left the one instance it built.
-	set, ok := h.ChannelRouter.RegisteredSet(wecom.TypeWecom)
-	if !ok {
-		t.Fatalf("the WeCom boot block ran but registered no resolver set on the channel router. " +
-			"engine.Router.Register drops an incomplete set with nothing but a log line, so WeCom would boot, " +
-			"announce itself enabled, and answer no inbound message at all. Check wecom.NewResolverSet.")
+	// act on them. This is the set the boot block registered, handed over on
+	// its way past.
+	if wecomSet.Installation == nil {
+		t.Fatal("the WeCom boot block did not assemble a resolver set. WeCom would boot, announce " +
+			"itself enabled, and answer no inbound message at all.")
 	}
-	typing, ok := set.Typing.(*wecom.TypingIndicatorManager)
+	typing, ok := wecomSet.Typing.(*wecom.TypingIndicatorManager)
 	if !ok {
 		t.Fatalf("the WeCom resolver set carries no *wecom.TypingIndicatorManager (Typing is %T). "+
-			"Nothing opens or closes a stream bubble, so every WeCom user waits with no sign the bot heard them "+
-			"until the whole answer lands at once.", set.Typing)
+			"Nothing opens a stream bubble, so every WeCom user waits with no sign the bot heard them "+
+			"until the whole answer lands at once.", wecomSet.Typing)
 	}
 
 	// Each of these is optional at construction and silently narrows the
