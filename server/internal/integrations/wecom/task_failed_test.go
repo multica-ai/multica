@@ -61,7 +61,7 @@ func TestAFailureWithAReasonSealsTheBubbleWithIt(t *testing.T) {
 	t.Parallel()
 	rig := newBoundRoomRig(t)
 	rig.askedInTheRoom(t, "task-1")
-	rig.ran(t, "REQ-1", 1, "task-1")
+	rig.ran(t, "REQ-1", "task-1")
 
 	rig.failedWithReason(t, "task-1", "上下文超出模型限制")
 
@@ -98,7 +98,7 @@ func TestARetryPendingFailureSaysNothing(t *testing.T) {
 	t.Parallel()
 	rig := newBoundRoomRig(t)
 	rig.askedInTheRoom(t, "task-1")
-	rig.ran(t, "REQ-1", 1, "task-1")
+	rig.ran(t, "REQ-1", "task-1")
 
 	rig.failed(t, "task-1", true)
 
@@ -126,7 +126,7 @@ func TestAFailedRunProducesExactlyOneMessage(t *testing.T) {
 	// the indicator alone will always produce exactly one message.
 	rig.out.Register(rig.bus)
 	rig.askedInTheRoom(t, "task-1")
-	rig.ran(t, "REQ-1", 1, "task-1")
+	rig.ran(t, "REQ-1", "task-1")
 
 	rig.failedWithReason(t, "task-1", "上下文超出模型限制")
 

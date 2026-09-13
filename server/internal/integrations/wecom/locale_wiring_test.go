@@ -87,7 +87,7 @@ func TestTheBubbleClosesInTheAskersLanguage(t *testing.T) {
 			// ask() sends as USER_1 in a 1:1, so the bubble belongs to one
 			// person and reads their profile.
 			rig.typing.languages = fakeLanguages{senderID: "USER_1", userID: localeTestUserID, language: tc.language}
-			rig.ran(t, "REQ-L", 1, "task-1")
+			rig.ran(t, "REQ-L", "task-1")
 			rig.answer(t, "   \n ", "task-1")
 
 			frames := rig.conn.streamFrames(t)

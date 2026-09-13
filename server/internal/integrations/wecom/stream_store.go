@@ -26,29 +26,43 @@ package wecom
 // immediately, because a message that produces nothing on screen reads as a
 // message that was lost.
 //
-// WHICH RUN A BUBBLE STANDS FOR IS NEVER INFERRED HERE. Both halves of that
-// question are answered upstream and carried in:
+// WHICH RUN A BUBBLE STANDS FOR IS DECIDED HERE, from two facts that arrive on
+// their own and in either order:
 //
-//   - engine.RunBatchID says which messages are one run. The batcher decides
-//     it under the lock that arms and retires the debounce window, so two
-//     messages share an id if and only if one flush answers both. Re-deriving
-//     it here from arrival times would be a second measurement of the same
-//     gap, taken on a detached goroutine, and near the window boundary the two
-//     disagree about how many runs exist — one bubble for two runs, or a
-//     bubble no run will ever close.
-//   - The task id arrives with the flush that created the run
-//     (TypingNotifier.OnRunStarted), so every later lifecycle event matches a
-//     round by id rather than by position. An auto-retry clone carries a fresh
-//     id and inherits its parent's chat_input_task_id, which is this same
-//     round's task id — see roundTaker, which resolves the clone through it.
+//   - A message was ingested (open). That is a bubble, and nothing more — at
+//     that moment nobody knows whether the debouncer will answer it with a run
+//     of its own or fold it into the one already collecting.
+//   - A chat run was queued for this session (bindNext, driven by the
+//     task:queued subscription in typing_indicator.go). That is a run, and
+//     nothing more — the event names a task and a chat session and says
+//     nothing about which message produced it.
 //
-// The rounds are kept sorted by batch id (insertLocked), which for one session
-// reads as the order its runs execute in: the engine serializes chat tasks per
-// session (ClaimAgentTask), so the oldest round is the running one and
-// everything behind it is waiting. Nothing consumes that order, though —
-// QueuedBehind compares batch ids rather than list positions, and it is
-// decided once when the round opens and never revised. The sorting is for
-// whoever reads the list, not for a caller that depends on it.
+// The pairing rule is position, and position alone: a queued run takes the
+// OLDEST round that has no run yet, and a message joins the round that is
+// still collecting rather than opening a second one. That works because the
+// engine serializes a session's chat tasks (ClaimAgentTask) and its debouncer
+// produces at most one run per window, so per session the two sequences are in
+// step. Nothing here re-measures the debounce gap from arrival times: whether
+// a message opens a round or joins one is read off "is a round still waiting
+// for its run", not off a clock.
+//
+// The rounds are kept sorted by the store's own sequence number (insertLocked),
+// which for one session is the order its bubbles were painted in, and that
+// order IS consumed: bindNext and takeOldestUnbound both take the oldest
+// unbound round.
+//
+// The event can beat the bubble. The Router detaches the ingest goroutine, and
+// a session's first message enqueues its task inside dispatch (router.go's
+// startChat path) rather than on the debounced flush, so task:queued routinely
+// arrives before anything is painted. A run with no round to take waits in the
+// session's pending queue and is picked up by the next bubble.
+//
+// The task id, once bound, is what every later lifecycle event matches on —
+// never a position. An auto-retry clone carries a fresh id and inherits its
+// parent's chat_input_task_id, which is this round's own task id: see
+// roundTaker, which resolves the clone through it, and retryUnbind, which puts
+// the round back in line for the clone's own task:queued so the clone never
+// takes a bubble some other question opened.
 //
 // The catch is req_id. Every frame of one stream has to echo the req_id of the
 // aibot_msg_callback that started the turn, and that value is only ever seen
@@ -91,7 +105,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -138,17 +151,15 @@ const (
 type openVerdict int
 
 const (
-	// roundOpened — the first message of a run. The caller paints the opening
-	// frame; from here on the round owns the handle it registered.
+	// roundOpened — nothing was collecting, so this message starts a round.
+	// The caller paints the opening frame; from here on the round owns the
+	// handle it registered.
 	roundOpened openVerdict = iota
-	// roundJoined — another message of a run whose bubble is already on
-	// screen. The bubble is this message's receipt too and nothing is painted.
+	// roundJoined — a round is already on screen and still waiting for its
+	// run, so the debounce window that will answer this message is the one
+	// that bubble stands for. The bubble is this message's receipt too and
+	// nothing is painted.
 	roundJoined
-	// roundFinished — this run's bubble is already closed. Only a badly
-	// delayed OnIngested reaches this: the goroutine that paints the bubble
-	// outlived the run it was painting for. Painting now would open a bubble
-	// whose answer has already been delivered and which nothing would close.
-	roundFinished
 )
 
 // streamHandle is everything needed to keep writing to one open bubble. The
@@ -231,70 +242,100 @@ type roundTurn struct {
 	HasBubble bool
 }
 
-// roundKey picks which round an ending speaks for. Both names are authoritative
-// and neither is inferred: the task id is the one the debounced flush bound to
-// the round, and the batch id is the engine's own name for the run — used by
-// the one closer that fires before any answer exists, the flush that settled
-// without creating a task.
+// roundKey picks which round an ending speaks for: the task id the session's
+// task:queued bound to it. Authoritative and never inferred — a run whose id
+// is not on file has no bubble here.
 type roundKey struct {
-	taskID  string
-	batch   engine.RunBatchID
-	byBatch bool
+	taskID string
 }
 
 func byTask(taskID string) roundKey { return roundKey{taskID: taskID} }
 
-func byBatch(batch engine.RunBatchID) roundKey {
-	return roundKey{batch: batch, byBatch: true}
-}
+// roundSeq is the store's own name for a round, handed out in painting order.
+// It is an internal handle, not a platform id: the only thing outside this
+// file that ever holds one is the caller of open, which gives it back to drop
+// when the server refuses the opening frame.
+type roundSeq uint64
 
-// roundEntry is one run's place in a session, from the moment anything is
+// roundEntry is one round's place in a session, from the moment anything is
 // known about it until something takes it. Whoever takes or drops the round
 // disposes of all of it in one lock.
 //
-// The two facts arrive from different directions and in either order, which is
-// why the entry exists independently of both. OnIngested brings the bubble
-// (one goroutine per message, detached by the Router); the debounced flush
-// brings the task id ~3s later. An entry with a task and no bubble is a run
+// The bubble and the run arrive from different directions and in either order,
+// which is why the entry exists independently of both. open brings the bubble
+// (one goroutine per message, detached by the Router); the task:queued
+// subscription brings the run. An entry with a task and no bubble is a run
 // whose ingest goroutine has not got there yet, or one whose opening frame the
 // server refused: its ending is still matched correctly, it just has nowhere
 // on screen to land and falls back to a plain message.
 type roundEntry struct {
-	// batch is the engine's own name for this run and the entry's identity.
-	batch engine.RunBatchID
+	// seq is this round's place in its session's painting order, and the
+	// entry's identity while nothing else names it.
+	seq roundSeq
 
 	// handle is the open bubble; painted reports whether there is one.
 	handle  streamHandle
 	painted bool
 
-	// taskID is the run the flush created for this batch, as reported by
-	// OnRunStarted. Empty until the debounce window expires.
+	// taskID is the run bound to this round, from the session's task:queued.
+	// Empty means the round is waiting for one.
 	taskID string
+
+	// everBound separates the two ways a round can be waiting, which behave
+	// differently and must not be confused:
+	//
+	//   - never bound — the debounce window that will answer it has not
+	//     flushed yet. A message arriving now belongs to that same window, so
+	//     it joins rather than opening a bubble of its own, and a settled
+	//     flush (OnSettled) closes this one because it is a round that never
+	//     became a run.
+	//   - bound once, then released by retryUnbind — the platform is replacing
+	//     this round's run with an auto-retry clone. The round is between runs,
+	//     not collecting: a new message must NOT join it (that message is a new
+	//     question with a run of its own coming), and OnSettled must not close
+	//     it (its replacement is already on the way).
+	everBound bool
 
 	// createdAt bounds the entry for the sweep when there is no handle to read
 	// a time off.
 	createdAt time.Time
 }
 
-// maxFinishedRounds bounds the per-session memory of closed batches. Ten
-// rounds back is far more than an ingest goroutine can lag by — it holds the
-// Router's reply budget, a couple of seconds, against rounds that take
-// minutes.
+// maxFinishedRounds bounds the per-session memory of ended runs. Ten rounds
+// back is far more than a task:queued can lag an ending by.
 const maxFinishedRounds = 10
+
+// pendingRun is a run queued for a session that had no round waiting for one:
+// the ingest goroutine that will paint its bubble has not got there yet. It is
+// held until a bubble appears, and swept with everything else once the
+// protocol's window has passed — a run still pending that long has no bubble
+// coming and must not take one that a much later question opened.
+type pendingRun struct {
+	taskID string
+	at     time.Time
+}
 
 // streamStore maps chat_session_id to that session's rounds, oldest first.
 type streamStore struct {
 	mu       sync.Mutex
 	sessions map[string][]*roundEntry
 
-	// finished remembers, per session, the last few batches whose round has
-	// been taken, so a badly delayed OnIngested cannot paint a second bubble
-	// for a run that has already answered. It is the one thing kept about a
-	// round after it is gone, and it says nothing about what was said — only
-	// that nothing more should be painted. Bounded by maxFinishedRounds; a
-	// session whose rounds are all gone keeps its ring until the sweep drops
-	// it along with everything else past the window.
+	// pending is each session's queue of runs that arrived before a bubble
+	// existed to bind them to, oldest first. Drained one at a time, in order,
+	// by the next bubble the session paints.
+	pending map[string][]pendingRun
+
+	// finished remembers, per session, the last few task ids whose round has
+	// been taken, so a run that has already ended cannot bind a bubble some
+	// later question opened. It is the one thing kept about a round after it is
+	// gone, and it says nothing about what was said. Bounded by
+	// maxFinishedRounds; a session whose rounds are all gone keeps its ring
+	// until the sweep drops it along with everything else past the window.
 	finished map[string]finishedRing
+
+	// seq hands out round identities. Monotonic across the store, so it is
+	// monotonic within every session, which is all anything here reads.
+	seq roundSeq
 
 	maxAge time.Duration
 	now    func() time.Time
@@ -304,19 +345,19 @@ type streamStore struct {
 	closeRetryDelay time.Duration
 }
 
-// finishedRing is one session's recently closed batches, with when the last
-// one was added so the sweep can retire the whole ring.
+// finishedRing is one session's recently ended runs, with when the last one was
+// added so the sweep can retire the whole ring.
 type finishedRing struct {
-	batches []engine.RunBatchID
-	at      time.Time
+	tasks []string
+	at    time.Time
 }
 
-func (r finishedRing) has(batch engine.RunBatchID) bool {
-	if batch == 0 {
+func (r finishedRing) has(taskID string) bool {
+	if taskID == "" {
 		return false
 	}
-	for _, id := range r.batches {
-		if id == batch {
+	for _, id := range r.tasks {
+		if id == taskID {
 			return true
 		}
 	}
@@ -326,6 +367,7 @@ func (r finishedRing) has(batch engine.RunBatchID) bool {
 func newStreamStore() *streamStore {
 	return &streamStore{
 		sessions:        make(map[string][]*roundEntry),
+		pending:         make(map[string][]pendingRun),
 		finished:        make(map[string]finishedRing),
 		maxAge:          streamMaxAge,
 		now:             time.Now,
@@ -337,128 +379,279 @@ func newStreamStore() *streamStore {
 // the typing indicator (writer) and the chat-done subscriber (reader).
 func NewStreamStore() *streamStore { return newStreamStore() }
 
-// entryLocked finds the round for a batch, or nil. Caller holds s.mu.
-func (s *streamStore) entryLocked(key string, batch engine.RunBatchID) *roundEntry {
+// collectingLocked finds the round a newly ingested message belongs to: one
+// that has never been bound to a run, so the debounce window that will answer
+// it is still open. A round released by retryUnbind is deliberately not one —
+// see roundEntry.everBound. Caller holds s.mu.
+func (s *streamStore) collectingLocked(key string) *roundEntry {
 	for _, r := range s.sessions[key] {
-		if r.batch == batch {
+		if r.taskID == "" && !r.everBound {
 			return r
 		}
 	}
 	return nil
 }
 
-// insertLocked files a new round in batch order. The ids are monotonic, so
-// this keeps the list in the order the runs will execute in even when the
-// Router's detached ingest goroutines deliver two messages out of order.
+// unboundLocked finds the oldest round with no run bound to it — the one a
+// newly queued run belongs to. Caller holds s.mu.
+func (s *streamStore) unboundLocked(key string) *roundEntry {
+	for _, r := range s.sessions[key] {
+		if r.taskID == "" {
+			return r
+		}
+	}
+	return nil
+}
+
+// boundLocked finds the round a task id is bound to, or nil. Caller holds s.mu.
+func (s *streamStore) boundLocked(key, taskID string) *roundEntry {
+	if taskID == "" {
+		return nil
+	}
+	for _, r := range s.sessions[key] {
+		if r.taskID == taskID {
+			return r
+		}
+	}
+	return nil
+}
+
+// insertLocked files a new round at the end of its session's list. The
+// sequence numbers are handed out under this same lock, so the list is always
+// in painting order even when the Router's detached ingest goroutines race.
 // Caller holds s.mu.
 func (s *streamStore) insertLocked(key string, e *roundEntry) *roundEntry {
-	rounds := s.sessions[key]
-	i := len(rounds)
-	for i > 0 && rounds[i-1].batch > e.batch {
-		i--
-	}
-	rounds = append(rounds, nil)
-	copy(rounds[i+1:], rounds[i:])
-	rounds[i] = e
-	s.sessions[key] = rounds
+	s.sessions[key] = append(s.sessions[key], e)
 	return e
 }
 
-// finishedLocked reports whether a batch's round has already been taken.
-// Caller holds s.mu.
-func (s *streamStore) finishedLocked(key string, batch engine.RunBatchID) bool {
-	return s.finished[key].has(batch)
+// finishedLocked reports whether a run has already had its round taken. Caller
+// holds s.mu.
+func (s *streamStore) finishedLocked(key, taskID string) bool {
+	return s.finished[key].has(taskID)
 }
 
-// retireLocked records that a batch's round is over, keeping the ring
-// bounded. Caller holds s.mu.
-func (s *streamStore) retireLocked(key string, batch engine.RunBatchID) {
-	if batch == 0 {
+// retireLocked records that a run is over, keeping the ring bounded. Caller
+// holds s.mu.
+func (s *streamStore) retireLocked(key, taskID string) {
+	if taskID == "" {
 		return
 	}
 	ring := s.finished[key]
-	if !ring.has(batch) {
-		ring.batches = append(ring.batches, batch)
-		if len(ring.batches) > maxFinishedRounds {
-			ring.batches = ring.batches[len(ring.batches)-maxFinishedRounds:]
+	if !ring.has(taskID) {
+		ring.tasks = append(ring.tasks, taskID)
+		if len(ring.tasks) > maxFinishedRounds {
+			ring.tasks = ring.tasks[len(ring.tasks)-maxFinishedRounds:]
 		}
 	}
 	ring.at = s.now()
 	s.finished[key] = ring
 }
 
-// open registers a message's bubble against the run the engine collected it
-// into, and says whether this message is the one that paints it. Every message
-// of a run calls this; the first gets roundOpened and the rest roundJoined,
-// because one run produces one answer and a second bubble for it is a bubble
-// nobody ever closes.
+// dropPendingLocked removes a run from the session's pending queue. Caller
+// holds s.mu.
+func (s *streamStore) dropPendingLocked(key, taskID string) {
+	queue := s.pending[key]
+	for i, p := range queue {
+		if p.taskID != taskID {
+			continue
+		}
+		queue = append(queue[:i], queue[i+1:]...)
+		if len(queue) == 0 {
+			delete(s.pending, key)
+		} else {
+			s.pending[key] = queue
+		}
+		return
+	}
+}
+
+// takePendingLocked pops the oldest run waiting for a bubble, or "". Caller
+// holds s.mu.
+func (s *streamStore) takePendingLocked(key string) string {
+	queue := s.pending[key]
+	if len(queue) == 0 {
+		return ""
+	}
+	taskID := queue[0].taskID
+	if len(queue) == 1 {
+		delete(s.pending, key)
+	} else {
+		s.pending[key] = queue[1:]
+	}
+	return taskID
+}
+
+// bindLocked attaches a run to a round. Caller holds s.mu.
+func (e *roundEntry) bindLocked(taskID string) {
+	e.taskID = taskID
+	e.everBound = true
+}
+
+// open registers a message's bubble and says whether this message is the one
+// that paints it. A message that arrives while a round is still collecting —
+// painted, and with no run bound to it yet — joins that round, because the
+// debounce window that will answer it is the one that bubble already stands
+// for; a second bubble there is one nobody ever closes. Otherwise it opens a
+// round of its own, immediately, because a wait with nothing on screen reads
+// as a message that was lost.
 //
-// Which run this is comes from batch — the debouncer's own verdict — so the
-// count of bubbles and the count of runs cannot drift apart.
-func (s *streamStore) open(sessionID pgtype.UUID, batch engine.RunBatchID, h streamHandle) openVerdict {
+// The returned sequence number is the caller's handle on the round for the one
+// case where it has to take it back: an opening frame the server refuses
+// outright (drop).
+func (s *streamStore) open(sessionID pgtype.UUID, h streamHandle) (roundSeq, openVerdict) {
 	key := util.UUIDToString(sessionID)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sweepLocked()
 
-	if s.finishedLocked(key, batch) {
-		return roundFinished
-	}
 	if h.CreatedAt.IsZero() {
 		h.CreatedAt = s.now()
 	}
-	if e := s.entryLocked(key, batch); e != nil {
-		if e.painted {
-			return roundJoined
-		}
-		// The flush got here before this message's ingest goroutine did. The
-		// round already has its run; it was only ever missing the bubble.
-		h.QueuedBehind = e.queuedBehind(s.sessions[key])
-		e.handle, e.painted = h, true
-		return roundOpened
+	if e := s.collectingLocked(key); e != nil {
+		return e.seq, roundJoined
 	}
-	e := &roundEntry{batch: batch, handle: h, painted: true, createdAt: h.CreatedAt}
+
+	s.seq++
+	e := &roundEntry{seq: s.seq, handle: h, painted: true, createdAt: h.CreatedAt}
+	e.handle.QueuedBehind = queuedBehind(s.sessions[key])
 	s.insertLocked(key, e)
-	e.handle.QueuedBehind = e.queuedBehind(s.sessions[key])
-	return roundOpened
-}
-
-// queuedBehind reports whether any OLDER round of this session is still on
-// file — this round will wait for it, and an empty answer of its own then
-// means "the reply ahead of it covered this", not plain silence.
-func (e *roundEntry) queuedBehind(rounds []*roundEntry) bool {
-	for _, r := range rounds {
-		if r.batch < e.batch {
-			return true
-		}
+	// A run queued before anything was on screen has been waiting for exactly
+	// this. Pairing them here rather than leaving the run for the NEXT bubble
+	// is what keeps the two sequences in step.
+	if taskID := s.takePendingLocked(key); taskID != "" {
+		e.bindLocked(taskID)
 	}
-	return false
+	return e.seq, roundOpened
 }
 
-// bind records the task the debounced flush created for a batch. This is the
-// authoritative round-to-run link: from here on every task lifecycle event
-// finds its bubble by id.
+// queuedBehind reports whether a round opening now would be waiting on one
+// already on file. Its own empty answer then means "the reply ahead of it
+// covered this", which is worth saying differently from plain silence. Decided
+// once, when the round opens, and never revised.
+func queuedBehind(rounds []*roundEntry) bool { return len(rounds) > 0 }
+
+// bindNext records that a run was queued for this session and hands it the
+// round it belongs to: the oldest one still waiting for a run. From here on
+// every task lifecycle event finds its bubble by task id.
 //
-// It files a round even when no bubble has been painted yet, because the
-// Router runs OnIngested on a detached goroutine and the flush that names the
-// task can win the race. The bubble attaches to the same entry when it lands.
-func (s *streamStore) bind(sessionID pgtype.UUID, batch engine.RunBatchID, taskID string) {
-	if taskID == "" || batch == 0 {
+// A run with no round waiting goes on the session's pending queue rather than
+// being dropped, because the Router detaches the ingest goroutine and a
+// session's first message enqueues its task inside dispatch — so the event
+// routinely beats the bubble it belongs to.
+func (s *streamStore) bindNext(sessionID pgtype.UUID, taskID string) {
+	if taskID == "" {
 		return
 	}
 	key := util.UUIDToString(sessionID)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.finishedLocked(key, batch) {
+	s.sweepLocked()
+
+	// A run whose ending has already been handled must never take a bubble: it
+	// would be a bubble with no ending left to close it.
+	if s.finishedLocked(key, taskID) {
 		return
 	}
-	if e := s.entryLocked(key, batch); e != nil {
-		e.taskID = taskID
+	if s.boundLocked(key, taskID) != nil {
+		return // already on file; a republished queued event changes nothing
+	}
+	if e := s.unboundLocked(key); e != nil {
+		e.bindLocked(taskID)
 		return
 	}
-	s.insertLocked(key, &roundEntry{batch: batch, taskID: taskID, createdAt: s.now()})
+	for _, p := range s.pending[key] {
+		if p.taskID == taskID {
+			return
+		}
+	}
+	s.pending[key] = append(s.pending[key], pendingRun{taskID: taskID, at: s.now()})
+}
+
+// retryUnbind puts a round back in line for the run that will replace it, and
+// reports whether it found one.
+//
+// The platform answers a retryable failure by creating an auto-retry clone: a
+// NEW task row, with a new id, which publishes a task:queued of its own. The
+// clone's id is the only name its ending will ever carry, and the round it
+// belongs to is this one — so the round gives up the dead attempt's id and
+// goes back to waiting. Being the oldest round with no run, it is what the
+// clone's task:queued then takes.
+//
+// This works in either publish order, which matters because FailTask emits the
+// clone's task:queued BEFORE the parent's task:failed (service/task.go, the
+// retried block above broadcastTaskFailedEvent) while a backoff child is
+// queued minutes later by the deferred sweeper. Early, the clone is already
+// waiting in the pending queue and is taken here; late, it finds this round
+// still unbound and takes it then.
+//
+// The bubble is deliberately untouched: the user is watching a spinner for a
+// question whose answer is still coming.
+func (s *streamStore) retryUnbind(sessionID pgtype.UUID, taskID string) bool {
+	if taskID == "" {
+		return false
+	}
+	key := util.UUIDToString(sessionID)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.boundLocked(key, taskID)
+	if e == nil {
+		return false
+	}
+	e.taskID = ""
+	if clone := s.takePendingLocked(key); clone != "" {
+		e.bindLocked(clone)
+	}
+	return true
+}
+
+// takeOldestUnbound hands back the oldest round that never became a run — the
+// bubble a settled flush opened and nothing will ever answer. A round released
+// by retryUnbind is not one of those: its replacement is on the way.
+func (s *streamStore) takeOldestUnbound(sessionID pgtype.UUID) (roundTurn, bool) {
+	key := util.UUIDToString(sessionID)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sweepLocked()
+	e := s.collectingLocked(key)
+	if e == nil {
+		return roundTurn{}, false
+	}
+	for i, r := range s.sessions[key] {
+		if r == e {
+			return s.takeAtLocked(key, i), true
+		}
+	}
+	return roundTurn{}, false
+}
+
+// forget records that a run has ended without taking a round for it: it drops
+// the run from the pending queue and retires its id.
+//
+// It is what stops an ending that arrived before the bubble — a cancel, or a
+// failure this process is not the one to announce — from leaving a run on the
+// pending queue that the NEXT question's bubble would then bind itself to,
+// spinning with nothing left that could close it.
+func (s *streamStore) forget(sessionID pgtype.UUID, taskID string) {
+	if taskID == "" {
+		return
+	}
+	key := util.UUIDToString(sessionID)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.sessions[key]) == 0 && len(s.pending[key]) == 0 {
+		// Nothing of this session's is on file, so there is nothing to forget
+		// and no reason to start remembering. task:failed fires for every run
+		// in the deployment; a ring per stranger's session would be a leak.
+		return
+	}
+	s.dropPendingLocked(key, taskID)
+	s.retireLocked(key, taskID)
 }
 
 // indexLocked finds the round an ending speaks for, or -1. Matching is by the
@@ -466,16 +659,10 @@ func (s *streamStore) bind(sessionID pgtype.UUID, batch engine.RunBatchID, taskI
 // id is not on file has no bubble here, and taking somebody else's would seal
 // the wrong question with this answer. Caller holds s.mu.
 func (s *streamStore) indexLocked(key string, k roundKey) int {
-	if !k.byBatch && k.taskID == "" {
+	if k.taskID == "" {
 		return -1
 	}
 	for i, r := range s.sessions[key] {
-		if k.byBatch {
-			if r.batch == k.batch {
-				return i
-			}
-			continue
-		}
 		if r.taskID == k.taskID {
 			return i
 		}
@@ -493,9 +680,9 @@ func (s *streamStore) indexLocked(key string, k roundKey) int {
 // does a handle past maxAge: the server would refuse the frame and a caller
 // that believed it had a bubble would leave the user with nothing.
 //
-// The batch goes on the session's finished ring so a badly delayed OnIngested
-// cannot paint a second bubble for a run that has already answered. Caller
-// holds s.mu.
+// The run goes on the session's finished ring so a republished task:queued for
+// a run that has already ended cannot bind a bubble some later question
+// opened. Caller holds s.mu.
 func (s *streamStore) takeAtLocked(key string, i int) roundTurn {
 	rounds := s.sessions[key]
 	entry := rounds[i]
@@ -505,7 +692,7 @@ func (s *streamStore) takeAtLocked(key string, i int) roundTurn {
 	} else {
 		s.sessions[key] = rounds
 	}
-	s.retireLocked(key, entry.batch)
+	s.retireLocked(key, entry.taskID)
 
 	turn := roundTurn{}
 	if entry.painted && !s.expiredLocked(entry.handle.CreatedAt) {
@@ -529,12 +716,18 @@ func (s *streamStore) take(ctx context.Context, sessionID pgtype.UUID, k roundKe
 
 	s.mu.Lock()
 	s.sweepLocked()
+	// Whatever else happens, this run is over: it must not be left waiting for
+	// a bubble it would only strand.
+	s.dropPendingLocked(key, k.taskID)
 	if i := s.indexLocked(key, k); i >= 0 {
 		turn := s.takeAtLocked(key, i)
 		s.mu.Unlock()
 		return turn, true
 	}
-	worthResolving := !k.byBatch && k.taskID != "" && len(s.sessions[key]) > 0
+	if len(s.sessions[key]) > 0 || len(s.pending[key]) > 0 {
+		s.retireLocked(key, k.taskID)
+	}
+	worthResolving := k.taskID != "" && len(s.sessions[key]) > 0
 	s.mu.Unlock()
 
 	if !worthResolving || resolve == nil {
@@ -553,9 +746,9 @@ func (s *streamStore) take(ctx context.Context, sessionID pgtype.UUID, k roundKe
 }
 
 // has reports whether a session holds a round bound to this run. A round is
-// opened by a message this adapter ingested and named by the flush that
-// answered it, so an entry here is local proof the question was asked in the
-// room — the one case the failure notice's origin gate can decide without a
+// opened by a message this adapter ingested and bound to this run by the
+// session's own task:queued, so an entry here is local proof the question was
+// asked in the room — the one case the failure notice's origin gate can decide without a
 // database (failureBelongsOnWecom).
 func (s *streamStore) has(sessionID pgtype.UUID, taskID string) bool {
 	if taskID == "" {
@@ -571,15 +764,15 @@ func (s *streamStore) has(sessionID pgtype.UUID, taskID string) bool {
 	return false
 }
 
-// holding reports whether this store has any round on file anywhere, painted
-// or not. It is the "nothing here to close" test at the head of the two
-// ending subscribers.
+// holding reports whether this store has anything on file anywhere — a round,
+// painted or not, or a run still waiting for its bubble. It is the "nothing
+// here to close" test at the head of the two ending subscribers.
 //
-// Unpainted rounds count, and that is the point. depth() screens on painted
-// because it answers "how many bubbles are on screen"; a round bound to a run
-// whose opening frame is still in flight has no bubble yet and is exactly the
-// one whose ending must not be dropped — retiring it is what makes the late
-// paint a no-op (open returns roundFinished), and skipping it leaves a spinner
+// Unpainted rounds and pending runs both count, and that is the point. depth()
+// screens on painted because it answers "how many bubbles are on screen"; a run
+// whose bubble is still in flight is exactly the one whose ending must not be
+// dropped — forgetting it is what keeps the bubble that lands a moment later
+// from binding a run that has already ended, and skipping it leaves a spinner
 // nothing will ever close.
 func (s *streamStore) holding() bool {
 	s.mu.Lock()
@@ -589,19 +782,20 @@ func (s *streamStore) holding() bool {
 			return true
 		}
 	}
-	return false
+	return len(s.pending) > 0
 }
 
 // drop forgets a round without sending anything — used when the opening frame
-// was refused and the bubble the handle describes never existed.
-func (s *streamStore) drop(sessionID pgtype.UUID, batch engine.RunBatchID) {
+// was refused and the bubble the handle describes never existed. seq is what
+// open handed back.
+func (s *streamStore) drop(sessionID pgtype.UUID, seq roundSeq) {
 	key := util.UUIDToString(sessionID)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rounds := s.sessions[key]
 	for i, r := range rounds {
-		if r.batch != batch {
+		if r.seq != seq {
 			continue
 		}
 		rounds = append(rounds[:i], rounds[i+1:]...)
@@ -634,12 +828,12 @@ func (s *streamStore) expiredLocked(createdAt time.Time) bool {
 	return s.now().Sub(createdAt) > s.maxAge
 }
 
-// sweepLocked evicts rounds the server would no longer accept, and the
+// sweepLocked evicts rounds the server would no longer accept, runs that have
+// been waiting for a bubble longer than one could still be coming, and the
 // finished rings of sessions that have been quiet for a whole window. An
-// ending normally takes a round long before this fires; the sweep is what
-// keeps a round whose run produced no ending at all — a flush that named a run
-// whose ingest goroutine never arrived — from accumulating forever. Caller
-// holds s.mu.
+// ending normally takes a round long before this fires; the sweep is what keeps
+// a round whose run produced no ending at all — and a run whose ingest
+// goroutine never arrived — from accumulating forever. Caller holds s.mu.
 func (s *streamStore) sweepLocked() {
 	for key, rounds := range s.sessions {
 		live := rounds[:0]
@@ -653,6 +847,20 @@ func (s *streamStore) sweepLocked() {
 			delete(s.sessions, key)
 		} else {
 			s.sessions[key] = live
+		}
+	}
+	for key, queue := range s.pending {
+		live := queue[:0]
+		for _, p := range queue {
+			if s.expiredLocked(p.at) {
+				continue
+			}
+			live = append(live, p)
+		}
+		if len(live) == 0 {
+			delete(s.pending, key)
+		} else {
+			s.pending[key] = live
 		}
 	}
 	for key, ring := range s.finished {
@@ -718,8 +926,8 @@ func (s *streamStore) seal(ctx context.Context, senders *sendersRegistry, h stre
 }
 
 // roundTaker matches a task lifecycle event to the round it belongs to. Both
-// halves of the store's identity live behind it: the binding the flush filed,
-// and the one column that resolves an auto-retry clone back to it.
+// halves of the store's identity live behind it: the binding task:queued
+// filed, and the one column that resolves an auto-retry clone back to it.
 type roundTaker struct {
 	streams *streamStore
 	tasks   taskLookup
@@ -729,13 +937,14 @@ type roundTaker struct {
 // take is roundTaker's one job: take on the store, with the auto-retry lookup
 // supplied.
 //
-// The id on the event is tried first, because that is the id the flush bound.
-// An auto-retry clone is the one case it does not match: FailTask creates the
-// clone with a fresh id and it inherits the parent's chat_input_task_id, which
-// is the round's own task id (EnqueueChatTask stamps chat_input_task_id = id on
-// the turn it creates). So a clone's ending is routed by reading that column,
-// not by falling back to whichever round is at the head — the round a clone
-// belongs to is on file, it is just filed under the batch's owner.
+// The id on the event is tried first, because that is the id bindNext filed.
+// retryUnbind normally hands the round straight to the clone's own task:queued,
+// so the clone's ending matches on that first try; this column is the belt to
+// that braces. It reads chat_input_task_id, which the clone inherits from its
+// parent and which is the round's own task id (EnqueueChatTask stamps
+// chat_input_task_id = id on the turn it creates) — so a clone whose
+// task:queued this process never saw, one queued before a restart, still finds
+// its round rather than falling back to whichever is at the head.
 //
 // The lookup costs one read, and the store only asks for it on a miss in a
 // session that still holds a round. Without a task lookup configured the miss

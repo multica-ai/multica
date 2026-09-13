@@ -26,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // bubbleReplica is one backend process holding the bot's socket: its own bus,
@@ -60,7 +61,7 @@ func newBubbleReplica(t *testing.T, q *db.Queries, instID pgtype.UUID) *bubbleRe
 
 // asked is the Router's half of a WeCom question arriving: the message is
 // ingested (OnIngested, with the callback's req_id in the raw envelope) and the
-// debounced flush names the run it created (OnRunStarted).
+// enqueue that follows publishes task:queued for the run it created.
 func (r *bubbleReplica) asked(t *testing.T, turn boundTurn, reqID string) {
 	t.Helper()
 	raw, err := json.Marshal(InboundMessage{
@@ -77,8 +78,15 @@ func (r *bubbleReplica) asked(t *testing.T, turn boundTurn, reqID string) {
 			Source: channel.Source{ChannelType: TypeWecom, ChatID: turn.chatID, ChatType: channel.ChatTypeP2P, SenderID: "USER_1"},
 			Raw:    raw,
 		},
-		sessionID, 1)
-	r.typing.OnRunStarted(context.Background(), sessionID, 1, mustParseTaskUUID(t, turn.taskID))
+		sessionID)
+	r.bus.Publish(events.Event{
+		Type:          protocol.EventTaskQueued,
+		ChatSessionID: turn.sessionID,
+		TaskID:        turn.taskID,
+		Payload: map[string]any{
+			"task_id": turn.taskID, "issue_id": "", "status": "queued",
+		},
+	})
 }
 
 // wire decodes what the socket carried: the stream frames in order, and the

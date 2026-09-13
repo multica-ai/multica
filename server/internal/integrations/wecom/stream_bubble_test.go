@@ -274,12 +274,12 @@ func bubbleSessionID(t *testing.T) pgtype.UUID {
 }
 
 // ask feeds one inbound message through the typing indicator, the way the
-// Router does after a successful ingest. batch is the engine debouncer's
-// verdict on which run the message was collected into — the Router reads it
-// off pendingBatcher.Schedule and hands it straight through, so a test says
-// "the batcher merged these" by passing one id twice and "the batcher split
-// them" by passing two, without touching a clock.
-func (r *bubbleRig) ask(t *testing.T, reqID string, batch engine.RunBatchID) {
+// Router does after a successful ingest. It says nothing about which run will
+// answer it, because the Router says nothing either: a message that arrives
+// while a round is still waiting for its run joins that round, and a test says
+// "these two are one run" by not queueing a run between them and "these are two
+// runs" by queueing one.
+func (r *bubbleRig) ask(t *testing.T, reqID string) {
 	t.Helper()
 	raw, err := json.Marshal(InboundMessage{
 		BotID:        "BOT",
@@ -298,7 +298,7 @@ func (r *bubbleRig) ask(t *testing.T, reqID string, batch engine.RunBatchID) {
 			Source: channel.Source{ChannelType: TypeWecom, ChatID: "CHAT_1", ChatType: channel.ChatTypeP2P, SenderID: "USER_1"},
 			Raw:    raw,
 		},
-		bubbleSessionID(t), batch)
+		bubbleSessionID(t))
 }
 
 // reconnect swaps the installation's live socket the way the Supervisor does
@@ -313,28 +313,50 @@ func (r *bubbleRig) reconnect() *bubbleConn {
 	return conn
 }
 
-// runStarted is the debounced flush reporting the task it created for a batch,
-// the way Router.flushChatRun does after EnqueueChatTask returns.
+// queued publishes the task:queued that service.FinalizeChatTaskEnqueue
+// broadcasts once the debounced flush has created the run — a chat turn, so
+// chat_session_id is set and issue_id is the empty string a NULL column
+// serializes to (CreateChatTask inserts issue_id as NULL).
 //
-// That flush only ever runs for messages this adapter ingested, so the run it
-// creates was asked in the room by construction — which is the answer both
-// origin gates want, and the reason it is stated here rather than in every
-// test. A test modelling a question typed in Multica does not come through
-// here; it says so itself with askedInTheBrowser.
-func (r *bubbleRig) runStarted(t *testing.T, batch engine.RunBatchID, taskName string) {
+// Driving it through the bus rather than by calling the handler is what keeps
+// the test honest about the subscription itself: a manager that never
+// subscribed to task:queued binds nothing, and every bubble in this file spins.
+//
+// The enqueue only ever happens for messages this adapter ingested, so the run
+// was asked in the room by construction — which is the answer both origin gates
+// want, and the reason it is stated here rather than in every test. A test
+// modelling a question typed in Multica does not come through here; it says so
+// itself with askedInTheBrowser.
+func (r *bubbleRig) queued(t *testing.T, taskName string) {
 	t.Helper()
 	r.q.fileTask(t, taskUUID(t, taskName))
-	r.typing.OnRunStarted(context.Background(), bubbleSessionID(t), batch, mustParseTestUUID(t, taskName))
+	r.queueTask(t, taskUUID(t, taskName), "")
 	r.q.fileTask(t, taskUUID(t, taskName))
 	r.q.channelIngested = askedOverWecom()
 }
 
+// queueTask publishes one task:queued with an explicit issue id, so a test can
+// send the kind of run that must NOT take a bubble.
+func (r *bubbleRig) queueTask(t *testing.T, taskID, issueID string) {
+	t.Helper()
+	r.bus.Publish(events.Event{
+		Type:          protocol.EventTaskQueued,
+		ChatSessionID: bubbleSession,
+		TaskID:        taskID,
+		Payload: map[string]any{
+			"task_id":  taskID,
+			"issue_id": issueID,
+			"status":   "queued",
+		},
+	})
+}
+
 // ran is the common case: a message arrives and the flush 3s later creates its
 // run.
-func (r *bubbleRig) ran(t *testing.T, reqID string, batch engine.RunBatchID, taskName string) {
+func (r *bubbleRig) ran(t *testing.T, reqID, taskName string) {
 	t.Helper()
-	r.ask(t, reqID, batch)
-	r.runStarted(t, batch, taskName)
+	r.ask(t, reqID)
+	r.queued(t, taskName)
 }
 
 func (r *bubbleRig) answer(t *testing.T, content, taskName string) {
@@ -420,7 +442,7 @@ func taskUUID(t *testing.T, name string) string {
 func TestAQuestionPaintsALoadingBubbleImmediately(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
-	rig.ask(t, "REQ-A", 1)
+	rig.ask(t, "REQ-A")
 
 	frames := rig.conn.streamFrames(t)
 	if len(frames) != 1 {
@@ -440,7 +462,7 @@ func TestAQuestionPaintsALoadingBubbleImmediately(t *testing.T) {
 func TestTheAnswerReplacesTheBubbleInPlace(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
-	rig.ran(t, "REQ-B", 1, "task-1")
+	rig.ran(t, "REQ-B", "task-1")
 	rig.answer(t, "the agent reply", "task-1")
 
 	frames := rig.conn.streamFrames(t)
@@ -475,7 +497,7 @@ func TestTheAnswerReplacesTheBubbleInPlace(t *testing.T) {
 func TestTheAnswerClosesTheBubbleOverTheNextConnection(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
-	rig.ran(t, "REQ-RECONNECT", 1, "task-1")
+	rig.ran(t, "REQ-RECONNECT", "task-1")
 
 	opened := rig.conn.streamFrames(t)
 	if len(opened) != 1 {
@@ -517,7 +539,7 @@ func TestTheAnswerClosesTheBubbleOverTheNextConnection(t *testing.T) {
 func TestAnEmptyAnswerStillClosesTheBubbleWithWords(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
-	rig.ran(t, "REQ-C", 1, "task-1")
+	rig.ran(t, "REQ-C", "task-1")
 	rig.answer(t, "   \n ", "task-1")
 
 	frames := rig.conn.streamFrames(t)
@@ -536,19 +558,22 @@ func TestAnEmptyAnswerStillClosesTheBubbleWithWords(t *testing.T) {
 	}
 }
 
-// A message the batcher gave a run of its own is a round of its own, queued
-// behind the run in flight — and it gets its own bubble immediately, because a
-// wait with nothing on screen reads as a message that was lost.
+// A message that arrives once the round ahead of it has its run is a round of
+// its own, queued behind the run in flight — and it gets its own bubble
+// immediately, because a wait with nothing on screen reads as a message that
+// was lost.
 //
 // The two messages arrive at the SAME instant on this store's clock. Only the
-// batcher's verdict separates them, which is the point: the gap between two
-// messages is not this side's to measure, and a store that measured it would
-// fold these two into one round and leave the second question with no receipt.
+// run queued between them separates them, which is the point: the gap between
+// two messages is not this side's to measure, and a store that measured it
+// would fold these two into one round and leave the second question with no
+// receipt.
 func TestAQueuedQuestionGetsItsOwnBubble(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
-	rig.ask(t, "REQ-D1", 1)
-	rig.ask(t, "REQ-D2", 2)
+	rig.ask(t, "REQ-D1")
+	rig.queued(t, "task-1")
+	rig.ask(t, "REQ-D2")
 
 	frames := rig.conn.streamFrames(t)
 	if len(frames) != 2 {
@@ -562,21 +587,21 @@ func TestAQueuedQuestionGetsItsOwnBubble(t *testing.T) {
 	}
 }
 
-// Two messages the batcher collected into ONE run share one bubble. A second
+// Two messages still inside one debounce window share one bubble. A second
 // bubble here is one nobody would ever close: the run produces one answer, it
 // seals one bubble, and the other spins until the guard promises a separate
 // reply for a question that has already been answered.
 //
 // The clock is moved a full window and a half between them, further apart than
 // any local rule would call one round. The batcher says otherwise — it re-arms
-// on every message, so a burst is one run however long it runs — and the
-// batcher is the one that decides.
+// on every message, so a burst is one run however long it runs — and the run,
+// not the clock, is what this side reads: nothing has been queued yet.
 func TestMessagesInsideTheDebounceWindowShareOneBubble(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
-	rig.ask(t, "REQ-E1", 1)
+	rig.ask(t, "REQ-E1")
 	rig.now = rig.now.Add(engine.DefaultChatRunBatchWindow * 3 / 2)
-	rig.ask(t, "REQ-E2", 1)
+	rig.ask(t, "REQ-E2")
 
 	if n := len(rig.conn.streamFrames(t)); n != 1 {
 		t.Fatalf("two messages in one debounce window opened %d bubbles, want 1 — the extra one is never closed", n)
@@ -592,8 +617,8 @@ func TestMessagesInsideTheDebounceWindowShareOneBubble(t *testing.T) {
 func TestAQueuedRoundWithNothingToSaySaysItWasMerged(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
-	rig.ran(t, "REQ-F1", 1, "task-1")
-	rig.ran(t, "REQ-F2", 2, "task-2")
+	rig.ran(t, "REQ-F1", "task-1")
+	rig.ran(t, "REQ-F2", "task-2")
 
 	rig.answer(t, "the first reply", "task-1") // seals the head
 	rig.answer(t, "", "task-2")                // seals the queued one
@@ -614,7 +639,7 @@ func TestARefusedClosingFrameStillDeliversTheAnswer(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
 	rig.conn.refuseClosingCode = errcodeStreamExpired
-	rig.ran(t, "REQ-G", 1, "task-1")
+	rig.ran(t, "REQ-G", "task-1")
 	rig.answer(t, "the agent reply", "task-1")
 
 	pushes := rig.conn.pushes(t)
@@ -632,7 +657,7 @@ func TestARefusedClosingFrameStillDeliversTheAnswer(t *testing.T) {
 func TestAFailedRunClosesTheBubble(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
-	rig.ran(t, "REQ-H", 1, "task-1")
+	rig.ran(t, "REQ-H", "task-1")
 
 	rig.failed(t, "task-1", false)
 
@@ -664,7 +689,7 @@ func TestAFailedRunClosesTheBubble(t *testing.T) {
 func TestALongRunStillAnswersInItsBubbleInsideTheMeasuredWindow(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
-	rig.ran(t, "REQ-LONG", 1, "task-1")
+	rig.ran(t, "REQ-LONG", "task-1")
 
 	// A run that takes eight minutes. Long, and well within what WeCom took on
 	// 2026-08-09: it accepted a frame at 600.0s and refused one at 630.0s.
@@ -712,7 +737,7 @@ func TestARunPastTheWindowAnswersAsExactlyOnePlainMessage(t *testing.T) {
 	// on our clock alone: every closing frame it is offered is refused with
 	// 846608. Nothing here should ever offer it one.
 	rig.conn.refuseClosingCode = errcodeStreamExpired
-	rig.ran(t, "REQ-PAST-WINDOW", 1, "task-1")
+	rig.ran(t, "REQ-PAST-WINDOW", "task-1")
 
 	// Eleven minutes: past the 600s the live tenant accepted on 2026-08-09 and
 	// past the 630s at which it refused.
@@ -786,7 +811,7 @@ func TestABubbleNobodyEndsIsCountedAsOpenedWithNoEnding(t *testing.T) {
 	mx := newCountingMetrics()
 	rig.senders.WithMetrics(mx)
 
-	rig.ran(t, "REQ-STRANDED", 1, "task-1")
+	rig.ran(t, "REQ-STRANDED", "task-1")
 	// No answer, no failure, no cancellation. This is what the relay gap and a
 	// restart mid-run both leave behind.
 
@@ -812,7 +837,7 @@ func TestAnAnsweredBubbleLeavesNothingOutstanding(t *testing.T) {
 	mx := newCountingMetrics()
 	rig.senders.WithMetrics(mx)
 
-	rig.ran(t, "REQ-ANSWERED", 1, "task-1")
+	rig.ran(t, "REQ-ANSWERED", "task-1")
 	rig.answer(t, "the agent reply", "task-1")
 
 	if opened, ended := mx.get("stream_opened"), mx.get("stream_finished")+mx.get("stream_fell_back"); opened != 1 || opened-ended != 0 {
@@ -836,7 +861,7 @@ func TestARefusedOpeningFrameCountsNoBubble(t *testing.T) {
 	rig.senders.WithMetrics(mx)
 	rig.conn.refuseOpeningCode = errcodeStreamBadReqID
 
-	rig.ran(t, "REQ-REFUSED", 1, "task-1")
+	rig.ran(t, "REQ-REFUSED", "task-1")
 	rig.answer(t, "the agent reply", "task-1")
 
 	if got := mx.get("stream_opened"); got != 0 {
