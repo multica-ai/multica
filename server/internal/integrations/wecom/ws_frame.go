@@ -937,6 +937,24 @@ func splitForWire(content string) []string {
 		remaining = remaining[cut:]
 	}
 
+	// A piece with nothing visible in it is not sent. A long answer that ends
+	// in a run of blank lines puts that run in a piece of its own — the last
+	// piece carries no marker, so nothing else makes it visible — and that
+	// piece reaches the chat as an empty bubble, which is the thing
+	// hasVisibleChar exists at the call sites to prevent. Dropping it costs
+	// the reader nothing: what is dropped is whitespace that would have
+	// occupied a whole message on its own.
+	//
+	// Filtered before the markers go on, so the numbering counts the pieces
+	// the person actually receives.
+	kept := pieces[:0]
+	for _, p := range pieces {
+		if hasVisibleChar(p) {
+			kept = append(kept, p)
+		}
+	}
+	pieces = kept
+
 	// The count is only knowable once the split is done, so the markers go on
 	// afterwards. The last piece gets none: there is nothing after it to
 	// promise, and the reader can see that for themselves.
