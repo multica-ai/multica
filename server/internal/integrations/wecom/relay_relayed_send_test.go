@@ -152,7 +152,7 @@ func newRelaySendRigWithDedupe(t *testing.T, failOn func(n int) bool, dedupe Ded
 	reg.set(instID, conn.newSender())
 
 	mx := newCountingMetrics()
-	o := NewOutbound(&fakeOutboundQueries{}, reg, testLogger(), WithOutboundMetrics(mx))
+	o := NewOutbound(&fakeOutboundQueries{}, reg, nil, testLogger(), WithOutboundMetrics(mx))
 	o.spawn = func(f func()) { f() }
 
 	// No dedupe store: that is the single-replica claim gate, and it leaves the

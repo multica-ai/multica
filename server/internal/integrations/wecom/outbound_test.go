@@ -31,6 +31,15 @@ import (
 // (use pgx.ErrNoRows to exercise the "not a wecom session" / "no binding"
 // branches).
 type fakeOutboundQueries struct {
+	// userBinding* / user* answer the languageLookup half of the interface:
+	// which Multica user a channel userid belongs to, and what language that
+	// user reads. A fake with no profile set answers "nothing", which is the
+	// deployment default — the answer every test written before the copy pack
+	// expects.
+	userBindingID  pgtype.UUID
+	userBindErr    error
+	userLanguage   string
+	userErr        error
 	sessionBinding db.ChannelChatSessionBinding
 	sessionErr     error
 	installation   db.ChannelInstallation
@@ -111,6 +120,20 @@ func (f *fakeOutboundQueries) ListAttachmentsByChatMessage(context.Context, db.L
 	}
 	return f.attachments, f.attachmentsErr
 }
+func (f *fakeOutboundQueries) GetChannelUserBindingByUserID(context.Context, db.GetChannelUserBindingByUserIDParams) (db.ChannelUserBinding, error) {
+	if f.userBindErr != nil {
+		return db.ChannelUserBinding{}, f.userBindErr
+	}
+	return db.ChannelUserBinding{MulticaUserID: f.userBindingID}, nil
+}
+
+func (f *fakeOutboundQueries) GetUser(_ context.Context, id pgtype.UUID) (db.User, error) {
+	if f.userErr != nil {
+		return db.User{}, f.userErr
+	}
+	return db.User{ID: id, Language: pgtype.Text{String: f.userLanguage, Valid: f.userLanguage != ""}}, nil
+}
+
 func (f *fakeOutboundQueries) GetAgentTask(_ context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
 	f.taskGets++
 	if f.taskErr != nil {
@@ -195,7 +218,7 @@ func newOutboundWithConn(t *testing.T, q outboundQueries) (*Outbound, pgtype.UUI
 	instID := mustTestUUID(t)
 	conn := &recordingConn{}
 	reg.set(instID, conn.autoAck(newWSSender(conn, nil)))
-	return NewOutbound(q, reg, slog.Default()), instID, conn
+	return NewOutbound(q, reg, nil, slog.Default()), instID, conn
 }
 
 func TestProcessEvent_DeliversChatReplyToBoundChat(t *testing.T) {

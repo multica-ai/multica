@@ -73,7 +73,7 @@ func TestChannelStartTitleCommandMappingDB(t *testing.T) {
 			case "slack":
 				binder = slack.NewSlackResolverSet(q, pool, nil, nil, nil).Session
 			case "wecom":
-				binder = wecom.NewResolverSet(nil, session, nil, nil).Session
+				binder = wecom.NewResolverSet(nil, session, nil, nil, nil).Session
 			}
 			msg := channel.InboundMessage{MessageID: "current", CommandText: "Current instruction", Text: "<quoted_message>\nHistorical subject\n</quoted_message>\n\nCurrent instruction", Source: channel.Source{ChannelType: channel.Type(platform), ChatType: channel.ChatTypeP2P, ChatID: suffix, SenderID: "sender"}}
 			result, err := binder.StartSession(ctx, engine.StartSessionParams{Installation: engine.ResolvedInstallation{ID: asUUID(installation), WorkspaceID: asUUID(fx.WorkspaceID), AgentID: asUUID(agent)}, Creator: asUUID(fx.UserID), Sender: asUUID(fx.UserID), Message: msg, PersistMessage: true})
