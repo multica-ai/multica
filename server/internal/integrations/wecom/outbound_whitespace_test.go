@@ -63,7 +63,9 @@ func TestOutbound_WhitespaceOnlyCompletionIsNotSentAndTheFilesCarryTheReply(t *t
 // REVERSE VERIFICATION: restore `f.Content != ""` and `f.Content == ""` in
 // deliverRelayed and this reports a blank message on the socket, outbound
 // _delivered = 1, and no skip. Build and vet stay silent — both spellings
-// compile.
+// compile. The _delivered half of that only holds because the settlement
+// callback is run below: this path hands its record to the dispatcher instead
+// of counting inline.
 func TestRelayedReply_WhitespaceOnlyContentIsNotSentAndTheFilesCarryTheReply(t *testing.T) {
 	t.Parallel()
 	q := whitespaceQueries(t)
@@ -90,6 +92,14 @@ func TestRelayedReply_WhitespaceOnlyContentIsNotSentAndTheFilesCarryTheReply(t *
 	})
 	if res.outcome != outcomeDone {
 		t.Fatalf("outcome = %v, want outcomeDone", res.outcome)
+	}
+	// A relayed delivery does not move the reply counters itself; it hands
+	// back the one record for the frame and the dispatcher runs it once the
+	// claim is settled. Run it here, or the outbound_delivered assertion below
+	// passes because nobody counted rather than because there was nothing to
+	// count — and it would go on passing with `f.Content != ""` restored.
+	if res.record != nil {
+		res.record()
 	}
 
 	assertWhitespaceWasNotAMessage(t, conn, mx)

@@ -729,8 +729,10 @@ func aibotChatTypeFromChannel(t channel.ChatType) int {
 // Not the same as "the client will render something", and deliberately not.
 // Format runes — U+200B zero width space, U+FEFF, a soft hyphen — are neither
 // space nor control, so a body made only of those passes here and still shows
-// as nothing. Widening the test would mean carrying a Unicode category table
-// for input this adapter does not accept.
+// as nothing. Nothing upstream rejects such a body either: it reaches the chat
+// as an empty bubble, and this predicate is not what stops it. The line is
+// drawn here to keep a Unicode category table out of the adapter — moving it
+// is a separate decision, and that table is its cost.
 func hasVisibleChar(s string) bool {
 	for _, r := range s {
 		if !unicode.IsSpace(r) && !unicode.IsControl(r) {
