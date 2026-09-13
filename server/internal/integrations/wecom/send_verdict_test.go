@@ -7,11 +7,17 @@ package wecom
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestSendTextReportsAServerRefusal(t *testing.T) {
 	conn := &recordingConn{refuseCode: 45009, refuseMsg: "rate limit"}
 	sender := conn.autoAck(newWSSender(conn, nil))
+	// 45009 is a throttle, so this send is retried once (rate_limit.go). The
+	// retry is not what this test is about, but the two seconds it waits for
+	// by default would be: shortened, so the assertion below is the only thing
+	// the test spends time on.
+	sender.retryBackoff = time.Millisecond
 
 	err := sender.sendText("CHAT", chatTypeSingleInt, "hello")
 	if err == nil {

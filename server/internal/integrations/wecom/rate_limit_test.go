@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -32,6 +33,19 @@ type quotaConn struct {
 	pushes []map[string]any
 	codes  []int
 	writes int
+
+	// ackDelay holds every verdict back this long. A real server answers in a
+	// few hundred milliseconds, so this is how a test makes a write outlast
+	// whatever budget the caller had left for it — the failure the gate is
+	// supposed to make impossible rather than merely unlikely.
+	ackDelay time.Duration
+	// silentFrom is the 1-based push from which nothing answers at all, so a
+	// test can park the sender on a verdict that never comes.
+	silentFrom int
+	// onPush runs after each push is recorded, outside the lock, with its
+	// 1-based number. A hook rather than a channel because the tests that use
+	// it need to act DURING the write, not after it.
+	onPush func(n int)
 }
 
 func (c *quotaConn) WriteMessage(_ int, data []byte) error {
@@ -40,7 +54,7 @@ func (c *quotaConn) WriteMessage(_ int, data []byte) error {
 		return err
 	}
 	c.mu.Lock()
-	code := 0
+	code, n := 0, 0
 	if env.Cmd == cmdSendMsg {
 		var body map[string]any
 		_ = json.Unmarshal(env.Body, &body)
@@ -49,15 +63,24 @@ func (c *quotaConn) WriteMessage(_ int, data []byte) error {
 			code = c.codes[c.writes]
 		}
 		c.writes++
+		n = c.writes
 	}
-	s := c.sender
+	s, delay, silent, hook := c.sender, c.ackDelay, c.silentFrom, c.onPush
 	c.mu.Unlock()
-	if s != nil {
-		s.routeResponse(frameEnvelope{
+	if s != nil && (silent == 0 || n < silent) {
+		ack := frameEnvelope{
 			Headers: frameHeaders{ReqID: env.Headers.ReqID},
 			ErrCode: code,
 			ErrMsg:  "scripted",
-		})
+		}
+		if delay > 0 {
+			time.AfterFunc(delay, func() { s.routeResponse(ack) })
+		} else {
+			s.routeResponse(ack)
+		}
+	}
+	if hook != nil && n > 0 {
+		hook(n)
 	}
 	return nil
 }
@@ -93,6 +116,20 @@ func quotaSender(codes ...int) (*wsSender, *quotaConn) {
 	s.retryBackoff = time.Millisecond
 	conn.sender = s
 	return s, conn
+}
+
+// spentMinute is a gate running on WeCom's real published windows whose
+// per-minute allowance for chatID is already gone, with the next slot freeing
+// freeIn from now. The only way to reach the interesting states at the
+// published figures inside a test: a real minute is a real minute, and admit
+// takes the clock as an argument precisely so the timestamps can be placed.
+func spentMinute(chatID string, freeIn time.Duration) *sendQuota {
+	q := newSendQuota()
+	at := time.Now().Add(freeIn - time.Minute)
+	for i := 0; i < rateLimitPerMinute; i++ {
+		q.admit(chatID, at)
+	}
+	return q
 }
 
 // ---- the retry ----
@@ -169,33 +206,291 @@ func TestARefusalThatIsNotAThrottleIsNotRetried(t *testing.T) {
 	}
 }
 
-// ---- the gate ----
-
-// The gate is what keeps us from reaching a throttle at all, and its promise
-// is that a burst arrives LATE rather than not at all. A reply that waits two
-// seconds is a reply; a reply refused for quota is a silence.
+// The retry has to be affordable before it is attempted, because the frame it
+// costs is not the expensive part — the REPORT is. Once the backoff is over,
+// the second attempt spends the caller's context on a write and on the wait
+// for a verdict, and a context error raised in there used to become the
+// function's return value, replacing a refusal we were certain of with
+// "interrupted". unconfirmedReason files that as an unknown outcome, which
+// tells an operator the person may already have the message and somebody
+// should go and check — for a frame WeCom had stated, in so many words, that
+// it did not act on.
 //
-// REVERSE VERIFICATION: drop the s.quota.reserve call from sendMsgFrame and
-// this fails on the elapsed time (the third push goes out immediately), with
-// the build, vet and the rest of the suite silent.
-func TestABurstOverTheQuotaWaitsInsteadOfBeingLost(t *testing.T) {
+// Numbers from the reply path rather than invented: a throttle arriving with
+// 300ms left of a delivery cannot fund a 100ms backoff plus the five seconds
+// ackTimeout allows the verdict.
+//
+// REVERSE VERIFICATION: delete the retryUnaffordable check from sendMsgFrame
+// and this fails with
+//
+//	2 push(es) reached the socket, want 1 — the retry ran on a budget that could not hold it
+//
+// and with sendMsgFrame back in its reviewed shape (one loop, the second
+// pass's return value winning) with the reviewer's own probe output:
+//
+//	error = context deadline exceeded, want the 45009 refusal the server stated
+func TestARetryTheCallerCannotAffordKeepsTheRefusal(t *testing.T) {
 	t.Parallel()
-	s, conn := quotaSender()
-	// Two per 150ms, so the third send has to wait out the first one's window
-	// — the same arithmetic as 30 a minute, at a length a test can stand.
-	s.quota = newSendQuotaWith(time.Second, quotaWindow{span: 150 * time.Millisecond, limit: 2})
+	s, conn := quotaSender(errCodeAPIFreqLimit)
+	s.retryBackoff = 100 * time.Millisecond
+	// Nothing answers a retry, which is the point: an attempt started without
+	// the budget to see it through does not get a verdict of its own, it gets
+	// the caller's deadline.
+	conn.silentFrom = 2
 
-	start := time.Now()
-	for i := 0; i < 3; i++ {
-		if err := s.sendTextCtx(context.Background(), "CHAT_1", chatTypeSingleInt, "piece"); err != nil {
-			t.Fatalf("send %d failed: %v", i+1, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	err := s.sendTextCtx(ctx, "CHAT_1", chatTypeSingleInt, "the answer")
+
+	var apiErr *wecomAPIError
+	if !errors.As(err, &apiErr) || apiErr.Code != errCodeAPIFreqLimit {
+		t.Fatalf("error = %v, want the 45009 refusal the server stated", err)
+	}
+	if r := unconfirmedReason(err); r != "" {
+		t.Errorf("the refusal was filed as an unknown outcome (%q); "+
+			"an operator reads that as 'the user may already have it' and resends by hand", r)
+	}
+	if got := conn.pushCount(); got != 1 {
+		t.Fatalf("%d push(es) reached the socket, want 1 — the retry ran on a budget that could not hold it", got)
+	}
+}
+
+// Same rule from the other side: the retry was affordable, was attempted, and
+// STILL ended in a context error, because the caller went away while the
+// verdict was outstanding. The first refusal is the better report even then.
+// It is definite where the context error is ambiguous, provablyNotSent is
+// false for both so neither can produce a duplicate, and only one of the two
+// sends a person to resend a message by hand.
+//
+// REVERSE VERIFICATION: return err rather than refusal from the context arm of
+// sendMsgFrame's closing switch and this fails with
+//
+//	error = context canceled, want the 45009 refusal the server stated
+func TestASecondAttemptCutShortReportsTheFirstRefusal(t *testing.T) {
+	t.Parallel()
+	s, conn := quotaSender(errCodeAPIFreqLimit)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	// Nothing answers the retry, and the caller gives up while it waits.
+	conn.silentFrom = 2
+	conn.onPush = func(n int) {
+		if n == 2 {
+			cancel()
 		}
 	}
-	if elapsed := time.Since(start); elapsed < 100*time.Millisecond {
-		t.Fatalf("three sends against a two-per-150ms quota took %s — the third was never held back", elapsed)
+
+	err := s.sendTextCtx(ctx, "CHAT_1", chatTypeSingleInt, "the answer")
+
+	var apiErr *wecomAPIError
+	if !errors.As(err, &apiErr) || apiErr.Code != errCodeAPIFreqLimit {
+		t.Fatalf("error = %v, want the 45009 refusal the server stated", err)
 	}
-	if got := conn.pushCount(); got != 3 {
-		t.Fatalf("%d push(es) reached the socket, want 3 — waiting must not cost a message", got)
+	if r := unconfirmedReason(err); r != "" {
+		t.Errorf("the refusal was filed as an unknown outcome (%q)", r)
+	}
+	if got := conn.pushCount(); got != 2 {
+		t.Fatalf("%d push(es) reached the socket, want 2 — this test's premise is that the retry ran", got)
+	}
+}
+
+// A throttle raised while OUR OWN window is spent is the quota's, not a stale
+// count's, and WeCom holds a frequency block for the rest of the period that
+// earned it (doc 90313). So there is nothing to come back to in two seconds,
+// and the decision is taken from admit — which already knows when the next
+// slot frees — rather than from a fixed sleep.
+//
+// The real sendRetryBackoff on purpose: the proof is that the call returns
+// long before two seconds have passed.
+//
+// REVERSE VERIFICATION: delete the slot arm from retryUnaffordable and this
+// fails with
+//
+//	the call took 2.976430042s — it served a backoff instead of asking admit when the next slot frees
+func TestAThrottleIsNotRetriedWhenOurOwnWindowIsSpentToo(t *testing.T) {
+	t.Parallel()
+	s, conn := quotaSender(errCodeAPIFreqLimit)
+	s.retryBackoff = sendRetryBackoff
+	// 29 spent, so this send is the minute's 30th: admitted, then refused by
+	// the server, with the window full behind it.
+	q := newSendQuota()
+	at := time.Now()
+	for i := 0; i < rateLimitPerMinute-1; i++ {
+		q.admit("CHAT_1", at)
+	}
+	s.quota = q
+
+	start := time.Now()
+	err := s.sendTextCtx(context.Background(), "CHAT_1", chatTypeSingleInt, "the answer")
+	elapsed := time.Since(start)
+
+	var apiErr *wecomAPIError
+	if !errors.As(err, &apiErr) || apiErr.Code != errCodeAPIFreqLimit {
+		t.Fatalf("error = %v, want the 45009 refusal the server stated", err)
+	}
+	if got := conn.pushCount(); got != 1 {
+		t.Fatalf("%d push(es) reached the socket, want 1 — a frame was spent on a block that lasts the minute out", got)
+	}
+	if elapsed > sendRetryBackoff/2 {
+		t.Fatalf("the call took %s — it served a backoff instead of asking admit when the next slot frees", elapsed)
+	}
+}
+
+// The delay is spread, because a concurrency refusal catches every caller that
+// was in flight at once and a fixed delay sends all of them back at the same
+// instant. 45033's documented remedy is the opposite of that: "出现这种限制错误
+// 后，请企业调低并发数" (doc 90313).
+//
+// REVERSE VERIFICATION: return s.retryBackoff unchanged from retryDelay and
+// this fails with
+//
+//	50 draws produced 1 distinct delay(s) — every caller one refusal caught comes back at the same instant
+func TestTheRetryBackoffIsSpreadAcrossCallers(t *testing.T) {
+	t.Parallel()
+	s, _ := quotaSender()
+	s.retryBackoff = sendRetryBackoff
+
+	low, high := s.retryBackoff/2, s.retryBackoff+s.retryBackoff/2
+	seen := make(map[time.Duration]bool)
+	for i := 0; i < 50; i++ {
+		d := s.retryDelay()
+		if d < low || d >= high {
+			t.Fatalf("retryDelay() = %s, want inside [%s, %s)", d, low, high)
+		}
+		seen[d] = true
+	}
+	if len(seen) < 2 {
+		t.Fatalf("50 draws produced %d distinct delay(s) — every caller one refusal caught comes back at the same instant", len(seen))
+	}
+}
+
+// ---- the gate ----
+
+// The gate waits for a slot, but never so long that the write it is waiting
+// for can no longer be seen through. The wait has to fit inside the caller's
+// deadline MINUS ackTimeout, not merely inside the deadline.
+//
+// The numbers are the inbox push path's, unchanged: five seconds for the whole
+// delivery (outbound.go:415), and a slot 2.5s away — comfortably inside
+// rateWaitBudget, so a gate that only checked the deadline would wait for it
+// and hand the write the 2.5s that were left, for a verdict ackTimeout allows
+// five seconds to arrive. That write is cut off mid-flight and reported as an
+// unknown outcome. Refusing before it is the honest failure: nothing on the
+// wire, a definite error, and the caller's whole budget still there to record
+// it with.
+//
+// REVERSE VERIFICATION: drop the writeBudget subtraction from reserve (check
+// the deadline itself) and this fails after the full five seconds with
+//
+//	error = context deadline exceeded, want errRateLimited
+func TestTheGateLeavesTheWriteItsAckBudget(t *testing.T) {
+	t.Parallel()
+	s, conn := quotaSender()
+	conn.ackDelay = 3 * time.Second // slower than what 2.5s of waiting leaves
+	s.quota = spentMinute("CHAT_1", 2500*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	err := s.sendTextCtx(ctx, "CHAT_1", chatTypeSingleInt, "you have a new item")
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, errRateLimited) {
+		t.Fatalf("error = %v, want errRateLimited", err)
+	}
+	if r := unconfirmedReason(err); r != "" {
+		t.Errorf("a frame the gate never wrote was filed as an unknown outcome (%q)", r)
+	}
+	if got := conn.pushCount(); got != 0 {
+		t.Fatalf("%d push(es) reached the socket, want 0 — the gate spent the write's own budget waiting", got)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("the refusal took %s — the gate waited for a slot it could not afford to use", elapsed)
+	}
+}
+
+// The gate's promise, at the published figures and nowhere near them: a chat
+// that goes a LITTLE over 30 a minute has its next frame delayed into the slot
+// that is about to free, and the frame goes out.
+//
+// At WeCom's real windows, which is the whole point of this one — the same
+// claim at a 150ms window and a limit of 2 is true by construction, because a
+// wait that short cannot outlast any budget worth naming.
+//
+// REVERSE VERIFICATION: drop the s.quota.reserve call from sendMsgFrame and
+// this fails with
+//
+//	the send returned after 439.417µs — the frame was never held back
+func TestABurstJustOverThePublishedRateIsDelayedNotLost(t *testing.T) {
+	t.Parallel()
+	s, conn := quotaSender()
+	s.quota = spentMinute("CHAT_1", 400*time.Millisecond)
+
+	start := time.Now()
+	err := s.sendTextCtx(context.Background(), "CHAT_1", chatTypeSingleInt, "piece")
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("a send 400ms short of a free slot failed instead of waiting for it: %v", err)
+	}
+	if elapsed < 300*time.Millisecond {
+		t.Fatalf("the send returned after %s — the frame was never held back", elapsed)
+	}
+	if got := conn.pushCount(); got != 1 {
+		t.Fatalf("%d push(es) reached the socket, want 1 — waiting must not cost a message", got)
+	}
+}
+
+// And the limit of that promise, pinned rather than described. A burst of 31
+// into one chat at the published figures does NOT arrive late: the 31st frame
+// is refused where it stands, because the next slot is a whole window away and
+// no caller on this path has a minute to give. Nothing is written, nothing
+// tells the person, and the drop is filed under transport_error.
+//
+// transport_error rather than platform_refused is deliberate and is asserted
+// here so it stays deliberate: WeCom refused nothing, this process did, and
+// the reason text on that counter already covers a delivery whose own budget
+// ran out before it got a turn on the wire. What must not change is the last
+// assertion — errRateLimited stays provably unsent, which is what lets the
+// relay offer the frame somewhere else instead of writing it off.
+//
+// REVERSE VERIFICATION: drop the s.quota.reserve call from sendMsgFrame and
+// this fails with
+//
+//	error = <nil>, want errRateLimited on frame 31 of a burst
+func TestTheThirtyFirstFrameOfABurstIsRefusedNotDelayed(t *testing.T) {
+	t.Parallel()
+	s, conn := quotaSender()
+
+	for i := 0; i < rateLimitPerMinute; i++ {
+		if err := s.sendTextCtx(context.Background(), "CHAT_1", chatTypeSingleInt, "piece"); err != nil {
+			t.Fatalf("send %d of the minute's %d failed: %v", i+1, rateLimitPerMinute, err)
+		}
+	}
+
+	start := time.Now()
+	err := s.sendTextCtx(context.Background(), "CHAT_1", chatTypeSingleInt, "the one past the ceiling")
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, errRateLimited) {
+		t.Fatalf("error = %v, want errRateLimited on frame %d of a burst", err, rateLimitPerMinute+1)
+	}
+	if !strings.Contains(err.Error(), "the next slot is") {
+		t.Errorf("error = %q, want it to say how far off the next slot is — that distance is the whole reason it was refused", err)
+	}
+	if elapsed >= rateWaitBudget {
+		t.Errorf("the refusal took %s — a wait of nearly a whole window was served instead of refused", elapsed)
+	}
+	if got := conn.pushCount(); got != rateLimitPerMinute {
+		t.Fatalf("%d push(es) reached the socket, want %d — the refused frame was written anyway", got, rateLimitPerMinute)
+	}
+	if got := classifyDrop(err); got != dropTransport {
+		t.Errorf("classifyDrop = %q, want %q — WeCom refused nothing here, this process did", got, dropTransport)
+	}
+	if r := unconfirmedReason(err); r != "" {
+		t.Errorf("a frame the gate never wrote was filed as an unknown outcome (%q)", r)
+	}
+	if !provablyNotSent(err) {
+		t.Error("a frame the gate never wrote was not reported as provably unsent, so the relay will not offer it anywhere else")
 	}
 }
 

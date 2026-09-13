@@ -1,21 +1,33 @@
 package wecom
 
-// rate_limit.go — everything that keeps aibot_send_msg inside WeCom's
-// published quota: a per-chat gate in front of the write, and one short retry
-// for the two errcodes that mean "not now" rather than "never".
+// rate_limit.go — everything that keeps aibot_send_msg near WeCom's published
+// quota: a per-chat gate in front of the write, and one jittered retry for the
+// two errcodes that mean "not now" rather than "never".
 //
-// Both halves answer the same failure. WeCom refuses an over-quota push with
-// errcode 45009, ws_sender turns that into a *wecomAPIError, and every caller
+// WHAT THIS DELIVERS, AND WHAT IT DOES NOT. A conversation that stays under 30
+// pushes a minute is untouched. One that goes a little over is DELAYED into
+// the next free slot rather than refused — reserve waits, inside a budget. One
+// that bursts far over is refused HERE, before the write: the 31st frame of a
+// burst is not delayed, it is turned away with a definite error and nothing on
+// the wire. Making that burst deliverable is not something this file can do;
+// that needs somewhere to keep the frame until the window moves, and this tree
+// has no such place since the outbound queue was retired.
+//
+// Refusing on our own side is still the improvement, because of what it
+// replaces. Without the gate the same burst goes to WeCom and comes back as
+// errcode 45009: ws_sender turns that into a *wecomAPIError, and every caller
 // on the outbound path reads a stated refusal as final — provablyNotSent says
 // no re-offer, classifyDrop files platform_refused, and the reply is gone. One
 // throttled frame is one answer the person never sees, with nothing on their
-// screen to say so. The gate makes reaching that unlikely; the retry makes
-// reaching it survivable.
+// screen to say so. Our own refusal costs nothing on the platform side, spends
+// none of the chat's allowance, and stays provably unsent so the relay can
+// offer it elsewhere.
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	mathrand "math/rand/v2"
 	"sort"
 	"sync"
 	"time"
@@ -44,14 +56,21 @@ const (
 )
 
 // rateWaitBudget caps how long the gate holds a caller waiting for a slot.
+// The cap is not the whole answer: reserve also keeps its hands off the
+// write's own budget, so the wait that actually happens is
+// min(rateWaitBudget, deadline − ackTimeout).
 //
-// Sized against the budget the callers run on: the outbound subscriber gives a
-// whole delivery ten seconds (outbound.go), and a gate that could eat all of
-// it would turn "delayed" into "the context expired mid-write", which is an
-// outcome nobody can classify — unconfirmedReason has to call that unknown,
-// and an unknown tells an operator to resend something the user may already
-// have. Refusing early is the honest failure: nothing was written, so the
-// caller gets a definite answer with time left to record it.
+// It has to work that way because the callers do not share one deadline. A
+// reply gets ten seconds for the whole delivery (outbound.go:155), an inbox
+// push gets five (outbound.go:415), an attachment gets five minutes
+// (outbound_media.go:83). Three seconds out of ten leaves a write seven; three
+// out of five leaves it two, and the ack alone is allowed five
+// (ws_sender.go:111). That write gets cut off mid-flight and request returns a
+// context error — "we may have written and cannot tell", which unconfirmedReason
+// has to file as unknown and an operator resolves by resending something the
+// person may already have. So on the five-second path the gate does not wait
+// at all; it refuses, and refusing is the honest failure because nothing was
+// written and the caller still has its whole budget to record that.
 const rateWaitBudget = 3 * time.Second
 
 // errRateLimited — this process's own gate declined to write, because the
@@ -65,6 +84,17 @@ const rateWaitBudget = 3 * time.Second
 // nothing sent, and provablyNotSent's default answers it correctly. It lands
 // on transport_error, whose reason text already covers "this delivery's own
 // budget ran out before it got a turn on the wire".
+//
+// That default is also what makes one asymmetry worth knowing, and it is the
+// relay's rather than this file's. A frame that reaches the socket THROUGH the
+// relay is handed back to the scheduler when provablyNotSent says nothing was
+// written (relay_outbound.go:1276), so a refusal here costs it a retry chain
+// of roughly one and a half LeaseSettle and no more. The same frame produced
+// on the replica that already holds the lease never goes near that chain:
+// sendTextCtx returns the refusal to its caller and outbound.go files a drop
+// (outbound.go:162). So the relayed copy gets a second chance the direct one
+// does not. Giving the direct path a bounded re-offer of its own is a change
+// to the outbound path rather than to the gate, and is deliberately not here.
 var errRateLimited = errors.New("wecom: this chat's outbound quota is spent")
 
 // WeCom errcodes that mean the frame was refused for a reason that passes.
@@ -77,15 +107,37 @@ const (
 	errCodeAPIConcurrencyLimit = 45033 // api concurrency out of limit
 )
 
-// sendRetryBackoff is how long a throttled frame waits before its one retry.
+// sendRetryBackoff is the base delay before a throttled frame's one retry.
 //
-// Two seconds is one slot's worth at the documented rate: 30 per minute is a
-// send every two seconds on average, so this is the shortest wait that can
-// expect an earlier send to have aged out of the window. It is also short
-// enough to leave a delivery most of its ten-second budget, which is what
-// decides the question — a longer wait that runs the budget out reports an
-// outcome nobody can classify, and a lost answer is what we are here to avoid,
-// not to relabel.
+// One cheap attempt at a refusal that may be momentary. NOT a wait for a slot:
+// this gate is a sliding count, so the next slot frees when the window's
+// oldest entry ages out of it, which for a burst is most of a whole window —
+// admit will happily report 59.999s. Waiting for a slot is what reserve is
+// for, and deriving a fixed delay from "30 a minute is one every two seconds"
+// would be reading an average off a limit that is deliberately not one.
+//
+// Two seconds is sized for 45033, the concurrency refusal, whose documented
+// remedy is exactly this and nothing more: "企业微信出于系统保护的考虑，会对同一个
+// 企业调用同一个接口做并发数的限制，出现这种限制错误后，请企业调低并发数"
+// (developer.work.weixin.qq.com/document/path/90313). No window has to turn
+// over for that one to lift — fewer callers at once is the entire fix.
+//
+// For 45009 it is a long shot, and the code treats it as one rather than
+// pretending otherwise. The same page says a frequency block lasts as long as
+// the period that earned it: "频率拦截时长一般与调用的限制时长相同，比如说是分钟
+// 级别的限制，则在中频率后的1分钟后自动解除". Two seconds cannot clear a
+// minute's block. What buys the one attempt anyway is the seam this gate
+// cannot see — a reconnect mints a fresh window (see sendQuota), so a 45009
+// can be raised against a count this process is not keeping. retryUnaffordable
+// is what stops that from turning into hammering: when OUR OWN window says the
+// next slot is far off, our count agrees with WeCom's, the block is the real
+// one, and the frame is not sent a second time. That also keeps us on the
+// right side of the same page's advice for this family of codes — "仅系统失败
+// 需要重试。其余错误码，应该排查下调用失败原因".
+//
+// Jittered by retryDelay, because a concurrency refusal hits every concurrent
+// caller at once and a fixed delay sends all of them back at the same instant,
+// which is the opposite of 调低并发数.
 //
 // A field on wsSender rather than a constant read at the call site, for the
 // same reason ackTimeout is one: a test that has to stand still for it is a
@@ -106,41 +158,120 @@ const sendRetryBackoff = 2 * time.Second
 // has to reserve here as well, and cannot be excused by carrying a throttle of
 // its own.
 //
-// A refusal is retried once, and only for a throttle. Retrying a stated
-// refusal is safe in a way retrying a timeout is not: a non-zero errcode is
-// the server saying it did not act on the frame, so a second attempt cannot
-// duplicate anything. A verdict that never came (errAckTimeout) says nothing
-// of the kind and is returned untouched.
+// A refusal is retried once, and only for a throttle the caller can still
+// afford (retryUnaffordable). Retrying a stated refusal is safe in a way
+// retrying a timeout is not: a non-zero errcode is the server saying it did
+// not act on the frame, so a second attempt cannot duplicate anything. A
+// verdict that never came (errAckTimeout) says nothing of the kind and is
+// returned untouched.
+//
+// Written as first attempt / decision / second attempt rather than a loop,
+// because the two attempts do not report failure the same way. The first one's
+// refusal is a FACT — the server named an errcode — and it stays in hand for
+// the rest of the function, so no later ambiguity can overwrite it. As a loop
+// it could not: the second pass's return value was simply the function's, and
+// a context error raised inside request (either from its pre-write check or
+// from the wait for the verdict, ws_sender.go) replaced a definite refusal
+// with an unknown outcome, which is the one thing on this path that sends a
+// person to resend a message by hand.
 func (s *wsSender) sendMsgFrame(ctx context.Context, chatID string, body map[string]any) error {
-	for attempt := 0; ; attempt++ {
-		if err := s.quota.reserve(ctx, chatID); err != nil {
-			// No chat id on either line. In a one-to-one chat the chat id IS
-			// the person's userid, and nothing else in this package puts one
-			// in the log; an operator needs to know the bot is at its ceiling,
-			// not who was talking to it.
-			s.log.Warn("wecom: a chat is at its outbound quota, frame not written",
-				"per_minute", rateLimitPerMinute, "per_hour", rateLimitPerHour)
-			return err
-		}
-		_, err := s.request(ctx, cmdSendMsg, body)
-		if err == nil || attempt > 0 || !throttled(err) {
-			return err
-		}
-		s.log.Warn("wecom: push throttled, retrying once",
-			"backoff", s.retryBackoff, "error", err)
-		// A context cut short during the backoff returns the REFUSAL, not the
-		// context error. What we know at this point is that the server refused
-		// the frame and nothing landed; reporting the cancellation instead
-		// would downgrade a definite outcome to an unknown one, and an unknown
-		// is the one an operator has to resolve by hand.
-		timer := time.NewTimer(s.retryBackoff)
-		select {
-		case <-timer.C:
-		case <-ctx.Done():
-			timer.Stop()
-			return err
-		}
+	if err := s.quota.reserve(ctx, chatID); err != nil {
+		// No chat id on either line. In a one-to-one chat the chat id IS
+		// the person's userid, and nothing else in this package puts one
+		// in the log; an operator needs to know the bot is at its ceiling,
+		// not who was talking to it.
+		s.log.Warn("wecom: a chat is at its outbound quota, frame not written",
+			"per_minute", rateLimitPerMinute, "per_hour", rateLimitPerHour)
+		return err
 	}
+	_, refusal := s.request(ctx, cmdSendMsg, body)
+	if refusal == nil || !throttled(refusal) {
+		return refusal
+	}
+
+	delay := s.retryDelay()
+	if reason := s.retryUnaffordable(ctx, chatID, delay); reason != "" {
+		s.log.Warn("wecom: push throttled, retry skipped",
+			"reason", reason, "backoff", delay, "error", refusal)
+		return refusal
+	}
+	s.log.Warn("wecom: push throttled, retrying once",
+		"backoff", delay, "error", refusal)
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+		// The REFUSAL, not the context error. What we know at this point is
+		// that the server refused the frame and nothing landed; reporting the
+		// cancellation instead would downgrade a definite outcome to an
+		// unknown one, and an unknown is the one an operator resolves by hand.
+		return refusal
+	}
+
+	if err := s.quota.reserve(ctx, chatID); err != nil {
+		return refusal
+	}
+	_, err := s.request(ctx, cmdSendMsg, body)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, errAckTimeout), errors.Is(err, errWriteAttempted):
+		// The retry's own outcome is genuinely unknown, and unknown outranks
+		// the first refusal here: the second frame may be in front of the
+		// person right now, and saying "refused" would deny a delivery that
+		// happened. This is the one direction in which the first refusal is
+		// NOT the better answer.
+		return err
+	case errors.Is(err, errRateLimited), errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		// Neither of these adds anything to what the server already told us,
+		// and both are ambiguous where the refusal is not. Report the refusal:
+		// it files as platform_refused, it is provablyNotSent(false) either
+		// way so no duplicate can follow from it, and it does not send anybody
+		// to resend a message by hand.
+		return refusal
+	default:
+		return err
+	}
+}
+
+// retryDelay is sendRetryBackoff spread over ±50%, so the callers a
+// concurrency refusal caught together do not come back together.
+func (s *wsSender) retryDelay() time.Duration {
+	base := s.retryBackoff
+	if base <= 0 {
+		return 0
+	}
+	return base/2 + time.Duration(mathrand.Int64N(int64(base)))
+}
+
+// retryUnaffordable reports why the one retry should not be attempted, or ""
+// when it should. Two ways it is not worth a frame, and both are answered from
+// what this process knows rather than from hope.
+//
+// The caller has to be able to sit through it. request spends the caller's
+// context on the write AND on the wait for the verdict, so an attempt needs
+// delay + ackTimeout of deadline left; started with less, it comes back as a
+// context error, which is an unknown outcome standing where a definite refusal
+// used to be. The reply path has ten seconds for the whole delivery
+// (outbound.go:155) and a throttle late in one can leave less than that.
+//
+// And the gate has to be able to hand out a slot when the delay is up — admit
+// already knows when the next one frees, so ask it. A slot that is a minute
+// away means our own count has reached the ceiling too, which means the
+// refusal is the quota's rather than a stale count's, and WeCom holds a
+// frequency block for the rest of the period it was earned in (doc 90313,
+// quoted on sendRetryBackoff). Sending again into that costs a frame and
+// changes nothing.
+func (s *wsSender) retryUnaffordable(ctx context.Context, chatID string, delay time.Duration) string {
+	if d, ok := ctx.Deadline(); ok && time.Until(d) < delay+ackTimeout {
+		return "the caller has no budget for another attempt"
+	}
+	if wait := s.quota.nextSlot(chatID, time.Now().Add(delay)); wait > 0 {
+		return fmt.Sprintf("this chat's own quota has no slot for it either, the next one is %s off",
+			wait.Round(time.Millisecond))
+	}
+	return ""
 }
 
 // throttled reports whether a send failure was a throttle the platform will
@@ -192,6 +323,10 @@ type sendQuota struct {
 	windows []quotaWindow
 	longest time.Duration
 	maxWait time.Duration
+	// writeBudget is what reserve refuses to spend out of a caller's deadline,
+	// because the write that follows needs it. ackTimeout, since that is what
+	// bounds the wait for the verdict (ws_sender.go).
+	writeBudget time.Duration
 }
 
 func newSendQuota() *sendQuota {
@@ -204,7 +339,12 @@ func newSendQuota() *sendQuota {
 // newSendQuotaWith builds a gate with windows of its own. Tests use it to
 // exercise the waiting and refusing paths in milliseconds instead of minutes.
 func newSendQuotaWith(maxWait time.Duration, windows ...quotaWindow) *sendQuota {
-	q := &sendQuota{sent: make(map[string][]time.Time), windows: windows, maxWait: maxWait}
+	q := &sendQuota{
+		sent:        make(map[string][]time.Time),
+		windows:     windows,
+		maxWait:     maxWait,
+		writeBudget: ackTimeout,
+	}
 	for _, w := range windows {
 		if w.span > q.longest {
 			q.longest = w.span
@@ -221,12 +361,25 @@ func newSendQuotaWith(maxWait time.Duration, windows ...quotaWindow) *sendQuota 
 // arrive at the same answer with no time left to record it.
 func (q *sendQuota) reserve(ctx context.Context, chatID string) error {
 	giveUpAt := time.Now().Add(q.maxWait)
-	if d, ok := ctx.Deadline(); ok && d.Before(giveUpAt) {
-		giveUpAt = d
+	if d, ok := ctx.Deadline(); ok {
+		// deadline − writeBudget, not the deadline. A wait that merely fits
+		// inside the caller's deadline is not good enough: what comes after it
+		// is a write plus a wait for the verdict, and ackTimeout is how long
+		// that alone is allowed to take. Waiting past this point buys a turn
+		// on the wire the caller can no longer sit through, and request then
+		// returns a context error — an outcome nobody can classify, where the
+		// gate could have returned a definite one for free. See rateWaitBudget
+		// for the deadlines this actually bites on.
+		if latest := d.Add(-q.writeBudget); latest.Before(giveUpAt) {
+			giveUpAt = latest
+		}
 	}
 	for {
 		wait := q.admit(chatID, time.Now())
 		if wait == 0 {
+			// A slot was free, so no budget was needed. Deliberately checked
+			// before giveUpAt: a caller down to its last moment still gets its
+			// turn on the wire when the gate is not in the way.
 			return nil
 		}
 		if time.Now().Add(wait).After(giveUpAt) {
@@ -250,6 +403,28 @@ func (q *sendQuota) admit(chatID string, now time.Time) time.Duration {
 	q.sweep(now)
 
 	sent := trimBefore(q.sent[chatID], now.Add(-q.longest))
+	if wait := q.waitFor(sent, now); wait > 0 {
+		q.sent[chatID] = sent
+		return wait
+	}
+	q.sent[chatID] = append(sent, now)
+	return 0
+}
+
+// nextSlot is how long after at this chat's next slot frees, WITHOUT taking
+// one. The read-only twin of admit, for deciding whether an action is worth
+// starting — asking admit would answer the question by spending the thing
+// being asked about.
+func (q *sendQuota) nextSlot(chatID string, at time.Time) time.Duration {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.waitFor(trimBefore(q.sent[chatID], at.Add(-q.longest)), at)
+}
+
+// waitFor is how long until sent has room in every window, 0 when it has room
+// now. The one place the windows are read, so admit and nextSlot cannot drift
+// into answering the same question differently. Caller holds mu.
+func (q *sendQuota) waitFor(sent []time.Time, now time.Time) time.Duration {
 	var wait time.Duration
 	for _, w := range q.windows {
 		first := indexAtOrAfter(sent, now.Add(-w.span))
@@ -263,12 +438,7 @@ func (q *sendQuota) admit(chatID string, now time.Time) time.Duration {
 			wait = free
 		}
 	}
-	if wait > 0 {
-		q.sent[chatID] = sent
-		return wait
-	}
-	q.sent[chatID] = append(sent, now)
-	return 0
+	return wait
 }
 
 // sweep drops chats with nothing left inside the longest window. Without it a
