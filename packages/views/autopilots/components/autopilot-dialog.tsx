@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState, type Ref } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -67,7 +67,7 @@ import { getDefaultScheduleConfig, type ScheduleConfig } from "./schedule-editor
 import { browserTimezone } from "../../common/timezone-select";
 import { parseCron, toCron } from "./schedule-editor/cron-mapping";
 import { useScheduleSubmitGate } from "./schedule-editor/validate";
-import { WebhookEventFilterSection } from "./webhook-event-filter-section";
+import { WebhookEventFilterSection, type WebhookEventFilterSectionRef } from "./webhook-event-filter-section";
 import { WebhookUrlField } from "./webhook-url-field";
 import { useT } from "../../i18n";
 import { formatSchedulePartialFailureToast } from "./autopilot-dialog-toast";
@@ -217,8 +217,6 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const scheduleDirty =
     toCron(schedule) !== initialCronRef.current ||
     schedule.timezone !== initialTimezoneRef.current;
-  const eventFiltersDirty =
-    serializeEventFilters(eventFilters) !== initialEventFiltersRef.current;
 
   const firstTriggerIdRef = useRef(
     !isCreate && props.triggers[0] ? props.triggers[0].id : null,
@@ -292,6 +290,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   // so filling the field clears its error without a second submit.
   const [showErrors, setShowErrors] = useState(false);
   const titleEditorRef = useRef<TitleEditorRef>(null);
+  const filterSectionRef = useRef<WebhookEventFilterSectionRef>(null);
   const assigneeTriggerRef = useRef<HTMLButtonElement>(null);
   const assigneeErrorId = useId();
 
@@ -305,6 +304,13 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
       else assigneeTriggerRef.current?.focus();
       return;
     }
+    // Flush any uncommitted draft filter row before saving — without this,
+    // text typed into the event/actions inputs but not yet committed via
+    // Enter or the + button is silently discarded on Save. The returned
+    // array is used below instead of the `eventFilters` state, which is
+    // still the pre-flush snapshot in this closure.
+    const flushedFilters =
+      filterSectionRef.current?.flushDraft() ?? eventFilters;
     setSubmitting(true);
     try {
       if (scheduleWillBeWritten && !(await scheduleGate.ensureAccepted(schedule))) {
@@ -332,7 +338,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             webhookTrigger = await createTrigger.mutateAsync({
               autopilotId: autopilot.id,
               kind: "webhook",
-              event_filters: eventFilters.length > 0 ? eventFilters : undefined,
+              event_filters: flushedFilters.length > 0 ? flushedFilters : undefined,
             });
           } else {
             await createTrigger.mutateAsync({
@@ -413,14 +419,14 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         // UpdateAutopilotTriggerRequest in autopilot.go).
         if (
           triggerKind === "webhook" &&
-          eventFiltersDirty &&
+          serializeEventFilters(flushedFilters) !== initialEventFiltersRef.current &&
           firstTriggerIdRef.current
         ) {
           try {
             await updateTrigger.mutateAsync({
               autopilotId: props.autopilotId,
               triggerId: firstTriggerIdRef.current,
-              event_filters: eventFilters,
+              event_filters: flushedFilters,
             });
           } catch (err) {
             triggerOk = false;
@@ -680,6 +686,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                 isCreate={isCreate}
                 eventFilters={eventFilters}
                 onEventFiltersChange={setEventFilters}
+                filterRef={filterSectionRef}
               />
             )}
           </aside>
@@ -1028,10 +1035,12 @@ function WebhookSection({
   isCreate,
   eventFilters,
   onEventFiltersChange,
+  filterRef,
 }: {
   isCreate: boolean;
   eventFilters: WebhookEventFilter[];
   onEventFiltersChange: (filters: WebhookEventFilter[]) => void;
+  filterRef: Ref<WebhookEventFilterSectionRef>;
 }) {
   const { t } = useT("autopilots");
   return (
@@ -1045,6 +1054,7 @@ function WebhookSection({
         </p>
       </div>
       <WebhookEventFilterSection
+        ref={filterRef}
         filters={eventFilters}
         onChange={onEventFiltersChange}
       />
