@@ -69,10 +69,17 @@ const (
 	dropAttachmentNotAdmitted dropReason = "attachment_not_admitted"
 )
 
-// skipReason names a completion this adapter was never going to deliver. Kept
-// in its own set, and behind its own counter, because "we chose not to send
-// this" and "we owed this and failed" answer different questions and only one
-// of them is an incident.
+// skipReason names a completion this adapter did not send. Kept in its own
+// set, and behind its own counter, because "this never went on the wire" and
+// "this went on the wire and failed" answer different questions, and counting a
+// web-UI question's answer as a failed WeCom delivery makes ordinary usage read
+// as an outage.
+//
+// Most of them are harmless too, which is what this set used to mean outright.
+// It no longer does: skipNoDeliveryRow is a turn the channel ingested with
+// nothing left that can say which chat, so a reply may well be owed and nobody
+// can place it. Read a skip as "not sent, and here is why", and actionable()
+// for which of them somebody has to do something about.
 type skipReason string
 
 const (
@@ -117,6 +124,13 @@ const (
 	// Not a DROP: with no row this adapter cannot establish the turn was ever
 	// WeCom's, and filing another platform's turn as a WeCom delivery failure
 	// would put a number an operator pages on at the mercy of Slack's traffic.
+	//
+	// Its neighbour in that same branch IS filed as a drop under the same
+	// uncertainty — no delivery row and no task row either, dropTaskMissing.
+	// The difference is how ordinary the two are on a shared bus: most of the
+	// traffic through here is not WeCom's, so an unroutable channel turn may
+	// well belong to Slack, while a task row that vanished mid-completion is
+	// not ordinary for any platform.
 	skipNoDeliveryRow skipReason = "no_delivery_row"
 )
 
@@ -227,11 +241,11 @@ func (o *Outbound) attachmentUnconfirmed(ctx context.Context, reason string, err
 	o.logger.WarnContext(ctx, "wecom outbound: attachment delivery unconfirmed", attrs...)
 }
 
-// skipped records one completion this adapter was never going to deliver.
-// DEBUG for all but one of them: none of those is an incident, and on a
-// workspace where people use the web UI against WeCom-bound sessions this is
-// the busiest path here. skipNoDeliveryRow is the exception and logs at WARN —
-// see its comment for why an upgrade is the only thing that produces it.
+// skipped records one completion this adapter did not send. DEBUG for all but
+// one of them: none of those is an incident, and on a workspace where people
+// use the web UI against WeCom-bound sessions this is the busiest path here.
+// skipNoDeliveryRow is the exception and logs at WARN — see its comment for why
+// an upgrade is the only thing that produces it.
 func (o *Outbound) skipped(ctx context.Context, e events.Event, reason skipReason) {
 	o.skippedFor(ctx, e.ChatSessionID, reason)
 }
