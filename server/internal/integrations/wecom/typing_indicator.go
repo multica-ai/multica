@@ -295,6 +295,10 @@ func (m *TypingIndicatorManager) OnIngested(ctx context.Context, inst engine.Res
 			return
 		}
 	}
+	// Past every path that gives the handle back. One bubble is on screen, or
+	// will be when its stream id is next written, and from here something owes
+	// it an ending — see RecordStreamOpened.
+	m.senders.recordOpened()
 }
 
 // OnRunStarted files the task the debounced flush created for this run. It is

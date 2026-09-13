@@ -63,8 +63,7 @@ type Metrics interface {
 	// RecordStreamFinished / FellBack — how the bubble ended. A fall-back is
 	// an ending that arrived as a new message because the bubble could not
 	// take the closing frame; the words are not lost, but the experience is
-	// the one the bubble was built to replace. The ratio between the two is
-	// the signal; the count of bubbles opened is not, so it is not collected.
+	// the one the bubble was built to replace.
 	//
 	// Both are fed from the one line in sendersRegistry.recordEnding, and they
 	// have to stay that way for the ratio to mean anything: every closer goes
@@ -73,6 +72,24 @@ type Metrics interface {
 	// population on both sides.
 	RecordStreamFinished()
 	RecordStreamFellBack()
+
+	// RecordStreamOpened — one bubble is on a user's screen and something owes
+	// it an ending. Counted where the handle is KEPT, which is not the same as
+	// where a frame was accepted: an opening frame whose ack never came back
+	// keeps its handle on purpose, because re-sending that stream id later
+	// creates the message if the frame was lost.
+	//
+	// It is here because the ratio above cannot see the failure that matters
+	// most. A bubble nobody ever closes moves neither counter — the relay gap
+	// on a multi-replica deployment, a process restarted mid-run, a closing
+	// frame that never happens — and from the two ending counters alone that
+	// is indistinguishable from a quiet hour. opened minus finished minus
+	// fell_back is that number, and it is the one an operator can act on.
+	//
+	// It does not settle to zero at any instant: bubbles in flight sit in the
+	// difference, and a run can hold one for the length of the window. It is a
+	// gauge of a backlog read over time, not a balance.
+	RecordStreamOpened()
 
 	// RecordOutboundDelivered — one reply reached the user. It is the
 	// denominator: without it a flat drop counter cannot be told apart from a
@@ -142,6 +159,7 @@ func (nopMetrics) RecordConnectFailure()              {}
 func (nopMetrics) RecordAuthFailure()                 {}
 func (nopMetrics) RecordCallbackQueued()              {}
 func (nopMetrics) RecordCallbackQueueBlocked()        {}
+func (nopMetrics) RecordStreamOpened()                {}
 func (nopMetrics) RecordStreamFinished()              {}
 func (nopMetrics) RecordStreamFellBack()              {}
 func (nopMetrics) RecordOutboundDelivered()           {}
