@@ -164,6 +164,14 @@ func (r *sendersRegistry) stream(ctx context.Context, h streamHandle, content st
 // Counted once per ending rather than once per attempt: seal may write the
 // same closing frame several times when an ack is lost, and a bubble that
 // took the frame on the second try ended in words all the same.
+// recordOpened counts one bubble that is now on screen and owed an ending.
+// Separate from recordEnding because the two are written from opposite sides:
+// an ending is known here, inside the seal; an opening is only known to the
+// caller that decided to keep the handle.
+func (r *sendersRegistry) recordOpened() {
+	r.mx().RecordStreamOpened()
+}
+
 func (r *sendersRegistry) recordEnding(err error) {
 	if err == nil {
 		r.mx().RecordStreamFinished()

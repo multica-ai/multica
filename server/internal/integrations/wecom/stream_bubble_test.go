@@ -31,6 +31,11 @@ type bubbleConn struct {
 
 	refuseClosingCode int
 
+	// refuseOpeningCode makes the server state a verdict on the frame that
+	// paints the bubble. 846605 and 846608 are the two that mean this stream
+	// will never take a frame, so no bubble exists to close.
+	refuseOpeningCode int
+
 	// failClosingWrite makes the socket itself refuse a closing frame — the
 	// write returns this error, the way a half-closed connection reports a
 	// broken pipe. No ack is ever produced for it: nothing may have left the
@@ -74,6 +79,8 @@ func (c *bubbleConn) WriteMessage(_ int, data []byte) error {
 		}
 		lost = c.closingWrites <= c.loseClosingAcks
 		onClosing = c.onClosing
+	} else if c.refuseOpeningCode != 0 && env.Cmd == cmdRespondMsg {
+		code = c.refuseOpeningCode
 	}
 	c.mu.Unlock()
 	if onClosing != nil {
@@ -762,4 +769,81 @@ func said(t *testing.T, c *bubbleConn) []string {
 		}
 	}
 	return out
+}
+
+// A bubble is painted and the run never ends — the process that owns it goes
+// away, or the answer is produced on a replica that does not hold the socket
+// and arrives as its own message. Nothing seals the stream, so neither ending
+// counter moves, and from those two alone a stranded bubble and a quiet hour
+// are the same picture. stream_opened is what tells them apart.
+//
+// REVERSE VERIFICATION: move senders.recordOpened() inside the err == nil arm
+// of OnIngested, or delete it, and this fails with stream_opened = 0 — the
+// stranded bubble becomes invisible again, which is the whole point of it.
+func TestABubbleNobodyEndsIsCountedAsOpenedWithNoEnding(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	mx := newCountingMetrics()
+	rig.senders.WithMetrics(mx)
+
+	rig.ran(t, "REQ-STRANDED", 1, "task-1")
+	// No answer, no failure, no cancellation. This is what the relay gap and a
+	// restart mid-run both leave behind.
+
+	if got := mx.get("stream_opened"); got != 1 {
+		t.Fatalf("stream_opened = %d, want 1 — one bubble is on screen and owed an ending", got)
+	}
+	if got := mx.get("stream_finished"); got != 0 {
+		t.Errorf("stream_finished = %d, want 0", got)
+	}
+	if got := mx.get("stream_fell_back"); got != 0 {
+		t.Errorf("stream_fell_back = %d, want 0", got)
+	}
+	if opened, ended := mx.get("stream_opened"), mx.get("stream_finished")+mx.get("stream_fell_back"); opened-ended != 1 {
+		t.Fatalf("opened - ended = %d, want 1 — this difference is the number an operator reads", opened-ended)
+	}
+}
+
+// The same turn, ended properly: the difference goes back to zero. Without
+// this the test above would pass against a counter that only ever counts up.
+func TestAnAnsweredBubbleLeavesNothingOutstanding(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	mx := newCountingMetrics()
+	rig.senders.WithMetrics(mx)
+
+	rig.ran(t, "REQ-ANSWERED", 1, "task-1")
+	rig.answer(t, "the agent reply", "task-1")
+
+	if opened, ended := mx.get("stream_opened"), mx.get("stream_finished")+mx.get("stream_fell_back"); opened != 1 || opened-ended != 0 {
+		t.Fatalf("opened = %d, opened - ended = %d, want 1 and 0", opened, opened-ended)
+	}
+}
+
+// The server states a verdict on the opening frame itself: this req_id will
+// never carry a stream. No bubble was painted, so nothing is owed an ending
+// and nothing is counted — the counter has to follow the handle, not the
+// write. The answer still reaches the user, as the plain message main sends
+// today.
+//
+// REVERSE VERIFICATION: count the open before the frame is written and this
+// fails with stream_opened = 1, which would leave every refused opening frame
+// sitting permanently in opened-minus-ended and make the number unreadable.
+func TestARefusedOpeningFrameCountsNoBubble(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	mx := newCountingMetrics()
+	rig.senders.WithMetrics(mx)
+	rig.conn.refuseOpeningCode = errcodeStreamBadReqID
+
+	rig.ran(t, "REQ-REFUSED", 1, "task-1")
+	rig.answer(t, "the agent reply", "task-1")
+
+	if got := mx.get("stream_opened"); got != 0 {
+		t.Fatalf("stream_opened = %d, want 0 — the server said this stream will never exist", got)
+	}
+	pushes := rig.conn.pushes(t)
+	if len(pushes) != 1 || pushText(pushes[0]) != "the agent reply" {
+		t.Fatalf("the asker read %d plain message(s) %v, want exactly the answer", len(pushes), pushes)
+	}
 }
