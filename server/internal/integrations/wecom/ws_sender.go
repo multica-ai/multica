@@ -90,6 +90,79 @@ type wsSender struct {
 	// job, because a pong echoes the server's req_id and that may be empty
 	// or repeated. It never goes on the wire.
 	seq uint64
+
+	// chats serializes whole logical messages per target chat. mu orders one
+	// frame write; it is released before the ack wait, which is where an
+	// unrelated send used to land between two pieces of one answer.
+	chats chatLocks
+}
+
+// chatLocks is one lock per target chat, created on demand and dropped when
+// the last holder leaves, so a process that has talked to many chats does not
+// keep an entry for each of them forever.
+//
+// Per CHAT rather than per connection on purpose: a second answer to a
+// different room has no reason to queue behind this one, and the ping loop
+// writes through request/write and never takes a chat lock at all, so it
+// cannot be held up by a send.
+type chatLocks struct {
+	mu    sync.Mutex
+	locks map[string]*chatLock
+}
+
+type chatLock struct {
+	// ch is a mutex that can be waited on with a context: capacity one, a
+	// token in it means held.
+	ch   chan struct{}
+	refs int
+}
+
+// acquire blocks until this chat is free or ctx ends. The returned release is
+// nil when it returns an error.
+//
+// The wait is bounded by whoever holds it: a holder is inside at most one
+// ackTimeout per piece, and the pieces of one answer are few. A caller on
+// context.Background therefore waits rather than interleaving, which is the
+// whole point — the alternative is the reader seeing an unrelated message
+// wedged into the middle of an answer.
+func (c *chatLocks) acquire(ctx context.Context, chatID string) (func(), error) {
+	c.mu.Lock()
+	if c.locks == nil {
+		c.locks = make(map[string]*chatLock)
+	}
+	l := c.locks[chatID]
+	if l == nil {
+		l = &chatLock{ch: make(chan struct{}, 1)}
+		c.locks[chatID] = l
+	}
+	l.refs++
+	c.mu.Unlock()
+
+	release := func() {
+		<-l.ch
+		c.mu.Lock()
+		l.refs--
+		if l.refs == 0 {
+			delete(c.locks, chatID)
+		}
+		c.mu.Unlock()
+	}
+	drop := func() {
+		c.mu.Lock()
+		l.refs--
+		if l.refs == 0 {
+			delete(c.locks, chatID)
+		}
+		c.mu.Unlock()
+	}
+
+	select {
+	case l.ch <- struct{}{}:
+		return release, nil
+	case <-ctx.Done():
+		drop()
+		return nil, ctx.Err()
+	}
 }
 
 func newWSSender(conn wsConn, log *slog.Logger) *wsSender {
@@ -345,9 +418,16 @@ func (s *wsSender) sendText(chatID string, chatTypeInt int, content string) erro
 // once part of the answer is in the chat.
 func (s *wsSender) sendTextCtx(ctx context.Context, chatID string, chatTypeInt int, content string) error {
 	pieces := splitForWire(content)
-	if len(pieces) == 1 {
-		return s.sendOneTextCtx(ctx, chatID, chatTypeInt, pieces[0])
+	// Held for every send, not only a split one: a single-frame push from
+	// another caller — an inbox card, a media receipt, the unsupported-type
+	// notice — is exactly what used to arrive between piece one and piece two,
+	// and with two long answers in flight at once the (n/total) counters could
+	// not be matched back to their own text.
+	release, err := s.chats.acquire(ctx, chatID)
+	if err != nil {
+		return err
 	}
+	defer release()
 	for i, piece := range pieces {
 		if err := s.sendOneTextCtx(ctx, chatID, chatTypeInt, piece); err != nil {
 			if i > 0 {

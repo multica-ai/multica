@@ -1288,13 +1288,11 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult
 			}
 			sendErr := err
 			if f.Kind == relayKindReply {
-				record = func() {
-					if reason := unconfirmedReason(sendErr); reason != "" {
-						o.unconfirmedFor(ctx, f.SessionID, f.Kind, reason, sendErr)
-					} else {
-						o.droppedFor(ctx, f.SessionID, f.Kind, classifyDrop(sendErr), sendErr)
-					}
-				}
+				// The same mapping the direct path uses. A partial send in
+				// particular has to agree across the two, or one reply counts
+				// as delivered or dropped depending on which replica held the
+				// socket — see recordSend.
+				record = func() { o.recordSend(ctx, f.SessionID, f.Kind, sendErr) }
 			} else {
 				record = func() {
 					o.logger.WarnContext(ctx, "wecom relay: inbox push failed on the lease holder",
