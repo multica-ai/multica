@@ -472,6 +472,79 @@ func TestWorseUnconfirmedReason_IsARuleNotALoopOrder(t *testing.T) {
 	}
 }
 
+// TestAReapedTaskRowIsStillADrop — the origin gate has to read a task row to
+// answer anything, and that row can be gone: cancelled and reaped while its
+// completion was in flight. That is not an answer to "where was this asked", it
+// is the absence of one, and main counted it as
+// outbound_dropped{reason="task_missing"} at WARN.
+//
+// Folded into a gate that returns a bool it became origin_not_channel at DEBUG
+// — a lost reply wearing the label of the most ordinary event in the
+// deployment, one level below where anybody is looking. That is the
+// indistinguishability this file exists to remove, put back by the change that
+// removes it.
+//
+// REVERSE VERIFICATION: return originWebUI from taskOriginOf's pgx.ErrNoRows
+// branch (the collapse a bool forces) and both cases fail on the first
+// assertion, with outbound_dropped:task_missing = 0 and a DEBUG
+// origin_not_channel line in the log the failure prints.
+func TestAReapedTaskRowIsStillADrop(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		setup func(q *fakeOutboundQueries)
+	}{
+		{
+			// The case main covered: the delivery row is there and says wecom,
+			// so this turn WAS ours and somebody is owed the answer.
+			name:  "with a wecom delivery row",
+			setup: func(*fakeOutboundQueries) {},
+		},
+		{
+			// No delivery row either, so nothing here can even say which
+			// platform the turn belonged to. Counted the same way regardless: a
+			// task row that vanished mid-completion is not ordinary for any of
+			// them, and the missing-task-id branch at the top of processEvent
+			// already files every platform's ending under this reason.
+			name:  "with no delivery row",
+			setup: func(q *fakeOutboundQueries) { q.sessionErr = pgx.ErrNoRows },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			q := deliverableTurn(t)
+			q.taskErr = pgx.ErrNoRows
+			tc.setup(q)
+			r := newOutcomeRig(t, q, true)
+
+			r.o.handleEvent(outcomeEvent())
+
+			if got := r.mx.get("outbound_dropped:" + string(dropTaskMissing)); got != 1 {
+				t.Fatalf("outbound_dropped:%s = %d, want 1 — a task row that is gone is a missing row, "+
+					"not a verdict about where the question was asked. log:\n%s",
+					dropTaskMissing, got, r.logs.String())
+			}
+			if got := r.mx.get("outbound_skipped:" + string(skipOriginNotChannel)); got != 0 {
+				t.Errorf("outbound_skipped:%s = %d; this was not a question typed in the web UI, and "+
+					"filing it as one is how the case disappears", skipOriginNotChannel, got)
+			}
+			out := r.logs.String()
+			if !strings.Contains(out, "reason="+string(dropTaskMissing)) {
+				t.Errorf("log does not name the reason:\n%s", out)
+			}
+			// WARN, not DEBUG: main's level for this, and the level an operator
+			// alerts on. At DEBUG it is read as a rate, which is the wrong
+			// treatment for a row that should never be missing.
+			if !strings.Contains(out, "level=WARN") {
+				t.Errorf("a reaped task row logged below WARN:\n%s", out)
+			}
+			if n := r.frames(); n != 0 {
+				t.Errorf("frames = %d, want 0 — nothing could be addressed", n)
+			}
+		})
+	}
+}
+
 // Another channel's turn must not pay for the origin gate. This subscriber is
 // on the bus every channel publishes to, so the common exit — a delivery row
 // that exists and says slack or lark — has to stay at the one query it costs
