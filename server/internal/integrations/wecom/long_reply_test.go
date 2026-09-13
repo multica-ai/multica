@@ -25,6 +25,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -288,7 +289,6 @@ func TestReassemblingThePiecesGivesBackEveryByte(t *testing.T) {
 		{"line breaks, blank lines and multi-byte runes", aLongAnswerWithLineBreaks()},
 		{"no line breaks at all", aLongAnswer()},
 		{"a single break right at the budget", strings.Repeat("字", sendMsgContentLimit/3) + "\n" + strings.Repeat("字", sendMsgContentLimit)},
-		{"nothing but blank lines", strings.Repeat("\n", sendMsgContentLimit+100)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -627,4 +627,54 @@ func summarize(wire []string) []string {
 		out = append(out, f)
 	}
 	return out
+}
+
+// A long answer whose tail is a run of blank lines puts that run in a piece of
+// its own, and the last piece carries no marker — so it would reach the chat as
+// an empty bubble, which is what hasVisibleChar stops at the call sites. The
+// split has to stop it too, because by then the call site has already seen a
+// body with visible characters in it.
+//
+// REVERSE VERIFICATION: remove the filter in splitForWire and this fails with
+// the last piece carrying no visible character.
+func TestAPieceThatRendersAsNothingIsNotSent(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, body string }{
+		{"a tail of blank lines", "答案的正文在这里。\n" + strings.Repeat("\n", sendMsgContentLimit*2)},
+		{"a blank run in the middle", strings.Repeat("字", sendMsgContentLimit/2) + strings.Repeat("\n", sendMsgContentLimit) + "结尾还有字"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if !hasVisibleChar(tc.body) {
+				t.Fatalf("the fixture has nothing visible in it; the call sites would never reach the split")
+			}
+			if len(tc.body) <= sendMsgContentLimit {
+				t.Fatalf("the fixture is %d bytes and never reaches the split", len(tc.body))
+			}
+			pieces := splitForWire(tc.body)
+			for i, p := range pieces {
+				if !hasVisibleChar(p) {
+					t.Errorf("piece %d/%d is %d bytes with nothing visible in it — it reaches the chat as an empty bubble",
+						i+1, len(pieces), len(p))
+				}
+			}
+			// Nothing a reader can see is lost: every visible rune of the
+			// original is still there, in order.
+			if got, want := visibleOnly(reassemble(pieces)), visibleOnly(tc.body); got != want {
+				t.Fatalf("the visible text changed: %d runes reached the chat, want %d", len([]rune(got)), len([]rune(want)))
+			}
+		})
+	}
+}
+
+// visibleOnly is the original with everything the client renders as nothing
+// taken out, which is the part the split promises to preserve.
+func visibleOnly(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if !unicode.IsSpace(r) && !unicode.IsControl(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
