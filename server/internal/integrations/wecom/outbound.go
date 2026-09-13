@@ -290,20 +290,16 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// as the words that answered the turn also tells the file below it that
 	// the reply has already been accounted for.
 	if hasVisibleChar(content) {
-		if err := sender.sendTextCtx(ctx, binding.ChannelChatID, chatType, content); err != nil {
-			if !errors.Is(err, errPartiallySent) {
-				return err
-			}
-			// An earlier piece of this answer is already in the chat. Neither
-			// ending the caller would otherwise pick is right: returning the
-			// error records a drop, and an operator reading that as "resend
-			// it" would print the opening a second time. Some of the words
-			// did reach the person, so it counts as delivered and the log
-			// says how much did not.
-			o.logger.WarnContext(ctx, "wecom outbound: only part of a long answer reached the chat",
-				"error", err, "chat_session_id", e.ChatSessionID)
+		err := sender.sendTextCtx(ctx, binding.ChannelChatID, chatType, content)
+		// Recorded here rather than returned, so this send and the relay's
+		// go through the one mapping in recordSend. Returning it as well
+		// would have handleChatDone classify the same send a second time.
+		o.recordSend(ctx, e.ChatSessionID, e.Type, err)
+		if err != nil && !errors.Is(err, errPartiallySent) {
+			// Nothing of the answer landed. The files are not an answer on
+			// their own, so the turn ends here.
+			return nil
 		}
-		o.delivered()
 	}
 	// Then whatever the agent produced alongside them, as its own message — a
 	// WeCom reply cannot carry a file inline.

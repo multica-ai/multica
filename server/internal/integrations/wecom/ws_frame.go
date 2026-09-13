@@ -786,8 +786,15 @@ func splitForWire(content string) []string {
 			break
 		}
 		cut := wireCutPoint(remaining, budget)
+		// Nothing is dropped at the seam. The cut is an index into remaining
+		// and both sides of it are kept: a line break the cut point chose ends
+		// the piece it belongs to, so concatenating the pieces with their
+		// markers stripped gives the answer back byte for byte. An earlier
+		// version trimmed leading newlines here, which silently ate a
+		// paragraph break out of every log and code block long enough to
+		// split.
 		pieces = append(pieces, remaining[:cut])
-		remaining = strings.TrimLeft(remaining[cut:], "\n")
+		remaining = remaining[cut:]
 	}
 
 	// The count is only knowable once the split is done, so the markers go on
@@ -810,9 +817,11 @@ func wireCutPoint(s string, budget int) int {
 		return len(s)
 	}
 	// A line break in the last quarter of the budget is worth taking; one
-	// near the start would waste most of a frame.
+	// near the start would waste most of a frame. The cut goes AFTER it, so
+	// the break stays at the end of the piece it terminated rather than
+	// falling into the gap between two frames.
 	if nl := strings.LastIndexByte(s[:budget], '\n'); nl > budget*3/4 {
-		return nl
+		return nl + 1
 	}
 	cut := budget
 	for cut > 0 && !utf8.RuneStart(s[cut]) {

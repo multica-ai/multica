@@ -53,6 +53,15 @@ type deadlineFlakyConn struct {
 	attempts int
 	// failOn reports whether the n-th (1-based) write deadline is refused.
 	failOn func(n int) bool
+
+	// refuseFromSend and swallowAckFromSend act on aibot_send_msg frames,
+	// counted 1-based, so a test can refuse or lose the verdict on the SECOND
+	// piece of a split answer after the first one landed. Unlike failOn these
+	// are failures the peer stated or swallowed, not ones raised before the
+	// write — which is what makes the send partial rather than unsent.
+	refuseFromSend     int
+	swallowAckFromSend int
+	sends              int
 }
 
 func (c *deadlineFlakyConn) newSender() *wsSender {
@@ -87,13 +96,21 @@ func (c *deadlineFlakyConn) WriteMessage(_ int, data []byte) error {
 	}
 	_ = json.Unmarshal(env.Body, &body)
 	c.mu.Lock()
-	if env.Cmd == cmdSendMsg && body.MsgType == "markdown" {
-		c.texts = append(c.texts, body.Markdown.Content)
+	code, msg, swallow := 0, "", false
+	if env.Cmd == cmdSendMsg {
+		c.sends++
+		if c.refuseFromSend > 0 && c.sends >= c.refuseFromSend {
+			code, msg = 45002, "content exceed max length"
+		}
+		swallow = c.swallowAckFromSend > 0 && c.sends >= c.swallowAckFromSend
+		if code == 0 && body.MsgType == "markdown" {
+			c.texts = append(c.texts, body.Markdown.Content)
+		}
 	}
 	s := c.sender
 	c.mu.Unlock()
-	if s != nil {
-		s.routeResponse(frameEnvelope{Headers: frameHeaders{ReqID: env.Headers.ReqID}})
+	if s != nil && !swallow {
+		s.routeResponse(frameEnvelope{Headers: frameHeaders{ReqID: env.Headers.ReqID}, ErrCode: code, ErrMsg: msg})
 	}
 	return nil
 }
@@ -400,5 +417,81 @@ func TestRelayedReply_ASettleThatNeverExecutedIsRetried(t *testing.T) {
 	}
 	if v := dedupe.valueOf(dedupeKey(rig.lastEventID())); v != claimSettledValue {
 		t.Fatalf("claim value = %q, want %q", v, claimSettledValue)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// the same partial send, on the lease holder
+// ---------------------------------------------------------------------------
+
+// The relay half of the pair in long_reply_test.go. A reply produced on
+// another replica, split because it is over the cap, with its second piece
+// refused here: the person's screen is in exactly the state the direct path
+// leaves it in, so the counter has to agree.
+//
+// It also must not be re-offered. provablyNotSent reads errPartiallySent as
+// "something reached the peer", and a retry would print piece one a second
+// time in a chat with no unsend.
+//
+// REVERSE VERIFICATION: drop the errPartiallySent arm from recordSend and this
+// reports outbound_dropped = 1 with outbound_delivered = 0 — the very split
+// this test exists to close, since the direct path counts the same event
+// delivered.
+func TestRelayedReply_ARefusedSecondPieceCountsDeliveredAndIsNotReoffered(t *testing.T) {
+	t.Parallel()
+	rig := newRelaySendRig(t, nil)
+	rig.conn.refuseFromSend = 2
+
+	rig.route(t, aLongAnswer())
+	waitFor(t, "the lease holder to take the reply", func() bool {
+		return rig.mx.get("outbound_delivered")+rig.mx.get("outbound_dropped")+rig.mx.get("outbound_unconfirmed") > 0
+	})
+	rig.stop()
+
+	if got := rig.mx.get("outbound_delivered"); got != 1 {
+		t.Errorf("outbound_delivered = %d, want 1 — the direct path counts this same event delivered", got)
+	}
+	if got := rig.mx.get("outbound_dropped"); got != 0 {
+		t.Errorf("outbound_dropped = %d, want 0 — a drop here and a delivery on the direct path is the same reply with two verdicts", got)
+	}
+	if got := rig.mx.get("outbound_unconfirmed"); got != 0 {
+		t.Errorf("outbound_unconfirmed = %d, want 0", got)
+	}
+	if got := len(rig.conn.sent()); got != 1 {
+		t.Errorf("the chat received %d piece(s), want 1 — piece two was refused and must not be re-offered", got)
+	}
+}
+
+// The lost-verdict half. The dispatcher gives a delivery a bounded budget, so
+// the wait ends there rather than on ackTimeout, and the frame is still not
+// owed another offer: piece one is already on the person's screen.
+//
+// REVERSE VERIFICATION: same revert, and this reports outbound_unconfirmed = 1
+// with outbound_delivered = 0.
+func TestRelayedReply_ALostAckOnTheSecondPieceCountsDelivered(t *testing.T) {
+	t.Parallel()
+	rig := newRelaySendRig(t, nil)
+	rig.conn.swallowAckFromSend = 2
+
+	rig.route(t, aLongAnswer())
+	// Both pieces reach the wire; the second one's verdict never comes back.
+	// What ends that wait in production is the delivery's own deadline, and
+	// here it is the dispatcher shutting down — the same ctx.Err() out of
+	// request(), without a test that stands still for the five-second
+	// ackTimeout. (DeliveryBudget reads like it should bound this and does not
+	// reach deliverRelayed; that is a separate defect, not this PR's.)
+	waitFor(t, "both pieces to reach the wire", func() bool {
+		return rig.conn.writeAttempts() >= 2
+	})
+	rig.stop()
+
+	if got := rig.mx.get("outbound_delivered"); got != 1 {
+		t.Errorf("outbound_delivered = %d, want 1", got)
+	}
+	if got := rig.mx.get("outbound_unconfirmed"); got != 0 {
+		t.Errorf("outbound_unconfirmed = %d, want 0 — part of the answer is on screen, so the delivery is not unknown", got)
+	}
+	if got := rig.mx.get("outbound_dropped"); got != 0 {
+		t.Errorf("outbound_dropped = %d, want 0", got)
 	}
 }
