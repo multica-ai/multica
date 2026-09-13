@@ -89,10 +89,13 @@ func (tx *pauseIssueAttachmentLinkTx) QueryRow(ctx context.Context, sql string, 
 
 func insertWorkflowTestIssue(t *testing.T, title string, number int) string {
 	t.Helper()
+	// The workflow later moves this issue to in_progress via a raw
+	// UpdateIssueStatus; in_progress now requires an assignee (I4127.DP),
+	// so seed the creator as assignee up front.
 	var id string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO issue (workspace_id, title, creator_type, creator_id, number)
-		VALUES ($1, $2, 'member', $3, $4)
+		INSERT INTO issue (workspace_id, title, creator_type, creator_id, assignee_type, assignee_id, number)
+		VALUES ($1, $2, 'member', $3, 'member', $3, $4)
 		RETURNING id
 	`, testWorkspaceID, title, testUserID, number).Scan(&id); err != nil {
 		t.Fatalf("insert workflow issue: %v", err)

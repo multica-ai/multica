@@ -126,8 +126,8 @@ func TestClaimDoesNotLeakForeignWorkspaceTriggerCommentOrSummary(t *testing.T) {
 	otherWS := createOtherTestWorkspace(t)
 	var foreignIssueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'foreign issue', 'in_progress', 'none', $2, 'member',
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, assignee_type, assignee_id, number, position)
+		VALUES ($1, 'foreign issue', 'in_progress', 'none', $2, 'member', 'member', $2,
 			(SELECT COALESCE(MAX(number), 90000) + 1 FROM issue WHERE workspace_id = $1), 0)
 		RETURNING id
 	`, otherWS, testUserID).Scan(&foreignIssueID); err != nil {

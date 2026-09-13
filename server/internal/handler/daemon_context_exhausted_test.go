@@ -45,8 +45,8 @@ func TestCompleteTask_ContextExhaustionFromOlderDaemonIsRecordedAsFailed(t *test
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'gh-6402 context exhaustion fixture', 'in_progress', 'none', $2, 'member', 6402, 0)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, assignee_type, assignee_id, number, position)
+		VALUES ($1, 'gh-6402 context exhaustion fixture', 'in_progress', 'none', $2, 'member', 'member', $2, 6402, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
@@ -170,8 +170,8 @@ func TestCompleteTask_RealAnswerStillCompletes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var issueID string
 			if err := testPool.QueryRow(ctx, `
-				INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-				VALUES ($1, 'gh-6402 control fixture', 'in_progress', 'none', $2, 'member', $3, 0)
+				INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, assignee_type, assignee_id, number, position)
+				VALUES ($1, 'gh-6402 control fixture', 'in_progress', 'none', $2, 'member', 'member', $2, $3, 0)
 				RETURNING id
 			`, testWorkspaceID, testUserID, tc.number).Scan(&issueID); err != nil {
 				t.Fatalf("setup: create issue: %v", err)

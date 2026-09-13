@@ -119,8 +119,10 @@ func TestClaimTask_IssueResumesCancelledTaskSession(t *testing.T) {
 	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
 
 	issueID := dbfx.Issue(t, "cancelled issue run fixture", testutil.Cols{
-		"status": "in_progress",
-		"number": 86340,
+		"status":        "in_progress",
+		"number":        86340,
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
 	})
 
 	dbfx.Exec(t, `
