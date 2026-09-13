@@ -219,20 +219,53 @@ type fakeTyping struct {
 	mu      sync.Mutex
 	count   int
 	settled int
+	// ingestBatches records the batch id reported with each OnIngested, and
+	// runBatches / settledBatches the ones reported by the flush. A per-run
+	// indicator is only correct if these agree with the number of flushes.
+	ingestBatches  []RunBatchID
+	runBatches     []RunBatchID
+	settledBatches []RunBatchID
+	boundTasks     map[RunBatchID]pgtype.UUID
 }
 
-func (f *fakeTyping) OnIngested(_ context.Context, _ ResolvedInstallation, _ channel.InboundMessage, _ pgtype.UUID) {
+func (f *fakeTyping) OnIngested(_ context.Context, _ ResolvedInstallation, _ channel.InboundMessage, _ pgtype.UUID, batch RunBatchID) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.count++
+	f.ingestBatches = append(f.ingestBatches, batch)
 }
-func (f *fakeTyping) OnSettled(_ context.Context, _ pgtype.UUID) {
+func (f *fakeTyping) OnRunStarted(_ context.Context, _ pgtype.UUID, batch RunBatchID, taskID pgtype.UUID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.runBatches = append(f.runBatches, batch)
+	if f.boundTasks == nil {
+		f.boundTasks = make(map[RunBatchID]pgtype.UUID)
+	}
+	f.boundTasks[batch] = taskID
+}
+func (f *fakeTyping) OnSettled(_ context.Context, _ pgtype.UUID, batch RunBatchID) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.settled++
+	f.settledBatches = append(f.settledBatches, batch)
 }
 func (f *fakeTyping) calls() int        { f.mu.Lock(); defer f.mu.Unlock(); return f.count }
 func (f *fakeTyping) settledCalls() int { f.mu.Lock(); defer f.mu.Unlock(); return f.settled }
+func (f *fakeTyping) ingested() []RunBatchID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]RunBatchID(nil), f.ingestBatches...)
+}
+func (f *fakeTyping) started() []RunBatchID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]RunBatchID(nil), f.runBatches...)
+}
+func (f *fakeTyping) settledOn() []RunBatchID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]RunBatchID(nil), f.settledBatches...)
+}
 
 type fakeMedia struct {
 	mu            sync.Mutex
@@ -329,6 +362,7 @@ type fakeTasks struct {
 	forceFresh          bool
 	forceFreshArgs      []bool
 	initiator           pgtype.UUID
+	enqueued            []pgtype.UUID
 	initiators          []pgtype.UUID
 	contextRevisions    []int64
 	bindingIDs          []pgtype.UUID
@@ -360,11 +394,26 @@ func (f *fakeTasks) EnqueueChannelChatTask(_ context.Context, _ db.ChatSession, 
 	f.forceFresh = forceFresh
 	f.forceFreshArgs = append(f.forceFreshArgs, forceFresh)
 	f.initiator = initiator
+	// Recorded before the error early-return: a test that forces an enqueue
+	// failure still asserts on what the router passed in.
 	f.initiators = append(f.initiators, initiator)
 	f.contextRevisions = append(f.contextRevisions, contextRevision)
 	f.bindingIDs = append(f.bindingIDs, bindingID)
 	f.routeRevisions = append(f.routeRevisions, routeRevision)
-	return db.AgentTaskQueue{ID: uid(81)}, f.err
+	if f.err != nil {
+		return db.AgentTaskQueue{}, f.err
+	}
+	// A distinct id per call, so a test can tell which run a flush created.
+	var id pgtype.UUID
+	id.Bytes[15] = byte(f.callCount)
+	id.Valid = true
+	f.enqueued = append(f.enqueued, id)
+	return db.AgentTaskQueue{ID: id}, nil
+}
+func (f *fakeTasks) enqueuedIDs() []pgtype.UUID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]pgtype.UUID(nil), f.enqueued...)
 }
 func (f *fakeTasks) PrepareChatTaskEnqueue(context.Context, pgtype.UUID, pgtype.UUID) (service.PreparedChatTaskEnqueue, error) {
 	f.mu.Lock()

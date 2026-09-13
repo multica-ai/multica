@@ -84,7 +84,7 @@ func newOutboundWithMedia(t *testing.T, q outboundQueries, objects mediaObjectSt
 	if objects != nil {
 		opts = append(opts, WithAttachments(objects))
 	}
-	o := NewOutbound(q, reg, slog.Default(), opts...)
+	o := NewOutbound(q, reg, nil, slog.Default(), opts...)
 	o.spawn = func(f func()) { f() }
 	return o, instID, conn
 }
@@ -822,7 +822,7 @@ func newMediaRigWithMetrics(t *testing.T, q outboundQueries, objects mediaObject
 	if objects != nil {
 		opts = append(opts, WithAttachments(objects))
 	}
-	o := NewOutbound(q, reg, slog.Default(), opts...)
+	o := NewOutbound(q, reg, nil, slog.Default(), opts...)
 	o.spawn = func(f func()) { f() }
 	return o, instID, conn, mx
 }
@@ -1048,7 +1048,7 @@ func TestNoLiveSender_SettlesEveryKnownFile(t *testing.T) {
 	instID := mustTestUUID(t)
 	q.sessionBinding.InstallationID = instID
 	q.installation.ID = instID
-	o := NewOutbound(q, reg, slog.Default(), WithOutboundMetrics(mx), WithAttachments(&fakeObjectStore{}))
+	o := NewOutbound(q, reg, nil, slog.Default(), WithOutboundMetrics(mx), WithAttachments(&fakeObjectStore{}))
 	o.spawn = func(f func()) { f() }
 
 	o.sendAttachments(context.Background(), mustParseTaskUUID(t, testMessageID), mustParseTaskUUID(t, testWorkspaceID),
