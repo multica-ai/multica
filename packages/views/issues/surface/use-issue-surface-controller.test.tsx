@@ -245,6 +245,57 @@ describe("useIssueSurfaceController", () => {
     );
   });
 
+  // The project-status filter is server-side only for the list
+  // surfaces, so the store field has to reach the request body. Nothing else
+  // asserts that hop: typecheck is happy either way with a conditional spread.
+  it("sends the project-status filter in the table query", async () => {
+    const store = getIssueSurfaceViewStore("workspace");
+    store.getState().toggleProjectStatusFilter("in_progress");
+    store.getState().toggleProjectStatusFilter("planned");
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "workspace" },
+          modes: ["board", "list"],
+        }),
+      { wrapper: makeWrapper(qc, "workspace") },
+    );
+
+    await waitFor(() => expect(listIssueTableRows).toHaveBeenCalled());
+
+    expect(result.current.tableQuerySpec.filters.project_statuses).toEqual([
+      "in_progress",
+      "planned",
+    ]);
+    // Its own dimension: turning it on must not touch the project-id filter.
+    expect(result.current.tableQuerySpec.filters.project_ids).toBeUndefined();
+    expect(listIssueTableRows).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: expect.objectContaining({
+          filters: expect.objectContaining({
+            project_statuses: ["in_progress", "planned"],
+          }),
+        }),
+      }),
+    );
+  });
+
+  // Off by default: an untouched surface sends no project-status key at all.
+  it("omits the project-status filter when nothing is selected", async () => {
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "workspace" },
+          modes: ["board", "list"],
+        }),
+      { wrapper: makeWrapper(qc, "workspace") },
+    );
+
+    await waitFor(() => expect(listIssueTableRows).toHaveBeenCalled());
+    expect(result.current.tableQuerySpec.filters.project_statuses).toBeUndefined();
+  });
+
   // MUL-5477. `tableQuerySpec` is the identity every downstream consumer keys
   // off: the facet request, the status/group branch hooks, and — the expensive
   // one — the Table's `useQueries` branch list, which is rebuilt whenever this

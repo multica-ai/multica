@@ -51,6 +51,7 @@ export function lockedDimensionsFromQuery(
   if (nonEmptyArray(query.projectFilters) || query.includeNoProject === true) {
     locked.add("project");
   }
+  if (nonEmptyArray(query.projectStatusFilters)) locked.add("projectStatus");
   if (nonEmptyArray(query.labelFilters)) locked.add("label");
   const propertyFilters = query.propertyFilters;
   if (propertyFilters && typeof propertyFilters === "object") {

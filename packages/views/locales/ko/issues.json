@@ -146,6 +146,14 @@
     "chip_op_before": "{{value}} 이전",
     "chip_op_after": "{{value}} 이후",
     "section_project": "프로젝트",
+    "section_project_status": "프로젝트 상태",
+    "project_status": {
+      "planned": "계획됨",
+      "in_progress": "진행 중",
+      "paused": "일시 중지",
+      "completed": "완료됨",
+      "cancelled": "취소됨"
+    },
     "section_label": "라벨",
     "section_date": "날짜",
     "date_field": "필드",
