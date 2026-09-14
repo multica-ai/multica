@@ -137,11 +137,23 @@ type RegistrationService struct {
 	sessions map[string]*registrationSession
 }
 
-// sessionWriteTimeout bounds the status writes the polling goroutine
-// makes. These cannot ride the goroutine's own context: that context is
-// deadlined to the device_code expiry, so the expiry branch itself would
-// always write with an already-cancelled context.
-const sessionWriteTimeout = 10 * time.Second
+const (
+	// sessionWriteTimeout bounds a single status write. These cannot ride
+	// the polling goroutine's own context: that context is deadlined to
+	// the device_code expiry, so the expiry branch itself would always
+	// write with an already-cancelled context.
+	sessionWriteTimeout = 10 * time.Second
+
+	// Retry budget for recording a terminal outcome. Sized to ride out a
+	// Redis failover or restart rather than just a dropped packet: 8
+	// attempts backing off 200ms→12.8s cap is a little over a minute of
+	// wall clock. The goroutine has no other work left at this point, and
+	// the alternative — dropping a completion that is already committed in
+	// Postgres — is what leaves a bound user staring at a pending dialog.
+	terminalWriteAttempts       = 8
+	terminalWriteInitialBackoff = 200 * time.Millisecond
+	terminalWriteMaxBackoff     = 15 * time.Second
+)
 
 // authQueriesAdapter is the minimal lookup surface the service needs
 // before kicking off a session: agent ↔ workspace ownership validation.
@@ -232,8 +244,8 @@ func (s *RegistrationService) publishInstalled(workspaceID, installationID pgtyp
 
 // registrationSession is the polling goroutine's working state for one
 // in-flight install. It holds ONLY what that goroutine needs in order to
-// keep talking to Lark; the status the browser reads lives in
-// lark_install_session so any process can serve it.
+// keep talking to Lark; the status the browser reads lives in the shared
+// InstallSessionStore so any process can serve it.
 //
 // deviceCode deliberately stays here and is never persisted: it is a
 // bearer credential — anyone holding it can complete the authorization —
@@ -259,11 +271,7 @@ type registrationSession struct {
 }
 
 // markSuccess records the terminal success and drops the goroutine's
-// working state. The UPDATE is guarded on status = 'pending' (see
-// queries/lark_install_session.sql), so first writer wins: if the expiry
-// deadline fires while a success is committing, whichever lands first is
-// what the user keeps seeing. A no-rows result is therefore an expected
-// outcome, not an error.
+// working state.
 func (s *RegistrationService) markSuccess(sess *registrationSession, installationID pgtype.UUID) {
 	s.markTerminal(sess, InstallSessionOutcome{
 		Status:         RegistrationStatusSuccess,
@@ -281,26 +289,63 @@ func (s *RegistrationService) markError(sess *registrationSession, reason, msg s
 	})
 }
 
-// markTerminal writes the session's final outcome and drops the
+// markTerminal writes the session's final outcome and then drops the
 // goroutine's working state. The store applies first-writer-wins, so when
 // the expiry deadline and a poll result race, whichever lands first is
 // what the user keeps seeing.
 //
+// The write is RETRIED with backoff, and the session is held until it
+// settles. By the time a success reaches here the installation and the
+// installer binding are already committed in Postgres — so dropping this
+// write on the first error would leave a user who bound successfully
+// watching the dialog sit on "pending" until the QR expires, then fail.
+// Retrying is safe because MarkTerminal is idempotent and
+// first-writer-wins: a retry can only re-assert the outcome already
+// recorded, never replace it with a different one.
+//
 // Retention runs from now rather than from the session's start: the
 // dialog has to be able to read this outcome after the QR window closed.
 func (s *RegistrationService) markTerminal(sess *registrationSession, outcome InstallSessionOutcome) {
-	ctx, cancel := context.WithTimeout(context.Background(), sessionWriteTimeout)
-	defer cancel()
-	if err := s.sessionStore.MarkTerminal(ctx, sess.id, outcome, s.cfg.SessionTTL); err != nil {
-		// For a success the install itself already committed and only the
-		// status projection failed; the dialog falls back to reporting the
-		// session expired once the window closes, and the installation row
-		// is live either way.
-		s.cfg.Logger.Error("lark registration: record session outcome",
-			"session_id", sess.id, "status", string(outcome.Status),
-			"reason", outcome.ErrorReason, "err", err)
+	defer s.forgetSession(sess.id)
+
+	delay := terminalWriteInitialBackoff
+	var err error
+	for attempt := 1; attempt <= terminalWriteAttempts; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), sessionWriteTimeout)
+		err = s.sessionStore.MarkTerminal(ctx, sess.id, outcome, s.cfg.SessionTTL)
+		cancel()
+		if err == nil {
+			return
+		}
+		// The session record is gone (expired out, or the store was
+		// wiped). Nothing to record and nothing a retry could fix.
+		if errors.Is(err, ErrInstallSessionNotFound) {
+			s.cfg.Logger.Warn("lark registration: session gone before its outcome was recorded",
+				"session_id", sess.id, "status", string(outcome.Status))
+			return
+		}
+		if attempt == terminalWriteAttempts {
+			break
+		}
+		s.cfg.Logger.Warn("lark registration: record session outcome failed, retrying",
+			"session_id", sess.id, "attempt", attempt, "retry_in", delay, "err", err)
+		time.Sleep(delay)
+		if delay *= 2; delay > terminalWriteMaxBackoff {
+			delay = terminalWriteMaxBackoff
+		}
 	}
-	s.forgetSession(sess.id)
+
+	// Out of retries. For a success the install itself is live and
+	// lark_installation:created already went out, so the workspace shows
+	// the Bot connected; it is this one dialog that will time out. Log the
+	// installation id so the outcome is recoverable by hand.
+	s.cfg.Logger.Error("lark registration: gave up recording session outcome",
+		"session_id", sess.id,
+		"status", string(outcome.Status),
+		"reason", outcome.ErrorReason,
+		"installation_id", uuidString(outcome.InstallationID),
+		"attempts", terminalWriteAttempts,
+		"err", err)
 }
 
 // forgetSession drops the goroutine's working state once it has

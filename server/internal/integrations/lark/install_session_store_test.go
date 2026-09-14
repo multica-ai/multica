@@ -211,14 +211,18 @@ func TestInstallSessionStoreRetentionExpires(t *testing.T) {
 		if err := store.Create(ctx, InstallSessionState{
 			ID: "sess-5", WorkspaceID: ws, InitiatorID: ws,
 			Status: RegistrationStatusPending, ExpiresAt: time.Now().Add(time.Hour),
-		}, 150*time.Millisecond); err != nil {
+			// 1s is the shortest retention both implementations can
+			// express: Redis EXPIRE is second-granular, and ttlSeconds
+			// floors at 1 so a sub-second TTL cannot round down to 0,
+			// which Redis reads as "no expiry".
+		}, time.Second); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 		if _, err := store.Get(ctx, ws, "sess-5"); err != nil {
 			t.Fatalf("within retention: %v", err)
 		}
 
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(1300 * time.Millisecond)
 
 		if _, err := store.Get(ctx, ws, "sess-5"); !errors.Is(err, ErrInstallSessionNotFound) {
 			t.Errorf("past retention: want ErrInstallSessionNotFound, got %v", err)
@@ -295,4 +299,118 @@ func TestRedisInstallSessionStoreFailureIsNotNotFound(t *testing.T) {
 	if errors.Is(err, ErrInstallSessionNotFound) {
 		t.Fatal("a Redis failure must not be reported as ErrInstallSessionNotFound")
 	}
+}
+
+// failScriptOnce fails the first script evaluation, then passes through.
+// Script.Run tries EVALSHA and falls back to EVAL on NOSCRIPT, so both
+// have to be wrapped to intercept the first attempt reliably.
+type failScriptOnce struct {
+	redis.UniversalClient
+	// armed gates the injection so setup calls — Create also runs a
+	// script — do not consume it.
+	armed  bool
+	failed bool
+}
+
+func (c *failScriptOnce) fail(ctx context.Context) *redis.Cmd {
+	cmd := redis.NewCmd(ctx)
+	cmd.SetErr(errors.New("injected Redis outage mid-script"))
+	return cmd
+}
+
+func (c *failScriptOnce) EvalSha(ctx context.Context, sha string, keys []string, args ...any) *redis.Cmd {
+	if c.armed && !c.failed {
+		c.failed = true
+		return c.fail(ctx)
+	}
+	return c.UniversalClient.EvalSha(ctx, sha, keys, args...)
+}
+
+func (c *failScriptOnce) Eval(ctx context.Context, script string, keys []string, args ...any) *redis.Cmd {
+	if c.armed && !c.failed {
+		c.failed = true
+		return c.fail(ctx)
+	}
+	return c.UniversalClient.Eval(ctx, script, keys, args...)
+}
+
+// TestRedisInstallSessionStoreTerminalWriteIsAllOrNothing covers what an
+// earlier two-key version of this store got wrong (review of #8376): the
+// terminal status and the retention window were separate writes, so a
+// SETNX that landed followed by a failed EXPIRE left the status stored
+// under the base key's original, much longer TTL — and the retry could
+// not repair it, because SETNX then reported that someone else had won.
+// A session that finished early lost its terminal field first and read as
+// `pending` again.
+//
+// The record is now one key written by one script, so there is no partial
+// state to observe: a failed attempt applies nothing, and a retry moves
+// status and retention together.
+func TestRedisInstallSessionStoreTerminalWriteIsAllOrNothing(t *testing.T) {
+	rdb := newInstallSessionRedis(t)
+	injector := &failScriptOnce{UniversalClient: rdb}
+	store := NewRedisInstallSessionStore(injector)
+	ctx := context.Background()
+	ws := installSessionUUID(t, "11111111-1111-1111-1111-111111111111")
+	id := "partial-write"
+
+	if err := store.Create(ctx, InstallSessionState{
+		ID: id, WorkspaceID: ws, InitiatorID: ws,
+		Status: RegistrationStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+	}, 90*time.Minute); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	injector.armed = true
+	outcome := InstallSessionOutcome{Status: RegistrationStatusSuccess}
+	if err := store.MarkTerminal(ctx, id, outcome, time.Second); err == nil {
+		t.Fatal("expected the injected failure to surface")
+	}
+
+	// Nothing applied: the failed attempt must not have left the status
+	// written under the original retention.
+	state, err := store.Get(ctx, ws, id)
+	if err != nil {
+		t.Fatalf("Get after failed write: %v", err)
+	}
+	if state.Status != RegistrationStatusPending {
+		t.Errorf("Status after a failed terminal write: got %q want pending", state.Status)
+	}
+	if ttl := rdb.TTL(ctx, installSessionKey(id)).Val(); ttl <= time.Hour {
+		t.Errorf("failed write moved retention anyway: TTL=%s", ttl)
+	}
+
+	// Retry: status and retention move together.
+	if err := store.MarkTerminal(ctx, id, outcome, time.Second); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if ttl := rdb.TTL(ctx, installSessionKey(id)).Val(); ttl > 2*time.Second {
+		t.Errorf("retry reported success without moving retention: TTL=%s", ttl)
+	}
+	state, err = store.Get(ctx, ws, id)
+	if err != nil {
+		t.Fatalf("Get after retry: %v", err)
+	}
+	if state.Status != RegistrationStatusSuccess {
+		t.Errorf("Status after retry: got %q want success", state.Status)
+	}
+
+	// And it never regresses to pending: the whole record expires at once.
+	time.Sleep(1100 * time.Millisecond)
+	if _, err := store.Get(ctx, ws, id); !errors.Is(err, ErrInstallSessionNotFound) {
+		t.Errorf("past retention: want ErrInstallSessionNotFound, got %v", err)
+	}
+}
+
+// A MarkTerminal for a session that is already gone reports
+// ErrInstallSessionNotFound so the service's retry loop stops instead of
+// burning its whole budget on something no retry can fix.
+func TestInstallSessionStoreMarkTerminalOnMissingSessionIsNotFound(t *testing.T) {
+	forEachInstallSessionStore(t, func(t *testing.T, store InstallSessionStore) {
+		err := store.MarkTerminal(context.Background(), "never-existed",
+			InstallSessionOutcome{Status: RegistrationStatusSuccess}, time.Minute)
+		if !errors.Is(err, ErrInstallSessionNotFound) {
+			t.Errorf("want ErrInstallSessionNotFound, got %v", err)
+		}
+	})
 }

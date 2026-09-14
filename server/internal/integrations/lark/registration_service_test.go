@@ -457,3 +457,75 @@ func TestFinishSuccess_DropsCachedTokenBeforeMintingWithRotatedCreds(t *testing.
 		t.Errorf("bot info credentials carried app_secret %q, want the rotated one", api.creds.AppSecret)
 	}
 }
+
+// flakyTerminalStore fails the first n MarkTerminal calls, then delegates.
+type flakyTerminalStore struct {
+	InstallSessionStore
+	remainingFailures int
+	calls             int
+}
+
+func (s *flakyTerminalStore) MarkTerminal(ctx context.Context, id string, outcome InstallSessionOutcome, ttl time.Duration) error {
+	s.calls++
+	if s.remainingFailures > 0 {
+		s.remainingFailures--
+		return errors.New("injected store outage")
+	}
+	return s.InstallSessionStore.MarkTerminal(ctx, id, outcome, ttl)
+}
+
+// TestRegistrationTerminalWriteSurvivesTransientStoreFailure covers the
+// review finding on #8376: by the time markSuccess runs, the installation
+// and the installer binding are already committed in Postgres. Logging the
+// store failure and walking away discarded that completion permanently —
+// the browser kept reading `pending` until the QR expired and then showed
+// a failure, for a bind that had actually succeeded.
+func TestRegistrationTerminalWriteSurvivesTransientStoreFailure(t *testing.T) {
+	shared := NewMemoryInstallSessionStore()
+	flaky := &flakyTerminalStore{InstallSessionStore: shared, remainingFailures: 2}
+
+	// Instance A owns the polling goroutine and hits the outage; instance
+	// B is the replica the browser happens to poll.
+	instanceA := newRegistrationServiceForTest(t)
+	instanceA.sessionStore = flaky
+	instanceB := newRegistrationServiceForTest(t)
+	instanceB.sessionStore = shared
+
+	ctx := context.Background()
+	ws := uuidFromStringSvc(t, "11111111-1111-1111-1111-111111111111")
+	installationID := uuidFromStringSvc(t, "33333333-3333-3333-3333-333333333333")
+
+	sess := plantSession(t, instanceA, "retry-1", ws, instanceA.cfg.Now().Add(time.Hour))
+	instanceA.markSuccess(sess, installationID)
+
+	if flaky.calls < 3 {
+		t.Errorf("expected the write to be retried past the outage, got %d call(s)", flaky.calls)
+	}
+
+	state, err := instanceB.GetSession(ctx, ws, "retry-1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if state.Status != RegistrationStatusSuccess {
+		t.Fatalf("Status: got %q want success — a committed bind must not be lost to a transient store failure", state.Status)
+	}
+	if state.InstallationID != installationID {
+		t.Errorf("InstallationID: got %v want %v", state.InstallationID, installationID)
+	}
+}
+
+// A session that has already expired out of the store cannot be repaired
+// by retrying, so the loop must stop on the first not-found rather than
+// spending its whole budget sleeping.
+func TestRegistrationTerminalWriteStopsWhenSessionIsGone(t *testing.T) {
+	s := newRegistrationServiceForTest(t)
+	counting := &flakyTerminalStore{InstallSessionStore: NewMemoryInstallSessionStore()}
+	s.sessionStore = counting
+
+	// Never planted, so the store reports it gone.
+	s.markError(&registrationSession{id: "absent"}, RegistrationReasonExpired, "qr expired")
+
+	if counting.calls != 1 {
+		t.Errorf("want a single attempt for a session that no longer exists, got %d", counting.calls)
+	}
+}

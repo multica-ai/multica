@@ -72,7 +72,12 @@ type InstallSessionStore interface {
 	Get(ctx context.Context, workspaceID pgtype.UUID, id string) (InstallSessionState, error)
 
 	// MarkTerminal records the first terminal outcome for id and ignores
-	// any later one.
+	// any later one. It must also be self-repairing: a call that loses the
+	// race still moves retention onto the terminal window, so a retry
+	// after a partially-applied write leaves the record consistent.
+	//
+	// Returns ErrInstallSessionNotFound when the session is gone — the
+	// signal to a retrying caller that there is nothing left to fix.
 	MarkTerminal(ctx context.Context, id string, outcome InstallSessionOutcome, ttl time.Duration) error
 }
 
@@ -135,18 +140,19 @@ func (s *MemoryInstallSessionStore) MarkTerminal(_ context.Context, id string, o
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry, ok := s.entries[id]
-	if !ok {
-		return nil
+	if !ok || !entry.retainTil.After(s.now()) {
+		return ErrInstallSessionNotFound
 	}
-	// First writer wins — a second terminal write is a no-op, matching the
-	// Redis implementation's SetNX.
-	if entry.state.Status != RegistrationStatusPending {
-		return nil
+	// First writer wins — a second terminal write leaves the recorded
+	// outcome alone. Retention still moves, matching the unconditional
+	// EXPIRE in the Redis script, so the two implementations agree on what
+	// a retry does.
+	if entry.state.Status == RegistrationStatusPending {
+		entry.state.Status = outcome.Status
+		entry.state.InstallationID = outcome.InstallationID
+		entry.state.ErrorReason = outcome.ErrorReason
+		entry.state.ErrorMessage = outcome.ErrorMessage
 	}
-	entry.state.Status = outcome.Status
-	entry.state.InstallationID = outcome.InstallationID
-	entry.state.ErrorReason = outcome.ErrorReason
-	entry.state.ErrorMessage = outcome.ErrorMessage
 	entry.retainTil = s.now().Add(ttl)
 	s.entries[id] = entry
 	return nil

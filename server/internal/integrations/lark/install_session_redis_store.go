@@ -2,8 +2,6 @@ package lark
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -13,26 +11,62 @@ import (
 
 // Redis-backed InstallSessionStore — the multi-replica implementation.
 //
-// The record is split across two keys so the first-writer-wins contract
-// falls out of Redis primitives instead of a read-modify-write:
+// The whole session is ONE hash key, and both writes go through Lua so
+// they are atomic. An earlier version split the record across a base key
+// and a SetNX'd terminal key, which made the terminal status and the
+// retention window two separately-failing writes: a SetNX that landed
+// followed by a failed EXPIRE left the status stored under the base key's
+// original (much longer) TTL, and the retry could not tell the difference
+// because SetNX now reported "someone else won". A session that finished
+// early then lost its terminal field first and read as `pending` again.
 //
-//	mul:lark:install:<id>       immutable half, written once by Create
-//	mul:lark:install:<id>:done  terminal half, written with SetNX
-//
-// SetNX is the whole concurrency story: the expiry deadline and a poll
-// result race on the same key and the loser's write simply does not land,
-// so whichever outcome the user was shown first is the one that sticks. A
-// single-key CAS would need either a Lua script or an optimistic retry
-// loop to say the same thing.
-const (
-	installSessionKeyPrefix = "mul:lark:install:"
-	installSessionDoneSufix = ":done"
-)
+// One key and one script removes that class outright: status and
+// retention move together or not at all, and a retry re-asserts both.
+const installSessionKeyPrefix = "mul:lark:install:"
 
 func installSessionKey(id string) string { return installSessionKeyPrefix + id }
-func installSessionDoneKey(id string) string {
-	return installSessionKeyPrefix + id + installSessionDoneSufix
-}
+
+// Hash fields. Short because these are written once per bind attempt and
+// read every ~5s: w/i/e are the immutable half, s/n/r/m the terminal one.
+const (
+	installFieldWorkspace      = "w"
+	installFieldInitiator      = "i"
+	installFieldExpiresAt      = "e"
+	installFieldStatus         = "s"
+	installFieldInstallationID = "n"
+	installFieldErrorReason    = "r"
+	installFieldErrorMessage   = "m"
+)
+
+// installSessionCreateScript writes the immutable half and its retention
+// in one step, so a failure can never leave a key with no TTL behind.
+var installSessionCreateScript = redis.NewScript(`
+redis.call('HSET', KEYS[1], 'w', ARGV[1], 'i', ARGV[2], 'e', ARGV[3])
+redis.call('EXPIRE', KEYS[1], ARGV[4])
+return 1
+`)
+
+// installSessionTerminalScript is idempotent AND self-repairing.
+//
+// The status is written only if no terminal status is present yet, which
+// is the first-writer-wins guarantee: when the expiry deadline and a poll
+// result race, the user keeps whichever outcome they were already shown.
+// The EXPIRE runs UNCONDITIONALLY — including for the caller that lost —
+// so a retry after a partially-applied write still moves retention onto
+// the terminal window instead of reporting success and leaving it stale.
+//
+// Returns 0 when the session is gone (expired out or never existed):
+// there is nothing to record and nothing a retry could fix.
+var installSessionTerminalScript = redis.NewScript(`
+if redis.call('EXISTS', KEYS[1]) == 0 then
+    return 0
+end
+if redis.call('HGET', KEYS[1], 's') == false then
+    redis.call('HSET', KEYS[1], 's', ARGV[1], 'n', ARGV[2], 'r', ARGV[3], 'm', ARGV[4])
+end
+redis.call('EXPIRE', KEYS[1], ARGV[5])
+return 1
+`)
 
 type RedisInstallSessionStore struct {
 	rdb redis.UniversalClient
@@ -42,54 +76,46 @@ func NewRedisInstallSessionStore(rdb redis.UniversalClient) *RedisInstallSession
 	return &RedisInstallSessionStore{rdb: rdb}
 }
 
-// redisInstallSession is the immutable half: everything Create knows and
-// nothing that changes afterwards. Short JSON keys because these records
-// are written once per bind attempt and read every ~5s.
-type redisInstallSession struct {
-	WorkspaceID string    `json:"w"`
-	InitiatorID string    `json:"i"`
-	ExpiresAt   time.Time `json:"e"`
-}
-
-// redisInstallOutcome is the terminal half, written at most once.
-type redisInstallOutcome struct {
-	Status         string `json:"s"`
-	InstallationID string `json:"n,omitempty"`
-	ErrorReason    string `json:"r,omitempty"`
-	ErrorMessage   string `json:"m,omitempty"`
+// ttlSeconds rounds up: a sub-second TTL must not floor to 0, which Redis
+// reads as "no expiry" and would leak the key forever.
+func ttlSeconds(ttl time.Duration) int {
+	secs := int(ttl / time.Second)
+	if ttl%time.Second != 0 {
+		secs++
+	}
+	if secs < 1 {
+		secs = 1
+	}
+	return secs
 }
 
 func (s *RedisInstallSessionStore) Create(ctx context.Context, state InstallSessionState, ttl time.Duration) error {
-	data, err := json.Marshal(redisInstallSession{
-		WorkspaceID: uuidString(state.WorkspaceID),
-		InitiatorID: uuidString(state.InitiatorID),
-		ExpiresAt:   state.ExpiresAt,
-	})
+	err := installSessionCreateScript.Run(ctx, s.rdb,
+		[]string{installSessionKey(state.ID)},
+		uuidString(state.WorkspaceID),
+		uuidString(state.InitiatorID),
+		state.ExpiresAt.UTC().Format(time.RFC3339Nano),
+		ttlSeconds(ttl),
+	).Err()
 	if err != nil {
-		return fmt.Errorf("lark: marshal install session: %w", err)
-	}
-	if err := s.rdb.Set(ctx, installSessionKey(state.ID), data, ttl).Err(); err != nil {
 		return fmt.Errorf("lark: persist install session: %w", err)
 	}
 	return nil
 }
 
 func (s *RedisInstallSessionStore) Get(ctx context.Context, workspaceID pgtype.UUID, id string) (InstallSessionState, error) {
-	raw, err := s.rdb.Get(ctx, installSessionKey(id)).Bytes()
-	if errors.Is(err, redis.Nil) {
-		return InstallSessionState{}, ErrInstallSessionNotFound
-	}
+	fields, err := s.rdb.HGetAll(ctx, installSessionKey(id)).Result()
 	if err != nil {
-		// Surface the failure rather than degrading to "not found": a
-		// Redis blip must not tell the dialog the session is gone, which
-		// is a terminal state it cannot recover from.
+		// Surface the failure rather than degrading to not-found: not-found
+		// is terminal in the dialog, so a Redis blip reported that way would
+		// permanently kill a live scan.
 		return InstallSessionState{}, fmt.Errorf("lark: load install session: %w", err)
 	}
-	var rec redisInstallSession
-	if err := json.Unmarshal(raw, &rec); err != nil {
-		return InstallSessionState{}, fmt.Errorf("lark: decode install session: %w", err)
+	// HGETALL on a missing key returns an empty map, not an error.
+	if len(fields) == 0 {
+		return InstallSessionState{}, ErrInstallSessionNotFound
 	}
-	if rec.WorkspaceID != uuidString(workspaceID) {
+	if fields[installFieldWorkspace] != uuidString(workspaceID) {
 		return InstallSessionState{}, ErrInstallSessionNotFound
 	}
 
@@ -97,29 +123,25 @@ func (s *RedisInstallSessionStore) Get(ctx context.Context, workspaceID pgtype.U
 		ID:          id,
 		WorkspaceID: workspaceID,
 		Status:      RegistrationStatusPending,
-		ExpiresAt:   rec.ExpiresAt,
 	}
-	if err := state.InitiatorID.Scan(rec.InitiatorID); err != nil {
+	if err := state.InitiatorID.Scan(fields[installFieldInitiator]); err != nil {
 		return InstallSessionState{}, fmt.Errorf("lark: decode install session initiator: %w", err)
 	}
-
-	doneRaw, err := s.rdb.Get(ctx, installSessionDoneKey(id)).Bytes()
-	if errors.Is(err, redis.Nil) {
-		return state, nil
+	if raw := fields[installFieldExpiresAt]; raw != "" {
+		expiresAt, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			return InstallSessionState{}, fmt.Errorf("lark: decode install session expiry: %w", err)
+		}
+		state.ExpiresAt = expiresAt
 	}
-	if err != nil {
-		return InstallSessionState{}, fmt.Errorf("lark: load install session outcome: %w", err)
-	}
-	var outcome redisInstallOutcome
-	if err := json.Unmarshal(doneRaw, &outcome); err != nil {
-		return InstallSessionState{}, fmt.Errorf("lark: decode install session outcome: %w", err)
-	}
-	state.Status = RegistrationSessionStatus(outcome.Status)
-	state.ErrorReason = outcome.ErrorReason
-	state.ErrorMessage = outcome.ErrorMessage
-	if outcome.InstallationID != "" {
-		if err := state.InstallationID.Scan(outcome.InstallationID); err != nil {
-			return InstallSessionState{}, fmt.Errorf("lark: decode install session installation id: %w", err)
+	if status := fields[installFieldStatus]; status != "" {
+		state.Status = RegistrationSessionStatus(status)
+		state.ErrorReason = fields[installFieldErrorReason]
+		state.ErrorMessage = fields[installFieldErrorMessage]
+		if raw := fields[installFieldInstallationID]; raw != "" {
+			if err := state.InstallationID.Scan(raw); err != nil {
+				return InstallSessionState{}, fmt.Errorf("lark: decode install session installation id: %w", err)
+			}
 		}
 	}
 	return state, nil
@@ -130,29 +152,22 @@ func (s *RedisInstallSessionStore) MarkTerminal(ctx context.Context, id string, 
 	if outcome.InstallationID.Valid {
 		installationID = uuidString(outcome.InstallationID)
 	}
-	data, err := json.Marshal(redisInstallOutcome{
-		Status:         string(outcome.Status),
-		InstallationID: installationID,
-		ErrorReason:    outcome.ErrorReason,
-		ErrorMessage:   outcome.ErrorMessage,
-	})
-	if err != nil {
-		return fmt.Errorf("lark: marshal install session outcome: %w", err)
-	}
-	// SetNX: the first terminal write wins, later ones are no-ops.
-	won, err := s.rdb.SetNX(ctx, installSessionDoneKey(id), data, ttl).Result()
+	applied, err := installSessionTerminalScript.Run(ctx, s.rdb,
+		[]string{installSessionKey(id)},
+		string(outcome.Status),
+		installationID,
+		outcome.ErrorReason,
+		outcome.ErrorMessage,
+		ttlSeconds(ttl),
+	).Int64()
 	if err != nil {
 		return fmt.Errorf("lark: record install session outcome: %w", err)
 	}
-	if !won {
-		return nil
-	}
-	// Extend the immutable half to match, so the dialog can still read the
-	// full record during the terminal window. Best-effort: if the base key
-	// already expired there is nothing to hold open, and Get would report
-	// not-found either way.
-	if err := s.rdb.Expire(ctx, installSessionKey(id), ttl).Err(); err != nil {
-		return fmt.Errorf("lark: extend install session retention: %w", err)
+	if applied == 0 {
+		// The session is gone; no retry can bring it back.
+		return ErrInstallSessionNotFound
 	}
 	return nil
 }
+
+var _ InstallSessionStore = (*RedisInstallSessionStore)(nil)
