@@ -18,7 +18,9 @@
     "POSTGRES_DB",
     "POSTGRES_PORT",
     "DESKTOP_RENDERER_PORT",
-    "DESKTOP_APP_SUFFIX"
+    "DESKTOP_APP_SUFFIX",
+    "MULTICA_DEV_PROFILE",
+    "MULTICA_DEV_PROFILES_HOME"
   ],
   "tasks": {
     // `fumadocs-mdx` regenerates `.source/` by removing the directory and
