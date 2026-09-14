@@ -997,6 +997,48 @@ func TestLoadConfig_OpenCodeIdleWatchdog(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_ClaudeIdleWatchdog(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_CLAUDE_IDLE_WATCHDOG", "")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with default: %v", err)
+	}
+	if cfg.ClaudeIdleWatchdog != DefaultClaudeIdleWatchdog {
+		t.Fatalf("ClaudeIdleWatchdog = %s, want default %s", cfg.ClaudeIdleWatchdog, DefaultClaudeIdleWatchdog)
+	}
+
+	t.Setenv("MULTICA_CLAUDE_IDLE_WATCHDOG", "12m")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with env: %v", err)
+	}
+	if cfg.ClaudeIdleWatchdog != 12*time.Minute {
+		t.Fatalf("ClaudeIdleWatchdog = %s, want 12m from env", cfg.ClaudeIdleWatchdog)
+	}
+
+	// Zero removes the provider-specific override. The generic watchdog remains
+	// the fallback and its zero value still disables the whole suite.
+	t.Setenv("MULTICA_CLAUDE_IDLE_WATCHDOG", "0")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with zero env: %v", err)
+	}
+	if cfg.ClaudeIdleWatchdog != 0 {
+		t.Fatalf("ClaudeIdleWatchdog = %s, want zero from env", cfg.ClaudeIdleWatchdog)
+	}
+}
+
 // TestLoadConfig_AutoUpdateDefault_CloudOn confirms the symmetric case: a
 // daemon pointed at Multica's hosted cloud keeps the historical opt-in
 // auto-update default. We pass the WSS form of the URL to also exercise that

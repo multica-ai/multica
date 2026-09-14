@@ -1086,7 +1086,7 @@ func taskErrorType(reason string) string {
 	switch reason {
 	case "runtime_offline", "runtime_recovery":
 		return "runtime"
-	case "timeout", "codex_semantic_inactivity":
+	case "timeout", "idle_watchdog", "codex_semantic_inactivity":
 		return "timeout"
 	case "iteration_limit", "agent_fallback_message":
 		return "agent_output"
@@ -4124,11 +4124,48 @@ func (s *TaskService) maybeLogClaimSlow(agentID pgtype.UUID, outcome string, sta
 	)
 }
 
-// StartTask transitions a dispatched task to running.
-// Issue status is NOT changed here — the agent manages it via the CLI.
+// StartTask transitions a dispatched task to running. An assignment-backed
+// task that still owns a todo issue also establishes the one deterministic
+// issue fact the server can know at this boundary: owned work has started.
+// Comment/mention runs and every later status remain agent-managed.
 func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
-	task, err := s.Queries.StartAgentTask(ctx, taskID)
-	if err != nil {
+	var task db.AgentTaskQueue
+	var startedIssue *db.Issue
+	var previousIssueStatus string
+	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		started, err := qtx.StartAgentTask(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		task = started
+
+		if !taskMayAdvanceIssueOnStart(task) {
+			return nil
+		}
+		issue, err := qtx.LockIssueForWorkflowReconcile(ctx, task.IssueID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("lock issue for task start: %w", err)
+		}
+		if !delegatedTaskOwnsIssue(task, issue) ||
+			issuestatus.Effective(ctx, qtx, issue.WorkspaceID, issue.Status) != issuestatus.Todo {
+			return nil
+		}
+
+		previousIssueStatus = issue.Status
+		issue, err = qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ID:          issue.ID,
+			Status:      issuestatus.InProgress,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			return fmt.Errorf("advance owned issue on task start: %w", err)
+		}
+		startedIssue = &issue
+		return nil
+	}); err != nil {
 		return nil, fmt.Errorf("start task: %w", err)
 	}
 	s.forgetTaskReclaim(task)
@@ -4148,7 +4185,22 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 	// the issue-card agent activity indicator) lags by up to half a minute
 	// on the transition users care about most.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskRunning, task)
+	if startedIssue != nil {
+		s.broadcastIssueUpdated(ctx, *startedIssue, previousIssueStatus)
+	}
 	return &task, nil
+}
+
+// taskMayAdvanceIssueOnStart limits the server-owned transition to a task whose
+// durable provenance says the issue itself was assigned for execution. The
+// evidence reference check rejects malformed or legacy rows instead of making
+// a status decision from an ambiguous trigger.
+func taskMayAdvanceIssueOnStart(task db.AgentTaskQueue) bool {
+	return task.IssueID.Valid &&
+		task.TriggerEvidenceKind.Valid &&
+		task.TriggerEvidenceKind.String == string(attribution.EvidenceIssueAssignment) &&
+		task.TriggerEvidenceRefID.Valid &&
+		task.TriggerEvidenceRefID == task.IssueID
 }
 
 func (s *TaskService) cancelDeferredEscalationsForTask(ctx context.Context, taskID pgtype.UUID) {
@@ -5425,7 +5477,7 @@ func resumeUnsafeFailureReason(reason string) bool {
 	// codex_resume_oversized is the strongest member of this set: a codex
 	// rollout only ever grows, so a thread whose resume response already
 	// overflowed the reader will overflow on every future attempt too.
-	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity", "agent_error.context_overflow", "codex_resume_oversized":
+	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "idle_watchdog", "codex_semantic_inactivity", "agent_error.context_overflow", "codex_resume_oversized":
 		return true
 	default:
 		return false

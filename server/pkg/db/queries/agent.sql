@@ -567,10 +567,10 @@ SELECT
     CASE WHEN sqlc.narg(fire_at)::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
-    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
-    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
+    CASE WHEN p.failure_reason IN ('idle_watchdog', 'codex_semantic_inactivity') THEN NULL ELSE p.session_id END,
+    CASE WHEN p.failure_reason IN ('idle_watchdog', 'codex_semantic_inactivity') THEN NULL ELSE p.work_dir END,
     p.attempt + 1, COALESCE(sqlc.narg(max_attempts)::int, p.max_attempts), p.id,
-    p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
+    COALESCE(p.failure_reason IN ('idle_watchdog', 'codex_semantic_inactivity'), FALSE),
     p.is_leader_task,
     p.squad_id,
     p.originator_user_id,
@@ -1039,7 +1039,7 @@ RETURNING *;
 -- Tasks that ended in a known "poisoned" terminal state are also excluded
 -- here so even auto-retry does not inherit the bad session. The daemon
 -- classifies these failures (iteration_limit, agent_fallback_message,
--- api_invalid_request, codex_semantic_inactivity, agent_error.context_overflow,
+-- api_invalid_request, idle_watchdog, codex_semantic_inactivity, agent_error.context_overflow,
 -- codex_resume_oversized)
 -- when it detects either an agent fallback marker in the output, an upstream
 -- API 400 that means the conversation history itself is unprocessable
@@ -1139,7 +1139,7 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
     status IN ('completed', 'cancelled')
     OR (
       status = 'failed'
-      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized')
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'idle_watchdog', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
       AND NOT (COALESCE(error, '') ILIKE '%image dimensions exceed max allowed size%' AND COALESCE(error, '') ILIKE '%image.source.base64.data%')
       -- A provider credential-resolution failure ("Could not resolve

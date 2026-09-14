@@ -31,3 +31,42 @@ func TestIsWorkflowReconcileTrigger(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkflowReconcileNeedsFreshSession(t *testing.T) {
+	tests := []struct {
+		name   string
+		source db.AgentTaskQueue
+		want   bool
+	}{
+		{
+			name: "idle watchdog failure",
+			source: db.AgentTaskQueue{
+				Status:        "failed",
+				FailureReason: pgtype.Text{String: "idle_watchdog", Valid: true},
+			},
+			want: true,
+		},
+		{
+			name: "ordinary failure may resume",
+			source: db.AgentTaskQueue{
+				Status:        "failed",
+				FailureReason: pgtype.Text{String: "agent_error.unknown", Valid: true},
+			},
+		},
+		{
+			name: "completed task",
+			source: db.AgentTaskQueue{
+				Status:        "completed",
+				FailureReason: pgtype.Text{String: "idle_watchdog", Valid: true},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := workflowReconcileNeedsFreshSession(tt.source); got != tt.want {
+				t.Fatalf("workflowReconcileNeedsFreshSession() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

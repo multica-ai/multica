@@ -171,9 +171,10 @@ Current behavior:
 - moving a squad-assigned issue out of `backlog` can trigger the leader;
 - changing assignee cancels existing tasks for the issue before enqueueing the
   new assignee path;
-- parent issue status is agent-managed (same model as direct agent assignment):
-  the leader's first assignment turn should move the parent to `in_progress`
-  and keep it there while members work; the leader moves the parent to
+- parent issue status is agent-managed after the server establishes the start
+  invariant: a leader assignment task starting against a `todo`-category parent
+  moves it to built-in `in_progress`. The leader then keeps it there while
+  members work and moves the parent to
   `in_review` only when a later re-trigger confirms the overall goal is met.
   Completing a leader task (including the first dispatch) does not itself
   change issue status;

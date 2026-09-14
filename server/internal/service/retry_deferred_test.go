@@ -15,8 +15,8 @@ import (
 // three-tier provider_network schedule (MUL-4910): CreateRetryTask inserts a
 // 'deferred' child carrying fire_at when the fire_at param is set (the final,
 // backed-off attempt) and an immediately-claimable 'queued' child when it is
-// NULL (every other retry). Both continue the resume chain — force_fresh_session
-// stays false for a provider_network parent.
+// NULL (every other retry). Provider-network retries continue the resume chain;
+// a watchdog-poisoned parent must instead clear the old session and work dir.
 func TestCreateRetryTaskFireAtControlsDeferral(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
@@ -50,15 +50,25 @@ func TestCreateRetryTaskFireAtControlsDeferral(t *testing.T) {
 		wantStatus      string
 		wantFireAt      bool
 		wantMaxAttempts int32
+		failureReason   string
+		wantFresh       bool
 	}{
 		// Final tier: deferred, and the effective budget (3) written into the row
 		// so it self-describes as attempt=3/max_attempts=3, not attempt=3/max=2.
-		{"deferred final tier persists budget", pgtype.Timestamptz{Time: time.Now().Add(5 * time.Second), Valid: true}, pgtype.Int4{Int32: 3, Valid: true}, "deferred", true, 3},
+		{"deferred final tier persists budget", pgtype.Timestamptz{Time: time.Now().Add(5 * time.Second), Valid: true}, pgtype.Int4{Int32: 3, Valid: true}, "deferred", true, 3, "agent_error.provider_network", false},
 		// NULL max_attempts inherits the parent's column (COALESCE fallback).
-		{"queued immediate tier inherits budget", pgtype.Timestamptz{}, pgtype.Int4{}, "queued", false, 2},
+		{"queued immediate tier inherits budget", pgtype.Timestamptz{}, pgtype.Int4{}, "queued", false, 2, "agent_error.provider_network", false},
+		{"idle watchdog starts fresh", pgtype.Timestamptz{}, pgtype.Int4{}, "queued", false, 2, "idle_watchdog", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, `
+				UPDATE agent_task_queue
+				SET failure_reason = $2, session_id = 'src-session', work_dir = '/tmp/src-workdir'
+				WHERE id = $1
+			`, parentID, tc.failureReason); err != nil {
+				t.Fatalf("update parent failure: %v", err)
+			}
 			child, err := q.CreateRetryTask(ctx, db.CreateRetryTaskParams{ID: parentID, FireAt: tc.fireAt, MaxAttempts: tc.maxAttempts})
 			if err != nil {
 				t.Fatalf("CreateRetryTask: %v", err)
@@ -77,9 +87,14 @@ func TestCreateRetryTaskFireAtControlsDeferral(t *testing.T) {
 			if child.MaxAttempts != tc.wantMaxAttempts {
 				t.Errorf("max_attempts = %d, want %d", child.MaxAttempts, tc.wantMaxAttempts)
 			}
-			// provider_network is resume-safe: the retry must continue the session.
-			if child.ForceFreshSession {
-				t.Errorf("force_fresh_session = true, want false (provider_network resumes) for %s", util.UUIDToString(child.ID))
+			if child.ForceFreshSession != tc.wantFresh {
+				t.Errorf("force_fresh_session = %v, want %v for %s", child.ForceFreshSession, tc.wantFresh, util.UUIDToString(child.ID))
+			}
+			if tc.wantFresh && (child.SessionID.Valid || child.WorkDir.Valid) {
+				t.Errorf("fresh retry retained session/work dir: session=%+v work_dir=%+v", child.SessionID, child.WorkDir)
+			}
+			if !tc.wantFresh && (!child.SessionID.Valid || !child.WorkDir.Valid) {
+				t.Errorf("resumable retry lost session/work dir: session=%+v work_dir=%+v", child.SessionID, child.WorkDir)
 			}
 			if !child.ChannelContextRevision.Valid || child.ChannelContextRevision.Int64 != 7 {
 				t.Errorf("channel_context_revision = %+v, want 7", child.ChannelContextRevision)

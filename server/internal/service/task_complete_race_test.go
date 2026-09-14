@@ -236,6 +236,7 @@ func TestProviderNetworkRetrySchedule(t *testing.T) {
 		{"provider_network with retry disabled (max_attempts=1) never retries", provNet, 1, 1, false},
 		{"timeout keeps single immediate retry", "timeout", 1, 2, true},
 		{"timeout exhausts at attempt 2", "timeout", 2, 2, false},
+		{"idle watchdog stays outside generic retry", "idle_watchdog", 1, 2, false},
 		{"non-retryable reason never retries", "agent_error.unknown", 1, 2, false},
 	}
 	for _, tc := range eligCases {
@@ -253,6 +254,7 @@ func TestTaskFailureClassifiers(t *testing.T) {
 		wantRetry    bool
 	}{
 		{reason: "timeout", wantType: "timeout", wantResumeOK: true, wantRetry: true},
+		{reason: "idle_watchdog", wantType: "timeout", wantResumeOK: false, wantRetry: false},
 		{reason: "codex_semantic_inactivity", wantType: "timeout", wantResumeOK: false, wantRetry: true},
 		// Transient mid-stream provider disconnect (MUL-4910): retryable, and
 		// resume-safe so the retry continues the truncated conversation.

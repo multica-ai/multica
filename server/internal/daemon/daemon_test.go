@@ -3716,6 +3716,29 @@ func TestExecuteAndDrain_IdleWatchdog_UsesPerRunOverride(t *testing.T) {
 	}
 }
 
+func TestProviderIdleWatchdogTimeout(t *testing.T) {
+	cfg := Config{
+		ClaudeIdleWatchdog:   30 * time.Minute,
+		OpenCodeIdleWatchdog: 10 * time.Minute,
+	}
+	tests := []struct {
+		provider string
+		want     time.Duration
+	}{
+		{provider: "claude", want: 30 * time.Minute},
+		{provider: "opencode", want: 10 * time.Minute},
+		{provider: "codearts", want: 10 * time.Minute},
+		{provider: "codex", want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			if got := providerIdleWatchdogTimeout(tt.provider, cfg); got != tt.want {
+				t.Fatalf("providerIdleWatchdogTimeout(%q) = %s, want %s", tt.provider, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExecuteAndDrain_IdleWatchdog_GlobalDisableWinsOverPerRunOverride(t *testing.T) {
 	t.Parallel()
 

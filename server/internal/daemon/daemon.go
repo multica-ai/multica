@@ -1989,6 +1989,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		// Logged explicitly because it is normally derived from idle_watchdog:
 		// without it an operator cannot read the tool budget actually in effect.
 		"tool_watchdog", d.cfg.AgentToolWatchdog,
+		"claude_idle_watchdog", d.cfg.ClaudeIdleWatchdog,
 		"opencode_idle_watchdog", d.cfg.OpenCodeIdleWatchdog,
 		// Derived from the watchdog budget too (Codex's own timer is not
 		// tool-aware), so it needs the same treatment as tool_watchdog: without
@@ -8227,10 +8228,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
 	model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
 
-	var idleWatchdogTimeout time.Duration
-	if provider == "opencode" || provider == "codearts" {
-		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
-	}
+	idleWatchdogTimeout := providerIdleWatchdogTimeout(provider, d.cfg)
 	execOpts := agent.ExecOptions{
 		Cwd:                        env.WorkDir,
 		Model:                      model,
@@ -8647,6 +8645,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Usage:         usageEntries,
 			FailureReason: failureReason,
 		}, nil
+	}
+}
+
+func providerIdleWatchdogTimeout(provider string, cfg Config) time.Duration {
+	switch provider {
+	case "claude":
+		return cfg.ClaudeIdleWatchdog
+	case "opencode", "codearts":
+		return cfg.OpenCodeIdleWatchdog
+	default:
+		return 0
 	}
 }
 

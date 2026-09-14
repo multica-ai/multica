@@ -85,6 +85,7 @@ func (s *TaskService) ReconcileStalledWorkflow(ctx context.Context, sourceTaskID
 	}
 
 	var enqueued bool
+	forceFreshSession := workflowReconcileNeedsFreshSession(source)
 	err = s.runInTx(ctx, func(qtx *db.Queries) error {
 		issue, lockErr := qtx.LockIssueForWorkflowReconcile(ctx, source.IssueID)
 		if lockErr != nil {
@@ -145,6 +146,7 @@ func (s *TaskService) ReconcileStalledWorkflow(ctx context.Context, sourceTaskID
 			IssueID:              issue.ID,
 			Priority:             priorityToInt(issue.Priority),
 			TriggerSummary:       pgtype.Text{String: "Automatic workflow reconciliation after an unplanned stop", Valid: true},
+			ForceFreshSession:    pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 			IsLeaderTask:         pgtype.Bool{Bool: isLeader, Valid: isLeader},
 			HandoffNote:          pgtype.Text{String: workflowReconcileHandoff, Valid: true},
 			SquadID:              squadID,
@@ -191,6 +193,17 @@ func (s *TaskService) ReconcileStalledWorkflow(ctx context.Context, sourceTaskID
 		s.NotifyTaskEnqueued(ctx, result.Task)
 	}
 	return result, nil
+}
+
+// workflowReconcileNeedsFreshSession prevents a continuation from resuming the
+// exact provider session that the daemon already had to kill for inactivity.
+// The workflow reconciler itself supplies the single bounded continuation;
+// if that continuation also stalls, its workflow_reconcile evidence produces
+// human attention instead of another automatic run.
+func workflowReconcileNeedsFreshSession(source db.AgentTaskQueue) bool {
+	return source.Status == "failed" &&
+		source.FailureReason.Valid &&
+		source.FailureReason.String == "idle_watchdog"
 }
 
 func workflowHasAgentOwner(issue db.Issue) bool {

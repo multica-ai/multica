@@ -189,8 +189,11 @@ writes the literal `done` key.
 - **`backlog`** parks an agent-assigned issue: the assignee is set but no task
   fires. Moving `backlog → todo` (or any non-done/non-cancelled status) enqueues
   the assigned agent then.
-- **`in_progress` / `in_review`** are agent-managed CLI mutations, not automatic
-  side effects of a task starting or finishing. The runtime brief asks agents to
+- **`in_progress` / `in_review`** are normally agent-managed CLI mutations.
+  One narrow server invariant applies at start: an assignment-backed task that
+  still owns an issue in the `todo` category moves it to built-in `in_progress`.
+  Comment/mention tasks never do this, and task completion or failure never
+  implies `in_review` or `blocked`. The runtime brief asks agents to
   write the state the issue is in whenever their work changes it — not from
   the trigger type or the run's lifecycle, and not gated on being the
   assignee. Writes happen whenever the state changes, mid-turn included: a

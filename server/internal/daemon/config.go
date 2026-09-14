@@ -35,6 +35,10 @@ const (
 	DefaultCodexSemanticInactivityTimeout = 10 * time.Minute
 	DefaultCodexHandshakeTimeout          = 30 * time.Second
 	DefaultCodexThreadHandshakeTimeout    = 60 * time.Second
+	// DefaultClaudeIdleWatchdog catches a Claude process that stops producing
+	// protocol messages after a completed tool call. Long-running tools retain
+	// the separate AgentToolWatchdog budget.
+	DefaultClaudeIdleWatchdog = 30 * time.Minute
 	// DefaultOpenCodeIdleWatchdog shortens the no-message budget for OpenCode
 	// runs while they are not executing a tool. OpenCode streams text and tool
 	// events incrementally, so a completely silent interval here covers both a
@@ -141,6 +145,7 @@ type Config struct {
 	CodexFirstTurnNoProgressTimeout time.Duration
 	CodexHandshakeTimeout           time.Duration
 	CodexThreadHandshakeTimeout     time.Duration
+	ClaudeIdleWatchdog              time.Duration // Claude-specific no-message window; 0 falls back to AgentIdleWatchdog and values above it cannot extend the global bound
 	OpenCodeIdleWatchdog            time.Duration // OpenCode-specific no-message window; 0 falls back to AgentIdleWatchdog and values above it cannot extend the global bound
 	AgentIdleWatchdog               time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
 	AgentToolWatchdog               time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = never force-stop during a tool call); defaults to AgentIdleWatchdog, so operators tune one number unless they deliberately want a wider tool budget
@@ -326,6 +331,13 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// route 0 through durationFromEnv so the operator can opt out without
 	// patching the binary; any positive duration overrides DefaultAgentIdleWatchdog.
 	agentIdleWatchdog, err := durationFromEnv("MULTICA_AGENT_IDLE_WATCHDOG", DefaultAgentIdleWatchdog)
+	if err != nil {
+		return Config{}, err
+	}
+	// Claude streams protocol activity around model and tool boundaries. A
+	// shorter no-message window catches the post-tool hang class without
+	// shortening the separate allowance for a tool that is still running.
+	claudeIdleWatchdog, err := durationFromEnv("MULTICA_CLAUDE_IDLE_WATCHDOG", DefaultClaudeIdleWatchdog)
 	if err != nil {
 		return Config{}, err
 	}
@@ -635,6 +647,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodexFirstTurnNoProgressTimeout: codexFirstTurnNoProgressTimeout,
 		CodexHandshakeTimeout:           codexHandshakeTimeout,
 		CodexThreadHandshakeTimeout:     codexThreadHandshakeTimeout,
+		ClaudeIdleWatchdog:              claudeIdleWatchdog,
 		OpenCodeIdleWatchdog:            openCodeIdleWatchdog,
 		AgentIdleWatchdog:               agentIdleWatchdog,
 		AgentToolWatchdog:               agentToolWatchdog,
