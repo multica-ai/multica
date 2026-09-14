@@ -2420,6 +2420,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		)
 	}
 
+	// Agent processes need the accountable human's name and email to author
+	// commits on that person's behalf. taskToResponse deliberately builds only
+	// raw attribution IDs, so hydrate the claim's attribution before it crosses
+	// the daemon boundary. This is the same departed-member-safe lookup used by
+	// user-facing task responses and does not affect task authorization.
+	h.hydrateTaskAttributions(r.Context(), []*TaskAttribution{resp.Attribution})
+
 	// Resolve the runtime owner's profile description so the daemon can
 	// inject "## Requesting User" into the brief. Empty fields short-circuit
 	// the heading entirely on the daemon side; cloud / system runtimes with

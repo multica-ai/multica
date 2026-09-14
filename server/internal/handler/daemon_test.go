@@ -3551,8 +3551,8 @@ func TestClaimTask_ChatPopulatesInitiator(t *testing.T) {
 	`, sessionID)
 	// initiator_user_id = the real sender (testUserID), distinct from creator.
 	dbfx.Exec(t, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority, initiator_user_id)
-		VALUES ($1, $2, $3, 'queued', 2, $4)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority, initiator_user_id, accountable_user_id, originator_source)
+		VALUES ($1, $2, $3, 'queued', 2, $4, $4, 'direct_human')
 	`, agentID, runtimeID, sessionID, testUserID)
 
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, daemonID)
@@ -3564,6 +3564,9 @@ func TestClaimTask_ChatPopulatesInitiator(t *testing.T) {
 			InitiatorID    string `json:"initiator_id"`
 			InitiatorName  string `json:"initiator_name"`
 			InitiatorEmail string `json:"initiator_email"`
+			Attribution    *struct {
+				Initiator *AttributionUser `json:"initiator"`
+			} `json:"attribution"`
 		} `json:"task"`
 	}
 	w.JSON(&resp)
@@ -3575,6 +3578,13 @@ func TestClaimTask_ChatPopulatesInitiator(t *testing.T) {
 		t.Errorf("chat initiator = {type:%q id:%q name:%q email:%q}, want {member %q %q %q}",
 			resp.Task.InitiatorType, resp.Task.InitiatorID, resp.Task.InitiatorName, resp.Task.InitiatorEmail,
 			testUserID, handlerTestName, handlerTestEmail)
+	}
+	if resp.Task.Attribution == nil || resp.Task.Attribution.Initiator == nil {
+		t.Fatalf("claim attribution initiator is missing: %s", w.Body.String())
+	}
+	if got := resp.Task.Attribution.Initiator; got.ID != testUserID || got.Name != handlerTestName || got.Email != handlerTestEmail {
+		t.Errorf("claim accountable attribution = {id:%q name:%q email:%q}, want {%q %q %q}",
+			got.ID, got.Name, got.Email, testUserID, handlerTestName, handlerTestEmail)
 	}
 }
 

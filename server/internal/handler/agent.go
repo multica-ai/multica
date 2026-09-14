@@ -526,7 +526,8 @@ type AgentTaskResponse struct {
 	// (MUL-4302 §9): the source label + precise flag, the initiator (accountable)
 	// and originator refs, the evidence pointer, and lineage. Always present (the
 	// pure taskToResponse builds the labels + raw ids); initiator/originator names
-	// are hydrated from the global user table only on user-facing surfaces.
+	// are hydrated from the global user table on user-facing surfaces and daemon
+	// claims. Claims need the accountable name/email for Git author attribution.
 	Attribution *TaskAttribution `json:"attribution,omitempty"`
 	// Usage is this run's own token consumption, one entry per (provider, model)
 	// it used — the same grain `task_usage` stores and the same grain the client
@@ -553,7 +554,7 @@ type AgentTaskResponse struct {
 // TaskAttribution is the wire shape of a run's accountable-human provenance
 // (MUL-4302 §9). Source/Precise/Evidence/lineage come straight from the row (pure);
 // Initiator/Originator carry the raw user id always and the display name/email/avatar
-// only after hydration on a user-facing surface.
+// only after hydration on a user-facing surface or daemon claim.
 type TaskAttribution struct {
 	// Source is the waterfall level that resolved the accountable human:
 	// direct_human | delegation | comment_source | rule_owner | owner_fallback |
@@ -846,7 +847,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		AutopilotRunID: uuidToString(t.AutopilotRunID),
 		Kind:           computeTaskKind(t),
 		// Attribution labels + evidence + lineage + raw user ids (pure). Names are
-		// hydrated separately on user-facing surfaces (MUL-4302 §9).
+		// hydrated separately on user-facing surfaces and daemon claims (MUL-4302 §9).
 		Attribution: taskAttributionBase(t),
 	}
 }
