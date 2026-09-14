@@ -101,6 +101,35 @@ pnpm exec playwright test
 pnpm ui:add badge     # shadcn/Base UI component into packages/ui
 ```
 
+### Frontend development against the remote API
+
+For local Web verification against remote data, use the existing same-origin Next.js proxy and
+the explicit local bearer-token mode. In the root `.env`, set:
+
+```dotenv
+REMOTE_API_URL=https://api.multica.ai
+NEXT_PUBLIC_AUTH_MODE=token
+```
+
+Leave `NEXT_PUBLIC_API_URL` unset. `NEXT_PUBLIC_API_URL` makes the browser call that origin
+directly and bypasses the Next.js proxy. After changing any `NEXT_PUBLIC_*` variable, clear the
+compiled client bundle and restart Web:
+
+```bash
+rm -rf apps/web/.next
+FRONTEND_PORT=3000 pnpm --filter @multica/web dev
+```
+
+Open `http://localhost:3000`. The proxy forwards `/api/*`, `/auth/*`, `/uploads/*`, `/v1/*`,
+`/ws`, and `/health` to `REMOTE_API_URL`. `NEXT_PUBLIC_AUTH_MODE=token` reuses the existing
+Bearer-token path for this local-only setup: the debug token is stored in
+`localStorage.multica_token`, keeping the localhost session isolated from the remote Web
+HttpOnly cookies. Do not set this variable for production; unset means the normal Cookie auth
+flow remains active.
+
+If authenticated requests return `401`, confirm the variable is present in the client build,
+remove stale `localStorage.multica_token`, clear `apps/web/.next`, and restart Web.
+
 `make up` records each environment in `~/.multica/dev/`, allocates its API, Web and Desktop renderer ports plus database name under a lock instead of recomputing them from the path, and verifies the database through `DATABASE_URL` rather than `docker exec` — a `docker exec` create lands in the wrong server whenever a native PostgreSQL owns 5432. It reuses an API only when `/health` proves its listener pid, process group and commit belong to this checkout. `make down` keeps the data; `make destroy` consumes the database, profile, daemon workspaces, Desktop userData and registry entry. Agent-owned TTL environments are collected best-effort on the next `make up`, or explicitly with `make gc`.
 
 Worktrees share one PostgreSQL container and get isolated DB names/ports via `.env.worktree`. `make dev` auto-detects this. For manual setup use `make worktree-env`, `make setup-worktree`, and `make start-worktree`. Direct `pnpm dev:desktop` self-isolates from the path; `make up C=desktop` overrides that fallback with the registry-allocated renderer port and app name so Desktop shares the environment ledger.
