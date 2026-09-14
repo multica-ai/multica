@@ -23,7 +23,11 @@ ALTER TABLE autopilot_trigger
         CHECK (provider IN ('generic', 'github')),
     ADD COLUMN signing_secret TEXT;
 
-CREATE TABLE IF NOT EXISTS webhook_delivery (
+-- Migration 044 created webhook_delivery for outbound webhooks (endpoint_id schema).
+-- This migration repurposes it for inbound autopilot webhook tracking.
+DROP TABLE IF EXISTS webhook_delivery CASCADE;
+
+CREATE TABLE webhook_delivery (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
     autopilot_id UUID NOT NULL REFERENCES autopilot(id) ON DELETE CASCADE,
