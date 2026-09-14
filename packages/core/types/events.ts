@@ -294,6 +294,18 @@ export interface TaskMessagePayload {
   content?: string;
   input?: Record<string, unknown>;
   output?: string;
+  /**
+   * Whether `output` is the whole tool output that ran (`tool_result` only).
+   *
+   * Tri-state on purpose. `undefined` means no daemon ever measured this
+   * record — messages stored before the flag existed, and messages from an
+   * older installed daemon — and must be presented as unknown, never as
+   * complete: the original length is gone and cannot be reconstructed.
+   * `true` means the remainder was never uploaded and no amount of expanding
+   * or scrolling recovers it, which is what separates it from a client-side
+   * display clip.
+   */
+  output_truncated?: boolean;
   created_at?: string;
 }
 

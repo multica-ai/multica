@@ -139,7 +139,7 @@ describe("SourceContextBadge", () => {
     expect(dialog).toHaveClass("h-[min(82dvh,56rem)]", "sm:max-w-4xl");
     expect(dialog).not.toHaveClass("h-[calc(100dvh-2rem)]", "sm:max-w-[calc(100%-2rem)]");
     expect(screen.getByText("Source comment")).toHaveClass(
-      "rounded",
+      "rounded-xs",
       "bg-info/10",
       "text-info",
     );

@@ -345,12 +345,12 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
             <span className="text-caption text-muted-foreground">({trigger.label})</span>
           )}
           {!trigger.enabled && (
-            <span className="text-caption bg-muted px-1.5 py-0.5 rounded">
+            <span className="text-caption bg-muted px-1.5 py-0.5 rounded-xs">
               {t(($) => $.trigger_row.disabled_badge)}
             </span>
           )}
           {isApi && (
-            <span className="text-caption bg-muted px-1.5 py-0.5 rounded">
+            <span className="text-caption bg-muted px-1.5 py-0.5 rounded-xs">
               {t(($) => $.trigger_row.deprecated_badge)}
             </span>
           )}

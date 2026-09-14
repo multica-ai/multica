@@ -467,8 +467,9 @@ func TestIssueTableLastActivityDefaultsToIndexedOrder(t *testing.T) {
 	sort, ok := testHandler.issueTableOrderBy(
 		w,
 		newRequest(http.MethodPost, "/api/issues/table/rows", nil),
-		testWorkspaceID,
+		parseUUID(testWorkspaceID),
 		issueTableSortRequest{Field: "last_activity"},
+		func(any) string { return "$1" },
 	)
 	if !ok {
 		t.Fatalf("last_activity sort rejected: status=%d body=%s", w.Code, w.Body.String())

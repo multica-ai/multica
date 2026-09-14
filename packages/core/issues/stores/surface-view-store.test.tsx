@@ -59,6 +59,75 @@ afterEach(async () => {
 });
 
 describe("issue surface view store registry", () => {
+  it("migrates legacy defaults without rewriting explicit preferences", async () => {
+    localStorage.setItem(
+      `${ISSUE_SURFACE_VIEW_STORAGE_KEY}:acme`,
+      JSON.stringify({
+        version: 0,
+        state: {
+          surfaces: {
+            "workspace:legacy": {
+              state: {
+                sortBy: "position",
+                sortDirection: "asc",
+                cardProperties: {
+                  priority: true,
+                  description: true,
+                  assignee: true,
+                  startDate: true,
+                  dueDate: true,
+                  project: true,
+                  childProgress: true,
+                  labels: true,
+                },
+                hiddenStatusCategories: [],
+              },
+              updatedAt: "2026-01-01T00:00:00Z",
+            },
+            "workspace:custom": {
+              state: {
+                sortBy: "title",
+                sortDirection: "desc",
+                cardProperties: { description: false },
+                hiddenStatusCategories: ["done"],
+              },
+              updatedAt: "2026-01-01T00:00:00Z",
+            },
+          },
+        },
+      }),
+    );
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+
+    const legacy = getIssueSurfaceViewStore("workspace:legacy").getState();
+    expect([legacy.sortBy, legacy.sortDirection]).toEqual([
+      "created_at",
+      "desc",
+    ]);
+    expect(legacy.cardProperties.description).toBe(false);
+    expect(legacy.hiddenStatusCategories).toEqual(["cancelled"]);
+
+    const custom = getIssueSurfaceViewStore("workspace:custom").getState();
+    expect([custom.sortBy, custom.sortDirection]).toEqual(["title", "desc"]);
+    expect(custom.cardProperties.description).toBe(false);
+    expect(custom.hiddenStatusCategories).toEqual(["done"]);
+  });
+
+  it("omits the redundant project property only on fresh project surfaces", async () => {
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+
+    expect(
+      getIssueSurfaceViewStore("project:compact-card").getState().cardProperties
+        .project,
+    ).toBe(false);
+    expect(
+      getIssueSurfaceViewStore("workspace:compact-card").getState().cardProperties
+        .project,
+    ).toBe(true);
+  });
+
   it("isolates view state by surface key inside one workspace registry", async () => {
     setCurrentWorkspace("acme", "ws_a");
     await flush();

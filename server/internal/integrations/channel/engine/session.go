@@ -74,6 +74,7 @@ type SessionQueries interface {
 	ResolveChannelChatContextHistoryStart(ctx context.Context, arg db.ResolveChannelChatContextHistoryStartParams) error
 	SetChannelChatContextInitiator(ctx context.Context, arg db.SetChannelChatContextInitiatorParams) (pgtype.UUID, error)
 	UpdateChannelChatSessionBindingReplyTarget(ctx context.Context, arg db.UpdateChannelChatSessionBindingReplyTargetParams) error
+	SetChannelChatContextReplyTarget(ctx context.Context, arg db.SetChannelChatContextReplyTargetParams) error
 	MarkChannelInboundDedupProcessed(ctx context.Context, arg db.MarkChannelInboundDedupProcessedParams) (int64, error)
 }
 
@@ -204,6 +205,9 @@ func (a dbSessionQueries) SetChannelChatContextInitiator(ctx context.Context, ar
 }
 func (a dbSessionQueries) UpdateChannelChatSessionBindingReplyTarget(ctx context.Context, arg db.UpdateChannelChatSessionBindingReplyTargetParams) error {
 	return a.q.UpdateChannelChatSessionBindingReplyTarget(ctx, arg)
+}
+func (a dbSessionQueries) SetChannelChatContextReplyTarget(ctx context.Context, arg db.SetChannelChatContextReplyTargetParams) error {
+	return a.q.SetChannelChatContextReplyTarget(ctx, arg)
 }
 func (a dbSessionQueries) MarkChannelInboundDedupProcessed(ctx context.Context, arg db.MarkChannelInboundDedupProcessedParams) (int64, error) {
 	return a.q.MarkChannelInboundDedupProcessed(ctx, arg)
@@ -379,14 +383,20 @@ func (s *ChatSession) createSessionAndBinding(ctx context.Context, in EnsureSess
 // its own binding row, recording the real thread here per session does not clash
 // across sibling threads.
 type AppendInput struct {
-	SessionID           pgtype.UUID
-	Sender              pgtype.UUID
-	InstallationID      pgtype.UUID
-	Body                string
-	CommandText         string
-	MessageID           string
-	DedupMessageID      string
-	ThreadID            string
+	SessionID      pgtype.UUID
+	Sender         pgtype.UUID
+	InstallationID pgtype.UUID
+	Body           string
+	CommandText    string
+	MessageID      string
+	DedupMessageID string
+	ThreadID       string
+	// SenderChannelID is the platform-native id of whoever sent THIS message
+	// (Lark open_id, Slack user id, ...). Sender above is the Multica user it
+	// resolved to; both are recorded because the outbound side needs the
+	// platform id to render a native @-mention, and a Multica user can hold
+	// more than one platform identity on the same installation.
+	SenderChannelID     string
 	ClaimToken          pgtype.UUID
 	MediaPendingSeconds float64
 	ForceFresh          bool
@@ -407,10 +417,12 @@ type StartSessionInput struct {
 	// CommandText is the current member-authored instruction before adapter
 	// context enrichment. It is used only for the initial Chat title; Body
 	// remains the canonical persisted/agent-visible content.
-	CommandText            string
-	MessageID              string
-	DedupMessageID         string
-	ThreadID               string
+	CommandText    string
+	MessageID      string
+	DedupMessageID string
+	ThreadID       string
+	// SenderChannelID mirrors AppendInput.SenderChannelID.
+	SenderChannelID        string
 	ClaimToken             pgtype.UUID
 	MediaPendingSeconds    float64
 	PersistMessage         bool
@@ -543,6 +555,17 @@ func (s *ChatSession) StartSession(ctx context.Context, in StartSessionInput) (S
 			ReplyChatSessionID: session.ID, LastMessageID: textOrNull(in.MessageID), LastThreadID: textOrNull(in.ThreadID),
 		}); err != nil {
 			return StartSessionResult{}, fmt.Errorf("set started chat reply target: %w", err)
+		}
+		// A started session opens at revision 1, and the message that started
+		// it is that generation's trigger.
+		if err := qtx.SetChannelChatContextReplyTarget(ctx, db.SetChannelChatContextReplyTargetParams{
+			ChatSessionID: session.ID,
+			Revision:      1,
+			LastMessageID: textOrNull(in.MessageID),
+			LastThreadID:  textOrNull(in.ThreadID),
+			LastSenderID:  textOrNull(in.SenderChannelID),
+		}); err != nil {
+			return StartSessionResult{}, fmt.Errorf("snapshot started chat reply target: %w", err)
 		}
 	}
 	dedupMessageID := in.DedupMessageID
@@ -704,6 +727,21 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 		}); err != nil {
 			return AppendResult{}, fmt.Errorf("snapshot channel context initiator: %w", err)
 		}
+		// The trigger an outbound reply answers, snapshotted on the same
+		// generation and under the same command guard as the initiator above:
+		// a message excluded from agent input is not the question being
+		// answered, so it must not become the message the answer quotes.
+		if in.MessageID != "" {
+			if err := qtx.SetChannelChatContextReplyTarget(ctx, db.SetChannelChatContextReplyTargetParams{
+				ChatSessionID: in.SessionID,
+				Revision:      contextRevision,
+				LastMessageID: textOrNull(in.MessageID),
+				LastThreadID:  textOrNull(in.ThreadID),
+				LastSenderID:  textOrNull(in.SenderChannelID),
+			}); err != nil {
+				return AppendResult{}, fmt.Errorf("snapshot channel context reply target: %w", err)
+			}
+		}
 	}
 	// channel_ingested is the immutable provenance the cancel path gates on:
 	// it must be stamped in the same transaction as the message so no later
@@ -729,8 +767,10 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 		return AppendResult{}, fmt.Errorf("touch chat session: %w", err)
 	}
 
-	// Record the latest trigger so the decoupled outbound patcher can thread
-	// its reply back into the originating topic.
+	// Advance the session's latest-trigger cursor, which the history-boundary
+	// bookkeeping reads. The outbound reply target is NOT taken from here — it
+	// is frozen per generation above, because this cursor belongs to the
+	// session and a debounced run answers one generation of it.
 	if in.MessageID != "" {
 		if err := qtx.UpdateChannelChatSessionBindingReplyTarget(ctx, db.UpdateChannelChatSessionBindingReplyTargetParams{
 			ReplyChatSessionID: in.SessionID,

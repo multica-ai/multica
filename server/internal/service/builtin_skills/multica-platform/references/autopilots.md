@@ -48,6 +48,11 @@ offline, quota exhausted, a duplicate already in flight — dispatched nothing, 
 its `failure_reason` says which. Do not report a manual run as done without
 seeing one of those two statuses.
 
+The default `multica autopilot list` table includes `LAST_STATUS`. Treat a
+healthy-looking `STATUS=active` row with `LAST_STATUS=failed` as a failing
+autopilot; inspect `multica autopilot runs <id> --output json` for the failure
+reason.
+
 A schedule trigger without `--timezone` runs in **UTC**. Name the zone whenever
 a human confirmed a wall-clock time, or they will confirm a morning job and
 receive an afternoon one.

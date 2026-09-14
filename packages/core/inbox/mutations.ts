@@ -1,8 +1,46 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { inboxKeys } from "./queries";
+import { onInboxInvalidate, onInboxSummaryInvalidate } from "./ws-updaters";
 import { useWorkspaceId } from "../hooks";
 import type { InboxItem } from "../types";
+
+/**
+ * Re-read every inbox cache a write can change: both workspace lists and the
+ * cross-workspace unread summary.
+ *
+ * The unread badge reads that summary (`useInboxUnreadCount`), and it lives
+ * under its own account-level key which `inboxKeys.all(wsId)` does not reach.
+ * Every mutation here can change the number it holds, so each one refreshes it
+ * once the server has confirmed, rather than waiting for the WebSocket echo of
+ * its own action.
+ *
+ * Deliberately the same entry points realtime uses, not local copies: both
+ * refreshes have to cancel any in-flight request first, and a mutation racing
+ * a first load hits exactly the same hole a WS event does. A plain
+ * `invalidateQueries` on the list here would let the list fall behind the
+ * badge — the two are rendered side by side (see `refreshInboxQuery`).
+ *
+ * Not awaited by `onSettled`: the mutation is finished once the server has
+ * answered, and a background refresh should not hold its lifecycle open.
+ *
+ * The rows are patched optimistically but the badge is NOT: it follows the
+ * server's confirmation, which buys a single writer at the cost of the badge
+ * trailing the row. Deriving it locally instead — recomputing the count from
+ * the list cache and writing that back — reads as instant but is unsound: a
+ * list cache proves only that the list was loaded ONCE, never that it is
+ * complete or concurrent with the summary, and the account-level summary
+ * request is not cancelled by the workspace-scoped `cancelQueries` below, so a
+ * response already in flight lands on top of the local value anyway. Under
+ * pagination it would be wrong by construction — one loaded page cannot
+ * produce a global count. If instant feedback is wanted later, it has to be a
+ * per-group delta that handles the race, not a recomputed total.
+ */
+function refreshInboxAfterWrite(qc: QueryClient, wsId: string) {
+  void onInboxInvalidate(qc, wsId);
+  void onInboxSummaryInvalidate(qc);
+}
 
 export function useMarkInboxRead() {
   const qc = useQueryClient();
@@ -27,7 +65,7 @@ export function useMarkInboxRead() {
       if (ctx?.prevArchived) qc.setQueryData(inboxKeys.archived(wsId), ctx.prevArchived);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }
@@ -38,7 +76,7 @@ export function useRetrySourceContextQuickCreate() {
   return useMutation({
     mutationFn: (taskId: string) => api.retrySourceContextQuickCreate(taskId),
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }
@@ -51,10 +89,8 @@ export function useRetrySourceContextQuickCreate() {
  * can be actioned from either list, and leaving the other one stale would show
  * two different read states for one notification after a view switch.
  *
- * The unread badge is derived from the main list's cache (`useInboxUnreadCount`
- * dedupes it client-side), so the optimistic patch raises the badge without
- * waiting for the round-trip; `onSettled` re-pulls the cross-workspace summary,
- * which is server-computed and cannot be patched here.
+ * The rows flip at once; the badge follows on settle — see
+ * {@link refreshInboxAfterWrite} for why it is not patched locally.
  */
 export function useMarkInboxUnread() {
   const qc = useQueryClient();
@@ -76,10 +112,9 @@ export function useMarkInboxUnread() {
       if (ctx?.prevArchived) qc.setQueryData(inboxKeys.archived(wsId), ctx.prevArchived);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
       // The switcher dot must light again when the workspace goes back to
       // having unread items — that count lives on the server.
-      qc.invalidateQueries({ queryKey: inboxKeys.unreadSummary() });
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }
@@ -109,7 +144,7 @@ export function useArchiveInbox() {
     },
     onSettled: () => {
       // Both lists: the item just moved from the main inbox into the archive.
-      qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }
@@ -152,8 +187,7 @@ export function useUnarchiveInbox() {
     onSettled: () => {
       // Both lists: the item moves from one to the other, and the unread badge
       // rises again when it was archived unread.
-      qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
-      qc.invalidateQueries({ queryKey: inboxKeys.unreadSummary() });
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }
@@ -177,20 +211,21 @@ export function useMarkAllInboxRead() {
       if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }
 
 // The three batch-archive mutations below all move items into the archive, so
-// each invalidates BOTH lists on settle.
+// each invalidates BOTH lists on settle — plus the unread summary, since an
+// archived unread group leaves the badge.
 export function useArchiveAllInbox() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: () => api.archiveAllInbox(),
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }
@@ -201,7 +236,7 @@ export function useArchiveAllReadInbox() {
   return useMutation({
     mutationFn: () => api.archiveAllReadInbox(),
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }
@@ -212,7 +247,7 @@ export function useArchiveCompletedInbox() {
   return useMutation({
     mutationFn: () => api.archiveCompletedInbox(),
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }

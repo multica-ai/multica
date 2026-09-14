@@ -46,6 +46,8 @@ type TimelineEntry struct {
 	ResolvedByType *string              `json:"resolved_by_type,omitempty"`
 	ResolvedByID   *string              `json:"resolved_by_id,omitempty"`
 	SourceTaskID   *string              `json:"source_task_id,omitempty"`
+	// Set only on a tombstone: a comment deleted while it still had replies.
+	DeletedAt *string `json:"deleted_at,omitempty"`
 }
 
 // timelineHardCap bounds the per-issue timeline payload. Sized as a defensive
@@ -305,6 +307,7 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 			ResolvedByType: textToPtr(c.ResolvedByType),
 			ResolvedByID:   uuidToPtr(c.ResolvedByID),
 			SourceTaskID:   uuidToPtr(c.SourceTaskID),
+			DeletedAt:      timestampToPtr(c.DeletedAt),
 		}
 	}
 	return out

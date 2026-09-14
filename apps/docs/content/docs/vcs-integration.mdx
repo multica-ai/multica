@@ -1,6 +1,6 @@
 ---
 title: Self-hosted Git providers
-description: Connect a self-hosted Forgejo, Gitea, or GitLab instance per workspace so pull/merge requests that reference an issue identifier auto-attach to that issue, move it to Done on merge, and show CI status.
+description: Connect a self-hosted Forgejo, Gitea, or GitLab instance per workspace so pull/merge requests that carry an issue identifier in their branch name or title, or after a closing keyword in the body, auto-attach to that issue, move it to Done on merge, and show CI status.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -14,7 +14,7 @@ and set `MULTICA_VCS_SECRET_KEY`; until then the section does not appear in
 Settings → Integrations.
 </Callout>
 
-Multica connects to a self-hosted Git provider per workspace: **Forgejo**, **Gitea**, or **GitLab**. Once connected, any pull request (GitLab: merge request) whose branch name, title, or body contains an issue identifier (for example `MUL-123`) is **auto-linked** to that [issue](/issues), appears under **Pull requests** in the issue sidebar, and — when merged with a closing keyword — moves the issue to **Done**. CI for the head commit shows as a checks bar on the card.
+Multica connects to a self-hosted Git provider per workspace: **Forgejo**, **Gitea**, or **GitLab**. Once connected, any pull request (GitLab: merge request) whose branch name or title contains an issue identifier (for example `MUL-123`), or whose body names one after a closing keyword (`Closes MUL-123`), is **auto-linked** to that [issue](/issues), appears under **Pull requests** in the issue sidebar, and — when merged with a closing keyword — moves the issue to **Done**. CI for the head commit shows as a checks bar on the card.
 
 These providers run alongside GitHub: a workspace can use any combination.
 
@@ -81,7 +81,7 @@ Multica authenticates every delivery against the stored secret, so a webhook wit
 ## What gets mirrored
 
 - **Pull / merge requests** — open, closed, merged, and draft state, author, branch, and (where the provider supplies them) diff stats.
-- **Issue links** — identifiers in the title, body, or branch link the PR to the issue. A closing keyword (`Closes`/`Fixes`/`Resolves MUL-123`) on a merged PR moves the issue to **Done** once no linked PR is still open.
+- **Issue links** — an identifier in the title or branch links the PR to the issue, as does an identifier after a closing keyword in the body; a bare mention in the body links nothing. A closing keyword (`Closes`/`Fixes`/`Resolves MUL-123`) on a merged PR moves the issue to **Done** once no linked PR is still open.
 - **CI** — Forgejo/Gitea commit statuses and GitLab pipelines aggregate into a passed/failed/pending checks bar for the head commit.
 
 ## Agents opening pull requests

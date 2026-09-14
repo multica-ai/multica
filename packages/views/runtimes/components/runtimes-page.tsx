@@ -481,7 +481,7 @@ function MachineRow({ machine }: { machine: RuntimeMachine }) {
                 : t(($) => $.machine.metrics.local_daemon))}
           </span>
           {machine.isCurrent && (
-            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
+            <span className="shrink-0 rounded-xs bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
               {t(($) => $.machine.this_machine)}
             </span>
           )}
@@ -539,13 +539,13 @@ function ProviderIconStack({ providers }: { providers: string[] }) {
       {visible.map((provider) => (
         <span
           key={provider}
-          className="inline-flex h-5 w-5 items-center justify-center rounded bg-background ring-1 ring-border"
+          className="inline-flex h-5 w-5 items-center justify-center rounded-xs bg-background ring-1 ring-border"
         >
           <ProviderLogo provider={provider} className="h-3.5 w-3.5" />
         </span>
       ))}
       {extra > 0 && (
-        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-muted px-1 text-micro font-medium text-muted-foreground ring-1 ring-border">
+        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-xs bg-muted px-1 text-micro font-medium text-muted-foreground ring-1 ring-border">
           +{extra}
         </span>
       )}

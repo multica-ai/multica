@@ -662,6 +662,17 @@ func (t *prepareLeaseCountingTransport) RoundTrip(req *http.Request) (*http.Resp
 	return t.base.RoundTrip(req)
 }
 
+// prepareBudgetForBlockedStart is the prepare deadline the blocked-/start test
+// arms. It has to outlast everything runTask does before it calls /start — the
+// isolated execution environment, its sidecars, and the task temp dir are all
+// real filesystem work — because a deadline that expires during preparation
+// never reaches the /start this test is about. That preparation costs ~15ms on
+// an idle developer machine but an order of magnitude more on a loaded CI
+// runner under -race, which is why the original 150ms turned main red
+// (MUL-7244). Two seconds keeps ~20x headroom over the observed CI cost while
+// still bounding the test at roughly the budget itself.
+const prepareBudgetForBlockedStart = 2 * time.Second
+
 func TestRunTask_PrepareTimeoutStopsLeaseDuringBlockedStartTask(t *testing.T) {
 	oldRefresh := taskPrepareLeaseRefresh
 	oldTimeout := taskPrepareLeaseTimeout
@@ -712,7 +723,7 @@ func TestRunTask_PrepareTimeoutStopsLeaseDuringBlockedStartTask(t *testing.T) {
 		workspaces:         make(map[string]*workspaceState),
 		runtimeIndex:       map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
 		activeEnvRoots:     make(map[string]int),
-		taskPrepareTimeout: 150 * time.Millisecond,
+		taskPrepareTimeout: prepareBudgetForBlockedStart,
 		cfg: Config{
 			WorkspacesRoot: workspacesRoot,
 			Agents: map[string]AgentEntry{
@@ -735,13 +746,19 @@ func TestRunTask_PrepareTimeoutStopsLeaseDuringBlockedStartTask(t *testing.T) {
 	if !errors.Is(err, errTaskPrepareTimeout) {
 		t.Fatalf("runTask error = %v, want task prepare timeout", err)
 	}
-	if elapsed := time.Since(startedAt); elapsed > time.Second {
+	if elapsed := time.Since(startedAt); elapsed > prepareBudgetForBlockedStart+time.Second {
 		t.Fatalf("runTask took %s, want prepare deadline to stop blocked /start", elapsed)
 	}
+	// Wait for the handler rather than sampling it: runTask returns as soon as
+	// the deadline cancels the in-flight RoundTrip, which can beat httptest
+	// scheduling the handler goroutine that closes startEntered. The wait only
+	// slows the failing path — when /start was reached the channel is already
+	// closed, and when it was not the budget above was too small to survive
+	// preparation on this machine.
 	select {
 	case <-startEntered:
-	default:
-		t.Fatal("runTask did not reach /start")
+	case <-time.After(2 * time.Second):
+		t.Fatalf("runTask did not reach /start: the %s prepare budget expired during preparation", prepareBudgetForBlockedStart)
 	}
 	releaseStartOnce.Do(func() { close(releaseStart) })
 	if got := leaseCalls.Load(); got == 0 {

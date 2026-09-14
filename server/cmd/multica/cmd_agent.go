@@ -160,6 +160,7 @@ func init() {
 	agentCreateCmd.Flags().String("name", "", "Agent name (required)")
 	agentCreateCmd.Flags().String("description", "", "Agent description")
 	agentCreateCmd.Flags().String("instructions", "", "Agent instructions")
+	agentCreateCmd.Flags().String("conversation-starters", "", "Conversation starters as a JSON array of {\"label\",\"prompt\"} objects (at most 3; label ≤80, prompt ≤4000). Shown above the Chat composer; selecting one fills the composer and does not start a run. Omit to default to none.")
 	agentCreateCmd.Flags().String("runtime-id", "", "Runtime ID (required)")
 	agentCreateCmd.Flags().String("runtime-config", "", "Runtime config as JSON string")
 	agentCreateCmd.Flags().String("model", "", "Model identifier (e.g. claude-sonnet-4-6, openai/gpt-4o). Prefer this over passing --model in --custom-args.")
@@ -183,6 +184,7 @@ func init() {
 	agentUpdateCmd.Flags().String("name", "", "New name")
 	agentUpdateCmd.Flags().String("description", "", "New description")
 	agentUpdateCmd.Flags().String("instructions", "", "New instructions")
+	agentUpdateCmd.Flags().String("conversation-starters", "", "New conversation starters as a JSON array of {\"label\",\"prompt\"} objects (at most 3; label ≤80, prompt ≤4000). Pass '[]' to clear. Omit to leave the stored value unchanged.")
 	agentUpdateCmd.Flags().String("runtime-id", "", "New runtime ID")
 	agentUpdateCmd.Flags().String("runtime-config", "", "New runtime config as JSON string")
 	agentUpdateCmd.Flags().String("model", "", "New model identifier. Pass an empty string to clear and fall back to the runtime default.")
@@ -653,6 +655,9 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("instructions"); v != "" {
 		body["instructions"] = v
 	}
+	if err := applyConversationStartersFlag(cmd, body); err != nil {
+		return err
+	}
 	if cmd.Flags().Changed("runtime-config") {
 		v, _ := cmd.Flags().GetString("runtime-config")
 		var rc any
@@ -744,6 +749,9 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("instructions")
 		body["instructions"] = v
 	}
+	if err := applyConversationStartersFlag(cmd, body); err != nil {
+		return err
+	}
 	if cmd.Flags().Changed("runtime-id") {
 		v, _ := cmd.Flags().GetString("runtime-id")
 		body["runtime_id"] = v
@@ -802,7 +810,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --custom-args, --mcp-config, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --conversation-starters, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --custom-args, --mcp-config, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())
@@ -1233,6 +1241,48 @@ func parseCustomArgs(raw string) ([]string, error) {
 		return nil, fmt.Errorf("--custom-args must be a valid JSON array of strings")
 	}
 	return ca, nil
+}
+
+// agentConversationStarter is the CLI wire shape for conversation_starters.
+// Limits match the server/handler and packages/core/agents/constants.ts.
+type agentConversationStarter struct {
+	Label  string `json:"label"`
+	Prompt string `json:"prompt"`
+}
+
+func applyConversationStartersFlag(cmd *cobra.Command, body map[string]any) error {
+	if !cmd.Flags().Changed("conversation-starters") {
+		return nil
+	}
+	v, _ := cmd.Flags().GetString("conversation-starters")
+	starters, err := parseConversationStarters(v)
+	if err != nil {
+		return err
+	}
+	body["conversation_starters"] = starters
+	return nil
+}
+
+// parseConversationStarters parses --conversation-starters (a JSON array of
+// {label, prompt} objects). An explicit [] is a valid clear; null/empty input
+// is rejected so it cannot be confused with omit. A nil slice is coerced to
+// empty so encoding/json emits [] rather than null.
+func parseConversationStarters(raw string) ([]agentConversationStarter, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || strings.EqualFold(trimmed, "null") {
+		return nil, fmt.Errorf("--conversation-starters must be a JSON array of {\"label\",\"prompt\"} objects; pass '[]' to clear")
+	}
+	var starters []agentConversationStarter
+	if err := json.Unmarshal([]byte(raw), &starters); err != nil {
+		return nil, fmt.Errorf("--conversation-starters must be a JSON array of {\"label\",\"prompt\"} objects")
+	}
+	if starters == nil {
+		starters = []agentConversationStarter{}
+	}
+	if len(starters) > 3 {
+		return nil, fmt.Errorf("--conversation-starters must contain at most 3 items")
+	}
+	return starters, nil
 }
 
 // resolveCustomEnv collects the --custom-env, --custom-env-stdin, and

@@ -249,7 +249,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `resource list/add/update/remove` | 管理项目附加资源 | `--type`、`--url`、`--local-path`、`--daemon-id`、`--execution-mode`（本地目录的 `in_place` / `worktree`） |
 | `label` | `list/get/create/update/delete` | 管理工作区标签 | |
 | `property` | `list/get/create/update/archive/unarchive` | 管理工作区自定义属性 | `create`：`--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`）、`--option`（可重复，仅 select 类型）；`list`：`--include-archived`；类型创建后不可修改 |
-| `agent` | `list/get/create/update/archive/restore` | 管理智能体 | `--name`、`--runtime-id`（`create` 必填）、`--instructions`、`--model`、`--thinking-level`、`--mcp-config`、`--permission-mode`、`--max-concurrent-tasks` |
+| `agent` | `list/get/create/update/archive/restore` | 管理智能体 | `--name`、`--runtime-id`（`create` 必填）、`--instructions`、`--conversation-starters`、`--model`、`--thinking-level`、`--mcp-config`、`--permission-mode`、`--max-concurrent-tasks` |
 | | `copy <agent-id>` | 复制为新智能体，原智能体不受影响 | `--name`（默认为原名加 ` (copy)`）、`--runtime-id`（复制到其他运行时时必须同时指定 `--model`）、`--no-skills`；`custom_env`、`mcp_config`、`runtime_config` 等机密配置不会复制，需用与 `create` 相同的 flag 重新提供 |
 | | `tasks <id>` | 查看智能体的运行 | |
 | | `avatar <id>` | 上传头像 | |

@@ -217,7 +217,7 @@ export function IssueActionsMenuItems({
           {PRIORITY_DISPLAY_ORDER.map((p) => (
             <P.Item key={p} onClick={() => updateField({ priority: p })}>
               <span
-                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-caption font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}
+                className={`inline-flex items-center gap-1 rounded-xs px-1.5 py-0.5 text-caption font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}
               >
                 <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
                 {t(($) => $.priority[p])}

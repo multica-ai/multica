@@ -156,7 +156,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `REDIS_URL` | 空 | 用于共享限流、实时事件和 token cache；未设置时实时事件和邀请限流回退到进程内存，认证限流不生效 |
+| `REDIS_URL` | 空 | 所有 Redis 功能共用的唯一连接地址，包括共享限流、实时事件、频道 WebSocket 租约和 token cache |
+| `REDIS_CLUSTER_MODE` | `false` | 设为 `true` 后强制使用 Redis Cluster 客户端，单配置地址也适用；集群模式只能使用数据库 0，且要求 `REALTIME_RELAY_MODE=sharded` |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | 托管 Redis 禁止 `CLIENT SETNAME` 时设为 `true` |
 | `RATE_LIMIT_AUTH` | `5` | 单 IP 每分钟发送验证码或发起 Google 登录的次数 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | 单 IP 每分钟验证验证码的次数 |
@@ -249,7 +250,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 
 守护进程注入智能体 task 的内部上下文见 [Task 运行时环境](/daemon-runtimes#task-运行时环境)。
 
-各 AI 编程工具可以使用 `MULTICA_<PROVIDER>_PATH` 覆盖命令路径；支持模型覆盖的工具还可以使用 `MULTICA_<PROVIDER>_MODEL`。QwenPaw 和 MiniMax Code 没有模型变量，因为 Multica 不会向它们传模型；MiniMax Code 的路径变量是 `MULTICA_MCODE_PATH`。详见 [AI 编程工具对比](/providers#模型来源)。DeepSeek Harness 支持 `MULTICA_DSH_PATH` 和 `MULTICA_DSH_MODEL`（取值为 dsh 模型目录中的模型 id，例如 `deepseek-official/deepseek-chat`）。ZeroClaw 支持 `MULTICA_ZEROCLAW_PATH`，但没有模型变量；模型由 ZeroClaw 的智能体配置管理。全机默认参数 `MULTICA_<PROVIDER>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具。对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
+各 AI 编程工具可以使用 `MULTICA_<PROVIDER>_PATH` 覆盖命令路径；支持模型覆盖的工具还可以使用 `MULTICA_<PROVIDER>_MODEL`。QwenPaw 和 MiniMax Code 没有模型变量，因为 Multica 不会向它们传模型；MiniMax Code 的路径变量是 `MULTICA_MCODE_PATH`。详见 [AI 编程工具对比](/providers#模型来源)。DeepSeek Harness 支持 `MULTICA_DSH_PATH` 和 `MULTICA_DSH_MODEL`（取值为 dsh 模型目录中的模型 id，例如 `deepseek-official/deepseek-chat`）。 DeepSeek Harness 另外支持 `MULTICA_DSH_PROFILE_BUNDLE`：当 `multica` profile 缺失时，用它指定要安装的 bundle，多个候选用逗号分隔、按序尝试，每项可以是 npm 包名、目录或打包好的 tarball。该变量默认不设置；Multica 驱动的 `--stdio` 协议正是由这个 profile 提供，所以不设置时不会改动 DSH 的安装，守护进程会报告缺少 profile，而不是注册一个不可用的运行时。Multica 自己的桥接还没有发布到公共 npm registry，如何选取值见[安装智能体运行时](/install-agent-runtime)；这里填的东西会在没有二次确认的情况下装进每一台守护进程宿主的 DSH 家目录，请当作供应链决策来对待。`MULTICA_DSH_PROFILE_BUNDLE` 开启的安装被刻意限制了范围：每个守护进程生命周期最多执行一次，只在探测确认 profile 确实缺失时执行；失败时会把包管理器自身的输出记入日志，且只有重启守护进程后才会重试。探测超时、或返回本守护进程不支持的协议版本时，只做报告，绝不覆盖安装——守护进程不会覆盖一个明显是刻意装上去的 profile。排查时在守护进程日志中搜索 `DSH runtime profile`；要撤销安装，删除 `$DSH_HOME/profiles/multica`（默认 `~/.dsh/profiles/multica`）。`MULTICA_DSH_PLUGIN_PATH` 用于覆盖安装时解析 pnpm 的目录。`dsh plugin` 转发到的那个 pnpm 由 DSH Desktop 放在它私有的 runtime-commands 目录里，macOS 和 Windows 都是如此，守护进程会自动找到并加到 PATH 最前——包括较新版 Desktop 采用的带版本号目录结构。所以只有守护进程找不到的安装位置、或者你想让安装使用自己的 pnpm 时，才需要这个变量。一旦设置就完全取代自动查找：目录不存在时，安装会退回使用守护进程 `PATH` 上的 pnpm，而不是内置的那个。Linux 上没有 DSH Desktop，安装始终使用 `PATH`。ZeroClaw 支持 `MULTICA_ZEROCLAW_PATH`，但没有模型变量；模型由 ZeroClaw 的智能体配置管理。全机默认参数 `MULTICA_<PROVIDER>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具。对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude

@@ -413,7 +413,7 @@ function Badge({
   return (
     <View
       className={cn(
-        "px-1.5 py-0.5 rounded",
+        "px-1.5 py-0.5 rounded-xs",
         tone === "brand"
           ? "bg-brand/10"
           : tone === "outline"

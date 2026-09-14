@@ -209,7 +209,7 @@ func normalizeServerVersion(v string) string {
 // path Redis client, not the realtime relay's blocking read client. A nil rdb
 // keeps the default in-memory stores which are fine for single-node dev and
 // tests.
-func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client) chi.Router {
+func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb redis.UniversalClient) chi.Router {
 	r, _ := NewRouterWithOptions(pool, hub, bus, analyticsClient, rdb, RouterOptions{})
 	return r
 }
@@ -220,7 +220,7 @@ type RouterOptions struct {
 	ChannelLeaseMetrics *obsmetrics.ChannelLeaseMetrics
 	// ChannelLeaseRedis is a dedicated non-blocking Redis client/pool. It is
 	// required only when CHANNEL_WS_LEASE_BACKEND=redis.
-	ChannelLeaseRedis *redis.Client
+	ChannelLeaseRedis redis.UniversalClient
 	// WecomRelay is the realtime relay, seen through the two halves the WeCom
 	// adapter needs: publish a reply to the other replicas, and register as
 	// the consumer that delivers the ones they publish. Nil on a deployment
@@ -286,7 +286,7 @@ func buildChannelSupervisor(
 		leases = postgresLeases
 	case "redis":
 		if opts.ChannelLeaseRedis == nil {
-			slog.Error("channel engine: Redis lease backend selected but CHANNEL_WS_LEASE_REDIS_URL/REDIS_URL is missing or invalid; supervisor disabled")
+			slog.Error("channel engine: Redis lease backend selected but REDIS_URL is missing or invalid; supervisor disabled")
 			return nil
 		}
 		namespace := strings.TrimSpace(os.Getenv("CHANNEL_WS_LEASE_NAMESPACE"))
@@ -401,7 +401,7 @@ func seatCapacityExecutor(cloudURL string) seatcapacity.Executor {
 // context, calling Wait on shutdown) use the returned handler;
 // callers that only need the HTTP handler (tests, the simple
 // NewRouter shim) discard the second value.
-func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client, opts RouterOptions) (chi.Router, *handler.Handler) {
+func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb redis.UniversalClient, opts RouterOptions) (chi.Router, *handler.Handler) {
 	queries := db.New(pool)
 	emailSvc := service.NewEmailService()
 	daemonHub := opts.DaemonHub
@@ -2079,6 +2079,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.With(handler.RequireHumanActor).Post("/sub-issues", h.CreateCommentSubIssue)
 				r.Put("/", h.UpdateComment)
 				r.Delete("/", h.DeleteComment)
+				// Same handler under a path servers from before #8296 do not
+				// route. Clients that promise "replies are kept" call this one,
+				// so a request that reaches an older server — mid-rollout, after
+				// a rollback, or self-hosted — fails instead of deleting the
+				// replies with the comment.
+				r.Delete("/keep-replies", h.DeleteComment)
 				r.Post("/resolve", h.ResolveComment)
 				r.Delete("/resolve", h.UnresolveComment)
 				r.Post("/reactions", h.AddReaction)

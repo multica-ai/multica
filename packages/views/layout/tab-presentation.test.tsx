@@ -170,14 +170,67 @@ describe("useTabPresentation — live from cache", () => {
     });
   });
 
-  it("archived inbox: selected issue resolves against the archived list", () => {
-    // a1 lives only in the archived list; without ?view=archived it must NOT
-    // resolve (title stays Inbox), and with it, it resolves to i1's title.
-    expect(presentationOf("/acme/inbox?issue=i1").title).toBe("Inbox");
+  it("issue-backed selection resolves by object, in either view", () => {
+    // The selection key IS the group key (`issue_id ?? id`), so an
+    // issue-backed selection names the issue directly and is answered by the
+    // issue cache — no inbox list involved. That holds in both views on
+    // purpose: i1's notification lives only in the ARCHIVED list, yet the main
+    // view still titles the tab by the object the URL names. Treating "not in
+    // the list I loaded" as "does not exist" is what this must not do — the
+    // page itself resolves such a link to the issue rather than dropping it
+    // (see the deep-link fallback in inbox-page).
+    expect(presentationOf("/acme/inbox?issue=i1")).toEqual({
+      visual: { kind: "icon", icon: "Inbox" },
+      title: "MUL-1: Fix login",
+    });
     expect(presentationOf("/acme/inbox?view=archived&issue=i1")).toEqual({
       visual: { kind: "icon", icon: "Inbox" },
       title: "MUL-1: Fix login",
     });
+  });
+
+  it("issue-backed selection survives a cold inbox list", () => {
+    // Regression (MUL-6967): the badge no longer pre-warms the inbox list at
+    // app start, so a restored tab may have the issue cached but no list. It
+    // must still show the issue, not collapse to the container label.
+    const qc = makeClient();
+    seed(qc);
+    qc.removeQueries({ queryKey: inboxListOptions("ws1").queryKey });
+    qc.removeQueries({ queryKey: archivedInboxListOptions("ws1").queryKey });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(
+      () => useTabPresentation("/acme/inbox?issue=i9", "MUL-9: Crash"),
+      { wrapper },
+    );
+
+    expect(result.current.title).toBe("MUL-9: Crash");
+  });
+
+  it("falls back to the persisted title while a selection is unresolved", () => {
+    // Nothing cached for this key yet — an issue-less notification whose row
+    // has not loaded. The persisted title is a better first frame than
+    // "Inbox"; without it the tab loses its identity until the page loads.
+    const qc = makeClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(
+      () => useTabPresentation("/acme/inbox?issue=n7", "Autopilot paused"),
+      { wrapper },
+    );
+
+    expect(result.current.title).toBe("Autopilot paused");
+  });
+
+  it("uses the container label when nothing is selected, persisted title or not", () => {
+    // The fallback is for a PENDING identity only. An Inbox tab with no
+    // selection is fully resolved — it really is just "Inbox", and a stale
+    // persisted title must not override it.
+    expect(presentationOf("/acme/inbox", "MUL-9: Crash").title).toBe("Inbox");
   });
 
   it("archived inbox: selected non-issue resolves against the archived list", () => {

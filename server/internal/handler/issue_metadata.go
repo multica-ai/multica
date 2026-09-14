@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"sync/atomic"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -33,6 +35,8 @@ const (
 )
 
 var issueMetadataKeyRE = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$`)
+
+var issueMetadataMutationLogSequence atomic.Uint64
 
 // SetIssueMetadataKeyRequest carries the JSON value to write under the key
 // named in the URL. Value is a RawMessage so we can preserve numeric vs.
@@ -81,6 +85,24 @@ func validateIssueMetadataValue(raw json.RawMessage) error {
 // describing an issue agree on what an unset bag looks like on the wire.
 func parseIssueMetadata(raw []byte) map[string]any {
 	return util.JSONObjectOrEmpty(raw)
+}
+
+func (h *Handler) recordIssueMetadataMutation(r *http.Request, op, result, issueID, key string, duration time.Duration) {
+	h.Metrics.RecordIssueMetadataMutation(op, result, duration)
+	// Keep issue IDs and metadata keys out of metric labels. A one-percent
+	// process-local sample retains request-level correlation without turning a
+	// hot metadata endpoint into an equally hot high-cardinality log stream.
+	if !slog.Default().Enabled(r.Context(), slog.LevelDebug) || issueMetadataMutationLogSequence.Add(1)%100 != 1 {
+		return
+	}
+	slog.Debug("issue metadata mutation", append(logger.RequestAttrs(r),
+		"source", "api",
+		"operation", op,
+		"result", result,
+		"issue_id", issueID,
+		"key", key,
+		"db_duration_ms", duration.Milliseconds(),
+	)...)
 }
 
 // parseMetadataFilterParam reads the `metadata` query parameter (a JSON
@@ -168,13 +190,41 @@ func (h *Handler) SetIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	queryStarted := time.Now()
 	updated, err := h.Queries.SetIssueMetadataKey(r.Context(), db.SetIssueMetadataKeyParams{
 		ID:          issue.ID,
 		WorkspaceID: issue.WorkspaceID,
 		Key:         key,
 		Value:       []byte(req.Value),
 	})
+	queryDuration := time.Since(queryStarted)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			fallbackStarted := time.Now()
+			current, getErr := h.Queries.GetIssueMetadataInWorkspace(r.Context(), db.GetIssueMetadataInWorkspaceParams{
+				ID:          issue.ID,
+				WorkspaceID: issue.WorkspaceID,
+			})
+			queryDuration += time.Since(fallbackStarted)
+			if errors.Is(getErr, pgx.ErrNoRows) {
+				h.recordIssueMetadataMutation(r, "set", "not_found", issueID, key, queryDuration)
+				writeError(w, http.StatusNotFound, "issue not found")
+				return
+			}
+			if getErr != nil {
+				h.recordIssueMetadataMutation(r, "set", "error", issueID, key, queryDuration)
+				slog.Warn("GetIssueMetadataInWorkspace after metadata set no-op failed", append(logger.RequestAttrs(r), "error", getErr, "issue_id", issueID, "key", key)...)
+				writeError(w, http.StatusInternalServerError, "failed to load issue metadata")
+				return
+			}
+			h.recordIssueMetadataMutation(r, "set", "noop", issueID, key, queryDuration)
+			writeJSON(w, http.StatusOK, map[string]any{
+				"metadata":       parseIssueMetadata(current.Metadata),
+				"issue_revision": current.Revision,
+			})
+			return
+		}
+		h.recordIssueMetadataMutation(r, "set", "error", issueID, key, queryDuration)
 		if isCheckViolation(err) {
 			writeError(w, http.StatusBadRequest, "metadata exceeds the 8KB size limit")
 			return
@@ -183,6 +233,7 @@ func (h *Handler) SetIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to set metadata key")
 		return
 	}
+	h.recordIssueMetadataMutation(r, "set", "changed", issueID, key, queryDuration)
 
 	workspaceID := uuidToString(updated.WorkspaceID)
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
@@ -212,20 +263,45 @@ func (h *Handler) DeleteIssueMetadataKey(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	queryStarted := time.Now()
 	updated, err := h.Queries.DeleteIssueMetadataKey(r.Context(), db.DeleteIssueMetadataKeyParams{
 		ID:          issue.ID,
 		WorkspaceID: issue.WorkspaceID,
 		Key:         key,
 	})
+	queryDuration := time.Since(queryStarted)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "issue not found")
+			fallbackStarted := time.Now()
+			current, getErr := h.Queries.GetIssueMetadataInWorkspace(r.Context(), db.GetIssueMetadataInWorkspaceParams{
+				ID:          issue.ID,
+				WorkspaceID: issue.WorkspaceID,
+			})
+			queryDuration += time.Since(fallbackStarted)
+			if errors.Is(getErr, pgx.ErrNoRows) {
+				h.recordIssueMetadataMutation(r, "delete", "not_found", issueID, key, queryDuration)
+				writeError(w, http.StatusNotFound, "issue not found")
+				return
+			}
+			if getErr != nil {
+				h.recordIssueMetadataMutation(r, "delete", "error", issueID, key, queryDuration)
+				slog.Warn("GetIssueMetadataInWorkspace after metadata delete no-op failed", append(logger.RequestAttrs(r), "error", getErr, "issue_id", issueID, "key", key)...)
+				writeError(w, http.StatusInternalServerError, "failed to load issue metadata")
+				return
+			}
+			h.recordIssueMetadataMutation(r, "delete", "noop", issueID, key, queryDuration)
+			writeJSON(w, http.StatusOK, map[string]any{
+				"metadata":       parseIssueMetadata(current.Metadata),
+				"issue_revision": current.Revision,
+			})
 			return
 		}
+		h.recordIssueMetadataMutation(r, "delete", "error", issueID, key, queryDuration)
 		slog.Warn("DeleteIssueMetadataKey failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID, "key", key)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete metadata key")
 		return
 	}
+	h.recordIssueMetadataMutation(r, "delete", "changed", issueID, key, queryDuration)
 
 	workspaceID := uuidToString(updated.WorkspaceID)
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)

@@ -88,7 +88,7 @@ type blipOnce struct {
 	done bool
 }
 
-func (b *blipOnce) Claim(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+func (b *blipOnce) Claim(ctx context.Context, key, token string, ttl time.Duration) (bool, error) {
 	b.mu.Lock()
 	first := !b.done
 	b.done = true
@@ -96,7 +96,7 @@ func (b *blipOnce) Claim(ctx context.Context, key string, ttl time.Duration) (bo
 	if first {
 		return false, errors.New("wecom test: redis blip")
 	}
-	return b.DedupeStore.Claim(ctx, key, ttl)
+	return b.DedupeStore.Claim(ctx, key, token, ttl)
 }
 
 // sentTexts is what actually reached the chat, in order.
@@ -297,15 +297,15 @@ type failsOnceHandler struct {
 }
 
 func (h *failsOnceHandler) ownsSocket(string) bool { return true }
-func (h *failsOnceHandler) deliverRelayed(context.Context, relayFrame) deliveryOutcome {
+func (h *failsOnceHandler) deliverRelayed(context.Context, relayFrame) relayResult {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.n++
 	if h.n == 1 {
-		return outcomeProvablyNotSent
+		return relayResult{outcome: outcomeProvablyNotSent}
 	}
 	h.delivered = true
-	return outcomeDone
+	return relayResult{outcome: outcomeDone}
 }
 func (h *failsOnceHandler) calls() int {
 	h.mu.Lock()

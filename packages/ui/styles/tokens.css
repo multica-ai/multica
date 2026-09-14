@@ -51,13 +51,17 @@
     --color-card: var(--card);
     --color-foreground: var(--foreground);
     --color-background: var(--background);
-    --radius-sm: calc(var(--radius) * 0.6);
-    --radius-md: calc(var(--radius) * 0.8);
+    /* Compact product radius ladder. Keep the roles stable even when the base
+       value changes: xs=micro controls, sm=nested surfaces, md=rows/menus,
+       lg=controls/compact surfaces, xl=cards/dialogs. */
+    --radius-xs: calc(var(--radius) * 0.375);
+    --radius-sm: calc(var(--radius) * 0.5);
+    --radius-md: calc(var(--radius) * 0.75);
     --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) * 1.4);
-    --radius-2xl: calc(var(--radius) * 1.8);
-    --radius-3xl: calc(var(--radius) * 2.2);
-    --radius-4xl: calc(var(--radius) * 2.6);
+    --radius-xl: calc(var(--radius) * 1.5);
+    --radius-2xl: calc(var(--radius) * 2);
+    --radius-3xl: calc(var(--radius) * 2.5);
+    --radius-4xl: calc(var(--radius) * 3);
 }
 
 /* Type scale — the only font sizes product UI may use.
@@ -196,7 +200,7 @@
     --chart-3: oklch(0.76 0.10 255);
     --chart-4: oklch(0.85 0.06 255);
     --chart-5: oklch(0.92 0.03 255);
-    --radius: 0.625rem;
+    --radius: 0.5rem;
     --sidebar: oklch(0.964435 0.001327 286.375);
     --sidebar-foreground: oklch(0.141 0.005 285.823);
     --sidebar-primary: oklch(0.21 0.006 285.885);

@@ -92,10 +92,12 @@ function ListRowContent({
           className="relative flex shrink-0 items-center justify-center w-4 h-4"
           {...checkboxProps}
         >
-          <PriorityIcon
-            priority={issue.priority}
-            className={selected ? "hidden" : "group-hover/row:hidden"}
-          />
+          {storeProperties.priority && issue.priority !== "none" && (
+            <PriorityIcon
+              priority={issue.priority}
+              className={selected ? "hidden" : "group-hover/row:hidden"}
+            />
+          )}
           <input
             type="checkbox"
             checked={selected}

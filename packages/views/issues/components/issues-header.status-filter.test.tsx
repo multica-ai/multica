@@ -134,8 +134,8 @@ describe("IssueFilterMenu status section", () => {
       "In Progress",
       "In Review",
       "Human Review",
-      "Done",
       "Blocked",
+      "Done",
       "Cancelled",
     ]);
   });

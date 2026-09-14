@@ -415,15 +415,12 @@ func (q *Queries) DeleteIssue(ctx context.Context, arg DeleteIssueParams) error 
 const deleteIssueMetadataKey = `-- name: DeleteIssueMetadataKey :one
 UPDATE issue SET
     metadata = metadata - $1::text,
-    revision = revision + CASE WHEN metadata ? $1::text THEN 1 ELSE 0 END,
-    last_activity_at = CASE
-        WHEN metadata ? $1::text
-        THEN GREATEST(COALESCE(last_activity_at, updated_at), now())
-        ELSE last_activity_at
-    END,
+    revision = revision + 1,
+    last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now()),
     updated_at = now()
 WHERE id = $2 AND workspace_id = $3
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at
+  AND metadata ? $1::text
+RETURNING id, workspace_id, metadata, revision
 `
 
 type DeleteIssueMetadataKeyParams struct {
@@ -432,40 +429,23 @@ type DeleteIssueMetadataKeyParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
+type DeleteIssueMetadataKeyRow struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Metadata    []byte      `json:"metadata"`
+	Revision    int64       `json:"revision"`
+}
+
 // Atomically removes a single key from the issue's metadata JSONB.
-// Deleting a missing key is a no-op (still returns the row).
-func (q *Queries) DeleteIssueMetadataKey(ctx context.Context, arg DeleteIssueMetadataKeyParams) (Issue, error) {
+// Deleting a missing key is a no-op (returns no rows).
+func (q *Queries) DeleteIssueMetadataKey(ctx context.Context, arg DeleteIssueMetadataKeyParams) (DeleteIssueMetadataKeyRow, error) {
 	row := q.db.QueryRow(ctx, deleteIssueMetadataKey, arg.Key, arg.ID, arg.WorkspaceID)
-	var i Issue
+	var i DeleteIssueMetadataKeyRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
-		&i.Title,
-		&i.Description,
-		&i.Status,
-		&i.Priority,
-		&i.AssigneeType,
-		&i.AssigneeID,
-		&i.CreatorType,
-		&i.CreatorID,
-		&i.ParentIssueID,
-		&i.AcceptanceCriteria,
-		&i.ContextRefs,
-		&i.Position,
-		&i.DueDate,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Number,
-		&i.ProjectID,
-		&i.OriginType,
-		&i.OriginID,
-		&i.FirstExecutedAt,
-		&i.StartDate,
 		&i.Metadata,
-		&i.Stage,
-		&i.Properties,
 		&i.Revision,
-		&i.LastActivityAt,
 	)
 	return i, err
 }
@@ -877,6 +857,30 @@ func (q *Queries) GetIssueInWorkspace(ctx context.Context, arg GetIssueInWorkspa
 		&i.Revision,
 		&i.LastActivityAt,
 	)
+	return i, err
+}
+
+const getIssueMetadataInWorkspace = `-- name: GetIssueMetadataInWorkspace :one
+SELECT metadata, revision FROM issue
+WHERE id = $1 AND workspace_id = $2
+`
+
+type GetIssueMetadataInWorkspaceParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type GetIssueMetadataInWorkspaceRow struct {
+	Metadata []byte `json:"metadata"`
+	Revision int64  `json:"revision"`
+}
+
+// Reloads the committed metadata snapshot after a conditional mutation
+// returns no rows, without fetching the rest of the issue payload.
+func (q *Queries) GetIssueMetadataInWorkspace(ctx context.Context, arg GetIssueMetadataInWorkspaceParams) (GetIssueMetadataInWorkspaceRow, error) {
+	row := q.db.QueryRow(ctx, getIssueMetadataInWorkspace, arg.ID, arg.WorkspaceID)
+	var i GetIssueMetadataInWorkspaceRow
+	err := row.Scan(&i.Metadata, &i.Revision)
 	return i, err
 }
 
@@ -1422,6 +1426,35 @@ func (q *Queries) LockIssueDuplicateKey(ctx context.Context, dollar_1 string) er
 	return err
 }
 
+const lockIssueForAttachmentWrite = `-- name: LockIssueForAttachmentWrite :one
+SELECT id FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR NO KEY UPDATE
+`
+
+type LockIssueForAttachmentWriteParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Owner-first guard for a write to one of an issue's attachments: take the
+// issue before the attachment row, so a writer that reaches the same row
+// through the issue — teardown's issue_id cascade, or the revision bump this
+// write itself performs — either waits for this transaction or is waited on,
+// never both.
+//
+// FOR NO KEY UPDATE, the mode of that revision bump, is the weakest mode that
+// actually serializes issue writers. FOR KEY SHARE is NOT enough: it is
+// compatible with FOR NO KEY UPDATE (see LockLiveComment), so a concurrent
+// CreateComment would take the issue anyway, wait on the attachment this
+// transaction holds, and deadlock with its bump.
+func (q *Queries) LockIssueForAttachmentWrite(ctx context.Context, arg LockIssueForAttachmentWriteParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockIssueForAttachmentWrite, arg.ID, arg.WorkspaceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const lockIssueForChannelMediaBind = `-- name: LockIssueForChannelMediaBind :one
 SELECT id FROM issue
 WHERE id = $1 AND workspace_id = $2
@@ -1625,15 +1658,12 @@ const setIssueMetadataKey = `-- name: SetIssueMetadataKey :one
 
 UPDATE issue SET
     metadata = jsonb_set(metadata, ARRAY[$1::text], $2::jsonb),
-    revision = revision + CASE WHEN metadata -> $1::text IS DISTINCT FROM $2::jsonb THEN 1 ELSE 0 END,
-    last_activity_at = CASE
-        WHEN metadata -> $1::text IS DISTINCT FROM $2::jsonb
-        THEN GREATEST(COALESCE(last_activity_at, updated_at), now())
-        ELSE last_activity_at
-    END,
+    revision = revision + 1,
+    last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now()),
     updated_at = now()
 WHERE id = $3 AND workspace_id = $4
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at
+  AND metadata -> $1::text IS DISTINCT FROM $2::jsonb
+RETURNING id, workspace_id, metadata, revision
 `
 
 type SetIssueMetadataKeyParams struct {
@@ -1643,47 +1673,32 @@ type SetIssueMetadataKeyParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
+type SetIssueMetadataKeyRow struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Metadata    []byte      `json:"metadata"`
+	Revision    int64       `json:"revision"`
+}
+
 // SearchIssues: moved to handler (dynamic SQL for multi-word search support).
 // Atomically sets a single key in the issue's metadata JSONB. The
 // workspace_id filter is the authorization gate — handler resolves the
-// issue first so this is also the tenant check.
-func (q *Queries) SetIssueMetadataKey(ctx context.Context, arg SetIssueMetadataKeyParams) (Issue, error) {
+// issue first so this is also the tenant check. A no-op, a missing issue, or
+// a workspace mismatch returns no rows; callers that must distinguish those
+// cases need a separate workspace-scoped read.
+func (q *Queries) SetIssueMetadataKey(ctx context.Context, arg SetIssueMetadataKeyParams) (SetIssueMetadataKeyRow, error) {
 	row := q.db.QueryRow(ctx, setIssueMetadataKey,
 		arg.Key,
 		arg.Value,
 		arg.ID,
 		arg.WorkspaceID,
 	)
-	var i Issue
+	var i SetIssueMetadataKeyRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
-		&i.Title,
-		&i.Description,
-		&i.Status,
-		&i.Priority,
-		&i.AssigneeType,
-		&i.AssigneeID,
-		&i.CreatorType,
-		&i.CreatorID,
-		&i.ParentIssueID,
-		&i.AcceptanceCriteria,
-		&i.ContextRefs,
-		&i.Position,
-		&i.DueDate,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Number,
-		&i.ProjectID,
-		&i.OriginType,
-		&i.OriginID,
-		&i.FirstExecutedAt,
-		&i.StartDate,
 		&i.Metadata,
-		&i.Stage,
-		&i.Properties,
 		&i.Revision,
-		&i.LastActivityAt,
 	)
 	return i, err
 }

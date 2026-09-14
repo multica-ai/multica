@@ -33,6 +33,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import type { Reaction, TimelineEntry } from "@multica/core/types";
+import { isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { useActorLookup } from "@/data/use-actor-name";
@@ -52,6 +53,7 @@ import { useFailedCommentsStore } from "@/data/stores/failed-comments-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import { continuousCorners } from "@/lib/radius";
 import { ReactionBar } from "./reaction-bar";
 import { useCommentLongPress } from "./comment-context-menu";
 import { useCommentSelectStore } from "@/data/comment-select-store";
@@ -137,7 +139,7 @@ export function CommentCard({
 
   return (
     <View className="px-4">
-      <View className="rounded-2xl">
+      <View className="rounded-xl" style={continuousCorners}>
         {/* Bubble uses `surface-1` (L 98%) — extremely subtle elevation
          *  above the page, visible mostly through the rounded edge rather
          *  than the fill (iOS settings cell feel; see Refactoring UI #4
@@ -153,11 +155,12 @@ export function CommentCard({
          *  body — mirrors web's muted resolved card visual. */}
         <View
           className={cn(
-            "bg-surface-1 rounded-2xl px-4 py-3 gap-3 border-2 border-transparent transition-colors",
+            "bg-surface-1 rounded-xl px-4 py-3 gap-3 border-2 border-transparent transition-colors",
             resolved && "opacity-70",
             isHighlighted && "border-primary/30",
             isSelectingHere && "bg-primary/5 border-primary/30",
           )}
+          style={continuousCorners}
         >
           {resolved ? (
             <ResolvedIndicator
@@ -223,6 +226,8 @@ function ResolvedThreadBar({
     const ordered: { type: string | null; id: string | null; name?: string }[] =
       [];
     for (const e of [entry, ...replies]) {
+      // A deleted comment names no author (mirrors web's useAuthorsLabel).
+      if (isDeletedComment(e)) continue;
       const key = `${e.actor_type}:${e.actor_id}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -245,7 +250,8 @@ function ResolvedThreadBar({
     <View className="px-4">
       <Pressable
         onPress={onExpand}
-        className="flex-row items-center gap-2.5 px-4 py-3 rounded-2xl bg-surface-1 active:opacity-70"
+        className="flex-row items-center gap-2.5 px-4 py-3 rounded-xl bg-surface-1 active:opacity-70"
+        style={continuousCorners}
         accessibilityRole="button"
         accessibilityLabel={`Resolved thread by ${authorsLabel}, ${total} ${total === 1 ? "message" : "messages"}. Tap to expand.`}
       >
@@ -310,7 +316,7 @@ function ResolvedIndicator({
 
 /**
  * Animated highlight overlay for a root comment bubble. Sits absolute-
- * positioned over the parent <View className="rounded-2xl">, no pointer
+ * positioned over the parent <View className="rounded-xl">, no pointer
  * capture (long-press still works through it). Border + background wash
  * — equivalent to web's `ring-2 ring-brand/50 bg-brand/5`.
  *
@@ -340,8 +346,8 @@ function RootHighlightOverlay({ active }: { active: boolean }) {
   return (
     <Animated.View
       pointerEvents="none"
-      className="absolute inset-0 rounded-2xl border-2 border-brand/50 bg-brand/5"
-      style={style}
+      className="absolute inset-0 rounded-xl border-2 border-brand/50 bg-brand/5"
+      style={[continuousCorners, style]}
     />
   );
 }
@@ -480,6 +486,17 @@ function CommentBody({
     if (isSelecting) return;
     onPressChange?.(entry.id, longPress.isPressed);
   }, [longPress.isPressed, entry.id, isSelecting, onPressChange]);
+
+  if (isDeletedComment(entry)) {
+    // Kept only so the replies to it stay attached (#8296): no author, body
+    // or long-press actions. Mirrors CommentRow's placeholder in
+    // packages/views/issues/components/comment-card.tsx.
+    return (
+      <Text className="text-sm italic text-muted-foreground">
+        This comment was deleted
+      </Text>
+    );
+  }
 
   const body = (
     <View className="gap-2">

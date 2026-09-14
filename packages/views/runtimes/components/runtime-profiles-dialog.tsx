@@ -446,7 +446,7 @@ function CatalogRow({
             {label}
           </span>
           {disabled && (
-            <span className="shrink-0 rounded bg-muted px-1 text-micro font-medium text-muted-foreground">
+            <span className="shrink-0 rounded-xs bg-muted px-1 text-micro font-medium text-muted-foreground">
               {t(($) => $.profiles.badge_disabled)}
             </span>
           )}
@@ -957,7 +957,7 @@ function ProfileDetailsForm({
                   {parsedCommand.fixedArgs.map((arg, index) => (
                     <span
                       key={`${arg}-${index}`}
-                      className="rounded bg-background px-1 font-mono text-foreground"
+                      className="rounded-xs bg-background px-1 font-mono text-foreground"
                     >
                       {arg}
                     </span>

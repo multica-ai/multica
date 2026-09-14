@@ -54,7 +54,7 @@ function ScopeList({ scopes, highlighted }: { scopes: string[]; highlighted?: st
     <ul className="space-y-1.5">
       {scopes.map((scope) => (
         <li key={scope} className="flex items-baseline gap-2 text-caption">
-          <code className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono">{scope}</code>
+          <code className="shrink-0 rounded-xs bg-muted px-1.5 py-0.5 font-mono">{scope}</code>
           <span className="text-muted-foreground">{scopeDescription(scope, t)}</span>
           {added.has(scope) ? (
             <Badge variant="secondary">{t(($) => $.plugins.consent.new_scope)}</Badge>
@@ -80,7 +80,7 @@ function ScheduleList({ hooks, showNextRun = false }: { hooks: ScheduledHook[]; 
         <li key={hook.key} className="flex flex-wrap items-baseline gap-2 text-caption">
           <span className="font-medium">{hook.name}</span>
           <span>{scheduleFrequency(hook.schedule?.cron ?? "", t)}</span>
-          <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{hook.schedule?.cron ?? ""}</code>
+          <code className="rounded-xs bg-muted px-1.5 py-0.5 font-mono">{hook.schedule?.cron ?? ""}</code>
           <span className="text-muted-foreground">{hook.schedule?.timezone ?? ""}</span>
           {showNextRun && hook.schedule?.next_run_at ? (
             <span className="text-muted-foreground">
@@ -516,7 +516,7 @@ function PublishedPackage({
       <ul className="space-y-1.5">
         {pluginPackage.versions.map((version) => (
           <li key={version.id} className="flex flex-wrap items-center gap-2 text-caption">
-            <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{version.version}</code>
+            <code className="rounded-xs bg-muted px-1.5 py-0.5 font-mono">{version.version}</code>
             {version.installed === true ? (
               <Badge variant="secondary">{t(($) => $.plugins.publish.installed_version)}</Badge>
             ) : null}

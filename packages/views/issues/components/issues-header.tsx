@@ -2,8 +2,6 @@
 
 import { cloneElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowDown,
-  ArrowUp,
   CalendarDays,
   ChartGantt,
   ChevronDown,
@@ -79,12 +77,15 @@ import { formatActorRef, isActorPropertyType, isFilterablePropertyType, isScalar
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropertyIcon } from "../../common/property-icon";
+import { sortDirectionLabelKey } from "../utils/sort-direction";
 import { LabelChip } from "../../labels/label-chip";
 import {
   SORT_OPTIONS,
   GROUPING_OPTIONS,
   SWIMLANE_GROUPINGS,
   CARD_PROPERTY_OPTIONS,
+  cardPropertyOptionsForView,
+  sortOptionsForView,
   type ActorFilterValue,
   type IssueDateField,
   type IssueDateFilter,
@@ -1949,6 +1950,8 @@ export function IssueDisplayControls({
     labels: "card_labels",
     childProgress: "card_child_progress",
   };
+  const availableCardPropertyOptions = cardPropertyOptionsForView(viewMode);
+  const availableSortOptions = sortOptionsForView(viewMode, grouping);
   const sortPropertyId = propertyIdFromViewKey(sortBy);
   const groupingPropertyId = propertyIdFromViewKey(grouping);
   const tableGroupingPropertyId = propertyIdFromViewKey(tableGrouping);
@@ -1958,6 +1961,9 @@ export function IssueDisplayControls({
   const sortLabel = sortPropertyId
     ? propertyById.get(sortPropertyId)?.name ?? t(($) => $.display.sort_manual)
     : t(($) => $.display[SORT_LABEL_KEY[sortBy as keyof typeof SORT_LABEL_KEY]]);
+  const sortDirectionLabel = t(
+    ($) => $.display[sortDirectionLabelKey(sortBy, sortDirection)],
+  );
   const groupingLabel = groupingPropertyId
     ? propertyById.get(groupingPropertyId)?.name ?? t(($) => $.display.group_status)
     : t(($) => $.display[GROUPING_LABEL_KEY[grouping as keyof typeof GROUPING_LABEL_KEY]]);
@@ -2109,9 +2115,10 @@ export function IssueDisplayControls({
             />
             <TooltipContent side="bottom">{t(($) => $.display.tooltip)}</TooltipContent>
           </Tooltip>
-          <PopoverContent align="end" className="w-64 p-3">
+          <PopoverContent align="end" className="w-72 p-3">
             <div className="space-y-3">
-              {/* Uniform rows: caption label left, control right. Spacing
+              {/* Caption label left, control right; multi-control sections
+                  (Ordering, Card properties) stack the label on top. Spacing
                   separates sections — no dividers (see UI rules). */}
               {viewMode === "board" && (
                 <div className="flex items-center justify-between gap-3">
@@ -2201,14 +2208,18 @@ export function IssueDisplayControls({
                   />
                 </label>
               )}
-              <div className="flex items-center justify-between gap-3">
+              <div>
                 <span className="text-caption font-medium text-muted-foreground">
                   {t(($) => $.display.ordering_section)}
                 </span>
-                <div className="flex items-center gap-1.5">
+                {/* Direction labels run up to "Reverse workflow order", so the
+                    pair gets the full popover width (w-72 keeps "Status" beside
+                    it untruncated): the field select absorbs the slack and
+                    truncates, the direction label never does. */}
+                <div className="mt-2 flex items-center gap-1.5">
                   <Select
                     items={[
-                      ...SORT_OPTIONS.map((opt) => ({
+                      ...availableSortOptions.map((opt) => ({
                         value: opt.value as string,
                         label: t(($) => $.display[SORT_LABEL_KEY[opt.value as keyof typeof SORT_LABEL_KEY]]),
                       })),
@@ -2222,12 +2233,12 @@ export function IssueDisplayControls({
                       if (v) act.setSortBy(v as SortField);
                     }}
                   >
-                    <SelectTrigger size="sm" className="w-26" aria-label={t(($) => $.display.ordering_section)}>
+                    <SelectTrigger size="sm" className="min-w-0 flex-1" aria-label={t(($) => $.display.ordering_section)}>
                       <SelectValue>{sortLabel}</SelectValue>
                     </SelectTrigger>
                     <SelectContent align="end">
                       <SelectGroup>
-                      {SORT_OPTIONS.map((opt) => (
+                      {availableSortOptions.map((opt) => (
                         <SelectItem key={opt.value} value={opt.value}>
                           {t(($) => $.display[SORT_LABEL_KEY[opt.value as keyof typeof SORT_LABEL_KEY]])}
                         </SelectItem>
@@ -2243,17 +2254,14 @@ export function IssueDisplayControls({
                   {sortBy !== "position" && (
                     <Button
                       variant="outline"
-                      size="icon-sm"
+                      size="sm"
                       onClick={() =>
                         act.setSortDirection(sortDirection === "asc" ? "desc" : "asc")
                       }
-                      title={sortDirection === "asc" ? t(($) => $.display.ascending_title) : t(($) => $.display.descending_title)}
+                      aria-label={sortDirectionLabel}
+                      title={sortDirectionLabel}
                     >
-                      {sortDirection === "asc" ? (
-                        <ArrowUp className="size-3.5" />
-                      ) : (
-                        <ArrowDown className="size-3.5" />
-                      )}
+                      {sortDirectionLabel}
                     </Button>
                   )}
                 </div>
@@ -2268,7 +2276,7 @@ export function IssueDisplayControls({
                   onCheckedChange={() => act.toggleShowSubIssues()}
                 />
               </label>
-              {viewMode !== "table" && (
+              {availableCardPropertyOptions.length > 0 && (
                 <div>
                   <span className="text-caption font-medium text-muted-foreground">
                     {t(($) => $.display.card_properties_section)}
@@ -2276,7 +2284,7 @@ export function IssueDisplayControls({
                   {/* Chip toggles (pressed = shown on cards). Unpressed chips
                       dim so the active set reads at a glance. */}
                   <div className="mt-2 flex flex-wrap gap-1">
-                    {CARD_PROPERTY_OPTIONS.map((opt) => (
+                    {availableCardPropertyOptions.map((opt) => (
                       <Toggle
                         key={opt.key}
                         size="sm"

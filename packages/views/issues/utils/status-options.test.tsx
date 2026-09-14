@@ -72,8 +72,8 @@ describe("useStatusOptions", () => {
       "todo",
       "in_progress",
       "in_review",
-      "done",
       "blocked",
+      "done",
       "cancelled",
     ]);
   });
@@ -91,8 +91,8 @@ describe("useStatusOptions", () => {
       "in_progress",
       "in_review",
       "qa",
-      "done",
       "blocked",
+      "done",
       "cancelled",
     ]);
   });

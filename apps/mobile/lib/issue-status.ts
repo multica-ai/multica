@@ -33,8 +33,8 @@ export const STATUS_CATEGORIES: IssueStatusCategory[] = [
   "todo",
   "in_progress",
   "in_review",
-  "done",
   "blocked",
+  "done",
   "cancelled",
 ];
 

@@ -94,6 +94,9 @@
     "header_cost": "费用",
     "header_time": "耗时",
     "header_tasks": "运行数",
+    "usage_unreported_other": "{{count}} 次运行未上报用量",
+    "usage_unreported_pending_other": "{{count}} 次运行未上报用量 · 用量汇总仍在处理中",
+    "usage_totals_pending": "用量汇总仍在处理中",
     "show_all": "展开全部",
     "show_less": "只看前 {{count}} 个",
     "no_data": "所选时间范围内暂无智能体活动。"

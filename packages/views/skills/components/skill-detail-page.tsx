@@ -698,7 +698,7 @@ function FilesTab({
                     aria-pressed={mode === value}
                     onClick={() => onModeChange(value)}
                     className={cn(
-                      "h-6 rounded px-2 text-caption font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "h-6 rounded-xs px-2 text-caption font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       mode === value
                         ? "bg-surface text-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground",
@@ -1097,7 +1097,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       <div className="flex flex-1 min-h-0 flex-col">
         <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
           <Skeleton className="h-4 w-16" />
-          <Skeleton className="h-3 w-3 rounded" />
+          <Skeleton className="h-3 w-3 rounded-xs" />
           <Skeleton className="h-4 w-40" />
         </div>
         <div className={cn(PAGE_RAIL, PAGE_GUTTER, "space-y-3 py-6")}>

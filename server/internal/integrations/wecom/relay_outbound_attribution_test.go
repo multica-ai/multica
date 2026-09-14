@@ -32,11 +32,11 @@ type ownsSocketHandler struct {
 }
 
 func (h *ownsSocketHandler) ownsSocket(string) bool { return h.owns }
-func (h *ownsSocketHandler) deliverRelayed(_ context.Context, f relayFrame) deliveryOutcome {
+func (h *ownsSocketHandler) deliverRelayed(_ context.Context, f relayFrame) relayResult {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.calls = append(h.calls, f)
-	return outcomeDone
+	return relayResult{outcome: outcomeDone}
 }
 func (h *ownsSocketHandler) sent() []relayFrame {
 	h.mu.Lock()
@@ -132,7 +132,7 @@ func (b budgetStore) ClaimBudget() time.Duration { return b.budget }
 // running against a slow store — and the watcher records no_live_connection
 // for a reply the very next attempt then delivers, so one reply moves both
 // counters.
-func TestRelayOutcomeGrace_CoversAClaimRoundTripPerOffer(t *testing.T) {
+func TestRelayOutcomeGrace_CoversEveryStoreRoundTripTheChainCanMake(t *testing.T) {
 	t.Parallel()
 	const budget = 2 * time.Second
 	r := NewRelayOutbound(nil, budgetStore{budget: budget}, RelayConfig{}, slog.Default())
@@ -141,15 +141,23 @@ func TestRelayOutcomeGrace_CoversAClaimRoundTripPerOffer(t *testing.T) {
 	for _, d := range r.retryPlan {
 		chain += d
 	}
-	// Worst case the chain can actually take: every backoff, plus a claim that
-	// times out on the first offer and on each re-offer.
-	worst := chain + budget*time.Duration(len(r.retryPlan)+1)
+	offers := len(r.retryPlan) + 1
+	// Worst case the chain can actually take. TWO store round trips per
+	// offer, because every offer ends in a Release or a Settle on the same
+	// budget as its Claim; the finished offer's settle retries on top; and
+	// the delivery itself. Counting one round trip per offer left up to half
+	// the store time out of the arithmetic, and the absent state is not
+	// fenced — so a grace that expires early is recorded as a loss while a
+	// later offer can still claim, deliver and settle.
+	worst := chain + budget*time.Duration(2*offers) +
+		time.Duration(claimSettleAttempts-1)*(budget+r.settleRetryBackoff()) +
+		r.cfg.deliveryBudget()
 
 	if r.outcomeGrace() < worst {
 		t.Fatalf("outcome grace %s is shorter than the %s a fully timed-out chain can take "+
-			"(%d offers × %s claim + %s of backoff) — the watch would call a reply lost while "+
-			"it was still being retried, and the retry would then deliver it",
-			r.outcomeGrace(), worst, len(r.retryPlan)+1, budget, chain)
+			"(%d offers × 2 × %s of store round trips + %s of backoff + %d settle retries + %s of delivery) — "+
+			"the watch would call a reply lost while it was still being retried, and the retry would then deliver it",
+			r.outcomeGrace(), worst, offers, budget, chain, claimSettleAttempts-1, r.cfg.deliveryBudget())
 	}
 }
 

@@ -94,6 +94,9 @@
     "header_cost": "비용",
     "header_time": "시간",
     "header_tasks": "실행",
+    "usage_unreported_other": "{{count}}개 실행에서 사용량이 보고되지 않음",
+    "usage_unreported_pending_other": "{{count}}개 실행에서 사용량이 보고되지 않음 · 사용량을 집계하는 중",
+    "usage_totals_pending": "사용량을 집계하는 중",
     "show_all": "전체 보기",
     "show_less": "상위 {{count}}개만",
     "no_data": "이 기간에는 에이전트 활동이 없습니다."

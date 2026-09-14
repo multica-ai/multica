@@ -1025,7 +1025,7 @@ function FailureBubble({
                 <span>{t(($) => $.message_list.show_details)}</span>
               </CollapsibleTrigger>
               <CollapsibleContent>
-                <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted/40 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-all">
+                <pre className="mt-1 max-h-40 overflow-auto rounded-xs bg-muted/40 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-all">
                   {rawError}
                 </pre>
               </CollapsibleContent>
@@ -1229,7 +1229,7 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
+      <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-xs px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
         <ChevronRight
           className={cn(
             "h-3 w-3 shrink-0 text-muted-foreground transition-transform",
@@ -1242,7 +1242,7 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
       </CollapsibleTrigger>
       {hasInput && (
         <CollapsibleContent>
-          <pre className="ml-[18px] mt-0.5 max-h-32 overflow-auto rounded bg-muted/50 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-all">
+          <pre className="ml-[18px] mt-0.5 max-h-32 overflow-auto rounded-xs bg-muted/50 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-all">
             {JSON.stringify(item.input, null, 2)}
           </pre>
         </CollapsibleContent>
@@ -1264,7 +1264,7 @@ function ToolResultRow({ item }: { item: ChatTimelineItem }) {
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex w-full items-start gap-1.5 rounded px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
+      <CollapsibleTrigger className="flex w-full items-start gap-1.5 rounded-xs px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
         <ChevronRight
           className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform mt-0.5", open && "rotate-90")}
         />
@@ -1273,7 +1273,7 @@ function ToolResultRow({ item }: { item: ChatTimelineItem }) {
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <pre className="ml-[18px] mt-0.5 max-h-40 overflow-auto rounded bg-muted/50 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-all">
+        <pre className="ml-[18px] mt-0.5 max-h-40 overflow-auto rounded-xs bg-muted/50 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-all">
           {output.length > 4000 ? output.slice(0, 4000) + "\n... (truncated)" : output}
         </pre>
       </CollapsibleContent>
@@ -1290,12 +1290,12 @@ function ThinkingRow({ item }: { item: ChatTimelineItem }) {
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex w-full items-start gap-1.5 rounded px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
+      <CollapsibleTrigger className="flex w-full items-start gap-1.5 rounded-xs px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
         <Brain className="h-3 w-3 shrink-0 text-faint-foreground mt-0.5" />
         <span className="text-muted-foreground italic truncate">{preview}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <pre className="ml-[18px] mt-0.5 max-h-40 overflow-auto rounded bg-muted/30 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-words">
+        <pre className="ml-[18px] mt-0.5 max-h-40 overflow-auto rounded-xs bg-muted/30 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-words">
           {text}
         </pre>
       </CollapsibleContent>

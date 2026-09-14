@@ -85,8 +85,17 @@ func TestOmpExecuteDefaultsToOmpBinary(t *testing.T) {
 
 	fakeDir := t.TempDir()
 	fakePath := filepath.Join(fakeDir, "omp")
+	// Real omp reads the piped prompt to EOF before emitting events, so the
+	// fake has to drain stdin too: one that exits without reading closes the
+	// read end while the backend is still writing, and the EPIPE surfaces as
+	// "omp prompt write failed: broken pipe" (MUL-7244). It must drain with a
+	// shell builtin, not `cat` — PATH is replaced with fakeDir below so the
+	// backend has to resolve "omp" by name, which leaves no external command
+	// on PATH for the fixture to call. A `cat` drain here fails silently with
+	// "cat: not found" and the script runs straight through to its exit,
+	// reopening the very race the drain was added to close.
 	script := "#!/bin/sh\n" +
-		"cat > /dev/null\n" +
+		"while IFS= read -r _; do :; done\n" +
 		"printf '%s\\n' '{\"type\":\"agent_start\"}'\n" +
 		"printf '%s\\n' '{\"type\":\"turn_end\",\"message\":{\"role\":\"assistant\",\"model\":\"test\",\"usage\":{\"input\":1,\"output\":1}}}'\n" +
 		"exit 0\n"

@@ -156,7 +156,8 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `REDIS_URL` | 空 | 共有レート制限、リアルタイムイベント、token cache に使用。未設定の場合、リアルタイムイベントと招待制限はプロセス内メモリにフォールバックし、認証レート制限は無効になります |
+| `REDIS_URL` | 空 | 共有レート制限、リアルタイムイベント、チャンネル WebSocket リース、token cache など、すべての Redis 機能が使用する唯一の接続 URL |
+| `REDIS_CLUSTER_MODE` | `false` | `true` にすると、`REDIS_URL` が単一の設定エンドポイントでも Redis Cluster クライアントを使用します。クラスターモードではデータベース 0 と `REALTIME_RELAY_MODE=sharded` が必要です |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | マネージド Redis が `CLIENT SETNAME` を禁止している場合に `true` を設定 |
 | `RATE_LIMIT_AUTH` | `5` | 認証コード送信または Google ログイン開始の、IP あたり毎分の回数 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | 認証コード検証の、IP あたり毎分の回数 |
@@ -249,7 +250,7 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 
 デーモンがエージェント作業に注入する内部コンテキストについては、[作業ランタイム環境](/daemon-runtimes#作業ランタイム環境)を参照してください。
 
-各 AI コーディングツールは `MULTICA_<PROVIDER>_PATH` でコマンドパスを上書きでき、モデル上書き対応ツールでは `MULTICA_<PROVIDER>_MODEL` も利用できます。QwenPaw と MiniMax Code にはモデル変数がなく、MiniMax Code のパス変数は `MULTICA_MCODE_PATH` です。詳しくは [AI コーディングツール比較](/providers#モデルの取得元) を参照してください。DeepSeek Harness は `MULTICA_DSH_PATH` と `MULTICA_DSH_MODEL` に対応しています（値は dsh のモデルカタログにあるモデル ID、例: `deepseek-official/deepseek-chat`）。ZeroClaw は `MULTICA_ZEROCLAW_PATH` に対応しますが、モデル変数はありません。モデルは ZeroClaw のエージェント設定で管理します。マシン全体のデフォルト引数 `MULTICA_<PROVIDER>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code、QwenPaw の 5 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_QWENPAW_ARGS` です。例:
+各 AI コーディングツールは `MULTICA_<PROVIDER>_PATH` でコマンドパスを上書きでき、モデル上書き対応ツールでは `MULTICA_<PROVIDER>_MODEL` も利用できます。QwenPaw と MiniMax Code にはモデル変数がなく、MiniMax Code のパス変数は `MULTICA_MCODE_PATH` です。詳しくは [AI コーディングツール比較](/providers#モデルの取得元) を参照してください。DeepSeek Harness は `MULTICA_DSH_PATH` と `MULTICA_DSH_MODEL` に対応しています（値は dsh のモデルカタログにあるモデル ID、例: `deepseek-official/deepseek-chat`）。 DeepSeek Harness はさらに `MULTICA_DSH_PROFILE_BUNDLE` に対応しています。`multica` プロファイルが存在しない場合にインストールするバンドルを指定するもので、カンマ区切りで複数の候補を順に試します。各項目は npm のパッケージ名、ディレクトリ、またはパック済み tarball です。既定では未設定です。Multica が利用する `--stdio` プロトコルはこのプロファイルが提供するため、未設定の場合は DSH のインストールには手を加えず、デーモンは使用できないランタイムを登録する代わりにプロファイルの欠落を報告します。Multica 自身のブリッジはまだ公開 npm レジストリにないため、値の選び方は[エージェントランタイムのインストール](/install-agent-runtime)を参照してください。ここに設定した値は追加の確認なしに各デーモンホストの DSH ホームへインストールされるので、サプライチェーンの判断として扱ってください。`MULTICA_DSH_PROFILE_BUNDLE` が有効にするインストールは範囲を意図的に限定しています。実行はデーモンのライフタイムにつき最大 1 回、プローブがプロファイルの不在を確認できた場合のみです。失敗時はパッケージマネージャー自身の出力をログに記録し、再試行はデーモンの再起動後のみ行います。プローブがタイムアウトした場合や、このデーモンが扱わないプロトコルバージョンを返した場合は報告のみで、上書きインストールは行いません。意図して用意されたプロファイルをデーモンが上書きすることはありません。調査はデーモンログで `DSH runtime profile` を検索してください。取り消す場合は `$DSH_HOME/profiles/multica`（既定は `~/.dsh/profiles/multica`）を削除します。`MULTICA_DSH_PLUGIN_PATH` はインストール時に pnpm を解決するディレクトリを上書きします。`dsh plugin` が転送する pnpm は macOS でも Windows でも DSH Desktop 独自の runtime-commands ディレクトリに置かれており、デーモンはそれを自動で見つけて PATH の先頭に追加します（新しい Desktop が使うバージョン付きの構成も含みます）。したがってこの変数が必要なのは、デーモンが見つけられない場所にインストールされている場合か、独自の pnpm を使わせたい場合だけです。設定すると自動探索は完全に置き換わり、指定したディレクトリが存在しなければ、インストールは同梱の pnpm ではなくデーモンの `PATH` 上の pnpm にフォールバックします。Linux には DSH Desktop がないため、常に `PATH` が使われます。ZeroClaw は `MULTICA_ZEROCLAW_PATH` に対応しますが、モデル変数はありません。モデルは ZeroClaw のエージェント設定で管理します。マシン全体のデフォルト引数 `MULTICA_<PROVIDER>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code、QwenPaw の 5 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_QWENPAW_ARGS` です。例:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude

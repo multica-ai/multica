@@ -10,7 +10,7 @@ import { issueSurfaceGanttOptions } from "@multica/core/issues/surface/repositor
 import type { IssueSurfaceQueryPlan } from "@multica/core/issues/surface/query-plan";
 import type { IssueStatus, IssueStatusCategory, PropertyFilterValue } from "@multica/core/types";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { issueBehavesAsAny, statusFilterColumns } from "@multica/core/issues";
+import { issueBehavesAsAny, visibleStatusCategories } from "@multica/core/issues";
 import {
   applyIssueFilters,
   type IssueFilterState,
@@ -160,11 +160,10 @@ export function useIssueSurfaceData({
       ? serverGroupBranches.issues
       : EMPTY_ISSUES;
 
-  // `cancelled` is a first-class default status (MUL-4290): it is fetched into
-  // the cache like every other status and flows straight through to list /
-  // board / swimlane columns, header facet counts, batch selection, and the
-  // isEmpty check. The status filter narrows this set like any other status —
-  // it no longer unlocks an otherwise-hidden bucket.
+  // Status branches already reflect the visible category set chosen by the
+  // controller. Cancelled is hidden for a new view, but remains a first-class
+  // branch once the user restores it or selects it explicitly in a status
+  // filter; no client-only exclusion happens here.
   const ganttIssues = ganttIssuesQuery.data ?? EMPTY_ISSUES;
   const surfaceIssues = usesGantt
     ? ganttIssues
@@ -341,18 +340,12 @@ export function useIssueSurfaceData({
     // must never add a column. Two independent things narrow them: hidden
     // columns (display state) and the status filter, which is expressed in
     // concrete KEYS and so has to be mapped back to the columns those keys land
-    // in. Default view shows every category, `cancelled` last (its canonical
-    // position in ALL_STATUSES). (MUL-6243)
-    const resolved =
-      statusFilters.length > 0 ? statusFilterColumns(statusFilters, catalog) : null;
-    // Pending/error contribute no narrowing here; the surface's loading and
-    // error states (statusFilterPending / statusFilterError) are what stop it
-    // rendering as though the empty result were the answer.
-    const selected = resolved?.state === "resolved" ? resolved.columns : null;
-    return ALL_STATUSES.filter(
-      (s) =>
-        !hiddenStatusCategories.includes(s) &&
-        (selected === null || selected.has(s)),
+    // in. An explicit filter wins over hidden defaults so selecting Cancelled
+    // cannot produce an empty surface. (MUL-6243)
+    return visibleStatusCategories(
+      statusFilters,
+      hiddenStatusCategories,
+      catalog,
     );
   }, [statusFilters, hiddenStatusCategories, catalog]);
 

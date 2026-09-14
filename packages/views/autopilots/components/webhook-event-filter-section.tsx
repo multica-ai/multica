@@ -77,7 +77,7 @@ export function WebhookEventFilterSection({
                 onClick={() => removeFilter(idx)}
                 aria-label={t(($) => $.dialog.event_filter_remove_label)}
                 title={t(($) => $.dialog.event_filter_remove_label)}
-                className="ml-auto rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                className="ml-auto rounded-xs p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
                 <X className="size-3" />
               </button>

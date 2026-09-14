@@ -6,8 +6,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
@@ -209,4 +211,155 @@ func TestArchiveCompletedInboxExpandsCustomTerminalStatuses(t *testing.T) {
 		"SELECT count(*) FROM inbox_item WHERE issue_id = $1 AND archived = true", openIssueID); got != 0 {
 		t.Fatalf("archived rows for open issue = %d, want 0", got)
 	}
+}
+
+func TestInboxListBodyPreview(t *testing.T) {
+	issue := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+	text := func(s string) pgtype.Text { return pgtype.Text{String: s, Valid: true} }
+	long := strings.Repeat("a", 5000)
+	// Every CJK character is three bytes in UTF-8: a byte-based cut would land
+	// mid-character and produce invalid UTF-8.
+	longCJK := strings.Repeat("评论内容", 500)
+
+	cases := []struct {
+		name      string
+		notifType string
+		issueID   pgtype.UUID
+		body      pgtype.Text
+		want      *string
+	}{
+		{"null body stays null", "new_comment", issue, pgtype.Text{}, nil},
+		{"short comment is untouched", "new_comment", issue, text("looks good"), ptr("looks good")},
+		{"exactly at the limit is untouched", "new_comment", issue,
+			text(strings.Repeat("a", inboxListBodyPreviewLimit)),
+			ptr(strings.Repeat("a", inboxListBodyPreviewLimit))},
+		{"one past the limit is cut, ellipsis included", "new_comment", issue,
+			text(strings.Repeat("a", inboxListBodyPreviewLimit+1)),
+			ptr(strings.Repeat("a", inboxListBodyPreviewLimit-1) + "…")},
+		{"long comment is cut to the limit", "new_comment", issue, text(long),
+			ptr(strings.Repeat("a", inboxListBodyPreviewLimit-1) + "…")},
+		// Issue-less notifications render their body in the detail pane from
+		// the list cache, so shortening them would lose content.
+		{"comment without an issue keeps its full body", "new_comment", pgtype.UUID{}, text(long), ptr(long)},
+		// Other types are out of scope even when issue-backed: their body is
+		// not merely a preview of something the issue page shows.
+		{"other types keep their full body", "task_failed", issue, text(long), ptr(long)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := inboxListBody(tc.notifType, tc.issueID, tc.body)
+			switch {
+			case tc.want == nil && got != nil:
+				t.Fatalf("body = %q, want nil", *got)
+			case tc.want != nil && got == nil:
+				t.Fatalf("body = nil, want %d characters", utf8.RuneCountInString(*tc.want))
+			case tc.want != nil && *got != *tc.want:
+				t.Fatalf("body = %d characters %q…, want %d characters",
+					utf8.RuneCountInString(*got), truncateForLog(*got),
+					utf8.RuneCountInString(*tc.want))
+			}
+		})
+	}
+
+	t.Run("multi-byte text is cut on a character boundary", func(t *testing.T) {
+		got := inboxListBody("new_comment", issue, text(longCJK))
+		if got == nil {
+			t.Fatal("body = nil")
+		}
+		if !utf8.ValidString(*got) {
+			t.Fatalf("preview is not valid UTF-8: %q", truncateForLog(*got))
+		}
+		if n := utf8.RuneCountInString(*got); n != inboxListBodyPreviewLimit {
+			t.Fatalf("preview = %d characters, want %d", n, inboxListBodyPreviewLimit)
+		}
+		if !strings.HasSuffix(*got, "…") {
+			t.Fatalf("preview does not end with an ellipsis: %q", truncateForLog(*got))
+		}
+	})
+}
+
+// Both inbox lists ship the preview, the stored row keeps the whole comment,
+// and a notification that needs its full body still gets it.
+func TestInboxListsShipCommentPreviewNotFullComment(t *testing.T) {
+	workspaceID := dbfx.Workspace(t, "Inbox body preview", "inbox-preview-"+uuid.NewString())
+	dbfx.Member(t, workspaceID, testUserID, "owner")
+	activeIssue := dbfx.Issue(t, "Active comment issue", testutil.Cols{"workspace_id": workspaceID})
+	archivedIssue := dbfx.Issue(t, "Archived comment issue", testutil.Cols{"workspace_id": workspaceID})
+	fullComment := strings.Repeat("A long agent reply. ", 300)
+	issueLessBody := strings.Repeat("An issue-less notice. ", 300)
+
+	insert := func(cols testutil.Cols) {
+		base := testutil.Cols{
+			"workspace_id":   workspaceID,
+			"recipient_type": "member",
+			"recipient_id":   testUserID,
+			"severity":       "info",
+			"title":          "Notification",
+		}
+		for k, v := range cols {
+			base[k] = v
+		}
+		dbfx.Insert(t, "inbox_item", base)
+	}
+	insert(testutil.Cols{"type": "new_comment", "issue_id": activeIssue, "body": fullComment})
+	insert(testutil.Cols{"type": "new_comment", "issue_id": archivedIssue, "body": fullComment, "archived": true})
+	insert(testutil.Cols{"type": "autopilot_paused", "body": issueLessBody})
+
+	wantPreview := string([]rune(fullComment)[:inboxListBodyPreviewLimit-1]) + "…"
+	bodyOf := func(items []InboxItemResponse, issueID string) string {
+		t.Helper()
+		for _, item := range items {
+			if item.IssueID != nil && *item.IssueID == issueID {
+				if item.Body == nil {
+					t.Fatalf("item for issue %s has no body", issueID)
+				}
+				return *item.Body
+			}
+		}
+		t.Fatalf("no item for issue %s in %d items", issueID, len(items))
+		return ""
+	}
+
+	var active []InboxItemResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListInbox),
+		inboxRequest(http.MethodGet, "/api/inbox", workspaceID)).
+		Want(http.StatusOK).
+		JSON(&active)
+	if got := bodyOf(active, activeIssue); got != wantPreview {
+		t.Errorf("main list body = %d characters, want the %d-character preview",
+			utf8.RuneCountInString(got), inboxListBodyPreviewLimit)
+	}
+	var issueLess *string
+	for _, item := range active {
+		if item.IssueID == nil {
+			issueLess = item.Body
+		}
+	}
+	if issueLess == nil || *issueLess != issueLessBody {
+		t.Errorf("issue-less notification lost its full body (its detail pane renders it)")
+	}
+
+	var archived []InboxItemResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListArchivedInbox),
+		inboxRequest(http.MethodGet, "/api/inbox/archived", workspaceID)).
+		Want(http.StatusOK).
+		JSON(&archived)
+	if got := bodyOf(archived, archivedIssue); got != wantPreview {
+		t.Errorf("archived list body = %d characters, want the %d-character preview",
+			utf8.RuneCountInString(got), inboxListBodyPreviewLimit)
+	}
+
+	// Only the response is shortened; the stored comment is whole.
+	if got := dbfx.Count(t,
+		`SELECT count(*) FROM inbox_item WHERE workspace_id = $1 AND type = 'new_comment' AND body = $2`,
+		workspaceID, fullComment); got != 2 {
+		t.Errorf("stored full comments = %d, want 2", got)
+	}
+}
+
+func truncateForLog(s string) string {
+	if r := []rune(s); len(r) > 40 {
+		return string(r[:40])
+	}
+	return s
 }

@@ -4,19 +4,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, Download } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
-import { useLocale } from "../i18n";
+import { docsHrefForLocale, useLocale } from "../i18n";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
-import {
-  ClaudeCodeLogo,
-  CodexLogo,
-  GeminiCliLogo,
-  OpenClawLogo,
-  OpenCodeLogo,
-  heroButtonClassName,
-} from "./shared";
+import { HERO_PROVIDERS } from "./provider-marks";
+import { heroButtonClassName } from "./shared";
 
 export function LandingHero() {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const user = useAuthStore((s) => s.user);
   const ctaHref = useDashboardCtaHref();
 
@@ -53,7 +47,7 @@ export function LandingHero() {
               </Link>
               <Link
                 href="/contact-sales"
-                className="group inline-flex items-center justify-center gap-1.5 rounded-[12px] px-3 py-3 text-body font-semibold text-white/80 transition-colors hover:text-white"
+                className="group inline-flex items-center justify-center gap-1.5 rounded-(--landing-radius-action) px-3 py-3 text-body font-semibold text-white/80 transition-colors hover:text-white"
               >
                 {t.hero.talkToSales}
                 <ArrowRight
@@ -64,39 +58,59 @@ export function LandingHero() {
             </div>
           </div>
 
-          <div className="mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
-            <span className="text-body-lg text-white/50">
-              {t.hero.worksWith}
-            </span>
-            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-3">
-              <div className="flex items-center gap-2.5 text-white/80">
-                <ClaudeCodeLogo className="size-5" />
-                <span className="text-body-lg font-medium">Claude Code</span>
-              </div>
-              <div className="flex items-center gap-2.5 text-white/80">
-                <CodexLogo className="size-5" />
-                <span className="text-body-lg font-medium">Codex</span>
-              </div>
-              <div className="flex items-center gap-2.5 text-white/80">
-                <GeminiCliLogo className="size-5" />
-                <span className="text-body-lg font-medium">Gemini CLI</span>
-              </div>
-              <div className="flex items-center gap-2.5 text-white/80">
-                <OpenClawLogo className="size-5" />
-                <span className="text-body-lg font-medium">OpenClaw</span>
-              </div>
-              <div className="flex items-center gap-2.5 text-white/80">
-                <OpenCodeLogo className="size-5" />
-                <span className="text-body-lg font-medium">OpenCode</span>
-              </div>
-            </div>
-          </div>
+          <WorksWithRow
+            label={t.hero.worksWith}
+            href={`${docsHrefForLocale(locale)}/providers`}
+          />
 
           <div id="preview" className="mt-10 sm:mt-12">
             <ProductImage alt={t.hero.imageAlt} />
           </div>
         </section>
       </main>
+    </div>
+  );
+}
+
+/**
+ * The runtime catalog is far longer than this row (see `/docs/providers`), so
+ * the marks are a sample and the label carries the full claim — that split is
+ * what keeps the row honest without growing it every time a runtime lands.
+ */
+function WorksWithRow({ label, href }: { label: string; href: string }) {
+  return (
+    <div className="mt-12 flex flex-col items-center gap-6">
+      <Link
+        href={href}
+        className="group inline-flex items-center gap-1.5 text-body text-white/60 transition-colors hover:text-white"
+      >
+        {label}
+        <ArrowRight
+          className="size-3.5 transition-transform group-hover:translate-x-0.5"
+          aria-hidden
+        />
+      </Link>
+
+      {/*
+        Explicit column counts, not free wrapping: with `flex-wrap` the 14 marks
+        broke 13 + 1 around 834px and 12 + 2 around 768px, and a single orphan
+        on the second row reads as a bug rather than a layout. Fourteen columns
+        once there is room for one row, seven — an exact 7 x 2 — below that. The
+        columns carry the spacing, so the marks stay evenly pitched at every
+        width and the grid still shrinks below its max width on a narrow phone.
+      */}
+      <ul className="grid w-full max-w-[392px] grid-cols-7 items-center justify-items-center gap-y-6 sm:max-w-[532px] lg:max-w-[896px] lg:grid-cols-14">
+        {HERO_PROVIDERS.map(({ name, Mark, size }) => (
+          <li
+            key={name}
+            title={name}
+            className="flex items-center text-white opacity-70 drop-shadow-[0_1px_6px_rgba(0,0,0,0.28)] transition-opacity duration-200 hover:opacity-100"
+          >
+            <Mark className={size ?? "size-6"} />
+            <span className="sr-only">{name}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

@@ -39,6 +39,8 @@ import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
+import { isDeletedComment } from "@multica/core/issues/comment-deletion";
+import { useConfigStore } from "@multica/core/config";
 import { selectStandaloneAttachments } from "@multica/core/attachments/image-sequence";
 import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
@@ -47,6 +49,7 @@ import { deriveThreadResolution } from "./thread-utils";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
 import { InlineCommentRun, useInlineCommentRunState, type InlineCommentRunState } from "./inline-comment-run";
 import { EMPTY_COMMENT_RUNS, showCommentRunInHeader, type CommentRun } from "./comment-runs";
+import { useCommentAnnotations } from "./use-comment-annotations";
 import { useRunCommentMotion } from "./use-run-comment-motion";
 
 const commentActionClassName =
@@ -158,15 +161,20 @@ function DeleteCommentDialog({
   hasReplies?: boolean;
 }) {
   const { t } = useT("issues");
+  // Only a server that declares it keeps the replies (#8296); an older one
+  // deletes them with the comment, and the copy must say so.
+  const keepsReplies = useConfigStore((s) => s.commentDeleteKeepRepliesSupported);
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{t(($) => $.comment.delete_title)}</AlertDialogTitle>
           <AlertDialogDescription>
-            {hasReplies
-              ? t(($) => $.comment.delete_desc_with_replies)
-              : t(($) => $.comment.delete_desc)}
+            {!hasReplies
+              ? t(($) => $.comment.delete_desc)
+              : keepsReplies
+                ? t(($) => $.comment.delete_desc_replies_kept)
+                : t(($) => $.comment.delete_desc_with_replies)}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -604,6 +612,7 @@ function CommentRow({
   canModerate = false,
   isResolution = false,
   isHighlighted = false,
+  hasReplies = false,
   onEdit,
   onDelete,
   onToggleReaction,
@@ -618,6 +627,8 @@ function CommentRow({
   canModerate?: boolean;
   /** True when this reply is the thread's resolution (shows the green badge). */
   isResolution?: boolean;
+  /** True when other replies answer this one; they are kept when it is deleted. */
+  hasReplies?: boolean;
   /** True when this row is the deep-link target currently being highlighted. */
   isHighlighted?: boolean;
   onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string) => Promise<void>;
@@ -639,6 +650,16 @@ function CommentRow({
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const reactions = entry.reactions ?? [];
+
+  if (isDeletedComment(entry)) {
+    // Kept only so the replies to it stay attached (#8296): nothing is left
+    // to show or act on.
+    return (
+      <div data-comment-block className="py-3 pl-12 pr-4 max-md:pl-3 max-md:pr-3 text-body italic text-muted-foreground">
+        {t(($) => $.comment.deleted_placeholder)}
+      </div>
+    );
+  }
 
   return (
     <div data-comment-block className="pb-3">
@@ -760,6 +781,7 @@ function CommentRow({
             open={confirmDelete}
             onOpenChange={setConfirmDelete}
             onConfirm={() => onDelete(entry.id)}
+            hasReplies={hasReplies}
           />
         </div>
       </StickyHeaderShell>
@@ -844,7 +866,9 @@ function CommentRow({
         </div>
       ) : (
         <>
-          <div data-comment-content={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 text-body leading-relaxed text-foreground">
+          <div tabIndex={currentUserId ? 0 : undefined} role="group"
+            aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
+            data-comment-content={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 text-body leading-relaxed text-foreground">
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
@@ -938,6 +962,18 @@ function CommentCardImpl({
   const locale = useLocale();
   const timeAgo = useTimeAgo();
   const { getActorName } = useActorName();
+  const replyTarget = useCommentDraftStore((s) => s.drafts[`reply:${issueId}:${entry.id}`]?.replyTarget);
+  const replyTargetId = replyTarget?.commentId ?? entry.id;
+  // A deleted target's tombstone is as gone as a removed row.
+  const replyTargetMissing = !!replyTarget && replyTargetId !== entry.id
+    && !replies.some((r) => r.id === replyTargetId && !isDeletedComment(r));
+  const annotation = useCommentAnnotations({
+    draftKey: `reply:${issueId}:${entry.id}`,
+    sources: [entry, ...replies].filter((e) => e.type === "comment")
+      .map((e) => ({ id: e.id, name: e.actor_name || getActorName(e.actor_type, e.actor_id), revision: e.revision })),
+    enabled: !!currentUserId,
+    onAdded: () => { if (replyFolded) onResolvedExpandChange?.(entry.id, true); },
+  });
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
   const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
   const open = !isCollapsed;
@@ -972,6 +1008,8 @@ function CommentCardImpl({
     });
 
   const replyCount = allNestedReplies.length;
+  const repliedToIds = new Set(allNestedReplies.map((reply) => reply.parent_id));
+  const deleted = isDeletedComment(entry);
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
   const reactions = entry.reactions ?? [];
 
@@ -1009,7 +1047,8 @@ function CommentCardImpl({
     // overflow-clip (not -hidden) clips the rounded corners WITHOUT creating a
     // scroll container, so the sticky collapse affordances below resolve to the
     // timeline's scroll parent instead of this card. See PR #3623.
-    <Card className="!py-0 !gap-0 overflow-clip transition-colors duration-700">
+    <Card ref={annotation.cardRef} {...annotation.captureProps} className="!py-0 !gap-0 overflow-clip transition-colors duration-700">
+      {annotation.popup}
       {onCollapseResolved && (
         <button
           type="button"
@@ -1035,33 +1074,42 @@ function CommentCardImpl({
             className={cn("px-4 max-md:px-3", open ? "pt-3 pb-2" : "py-3")}
           >
             <div className="flex items-center gap-2.5">
-              <ActorAvatar
-                actorType={entry.actor_type}
-                actorId={entry.actor_id}
-                name={entry.actor_name}
-                avatarUrl={entry.actor_avatar_url}
-                profileRequiresDirectoryEntry
-                size="md"
-                enableHoverCard
-                showStatusDot
-              />
-              <span className="shrink-0 cursor-pointer text-body font-medium">
-                {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
-              </span>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <span className="shrink-0 text-caption text-muted-foreground cursor-default">
-                      {timeAgo(entry.created_at)}
-                    </span>
-                  }
-                />
-                <TooltipContent side="top">
-                  {new Date(entry.created_at).toLocaleString(locale)}
-                </TooltipContent>
-              </Tooltip>
+              {deleted ? (
+                // The thread's root was deleted; its replies still hang off it.
+                <span className="min-w-0 truncate text-body italic text-muted-foreground">
+                  {t(($) => $.comment.deleted_placeholder)}
+                </span>
+              ) : (
+                <>
+                  <ActorAvatar
+                    actorType={entry.actor_type}
+                    actorId={entry.actor_id}
+                    name={entry.actor_name}
+                    avatarUrl={entry.actor_avatar_url}
+                    profileRequiresDirectoryEntry
+                    size="md"
+                    enableHoverCard
+                    showStatusDot
+                  />
+                  <span className="shrink-0 cursor-pointer text-body font-medium">
+                    {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
+                  </span>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span className="shrink-0 text-caption text-muted-foreground cursor-default">
+                          {timeAgo(entry.created_at)}
+                        </span>
+                      }
+                    />
+                    <TooltipContent side="top">
+                      {new Date(entry.created_at).toLocaleString(locale)}
+                    </TooltipContent>
+                  </Tooltip>
 
-              {renderRuns(entry.id, "header")}
+                  {renderRuns(entry.id, "header")}
+                </>
+              )}
 
               {!open && contentPreview && (
                 <span className="min-w-0 flex-1 truncate text-caption text-muted-foreground">
@@ -1088,7 +1136,7 @@ function CommentCardImpl({
                 >
                   <ChevronRight aria-hidden className={cn("h-3.5 w-3.5 transition-transform motion-reduce:transition-none", open && "rotate-90")} />
                 </Button>
-                {open && <>
+                {open && !deleted && <>
                   {!edit.editing && <QuickEmojiPicker
                     onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
                     ariaLabel={t(($) => $.comment.add_reaction)}
@@ -1165,7 +1213,7 @@ function CommentCardImpl({
                     open={confirmDelete}
                     onOpenChange={setConfirmDelete}
                     onConfirm={() => onDelete(entry.id)}
-                    hasReplies
+                    hasReplies={replyCount > 0}
                   />
                 </>}
               </div>
@@ -1175,7 +1223,7 @@ function CommentCardImpl({
         {/* Root comment body. Avoid Base UI's Panel here: every mounted panel
             probes computed styles to detect animations, forcing a style
             recalculation across long issue-detail documents. */}
-        {open && (
+        {open && !deleted && (
           <div id={`comment-body-${entry.id}`} className="px-4 max-md:px-3 pb-3">
             {edit.editing ? (
               <div
@@ -1257,7 +1305,9 @@ function CommentCardImpl({
               </div>
             ) : (
               <>
-                <div data-comment-content={entry.id} className="pl-8 max-md:pl-0 text-body leading-relaxed text-foreground">
+                <div tabIndex={currentUserId ? 0 : undefined} role="group"
+            aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
+            data-comment-content={entry.id} className="pl-8 max-md:pl-0 text-body leading-relaxed text-foreground">
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8 max-md:pl-0" />
@@ -1318,6 +1368,7 @@ function CommentCardImpl({
                       canModerate={canModerate}
                       isResolution
                       isHighlighted={highlightedCommentId === resolutionReply.id}
+                      hasReplies={repliedToIds.has(resolutionReply.id)}
                       onEdit={onEdit}
                       onDelete={onDelete}
                       onToggleReaction={onToggleReaction}
@@ -1362,6 +1413,7 @@ function CommentCardImpl({
                       canModerate={canModerate}
                       isResolution={reply.id === replyResolutionId}
                       isHighlighted={highlightedCommentId === reply.id}
+                      hasReplies={repliedToIds.has(reply.id)}
                       onEdit={onEdit}
                       onDelete={onDelete}
                       onToggleReaction={onToggleReaction}
@@ -1377,13 +1429,15 @@ function CommentCardImpl({
               <div className="border-t border-border/50 px-4 max-md:px-3 py-2.5">
                 <ReplyInput
                   issueId={issueId}
-                  parentId={entry.id}
+                  parentId={replyTargetId}
+                  targetMissing={replyTargetMissing}
                   placeholder={t(($) => $.reply.placeholder)}
                   size="sm"
                   avatarType="member"
                   avatarId={currentUserId ?? ""}
                   draftKey={`reply:${issueId}:${entry.id}`}
-                  onSubmit={(content, attachmentIds, suppressAgentIds) => onReply(entry.id, content, attachmentIds, suppressAgentIds)}
+                  onEditAnnotation={(id) => annotation.editAnnotation(id, true)}
+                  onSubmit={(content, attachmentIds, suppressAgentIds) => replyTargetMissing ? Promise.resolve(false) : onReply(replyTargetId, content, attachmentIds, suppressAgentIds)}
                   onAccepted={onReplyAccepted}
                 />
               </div>

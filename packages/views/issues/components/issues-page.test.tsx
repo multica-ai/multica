@@ -272,8 +272,8 @@ vi.mock("@multica/core/api", () => ({
 
 // Mock issue config
 vi.mock("@multica/core/issues/config", () => ({
-  ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
+  ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"],
+  STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"],
   STATUS_CONFIG: {
     backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
     todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
@@ -378,6 +378,22 @@ vi.mock("@multica/core/issues/stores/view-store", () => ({
     { key: "project", label: "Project" },
     { key: "labels", label: "Labels" },
     { key: "childProgress", label: "Sub-issue progress" },
+  ],
+  cardPropertyOptionsForView: () => [
+    { key: "priority", label: "Priority" },
+    { key: "description", label: "Description" },
+    { key: "assignee", label: "Assignee" },
+    { key: "dueDate", label: "Due date" },
+    { key: "project", label: "Project" },
+    { key: "labels", label: "Labels" },
+    { key: "childProgress", label: "Sub-issue progress" },
+  ],
+  sortOptionsForView: () => [
+    { value: "position", label: "Manual" },
+    { value: "priority", label: "Priority" },
+    { value: "due_date", label: "Due date" },
+    { value: "created_at", label: "Created date" },
+    { value: "title", label: "Title" },
   ],
 }));
 

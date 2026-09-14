@@ -87,8 +87,8 @@ function durationBetween(start?: string, end?: string): number | undefined {
   const a = timeMs(start);
   const b = timeMs(end);
   if (a === undefined || b === undefined) return undefined;
-  // Clamp rather than drop: the daemon flushes in 500ms batches, so a fast
-  // call can land with its result on the same tick or one tick earlier.
+  // Clamp rather than drop: a daemon wall-clock adjustment can make a result
+  // appear just before its call. Zero is preserved as "unknown" in the UI.
   return Math.max(0, b - a);
 }
 

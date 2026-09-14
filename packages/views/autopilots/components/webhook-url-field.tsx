@@ -13,7 +13,7 @@ const SIZES = {
   // Trigger row on the detail page — compact, sits inline with the row actions.
   sm: {
     row: "items-center",
-    value: "rounded bg-muted px-2 py-1 text-caption",
+    value: "rounded-xs bg-muted px-2 py-1 text-caption",
     button: "h-7 w-7",
     buttonVariant: "ghost",
     icon: "h-3.5 w-3.5",

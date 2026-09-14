@@ -607,6 +607,11 @@ function BoardViewImpl({
         const currentIssue = map.get(activeId);
         if (!currentIssue || issueMatchesGroup(currentIssue, finalGroup)) {
           resetColumns();
+          if (activeId !== overId) {
+            toast.info(t(($) => $.board.manual_reorder_hint), {
+              id: "issue-manual-reorder-hint",
+            });
+          }
           return;
         }
         // Optimistically move the card into the target column *now*. Without
@@ -665,7 +670,7 @@ function BoardViewImpl({
       );
       applyPropertyGroupValue(finalGroup, activeId);
     },
-    [groupedIssues, groups, grouping, groupingOptionIds, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns, applyPropertyGroupValue],
+    [groupedIssues, groups, grouping, groupingOptionIds, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns, applyPropertyGroupValue, t],
   );
 
   // An aborted drag (pointercancel, window resize, tab hide, Escape) fires

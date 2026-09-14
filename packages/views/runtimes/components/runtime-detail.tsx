@@ -639,7 +639,7 @@ function VisibilityChoice({
             type="button"
             onClick={onClick}
             disabled={disabled}
-            className={`inline-flex items-center gap-1.5 rounded px-2 py-1 text-caption font-medium transition-colors ${
+            className={`inline-flex items-center gap-1.5 rounded-xs px-2 py-1 text-caption font-medium transition-colors ${
               active
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"

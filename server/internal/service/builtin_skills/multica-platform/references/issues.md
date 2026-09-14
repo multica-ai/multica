@@ -16,15 +16,18 @@ Product contracts the runtime brief does not fully encode.
 The GitHub webhook runs two separate scans over an incoming PR. They are not the
 same gate and they read different fields.
 
-**Linking** scans the PR **title, body, OR branch** for a routable issue key
-(`PREFIX-NUMBER`, e.g. `MUL-123`). Each match writes an issue to PR link row.
-This is the link that `multica issue pull-requests` reads back — but see the
-reference-only rule below: a key that appears **only** as a bare mention in the
-body is linked yet hidden from that list.
+**Linking** scans three places for a routable issue key (`PREFIX-NUMBER`, e.g.
+`MUL-123`): the PR **title**, the **branch name**, and the **body right after a
+closing keyword**. Each match writes an issue to PR link row — the link that
+`multica issue pull-requests` reads back. A key that appears in the body as a
+bare mention, with nothing in the title or branch and no closing keyword, is a
+passing reference and links nothing.
 
 ```text
-MUL-123: add the thing the issue asks for        # title prefix → links, shown
-agent/dana/mul-123-add-the-thing             # branch ref   → links, shown
+MUL-123: add the thing the issue asks for        # key anywhere in title → links
+agent/dana/mul-123-add-the-thing             # branch ref   → links
+Closes MUL-123                                   # body + closing keyword → links
+Related to MUL-123                               # body mention only → no link
 ```
 
 **Close intent** is stricter and is a separate scan over **title or body only —
@@ -37,26 +40,31 @@ auto-advances the issue to `done` when the PR merges.
 Closes MUL-123                                    # links AND records close intent
 Fixes MUL-123
 Resolves MUL-123
-Fix login MUL-123                                 # links only — keyword not adjacent
+Fix login MUL-123                                 # in a title: links, no close intent
 ```
 
-Consequence: a bare title prefix or a branch reference links the PR but does not
-close the issue on merge. A closing keyword immediately adjacent to the issue key
+Consequence: a bare key in the title or a branch reference links the PR but does
+not close the issue on merge. A closing keyword immediately adjacent to the issue key
 records close intent; on merge, that close intent can move the linked issue to
 `done`.
 
-**Reference-only links (hidden from the PR list).** A key that appears **only**
-as a bare mention in the body — no closing keyword, and not in the title or
-branch — still writes a link row, but the row is flagged `reference_only` and
-**excluded from `multica issue pull-requests`** (and the issue's right-side PR
-list in the UI). This keeps passing mentions like `Related MUL-123` or
-`Follow up in MUL-123` from surfacing an unrelated PR as if it were working on
-that issue. To make a PR show up for an issue, put the key in the title, the
-branch, or after a closing keyword in the body — not as a loose body reference.
+**Passing mentions link nothing.** A key that appears **only** as a bare mention
+in the body — no closing keyword, and not in the title or branch — does not link
+the PR at all. This keeps `Related MUL-123` or `Follow up in MUL-123` from
+surfacing an unrelated PR as if it were working on that issue. To make a PR show
+up for an issue, put the key in the title, the branch, or after a closing keyword
+in the body — not as a loose body reference.
+
+While the PR is still open the link follows the live title and body: adding a key
+links it, and downgrading that key to a plain mention drops the link. Once the PR
+has merged or closed, existing links and their close-intent decision are frozen —
+but a PR that was never linked can still be linked by editing it, so a forgotten
+key is repairable after the fact. That late link does not move the issue to
+`done`; close intent is decided at merge time.
 
 ```text
-Closes MUL-123 in the body                        # links and shown
-Related to MUL-123 in the body (no title/branch)  # links but reference_only → hidden
+Closes MUL-123 in the body                        # links
+Related to MUL-123 in the body (no title/branch)  # no link
 ```
 
 ### Default for code-changing issue work
@@ -68,13 +76,15 @@ an unconditional command: if no code changed, say no PR is needed; if PR creatio
 is blocked by auth, failing tests, or missing remote state, report that blocker
 instead of pretending the run is complete.
 
-Use a routable issue key in the PR title, body, or branch so the webhook can link
-the PR back to the issue. If the PR should close the issue on merge, put the key
-immediately after a closing keyword in the title or body, for example:
+To make the PR show on the issue, put a routable issue key in the PR **title**
+(preferred) or the **branch**. A key that appears only as a bare mention in the
+body links nothing. Do not use a closing keyword (`Closes` / `Fixes` /
+`Resolves`) unless the issue should auto-advance to `done` on merge.
 
 ```text
-MUL-123: fix login redirect        # links only
-Closes MUL-123                     # links and records close intent
+MUL-123: fix login redirect        # key anywhere in title → links
+Closes MUL-123                     # only when merge should mark the issue done
+Part of MUL-123                    # body mention only → no link at all
 ```
 
 In the final issue comment, include the PR URL when a PR exists. If the task did
@@ -117,10 +127,36 @@ Returns `{"pull_requests": [...]}`. Each element exposes:
 So "is it merged?" is `state == "merged"` (or `merged_at != null`); "is it still
 a draft?" is `state == "draft"`; coarse CI status is `checks_conclusion`.
 
-If the command returns no linked PRs after a PR was opened, the link scanner did
-not observe a routable issue key in the PR title/body/branch — or the only match
-was a bare body mention, which links as `reference_only` and is hidden from this
-list (see the reference-only rule above).
+If the command returns no linked PRs after a PR was opened, check the syntax
+first: the scanner needs a routable issue key in the PR title or branch, or one
+right after a closing keyword in the body — a bare body mention does not count
+(see the passing-mention rule above). When the syntax is the problem, editing the
+title or adding a closing keyword re-runs the scan.
+
+If the key is already written correctly and the list is still empty, stop editing
+the PR blind: another no-op edit cannot fix an integration that never received the
+event. Check the integration side instead — whether the app is installed on that
+repository, whether the installation is bound to this workspace, whether
+auto-linking is turned off for the workspace, and whether the event reached the
+platform at all. A delivery that failed is not retried on its own, but it can be
+redelivered once the receiving side is fixed. Report what you found in the result
+comment rather than repeating the edit.
+
+## Listing and ordering issues
+
+`issue list` reads one page at a time, with a server maximum of 100 issues.
+Advance `--offset` by the number of issues actually returned. If the server
+cannot count matching issues, it returns `failed to count issues` as an error;
+do not treat that failure as an empty or complete list. Older servers can
+substitute the page length for a failed count, so that value alone is not proof
+that all matching issues have been read.
+
+`issue reorder` reads the issue's project-scoped status column before writing
+its new position. When a legacy total is unavailable or no larger than its
+page, it reads through an empty page. A failed request, malformed page, or
+duplicate issue stops the operation before any position write. This protects
+against truncated or repeated pages, but does not promise a snapshot across
+concurrent edits. There is no CLI bulk-export or `--all` mode.
 
 ## Custom properties: typed workflow state
 
@@ -263,14 +299,6 @@ multica issue runs <issue-id> --active --output json     # in-flight runs on thi
 multica issue runs <issue-id> --siblings --output json   # ...and across the sub-issue family
 ```
 
-Comment replies stay with the directly replied-to agent or the thread owner;
-they never schedule a delayed run for the issue assignee. Waiting for an offline
-or busy agent does not change the recipient. Explicitly @-mention another agent to
-involve it. New top-level comments without a target still route to the assignee.
-Issue and agent run history omit unused assignee fallbacks from older versions;
-cancelled fallbacks are hidden even if dispatched, provided execution never
-started. Ordinary cancellations and fallbacks that started remain visible.
-
 `--active` drops the execution history and returns only `queued` / `dispatched`
 / `running` / `waiting_local_directory` runs. `--siblings` widens the same read
 to the issue's family — its parent (or itself, when it has no parent) plus every
@@ -316,12 +344,12 @@ Creating every serial step as `todo` enqueues the whole chain at once.
 ### Stages: order sub-issues into barrier groups
 
 `--stage <N>` (N >= 1) groups sub-issues under the same parent into ordered
-stages. The parent assignee is woken **once, when a whole stage finishes** —
-i.e. every sub-issue in the lowest unfinished stage has reached a terminal
-status (`done`/`cancelled`). A completion that does not close a stage is silent
-(no comment, no wake). A sibling set with **no** stages is one implicit stage,
-so the parent is woken once when the *last* sub-issue finishes — not on every
-child.
+stages. The server **tries once to wake the parent assignee when a whole stage
+finishes** — i.e. every sub-issue in the lowest unfinished stage has reached a
+terminal status (`done`/`cancelled`); a notification that fails is not replayed.
+A completion that does not close a stage is silent (no comment, no wake). A
+sibling set with **no** stages is one implicit stage, so the parent is woken
+once when the *last* sub-issue finishes — not on every child.
 
 Advancement is agent-driven: the server only detects the closed barrier and
 wakes the parent assignee, who then decides whether to promote the next stage's
@@ -358,6 +386,7 @@ PR title (link the issue):
 
 ```text
 Fix login redirect                  # incorrect — no issue key, won't link
+Body-only "Part of MUL-123"         # incorrect — passing mention, won't link
 MUL-123: fix login redirect        # correct — links the PR
 ```
 

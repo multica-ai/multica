@@ -29,13 +29,13 @@ type DaemonTokenIdentity struct {
 // or reports a cache miss, so single-node dev / tests with no REDIS_URL
 // degrade cleanly to direct DB lookups.
 type DaemonTokenCache struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
 // NewDaemonTokenCache returns a cache backed by rdb. Pass nil to disable
 // caching; the returned *DaemonTokenCache is safe to call but never hits
 // Redis.
-func NewDaemonTokenCache(rdb *redis.Client) *DaemonTokenCache {
+func NewDaemonTokenCache(rdb redis.UniversalClient) *DaemonTokenCache {
 	if rdb == nil {
 		return nil
 	}

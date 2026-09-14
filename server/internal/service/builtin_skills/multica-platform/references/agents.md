@@ -65,21 +65,17 @@ multica agent create --name <name> --runtime-id <runtime-id> \
 
 The CLI builds a JSON body and posts it to `/api/agents`. It only adds a key
 when its flag was provided — `description`/`instructions` on a non-empty value,
-the rest (`runtime-config`, `custom-args`, `model`, `thinking-level`,
-`service-tier`, `visibility`, …) on the flag being explicitly set — so omitted
-flags fall through to server defaults rather than sending empty strings.
-`--max-concurrent-tasks` is validated as 1–50 before the request is sent.
+the rest (`runtime-config`, `custom-args`, `conversation-starters`, `model`,
+`thinking-level`, `service-tier`, `visibility`, …) on the flag being explicitly
+set — so omitted flags fall through to server defaults rather than sending
+empty strings. `--max-concurrent-tasks` is validated as 1–50 before the
+request is sent. `--conversation-starters` is a JSON array of `{label, prompt}`
+objects (at most 3); pass `'[]'` on update to clear.
 
 The HTTP body accepts: `name`, `description`, `instructions`,
 `conversation_starters`, `avatar_url`, `runtime_id`, `runtime_config`,
 `custom_env`, `custom_args`, `model`, `thinking_level`, `service_tier`,
 `visibility`, `max_concurrent_tasks`, `mcp_config`, `skill_ids`.
-
-The body accepts more than the CLI exposes. `conversation_starters` has no
-`agent create` / `agent update` flag — the CLI can only carry it across an
-`agent copy`. Setting it for a new agent means either calling `/api/agents`
-directly or telling the human to use the web UI; see below for where they
-will find it.
 
 ## Copying an agent
 
@@ -203,6 +199,11 @@ Omitting the field on create defaults to `[]`; omitting it on update preserves
 the stored value, and an explicit `[]` clears it. An agent with none
 configured still shows three built-in generic defaults in that empty state, so
 "the Chat shows suggestions" does not mean this agent has any of its own.
+
+Set them from the CLI with `--conversation-starters` on `agent create` and
+`agent update`. The flag is Changed-gated like `--custom-args`: omit it to
+leave the server default (create) or the stored value (update); pass `'[]'`
+to clear. `agent copy` still carries the source value and has no override flag.
 
 ### model vs custom_args
 
@@ -368,9 +369,8 @@ State-changing (require an explicit instruction — do not run speculatively):
   clear; only `custom_env` is gated behind the dedicated env endpoint.
 - "`agent get` shows env values." It shows only `has_custom_env` and
   `custom_env_key_count`.
-- "Every accepted body field has a CLI flag." `conversation_starters` does not
-  — `agent create`/`agent update` cannot set it, and `agent copy` only carries
-  an existing value forward.
+- "`agent copy` can override conversation starters." It cannot — create and
+  update take `--conversation-starters`, but copy only carries the source value.
 - "An invalid `thinking_level`/`model` combo is caught at create." Only an
   unknown provider-level literal is — model-specific gaps fail at run time.
 - "`set` and `add` are interchangeable for skills." `set` replaces all

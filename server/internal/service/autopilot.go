@@ -124,9 +124,11 @@ func (s *AutopilotService) DispatchAutopilot(
 	payload []byte,
 ) (*db.AutopilotRun, error) {
 	// No member actor on this entry point (schedule / webhook / api, or a manual
-	// trigger without a resolved member): the run acts as the trigger's creator
-	// (trigger_owner), degrading to the audit-only rule_owner when no creator is
-	// recoverable — in which case it carries no authorization at all (MUL-6951).
+	// trigger without a resolved member): the run acts as the trigger's persisted
+	// created_by principal (trigger_owner; legacy semantics in
+	// ResolveAutopilotTriggerPrincipal), degrading to the audit-only rule_owner when
+	// the trigger has none — in which case it carries no authorization at all
+	// (MUL-6951).
 	// These callers don't surface a per-run reason code to a human, so it is
 	// dropped.
 	// webhookDeliveryID is invalid here — durable webhook deliveries admit through
@@ -136,8 +138,8 @@ func (s *AutopilotService) DispatchAutopilot(
 }
 
 // DispatchAutopilotManual is the "run now" entry point for a manual trigger.
-// Scheduled / webhook / api dispatch acts as the firing trigger's creator
-// (MUL-6951); a manual trigger is a direct human action by the human who ORDERED
+// Scheduled / webhook / api dispatch acts as the firing trigger's created_by
+// principal (MUL-6951); a manual trigger is a direct human action by the human who ORDERED
 // it instead, so it need not consult the trigger at all: the run is attributed
 // direct_human to actorUserID, which becomes BOTH its originator (authorization)
 // and accountable human (MUL-4302 §4), across both execution modes.
@@ -201,8 +203,8 @@ func (s *AutopilotService) AdmitAutopilotWebhookDelivery(
 	}
 
 	// Webhook admission has no member actor → the automation principal is this
-	// trigger's creator (MUL-6951); the per-run reason code is not surfaced to a
-	// human here, so it is dropped.
+	// trigger's created_by (MUL-6951; see ResolveAutopilotTriggerPrincipal); the
+	// per-run reason code is not surfaced to a human here, so it is dropped.
 	if reason, _, skip := s.shouldSkipDispatch(ctx, autopilot, pgtype.UUID{}, triggerID); skip {
 		run, err := s.recordSkippedRun(
 			ctx,
@@ -475,8 +477,8 @@ func (s *AutopilotService) DispatchAutopilotForPlan(
 		return nil, fmt.Errorf("dispatch for plan: lookup existing run: %w", err)
 	}
 
-	// Scheduled dispatch has no member actor → it acts as the trigger's creator
-	// (trigger_owner, MUL-6951), and has no human surface for a per-run reason
+	// Scheduled dispatch has no member actor → it acts as the trigger's created_by
+	// principal (trigger_owner, MUL-6951), and has no human surface for a per-run reason
 	// code, so it is dropped. No webhook delivery on the scheduled-plan path.
 	key := "schedule:" + util.UUIDToString(triggerID) + ":" + plannedAt.UTC().Format(time.RFC3339Nano)
 	run, _, err := s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, plannedTS, pgtype.UUID{}, pgtype.UUID{}, key)
@@ -807,13 +809,13 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// actor-carrying entry points so attribution resolves direct_human to the
 	// triggering member (originator == accountable == actor, MUL-4302 §4). Schedule /
 	// webhook dispatch has no actor and takes the plain entry points, where the
-	// autopilot-origin issue resolves to the trigger's creator (MUL-6951). The
-	// *ByActor variants are the actor-carrying enqueue methods.
+	// autopilot-origin issue resolves to the trigger's created_by principal
+	// (MUL-6951). The *ByActor variants are the actor-carrying enqueue methods.
 	if ap.AssigneeType == "squad" {
 		// Fail-closed invocation gate: verify the admission principal (manual
-		// clicker, else creator — see autopilotAdmitInvoke) may still invoke the
-		// leader. Catches configs that predate the save-time gate, and configs
-		// that no longer pass (MUL-3963 / MUL-4525).
+		// clicker, else the trigger's created_by — see autopilotAdmitInvoke) may
+		// still invoke the leader. Catches configs that predate the save-time
+		// gate, and configs that no longer pass (MUL-3963 / MUL-4525).
 		if !s.autopilotAdmitInvoke(ctx, ap, leader, actorUserID, run.TriggerID) {
 			return fmt.Errorf("not allowed to invoke private squad leader")
 		}
@@ -970,7 +972,7 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	}
 
 	// Fail-closed invocation gate for squad autopilots (admission principal =
-	// manual clicker, else creator — see autopilotAdmitInvoke).
+	// manual clicker, else the trigger's created_by — see autopilotAdmitInvoke).
 	if ap.AssigneeType == "squad" && !s.autopilotAdmitInvoke(ctx, ap, agent, actorUserID, run.TriggerID) {
 		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "not allowed to invoke private squad leader"), code: dispatch.ReasonInvocationNotAllowed}
 	}
@@ -978,16 +980,17 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	// Attribution splits on the trigger only to pick WHICH human and which source
 	// label; both branches now produce a real originator. A MANUAL trigger is a
 	// direct human action: the triggering member is direct_human (MUL-4302 §4). A
-	// schedule / webhook trigger resolves the firing trigger's immutable CREATOR —
-	// trigger_owner, from run.TriggerID (MUL-4302; MUL-6951) — degrading to the rule
-	// version publisher (rule_owner, audit-only) when no creator is recoverable, then
-	// to unattributed. An edit of the trigger does NOT move this: published_by
+	// schedule / webhook trigger resolves the firing trigger's created_by principal —
+	// trigger_owner, from run.TriggerID (MUL-4302; MUL-6951; for a legacy trigger a
+	// backfilled inference, see ResolveAutopilotTriggerPrincipal) — degrading to the
+	// rule version publisher (rule_owner, audit-only) when it has none, then to
+	// unattributed. An edit of the trigger does NOT move this: published_by
 	// transfers, created_by does not. Since MUL-6951 that human is the originator
-	// too, so an armed autopilot runs with its creator's authorization instead of
-	// borrowing narrowly-scoped capabilities per surface; the source label is what
-	// keeps "fired on a schedule" distinguishable from "a human clicked run". Either
-	// way evidence points at the autopilot run and the row is never a NULL-source
-	// bypass.
+	// too, so an armed autopilot runs with its created_by principal's authorization
+	// instead of borrowing narrowly-scoped capabilities per surface; the source
+	// label is what keeps "fired on a schedule" distinguishable from "a human
+	// clicked run". Either way evidence points at the autopilot run and the row is
+	// never a NULL-source bypass.
 	var autopilotAttr attribution.Result
 	if actorUserID.Valid {
 		autopilotAttr = attribution.DirectHumanRun(actorUserID, attribution.EvidenceAutopilotRun, run.ID)
@@ -1359,8 +1362,9 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 	// resolved by the handler (requireAutopilotTriggerInvoker) — not the
 	// autopilot creator's, so admission and attribution credit the same human and
 	// never fork. Automation (schedule / webhook, actorUserID invalid) preserves
-	// that same property by resolving the trigger's creator, which is also the
-	// human the run will act as (MUL-6951). Admins do NOT bypass a private agent
+	// that same property by resolving the trigger's created_by principal
+	// (ResolveAutopilotTriggerPrincipal), which is also the human the run will act
+	// as (MUL-6951). Admins do NOT bypass a private agent
 	// they do not own, and no branch admits a principal-less dispatch. For squad
 	// autopilots the gate runs against the resolved leader.
 	if !s.autopilotAdmitInvoke(ctx, ap, agent, actorUserID, triggerID) {
@@ -1870,8 +1874,10 @@ func (s *AutopilotService) getIssuePrefix(workspaceID pgtype.UUID) string {
 // invoke the target agent (MUL-4525). A MANUAL "run now" (actorUserID valid) is
 // a direct human action gated by the CURRENT clicker's access, so admission and
 // attribution credit the same member. Automation (schedule / webhook / api,
-// actorUserID invalid) resolves the trigger's creator — the same human the run
-// itself will act as (MUL-6951). Both branches fail closed and never grant an admin bypass.
+// actorUserID invalid) resolves the trigger's created_by principal — the same
+// human the run itself will act as (MUL-6951; legacy semantics in
+// ResolveAutopilotTriggerPrincipal). Both branches fail closed and never grant an
+// admin bypass.
 func (s *AutopilotService) autopilotAdmitInvoke(ctx context.Context, ap db.Autopilot, agent db.Agent, actorUserID, triggerID pgtype.UUID) bool {
 	if actorUserID.Valid {
 		return s.canMemberInvokeAgent(ctx, agent, actorUserID, ap.WorkspaceID)

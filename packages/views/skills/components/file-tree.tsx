@@ -242,7 +242,7 @@ function TreeNodeItem({
                 // file name. Selecting a supporting file opened this menu
                 // instead (MUL-5654). opacity-0 does not opt out of hit
                 // testing, so the row was unclickable even before hover.
-                className="relative mr-1 shrink-0 rounded p-0.5 text-faint-foreground opacity-0 transition-opacity after:absolute after:-inset-1 hover:text-foreground group-hover/row:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
+                className="relative mr-1 shrink-0 rounded-xs p-0.5 text-faint-foreground opacity-0 transition-opacity after:absolute after:-inset-1 hover:text-foreground group-hover/row:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
                 onClick={(event) => event.stopPropagation()}
               >
                 <MoreHorizontal className="h-3.5 w-3.5" />

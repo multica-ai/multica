@@ -1,9 +1,20 @@
 import { normalizeStatusPatch } from "./status-category";
-import { hashKey, useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
+import {
+  hashKey,
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+  type QueryKey,
+} from "@tanstack/react-query";
 import { api } from "../api";
 import { issueKeys } from "./queries";
 import { projectKeys } from "../projects/queries";
 import { inboxKeys } from "../inbox/queries";
+import {
+  cancelInboxLists,
+  isInboxListRequestInFlight,
+  onInboxInvalidate,
+} from "../inbox/ws-updaters";
 import {
   applyIssueChange,
   invalidateIssueDerivatives,
@@ -37,6 +48,8 @@ import type {
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
 import { sortTimelineEntriesAsc } from "./timeline-sort";
+import { applyCommentDeletion, removeCommentSubtree } from "./comment-deletion";
+import { configStore } from "../config";
 import {
   onIssueAuxiliaryRevision,
   invalidateIssueOwnerProjections,
@@ -75,6 +88,58 @@ export type UpdateIssueMutationInput = {
 // ---------------------------------------------------------------------------
 // Issue CRUD
 // ---------------------------------------------------------------------------
+
+// Shared by the single and batch update hooks, so the inbox re-read can wait
+// for the last of them (see `owedInboxRereads`).
+const ISSUE_WRITE = "issue-write";
+const issueWriteMutationKey = (wsId: string) => [ISSUE_WRITE, wsId] as const;
+
+// Workspaces whose inbox lists owe a re-read, per client.
+const inboxRereadsOwed = new WeakMap<QueryClient, Set<string>>();
+
+// A client's owed re-reads, each paid once its workspace has no issue write
+// left in flight. Issued earlier, the re-read could read a pending write's old
+// value and land after that write's patch, reverting a saved change. The check
+// runs when a write reaches its terminal state, not in onSettled: TanStack
+// calls onSettled while the mutation still counts as pending, so two writes
+// settling in the same tick would each count the other and both skip
+// (MUL-7286).
+function owedInboxRereads(qc: QueryClient): Set<string> {
+  const existing = inboxRereadsOwed.get(qc);
+  if (existing) return existing;
+  const owed = new Set<string>();
+  inboxRereadsOwed.set(qc, owed);
+  qc.getMutationCache().subscribe((event) => {
+    if (event.type !== "updated") return;
+    if (event.action.type !== "success" && event.action.type !== "error") return;
+    const [kind, wsId] = event.mutation.options.mutationKey ?? [];
+    if (kind !== ISSUE_WRITE || typeof wsId !== "string") return;
+    if (!owed.has(wsId)) return;
+    if (qc.isMutating({ mutationKey: issueWriteMutationKey(wsId) }) > 0) return;
+    owed.delete(wsId);
+    void onInboxInvalidate(qc, wsId);
+  });
+  return owed;
+}
+
+// Inbox side of settling a status / priority write. It patched the inbox rows
+// optimistically, so the lists owe a re-read only when the write left them
+// behind the server: onMutate interrupted one of their requests (see
+// `cancelInboxLists`), a failure restored their rollback snapshot, or a list
+// request is still out and may have read the server before this write
+// committed. Otherwise the patch was the whole change, and no request is added.
+function settleInboxAfterIssueWrite(
+  qc: QueryClient,
+  wsId: string,
+  // Set by onMutate for status / priority writes only.
+  inboxWrite: { interrupted: boolean } | undefined,
+  failed: boolean,
+) {
+  if (!inboxWrite) return;
+  if (inboxWrite.interrupted || failed || isInboxListRequestInFlight(qc, wsId)) {
+    owedInboxRereads(qc).add(wsId);
+  }
+}
 
 function useIssueCreateMutation<TVariables>(
   mutationFn: (variables: TVariables) => Promise<Issue>,
@@ -126,6 +191,7 @@ export function useUpdateIssue() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
+    mutationKey: issueWriteMutationKey(wsId),
     mutationFn: ({ id, move_intent: moveIntent, ...data }: UpdateIssueMutationInput) => {
       if (!moveIntent) return api.updateIssue(id, data);
       const { position: _optimisticPosition, ...target } = data;
@@ -154,9 +220,10 @@ export function useUpdateIssue() {
       qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) });
       qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) });
       qc.cancelQueries({ queryKey: issueKeys.tableAll(wsId) });
-      if (patch.status !== undefined || patch.priority !== undefined) {
-        qc.cancelQueries({ queryKey: inboxKeys.all(wsId) });
-      }
+      const inboxWrite =
+        patch.status !== undefined || patch.priority !== undefined
+          ? { interrupted: cancelInboxLists(qc, wsId) }
+          : undefined;
       const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
       // The coordinator owns the cross-cache rules: surgical patch/rebucket
       // where the card is loaded and still belongs, surgical REMOVE where the
@@ -212,7 +279,7 @@ export function useUpdateIssue() {
               : old?.map((c) => (c.id === id ? { ...c, ...normalizeStatusPatch(patch) } : c)),
         );
       }
-      return { change, prevChildren, parentId, id };
+      return { change, prevChildren, parentId, id, inboxWrite };
     },
     onError: (_err, vars, ctx) => {
       if (ctx) {
@@ -282,7 +349,8 @@ export function useUpdateIssue() {
       // The server has committed — safe to flush any drift it reported now.
       invalidateStaleListKeys(qc, reconcile.staleKeys);
     },
-    onSettled: (_data, _err, vars, ctx) => {
+    onSettled: (_data, err, vars, ctx) => {
+      settleInboxAfterIssueWrite(qc, wsId, ctx?.inboxWrite, err !== null);
       // The issue's own list + detail caches are reconciled surgically in
       // onSuccess / onError, so they are deliberately NOT invalidated here — a
       // full-list refetch on settle is what made drags flicker. Only aggregate
@@ -429,6 +497,7 @@ export function useBatchUpdateIssues() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
+    mutationKey: issueWriteMutationKey(wsId),
     mutationFn: ({
       ids,
       updates,
@@ -451,9 +520,10 @@ export function useBatchUpdateIssues() {
       await qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) });
       await qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) });
       await qc.cancelQueries({ queryKey: issueKeys.tableAll(wsId) });
-      if (patch.status !== undefined || patch.priority !== undefined) {
-        await qc.cancelQueries({ queryKey: inboxKeys.all(wsId) });
-      }
+      const inboxWrite =
+        patch.status !== undefined || patch.priority !== undefined
+          ? { interrupted: cancelInboxLists(qc, wsId) }
+          : undefined;
 
       // Run every issue through the coordinator — the same rules table the
       // single-issue update uses, so a batch edit patches/removes across the
@@ -532,6 +602,7 @@ export function useBatchUpdateIssues() {
         prevDetailById,
         prevInboxList,
         prevArchivedInboxList,
+        inboxWrite,
         staleKeys,
         prevChildren,
         affectedParentIds,
@@ -573,7 +644,8 @@ export function useBatchUpdateIssues() {
         }
       }
     },
-    onSettled: (_data, _err, _vars, ctx) => {
+    onSettled: (_data, err, _vars, ctx) => {
+      settleInboxAfterIssueWrite(qc, wsId, ctx?.inboxWrite, err !== null);
       // Deliberately NOT invalidating issueKeys.list / myAll here: the onMutate
       // pass above is a complete surgical reconcile for the loaded bucketed
       // boards, so a full-board refetch on settle would only re-introduce the
@@ -860,41 +932,24 @@ export function useDeleteComment(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: (commentId: string) => api.deleteComment(commentId),
-    onMutate: async (commentId) => {
-      await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
-      const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
-
-      // Cascade: collect all descendants of the deleted comment.
-      const toRemove = new Set<string>([commentId]);
-      if (prev) {
-        let changed = true;
-        while (changed) {
-          changed = false;
-          for (const e of prev) {
-            if (
-              e.parent_id &&
-              toRemove.has(e.parent_id) &&
-              !toRemove.has(e.id)
-            ) {
-              toRemove.add(e.id);
-              changed = true;
-            }
-          }
-        }
-      }
-
-      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
-        old?.filter((e) => !toRemove.has(e.id)),
-      );
-      return { prev };
+    // The capability is read when the delete runs, so the route matches the
+    // copy the confirmation showed. Older servers delete the replies too.
+    mutationFn: async (commentId: string) => {
+      const keepReplies = configStore.getState().commentDeleteKeepRepliesSupported;
+      await api.deleteComment(commentId, { keepReplies });
+      return keepReplies;
     },
-    onError: (_err, _id, ctx) => {
-      if (ctx?.prev !== undefined) {
-        qc.setQueryData(issueKeys.timeline(issueId), ctx.prev);
-      }
-    },
-    onSuccess: () => {
+    // Not optimistic: whether the comment disappears or stays as a tombstone
+    // depends on replies only the server sees for certain (#8296). Once it
+    // confirms, mirror its outcome; realtime events and the settle refetch
+    // reconcile the rest.
+    onSuccess: (keptReplies, commentId) => {
+      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
+        if (!old) return old;
+        return keptReplies
+          ? applyCommentDeletion(old, commentId, new Date().toISOString())
+          : removeCommentSubtree(old, commentId);
+      });
       // The endpoint remains 204 for compatibility, so the local caller has
       // no body carrying issue_revision. The realtime event will narrow this
       // with its revision when connected; this is the no-WS safety net.

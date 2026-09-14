@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -992,6 +994,260 @@ var codexDesktopAppBundlePaths = func() []string {
 		)
 	}
 	return paths
+}
+
+// dshDesktopAppBundlePaths returns candidate locations for the DSH CLI that
+// DeepSeek Harness Desktop manages. The app never installs `dsh` onto PATH, so
+// a GUI-launched daemon misses it on exec.LookPath and the login-shell fallback
+// cannot rescue it either — a user's rc files have no reason to know that path.
+//
+// Only DEFAULT locations are covered, and nothing here reads an install receipt
+// or the registry, so an install put somewhere else still needs
+// MULTICA_DSH_PATH. This is a convenience for the common case, never a contract
+// — which is why a miss falls through to "dsh not found" rather than to a guess.
+var dshDesktopAppBundlePaths = func() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	return dshDesktopBundlePathsFor(runtime.GOOS, os.Getenv, home)
+}
+
+// dshDesktopBundlePathsFor builds the candidate list for one platform.
+//
+// Taking goos/env/home as arguments, rather than reading runtime.GOOS and
+// os.Getenv inline, is what makes the Windows layout assertable from any host.
+// The alternative leaves the Windows branch testable only on Windows, which in
+// this package has meant untested.
+//
+// Generated shims come first on BOTH platforms, and that order is the point: a
+// shim runs the Desktop app's own Electron binary as node, by absolute path, so
+// it needs nothing on PATH. The macOS app-bundle script below is the same CLI
+// entered through `#!/usr/bin/env node`, so it only works on a machine that
+// happens to have node installed — a last resort, not a first choice.
+func dshDesktopBundlePathsFor(goos string, env func(string) string, home string) []string {
+	paths := dshDesktopShimCandidates(dshDesktopAppDataDir(goos, env, home), dshDesktopShimNames(goos))
+	if goos == "darwin" {
+		// The CLI entry point inside the app bundle, tried last. System-wide
+		// /Applications before the per-user ~/Applications, matching
+		// codexDesktopAppBundlePaths.
+		const bundle = "DSH Desktop.app/Contents/Resources/app.asar.unpacked/node_modules/@deepseek-ai/dsh/lib/bin.js"
+		paths = append(paths, filepath.Join("/Applications", bundle))
+		if home != "" {
+			paths = append(paths, filepath.Join(home, "Applications", bundle))
+		}
+	}
+	return paths
+}
+
+// dshDesktopAppDataDir returns the per-user directory DSH Desktop keeps its
+// state in, which is also where it generates the CLI shims.
+//
+// Roaming application data on Windows, NOT the install directory: the app
+// installs to Program Files or %LOCALAPPDATA%\Programs, but the CLI it drives
+// lives beside its other per-user state. That also makes one lookup cover both
+// install modes, since a per-machine install still generates these shims into
+// each user's own roaming directory.
+//
+// %APPDATA% is preferred over composing from home because it is redirected on
+// managed and roaming-profile machines; the home-relative form is the last
+// resort for a daemon started with a stripped environment.
+func dshDesktopAppDataDir(goos string, env func(string) string, home string) string {
+	const app = "DSH Desktop"
+	switch goos {
+	case "darwin":
+		if home == "" {
+			return ""
+		}
+		return filepath.Join(home, "Library", "Application Support", app)
+	case "windows":
+		if appData := strings.TrimSpace(env("APPDATA")); appData != "" {
+			return filepath.Join(appData, app)
+		}
+		if home != "" {
+			return filepath.Join(home, "AppData", "Roaming", app)
+		}
+	}
+	return ""
+}
+
+// dshDesktopShimNames are the launchable file names a generated shim directory
+// can hold, most likely first.
+//
+// The macOS app-bundle entry point — lib/bin.js — deliberately has no Windows
+// counterpart. It is a Node script macOS starts through its shebang; Windows
+// has no shebang, exec.LookPath rejects a .js unless PATHEXT says otherwise,
+// and CreateProcess cannot start one either. Listing it there would register a
+// runtime that fails on every spawn, which is the failure executableCandidate
+// exists to prevent.
+func dshDesktopShimNames(goos string) []string {
+	if goos == "windows" {
+		return []string{"dsh.exe", "dsh.cmd", "dsh.bat"}
+	}
+	return []string{"dsh"}
+}
+
+// dshDesktopShimTiers are the directories under the app-data root whose
+// subdirectories are generated CLI payloads, in preference order.
+//
+// host-commands wins because that is the layout whose shim was confirmed to
+// run: it sets DSH_HOME and invokes the Desktop executable by absolute path.
+// The cli payload is the other shape, kept as a fallback for a Desktop version
+// that does not generate host-commands — on at least one Windows install its
+// shim exits 9009 (cmd.exe's "command not found") because what it forwards to
+// is not there. Ranking it second is what stops a broken-but-present shim being
+// chosen over a working one; nothing here executes a candidate, so order is the
+// only lever available.
+//
+// profiled marks the tier that keys its payloads by DSH profile
+// (host-commands/<profile>/generations). The profile set is the user's, so that
+// level is enumerated rather than assumed.
+var dshDesktopShimTiers = []struct {
+	dir      string
+	profiled bool
+}{
+	{dir: "host-commands", profiled: true},
+	{dir: "cli"},
+}
+
+// dshBinDir is one generated command directory plus the keys that order it.
+type dshBinDir struct {
+	path    string
+	name    string
+	modTime time.Time
+}
+
+// dshDesktopBinDirsIn collects the bin directories under root, unsorted.
+//
+// DSH Desktop lays its generated command directories out in two shapes, and a
+// host can be on either depending on which version generated them:
+//
+//	<root>/bin            — flat
+//	<root>/<id>/bin       — one payload directory per generation
+//
+// The payload id is a content hash, sometimes with a generation uuid appended,
+// so it is enumerated rather than composed. Only directories holding a bin are
+// accepted, so a stray file or a half-extracted download is skipped rather than
+// turned into a candidate.
+//
+// The flat directory carries a zero timestamp, which sorts it last: a host that
+// has both shapes is one where the generational layout is the newer of the two.
+func dshDesktopBinDirsIn(root string) []dshBinDir {
+	if root == "" {
+		return nil
+	}
+	var dirs []dshBinDir
+	if entries, err := os.ReadDir(root); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() || entry.Name() == "bin" {
+				continue
+			}
+			binDir := filepath.Join(root, entry.Name(), "bin")
+			if !isExistingDir(binDir) {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			dirs = append(dirs, dshBinDir{path: binDir, name: entry.Name(), modTime: info.ModTime()})
+		}
+	}
+	if flat := filepath.Join(root, "bin"); isExistingDir(flat) {
+		dirs = append(dirs, dshBinDir{path: flat, name: ""})
+	}
+	return dirs
+}
+
+// sortDshBinDirs orders generated directories newest first.
+//
+// This is what protects a host mid-upgrade: a new payload is written and the
+// previous one can be left in place, and the newest is the one the app is
+// actually driving. The name breaks ties, because two payloads written in the
+// same filesystem timestamp tick must still produce one stable answer rather
+// than whatever ReadDir returned — and because the answer feeds PATH and
+// process launches, an order that changes between rounds is a daemon that picks
+// a different CLI each time.
+func sortDshBinDirs(dirs []dshBinDir) {
+	sort.SliceStable(dirs, func(i, j int) bool {
+		if !dirs[i].modTime.Equal(dirs[j].modTime) {
+			return dirs[i].modTime.After(dirs[j].modTime)
+		}
+		return dirs[i].name > dirs[j].name
+	})
+}
+
+// dshDesktopBinDirs returns the bin directories under root, newest first.
+func dshDesktopBinDirs(root string) []string {
+	dirs := dshDesktopBinDirsIn(root)
+	sortDshBinDirs(dirs)
+	paths := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		paths = append(paths, dir.path)
+	}
+	return paths
+}
+
+// isExistingDir reports whether path is a directory that exists.
+func isExistingDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+// dshDesktopShimCandidates expands the generated CLI payloads under appData
+// into launchable candidate paths.
+//
+// Tier order is applied first and payload age second, so a working shim in the
+// preferred tier always outranks a newer one in the fallback tier. Within a
+// tier every root is pooled before sorting, so the newest generation wins even
+// when it belongs to a different DSH profile than the one ReadDir happened to
+// return first.
+func dshDesktopShimCandidates(appData string, names []string) []string {
+	if appData == "" || len(names) == 0 {
+		return nil
+	}
+	var paths []string
+	for _, spec := range dshDesktopShimTiers {
+		var tierDirs []dshBinDir
+		for _, root := range dshDesktopPayloadRoots(filepath.Join(appData, spec.dir), spec.profiled) {
+			tierDirs = append(tierDirs, dshDesktopBinDirsIn(root)...)
+		}
+		sortDshBinDirs(tierDirs)
+		for _, dir := range tierDirs {
+			for _, name := range names {
+				paths = append(paths, filepath.Join(dir.path, name))
+			}
+		}
+	}
+	return paths
+}
+
+// dshDesktopPayloadRoots resolves one tier to the directories whose contents
+// dshDesktopBinDirsIn enumerates.
+//
+// A profiled tier keys its payloads by DSH profile and puts them under a
+// `generations` directory (host-commands/<profile>/generations). The profile
+// names belong to the user, so that level is enumerated; an unprofiled tier
+// holds its payloads directly.
+func dshDesktopPayloadRoots(dir string, profiled bool) []string {
+	if !profiled {
+		return []string{dir}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var roots []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		generations := filepath.Join(dir, entry.Name(), "generations")
+		if isExistingDir(generations) {
+			roots = append(roots, generations)
+		}
+	}
+	return roots
 }
 
 // loginShellResolveTimeout caps how long the daemon will wait for the user's

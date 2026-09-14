@@ -699,7 +699,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                     type="button"
                     onClick={() => handleSourceModeChange("repos")}
                     className={cn(
-                      "rounded px-2 py-1 text-caption transition-colors",
+                      "rounded-xs px-2 py-1 text-caption transition-colors",
                       sourceMode === "repos"
                         ? "bg-background shadow-sm font-medium"
                         : "text-muted-foreground hover:text-foreground",
@@ -711,7 +711,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                     type="button"
                     onClick={() => handleSourceModeChange("local")}
                     className={cn(
-                      "rounded px-2 py-1 text-caption transition-colors",
+                      "rounded-xs px-2 py-1 text-caption transition-colors",
                       sourceMode === "local"
                         ? "bg-background shadow-sm font-medium"
                         : "text-muted-foreground hover:text-foreground",

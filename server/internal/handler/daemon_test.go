@@ -1444,7 +1444,11 @@ func TestCancelTask_SameIssue_Succeeds(t *testing.T) {
 
 	req := newRequest("POST", "/api/issues/"+issueID+"/tasks/"+taskID+"/cancel", nil)
 	req = withURLParams(req, "id", issueID, "taskId", taskID)
-	testutil.Call(t, testHandler.CancelTask, req).Want(http.StatusOK)
+	var response AgentTaskResponse
+	testutil.Call(t, testHandler.CancelTask, req).Want(http.StatusOK).JSON(&response)
+	if got := response.CancelledBy; got == nil || got.Type != "member" || got.ID != testUserID || got.Name != handlerTestName {
+		t.Fatalf("cancelled_by = %#v, want member %s (%s)", got, handlerTestName, testUserID)
+	}
 }
 
 // TestListTasksByIssue_CrossWorkspace_Returns404 verifies that task history
@@ -1473,6 +1477,64 @@ func TestGetIssueUsage_CrossWorkspace_Returns404(t *testing.T) {
 	req := newRequest("GET", "/api/issues/"+foreignIssueID+"/usage", nil)
 	req = withURLParam(req, "id", foreignIssueID)
 	testutil.Call(t, testHandler.GetIssueUsage, req).Want(http.StatusNotFound)
+}
+
+func TestGetIssueUsageReportsUsageCoverage(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	var agentID, runtimeID string
+	dbfx.QueryRow(t, `
+		SELECT id, runtime_id FROM agent
+		WHERE workspace_id = $1 AND runtime_id IS NOT NULL
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID)
+	issueID := dbfx.Issue(t, "issue usage coverage")
+	finished := testutil.Cols{
+		"issue_id":     issueID,
+		"runtime_id":   runtimeID,
+		"started_at":   testutil.Raw("now() - interval '2 minutes'"),
+		"completed_at": testutil.Raw("now() - interval '1 minute'"),
+	}
+	meteredTaskID := dbfx.Task(t, agentID, finished, testutil.Cols{"status": "completed"})
+	dbfx.Task(t, agentID, finished, testutil.Cols{"status": "failed"})
+	// A cancelled task that never started and a queued task are not runs, so
+	// neither belongs in terminal_task_count or unreported_task_count.
+	dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id":     issueID,
+		"runtime_id":   runtimeID,
+		"status":       "cancelled",
+		"completed_at": testutil.Raw("now() - interval '1 minute'"),
+	})
+	dbfx.Task(t, agentID, testutil.Cols{"issue_id": issueID, "runtime_id": runtimeID})
+	dbfx.Insert(t, "task_usage", testutil.Cols{
+		"task_id":       meteredTaskID,
+		"provider":      "qoderclicn",
+		"model":         "bailian/tp/qwen3.8-max",
+		"input_tokens":  120,
+		"output_tokens": 30,
+	})
+
+	req := newRequest("GET", "/api/issues/"+issueID+"/usage", nil)
+	req = withURLParam(req, "id", issueID)
+	var got struct {
+		TotalInputTokens    int64 `json:"total_input_tokens"`
+		TotalOutputTokens   int64 `json:"total_output_tokens"`
+		TaskCount           int32 `json:"task_count"`
+		TerminalTaskCount   int32 `json:"terminal_task_count"`
+		MeteredTaskCount    int32 `json:"metered_task_count"`
+		UnreportedTaskCount int32 `json:"unreported_task_count"`
+	}
+	testutil.Call(t, testHandler.GetIssueUsage, req).Want(http.StatusOK).JSON(&got)
+
+	if got.TotalInputTokens != 120 || got.TotalOutputTokens != 30 {
+		t.Errorf("token totals = %d/%d, want 120/30", got.TotalInputTokens, got.TotalOutputTokens)
+	}
+	if got.TaskCount != 1 || got.TerminalTaskCount != 2 || got.MeteredTaskCount != 1 || got.UnreportedTaskCount != 1 {
+		t.Errorf("coverage = legacy:%d terminal:%d metered:%d unreported:%d, want 1/2/1/1",
+			got.TaskCount, got.TerminalTaskCount, got.MeteredTaskCount, got.UnreportedTaskCount)
+	}
 }
 
 func TestGetDaemonWorkspaceRepos_WithDaemonToken(t *testing.T) {
@@ -2668,10 +2730,20 @@ type claimRuntimeGuardTask struct {
 
 func claimTaskForRuntimeGuard(t *testing.T, runtimeID, daemonID string) *claimRuntimeGuardTask {
 	t.Helper()
+	return claimTaskForRuntimeGuardWithCapabilities(t, runtimeID, daemonID, "")
+}
+
+// claimTaskForRuntimeGuardWithCapabilities claims as a daemon advertising the
+// given X-Client-Capabilities value ("" for a daemon that advertises none).
+func claimTaskForRuntimeGuardWithCapabilities(t *testing.T, runtimeID, daemonID, capabilities string) *claimRuntimeGuardTask {
+	t.Helper()
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
 		testWorkspaceID, daemonID)
+	if capabilities != "" {
+		req.Header.Set("X-Client-Capabilities", capabilities)
+	}
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("runtimeId", runtimeID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
@@ -3118,6 +3190,141 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 			t.Fatal("cross-agent rerun must disclose that the requested source was not resumable")
 		}
 	})
+}
+
+// createAutoRetryForTest runs the production retry insert against a failed
+// parent, so a claim test exercises the row CreateRetryTask actually writes.
+func createAutoRetryForTest(t *testing.T, ctx context.Context, parentID string) {
+	t.Helper()
+	child, err := testHandler.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{ID: parseUUID(parentID)})
+	if err != nil {
+		t.Fatalf("setup: CreateRetryTask: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, child.ID)
+	})
+}
+
+// TestClaimTask_AutoRetryFreshSessionReusesParentWorkdir is the MUL-7034
+// claim-layer contract for an automatic retry of a conversation-poisoning
+// failure: a fresh session, the parent's workdir, and a disclosed continuity
+// gap. The retry row comes from the real CreateRetryTask so the query and the
+// claim are pinned together; the workdir reaches the daemon only when both
+// carry it (GH #7998). The workdir is offered only to a daemon whose
+// `multica repo checkout` keeps an existing checkout's work; an older daemon
+// keeps getting a fresh directory, because its checkout would reset the very
+// checkout being kept. Contrast a
+// force_fresh task with no retry lineage, which resumes nothing
+// (TestClaimTask_IssuePriorSessionRuntimeGuard).
+func TestClaimTask_AutoRetryFreshSessionReusesParentWorkdir(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	for _, tc := range []struct {
+		name         string
+		capabilities string
+		wantWorkDir  string
+	}{
+		{
+			name:         "daemon_checkout_keeps_work",
+			capabilities: protocol.DaemonCapabilityCheckoutKeepsWorkV1,
+			wantWorkDir:  "/tmp/codex-stuck-workdir",
+		},
+		{
+			name:         "older_daemon_gets_fresh_directory",
+			capabilities: protocol.DaemonCapabilityCoalescedCommentsV1,
+			wantWorkDir:  "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+			issueID := dbfx.Issue(t, "auto-retry fresh-session fixture", testutil.Cols{"status": "in_progress"})
+
+			// An earlier healthy turn is what the (agent, issue) resume lookup
+			// returns, since it skips the poisoned parent. Getting its session or
+			// workdir back would mean the retry fell through to that lookup.
+			dbfx.Task(t, agentID, testutil.Cols{
+				"runtime_id":   runtimeID,
+				"issue_id":     issueID,
+				"status":       "completed",
+				"started_at":   testutil.Raw("now() - interval '30 minutes'"),
+				"completed_at": testutil.Raw("now() - interval '25 minutes'"),
+				"session_id":   "earlier-healthy-session",
+				"work_dir":     "/tmp/earlier-healthy-workdir",
+			})
+			parentID := dbfx.Task(t, agentID, testutil.Cols{
+				"runtime_id":     runtimeID,
+				"issue_id":       issueID,
+				"status":         "failed",
+				"failure_reason": "codex_semantic_inactivity",
+				"started_at":     testutil.Raw("now() - interval '20 minutes'"),
+				"completed_at":   testutil.Raw("now() - interval '1 minute'"),
+				"session_id":     "codex-stuck-session",
+				"work_dir":       "/tmp/codex-stuck-workdir",
+				"attempt":        1,
+				"max_attempts":   2,
+			})
+			createAutoRetryForTest(t, ctx, parentID)
+
+			task := claimTaskForRuntimeGuardWithCapabilities(t, runtimeID, daemonID, tc.capabilities)
+			if task.PriorWorkDir != tc.wantWorkDir {
+				t.Fatalf("PriorWorkDir = %q, want %q", task.PriorWorkDir, tc.wantWorkDir)
+			}
+			if task.PriorSessionID != "" {
+				t.Fatalf("PriorSessionID = %q, want empty (the poisoned session must not resume)", task.PriorSessionID)
+			}
+			if !task.PriorSessionResumeUnavailable {
+				t.Fatal("auto-retry must disclose that the failed attempt's context did not come back")
+			}
+		})
+	}
+}
+
+// TestClaimTask_ChatAutoRetryFreshSessionReusesParentWorkdir is the chat half
+// of the same contract. The chat_session pointer names a different session and
+// workdir, so the assertions prove the retry continues its parent rather than
+// the conversation-wide pointer. Contrast a force_fresh chat task with no retry
+// lineage, which inherits nothing
+// (TestClaimTask_ChatForceFreshSessionSkipsPriorSession).
+func TestClaimTask_ChatAutoRetryFreshSessionReusesParentWorkdir(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title":      "auto-retry fresh chat",
+		"session_id": "chat-pointer-session",
+		"work_dir":   "/tmp/chat-pointer-workdir",
+		"runtime_id": runtimeID,
+	})
+	parentID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":      runtimeID,
+		"chat_session_id": chatSessionID,
+		"status":          "failed",
+		"failure_reason":  "codex_semantic_inactivity",
+		"started_at":      testutil.Raw("now() - interval '20 minutes'"),
+		"completed_at":    testutil.Raw("now() - interval '1 minute'"),
+		"session_id":      "codex-stuck-chat-session",
+		"work_dir":        "/tmp/codex-stuck-chat-workdir",
+		"attempt":         1,
+		"max_attempts":    2,
+	})
+	createAutoRetryForTest(t, ctx, parentID)
+
+	task := claimTaskForRuntimeGuardWithCapabilities(t, runtimeID, daemonID, protocol.DaemonCapabilityCheckoutKeepsWorkV1)
+	if task.PriorWorkDir != "/tmp/codex-stuck-chat-workdir" {
+		t.Fatalf("PriorWorkDir = %q, want the failed parent's /tmp/codex-stuck-chat-workdir", task.PriorWorkDir)
+	}
+	if task.PriorSessionID != "" {
+		t.Fatalf("PriorSessionID = %q, want empty (the poisoned session must not resume)", task.PriorSessionID)
+	}
+	if !task.PriorSessionResumeUnavailable {
+		t.Fatal("chat auto-retry must disclose that the failed attempt's context did not come back")
+	}
 }
 
 func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {

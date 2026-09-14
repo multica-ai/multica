@@ -331,6 +331,11 @@ WHERE id = sqlc.arg('id')
 -- makes the late pin safe: a NEWER task on this chat that already recorded a
 -- session owns the pointer, and a straggler must not drag the conversation
 -- backwards onto the turn the user interrupted.
+--
+-- The newer-task lookup depends on
+-- idx_agent_task_queue_chat_with_session_created_at (migration 465). Neither
+-- chat_pending_v3 nor chat_terminal_resume can replace it: this guard spans
+-- both in-flight and terminal tasks and compares created_at.
 UPDATE chat_session cs
 SET session_id = t.session_id,
     runtime_id = t.runtime_id,

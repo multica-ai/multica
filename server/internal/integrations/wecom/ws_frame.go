@@ -720,3 +720,24 @@ func aibotChatTypeFromChannel(t channel.ChatType) int {
 	}
 	return chatTypeSingleInt
 }
+
+// hasVisibleChar reports whether s contains a rune that is neither whitespace
+// nor a control character. That is the test a completion has to pass before it
+// becomes a message: a body the client renders as nothing still occupies a
+// bubble in the chat, and a completion of newlines is one.
+//
+// Not the same as "the client will render something", and deliberately not.
+// Format runes — U+200B zero width space, U+FEFF, a soft hyphen — are neither
+// space nor control, so a body made only of those passes here and still shows
+// as nothing. Nothing upstream rejects such a body either: it reaches the chat
+// as an empty bubble, and this predicate is not what stops it. The line is
+// drawn here to keep a Unicode category table out of the adapter — moving it
+// is a separate decision, and that table is its cost.
+func hasVisibleChar(s string) bool {
+	for _, r := range s {
+		if !unicode.IsSpace(r) && !unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
+}

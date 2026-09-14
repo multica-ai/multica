@@ -12,8 +12,8 @@ export const STATUS_ORDER: IssueStatusCategory[] = [
   "todo",
   "in_progress",
   "in_review",
-  "done",
   "blocked",
+  "done",
   "cancelled",
 ];
 
@@ -22,8 +22,8 @@ export const ALL_STATUSES: IssueStatusCategory[] = [
   "todo",
   "in_progress",
   "in_review",
-  "done",
   "blocked",
+  "done",
   "cancelled",
 ];
 

@@ -257,7 +257,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | | `resource list/add/update/remove` | Manage project resources | `--type`, `--url`, `--local-path`, `--daemon-id`, `--execution-mode` (`in_place` / `worktree` for a local directory) |
 | `label` | `list/get/create/update/delete` | Manage workspace labels | |
 | `property` | `list/get/create/update/archive/unarchive` | Manage workspace custom properties | `create`: `--name`, `--type` (`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`), `--option` (repeatable, select types only); `list`: `--include-archived`; the type cannot be changed after creation |
-| `agent` | `list/get/create/update/archive/restore` | Manage agents | `--name`, `--runtime-id` (required for `create`), `--instructions`, `--model`, `--thinking-level`, `--mcp-config`, `--permission-mode`, `--max-concurrent-tasks` |
+| `agent` | `list/get/create/update/archive/restore` | Manage agents | `--name`, `--runtime-id` (required for `create`), `--instructions`, `--conversation-starters`, `--model`, `--thinking-level`, `--mcp-config`, `--permission-mode`, `--max-concurrent-tasks` |
 | | `copy <agent-id>` | Copy into a new agent; the original is untouched | `--name` (defaults to the original name plus ` (copy)`), `--runtime-id` (copying to another runtime also requires `--model`), `--no-skills`; secret configuration such as `custom_env`, `mcp_config`, and `runtime_config` is not copied — re-provide it with the same flags as `create` |
 | | `tasks <id>` | View an agent's runs | |
 | | `avatar <id>` | Upload an avatar | |
