@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -19,6 +20,7 @@ import (
 type delegatedChatHandoffFixture struct {
 	pool          *pgxpool.Pool
 	service       *TaskService
+	bus           *events.Bus
 	workspaceID   string
 	userID        string
 	runtimeID     string
@@ -68,7 +70,8 @@ func newDelegatedChatHandoffFixture(t *testing.T) *delegatedChatHandoffFixture {
 		t.Fatalf("create source delivery: %v", err)
 	}
 
-	f.service = NewTaskService(db.New(pool), pool, nil, events.New())
+	f.bus = events.New()
+	f.service = NewTaskService(db.New(pool), pool, nil, f.bus)
 	t.Cleanup(func() {
 		cleanup := context.Background()
 		pool.Exec(cleanup, `DELETE FROM channel_task_delivery WHERE installation_id=$1`, f.installID)
@@ -88,16 +91,23 @@ func newDelegatedChatHandoffFixture(t *testing.T) *delegatedChatHandoffFixture {
 	return f
 }
 
-func (f *delegatedChatHandoffFixture) backgroundTask(t *testing.T, number int) string {
+func (f *delegatedChatHandoffFixture) backgroundTaskWithStatus(t *testing.T, number int, status string) (string, string) {
 	t.Helper()
 	ctx := context.Background()
 	var issueID, taskID string
-	if err := f.pool.QueryRow(ctx, `INSERT INTO issue (workspace_id,title,status,priority,creator_id,creator_type,number,position,assignee_type,assignee_id) VALUES ($1,$2,'in_review','none',$3,'agent',$4,0,'agent',$5) RETURNING id`, f.workspaceID, fmt.Sprintf("Analysis %d", number), f.mikaID, number, f.analystID).Scan(&issueID); err != nil {
+	if err := f.pool.QueryRow(ctx, `INSERT INTO issue (workspace_id,title,status,priority,creator_id,creator_type,number,position,assignee_type,assignee_id) VALUES ($1,$2,$3,'none',$4,'agent',$5,0,'agent',$6) RETURNING id`, f.workspaceID, fmt.Sprintf("Analysis %d", number), status, f.mikaID, number, f.analystID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 	if err := f.pool.QueryRow(ctx, `INSERT INTO agent_task_queue (agent_id,runtime_id,issue_id,status,priority,started_at,originator_user_id,accountable_user_id,originator_source,delegated_from_task_id,trigger_evidence_kind,trigger_evidence_ref_id) VALUES ($1,$2,$3,'running',2,now(),$4,$4,'delegation',$5,'delegation',$5) RETURNING id`, f.analystID, f.runtimeID, issueID, f.userID, f.sourceTaskID).Scan(&taskID); err != nil {
 		t.Fatalf("create background task: %v", err)
 	}
+	return issueID, taskID
+
+}
+
+func (f *delegatedChatHandoffFixture) backgroundTask(t *testing.T, number int) string {
+	t.Helper()
+	_, taskID := f.backgroundTaskWithStatus(t, number, "in_review")
 	return taskID
 }
 
@@ -157,5 +167,135 @@ func TestDelegatedReviewCompletionReturnsToMikaOncePerMemberTurn(t *testing.T) {
 	var pending int
 	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM chat_message WHERE chat_session_id=$1 AND message_kind='delegation_handoff' AND task_id IS NULL`, f.chatSessionID).Scan(&pending); err != nil || pending != 1 {
 		t.Fatalf("pending handoffs = %d err=%v, want 1", pending, err)
+	}
+}
+
+func TestDelegatedTodoCompletionFallsBackToReviewAndReturnsToMika(t *testing.T) {
+	f := newDelegatedChatHandoffFixture(t)
+	issueID, taskID := f.backgroundTaskWithStatus(t, 1, "todo")
+	var statusEvents []events.Event
+	f.bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) {
+		statusEvents = append(statusEvents, e)
+	})
+
+	f.complete(t, taskID)
+
+	var status string
+	if err := f.pool.QueryRow(context.Background(), `SELECT status FROM issue WHERE id=$1`, issueID).Scan(&status); err != nil {
+		t.Fatalf("load issue status: %v", err)
+	}
+	if status != "in_review" {
+		t.Fatalf("issue status = %q, want in_review", status)
+	}
+
+	var handoffTasks int
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1 AND trigger_evidence_kind='delegated_completion'`, f.chatSessionID).Scan(&handoffTasks); err != nil {
+		t.Fatalf("count Mika handoff tasks: %v", err)
+	}
+	if handoffTasks != 1 {
+		t.Fatalf("Mika handoff tasks = %d, want 1", handoffTasks)
+	}
+	if len(statusEvents) != 1 {
+		t.Fatalf("issue status events = %d, want 1", len(statusEvents))
+	}
+	payload, ok := statusEvents[0].Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("issue status payload is %T, want map[string]any", statusEvents[0].Payload)
+	}
+	if payload[TaskCompletionStatusFallbackField] != true || payload["prev_status"] != "todo" || payload["source_task_id"] != taskID {
+		t.Fatalf("unexpected issue status fallback payload: %#v", payload)
+	}
+
+	// Replaying the terminal callback must not create another handoff or rewrite
+	// the issue status a second time.
+	f.complete(t, taskID)
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1 AND trigger_evidence_kind='delegated_completion'`, f.chatSessionID).Scan(&handoffTasks); err != nil {
+		t.Fatalf("count Mika handoff tasks after replay: %v", err)
+	}
+	if handoffTasks != 1 {
+		t.Fatalf("Mika handoff tasks after replay = %d, want 1", handoffTasks)
+	}
+	if len(statusEvents) != 1 {
+		t.Fatalf("issue status events after replay = %d, want 1", len(statusEvents))
+	}
+}
+
+func TestDelegatedTodoCompletionDoesNotSettleWhileFollowUpWorkExists(t *testing.T) {
+	f := newDelegatedChatHandoffFixture(t)
+	issueID, taskID := f.backgroundTaskWithStatus(t, 1, "todo")
+	if _, err := f.pool.Exec(context.Background(), `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			originator_user_id, accountable_user_id, originator_source,
+			delegated_from_task_id, trigger_evidence_kind, trigger_evidence_ref_id
+		) VALUES ($1,$2,$3,'queued',2,$4,$4,'delegation',$5,'delegation',$5)
+	`, f.analystID, f.runtimeID, issueID, f.userID, f.sourceTaskID); err != nil {
+		t.Fatalf("create follow-up task: %v", err)
+	}
+
+	f.complete(t, taskID)
+
+	var status string
+	if err := f.pool.QueryRow(context.Background(), `SELECT status FROM issue WHERE id=$1`, issueID).Scan(&status); err != nil {
+		t.Fatalf("load issue status: %v", err)
+	}
+	if status != "todo" {
+		t.Fatalf("issue status = %q, want todo while follow-up work exists", status)
+	}
+	var handoffTasks int
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1 AND trigger_evidence_kind='delegated_completion'`, f.chatSessionID).Scan(&handoffTasks); err != nil {
+		t.Fatalf("count Mika handoff tasks: %v", err)
+	}
+	if handoffTasks != 0 {
+		t.Fatalf("Mika handoff tasks = %d, want 0 while follow-up work exists", handoffTasks)
+	}
+}
+
+func TestDelegatedTaskOwnsIssue(t *testing.T) {
+	agentID := util.MustParseUUID("00000000-0000-0000-0000-000000000001")
+	otherID := util.MustParseUUID("00000000-0000-0000-0000-000000000002")
+	squadID := util.MustParseUUID("00000000-0000-0000-0000-000000000003")
+
+	tests := []struct {
+		name  string
+		task  db.AgentTaskQueue
+		issue db.Issue
+		want  bool
+	}{
+		{
+			name:  "current agent owns issue",
+			task:  db.AgentTaskQueue{AgentID: agentID},
+			issue: db.Issue{AssigneeType: pgtype.Text{String: "agent", Valid: true}, AssigneeID: agentID},
+			want:  true,
+		},
+		{
+			name:  "different agent owns issue",
+			task:  db.AgentTaskQueue{AgentID: agentID},
+			issue: db.Issue{AssigneeType: pgtype.Text{String: "agent", Valid: true}, AssigneeID: otherID},
+		},
+		{
+			name:  "squad leader owns workflow",
+			task:  db.AgentTaskQueue{AgentID: agentID, SquadID: squadID, IsLeaderTask: true},
+			issue: db.Issue{AssigneeType: pgtype.Text{String: "squad", Valid: true}, AssigneeID: squadID},
+			want:  true,
+		},
+		{
+			name:  "squad member does not own workflow",
+			task:  db.AgentTaskQueue{AgentID: agentID, SquadID: squadID},
+			issue: db.Issue{AssigneeType: pgtype.Text{String: "squad", Valid: true}, AssigneeID: squadID},
+		},
+		{
+			name:  "member owned issue",
+			task:  db.AgentTaskQueue{AgentID: agentID},
+			issue: db.Issue{AssigneeType: pgtype.Text{String: "member", Valid: true}, AssigneeID: otherID},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := delegatedTaskOwnsIssue(tc.task, tc.issue); got != tc.want {
+				t.Fatalf("delegatedTaskOwnsIssue() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

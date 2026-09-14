@@ -116,3 +116,40 @@ func TestBroadcastIssueUpdated_NoStatusChange(t *testing.T) {
 		t.Errorf("expected status_changed=false, got %v", payload["status_changed"])
 	}
 }
+
+func TestBroadcastIssueStatusFallbackMarksCanonicalSideEffects(t *testing.T) {
+	bus := events.New()
+	var got []events.Event
+	bus.SubscribeAll(func(e events.Event) { got = append(got, e) })
+
+	svc := &TaskService{
+		Queries: db.New(noRowsDBTX{}),
+		Bus:     bus,
+	}
+	issue := db.Issue{
+		ID:          testUUID(1),
+		WorkspaceID: testUUID(2),
+		Number:      7,
+		Status:      "in_review",
+	}
+	sourceTaskID := testUUID(3)
+
+	svc.broadcastIssueStatusFallback(context.Background(), issue, "todo", sourceTaskID)
+
+	if len(got) != 1 {
+		t.Fatalf("expected exactly 1 published event, got %d", len(got))
+	}
+	payload, ok := got[0].Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("payload is not map[string]any: %T", got[0].Payload)
+	}
+	if payload[TaskCompletionStatusFallbackField] != true {
+		t.Fatalf("fallback marker = %v, want true", payload[TaskCompletionStatusFallbackField])
+	}
+	if payload["prev_status"] != "todo" {
+		t.Fatalf("prev_status = %v, want todo", payload["prev_status"])
+	}
+	if payload["source_task_id"] != util.UUIDToString(sourceTaskID) {
+		t.Fatalf("source_task_id = %v, want %s", payload["source_task_id"], util.UUIDToString(sourceTaskID))
+	}
+}

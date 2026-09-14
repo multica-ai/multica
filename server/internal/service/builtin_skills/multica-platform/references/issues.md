@@ -210,6 +210,14 @@ writes the literal `done` key.
   later re-trigger confirms the overall goal is met.
 - **`in_review`** is an accepted issue status. Some workflows use it while a PR
   is open and awaiting review; moving to it is an explicit mutation.
+- **Direct Mika delegations have a completion fallback.** The delegated agent
+  still owns the normal status update. If its run nevertheless completes
+  successfully while the assigned issue remains in the `todo` category and no
+  durable follow-up task exists, the server moves the issue to the built-in
+  `in_review` status before returning control to Mika. This narrow fallback
+  prevents a completed delegation from becoming silent; it does not apply to
+  ordinary comment/consultation runs, failures, cancellations, or work that
+  still has a queued, dispatched, running, waiting, or deferred task.
 - **`done`** on a child issue posts a system comment on its parent. If a PR
   carries close intent (`Closes MUL-XXXX`), it advances the issue to `done`
   itself on merge — you do not also need to flip it manually.

@@ -4306,8 +4306,10 @@ func startsWithAbsolutePath(s string) bool {
 	return false
 }
 
-// CompleteTask marks a task as completed.
-// Issue status is NOT changed here — the agent manages it via the CLI.
+// CompleteTask marks a task as completed. Agents normally manage issue status
+// through the CLI. The direct Mika delegation path has one narrow fallback:
+// successful owner work that otherwise leaves an idle issue in todo is moved to
+// in_review before the handoff is queued.
 //
 // For chat tasks, CompleteAgentTask and the chat_session resume-pointer
 // update run in a single transaction. This closes a race where the next
@@ -4322,6 +4324,12 @@ type delegatedChatHandoffPlan struct {
 	prepared     PreparedChatTaskEnqueue
 	initiatorID  pgtype.UUID
 	sourceTaskID pgtype.UUID
+}
+
+type delegatedChatHandoffOutcome struct {
+	task                *db.AgentTaskQueue
+	statusFallbackIssue *db.Issue
+	previousStatus      string
 }
 
 // prepareDelegatedChatHandoff recognizes the narrow lifecycle edge this
@@ -4401,23 +4409,44 @@ func delegatedChatHandoffNote(issue db.Issue) string {
 // Mika already asked a question after the latest member message, leaves a
 // hidden input for the member's next turn. This is what prevents several
 // background completions from becoming several back-to-back questions.
-func (s *TaskService) enqueueDelegatedChatHandoffTx(ctx context.Context, qtx *db.Queries, completed db.AgentTaskQueue, plan *delegatedChatHandoffPlan) (*db.AgentTaskQueue, error) {
-	issue, err := qtx.GetIssue(ctx, completed.IssueID)
+func (s *TaskService) enqueueDelegatedChatHandoffTx(ctx context.Context, qtx *db.Queries, completed db.AgentTaskQueue, plan *delegatedChatHandoffPlan) (delegatedChatHandoffOutcome, error) {
+	var outcome delegatedChatHandoffOutcome
+	issue, err := qtx.LockIssueForWorkflowReconcile(ctx, completed.IssueID)
 	if err != nil {
-		return nil, err
+		return outcome, err
 	}
 	effective := issuestatus.Effective(ctx, qtx, issue.WorkspaceID, issue.Status)
+	if effective == issuestatus.Todo && delegatedTaskOwnsIssue(completed, issue) {
+		hasPlanned, activeErr := qtx.HasActiveTaskForIssue(ctx, issue.ID)
+		if activeErr != nil {
+			return outcome, fmt.Errorf("check delegated issue planned work: %w", activeErr)
+		}
+		if !hasPlanned {
+			previousStatus := issue.Status
+			issue, err = qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+				ID:          issue.ID,
+				Status:      issuestatus.InReview,
+				WorkspaceID: issue.WorkspaceID,
+			})
+			if err != nil {
+				return outcome, fmt.Errorf("apply delegated completion status fallback: %w", err)
+			}
+			outcome.statusFallbackIssue = &issue
+			outcome.previousStatus = previousStatus
+			effective = issuestatus.InReview
+		}
+	}
 	if effective != issuestatus.InReview && effective != issuestatus.Blocked {
-		return nil, nil
+		return outcome, nil
 	}
 	note := delegatedChatHandoffNote(issue)
 	active, err := qtx.HasActiveChatTaskForSession(ctx, plan.session.ID)
 	if err != nil {
-		return nil, err
+		return outcome, err
 	}
 	alreadyAsked, err := qtx.HasDelegationHandoffSinceLastMemberMessage(ctx, plan.session.ID)
 	if err != nil {
-		return nil, err
+		return outcome, err
 	}
 	if active || alreadyAsked {
 		_, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
@@ -4429,7 +4458,7 @@ func (s *TaskService) enqueueDelegatedChatHandoffTx(ctx context.Context, qtx *db
 			ChannelIngested:        pgtype.Bool{Bool: true, Valid: true},
 			ChannelContextRevision: pgtype.Int8{Int64: plan.binding.ContextRevision, Valid: true},
 		})
-		return nil, err
+		return outcome, err
 	}
 
 	prepared := plan.prepared
@@ -4441,7 +4470,7 @@ func (s *TaskService) enqueueDelegatedChatHandoffTx(ctx context.Context, qtx *db
 		plan.binding.ContextRevision, true, plan.binding.ID, plan.binding.RouteRevision, prepared,
 	)
 	if err != nil {
-		return nil, err
+		return outcome, err
 	}
 	if _, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
 		ID:                     dbid.NewV7(),
@@ -4453,9 +4482,24 @@ func (s *TaskService) enqueueDelegatedChatHandoffTx(ctx context.Context, qtx *db
 		ChannelIngested:        pgtype.Bool{Bool: true, Valid: true},
 		ChannelContextRevision: pgtype.Int8{Int64: plan.binding.ContextRevision, Valid: true},
 	}); err != nil {
-		return nil, err
+		return outcome, err
 	}
-	return &handoff, nil
+	outcome.task = &handoff
+	return outcome, nil
+}
+
+func delegatedTaskOwnsIssue(task db.AgentTaskQueue, issue db.Issue) bool {
+	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
+		return false
+	}
+	switch issue.AssigneeType.String {
+	case "agent":
+		return issue.AssigneeID == task.AgentID
+	case "squad":
+		return task.IsLeaderTask && task.SquadID.Valid && issue.AssigneeID == task.SquadID
+	default:
+		return false
+	}
 }
 
 func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir, branchName string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, error) {
@@ -4465,6 +4509,8 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	}
 	var task db.AgentTaskQueue
 	var handoffTask *db.AgentTaskQueue
+	var statusFallbackIssue *db.Issue
+	var previousIssueStatus string
 	// chatAssistantMsg is the single assistant outcome row written for a chat
 	// task inside the completion transaction below. It is broadcast (chat:done)
 	// only after the transaction commits.
@@ -4543,7 +4589,11 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			chatAssistantMsg = msg
 		}
 		if handoffPlan != nil && t.DelegatedFromTaskID == handoffPlan.sourceTaskID {
-			handoffTask, err = s.enqueueDelegatedChatHandoffTx(ctx, qtx, t, handoffPlan)
+			var outcome delegatedChatHandoffOutcome
+			outcome, err = s.enqueueDelegatedChatHandoffTx(ctx, qtx, t, handoffPlan)
+			handoffTask = outcome.task
+			statusFallbackIssue = outcome.statusFallbackIssue
+			previousIssueStatus = outcome.previousStatus
 			if err != nil {
 				if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, ErrChatSessionArchived) || errors.Is(err, ErrChatTaskAgentArchived) || errors.Is(err, ErrChatTaskAgentNoRuntime) {
 					handoffTask = nil
@@ -4586,6 +4636,9 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
+	if statusFallbackIssue != nil {
+		s.broadcastIssueStatusFallback(ctx, *statusFallbackIssue, previousIssueStatus, task.ID)
+	}
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run
@@ -7300,6 +7353,28 @@ func (s *TaskService) broadcastIssueUpdated(ctx context.Context, issue db.Issue,
 			"issue":          IssueToMapResolved(ctx, s.Queries, issue, prefix),
 			"status_changed": prevStatus != issue.Status,
 			"prev_status":    prevStatus,
+		},
+	})
+}
+
+// TaskCompletionStatusFallbackField marks the one server-authored status
+// transition that must receive the same activity and notification side effects
+// as an HTTP issue update. Other background issue maps intentionally retain
+// their narrower realtime-only behavior.
+const TaskCompletionStatusFallbackField = "task_completion_status_fallback"
+
+func (s *TaskService) broadcastIssueStatusFallback(ctx context.Context, issue db.Issue, prevStatus string, sourceTaskID pgtype.UUID) {
+	prefix := s.getIssuePrefix(issue.WorkspaceID)
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
+		ActorType:   "system",
+		Payload: map[string]any{
+			"issue":                           IssueToMapResolved(ctx, s.Queries, issue, prefix),
+			"status_changed":                  true,
+			"prev_status":                     prevStatus,
+			"source_task_id":                  util.UUIDToString(sourceTaskID),
+			TaskCompletionStatusFallbackField: true,
 		},
 	})
 }
