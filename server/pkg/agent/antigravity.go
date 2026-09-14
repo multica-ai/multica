@@ -49,12 +49,98 @@ type antigravityStreamUsage struct {
 }
 
 type antigravityStreamStepUpdate struct {
-	ConversationID string                  `json:"conversation_id"`
-	StepIndex      int                     `json:"step_index"`
-	State          string                  `json:"state"`
-	StepType       string                  `json:"step_type"`
-	TextDelta      string                  `json:"text_delta"`
-	Usage          *antigravityStreamUsage `json:"usage"`
+	ConversationID string                     `json:"conversation_id"`
+	StepIndex      int                        `json:"step_index"`
+	State          string                     `json:"state"`
+	StepType       string                     `json:"step_type"`
+	TextDelta      string                     `json:"text_delta"`
+	Usage          *antigravityStreamUsage    `json:"usage"`
+	ToolName       string                     `json:"tool_name"`
+	ToolInfo       *antigravityStreamToolInfo `json:"tool_info"`
+}
+
+type antigravityStreamToolInfo struct {
+	Name       string          `json:"name"`
+	Parameters map[string]any  `json:"parameters"`
+	Output     json.RawMessage `json:"output"`
+	Error      json.RawMessage `json:"error"`
+}
+
+type antigravityToolState struct {
+	name     string
+	finished bool
+}
+
+// toolMessages translates snapshots, not deltas: each call starts and ends once.
+// Terminal-only snapshots still emit a matching start for the daemon's in-flight
+// counter. Conversation identity keeps equal step indexes from colliding.
+func (step *antigravityStreamStepUpdate) toolMessages(sessionID string, calls map[string]antigravityToolState) []Message {
+	if step.StepType != "tool" {
+		return nil
+	}
+	state := strings.ToUpper(step.State)
+	terminal := false
+	switch state {
+	case "ACTIVE":
+	case "DONE", "ERROR", "FAILED", "CANCELLED", "CANCELED", "ABORTED":
+		terminal = true
+	default:
+		return nil
+	}
+	callID := fmt.Sprintf("agy:%s:%d", sessionID, step.StepIndex)
+	call, started := calls[callID]
+	if call.finished {
+		return nil
+	}
+	var input map[string]any
+	if !started {
+		call.name = step.ToolName
+		if step.ToolInfo != nil {
+			if call.name == "" {
+				call.name = step.ToolInfo.Name
+			}
+			input = step.ToolInfo.Parameters
+		}
+		// Incomplete snapshots carry no actionable tool identity yet.
+		if call.name == "" {
+			return nil
+		}
+	}
+	var messages []Message
+	if !started {
+		messages = append(messages, Message{Type: MessageToolUse, Tool: call.name, CallID: callID, Input: input})
+	}
+	if terminal {
+		var output, toolError string
+		if step.ToolInfo != nil {
+			output = antigravityToolText(step.ToolInfo.Output)
+			toolError = antigravityToolText(step.ToolInfo.Error)
+		}
+		if state != "DONE" || toolError != "" {
+			if toolError == "" {
+				toolError = state
+			}
+			if output != "" {
+				output += "\n"
+			}
+			output += "Tool error: " + toolError
+		}
+		messages = append(messages, Message{Type: MessageToolResult, Tool: call.name, CallID: callID, Output: output})
+		call.finished = true
+	}
+	calls[callID] = call
+	return messages
+}
+
+func antigravityToolText(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	return string(raw)
 }
 
 type antigravityStreamResult struct {
@@ -237,6 +323,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		var streamResponse string
 		var streamResultUsage *antigravityStreamUsage
 		streamStepUsage := make(map[int]TokenUsage)
+		streamTools := make(map[string]antigravityToolState)
 		streamLatestAgentResponseStep := -1
 		streamLatestAgentResponseDone := false
 		finalStatus := "completed"
@@ -260,6 +347,9 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 					}
 					if event.StepUpdate.ConversationID != "" {
 						streamSessionID = event.StepUpdate.ConversationID
+					}
+					for _, msg := range event.StepUpdate.toolMessages(streamSessionID, streamTools) {
+						trySend(msgCh, msg)
 					}
 					if event.StepUpdate.StepType == "agent_response" && event.StepUpdate.StepIndex >= streamLatestAgentResponseStep {
 						// Only the latest response step determines whether the answer

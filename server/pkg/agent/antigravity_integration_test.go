@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -96,4 +97,43 @@ func antigravityResultUsageTotal(result Result) int64 {
 		total += usage.InputTokens + usage.OutputTokens + usage.CacheReadTokens + usage.CacheWriteTokens
 	}
 	return total
+}
+
+func TestAntigravityRealToolProgress(t *testing.T) {
+	requireRealAgentSmoke(t)
+	execPath, err := exec.LookPath("agy")
+	if err != nil {
+		t.Skipf("agy not installed: %v", err)
+	}
+	backend := &antigravityBackend{cfg: Config{ExecutablePath: execPath, Logger: quietAntigravityLogger()}}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+	started := time.Now()
+	customArgs := []string{"--disable-slash-commands"}
+	if name := os.Getenv("MULTICA_ANTIGRAVITY_SMOKE_AGENT"); name != "" {
+		customArgs = append(customArgs, "--agent", name)
+	}
+	session, err := backend.Execute(ctx, "This is an isolated runtime smoke test, not a Multica business task; there is no AGENTS.md here. Only run the shell command: sleep 2 && printf multica-tool-event-ok. Do not access the network, call Multica, or write files. After the command finishes, reply with OK.", ExecOptions{
+		Cwd: t.TempDir(), Model: "gemini-3.8-flash-low", Timeout: 90 * time.Second,
+		CustomArgs: customArgs,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	starts, results := 0, 0
+	for msg := range session.Messages {
+		switch msg.Type {
+		case MessageToolUse:
+			starts++
+			t.Logf("tool start at %s: %s", time.Since(started), msg.Tool)
+		case MessageToolResult:
+			results++
+			t.Logf("tool result at %s: %s", time.Since(started), msg.Tool)
+		}
+	}
+	result := <-session.Result
+	if result.Status != "completed" || starts == 0 || starts != results {
+		t.Fatalf("starts=%d results=%d result=%+v", starts, results, result)
+	}
+	t.Logf("completed in %s; %d matched tool pairs", time.Since(started), starts)
 }

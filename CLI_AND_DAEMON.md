@@ -200,6 +200,12 @@ find out that the daemon you care about is running on a different profile —
 
 ### Supported Agents
 
+Antigravity's `stream-json` tool snapshots are forwarded as live tool-start and
+tool-result messages. Repeated snapshots are deduplicated by conversation and
+step index; failed or cancelled tools retain their error in the result output.
+These messages report actual tool activity, not model reasoning or estimated
+progress. The CLI must emit the events before Multica can display them.
+
 The daemon auto-detects these AI CLIs on your PATH:
 
 | CLI | Command | Description |
