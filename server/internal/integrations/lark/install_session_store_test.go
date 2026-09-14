@@ -334,19 +334,18 @@ func (c *failScriptOnce) Eval(ctx context.Context, script string, keys []string,
 	return c.UniversalClient.Eval(ctx, script, keys, args...)
 }
 
-// TestRedisInstallSessionStoreTerminalWriteIsAllOrNothing covers what an
-// earlier two-key version of this store got wrong (review of #8376): the
-// terminal status and the retention window were separate writes, so a
-// SETNX that landed followed by a failed EXPIRE left the status stored
-// under the base key's original, much longer TTL — and the retry could
-// not repair it, because SETNX then reported that someone else had won.
-// A session that finished early lost its terminal field first and read as
-// `pending` again.
+// TestRedisInstallSessionStoreFailedRequestWritesNothing covers the case
+// where the write never reaches Redis at all — a dropped connection
+// before the script runs. Nothing is applied, and the retry moves status
+// and retention together.
 //
-// The record is now one key written by one script, so there is no partial
-// state to observe: a failed attempt applies nothing, and a retry moves
-// status and retention together.
-func TestRedisInstallSessionStoreTerminalWriteIsAllOrNothing(t *testing.T) {
+// Note what this does NOT claim: the injector fails BEFORE executing, so
+// this says nothing about a script that dies partway through. Redis has
+// no rollback, so Lua atomicity would not save us there either. The
+// protection against the original two-key bug is structural — one key
+// with one expiry — plus the replay behaviour covered by
+// TestRedisInstallSessionStoreReplayAfterLostResponse.
+func TestRedisInstallSessionStoreFailedRequestWritesNothing(t *testing.T) {
 	rdb := newInstallSessionRedis(t)
 	injector := &failScriptOnce{UniversalClient: rdb}
 	store := NewRedisInstallSessionStore(injector)
@@ -367,8 +366,8 @@ func TestRedisInstallSessionStoreTerminalWriteIsAllOrNothing(t *testing.T) {
 		t.Fatal("expected the injected failure to surface")
 	}
 
-	// Nothing applied: the failed attempt must not have left the status
-	// written under the original retention.
+	// Nothing applied: a request that never reached Redis must not have
+	// left the status written under the original retention.
 	state, err := store.Get(ctx, ws, id)
 	if err != nil {
 		t.Fatalf("Get after failed write: %v", err)
@@ -413,4 +412,96 @@ func TestInstallSessionStoreMarkTerminalOnMissingSessionIsNotFound(t *testing.T)
 			t.Errorf("want ErrInstallSessionNotFound, got %v", err)
 		}
 	})
+}
+
+// loseScriptReply lets the script run on the server, then hands the
+// caller an error — the realistic failure the two-key version could not
+// survive: the write landed, but the client does not know it.
+type loseScriptReply struct {
+	redis.UniversalClient
+	armed  bool
+	failed bool
+}
+
+func (c *loseScriptReply) intercept(ctx context.Context, cmd *redis.Cmd) *redis.Cmd {
+	if c.armed && !c.failed && cmd.Err() == nil {
+		c.failed = true
+		lost := redis.NewCmd(ctx)
+		lost.SetErr(errors.New("injected lost response after successful server execution"))
+		return lost
+	}
+	return cmd
+}
+
+func (c *loseScriptReply) EvalSha(ctx context.Context, sha string, keys []string, args ...any) *redis.Cmd {
+	return c.intercept(ctx, c.UniversalClient.EvalSha(ctx, sha, keys, args...))
+}
+
+func (c *loseScriptReply) Eval(ctx context.Context, script string, keys []string, args ...any) *redis.Cmd {
+	return c.intercept(ctx, c.UniversalClient.Eval(ctx, script, keys, args...))
+}
+
+// TestRedisInstallSessionStoreReplayAfterLostResponse is the case the
+// earlier two-key store actually lost (raised in re-review of #8376): the
+// server ran the write, the client never saw the reply, and the retry
+// therefore replays a write that already landed.
+//
+// Under SETNX-plus-EXPIRE the replay reported "someone else won" and
+// skipped the EXPIRE, stranding the terminal status under the base key's
+// original retention. Here the replay must keep the first outcome AND
+// re-assert retention, so the record expires as one piece and never reads
+// `pending` again.
+func TestRedisInstallSessionStoreReplayAfterLostResponse(t *testing.T) {
+	rdb := newInstallSessionRedis(t)
+	client := &loseScriptReply{UniversalClient: rdb}
+	store := NewRedisInstallSessionStore(client)
+	ctx := context.Background()
+	ws := installSessionUUID(t, "11111111-1111-1111-1111-111111111111")
+	id := "lost-response"
+
+	if err := store.Create(ctx, InstallSessionState{
+		ID: id, WorkspaceID: ws, InitiatorID: ws,
+		Status: RegistrationStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+	}, 90*time.Minute); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	client.armed = true
+	if err := store.MarkTerminal(ctx, id, InstallSessionOutcome{
+		Status: RegistrationStatusSuccess,
+	}, 30*time.Minute); err == nil {
+		t.Fatal("expected the lost reply to surface as an error")
+	}
+
+	// The server did run it, so the outcome is already recorded.
+	state, err := store.Get(ctx, ws, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if state.Status != RegistrationStatusSuccess {
+		t.Fatalf("server did not retain the first write: got %q", state.Status)
+	}
+
+	// The caller retries, not knowing that. A different outcome must not
+	// replace the recorded one, and retention must still move.
+	if err := store.MarkTerminal(ctx, id, InstallSessionOutcome{
+		Status: RegistrationStatusError, ErrorReason: RegistrationReasonExpired,
+	}, time.Second); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	state, err = store.Get(ctx, ws, id)
+	if err != nil {
+		t.Fatalf("Get after replay: %v", err)
+	}
+	if state.Status != RegistrationStatusSuccess {
+		t.Fatalf("replay replaced the first terminal outcome: got %q", state.Status)
+	}
+	if ttl := rdb.TTL(ctx, installSessionKey(id)).Val(); ttl > 2*time.Second || ttl < 0 {
+		t.Fatalf("replay did not re-assert retention: TTL=%s", ttl)
+	}
+
+	time.Sleep(1100 * time.Millisecond)
+	if _, err := store.Get(ctx, ws, id); !errors.Is(err, ErrInstallSessionNotFound) {
+		t.Errorf("whole record must expire at once, never back to pending: %v", err)
+	}
 }

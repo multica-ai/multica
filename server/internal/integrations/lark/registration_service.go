@@ -144,13 +144,18 @@ const (
 	// write with an already-cancelled context.
 	sessionWriteTimeout = 10 * time.Second
 
-	// Retry budget for recording a terminal outcome. Sized to ride out a
-	// Redis failover or restart rather than just a dropped packet: 8
-	// attempts backing off 200ms→12.8s cap is a little over a minute of
-	// wall clock. The goroutine has no other work left at this point, and
-	// the alternative — dropping a completion that is already committed in
-	// Postgres — is what leaves a bound user staring at a pending dialog.
-	terminalWriteAttempts       = 8
+	// Retry budget for recording a terminal outcome, sized to ride out a
+	// Redis failover rather than just a dropped packet. 10 attempts means
+	// 9 waits — 200ms doubling into the 15s cap — which is 55.4s of
+	// backoff, plus up to sessionWriteTimeout per attempt on top. The
+	// goroutine has no other work left at this point, and the alternative
+	// (dropping a completion already committed in Postgres) is what leaves
+	// a bound user staring at a pending dialog.
+	//
+	// This is a bounded recovery window, not a guarantee: an outage that
+	// outlasts it still releases the session, and the read path then
+	// reports expiry once the QR window closes.
+	terminalWriteAttempts       = 10
 	terminalWriteInitialBackoff = 200 * time.Millisecond
 	terminalWriteMaxBackoff     = 15 * time.Second
 )

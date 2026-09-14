@@ -11,17 +11,29 @@ import (
 
 // Redis-backed InstallSessionStore — the multi-replica implementation.
 //
-// The whole session is ONE hash key, and both writes go through Lua so
-// they are atomic. An earlier version split the record across a base key
-// and a SetNX'd terminal key, which made the terminal status and the
-// retention window two separately-failing writes: a SetNX that landed
-// followed by a failed EXPIRE left the status stored under the base key's
-// original (much longer) TTL, and the retry could not tell the difference
-// because SetNX now reported "someone else won". A session that finished
-// early then lost its terminal field first and read as `pending` again.
+// The whole session is ONE hash key, and both writes go through Lua.
+// An earlier version split the record across a base key and a SetNX'd
+// terminal key, which made the terminal status and the retention window
+// two separately-failing round trips: a SetNX that landed followed by a
+// failed EXPIRE left the status stored under the base key's original
+// (much longer) TTL, and the retry could not repair it because SetNX then
+// reported "someone else won". A session that finished early lost its
+// terminal field first and read as `pending` again.
 //
-// One key and one script removes that class outright: status and
-// retention move together or not at all, and a retry re-asserts both.
+// Two properties remove that failure mode, and it is worth being precise
+// about which does the work — Lua atomicity is NOT one of them. Redis
+// does not roll back a script that fails partway through
+// (https://redis.io/blog/you-dont-need-transaction-rollbacks-in-redis/),
+// so "atomic" here buys isolation from other clients, not all-or-nothing
+// recovery. What actually fixes it:
+//
+//  1. One key. Status and retention share a single expiry, so the
+//     terminal outcome cannot outlive — or be outlived by — the record
+//     that carries it.
+//  2. A retry that re-asserts both. The terminal script keeps the first
+//     status and re-runs EXPIRE unconditionally, so replaying it after a
+//     lost or failed response converges on the right state instead of
+//     reporting "someone else won" and leaving retention stale.
 const installSessionKeyPrefix = "mul:lark:install:"
 
 func installSessionKey(id string) string { return installSessionKeyPrefix + id }
@@ -52,8 +64,10 @@ return 1
 // is the first-writer-wins guarantee: when the expiry deadline and a poll
 // result race, the user keeps whichever outcome they were already shown.
 // The EXPIRE runs UNCONDITIONALLY — including for the caller that lost —
-// so a retry after a partially-applied write still moves retention onto
-// the terminal window instead of reporting success and leaving it stale.
+// which is what makes a replay converge. A client that never saw the
+// reply to a script the server DID run re-sends it, hits the "already
+// terminal" branch, and still moves retention onto the terminal window
+// rather than reporting success and leaving it stale.
 //
 // Returns 0 when the session is gone (expired out or never existed):
 // there is nothing to record and nothing a retry could fix.
