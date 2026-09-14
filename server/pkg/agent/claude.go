@@ -171,6 +171,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var sessionID string
 		sawAsyncLaunch := false
 		usage := make(map[string]TokenUsage)
+		seenUsage := make(map[string]struct{})
 		eventCount := 0
 		invalidEventCount := 0
 		assistantEventCount := 0
@@ -227,7 +228,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			switch msg.Type {
 			case "assistant":
 				assistantEventCount++
-				turn := b.handleAssistant(msg, msgCh, usage)
+				turn := b.handleAssistant(msg, msgCh, usage, seenUsage)
 				toolUseCount += turn.toolUses
 				if !turn.understood {
 					unreadableAssistantCount++
@@ -363,7 +364,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage) assistantTurn {
+func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage, seenUsage map[string]struct{}) assistantTurn {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
 		// Unreadable body: understood stays false so the caller drops any
@@ -374,11 +375,22 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 	var assistantText strings.Builder
 	toolUseCount := 0
 
-	// Accumulate token usage per model.
-	if content.Usage != nil && content.Model != "" {
+	// A response can emit several assistant blocks with the same message ID
+	// and usage. Count its input/cache tokens once, without dropping any of
+	// the blocks below. Missing IDs retain best-effort per-event accounting.
+	// This fallback covers only the main loop: assistant output_tokens is a
+	// placeholder, and subagent totals require the final result's modelUsage.
+	// https://code.claude.com/docs/en/agent-sdk/cost-tracking#track-per-step-usage
+	_, counted := seenUsage[content.ID]
+	if msg.ParentToolUseID == "" && content.Usage != nil && content.Model != "" &&
+		(content.ID == "" || !counted) && claudeUsageHasTokens(
+		content.Usage.InputTokens, 0, content.Usage.CacheReadInputTokens, content.Usage.CacheCreationInputTokens,
+	) {
+		if content.ID != "" {
+			seenUsage[content.ID] = struct{}{}
+		}
 		u := usage[content.Model]
 		u.InputTokens += content.Usage.InputTokens
-		u.OutputTokens += content.Usage.OutputTokens
 		u.CacheReadTokens += content.Usage.CacheReadInputTokens
 		u.CacheWriteTokens += content.Usage.CacheCreationInputTokens
 		usage[content.Model] = u
@@ -537,11 +549,12 @@ func claudeMapHasAsyncLaunchStatus(value map[string]any) bool {
 // ── Claude SDK JSON types ──
 
 type claudeSDKMessage struct {
-	Type      string          `json:"type"`
-	Message   json.RawMessage `json:"message,omitempty"`
-	Subtype   string          `json:"subtype,omitempty"`
-	SessionID string          `json:"session_id,omitempty"`
-	Model     string          `json:"model,omitempty"`
+	Type            string          `json:"type"`
+	Message         json.RawMessage `json:"message,omitempty"`
+	Subtype         string          `json:"subtype,omitempty"`
+	SessionID       string          `json:"session_id,omitempty"`
+	Model           string          `json:"model,omitempty"`
+	ParentToolUseID string          `json:"parent_tool_use_id,omitempty"`
 
 	// result fields
 	ResultText string `json:"result,omitempty"`
@@ -569,6 +582,7 @@ type claudeLogEntry struct {
 }
 
 type claudeMessageContent struct {
+	ID      string               `json:"id"`
 	Role    string               `json:"role"`
 	Model   string               `json:"model"`
 	Content []claudeContentBlock `json:"content"`

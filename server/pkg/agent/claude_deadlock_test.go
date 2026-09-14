@@ -56,6 +56,9 @@ func TestMain(m *testing.M) {
 		// exit, which each of those fake CLIs would otherwise add to its test.
 		os.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
 		os.Exit(m.Run())
+	case "usage_fixture":
+		runFakeClaudeUsageFixture()
+		os.Exit(0)
 	case "startup_stdout_burst":
 		runFakeClaudeStartupStdoutBurst()
 		os.Exit(0)
