@@ -4595,6 +4595,7 @@ func (q *Queries) GetLatestTaskRoleForIssueAndAgent(ctx context.Context, arg Get
 const getLatestTaskRolloutMissing = `-- name: GetLatestTaskRolloutMissing :one
 SELECT COALESCE(session_rollout_missing, FALSE) FROM agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2
+  AND COALESCE(context->>'type', '') <> 'triage'
   AND status IN ('completed', 'failed')
   AND started_at IS NOT NULL
 ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
@@ -4612,6 +4613,12 @@ type GetLatestTaskRolloutMissingParams struct {
 // disclose that the most recent turn's context could not be carried over. Any
 // later task that records a real session resets this to FALSE by being the new
 // most-recent row, so the disclosure fires once and then clears.
+//
+// Triage runs are excluded for the same reason GetLastTaskSession excludes them
+// (MUL-7189 §5.6), and the two must agree: this query only reports whether THAT
+// one fell back. A triage run is invisible to it, so a triage run reported here
+// would tell the first execution run after accept that the previous turn's
+// context could not be carried over — about a turn it was never entitled to.
 func (q *Queries) GetLatestTaskRolloutMissing(ctx context.Context, arg GetLatestTaskRolloutMissingParams) (bool, error) {
 	row := q.db.QueryRow(ctx, getLatestTaskRolloutMissing, arg.AgentID, arg.IssueID)
 	var session_rollout_missing bool

@@ -35,6 +35,12 @@ import (
 // callers log it and drop the trigger.
 var ErrIssueInTriage = errors.New("the issue is in triage, so it does not run")
 
+// ErrRerunSourceIsTriage is returned when a manual rerun names a triage run as
+// the task to repeat. Handlers render it as 400: the request is well-formed and
+// the issue may well be runnable — it is the target that is not an execution
+// run. Redoing triage is re-triage.
+var ErrRerunSourceIsTriage = errors.New("the source task is a triage run, which is redone by re-triaging the issue rather than by rerunning it")
+
 // guardIssueNotInTriage refuses an enqueue for an issue in Triage. q is the
 // caller's own query handle so a transaction-scoped enqueue reads the status
 // its own transaction wrote — the deferred-channel path creates the issue and
@@ -66,10 +72,14 @@ func guardIssueNotInTriage(ctx context.Context, q *db.Queries, issueID pgtype.UU
 // execution run on the accepted issue must not inherit the triage conversation.
 const TriageContextType = "triage"
 
-// isTriageTask reports whether a queued task is a Triage run. The marker lives
-// in the task's context rather than a column, so a task written before Triage
-// existed reads as false.
-func isTriageTask(t db.AgentTaskQueue) bool {
+// IsTriageTask reports whether a task is a Triage run. The marker lives in the
+// task's context rather than a column, so a task written before Triage existed
+// reads as false.
+//
+// Exported because the daemon claim handler needs the same answer: it resolves
+// a manual rerun's session from the named source task, which no query-level
+// exclusion can reach.
+func IsTriageTask(t db.AgentTaskQueue) bool {
 	if len(t.Context) == 0 {
 		return false
 	}

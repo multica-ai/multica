@@ -169,3 +169,63 @@ func TestTriageRunsCannotInvalidateAnExecutionSession(t *testing.T) {
 		}
 	})
 }
+
+// GetLatestTaskRolloutMissing only reports whether GetLastTaskSession fell
+// back, so the two must exclude the same rows. A triage run is invisible to
+// that lookup, and reporting one here would tell the first execution run after
+// accept that it lost the previous turn's context — about a turn it was never
+// entitled to (MUL-7189 §5.6).
+func TestGetLatestTaskRolloutMissingIgnoresTriageRuns(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	ctx := context.Background()
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	rolloutMissing := func() bool {
+		t.Helper()
+		missing, err := db.New(testPool).GetLatestTaskRolloutMissing(ctx, db.GetLatestTaskRolloutMissingParams{
+			AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+			IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+		})
+		if err != nil {
+			t.Fatalf("GetLatestTaskRolloutMissing failed: %v", err)
+		}
+		return missing
+	}
+
+	// An ordinary execution run that carried its context over cleanly.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, session_rollout_missing)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '5 minutes', now() - interval '5 minutes', 'EXECUTION-SESSION', '/tmp/execution', FALSE)
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert execution task: %v", err)
+	}
+	if rolloutMissing() {
+		t.Fatal("a clean execution run already reports a continuity gap, so the triage case below proves nothing")
+	}
+
+	// A newer triage run whose rollout was missing. Before the exclusion this
+	// became the most-recent row and flipped the disclosure to true.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, work_dir, session_rollout_missing, context)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '1 minute', now() - interval '1 minute', '/tmp/triage', TRUE, '{"type":"triage"}'::jsonb)
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert triage task: %v", err)
+	}
+	if rolloutMissing() {
+		t.Error("a triage run reported a continuity gap to the execution run after accept")
+	}
+
+	// The signal still works for an execution run that really did lose one.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, work_dir, session_rollout_missing)
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(), '/tmp/execution', TRUE)
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert rollout-missing execution task: %v", err)
+	}
+	if !rolloutMissing() {
+		t.Error("the exclusion also silenced a real execution-side continuity gap")
+	}
+}

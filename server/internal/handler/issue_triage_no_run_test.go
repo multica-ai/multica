@@ -366,3 +366,113 @@ func retryableOnItsOwn(t db.AgentTaskQueue) bool {
 	return t.Status == "failed" && t.FailureReason.String == "timeout" &&
 		t.Attempt < t.MaxAttempts && t.IssueID.Valid && !t.AutopilotRunID.Valid
 }
+
+// A triage run must not outlive Triage as something to repeat (MUL-7189 §5.6).
+//
+// This is the one path that survives accept: once the issue is runnable again
+// nothing above refuses it, and rerun resolves its session from the task the
+// user named rather than from GetLastTaskSession — so the query-level exclusion
+// cannot see it. It would also target the triager instead of the assignee.
+func TestRerunRefusesAHistoricalTriageTaskAfterAccept(t *testing.T) {
+	f := newTriageRunFixture(t)
+	// Already accepted: the issue itself runs fine, which is what makes the
+	// source task the only thing left to refuse.
+	issueID := f.issueFor(t, "todo", "accepted out of triage")
+
+	sourceTask := func(cols testutil.Cols) string {
+		base := testutil.Cols{
+			"runtime_id":   f.runtimeID,
+			"issue_id":     issueID,
+			"status":       "completed",
+			"session_id":   "TRIAGE-SESSION",
+			"work_dir":     "/tmp/triage",
+			"started_at":   testutil.Raw("now() - interval '2 minutes'"),
+			"completed_at": testutil.Raw("now() - interval '1 minute'"),
+		}
+		for k, v := range cols {
+			base[k] = v
+		}
+		return dbfx.Task(t, f.agentID, base)
+	}
+	rerun := func(taskID string) *testutil.Response {
+		return testutil.Call(t, testHandler.RerunIssue, withURLParam(
+			newRequest(http.MethodPost, "/api/issues/"+issueID+"/rerun", map[string]any{"task_id": taskID}), "id", issueID))
+	}
+
+	// The control: an ordinary historical task on this issue reruns.
+	before := tasksOn(t, issueID)
+	rerun(sourceTask(nil)).Want(http.StatusAccepted)
+	if got := tasksOn(t, issueID); got != before+2 {
+		t.Fatalf("ordinary rerun left %d task(s), want the source plus a rerun", got-before)
+	}
+
+	triageID := sourceTask(testutil.Cols{"context": testutil.Raw(`'{"type":"triage"}'::jsonb`)})
+	before = tasksOn(t, issueID)
+	if body := rerun(triageID).Want(http.StatusBadRequest).Map()["error"]; body == nil {
+		t.Fatal("refused triage rerun carried no error message")
+	}
+	if got := tasksOn(t, issueID); got != before {
+		t.Fatalf("refused triage rerun created %d task(s)", got-before)
+	}
+}
+
+// The claim-side half of the same rule. The service refuses first, so this
+// guards a rerun row written by an older server during a rolling deploy — the
+// one case where the refusal above was not in effect when the row was created.
+func TestRerunSourceScopeRejectsATriageSource(t *testing.T) {
+	agent := parseUUID(testUserID)
+	issue := pgtype.UUID{Bytes: [16]byte{7}, Valid: true}
+	task := db.AgentTaskQueue{AgentID: agent, IssueID: issue}
+	ordinary := db.AgentTaskQueue{AgentID: agent, IssueID: issue}
+	triage := db.AgentTaskQueue{AgentID: agent, IssueID: issue, Context: []byte(`{"type":"triage"}`)}
+
+	if !rerunSourceMatchesTaskScope(task, ordinary) {
+		t.Fatal("an ordinary same-issue source is in scope, so the triage case below proves nothing")
+	}
+	if rerunSourceMatchesTaskScope(task, triage) {
+		t.Error("a triage source is in scope, so its session and workdir would be reused")
+	}
+}
+
+// FailTask's in-transaction retry is the one enqueue that must refuse WITHOUT
+// failing: the transaction also carries the parent's failed status, so aborting
+// would leave the task stuck in 'running'.
+func TestFailTaskRetryStartsNoRunForATriageIssue(t *testing.T) {
+	ctx := context.Background()
+	f := newTriageRunFixture(t)
+
+	for _, tc := range []struct {
+		status     string
+		wantChild  bool
+		wantOnFail string
+	}{
+		{"todo", true, "an ordinary issue retries, so the triage case below proves nothing"},
+		{issuestatus.Triage, false, "an issue in Triage was given a retry"},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			issueID := f.issueFor(t, tc.status, "fail task retry: "+tc.status)
+			taskID := dbfx.Task(t, f.agentID, testutil.Cols{
+				"runtime_id":   f.runtimeID,
+				"issue_id":     issueID,
+				"status":       "running",
+				"attempt":      1,
+				"max_attempts": 2,
+				"started_at":   testutil.Raw("now() - interval '1 minute'"),
+			})
+			if _, err := testHandler.TaskService.FailTask(ctx, parseUUID(taskID), "runtime went away", "", "", "", "timeout", false, "", ""); err != nil {
+				t.Fatalf("FailTask: %v", err)
+			}
+			// The parent must land failed either way. A guard that aborted the
+			// transaction would leave it 'running' and the task stuck forever.
+			var status string
+			dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
+			if status != "failed" {
+				t.Fatalf("parent task status = %q, want failed", status)
+			}
+			children := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND id <> $2`, issueID, taskID)
+			if (children > 0) != tc.wantChild {
+				t.Fatalf("%s (children = %d)", tc.wantOnFail, children)
+			}
+		})
+	}
+}

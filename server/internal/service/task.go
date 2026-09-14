@@ -5237,7 +5237,7 @@ func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
 	return retryableReasons[failureReason] &&
 		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
 		!t.AutopilotRunID.Valid &&
-		!isTriageTask(t) &&
+		!IsTriageTask(t) &&
 		(t.IssueID.Valid || t.ChatSessionID.Valid || isSourceContextQuickCreateTask(t))
 }
 
@@ -5535,6 +5535,17 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		}
 		if !sourceTask.IssueID.Valid || util.UUIDToString(sourceTask.IssueID) != util.UUIDToString(issueID) {
 			return nil, fmt.Errorf("source task does not belong to this issue")
+		}
+		// A triage run is not an execution run to repeat (MUL-7189 §5.6). This
+		// is the only path that names a source task directly, and it would
+		// otherwise outlive Triage: after accept the issue is runnable again, so
+		// nothing above stops a rerun pointed at the triage task — which resumes
+		// its session through rerun_of_task_id (the claim handler reads the
+		// named source, not GetLastTaskSession) and targets the triager rather
+		// than the issue's assignee. Redoing triage is re-triage, a different
+		// action on a different status.
+		if IsTriageTask(sourceTask) {
+			return nil, ErrRerunSourceIsTriage
 		}
 		agentID = sourceTask.AgentID
 		isLeader = sourceTask.IsLeaderTask

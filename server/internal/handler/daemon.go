@@ -2150,6 +2150,15 @@ func rerunSourceMatchesTaskScope(task, source db.AgentTaskQueue) bool {
 	if task.AgentID != source.AgentID {
 		return false
 	}
+	// A triage run is never a source to continue from (MUL-7189 §5.6). The
+	// exclusion GetLastTaskSession applies cannot reach this branch, which
+	// resolves the session from the task the user named rather than from the
+	// (agent, issue) lookup. RerunIssue already refuses a triage source, so this
+	// is the second lock on the same door — and the one that still holds for a
+	// row written by an older server mid rolling-deploy.
+	if service.IsTriageTask(source) {
+		return false
+	}
 	if task.IssueID.Valid {
 		return source.IssueID.Valid && task.IssueID == source.IssueID
 	}

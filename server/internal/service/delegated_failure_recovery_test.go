@@ -1171,3 +1171,63 @@ func TestDelegatedFailureRecoveryTaskDoesNotRecursivelyWake(t *testing.T) {
 		t.Fatalf("recursive recovery comments = %d, want 0", comments)
 	}
 }
+
+// A source issue in Triage runs nothing, so a worker failure must not wake its
+// coordinator (MUL-7189 §2.3). This path builds its coordinator task with a
+// direct CreateAgentTask call, bypassing both enqueue funnels, so it needs the
+// queue door of its own.
+//
+// The obligation is not discharged — the comment stays in the outbox and
+// dispatches once the issue is accepted — so the sweep reports it as scanned
+// and replays nothing.
+func TestPendingDelegatedFailureSweepSkipsTriageSourceIssue(t *testing.T) {
+	f, svc := seedDelegatedFailureFixture(t)
+	ctx := context.Background()
+	failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET failure_reason = 'agent_error.process_failure', error = 'worker exited', completed_at = now()
+		WHERE id = $1`, failedID); err != nil {
+		t.Fatalf("stamp failed task: %v", err)
+	}
+	if target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID); err != nil || target == nil || !created {
+		t.Fatalf("ensure recovery comment = target %v created %v err %v", target != nil, created, err)
+	}
+
+	recoveryTasks := func() int {
+		t.Helper()
+		var n int
+		if err := f.pool.QueryRow(ctx, `
+			SELECT count(*) FROM agent_task_queue
+			WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&n); err != nil {
+			t.Fatalf("count recovery tasks: %v", err)
+		}
+		return n
+	}
+
+	if _, err := f.pool.Exec(ctx, `UPDATE issue SET status = 'triage' WHERE id = $1`, f.issueID); err != nil {
+		t.Fatalf("move source issue into triage: %v", err)
+	}
+	result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
+	if err != nil {
+		t.Fatalf("triage-source recovery sweep: %v", err)
+	}
+	if result.Scanned != 1 || result.Replayed != 0 || result.Exhausted != 0 {
+		t.Fatalf("triage-source sweep = %+v, want the comment scanned and nothing replayed", result)
+	}
+	if n := recoveryTasks(); n != 0 {
+		t.Fatalf("recovery tasks = %d, want none while the source issue is in Triage", n)
+	}
+
+	// Accept, and the same pending comment wakes the coordinator — which is
+	// what makes the zero above Triage's doing and not an inert fixture.
+	if _, err := f.pool.Exec(ctx, `UPDATE issue SET status = 'in_progress' WHERE id = $1`, f.issueID); err != nil {
+		t.Fatalf("accept source issue: %v", err)
+	}
+	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result.Replayed != 1 {
+		t.Fatalf("post-accept sweep = %+v, %v; want one replay", result, err)
+	}
+	if n := recoveryTasks(); n != 1 {
+		t.Fatalf("recovery tasks after accept = %d, want 1", n)
+	}
+}
