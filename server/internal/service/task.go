@@ -1102,7 +1102,7 @@ func taskFailureReason(task db.AgentTaskQueue) string {
 
 func taskErrorType(reason string) string {
 	switch reason {
-	case "runtime_offline", "runtime_recovery":
+	case "runtime_offline", "runtime_recovery", "resource_exhausted.memory":
 		return "runtime"
 	case "timeout", "codex_semantic_inactivity":
 		return "timeout"

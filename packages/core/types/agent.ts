@@ -190,7 +190,26 @@ export type TaskFailureReason =
   | "runtime_offline"
   | "runtime_reconnect_timeout"
   | "runtime_recovery"
+  | "resource_exhausted.memory"
   | "manual";
+
+export interface TaskResourceUsage {
+  isolation_mode: "systemd_cgroup_v2" | "process_group" | (string & {});
+  fallback_reason?: string;
+  kind?: "memory" | (string & {});
+  memory_oom?: boolean;
+  memory_peak_bytes?: number;
+  swap_peak_bytes?: number;
+  memory_high_bytes?: number;
+  memory_max_bytes?: number;
+  swap_max_bytes?: number;
+  psi_some_avg10_peak?: number;
+  psi_full_avg10_peak?: number;
+  oom_kills?: number;
+  oom_group_kills?: number;
+  victim_cgroup?: string;
+  last_command?: string;
+}
 
 // One daily bucket for the Agents-list ACTIVITY sparkline. The back-end
 // only returns days that had at least one completion; the front-end fills
@@ -320,6 +339,7 @@ export interface AgentTask {
   // coarse values; `string & {}` admits the rest without collapsing the
   // hints.
   failure_reason?: TaskFailureReason | (string & {}) | "";
+  resource_usage?: TaskResourceUsage;
   /** The input comment was edited or deleted, invalidating this run. */
   cancelled_by_comment_change?: boolean;
   /** Present on cancellations recorded by a backend with actor provenance. */

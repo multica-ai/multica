@@ -258,6 +258,9 @@ Daemon behavior is configured via flags or environment variables:
 | Codex turn-interrupt timeout | — | `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` (bounded grace period for `turn/interrupt` acknowledgement and `turn/completed`; tune from the logged interrupt latency on unusually slow hosts) |
 | OpenCode idle watchdog | — | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` (`0` falls back to the generic idle watchdog; cannot extend it) |
 | Max concurrent tasks | `--max-concurrent-tasks` | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` |
+| Task memory soft limit | — | `MULTICA_TASK_MEMORY_HIGH` | `0` (unlimited) |
+| Task memory hard limit | — | `MULTICA_TASK_MEMORY_MAX` | `0` (unlimited) |
+| Task swap hard limit | — | `MULTICA_TASK_SWAP_MAX` | `unlimited` |
 | Daemon ID | `--daemon-id` | `MULTICA_DAEMON_ID` | hostname |
 | Device name | `--device-name` | `MULTICA_DAEMON_DEVICE_NAME` | hostname |
 | Runtime name | `--runtime-name` | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` |
@@ -274,6 +277,10 @@ Daemon behavior is configured via flags or environment variables:
 | GC Hermes memory TTL (per-agent `memories/`) | — | `MULTICA_GC_HERMES_MEMORY_TTL` | `2160h` (90d; set `0` to disable) |
 | GC Hermes session TTL (per-conversation `state.db`) | — | `MULTICA_GC_HERMES_SESSION_TTL` | `336h` (14d; set `0` to disable) |
 | GC task temp legacy TTL (pre-lock `multica-task-*`) | — | `MULTICA_GC_TASK_TEMP_LEGACY_TTL` | `0` (disabled; set a duration to opt in) |
+
+On Linux hosts with cgroup v2 and a user systemd manager, every run is placed in its own transient slice and scope, separate from the daemon and sibling runs. The three task-memory settings accept integer byte counts or `K`, `M`, `G`, `T` suffixes (including `KiB`, `MiB`, and so on); `MULTICA_TASK_SWAP_MAX=unlimited` keeps the host default. A kernel OOM in that scope is reported as `resource_exhausted.memory`, with peak memory, peak swap, PSI, the victim cgroup, and the launch command. The same command/profile is not retried automatically.
+
+When cgroup v2, `systemd-run`, or the user manager is unavailable, the daemon logs the reason and records `isolation_mode: process_group`. Existing process-group cancellation and descendant cleanup remain active, but the memory limits cannot be enforced and an OS kill cannot be positively classified as a task OOM on that fallback.
 
 #### Workspace garbage collection
 

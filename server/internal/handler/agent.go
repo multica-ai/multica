@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
+	"github.com/multica-ai/multica/server/internal/daemon/taskresource"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -405,6 +406,7 @@ type AgentTaskResponse struct {
 	Result               any                   `json:"result"`
 	Error                *string               `json:"error"`
 	FailureReason        string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	ResourceUsage        *taskresource.Usage   `json:"resource_usage,omitempty"`
 	Attempt              int32                 `json:"attempt"`
 	MaxAttempts          int32                 `json:"max_attempts"`
 	ParentTaskID         *string               `json:"parent_task_id,omitempty"`
@@ -788,6 +790,13 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
 	}
+	var resourceUsage *taskresource.Usage
+	if len(t.ResourceUsage) > 0 {
+		var usage taskresource.Usage
+		if json.Unmarshal(t.ResourceUsage, &usage) == nil {
+			resourceUsage = &usage
+		}
+	}
 	failureReason := ""
 	if t.FailureReason.Valid {
 		failureReason = t.FailureReason.String
@@ -826,6 +835,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		Result:                 result,
 		Error:                  textToPtr(t.Error),
 		FailureReason:          failureReason,
+		ResourceUsage:          resourceUsage,
 		BranchName:             branchName,
 		Attempt:                t.Attempt,
 		MaxAttempts:            t.MaxAttempts,

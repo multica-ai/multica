@@ -149,11 +149,11 @@ func (c *hermesClient) acpTerminalCreate(params json.RawMessage) (map[string]any
 
 	var cmd *exec.Cmd
 	if len(p.Args) > 0 {
-		cmd = NewCommand(p.Command, nil).exec(c.terminalContext(), p.Args...)
+		cmd = c.cfg.taskCommandAt(p.Command).exec(c.terminalContext(), p.Args...)
 	} else if runtime.GOOS == "windows" {
-		cmd = NewCommand("cmd.exe", nil).exec(c.terminalContext(), "/d", "/s", "/c", p.Command)
+		cmd = c.cfg.taskCommandAt("cmd.exe").exec(c.terminalContext(), "/d", "/s", "/c", p.Command)
 	} else {
-		cmd = NewCommand("/bin/sh", nil).exec(c.terminalContext(), "-c", p.Command)
+		cmd = c.cfg.taskCommandAt("/bin/sh").exec(c.terminalContext(), "-c", p.Command)
 	}
 	hideAgentWindow(cmd)
 	cmd.Dir = cwd

@@ -106,6 +106,65 @@ func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
 	}
 }
 
+func TestByteSizeFromEnv(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  int64
+	}{
+		{"", 7},
+		{"0", 0},
+		{"512M", 512 << 20},
+		{"12GiB", 12 << 30},
+		{"4096", 4096},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			t.Setenv("MULTICA_TEST_BYTES", tc.value)
+			got, err := byteSizeFromEnv("MULTICA_TEST_BYTES", 7)
+			if err != nil || got != tc.want {
+				t.Fatalf("byteSizeFromEnv(%q) = %d, %v; want %d", tc.value, got, err, tc.want)
+			}
+		})
+	}
+
+	for _, invalid := range []string{"-1", "2XB", "1.5G", "overflow999999999999999999G"} {
+		t.Run("invalid_"+invalid, func(t *testing.T) {
+			t.Setenv("MULTICA_TEST_BYTES", invalid)
+			if _, err := byteSizeFromEnv("MULTICA_TEST_BYTES", 0); err == nil {
+				t.Fatalf("byteSizeFromEnv(%q) unexpectedly succeeded", invalid)
+			}
+		})
+	}
+
+	t.Setenv("MULTICA_TEST_BYTES", "unlimited")
+	if got, err := byteSizeFromEnvAllowUnlimited("MULTICA_TEST_BYTES", 0); err != nil || got != -1 {
+		t.Fatalf("byteSizeFromEnvAllowUnlimited(unlimited) = %d, %v; want -1", got, err)
+	}
+}
+
+func TestLoadConfig_TaskMemoryLimits(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", "")
+	t.Setenv("MULTICA_TASK_MEMORY_HIGH", "384M")
+	t.Setenv("MULTICA_TASK_MEMORY_MAX", "512M")
+	t.Setenv("MULTICA_TASK_SWAP_MAX", "0")
+
+	overrides := Overrides{ServerURL: "http://localhost:0", WorkspacesRoot: t.TempDir()}
+	cfg, err := LoadConfig(overrides)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.TaskMemoryHighBytes != 384<<20 || cfg.TaskMemoryMaxBytes != 512<<20 || cfg.TaskSwapMaxBytes != 0 {
+		t.Fatalf("task memory limits = high:%d max:%d swap:%d", cfg.TaskMemoryHighBytes, cfg.TaskMemoryMaxBytes, cfg.TaskSwapMaxBytes)
+	}
+
+	t.Setenv("MULTICA_TASK_MEMORY_HIGH", "768M")
+	if _, err := LoadConfig(overrides); err == nil || !strings.Contains(err.Error(), "must not exceed") {
+		t.Fatalf("LoadConfig high > max error = %v", err)
+	}
+}
+
 // A localhost server URL is not the official cloud host, so this exercises the
 // self-host branch of defaultGCCompletedTaskTTL: retention stays unbounded until
 // an operator opts in, and a daemon upgrade never starts deleting on its own.

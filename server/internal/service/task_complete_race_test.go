@@ -261,6 +261,9 @@ func TestTaskFailureClassifiers(t *testing.T) {
 		// Correcting a misleading auth label must not enable an automatic resend.
 		{reason: "agent_error.provider_capacity_or_rate_limit", wantType: "agent_error", wantResumeOK: true, wantRetry: false},
 		{reason: "runtime_recovery", wantType: "runtime", wantResumeOK: true, wantRetry: true},
+		// A cgroup-confirmed OOM is a runtime resource failure, but repeating the
+		// same command under the same budget is deliberately unsafe.
+		{reason: "resource_exhausted.memory", wantType: "runtime", wantResumeOK: true, wantRetry: false},
 		{reason: "iteration_limit", wantType: "agent_output", wantResumeOK: false, wantRetry: false},
 		{reason: "api_invalid_request", wantType: "agent_error", wantResumeOK: false, wantRetry: false},
 		{reason: "agent_error.context_overflow", wantType: "agent_error", wantResumeOK: false, wantRetry: false},

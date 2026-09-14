@@ -176,6 +176,8 @@ type AgentTaskQueue struct {
 	CancelledByType           pgtype.Text `json:"cancelled_by_type"`
 	CancelledByID             pgtype.UUID `json:"cancelled_by_id"`
 	CancelledByName           pgtype.Text `json:"cancelled_by_name"`
+	// Per-run cgroup/process-group accounting reported by the daemon, including memory OOM evidence and isolation fallback diagnostics.
+	ResourceUsage []byte `json:"resource_usage"`
 }
 
 type AgentToLabel struct {

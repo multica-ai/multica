@@ -972,6 +972,39 @@ describe("AgentTranscriptDialog — reason vs raw diagnostics", () => {
   });
 });
 
+describe("AgentTranscriptDialog — resource diagnostics", () => {
+  it("shows peak memory, swap, PSI, cgroup, and the last command", async () => {
+    renderDialog(items, {
+      task: {
+        ...baseTask,
+        status: "failed",
+        failure_reason: "resource_exhausted.memory",
+        resource_usage: {
+          isolation_mode: "systemd_cgroup_v2",
+          kind: "memory",
+          memory_oom: true,
+          memory_peak_bytes: 48 << 20,
+          swap_peak_bytes: 0,
+          psi_some_avg10_peak: 7.5,
+          psi_full_avg10_peak: 2.25,
+          victim_cgroup: "/multica-task.slice/task.slice",
+          last_command: "codex app-server",
+        },
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Run details" }));
+
+    expect(screen.getByText("Peak memory")).toBeInTheDocument();
+    expect(screen.getByText("48.0 MB")).toBeInTheDocument();
+    expect(screen.getByText("Peak swap")).toBeInTheDocument();
+    expect(screen.getByText("0 B")).toBeInTheDocument();
+    expect(screen.getByText("7.50% / 2.25%")).toBeInTheDocument();
+    expect(screen.getByText("/multica-task.slice/task.slice")).toBeInTheDocument();
+    expect(screen.getByText("codex app-server")).toBeInTheDocument();
+  });
+});
+
 
 describe("readable issue references", () => {
   it("searches both the displayed identifier and original UUID", async () => {

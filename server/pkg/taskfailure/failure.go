@@ -176,6 +176,12 @@ const (
 	// only repeat an isolation failure.
 	ReasonInvalidTaskIdentity Reason = "invalid_task_identity"
 
+	// ReasonResourceExhaustedMemory: the task's dedicated cgroup reported an
+	// OOM kill. It is deliberately non-retryable: repeating the same command
+	// and resource profile is unsafe until an explicit retry policy changes one
+	// of them.
+	ReasonResourceExhaustedMemory Reason = "resource_exhausted.memory"
+
 	// Agent process side: failure surfaced by the agent CLI / SDK as
 	// an error string. Classify(rawError) is responsible for picking
 	// the right sub-reason from the string. IsAgentError returns true
@@ -251,7 +257,7 @@ const (
 	ReasonAgentUnknown Reason = "agent_error.unknown"
 )
 
-// allReasons is the canonical ordered list of the 26 reasons. Order is
+// allReasons is the canonical ordered list of the 27 reasons. Order is
 // stable so callers (e.g. Prometheus collectors that pre-warm series via
 // AllReasons) can build deterministic label sets across restarts.
 //
@@ -274,6 +280,7 @@ var allReasons = []Reason{
 	ReasonRuntimeCLITimeout,
 	ReasonEnvironmentPrepareFailed,
 	ReasonInvalidTaskIdentity,
+	ReasonResourceExhaustedMemory,
 
 	// Agent process side: provider errors.
 	ReasonAgentProviderAuthOrAccess,

@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 
+	"github.com/multica-ai/multica/server/internal/daemon/taskresource"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
@@ -305,8 +306,9 @@ type TaskResult struct {
 	// abandoned as unresumable (GH #6066). Forwarded on every terminal path,
 	// including the completed one: a fresh-session retry that SUCCEEDS is
 	// precisely when the abandoned id would otherwise stay selectable.
-	RetiredSessionID string           `json:"-"`
-	Usage            []TaskUsageEntry `json:"usage,omitempty"` // per-model token usage
+	RetiredSessionID string              `json:"-"`
+	Usage            []TaskUsageEntry    `json:"usage,omitempty"` // per-model token usage
+	ResourceUsage    *taskresource.Usage `json:"-"`               // host resource accounting, reported separately before terminal state
 }
 
 // PluginHookTool is one agent-trigger plugin hook, as the agent will see it.

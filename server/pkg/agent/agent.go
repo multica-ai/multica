@@ -321,6 +321,10 @@ type Config struct {
 	// Command boundary applies it to every process the package spawns, task
 	// launches and CLI probes alike. Backends never read it directly.
 	LaunchPrefix []string
+	// CommandPrefix wraps every task runtime process at the final launch
+	// boundary. The daemon uses it for systemd-run's per-task cgroup scope.
+	// Empty preserves the direct process-group launch used on unsupported hosts.
+	CommandPrefix []string
 }
 
 // New creates a Backend for the given agent type.

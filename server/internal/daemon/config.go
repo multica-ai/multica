@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -90,6 +91,12 @@ const (
 	// reclaimed on liveness and never touch this knob.
 	DefaultGCTaskTempLegacyTTL     = time.Duration(0)
 	DefaultAutoUpdateCheckInterval = 6 * time.Hour // how often the daemon polls GitHub for a newer CLI release
+	// Task memory limits are opt-in so upgrades cannot kill workloads whose
+	// baseline has not been measured. Isolation and accounting still apply
+	// with both limits unset.
+	DefaultTaskMemoryHighBytes int64 = 0
+	DefaultTaskMemoryMaxBytes  int64 = 0
+	DefaultTaskSwapMaxBytes    int64 = -1
 )
 
 // DefaultGCArtifactPatterns lists basename matches that the GC loop treats as
@@ -135,6 +142,9 @@ type Config struct {
 	WSClaimPollInterval            time.Duration // upper bound for healthy WS batch-claim safety polls; actual sleeps use downward-only jitter
 	HeartbeatInterval              time.Duration
 	AgentTimeout                   time.Duration
+	TaskMemoryHighBytes            int64
+	TaskMemoryMaxBytes             int64
+	TaskSwapMaxBytes               int64
 	CodexSemanticInactivityTimeout time.Duration
 	// CodexFirstTurnNoProgressTimeout is an explicit override for the Codex
 	// first-turn no-progress ceiling (MULTICA_CODEX_FIRST_TURN_TIMEOUT). 0 means
@@ -328,6 +338,21 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 	if overrides.AgentTimeout != nil {
 		agentTimeout = *overrides.AgentTimeout
+	}
+	taskMemoryHighBytes, err := byteSizeFromEnv("MULTICA_TASK_MEMORY_HIGH", DefaultTaskMemoryHighBytes)
+	if err != nil {
+		return Config{}, err
+	}
+	taskMemoryMaxBytes, err := byteSizeFromEnv("MULTICA_TASK_MEMORY_MAX", DefaultTaskMemoryMaxBytes)
+	if err != nil {
+		return Config{}, err
+	}
+	taskSwapMaxBytes, err := byteSizeFromEnvAllowUnlimited("MULTICA_TASK_SWAP_MAX", DefaultTaskSwapMaxBytes)
+	if err != nil {
+		return Config{}, err
+	}
+	if taskMemoryHighBytes > 0 && taskMemoryMaxBytes > 0 && taskMemoryHighBytes > taskMemoryMaxBytes {
+		return Config{}, fmt.Errorf("MULTICA_TASK_MEMORY_HIGH (%d) must not exceed MULTICA_TASK_MEMORY_MAX (%d)", taskMemoryHighBytes, taskMemoryMaxBytes)
 	}
 
 	// MULTICA_AGENT_IDLE_WATCHDOG=0 disables the per-task idle watchdog. We
@@ -654,6 +679,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		WSClaimPollInterval:             wsClaimPollInterval,
 		HeartbeatInterval:               heartbeatInterval,
 		AgentTimeout:                    agentTimeout,
+		TaskMemoryHighBytes:             taskMemoryHighBytes,
+		TaskMemoryMaxBytes:              taskMemoryMaxBytes,
+		TaskSwapMaxBytes:                taskSwapMaxBytes,
 		CodexSemanticInactivityTimeout:  codexSemanticInactivityTimeout,
 		CodexFirstTurnNoProgressTimeout: codexFirstTurnNoProgressTimeout,
 		CodexHandshakeTimeout:           codexHandshakeTimeout,
@@ -669,6 +697,54 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		QwenpawArgs:                     qwenpawArgs,
 		ProfileCommandOverrides:         profileCommandOverrides,
 	}, nil
+}
+
+func byteSizeFromEnv(name string, defaultValue int64) (int64, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue, nil
+	}
+	return parseByteSize(name, raw)
+}
+
+func byteSizeFromEnvAllowUnlimited(name string, defaultValue int64) (int64, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue, nil
+	}
+	if strings.EqualFold(raw, "unlimited") || strings.EqualFold(raw, "infinity") {
+		return -1, nil
+	}
+	return parseByteSize(name, raw)
+}
+
+func parseByteSize(name, raw string) (int64, error) {
+	upper := strings.ToUpper(strings.TrimSpace(raw))
+	multiplier := int64(1)
+	for _, suffix := range []struct {
+		text string
+		mul  int64
+	}{
+		{"TIB", 1 << 40}, {"TB", 1 << 40}, {"T", 1 << 40},
+		{"GIB", 1 << 30}, {"GB", 1 << 30}, {"G", 1 << 30},
+		{"MIB", 1 << 20}, {"MB", 1 << 20}, {"M", 1 << 20},
+		{"KIB", 1 << 10}, {"KB", 1 << 10}, {"K", 1 << 10},
+		{"B", 1},
+	} {
+		if strings.HasSuffix(upper, suffix.text) {
+			upper = strings.TrimSpace(strings.TrimSuffix(upper, suffix.text))
+			multiplier = suffix.mul
+			break
+		}
+	}
+	if upper == "" || strings.HasPrefix(upper, "-") {
+		return 0, fmt.Errorf("%s must be a non-negative byte size (got %q)", name, raw)
+	}
+	n, err := strconv.ParseInt(upper, 10, 64)
+	if err != nil || n > (int64(^uint64(0)>>1))/multiplier {
+		return 0, fmt.Errorf("%s must be a non-negative byte size such as 12G (got %q)", name, raw)
+	}
+	return n * multiplier, nil
 }
 
 // officialCloudHost is the hostname of Multica's hosted cloud. It's the only

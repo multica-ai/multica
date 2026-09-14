@@ -841,6 +841,7 @@ export function AgentTranscriptDialog({
   // this figure, same as on the other usage surfaces.
   useCustomPricingStore((s) => s.pricings);
   const usage = summarizeTaskUsage(task.usage);
+  const resourceUsage = task.resource_usage;
   // Two separate things, deliberately not one string (#7411):
   //   • `reasonLabel` — the localized reason, derived from the stable
   //     `failure_reason` enum. This is the user-facing explanation.
@@ -862,7 +863,8 @@ export function AgentTranscriptDialog({
     !!createdLabel ||
     !!startedLabel ||
     !!completedLabel ||
-    !!usage;
+    !!usage ||
+    !!resourceUsage;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1023,6 +1025,44 @@ export function AgentTranscriptDialog({
                       )}
                       {completedLabel && (
                         <RunDetailRow label={t(($) => $.transcript.details_completed)} value={completedLabel} />
+                      )}
+                      {resourceUsage && (
+                        <>
+                          <div className="my-2 h-px bg-border" />
+                          {resourceUsage.memory_peak_bytes !== undefined && (
+                            <RunDetailRow
+                              label={t(($) => $.transcript.details_peak_memory)}
+                              value={formatBytes(resourceUsage.memory_peak_bytes)}
+                            />
+                          )}
+                          {resourceUsage.swap_peak_bytes !== undefined && (
+                            <RunDetailRow
+                              label={t(($) => $.transcript.details_peak_swap)}
+                              value={formatBytes(resourceUsage.swap_peak_bytes)}
+                            />
+                          )}
+                          {(resourceUsage.psi_some_avg10_peak !== undefined ||
+                            resourceUsage.psi_full_avg10_peak !== undefined) && (
+                            <RunDetailRow
+                              label={t(($) => $.transcript.details_memory_psi)}
+                              value={`${(resourceUsage.psi_some_avg10_peak ?? 0).toFixed(2)}% / ${(resourceUsage.psi_full_avg10_peak ?? 0).toFixed(2)}%`}
+                            />
+                          )}
+                          {resourceUsage.victim_cgroup && (
+                            <RunDetailRow
+                              label={t(($) => $.transcript.details_cgroup)}
+                              value={resourceUsage.victim_cgroup}
+                              mono
+                            />
+                          )}
+                          {resourceUsage.last_command && (
+                            <RunDetailRow
+                              label={t(($) => $.transcript.details_last_command)}
+                              value={resourceUsage.last_command}
+                              mono
+                            />
+                          )}
+                        </>
                       )}
                       {/* The raw persisted diagnostic, last and behind its own
                           divider. It is English prose written by the server

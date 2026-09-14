@@ -233,6 +233,9 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` | Upper bound for healthy WebSocket claim safety polls, configured independently of `MULTICA_DAEMON_POLL_INTERVAL`; downward jitter makes the normal default `2m30s`–`2m45s`, while old servers and uncertain claims retain the ordinary poll interval |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat interval |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Concurrent run ceiling per daemon |
+| `MULTICA_TASK_MEMORY_HIGH` | `0` | Per-run cgroup v2 soft memory limit; accepts bytes or `K`/`M`/`G`/`T` suffixes, and `0` disables the limit |
+| `MULTICA_TASK_MEMORY_MAX` | `0` | Per-run cgroup v2 hard memory limit; accepts bytes or `K`/`M`/`G`/`T` suffixes, and `0` disables the limit |
+| `MULTICA_TASK_SWAP_MAX` | `unlimited` | Per-run cgroup v2 swap limit; accepts the same sizes, `0` disables swap, and `unlimited` keeps the host default |
 | `MULTICA_AGENT_TIMEOUT` | `0` | Absolute time limit per run; `0` means no limit |
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | Silence ceiling with no output and no tool execution; `0` disables the watchdog entirely |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | same as `MULTICA_AGENT_IDLE_WATCHDOG` | Silence ceiling for a single tool call; set it only to give tools more room than the model gets, `0` never force-stops a tool call. Cursor background shells stay in flight until their owned processes exit; at this boundary the daemon stops those processes and gives Cursor a fresh watchdog budget to produce its terminal result. If process ownership or cleanup cannot be verified, the ordinary run-cancellation policy applies |
@@ -247,6 +250,8 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Root directory for run working directories |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp` (Linux/macOS) | Linux/macOS only. Parent directory for private per-run temp dirs; must be an existing, writable absolute directory, and an invalid value fails run startup instead of falling back to `/tmp`. Pick a short path — child tools may bind AF_UNIX sockets under it, and `sun_path` is limited to 108 bytes on Linux and 104 on macOS |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | Keep run directories for debugging |
+
+Linux daemons use a transient systemd slice and scope per run when cgroup v2 and the user systemd manager are available. A task OOM kills only that scope and is stored as `resource_exhausted.memory` with peak memory/swap, PSI, victim cgroup, and launch command; it is not automatically retried under the same profile. If systemd isolation is unavailable, the daemon records a `process_group` fallback and its reason. Cancellation cleanup still applies, but memory limits and exact OOM attribution are unavailable in that mode.
 
 For the internal context that the daemon injects into agent tasks, see [Task runtime environment](/daemon-runtimes#task-runtime-environment).
 

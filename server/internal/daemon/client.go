@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/daemon/taskresource"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
@@ -561,6 +562,10 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/usage", taskID), map[string]any{
 		"usage": usage,
 	}, nil)
+}
+
+func (c *Client) ReportTaskResourceUsage(ctx context.Context, taskID string, usage taskresource.Usage) error {
+	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/resources", taskID), usage, nil, defaultTerminalRetrySchedule)
 }
 
 func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) error {

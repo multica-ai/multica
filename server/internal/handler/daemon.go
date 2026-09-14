@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/daemon/taskresource"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
@@ -4618,6 +4619,57 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// ReportTaskResourceUsage persists the cgroup/process-group accounting that
+// the daemon collected after the provider process stopped. It is independent
+// of complete/fail so the same diagnostic shape survives every terminal path.
+func (h *Handler) ReportTaskResourceUsage(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+		return
+	}
+
+	var usage taskresource.Usage
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
+	if err := decoder.Decode(&usage); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if usage.MemoryPeakBytes < 0 || usage.SwapPeakBytes < 0 || usage.MemoryHighBytes < 0 || usage.MemoryMaxBytes < 0 ||
+		usage.PSISomeAvg10Peak < 0 || usage.PSIFullAvg10Peak < 0 {
+		writeError(w, http.StatusBadRequest, "resource counters must be non-negative")
+		return
+	}
+	if usage.Kind != "" && usage.Kind != "memory" {
+		writeError(w, http.StatusBadRequest, "unsupported resource failure kind")
+		return
+	}
+	if usage.IsolationMode != taskresource.IsolationSystemd && usage.IsolationMode != taskresource.IsolationProcessGroup {
+		writeError(w, http.StatusBadRequest, "unsupported resource isolation mode")
+		return
+	}
+	if usage.MemoryOOM != (usage.Kind == "memory") || usage.MemoryOOM && usage.OOMKills+usage.OOMGroupKills == 0 {
+		writeError(w, http.StatusBadRequest, "inconsistent memory OOM evidence")
+		return
+	}
+	usage.FallbackReason = util.SanitizeTextForPostgres(usage.FallbackReason)
+	usage.VictimCgroup = util.SanitizeTextForPostgres(usage.VictimCgroup)
+	usage.LastCommand = util.SanitizeTextForPostgres(usage.LastCommand)
+	payload, err := json.Marshal(usage)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid resource usage")
+		return
+	}
+	if _, err := h.Queries.UpdateAgentTaskResourceUsage(r.Context(), db.UpdateAgentTaskResourceUsageParams{
+		ID:            parseUUID(taskID),
+		ResourceUsage: payload,
+	}); err != nil {
+		slog.Warn("update task resource usage failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to store task resource usage")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

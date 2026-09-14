@@ -14,6 +14,7 @@ describe("failureClassOf", () => {
     expect(failureClassOf("agent_error.agent_timeout")).toBe("timeout");
     expect(failureClassOf("agent_error.provider_server_error")).toBe("provider");
     expect(failureClassOf("runtime_offline")).toBe("runtime");
+    expect(failureClassOf("resource_exhausted.memory")).toBe("runtime");
     expect(failureClassOf("queued_expired")).toBe("runtime");
     // MUL-5370: the run never reached the model provider, so this belongs
     // with the substrate failures an operator fixes by checking the daemon.

@@ -10,11 +10,11 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-
-	"github.com/multica-ai/multica/server/pkg/remotemcp"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/daemon/taskresource"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
 func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
@@ -533,6 +533,36 @@ func TestTerminalReportsOmitEmptyRetiredSessionID(t *testing.T) {
 	}
 	if _, present := body["retired_session_id"]; present {
 		t.Fatalf("retired_session_id must be omitted when nothing was retired, got %v", body)
+	}
+}
+
+func TestReportTaskResourceUsage(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/daemon/tasks/task-1/resources" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	usage := taskresource.Usage{
+		IsolationMode:   taskresource.IsolationSystemd,
+		MemoryOOM:       true,
+		Kind:            "memory",
+		MemoryPeakBytes: 32 << 20,
+		VictimCgroup:    "/user.slice/multica-task-aabb.slice",
+		LastCommand:     "codex app-server",
+	}
+	if err := NewClient(srv.URL).ReportTaskResourceUsage(context.Background(), "task-1", usage); err != nil {
+		t.Fatalf("ReportTaskResourceUsage: %v", err)
+	}
+	if got := body["kind"]; got != "memory" {
+		t.Fatalf("kind = %v, body = %#v", got, body)
+	}
+	if got := body["victim_cgroup"]; got != usage.VictimCgroup {
+		t.Fatalf("victim_cgroup = %v, body = %#v", got, body)
 	}
 }
 

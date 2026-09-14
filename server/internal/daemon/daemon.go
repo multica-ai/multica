@@ -28,6 +28,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/daemon/taskresource"
 	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -5829,6 +5830,13 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			taskLog.Warn("report task usage failed", "error", usageErr)
 		}
 	}
+	if result.ResourceUsage != nil {
+		resourceCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		if resourceErr := d.client.ReportTaskResourceUsage(resourceCtx, task.ID, *result.ResourceUsage); resourceErr != nil {
+			taskLog.Warn("report task resource usage failed", "error", resourceErr)
+		}
+		cancel()
+	}
 
 	// Check if we were cancelled by the polling goroutine.
 	select {
@@ -6011,6 +6019,20 @@ func taskRunFailureReason(err error) string {
 		return taskfailure.ReasonEnvironmentPrepareFailed.String()
 	}
 	return taskfailure.Classify(err.Error()).String()
+}
+
+func applyTaskResourceUsage(result *TaskResult, runErr error, usage taskresource.Usage) error {
+	result.ResourceUsage = &usage
+	if !usage.MemoryOOM {
+		return runErr
+	}
+	result.Status = "blocked"
+	result.FailureReason = taskfailure.ReasonResourceExhaustedMemory.String()
+	result.Comment = fmt.Sprintf(
+		"task resource exhausted: memory (peak=%d bytes, swap_peak=%d bytes, cgroup=%s, command=%s)",
+		usage.MemoryPeakBytes, usage.SwapPeakBytes, usage.VictimCgroup, usage.LastCommand,
+	)
+	return nil
 }
 
 // acquireLocalDirectoryLockIfNeeded inspects the task's project resources for
@@ -8318,6 +8340,32 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	prepareComplete = true
 	cancelPrepare()
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
+	resourceSupervisor := taskresource.Start(ctx, taskresource.Options{
+		TaskID:          task.ID,
+		MemoryHighBytes: d.cfg.TaskMemoryHighBytes,
+		MemoryMaxBytes:  d.cfg.TaskMemoryMaxBytes,
+		SwapMaxBytes:    d.cfg.TaskSwapMaxBytes,
+	})
+	resourceSupervisor.SetLastCommand(agent.LaunchHeader(provider))
+	if resourceSupervisor.IsolationMode() != taskresource.IsolationSystemd {
+		taskLog.Warn("task cgroup isolation unavailable; using process-group fallback",
+			"fallback_reason", resourceSupervisor.FallbackReason())
+	}
+	defer func() {
+		usage := resourceSupervisor.Close()
+		if usage.MemoryOOM {
+			// Execute can fail before it returns a provider session (for example
+			// during the initial handshake). Preserve the already-prepared task
+			// environment even on that early OOM path.
+			if taskResult.WorkDir == "" {
+				taskResult.WorkDir = env.WorkDir
+			}
+			if taskResult.EnvRoot == "" {
+				taskResult.EnvRoot = env.RootDir
+			}
+		}
+		returnErr = applyTaskResourceUsage(&taskResult, returnErr, usage)
+	}()
 
 	// usesCustomProfileCommand is the same provenance the backend receives as
 	// agent.Config.BuiltinRuntime: it separates the provider's own discovered
@@ -8500,6 +8548,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		DaemonVersion:  d.cfg.CLIVersion,
 		CodexVersion:   codexVersion,
 		BuiltinRuntime: !usesCustomProfileCommand,
+		CommandPrefix:  resourceSupervisor.CommandPrefix(),
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)

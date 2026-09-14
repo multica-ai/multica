@@ -79,6 +79,10 @@ type Command struct {
 	// logger reports prefix/argument conflicts at the moment a process is
 	// built. Optional: a zero Command logs nothing.
 	logger *slog.Logger
+	// commandPrefix is a daemon-owned wrapper such as systemd-run. It ends in
+	// "--" and is applied outside Path + Prefix so provider argv semantics stay
+	// unchanged.
+	commandPrefix []string
 }
 
 // NewCommand builds a Command from a resolved executable path and a launch
@@ -111,7 +115,19 @@ func (c Command) Argv(args ...string) []string {
 // reintroduce GH #7046. TestOnlyLaunchGoSpawnsRuntimeProcesses enforces it.
 func (c Command) exec(ctx context.Context, args ...string) *exec.Cmd {
 	warnLaunchPrefixOverlap(c.Prefix, args, c.logger)
-	return newRuntimeCmd(exec.CommandContext(ctx, c.Path, c.Argv(args...)...))
+	path, argv := wrapRuntimeCommand(c.commandPrefix, c.Path, c.Argv(args...))
+	return newRuntimeCmd(exec.CommandContext(ctx, path, argv...))
+}
+
+func wrapRuntimeCommand(prefix []string, path string, args []string) (string, []string) {
+	if len(prefix) == 0 {
+		return path, args
+	}
+	argv := make([]string, 0, len(prefix)-1+1+len(args))
+	argv = append(argv, prefix[1:]...)
+	argv = append(argv, path)
+	argv = append(argv, args...)
+	return prefix[0], argv
 }
 
 // newRuntimeCmd applies the process-lifecycle defaults every runtime process in
@@ -269,7 +285,8 @@ type invocationChooser func(execName, lookedUp string, args []string, logger *sl
 func (c Command) execVia(ctx context.Context, choose invocationChooser, lookedUp string, args []string, logger *slog.Logger) (*exec.Cmd, string, []string) {
 	warnLaunchPrefixOverlap(c.Prefix, args, logger)
 	argv0, cmdArgs := choose(c.Path, lookedUp, c.Argv(args...), logger)
-	return newRuntimeCmd(exec.CommandContext(ctx, argv0, cmdArgs...)), argv0, cmdArgs
+	actualPath, actualArgs := wrapRuntimeCommand(c.commandPrefix, argv0, cmdArgs)
+	return newRuntimeCmd(exec.CommandContext(ctx, actualPath, actualArgs...)), argv0, cmdArgs
 }
 
 // withFilteredPrefix returns a copy of the command whose prefix has been
@@ -312,7 +329,14 @@ func (c Command) String() string {
 // fallback, which is why the path is a parameter rather than read from
 // Config.ExecutablePath.
 func (c Config) commandAt(path string) Command {
-	return Command{Path: path, Prefix: c.LaunchPrefix, logger: c.Logger}
+	return Command{Path: path, Prefix: c.LaunchPrefix, logger: c.Logger, commandPrefix: c.CommandPrefix}
+}
+
+// taskCommandAt applies only the daemon-owned task boundary. It is for helper
+// commands requested by a running protocol (currently ACP terminal/create),
+// where the provider executable's LaunchPrefix must not leak onto /bin/sh.
+func (c Config) taskCommandAt(path string) Command {
+	return Command{Path: path, logger: c.Logger, commandPrefix: c.CommandPrefix}
 }
 
 // logAgentCommand is the only boundary allowed to record runtime process

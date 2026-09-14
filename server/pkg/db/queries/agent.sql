@@ -1228,6 +1228,15 @@ SET status = 'failed',
 WHERE id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
 RETURNING *;
 
+-- name: UpdateAgentTaskResourceUsage :one
+-- Resource accounting is reported immediately after the local process exits,
+-- before the terminal callback. Accept any claimed/running/terminal state so
+-- a delayed-but-authenticated report remains useful without reopening state.
+UPDATE agent_task_queue
+SET resource_usage = $2
+WHERE id = $1
+RETURNING *;
+
 -- name: UpdateAgentTaskSession :exec
 -- Pins the resume pointer mid-flight so a daemon crash leaves a usable
 -- session_id/work_dir on the task row. No-op if the task is no longer
