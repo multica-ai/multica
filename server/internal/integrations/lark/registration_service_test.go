@@ -88,107 +88,24 @@ func TestBotNamePreset(t *testing.T) {
 	}
 }
 
-// fakeInstallSessionStore is an in-memory stand-in for the
-// lark_install_session table. It exists so the boundary tests below can
-// exercise GetSession without Postgres; the cross-process behaviour that
-// actually motivated the table is covered DB-backed in
-// registration_session_store_test.go.
-type fakeInstallSessionStore struct {
-	mu   sync.Mutex
-	rows map[string]db.LarkInstallSession
-	// createErr, when set, fails CreateLarkInstallSession.
-	createErr error
-	sweeps    int
-}
+// The service's own MemoryInstallSessionStore stands in for Redis here —
+// it implements the same InstallSessionStore contract, so these tests
+// exercise the real production type rather than a bespoke fake. The
+// behaviour that only Redis can prove (cross-client sharing, TTL, SetNX
+// first-writer-wins) is covered in install_session_store_test.go against
+// a real server.
 
-func newFakeInstallSessionStore() *fakeInstallSessionStore {
-	return &fakeInstallSessionStore{rows: map[string]db.LarkInstallSession{}}
-}
-
-func (f *fakeInstallSessionStore) CreateLarkInstallSession(_ context.Context, arg db.CreateLarkInstallSessionParams) (db.LarkInstallSession, error) {
-	if f.createErr != nil {
-		return db.LarkInstallSession{}, f.createErr
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	row := db.LarkInstallSession{
-		ID:          arg.ID,
-		WorkspaceID: arg.WorkspaceID,
-		AgentID:     arg.AgentID,
-		InitiatorID: arg.InitiatorID,
-		Status:      string(RegistrationStatusPending),
-		ExpiresAt:   arg.ExpiresAt,
-	}
-	f.rows[arg.ID] = row
-	return row, nil
-}
-
-func (f *fakeInstallSessionStore) GetLarkInstallSession(_ context.Context, arg db.GetLarkInstallSessionParams) (db.LarkInstallSession, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	row, ok := f.rows[arg.ID]
-	// Workspace scoping lives in the SQL WHERE clause, so the fake has to
-	// reproduce it — otherwise the cross-workspace assertion below would
-	// pass for the wrong reason.
-	if !ok || row.WorkspaceID != arg.WorkspaceID {
-		return db.LarkInstallSession{}, pgx.ErrNoRows
-	}
-	return row, nil
-}
-
-func (f *fakeInstallSessionStore) MarkLarkInstallSessionSuccess(_ context.Context, arg db.MarkLarkInstallSessionSuccessParams) (db.LarkInstallSession, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	row, ok := f.rows[arg.ID]
-	if !ok || row.WorkspaceID != arg.WorkspaceID || row.Status != string(RegistrationStatusPending) {
-		return db.LarkInstallSession{}, pgx.ErrNoRows
-	}
-	row.Status = string(RegistrationStatusSuccess)
-	row.InstallationID = arg.InstallationID
-	row.GcAfter = arg.GcAfter
-	f.rows[arg.ID] = row
-	return row, nil
-}
-
-func (f *fakeInstallSessionStore) MarkLarkInstallSessionError(_ context.Context, arg db.MarkLarkInstallSessionErrorParams) (db.LarkInstallSession, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	row, ok := f.rows[arg.ID]
-	if !ok || row.WorkspaceID != arg.WorkspaceID || row.Status != string(RegistrationStatusPending) {
-		return db.LarkInstallSession{}, pgx.ErrNoRows
-	}
-	row.Status = string(RegistrationStatusError)
-	row.ErrorReason = arg.ErrorReason
-	row.ErrorMessage = arg.ErrorMessage
-	row.GcAfter = arg.GcAfter
-	f.rows[arg.ID] = row
-	return row, nil
-}
-
-func (f *fakeInstallSessionStore) SweepLarkInstallSessions(_ context.Context, arg db.SweepLarkInstallSessionsParams) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.sweeps++
-	for id, row := range f.rows {
-		terminalAndSwept := row.GcAfter.Valid && row.GcAfter.Time.Before(arg.GcAfter.Time)
-		pendingAndDead := row.Status == string(RegistrationStatusPending) &&
-			row.ExpiresAt.Valid && row.ExpiresAt.Time.Before(arg.ExpiresAt.Time)
-		if terminalAndSwept || pendingAndDead {
-			delete(f.rows, id)
-		}
-	}
-	return nil
-}
-
-// plantSession seeds a pending row and returns the in-memory handle the
-// polling goroutine would have held.
-func plantSession(t *testing.T, s *RegistrationService, store *fakeInstallSessionStore, id string, ws pgtype.UUID, expiresAt time.Time) *registrationSession {
+// plantSession registers a pending session and returns the in-memory
+// handle the polling goroutine would have held.
+func plantSession(t *testing.T, s *RegistrationService, id string, ws pgtype.UUID, expiresAt time.Time) *registrationSession {
 	t.Helper()
-	if _, err := store.CreateLarkInstallSession(context.Background(), db.CreateLarkInstallSessionParams{
+	if err := s.sessionStore.Create(context.Background(), InstallSessionState{
 		ID:          id,
 		WorkspaceID: ws,
-		ExpiresAt:   pgtype.Timestamptz{Time: expiresAt, Valid: true},
-	}); err != nil {
+		InitiatorID: ws,
+		Status:      RegistrationStatusPending,
+		ExpiresAt:   expiresAt,
+	}, time.Hour); err != nil {
 		t.Fatalf("plant session: %v", err)
 	}
 	sess := &registrationSession{id: id, workspaceID: ws, expiresAt: expiresAt}
@@ -206,8 +123,6 @@ func plantSession(t *testing.T, s *RegistrationService, store *fakeInstallSessio
 // workspaces.
 func TestRegistrationGetSessionNotFound(t *testing.T) {
 	s := newRegistrationServiceForTest(t)
-	store := newFakeInstallSessionStore()
-	s.sessionStore = store
 	ctx := context.Background()
 	ws := uuidFromStringSvc(t, "11111111-1111-1111-1111-111111111111")
 	otherWs := uuidFromStringSvc(t, "22222222-2222-2222-2222-222222222222")
@@ -216,7 +131,7 @@ func TestRegistrationGetSessionNotFound(t *testing.T) {
 		t.Errorf("unknown session: want ErrRegistrationSessionNotFound, got %v", err)
 	}
 
-	plantSession(t, s, store, "plant-1", ws, s.cfg.Now().Add(time.Hour))
+	plantSession(t, s, "plant-1", ws, s.cfg.Now().Add(time.Hour))
 
 	if _, err := s.GetSession(ctx, otherWs, "plant-1"); !errors.Is(err, ErrRegistrationSessionNotFound) {
 		t.Errorf("cross-workspace lookup: want ErrRegistrationSessionNotFound, got %v", err)
@@ -233,36 +148,36 @@ func TestRegistrationGetSessionNotFound(t *testing.T) {
 
 // TestRegistrationGetSessionServesSessionOwnedByAnotherProcess is the
 // MUL-7340 regression at the unit level: the status read must resolve
-// entirely from the store, with NOTHING in this process's session map.
-// When the map was the source of truth, a poll that landed on any other
-// replica 404'd and the dialog showed "安装会话已失效或丢失" about 5s
-// after the QR rendered.
+// entirely from the shared store, with NOTHING in this process's session
+// map. When the map was the source of truth, a poll that landed on any
+// other replica 404'd and the dialog showed "安装会话已失效或丢失" about
+// 5s after the QR rendered.
 func TestRegistrationGetSessionServesSessionOwnedByAnotherProcess(t *testing.T) {
-	s := newRegistrationServiceForTest(t)
-	store := newFakeInstallSessionStore()
-	s.sessionStore = store
+	shared := NewMemoryInstallSessionStore()
+
+	// Two services sharing one store — the stand-in for two replicas
+	// pointed at the same Redis.
+	instanceA := newRegistrationServiceForTest(t)
+	instanceA.sessionStore = shared
+	instanceB := newRegistrationServiceForTest(t)
+	instanceB.sessionStore = shared
+
 	ctx := context.Background()
 	ws := uuidFromStringSvc(t, "11111111-1111-1111-1111-111111111111")
 
-	// Row exists (written by the process that served begin); this process
-	// never saw the begin call, so its map is empty.
-	if _, err := store.CreateLarkInstallSession(ctx, db.CreateLarkInstallSessionParams{
-		ID:          "owned-elsewhere",
-		WorkspaceID: ws,
-		ExpiresAt:   pgtype.Timestamptz{Time: s.cfg.Now().Add(time.Hour), Valid: true},
-	}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	s.mu.Lock()
-	mapped := len(s.sessions)
-	s.mu.Unlock()
+	// A serves begin; B has never seen this session.
+	plantSession(t, instanceA, "owned-elsewhere", ws, instanceA.cfg.Now().Add(time.Hour))
+
+	instanceB.mu.Lock()
+	mapped := len(instanceB.sessions)
+	instanceB.mu.Unlock()
 	if mapped != 0 {
-		t.Fatalf("precondition: this process must hold no session, got %d", mapped)
+		t.Fatalf("precondition: instance B must hold no in-process session, got %d", mapped)
 	}
 
-	state, err := s.GetSession(ctx, ws, "owned-elsewhere")
+	state, err := instanceB.GetSession(ctx, ws, "owned-elsewhere")
 	if err != nil {
-		t.Fatalf("status read for a session owned by another process: %v", err)
+		t.Fatalf("status read on the instance that did not serve begin: %v", err)
 	}
 	if state.Status != RegistrationStatusPending {
 		t.Errorf("Status: got %q want pending", state.Status)
@@ -271,19 +186,20 @@ func TestRegistrationGetSessionServesSessionOwnedByAnotherProcess(t *testing.T) 
 
 // TestRegistrationGetSessionReportsExpiryFromTimestamp pins the other
 // half of cross-process correctness: if the process that owned the
-// polling goroutine died, nobody ever writes the terminal 'expired'
-// row. The status read must derive expiry from expires_at rather than
-// reporting 'pending' forever.
+// polling goroutine died, nobody ever records the terminal outcome. The
+// status read must derive expiry from ExpiresAt rather than reporting
+// 'pending' forever.
 func TestRegistrationGetSessionReportsExpiryFromTimestamp(t *testing.T) {
 	clock := &fakeClockSvc{now: time.Unix(1_700_000_000, 0)}
 	s := newRegistrationServiceForTest(t)
 	s.cfg.Now = clock.Now
-	store := newFakeInstallSessionStore()
+	store := NewMemoryInstallSessionStore()
+	store.now = clock.Now
 	s.sessionStore = store
 	ctx := context.Background()
 	ws := uuidFromStringSvc(t, "11111111-1111-1111-1111-111111111111")
 
-	plantSession(t, s, store, "stranded", ws, clock.Now().Add(-time.Minute))
+	plantSession(t, s, "stranded", ws, clock.Now().Add(-time.Minute))
 
 	state, err := s.GetSession(ctx, ws, "stranded")
 	if err != nil {
@@ -297,40 +213,6 @@ func TestRegistrationGetSessionReportsExpiryFromTimestamp(t *testing.T) {
 	}
 }
 
-// TestRegistrationSweepDropsFinishedAndDeadSessions pins that the sweep
-// removes rows nobody can be waiting on while leaving a live pending row
-// alone — a sweep that took live rows would reintroduce the 404.
-func TestRegistrationSweepDropsFinishedAndDeadSessions(t *testing.T) {
-	clock := &fakeClockSvc{now: time.Unix(1_700_000_000, 0)}
-	s := newRegistrationServiceForTest(t)
-	s.cfg.Now = clock.Now
-	store := newFakeInstallSessionStore()
-	s.sessionStore = store
-	ctx := context.Background()
-	ws := uuidFromStringSvc(t, "11111111-1111-1111-1111-111111111111")
-
-	live := plantSession(t, s, store, "live", ws, clock.Now().Add(time.Hour))
-	_ = live
-	plantSession(t, s, store, "dead-pending", ws, clock.Now().Add(-time.Hour))
-	terminal := plantSession(t, s, store, "terminal", ws, clock.Now().Add(time.Hour))
-	s.markError(terminal, RegistrationReasonAccessDenied, "user denied")
-	// Push the clock past the terminal row's gc_after.
-	clock.mu.Lock()
-	clock.now = clock.now.Add(2 * time.Hour)
-	clock.mu.Unlock()
-
-	s.sweepSessions(ctx)
-
-	// "live" expired relative to the advanced clock too, so assert on the
-	// two rows whose fate the sweep decides unambiguously.
-	if _, err := s.GetSession(ctx, ws, "dead-pending"); !errors.Is(err, ErrRegistrationSessionNotFound) {
-		t.Errorf("dead pending row should be swept, got %v", err)
-	}
-	if _, err := s.GetSession(ctx, ws, "terminal"); !errors.Is(err, ErrRegistrationSessionNotFound) {
-		t.Errorf("terminal row past gc_after should be swept, got %v", err)
-	}
-}
-
 // TestRegistrationMarkErrorIsIdempotent guards against a double-fire
 // race between the expiry timer and a Poll-driven terminal error:
 // whichever fires first wins, and the second mark must NOT clobber the
@@ -338,12 +220,10 @@ func TestRegistrationSweepDropsFinishedAndDeadSessions(t *testing.T) {
 // UPDATE's `status = 'pending'` predicate rather than a mutex.
 func TestRegistrationMarkErrorIsIdempotent(t *testing.T) {
 	s := newRegistrationServiceForTest(t)
-	store := newFakeInstallSessionStore()
-	s.sessionStore = store
 	ctx := context.Background()
 	ws := uuidFromStringSvc(t, "11111111-1111-1111-1111-111111111111")
 
-	sess := plantSession(t, s, store, "x", ws, s.cfg.Now().Add(time.Hour))
+	sess := plantSession(t, s, "x", ws, s.cfg.Now().Add(time.Hour))
 	s.markError(sess, RegistrationReasonAccessDenied, "user denied")
 	s.markError(sess, RegistrationReasonExpired, "qr expired") // second mark — must no-op
 
@@ -361,12 +241,10 @@ func TestRegistrationMarkErrorIsIdempotent(t *testing.T) {
 // device_code) while the durable row survives for the dialog to read.
 func TestRegistrationMarkDropsInProcessSession(t *testing.T) {
 	s := newRegistrationServiceForTest(t)
-	store := newFakeInstallSessionStore()
-	s.sessionStore = store
 	ctx := context.Background()
 	ws := uuidFromStringSvc(t, "11111111-1111-1111-1111-111111111111")
 
-	sess := plantSession(t, s, store, "done", ws, s.cfg.Now().Add(time.Hour))
+	sess := plantSession(t, s, "done", ws, s.cfg.Now().Add(time.Hour))
 	s.markSuccess(sess, uuidFromStringSvc(t, "33333333-3333-3333-3333-333333333333"))
 
 	s.mu.Lock()
@@ -490,8 +368,11 @@ func (fakeTxStarter) Begin(_ context.Context) (pgx.Tx, error) {
 func newRegistrationServiceForTest(t *testing.T) *RegistrationService {
 	t.Helper()
 	return &RegistrationService{
-		cfg:      RegistrationServiceConfig{}.withDefaults(),
-		sessions: make(map[string]*registrationSession),
+		cfg: RegistrationServiceConfig{}.withDefaults(),
+		// Same default the constructor installs — every service needs a
+		// session store, so building one by struct literal must not skip it.
+		sessionStore: NewMemoryInstallSessionStore(),
+		sessions:     make(map[string]*registrationSession),
 	}
 }
 
@@ -556,7 +437,7 @@ func TestFinishSuccess_DropsCachedTokenBeforeMintingWithRotatedCreds(t *testing.
 		api: api,
 		// finishSuccess records a terminal status on the bot-info failure
 		// this test forces, so the store seam has to be present.
-		sessionStore: newFakeInstallSessionStore(),
+		sessionStore: NewMemoryInstallSessionStore(),
 		sessions:     make(map[string]*registrationSession),
 	}
 	sess := &registrationSession{id: "sess-rotate"}

@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -65,13 +64,13 @@ const (
 
 // RegistrationServiceConfig configures the service.
 type RegistrationServiceConfig struct {
-	// SessionTTL caps how long a successful or errored session row stays
-	// readable before the sweep drops it. Default 30 minutes — long
-	// enough for the frontend to fetch the final status after the dialog
-	// closes, short enough that finished sessions do not accumulate
-	// forever. Independent of the device-flow expiry (Lark's
-	// expires_in, currently 1h), which bounds the PENDING phase; this
-	// TTL only starts once a session has already terminated.
+	// SessionTTL caps how long a finished session stays readable, and is
+	// also the tail added to the QR window when the session is first
+	// registered. Default 30 minutes — long enough for the frontend to
+	// fetch the final status after the dialog closes, short enough that
+	// finished sessions do not linger. Independent of the device-flow
+	// expiry (Lark's expires_in, currently 1h), which bounds the PENDING
+	// phase.
 	SessionTTL time.Duration
 
 	// Now is overridable for deterministic expiry-bound tests.
@@ -105,13 +104,13 @@ func (c RegistrationServiceConfig) withDefaults() RegistrationServiceConfig {
 //     credentials, then writes lark_installation + the installer's
 //     lark_user_binding in a single transaction.
 //
-// The status the browser polls lives in Postgres (lark_install_session),
-// NOT in this process. It used to be in-process only, which meant
-// GET /lark/install/{id}/status could be answered solely by the process
-// that served begin — any other replica, or the same one after a
-// restart, 404'd and the dialog gave up ~5s in with "session lost"
-// (MUL-7340). The in-process map below now holds only what the polling
-// goroutine needs to talk to Lark; the device_code never leaves it.
+// The status the browser polls lives in the shared InstallSessionStore
+// (Redis in multi-replica deploys), NOT in this process. It used to be
+// in-process only, which meant GET /lark/install/{id}/status could be
+// answered solely by the process that served begin — any other replica
+// 404'd and the dialog gave up ~5s in with "session lost" (MUL-7340).
+// The in-process map below now holds only what the polling goroutine
+// needs to talk to Lark; the device_code never leaves it.
 type RegistrationService struct {
 	cfg          RegistrationServiceConfig
 	client       *RegistrationClient
@@ -121,7 +120,7 @@ type RegistrationService struct {
 	installs     *InstallationService
 	binder       InstallerBinder
 	authQueries  authQueriesAdapter
-	sessionStore installSessionStore
+	sessionStore InstallSessionStore
 
 	// bus is optional. When wired (SetEventBus), a successful install
 	// publishes lark_installation:created the moment the row commits, so
@@ -136,17 +135,6 @@ type RegistrationService struct {
 	// reads never consult this map.
 	mu       sync.Mutex
 	sessions map[string]*registrationSession
-}
-
-// installSessionStore is the durable status projection for an in-flight
-// device-flow install. Kept behind an interface, like authQueriesAdapter,
-// so unit tests can stub it instead of standing up Postgres.
-type installSessionStore interface {
-	CreateLarkInstallSession(ctx context.Context, arg db.CreateLarkInstallSessionParams) (db.LarkInstallSession, error)
-	GetLarkInstallSession(ctx context.Context, arg db.GetLarkInstallSessionParams) (db.LarkInstallSession, error)
-	MarkLarkInstallSessionSuccess(ctx context.Context, arg db.MarkLarkInstallSessionSuccessParams) (db.LarkInstallSession, error)
-	MarkLarkInstallSessionError(ctx context.Context, arg db.MarkLarkInstallSessionErrorParams) (db.LarkInstallSession, error)
-	SweepLarkInstallSessions(ctx context.Context, arg db.SweepLarkInstallSessionsParams) error
 }
 
 // sessionWriteTimeout bounds the status writes the polling goroutine
@@ -196,15 +184,17 @@ func NewRegistrationService(
 		return nil, errors.New("lark registration: InstallerBinder is required")
 	}
 	return &RegistrationService{
-		cfg:          cfg.withDefaults(),
-		client:       client,
-		api:          api,
-		queries:      NewChannelStore(queries),
-		tx:           tx,
-		installs:     installs,
-		binder:       binder,
-		authQueries:  queries,
-		sessionStore: queries,
+		cfg:         cfg.withDefaults(),
+		client:      client,
+		api:         api,
+		queries:     NewChannelStore(queries),
+		tx:          tx,
+		installs:    installs,
+		binder:      binder,
+		authQueries: queries,
+		// Defaults to the single-process store; SetInstallSessionStore
+		// swaps in the Redis one when the deployment has Redis.
+		sessionStore: NewMemoryInstallSessionStore(),
 		sessions:     make(map[string]*registrationSession),
 	}, nil
 }
@@ -275,38 +265,40 @@ type registrationSession struct {
 // what the user keeps seeing. A no-rows result is therefore an expected
 // outcome, not an error.
 func (s *RegistrationService) markSuccess(sess *registrationSession, installationID pgtype.UUID) {
-	ctx, cancel := context.WithTimeout(context.Background(), sessionWriteTimeout)
-	defer cancel()
-	if _, err := s.sessionStore.MarkLarkInstallSessionSuccess(ctx, db.MarkLarkInstallSessionSuccessParams{
-		ID:             sess.id,
-		WorkspaceID:    sess.workspaceID,
+	s.markTerminal(sess, InstallSessionOutcome{
+		Status:         RegistrationStatusSuccess,
 		InstallationID: installationID,
-		GcAfter:        pgtype.Timestamptz{Time: s.gcDeadline(), Valid: true},
-	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		// The install itself committed; only the status projection
-		// failed. Log loudly — the dialog will fall back to reporting
-		// the session as expired once the window closes, and the
-		// installation row is already live either way.
-		s.cfg.Logger.Error("lark registration: record session success",
-			"session_id", sess.id, "err", err)
-	}
-	s.forgetSession(sess.id)
+	})
 }
 
 // markError records a terminal failure under the same first-writer-wins
-// guard as markSuccess, then drops the goroutine's working state.
+// contract as markSuccess.
 func (s *RegistrationService) markError(sess *registrationSession, reason, msg string) {
-	ctx, cancel := context.WithTimeout(context.Background(), sessionWriteTimeout)
-	defer cancel()
-	if _, err := s.sessionStore.MarkLarkInstallSessionError(ctx, db.MarkLarkInstallSessionErrorParams{
-		ID:           sess.id,
-		WorkspaceID:  sess.workspaceID,
+	s.markTerminal(sess, InstallSessionOutcome{
+		Status:       RegistrationStatusError,
 		ErrorReason:  reason,
 		ErrorMessage: msg,
-		GcAfter:      pgtype.Timestamptz{Time: s.gcDeadline(), Valid: true},
-	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		s.cfg.Logger.Error("lark registration: record session error",
-			"session_id", sess.id, "reason", reason, "err", err)
+	})
+}
+
+// markTerminal writes the session's final outcome and drops the
+// goroutine's working state. The store applies first-writer-wins, so when
+// the expiry deadline and a poll result race, whichever lands first is
+// what the user keeps seeing.
+//
+// Retention runs from now rather than from the session's start: the
+// dialog has to be able to read this outcome after the QR window closed.
+func (s *RegistrationService) markTerminal(sess *registrationSession, outcome InstallSessionOutcome) {
+	ctx, cancel := context.WithTimeout(context.Background(), sessionWriteTimeout)
+	defer cancel()
+	if err := s.sessionStore.MarkTerminal(ctx, sess.id, outcome, s.cfg.SessionTTL); err != nil {
+		// For a success the install itself already committed and only the
+		// status projection failed; the dialog falls back to reporting the
+		// session expired once the window closes, and the installation row
+		// is live either way.
+		s.cfg.Logger.Error("lark registration: record session outcome",
+			"session_id", sess.id, "status", string(outcome.Status),
+			"reason", outcome.ErrorReason, "err", err)
 	}
 	s.forgetSession(sess.id)
 }
@@ -413,26 +405,25 @@ func (s *RegistrationService) BeginInstall(ctx context.Context, p BeginInstallPa
 	}
 	expiresAt := now.Add(begin.ExpiresIn)
 
-	// Persist the status projection BEFORE starting the goroutine. If this
-	// write fails the whole begin fails: a session the browser could never
-	// read is worse than no QR at all — it would render a scannable code
-	// and then report "session lost" on the first poll, which is exactly
-	// the bug this row exists to prevent.
-	if _, err := s.sessionStore.CreateLarkInstallSession(ctx, db.CreateLarkInstallSessionParams{
+	// Register the session BEFORE starting the goroutine. If this fails the
+	// whole begin fails: a session the browser could never read is worse
+	// than no QR at all — it would render a scannable code and then report
+	// "session lost" on the first poll, which is exactly the bug this
+	// store exists to prevent.
+	//
+	// Retention covers the QR window PLUS the terminal-read window, so a
+	// session that ends at the last second can still be read afterwards.
+	// Sizing it off Lark's expires_in (currently 1h) rather than a fixed
+	// constant is what keeps the two from drifting apart.
+	if err := s.sessionStore.Create(ctx, InstallSessionState{
 		ID:          sessionID,
 		WorkspaceID: p.WorkspaceID,
-		AgentID:     p.AgentID,
 		InitiatorID: p.InitiatorID,
-		ExpiresAt:   pgtype.Timestamptz{Time: expiresAt, Valid: true},
-	}); err != nil {
-		return BeginInstallResult{}, fmt.Errorf("lark registration: persist session: %w", err)
+		Status:      RegistrationStatusPending,
+		ExpiresAt:   expiresAt,
+	}, begin.ExpiresIn+s.cfg.SessionTTL); err != nil {
+		return BeginInstallResult{}, fmt.Errorf("lark registration: register session: %w", err)
 	}
-
-	// Opportunistic sweep of finished / long-dead rows. Begin is the rare
-	// call (one per bind attempt), so this costs nothing measurable —
-	// unlike sweeping on the status read, which fires every 5s per open
-	// dialog.
-	s.sweepSessions(ctx)
 
 	sess := &registrationSession{
 		id:          sessionID,
@@ -477,38 +468,35 @@ func (s *RegistrationService) GetSession(ctx context.Context, workspaceID pgtype
 	if strings.TrimSpace(sessionID) == "" {
 		return RegistrationSessionState{}, ErrRegistrationSessionNotFound
 	}
-	// Read the durable row, never the in-process map: the goroutine that
+	// Read the shared store, never the in-process map: the goroutine that
 	// owns this session may be running in a different backend process.
-	// The query is workspace-scoped, so a session id from another
-	// workspace is indistinguishable from one that never existed —
-	// leaking "exists but wrong workspace" would let an attacker
-	// enumerate session ids across workspaces.
-	row, err := s.sessionStore.GetLarkInstallSession(ctx, db.GetLarkInstallSessionParams{
-		ID:          sessionID,
-		WorkspaceID: workspaceID,
-	})
+	// The read is workspace-scoped, so a session id from another workspace
+	// is indistinguishable from one that never existed — leaking "exists
+	// but wrong workspace" would let a caller enumerate session ids across
+	// workspaces.
+	stored, err := s.sessionStore.Get(ctx, workspaceID, sessionID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, ErrInstallSessionNotFound) {
 			return RegistrationSessionState{}, ErrRegistrationSessionNotFound
 		}
 		return RegistrationSessionState{}, fmt.Errorf("lark registration: load session: %w", err)
 	}
 
 	state := RegistrationSessionState{
-		ID:             row.ID,
-		Status:         RegistrationSessionStatus(row.Status),
-		InstallationID: row.InstallationID,
-		ErrorReason:    row.ErrorReason,
-		ErrorMessage:   row.ErrorMessage,
-		InitiatorID:    row.InitiatorID,
+		ID:             stored.ID,
+		Status:         stored.Status,
+		InstallationID: stored.InstallationID,
+		ErrorReason:    stored.ErrorReason,
+		ErrorMessage:   stored.ErrorMessage,
+		InitiatorID:    stored.InitiatorID,
 	}
 
-	// A row still pending past Lark's window means the process owning the
-	// polling goroutine died before it could record the expiry. Report the
-	// expiry from the timestamp rather than leaving the dialog polling a
-	// row that will never move again.
+	// Still pending past Lark's window means the process owning the polling
+	// goroutine died before it could record the expiry — no other replica
+	// can finish that scan. Report the expiry from the timestamp rather
+	// than leaving the dialog polling a session that will never move.
 	if state.Status == RegistrationStatusPending &&
-		row.ExpiresAt.Valid && !row.ExpiresAt.Time.After(s.cfg.Now()) {
+		!stored.ExpiresAt.IsZero() && !stored.ExpiresAt.After(s.cfg.Now()) {
 		state.Status = RegistrationStatusError
 		state.ErrorReason = RegistrationReasonExpired
 		state.ErrorMessage = "QR expired before authorization"
@@ -771,20 +759,6 @@ func (s *RegistrationService) gcDeadline() time.Time {
 	return s.cfg.Now().Add(s.cfg.SessionTTL)
 }
 
-// sweepSessions drops rows nobody can still be waiting on: terminal ones
-// past gc_after, and pending ones whose device_code expired. Pending rows
-// survive until expires_at so a status read inside the live window always
-// finds its row. Best-effort — a failed sweep only leaves rows behind.
-func (s *RegistrationService) sweepSessions(ctx context.Context) {
-	now := s.cfg.Now()
-	if err := s.sessionStore.SweepLarkInstallSessions(ctx, db.SweepLarkInstallSessionsParams{
-		GcAfter:   pgtype.Timestamptz{Time: now, Valid: true},
-		ExpiresAt: pgtype.Timestamptz{Time: now, Valid: true},
-	}); err != nil {
-		s.cfg.Logger.Warn("lark registration: sweep sessions", "err", err)
-	}
-}
-
 // ErrRegistrationSessionNotFound is what the service returns for
 // unknown / GC'd sessions. The handler maps it to 404.
 var ErrRegistrationSessionNotFound = errors.New("lark registration: session not found")
@@ -820,3 +794,15 @@ func botNamePreset(agentName string) string {
 // because both live in package `lark`; we read it directly in
 // finishSuccess so the Seal happens outside the DB transaction (which
 // would otherwise hold a row lock across the crypto call).
+
+// SetInstallSessionStore swaps the in-flight session store. The router
+// calls this with the Redis implementation when the deployment has Redis;
+// without it the service keeps its in-process default, which is correct
+// for local development and a single replica but reproduces MUL-7340 on a
+// multi-replica deployment.
+func (s *RegistrationService) SetInstallSessionStore(store InstallSessionStore) {
+	if store == nil {
+		return
+	}
+	s.sessionStore = store
+}

@@ -980,21 +980,6 @@ type LarkInboundMessageDedup struct {
 	ClaimToken     pgtype.UUID        `json:"claim_token"`
 }
 
-type LarkInstallSession struct {
-	ID             string             `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	AgentID        pgtype.UUID        `json:"agent_id"`
-	InitiatorID    pgtype.UUID        `json:"initiator_id"`
-	Status         string             `json:"status"`
-	InstallationID pgtype.UUID        `json:"installation_id"`
-	ErrorReason    string             `json:"error_reason"`
-	ErrorMessage   string             `json:"error_message"`
-	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
-	GcAfter        pgtype.Timestamptz `json:"gc_after"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-}
-
 type LarkInstallation struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
