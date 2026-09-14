@@ -149,6 +149,15 @@ type Config struct {
 	// Surfaced through /api/config so self-hosted operators can confirm which
 	// server build is deployed. Empty in dev builds.
 	ServerVersion string
+	// GovernanceRoot is the deployment-level base path for workspace governance
+	// hook scripts (MULTICA_GOVERNANCE_ROOT). Workspace settings may override
+	// individual hook paths; when unset, hooks are skipped unless configured
+	// per-workspace with absolute paths.
+	GovernanceRoot string
+	// GovernanceHookTimeout caps pre-comment / pre-status hook execution
+	// (MULTICA_GOVERNANCE_HOOK_TIMEOUT, default 30s). Hook timeout is
+	// fail-safe default-deny.
+	GovernanceHookTimeout time.Duration
 }
 
 type cloudRuntimeProxy interface {
