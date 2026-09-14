@@ -4320,11 +4320,13 @@ WITH retired_sessions AS (
     SELECT DISTINCT r.retired_session_id AS session_id
     FROM agent_task_queue r
     WHERE r.agent_id = $1 AND r.issue_id = $2
+      AND COALESCE(r.context->>'type', '') <> 'triage'
       AND r.retired_session_id IS NOT NULL
 ), resume_overflow_at AS (
     SELECT MAX(COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at)) AS at
     FROM agent_task_queue t
     WHERE t.agent_id = $1 AND t.issue_id = $2
+      AND COALESCE(t.context->>'type', '') <> 'triage'
       AND t.status = 'failed'
       AND (
         COALESCE(t.failure_reason, '') = 'codex_resume_oversized'
@@ -4336,6 +4338,7 @@ WITH retired_sessions AS (
         COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) AS terminal_at
     FROM agent_task_queue t
     WHERE t.agent_id = $1 AND t.issue_id = $2
+      AND COALESCE(t.context->>'type', '') <> 'triage'
       AND t.session_id IS NOT NULL
       AND t.status IN ('completed', 'failed', 'cancelled')
     ORDER BY t.session_id, COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) DESC
@@ -4483,6 +4486,14 @@ type GetLastTaskSessionRow struct {
 // complaint AND a locator pointing into the message history — mirroring
 // emptyContentRe and historyMessageLocatorRe in pkg/taskfailure/resume.go.
 // Keep the three in sync.
+//
+// Triage runs are excluded from all three CTEs (MUL-7189 §5.6). A triage run
+// and the execution run that follows accept are the same (agent_id, issue_id)
+// pair, so without this the first execution run would resume the conversation
+// in which the agent was deciding whether the entry was worth keeping. From the
+// execution side an accepted issue is a new issue, and it starts cold. The
+// exclusion is symmetric: a triage run does not resume an execution session
+// either, which is what force_fresh_session on the triage task already ensures.
 //
 // retired_sessions is the explicit half of the same rule (GH #6066). The
 // per-session latest state above can only judge sessions that some row still

@@ -3890,7 +3890,9 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 // UpdateIssue.
 func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bool {
 	// Only the fixed backlog key parks work; custom unstarted statuses do not.
-	if issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
+	// An issue in Triage is not parked but refused: it produces no run from any
+	// entry point until it is accepted (MUL-7189 §2.3).
+	if status := issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status); status == "backlog" || status == issuestatus.Triage {
 		return false
 	}
 	return h.isAgentAssigneeReady(ctx, issue)

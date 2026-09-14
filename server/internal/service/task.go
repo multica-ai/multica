@@ -1254,6 +1254,9 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
 	}
+	if err := guardIssueNotInTriage(ctx, s.Queries, issue.ID); err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 
 	agent, err := s.Queries.GetAgent(ctx, issue.AssigneeID)
 	if err != nil {
@@ -1423,6 +1426,9 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 }
 
 func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID) (db.AgentTaskQueue, error) {
+	if err := guardIssueNotInTriage(ctx, s.Queries, issue.ID); err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -4863,6 +4869,21 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 				createRetry = false
 			}
 		}
+		// The queue door, on the one insert path that cannot fail loudly. A
+		// refusal here must never abort the transaction — it also carries the
+		// parent's failed status, and losing that leaves the task stuck in
+		// 'running' — so both a Triage issue and an unreadable status skip the
+		// retry instead of returning, exactly as the ErrNoRows case below does.
+		if createRetry {
+			if gerr := guardIssueNotInTriage(ctx, qtx, t.IssueID); gerr != nil {
+				slog.Info("fail task auto-retry skipped: issue does not run",
+					"task_id", util.UUIDToString(taskID),
+					"issue_id", util.UUIDToString(t.IssueID),
+					"error", gerr,
+				)
+				createRetry = false
+			}
+		}
 		if createRetry {
 			child, cerr := qtx.CreateRetryTask(ctx, db.CreateRetryTaskParams{
 				NewTaskID:            dbid.NewV7(),
@@ -5204,13 +5225,19 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 
 // retryEligible reports whether a failed task qualifies for an automatic retry
 // attempt: an infrastructure-shaped failure_reason, remaining attempt budget,
-// not an autopilot run, and linked to an issue or chat session. Shared by
-// FailTask's in-transaction retry and the orphan sweeper's MaybeRetryFailedTask
-// so both agree on which failures re-run.
+// not an autopilot run, not a Triage run, and linked to an issue or chat
+// session. Shared by FailTask's in-transaction retry and the orphan sweeper's
+// MaybeRetryFailedTask so both agree on which failures re-run.
+//
+// A Triage run is excluded for the reason autopilot runs are (MUL-7189 §5.6):
+// it has its own recovery. Re-triaging reads the entry as it stands now, which
+// a human may have edited in the meantime, so replaying the failed attempt is
+// never what the workspace wants.
 func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
 	return retryableReasons[failureReason] &&
 		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
 		!t.AutopilotRunID.Valid &&
+		!isTriageTask(t) &&
 		(t.IssueID.Valid || t.ChatSessionID.Valid || isSourceContextQuickCreateTask(t))
 }
 
@@ -5337,6 +5364,15 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
+	if err := guardIssueNotInTriage(ctx, qtx, parent.IssueID); err != nil {
+		if errors.Is(err, ErrIssueInTriage) {
+			slog.Info("task auto-retry skipped: issue is in triage",
+				"parent_task_id", util.UUIDToString(parent.ID),
+				"issue_id", util.UUIDToString(parent.IssueID))
+			return nil, nil
+		}
+		return nil, err
+	}
 	child, err := qtx.CreateRetryTask(ctx, db.CreateRetryTaskParams{
 		NewTaskID:            dbid.NewV7(),
 		ID:                   parent.ID,
@@ -5477,6 +5513,12 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 	issue, err := s.Queries.GetIssue(ctx, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("load issue: %w", err)
+	}
+	// Refuse before anything is cancelled. The queue door would refuse the new
+	// task anyway, but this path cancels the prior run on its way there, so a
+	// late refusal would leave the issue with one fewer run and no new one.
+	if issue.Status == issuestatus.Triage {
+		return nil, ErrIssueInTriage
 	}
 
 	// Determine the target agent for the rerun.
@@ -6336,6 +6378,12 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 	// Signal creation has committed before reaching this shared dispatch path.
 	// Refresh the issue because its status may have changed since creation or
 	// sweep selection; a paused/unreadable lifecycle never settles the signal.
+	//
+	// This is also the queue door for Triage on this path (MUL-7189 §2.3), and
+	// it needs no separate check: Triage is its own category, so it is neither
+	// unstarted nor started and canDispatchDelegatedFailureRecovery already
+	// refuses it. "Covered" is the honest outcome — no further dispatch is owed,
+	// and the run that would answer the comment arrives with accept.
 	issue, err := s.Queries.GetIssue(ctx, target.issue.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return delegatedFailureRecoveryCovered, nil

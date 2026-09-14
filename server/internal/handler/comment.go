@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -2671,6 +2672,16 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 
 	mentions := util.ParseMentions(content)
 
+	// An issue in Triage produces no execution run, in any status and from any
+	// route (MUL-7189 §2.3) — comments are the one trigger that otherwise fires
+	// regardless of status. A target the author named by hand still gets an
+	// outcome, because the alternative is a mention that visibly does nothing;
+	// the implicit routes below (thread owner, assignee fallback) just resolve
+	// to nothing, which is what they already do when no route exists.
+	if issue.Status == issuestatus.Triage {
+		return nil, triageBlockedMentionTargets(mentions)
+	}
+
 	// EXPLICIT @agent / @squad mentions are a direct request and win over the
 	// @all broadcast (MUL-5411). @all only suppresses the IMPLICIT routing
 	// fallbacks (assignee / thread parent / conversation) below — it must not
@@ -2738,6 +2749,35 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 		return []commentAgentTrigger{trigger}, nil
 	}
 	return nil, nil
+}
+
+// triageBlockedMentionTargets reports one blocked outcome per explicitly named
+// @agent / @squad, deduped by the target the author wrote.
+//
+// Nothing is resolved and nothing is read: issue_in_triage is a fact about the
+// issue, identical for every target, so unlike the per-target reasons it cannot
+// be used to enumerate an agent the author may not invoke. The ids echoed back
+// are the ones the author just typed.
+func triageBlockedMentionTargets(mentions []util.Mention) []commentMentionTarget {
+	var targets []commentMentionTarget
+	seen := make(map[string]struct{}, len(mentions))
+	for _, m := range mentions {
+		if m.Type != "agent" && m.Type != "squad" {
+			continue
+		}
+		key := m.Type + ":" + m.ID
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		targets = append(targets, commentMentionTarget{
+			TargetType: m.Type,
+			TargetID:   m.ID,
+			Status:     DispatchBlocked,
+			ReasonCode: ReasonIssueInTriage,
+		})
+	}
+	return targets
 }
 
 func hasAgentOrSquadMention(mentions []util.Mention) bool {

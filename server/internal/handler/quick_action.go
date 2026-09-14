@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -866,6 +867,13 @@ func (h *Handler) RunQuickAction(w http.ResponseWriter, r *http.Request) {
 	}
 	if qa.Status != "active" {
 		writeError(w, http.StatusBadRequest, "quick action is archived")
+		return
+	}
+	// Before the comment is written, not after: a quick action is a comment AND
+	// a run, and posting the prompt to an issue that will never run it leaves an
+	// instruction addressed to nobody (MUL-7189 §2.3).
+	if issue.Status == issuestatus.Triage {
+		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonIssueInTriage)
 		return
 	}
 

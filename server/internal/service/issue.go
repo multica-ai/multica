@@ -739,7 +739,10 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 	}
 	// Backlog is the parking lot: nothing runs from it, so nothing here needs
 	// explaining either. Custom unstarted statuses do not inherit parking.
-	if issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
+	//
+	// Triage refuses for a different reason and so returns just as quietly: the
+	// entry is not yet work anyone agreed to do (MUL-7189 §2.3).
+	if status := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status); status == "backlog" || status == issuestatus.Triage {
 		return pgtype.UUID{}
 	}
 	verdict, admitted := agentAssigneeVerdict(ctx, s.runtimeLookup(s.Queries), issue)
@@ -785,7 +788,9 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 func (s *IssueService) shouldEnqueueAgentTaskWithQueries(ctx context.Context, q *db.Queries, issue db.Issue) bool {
 	// Resolved through q, not s.Queries: this runs inside the create
 	// transaction and must see the same snapshot as the rest of it. (MUL-6243)
-	if issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status) == "backlog" {
+	// That snapshot is also the only place a just-created Triage issue is
+	// visible, which is why the Triage check belongs on the same read.
+	if status := issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status); status == "backlog" || status == issuestatus.Triage {
 		return false
 	}
 	return isAgentAssigneeReadyWithQueries(ctx, s.runtimeLookup(q), issue)
@@ -818,7 +823,7 @@ func agentAssigneeVerdict(ctx context.Context, lookup RuntimeLookup, issue db.Is
 }
 
 func (s *IssueService) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db.Issue) bool {
-	if issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
+	if status := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status); status == "backlog" || status == issuestatus.Triage {
 		return false
 	}
 	return s.isSquadLeaderReady(ctx, issue)
