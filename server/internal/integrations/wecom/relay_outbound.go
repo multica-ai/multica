@@ -1248,7 +1248,14 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult
 	// a delivered reply, a dropped reply, or nothing at all depending on
 	// which replica happened to hold the socket.
 	var record func()
-	if f.Content != "" {
+	// hasVisibleChar, not `!= ""`, and the same predicate the local path uses
+	// (outbound.go). A completion of "\n" carrying a file is words to neither
+	// of them: the local path sends nothing and lets the file carry the
+	// reply's outcome, and a frame routed here has to reach the same two
+	// conclusions or which replica held the socket decides whether the user
+	// sees a blank message and whether the text or the file is what the reply
+	// counter is counting.
+	if hasVisibleChar(f.Content) {
 		if err := sender.sendTextCtx(ctx, f.ChatID, f.ChatType, f.Content); err != nil {
 			// WHETHER THIS FRAME IS FINISHED IS SETTLED BEFORE ANY COUNTER
 			// MOVES. A frame that is owed another offer is still in flight,
@@ -1309,7 +1316,7 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult
 			ChatID:         f.ChatID,
 			ChatType:       f.ChatType,
 			SessionID:      f.SessionID,
-		}, f.Content == "")
+		}, !hasVisibleChar(f.Content))
 	}
 	return relayResult{outcome: outcomeDone, record: record}
 }

@@ -12,12 +12,14 @@ import (
 )
 
 func TestAssigneeFrequencyRenumberPreservesExistingIndex(t *testing.T) {
+	t.Parallel()
 	const version = "466_activity_log_member_assignee_frequency_index"
 	const legacyVersion = "458_activity_log_member_assignee_frequency_index"
 	const index = "idx_activity_log_member_assignee_frequency"
 
 	for _, previouslyApplied := range []bool{false, true} {
 		t.Run(fmt.Sprintf("previously_applied_%t", previouslyApplied), func(t *testing.T) {
+			t.Parallel()
 			admin := openTestPool(t)
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()

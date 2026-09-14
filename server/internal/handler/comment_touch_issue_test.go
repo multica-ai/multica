@@ -181,12 +181,9 @@ func TestUpdateAndDeleteCommentBumpIssueActivity(t *testing.T) {
 	}
 
 	setBase()
-	deleted, err := testHandler.Queries.DeleteComment(ctx, db.DeleteCommentParams{
-		ID:          comment.ID,
-		WorkspaceID: parseUUID(testWorkspaceID),
-	})
-	if err != nil || !deleted.Changed {
-		t.Fatalf("DeleteComment = (%+v, %v), want changed result", deleted, err)
+	deleted, err := testHandler.deleteComment(ctx, comment.ID, parseUUID(testWorkspaceID))
+	if err != nil || len(deleted.RemovedIDs) != 1 {
+		t.Fatalf("deleteComment = (%+v, %v), want the comment removed", deleted, err)
 	}
 	if deleted.IssueRevision == 0 {
 		t.Fatal("comment delete omitted the advanced issue revision")
@@ -293,8 +290,8 @@ func TestUpdateCommentLosingRaceDoesNotTouchIssue(t *testing.T) {
 }
 
 // A delete that loses after waiting for the same comment row likewise must not
-// mutate the issue. The issue touch now depends on DELETE ... RETURNING, so an
-// empty delete result is an empty activity source.
+// mutate the issue. The issue touch runs in the delete transaction only after
+// the comment lock was won, so a lost race rolls back without touching it.
 func TestDeleteCommentLosingRaceDoesNotTouchIssue(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -315,28 +312,19 @@ func TestDeleteCommentLosingRaceDoesNotTouchIssue(t *testing.T) {
 		t.Fatalf("lock comment: %v", err)
 	}
 
-	type deleteResult struct {
-		row db.DeleteCommentRow
-		err error
-	}
-	done := make(chan deleteResult, 1)
-	go func() {
-		row, deleteErr := testHandler.Queries.DeleteComment(context.Background(), db.DeleteCommentParams{
-			ID:          parseUUID(commentID),
-			WorkspaceID: parseUUID(testWorkspaceID),
-		})
-		done <- deleteResult{row: row, err: deleteErr}
-	}()
 	lockDone := make(chan error, 1)
 	go func() {
-		result := <-done
-		if result.err == nil && result.row.Changed {
+		_, deleteErr := testHandler.deleteComment(context.Background(), parseUUID(commentID), parseUUID(testWorkspaceID))
+		if deleteErr == nil {
 			lockDone <- errors.New("losing delete unexpectedly changed a row")
 			return
 		}
-		lockDone <- result.err
+		if errors.Is(deleteErr, pgx.ErrNoRows) {
+			deleteErr = nil
+		}
+		lockDone <- deleteErr
 	}()
-	waitForCommentMutationLock(t, "DeleteComment", lockDone)
+	waitForCommentMutationLock(t, "LockCommentForDelete", lockDone)
 
 	if _, err := holder.Exec(ctx, `DELETE FROM comment WHERE id = $1`, commentID); err != nil {
 		t.Fatalf("commit winning delete: %v", err)
@@ -383,19 +371,16 @@ func TestCommentMutationsFollowIssueTeardownLockOrder(t *testing.T) {
 		},
 		{
 			name:      "delete",
-			queryName: "DeleteComment",
+			queryName: "LockCommentForDelete",
 			mutate: func(ctx context.Context, commentID string) error {
-				result, err := testHandler.Queries.DeleteComment(ctx, db.DeleteCommentParams{
-					ID:          parseUUID(commentID),
-					WorkspaceID: parseUUID(testWorkspaceID),
-				})
+				_, err := testHandler.deleteComment(ctx, parseUUID(commentID), parseUUID(testWorkspaceID))
+				if errors.Is(err, pgx.ErrNoRows) {
+					return nil
+				}
 				if err != nil {
 					return err
 				}
-				if result.Changed {
-					return errors.New("comment delete changed a row after its issue was deleted")
-				}
-				return nil
+				return errors.New("comment delete changed a row after its issue was deleted")
 			},
 		},
 	}
@@ -467,7 +452,7 @@ func waitForCommentMutationLock(t *testing.T, queryName string, done <-chan erro
 				  AND wait_event_type = 'Lock'
 				  AND query LIKE '%' || $1 || '%'
 			)
-		`, "-- name: "+queryName+" :one").Scan(&waiting); err != nil {
+		`, "-- name: "+queryName+" :").Scan(&waiting); err != nil {
 			t.Fatalf("observe blocked %s: %v", queryName, err)
 		}
 		if waiting {

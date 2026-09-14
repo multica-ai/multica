@@ -182,7 +182,7 @@ function useFilterChips(
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const resolveStatusLabel = useStatusLabel(wsId);
-  const { categoryOf, colorOf } = useIssueStatuses(wsId);
+  const { categoryOf, colorOf, iconOf } = useIssueStatuses(wsId);
 
   const statusFilters = useViewStore((s) => s.statusFilters);
   const priorityFilters = useViewStore((s) => s.priorityFilters);
@@ -355,6 +355,7 @@ function useFilterChips(
               status={s}
               category={categoryOf(s)}
               color={colorOf(s)}
+              icon={iconOf(s)}
               className="size-3"
             />
           ))}

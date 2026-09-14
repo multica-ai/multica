@@ -111,6 +111,12 @@
     "blocked": "ブロック中",
     "cancelled": "キャンセル済み"
   },
+  "status_category": {
+    "unstarted": "未着手",
+    "started": "開始済み",
+    "done": "完了",
+    "closed": "終了"
+  },
   "priority": {
     "urgent": "緊急",
     "high": "高",
@@ -489,6 +495,8 @@
     "delete_title": "コメントを削除",
     "delete_desc": "このコメントは完全に削除されます。この操作は元に戻せません。",
     "delete_desc_with_replies": "このコメントとすべての返信が完全に削除されます。この操作は元に戻せません。",
+    "delete_desc_replies_kept": "このコメントは完全に削除されます。返信はスレッドに残ります。この操作は元に戻せません。",
+    "deleted_placeholder": "このコメントは削除されました",
     "delete_action": "削除",
     "cancel_action": "キャンセル",
     "edit_placeholder": "コメントを編集...",
@@ -507,12 +515,14 @@
     "trigger_blocked_target_unavailable": "この対象は利用できません",
     "trigger_blocked_runtime_offline": "この対象のランタイムがオフラインです",
     "trigger_blocked_runtime_unusable": "この対象の CLI はそのマシンで実行できません — そのマシンで再インストールしてください",
+    "trigger_blocked_runtime_profile_missing": "この対象の CLI はそのマシンでランタイム プロファイルが不足しています — そのマシンでインストールしてください",
     "trigger_blocked_agent_runtime_required": "この対象にはランタイムがありません — 実行するにはバインドしてください",
     "trigger_blocked_generic": "この対象はトリガーされません",
     "trigger_blocked_short_invocation_not_allowed": "未検出または権限なし",
     "trigger_blocked_short_target_unavailable": "利用不可",
     "trigger_blocked_short_runtime_offline": "ランタイム オフライン",
     "trigger_blocked_short_runtime_unusable": "CLI を実行できません",
+    "trigger_blocked_short_runtime_profile_missing": "ランタイム プロファイル未導入",
     "trigger_blocked_short_agent_runtime_required": "ランタイム未設定",
     "trigger_blocked_short_generic": "トリガーされません",
     "send_reply_failed": "返信を送信できませんでした",
@@ -554,7 +564,25 @@
     }
   },
   "reply": {
-    "placeholder": "返信を残す..."
+    "placeholder": "返信を残す...",
+    "annotations": {
+      "confirm_add": "注釈を追加",
+      "save": "注釈を保存",
+      "add_comment": "コメントに追加",
+      "add": "返信に追加",
+      "note_label": "コメント",
+      "count_other": "{{count}} 件の注釈",
+      "quote_limit": "一度に選択できるのは {{count}} 文字までです。",
+      "count_limit": "コメントに追加できる注釈は {{count}} 件までです。",
+      "remove": "注釈 {{number}} を削除",
+      "source_changed": "原文が変更されたか、利用できません。保存した引用は保持されます。",
+      "intent_hint": "注釈のコメントか本文を入力してから送信してください。",
+      "target_deleted": "返信先が削除されました。この下書きの注釈をすべて削除し、残っているコメントの文字を選択して注釈を追加し直してください。",
+      "selection_failed": "選択範囲を取得できませんでした。同じコメントまたは説明の中で文字を選び直してください。",
+      "source_label": "{{name}} のコメント",
+      "edit": "注釈 {{number}} を編集",
+      "note_placeholder": "コメントを追加…"
+    }
   },
   "agent_activity": {
     "hover_header_other": "作業中のエージェント {{count}} 件",

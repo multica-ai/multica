@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { issueStatusListOptions, buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
 import {
   parseTabSubject,
   resolveTabPresentation,
@@ -266,6 +267,8 @@ export function useTabPresentation(
   const ws = useCurrentWorkspace();
   const wsId = ws?.id ?? "";
   const data = useTabEntityData(subject, wsId);
+  const statuses = useQuery({ ...issueStatusListOptions(wsId), enabled: false }).data;
+  const catalog = useMemo(() => buildIssueStatusCatalog(statuses), [statuses]);
   const { visual, title: titleSpec } = resolveTabPresentation(subject, data);
   // A selected notification whose identity has not resolved from cache yet is
   // pending in exactly the sense a not-yet-loaded issue is — keep the tab's
@@ -289,7 +292,12 @@ export function useTabPresentation(
         }
       : visual;
 
-  return { visual: safeVisual, title };
+  return {
+    visual: safeVisual.kind === "issue-status" && safeVisual.status && catalog.entryOf(safeVisual.status)?.is_system === false
+      ? { ...safeVisual, color: catalog.colorOf(safeVisual.status), icon: catalog.iconOf(safeVisual.status) }
+      : safeVisual,
+    title,
+  };
 }
 
 /**
@@ -318,6 +326,8 @@ export function ResourceLeadingVisual({
         <StatusIcon
           status={visual.status ?? ""}
           category={visual.category}
+          color={visual.color}
+          icon={visual.icon}
           className="size-3.5"
         />
       );

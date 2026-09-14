@@ -6,7 +6,7 @@ import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "..
 import { defaultStorage } from "../../platform/storage";
 import {
   DEFAULT_CARD_PROPERTIES,
-  DEFAULT_HIDDEN_STATUS_CATEGORIES,
+  DEFAULT_HIDDEN_STATUSES,
   type IssueViewState,
   mergeViewStatePersisted,
   viewStorePersistOptions,
@@ -81,11 +81,12 @@ function migrateLegacySurfaceState(
       ...(surfaceKey.startsWith("project:") ? { project: false } : {}),
     };
   }
+  const legacyHidden = (state as unknown as { hiddenStatusCategories?: string[] }).hiddenStatusCategories;
   if (
-    state.hiddenStatusCategories === undefined ||
-    state.hiddenStatusCategories.length === 0
+    (state.hiddenStatuses ?? legacyHidden) === undefined ||
+    (state.hiddenStatuses ?? legacyHidden)?.length === 0
   ) {
-    next.hiddenStatusCategories = [...DEFAULT_HIDDEN_STATUS_CATEGORIES];
+    next.hiddenStatuses = [...DEFAULT_HIDDEN_STATUSES];
   }
   return next;
 }

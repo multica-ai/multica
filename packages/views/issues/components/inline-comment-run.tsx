@@ -30,6 +30,11 @@ import { commentRunOutput, isActiveCommentRun, showCommentRunInHeader, type Comm
 
 import { useRunAnimationVisibility, useRunDisclosureMotion } from "./use-run-comment-motion";
 
+function thinkingPreview(content: string | undefined, formatText: (text: string) => string): string {
+  // Redact the complete content before clipping so a split credential cannot leak.
+  return traceEventSummary({ type: "thinking", content: redactSecrets(formatText(content ?? "")) });
+}
+
 export function useInlineCommentRunState() {
   const [expanded, setExpanded] = useState(false);
   const [fullLogOpen, setFullLogOpen] = useState(false);
@@ -100,7 +105,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const activitySummary = current && isCallStep(current)
     ? redactSecrets(traceToolArgSummary(current.call?.input, { formatText }) || current.tool)
     : current?.kind === "text" ? redactSecrets(formatText(current.item.content ?? ""))
-    : current?.kind === "thinking" ? t(($) => $.inline_run.thinking)
+    : current?.kind === "thinking" ? thinkingPreview(current.item.content, formatText) || t(($) => $.inline_run.thinking)
     : current?.kind === "error" ? t(($) => $.inline_run.error)
     : t(($) => $.inline_run.waiting_response);
   const summary = task.status === "queued" ? t(($) => $.inline_run.queued)
@@ -211,7 +216,7 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
     ? redactSecrets(traceToolArgSummary(row.call?.input, { formatText }) || (row.result ? traceEventSummary(row.result, { formatText }) : "")) || row.tool
     : grouped ? row.tool
     : row.kind === "text" ? t(($) => $.inline_run.message)
-    : row.kind === "thinking" ? t(($) => $.inline_run.thinking)
+    : row.kind === "thinking" ? thinkingPreview(row.item.content, formatText) || t(($) => $.inline_run.thinking)
     : t(($) => $.inline_run.error);
   return <details className="min-w-0 text-caption" onToggle={onToggle}>
     <summary onClick={disclosure.onTrigger} className="flex cursor-pointer list-none items-center gap-2 rounded-xs py-1.5 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">

@@ -59,6 +59,10 @@ const hookOnlyTestManifest = `{
   }
 }`
 
+// scheduleHookTestManifest runs daily on purpose. Manifest validation walks
+// every occurrence in a 400-day window to enforce the five-minute floor, and a
+// test manifest is parsed on every write and publish: "*/5 * * * *" cost ~115k
+// cron steps per parse (seconds per test under -race), a daily cron ~400.
 const scheduleHookTestManifest = `{
   "manifest_version": 1,
   "key": "com.example.scheduled",
@@ -72,7 +76,7 @@ const scheduleHookTestManifest = `{
       "name": "Heartbeat",
       "description": "Send a periodic heartbeat.",
       "triggers": ["schedule"],
-      "schedule": { "cron": "*/5 * * * *", "timezone": "UTC" },
+      "schedule": { "cron": "0 6 * * *", "timezone": "UTC" },
       "transport": { "type": "http", "url": "https://example.com/hooks/heartbeat" }
     }]
   }
@@ -249,7 +253,7 @@ func TestPluginScheduleLifecycleReconcilesAtomically(t *testing.T) {
 	}
 
 	enabled, generation1, cron := loadSchedule()
-	if !enabled || cron != "*/5 * * * *" {
+	if !enabled || cron != "0 6 * * *" {
 		t.Fatalf("installed schedule enabled=%v cron=%q", enabled, cron)
 	}
 	params := map[string]string{"id": testWorkspaceID, "installationId": installed.ID}
@@ -301,7 +305,7 @@ func TestPluginScheduleLifecycleReconcilesAtomically(t *testing.T) {
 	}
 
 	changed := strings.Replace(unchanged, `"version": "2.0.0"`, `"version": "3.0.0"`, 1)
-	changed = strings.Replace(changed, `"cron": "*/5 * * * *"`, `"cron": "*/10 * * * *"`, 1)
+	changed = strings.Replace(changed, `"cron": "0 6 * * *"`, `"cron": "0 7 * * *"`, 1)
 	writeLocalPluginManifest(t, root, changed)
 	changedVersionID := publishLocalPlugin(t, "hello")
 	upgrade, _ = json.Marshal(map[string]any{"version_id": changedVersionID, "granted_scopes": []string{"net:example.com"}})
@@ -311,13 +315,13 @@ func TestPluginScheduleLifecycleReconcilesAtomically(t *testing.T) {
 		t.Fatalf("changed upgrade status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	_, generation3, cron := loadSchedule()
-	if generation3 == generation2 || cron != "*/10 * * * *" {
+	if generation3 == generation2 || cron != "0 7 * * *" {
 		t.Fatalf("changed schedule generation=%q cron=%q, previous generation %q", generation3, cron, generation2)
 	}
 
 	removed := strings.Replace(changed, `"version": "3.0.0"`, `"version": "4.0.0"`, 1)
 	removed = strings.Replace(removed, `"triggers": ["schedule"],
-      "schedule": { "cron": "*/10 * * * *", "timezone": "UTC" },`, `"triggers": ["manual"],`, 1)
+      "schedule": { "cron": "0 7 * * *", "timezone": "UTC" },`, `"triggers": ["manual"],`, 1)
 	writeLocalPluginManifest(t, root, removed)
 	removedVersionID := publishLocalPlugin(t, "hello")
 	upgrade, _ = json.Marshal(map[string]any{"version_id": removedVersionID, "granted_scopes": []string{"net:example.com"}})

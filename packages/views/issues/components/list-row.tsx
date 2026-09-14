@@ -119,8 +119,7 @@ function ListRowContent({
 
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className="truncate">{issue.title}</span>
-            {/* List sections are categories, so a custom status needs to name
-                itself on the row. Silent for built-ins. (MUL-6243) */}
+            {/* Keep custom names visible when this row appears outside a status section. */}
             <CustomStatusChip status={issue.status} className="shrink-0" />
             {showChildProgress && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">

@@ -238,8 +238,6 @@ describe("useIssueSurfaceController", () => {
         query: expect.objectContaining({
           scope: { kind: "project", project_id: "p1" },
         }),
-        // A workspace with no custom statuses keeps the original contract —
-        // that is what makes this safe across a rolling deploy. (MUL-6243)
         group: { kind: "status" },
       }),
     );
@@ -317,7 +315,7 @@ describe("useIssueSurfaceController", () => {
     });
     expect(listIssueTableRows).toHaveBeenCalledWith(
       expect.objectContaining({
-        group_key: "status:backlog",
+        group_key: "status:todo",
         page: { limit: 50, cursor: null },
       }),
     );

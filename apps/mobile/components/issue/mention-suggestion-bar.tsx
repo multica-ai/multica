@@ -359,7 +359,7 @@ export function MentionSuggestionBar({
             );
           }
           // issue
-          // By CATEGORY, not by key: a custom status in the done category IS
+          // By CATEGORY, not by key: a custom status in the completed category is
           // done, and `status === "done"` silently disagrees — the row would
           // render at full opacity as though the work were still open.
           // (MUL-6243)
@@ -382,7 +382,7 @@ export function MentionSuggestionBar({
                 <StatusIcon
                   status={item.issue.status}
                   category={issueColumnCategory(item.issue)}
-                  color={catalog.colorOf(item.issue.status)}
+                  icon={catalog.iconOf(item.issue.status)} color={catalog.colorOf(item.issue.status)}
                   size={16}
                 />
               </View>

@@ -89,7 +89,7 @@ describe("sortIssues property sorts", () => {
         staticIssue("done", { status: "done" }),
         staticIssue("blocked", {
           status: "waiting_on_vendor",
-          status_category: "blocked",
+          status_category: "started",
         }),
       ],
       "status",

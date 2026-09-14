@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -4820,6 +4821,67 @@ func TestRunIssueListTableFooterReportsPage(t *testing.T) {
 			}
 			if got := strings.TrimSpace(stderr.read()); got != tc.wantStderr {
 				t.Errorf("stderr = %q, want %q", got, tc.wantStderr)
+			}
+		})
+	}
+}
+
+// #8296: the CLI deletes through the keep-replies route, which only servers
+// that keep a deleted comment's replies expose. An older server does not route
+// it, and the CLI refuses rather than falling back to a delete that would
+// remove the replies too.
+func TestRunIssueCommentDeleteKeepsReplies(t *testing.T) {
+	commentID := "comment-123"
+	tests := []struct {
+		name    string
+		respond func(http.ResponseWriter)
+		wantErr string
+	}{
+		{
+			name:    "server keeps replies",
+			respond: func(w http.ResponseWriter) { w.WriteHeader(http.StatusNoContent) },
+		},
+		{
+			name:    "older server without the route",
+			respond: func(w http.ResponseWriter) { http.Error(w, "404 page not found", http.StatusNotFound) },
+			wantErr: "would delete the comment's replies too",
+		},
+		{
+			name: "comment not found",
+			respond: func(w http.ResponseWriter) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(map[string]string{"error": "comment not found"})
+			},
+			wantErr: "comment not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var paths []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodDelete {
+					t.Errorf("method = %s, want DELETE", r.Method)
+				}
+				paths = append(paths, r.URL.Path)
+				tt.respond(w)
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			err := runIssueCommentDelete(newIssueCommentResolutionTestCmd("delete"), []string{commentID})
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("run command: %v", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("error = %v, want it to mention %q", err, tt.wantErr)
+			}
+			if want := []string{"/api/comments/" + commentID + "/keep-replies"}; !slices.Equal(paths, want) {
+				t.Fatalf("requests = %v, want only %v", paths, want)
 			}
 		})
 	}

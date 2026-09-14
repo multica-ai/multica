@@ -111,6 +111,12 @@
     "blocked": "已阻塞",
     "cancelled": "已取消"
   },
+  "status_category": {
+    "unstarted": "未开始",
+    "started": "已开始",
+    "done": "已完成",
+    "closed": "已关闭"
+  },
   "priority": {
     "urgent": "紧急",
     "high": "高",
@@ -489,6 +495,8 @@
     "delete_title": "删除评论",
     "delete_desc": "这条评论会被永久删除，无法撤销。",
     "delete_desc_with_replies": "这条评论及其全部回复会被永久删除，无法撤销。",
+    "delete_desc_replies_kept": "这条评论会被永久删除，它的回复会保留在讨论中，无法撤销。",
+    "deleted_placeholder": "评论已删除",
     "delete_action": "删除",
     "cancel_action": "取消",
     "edit_placeholder": "编辑评论...",
@@ -507,12 +515,14 @@
     "trigger_blocked_target_unavailable": "该目标不可用",
     "trigger_blocked_runtime_offline": "该目标的运行时已离线",
     "trigger_blocked_runtime_unusable": "该目标的 CLI 在它所在的机器上无法运行 —— 需要在那台机器上重装",
+    "trigger_blocked_runtime_profile_missing": "该目标的 CLI 在它所在的机器上缺少运行时 profile —— 需要在那台机器上安装",
     "trigger_blocked_agent_runtime_required": "该目标未绑定运行时——绑定后才能运行",
     "trigger_blocked_generic": "该目标不会被触发",
     "trigger_blocked_short_invocation_not_allowed": "找不到或无权限",
     "trigger_blocked_short_target_unavailable": "不可用",
     "trigger_blocked_short_runtime_offline": "运行时离线",
     "trigger_blocked_short_runtime_unusable": "CLI 无法运行",
+    "trigger_blocked_short_runtime_profile_missing": "缺少运行时 profile",
     "trigger_blocked_short_agent_runtime_required": "需绑定运行时",
     "trigger_blocked_short_generic": "不会触发",
     "send_reply_failed": "发送回复失败",
@@ -554,7 +564,25 @@
     }
   },
   "reply": {
-    "placeholder": "回复..."
+    "placeholder": "回复...",
+    "annotations": {
+      "confirm_add": "添加批注",
+      "save": "保存批注",
+      "add_comment": "加入评论",
+      "add": "加入回复",
+      "note_label": "批注",
+      "count_other": "{{count}} 条批注",
+      "quote_limit": "每次最多选择 {{count}} 个字符。",
+      "count_limit": "一条评论最多包含 {{count}} 条批注。",
+      "remove": "移除第 {{number}} 条批注",
+      "source_changed": "原文已更改或不可用，已保留你保存的引用。",
+      "intent_hint": "请填写至少一条批注意见或评论正文后再发送。",
+      "target_deleted": "回复目标已删除。请移除此草稿中的全部批注，再选择仍存在的评论文字重新添加批注。",
+      "selection_failed": "未能获取选中文字。请在同一条评论或任务描述内重新选择后再试。",
+      "source_label": "{{name}} 的评论",
+      "edit": "编辑批注 {{number}}",
+      "note_placeholder": "添加意见..."
+    }
   },
   "agent_activity": {
     "hover_header_other": "{{count}} 个智能体工作中",

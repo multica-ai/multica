@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2 } from "lucide-react";
 import type { TimelineEntry } from "@multica/core/types";
+import { isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -448,10 +449,11 @@ export function ThreadMinimap({
         className="pointer-events-auto flex max-h-full flex-col overflow-hidden"
       >
         {threads.map((thread, i) => {
-          const title =
-            previews[i]!.title ||
-            thread.entry.actor_name ||
-            getActorName(thread.entry.actor_type, thread.entry.actor_id);
+          const title = isDeletedComment(thread.entry)
+            ? t(($) => $.comment.deleted_placeholder)
+            : previews[i]!.title ||
+              thread.entry.actor_name ||
+              getActorName(thread.entry.actor_type, thread.entry.actor_id);
           return (
             <MinimapTick
               key={thread.id}
@@ -480,8 +482,10 @@ export function ThreadMinimap({
         >
           <ul>
             {threads.map((thread, index) => {
-              const title = previews[index]!.title || thread.entry.actor_name ||
-                getActorName(thread.entry.actor_type, thread.entry.actor_id);
+              const title = isDeletedComment(thread.entry)
+                ? t(($) => $.comment.deleted_placeholder)
+                : previews[index]!.title || thread.entry.actor_name ||
+                  getActorName(thread.entry.actor_type, thread.entry.actor_id);
               const participantNames = thread.participants.map((participant) =>
                 participant.actor_name || getActorName(participant.actor_type, participant.actor_id),
               );

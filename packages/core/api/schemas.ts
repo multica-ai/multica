@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeIssueStatusCategory } from "../issues/config/status";
 import type {
   AgentBuilderRuntimeSwitch,
   AgentBuilderSession,
@@ -482,8 +483,9 @@ export const IssueStatusEntrySchema = z.object({
   key: z.string(),
   name: z.string(),
   description: z.string().optional().default(""),
-  category: z.string(),
+  category: z.string().transform((value) => normalizeIssueStatusCategory(value) ?? value),
   color: z.string().optional().default("#6b7280"),
+  icon: z.string().nullable().optional(),
   is_system: z.boolean().optional().default(false),
   position: z.number().optional().default(0),
   archived_at: z.string().nullable().optional().default(null),
@@ -497,7 +499,7 @@ export const EMPTY_ISSUE_STATUS_ENTRY: IssueStatusEntry = {
   key: "",
   name: "",
   description: "",
-  category: "backlog",
+  category: "unstarted",
   color: "#6b7280",
   is_system: false,
   position: 0,
@@ -508,15 +510,15 @@ export const EMPTY_ISSUE_STATUS_ENTRY: IssueStatusEntry = {
 
 export const ListIssueStatusesResponseSchema = z.object({
   statuses: z.array(IssueStatusEntrySchema).default([]),
-  categories: z.array(z.string()).default([]),
+  categories: z.array(z.string()).default([]).transform((values) => [...new Set(values.map((value) => normalizeIssueStatusCategory(value) ?? value))]),
   total: z.number().default(0),
 }).loose();
 
-// The fallback carries the 7 built-ins' keys as categories, so a client talking
-// to a server that predates this endpoint still has the canonical list.
+// The fallback carries the four lifecycle categories. Concrete built-in status
+// keys remain available through the status configuration.
 export const EMPTY_LIST_ISSUE_STATUSES_RESPONSE: ListIssueStatusesResponse = {
   statuses: [],
-  categories: ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"],
+  categories: ["unstarted", "started", "done", "closed"],
   total: 0,
 };
 
@@ -753,6 +755,10 @@ export interface AppConfigResponse {
   /** Whether agent create/update persists `conversation_starters`. Older servers
    * silently ignored the unknown field, so absent must be treated as false. */
   agent_conversation_starters_supported?: boolean;
+  /** Whether deleting a comment keeps its replies and the server routes
+   * DELETE /api/comments/{id}/keep-replies. Older servers deleted the replies
+   * too, so absent must be treated as false (#8296). */
+  comment_delete_keep_replies_supported?: boolean;
   server_version?: string;
 }
 
@@ -908,6 +914,9 @@ const TimelineEntrySchema = z.object({
   reactions: z.array(ReactionSchema).optional(),
   attachments: z.array(AttachmentSchema).optional(),
   source_task_id: z.string().nullable().optional(),
+  // Tombstone marker (#8296). Lenient: a malformed value reads as a live
+  // comment instead of failing the whole timeline.
+  deleted_at: z.string().nullable().optional().catch(undefined),
   coalesced_count: z.number().optional(),
 }).loose();
 
@@ -952,6 +961,7 @@ export const AppConfigSchema = z.object({
   feature_flags: FeatureFlagsSchema,
   local_worktree_supported: BooleanWithDefaultSchema(false),
   agent_conversation_starters_supported: BooleanWithDefaultSchema(false),
+  comment_delete_keep_replies_supported: BooleanWithDefaultSchema(false),
   server_version: OptionalStringSchema,
 }).loose();
 
@@ -969,6 +979,8 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   local_worktree_supported: false,
   // Fail closed: old servers returned success while dropping the field.
   agent_conversation_starters_supported: false,
+  // Fail closed: old servers delete a comment's replies with it.
+  comment_delete_keep_replies_supported: false,
   feature_flags: {},
 };
 
@@ -1010,6 +1022,7 @@ export const CommentSchema = z.object({
   source_task_id: z.string().nullable().optional(),
   // Set only on comments a quick action produced (MUL-5465). Server-only.
   quick_action_id: z.string().nullable().optional(),
+  deleted_at: z.string().nullable().optional().catch(undefined),
 }).loose();
 
 export const CommentsListSchema = z.array(CommentSchema);
@@ -1131,6 +1144,7 @@ const SourceContextCommentSnapshotSchema = z.object({
   updated_at: z.string(),
   revision: z.number(),
   attachments: SourceContextAttachmentsSchema,
+  deleted: z.boolean().optional().catch(undefined),
 }).loose();
 
 export const SourceContextSnapshotSchema = z.object({
@@ -1206,7 +1220,7 @@ export const IssueSchema = z.object({
   // status. Optional because only endpoints that resolve it emit it, so
   // consumers must fall back to `status` rather than treat "" as a category.
   // (MUL-6243)
-  status_category: z.string().optional(),
+  status_category: z.string().transform((value) => normalizeIssueStatusCategory(value) ?? value).optional(),
   // A CUSTOM status's display name; "" for a built-in, which clients localize
   // from the key. Optional so a response from a server that predates the field
   // still validates.

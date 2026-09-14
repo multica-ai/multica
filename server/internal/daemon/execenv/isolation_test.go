@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -19,13 +20,34 @@ import (
 
 const preparationHelperTestMode = "execenv-preparation-helper"
 
-func preparationHelperTestCommand() []string {
-	return []string{
-		os.Args[0],
-		"-test.run=^TestPreparationHelperProcess$",
-		"--",
-		preparationHelperTestMode,
+// TestMain drops the race runtime's exit delay for the children these tests
+// re-exec from the test binary itself (the preparation helper, the git lock
+// holder). A -race binary sleeps atexit_sleep_ms — a full second by default —
+// on every clean exit, which made each helper round trip cost a second of
+// wall time. A race the child detects while it runs is still reported and
+// still fails its exit status; what goes is the grace period for surfacing a
+// race in a goroutine still running at exit, and these children exit as soon
+// as their one job is done. The parent read GORACE at startup, so it keeps
+// its own settings.
+//
+// It also removes the template repository newTestRepo copies from.
+func TestMain(m *testing.M) {
+	os.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
+	code := m.Run()
+	if testRepoTemplate.dir != "" {
+		os.RemoveAll(testRepoTemplate.dir)
 	}
+	os.Exit(code)
+}
+
+// preparationHelperTestCommand re-execs this test binary as the preparation
+// helper. setenv holds KEY=VALUE pairs the helper applies to its own
+// environment first, so a test can configure the child without t.Setenv and
+// still run in parallel.
+func preparationHelperTestCommand(setenv ...string) []string {
+	command := []string{os.Args[0], "-test.run=^TestPreparationHelperProcess$", "--"}
+	command = append(command, setenv...)
+	return append(command, preparationHelperTestMode)
 }
 
 // TestPreparationHelperProcess is both a no-op parent-side test and the child
@@ -34,6 +56,10 @@ func preparationHelperTestCommand() []string {
 func TestPreparationHelperProcess(t *testing.T) {
 	if len(os.Args) == 0 || os.Args[len(os.Args)-1] != preparationHelperTestMode {
 		return
+	}
+	for _, kv := range os.Args[slices.Index(os.Args, "--")+1 : len(os.Args)-1] {
+		key, value, _ := strings.Cut(kv, "=")
+		os.Setenv(key, value)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	if err := RunPreparationHelper(os.Stdin, os.Stdout, logger); err != nil {
@@ -264,20 +290,20 @@ func TestPreparationHelperPreservesOpenclawTimeoutKind(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell shim shape is covered by the windows-tagged tests")
 	}
+	t.Parallel()
 	sleepBin, err := exec.LookPath("sleep")
 	if err != nil {
 		t.Skipf("no sleep binary available to build a slow shim: %v", err)
 	}
-	// A CLI slower than the deadline, which the child process inherits through
-	// the environment. openclawCLIMinTimeout is the floor, so the shim has to
-	// outlast a full second.
+	// A CLI slower than the deadline the helper process is given.
+	// openclawCLIMinTimeout is the floor, so the shim has to outlast a full
+	// second.
 	shim := writeShim(t, t.TempDir(), "#!/bin/sh\n"+sleepBin+" 5\n", "")
-	t.Setenv(OpenclawCLITimeoutEnv, "1s")
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	_, err = PrepareIsolated(ctx, preparationHelperTestCommand(), PrepareParams{
+	_, err = PrepareIsolated(ctx, preparationHelperTestCommand(OpenclawCLITimeoutEnv+"=1s"), PrepareParams{
 		WorkspacesRoot: t.TempDir(),
 		WorkspaceID:    "ws-helper-openclaw-timeout",
 		TaskID:         "11111111-2222-3333-4444-555555555555",

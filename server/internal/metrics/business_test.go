@@ -139,6 +139,7 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	m.RecordChatClaimSessionFallbackHit()
 	m.ObserveChatClaimLastSessionQuery(0.01)
 	m.ObserveChatClaimRolloutMissingQuery(0.01)
+	m.RecordIssueMetadataMutation("set", "changed", 10*time.Millisecond)
 	m.RecordLLMUsage("issue", "local", "codex", "gpt-5.4", 1, 1, 1, 1, 0)
 	m.RecordLLMUsage("issue", "local", "custom-provider", "custom-model", 1, 0, 0, 0, 0)
 

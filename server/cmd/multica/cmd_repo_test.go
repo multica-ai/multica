@@ -217,9 +217,9 @@ func TestRunRepoCheckoutForwardsManagedCheckoutMode(t *testing.T) {
 	t.Setenv("MULTICA_TOKEN", "mat_repo_checkout_test")
 	t.Setenv("MULTICA_REPO_CHECKOUT_MODE", "isolated")
 
-	previousRef := repoCheckoutRef
-	repoCheckoutRef = "release/v2"
-	defer func() { repoCheckoutRef = previousRef }()
+	previousRef, previousFresh := repoCheckoutRef, repoCheckoutFresh
+	repoCheckoutRef, repoCheckoutFresh = "release/v2", true
+	defer func() { repoCheckoutRef, repoCheckoutFresh = previousRef, previousFresh }()
 
 	if err := runRepoCheckout(&cobra.Command{}, []string{"https://github.com/org/repo.git"}); err != nil {
 		t.Fatalf("runRepoCheckout: %v", err)
@@ -232,6 +232,56 @@ func TestRunRepoCheckoutForwardsManagedCheckoutMode(t *testing.T) {
 	}
 	if got := body["retry_busy"]; got != true {
 		t.Fatalf("retry_busy = %v, want true", got)
+	}
+	if got := body["fresh"]; got != true {
+		t.Fatalf("fresh = %v, want true", got)
+	}
+}
+
+func TestRepoCheckoutSummary(t *testing.T) {
+	t.Parallel()
+	const repoURL = "https://github.com/org/repo.git"
+	for _, tc := range []struct {
+		name   string
+		result repoCheckoutResult
+		want   []string
+	}{
+		{
+			name:   "new branch",
+			result: repoCheckoutResult{Path: "/work/repo", BranchName: "agent/test/task"},
+			want:   []string{"Checked out " + repoURL + " → /work/repo (branch: agent/test/task)"},
+		},
+		{
+			name:   "kept for local work",
+			result: repoCheckoutResult{Path: "/work/repo", BranchName: "agent/test/old", Kept: "local_work", UncommittedFiles: 2, UnpushedCommits: 1},
+			want: []string{
+				"Kept the existing checkout of " + repoURL + " at /work/repo (branch: agent/test/old; 2 uncommitted files, 1 unpushed commit)",
+				"nothing was reset, cleaned, or switched",
+				"re-run with --fresh",
+			},
+		},
+		{
+			name:   "kept on the task branch",
+			result: repoCheckoutResult{Path: "/work/repo", BranchName: "agent/test/task", Kept: "task_branch"},
+			want:   []string{"(branch: agent/test/task, this task's branch; 0 uncommitted files, 0 unpushed commits)"},
+		},
+		{
+			name:   "kept on a detached HEAD",
+			result: repoCheckoutResult{Path: "/work/repo", Kept: "local_work", UnpushedCommits: 3},
+			want:   []string{"(branch: detached HEAD; 0 uncommitted files, 3 unpushed commits)"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := repoCheckoutSummary(repoURL, tc.result)
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("summary missing %q:\n%s", want, got)
+				}
+			}
+			if kept := strings.HasPrefix(got, "Kept "); kept != (tc.result.Kept != "") {
+				t.Fatalf("summary reads kept=%v for Kept=%q:\n%s", kept, tc.result.Kept, got)
+			}
+		})
 	}
 }
 

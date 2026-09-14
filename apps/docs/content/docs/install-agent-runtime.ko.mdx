@@ -55,12 +55,12 @@ QwenPaw를 사용할 때는 QwenPaw 자체 설정에서 공급자와 모델을 �
 
 MiniMax Code를 사용하려면 지원되는 Node.js 버전(`>=22.19 <23` 또는 `>=24 <27`)을 설치한 뒤 `npm install --global @minimax-ai/code@latest`를 실행하세요. npm 전역 설치는 `mcode`를 npm의 전역 실행 파일 디렉터리에 추가합니다. `command -v mcode` 또는 `Get-Command mcode`에서 찾지 못하면 해당 디렉터리를 `PATH`에 추가하세요. 그다음 `mcode login`을 실행합니다. 모델은 MiniMax Code가 관리하며 Multica는 ACP를 통해 이를 덮어쓸 수 없습니다.
 
-DeepSeek Harness를 사용하려면 Node.js 20+를 설치하고 `npm install -g @deepseek-ai/dsh`를 실행한 뒤 Multica 런타임 프로필을 추가하세요(`dsh plugin --profile multica add <bundle>`). 데몬은 `dsh --profile multica --probe`가 성공한 경우에만 DeepSeek Harness를 등록합니다. 데몬을 시작하기 전에 `DEEPSEEK_API_KEY`를 설정(또는 dsh 자체 설정에 저장)하세요.
+DeepSeek Harness를 사용하려면 Node.js 20+를 설치하고 `npm install -g @deepseek-ai/dsh`를 실행한 뒤 Multica 런타임 프로필을 추가하세요. 이 번들이 Multica가 사용하는 `--stdio` 프로토콜을 제공하며, `dsh`만으로는 사용할 수 없는 이유이기도 합니다. `MULTICA_DSH_PROFILE_BUNDLE`에 설치할 번들을 설정하면 데몬이 대신 추가합니다. 직접 하려면 `dsh plugin --profile multica add <bundle>`을 실행하세요. `<bundle>`은 `dsh plugin`이 받아들이는 모든 형태 — npm 패키지 이름, 디렉터리, 패키징된 tarball — 이며, Multica 자체 브리지는 [multica-ai/dsh-multica-runtime](https://github.com/multica-ai/dsh-multica-runtime)에 있습니다. 아직 공개 npm 레지스트리에 게시되지 않았으므로([multica#6936](https://github.com/multica-ai/multica/issues/6936)), 현재 셀프호스트 팀은 해당 저장소에서 직접 빌드한 뒤 변수를 빌드 산출물 디렉터리로 지정합니다. 데몬을 실행하는 기기와 빌드한 기기가 다르면 `npm pack`이 만든 tarball을 지정하세요. 브리지가 게시되면 패키지 이름을 쓰는 것이 가장 간단합니다. 어느 쪽이든 팀이 직접 게시하거나 빌드한 산출물을 우선하세요. 이 값은 추가 확인 없이 모든 데몬 호스트의 DSH 홈에 설치되므로, 검증되지 않은 서드파티 패키지를 지정하는 것은 편의의 문제가 아니라 공급망에 관한 결정입니다. npm 패키지 대신 DeepSeek Harness Desktop을 설치했다면, 데몬은 그 앱이 생성하는 CLI 심(shim)도 앱 자체의 사용자 데이터 디렉터리에서 찾습니다. macOS는 `~/Library/Application Support/DSH Desktop`, Windows는 `%APPDATA%\DSH Desktop`입니다. Windows의 이 경로는 로밍 애플리케이션 데이터이지 설치 디렉터리가 아닙니다. 앱 자체는 Program Files 또는 `%LOCALAPPDATA%\Programs`에 설치되지만, 앱이 구동하는 CLI는 사용자별 다른 상태와 함께 저장됩니다. 이 경로의 버전 구간은 생성된 id이므로 데몬이 열거하여 가장 최신 것을 우선합니다. `PATH`에 다른 것이 필요하지 않습니다. 생성된 심은 앱에 포함된 런타임을 절대 경로로 실행합니다. DSH Desktop이 기본이 아닌 위치에 있다면 `MULTICA_DSH_PATH`로 그 심을 지정하세요. 데몬은 `dsh --profile multica --probe`가 성공한 경우에만 DeepSeek Harness를 등록하고, 실패하면 `/health`에 프로필 누락을 보고합니다. 데몬을 시작하기 전에 `DEEPSEEK_API_KEY`를 설정(또는 dsh 자체 설정에 저장)하세요.
 
 로그인 자격 증명은 도구가 로컬에 저장합니다. Multica는 Claude, Codex, Cursor 또는 다른 CLI의 로그인 token을 받지 않습니다.
 
 <Callout type="info">
-Claude Code는 2.0.0 이상, Codex는 0.100.0 이상, Copilot은 1.0.0 이상, Grok은 0.2.89 이상, Qwen Code는 0.20.0 이상, MiniMax Code는 0.1.2 이상이 필요합니다. 최소 버전보다 낮으면 데몬이 해당 런타임을 등록하지 않습니다.
+Antigravity는 1.1.10 이상, Claude Code는 2.0.0 이상, Codex는 0.100.0 이상, Copilot은 1.0.0 이상, Grok은 0.2.89 이상, Qwen Code는 0.20.0 이상, MiniMax Code는 0.1.2 이상이 필요합니다. 최소 버전보다 낮으면 데몬이 해당 런타임을 등록하지 않습니다.
 </Callout>
 
 ## 3. 데몬이 명령을 찾을 수 있는지 확인
@@ -102,7 +102,7 @@ Multica Desktop을 사용한다면 앱을 종료한 뒤 다시 열면 됩니다.
 그런 다음 Multica의 **런타임** 페이지를 엽니다. 대상 컴퓨터 아래에 해당 도구가 나타나고 온라인으로 표시됩니다. 이제 에이전트를 만들거나 수정할 때 이 런타임을 선택할 수 있습니다.
 
 <Callout type="warning">
-데몬이 시작될 때 기본 지원 CLI를 하나 이상 감지해야 합니다. 사용자 지정 런타임 설정은 데몬이 시작된 뒤 동기화되므로 빈 컴퓨터에서 유일한 시작 조건으로 사용할 수 없습니다.
+데몬이 시작될 때 기본 지원 CLI를 하나 이상 감지해야 합니다. 사용자 지정 런타임 설정은 데몬이 시작된 뒤 동기화되므로 빈 컴퓨터에서 유일한 시작 조건으로 사용할 수 없습니다. 예외는 하나뿐입니다. 데몬이 DSH 런타임 프로필 설치(`MULTICA_DSH_PROFILE_BUNDLE`)를 막 시작한 경우에는 런타임 없이 시작하고, 그 설치가 끝나면 DeepSeek Harness를 등록합니다. 그렇지 않으면 프로필이 필요한 DSH만 설치된 컴퓨터에서는 설치를 끝낼 수 없습니다. 데몬이 완료 전에 종료하면서 설치 과정까지 함께 중단시키기 때문입니다.
 </Callout>
 
 ## 도구가 감지되지 않을 때

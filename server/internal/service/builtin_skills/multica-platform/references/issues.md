@@ -230,10 +230,30 @@ multica issue get <issue-id> --resolve-properties
 A status change is not cosmetic — the server enqueues or skips agent work based
 on it. These are the contracts, not advice.
 
-Read them as category rules: a custom status inherits its category's behavior in
-full. Two writes are literal-key exceptions, not category rules — the failed-task
-rollback below writes the literal `todo` key, and a merged PR with close intent
-writes the literal `done` key.
+The rules below name fixed built-in status keys, not category-wide behaviors.
+Custom statuses have only lifecycle semantics: unstarted, started, done
+(successful terminal), or closed (cancelled terminal). They do not inherit
+Backlog parking, In Review completion, Blocked failure, or In Progress recovery.
+Use the built-in key when its special behavior is needed. Built-in definitions
+cannot be edited or archived.
+
+Task claims send custom status categories using the legacy wire enum so older
+daemons can display the catalog: unstarted → todo, started → in_progress,
+done → done, closed → cancelled. This presentation mapping does not restore
+built-in automation behavior. Older daemon instructions may still describe
+inheritance; upgrading the daemon is required for current behavior guidance.
+If the brief reports unrecognized categories, upgrade the daemon to display
+those entries. That omission count is separate from the server's 30-custom-status
+catalog limit.
+
+Archive a custom status only after moving every issue off it, including
+completed/canceled issues. An occupied status returns HTTP 409 with code
+`issue_status_in_use` and `issue_count`; it remains active. Use Settings >
+View issues to inspect and move its issues, then retry. For terminal-status
+replacement, preserve the lifecycle meaning (`done` to `done`, `closed` to
+`closed`); do not reopen or cancel completed work just to retire a status.
+Archival does not move issues automatically. Historical issues on previously
+archived statuses remain readable via an explicit status filter.
 
 - **`backlog`** parks an agent-assigned issue: the assignee is set but no task
   fires. Moving `backlog → todo` (or any non-done/non-cancelled status) enqueues
@@ -371,10 +391,15 @@ multica issue children <parent-id>             # sub-issues grouped by stage
 multica issue status <stage-2-child-id> todo   # promote when its deps are met
 ```
 
-`issue children --output json` reports per-stage `done` counts. A custom status
-counts as done here when its category is `done` or `cancelled`, which is what
-`status_category` on each child carries. Read `status_category` rather than
-matching `status` against the built-in names.
+`issue children --output json` reports per-stage `done` counts, including custom
+statuses in terminal categories. When reading issue JSON, `status` is the exact
+key; `status_category` retains the seven-value API enum for installed clients:
+`backlog` / `todo` mean unstarted, `in_progress` / `in_review` / `blocked` mean
+started, `done` means successful terminal, and `cancelled` means cancelled
+terminal (the internal closed category). These values encode lifecycle, not
+built-in automation behavior. Check `status_category` for `done` / `cancelled`
+(or use the stage counts), not just the concrete `status` key, to recognize
+terminal children.
 
 Read each sub-issue's description before promoting and only promote items whose
 stated dependencies are met; if a description conflicts with the parent's

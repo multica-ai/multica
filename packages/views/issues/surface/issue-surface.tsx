@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import type { StoreApi } from "zustand/vanilla";
+import type { IssueViewState } from "@multica/core/issues/stores/view-store";
+import type { IssueViewBaseline } from "@multica/core/issue-views/baseline";
 import { AlertTriangle, FilterX, ListTodo, Plus } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -55,6 +58,19 @@ interface IssueSurfaceComponentProps extends IssueSurfaceProps {
   showClientEmpty?: (context: IssueSurfaceRenderContext) => boolean;
   batchToolbar?: "always" | "list" | "never";
   contentClassName?: string;
+}
+
+/** An explicit, caller-owned store bypasses saved views and persisted surfaces. */
+export function IssueSurfaceWithStore({ store, baseline, ...props }: Omit<IssueSurfaceComponentProps, "surfaceKey"> & {
+  store: StoreApi<IssueViewState>;
+  baseline: IssueViewBaseline;
+}) {
+  const wsId = useWorkspaceId();
+  return <ViewStoreProvider store={store}>
+    <ViewBaselineProvider baseline={baseline}>
+      <IssueSurfaceContent key={wsId} {...props} />
+    </ViewBaselineProvider>
+  </ViewStoreProvider>;
 }
 
 export function IssueSurface({

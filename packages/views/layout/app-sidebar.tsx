@@ -1,4 +1,5 @@
 "use client";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 
 import { issueStatusCategory } from "@multica/core/issues";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -290,6 +291,7 @@ function PinRow({
   wsId: string;
 }) {
   const isIssue = pin.item_type === "issue";
+  const statusCatalog = useIssueStatuses(wsId);
   const isView = pin.item_type === "view";
   const p = useWorkspacePaths();
   const setActiveView = useActiveIssueViewStore((s) => s.setActive);
@@ -374,6 +376,8 @@ function PinRow({
       /* Override parent [&_svg]:size-4 — pinned items need smaller icons to match sm size */
       <StatusIcon
         status={issue.status}
+        color={statusCatalog.colorOf(issue.status)}
+        icon={statusCatalog.iconOf(issue.status)}
         category={issueStatusCategory(issue) ?? undefined}
         className="!size-3.5 shrink-0"
       />

@@ -6,10 +6,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/daemon/processtree"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
@@ -149,6 +151,27 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 				}
 			}
 		}
+		if defaultCmd == "dsh" && cmd == defaultCmd {
+			// DeepSeek Harness Desktop bundles its CLI inside the macOS app
+			// instead of installing `dsh` onto PATH, and the login-shell
+			// fallback above cannot rescue it: no rc file knows that path.
+			// The candidate is a Node script rather than a native binary, so
+			// it only counts while it is executable — an entry discovered
+			// without the executable bit would be advertised as a healthy
+			// runtime and then fail on every spawn.
+			//
+			// The Multica runtime profile gate in the caller still applies:
+			// a bundled CLI without the `multica` profile is not a runtime.
+			for _, p := range dshDesktopAppBundlePaths() {
+				if executableCandidate(p) {
+					return AgentEntry{
+						Path:    p,
+						Command: cmd,
+						Model:   strings.TrimSpace(os.Getenv(modelEnv)),
+					}, true
+				}
+			}
+		}
 		return AgentEntry{}, false
 	}
 
@@ -222,10 +245,15 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_REASONIX_PATH", "reasonix", "MULTICA_REASONIX_MODEL"); ok {
 		agents["reasonix"] = e
 	}
-	// DSH is registered only when its Multica runtime profile is installed.
-	// A bare dsh binary is not enough: without the bundle it has no --stdio
-	// protocol and every task would fail after being advertised as healthy.
-	if e, ok := probe("MULTICA_DSH_PATH", "dsh", "MULTICA_DSH_MODEL"); ok && probeDshMulticaProfile(e.Path) {
+	// DSH resolves here like any other CLI. Whether it is *usable* is decided
+	// one layer up: the Multica runtime profile is what gives it the --stdio
+	// protocol, so a bare `dsh` prints a version and still cannot run a task.
+	// That check lives in probeBuiltinRuntime, where a failure produces a
+	// verdict the user can actually see — /health reports it as a skipped
+	// agent carrying the repair command, and the daemon logs it. Gating here
+	// instead made the drop invisible: the provider vanished from the
+	// availability set with nothing anywhere saying why.
+	if e, ok := probe("MULTICA_DSH_PATH", "dsh", "MULTICA_DSH_MODEL"); ok {
 		agents["dsh"] = e
 	}
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
@@ -306,25 +334,156 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	return agents
 }
 
-func probeDshMulticaProfile(executablePath string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, executablePath, "--profile", "multica", "--probe")
-	cmd.WaitDelay = time.Second
-	output, err := cmd.Output()
-	if err != nil {
+// executableCandidate reports whether a Desktop-app bundle candidate can be
+// spawned directly. Bundle candidates reached through probe() never went
+// through exec.LookPath, which is what normally enforces this.
+//
+// "Executable" is not the same fact on both platforms, and the difference is
+// not cosmetic. On Unix it is the executable bit — the macOS candidate is a
+// Node script that runs through its shebang, and one that lost its bit would be
+// advertised as a healthy runtime and then fail on every spawn.
+//
+// Windows has no such bit: Go synthesizes a regular file's mode from the
+// read-only attribute and never sets 0111 on one, so the Unix test would reject
+// every candidate and the whole fallback would be dead code there. What decides
+// on Windows is the extension, and exec.LookPath is the component that already
+// knows the rule (PATHEXT) — the same check agentExecutablePresent makes, so a
+// candidate accepted here is one the launcher can actually start.
+func executableCandidate(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
 		return false
 	}
-	for _, line := range strings.Split(string(output), "\n") {
-		var frame struct {
-			Version         int    `json:"v"`
-			Type            string `json:"type"`
-			Runtime         string `json:"runtime"`
-			ProtocolVersion int    `json:"protocol_version"`
+	if runtime.GOOS == "windows" {
+		_, err := exec.LookPath(path)
+		return err == nil
+	}
+	return info.Mode().Perm()&0o111 != 0
+}
+
+// dshProbeFrame is the discovery frame a Multica-capable DSH profile prints for
+// `--probe`. Only these fields are read; the bundle owns everything else.
+type dshProbeFrame struct {
+	Version         int    `json:"v"`
+	Type            string `json:"type"`
+	Runtime         string `json:"runtime"`
+	ProtocolVersion int    `json:"protocol_version"`
+}
+
+// dshProbeVerdict is what `dsh --profile multica --probe` actually said.
+//
+// The distinction is the point. "The profile is not installed" is a confirmed,
+// locally repairable fact that justifies installing it and taking a live
+// runtime offline; a timeout or an unparseable answer is evidence about this
+// instant and nothing more. Collapsing both into one bool is what let a
+// momentary failure during a DSH upgrade demote a working runtime, and — with a
+// bundle configured — start overwriting an installation that was already there.
+type dshProbeVerdict int
+
+const (
+	// dshProbeOK: the profile answered with the protocol version this backend drives.
+	dshProbeOK dshProbeVerdict = iota
+	// dshProbeMissingProfile: the probe ran and no profile manifest is present,
+	// which is the same fact DSH itself checks before refusing to boot. This is
+	// the only verdict that may install a bundle or condemn the runtime.
+	dshProbeMissingProfile
+	// dshProbeIncompatible: something answered, with a protocol this daemon does
+	// not drive. The profile is installed, so installing over it would replace a
+	// deliberate configuration with one this daemon still cannot drive.
+	dshProbeIncompatible
+	// dshProbeUnavailable: nothing usable was learned — the probe timed out,
+	// could not be executed, or printed something unparseable. Transient.
+	dshProbeUnavailable
+)
+
+// dshProbeTimeout bounds one `--probe`.
+//
+// The healthy path boots a whole DSH process — on a Desktop install that means
+// starting the app's Electron binary as node — and then prints one line. Five
+// seconds was too thin for that on a cold VM, and cutting a slow-but-healthy
+// probe short reports it as unusable. This is generous instead, because the
+// cost is paid only by a probe that has nothing to say, and it stays well
+// inside the daemon's own 45s startup window.
+//
+// A missing profile does spend the whole budget here: DSH does not refuse the
+// probe, it hangs. That is bounded by construction — the state ends the moment
+// someone installs the profile — and the verdict below no longer depends on
+// telling that hang apart from a busy machine.
+//
+// A var so tests can shrink it instead of waiting out a real timeout.
+var dshProbeTimeout = 15 * time.Second
+
+// parseDshProbeFrame returns the first decodable probe frame in the output.
+func parseDshProbeFrame(output string) (dshProbeFrame, bool) {
+	for _, line := range strings.Split(output, "\n") {
+		var frame dshProbeFrame
+		if json.Unmarshal([]byte(line), &frame) != nil {
+			continue
 		}
-		if json.Unmarshal([]byte(line), &frame) == nil && frame.Version == 1 && frame.Type == "probe" && frame.Runtime == "dsh" && frame.ProtocolVersion == 1 {
-			return true
+		if frame.Type == "probe" && frame.Runtime != "" {
+			return frame, true
 		}
 	}
-	return false
+	return dshProbeFrame{}, false
+}
+
+// probeDshMulticaProfile classifies one `--probe` attempt. See dshProbeVerdict
+// for why this is not a bool.
+//
+// Scoped to the caller's context as well as its own timeout: `--probe` boots a
+// whole DSH process, and a round abandoned by a shutting-down daemon should not
+// go on holding one for the rest of the timeout — once per retry, per provider.
+func probeDshMulticaProfile(ctx context.Context, executablePath string) dshProbeVerdict {
+	parent := ctx
+	ctx, cancel := context.WithTimeout(parent, dshProbeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, executablePath, "--profile", dshMulticaProfileName, "--probe")
+	// processtree, not cmd.Output: `--probe` boots a whole DSH profile, so the
+	// process it starts is a tree. Killing only the direct child leaves
+	// grandchildren holding the stdout pipe open — which is both a leaked
+	// process and, as this probe's own tests showed, a wait that outlives the
+	// timeout it was supposed to be bounded by.
+	output, _ := processtree.Output(ctx, cmd, time.Second)
+
+	// The frame decides, not the exit status. A profile that printed a valid
+	// answer has answered, whatever the process did on its way out — and the
+	// run helper reports a lifecycle error for a tree that outlived its leader,
+	// which says nothing about the protocol.
+	//
+	// agent.DshProtocolVersion, not a local copy: this decides whether the
+	// daemon may drive the profile, and the code that drives it is the only
+	// honest source for that number.
+	if frame, ok := parseDshProbeFrame(string(output)); ok {
+		if frame.Version == 1 && frame.Runtime == "dsh" && frame.ProtocolVersion == agent.DshProtocolVersion {
+			return dshProbeOK
+		}
+		return dshProbeIncompatible
+	}
+
+	// No usable answer. A cancelled ROUND is the one case that says nothing
+	// about the profile: the daemon is shutting down, or this round was
+	// abandoned, and the probe never got to finish on its own terms.
+	if parent.Err() != nil {
+		return dshProbeUnavailable
+	}
+
+	// Otherwise the manifest decides, and how the probe failed does not.
+	//
+	// Timeouts used to be classed transient on the reasoning that a busy
+	// machine is not a missing profile. That reasoning does not survive
+	// contact with DSH: asked for a profile it does not have, `--probe` does
+	// not refuse — it HANGS, printing nothing, until something kills it. So a
+	// timeout is the ordinary way a missing profile presents, and treating it
+	// as transient made the profile undetectable on exactly the host the
+	// install exists for: the daemon reported "the probe returned no usable
+	// answer", never started the install, and exited for want of a runtime.
+	//
+	// The manifest is the same file DSH's own loadProfile consults before it
+	// refuses to boot, so a confirmed-absent one is evidence, not a guess —
+	// while a manifest that IS present keeps every failure transient, which is
+	// what protects a working install from being overwritten during an upgrade.
+	if !dshMulticaProfilePresent() {
+		return dshProbeMissingProfile
+	}
+	return dshProbeUnavailable
 }

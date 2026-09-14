@@ -39,6 +39,16 @@ const (
 	// machine is already on, and the fix is a command the user runs on it, which
 	// the daemon reports with this verdict so clients can show it.
 	ReasonRuntimeUnusable ReasonCode = "runtime_unusable"
+	// ReasonRuntimeProfileMissing: the target is bound to a reachable runtime
+	// whose agent CLI runs fine, but a runtime profile that CLI needs in order
+	// to speak Multica's protocol is not installed on that machine — DeepSeek
+	// Harness, whose `multica` profile supplies the `--stdio` protocol, is the
+	// case in the field. Blocked for the same reason as runtime_unusable
+	// (MUL-6164): the machine is already on and waiting changes nothing. Kept
+	// APART from runtime_unusable because the repair is different in kind — the
+	// CLI is not broken and reinstalling it fixes nothing, so copy that says
+	// "reinstall the CLI" sends the user to the wrong place entirely.
+	ReasonRuntimeProfileMissing ReasonCode = "runtime_profile_missing"
 	// ReasonAgentRuntimeRequired: the target is permitted but bound to no
 	// runtime at all (agent.runtime_id IS NULL), which is where an agent lands
 	// when its runtime is deleted (MUL-5559). Distinct from runtime_offline on

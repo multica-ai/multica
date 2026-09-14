@@ -814,12 +814,16 @@ func failWorkspaceDelete(w http.ResponseWriter, r *http.Request, workspaceID, st
 // DELETE. A whole workspace's task set is not bounded by anything — one busy
 // agent can own millions of historical rows — so it must never be materialized at
 // once (MUL-5999 review).
-const workspaceDeleteTaskPageSize = 1000
+//
+// This and workspaceDeleteOwnerPageSize are variables only so the paging tests
+// can cross a page boundary without seeding thousands of rows; nothing outside
+// tests assigns them.
+var workspaceDeleteTaskPageSize int32 = 1000
 
 // workspaceDeleteOwnerPageSize bounds owner enumeration the same way. A workspace
 // with a very large agent or issue set must not have its whole id list held here
 // either.
-const workspaceDeleteOwnerPageSize = 500
+var workspaceDeleteOwnerPageSize int32 = 500
 
 // workspaceDeleteVerifyPasses caps how many times a single owner may be swept.
 //

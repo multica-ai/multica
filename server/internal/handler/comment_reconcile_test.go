@@ -378,11 +378,9 @@ func TestCompleteTask_DoesNotReconcilePlainAgentReply(t *testing.T) {
 // computeCommentAgentTriggers routes a plain worker-agent reply (no mention) to
 // the squad leader via routeAssignedSquadLeaderFallback (Source = issue
 // assignee) — that is the create-time leader→worker→leader coordination path.
-// Reconcile must NOT replay that fallback: it compensates ONLY explicit
-// @agent/@squad mentions (keepExplicitMentionTriggers). So when the squad leader
-// completes a task and a worker's plain reply arrived during the run, no
-// completion-driven follow-up may be enqueued for the leader. Without the
-// explicit-mention filter this test enqueues 1 leader task and fails.
+// This reply was never accepted into a run's input plan. Reconcile must NOT
+// turn a timestamp-only plain reply into a new conversation. Accepted worker
+// handoffs are covered separately by TestWorkerReplyDelivery.
 func TestCompleteTask_DoesNotReconcilePlainWorkerReplyOnSquadIssue(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

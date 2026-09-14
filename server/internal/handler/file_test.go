@@ -625,12 +625,29 @@ func newDownloadRouter() http.Handler {
 	return r
 }
 
+var (
+	sharedTestRSAKeyOnce sync.Once
+	sharedTestRSAKeyVal  *rsa.PrivateKey
+	sharedTestRSAKeyErr  error
+)
+
+// sharedTestRSAKey returns one RSA-2048 key for the whole test binary. Minting
+// a key costs tens to hundreds of milliseconds under -race, and no test needs
+// a unique one: each signs and verifies with the key it was handed.
+func sharedTestRSAKey(t *testing.T) *rsa.PrivateKey {
+	t.Helper()
+	sharedTestRSAKeyOnce.Do(func() {
+		sharedTestRSAKeyVal, sharedTestRSAKeyErr = rsa.GenerateKey(rand.Reader, 2048)
+	})
+	if sharedTestRSAKeyErr != nil {
+		t.Fatalf("generate RSA test key: %v", sharedTestRSAKeyErr)
+	}
+	return sharedTestRSAKeyVal
+}
+
 func testCloudFrontSigner(t *testing.T) *auth.CloudFrontSigner {
 	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("generate CloudFront test key: %v", err)
-	}
+	key := sharedTestRSAKey(t)
 	pemBytes := pem.EncodeToMemory(&pem.Block{
 		Type:  "RSA PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(key),

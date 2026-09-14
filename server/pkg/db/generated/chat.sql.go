@@ -87,9 +87,10 @@ WHERE t.id = $1
 // backwards onto the turn the user interrupted.
 //
 // The newer-task lookup depends on
-// idx_agent_task_queue_chat_with_session_created_at (migration 465). Neither
-// chat_pending_v3 nor chat_terminal_resume can replace it: this guard spans
-// both in-flight and terminal tasks and compares created_at.
+// idx_agent_task_queue_chat_session (migration 472). Neither chat_pending_v3
+// nor chat_terminal_resume can replace it: this guard spans both in-flight and
+// terminal tasks and compares created_at; the broader index also serves the
+// chat_session foreign-key delete lookup.
 func (q *Queries) AdvanceCancelledChatSessionPointer(ctx context.Context, taskID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, advanceCancelledChatSessionPointer, taskID)
 	return err

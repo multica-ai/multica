@@ -49,6 +49,19 @@ const (
 	// nothing extra, so the stub retires itself as daemons update.
 	DaemonCapabilityPlatformSkillV1 = "platform-skill-v1"
 
+	// DaemonCapabilityCheckoutKeepsWorkV1 advertises that the daemon's
+	// `multica repo checkout` keeps an existing checkout that holds work
+	// (uncommitted changes, untracked files, unpushed commits) instead of
+	// resetting it (MUL-7284).
+	//
+	// The server hands an automatic retry that must start a fresh session its
+	// parent's workdir only when this is present (MUL-7034). That session has no
+	// memory of the work in the directory and will fetch its repositories again.
+	// An older daemon's checkout resets an existing checkout and deletes that
+	// work, so such a daemon keeps getting a fresh directory and the parent's
+	// stays untouched on disk.
+	DaemonCapabilityCheckoutKeepsWorkV1 = "checkout-keeps-work-v1"
+
 	// AppCapabilityChatDraftRestoreV1 is advertised (X-Client-Capabilities) by
 	// app clients that understand the durable draft-restore recovery path:
 	// chat:cancel_finalized as an invalidation hint plus the draft-restores

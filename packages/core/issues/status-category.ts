@@ -1,57 +1,48 @@
-import type { Issue, IssueStatusCategory } from "../types";
-import { isIssueStatusCategory } from "../issue-statuses";
+import type { Issue, IssueStatus, IssueStatusCategory } from "../types";
+import {
+  compareIssueStatusEntries,
+  isBuiltInIssueStatus,
+  normalizeIssueStatusCategory,
+} from "../issue-statuses";
 import type { IssueStatusCatalog } from "../issue-statuses";
-import { ALL_STATUSES } from "./config";
+import { ALL_STATUSES, BUILT_IN_STATUS_CATEGORY, BUILT_IN_STATUS_ORDER } from "./config";
 
 /**
- * The category an issue's status belongs to — the bucket it occupies on the
- * board (MUL-6243).
+ * The internal lifecycle category used for behavior and cache predicates.
+ * User-facing status columns are keyed by issue.status, not this value.
  *
  * Pure on purpose: the cache helpers that call it run outside React and must
  * not reach for a catalog. It reads the server-provided `status_category` when
- * present and otherwise falls back to the rule that makes that field optional
- * in the first place — a BUILT-IN status key is its own category. Since custom
- * statuses only exist once an admin creates one, the fallback is exact for
- * every workspace that has none.
+ * present and otherwise falls back to the fixed built-in key mapping.
  *
  * Returns null when the status is a custom key this response did not resolve,
- * so callers can skip bucketing rather than guessing a wrong column.
+ * so callers do not infer an unsupported lifecycle.
  */
-export function issueStatusCategory(issue: Pick<Issue, "status" | "status_category">): IssueStatusCategory | null {
+export function issueStatusCategory(
+  issue: Pick<Issue, "status" | "status_category">,
+): IssueStatusCategory | null {
   const fromServer = issue.status_category;
-  if (fromServer && isIssueStatusCategory(fromServer)) return fromServer;
-  if (isIssueStatusCategory(issue.status)) return issue.status;
+  const normalized = fromServer ? normalizeIssueStatusCategory(fromServer) : null;
+  if (normalized) return normalized;
+  if (isBuiltInIssueStatus(issue.status)) return BUILT_IN_STATUS_CATEGORY[issue.status];
   return null;
 }
 
 /**
  * Category for a bare status KEY, for render paths that hold only the string.
  *
- * Exact for the 7 built-ins, which is every status that exists until an admin
- * defines a custom one. A custom key returns `todo` so presentation lookups
- * always resolve to something renderable; surfaces that must show the real
- * status use the catalog (`useIssueStatuses`) instead. (MUL-6243)
+ * Exact for the seven built-ins and the four categories. A custom key returns
+ * `unstarted` so presentation lookups always resolve to something renderable;
+ * surfaces that must show the real status use the catalog
+ * (`useIssueStatuses`) instead. (MUL-6243)
  */
 export function statusCategoryOfKey(statusKey: string): IssueStatusCategory {
-  return isIssueStatusCategory(statusKey) ? statusKey : "todo";
+  if (isBuiltInIssueStatus(statusKey)) return BUILT_IN_STATUS_CATEGORY[statusKey];
+  return normalizeIssueStatusCategory(statusKey) ?? "unstarted";
 }
 
-/**
- * The board/list/swimlane COLUMN an issue renders in — always an answer, never
- * null (MUL-6409).
- *
- * Columns are categories while `issue.status` is a concrete KEY, and bucketing
- * a card by its key against category columns is how a custom status made cards
- * disappear: `status:awaiting_response` matched no column id, so the rows the
- * server had correctly returned were dropped on the floor. Filtering the board
- * by that status made it total — every card in the one visible column was
- * custom, so the column rendered empty next to a non-zero header count.
- *
- * The unresolved-custom-key fallback lands in `todo` rather than nowhere: a
- * card in a possibly-wrong column is recoverable, a card in no column is
- * invisible. In practice it is unreachable — the server sends a category on
- * every issue payload, and a built-in key IS its own category.
- */
+/** Lifecycle fallback for legacy category queries and presentation tokens.
+ * Do not use this as the key of a user-facing status column. */
 export function issueColumnCategory(
   issue: Pick<Issue, "status" | "status_category">,
 ): IssueStatusCategory {
@@ -63,9 +54,9 @@ export function issueColumnCategory(
  * reaches any cache (MUL-6243).
  *
  * The server now sends a category on every issue, so a cached entity looks like
- * `{status: "todo", status_category: "todo"}`. An optimistic patch carries only
+ * `{status: "todo", status_category: "unstarted"}`. An optimistic patch carries only
  * `{status: "done"}`, and a bare `{...issue, ...patch}` therefore keeps the
- * STALE `status_category: "todo"` while the card moves to the done bucket. A
+ * stale category while the card moves to the completed bucket. A
  * single update self-heals when the full server response lands, but the batch
  * API returns only `{updated: n}` and does not refetch bucketed lists — so
  * without this the entity stays permanently inconsistent with the bucket it
@@ -90,11 +81,11 @@ export function normalizeStatusPatch(patch: Partial<Issue>): Partial<Issue> {
 /**
  * How an exact status-key filter resolves to board/list COLUMNS (MUL-6243).
  *
- * Three states, not two. Built-in keys resolve with no catalog at all, because
- * a built-in key IS its own category. A CUSTOM key does not — and `categoryOf`
- * answers `todo` for anything it has not loaded, which is indistinguishable
- * from a real `todo`. Routing on that guess paged the todo column for a saved
- * `qa` filter while the query still restricted `status=qa`.
+ * Three states, not two. Built-in keys resolve with no catalog at all. A CUSTOM
+ * key does not — and `categoryOf` answers `unstarted` for anything it has not
+ * loaded, which is indistinguishable from a real value. Routing on that guess
+ * paged the unstarted column for a saved `qa` filter while the query still
+ * restricted `status=qa`.
  *
  * Returning an empty column set for that case is equally wrong: the caller
  * cannot tell "narrow to nothing" from "cannot answer yet", so it fetched no
@@ -108,7 +99,7 @@ export function normalizeStatusPatch(patch: Partial<Issue>): Partial<Issue> {
  *                filter cannot be honoured without it.
  */
 export type StatusFilterColumnsResult =
-  | { state: "resolved"; columns: Set<IssueStatusCategory> }
+  | { state: "resolved"; columns: Set<IssueStatus> }
   | { state: "pending" }
   | { state: "error" };
 
@@ -116,9 +107,9 @@ export function statusFilterColumns(
   statusFilters: readonly string[],
   catalog: Pick<IssueStatusCatalog, "entryOf" | "isLoaded" | "isPending" | "isError">,
 ): StatusFilterColumnsResult {
-  const columns = new Set<IssueStatusCategory>();
+  const columns = new Set<IssueStatus>();
   for (const key of statusFilters) {
-    if (isIssueStatusCategory(key)) {
+    if (isBuiltInIssueStatus(key)) {
       columns.add(key);
       continue;
     }
@@ -129,39 +120,51 @@ export function statusFilterColumns(
     // A LOADED catalog that does not know the key is authoritative too: the
     // status was deleted, or belongs to another workspace. Contributing no
     // column is the resolved answer, not a pending one.
-    if (category && ALL_STATUSES.includes(category)) columns.add(category);
+    const normalized = category ? normalizeIssueStatusCategory(category) : null;
+    if (normalized) columns.add(key);
   }
   return { state: "resolved", columns };
 }
 
-/**
- * Resolve the category columns a surface may display. An explicit status
- * filter wins over hidden-column preferences so selecting a hidden status
- * always provides a recovery path. Pending/error custom-status resolution is
- * handled by the caller's loading/error state, so it does not narrow here.
- */
-export function visibleStatusCategories(
+/** Active columns by default; explicit historical inspection can include archived keys. */
+export function statusColumnKeys(
+  catalog: Pick<IssueStatusCatalog, "statuses">,
+  includeArchived = false,
+): IssueStatus[] {
+  const entries = [...catalog.statuses].sort(compareIssueStatusEntries);
+  const knownKeys = new Set(entries.map((entry) => entry.key));
+  return ALL_STATUSES.flatMap((category) => [
+    // Preserve cold-load/missing-entry fallbacks, but never pin loaded built-ins.
+    ...BUILT_IN_STATUS_ORDER.filter((key) =>
+      BUILT_IN_STATUS_CATEGORY[key] === category && !knownKeys.has(key),
+    ),
+    ...entries.filter((entry) =>
+      normalizeIssueStatusCategory(entry.category) === category && (includeArchived || !entry.archived_at),
+    ).map((entry) => entry.key),
+  ]);
+}
+
+/** Exact-key filters override hidden-column preferences, never merge siblings. */
+export function visibleStatusKeys(
   statusFilters: readonly string[],
-  hiddenCategories: readonly IssueStatusCategory[],
-  catalog: Pick<IssueStatusCatalog, "entryOf" | "isLoaded" | "isPending" | "isError">,
-): IssueStatusCategory[] {
-  const resolved =
-    statusFilters.length > 0 ? statusFilterColumns(statusFilters, catalog) : null;
+  hiddenStatuses: readonly IssueStatus[],
+  catalog: Pick<IssueStatusCatalog, "statuses" | "entryOf" | "isLoaded" | "isPending" | "isError">,
+): IssueStatus[] {
+  const resolved = statusFilters.length > 0 ? statusFilterColumns(statusFilters, catalog) : null;
   const selected = resolved?.state === "resolved" ? resolved.columns : null;
-  return ALL_STATUSES.filter((category) =>
-    selected !== null
-      ? selected.has(category)
-      : !hiddenCategories.includes(category),
+  // Old archives may still carry issues. An explicit exact-key filter remains
+  // a read/move-out path without restoring those columns to everyday boards.
+  return statusColumnKeys(catalog, selected !== null).filter((key) =>
+    selected !== null ? selected.has(key) : !hiddenStatuses.includes(key),
   );
 }
 
 /**
- * Whether an issue BEHAVES as a given category (MUL-6243).
+ * Whether an issue belongs to a given lifecycle category (MUL-6243).
  *
- * The one question every status-coupled product rule actually asks. Comparing
- * `issue.status` to a built-in key answers it only for a workspace with no
- * custom statuses: a custom status in the `done` category is done, and code
- * that checks `status === "done"` silently disagrees.
+ * Comparing `issue.status` to a built-in key answers lifecycle questions only
+ * for a workspace with no custom statuses: a custom status in `done` is
+ * completed, and code that checks `status === "done"` silently disagrees.
  *
  * An unresolved custom key answers `false`, and that direction is deliberate —
  * every caller of this fails safe that way. "Is it done/cancelled?" false keeps

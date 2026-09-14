@@ -334,7 +334,8 @@ const taskIssueStatusCap = 30
 // TaskIssueStatusData is one active CUSTOM workspace status on the claim wire
 // (MUL-6460). Only the fields an agent needs to choose and write the status
 // travel: key is the CLI argument, name is what users call it in instructions,
-// category anchors the inherited platform behavior, and description is the
+// category uses the legacy wire enum for installed daemons (presentation only,
+// not inherited platform behavior), and description is the
 // admin's "when to use me" guidance — the disambiguator when a category holds
 // more than one status. Color/position/id stay off the wire: they carry no
 // behavioral meaning for an agent, and the server already emits entries in
@@ -421,9 +422,11 @@ type AgentTaskResponse struct {
 	PriorWorkDir         string                `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
 	// PriorSessionResumeUnavailable is set when a more recent Codex session was
 	// withheld because its rollout was missing (MUL-5305); PriorSessionID (if
-	// any) is then an older fallback. The daemon surfaces the continuity gap in
-	// the brief even when that older session resumes cleanly. omitempty keeps it
-	// off the wire for the common (no-gap) case and for old daemons.
+	// any) is then an older fallback, and the daemon surfaces the continuity gap
+	// in the brief even when that older session resumes cleanly. It is also set
+	// when an automatic retry continues in its parent's workdir under a fresh
+	// session (MUL-7034). omitempty keeps it off the wire for the common
+	// (no-gap) case and for old daemons.
 	PriorSessionResumeUnavailable bool   `json:"prior_session_resume_unavailable,omitempty"`
 	WorkDir                       string `json:"work_dir,omitempty"` // local working directory pinned for this task; populated once the daemon reports it
 	// RelativeWorkDir is a privacy-safe display form of WorkDir intended for

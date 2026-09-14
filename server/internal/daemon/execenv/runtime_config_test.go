@@ -201,10 +201,9 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 		// on MUL-6460 proved a detached status-block bullet does not fire —
 		// the model is walking the numbered list when the condition triggers.
 		"3. If any part of what this turn will produce is what the issue itself asks for",
-		// Category-scoped skip so a custom in_progress-category status (e.g.
-		// Planning, MUL-6460) already counts as "recorded" once agents can
-		// see the catalog.
-		"already in an `in_progress`-category status",
+		// Only the exact built-in key satisfies this workflow step. The
+		// started category also contains review and blocked statuses.
+		"already `in_progress`",
 		"the board should show the issue being worked while you work, not only after",
 		// No assignee gate: the judgment applies to whoever is running.
 		"whoever the assignee is",
@@ -233,6 +232,8 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 	// timing that hides a long first work turn in todo.
 	for _, banned := range []string{
 		"Turn mode",
+		"already in an `in_progress`-category status",
+		"already in a `started`-category status",
 		"Ownership mode",
 		"Reply mode",
 		"when this issue is assigned to you and this turn does substantive work on it",

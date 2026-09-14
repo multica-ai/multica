@@ -557,3 +557,22 @@ func TestGetConfigDeclaresAgentConversationStartersSupport(t *testing.T) {
 		t.Fatal("agent_conversation_starters_supported missing from the JSON body")
 	}
 }
+
+// Web/Desktop, mobile and the CLI promise that a delete keeps the replies only
+// when the server declares it (#8296). Older servers omit the field and delete
+// the replies too, so this build must advertise the contract explicitly.
+func TestGetConfigDeclaresCommentDeleteKeepsReplies(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw config: %v", err)
+	}
+	if raw["comment_delete_keep_replies_supported"] != true {
+		t.Fatalf("comment_delete_keep_replies_supported = %v, want true", raw["comment_delete_keep_replies_supported"])
+	}
+}

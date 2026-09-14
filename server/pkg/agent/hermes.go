@@ -839,7 +839,9 @@ func waitForHermesNotificationQuiescence(ctx context.Context, activity <-chan st
 // before concluding an ACP agent has stopped emitting notifications. It is a
 // protocol-level heuristic rather than a per-backend trait, so backends that
 // have no reason to differ share it; the hard bound stays per-backend.
-const acpNotificationQuietTime = 250 * time.Millisecond
+// Package tests shorten it globally while keeping their late-output fixtures
+// inside the window; production never reassigns it.
+var acpNotificationQuietTime = 250 * time.Millisecond
 
 // waitForACPNotificationQuiescence gives the shared ACP stdout reader a
 // bounded chance to consume notifications a backend may emit just after its

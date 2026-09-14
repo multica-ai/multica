@@ -41,6 +41,11 @@ type CommentResponse struct {
 	ResolvedByType *string `json:"resolved_by_type"`
 	ResolvedByID   *string `json:"resolved_by_id"`
 	SourceTaskID   *string `json:"source_task_id,omitempty"`
+	// DeletedAt marks a tombstone: a comment deleted while it still had
+	// replies (#8296). Its content is empty and it carries no attachments or
+	// reactions; it stays only so the replies keep their direct parent.
+	// Omitted for every live comment.
+	DeletedAt *string `json:"deleted_at,omitempty"`
 	// QuickActionID marks a comment produced by a quick action run (MUL-5465).
 	// The timeline renders those as a collapsed one-line card instead of the
 	// raw prompt body. It is NOT settable through this endpoint — there is no
@@ -114,6 +119,7 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 		ResolvedByType: textToPtr(c.ResolvedByType),
 		ResolvedByID:   uuidToPtr(c.ResolvedByID),
 		SourceTaskID:   uuidToPtr(c.SourceTaskID),
+		DeletedAt:      timestampToPtr(c.DeletedAt),
 		QuickActionID:  uuidToPtr(c.QuickActionID),
 		Reactions:      reactions,
 		Attachments:    attachments,
@@ -279,7 +285,11 @@ func foldResolvedThreads(comments []db.Comment) ([]db.Comment, map[string]foldSt
 // the all-time max observed is ~1.1k, so 2000 leaves ~2x headroom while still
 // preventing a runaway response if some user manages to accumulate a wild
 // number of rows on a single issue.
-const commentHardCap = 2000
+//
+// This and the thread-completion budgets below are variables only so the cap
+// tests can run the same windowing without seeding thousands of rows per
+// scenario; nothing outside tests assigns them.
+var commentHardCap = 2000
 
 // HeaderCommentsTruncated tells browser and CLI callers that a defensive
 // comment-list cap omitted rows. It is deliberately separate from the timeline
@@ -290,7 +300,7 @@ const HeaderCommentsTruncated = "X-Comments-Truncated"
 // commentProbeLimit reads one row past the cap so a truncated read can be told
 // apart from an issue holding exactly commentHardCap comments. The difference
 // matters: exact-cap reads are complete and must not advertise data loss.
-const commentProbeLimit = commentHardCap + 1
+func commentProbeLimit() int32 { return int32(commentHardCap) + 1 }
 
 // Budgets for thread completion (completeCommentThreads).
 //
@@ -304,7 +314,7 @@ const commentProbeLimit = commentHardCap + 1
 // general write path saves the exact comment being replied to, so chains can run
 // far deeper than the two levels the UI usually renders. Without a budget the
 // completion pass would defeat the row cap it is meant to preserve.
-const (
+var (
 	commentThreadContextBudget = 2000
 	commentThreadMaxDepth      = 64
 )
@@ -804,6 +814,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 					SourceTaskID:   r.SourceTaskID,
 					QuickActionID:  r.QuickActionID,
 					Revision:       r.Revision,
+					DeletedAt:      r.DeletedAt,
 				}
 				if !r.ParentID.Valid {
 					root := c
@@ -870,7 +881,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 			AnchorID:    anchor,
 			IssueID:     issue.ID,
 			WorkspaceID: issue.WorkspaceID,
-			ReplyLimit:  commentHardCap,
+			ReplyLimit:  int32(commentHardCap),
 		})
 		if err != nil {
 			return fetchCommentsResult{}, err
@@ -898,6 +909,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				SourceTaskID:   r.SourceTaskID,
 				QuickActionID:  r.QuickActionID,
 				Revision:       r.Revision,
+				DeletedAt:      r.DeletedAt,
 			}
 			if !r.ParentID.Valid {
 				root := c
@@ -986,6 +998,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				SourceTaskID:   r.SourceTaskID,
 				QuickActionID:  r.QuickActionID,
 				Revision:       r.Revision,
+				DeletedAt:      r.DeletedAt,
 			})
 		}
 
@@ -1026,7 +1039,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				IssueID:     issue.ID,
 				WorkspaceID: issue.WorkspaceID,
 				Since:       args.Since,
-				RowLimit:    commentProbeLimit,
+				RowLimit:    commentProbeLimit(),
 			})
 			if err != nil {
 				return fetchCommentsResult{}, err
@@ -1045,6 +1058,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 					ParentID: r.ParentID, WorkspaceID: r.WorkspaceID, ResolvedAt: r.ResolvedAt,
 					ResolvedByType: r.ResolvedByType, ResolvedByID: r.ResolvedByID,
 					SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID, Revision: r.Revision,
+					DeletedAt: r.DeletedAt,
 				}
 				stats[uuidToString(r.ID)] = rootStat{ReplyCount: int(r.ReplyCount), LastActivityAt: r.LastActivityAt}
 			}
@@ -1056,7 +1070,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 		rows, err := h.Queries.ListRootCommentsForIssue(ctx, db.ListRootCommentsForIssueParams{
 			IssueID:     issue.ID,
 			WorkspaceID: issue.WorkspaceID,
-			RowLimit:    commentProbeLimit,
+			RowLimit:    commentProbeLimit(),
 		})
 		if err != nil {
 			return fetchCommentsResult{}, err
@@ -1075,6 +1089,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				ParentID: r.ParentID, WorkspaceID: r.WorkspaceID, ResolvedAt: r.ResolvedAt,
 				ResolvedByType: r.ResolvedByType, ResolvedByID: r.ResolvedByID,
 				SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID, Revision: r.Revision,
+				DeletedAt: r.DeletedAt,
 			}
 			stats[uuidToString(r.ID)] = rootStat{ReplyCount: int(r.ReplyCount), LastActivityAt: r.LastActivityAt}
 		}
@@ -1090,7 +1105,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 			IssueID:     issue.ID,
 			WorkspaceID: issue.WorkspaceID,
 			CreatedAt:   args.Since,
-			Limit:       commentProbeLimit,
+			Limit:       commentProbeLimit(),
 		})
 		if err != nil {
 			return fetchCommentsResult{}, err
@@ -1104,7 +1119,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 	comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
-		Limit:       commentProbeLimit,
+		Limit:       commentProbeLimit(),
 	})
 	if err != nil {
 		return fetchCommentsResult{}, err
@@ -1504,6 +1519,11 @@ type commentAgentTrigger struct {
 	Source         commentAgentTriggerSource
 	Squad          *db.Squad
 	AlreadyPending bool
+	// NonLeaderAgentReply marks an agent comment, not authored by the leader,
+	// that the assigned-squad-leader fallback routes to that leader. The author
+	// need not be a squad member. Completion may replay it only if creation
+	// recorded it as a planned input.
+	NonLeaderAgentReply bool
 }
 
 type commentTriggerComputeOptions struct {
@@ -1832,7 +1852,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	created, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
+	createParams := db.CreateCommentParams{
 		ID:           dbid.NewV7(),
 		IssueID:      issue.ID,
 		WorkspaceID:  issue.WorkspaceID,
@@ -1842,18 +1862,69 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		Type:         req.Type,
 		ParentID:     parentID,
 		SourceTaskID: sourceTaskID,
-	})
+	}
+	var created db.CreateCommentRow
+	var err error
+	if len(attachmentIDs) > 0 {
+		// A comment and the attachments it was posted with are one visible
+		// change, and one database outcome. Committing the comment first leaves
+		// a window in which it can gain a reply and be deleted into a
+		// tombstone, and the link would then bind uploaded objects to that
+		// placeholder — invisible, and missed by the prune's storage cleanup
+		// (#8296 review). Inside this transaction the row is not yet visible to
+		// a delete, so there is no window at all. Mirrors the attachment-set
+		// edit in UpdateComment.
+		//
+		// Owner first: the CreateComment statement takes the issue row, and only
+		// then are the attachments locked — the issue -> comment -> child order
+		// LockIssueForDelete, UpdateComment, LockLiveComment and DeleteAttachment
+		// all share. Taking the attachments first inverts it against issue
+		// teardown, which holds the issue and then reaches the same rows through
+		// the issue_id cascade, and Postgres aborts one side. Locking them at all
+		// still pins the requested set: an attachment deleted while this waited
+		// is refused before the comment is committed, rather than the comment
+		// committing without it.
+		tx, beginErr := h.TxStarter.Begin(r.Context())
+		if beginErr != nil {
+			slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", beginErr, "issue_id", issueID)...)
+			writeError(w, http.StatusInternalServerError, "failed to create comment: "+beginErr.Error())
+			return
+		}
+		defer tx.Rollback(r.Context())
+		qtx := h.Queries.WithTx(tx)
+		created, err = qtx.CreateComment(r.Context(), createParams)
+		if err == nil {
+			var missing pgtype.UUID
+			missing, err = lockCommentAttachments(r.Context(), qtx, issue.WorkspaceID, issue.ID, attachmentIDs)
+			if err == nil && missing.Valid {
+				writeError(w, http.StatusConflict, "attachment "+uuidToString(missing)+" is no longer available")
+				return
+			}
+		}
+		if err == nil {
+			err = qtx.LinkAttachmentsToComment(r.Context(), db.LinkAttachmentsToCommentParams{
+				CommentID: created.ID,
+				IssueID:   issue.ID,
+				Column3:   attachmentIDs,
+			})
+		}
+		if err == nil {
+			err = tx.Commit(r.Context())
+		}
+	} else {
+		created, err = h.Queries.CreateComment(r.Context(), createParams)
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The issue was deleted, possibly while this waited for its row lock.
+		writeError(w, http.StatusNotFound, "issue not found")
+		return
+	}
 	if err != nil {
 		slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create comment: "+err.Error())
 		return
 	}
 	comment := created.Comment()
-
-	// Link uploaded attachments to this comment.
-	if len(attachmentIDs) > 0 {
-		h.linkAttachmentsByIDs(r.Context(), comment.ID, issue.ID, attachmentIDs)
-	}
 
 	// Fetch linked attachments so the response includes them.
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
@@ -2034,10 +2105,10 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 //   - queued    — a fresh task was created for it;
 //   - deferred  — an active task's completion reconcile will replay it, either
 //     because a planned-id write landed on a claim-receipt task
-//     (lost-race path, where the comment may PREDATE the task) or
+//     (worker reply, or lost enqueue race where the comment may predate the task) or
 //     because the comment is newer than that task and therefore
 //     inside reconcile's `created_at > since` window (AlreadyPending
-//     path, where the task existed before the comment).
+//     path for member/explicit-mention routes, where the task existed first).
 //
 // The deferral is not a one-shot prediction: if a replay is later blocked by a
 // task that cannot cover the comment, reconcileCommentsOnCompletion hands the
@@ -2094,7 +2165,7 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 			}
 			// No same-head QUEUED row to fold into (merge missed). The two paths
 			// resolve differently.
-			if !lostRace {
+			if !lostRace && !trigger.NonLeaderAgentReply {
 				// (b) AlreadyPending path: this comment arrived AFTER its task, so
 				// it is newer than the task and completion reconcile covers it by
 				// timestamp; MUL-4195 leaves the claimed task untouched. Defer to
@@ -2105,7 +2176,10 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 				}
 				// enqueueFresh → fall through to the enqueue below.
 			} else {
-				// (c) Lost INSERT race: the losing comment can PREDATE the winner,
+				// (c) A worker reply needs a recorded obligation: unlike explicit
+				// mentions, timestamp-only agent replies are not replayed (loop
+				// safety). The same registration also covers a lost INSERT race,
+				// where the losing comment can PREDATE the winner,
 				// which completion reconcile's `created_at > since` window cannot
 				// see. Register it as a planned (undelivered) input on a same-head
 				// CLAIM-RECEIPT task (dispatched/running/waiting; queued is excluded
@@ -2113,7 +2187,7 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 				// into a bounded follow-up (#5914, Elon round 2).
 				registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, triggerCommentID, getHeadSha())
 				if err != nil {
-					slog.Warn("register planned lost-race comment failed",
+					slog.Warn("register planned comment failed",
 						"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID), "error", err)
 					return DispatchBlocked, ReasonInternalError
 				}
@@ -2398,7 +2472,7 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 	return commentMergeSucceeded
 }
 
-// registerPlannedCommentForActiveTask durably folds a lost-race comment into the
+// registerPlannedCommentForActiveTask durably folds an accepted comment into the
 // same-head active task's planned (coalesced) set when the queued merge could no
 // longer target it (the winner was already claimed → dispatched/running). It
 // returns true when a same-head active task absorbed the comment; (false, nil)
@@ -2419,7 +2493,7 @@ func (h *Handler) registerPlannedCommentForActiveTask(ctx context.Context, issue
 		}
 		return false, err
 	}
-	slog.Info("registered lost-race comment as planned follow-up input",
+	slog.Info("registered comment as planned follow-up input",
 		"task_id", uuidToString(row.ID),
 		"issue_id", uuidToString(issue.ID),
 		"agent_id", uuidToString(agentID),
@@ -2524,7 +2598,13 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 			return nil
 		}
 		if _, err := h.TaskService.EnqueueTaskForIssue(ctx, issue, triggerCommentID); err != nil {
-			slog.Warn("enqueue agent task on comment failed", "issue_id", uuidToString(issue.ID), "error", err)
+			// EnqueueTaskForIssue now returns ErrDuplicatePendingTask on the
+			// benign duplicate-pending-task race, so use the shared helper that
+			// downgrades that case to debug — matching the squad-leader and
+			// mention cases and letting resolveCommentTriggerEnqueue coalesce
+			// instead of surfacing a warning (#5914).
+			logCommentEnqueueFailure("enqueue agent task on comment failed", err,
+				"issue_id", uuidToString(issue.ID))
 			return err
 		}
 	case commentTriggerSourceMentionSquadLeader:
@@ -2621,13 +2701,15 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 		// target alongside the assigned leader.
 		if issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" {
 			if trigger, ok := h.routeAssignedSquadLeaderFallback(ctx, issue, actorType, actorID, opts); ok {
+				trigger.NonLeaderAgentReply = actorType == "agent" && actorID != uuidToString(trigger.Agent.ID)
 				return []commentAgentTrigger{trigger}, nil
 			}
 		}
 		return nil, nil
 	}
 
-	if parentComment != nil && parentComment.AuthorType == "agent" {
+	// A deleted parent no longer speaks for its agent author (#8296).
+	if parentComment != nil && parentComment.AuthorType == "agent" && !parentComment.DeletedAt.Valid {
 		trigger, ok := h.routeReplyToParentAuthor(ctx, issue, parentComment, actorType, actorID, opts)
 		if !ok {
 			return nil, nil
@@ -2645,8 +2727,9 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 		}
 		// A plain member-to-member reply must not start the issue assignee just
 		// because the thread has no agent owner. Explicit mentions and existing
-		// conversation owners were already resolved above.
-		if parentComment.AuthorType == "member" {
+		// conversation owners were already resolved above. The same holds for a
+		// reply under a deleted comment: it is still a reply, not a new request.
+		if parentComment.AuthorType == "member" || parentComment.DeletedAt.Valid {
 			return nil, nil
 		}
 	}
@@ -3038,7 +3121,7 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 	// mention has nobody watching a response at all.
 	blockUnusableTarget := func(targetType, targetID string, agent db.Agent, verdict service.AgentVerdict) {
 		notice := &blockedRuntimeNotice{agent: agent, verdict: verdict}
-		if verdict.Reason != ReasonRuntimeUnusable {
+		if !service.RuntimeBlockedNeedsNotice(verdict.Reason) {
 			notice = nil
 		}
 		addTarget(commentMentionTarget{
@@ -3200,7 +3283,8 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		ID:          commentUUID,
 		WorkspaceID: wsUUID,
 	})
-	if err != nil {
+	// A deleted comment's tombstone has nothing left to edit.
+	if err != nil || existing.DeletedAt.Valid {
 		writeError(w, http.StatusNotFound, "comment not found")
 		return
 	}
@@ -3387,9 +3471,14 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 			// original batch, including the still-valid unchanged comment.
 			h.retriggerCancelledTaskSurvivors(r.Context(), *triggerIssue, cancelled, pgtype.UUID{})
 		}
-		if errors.Is(err, pgx.ErrNoRows) && strictContentEdit {
+		if errors.Is(err, pgx.ErrNoRows) {
 			current, reloadErr := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{ID: commentUUID, WorkspaceID: wsUUID})
-			if reloadErr == nil {
+			if errors.Is(reloadErr, pgx.ErrNoRows) || (reloadErr == nil && current.DeletedAt.Valid) {
+				// Deleted while the edit waited for it.
+				writeError(w, http.StatusNotFound, "comment not found")
+				return
+			}
+			if reloadErr == nil && strictContentEdit {
 				if req.ExpectedRevision != nil {
 					writeRevisionConflict(w, "comment", current.ID, *req.ExpectedRevision, current.Revision)
 				} else {
@@ -3492,52 +3581,237 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		slog.Info("comment parent issue no longer exists", "issue_id", uuidToString(comment.IssueID), "comment_id", commentId)
 	}
 
-	// Collect attachment URLs before CASCADE delete removes them.
-	attachmentURLs, _ := h.Queries.ListAttachmentURLsByCommentID(r.Context(), comment.ID)
+	if comment.DeletedAt.Valid {
+		writeError(w, http.StatusNotFound, "comment not found")
+		return
+	}
 
 	// Cancel any active task whose planned batch contains this comment so the
 	// agent does not run with the now-deleted content already embedded. Must
-	// run before DeleteComment because the FK ON DELETE SET NULL would
-	// otherwise nullify trigger_comment_id and orphan those tasks in queued.
+	// run before the delete: a removed row would nullify trigger_comment_id
+	// through ON DELETE SET NULL and orphan those tasks in queued.
 	cancelled, cancelErr := h.TaskService.CancelTasksByTriggerComment(r.Context(), comment.ID)
 	if cancelErr != nil {
 		slog.Warn("cancel tasks for deleted trigger comment failed", append(logger.RequestAttrs(r), "error", cancelErr, "comment_id", commentId)...)
 	}
 
-	deleted, err := h.Queries.DeleteComment(r.Context(), db.DeleteCommentParams{
-		ID:          comment.ID,
-		WorkspaceID: comment.WorkspaceID,
-	})
-	if err != nil || !deleted.Changed {
-		slog.Warn("delete comment failed", append(logger.RequestAttrs(r), "error", err, "changed", deleted.Changed, "comment_id", commentId)...)
+	deleted, err := h.deleteComment(r.Context(), comment.ID, comment.WorkspaceID)
+	if err != nil {
+		slog.Warn("delete comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
 		// Cancellation already committed but deletion did not. If the parent
 		// issue still exists, rebuild the complete cancelled batch (including
 		// this trigger) before reporting the storage error or concurrent no-op.
 		if hasIssue {
 			h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, pgtype.UUID{})
 		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to delete comment")
-		} else {
+		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "comment not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to delete comment")
 		}
 		return
 	}
 
-	h.deleteS3Objects(r.Context(), attachmentURLs)
-	slog.Info("comment deleted", append(logger.RequestAttrs(r), "comment_id", commentId, "issue_id", uuidToString(comment.IssueID))...)
-	eventPayload := map[string]any{
-		"comment_id": uuidToString(comment.ID),
-		"issue_id":   uuidToString(comment.IssueID),
+	h.deleteS3Objects(r.Context(), deleted.AttachmentURLs)
+	slog.Info("comment deleted", append(logger.RequestAttrs(r),
+		"comment_id", commentId,
+		"issue_id", uuidToString(comment.IssueID),
+		"tombstoned", deleted.Tombstone != nil,
+		"removed_count", len(deleted.RemovedIDs),
+	)...)
+	// A tombstone is still part of the thread, so clients replace it in place
+	// through the ordinary update event; removed rows get one delete event each.
+	if deleted.Tombstone != nil {
+		resp := commentToResponse(*deleted.Tombstone, nil, nil)
+		resp.IssueRevision = deleted.IssueRevision
+		eventPayload := map[string]any{"comment": resp}
+		if deleted.IssueRevision > 0 {
+			eventPayload["issue_revision"] = deleted.IssueRevision
+		}
+		h.publish(protocol.EventCommentUpdated, workspaceID, actorType, actorID, eventPayload)
 	}
-	if deleted.IssueRevision > 0 {
-		eventPayload["issue_revision"] = deleted.IssueRevision
+	for _, removedID := range deleted.RemovedIDs {
+		eventPayload := map[string]any{
+			"comment_id": uuidToString(removedID),
+			"issue_id":   uuidToString(comment.IssueID),
+		}
+		if deleted.IssueRevision > 0 {
+			eventPayload["issue_revision"] = deleted.IssueRevision
+		}
+		h.publish(protocol.EventCommentDeleted, workspaceID, actorType, actorID, eventPayload)
 	}
-	h.publish(protocol.EventCommentDeleted, workspaceID, actorType, actorID, eventPayload)
 	if hasIssue {
 		h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, comment.ID)
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// commentDeletion is the committed outcome of deleteComment.
+type commentDeletion struct {
+	// Tombstone is the cleared row when the comment still had replies.
+	Tombstone *db.Comment
+	// RemovedIDs lists every row removed outright: the comment itself when it
+	// had no replies, followed by each tombstone ancestor that lost its last
+	// reply as a result, nearest first.
+	RemovedIDs []pgtype.UUID
+	// AttachmentURLs are the deleted comment's storage objects, for cleanup
+	// after commit.
+	AttachmentURLs []string
+	IssueRevision  int64
+}
+
+// lockCommentAttachments locks the unbound issue attachments a comment is
+// being created with and reports the first requested id that is not among
+// them: never eligible, or deleted while the lock waited. The caller must
+// already hold the issue's row lock — these are its children, and taking them
+// first is the inversion CreateComment documents.
+func lockCommentAttachments(ctx context.Context, qtx *db.Queries, workspaceID, issueID pgtype.UUID, ids []pgtype.UUID) (missing pgtype.UUID, err error) {
+	locked, err := qtx.LockAttachmentsForCommentLink(ctx, db.LockAttachmentsForCommentLinkParams{
+		WorkspaceID:   workspaceID,
+		IssueID:       issueID,
+		AttachmentIds: ids,
+	})
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	have := make(map[pgtype.UUID]struct{}, len(locked))
+	for _, id := range locked {
+		have[id] = struct{}{}
+	}
+	for _, id := range ids {
+		if _, ok := have[id]; !ok {
+			return id, nil
+		}
+	}
+	return pgtype.UUID{}, nil
+}
+
+// withLiveCommentLock runs write in a transaction that first locks the
+// comment's issue and then the comment — the order every comment mutation
+// takes — and only while the comment is live. Writes to a comment's children
+// (reactions, attachments) go through it so none can land on a tombstone, even
+// when the delete commits while this waits. Returns pgx.ErrNoRows when the
+// comment is gone or deleted.
+func (h *Handler) withLiveCommentLock(ctx context.Context, commentID, workspaceID pgtype.UUID, write func(*db.Queries) error) error {
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+	if _, err := qtx.LockLiveComment(ctx, db.LockLiveCommentParams{ID: commentID, WorkspaceID: workspaceID}); err != nil {
+		return err
+	}
+	if err := write(qtx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// commentTombstonePruneDepth bounds the upward walk over tombstone ancestors,
+// matching the depth bound of the ancestor path queries.
+const commentTombstonePruneDepth = 256
+
+// deleteComment deletes exactly one comment (#8296). A comment that still has
+// replies becomes a tombstone — content, attachments, reactions and resolution
+// cleared, row kept — so each reply stays attached to its direct parent. A
+// comment without replies is removed, along with every tombstone ancestor
+// that is left without replies. Nothing here relies on the parent_id cascade.
+//
+// Returns pgx.ErrNoRows when the comment is already gone or already deleted.
+func (h *Handler) deleteComment(ctx context.Context, commentID, workspaceID pgtype.UUID) (commentDeletion, error) {
+	var out commentDeletion
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return out, err
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+
+	target, err := qtx.LockCommentForDelete(ctx, db.LockCommentForDeleteParams{
+		ID:          commentID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return out, err
+	}
+	// Separate statement on purpose: its snapshot postdates the locks above,
+	// so it sees every committed reply, and none can be added while they are
+	// held.
+	hasReplies, err := qtx.CommentHasReplies(ctx, db.CommentHasRepliesParams{
+		ID:          target.ID,
+		WorkspaceID: target.WorkspaceID,
+	})
+	if err != nil {
+		return out, err
+	}
+	out.AttachmentURLs, err = qtx.DeleteCommentAttachments(ctx, db.DeleteCommentAttachmentsParams{
+		CommentID:   target.ID,
+		WorkspaceID: target.WorkspaceID,
+	})
+	if err != nil {
+		return out, err
+	}
+	if err := qtx.DeleteCommentReactions(ctx, db.DeleteCommentReactionsParams{
+		CommentID:   target.ID,
+		WorkspaceID: target.WorkspaceID,
+	}); err != nil {
+		return out, err
+	}
+
+	if hasReplies {
+		tombstone, err := qtx.TombstoneComment(ctx, db.TombstoneCommentParams{
+			ID:          target.ID,
+			WorkspaceID: target.WorkspaceID,
+		})
+		if err != nil {
+			return out, err
+		}
+		// A deleted delegated-failure recovery signal is withdrawn: settle it so
+		// the recovery sweeper stops scanning its row. A no-op for every other
+		// comment.
+		if _, err := qtx.SettleDelegatedFailureRecoveryComment(ctx, target.ID); err != nil {
+			return out, err
+		}
+		out.Tombstone = &tombstone
+	} else {
+		removed, err := qtx.DeleteLeafComment(ctx, db.DeleteLeafCommentParams{
+			ID:          target.ID,
+			WorkspaceID: target.WorkspaceID,
+		})
+		if err != nil {
+			return out, err
+		}
+		out.RemovedIDs = append(out.RemovedIDs, removed.ID)
+		parentID := removed.ParentID
+		for depth := 0; parentID.Valid && depth < commentTombstonePruneDepth; depth++ {
+			pruned, err := qtx.DeleteReplylessCommentTombstone(ctx, db.DeleteReplylessCommentTombstoneParams{
+				ID:          parentID,
+				WorkspaceID: target.WorkspaceID,
+			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				// A live comment, or a tombstone other replies still hold.
+				break
+			}
+			if err != nil {
+				return out, err
+			}
+			out.RemovedIDs = append(out.RemovedIDs, pruned.ID)
+			parentID = pruned.ParentID
+		}
+	}
+
+	out.IssueRevision, err = qtx.TouchIssueForCommentDelete(ctx, db.TouchIssueForCommentDeleteParams{
+		IssueID:     target.IssueID,
+		WorkspaceID: target.WorkspaceID,
+	})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return out, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return out, err
+	}
+	return out, nil
 }
 
 // retriggerCancelledTaskSurvivors repairs the surviving inputs from a
@@ -3579,7 +3853,8 @@ func (h *Handler) retriggerCancelledTaskSurvivors(ctx context.Context, issue db.
 				"issue_id", uuidToString(issue.ID), "comment_id", commentID, "error", err)
 			continue
 		}
-		if comment.IssueID != issue.ID {
+		// A tombstone is a deleted input, not a survivor.
+		if comment.IssueID != issue.ID || comment.DeletedAt.Valid {
 			continue
 		}
 		comments = append(comments, comment)
@@ -3668,7 +3943,8 @@ func (h *Handler) loadCommentForActor(w http.ResponseWriter, r *http.Request) (d
 		ID:          commentUUID,
 		WorkspaceID: wsUUID,
 	})
-	if err != nil {
+	// A deleted comment's tombstone cannot be a thread's resolution.
+	if err != nil || comment.DeletedAt.Valid {
 		writeError(w, http.StatusNotFound, "comment not found")
 		return db.Comment{}, "", "", "", false
 	}
@@ -3717,6 +3993,11 @@ func (h *Handler) ResolveComment(w http.ResponseWriter, r *http.Request) {
 		ResolvedByType: pgtype.Text{String: actorType, Valid: true},
 		ResolvedByID:   actorUUID,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Deleted after it was loaded.
+		writeError(w, http.StatusNotFound, "comment not found")
+		return
+	}
 	if err != nil {
 		slog.Warn("resolve comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", uuidToString(comment.ID))...)
 		writeError(w, http.StatusInternalServerError, "failed to resolve comment")

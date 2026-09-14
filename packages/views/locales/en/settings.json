@@ -1,7 +1,7 @@
 {
   "issue_statuses": {
     "title": "Issue Statuses",
-    "description": "Define the workflow your issues move through. Each status inherits its behavior from its category.",
+    "description": "Organize issue statuses into four lifecycle categories.",
     "loading": "Loading statuses…",
     "add": "Add status",
     "show_archived": "Show archived ({{count}})",
@@ -9,43 +9,78 @@
     "archived_hint": "Retired from new assignments. Issues already on it keep it.",
     "reorder_failed": "Could not save the new order.",
     "actions": {
+      "move_up": "Move up",
+      "move_down": "Move down",
       "open": "Actions for {{name}}",
       "edit": "Edit",
       "archive": "Archive",
       "reorder": "Reorder {{name}}"
     },
+    "reorder_hint": "Drag statuses within a category to set their order in boards, lists, and status menus.",
+    "built_in_dialog": {
+      "title": "Built-in status cannot be changed",
+      "description": "Built-in statuses are used by Multica and cannot be edited or archived. You can still change their order within the category.",
+      "confirm": "Got it"
+    },
     "editor": {
       "create_title": "New status",
       "edit_title": "Edit status",
-      "behavior_hint": "This status behaves exactly like {{category}}.",
       "name": "Name",
       "name_placeholder": "e.g. Code Review",
       "key_hint": "Referred to as {{key}} by the API and the CLI.",
       "created": "Status created. The API and the CLI refer to it as {{key}}.",
       "category": "Category",
-      "category_locked": "Category cannot be changed — issues already on this status depend on it.",
+      "category_locked": "Category cannot be changed after a status is created.",
       "description": "Description",
       "description_placeholder": "What this status means for your team",
       "color": "Color",
+      "icon": "Icon shape",
+      "icon_shapes": {
+        "default": "Default",
+        "dotted": "Dotted circle",
+        "circle": "Circle",
+        "half": "Half-filled circle",
+        "three_quarters": "Three-quarter circle",
+        "check": "Checkmark",
+        "slash": "Slash",
+        "cross": "Cross"
+      },
       "cancel": "Cancel",
       "save": "Save",
       "saving": "Saving…",
       "save_failed": "Could not save the status."
     },
     "archive_dialog": {
+      "retry": "Retry archive",
       "title": "Archive this status?",
-      "description": "\"{{name}}\" stops being available for new issues. Issues already on it keep it and keep behaving exactly as they do now.",
+      "description": "Move all issues out of \"{{name}}\" before archiving it. Once empty, it will be removed from boards and status pickers.",
+      "in_use_title": "Move issues before archiving",
+      "in_use": "Issues still using this status: {{count}}. Move them to another status, including completed and canceled issues, then try again.",
+      "view_issues": "View issues",
+      "archiving": "Archiving...",
       "cancel": "Cancel",
       "confirm": "Archive",
       "failed": "Could not archive the status."
     },
+    "category_labels": {
+      "unstarted": "Unstarted",
+      "started": "Started",
+      "done": "Done",
+      "closed": "Closed"
+    },
     "categories": {
+      "unstarted": "Work that has not started, whether planned or in the backlog.",
+      "started": "Work that is active, under review, or blocked.",
+      "done": "Work that has been finished.",
+      "closed": "Work that will not be completed."
+    },
+    "built_in_descriptions": {
       "backlog": "Parked. Assigning an issue here never starts an agent run.",
       "todo": "Queued. Moving an issue here starts the assigned agent.",
       "in_progress": "Actively being worked on.",
       "in_review": "Delivered, waiting on human review. Finalizes the autopilot run.",
-      "done": "Completed.",
       "blocked": "Stalled on an external dependency.",
+      "done": "Completed.",
       "cancelled": "Decided not to do."
     }
   },

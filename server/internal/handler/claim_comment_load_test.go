@@ -166,3 +166,21 @@ func TestBuildCoalescedCommentDataMissingInputAndOptionalAuthor(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildCoalescedCommentDataSkipsTombstoneKeepsReplies(t *testing.T) {
+	issueID := dbfx.Issue(t, "Deleted comment must not discard surviving replies")
+	rootID := dbfx.Comment(t, issueID, "", testutil.Cols{"deleted_at": testutil.Raw("now()")})
+	replyID := dbfx.Comment(t, issueID, "preserve this handoff", testutil.Cols{"parent_id": rootID})
+	comments, err := testHandler.buildCoalescedCommentData(context.Background(), parseUUID(testWorkspaceID), []pgtype.UUID{
+		parseUUID(rootID), parseUUID(replyID),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comments) != 1 {
+		t.Fatalf("got %d comments, want only the surviving reply", len(comments))
+	}
+	if comments[0].ID != replyID || comments[0].ThreadID != rootID || comments[0].Content != "preserve this handoff" {
+		t.Fatalf("deleted root changed the surviving handoff: %+v", comments[0])
+	}
+}
