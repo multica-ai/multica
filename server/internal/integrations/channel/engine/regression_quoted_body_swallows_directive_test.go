@@ -22,6 +22,11 @@ package engine
 // emits, pinned from the other side in
 // wecom/regression_quoted_directive_test.go. Router is what has to be driven,
 // because neither failure is visible in the adapter's own output.
+//
+// Router already distinguishes context the sender chose from history it added
+// itself (HasSelectedContext, message.go:149). A quote is the former, so the
+// adapter sets it and these tests send it — the directive-behind-a-quote case
+// needs no rule of its own on the Router side.
 
 import (
 	"context"
@@ -40,6 +45,9 @@ func quotedDirectiveMessage(t *testing.T, directive string, forceFresh bool) cha
 	msg := p2pMessage(t)
 	msg.Text = "> [Quote] Q3 毛利率 42.1%"
 	msg.CommandText = directive
+	// The sender selected this context by replying to it, so Router must count
+	// it as the turn's input even when the directive has no body of its own.
+	msg.HasSelectedContext = true
 	msg.ForceFresh = forceFresh
 	return msg
 }

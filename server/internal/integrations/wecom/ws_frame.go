@@ -596,7 +596,13 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 		// (feishu_channel.go:139) and Slack from its cleaned text
 		// (slack/inbound.go:131); WeCom was the one adapter leaving it empty.
 		CommandText: command,
-		ForceFresh:  controlNormalized && control.Kind == engine.ControlCommandFreshSession,
+		// The quote is context the sender picked by replying to it, which is
+		// what channel.InboundMessage.HasSelectedContext names: it is input
+		// even when a control command has no body of its own. Without it a
+		// bare directive behind a quote reads as an empty message to Router,
+		// which persists nothing and answers nobody.
+		HasSelectedContext: quoted != "",
+		ForceFresh:         controlNormalized && control.Kind == engine.ControlCommandFreshSession,
 		// A pure /issue command in WeCom should NOT trigger the
 		// agent — the engine already creates the issue and the
 		// OutboundReplier already sends "✅ 已创建 #N". Letting the agent

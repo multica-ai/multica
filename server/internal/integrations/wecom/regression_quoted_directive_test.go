@@ -56,6 +56,13 @@ func TestABareNewBehindAQuoteLeavesOnlyTheQuote(t *testing.T) {
 	if _, ok := engine.ParseNewChatCommand(msg.CommandText); !ok {
 		t.Fatalf("CommandText = %q — /new is no longer parseable, so no new session is opened", msg.CommandText)
 	}
+	// And it has to see that the quote is input the sender chose: without this
+	// the directive is bare as far as Router is concerned, so it opens the
+	// route and persists nothing — the quote is silently dropped again, one
+	// layer further down than before.
+	if !msg.HasSelectedContext {
+		t.Fatal("HasSelectedContext = false — Router reads a quote-only body as an empty message")
+	}
 }
 
 // TestABareClearBehindAQuoteKeepsTheQuoteAndForcesFresh: /clear carries no body
@@ -102,6 +109,10 @@ func TestABareDirectiveWithNoQuoteIsStillTheSentinel(t *testing.T) {
 			if msg.ForceFresh {
 				t.Fatal("ForceFresh set for a bare directive with nothing else; the adapter consumed " +
 					"a directive it was supposed to pass through")
+			}
+			if msg.HasSelectedContext {
+				t.Fatal("HasSelectedContext set with nothing quoted; Router would take the bare " +
+					"directive for a turn and start a run on an empty prompt")
 			}
 		})
 	}
