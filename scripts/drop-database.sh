@@ -69,7 +69,10 @@ case "$answer" in
 esac
 
 cd "$root_dir"
-docker compose exec -T postgres \
+# Local development shares one PostgreSQL Compose project across checkouts.
+# Ignore the worktree-specific project name here; it is reserved for direct
+# self-host Compose stacks.
+docker compose -p multica exec -T postgres \
   dropdb \
   --username "$POSTGRES_USER" \
   --maintenance-db postgres \
