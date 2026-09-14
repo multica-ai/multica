@@ -15,6 +15,8 @@ import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useFeatureEnabled } from "@multica/core/config";
+import { PROJECT_PLANS_FLAG } from "@multica/core/feature-flags";
 import { useIssuesScope } from "@multica/core/issues/stores";
 import { useRecentContextStore } from "@multica/core/chat";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -29,6 +31,7 @@ import { ProjectResourcesSection } from "./project-resources-section";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
 import { ProjectDueDatePicker } from "./project-due-date-picker";
 import { IssueSurface } from "../../issues/surface/issue-surface";
+import { PLAN_VIEW_MODES, type IssueSurfaceMode } from "../../issues/surface/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
@@ -125,6 +128,18 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const issueScope = useMemo(
     () => ({ type: "project" as const, projectId, actorKind: issueTab }),
     [projectId, issueTab],
+  );
+  // Plan Document/Pipeline/Coverage stay out of `issueSurfaceModes` while the
+  // flag is off, so a persisted plan mode falls back to "board" through the
+  // same allowedModes mechanism Gantt already uses (see
+  // use-issue-surface-controller's effectiveViewMode).
+  const planViewsEnabled = useFeatureEnabled(PROJECT_PLANS_FLAG, false);
+  const issueSurfaceModes = useMemo<IssueSurfaceMode[]>(
+    () =>
+      planViewsEnabled
+        ? ["board", "list", "table", "swimlane", "gantt", ...PLAN_VIEW_MODES]
+        : ["board", "list", "table", "swimlane", "gantt"],
+    [planViewsEnabled],
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -550,7 +565,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
           <IssueSurface
             scope={issueScope}
-            modes={["board", "list", "table", "swimlane", "gantt"]}
+            modes={issueSurfaceModes}
           />
           </div>
         </ResizablePanel>

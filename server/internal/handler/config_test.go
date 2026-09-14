@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
@@ -438,6 +439,10 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	if cfg.FeatureFlags["plugins_v1"] {
 		t.Fatalf("plugins_v1: want false by default, got true")
 	}
+	projectPlansEnabled, projectPlansPublished := cfg.FeatureFlags["project_plans"]
+	if !projectPlansPublished || projectPlansEnabled {
+		t.Fatal("project_plans: want published and false by default")
+	}
 	for _, retired := range []string{"private_plugins_v1", "remote_mcp_plugins_v1"} {
 		if _, published := cfg.FeatureFlags[retired]; published {
 			t.Fatalf("retired Plugin sub-flag %q must not be published", retired)
@@ -478,6 +483,19 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	}
 	if !cfg.FeatureFlags["composio_mcp_apps"] {
 		t.Fatalf("composio_mcp_apps: want true with flag enabled, got false")
+	}
+}
+
+func TestGetConfigPublishesProjectPlansKillSwitch(t *testing.T) {
+	h := &Handler{}
+	withFeatureFlag(t, h, featureflags.ProjectPlans, false)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	var cfg AppConfig
+	testutil.Call(t, h.GetConfig, req).Want(http.StatusOK).JSON(&cfg)
+	projectPlansEnabled, projectPlansPublished := cfg.FeatureFlags["project_plans"]
+	if !projectPlansPublished || projectPlansEnabled {
+		t.Fatalf("project_plans: want published false with kill switch, got published=%t enabled=%t", projectPlansPublished, projectPlansEnabled)
 	}
 }
 

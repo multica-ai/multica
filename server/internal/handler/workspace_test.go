@@ -381,6 +381,112 @@ WHERE storage_key = $1
 	}
 }
 
+func TestDeleteWorkspace_CleansProjectPlansWithoutCrossWorkspaceDamage(t *testing.T) {
+	suffix := time.Now().UnixNano()
+	targetWorkspaceID := dbfx.Workspace(t, "Plan cleanup target", fmt.Sprintf("plan-cleanup-target-%d", suffix))
+	dbfx.Member(t, targetWorkspaceID, testUserID, "owner")
+	otherWorkspaceID := dbfx.Workspace(t, "Plan cleanup survivor", fmt.Sprintf("plan-cleanup-survivor-%d", suffix))
+	dbfx.Member(t, otherWorkspaceID, testUserID, "owner")
+
+	targetProjectID := dbfx.Insert(t, "project", testutil.Cols{
+		"workspace_id": targetWorkspaceID,
+		"title":        "Target project",
+		"description":  "",
+		"status":       "planned",
+		"priority":     "none",
+	})
+	otherProjectID := dbfx.Insert(t, "project", testutil.Cols{
+		"workspace_id": otherWorkspaceID,
+		"title":        "Surviving project",
+		"description":  "",
+		"status":       "planned",
+		"priority":     "none",
+	})
+	targetOwnedIssueID := dbfx.Issue(t, "Target workspace issue", testutil.Cols{
+		"workspace_id": targetWorkspaceID,
+		"project_id":   targetProjectID,
+	})
+	survivingIssueID := dbfx.Issue(t, "Cross-workspace linked issue", testutil.Cols{
+		"workspace_id": otherWorkspaceID,
+		"project_id":   otherProjectID,
+	})
+
+	seedPlan := func(workspaceID, projectID, title, issueID string) string {
+		t.Helper()
+		planID := dbfx.Insert(t, "project_plan", testutil.Cols{
+			"workspace_id":    workspaceID,
+			"project_id":      projectID,
+			"version":         1,
+			"kind":            "prd",
+			"origin":          "manual",
+			"title":           title,
+			"created_by_type": "member",
+			"created_by_id":   testUserID,
+		})
+		phaseID := dbfx.Insert(t, "project_plan_phase", testutil.Cols{
+			"project_plan_id": planID,
+			"title":           "Phase",
+			"position":        0,
+		})
+		partID := dbfx.Insert(t, "project_plan_part", testutil.Cols{
+			"project_plan_id":       planID,
+			"project_plan_phase_id": phaseID,
+			"title":                 "Part",
+			"position":              0,
+		})
+		dbfx.Insert(t, "project_plan_part_issue", testutil.Cols{
+			"project_plan_id":       planID,
+			"project_plan_part_id":  partID,
+			"issue_id":              issueID,
+			"issue_number_snapshot": 1,
+			"issue_title_snapshot":  "Linked issue snapshot",
+		})
+		dbfx.Insert(t, "project_plan_dependency", testutil.Cols{
+			"project_plan_id":   planID,
+			"blocked_part_id":   partID,
+			"blocking_phase_id": phaseID,
+		})
+		return planID
+	}
+
+	// The target plan deliberately links an issue owned by the other workspace.
+	// Workspace plan cleanup must delete the membership row, never the issue.
+	targetPlanID := seedPlan(targetWorkspaceID, targetProjectID, "Target plan", survivingIssueID)
+	otherPlanID := seedPlan(otherWorkspaceID, otherProjectID, "Surviving plan", survivingIssueID)
+
+	req := newRequest("DELETE", "/api/workspaces/"+targetWorkspaceID, nil)
+	req = withURLParam(req, "id", targetWorkspaceID)
+	testutil.Call(t, testHandler.DeleteWorkspace, req).Want(http.StatusNoContent)
+
+	var targetPlanRows, otherPlanRows, targetIssueRows, survivingIssueRows int
+	dbfx.QueryRow(t, `
+		SELECT
+			(SELECT COUNT(*) FROM project_plan WHERE id = $1) +
+			(SELECT COUNT(*) FROM project_plan_phase WHERE project_plan_id = $1) +
+			(SELECT COUNT(*) FROM project_plan_part WHERE project_plan_id = $1) +
+			(SELECT COUNT(*) FROM project_plan_part_issue WHERE project_plan_id = $1) +
+			(SELECT COUNT(*) FROM project_plan_dependency WHERE project_plan_id = $1),
+			(SELECT COUNT(*) FROM project_plan WHERE id = $2) +
+			(SELECT COUNT(*) FROM project_plan_phase WHERE project_plan_id = $2) +
+			(SELECT COUNT(*) FROM project_plan_part WHERE project_plan_id = $2) +
+			(SELECT COUNT(*) FROM project_plan_part_issue WHERE project_plan_id = $2) +
+			(SELECT COUNT(*) FROM project_plan_dependency WHERE project_plan_id = $2),
+			(SELECT COUNT(*) FROM issue WHERE id = $3),
+			(SELECT COUNT(*) FROM issue WHERE id = $4)
+	`, targetPlanID, otherPlanID, targetOwnedIssueID, survivingIssueID).
+		Scan(&targetPlanRows, &otherPlanRows, &targetIssueRows, &survivingIssueRows)
+
+	if targetPlanRows != 0 {
+		t.Fatalf("deleted workspace retained %d project plan rows", targetPlanRows)
+	}
+	if otherPlanRows != 5 {
+		t.Fatalf("other workspace project plan rows = %d, want 5", otherPlanRows)
+	}
+	if targetIssueRows != 0 || survivingIssueRows != 1 {
+		t.Fatalf("target/surviving issue rows = %d/%d, want 0/1", targetIssueRows, survivingIssueRows)
+	}
+}
+
 func TestDeleteWorkspace_DirtyTriggersHaveTeardownGuard(t *testing.T) {
 	for _, triggerName := range []string{
 		"trg_atq_dirty_hourly",

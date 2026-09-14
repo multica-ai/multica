@@ -556,6 +556,67 @@ func (q *Queries) DeleteWorkspacePluginData(ctx context.Context, workspaceID pgt
 	return err
 }
 
+const deleteWorkspaceProjectPlanDependencies = `-- name: DeleteWorkspaceProjectPlanDependencies :exec
+DELETE FROM project_plan_dependency
+WHERE project_plan_id IN (
+    SELECT id FROM project_plan WHERE workspace_id = $1
+)
+`
+
+// Project-plan tables deliberately have no foreign keys or cascades. These
+// statements are called in dependency-to-root order inside the workspace
+// teardown transaction. The membership delete only removes mapping rows; it
+// never targets the issue rows referenced by issue_id.
+func (q *Queries) DeleteWorkspaceProjectPlanDependencies(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceProjectPlanDependencies, workspaceID)
+	return err
+}
+
+const deleteWorkspaceProjectPlanMemberships = `-- name: DeleteWorkspaceProjectPlanMemberships :exec
+DELETE FROM project_plan_part_issue
+WHERE project_plan_id IN (
+    SELECT id FROM project_plan WHERE workspace_id = $1
+)
+`
+
+func (q *Queries) DeleteWorkspaceProjectPlanMemberships(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceProjectPlanMemberships, workspaceID)
+	return err
+}
+
+const deleteWorkspaceProjectPlanParts = `-- name: DeleteWorkspaceProjectPlanParts :exec
+DELETE FROM project_plan_part
+WHERE project_plan_id IN (
+    SELECT id FROM project_plan WHERE workspace_id = $1
+)
+`
+
+func (q *Queries) DeleteWorkspaceProjectPlanParts(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceProjectPlanParts, workspaceID)
+	return err
+}
+
+const deleteWorkspaceProjectPlanPhases = `-- name: DeleteWorkspaceProjectPlanPhases :exec
+DELETE FROM project_plan_phase
+WHERE project_plan_id IN (
+    SELECT id FROM project_plan WHERE workspace_id = $1
+)
+`
+
+func (q *Queries) DeleteWorkspaceProjectPlanPhases(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceProjectPlanPhases, workspaceID)
+	return err
+}
+
+const deleteWorkspaceProjectPlans = `-- name: DeleteWorkspaceProjectPlans :exec
+DELETE FROM project_plan WHERE workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceProjectPlans(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceProjectPlans, workspaceID)
+	return err
+}
+
 const deleteWorkspacePullRequests = `-- name: DeleteWorkspacePullRequests :exec
 WITH deleted_github_prs AS (
     DELETE FROM github_pull_request

@@ -21,6 +21,7 @@ export {
   BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
   COMPOSIO_MCP_APPS_FLAG,
   PLUGINS_V1_FLAG,
+  PROJECT_PLANS_FLAG,
 } from "./keys";
 export {
   FeatureFlagsProvider,

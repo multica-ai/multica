@@ -447,6 +447,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.Metrics = opts.BusinessMetrics
 	h.FeatureFlags = opts.FeatureFlags
 	h.TaskService.FeatureFlags = opts.FeatureFlags
+	h.ProjectPlanService.FeatureFlags = opts.FeatureFlags
 	h.TaskService.Metrics = opts.BusinessMetrics
 	h.IssueService.Metrics = opts.BusinessMetrics
 	entitlementClient, entitlementErr := entitlement.New(entitlement.Config{
@@ -1974,6 +1975,24 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
+					r.Get("/plan", h.GetActiveProjectPlan)
+					r.Get("/plans/{planId}", h.GetProjectPlan)
+					r.Post("/plans", h.CreateProjectPlan)
+					r.Post("/plans/from-issue", h.CreateProjectPlanFromIssue)
+					r.Patch("/plans/{planId}", h.UpdateProjectPlan)
+					r.Post("/plans/{planId}/supersede", h.SupersedeProjectPlan)
+					r.Post("/plans/{planId}/phases", h.AddProjectPlanPhase)
+					r.Patch("/plans/{planId}/phases/reorder", h.ReorderProjectPlanPhases)
+					r.Patch("/plans/{planId}/phases/{phaseId}", h.UpdateProjectPlanPhase)
+					r.Delete("/plans/{planId}/phases/{phaseId}", h.DeleteProjectPlanPhase)
+					r.Post("/plans/{planId}/phases/{phaseId}/parts", h.AddProjectPlanPart)
+					r.Patch("/plans/{planId}/phases/{phaseId}/parts/reorder", h.ReorderProjectPlanParts)
+					r.Patch("/plans/{planId}/parts/{partId}", h.UpdateProjectPlanPart)
+					r.Delete("/plans/{planId}/parts/{partId}", h.DeleteProjectPlanPart)
+					r.Post("/plans/{planId}/parts/{partId}/issues/{issueId}", h.LinkProjectPlanIssue)
+					r.Delete("/plans/{planId}/parts/{partId}/issues/{issueId}", h.UnlinkProjectPlanIssue)
+					r.Get("/plans/{planId}/delete-impact", h.GetProjectPlanDeleteImpact)
+					r.Delete("/plans/{planId}", h.DeleteProjectPlan)
 					r.Get("/resources", h.ListProjectResources)
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
