@@ -306,7 +306,7 @@ func TestGoogleLoginSuccessfulExistingUser(t *testing.T) {
 	// Exercise the issued JWT through the same middleware that accepts browser sessions.
 	meReq := httptest.NewRequest(http.MethodGet, "/users/me", nil)
 	meReq.AddCookie(authCookie)
-	protected := middleware.Auth(h.Queries, nil, nil)(http.HandlerFunc(h.GetMe))
+	protected := middleware.Auth(h.Queries, nil, nil, auth.NoopPATLastUsedRecorder{})(http.HandlerFunc(h.GetMe))
 	var me UserResponse
 	testutil.Call(t, protected.ServeHTTP, meReq).Want(http.StatusOK).JSON(&me)
 	if me.ID != userID || me.Email != email {
