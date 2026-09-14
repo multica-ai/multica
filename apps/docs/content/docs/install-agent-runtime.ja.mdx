@@ -40,6 +40,7 @@ Multica は現在、次のコマンドを検出します。
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 公式サイト](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/en/docs/cli) |
+| ZCode | `zcode-acp-server` | [ZCode](https://zcode.z.ai) |
 
 ここでの「対応」とは、Multica が該当する CLI を呼び出せるという意味です。そのツールのアカウント、サブスクリプション、モデルの利用枠を Multica が提供するわけではありません。
 
@@ -54,6 +55,7 @@ Reasonix を使う場合は、デーモンを起動する前に `reasonix setup`
 QwenPaw を使う場合は、QwenPaw 側の設定でプロバイダーとモデルを選んでください。Multica が実行時に QwenPaw のモデルを上書きすることはできません。
 
 MiniMax Code を使う場合は、対応する Node.js バージョン（`>=22.19 <23` または `>=24 <27`）をインストールし、`npm install --global @minimax-ai/code@latest` を実行してください。npm のグローバルインストールによって `mcode` は npm のグローバル実行ファイルディレクトリに配置されます。`command -v mcode` または `Get-Command mcode` で見つからない場合は、そのディレクトリを `PATH` に追加してください。その後 `mcode login` を実行します。モデルは MiniMax Code が管理し、Multica から ACP 経由で上書きすることはできません。
+ZCode を使うには、ZCode デスクトップアプリをインストールしてアプリ内で一度サインインし、コミュニティ ACP ブリッジ [zcode-acp-server](https://github.com/william0wang/zcode-acp)(`npm i -g zcode-acp-server`、william0wang/zcode-acp#38 を含むリリースが必要)をインストールします。ブリッジはデスクトップアプリがインストールした公式ランタイムを駆動し、その資格情報を再利用するため、別のサインインは不要です。
 
 DeepSeek Harness を使う場合は、Node.js 20+ をインストールして `npm install -g @deepseek-ai/dsh` を実行し、Multica ランタイムプロファイルを追加してください。このバンドルが Multica の利用する `--stdio` プロトコルを提供しており、素の `dsh` だけでは使えない理由でもあります。`MULTICA_DSH_PROFILE_BUNDLE` にインストールするバンドルを設定すればデーモンが追加します。手動で行う場合は `dsh plugin --profile multica add <bundle>` を実行します。`<bundle>` は `dsh plugin` が受け付けるもの、つまり npm のパッケージ名、ディレクトリ、パック済み tarball のいずれかで、Multica 自身のブリッジは [multica-ai/dsh-multica-runtime](https://github.com/multica-ai/dsh-multica-runtime) にあります。これはまだ公開 npm レジストリに公開されていないため（[multica#6936](https://github.com/multica-ai/multica/issues/6936)）、現時点でセルフホストのチームはそのリポジトリからビルドし、変数をビルド出力のディレクトリに向けます。デーモンを動かすマシンとビルドしたマシンが別なら、`npm pack` が生成する tarball を指定してください。ブリッジが公開されれば、パッケージ名を指定するのが最も簡単になります。いずれの場合も、自チームが公開・ビルドしたものを優先してください。この値は追加の確認なしに各デーモンホストの DSH ホームへインストールされるため、素性の分からないサードパーティのパッケージを指定することは利便性の問題ではなくサプライチェーンの判断です。npm パッケージではなく DeepSeek Harness Desktop をインストールした場合、デーモンはそのアプリが生成する CLI シムも、アプリ自身のユーザーデータディレクトリから探します。macOS は `~/Library/Application Support/DSH Desktop`、Windows は `%APPDATA%\DSH Desktop` です。Windows のそれはローミングのアプリケーションデータであり、インストール先ではありません。アプリ自体は Program Files または `%LOCALAPPDATA%\Programs` に入りますが、駆動される CLI はユーザーごとの他の状態と同じ場所に置かれます。これらのパスのバージョン部分は生成された ID なので、デーモンは列挙して最新のものを優先します。PATH に他のものは必要ありません。生成されたシムはアプリ同梱のランタイムを絶対パスで起動します。DSH Desktop が既定以外の場所にある場合は `MULTICA_DSH_PATH` でそのシムを指定してください。デーモンは `dsh --profile multica --probe` が成功した場合のみ DeepSeek Harness を登録し、失敗した場合は `/health` にプロファイルの欠落を報告します。デーモンを起動する前に `DEEPSEEK_API_KEY` を設定（または dsh の設定に保存）してください。
 

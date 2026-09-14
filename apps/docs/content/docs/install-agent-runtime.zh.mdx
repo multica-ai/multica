@@ -40,6 +40,7 @@ Multica 当前会检测以下命令：
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 官方站](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/docs/cli) |
+| ZCode | `zcode-acp-server` | [ZCode](https://zcode.z.ai) |
 
 "受支持"表示 Multica 能够调用对应 CLI，不代表 Multica 会替你提供该工具的账号、订阅或模型额度。
 
@@ -54,6 +55,7 @@ Multica 当前会检测以下命令：
 使用 QwenPaw 时，请在 QwenPaw 自身的配置里选择模型服务和模型。Multica 无法在执行时覆盖 QwenPaw 的模型。
 
 使用 MiniMax Code 时，请安装受支持的 Node.js 版本（`>=22.19 <23` 或 `>=24 <27`），并运行 `npm install --global @minimax-ai/code@latest`。全局 npm 安装会把 `mcode` 放入 npm 的全局可执行目录；如果 `command -v mcode` 或 `Get-Command mcode` 找不到它，请将该目录加入 `PATH`。然后运行 `mcode login`。模型由 MiniMax Code 管理，Multica 无法通过 ACP 覆盖它。
+使用 ZCode 时,请安装 ZCode 桌面版并在应用内登录一次,再安装社区 ACP 桥 [zcode-acp-server](https://github.com/william0wang/zcode-acp)(`npm i -g zcode-acp-server`,需要包含 william0wang/zcode-acp#38 修复的版本)。桥会驱动桌面版安装的官方运行时并复用其登录凭据,无需单独登录。
 
 使用 DeepSeek Harness 时，请先安装 Node.js 20+ 并运行 `npm install -g @deepseek-ai/dsh`，然后为它安装 Multica 运行时 profile —— 这个 bundle 实现了 Multica 驱动的 `--stdio` 协议，也是单独的 `dsh` 无法直接使用的原因。把 `MULTICA_DSH_PROFILE_BUNDLE` 设为要安装的 bundle，守护进程会替你安装；也可以自己执行 `dsh plugin --profile multica add <bundle>`。`<bundle>` 可以是 `dsh plugin` 接受的任意形式——npm 包名、目录，或打包好的 tarball——Multica 自己的桥接实现在 [multica-ai/dsh-multica-runtime](https://github.com/multica-ai/dsh-multica-runtime)。它目前还没有发布到公共 npm registry（[multica#6936](https://github.com/multica-ai/multica/issues/6936)），所以现阶段自托管团队的做法是：从该仓库自行构建，然后把变量指向构建产物目录；如果运行守护进程的机器和构建机器不是同一台，就指向 `npm pack` 产出的 tarball。等桥接发布之后，直接填包名是最省事的选择。无论选哪种，都优先用你们自己发布或构建的产物：这个值会在没有二次确认的情况下被装进每一台守护进程宿主的 DSH 家目录，填一个未经审查的第三方包是供应链决策，不是图方便。如果你装的是 DeepSeek Harness Desktop 而不是 npm 包，守护进程也会去找这个应用生成的 CLI shim，位置在它自己的用户级数据目录下：macOS 是 `~/Library/Application Support/DSH Desktop`，Windows 是 `%APPDATA%\DSH Desktop`。Windows 上这是漫游应用数据目录，不是安装目录：应用本身装在 Program Files 或 `%LOCALAPPDATA%\Programs`，但它驱动的 CLI 和其他用户级状态放在一起。这些路径里的版本层是生成出来的 id，所以守护进程会枚举并优先取最新的一份。不需要 PATH 上有别的东西——生成的 shim 会用绝对路径调用应用自带的运行时。如果 DSH Desktop 装在非默认位置，请用 `MULTICA_DSH_PATH` 指向那个 shim。守护进程只有在 `dsh --profile multica --probe` 成功后才注册 DeepSeek Harness；失败时会在 `/health` 报告缺少 profile。启动守护进程前请设置 `DEEPSEEK_API_KEY`（或在 dsh 自身设置中保存）。
 
