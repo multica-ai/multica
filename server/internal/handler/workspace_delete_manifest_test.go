@@ -86,6 +86,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"lark_chat_session_binding":          workspaceDelete,
 	"lark_inbound_audit":                 workspaceDelete,
 	"lark_inbound_message_dedup":         workspaceDelete,
+	"lark_install_session":               workspaceDelete,
 	"lark_installation":                  workspaceDelete,
 	"lark_outbound_card_message":         workspaceDelete,
 	"lark_user_binding":                  workspaceDelete,

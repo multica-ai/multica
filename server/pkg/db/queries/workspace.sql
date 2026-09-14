@@ -176,6 +176,12 @@ cleared_binding_tokens AS (
 cleared_installations AS (
     DELETE FROM channel_installation WHERE workspace_id = $1
 ),
+cleared_install_sessions AS (
+    -- In-flight device-flow bind sessions. Short-lived, but a workspace
+    -- deleted while a QR is on screen would otherwise leave rows the sweep
+    -- only reaches at their expiry.
+    DELETE FROM lark_install_session WHERE workspace_id = $1
+),
 cleared_issue_properties AS (
     DELETE FROM issue_property WHERE workspace_id = $1
 ),

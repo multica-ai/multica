@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -64,10 +65,10 @@ const (
 
 // RegistrationServiceConfig configures the service.
 type RegistrationServiceConfig struct {
-	// SessionTTL caps how long a successful or errored session stays in
-	// the in-process cache before GC. Default 30 minutes — long enough
-	// for the frontend to fetch the final status after the dialog
-	// closes, short enough that abandoned sessions do not pin memory
+	// SessionTTL caps how long a successful or errored session row stays
+	// readable before the sweep drops it. Default 30 minutes — long
+	// enough for the frontend to fetch the final status after the dialog
+	// closes, short enough that finished sessions do not accumulate
 	// forever. Independent of the device-flow expiry (Lark's
 	// expires_in, currently 1h), which bounds the PENDING phase; this
 	// TTL only starts once a session has already terminated.
@@ -104,20 +105,23 @@ func (c RegistrationServiceConfig) withDefaults() RegistrationServiceConfig {
 //     credentials, then writes lark_installation + the installer's
 //     lark_user_binding in a single transaction.
 //
-// In-process session storage is intentional: device-flow sessions are
-// short-lived (<10 min), the QR has no value outside the same browser
-// session that initiated it, and persisting half-completed installs
-// into Postgres would add a migration + GC sweep without delivering any
-// product capability the user can re-use across server restarts.
+// The status the browser polls lives in Postgres (lark_install_session),
+// NOT in this process. It used to be in-process only, which meant
+// GET /lark/install/{id}/status could be answered solely by the process
+// that served begin — any other replica, or the same one after a
+// restart, 404'd and the dialog gave up ~5s in with "session lost"
+// (MUL-7340). The in-process map below now holds only what the polling
+// goroutine needs to talk to Lark; the device_code never leaves it.
 type RegistrationService struct {
-	cfg         RegistrationServiceConfig
-	client      *RegistrationClient
-	api         APIClient
-	queries     *ChannelStore
-	tx          TxStarter
-	installs    *InstallationService
-	binder      InstallerBinder
-	authQueries authQueriesAdapter
+	cfg          RegistrationServiceConfig
+	client       *RegistrationClient
+	api          APIClient
+	queries      *ChannelStore
+	tx           TxStarter
+	installs     *InstallationService
+	binder       InstallerBinder
+	authQueries  authQueriesAdapter
+	sessionStore installSessionStore
 
 	// bus is optional. When wired (SetEventBus), a successful install
 	// publishes lark_installation:created the moment the row commits, so
@@ -126,9 +130,30 @@ type RegistrationService struct {
 	// is valid — install still works, it just won't push the WS frame.
 	bus *events.Bus
 
+	// sessions holds the polling goroutines' working state, keyed by
+	// session id. A miss here is normal and harmless: it just means the
+	// goroutine belongs to another process (or has finished). Status
+	// reads never consult this map.
 	mu       sync.Mutex
 	sessions map[string]*registrationSession
 }
+
+// installSessionStore is the durable status projection for an in-flight
+// device-flow install. Kept behind an interface, like authQueriesAdapter,
+// so unit tests can stub it instead of standing up Postgres.
+type installSessionStore interface {
+	CreateLarkInstallSession(ctx context.Context, arg db.CreateLarkInstallSessionParams) (db.LarkInstallSession, error)
+	GetLarkInstallSession(ctx context.Context, arg db.GetLarkInstallSessionParams) (db.LarkInstallSession, error)
+	MarkLarkInstallSessionSuccess(ctx context.Context, arg db.MarkLarkInstallSessionSuccessParams) (db.LarkInstallSession, error)
+	MarkLarkInstallSessionError(ctx context.Context, arg db.MarkLarkInstallSessionErrorParams) (db.LarkInstallSession, error)
+	SweepLarkInstallSessions(ctx context.Context, arg db.SweepLarkInstallSessionsParams) error
+}
+
+// sessionWriteTimeout bounds the status writes the polling goroutine
+// makes. These cannot ride the goroutine's own context: that context is
+// deadlined to the device_code expiry, so the expiry branch itself would
+// always write with an already-cancelled context.
+const sessionWriteTimeout = 10 * time.Second
 
 // authQueriesAdapter is the minimal lookup surface the service needs
 // before kicking off a session: agent ↔ workspace ownership validation.
@@ -171,15 +196,16 @@ func NewRegistrationService(
 		return nil, errors.New("lark registration: InstallerBinder is required")
 	}
 	return &RegistrationService{
-		cfg:         cfg.withDefaults(),
-		client:      client,
-		api:         api,
-		queries:     NewChannelStore(queries),
-		tx:          tx,
-		installs:    installs,
-		binder:      binder,
-		authQueries: queries,
-		sessions:    make(map[string]*registrationSession),
+		cfg:          cfg.withDefaults(),
+		client:       client,
+		api:          api,
+		queries:      NewChannelStore(queries),
+		tx:           tx,
+		installs:     installs,
+		binder:       binder,
+		authQueries:  queries,
+		sessionStore: queries,
+		sessions:     make(map[string]*registrationSession),
 	}, nil
 }
 
@@ -214,7 +240,14 @@ func (s *RegistrationService) publishInstalled(workspaceID, installationID pgtyp
 	})
 }
 
-// registrationSession is the in-memory state for one in-flight install.
+// registrationSession is the polling goroutine's working state for one
+// in-flight install. It holds ONLY what that goroutine needs in order to
+// keep talking to Lark; the status the browser reads lives in
+// lark_install_session so any process can serve it.
+//
+// deviceCode deliberately stays here and is never persisted: it is a
+// bearer credential — anyone holding it can complete the authorization —
+// and only the process running the goroutine has any use for it.
 type registrationSession struct {
 	id          string
 	workspaceID pgtype.UUID
@@ -233,52 +266,58 @@ type registrationSession struct {
 	// (it is informational — the authoritative cloud flows back through
 	// finishSuccess via the loop's local).
 	region Region
-
-	mu             sync.Mutex
-	status         RegistrationSessionStatus
-	installationID pgtype.UUID
-	errorReason    string
-	errorMessage   string
-	gcAfter        time.Time
 }
 
-func (s *registrationSession) snapshot() RegistrationSessionState {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return RegistrationSessionState{
-		ID:             s.id,
-		Status:         s.status,
-		InstallationID: s.installationID,
-		ErrorReason:    s.errorReason,
-		ErrorMessage:   s.errorMessage,
-		// InitiatorID is immutable after BeginInstall, so it is safe to
-		// read outside the mutex too — it is included here so the status
-		// handler can scope reads to the session's initiator.
-		InitiatorID: s.initiatorID,
+// markSuccess records the terminal success and drops the goroutine's
+// working state. The UPDATE is guarded on status = 'pending' (see
+// queries/lark_install_session.sql), so first writer wins: if the expiry
+// deadline fires while a success is committing, whichever lands first is
+// what the user keeps seeing. A no-rows result is therefore an expected
+// outcome, not an error.
+func (s *RegistrationService) markSuccess(sess *registrationSession, installationID pgtype.UUID) {
+	ctx, cancel := context.WithTimeout(context.Background(), sessionWriteTimeout)
+	defer cancel()
+	if _, err := s.sessionStore.MarkLarkInstallSessionSuccess(ctx, db.MarkLarkInstallSessionSuccessParams{
+		ID:             sess.id,
+		WorkspaceID:    sess.workspaceID,
+		InstallationID: installationID,
+		GcAfter:        pgtype.Timestamptz{Time: s.gcDeadline(), Valid: true},
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		// The install itself committed; only the status projection
+		// failed. Log loudly — the dialog will fall back to reporting
+		// the session as expired once the window closes, and the
+		// installation row is already live either way.
+		s.cfg.Logger.Error("lark registration: record session success",
+			"session_id", sess.id, "err", err)
 	}
+	s.forgetSession(sess.id)
 }
 
-func (s *registrationSession) markSuccess(installationID pgtype.UUID, gcAfter time.Time) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.status = RegistrationStatusSuccess
-	s.installationID = installationID
-	s.gcAfter = gcAfter
-}
-
-func (s *registrationSession) markError(reason, msg string, gcAfter time.Time) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// Idempotent: if a parallel goroutine already terminated the
-	// session (e.g. expiry fired between status reads), don't clobber
-	// the first reason — the user already saw it.
-	if s.status != RegistrationStatusPending {
-		return
+// markError records a terminal failure under the same first-writer-wins
+// guard as markSuccess, then drops the goroutine's working state.
+func (s *RegistrationService) markError(sess *registrationSession, reason, msg string) {
+	ctx, cancel := context.WithTimeout(context.Background(), sessionWriteTimeout)
+	defer cancel()
+	if _, err := s.sessionStore.MarkLarkInstallSessionError(ctx, db.MarkLarkInstallSessionErrorParams{
+		ID:           sess.id,
+		WorkspaceID:  sess.workspaceID,
+		ErrorReason:  reason,
+		ErrorMessage: msg,
+		GcAfter:      pgtype.Timestamptz{Time: s.gcDeadline(), Valid: true},
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		s.cfg.Logger.Error("lark registration: record session error",
+			"session_id", sess.id, "reason", reason, "err", err)
 	}
-	s.status = RegistrationStatusError
-	s.errorReason = reason
-	s.errorMessage = msg
-	s.gcAfter = gcAfter
+	s.forgetSession(sess.id)
+}
+
+// forgetSession drops the goroutine's working state once it has
+// terminated. The durable row outlives it by SessionTTL so the dialog can
+// still read the final status.
+func (s *RegistrationService) forgetSession(id string) {
+	s.mu.Lock()
+	delete(s.sessions, id)
+	s.mu.Unlock()
 }
 
 // RegistrationSessionState is the read-only snapshot the handler
@@ -372,6 +411,29 @@ func (s *RegistrationService) BeginInstall(ctx context.Context, p BeginInstallPa
 	if err != nil {
 		return BeginInstallResult{}, fmt.Errorf("lark registration: mint session id: %w", err)
 	}
+	expiresAt := now.Add(begin.ExpiresIn)
+
+	// Persist the status projection BEFORE starting the goroutine. If this
+	// write fails the whole begin fails: a session the browser could never
+	// read is worse than no QR at all — it would render a scannable code
+	// and then report "session lost" on the first poll, which is exactly
+	// the bug this row exists to prevent.
+	if _, err := s.sessionStore.CreateLarkInstallSession(ctx, db.CreateLarkInstallSessionParams{
+		ID:          sessionID,
+		WorkspaceID: p.WorkspaceID,
+		AgentID:     p.AgentID,
+		InitiatorID: p.InitiatorID,
+		ExpiresAt:   pgtype.Timestamptz{Time: expiresAt, Valid: true},
+	}); err != nil {
+		return BeginInstallResult{}, fmt.Errorf("lark registration: persist session: %w", err)
+	}
+
+	// Opportunistic sweep of finished / long-dead rows. Begin is the rare
+	// call (one per bind attempt), so this costs nothing measurable —
+	// unlike sweeping on the status read, which fires every 5s per open
+	// dialog.
+	s.sweepSessions(ctx)
+
 	sess := &registrationSession{
 		id:          sessionID,
 		workspaceID: p.WorkspaceID,
@@ -381,9 +443,8 @@ func (s *RegistrationService) BeginInstall(ctx context.Context, p BeginInstallPa
 		domain:      begin.Domain,
 		qrCodeURL:   begin.QRCodeURL,
 		interval:    begin.Interval,
-		expiresAt:   now.Add(begin.ExpiresIn),
+		expiresAt:   expiresAt,
 		region:      region,
-		status:      RegistrationStatusPending,
 	}
 	s.mu.Lock()
 	s.sessions[sessionID] = sess
@@ -412,23 +473,47 @@ func (s *RegistrationService) BeginInstall(ctx context.Context, p BeginInstallPa
 // ErrRegistrationSessionNotFound is returned for unknown / expired /
 // GC'd sessions; the frontend treats it the same as an error reason
 // of "session_lost" — prompt the user to restart the install.
-func (s *RegistrationService) GetSession(workspaceID pgtype.UUID, sessionID string) (RegistrationSessionState, error) {
+func (s *RegistrationService) GetSession(ctx context.Context, workspaceID pgtype.UUID, sessionID string) (RegistrationSessionState, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return RegistrationSessionState{}, ErrRegistrationSessionNotFound
 	}
-	s.gcExpiredLocked()
-	s.mu.Lock()
-	sess, ok := s.sessions[sessionID]
-	s.mu.Unlock()
-	if !ok {
-		return RegistrationSessionState{}, ErrRegistrationSessionNotFound
+	// Read the durable row, never the in-process map: the goroutine that
+	// owns this session may be running in a different backend process.
+	// The query is workspace-scoped, so a session id from another
+	// workspace is indistinguishable from one that never existed —
+	// leaking "exists but wrong workspace" would let an attacker
+	// enumerate session ids across workspaces.
+	row, err := s.sessionStore.GetLarkInstallSession(ctx, db.GetLarkInstallSessionParams{
+		ID:          sessionID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return RegistrationSessionState{}, ErrRegistrationSessionNotFound
+		}
+		return RegistrationSessionState{}, fmt.Errorf("lark registration: load session: %w", err)
 	}
-	if !uuidEqual(sess.workspaceID, workspaceID) {
-		// Treat as not found — leaking "exists but wrong workspace"
-		// would let an attacker enumerate session ids across workspaces.
-		return RegistrationSessionState{}, ErrRegistrationSessionNotFound
+
+	state := RegistrationSessionState{
+		ID:             row.ID,
+		Status:         RegistrationSessionStatus(row.Status),
+		InstallationID: row.InstallationID,
+		ErrorReason:    row.ErrorReason,
+		ErrorMessage:   row.ErrorMessage,
+		InitiatorID:    row.InitiatorID,
 	}
-	return sess.snapshot(), nil
+
+	// A row still pending past Lark's window means the process owning the
+	// polling goroutine died before it could record the expiry. Report the
+	// expiry from the timestamp rather than leaving the dialog polling a
+	// row that will never move again.
+	if state.Status == RegistrationStatusPending &&
+		row.ExpiresAt.Valid && !row.ExpiresAt.Time.After(s.cfg.Now()) {
+		state.Status = RegistrationStatusError
+		state.ErrorReason = RegistrationReasonExpired
+		state.ErrorMessage = "QR expired before authorization"
+	}
+	return state, nil
 }
 
 // runPolling is the background loop. The pattern matches the upstream
@@ -470,7 +555,7 @@ func (s *RegistrationService) runPolling(sess *registrationSession) {
 			s.cfg.Logger.Info("lark registration: session expired",
 				"session_id", sess.id,
 				"workspace_id", uuidString(sess.workspaceID))
-			sess.markError(RegistrationReasonExpired, "QR expired before authorization", s.gcDeadline())
+			s.markError(sess, RegistrationReasonExpired, "QR expired before authorization")
 			return
 		case <-time.After(interval):
 		}
@@ -481,7 +566,7 @@ func (s *RegistrationService) runPolling(sess *registrationSession) {
 			if errors.As(err, &re) {
 				s.cfg.Logger.Warn("lark registration: protocol error",
 					"session_id", sess.id, "code", re.Code, "desc", re.Description)
-				sess.markError(RegistrationReasonProtocol, re.Error(), s.gcDeadline())
+				s.markError(sess, RegistrationReasonProtocol, re.Error())
 				return
 			}
 			// Transient transport error (DNS, network) — log and try
@@ -524,7 +609,7 @@ func (s *RegistrationService) runPolling(sess *registrationSession) {
 			}
 			s.cfg.Logger.Info("lark registration: terminal error",
 				"session_id", sess.id, "code", res.Err.Code, "desc", res.Err.Description)
-			sess.markError(reason, res.Err.Error(), s.gcDeadline())
+			s.markError(sess, reason, res.Err.Error())
 			return
 		case res.Status == "slow_down":
 			// Honor Lark's back-off — bump by 5s, per RFC 8628 §3.5.
@@ -557,11 +642,11 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 	if err != nil {
 		s.cfg.Logger.Warn("lark registration: bot info failed",
 			"session_id", sess.id, "err", err)
-		sess.markError(RegistrationReasonBotInfoFailed, err.Error(), s.gcDeadline())
+		s.markError(sess, RegistrationReasonBotInfoFailed, err.Error())
 		return
 	}
 	if info.OpenID == "" {
-		sess.markError(RegistrationReasonBotInfoFailed, "bot info missing open_id", s.gcDeadline())
+		s.markError(sess, RegistrationReasonBotInfoFailed, "bot info missing open_id")
 		return
 	}
 
@@ -574,7 +659,7 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 	if err != nil {
 		s.cfg.Logger.Error("lark registration: seal app_secret",
 			"session_id", sess.id, "err", err)
-		sess.markError(RegistrationReasonInternalError, err.Error(), s.gcDeadline())
+		s.markError(sess, RegistrationReasonInternalError, err.Error())
 		return
 	}
 
@@ -582,7 +667,7 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 	if err != nil {
 		s.cfg.Logger.Error("lark registration: begin tx",
 			"session_id", sess.id, "err", err)
-		sess.markError(RegistrationReasonInternalError, err.Error(), s.gcDeadline())
+		s.markError(sess, RegistrationReasonInternalError, err.Error())
 		return
 	}
 	defer tx.Rollback(ctx)
@@ -600,7 +685,7 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 	if err := qtx.ReclaimDeadInstallationByAppID(ctx, sess.workspaceID, sess.agentID, res.ClientID); err != nil {
 		s.cfg.Logger.Warn("lark registration: reclaim dead installation",
 			"session_id", sess.id, "err", err)
-		sess.markError(RegistrationReasonInternalError, err.Error(), s.gcDeadline())
+		s.markError(sess, RegistrationReasonInternalError, err.Error())
 		return
 	}
 
@@ -626,7 +711,7 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
 			msg = s.liveOwnerConflictMessage(ctx, sess.workspaceID, res.ClientID)
 		}
-		sess.markError(RegistrationReasonInstallationConflict, msg, s.gcDeadline())
+		s.markError(sess, RegistrationReasonInstallationConflict, msg)
 		return
 	}
 
@@ -638,17 +723,17 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 	}); err != nil {
 		s.cfg.Logger.Warn("lark registration: bind installer",
 			"session_id", sess.id, "err", err)
-		sess.markError(RegistrationReasonInstallerBindFailed, err.Error(), s.gcDeadline())
+		s.markError(sess, RegistrationReasonInstallerBindFailed, err.Error())
 		return
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		s.cfg.Logger.Error("lark registration: commit",
 			"session_id", sess.id, "err", err)
-		sess.markError(RegistrationReasonInternalError, err.Error(), s.gcDeadline())
+		s.markError(sess, RegistrationReasonInternalError, err.Error())
 		return
 	}
-	sess.markSuccess(inst.ID, s.gcDeadline())
+	s.markSuccess(sess, inst.ID)
 	// Publish at the commit point so the connection badge updates on every
 	// workspace client without a page refresh — not only on the tab that
 	// happens to poll the status endpoint to success.
@@ -686,21 +771,17 @@ func (s *RegistrationService) gcDeadline() time.Time {
 	return s.cfg.Now().Add(s.cfg.SessionTTL)
 }
 
-// gcExpiredLocked drops any session whose `gcAfter` is in the past.
-// Pending sessions are NOT GC'd here — runPolling will set their
-// gcAfter when it terminates, and an expired-by-deadline session
-// closes itself.
-func (s *RegistrationService) gcExpiredLocked() {
+// sweepSessions drops rows nobody can still be waiting on: terminal ones
+// past gc_after, and pending ones whose device_code expired. Pending rows
+// survive until expires_at so a status read inside the live window always
+// finds its row. Best-effort — a failed sweep only leaves rows behind.
+func (s *RegistrationService) sweepSessions(ctx context.Context) {
 	now := s.cfg.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, sess := range s.sessions {
-		sess.mu.Lock()
-		drop := !sess.gcAfter.IsZero() && sess.gcAfter.Before(now)
-		sess.mu.Unlock()
-		if drop {
-			delete(s.sessions, id)
-		}
+	if err := s.sessionStore.SweepLarkInstallSessions(ctx, db.SweepLarkInstallSessionsParams{
+		GcAfter:   pgtype.Timestamptz{Time: now, Valid: true},
+		ExpiresAt: pgtype.Timestamptz{Time: now, Valid: true},
+	}); err != nil {
+		s.cfg.Logger.Warn("lark registration: sweep sessions", "err", err)
 	}
 }
 
@@ -714,13 +795,6 @@ func randomSessionID() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil
-}
-
-func uuidEqual(a, b pgtype.UUID) bool {
-	if !a.Valid || !b.Valid {
-		return false
-	}
-	return a.Bytes == b.Bytes
 }
 
 // botNamePreset builds the display name we pre-fill on Lark's
