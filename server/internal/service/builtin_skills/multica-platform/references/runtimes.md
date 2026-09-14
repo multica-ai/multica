@@ -28,6 +28,7 @@ The chain is:
 multica runtime list --output json
 multica runtime usage <runtime-id> --output json
 multica runtime activity <runtime-id> --output json
+multica usage export --from 2026-09-01 --to 2026-09-08 --timezone Asia/Shanghai --group-by agent,provider,model,day
 multica runtime update <runtime-id> --target-version <version> --output json
 multica runtime delete <runtime-id>
 multica repo checkout <url>
@@ -37,6 +38,13 @@ multica repo checkout <url> --fresh
 
 Runtime and repo commands affect active agent execution. Do not restart daemons,
 update runtimes, or check out arbitrary repos just to test.
+
+`usage export` is read-only and workspace-scoped. It interprets date-only
+`--from` / `--to` values as local midnights in `--timezone`; RFC3339 values are
+exact instants. The interval is always half-open (`from <= usage < to`). Agent
+filters may be repeated, and `--runtime` / `--project` accept UUIDs. The CLI
+follows every server cursor before printing one deterministic JSON document, so
+the exported result is never a silently truncated first page.
 
 `runtime update` and `runtime delete` are writes. Starting a runtime update is
 limited to its owner or a workspace owner/admin; the original initiator may keep

@@ -152,9 +152,24 @@ multica runtime list
 multica runtime rename <runtime-id> "Office Mac"
 multica runtime usage <runtime-id>
 multica runtime activity <runtime-id>
+
+multica usage export \
+  --from 2026-09-01 \
+  --to 2026-09-08 \
+  --timezone Asia/Shanghai \
+  --group-by agent,provider,model,day
 ```
 
 Deleting a runtime that still has active agents bound to it is refused by default. `multica runtime delete <id> --cascade` unbinds those agents, preserves their configuration and history, and cancels their active runs.
+
+`usage export` returns authoritative workspace token usage as JSON. Date-only
+bounds are local midnights in the requested IANA timezone, while RFC3339 bounds
+remain exact instants. The interval is half-open: records at `--from` are
+included and records at `--to` are excluded. Use repeatable `--agent` filters
+with an agent ID or exact name; `--runtime` and `--project` accept UUIDs. The
+allowed grouping dimensions are `agent`, `provider`, `model`, and `day`. The CLI
+retrieves all cursor pages before printing, so the JSON document is not
+silently truncated.
 
 See [Daemon and runtimes](/daemon-runtimes) for how it works and for custom profiles.
 
@@ -169,7 +184,7 @@ See [Daemon and runtimes](/daemon-runtimes) for how it works and for custom prof
 | `autopilot` | Manage automations, triggers, and run history |
 | `workspace` | Create, view, and switch workspaces, and invite members |
 | `repo` | Manage workspace repositories and check them out locally |
-| `daemon`, `runtime` | Start and stop the local daemon; view and manage runtimes |
+| `daemon`, `runtime`, `usage` | Start and stop the local daemon; view runtimes and export workspace usage |
 | `attachment` | Upload or download attachments |
 | `user profile` | View or update the current user's profile |
 | `auth`, `login`, `setup` | Log in, check auth status, and initialize a connection |
