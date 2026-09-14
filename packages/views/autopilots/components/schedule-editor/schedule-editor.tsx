@@ -47,7 +47,7 @@ import {
   parseCron,
   toCron,
 } from "./cron-mapping";
-import { classifyScheduleRejection } from "./validate";
+import { classifyScheduleRejection, isCronPreviewUnsupported } from "./validate";
 import { useDescribeSchedule } from "./describe";
 import {
   clampWindow,
@@ -394,7 +394,10 @@ export function ScheduleEditor({
   // different controls.
   const previewIsCurrent = previewExpr === committedCron;
   const liveRejection =
-    previewIsCurrent && preview.error instanceof ApiError && preview.error.status === 400
+    previewIsCurrent &&
+    preview.error instanceof ApiError &&
+    preview.error.status === 400 &&
+    !isCronPreviewUnsupported(preview.error)
       ? preview.error
       : null;
 
@@ -446,6 +449,7 @@ export function ScheduleEditor({
   const rejection = liveRejection ?? verdict?.rejection ?? null;
   const scheduleRejection = rejection !== null ? classifyScheduleRejection(rejection) : null;
   const cronErrorDetail = scheduleRejection?.detail ?? null;
+  const previewUnsupported = previewIsCurrent && isCronPreviewUnsupported(preview.error);
   const previewUnavailable =
     previewIsCurrent &&
     ((preview.error !== null && cronErrorDetail === null) ||
@@ -527,6 +531,13 @@ export function ScheduleEditor({
   const timezones = useMemo(() => timezoneOptions(value.timezone), [value.timezone]);
 
   const description = describe(value);
+  const advancedNotice = serverAccepted
+    ? t(($) => $.schedule_editor.advanced_hint)
+    : previewUnsupported
+      ? t(($) => $.schedule_editor.advanced_unsupported)
+      : previewUnavailable
+        ? t(($) => $.schedule_editor.advanced_unverified)
+        : t(($) => $.schedule_editor.advanced_checking);
 
   const dayKindLabel = (kind: DayPattern["kind"]): string => {
     if (kind === "every") return t(($) => $.schedule_editor.days_every);
@@ -795,13 +806,7 @@ export function ScheduleEditor({
             // Three different things are being said here, and only the first is
             // a statement about the expression: the server took it and the
             // controls cannot show it; we could not ask; we have not asked yet.
-            <p>
-              {serverAccepted
-                ? t(($) => $.schedule_editor.advanced_hint)
-                : previewUnavailable
-                  ? t(($) => $.schedule_editor.advanced_unverified)
-                  : t(($) => $.schedule_editor.advanced_checking)}
-            </p>
+            <p>{advancedNotice}</p>
           ) : cronOpen ? (
             <p>{t(($) => $.schedule_editor.cron_hint)}</p>
           ) : null}
@@ -828,7 +833,9 @@ export function ScheduleEditor({
           <p className="mb-1.5 font-medium text-foreground">
             {t(($) => $.schedule_editor.next_runs_label)}
           </p>
-          {previewUnavailable ? (
+          {previewUnsupported ? (
+            <p>{t(($) => $.schedule_editor.preview_unsupported)}</p>
+          ) : previewUnavailable ? (
             <p>{t(($) => $.schedule_editor.preview_unavailable)}</p>
           ) : shownPreview !== null && shownPreview.runs.length > 0 ? (
             // A grid, not per-row flex: the localized dates are not fixed-width,

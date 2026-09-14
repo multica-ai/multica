@@ -358,10 +358,12 @@
     "cron_invalid": "该 cron 表达式无效。",
     "timezone_invalid": "服务端无法识别该时区。",
     "advanced_hint": "该表达式包含可视化编辑器暂不支持的特性。可直接编辑 cron 文本，或简化表达式以恢复可视化编辑。",
+    "advanced_unsupported": "当前后端暂不支持排期预览。请将自托管后端更新到与 Web 应用匹配的版本；更新前可视化控件保持停用。",
     "advanced_unverified": "暂时无法连接服务器校验该表达式，可视化控件保持停用。保存前请确认 cron 文本无误。",
     "advanced_checking": "正在向服务器校验该表达式，结果返回前可视化控件保持停用。",
     "next_runs_label": "接下来",
     "next_in": "{{countdown}}后",
+    "preview_unsupported": "当前后端暂不支持排期预览。请将自托管后端更新到与 Web 应用匹配的版本。仍可保存；保存前请确认 cron 文本无误。",
     "preview_unavailable": "暂时无法获取下次运行时间。",
     "no_upcoming_runs": "该表达式没有即将到来的运行。",
     "describe": {
