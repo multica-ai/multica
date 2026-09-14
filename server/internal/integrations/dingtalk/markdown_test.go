@@ -188,17 +188,43 @@ func TestQuotePreviewPreservesLiteralParagraphsAndByteBudget(t *testing.T) {
 	}
 }
 
-func TestMarkdownTitle(t *testing.T) {
-	cases := map[string]string{
-		"# Heading one\nbody":   "Heading one",
-		"\n\n## Second\nmore":   "Second",
-		"no heading here":       defaultMarkdownTitle,
-		"plain line\n# late":    defaultMarkdownTitle, // first non-empty line is not a heading
-		"###   spaced   \nbody": "spaced",
+func TestMarkdownTitlePreservesSource(t *testing.T) {
+	for _, body := range []string{
+		"# PR8125 标题\n\n第一段：苹果。\n\n第二段：香蕉。",
+		"\n## **Status** `ready` ##\nbody  ",
+		"Read [the **result**](https://example.test/result?token=private).",
+		"Read [the result][report].\n\n[report]: https://example.test/result",
+		"![](https://example.test/private.png)",
+		"```go\nfmt.Println(\"# **hello** &amp;\")\n```",
+		"~~~sh\necho ready\n~~~",
+		"    value := \"[keep](literal)\"\n",
+		"`**literal** &amp; \\*` and <https://example.test/result>",
+		"\\*literal\\* &amp; &#35; <tag>",
+		"- **First answer**\n- Second answer\n\n> Quoted answer",
+		"| Result | State |\n| --- | --- |\n| One | Done |",
+		"#\n\n---\n\n***\n\n>\n<!-- hidden -->",
+		strings.Repeat("界🚀", 2000) + "\n\nFinal conclusion.",
+	} {
+		if got := markdownTitle(body); got != body {
+			t.Errorf("title lost source: got=%q, want=%q", got, body)
+		}
 	}
-	for body, want := range cases {
-		if got := markdownTitle(body); got != want {
-			t.Errorf("markdownTitle(%q) = %q, want %q", body, got, want)
+	for _, blank := range []string{"", " \n\t"} {
+		if got := markdownTitle(blank); got != defaultMarkdownTitle {
+			t.Errorf("blank title=%q, want fallback", got)
+		}
+	}
+}
+
+func TestChunkMarkdownWithFirstBudgetPreservesUTF8AtTinyBudgets(t *testing.T) {
+	const body = "界🚀界🚀"
+	chunks := chunkMarkdownWithFirstBudget(body, 1, 2)
+	if strings.Join(chunks, "") != body {
+		t.Fatal("small budgets lost or duplicated source bytes")
+	}
+	for _, chunk := range chunks {
+		if !utf8.ValidString(chunk) {
+			t.Fatal("small budgets split a UTF-8 rune")
 		}
 	}
 }

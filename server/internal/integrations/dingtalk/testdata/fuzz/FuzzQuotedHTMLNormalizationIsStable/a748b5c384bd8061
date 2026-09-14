@@ -1,0 +1,2 @@
+go test fuzz v1
+string("> * <div>0   \t000\n    <A0>000")

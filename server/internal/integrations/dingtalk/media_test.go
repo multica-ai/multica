@@ -258,8 +258,8 @@ func TestMediaResolver_QuotedAndCurrentIndexesUseCanonicalBody(t *testing.T) {
 			"repliedMsg":{
 				"msgType":"richText", "msgId":"quoted-message", "senderNick":"Alice [Image]",
 				"content":{"richText":[
-					{"text":"quoted literal [Image]"},
-					{"type":"picture","downloadCode":"quoted-picture"}
+					{"msgType":"text","content":{"text":"quoted literal [Image]"}},
+					{"msgType":"picture","downloadCode":"quoted-picture"}
 				]}
 			}
 		}
@@ -478,5 +478,23 @@ func TestMediaResolver_RejectsHTTPSDowngradeRedirect(t *testing.T) {
 	_, _, err := resolver.fetchBytes(context.Background(), server.URL+"/image")
 	if err == nil || strings.Contains(err.Error(), "supersecret") {
 		t.Fatalf("downgrade redirect error = %v", err)
+	}
+}
+
+func TestMediaResolver_SkipsObservedQuotedCardImage(t *testing.T) {
+	env := newMediaTestEnv(t, map[string][]byte{"card-image": pngBytes})
+	var cb botCallbackData
+	wire := `{"senderStaffId":"sender","conversationType":"1","msgtype":"text","text":{"content":"inspect","repliedMsg":{"msgType":"interactiveCard","content":{"cardContent":[{"elementType":"RICHTEXT","children":[{"elementType":"UNKNOWN","value":"{}"},{"elementType":"TEXT","value":"before"},{"elementType":"IMAGE","downloadCode":"card-image"},{"elementType":"TEXT","value":"after"}]}]}}}}`
+	if err := json.Unmarshal([]byte(wire), &cb); err != nil {
+		t.Fatal(err)
+	}
+	msg, ok := inboundFromCallback(&cb, "app-key")
+	if !ok {
+		t.Fatal("card rejected")
+	}
+	inst, id, _ := mediaFixture()
+	got := env.resolver.ResolveMedia(context.Background(), inst, engine.ResolvedIdentity{}, pgtype.UUID{}, id, msg)
+	if len(got.MediaRefs) != 0 || env.resolves.Load() != 0 || len(env.store.uploads) != 0 || !strings.Contains(got.Text, "> before\n> [Image]\n> after") {
+		t.Fatalf("card image must remain a placeholder without downloading: %+v", got.MediaRefs)
 	}
 }

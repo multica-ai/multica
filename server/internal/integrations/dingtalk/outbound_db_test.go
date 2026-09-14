@@ -116,7 +116,7 @@ func testOutboundSealedInput(t *testing.T, scenario string, restart bool) {
 		t.Fatal(err)
 	}
 	ack.OnIngested(ctx, inst, first, sid)
-	const firstBody = "> **Quoted author:**\n>\n> [quoted content unavailable]\n\nfirst question"
+	const firstBody = "> **Quoted author:**\n>\n> historical &lt;tag&gt; || context\n\nfirst question"
 	var persisted string
 	if err := pool.QueryRow(ctx, "SELECT content FROM chat_message WHERE id = $1", appended.MessageID).Scan(&persisted); err != nil || persisted != firstBody {
 		t.Fatalf("canonical input=%q error=%v", persisted, err)
@@ -196,13 +196,13 @@ func testOutboundSealedInput(t *testing.T, scenario string, restart bool) {
 	if err := json.Unmarshal([]byte(httpServer.lastBody["msgParam"].(string)), &param); err != nil {
 		t.Fatal(err)
 	}
-	wantQuote := "> \\> \\*\\*Quoted author:\\*\\*  \n> \\>  \n> \\> \\[quoted content unavailable\\]  \n>   \n> first question\n\n---\n\n"
+	wantQuote := "> \\> \\*\\*Quoted author:\\*\\*  \n> \\>  \n> \\> historical &lt;tag&gt; || context  \n>   \n> first question\n\n---\n\n"
 	wantSource := "first-message"
 	if scenario == "merged" {
 		wantQuote = "> second question\n\n---\n\n"
 		wantSource = "second-message"
 	}
-	if param.Title != defaultMarkdownTitle || param.Text != wantQuote+"first answer" {
+	if param.Title != "first answer" || param.Text != wantQuote+"first answer" {
 		t.Fatalf("wrong sealed quote: %q", param.Text)
 	}
 	if restart {
