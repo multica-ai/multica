@@ -2,6 +2,7 @@
 
 import {
   issueStatusCategory,
+  statusColumnKeys,
 } from "@multica/core/issues";
 import { memo, useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
@@ -656,6 +657,9 @@ function SwimLaneViewImpl({
   const wsId = useWorkspaceId();
   const statusCatalog = useIssueStatuses(wsId);
   const { categoryOf, entryOf } = statusCatalog;
+  // Board order for `sort=status`, archived included: an issue can still sit
+  // on an archived status and has to rank with the rest (MUL-7379).
+  const statusSortOrder = useMemo(() => statusColumnKeys(statusCatalog, true), [statusCatalog]);
 
   const activeFilters = useMemo(() => ({
     // Status is enforced by visible-column rendering, not by filterIssues
@@ -867,7 +871,7 @@ function SwimLaneViewImpl({
         : null;
 
     const issueSource = swimlaneGrouping === "parent" ? mergedIssues : issues;
-    const sorted = sortIssues(issueSource, sortBy, sortDirection);
+    const sorted = sortIssues(issueSource, sortBy, sortDirection, statusSortOrder);
     for (const issue of sorted) {
       let placed = false;
       for (const lane of laneGroups) {
@@ -903,7 +907,7 @@ function SwimLaneViewImpl({
       }
     }
     return result;
-  }, [issues, mergedIssues, laneGroups, sortedStatuses, sortBy, sortDirection, headerIssueIds, swimlaneGrouping]);
+  }, [issues, mergedIssues, laneGroups, sortedStatuses, sortBy, sortDirection, statusSortOrder, headerIssueIds, swimlaneGrouping]);
 
   const laneByKey = useMemo(() => {
     const map = new Map<string, LaneGroup>();

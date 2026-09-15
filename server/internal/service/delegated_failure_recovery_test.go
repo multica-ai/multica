@@ -94,7 +94,6 @@ func TestDelegatedFailureRecoveryStatusEligibility(t *testing.T) {
 				{status: "blocked", allowed: true},
 				{status: "done"},
 				{status: "cancelled"},
-				{status: "triage"},
 				{status: "missing_recovery_status", unresolved: true},
 				{status: "custom_unstarted", category: "unstarted", allowed: true},
 				{status: "custom_started", category: "started", allowed: true},
@@ -1169,5 +1168,68 @@ func TestDelegatedFailureRecoveryTaskDoesNotRecursivelyWake(t *testing.T) {
 	}
 	if comments != 0 {
 		t.Fatalf("recursive recovery comments = %d, want 0", comments)
+	}
+}
+
+// A worker failure must not wake a coordinator whose issue is in Triage: that
+// coordinator is the issue's own assignee, the derived executor Triage does not
+// have (MUL-7189 §2.3).
+//
+// Both the pending-recovery query and canDispatchDelegatedFailureRecovery
+// exclude a Triage source, which is why the sweep does not even scan the
+// comment. This test is what keeps that true.
+//
+// The obligation is not discharged either: the comment stays in the outbox and
+// dispatches once the issue is accepted.
+func TestPendingDelegatedFailureSweepSkipsTriageSourceIssue(t *testing.T) {
+	f, svc := seedDelegatedFailureFixture(t)
+	ctx := context.Background()
+	failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET failure_reason = 'agent_error.process_failure', error = 'worker exited', completed_at = now()
+		WHERE id = $1`, failedID); err != nil {
+		t.Fatalf("stamp failed task: %v", err)
+	}
+	if target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID); err != nil || target == nil || !created {
+		t.Fatalf("ensure recovery comment = target %v created %v err %v", target != nil, created, err)
+	}
+
+	recoveryTasks := func() int {
+		t.Helper()
+		var n int
+		if err := f.pool.QueryRow(ctx, `
+			SELECT count(*) FROM agent_task_queue
+			WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&n); err != nil {
+			t.Fatalf("count recovery tasks: %v", err)
+		}
+		return n
+	}
+
+	if _, err := f.pool.Exec(ctx, `UPDATE issue SET triage_state = 'pending' WHERE id = $1`, f.issueID); err != nil {
+		t.Fatalf("move source issue into triage: %v", err)
+	}
+	result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
+	if err != nil {
+		t.Fatalf("triage-source recovery sweep: %v", err)
+	}
+	if result != (DelegatedFailureRecoverySweepResult{}) {
+		t.Fatalf("triage-source sweep = %+v, want nothing selected and nothing replayed", result)
+	}
+	if n := recoveryTasks(); n != 0 {
+		t.Fatalf("recovery tasks = %d, want none while the source issue is in Triage", n)
+	}
+
+	// Accept clears the marker and the same pending comment wakes the
+	// coordinator — which is what makes the zero above the column's doing and
+	// not an inert fixture. The status never moved: only triage_state did.
+	if _, err := f.pool.Exec(ctx, `UPDATE issue SET triage_state = NULL WHERE id = $1`, f.issueID); err != nil {
+		t.Fatalf("accept source issue: %v", err)
+	}
+	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result.Replayed != 1 {
+		t.Fatalf("post-accept sweep = %+v, %v; want one replay", result, err)
+	}
+	if n := recoveryTasks(); n != 1 {
+		t.Fatalf("recovery tasks after accept = %d, want 1", n)
 	}
 }

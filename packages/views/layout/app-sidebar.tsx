@@ -917,10 +917,9 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
               );
             })}
           </SidebarMenu>
-          {/* One utility strip: the Discord link takes the leading space the
-              help trigger was leaving empty. `justify-end` keeps the trigger
-              right-aligned once the Discord link is dismissed. */}
-          <div className="flex items-center justify-end gap-1">
+          {/* Discord fills the strip while visible; once dismissed, help
+              aligns with the navigation icons above. */}
+          <div className="flex items-center gap-1">
             <JoinDiscordCard />
             <HelpLauncher />
           </div>

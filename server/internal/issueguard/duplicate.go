@@ -43,14 +43,17 @@ func NewActiveDuplicateError(issue db.Issue, issuePrefix string) *ActiveDuplicat
 }
 
 // inactiveStatusKeys are the status keys the duplicate guards never count as an
-// active duplicate: the terminal categories, plus Triage. An issue waiting in
-// Triage has not been taken on yet, so it must not block anyone filing the same
-// work; a duplicate there is resolved by merging it from Triage.
+// active duplicate: the terminal categories.
+//
+// A Triage entry is also never an active duplicate — it has not been taken on,
+// so it must not block anyone filing the same work; a duplicate there is
+// resolved by merging it out of Triage. That is not expressible here because
+// Triage is not a status: the duplicate queries carry `triage_state IS NULL`
+// instead (MUL-7189 §2.6).
 func inactiveStatusKeys(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID) ([]string, error) {
 	return issuestatus.ExpandCategories(ctx, q, workspaceID, []string{
 		issuestatus.CategoryDone,
 		issuestatus.CategoryClosed,
-		issuestatus.Triage,
 	})
 }
 

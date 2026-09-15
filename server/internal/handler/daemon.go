@@ -2150,6 +2150,15 @@ func rerunSourceMatchesTaskScope(task, source db.AgentTaskQueue) bool {
 	if task.AgentID != source.AgentID {
 		return false
 	}
+	// A triage run is never a source to continue from (MUL-7189 §5.6). The
+	// exclusion GetLastTaskSession applies cannot reach this branch, which
+	// resolves the session from the task the user named rather than from the
+	// (agent, issue) lookup. RerunIssue already refuses a triage source, so this
+	// is the second lock on the same door — and the one that still holds for a
+	// row written by an older server mid rolling-deploy.
+	if service.IsTriageTask(source) {
+		return false
+	}
 	if task.IssueID.Valid {
 		return source.IssueID.Valid && task.IssueID == source.IssueID
 	}
@@ -5559,9 +5568,12 @@ type batchIssueGCCheckItem struct {
 // status onto a built-in key here grants it no built-in behavior anywhere else.
 //
 // A status with no lifecycle category — an unresolvable key after a failed
-// catalog read or a status created since the resolver's snapshot, and Triage,
-// which is deliberately outside the four — is returned raw with no category, so
-// every daemon fails closed and reclaims artifacts only. (MUL-7364)
+// catalog read, or a status created since the resolver's snapshot — is returned
+// raw with no category, so every daemon fails closed and reclaims artifacts
+// only. (MUL-7364)
+//
+// Triage does not reach this: it is not a status, and a Triage entry carries an
+// ordinary non-terminal one, which already reclaims artifacts only.
 func issueGCWire(status, category string) (wireStatus, wireCategory string) {
 	if !issuestatus.IsCategory(category) {
 		return status, ""

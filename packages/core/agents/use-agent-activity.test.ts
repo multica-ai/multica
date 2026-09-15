@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { Agent, AgentActivityBucket } from "../types";
 import {
@@ -17,6 +18,7 @@ function bucket(
   daysAgo: number,
   taskCount: number,
   failedCount = 0,
+  cancelledCount = 0,
 ): AgentActivityBucket {
   const t = new Date(NOW);
   t.setHours(0, 0, 0, 0);
@@ -25,6 +27,8 @@ function bucket(
     bucket_at: new Date(t.getTime() - daysAgo * DAY).toISOString(),
     task_count: taskCount,
     failed_count: failedCount,
+    completed_count: taskCount - failedCount - cancelledCount,
+    cancelled_count: cancelledCount,
   };
 }
 
@@ -66,8 +70,8 @@ describe("deriveAgentActivity", () => {
       NOW,
     );
     expect(result.buckets).toHaveLength(30);
-    expect(result.buckets[0]).toEqual({ total: 1, failed: 0 });
-    expect(result.buckets[29]).toEqual({ total: 5, failed: 0 });
+    expect(result.buckets[0]).toMatchObject({ total: 1, failed: 0 });
+    expect(result.buckets[29]).toMatchObject({ total: 5, failed: 0 });
     expect(result.daysSinceCreated).toBe(30);
   });
 
@@ -83,7 +87,7 @@ describe("deriveAgentActivity", () => {
     expect(result.daysSinceCreated).toBe(0);
     // Today's bucket still records — pre-life days simply look like zero
     // days, which is on purpose.
-    expect(result.buckets[29]).toEqual({ total: 1, failed: 0 });
+    expect(result.buckets[29]).toMatchObject({ total: 1, failed: 0 });
   });
 
   it("ignores buckets older than the 30-day window", () => {
@@ -111,6 +115,57 @@ describe("deriveAgentActivity", () => {
 });
 
 describe("summarizeActivityWindow", () => {
+  it.each<[number, number, number, number | null]>([
+    [1, 1, 8, 50],
+    [0, 0, 8, null],
+    [0, 2, 1, 0],
+    [2, 0, 1, 100],
+    [0, 0, 0, null],
+  ])("counts completed=%s, failed=%s, cancelled=%s independently", (completed, failed, cancelled, rate) => {
+    const total = completed + failed + cancelled;
+    const result = deriveAgentActivity([
+      {
+        ...bucket("a1", 0, total, failed),
+        completed_count: completed,
+        cancelled_count: cancelled,
+      },
+    ], fullHistoryAgent.created_at, NOW);
+    expect(summarizeActivityWindow(result, 30)).toMatchObject({
+      totalRuns: total,
+      totalCompleted: completed,
+      totalFailed: failed,
+      totalCancelled: cancelled,
+      successRate: rate,
+    });
+  });
+
+  it("rolls outcome counts up over the requested window only", () => {
+    // 5 clean runs 20 days back, then 1/1/8 today. The 7-day window sees
+    // only the recent day, so the older successes must not lift its rate.
+    const result = deriveAgentActivity(
+      [bucket("a1", 20, 5), bucket("a1", 0, 10, 1, 8)],
+      fullHistoryAgent.created_at,
+      NOW,
+    );
+    expect(summarizeActivityWindow(result, 30)).toMatchObject({
+      totalRuns: 15, totalCompleted: 6, totalCancelled: 8, successRate: 86,
+    });
+    expect(summarizeActivityWindow(result, 7)).toMatchObject({
+      totalRuns: 10, totalCompleted: 1, totalCancelled: 8, successRate: 50,
+    });
+  });
+
+  it("sums outcomes from several buckets landing on the same day", () => {
+    const result = deriveAgentActivity(
+      [bucket("a1", 0, 5), bucket("a1", 0, 2, 1)],
+      fullHistoryAgent.created_at,
+      NOW,
+    );
+    expect(summarizeActivityWindow(result, 30)).toMatchObject({
+      totalRuns: 7, totalCompleted: 6, totalFailed: 1, successRate: 86,
+    });
+  });
+
   it("rolls up totals across the trailing N buckets", () => {
     // 5 runs total over the 30-day series.
     const result = deriveAgentActivity(

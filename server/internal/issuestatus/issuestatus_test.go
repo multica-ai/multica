@@ -19,7 +19,7 @@ func TestCategoryWithError(t *testing.T) {
 	ctx := context.Background()
 	q := newFakeQuerier()
 	q.err = errors.New("catalog unavailable")
-	for _, status := range append(Canonical(), Triage) {
+	for _, status := range Canonical() {
 		want, _ := CategoryForBehavior(status)
 		if got, err := CategoryWithError(ctx, q, testWorkspace, status); err != nil || got != want {
 			t.Errorf("built-in %s: category=%q err=%v; want %q", status, got, err, want)
@@ -280,43 +280,24 @@ func TestTriageIsReservedButNotACategory(t *testing.T) {
 
 // Triage resolves to itself on every read path without a catalog read, and is
 // never a write target. (MUL-7212)
-func TestTriageResolvesWithoutTheCatalog(t *testing.T) {
+func TestTriageIsAReservedNameNotAStatus(t *testing.T) {
 	ctx := context.Background()
 	q := newFakeQuerier(custom("human_review", InReview))
 
-	if got := Effective(ctx, q, testWorkspace, Triage); got != Triage {
-		t.Errorf("Effective(triage) = %q, want triage", got)
+	// Triage is not a status an issue can hold, so nothing resolves it to a
+	// category. What the name still does is refuse: no status write may take it
+	// and no custom status may claim it.
+	if got, ok := CategoryForBehavior(Triage); ok {
+		t.Errorf("CategoryForBehavior(triage) = %q, %v; want refused — triage is not a category", got, ok)
 	}
-	behavior, name := EffectiveAndName(ctx, q, testWorkspace, Triage)
-	if behavior != Triage || name != "" {
-		t.Errorf("EffectiveAndName(triage) = (%q, %q), want (triage, \"\") — clients localize it from the key", behavior, name)
-	}
-	// Triage is its own category, so the lifecycle question stays answerable
-	// for an issue whose status has no catalog row.
-	if got, ok := CategoryForBehavior(Triage); !ok || got != Triage {
-		t.Errorf("CategoryForBehavior(triage) = %q, %v; want triage, true", got, ok)
-	}
-	if got := Category(ctx, q, testWorkspace, Triage); got != Triage {
-		t.Errorf("Category(triage) = %q, want triage", got)
-	}
-	// ParseCategory is the input side: naming triage as a category must fail,
-	// or a custom status could declare it and land a row the catalog's CHECK
-	// rejects.
 	if got, ok := ParseCategory(Triage); ok {
 		t.Errorf("ParseCategory(triage) = %q, %v; want refused", got, ok)
 	}
-	if got := WireCategory(Triage, Triage); got != Triage {
-		t.Errorf("WireCategory(triage) = %q, want triage", got)
+	if IsCategory(Triage) {
+		t.Error("IsCategory(triage) = true, want false")
 	}
-	r := NewResolver(testWorkspace)
-	if got := r.Effective(ctx, q, Triage); got != Triage {
-		t.Errorf("Resolver.Effective(triage) = %q, want triage", got)
-	}
-	if got := r.Category(ctx, q, Triage); got != Triage {
-		t.Errorf("Resolver.Category(triage) = %q, want triage", got)
-	}
-	if got := r.Name(ctx, q, Triage); got != "" {
-		t.Errorf("Resolver.Name(triage) = %q, want empty", got)
+	if !IsBuiltIn(Triage) {
+		t.Error("IsBuiltIn(triage) = false; the name stays reserved against custom keys")
 	}
 	for _, input := range []string{Triage, "  TRIAGE "} {
 		if _, err := Resolve(ctx, q, testWorkspace, input); !errors.Is(err, ErrReservedStatus) {
@@ -324,7 +305,7 @@ func TestTriageResolvesWithoutTheCatalog(t *testing.T) {
 		}
 	}
 	if q.lookups != 0 || q.lists != 0 {
-		t.Errorf("triage resolution touched the catalog: %d lookup(s), %d list(s)", q.lookups, q.lists)
+		t.Errorf("refusing triage touched the catalog: %d lookup(s), %d list(s)", q.lookups, q.lists)
 	}
 
 	// A key that merely starts with triage still needs a catalog row: the
@@ -721,26 +702,24 @@ func TestExpandCategories(t *testing.T) {
 		}
 	})
 
-	t.Run("triage expands to exactly itself", func(t *testing.T) {
-		q := newFakeQuerier(custom("human_review", InReview))
-		got, err := ExpandCategories(ctx, q, testWorkspace, []string{Triage, Triage})
-		if err != nil {
-			t.Fatalf("expand: %v", err)
-		}
-		if !slices.Equal(got, []string{Triage}) {
-			t.Errorf("expand(triage) = %v, want [triage] — no custom status can carry it", got)
-		}
-	})
-
-	t.Run("triage rides along with real categories", func(t *testing.T) {
+	// Triage is not a category, so naming it expands to nothing. Callers that
+	// need Triage entries filter on issue.triage_state instead.
+	t.Run("triage is not a category to expand", func(t *testing.T) {
 		q := newFakeQuerier(custom("shipped", CategoryDone))
-		got, err := ExpandCategories(ctx, q, testWorkspace, []string{CategoryDone, CategoryClosed, Triage})
+		got, err := ExpandCategories(ctx, q, testWorkspace, []string{Triage})
 		if err != nil {
 			t.Fatalf("expand: %v", err)
 		}
-		slices.Sort(got)
-		if want := []string{Cancelled, Done, "shipped", Triage}; !slices.Equal(got, want) {
-			t.Errorf("expand(done, closed, triage) = %v, want %v", got, want)
+		if got != nil {
+			t.Errorf("expand(triage) = %v, want nil", got)
+		}
+		alongside, err := ExpandCategories(ctx, q, testWorkspace, []string{CategoryDone, CategoryClosed, Triage})
+		if err != nil {
+			t.Fatalf("expand: %v", err)
+		}
+		slices.Sort(alongside)
+		if want := []string{Cancelled, Done, "shipped"}; !slices.Equal(alongside, want) {
+			t.Errorf("expand(done, closed, triage) = %v, want %v", alongside, want)
 		}
 	})
 }

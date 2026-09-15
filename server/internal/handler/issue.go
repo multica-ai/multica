@@ -120,8 +120,22 @@ var validIssuePriorities = []string{"urgent", "high", "medium", "low", "none"}
 var validIssueStatuses = issuestatus.Canonical()
 var validIssueStatusCategories = issuestatus.Categories()
 
-// Status sort follows the board's category order and resolves custom keys to
-// their effective category with one catalog read plus a parameterized CASE.
+// Status sort ranks by the CONCRETE status key, in the catalog's own display
+// order. Sorting is a display question, so it resolves on status; only behavior
+// decisions aggregate on the four lifecycle categories (MUL-7379).
+//
+// Ranking by category instead collapses the seven built-ins into four buckets —
+// Backlog ties with Todo, and In Progress / In Review / Blocked all tie — which
+// leaves the created_at tiebreak deciding the visible order of a list the user
+// explicitly asked to sort by status.
+//
+// issueTableStatusOrder is the same "board order" the status GROUPING path
+// already builds, so sorting and grouping now share one source of truth instead
+// of drifting apart. Archived statuses are included because issues stay on them
+// after archival and still have to rank somewhere real. Triage leads: it has no
+// catalog row and no board column, matching the rank statusOrderExpression
+// gives it.
+//
 // Keeping the indexed column bare avoids the per-row issue_effective_status()
 // call that would otherwise turn a bounded page into a workspace scan.
 func (h *Handler) issueStatusSortExpression(
@@ -129,15 +143,18 @@ func (h *Handler) issueStatusSortExpression(
 	workspaceID pgtype.UUID,
 	addArg func(any) string,
 ) (string, error) {
-	customKeys, err := issuestatus.CustomKeyCategories(
-		ctx,
-		h.issueStatusCatalog(),
-		workspaceID,
-	)
+	entries, err := h.issueStatusCatalog().ListIssueStatusEntries(ctx, db.ListIssueStatusEntriesParams{
+		WorkspaceID:     workspaceID,
+		IncludeArchived: true,
+	})
 	if err != nil {
 		return "", err
 	}
-	return statusOrderExpression(statusCategoryExpr(customKeys, addArg)), nil
+	order := append([]string{issuestatus.Triage}, issueTableStatusOrder(entries)...)
+	return fmt.Sprintf(
+		"COALESCE(array_position(%s::text[], i.status), 100000)",
+		addArg(order),
+	), nil
 }
 
 // resolveIssueStatusKey checks a status against the workspace's catalog and
@@ -3442,8 +3459,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
 
-	if prevIssue.Status == issuestatus.Triage {
-		if field := triageLockedField(req.Status != nil, rawFields); field != "" {
+	if prevIssue.TriageState.Valid {
+		if field := triageLockedField(rawFields); field != "" {
 			writeIssueInTriage(w, field)
 			return
 		}
@@ -3873,7 +3890,9 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 // UpdateIssue.
 func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bool {
 	// Only the fixed backlog key parks work; custom unstarted statuses do not.
-	if issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
+	// An issue in Triage is not parked but refused: it produces no run from any
+	// entry point until it is accepted (MUL-7189 §2.3).
+	if issue.TriageState.Valid || issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
 		return false
 	}
 	return h.isAgentAssigneeReady(ctx, issue)
@@ -4195,7 +4214,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if !h.validateBatchTriageLocks(w, r, wsUUID, req.IssueIDs, req.Updates.Status != nil, rawUpdates) {
+	if !h.validateBatchTriageLocks(w, r, wsUUID, req.IssueIDs, rawUpdates) {
 		return
 	}
 	// The batch shares one project_id, so it is checked once here rather than

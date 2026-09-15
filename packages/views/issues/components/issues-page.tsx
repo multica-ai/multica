@@ -10,6 +10,7 @@ import type {
 import { useIssuesScope } from "@multica/core/issues/stores/issues-scope-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { PageHeader } from "../../layout/page-header";
+import { RefreshablePageIcon } from "../../layout/refreshable-page-icon";
 import { useT } from "../../i18n";
 import { IssueSurface } from "../surface/issue-surface";
 import { IssuesHeader } from "./issues-header";
@@ -29,20 +30,28 @@ function IssuesSurfaceHeader({
   tableFacetCounts?: IssueTableFacetsResponse;
   onTableFacetChange: (facet: IssueTableFacetSpec | null) => void;
 }) {
+  const { t } = useT("issues");
   const dateFilter = useViewStore((s) => s.dateFilter);
   const setDateFilter = useViewStore((s) => s.setDateFilter);
 
   return (
-    <IssuesHeader
-      scopedIssues={issues}
-      workingAgents={workingAgents}
-      dateFilter={dateFilter}
-      onDateFilterChange={setDateFilter}
-      isRefreshing={isRefreshing}
-      facetCountsExact={facetCountsExact}
-      tableFacetCounts={tableFacetCounts}
-      onTableFacetChange={onTableFacetChange}
-    />
+    <>
+      <PageHeader>
+        <RefreshablePageIcon refreshing={isRefreshing}>
+          <ListTodo className="size-4" />
+        </RefreshablePageIcon>
+        <h1 className="text-body font-medium">{t(($) => $.page.breadcrumb_title)}</h1>
+      </PageHeader>
+      <IssuesHeader
+        scopedIssues={issues}
+        workingAgents={workingAgents}
+        dateFilter={dateFilter}
+        onDateFilterChange={setDateFilter}
+        facetCountsExact={facetCountsExact}
+        tableFacetCounts={tableFacetCounts}
+        onTableFacetChange={onTableFacetChange}
+      />
+    </>
   );
 }
 
@@ -52,11 +61,6 @@ export function IssuesPage() {
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeader>
-        <ListTodo className="h-4 w-4 text-muted-foreground" />
-        <h1 className="text-body font-medium">{t(($) => $.page.breadcrumb_title)}</h1>
-      </PageHeader>
-
       <IssueSurface
         scope={{ type: "workspace", actorKind: scope }}
         modes={["board", "list", "table", "swimlane"]}

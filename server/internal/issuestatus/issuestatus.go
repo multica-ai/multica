@@ -9,8 +9,7 @@
 // lifecycle independently. WireCategory adapts response enums for installed
 // clients without persisting or granting legacy behavior.
 //
-// One key sits outside the catalog and outside the four categories: Triage,
-// reserved for issues waiting in Triage — see Triage.
+// One key is reserved and belongs to no category: Triage — see Triage.
 package issuestatus
 
 import (
@@ -37,19 +36,17 @@ const (
 	Cancelled  = "cancelled"
 )
 
-// Triage is the RESERVED status key of an issue waiting in Triage (MUL-7189).
+// Triage is a RESERVED status key, and nothing more (MUL-7189).
 //
-// It is platform-owned like the 7 canonical keys — no workspace can mint a
-// custom status with it — but it is deliberately not one of them: it has no
-// catalog row, it is not one of the four lifecycle categories, and it is not a
-// board column. An issue enters it only through Triage intake and leaves it
-// only by being accepted, so no ordinary write may set it or move an issue out
-// of it. It is its own category, which is what lets Category answer for it
-// without a catalog read.
+// Triage itself is NOT a status — an issue in Triage is marked by
+// issue.triage_state, because "is this work at all" is a different question
+// from "how far along is this work", and answering the first inside the second
+// field makes every reader of status re-answer it.
 //
-// Because no custom key can resolve to it, the SQL literal `status = 'triage'`
-// is exactly equivalent to the Go-side check, and read paths can filter on the
-// bare indexed column.
+// What survives here is the name: no workspace may mint a custom status keyed
+// `triage`, so the word means one thing. The catalog carries the same rule as a
+// CHECK (migration 475), and Resolve refuses the key so a write is turned away
+// by the resolver rather than by the database.
 const Triage = "triage"
 
 // The four stored lifecycle categories.
@@ -100,8 +97,8 @@ var categoryRank = func() map[string]int {
 // catalog, or present but archived.
 var ErrUnknownStatus = errors.New("unknown issue status")
 
-// ErrReservedStatus is returned by Resolve for Triage: the key is valid to
-// read but never a target an ordinary write may set.
+// ErrReservedStatus is returned by Resolve for Triage: the name is reserved, so
+// no status write may name it.
 var ErrReservedStatus = errors.New("issue status is reserved for triage")
 
 // keyPattern mirrors the issue_status.key CHECK constraint. Keys are lowercase
@@ -126,9 +123,7 @@ func Canonical() []string {
 }
 
 // IsBuiltIn reports whether key is platform-owned: one of the 7 canonical
-// statuses or the reserved Triage key. Each is its own category, so callers
-// can read the category off the key without a catalog lookup, and none can be
-// reused as a custom key.
+// statuses, or the reserved Triage name. None can be reused as a custom key.
 func IsBuiltIn(key string) bool {
 	_, ok := canonicalRank[key]
 	return ok || key == Triage
@@ -168,10 +163,6 @@ func CategoryForBehavior(behavior string) (string, bool) {
 		return CategoryDone, true
 	case Cancelled:
 		return CategoryClosed, true
-	case Triage:
-		// Not one of the four stored categories: no catalog row may hold it,
-		// and the pair below keeps Triage answerable without a catalog read.
-		return Triage, true
 	default:
 		return "", false
 	}
@@ -189,23 +180,13 @@ func BehaviorsForCategory(category string) []string {
 		return []string{Done}
 	case CategoryClosed:
 		return []string{Cancelled}
-	case Triage:
-		return []string{Triage}
 	default:
 		return nil
 	}
 }
 
 // ParseCategory normalizes API spellings and pre-backfill stored categories.
-//
-// Triage is refused: CategoryForBehavior answers for it so a Triage issue can
-// still be rendered and grouped, but it is not a category a caller may name —
-// accepting it here would let `{key: "foo", category: "triage"}` reach the
-// catalog, whose CHECK holds only the four stored categories.
 func ParseCategory(value string) (string, bool) {
-	if value == Triage {
-		return "", false
-	}
 	if IsCategory(value) {
 		return value, true
 	}
@@ -743,17 +724,10 @@ func (r *Resolver) Name(ctx context.Context, q Querier, status string) string {
 // category's column.
 //
 // An unseeded workspace yields no rows; the concrete built-in behavior keys are
-// added explicitly so filtering remains complete. The reserved Triage key
-// expands to exactly itself — no custom status can carry it.
+// added explicitly so filtering remains complete.
 func ExpandCategories(ctx context.Context, q Querier, workspaceID pgtype.UUID, categories []string) ([]string, error) {
 	behaviors := make([]string, 0, len(categories)*2)
-	triage := false
 	for _, c := range categories {
-		if c == Triage {
-			// The reserved key owns no catalog row, so it expands to itself.
-			triage = true
-			continue
-		}
 		if IsCategory(c) {
 			behaviors = append(behaviors, c)
 			continue
@@ -766,9 +740,6 @@ func ExpandCategories(ctx context.Context, q Querier, workspaceID pgtype.UUID, c
 		}
 	}
 	if len(behaviors) == 0 {
-		if triage {
-			return []string{Triage}, nil
-		}
 		return nil, nil
 	}
 	seenBehaviors := make(map[string]bool, len(behaviors))
@@ -803,9 +774,6 @@ func ExpandCategories(ctx context.Context, q Querier, workspaceID pgtype.UUID, c
 				out = append(out, key)
 			}
 		}
-	}
-	if triage {
-		out = append(out, Triage)
 	}
 	return out, nil
 }

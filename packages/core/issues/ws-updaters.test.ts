@@ -1069,6 +1069,8 @@ describe("onIssueDeleted", () => {
           bucket_at: "2025-01-01T00:00:00Z",
           task_count: 1,
           failed_count: 0,
+          completed_count: 1,
+          cancelled_count: 0,
         },
       ],
     );

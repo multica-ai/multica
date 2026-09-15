@@ -303,10 +303,19 @@ var briefStatusCategoryOrder = issuestatus.Categories()
 // With custom statuses it replaces the seven-value enumeration with the
 // workspace's catalog, grouped by lifecycle category. Special workflow rules
 // still name fixed built-in keys; a custom status inherits only lifecycle.
-// Each line leads with the category key, then the statuses inside it. Name and
-// description ride along because instructions and users refer to statuses by
-// display name ("move it to Human Review"), and the description is the
-// admin's disambiguator when a category holds more than one status.
+//
+// Each line leads with the category name as PLAIN TEXT, not a code token.
+// Three of the four category names — unstarted, started, closed — are not
+// status keys at all: ValidateKey reserves them, so no catalog row can hold
+// one, and Resolve returns ErrUnknownStatus. `done` is the exception, being
+// both a lifecycle category and a built-in key. Backticking the group label
+// the way the settable keys beside it are backticked therefore invited
+// `multica issue status <id> started`, which is a 400, so only keys are
+// backticked here (MUL-7379).
+//
+// Name and description ride along because instructions and users refer to
+// statuses by display name ("move it to Human Review"), and the description is
+// the admin's disambiguator when a category holds more than one status.
 //
 // Name/description are user-authored: they pass through
 // sanitizeNameForBriefMarkdown so a crafted status name cannot inject
@@ -334,7 +343,7 @@ func writeIssueStatusCommand(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("- `multica issue status <id> <status> [--no-start]` — flip status. Available statuses by lifecycle category:\n")
 	for _, category := range briefStatusCategoryOrder {
 		customs := byCategory[category]
-		fmt.Fprintf(b, "  - `%s`: `%s` (built-in)", category, strings.Join(issuestatus.BehaviorsForCategory(category), "`, `"))
+		fmt.Fprintf(b, "  - %s category: `%s` (built-in)", category, strings.Join(issuestatus.BehaviorsForCategory(category), "`, `"))
 		for _, s := range customs {
 			name := sanitizeNameForBriefMarkdown(s.Name)
 			desc := sanitizeNameForBriefMarkdown(s.Description)

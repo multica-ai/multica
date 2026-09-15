@@ -152,7 +152,7 @@ func TestQwenBackendStreamsNativeEvents(t *testing.T) {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 	usage := result.Usage["qwen-test"]
-	if usage.InputTokens != 20 || usage.OutputTokens != 4 || usage.CacheReadTokens != 6 {
+	if usage.InputTokens != 14 || usage.OutputTokens != 4 || usage.CacheReadTokens != 6 {
 		t.Fatalf("unexpected final usage: %+v", usage)
 	}
 	var thinking, toolUse, toolResult, text bool
@@ -334,7 +334,7 @@ func TestQwenCode020FixtureParses(t *testing.T) {
 	if !state.sawResult || state.resultIsError || state.sessionID != "session-redacted" || state.finalResultText != "DONE" {
 		t.Fatalf("unexpected fixture state: %+v", state)
 	}
-	if state.usage["qwen3.8-max-preview"].InputTokens != 46539 {
+	if state.usage["qwen3.8-max-preview"] != (TokenUsage{InputTokens: 4639, OutputTokens: 159, CacheReadTokens: 41900}) {
 		t.Fatalf("fixture usage = %+v", state.usage)
 	}
 }

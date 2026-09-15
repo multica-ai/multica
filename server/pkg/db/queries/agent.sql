@@ -1084,6 +1084,14 @@ RETURNING *;
 -- emptyContentRe and historyMessageLocatorRe in pkg/taskfailure/resume.go.
 -- Keep the three in sync.
 --
+-- Triage runs are excluded from all three CTEs (MUL-7189 §5.6). A triage run
+-- and the execution run that follows accept are the same (agent_id, issue_id)
+-- pair, so without this the first execution run would resume the conversation
+-- in which the agent was deciding whether the entry was worth keeping. From the
+-- execution side an accepted issue is a new issue, and it starts cold. The
+-- exclusion is symmetric: a triage run does not resume an execution session
+-- either, which is what force_fresh_session on the triage task already ensures.
+--
 -- retired_sessions is the explicit half of the same rule (GH #6066). The
 -- per-session latest state above can only judge sessions that some row still
 -- POINTS at, so it cannot see a session a run deliberately abandoned: a fresh
@@ -1096,11 +1104,13 @@ WITH retired_sessions AS (
     SELECT DISTINCT r.retired_session_id AS session_id
     FROM agent_task_queue r
     WHERE r.agent_id = $1 AND r.issue_id = $2
+      AND COALESCE(r.context->>'type', '') <> 'triage'
       AND r.retired_session_id IS NOT NULL
 ), resume_overflow_at AS (
     SELECT MAX(COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at)) AS at
     FROM agent_task_queue t
     WHERE t.agent_id = $1 AND t.issue_id = $2
+      AND COALESCE(t.context->>'type', '') <> 'triage'
       AND t.status = 'failed'
       AND (
         COALESCE(t.failure_reason, '') = 'codex_resume_oversized'
@@ -1112,6 +1122,7 @@ WITH retired_sessions AS (
         COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) AS terminal_at
     FROM agent_task_queue t
     WHERE t.agent_id = $1 AND t.issue_id = $2
+      AND COALESCE(t.context->>'type', '') <> 'triage'
       AND t.session_id IS NOT NULL
       AND t.status IN ('completed', 'failed', 'cancelled')
     ORDER BY t.session_id, COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) DESC
@@ -1162,8 +1173,15 @@ LIMIT 1;
 -- disclose that the most recent turn's context could not be carried over. Any
 -- later task that records a real session resets this to FALSE by being the new
 -- most-recent row, so the disclosure fires once and then clears.
+--
+-- Triage runs are excluded for the same reason GetLastTaskSession excludes them
+-- (MUL-7189 §5.6), and the two must agree: this query only reports whether THAT
+-- one fell back. A triage run is invisible to it, so a triage run reported here
+-- would tell the first execution run after accept that the previous turn's
+-- context could not be carried over — about a turn it was never entitled to.
 SELECT COALESCE(session_rollout_missing, FALSE) FROM agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2
+  AND COALESCE(context->>'type', '') <> 'triage'
   AND status IN ('completed', 'failed')
   AND started_at IS NOT NULL
 ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
@@ -2129,12 +2147,15 @@ WHERE recovery.author_type = 'system'
   -- for open work; parking belongs exclusively to the fixed Backlog status.
   -- Built-ins resolve without catalog rows; unknown custom states stay pending.
   AND source_issue.status <> 'backlog'
+  -- A coordinator waiting in Triage is the entry's proposed owner, not its
+  -- owner, so a worker failure must not wake it (MUL-7189 §2.3). Triage is not
+  -- a status, so it is a predicate of its own rather than a CASE arm.
+  AND source_issue.triage_state IS NULL
   AND CASE
       WHEN source_issue.status IN ('backlog', 'todo') THEN 'unstarted'
       WHEN source_issue.status IN ('in_progress', 'in_review', 'blocked') THEN 'started'
       WHEN source_issue.status = 'done' THEN 'done'
       WHEN source_issue.status = 'cancelled' THEN 'closed'
-      WHEN source_issue.status = 'triage' THEN 'triage'
       ELSE issue_status_category(source_status.category)
   END IN ('unstarted', 'started')
   AND source_agent.archived_at IS NULL
@@ -2539,11 +2560,15 @@ GROUP BY atq.agent_id;
 -- still in flight has no completed_at and contributes nothing here — that's
 -- correct: in-flight tasks are surfaced via the live presence indicator,
 -- not the historical trend.
+-- Keep total activity separate from outcomes: cancelled runs belong in the
+-- history, but success rate is completed / (completed + failed).
 SELECT
     atq.agent_id,
     DATE_TRUNC('day', atq.completed_at)::timestamptz AS bucket,
     COUNT(*)::int AS task_count,
-    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count
+    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count,
+    COUNT(*) FILTER (WHERE atq.status = 'completed')::int AS completed_count,
+    COUNT(*) FILTER (WHERE atq.status = 'cancelled')::int AS cancelled_count
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
