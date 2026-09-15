@@ -544,20 +544,21 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clientID := os.Getenv("GOOGLE_CLIENT_ID")
-	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
-	if clientID == "" || clientSecret == "" {
-		writeError(w, http.StatusServiceUnavailable, "Google login is not configured")
+	provider := oidcProviderFromEnv()
+	if !provider.Configured() {
+		writeError(w, http.StatusServiceUnavailable, provider.DisplayName+" login is not configured")
 		return
 	}
+	clientID := provider.ClientID
+	clientSecret := provider.ClientSecret
 
 	redirectURI := req.RedirectURI
 	if redirectURI == "" {
-		redirectURI = os.Getenv("GOOGLE_REDIRECT_URI")
+		redirectURI = provider.RedirectURI
 	}
 
 	// Exchange authorization code for tokens.
-	tokenResp, err := h.googleHTTPClient().PostForm("https://oauth2.googleapis.com/token", url.Values{
+	tokenResp, err := h.googleHTTPClient().PostForm(provider.TokenURL, url.Values{
 		"code":          {req.Code},
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
@@ -604,8 +605,8 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch user info from Google.
-	userInfoReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
+	// Fetch user info from the identity provider.
+	userInfoReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, provider.UserInfoURL, nil)
 	if err != nil {
 		slog.Error("failed to create userinfo request", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
@@ -663,7 +664,7 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if isNew {
 		evt := analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r))
-		evt.Properties["auth_method"] = "google"
+		evt.Properties["auth_method"] = provider.AuthMethod
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, evt)
 	}
 
