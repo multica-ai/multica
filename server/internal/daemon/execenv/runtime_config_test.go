@@ -314,23 +314,36 @@ func TestPerRunCommentContextStaysOutOfBrief(t *testing.T) {
 		"reply-abc", "thread-abc", "reply-def", "thread-def", since,
 		"4 new comment(s) on this issue since your last run",
 		"DISTINCT threads",
+		// MUL-7344's issue-state report is per-run for the same reason the
+		// comment delta is, and TaskContextForEnv deliberately has no field to
+		// carry it. These pin the rendered text so a future "just pass it
+		// through to the brief" cannot land quietly.
+		"The issue is unchanged since your last run",
+		"Since your last run the issue changed",
 	} {
 		if strings.Contains(out, banned) {
 			t.Errorf("brief must not carry per-run comment value %q (MUL-5377)\n---\n%s", banned, out)
 		}
 	}
 
-	// The helper that now feeds the per-turn prompt is unchanged.
+	// The helper that now feeds the per-turn prompt still carries the per-run
+	// values, as ONE issue-wide `--since` delta read (MUL-7344).
 	hint := BuildNewCommentsHint(issueID, "reply-abc", "thread-abc", since, 4)
 	for _, want := range []string{
 		"4 new comment(s) on this issue since your last run",
 		"across all threads",
-		"--thread thread-abc --since " + since + " --compact --output json",
-		"--tail 30",
+		"multica issue comment list " + issueID + " --since " + since + " --compact --output json",
+		"--thread thread-abc --tail 30",
 	} {
 		if !strings.Contains(hint, want) {
 			t.Errorf("BuildNewCommentsHint missing %q\n---\n%s", want, hint)
 		}
+	}
+	// The scan the `--since` delta replaces must not also be handed over: two
+	// wide reads for one server-computed answer is exactly the cost MUL-7344
+	// removed.
+	if strings.Contains(hint, "--roots-only --summary") {
+		t.Errorf("BuildNewCommentsHint must not hand over the roots scan alongside the delta read\n---\n%s", hint)
 	}
 }
 
@@ -363,10 +376,17 @@ func TestCommentHintsCarryNoModality(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"cold", "warm"} {
-		if !strings.Contains(hints[name], "--roots-only --summary") {
-			t.Errorf("%s hint must hand over the scan step 2 requires:\n%s", name, hints[name])
-		}
+	// Cold has no server-computed delta, so it hands over the scan itself. Warm
+	// has one, so it hands over the read that IS the scan's answer — a single
+	// issue-wide `--since` (MUL-7344). Both are unconditional commands.
+	if !strings.Contains(hints["cold"], "--roots-only --summary") {
+		t.Errorf("cold hint must hand over the scan step 2 requires:\n%s", hints["cold"])
+	}
+	if !strings.Contains(hints["warm"], "--since 2026-05-28T11:00:00Z --compact --output json") {
+		t.Errorf("warm hint must hand over the issue-wide delta read:\n%s", hints["warm"])
+	}
+	if strings.Contains(hints["warm"], "--roots-only --summary") {
+		t.Errorf("warm hint must not also hand over the scan the delta read answers:\n%s", hints["warm"])
 	}
 	if !strings.Contains(hints["resumed"], "issue-wide delta is empty") {
 		t.Errorf("resumed hint must report the empty delta as the scan's answer:\n%s", hints["resumed"])

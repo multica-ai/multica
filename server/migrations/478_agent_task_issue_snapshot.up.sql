@@ -1,0 +1,25 @@
+-- issue_snapshot records the comparable state of the issue AS THIS CLAIM SAW IT,
+-- so the next run this agent takes on the same issue can be told whether the
+-- issue itself moved instead of re-reading it unconditionally.
+--
+-- Written once per claim, next to the comment-delivery receipt and under the
+-- same CAS, then read back by the following claim through the same
+-- (agent_id, issue_id, started_at DESC) anchor the comment delta already uses.
+-- That anchor is why the column lives here and not on `issue`: a
+-- content_revision on the issue row would have to be bumped by every one of the
+-- dozen-odd writers that touch a title, description, status, assignee or
+-- priority, and the first one missed would report "unchanged" forever with no
+-- symptom. A snapshot taken at claim time has exactly one writer.
+--
+-- Shape is {"v":1,...}: version, status, assignee_type, assignee_id, priority,
+-- and sha256 of title and description. Hashes, not bodies — this column is a
+-- comparison key, never a second copy of the issue text. `v` gates the
+-- comparison: a snapshot written by a different version is treated as unknown,
+-- which degrades to the pre-existing "read the issue" instruction.
+--
+-- Nullable, and NULL is the normal state for every row written before this
+-- migration. A reader must treat NULL as "not compared", never as "unchanged".
+-- No index: every reader scopes by (agent_id, issue_id) and rides the same
+-- index path as the comment delta's anchor, which it now shares a row with
+-- (GetLastRunAnchorForIssueAndAgent).
+ALTER TABLE agent_task_queue ADD COLUMN IF NOT EXISTS issue_snapshot JSONB;

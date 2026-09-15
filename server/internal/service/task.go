@@ -3736,17 +3736,26 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 }
 
 // FinalizeTaskClaim atomically persists the task-scoped agent token, an
-// optional short-lived daemon token used by the Remote MCP broker, and, for a
-// comment-backed task, the exact comment ids embedded in the response. The
-// handler must call this only after the full payload has been built and before
-// writing any response bytes. A failure rolls every write back so the claim can
-// be safely returned to the queue.
+// optional short-lived daemon token used by the Remote MCP broker, the
+// comparable issue state this payload was built from, and, for a comment-backed
+// task, the exact comment ids embedded in the response. The handler must call
+// this only after the full payload has been built and before writing any
+// response bytes. A failure rolls every write back so the claim can be safely
+// returned to the queue.
+//
+// issueSnapshot is empty for tasks with no issue (chat, quick-create,
+// autopilot) and for an issue claim whose snapshot could not be encoded; the
+// write is then skipped and the NEXT run on that issue reports "not compared"
+// rather than a wrong "unchanged" (MUL-7344). Unlike the comment receipt it is
+// NOT gated on the task being comment-backed: an assignment run that recorded
+// no snapshot leaves the following comment-triggered run with no baseline.
 func (s *TaskService) FinalizeTaskClaim(
 	ctx context.Context,
 	task db.AgentTaskQueue,
 	token db.CreateTaskTokenParams,
 	deliveredCommentIDs []pgtype.UUID,
 	recordCommentReceipt bool,
+	issueSnapshot []byte,
 	daemonTokens ...db.CreateDaemonTokenParams,
 ) ([]pgtype.UUID, error) {
 	if len(daemonTokens) > 1 {
@@ -3765,6 +3774,21 @@ func (s *TaskService) FinalizeTaskClaim(
 			}
 			if _, err := qtx.CreateDaemonToken(ctx, daemonTokens[0]); err != nil {
 				return fmt.Errorf("create remote MCP daemon token: %w", err)
+			}
+		}
+		if len(issueSnapshot) > 0 {
+			// Same CAS columns as the receipt below, so a stale handler cannot
+			// write a snapshot over a newer reclaim's, or after the run has
+			// started. A no-op update (0 rows) is not an error: it means this
+			// claim generation is no longer current, and the newer one records
+			// its own snapshot.
+			if err := qtx.SetTaskIssueSnapshot(ctx, db.SetTaskIssueSnapshotParams{
+				IssueSnapshot: issueSnapshot,
+				TaskID:        task.ID,
+				RuntimeID:     task.RuntimeID,
+				DispatchedAt:  task.DispatchedAt,
+			}); err != nil {
+				return fmt.Errorf("set task issue snapshot: %w", err)
 			}
 		}
 		if !recordCommentReceipt {

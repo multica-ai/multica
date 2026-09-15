@@ -4201,6 +4201,12 @@ type claimCommentTaskResp struct {
 		NewCommentCount  int    `json:"new_comment_count"`
 		NewCommentsSince string `json:"new_comments_since"`
 		DeltaKnown       bool   `json:"new_comments_delta_known"`
+
+		IssueStateDeltaKnown bool     `json:"issue_state_delta_known"`
+		IssueChangedFields   []string `json:"issue_changed_fields"`
+		IssueStatus          string   `json:"issue_status"`
+		IssueAssigneeType    string   `json:"issue_assignee_type"`
+		IssueAssigneeID      string   `json:"issue_assignee_id"`
 	} `json:"task"`
 }
 

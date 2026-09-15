@@ -472,7 +472,21 @@ type AgentTaskResponse struct {
 	// the same zero. Only the first of those answers "has anything else been
 	// said on this issue", so only the first may waive the workflow's comment
 	// scan. Absent on old servers, which is the safe reading (MUL-6984).
-	NewCommentsDeltaKnown    bool                 `json:"new_comments_delta_known,omitempty"`
+	NewCommentsDeltaKnown bool `json:"new_comments_delta_known,omitempty"`
+	// IssueStateDeltaKnown is the same contract as NewCommentsDeltaKnown, for
+	// the ISSUE record rather than its comments: the server compared this
+	// claim's title / description / status / assignee / priority against the
+	// snapshot taken when this agent last ran on this issue, and both the
+	// lookup and the decode succeeded. Absent means NOT compared — a cold
+	// start, no prior snapshot, a read error, a shape-version mismatch, or an
+	// old server — and a daemon must then keep telling the agent to read the
+	// issue. An empty IssueChangedFields is only "unchanged" alongside this
+	// flag; on its own it is indistinguishable from "nobody looked" (MUL-7344).
+	IssueStateDeltaKnown     bool                 `json:"issue_state_delta_known,omitempty"`
+	IssueChangedFields       []string             `json:"issue_changed_fields,omitempty"`        // subset of title,description,status,assignee,priority in that order; empty alongside IssueStateDeltaKnown means unchanged. Fields outside that set (labels, parent, due date, stage, project, metadata) are NOT compared and must never be reported as checked
+	IssueStatus              string               `json:"issue_status,omitempty"`                // the issue's status key at claim time. Sent whether or not the delta is known: the agent needs it to decide workflow step 3 ("already in progress?") without a read
+	IssueAssigneeType        string               `json:"issue_assignee_type,omitempty"`         // "agent", "member" or "squad" at claim time; empty when unassigned. With IssueAssigneeID, lets the agent tell "mine" from "someone else's" without a read
+	IssueAssigneeID          string               `json:"issue_assignee_id,omitempty"`           // assignee UUID at claim time; empty when unassigned
 	ChatSessionID            string               `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
 	ChatChannelType          string               `json:"chat_channel_type,omitempty"`           // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Makes the agent channel-aware (read history from the channel, not Multica)
 	ChatChannelDeliversFiles bool                 `json:"chat_channel_delivers_files,omitempty"` // server capability: THIS deployment can put a file the agent produced into THIS conversation — the adapter goes back for the bound attachment AND object storage exists to go back to. Absent/false on a server predating it, which is the safe reading: the agent is told to describe its file in words. Never inferred daemon-side from chat_channel_type; see handler.Handler.channelDeliversFiles

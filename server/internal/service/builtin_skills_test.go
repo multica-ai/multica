@@ -443,6 +443,10 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Comment reads stay bounded",
 				"--roots-only --summary --compact",
 				"--thread <thread-id> --tail 30",
+				// MUL-7344: the per-turn `--since` delta IS a bounded read, so
+				// the bounded-reads rule must name it rather than leave an
+				// agent choosing between two contradicting instructions.
+				"that read is the bounded scan",
 			},
 			notWant: []string{
 				// The singular forms this replaced.

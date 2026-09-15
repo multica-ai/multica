@@ -813,6 +813,22 @@ WHERE id = @task_id
   )
 RETURNING delivered_comment_ids;
 
+-- name: SetTaskIssueSnapshot :exec
+-- Record the comparable issue state this claim's payload was built from, so the
+-- NEXT run this agent takes on the issue can be told whether the issue itself
+-- moved. Written for every issue-bound claim, not just comment-backed ones: an
+-- assignment run that skips this leaves the following run with no baseline to
+-- compare against, which reads as "not compared" and costs an extra issue read.
+-- Same CAS as SetTaskDeliveredCommentIDs so a stale handler cannot overwrite a
+-- newer reclaim's snapshot, or write one after execution has started.
+UPDATE agent_task_queue
+SET issue_snapshot = @issue_snapshot
+WHERE id = @task_id
+  AND runtime_id = @runtime_id
+  AND status = 'dispatched'
+  AND started_at IS NULL
+  AND dispatched_at = @dispatched_at;
+
 -- name: RequeueAgentTaskAfterClaimFailure :one
 -- Claim finalization (task token + optional comment receipt) failed before any
 -- response bytes were written. Return only that exact claim generation to the
@@ -1203,14 +1219,30 @@ WHERE chat_session_id = sqlc.arg('chat_session_id')
 ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
 LIMIT 1;
 
--- name: GetLastTaskStartedAtForIssueAndAgent :one
--- Returns the started_at of the most recent prior task for this (agent, issue)
--- pair, used as the "since" anchor for counting comments that arrived since the
--- agent's last run. Any terminal state counts as "a run happened". Tasks with
--- no started_at (never dispatched / the just-claimed current task) are excluded,
--- so this never returns the current claim's own row. MUST use started_at, never
--- completed_at: a long run would otherwise miss comments posted while it ran.
-SELECT started_at FROM agent_task_queue
+-- name: GetLastRunAnchorForIssueAndAgent :one
+-- Returns everything a claim needs to know about this agent's PREVIOUS run on
+-- this issue, in one row: when it started, and the issue state it was handed.
+--
+-- started_at is the "since" anchor for counting comments that arrived since
+-- that run. MUST be started_at, never completed_at: a long run would otherwise
+-- miss comments posted while it ran.
+--
+-- issue_snapshot is the comparable issue state recorded when that run was
+-- claimed (MUL-7344). NULL means that run predates the column or its write lost
+-- the CAS; the caller must report the comparison as not done, never as
+-- unchanged.
+--
+-- The two deltas a claim reports — comments and issue state — deliberately
+-- share this one anchor row. That is not only a saved round trip: it is what
+-- makes "since your last run" mean ONE thing on a claim rather than two
+-- separately-resolved things that could disagree. The shared read also shares a
+-- failure mode, and both consumers degrade the same safe way (comment scan
+-- required, issue comparison unknown).
+--
+-- Any terminal state counts as "a run happened". Tasks with no started_at
+-- (never dispatched / the just-claimed current task) are excluded, so this
+-- never returns the current claim's own row.
+SELECT started_at, issue_snapshot FROM agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2 AND started_at IS NOT NULL
 ORDER BY started_at DESC
 LIMIT 1;
