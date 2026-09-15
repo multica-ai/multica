@@ -52,7 +52,7 @@ import { useRestoredScrollRef } from "../../platform";
 import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
 import { toast } from "sonner";
 
-// List rows are a fixed 36px (h-9). Sharing the estimate between the seed's
+// List rows default to 36px (--issue-row-height). Sharing the estimate between the seed's
 // trailing spacer and Virtuoso's defaultItemHeight keeps the shared
 // scroller's height truthful from the first frame — which both stops the
 // scrollbar from re-drawing across the seed → Virtuoso handoff and lets the

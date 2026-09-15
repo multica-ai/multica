@@ -78,6 +78,7 @@ jobs:
             frontend:
               - 'apps/web/**'
               - 'apps/desktop/**'
+              - 'apps/ui-lab/**'
               - 'apps/docs/**'
               - 'packages/**'
               - 'package.json'

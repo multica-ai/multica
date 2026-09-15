@@ -174,7 +174,22 @@ func runFakeCursorStream(mode string) {
 	}
 	fmt.Println(`{"type":"thinking","subtype":"delta","text":"ready"}`)
 	fmt.Println(`{"type":"thinking","subtype":"completed"}`)
-	if mode != "finish" {
+	if mode == "finish" {
+		// Keep the parent alive until the test has consumed "ready", which
+		// follows background ownership capture. Exiting before that point
+		// reparents the shell and tests unverified ownership, not cleanup.
+		gate := filepath.Join(os.Getenv("CURSOR_FAKE_DIR"), "finish-ready")
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			if _, err := os.Stat(gate); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				panic("test did not acknowledge background ownership")
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	} else {
 		for _, child := range children {
 			_ = child.Wait()
 		}
@@ -254,6 +269,13 @@ func TestCursorBackgroundLifecycle(t *testing.T) {
 				t.Fatal("fake never reached background observation")
 			}
 			switch mode {
+			case "finish":
+				if count, _ := session.ToolActivity(); count != 1 {
+					t.Fatalf("background ownership was not captured: count=%d", count)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "finish-ready"), nil, 0600); err != nil {
+					t.Fatal(err)
+				}
 			case "budget", "multiple":
 				if !session.InterruptBackgroundTools() {
 					t.Fatal("tool budget did not clean up owned background processes")

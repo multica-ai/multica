@@ -95,6 +95,8 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 
 ## Web/Desktop UI Rules
 
+- For Button and Dialog usage, read `packages/ui/docs/button.md` and `packages/ui/docs/dialog.md`. These component contracts also power UI Lab documentation.
+
 - Prefer existing shadcn/Base UI primitives. Add components with `pnpm ui:add <component>`.
 - For `pnpm ui:add @reui/<name>`, decline overwrite prompts. Keep `REUI_LICENSE_KEY` in the environment, never in repo files. Adapt vendored primitives into `packages/ui/components/ui/` and compositions into `packages/views/`.
 - Use shared semantic tokens in `packages/ui/styles/`. Typography uses the role-named `--text-*` scale in `packages/ui/styles/tokens.css`, not Tailwind's default size ramp.
