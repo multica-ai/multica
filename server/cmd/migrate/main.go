@@ -416,8 +416,8 @@ func refuseChannelChatRouteHistoryRollbackWith(ctx context.Context, query rowQue
 
 var upMigrationConditions = map[string]migrationCondition{
 	// Preserve applied history; pending 469 is superseded by the bounded expand
-	// migration. Backfill is an independent operator job, never startup work.
-	"469_issue_status_lifecycle_categories": skipMigration("superseded by 478 compatibility expansion; backfill runs separately (MUL-7365)"),
+	// migration. SaaS backfills separately; self-host converges in 491.
+	"469_issue_status_lifecycle_categories": skipMigration("superseded by 478 expansion and 491 convergence (MUL-7365)"),
 	// Current search no longer consumes an issue-description GIN. Fresh installs
 	// should not build the historical fallback only to retire it at migration 464.
 	"139_issue_description_trgm_index": skipMigration("issue description search indexes are retired by migration 464"),

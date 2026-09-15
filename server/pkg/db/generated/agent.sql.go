@@ -5767,7 +5767,7 @@ WHERE recovery.author_type = 'system'
       WHEN source_issue.status IN ('in_progress', 'in_review', 'blocked') THEN 'started'
       WHEN source_issue.status = 'done' THEN 'done'
       WHEN source_issue.status = 'cancelled' THEN 'closed'
-      ELSE issue_status_category(source_status.category)
+      ELSE source_status.category
   END IN ('unstarted', 'started')
   AND source_agent.archived_at IS NULL
   AND source_agent.runtime_id IS NOT NULL

@@ -40,7 +40,7 @@ instruction to start, finish or fail an agent. The built-in platform skill and
 new daemon task briefs describe this distinction. This is not a workflow engine;
 PR #7990 is subsequent work, not part of this release.
 
-## Migration and release (MUL-7365, phase 1)
+## Migration and release (MUL-7365)
 
 The supported upgrade entrypoint is the **matching revision's migration runner**
 (`cd server && go run ./cmd/migrate up`, with the approved target DATABASE_URL).
@@ -109,12 +109,63 @@ Set workload limits from the environment's API latency, lock wait, I/O, WAL and
 replication budgets. Pausing the job must leave normal reads/writes working.
 Do not treat a skipped or failed batch as completion.
 
-**Phase 3 is separately released after verification, never triggered by the job.**
-Require zero residual old values, no old writers, correct mapping and business
-invariants, and no unfinished batches. Add strict CHECKs NOT VALID in a short
-transaction, commit, then VALIDATE in a separate transaction/file. Only then
-retire old-storage readers. Keep the audited completion evidence. Do not put
-these strict migrations into the phase-1 automatic deployment path.
+**Phase 3 uses the normal upgrade entrypoint for both SaaS and self-host.**
+There is no new environment flag, automatic maintenance worker, or manual job
+requirement for self-host. The matching container entrypoint runs migrations
+before starting the API, as before. Do not edit/replay historical 469 or delete
+its ledger entry: it may have executed or been recorded as skipped.
+
+| Migration | Work and transaction boundary |
+| --- | --- |
+| 491 | UPDATE only the six legacy spellings, including system/custom/archived rows; preserve every other field. Commit data independently of DDL. |
+| 492 | Replace both category and canonical-system CHECKs atomically, NOT VALID, with a 2s lock timeout and 10s statement timeout. |
+| 493 | Validate both CHECKs in a separate transaction under SHARE UPDATE EXCLUSIVE, allowing ordinary reads/writes. |
+| 494 | Retire the old stored `cancelled` branch of `issue_effective_status`; built-in `cancelled` identity remains. |
+
+Application catalog/recovery queries now read the four stored values directly.
+The normalization function remains for historical migration replay and job code;
+installed-client adapters and accepted category aliases remain supported.
+
+For **SaaS**, deploy the compatible PR1/PR2 revision first, replace all old
+writers, complete an **apply** job and its verification, and retain its audit
+JSON. Before releasing PR3, check the actual target database again:
+
+```sql
+-- Must return 0. Do not infer this from migration 469's ledger entry.
+SELECT count(*) AS remaining_legacy FROM issue_status
+WHERE category IN ('backlog','todo','in_progress','in_review','blocked','cancelled');
+-- Must return 0.
+SELECT count(*) AS invalid_catalog_rows FROM issue_status
+WHERE category NOT IN ('unstarted','started','done','closed')
+   OR (is_system AND (key,category) NOT IN (
+     ('backlog','unstarted'),('todo','unstarted'),('in_progress','started'),
+     ('in_review','started'),('blocked','started'),('done','done'),('cancelled','closed')));
+```
+
+Block SaaS release until both counts are zero, old writers are gone, the apply
+job is completed, and no apply work remains active. This is an operator/release
+prerequisite, not a self-host startup setting; this repository does not establish
+which external SaaS CD pipeline enforces it. Migration 491 then updates zero
+rows, although the predicate and constraint validation can still scan the table.
+Schedule validation against the target's I/O budget. Never release this revision
+to a large unconverted SaaS database: startup would perform the bulk UPDATE.
+
+For **self-host**, upgrade normally, including when skipping PR1/PR2 releases.
+491 converts the local catalog automatically, then 492–494 converge the schema.
+A fresh install follows the same path. The accepted small-database tradeoff is
+an UPDATE/validation startup window; this is not a zero-downtime guarantee for
+large self-host installations. The default Helm startup probe budget is 10
+minutes. An operator with unusually large data can use the SaaS staged path.
+
+If 492 times out, 491 stays committed and retry resumes at 492. If 493 fails,
+strict checks already protect new writes and readiness remains failed. Identify
+and stop the stale writer, repair residual values forward, and rerun the same
+runner without deleting ledger rows. All new SQL files tolerate replay after
+an uncertain ledger acknowledgement; there is no data+DDL mega-transaction.
+After success, verify both CHECKs have `convalidated=true`, residual counts are
+zero, and API readiness passes. Keep job history; phase 3 never starts a job.
+The category v1 job intentionally fails preflight after contract because it
+requires the expanded schema. Existing job records remain readable.
 
 Release policy is fix-forward. 478's down file preserves the compatible schema;
 469 already refuses reversal. Do not roll back to code that only understands one
@@ -142,7 +193,7 @@ The retained `group.kind: status_category` and compound
 `secondary: status_category` protocols default to seven-value **wire buckets**.
 Built-ins keep their own bucket; custom statuses use the same bucket as their
 per-row wire category. Headers, counts, secondary_values and row pagination share
-that mapping, including archived statuses and mixed storage. A category grouping
+that mapping, including archived statuses. A category grouping
 request can explicitly set `category_format: lifecycle` to use four buckets;
 other values or use with a non-category group are rejected. Both group and row
 cursors bind the category format; stale or cross-format cursors return the
@@ -166,7 +217,8 @@ will succeed, especially during the accepted mixed-version window.
 - Real runner upgrade tests with pending and applied 469, 478 lock timeout,
   retry/replay, unchanged system/archived rows and released DDL locks. The
   historical 332-to-469 test remains as coverage of the preserved historical SQL.
-- Old/mixed/new storage matrices for seven-value legacy groups, explicit
+- Real-runner old/mixed/already-backfilled upgrade matrices; contracted-storage
+  seven-value legacy groups, explicit
   four-value groups, concrete status groups, per-bucket pagination and counts;
   visible parent lanes, format-bound cursors, cross-workspace isolation and GC.
 - 100 historical terminal signals cannot starve a live recovery in another

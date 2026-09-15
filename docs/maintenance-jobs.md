@@ -215,9 +215,16 @@ session log. Completed/cancelled rows are retained; repeated maintenance creates
 new records rather than resetting history. Down migrations intentionally retain
 state and indexes. Keep the compatible backend and fix forward on failures.
 
-PR3 remains separate: no strict CHECK, validation DDL, legacy-reader removal,
-or wire-protocol retirement is triggered by this job. Installed-client API
-compatibility remains after backfill completion.
+PR3 is a separate release; this job never triggers schema contraction. For SaaS,
+finish the apply/verify pass before deploying PR3. Self-host upgrades do not
+require this job: migration 491 automatically converts any residual old values
+through the ordinary upgrade entrypoint. See the [release sequence](issue-status-lifecycle-rollout.md).
+
+After 492/494, the category v1 processor intentionally fails its compatibility
+preflight. Do not start/resume it on the contracted schema or weaken the
+preflight. Completed/cancelled records remain readable for audit, and the generic
+maintenance framework remains available for future processors. Installed-client
+API compatibility remains after storage contraction.
 
 ## Adding a processor
 

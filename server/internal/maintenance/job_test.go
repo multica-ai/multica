@@ -554,3 +554,31 @@ func TestSharedTableSupportsDifferentProcessorAndCursor(t *testing.T) {
 		t.Fatal("other job was modified")
 	}
 }
+
+func TestContractPreservesAuditAndRejectsCategoryProcessor(t *testing.T) {
+	pool, s := fixture(t)
+	seed(t, pool, "old")
+	ctx := context.Background()
+	completed := finish(t, s, create(t, s, false))
+	pending := create(t, s, false)
+	for _, name := range []string{"491_issue_status_category_backfill", "492_issue_status_category_contract", "493_issue_status_category_validate", "494_issue_status_category_read_contract"} {
+		body, err := os.ReadFile(filepath.Join("..", "..", "migrations", name+".up.sql"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, string(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	audit, err := s.Get(ctx, completed.ID)
+	if err != nil || string(audit.Result) != string(completed.Result) || audit.Status != "completed" || audit.Revision != completed.Revision {
+		t.Fatalf("audit changed: %+v %v", audit, err)
+	}
+	if _, err := s.Create(ctx, request(true)); err == nil {
+		t.Fatal("contracted schema accepted v1 category job")
+	}
+	failed, err := s.Mutate(ctx, pending.ID, pending.Revision, "advance")
+	if err == nil || failed.Status != "paused" {
+		t.Fatalf("pre-contract pending job did not fail closed: %+v %v", failed, err)
+	}
+}

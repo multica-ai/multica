@@ -17,8 +17,10 @@ import (
 // deliberately independent of the server's current category constants.
 var installedStatusBuckets = []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"}
 
-func TestStatusCompatibilityMixedStorageGroupsAndPagination(t *testing.T) {
-	for _, storage := range []string{"old", "mixed", "new"} {
+// Historical storage matrices are exercised by TestStatusCategoryContractUpgradePaths.
+// API assertions here run against the fully migrated production schema.
+func TestStatusCompatibilityContractedStorageGroupsAndPagination(t *testing.T) {
+	for _, storage := range []string{"contracted"} {
 		t.Run(storage, func(t *testing.T) {
 			project := dbfx.Insert(t, "project", testutil.Cols{"workspace_id": testWorkspaceID, "title": "Compatibility " + storage})
 			suffix := uuid.NewString()[:8]
@@ -27,9 +29,6 @@ func TestStatusCompatibilityMixedStorageGroupsAndPagination(t *testing.T) {
 			for i, old := range installedStatusBuckets {
 				category, _ := issuestatus.CategoryForBehavior(old)
 				stored := category
-				if storage == "old" || (storage == "mixed" && i%2 == 0) {
-					stored = old
-				}
 				key := fmt.Sprintf("compat_%s_%d", suffix, i)
 				cols := testutil.Cols{"workspace_id": testWorkspaceID, "key": key, "name": key, "category": stored, "color": "#123456"}
 				if old == "cancelled" {
@@ -135,8 +134,8 @@ func TestStatusCompatibilityMixedStorageGroupsAndPagination(t *testing.T) {
 func TestStatusCompatibilityCatalogWritesAndTenantIsolation(t *testing.T) {
 	ctx := context.Background()
 	key := "legacy_" + uuid.NewString()[:8]
-	id := dbfx.Insert(t, "issue_status", testutil.Cols{"workspace_id": testWorkspaceID, "key": key, "name": key, "category": "in_review", "color": "#123456", "position": 99999})
-	// Position allocation includes the old spelling in the same lifecycle.
+	id := dbfx.Insert(t, "issue_status", testutil.Cols{"workspace_id": testWorkspaceID, "key": key, "name": key, "category": "started", "color": "#123456", "position": 99999})
+	// Position allocation and old API inputs share the contracted lifecycle.
 	created, err := testHandler.Queries.CreateIssueStatusEntry(ctx, db.CreateIssueStatusEntryParams{
 		WorkspaceID: parseUUID(testWorkspaceID), Key: key + "_new", Name: "New", Category: "started", Color: "#123456",
 	})
@@ -153,7 +152,7 @@ func TestStatusCompatibilityCatalogWritesAndTenantIsolation(t *testing.T) {
 	}
 	ids := []string{}
 	for _, entry := range catalog {
-		if normalizedStatusCategory(entry.Category) == "started" && !entry.IsSystem {
+		if entry.Category == "started" && !entry.IsSystem {
 			ids = append(ids, uuid.UUID(entry.ID.Bytes).String())
 		}
 	}
@@ -161,11 +160,11 @@ func TestStatusCompatibilityCatalogWritesAndTenantIsolation(t *testing.T) {
 	var stored string
 	dbfx.QueryRow(t, "SELECT category FROM issue_status WHERE id=$1", id).Scan(&stored)
 	if stored != "started" {
-		t.Fatalf("reorder retained old category %s", stored)
+		t.Fatalf("reorder changed lifecycle category %s", stored)
 	}
 	foreign := dbfx.Workspace(t, "Other", "compat-"+uuid.NewString()[:8])
 	foreignKey := "foreign_" + uuid.NewString()[:8]
-	dbfx.Insert(t, "issue_status", testutil.Cols{"workspace_id": foreign, "key": foreignKey, "name": "Foreign", "category": "cancelled", "color": "#123456"})
+	dbfx.Insert(t, "issue_status", testutil.Cols{"workspace_id": foreign, "key": foreignKey, "name": "Foreign", "category": "closed", "color": "#123456"})
 	keys, err := issuestatus.ExpandCategories(ctx, testHandler.Queries, parseUUID(testWorkspaceID), []string{"closed"})
 	if err != nil || slices.Contains(keys, foreignKey) {
 		t.Fatalf("cross-workspace filter expansion: %v, %v", keys, err)
@@ -175,10 +174,10 @@ func TestStatusCompatibilityCatalogWritesAndTenantIsolation(t *testing.T) {
 	}
 }
 
-func TestStatusCompatibilityGCBeforeAndAfterBackfill(t *testing.T) {
+func TestStatusCompatibilityGCAfterContract(t *testing.T) {
 	for _, old := range installedStatusBuckets {
 		category, _ := issuestatus.CategoryForBehavior(old)
-		for _, stored := range []string{old, category} {
+		for _, stored := range []string{category} {
 			t.Run(old+"/"+stored, func(t *testing.T) {
 				key := "gc_" + uuid.NewString()[:8]
 				dbfx.Insert(t, "issue_status", testutil.Cols{"workspace_id": testWorkspaceID, "key": key, "name": key, "category": stored, "color": "#123456"})
@@ -228,7 +227,7 @@ func TestStatusCompatibilityCursorRejectsDifferentCategoryFormat(t *testing.T) {
 func TestStatusCompatibilityParentLaneUsesExpandedVisibleKeys(t *testing.T) {
 	project := dbfx.Insert(t, "project", testutil.Cols{"workspace_id": testWorkspaceID, "title": "Category parent lane"})
 	key := "child_" + uuid.NewString()[:8]
-	dbfx.Insert(t, "issue_status", testutil.Cols{"workspace_id": testWorkspaceID, "key": key, "name": key, "category": "in_review", "color": "#123456"})
+	dbfx.Insert(t, "issue_status", testutil.Cols{"workspace_id": testWorkspaceID, "key": key, "name": key, "category": "started", "color": "#123456"})
 	parent := dbfx.Issue(t, "Parent", testutil.Cols{"project_id": project, "status": "in_progress"})
 	dbfx.Issue(t, "Child", testutil.Cols{"project_id": project, "status": key, "parent_issue_id": parent})
 	group := issueTableGroupSpec{Kind: "compound", Primary: "parent", Secondary: "status_category", SecondaryValues: []string{"in_progress"}}

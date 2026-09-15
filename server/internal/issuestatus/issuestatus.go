@@ -165,7 +165,7 @@ func BehaviorsForCategory(category string) []string {
 	}
 }
 
-// ParseCategory normalizes API spellings and pre-backfill stored categories.
+// ParseCategory normalizes API spellings from installed and current clients.
 func ParseCategory(value string) (string, bool) {
 	if IsCategory(value) {
 		return value, true
@@ -207,7 +207,6 @@ func WireCategory(status, category string) string {
 // Custom statuses inherit only terminal lifecycle semantics, not parked, review,
 // blocked or active-agent recovery behavior. Nonterminal keys stay distinct.
 func customBehavior(status, category string) string {
-	category, _ = ParseCategory(category)
 	switch category {
 	case CategoryDone:
 		return Done
@@ -453,8 +452,8 @@ func categoryAndName(ctx context.Context, q Querier, workspaceID pgtype.UUID, st
 	if err != nil {
 		return "", "", fmt.Errorf("resolve issue status %q category: %w", status, err)
 	}
-	category, ok := ParseCategory(entry.Category)
-	if !ok {
+	category := entry.Category
+	if !IsCategory(category) {
 		return "", entry.Name, fmt.Errorf("invalid category %q for issue status %q", entry.Category, status)
 	}
 	return category, entry.Name, nil
@@ -617,7 +616,7 @@ func (r *Resolver) load(ctx context.Context, q Querier) {
 	r.categories = make(map[string]string, len(entries))
 	r.names = make(map[string]string, len(entries))
 	for _, e := range entries {
-		r.categories[e.Key], _ = ParseCategory(e.Category)
+		r.categories[e.Key] = e.Category
 		r.names[e.Key] = e.Name
 	}
 }
@@ -768,8 +767,8 @@ func CustomKeyCategories(ctx context.Context, q Querier, workspaceID pgtype.UUID
 	}
 	out := make(map[string]string, len(entries))
 	for _, e := range entries {
-		category, ok := ParseCategory(e.Category)
-		if IsBuiltIn(e.Key) || !ok {
+		category := e.Category
+		if IsBuiltIn(e.Key) || !IsCategory(category) {
 			continue
 		}
 		out[e.Key] = category

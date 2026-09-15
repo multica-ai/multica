@@ -7,14 +7,15 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-func TestPreBackfillCategoriesPreserveLifecycleAndWire(t *testing.T) {
+func TestConvertedCategoriesPreserveLifecycleAndWire(t *testing.T) {
 	ctx := context.Background()
 	for _, old := range Canonical() {
 		t.Run(old, func(t *testing.T) {
 			category, _ := CategoryForBehavior(old)
 			key := "custom_" + old
-			// Do not use custom(): that fixture already normalizes its input.
-			q := newFakeQuerier(db.IssueStatus{Key: key, Category: old, WorkspaceID: testWorkspace})
+			// Real-runner tests prove old storage converts to this lifecycle.
+			// API adapters below must still accept the original spelling.
+			q := newFakeQuerier(db.IssueStatus{Key: key, Category: category, WorkspaceID: testWorkspace})
 			behavior := key
 			if old == Done || old == Cancelled {
 				behavior = old
