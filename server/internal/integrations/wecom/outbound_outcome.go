@@ -69,17 +69,24 @@ const (
 	dropAttachmentNotAdmitted dropReason = "attachment_not_admitted"
 )
 
-// skipReason names a completion this adapter did not send. Kept in its own
-// set, and behind its own counter, because "this never went on the wire" and
-// "this went on the wire and failed" answer different questions, and counting a
-// web-UI question's answer as a failed WeCom delivery makes ordinary usage read
-// as an outage.
+// skipReason names a completion this adapter did not send because it was not
+// WeCom's to send: not owed, not applicable, or not attributable to a WeCom
+// chat at all. Kept in its own set, and behind its own counter, because "this
+// was not ours to deliver" and "we owed this and failed" answer different
+// questions, and counting a web-UI question's answer as a failed WeCom delivery
+// makes ordinary usage read as an outage.
 //
-// Most of them are harmless too, which is what this set used to mean outright.
-// It no longer does: skipNoDeliveryRow is a turn the channel ingested with
-// nothing left that can say which chat, so a reply may well be owed and nobody
-// can place it. Read a skip as "not sent, and here is why", and actionable()
-// for which of them somebody has to do something about.
+// The boundary is the obligation, not the wire. Most of the reasons above are
+// settled before a frame is written too — a task that cannot be resolved, no
+// socket to write on, a delivery refused admission, a budget spent before its
+// turn — and what makes those drops is that a WeCom user was owed the answer.
+//
+// What stopped holding when skipNoDeliveryRow arrived is the other half of what
+// this set used to claim: that none of them is an incident. That one is a skip
+// for the third reason rather than the first — a turn the channel ingested with
+// nothing left that can say which chat — so a reply may well be owed and nobody
+// can place it. actionable() says which side of that line each reason falls
+// on.
 type skipReason string
 
 const (
@@ -138,10 +145,11 @@ const (
 // drop is, now that the two ordinary outcomes have moved to skipReason.
 func (r dropReason) actionable() bool { return true }
 
-// actionable reports whether a skip is one a person should look at. Almost
-// none are — that is what separates this set from dropReason — so the one that
-// is gets a WARN and the rest stay at DEBUG, where they can be read as a rate
-// without drowning the log.
+// actionable reports whether a skip is one a person should look at. Almost none
+// are, which is a property of this set rather than its definition — what
+// separates it from dropReason is the obligation, see the type comment — so the
+// one that is gets a WARN and the rest stay at DEBUG, where they can be read as
+// a rate without drowning the log.
 func (r skipReason) actionable() bool { return r == skipNoDeliveryRow }
 
 // errNoLiveConnection — no live WebSocket for this installation in this
@@ -255,7 +263,7 @@ func (o *Outbound) skippedFor(ctx context.Context, sessionID string, reason skip
 	attrs := []any{"reason", string(reason), "chat_session_id", sessionID}
 	if reason.actionable() {
 		// Its own line, not the one below at a louder level: "not owed to
-		// WeCom" is what the ordinary three mean, and the actionable one is
+		// WeCom" is what the ordinary four mean, and the actionable one is
 		// precisely the case where the reply may well have been owed and there
 		// is no longer anything that can say to whom.
 		o.logger.WarnContext(ctx, "wecom outbound: a channel turn with no route, so nothing was sent", attrs...)
