@@ -59,6 +59,12 @@ type BuiltinRuntime struct {
 	// piBackend.providerLabel).
 	ProviderLabel string
 
+	// SessionMode is the pi-family session-persistence strategy. Zero is
+	// piSessionModeFile (pi/omp): the daemon creates a transcript file and
+	// reuses its path as the session id. Forks that own their session
+	// directory (prime) set piSessionModeDir.
+	SessionMode piSessionMode
+
 	// ModelDiscovery is the strategy for discovering available models.
 	// When set, it replaces the protocol family's discovery entirely — omp
 	// uses `omp models --json`, a different command and output shape from
@@ -82,8 +88,9 @@ type ModelDiscoveryFunc func(ctx context.Context, runtimeCmd Command) ([]Model, 
 // to its protocol family's backend.
 //
 // A runtime identity appears here when it needs its own probe/display/skills
-// but reuses an existing backend's protocol. The first entry is omp (oh-my-pi):
-// a separate CLI that speaks the pi JSON event protocol.
+// but reuses an existing backend's protocol. omp (oh-my-pi) is a separate CLI
+// that speaks the pi JSON event protocol; prime (Prime Agent) is a hard fork
+// of pi that keeps the same event protocol but owns its session directory.
 var BuiltinRuntimes = []BuiltinRuntime{
 	{
 		ID:                "omp",
@@ -97,6 +104,24 @@ var BuiltinRuntimes = []BuiltinRuntime{
 		DefaultExecutable: "omp",
 		ProviderLabel:     "omp",
 		ModelDiscovery:    discoverOmpModels,
+	},
+	{
+		ID:                "prime",
+		ProtocolFamily:    "pi",
+		DefaultCommand:    "prime-agent",
+		EnvPrefix:         "MULTICA_PRIME",
+		DisplayName:       "Prime Agent",
+		SkillsDir:         ".prime/agent/skills",
+		UserSkillsDir:     ".prime/agent/skills",
+		LaunchHeader:      "prime-agent (json mode)",
+		DefaultExecutable: "prime-agent",
+		ProviderLabel:     "prime",
+		// prime refuses pi's --session flag (verified against v0.8.0) and
+		// manages its own session directory; it resumes by the session event's
+		// id via --resume. File mode would break it, so the descriptor pins
+		// dir mode.
+		SessionMode:    piSessionModeDir,
+		ModelDiscovery: discoverPrimeModels,
 	},
 }
 
@@ -143,6 +168,7 @@ type backendOverrideApplicator interface {
 func (b *piBackend) applyBuiltinRuntimeOverrides(desc BuiltinRuntime) {
 	b.defaultExecutable = desc.DefaultExecutable
 	b.providerLabel = desc.ProviderLabel
+	b.sessionMode = desc.SessionMode
 }
 
 // ResolveBackend is the single production entry point the daemon uses to
