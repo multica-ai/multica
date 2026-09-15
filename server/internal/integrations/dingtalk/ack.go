@@ -57,33 +57,12 @@ func NewAckNotifier(client *Client, decrypt Decrypter, logger *slog.Logger, inpu
 	return &ackNotifier{client: client, decrypt: decrypt, logger: logger, inputs: inputs, active: make(map[string][]*ackState)}
 }
 
-<<<<<<< HEAD
 func (n *ackNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID) {
 	if !sessionID.Valid || msg.MessageID == "" || msg.Source.ChatID == "" {
 		return
 	}
 	release := n.client.beginReplyInput(sessionID)
 	defer release()
-=======
-// OnIngested posts the processing ack unless a recent ack for the same session
-// is still within the coalesce window.
-func (n *ackNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID) {
-	if n.suppress(sessionID) {
-		return
-	}
-	send := n.sendText
-	if send == nil {
-		send = n.realSend
-	}
-	if err := send(ctx, inst, msg, ackProcessingText); err != nil {
-		n.logger.WarnContext(ctx, "dingtalk ack: send failed",
-			"installation_id", util.UUIDToString(inst.ID), "error", err)
-	}
-}
-
-// OnSettled clears the session's dedup entry so its next turn acks immediately.
-func (n *ackNotifier) OnSettled(_ context.Context, sessionID pgtype.UUID) {
->>>>>>> 8c75d38c4 (feat(wecom): bind a bubble to its run off the bus, not off the engine)
 	key := util.UUIDToString(sessionID)
 	// Keep only reaction coordinates, not callback bodies or session webhooks.
 	state := &ackState{inst: inst, msg: channel.InboundMessage{MessageID: msg.MessageID, Source: msg.Source},
