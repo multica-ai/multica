@@ -1350,6 +1350,18 @@ func provablyNotSent(err error) bool {
 		return false
 	case errors.Is(err, errAckTimeout):
 		return false
+	case errors.Is(err, errStreamBusy):
+		// Nothing was written: the gate refused to put a frame out while the
+		// server still owed a verdict on this req_id. Provably not sent is
+		// what lets the answer go out once, by the plain route.
+		return true
+	case errors.Is(err, errStreamAckTimeout):
+		// A stream frame whose verdict never came back is the same evidence as
+		// errAckTimeout and has to be read the same way: the frame went to the
+		// socket and the server said nothing. Missing here it fell to the
+		// default and was reported as provably unsent, which is what let a
+		// sealed bubble's answer go out a second time as a plain message.
+		return false
 	case errors.Is(err, errWriteAttempted):
 		return false
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):

@@ -66,56 +66,6 @@ func (c *silentConn) streamBody(t *testing.T, i int) map[string]any {
 	return stream
 }
 
-// THE failure this bookkeeping exists to prevent.
-//
-// The opening frame's verdict is late. Its caller has already given up, the
-// answer has gone out behind it, and then the server's answer to the OPENING
-// frame arrives — errcode 0, "accepted". Handed to whoever happens to be
-// waiting, that stale acceptance satisfies the CLOSING frame: the answer reads
-// as delivered, the caller never falls back to a plain message, and the reply
-// the user was waiting for is sent nowhere at all.
-func TestALateVerdictIsNotHandedToTheNextFrame(t *testing.T) {
-	t.Parallel()
-	conn := &silentConn{}
-	sender := newWSSender(conn, nil)
-	sender.ackTimeout = 50 * time.Millisecond
-	const reqID = "REQ-1"
-
-	// Frame 1 — the opening frame. Nothing answers it, so its caller gives up.
-	if err := sender.respondStream(context.Background(), reqID, "S-1", streamThinkingPlaceholder, false); !errors.Is(err, errStreamAckTimeout) {
-		t.Fatalf("opening frame: got %v, want errStreamAckTimeout", err)
-	}
-
-	// Frame 2 — the answer. It has to wait for a verdict of its own.
-	done := make(chan error, 1)
-	go func() {
-		done <- sender.respondStream(context.Background(), reqID, "S-1", "the agent reply", true)
-	}()
-	waitForFrames(t, conn, 2)
-
-	// The opening frame's verdict finally arrives: accepted. It belongs to a
-	// frame nobody is waiting for any more and must go nowhere.
-	sender.deliverAck(reqID, 0, "")
-
-	select {
-	case err := <-done:
-		t.Fatalf("the closing frame took the opening frame's stale verdict and reported %v; the answer is now recorded as delivered and will never be re-sent", err)
-	case <-time.After(20 * time.Millisecond):
-	}
-
-	// Now the closing frame's own verdict: a refusal. THIS is the one it must
-	// read, because it is what sends the answer out as a plain message instead.
-	sender.deliverAck(reqID, errcodeStreamExpired, "stream expired")
-	select {
-	case err := <-done:
-		if !streamUnusable(err) {
-			t.Fatalf("closing frame reported %v; want the server's 846608 refusal", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("the closing frame never read its own verdict")
-	}
-}
-
 // A sealed stream is immutable. A frame that lost the race to the answer must
 // never reach the wire behind it — the server might still take it, and it would
 // paint the placeholder back over the reply the user is reading.
@@ -200,40 +150,6 @@ func TestTheClosingFrameWaitsForTheUnackedOpeningFrame(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("the closing frame never read its verdict")
-	}
-}
-
-// The wait is bounded: an opening frame nobody ever answers times out on its
-// own budget, and the closing frame goes out right behind it rather than
-// hanging the answer on a spinner. The late verdict, should it come, is then
-// handled by the count (TestALateVerdictIsNotHandedToTheNextFrame).
-func TestTheClosingFrameGoesOutOnceTheOpeningFrameTimesOut(t *testing.T) {
-	t.Parallel()
-	conn := &silentConn{}
-	sender := newWSSender(conn, nil)
-	sender.ackTimeout = 300 * time.Millisecond
-	const reqID = "REQ-3b"
-
-	opening := make(chan error, 1)
-	go func() {
-		opening <- sender.respondStream(context.Background(), reqID, "S-3b", streamThinkingPlaceholder, false)
-	}()
-	waitForFrames(t, conn, 1)
-
-	started := time.Now()
-	closing := make(chan error, 1)
-	go func() {
-		closing <- sender.respondStream(context.Background(), reqID, "S-3b", "the answer", true)
-	}()
-	waitForFrames(t, conn, 2)
-	if waited := time.Since(started); waited < 200*time.Millisecond {
-		t.Fatalf("the closing frame reached the wire after %v, before the opening frame's %v budget ran out", waited, sender.ackTimeout)
-	}
-	if err := <-opening; !errors.Is(err, errStreamAckTimeout) {
-		t.Fatalf("opening frame reported %v, want errStreamAckTimeout", err)
-	}
-	if err := <-closing; !errors.Is(err, errStreamAckTimeout) {
-		t.Fatalf("closing frame reported %v, want errStreamAckTimeout (nothing answered it either)", err)
 	}
 }
 
@@ -324,4 +240,81 @@ func waitForFrames(t *testing.T, c *silentConn, n int) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("only %d frames written, want %d", c.count(), n)
+}
+
+// The inverted ordering is the one we MEASURED, and it is what makes position
+// unusable once two frames are outstanding. STRATEGY §6.4: twenty-four frames
+// written back-to-back came back grouped by outcome rather than in write order.
+// So the closing frame's own refusal can land before an abandoned opener's late
+// acceptance, and matching by position drops the refusal and hands the
+// acceptance to the closing frame — the answer recorded as delivered, no
+// fallback, nobody receives it.
+//
+// The gate removes the premise rather than trying to survive it: while the
+// server still owes a verdict on this req_id, no further frame is written.
+// When the abandoned verdict never comes, the closing frame is never written
+// either, and the caller is told so plainly enough to send the answer the
+// ordinary way — which is the route that always works.
+//
+// REVERSE VERIFICATION: drop the owed check from awaitAck and this fails with
+// two frames on the wire and the closing one reporting nil, which is the
+// answer recorded as delivered and sent nowhere.
+func TestNoFrameIsWrittenWhileTheServerStillOwesAVerdict(t *testing.T) {
+	t.Parallel()
+	conn := &silentConn{}
+	sender := newWSSender(conn, nil)
+	sender.ackTimeout = 60 * time.Millisecond
+	const reqID = "REQ-OWED"
+
+	// The opening frame is abandoned by its caller — on the reply path that is
+	// the router's replyTimeout, 2500ms, well under ackTimeout, so it happens
+	// on an ordinary turn rather than a slow one. Its verdict never arrives.
+	if err := sender.respondStream(context.Background(), reqID, "S-1", streamThinkingPlaceholder, false); !errors.Is(err, errStreamAckTimeout) {
+		t.Fatalf("opening frame: got %v, want errStreamAckTimeout", err)
+	}
+
+	err := sender.respondStream(context.Background(), reqID, "S-1", "the agent reply", true)
+	if err == nil {
+		t.Fatal("the closing frame reported success while the server still owed a verdict: whatever ack arrives next would have been read as its own")
+	}
+	if !provablyNotSent(err) {
+		t.Fatalf("closing frame reported %v, which is not provably unsent — the answer would be left as unknown when in fact no frame was written", err)
+	}
+	if n := len(conn.frames); n != 1 {
+		t.Fatalf("%d frames reached the socket, want 1: the second was written with two verdicts outstanding", n)
+	}
+}
+
+// The other half: once the abandoned frame's verdict does arrive, the server
+// owes nothing, position means what it says again, and the closing frame goes
+// out and reads its own verdict.
+func TestTheClosingFrameGoesOutOnceTheOwedVerdictArrives(t *testing.T) {
+	t.Parallel()
+	conn := &silentConn{}
+	sender := newWSSender(conn, nil)
+	sender.ackTimeout = 2 * time.Second
+	const reqID = "REQ-SETTLED"
+
+	if err := sender.respondStream(context.Background(), reqID, "S-1", streamThinkingPlaceholder, false); err == nil {
+		t.Fatal("the opening frame should have timed out")
+	}
+	// The opener's verdict lands after its caller gave up. Nobody reads it;
+	// it only settles the debt.
+	sender.deliverAck(reqID, 0, "")
+
+	done := make(chan error, 1)
+	go func() {
+		done <- sender.respondStream(context.Background(), reqID, "S-1", "the agent reply", true)
+	}()
+	waitForFrames(t, conn, 2)
+	sender.deliverAck(reqID, errcodeStreamExpired, "stream expired")
+
+	select {
+	case err := <-done:
+		if !streamUnusable(err) {
+			t.Fatalf("closing frame reported %v; want the server's 846608 refusal, which is its own", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the closing frame never read its verdict")
+	}
 }

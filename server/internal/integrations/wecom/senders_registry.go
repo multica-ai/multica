@@ -143,6 +143,17 @@ func (r *sendersRegistry) stream(ctx context.Context, h streamHandle, content st
 	return sender.respondStream(ctx, h.ReqID, h.StreamID, content, finish)
 }
 
+// streamRewrite is stream for a frame already written once — seal's retry.
+// See respondStreamRewrite for why an identical frame may pass the gate an
+// ordinary one may not.
+func (r *sendersRegistry) streamRewrite(ctx context.Context, h streamHandle, content string, finish bool) error {
+	sender := r.get(h.InstallationID)
+	if sender == nil {
+		return errNoLiveConnection
+	}
+	return sender.respondStreamRewrite(ctx, h.ReqID, h.StreamID, content, finish)
+}
+
 // recordEnding counts how a bubble ended — BOTH halves, recorded on this one
 // line — from the final error of its closing frame.
 //

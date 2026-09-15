@@ -397,22 +397,60 @@ func (o *Outbound) deliverAnswer(ctx context.Context, e events.Event, taskID pgt
 				text = c.StreamNoReply
 			}
 		}
-		if err := o.finishStream(ctx, t.Handle, text); err == nil {
+		sealErr := o.finishStream(ctx, t.Handle, text)
+		if sealErr == nil {
 			o.delivered()
 			return answerOutcome{addr: t.Handle.address(), spoke: true}, nil
 		}
-		// The frame was refused for good, or every attempt at it went
-		// unanswered. Say it as a new message instead: 846608 and 846605 both
-		// mean this stream will never take another frame, and the retries
-		// inside seal have already spent what a lost ack is worth. The plain
-		// message is the one route whose outcome this process can actually
-		// observe. finishStream counted the refusal.
+		// ONLY A STATED REFUSAL IS PROOF THE ANSWER IS NOT ON SCREEN, and only
+		// proof may put the same words out a second time. WeCom has no unsend,
+		// so a duplicate is permanent while a delivery nobody confirmed can be
+		// re-asked; between the two, the duplicate is the error with no way
+		// back.
 		//
-		// Not because the handle has gone stale. A callback's req_id belongs to
-		// the turn rather than to the socket it arrived on, and a stream opened
+		// 846605 and 846608 say the stream will never take another frame, so
+		// nothing was written into the bubble. provablyNotSent covers the
+		// failures raised before the write reached the socket at all. Anything
+		// else — an ack that never came, a write whose own error may still
+		// have left bytes with the peer (errWriteAttempted's doc says exactly
+		// that) — is a delivery this process cannot see the end of, and
+		// cancelAck's note makes that the CASCADE rather than the exception:
+		// one lost ack times out every later frame on the same req_id, so a
+		// fallback on this evidence repeats the answer once per retry.
+		//
+		// Not a staleness question either. A callback's req_id belongs to the
+		// turn rather than to the socket it arrived on, and a stream opened
 		// before a reconnect is still writable after it — measured against a
 		// live tenant, see senders_registry.go.
+		if !streamUnusable(sealErr) && !provablyNotSent(sealErr) {
+			o.unconfirmed(ctx, e, unconfirmedSealReason(sealErr), sealErr)
+			return answerOutcome{addr: t.Handle.address(), spoke: true}, nil
+		}
 		content = text
+		// THE BUBBLE MUST NOT BE ABLE TO SPEND THE ANSWER'S BUDGET. seal
+		// retries a lost ack up to streamCloseRetries times, each attempt
+		// costing an ackTimeout and a streamCloseRetryDelay, and the caller's
+		// streamCloseTimeout does not cover that (see
+		// TestTheCloseRetryPolicyFitsTheBudgetItRunsUnder). When it ran out
+		// inside seal, the plain message that is this path's whole point then
+		// ran on the expired context and wrote nothing, while the WARN said it
+		// had been sent. On main the answer always had the full budget for its
+		// own message; falling back must not cost it that.
+		//
+		// The test is what is LEFT, not whether it is already gone. A context
+		// that has expired never reaches here — an expired seal returns a
+		// context error, which is not proof of non-delivery and is recorded as
+		// unknown above. What does reach here is a seal that spent most of the
+		// budget and then read a real refusal, leaving the plain message less
+		// time than one push needs.
+		//
+		// WithoutCancel rather than a longer deadline: the reason this budget
+		// is short is the bubble, which is over.
+		if d, ok := ctx.Deadline(); ok && time.Until(d) < ackTimeout {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), fallbackSendTimeout)
+			defer cancel()
+		}
 	}
 	if !hasVisibleChar(content) {
 		// No bubble to close and nothing to say. That is the end of it: a

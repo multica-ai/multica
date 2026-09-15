@@ -173,6 +173,17 @@ func (o *Outbound) droppedFor(ctx context.Context, sessionID, eventType string, 
 
 // unconfirmed records one reply whose outcome is unknown. WARN, because a
 // person deciding whether to resend needs to know this is NOT a failure.
+// unconfirmedSealReason names why a closing frame's outcome is unknown, for
+// the one label an operator reads off outbound_unconfirmed. It mirrors
+// unconfirmedReason and adds the seal's own case: a frame written and retried
+// with no verdict ever coming back.
+func unconfirmedSealReason(err error) string {
+	if r := unconfirmedReason(err); r != "" {
+		return r
+	}
+	return "seal_unacked"
+}
+
 func (o *Outbound) unconfirmed(ctx context.Context, e events.Event, reason string, err error) {
 	o.unconfirmedFor(ctx, e.ChatSessionID, e.Type, reason, err)
 }

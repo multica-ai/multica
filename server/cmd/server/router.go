@@ -1105,6 +1105,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				if opts.WecomRelayOutbound != nil {
 					opts.WecomRelayOutbound.SetMetrics(wecomMetricsOrNil(opts.WecomMetrics))
 					wecomOutboundOpts = append(wecomOutboundOpts, wecom.WithRelay(opts.WecomRelayOutbound))
+					// The indicator routes too. A run's ending can be produced
+					// on any replica while exactly one holds the socket, so
+					// without this a failure notice is delivered only when the
+					// two happen to coincide.
+					wecomTyping.WithRelay(opts.WecomRelayOutbound)
 					slog.Info("wecom integration: cross-replica outbound routing enabled")
 				}
 				// wecomStreams is the same store the typing indicator paints
