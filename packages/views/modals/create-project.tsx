@@ -44,7 +44,12 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 import { ContentEditor, type ContentEditorRef, TitleEditor } from "../editor";
@@ -390,6 +395,26 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     setSelectedRepos((prev) => (prev.includes(url) ? prev : [...prev, url]));
     setCustomRepoUrl("");
   };
+
+  const submitState: "submitting" | "missing_title" | "ready" = submitting
+    ? "submitting"
+    : !title.trim()
+      ? "missing_title"
+      : "ready";
+  const createButton = (
+    <Button
+      size="sm"
+      onClick={handleSubmit}
+      disabled={submitState === "submitting"}
+      aria-disabled={submitState === "missing_title" || undefined}
+      aria-busy={submitState === "submitting" || undefined}
+      className="shrink-0 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:active:translate-y-0"
+    >
+      {submitState === "submitting"
+        ? t(($) => $.create_project.submitting)
+        : t(($) => $.create_project.submit)}
+    </Button>
+  );
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
@@ -981,14 +1006,18 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         {/* Footer action bar — primary action in its own strip, matching
             create-issue. */}
         <div className="flex items-center justify-end border-t px-4 py-3 shrink-0">
-          <Button
-            size="sm"
-            onClick={handleSubmit}
-            disabled={!title.trim() || submitting}
-            className="shrink-0"
-          >
-            {submitting ? t(($) => $.create_project.submitting) : t(($) => $.create_project.submit)}
-          </Button>
+          {submitState === "missing_title" ? (
+            <TooltipProvider delay={200}>
+              <Tooltip>
+                <TooltipTrigger render={createButton} />
+                <TooltipContent side="top">
+                  {t(($) => $.create_project.title_required)}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : (
+            createButton
+          )}
         </div>
       </DialogContent>
     </Dialog>
