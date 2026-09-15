@@ -116,6 +116,18 @@ type Config struct {
 	CloudTimeout             time.Duration
 	AttachmentDownloadMode   string
 	AttachmentDownloadURLTTL time.Duration
+	// ResumeContextBudgetTokens caps how much input a provider session may
+	// have billed before a comment follow-up stops inheriting it and starts a
+	// fresh conversation instead (GH #4754). Populated from
+	// RESUME_CONTEXT_BUDGET_TOKENS.
+	//
+	// A pointer because the knob is tri-state and 0 is a meaningful setting,
+	// not an unset one: nil means "the deployment said nothing, use
+	// defaultResumeContextBudgetTokens", and an explicit 0 disables the gate
+	// and restores the previous always-resume behaviour exactly. Collapsing
+	// those two onto one int is how a "disable this" would silently re-enable
+	// itself — the same reason llm.Config.MaxRetries is a pointer.
+	ResumeContextBudgetTokens *int64
 	// AttachmentFrameAncestors are trusted browser origins allowed to embed
 	// attachment preview responses. In production this should mirror the
 	// frontend/CORS origin allowlist so split app/api self-hosted deployments

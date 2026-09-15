@@ -208,6 +208,24 @@ func envPositiveInt64(name string, def int64) int64 {
 	return v
 }
 
+// envOptionalNonNegativeInt64 reads a tri-state numeric knob: nil when the
+// deployment set nothing, a value when it did. Unlike envNonNegativeInt64
+// would be, an explicit 0 survives as 0 rather than collapsing into "unset" —
+// required wherever 0 is a real setting (e.g. RESUME_CONTEXT_BUDGET_TOKENS,
+// where it means "never gate a resume").
+func envOptionalNonNegativeInt64(name string) *int64 {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return nil
+	}
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || v < 0 {
+		slog.Warn("invalid env var, ignoring", "name", name, "value", raw, "error", err)
+		return nil
+	}
+	return &v
+}
+
 func envDuration(name string, def time.Duration) time.Duration {
 	raw := os.Getenv(name)
 	if raw == "" {
