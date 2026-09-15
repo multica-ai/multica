@@ -1,0 +1,260 @@
+---
+title: Authorization architecture
+description: How Multica composes identity, workspace membership, roles, ownership, explicit grants, and resource scope into access decisions.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Mermaid } from "@/components/mermaid";
+
+Multica does not use one global permission table or one role check for every action. Authorization is a composition of boundaries: the authenticated principal, the selected workspace, workspace membership and role, the relationship to a resource, explicit grants, and the kind of action being attempted.
+
+This page maps the current implementation. It is a reference for reviewing behavior and evolving the model; it does not grant additional access or propose a new role system.
+
+![Multica authorization architecture: credentials resolve to an actor and workspace, pass through six policy planes, and are enforced by server middleware, handlers, services, scoped queries, and realtime authorization](/images/docs/authorization-architecture.webp)
+
+<Callout type="info">
+The Go server is authoritative. Client permission helpers improve affordances and explain denials, but hiding or disabling a control is never an authorization boundary.
+</Callout>
+
+## The decision model
+
+An authorization decision can be read as:
+
+```text
+principal + actor kind + workspace membership + role
++ resource relationship + explicit grants + action
++ resource scope and sensitivity
+-> allow, redact, deny, or not found
+```
+
+The inputs are deliberately distinct:
+
+| Input | Meaning | Examples |
+| --- | --- | --- |
+| Principal | The identity established by a credential | Human user, agent task, daemon, cloud runtime node, plugin installation |
+| Actor kind | How the request is acting after authentication | `member`, `agent`, `system`, or a machine credential acting for an owner |
+| Workspace | The tenant boundary for the request and resource | Workspace UUID resolved from a bound token, route, header, or query |
+| Membership and role | Whether the user belongs to the workspace and their administrative role | `owner`, `admin`, `member` |
+| Resource relationship | A direct relationship that can grant management rights | Agent owner, runtime owner, comment author, skill creator, automation creator |
+| Explicit grant | A resource-local allow-list or collaborator row | Agent invocation target, Autopilot collaborator |
+| Action | The operation being authorized | View, edit, invoke, bind, reveal a secret, manage access, delete |
+
+Authentication often stamps a user ID even for machine credentials. Authorization must therefore consider the actor source as well as the user ID. An agent task token, for example, is bound to one user, agent, task, and workspace; it is not equivalent to an interactive human session on every endpoint.
+
+## Request flow
+
+<Mermaid chart={`flowchart TD
+  C[Credential] --> A[Authentication middleware]
+  A --> I[Principal and actor context]
+  R[Route, header, query, or token binding] --> W[Workspace resolution]
+  I --> M[Membership boundary]
+  W --> M
+  M --> P{Composed policy gates}
+  P -->|workspace role| E[Server enforcement]
+  P -->|resource owner or creator| E
+  P -->|explicit grant| E
+  P -->|visibility and consent| E
+  P -->|human or machine actor| E
+  E --> Q[Workspace-scoped query or transaction]
+  Q --> O[Allow, redact, 403, or 404]
+  F[Client permission helpers] -. affordance only .-> P`} />
+
+The main enforcement layers are:
+
+1. **Authentication middleware paths** validate session JWTs, personal access tokens, task tokens, cloud node credentials, daemon credentials, and plugin credentials. Server-set headers carry the resolved identity to downstream code.
+2. **Workspace middleware** resolves the workspace, verifies membership, and optionally requires one of the workspace roles. Task-token workspace bindings take precedence over client-supplied workspace identifiers.
+3. **Handlers and services** apply resource-specific rules such as ownership, collaborator grants, agent invocation access, runtime consent, secret redaction, and human-only operations.
+4. **Queries and transactions** scope reads and writes by `workspace_id` and preserve invariants while related rows change.
+5. **Realtime authorization** independently validates workspace, user, task, and chat subscriptions so WebSocket delivery cannot bypass the corresponding HTTP boundary.
+
+## Policy planes
+
+### Workspace membership and roles
+
+Every workspace member has exactly one role: `owner`, `admin`, or `member`.
+
+- `member` is the baseline for day-to-day collaboration. Most issue, project, squad, agent, skill, chat, inbox, and read-only workspace routes begin at this boundary.
+- `owner` and `admin` manage workspace settings, members below the owner boundary, shared catalogs, integrations, plugins, runtime profiles, and workspace billing operations.
+- `owner` alone deletes the workspace and controls changes involving the `owner` role.
+- A workspace must retain at least one `owner`.
+
+Workspace roles are intentionally coarse. They do not automatically grant the right to use a private agent or another member's private runtime.
+
+### Resource ownership
+
+Several resources add an ownership or authorship check on top of membership:
+
+| Resource | Relationship | Current effect |
+| --- | --- | --- |
+| Agent | `owner_id` | Owner or workspace owner/admin can manage lifecycle and configuration; only the owner controls invocation grants |
+| Runtime | `owner_id` | Owner or workspace owner/admin can rename or delete; only the owner can share a private runtime |
+| Skill | `created_by` | Creator or workspace owner/admin can edit or delete |
+| Comment | `author_type` + `author_id` | Author or workspace owner/admin can edit or delete |
+| Autopilot | `created_by_type` + `created_by_id` | Creator or workspace owner/admin has implicit write and access-management rights |
+| Chat session | `creator_id` | Creator-only HTTP and realtime access |
+
+Ownership is resource-local. It is not a fourth workspace role and does not transfer unrelated workspace administration rights.
+
+### Explicit grants
+
+Explicit grants answer narrower questions than workspace roles:
+
+- **Agent invocation targets** decide who may trigger an agent. `private` admits only the agent owner. `public_to` evaluates workspace and member targets. Team targets are reserved and grant nothing in the current model.
+- **Autopilot collaborators** can edit one Autopilot and request runs. The target agent still has a separate invocation gate. Collaborators cannot grant or revoke collaborators; that remains with the creator and workspace owner/admin.
+
+Agent access separates **seeing and managing inventory** from **using the underlying capability**. A workspace owner/admin may inspect or manage another member's private agent, but cannot invoke it without an invocation grant. This prevents an administrative role from silently using the agent owner's connected credentials.
+
+### Visibility, consent, and redaction
+
+The word `visibility` appears on several resources but is not one universal policy:
+
+- Runtime `private` / `public` is the runtime owner's consent to let other workspace members use their machine. Workspace owner/admin does not override a private runtime for binding or machine access.
+- Agent invocation uses `permission_mode` and invocation targets. The older agent `visibility` field is a derived compatibility field, not the invocation authority.
+- Saved views and quick actions use visibility for discoverability and ownership-filtered listing.
+- Secret-bearing agent fields use redaction rules that can be narrower than access to the agent record itself.
+
+The server may return the resource with sensitive fields removed, deny with `403`, or deliberately return `404` when confirming the resource's existence would leak information.
+
+### Human, agent, and system actors
+
+Task tokens authenticate an agent process and bind it to one task, agent, user, and workspace. That authenticated identity is distinct from the human whose invocation authority a delegated run carries. The [run authority model](#run-authority) below identifies that human without treating an agent's credentials as a new source of human authority.
+
+Account billing explicitly rejects task-token and cloud-node actor sources. Agent environment-secret management separately rejects agent actors, then requires the agent owner or a workspace owner/admin. These guards are attached to sensitive endpoints rather than applied globally because agents legitimately create issues, write comments, and perform other workspace work.
+
+## Run authority
+
+Three questions must stay separate: **who authenticated the request**, **whose permission admits the run**, and **whose connected credentials the agent uses**. An audit label is not an authorization grant.
+
+### Invocation identity
+
+| Entry point | Invocation principal | Admission rule |
+| --- | --- | --- |
+| Human invocation, including Autopilot **Run now** | The acting member | Check that member's access to the target agent; no workspace-admin bypass |
+| Agent-to-agent invocation with a human originator | The top-of-chain human, not the immediate agent | Apply the target agent's invocation gate to that originator |
+| General agent/system invocation without a human originator | The workspace-internal agent/system principal; no human is inferred | Only an explicit `public_to` **workspace** target admits it; private and member-target access remain denied, and team targets are inert |
+| Scheduled or webhook Autopilot dispatch | The firing trigger's immutable member creator | Resolve a valid creator, then check that member's access to the target agent; a workspace target does not waive creator resolution |
+
+The workspace-target exception belongs to the **general invocation gate**, not every entry point. An Autopilot automatic dispatch must prove its trigger creator even when the target agent is shared with the whole workspace. Missing attribution must never be repaired by silently borrowing an agent owner's, editor's, or rule publisher's rights.
+
+### Autopilot admission
+
+An Autopilot has two independent permission checks:
+
+1. **Permission to request or configure work.** `requireAutopilotWrite` admits the Autopilot creator, workspace owner/admin, or a granted collaborator to editing and manual run requests.
+2. **Permission to invoke the target agent.** `autopilotAdmitInvoke` checks the current clicker for **Run now**, or the firing trigger's creator for scheduled/webhook dispatch. Passing the first check does not satisfy the second.
+
+For example, a workspace admin can manage an Autopilot but still cannot manually run its private squad leader if the admin lacks invocation access. The manual endpoint can return HTTP `200` with `status: "skipped"` and `reason_code: "invocation_not_allowed"`. Clients must inspect the run outcome, not treat transport success as proof that execution started.
+
+An Autopilot can have several triggers, each with its own immutable `created_by`. Authority is **per trigger and per dispatch**, not per Autopilot. Admission and task attribution both use `ResolveAutopilotTriggerPrincipal`, never `published_by`, to select the same human. The resolver requires all of the following:
+
+- The trigger belongs to the expected Autopilot and workspace.
+- `created_by_type` is `member` and `created_by_id` is present.
+- That creator is still a member of the workspace, checked on every dispatch.
+
+If any check fails, automatic dispatch has no valid invocation principal and is refused. An audit-only `rule_owner` attribution cannot satisfy this gate.
+
+**Editing does not transfer execution identity.** Authorized editors can change what an Autopilot does, while existing triggers continue to execute as their immutable creators. An editor cannot inject their own rights into an existing trigger, but edited behavior can exercise the trigger creator's rights. This is an accepted tradeoff of collaborative editing. `published_by` records the latest substantive editor for configuration audit only.
+
+### Connected credentials
+
+The connected-apps overlay is the intersection of the **agent owner's active connections** and the **agent's allow-list**. Within overlay construction, `originatorUserID` is not an authorization input and never selects the originator's credentials.
+
+Permission to invoke an agent includes use of the apps its owner attached. Credential selection and exposure are therefore different boundaries: admitting another member can give that member use of the existing overlay without changing whose credentials it contains.
+
+### Legacy trigger recovery
+
+Triggers initialized by [migration 449](https://github.com/multica-ai/multica/blob/main/server/migrations/449_autopilot_trigger_created_by.up.sql) retain the last recoverable `published_by` as their immutable creator. For an already-edited trigger, this can identify its last editor rather than its historical creator. A recovered member is a full invocation principal, not merely audit attribution. This compatibility choice preserves existing automations while widening which members' invocation authority automatic runs can exercise. Admitted runs can use the target agent owner's attached apps even though credential selection is unchanged.
+
+A trigger with no recoverable creator has no invocation principal. Attribution can degrade to audit-only `rule_owner`, but automatic dispatch remains refused. Re-saving updates `published_by`, not `created_by`: restoring automatic execution requires recreating the trigger under a current member with the required invocation access.
+
+## Current capability matrix
+
+This matrix summarizes representative decisions. The resource-specific handler remains authoritative when a surface is not listed.
+
+| Capability | `owner` | `admin` | `member` | Additional rule |
+| --- | :---: | :---: | :---: | --- |
+| Day-to-day workspace collaboration | Yes | Yes | Yes | Resource must belong to the selected workspace |
+| Update workspace settings | Yes | Yes | No | Server role gate |
+| Manage `admin` and `member` membership | Yes | Yes | No | Target must belong to the workspace |
+| Promote, demote, remove, or grant `owner` | Yes | No | No | Last owner cannot be removed or demoted |
+| Delete workspace | Yes | No | No | Owner-only route |
+| Edit, archive, or restore an agent | Yes | Yes | Own only | Resource ownership check |
+| Change agent invocation grants | Own only | Own only | Own only | Agent owner only; no workspace-role override |
+| View agent inventory | All | All | Own or granted | Agent actors have a separate A2A view path; secrets are still redacted |
+| Invoke an agent | By grant | By grant | By grant | Agent owner always allowed; no admin bypass for private agents; scheduled or webhook runs invoke as the firing trigger's creator |
+| Use a runtime | By visibility | By visibility | By visibility | Private runtime is owner-only; public runtime is workspace-usable; ownerless runtime is unusable |
+| Rename or delete a runtime | Yes | Yes | Own only | Does not imply permission to use or share it |
+| Change runtime visibility | Own only | Own only | Own only | Runtime owner consent; no role override |
+| Edit an Autopilot | Yes | Yes | Creator or collaborator | Editing does not transfer existing triggers' execution identity |
+| Request a manual Autopilot run | Yes | Yes | Creator or collaborator | Target-agent invocation is checked separately against the clicker; the run can be `skipped` |
+| Manage Autopilot collaborators | Yes | Yes | Creator only | Collaborators cannot re-grant |
+| Read a chat session | Creator only | Creator only | Creator only | Workspace role does not override creator privacy |
+| Reveal or rotate agent environment secrets | Yes | Yes | Agent owner only | Agent actors are denied; successful reveals are audited |
+
+“Yes” in the role columns means the role satisfies the role part of the decision. Workspace scope, actor kind, resource state, and endpoint-specific checks still apply.
+
+## Frontend permissions
+
+`packages/core/permissions/` contains pure decision functions and React hooks for common affordances. They return both an allow/deny result and a stable reason so Web and Desktop can share disabled states and explanatory copy.
+
+These helpers intentionally mirror selected server rules; they do not cover every route. New permission-sensitive UI should:
+
+1. Reuse an existing pure rule or add one in `packages/core/permissions/` when multiple surfaces need the same decision.
+2. Treat loading or missing membership data as undetermined rather than as proof of access.
+3. Submit the request to the server even when a client check passed, and handle `403` and `404` responses.
+4. Add backend tests for the enforcement rule and frontend tests for the affordance separately.
+
+## Invariants
+
+Authorization changes must preserve these properties:
+
+- **Server authority:** client state never grants access.
+- **Workspace isolation:** resource lookup and mutation carry the target `workspace_id`; knowing a UUID is insufficient.
+- **Bound machine credentials:** credentials with a server-established task, workspace, installation, or node binding cannot widen that scope with request parameters.
+- **Governance is not direct use authority:** administrative visibility or management does not automatically grant direct invocation of another member's private agent or direct use of their credentials, runtime, or chat. Autopilot editors can still change behavior that an existing trigger later executes as its immutable creator, as described above.
+- **No inferred authority:** missing required principals and failed grant lookups cannot create access; unknown modes add no grants. The general invocation gate's explicit workspace-target exception admits unattributed agent/system principals, but never supplies a human identity or bypasses Autopilot creator resolution.
+- **Revocation is complete:** removing membership also removes or deactivates dependent grants and execution paths that would retain access.
+- **Realtime parity:** a subscription cannot reveal data the same principal could not read through the corresponding HTTP surface.
+- **Secret minimization:** responses and broadcasts redact sensitive fields independently of whether the surrounding resource is visible.
+
+## Open design boundaries
+
+The current model supports a small-team product without claiming a complete enterprise RBAC system. The following boundaries should be decided explicitly before adding broader B2B permissions:
+
+- Whether custom roles or permission bundles supplement the fixed workspace roles.
+- Whether project, team, or resource groups become first-class authorization scopes.
+- Whether agent, Autopilot, plugin, and future resource grants converge on one grant vocabulary or remain domain-specific.
+- Which administrative actions require human presence, step-up authentication, approval, or audit retention.
+- Whether permission metadata should be discoverable through one server capability endpoint rather than mirrored manually by clients.
+- How temporary access, service accounts, SCIM groups, and organization-level policy inherit into workspaces.
+
+Until those decisions are made, new behavior should extend the narrowest existing policy plane instead of treating `owner` or `admin` as a universal bypass.
+
+## Implementation map
+
+| Concern | Primary source |
+| --- | --- |
+| Credential resolution and actor-source stamps | [`auth.go`](https://github.com/multica-ai/multica/blob/main/server/internal/middleware/auth.go) |
+| Workspace resolution, membership, and role middleware | [`workspace.go`](https://github.com/multica-ai/multica/blob/main/server/internal/middleware/workspace.go) |
+| Route-level member/admin/owner boundaries | [`router.go`](https://github.com/multica-ai/multica/blob/main/server/cmd/server/router.go) |
+| Actor classification and common handler gates | [`handler.go`](https://github.com/multica-ai/multica/blob/main/server/internal/handler/handler.go) |
+| Agent view and invocation decisions | [`agent_access.go`](https://github.com/multica-ai/multica/blob/main/server/internal/handler/agent_access.go) |
+| Agent ownership, management, and response redaction | [`agent.go`](https://github.com/multica-ai/multica/blob/main/server/internal/handler/agent.go) |
+| Agent environment-secret authorization and audit | [`agent_env.go`](https://github.com/multica-ai/multica/blob/main/server/internal/handler/agent_env.go) |
+| Runtime ownership, visibility, and use consent | [`runtime.go`](https://github.com/multica-ai/multica/blob/main/server/internal/handler/runtime.go) |
+| Autopilot creator and collaborator access | [`autopilot.go`](https://github.com/multica-ai/multica/blob/main/server/internal/handler/autopilot.go) |
+| Autopilot trigger principal and dispatch admission | [`task.go`](https://github.com/multica-ai/multica/blob/main/server/internal/service/task.go), [`autopilot.go`](https://github.com/multica-ai/multica/blob/main/server/internal/service/autopilot.go) |
+| Connected-app credential selection | [`dispatch.go`](https://github.com/multica-ai/multica/blob/main/server/internal/integrations/composio/dispatch.go) |
+| Member removal and dependent cleanup | [`workspace_revoke.go`](https://github.com/multica-ai/multica/blob/main/server/internal/handler/workspace_revoke.go) |
+| Workspace-target exception and member-target denial tests | [`agent_permission_test.go`](https://github.com/multica-ai/multica/blob/main/server/internal/handler/agent_permission_test.go) |
+| Manual-run admission and trigger-principal tests | [`autopilot_private_leader_test.go`](https://github.com/multica-ai/multica/blob/main/server/internal/handler/autopilot_private_leader_test.go), [`autopilot_run_principal_test.go`](https://github.com/multica-ai/multica/blob/main/server/internal/service/autopilot_run_principal_test.go) |
+| Realtime task and chat scope authorization | [`scope_authorizer.go`](https://github.com/multica-ai/multica/blob/main/server/cmd/server/scope_authorizer.go) |
+| Shared client permission decisions | [`permissions/`](https://github.com/multica-ai/multica/tree/main/packages/core/permissions) |
+| Shared runtime picker decision | [`access.ts`](https://github.com/multica-ai/multica/blob/main/packages/core/runtimes/access.ts) |
+
+## Related documentation
+
+- [Project architecture](/developers/architecture) — Repository layers and request flow.
+- [Members and roles](/members-roles) — Product-facing workspace role behavior.
+- [Agents](/agents#permissions-and-access) — Configuring who can invoke an agent.
+- [Security model](/security-model) — Operating-system and daemon isolation, which is separate from product authorization.
