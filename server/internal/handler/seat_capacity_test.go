@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -587,5 +588,134 @@ func TestClaimNextDueSeatCapacityIntentIsExclusiveAcrossReplicas(t *testing.T) {
 	}
 	if claimed != 1 || empty != 1 {
 		t.Fatalf("claimed=%d empty=%d, want 1/1", claimed, empty)
+	}
+}
+
+func TestMemberCapacityReleaseDefersBeforeCloudCallWhenConfirmPending(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	workspaceID := parseUUID(testWorkspaceID)
+	memberID, confirmToken, releaseToken := uuid.New(), uuid.New(), uuid.New()
+	cleanup := func() {
+		_, _ = testPool.Exec(ctx, `DELETE FROM seat_capacity_outbox WHERE operation_token IN ($1, $2)`, confirmToken, releaseToken)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	executor := &stubSeatCapacity{}
+	useSeatCapacity(t, executor)
+
+	if _, err := queries.UpsertSeatCapacityIntent(ctx, db.UpsertSeatCapacityIntentParams{
+		WorkspaceID: workspaceID, OperationToken: uuidToPG(confirmToken),
+		Action: seatcapacity.ActionConfirm, MemberID: uuidToPG(memberID),
+		NextAttemptAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queries.UpsertSeatCapacityIntent(ctx, db.UpsertSeatCapacityIntentParams{
+		WorkspaceID: workspaceID, OperationToken: uuidToPG(releaseToken),
+		Action: seatcapacity.ActionReleaseMember, MemberID: uuidToPG(memberID),
+		NextAttemptAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	testHandler.settleMemberCapacityRelease(ctx, uuid.UUID(workspaceID.Bytes), memberID)
+
+	if executor.releaseMemberCalls != 0 {
+		t.Fatalf("ReleaseMember calls = %d, want 0", executor.releaseMemberCalls)
+	}
+	intent, err := queries.GetSeatCapacityIntent(ctx, uuidToPG(releaseToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intent.Action != seatcapacity.ActionReleaseMember || intent.AttemptCount != 0 {
+		t.Fatalf("release intent = %+v, want deferred release_member with unchanged attempts", intent)
+	}
+	if !intent.LastError.Valid || intent.LastError.String == "" {
+		t.Fatalf("release intent last_error = %+v, want pending-confirm defer reason", intent.LastError)
+	}
+	if !intent.NextAttemptAt.Valid || time.Until(intent.NextAttemptAt.Time) <= 0 {
+		t.Fatalf("release intent next_attempt_at = %+v, want future retry", intent.NextAttemptAt)
+	}
+	if _, err := queries.GetSeatCapacityIntent(ctx, uuidToPG(confirmToken)); err != nil {
+		t.Fatalf("pending confirm was not preserved: %v", err)
+	}
+}
+
+func TestMemberCapacityReleaseSettlesAfterConfirmDeadLetterEscape(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	workspaceID := parseUUID(testWorkspaceID)
+	memberID, confirmToken, releaseToken := uuid.New(), uuid.New(), uuid.New()
+	cleanup := func() {
+		_, _ = testPool.Exec(ctx, `DELETE FROM seat_capacity_outbox WHERE operation_token IN ($1, $2)`, confirmToken, releaseToken)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	executor := &stubSeatCapacity{releaseMemberErr: &seatcapacity.HTTPError{StatusCode: http.StatusNotFound}}
+	useSeatCapacity(t, executor)
+
+	if _, err := queries.UpsertSeatCapacityIntent(ctx, db.UpsertSeatCapacityIntentParams{
+		WorkspaceID: workspaceID, OperationToken: uuidToPG(confirmToken),
+		Action: seatcapacity.ActionConfirm, MemberID: uuidToPG(memberID),
+		NextAttemptAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE seat_capacity_outbox
+		SET dead_lettered_at = now()
+		WHERE operation_token = $1
+	`, confirmToken); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queries.UpsertSeatCapacityIntent(ctx, db.UpsertSeatCapacityIntentParams{
+		WorkspaceID: workspaceID, OperationToken: uuidToPG(releaseToken),
+		Action: seatcapacity.ActionReleaseMember, MemberID: uuidToPG(memberID),
+		NextAttemptAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	testHandler.settleMemberCapacityRelease(ctx, uuid.UUID(workspaceID.Bytes), memberID)
+
+	if executor.releaseMemberCalls != 1 {
+		t.Fatalf("ReleaseMember calls = %d, want 1", executor.releaseMemberCalls)
+	}
+	_, err := queries.GetSeatCapacityIntent(ctx, uuidToPG(releaseToken))
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("release intent lookup = %v, want deleted after dead-letter escape", err)
+	}
+}
+
+func TestMemberCapacityReleaseDeletesWithoutPendingConfirm(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	workspaceID := parseUUID(testWorkspaceID)
+	memberID, releaseToken := uuid.New(), uuid.New()
+	cleanup := func() {
+		_, _ = testPool.Exec(ctx, `DELETE FROM seat_capacity_outbox WHERE operation_token = $1`, releaseToken)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	executor := &stubSeatCapacity{}
+	useSeatCapacity(t, executor)
+
+	if _, err := queries.UpsertSeatCapacityIntent(ctx, db.UpsertSeatCapacityIntentParams{
+		WorkspaceID: workspaceID, OperationToken: uuidToPG(releaseToken),
+		Action: seatcapacity.ActionReleaseMember, MemberID: uuidToPG(memberID),
+		NextAttemptAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	testHandler.settleMemberCapacityRelease(ctx, uuid.UUID(workspaceID.Bytes), memberID)
+
+	if executor.releaseMemberCalls != 1 {
+		t.Fatalf("ReleaseMember calls = %d, want 1", executor.releaseMemberCalls)
+	}
+	_, err := queries.GetSeatCapacityIntent(ctx, uuidToPG(releaseToken))
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("release intent lookup = %v, want deleted", err)
 	}
 }

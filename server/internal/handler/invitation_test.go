@@ -24,13 +24,16 @@ import (
 const invitationTestEmail = "invitation-test@multica.ai"
 
 type stubSeatCapacity struct {
-	reserveDecision seatcapacity.Decision
-	reserveErr      error
-	reserveCalls    int
-	releaseCalls    int
-	consumeCalls    int
-	consumeDecision *seatcapacity.Decision
-	consumeErr      error
+	reserveDecision       seatcapacity.Decision
+	reserveErr            error
+	reserveCalls          int
+	releaseCalls          int
+	consumeCalls          int
+	releaseMemberDecision seatcapacity.Decision
+	releaseMemberErr      error
+	releaseMemberCalls    int
+	consumeDecision       *seatcapacity.Decision
+	consumeErr            error
 }
 
 func (*stubSeatCapacity) RecoveryAvailable() bool { return true }
@@ -58,7 +61,11 @@ func (s *stubSeatCapacity) Release(context.Context, uuid.UUID, uuid.UUID) (seatc
 	return seatcapacity.Decision{Managed: true, Allowed: true}, nil
 }
 func (s *stubSeatCapacity) ReleaseMember(context.Context, uuid.UUID, uuid.UUID) (seatcapacity.Decision, error) {
-	return seatcapacity.Decision{Managed: true, Allowed: true}, nil
+	s.releaseMemberCalls++
+	if s.releaseMemberDecision.Managed || s.releaseMemberDecision.Allowed || s.releaseMemberDecision.Reason != "" {
+		return s.releaseMemberDecision, s.releaseMemberErr
+	}
+	return seatcapacity.Decision{Managed: true, Allowed: true}, s.releaseMemberErr
 }
 func (s *stubSeatCapacity) GetOperation(context.Context, uuid.UUID, uuid.UUID) (seatcapacity.Decision, error) {
 	return seatcapacity.Decision{}, nil
