@@ -1,0 +1,129 @@
+{
+  "bubble_menu": {
+    "bold": "Жирный",
+    "italic": "Курсив",
+    "strikethrough": "Зачёркнутый",
+    "code": "Код",
+    "highlight": "Выделение",
+    "link": "Ссылка",
+    "list": "Список",
+    "task_list": "Список задач",
+    "quote": "Цитата",
+    "url_aria_label": "URL",
+    "link_edit": {
+      "apply": "Применить ссылку",
+      "remove": "Удалить ссылку",
+      "close": "Закрыть редактор ссылок"
+    },
+    "heading_dropdown": {
+      "text": "Текст",
+      "normal_text": "Обычный текст",
+      "heading_1": "Заголовок 1",
+      "heading_2": "Заголовок 2",
+      "heading_3": "Заголовок 3"
+    },
+    "list_dropdown": {
+      "bullet_list": "Маркированный список",
+      "ordered_list": "Нумерованный список",
+      "task_list": "Список задач"
+    },
+    "sub_issue": {
+      "tooltip": "Создать подзадачу из выделения",
+      "created": "Создано {{identifier}}",
+      "create_failed": "Не удалось создать подзадачу"
+    }
+  },
+  "image": {
+    "view": "Просмотреть изображение",
+    "download": "Скачать",
+    "copy_link": "Скопировать ссылку",
+    "delete": "Удалить",
+    "link_copied": "Ссылка скопирована",
+    "copy_link_failed": "Не удалось скопировать ссылку",
+    "canvas_label": "Холст изображения. Перетащите для панорамирования, прокрутите для масштабирования, дважды щёлкните для переключения на реальный размер.",
+    "previous": "Предыдущее изображение",
+    "next": "Следующее изображение",
+    "sequence_position": "{{index}} / {{total}}",
+    "unavailable": "Это изображение больше недоступно — пропущено."
+  },
+  "canvas": {
+    "zoom_in": "Увеличить",
+    "zoom_out": "Уменьшить",
+    "zoom_fit": "По размеру экрана",
+    "zoom_actual": "Реальный размер"
+  },
+  "attachment": {
+    "download_failed": "Не удалось получить ссылку для скачивания. Повторите попытку через некоторое время.",
+    "preview": "Предпросмотр",
+    "preview_loading": "Загрузка предпросмотра…",
+    "preview_failed": "Не удалось загрузить предпросмотр",
+    "preview_too_large": "Файл слишком большой для предпросмотра. Скачайте его.",
+    "preview_unsupported": "Предпросмотр для этого типа файлов недоступен.",
+    "close": "Закрыть",
+    "open_in_new_tab": "Открыть в новой вкладке",
+    "remove": "Удалить вложение"
+  },
+  "link_hover": {
+    "copy_link": "Скопировать ссылку",
+    "open_link": "Открыть ссылку",
+    "link_copied": "Ссылка скопирована",
+    "copy_failed": "Не удалось скопировать"
+  },
+  "mention": {
+    "group_users": "Пользователи",
+    "group_issues": "Задачи",
+    "all_members": "Все участники",
+    "agent_badge": "Агент",
+    "squad_badge": "Команда",
+    "searching": "Поиск...",
+    "no_results": "Нет результатов",
+    "group_current": "Текущая страница",
+    "group_recent": "Недавно просмотренные",
+    "group_search": "Результаты поиска",
+    "group_cancelled": "Отменено"
+  },
+  "slash_command": {
+    "no_skills_configured": "Навыки не настроены",
+    "no_results": "Совпадающих навыков не найдено",
+    "commands": {
+      "note": "Добавить заметку — не запускает агентов"
+    }
+  },
+  "code_block": {
+    "html_preview": "HTML-предпросмотр",
+    "copy_code": "Скопировать код",
+    "show_preview": "Показать предпросмотр",
+    "show_source": "Показать исходный код",
+    "fullscreen": "На весь экран"
+  },
+  "file_card": {
+    "uploading": "Загрузка {{filename}}"
+  },
+  "upload": {
+    "failed": "Не удалось загрузить {{filename}}: {{reason}}",
+    "in_progress": "Загрузка…",
+    "interrupted": "Загрузка прервана — файл не сохранён. Прикрепите его снова.",
+    "remove": "Удалить",
+    "uploading_label": "Загрузка {{filename}}…",
+    "failed_label": "Не удалось загрузить {{filename}}"
+  },
+  "title_editor": {
+    "title_aria_label": "Заголовок"
+  },
+  "mermaid": {
+    "diagram_label": "Диаграмма Mermaid",
+    "render_error": "Не удалось отобразить диаграмму Mermaid.",
+    "rendering": "Отрисовка диаграммы…",
+    "viewer_title": "Диаграмма",
+    "canvas_label": "Холст диаграммы. Перетащите для панорамирования, прокрутите для масштабирования.",
+    "open_viewer": "Открыть просмотр диаграммы",
+    "close_viewer": "Закрыть",
+    "copy_source": "Скопировать исходный код диаграммы",
+    "show_source": "Показать исходный код",
+    "show_diagram": "Показать диаграмму",
+    "export": "Экспорт",
+    "export_png": "Скачать PNG",
+    "export_svg": "Скачать SVG",
+    "export_source": "Скачать .mmd"
+  }
+}
