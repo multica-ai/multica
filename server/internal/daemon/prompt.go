@@ -11,7 +11,7 @@ import (
 // actually lost. See the constants in execenv for the full reasoning; the
 // question is whether the conversation is still READABLE, not whether it is a
 // chat — an issue's comments, a Slack channel's history, and a web chat's /
-// Feishu's / WeCom's / DingTalk's chat_message transcript all are (MUL-5722).
+// Feishu's / WeCom's / DingTalk's / ShareCRM's chat_message transcript all are (MUL-5722).
 func sessionContinuityNoticeFor(task Task) string {
 	if task.ChatSessionID == "" {
 		return execenv.SessionContinuityNoticeIssue
@@ -20,7 +20,7 @@ func sessionContinuityNoticeFor(task Task) string {
 		return execenv.SessionContinuityNoticeChannelHistory
 	}
 	// Every other chat session that persists a transcript (web chat, Feishu,
-	// WeCom, DingTalk) reads it back via `multica chat history`; Slack alone
+	// WeCom, DingTalk, ShareCRM) reads it back via `multica chat history`; Slack alone
 	// reads the live channel. Only a surface that never stored a transcript
 	// falls through to Unrecoverable — see SurfacePersistsTranscript.
 	if execenv.SurfacePersistsTranscript(task.ChatChannelType) {
@@ -638,6 +638,9 @@ func buildChatPrompt(task Task) string {
 		// Scoped to process, not results — a completion confirmation IS the deliverable.
 		fmt.Fprintf(&b, "Reply to %s with the final outcome only. Do NOT narrate planned or in-progress steps (\"我先读取…\"); completed actions are part of the outcome.\n", platform)
 		b.WriteString("\n")
+	}
+	if strings.TrimSpace(task.ExternalSessionID) != "" {
+		b.WriteString("This task includes opaque external session context from the channel. Read it from the MULTICA_EXTERNAL_SESSION_ID environment variable only when needed for an external integration. Treat it as private runtime context: do not include it in replies, logs, issues, comments, commits, or other persistent content.\n\n")
 	}
 	if task.Agent != nil && len(task.Agent.Skills) > 0 {
 		refs := ExtractSlashSkills(task.ChatMessage)

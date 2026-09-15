@@ -40,6 +40,7 @@
     "slack-bot-integration",
     "dingtalk-bot-integration",
     "telegram-bot-integration",
+    "sharecrm-bot-integration",
     "github-integration",
     "vcs-integration",
     "---客户端---",
