@@ -5,6 +5,7 @@ import { TriangleAlert } from "lucide-react";
 import type { CommentTriggerPreviewAgent, CommentTriggerOutcome } from "@multica/core/types";
 import { useAgentPresenceDetail } from "@multica/core/agents";
 import { mentionLabelsByTarget } from "@multica/core/issues/comment-trigger-outcomes";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { AVATAR_SIZE_PX } from "@multica/ui/lib/avatar-size";
@@ -413,7 +414,7 @@ function TriggerAgentAvatar({
       <ActorAvatarBase
         name={agent.name}
         initials=""
-        avatarUrl={agent.avatar_url}
+        avatarUrl={resolvePublicFileUrl(agent.avatar_url)}
         isAgent
         size="xs"
       />
