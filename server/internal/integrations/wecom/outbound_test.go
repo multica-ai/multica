@@ -75,6 +75,9 @@ type fakeOutboundQueries struct {
 	// row is the only route to the origin gate, so it is always there by the
 	// time the gate reads.
 	t testing.TB
+	// deliveryChannelType is the platform the delivery row names. Empty means
+	// wecom; a rig sets it to say the turn belongs to Slack or Lark.
+	deliveryChannelType string
 }
 
 // askedOverWecom and askedInTheWebUI are the two answers to "where was this
@@ -87,9 +90,13 @@ func (f *fakeOutboundQueries) GetChannelTaskDelivery(context.Context, pgtype.UUI
 	if f.sessionErr != nil {
 		return db.ChannelTaskDelivery{}, f.sessionErr
 	}
+	channelType := f.deliveryChannelType
+	if channelType == "" {
+		channelType = channelTypeWecom
+	}
 	return db.ChannelTaskDelivery{
 		BindingID: f.sessionBinding.ID, InstallationID: f.sessionBinding.InstallationID,
-		ChannelType: channelTypeWecom, ChannelChatID: f.sessionBinding.ChannelChatID,
+		ChannelType: channelType, ChannelChatID: f.sessionBinding.ChannelChatID,
 		ChatType:         f.sessionBinding.ChatType,
 		ChannelMessageID: f.sessionBinding.LastMessageID, ChannelThreadID: f.sessionBinding.LastThreadID,
 		RouteRevision: f.sessionBinding.RouteRevision, Config: f.sessionBinding.Config,

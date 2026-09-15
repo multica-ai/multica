@@ -196,6 +196,11 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// stay ahead of anything that consumes or mutates WeCom-side state for the
 	// turn, because an answer that must not reach the room must not take over
 	// the room's message either.
+	//
+	// The gate itself runs below, at the two points where its answer changes
+	// what is recorded: inside the no-delivery-row branch, and once the row has
+	// said the turn is WeCom's. Not ahead of the lookup — the no-row branch
+	// explains why.
 	taskID, ok := chatDoneTaskID(e)
 	if !ok {
 		o.dropped(ctx, e, dropTaskMissing, nil)
@@ -204,31 +209,87 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	delivery, err := o.q.GetChannelTaskDelivery(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			// No route recorded for this turn. Whether that is worth a word
+			// depends on where the question was asked, so the origin gate is
+			// asked HERE rather than ahead of the lookup: every question typed
+			// in the Multica web UI reaches this same branch, and warning
+			// about those would bury the one case that matters under the
+			// ordinary traffic of a shared bus.
+			//
+			// WHAT THAT COSTS, AND WHO PAYS IT. This branch is the busy one,
+			// not the exception: EnqueueChatTask writes no delivery row — only
+			// EnqueueChannelChatTask does — so every web-UI completion in the
+			// deployment arrives here, and this subscriber is on every
+			// chat:done there is. Each of them pays the gate's two keyed reads,
+			// the task row and then the channel_ingested stamp on the batch
+			// that task owns, where before it returned at once. Both are async,
+			// off the user's path, and the alternative is to pay for the
+			// distinction in the other currency: a WARN on every web message,
+			// or the silent return this used to be, which is #7215's shape — an
+			// answer in the transcript, a quiet chat, and nothing server-side
+			// that says which of the two happened.
+			// TestTheWebUITurnWithNoRowPaysForTheOriginGate holds that count at
+			// two, so a third read cannot arrive here unnoticed.
+			//
+			// Behind the gate, a missing row means a turn the channel DID
+			// ingest and nobody can now address. In a steady-state deployment
+			// there is no such turn: the row is written inside the same
+			// transaction that enqueues a channel task. What produces one is
+			// an upgrade, and the answer it belongs to is going nowhere — so
+			// it is counted and warned about rather than left as a quiet
+			// return. See skipNoDeliveryRow.
+			origin, gateErr := o.taskOriginOf(ctx, taskID)
+			if gateErr != nil {
+				return gateErr
+			}
+			switch origin {
+			case originTaskGone:
+				// The gate has no row left to read, so it answers neither
+				// question: not where this was asked, and not whether anybody
+				// is owed. Counted as the missing task id above is counted —
+				// that branch already files every platform's ending the same
+				// way — because a task row that vanished mid-completion is
+				// never ordinary, whoever the turn belonged to.
+				o.dropped(ctx, e, dropTaskMissing, nil)
+			case originChannel:
+				o.skipped(ctx, e, skipNoDeliveryRow)
+			default: // originWebUI
+				o.skipped(ctx, e, skipOriginNotChannel)
+			}
 			return nil
 		}
 		return fmt.Errorf("wecom: lookup task delivery: %w", err)
 	}
 	if delivery.ChannelType != channelTypeWecom {
+		// Not a wecom turn (Slack / Lark). Named rather than silent so it does
+		// not share an exit with the branch above it: the two are one quiet
+		// return from outside, and one of them means somebody is waiting.
+		o.skipped(ctx, e, skipNotWecomTurn)
 		return nil
 	}
-	binding := wecomBindingFromTaskDelivery(delivery)
-	task, err := o.q.GetAgentTask(ctx, taskID)
+	origin, err := o.taskOriginOf(ctx, taskID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			// Cancelled and deleted while its completion was in flight.
-			o.dropped(ctx, e, dropTaskMissing, nil)
-			return nil
-		}
-		return fmt.Errorf("wecom: load agent task: %w", err)
+		return err
 	}
-	deliver, err := engine.TaskInputIsChannelIngested(ctx, o.q, task)
-	if err != nil {
-		return fmt.Errorf("wecom: classify task input origin: %w", err)
-	}
-	if !deliver {
+	// Only one of the three sends. The closed side is the default, so a value
+	// added to taskOrigin later stops here rather than falling through into a
+	// send the gate never approved.
+	switch origin {
+	case originChannel:
+		// Asked in the room, and the delivery row says which one. Delivered
+		// below.
+	case originTaskGone:
+		// Cancelled and deleted while its completion was in flight. The
+		// delivery row says this turn was WeCom's, so a reply was owed and the
+		// row that could have placed it is gone — a drop, at the level an
+		// operator alerts on, exactly as before the gate was factored out.
+		o.dropped(ctx, e, dropTaskMissing, nil)
+		return nil
+	default: // originWebUI
 		o.skipped(ctx, e, skipOriginNotChannel)
 		return nil
 	}
+	binding := wecomBindingFromTaskDelivery(delivery)
 	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
 		ID:          binding.InstallationID,
 		ChannelType: channelTypeWecom,
@@ -307,6 +368,56 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		SessionID:      e.ChatSessionID,
 	}, !hasVisibleChar(content))
 	return nil
+}
+
+// taskOrigin is the origin gate's verdict. Three values rather than a bool
+// because "there is no task row" is a third answer and not a quiet no. A bool
+// has to spend one of its two states on it, and the only one available means
+// "asked in the web UI" — which turns a row that was reaped mid-completion,
+// the thing dropTaskMissing exists to report, into the most ordinary event in
+// the deployment, one level below where anybody is looking.
+//
+// A typed error would carry the third state too. It is not used because this
+// gate already unwraps pgx.ErrNoRows, so a sentinel would have to be told apart
+// from it at every call site, and one errors.Is written the obvious way puts
+// the state back where it just came from. Three named values cannot be unwrapped
+// into each other.
+type taskOrigin int
+
+const (
+	// originTaskGone — no task row to ask about. The zero value on purpose: a
+	// verdict nobody assigned must not read as deliverable.
+	originTaskGone taskOrigin = iota
+	// originWebUI — the task is there, and its input was typed in Multica.
+	originWebUI
+	// originChannel — the task is there, and its input came in over a channel.
+	originChannel
+)
+
+// taskOriginOf is the origin gate: was this run's input typed in the room, or
+// in the Multica web UI? A question asked in a browser can reuse a session that
+// originated in WeCom, and its answer belongs only in Multica — in a group,
+// sending it would put a private answer in front of everyone.
+//
+// Fails closed: an origin that cannot be established is not delivered. What the
+// caller does about originTaskGone is the caller's, because only it knows
+// whether a reply was owed — see both call sites in processEvent.
+func (o *Outbound) taskOriginOf(ctx context.Context, taskID pgtype.UUID) (taskOrigin, error) {
+	task, err := o.q.GetAgentTask(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return originTaskGone, nil
+		}
+		return originTaskGone, fmt.Errorf("wecom: load agent task: %w", err)
+	}
+	ingested, err := engine.TaskInputIsChannelIngested(ctx, o.q, task)
+	if err != nil {
+		return originTaskGone, fmt.Errorf("wecom: classify task input origin: %w", err)
+	}
+	if !ingested {
+		return originWebUI, nil
+	}
+	return originChannel, nil
 }
 
 func wecomBindingFromTaskDelivery(delivery db.ChannelTaskDelivery) db.ChannelChatSessionBinding {
