@@ -250,6 +250,13 @@ func newBubbleRig(t *testing.T) *bubbleRig {
 		// production. Bindings stays nil: these tests are about the rounds this
 		// process holds, not the restart path.
 		Tasks: q,
+		// Deliveries is what the origin gate reads, and it is wired in
+		// production for every ending. It used to be left out here because a
+		// round already on the open list skipped the gate — which stopped
+		// being sound when binding moved to task:queued, since a browser run
+		// publishes the same event. A rig without it is a rig where the gate
+		// cannot run at all.
+		Deliveries: q,
 	})
 	rig.out = NewOutbound(q, reg, streams, nil)
 	// Both halves go on a real bus, subscribed the way boot subscribes them.
@@ -361,7 +368,14 @@ func (r *bubbleRig) ran(t *testing.T, reqID, taskName string) {
 
 func (r *bubbleRig) answer(t *testing.T, content, taskName string) {
 	t.Helper()
-	if err := r.out.processEvent(context.Background(), events.Event{
+	r.answerWithContext(t, context.Background(), content, taskName)
+}
+
+// answerWithContext is answer on a caller's own deadline, for the tests that
+// care what the reply path does when the budget is already gone.
+func (r *bubbleRig) answerWithContext(t *testing.T, ctx context.Context, content, taskName string) {
+	t.Helper()
+	if err := r.out.processEvent(ctx, events.Event{
 		ChatSessionID: bubbleSession,
 		TaskID:        taskUUID(t, taskName),
 		Payload:       protocol.ChatDonePayload{Content: content},
@@ -428,6 +442,9 @@ var testTaskUUIDs = map[string]string{
 	"retry":  "aaaaaaaa-0000-0000-0000-0000000000ff",
 	// An issue or autopilot run: the same events, no chat session at all.
 	"issue-run": "aaaaaaaa-0000-0000-0000-0000000000e1",
+	// A question typed in Multica on this same WeCom-bound session. Its
+	// task:queued is indistinguishable from the room's on the bus.
+	"web-1": "aaaaaaaa-0000-0000-0000-0000000000b1",
 }
 
 // taskUUID is the string form the event payloads carry.

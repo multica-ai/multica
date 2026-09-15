@@ -206,10 +206,19 @@ var (
 // the wire — see streamAcks for why a verdict has to be matched rather than
 // simply handed to whoever is waiting.
 type ackWaiter struct {
-	ch   chan ackResult
-	seq  uint64        // 0 until the frame is written
-	done chan struct{} // closed once the waiter has left the table, by verdict or by cancel
-	once sync.Once
+	ch  chan ackResult
+	seq uint64 // 0 until the frame is written
+	// addressable says every frame written before this one on the same req_id
+	// had already been answered when this one went out — which is what makes
+	// the position of an arriving verdict identify the frame it belongs to.
+	//
+	// awaitAck is what keeps it true, by not letting a frame out while the
+	// server still owes one. This flag is the assertion of that invariant at
+	// the point it is relied on: if it is ever false, something wrote past the
+	// gate and no verdict on this req_id may be trusted by position.
+	addressable bool
+	done        chan struct{} // closed once the waiter has left the table, by verdict or by cancel
+	once        sync.Once
 }
 
 func newAckWaiter() *ackWaiter {
@@ -342,7 +351,7 @@ func (s *wsSender) deliverAck(reqID string, code int, msg string) {
 	}
 	st.acked++
 	w, ok := s.waiters[reqID]
-	if ok && w.seq == st.acked {
+	if ok && w.addressable && w.seq == st.acked {
 		delete(s.waiters, reqID)
 	} else {
 		ok = false
@@ -368,11 +377,36 @@ func (s *wsSender) deliverAck(reqID string, code int, msg string) {
 // the live probe showed to be lethal: two frames on the wire are answered in
 // whatever order the server likes and the second is refused with 6000 for
 // colliding with the first, so a refused answer could read as delivered.
-func (s *wsSender) awaitAck(ctx context.Context, reqID string, finish bool) (*ackWaiter, error) {
+// A FRAME GOES OUT ONLY WHEN THE SERVER OWES NOTHING ON THIS req_id. Two
+// things have to be true, and only one of them used to be checked.
+//
+// Nobody is waiting — the old condition — keeps two callers from reading each
+// other's verdict. It is not enough on its own, because a caller that GIVES UP
+// leaves the table empty while the server still owes that frame an answer: the
+// next frame is then written with two verdicts outstanding, and an ack carries
+// only req_id, so which frame an arriving one belongs to is decided by
+// position. Position is a guess the moment there is more than one.
+//
+// It is not a safe guess here. Acks come back grouped by outcome rather than in
+// write order — twenty-four frames back-to-back answered as eleven, then
+// twelve, then one (STRATEGY §6.4) — so the closing frame's own refusal can
+// land before the abandoned opener's late acceptance. Matching by position
+// then drops the refusal and hands the acceptance to the closing frame, which
+// reports the answer as delivered and never falls back. Nobody receives it.
+//
+// So the second condition: every frame already written has been answered. An
+// abandoned frame still blocks, until its verdict arrives or the caller's own
+// budget ends — and a caller that runs out gets errStreamBusy or its context
+// error, both of which leave the answer to the plain-message path rather than
+// to a guess.
+func (s *wsSender) awaitAck(ctx context.Context, reqID string, finish, rewrite bool) (*ackWaiter, error) {
+	waitStart := time.Now()
 	for {
 		s.ackMu.Lock()
 		prev, taken := s.waiters[reqID]
-		if !taken {
+		st, tracked := s.streams[reqID]
+		owed := tracked && st.acked < st.sent && !rewrite
+		if !taken && !owed {
 			w := newAckWaiter()
 			s.waiters[reqID] = w
 			s.ackMu.Unlock()
@@ -382,13 +416,39 @@ func (s *wsSender) awaitAck(ctx context.Context, reqID string, finish bool) (*ac
 		if !finish {
 			return nil, errStreamBusy
 		}
+		if taken {
+			select {
+			case <-prev.done:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			continue
+		}
+		// Owed but unwaited: the abandoned frame's verdict is in flight and
+		// nothing signals its arrival, so this is the one place a short poll
+		// is the honest mechanism.
+		//
+		// Bounded, and deliberately not by the caller's whole budget. A
+		// verdict that has not come back within one ack wait is not coming,
+		// and spending the rest of the budget here costs the plain message
+		// that is the answer's remaining route. Giving up returns
+		// errStreamBusy, which is provably-not-sent: nothing was written, so
+		// the fallback is free to send the answer exactly once.
+		if time.Since(waitStart) > ackTimeout {
+			return nil, errStreamBusy
+		}
 		select {
-		case <-prev.done:
+		case <-time.After(ackOwedPoll):
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
 	}
 }
+
+// ackOwedPoll is how often awaitAck re-checks whether an abandoned frame's
+// verdict has landed. Short enough not to add a perceptible pause to the one
+// turn in which it happens, long enough not to spin.
+const ackOwedPoll = 10 * time.Millisecond
 
 // cancelAck retires a waiter whose caller has stopped waiting, for either of
 // the two reasons a caller stops: its own budget ran out, or the full ack
@@ -431,12 +491,16 @@ func (s *wsSender) beginStreamFrameLocked(reqID, streamID string, w *ackWaiter, 
 	if st.isSealed(streamID) && !finish {
 		return false
 	}
+	// Read before the increment: every earlier frame answered means acked has
+	// caught up with sent.
+	clean := st.acked == st.sent
 	st.sent++
 	if finish {
 		st.seal(streamID)
 	}
 	if w != nil {
 		w.seq = st.sent
+		w.addressable = clean
 	}
 	return true
 }
@@ -593,6 +657,25 @@ func (s *wsSender) request(ctx context.Context, cmd string, body map[string]any)
 // (846605). streamID is ours — reuse it to replace the bubble's body, and set
 // finish once the content is final.
 func (s *wsSender) respondStream(ctx context.Context, reqID, streamID, content string, finish bool) error {
+	return s.respondStreamFrame(ctx, reqID, streamID, content, finish, false)
+}
+
+// respondStreamRewrite writes a frame this sender has already written once —
+// seal's retry of a closing frame whose verdict never came back.
+//
+// It is the one write allowed past the owed-verdict gate, and safely so: an
+// identical frame is not a second frame. Re-writing a sealed stream was
+// measured against the live tenant on 2026-09-03 — six frames onto an
+// already-sealed stream, same content and different, all errcode 0
+// (STRATEGY §6.5) — so whichever of the identical writes a verdict belongs to,
+// it reports the same outcome. Blocking the retry instead would leave a
+// written frame unanswered and the answer resent as a plain message, which is
+// the duplicate this whole path exists to avoid.
+func (s *wsSender) respondStreamRewrite(ctx context.Context, reqID, streamID, content string, finish bool) error {
+	return s.respondStreamFrame(ctx, reqID, streamID, content, finish, true)
+}
+
+func (s *wsSender) respondStreamFrame(ctx context.Context, reqID, streamID, content string, finish, rewrite bool) error {
 	if reqID == "" {
 		return errors.New("wecom: stream frame requires the callback req_id")
 	}
@@ -604,7 +687,7 @@ func (s *wsSender) respondStream(ctx context.Context, reqID, streamID, content s
 		return err
 	}
 
-	w, err := s.awaitAck(ctx, reqID, finish)
+	w, err := s.awaitAck(ctx, reqID, finish, rewrite)
 	if err != nil {
 		return err
 	}

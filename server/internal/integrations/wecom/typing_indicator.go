@@ -80,6 +80,11 @@ var (
 // which has no caller's context to inherit.
 const streamCloseTimeout = 10 * time.Second
 
+// fallbackSendTimeout is what the plain message gets when the bubble's own
+// attempt has already exhausted the caller's context. Sized at one ack wait
+// plus a little: this is a single aibot_send_msg, not a retried one.
+const fallbackSendTimeout = 6 * time.Second
+
 // taskLookup resolves a task id to the chat session it belongs to. Both
 // publishers of task:failed stamp the session whenever the task row has one,
 // so this is the fallback for a payload that does not, and the row the round
@@ -103,6 +108,10 @@ type taskOrigin interface {
 // TypingIndicatorManager opens a streaming bubble per round when messages are
 // ingested and owns each one until something closes it.
 type TypingIndicatorManager struct {
+	// relay routes a run's ending to the replica holding the socket. Nil on a
+	// single-replica deployment, where there is nowhere else to route to.
+	relay noticeRouter
+
 	senders *sendersRegistry
 	streams *streamStore
 	tasks   taskOrigin
@@ -469,25 +478,35 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 	// with a web run's ending. The answer path orders its own gate the same
 	// way — see the block above the gate in outbound.go's processEvent.
 	//
-	// A round on this session's open list is local proof and costs nothing:
-	// it was opened by a message this adapter ingested and bound to this run
-	// by the session's own task:queued. Everything else is decided by the database, cheapest
-	// first. task:failed fires for every run in the deployment — Slack's,
-	// Lark's, DingTalk's, the web UI's — so the delivery row is read before
-	// the task row: a run with no WeCom route is another channel's and never
-	// reaches the second read (TestAnotherChannelsFailureNeverReachesTheTaskRow).
+	// A ROUND ON THE OPEN LIST IS NOT PROOF OF ORIGIN, and it used to be read
+	// as one. Under the batch identity the engine handed down, a bound round
+	// was WeCom's by construction. Binding off task:queued it is not: a
+	// question typed in Multica on this same session publishes an event with
+	// the same chat_session_id and the same NULL issue_id — CreateChatTask
+	// writes NULL for every chat task — so the browser's run can hold the
+	// room's bubble. Skipping the gate for it put a web run's error text in
+	// front of everyone in the chat.
+	//
+	// The gate therefore runs for every ending. The order is what keeps it
+	// cheap: task:failed fires for every run in the deployment — Slack's,
+	// Lark's, DingTalk's, the web UI's — and the delivery row is read first,
+	// so a run with no WeCom route never reaches the second read
+	// (TestAnotherChannelsFailureNeverReachesTheTaskRow).
 	var bound roundAddress
-	if !m.streams.has(sessionID, taskID) {
-		if taskID != "" {
-			addr, ours := m.addressForTask(dbCtx, taskID)
-			if !ours {
-				return
-			}
-			bound = addr
-		}
-		if !m.failureBelongsOnWecom(dbCtx, sessionID, taskID) {
+	if taskID != "" {
+		addr, ours := m.addressForTask(dbCtx, taskID)
+		if !ours {
 			return
 		}
+		bound = addr
+	}
+	switch m.originOf(dbCtx, sessionID, taskID) {
+	case originNotOurs:
+		m.releaseRefusedRound(sessionID, taskID)
+		return
+	case originUnknown:
+		// originOf has already logged which read failed.
+		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
@@ -509,7 +528,7 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 		}
 		bound = found
 	}
-	m.sayAsPlainMessage(ctx, sessionID, bound,
+	m.sayAsPlainMessage(ctx, sessionID, bound, taskID,
 		failureText(e, localeFor(ctx, m.languages, bound.InstallationID, bound.ChatType, bound.ChatID)))
 }
 
@@ -552,6 +571,54 @@ func failureText(e events.Event, l Locale) string {
 // off the store before it gets here. So a WeCom round whose bubble is open is
 // closed while the database is down, and it is only the runs this process
 // holds no round for that have to produce a row to be spoken for.
+// originVerdict is what the gate could establish, and the three answers call
+// for three different things. "Not ours" releases the round — the run that
+// bound it is somebody else's and will never close it. "Unknown" says nothing
+// AND releases nothing: an unreachable database is not evidence that this run
+// belongs elsewhere, and giving the round away on a read that failed would
+// lose a bubble the room's own answer is still coming for.
+type originVerdict int
+
+const (
+	originUnknown originVerdict = iota
+	originNotOurs
+	originOurs
+)
+
+// originOf is failureBelongsOnWecom with the two refusals told apart.
+func (m *TypingIndicatorManager) originOf(ctx context.Context, sessionID pgtype.UUID, taskID string) originVerdict {
+	if taskID == "" {
+		// Both task:failed publishers carry one in production — see the block
+		// comment above handleTaskFailed — so this is a payload shape nothing
+		// real produces, and it names no run to attribute.
+		m.refuseUnknownOrigin(ctx, sessionID, taskID, "no task id on the event")
+		return originUnknown
+	}
+	if m.tasks == nil {
+		m.refuseUnknownOrigin(ctx, sessionID, taskID, "no task lookup configured")
+		return originUnknown
+	}
+	id, err := util.ParseUUID(taskID)
+	if err != nil || !id.Valid {
+		m.refuseUnknownOrigin(ctx, sessionID, taskID, "unparseable task id")
+		return originUnknown
+	}
+	task, err := m.tasks.GetAgentTask(ctx, id)
+	if err != nil {
+		m.refuseUnknownOrigin(ctx, sessionID, taskID, "cannot read the task row: "+err.Error())
+		return originUnknown
+	}
+	deliver, err := engine.TaskInputIsChannelIngested(ctx, m.tasks, task)
+	if err != nil {
+		m.refuseUnknownOrigin(ctx, sessionID, taskID, "cannot read the channel-ingested stamp: "+err.Error())
+		return originUnknown
+	}
+	if !deliver {
+		return originNotOurs
+	}
+	return originOurs
+}
+
 func (m *TypingIndicatorManager) failureBelongsOnWecom(ctx context.Context, sessionID pgtype.UUID, taskID string) bool {
 	if taskID == "" {
 		// Both task:failed publishers carry one in production — see the block
@@ -633,9 +700,26 @@ func (m *TypingIndicatorManager) handleTaskCancelled(e events.Event) {
 	if !ok {
 		return
 	}
+	// Same gate as the failure path, and for the same reason: a round bound
+	// off task:queued may belong to a question typed in Multica on this
+	// session, and "这次处理已取消" sealing the room's bubble would end a
+	// question the room is still waiting on, over a cancellation nobody in it
+	// performed. Asked before the take, so a refusal leaves the round where it
+	// was rather than having already removed it.
+	taskID := taskIDFromEvent(e)
+	dbCtx, cancelDB := context.WithTimeout(context.Background(), taskLookupTimeout)
+	defer cancelDB()
+	switch m.originOf(dbCtx, sessionID, taskID) {
+	case originNotOurs:
+		m.releaseRefusedRound(sessionID, taskID)
+		return
+	case originUnknown:
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
 	defer cancel()
-	t, _ := m.rounds().take(ctx, sessionID, byTask(taskIDFromEvent(e)))
+	t, _ := m.rounds().take(ctx, sessionID, byTask(taskID))
 	if !t.HasBubble || m.senders == nil {
 		return
 	}
@@ -644,6 +728,22 @@ func (m *TypingIndicatorManager) handleTaskCancelled(e events.Event) {
 
 // rounds builds the matcher that turns a task id on an event into the round it
 // belongs to.
+// releaseRefusedRound hands a bubble back when the run that bound it turns out
+// not to be WeCom's. Without this the round stays bound to a run that will
+// never close it: the asker watches the bubble turn until the platform ends
+// it, and their own answer finds no round and degrades to a plain message.
+//
+// Released rather than sealed, because the question it was opened for has not
+// been answered yet — the round goes back to waiting for a run, which is what
+// retryUnbind leaves behind too, and the next task:queued for this session
+// takes it.
+func (m *TypingIndicatorManager) releaseRefusedRound(sessionID pgtype.UUID, taskID string) {
+	if m.streams == nil || taskID == "" {
+		return
+	}
+	m.streams.retryUnbind(sessionID, taskID)
+}
+
 func (m *TypingIndicatorManager) rounds() roundTaker {
 	return roundTaker{streams: m.streams, tasks: m.tasks, log: m.log}
 }
@@ -659,9 +759,48 @@ func retryPending(e events.Event) bool {
 	return pending
 }
 
-func (m *TypingIndicatorManager) sayAsPlainMessage(ctx context.Context, sessionID pgtype.UUID, addr roundAddress, text string) error {
+// noticeRouter is the one thing this manager needs from the cross-replica
+// router: hand a frame to whichever replica holds the socket. *RelayOutbound
+// satisfies it; nil leaves the single-replica behaviour unchanged.
+type noticeRouter interface {
+	publish(f relayFrame, eventID string) bool
+}
+
+// WithRelay lets a run's ending reach the asker from a replica that does not
+// hold this installation's socket.
+//
+// Without it the notice is delivered only when the run happens to end on the
+// replica holding the lease — and since the lease guarantees exactly one does,
+// that is a coin toss on every multi-replica deployment, not an edge. main
+// routed the notice as an ordinary relayKindReply for exactly this reason; the
+// bubble took the notice off the answer's path and left the routing behind.
+func (m *TypingIndicatorManager) WithRelay(r noticeRouter) *TypingIndicatorManager {
+	m.relay = r
+	return m
+}
+
+func (m *TypingIndicatorManager) sayAsPlainMessage(ctx context.Context, sessionID pgtype.UUID, addr roundAddress, taskID, text string) error {
 	if m.senders == nil {
 		return errNoLiveConnection
+	}
+	// No socket here does not mean no socket anywhere. The replica holding the
+	// lease can say it, and the frame carries the task id so it seals the right
+	// bubble rather than pushing a second message under one.
+	if m.senders.get(addr.InstallationID) == nil && m.relay != nil {
+		if m.relay.publish(relayFrame{
+			Kind:           relayKindReply,
+			InstallationID: util.UUIDToString(addr.InstallationID),
+			ChatID:         addr.ChatID,
+			ChatType:       addr.ChatType,
+			Content:        text,
+			TaskID:         taskID,
+			SessionID:      util.UUIDToString(sessionID),
+		}, taskID) {
+			m.log.DebugContext(ctx, "wecom typing: routed a run's ending to the replica holding the socket",
+				"chat_session_id", util.UUIDToString(sessionID),
+				"installation_id", util.UUIDToString(addr.InstallationID))
+			return nil
+		}
 	}
 	err := m.senders.sendTextCtx(ctx, addr.InstallationID, addr.ChatID, addr.ChatType, text)
 	if err != nil {

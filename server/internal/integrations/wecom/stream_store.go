@@ -307,13 +307,26 @@ const maxFinishedRounds = 10
 
 // pendingRun is a run queued for a session that had no round waiting for one:
 // the ingest goroutine that will paint its bubble has not got there yet. It is
-// held until a bubble appears, and swept with everything else once the
-// protocol's window has passed — a run still pending that long has no bubble
-// coming and must not take one that a much later question opened.
+// held until a bubble appears, or until pendingMaxAge says none is coming.
 type pendingRun struct {
 	taskID string
 	at     time.Time
 }
+
+// pendingMaxAge is how long a queued run may wait for the bubble it was meant
+// to bind to.
+//
+// The clock is the ingest goroutine's, not the protocol's. That goroutine
+// resolves a sender, writes one opening frame and returns — bounded by the
+// router's own reply timeout and one ack wait, a few seconds — so a run still
+// pending after that is one whose bubble is never coming: the paint was
+// refused, the envelope was unreadable, the round was dropped. What it can
+// still do is pair with the NEXT question's bubble, which belongs to somebody
+// else and whose answer would then find no round of its own.
+//
+// streamMaxAge was the wrong bound for it: ten minutes is how long the SERVER
+// keeps a stream writable, which says nothing about how long an ingest takes.
+const pendingMaxAge = 30 * time.Second
 
 // streamStore maps chat_session_id to that session's rounds, oldest first.
 type streamStore struct {
@@ -470,7 +483,13 @@ func (s *streamStore) dropPendingLocked(key, taskID string) {
 // holds s.mu.
 func (s *streamStore) takePendingLocked(key string) string {
 	queue := s.pending[key]
+	// Drop what has waited past its own clock before taking: an abandoned run
+	// at the head would otherwise hand itself to a bubble opened much later.
+	for len(queue) > 0 && s.now().Sub(queue[0].at) > pendingMaxAge {
+		queue = queue[1:]
+	}
 	if len(queue) == 0 {
+		delete(s.pending, key)
 		return ""
 	}
 	taskID := queue[0].taskID
@@ -901,11 +920,28 @@ func (s *streamStore) sweepLocked() {
 func (s *streamStore) seal(ctx context.Context, senders *sendersRegistry, h streamHandle, text string) error {
 	var err error
 	for attempt := 0; ; attempt++ {
-		err = senders.stream(ctx, h, text, true)
+		// The first attempt is an ordinary frame and waits its turn like one.
+		// Every attempt after it is the SAME frame written again, which the
+		// gate lets through: blocking it would leave the first one unanswered
+		// and send the answer a second time by the plain route.
+		if attempt == 0 {
+			err = senders.stream(ctx, h, text, true)
+		} else {
+			err = senders.streamRewrite(ctx, h, text, true)
+		}
 		if !errors.Is(err, errStreamAckTimeout) || attempt >= streamCloseRetries {
 			break
 		}
 		if s.expiredLocked(h.CreatedAt) {
+			break
+		}
+		// A RETRY THAT CANNOT FINISH IS WORSE THAN NO RETRY. It spends the
+		// caller's remaining budget waiting, then hands back ctx.Err() instead
+		// of whatever the server actually said — and the fallback that needed
+		// that budget has none left. streamCloseRetries is therefore an upper
+		// bound and the deadline is the authority: one more attempt costs the
+		// pause plus a full ack wait, and it is only started if that fits.
+		if d, ok := ctx.Deadline(); ok && time.Until(d) < s.closeRetryDelay+ackTimeout {
 			break
 		}
 		if s.closeRetryDelay > 0 {

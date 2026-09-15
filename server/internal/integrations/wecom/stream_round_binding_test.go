@@ -18,6 +18,7 @@ package wecom
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 // ---- 1. one debounce window, one bubble ----
@@ -353,5 +354,53 @@ func TestASettledFlushWithNothingWaitingClosesNothing(t *testing.T) {
 	if got := len(rig.conn.streamFrames(t)); got != 1 {
 		t.Fatalf("got %d stream frames, want 1 — a settled flush sealed a bubble whose run is "+
 			"still going, and its answer now has nowhere to land", got)
+	}
+}
+
+// A run can be queued before its bubble is painted — the ingest goroutine is
+// detached and the flush runs on the batcher's timer — so a run with nobody to
+// pair with waits. What it must not do is wait long enough to pair with
+// somebody else.
+//
+// The ingest goroutine that owes it a bubble lives for seconds: it resolves a
+// sender, writes one frame and returns. A run still pending after that has no
+// bubble coming at all — the paint was refused, the envelope was unreadable,
+// the round was dropped — and the only thing left for it to pair with is the
+// NEXT question's bubble, which belongs to somebody else and whose answer
+// would then find no round.
+//
+// Bounding it by streamMaxAge — the protocol's ten minutes — is the wrong
+// clock: it is how long the SERVER keeps a stream, not how long an ingest
+// takes.
+//
+// REVERSE VERIFICATION: bound pending by streamMaxAge instead and this fails
+// with the later question's bubble bound to the abandoned run.
+func TestARunLeftPendingDoesNotTakeAMuchLaterQuestionsBubble(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+
+	// A run is queued and no bubble ever appears for it.
+	rig.queued(t, "task-1")
+
+	// Long after the ingest that owed it one would have finished.
+	rig.now = rig.now.Add(pendingMaxAge + time.Second)
+
+	// A new question, and its own run.
+	rig.ask(t, "REQ-LATER")
+	rig.queued(t, "task-2")
+	rig.answer(t, "the later answer", "task-2")
+
+	frames := rig.conn.streamFrames(t)
+	sealed := false
+	for _, f := range frames {
+		if f["finish"] == true && f["content"] == "the later answer" {
+			sealed = true
+		}
+	}
+	if !sealed {
+		t.Fatalf("the later question's answer never sealed its own bubble — an abandoned run from before had taken it: %v", frames)
+	}
+	if pushes := rig.conn.pushes(t); len(pushes) != 0 {
+		t.Fatalf("the later answer arrived as %d plain message(s): %v", len(pushes), pushes)
 	}
 }
