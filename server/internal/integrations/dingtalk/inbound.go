@@ -681,6 +681,8 @@ func normalizeDingTalkRichTextControlLayout(msg *channel.InboundMessage, items [
 // including legitimate quoted code/prose containing ||. Current input is never
 // filtered. Apply this only to provider text values, not rendered quote blocks,
 // so a fallback cannot discard generated image markers and their media slots.
+// This tradeoff was accepted in the review of PR #8061:
+// https://github.com/multica-ai/multica/pull/8061#pullrequestreview-5130718174
 func dingTalkReadableQuotedText(value string) string {
 	if strings.Contains(value, "||") {
 		return "[quoted content unavailable]"

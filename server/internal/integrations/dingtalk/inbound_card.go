@@ -63,6 +63,12 @@ func renderDingTalkQuotedCard(data json.RawMessage) string {
 					missing()
 					continue
 				}
+				// Apply the existing conservative policy to raw provider values,
+				// preserving neighboring nodes and generated image placeholders.
+				if dingTalkReadableQuotedText(value) != value {
+					missing()
+					continue
+				}
 				if node.ElementType == "LINK" {
 					if strings.TrimSpace(value) == "" {
 						missing()

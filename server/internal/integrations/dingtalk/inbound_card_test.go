@@ -19,7 +19,7 @@ func TestInboundQuotedCardObservedSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	msg, ok := inboundFromCallback(&cb, "app")
-	want := "> Bananas. Literal text: . Link: https://example.com/a_(b)?x=a_b+c&y=2#part_2\n> const available = primary || fallback;\n\nexplain"
+	want := "> Bananas. Literal text: . Link: https://example.com/a_(b)?x=a_b+c&y=2#part_2\n> [quoted content unavailable]\n\nexplain"
 	if !ok || msg.Text != want {
 		t.Fatalf("quoted body = %q, want %q (ok=%v)", msg.Text, want, ok)
 	}
@@ -31,7 +31,7 @@ func TestInboundQuotedCardObservedSnapshot(t *testing.T) {
 func TestInboundQuotedCardSnapshotBoundaries(t *testing.T) {
 	for _, tc := range []struct{ name, card, want string }{
 		{"preview", `[{"elementType":"RICHTEXT","children":[{"elementType":"TEXT","value":"Multica has replied."}]}]`, "Multica has replied."},
-		{"literal text", `[{"elementType":"RICHTEXT","children":[{"elementType":"TEXT","value":"/clear a || b "},{"elementType":"TEXT","value":"{\"text\":\"literal\"}"}]}]`, "/clear a || b {\"text\":\"literal\"}"},
+		{"literal text", `[{"elementType":"RICHTEXT","children":[{"elementType":"TEXT","value":"/clear a || b "},{"elementType":"TEXT","value":"{\"text\":\"literal\"}"}]}]`, "[quoted content unavailable]\n{\"text\":\"literal\"}"},
 		{"blocks", `[{"elementType":"RICHTEXT","children":[{"elementType":"TEXT","value":"one"}]},{"elementType":"RICHTEXT","children":[{"elementType":"TEXT","value":"two"}]}]`, "one\n\ntwo"},
 		{"bad neighbor", `[{"elementType":"RICHTEXT","children":[{"elementType":"TEXT","value":"before"},42,{"elementType":"TEXT","value":{}},{"elementType":"TEXT","value":"after"}]}]`, "before\n[quoted content unavailable]\nafter"},
 		{"unknown wrapper", `[{"elementType":"UNKNOWN","children":[{"elementType":"TEXT","value":"not verified"}]}]`, "[quoted content unavailable]"},
@@ -126,7 +126,7 @@ func TestInboundQuotedCardCapturedLinks(t *testing.T) {
 				t.Fatal(err)
 			}
 			msg, ok := inboundFromCallback(&cb, "app")
-			want := "> DingTalk quote testParagraph one: Apples are red.Paragraph two: Bananas are yellow. Marker: QUOTE-CONTEXT-7429.Literal HTML: keep this visible Literal operators: primary || fallback Escaped entity: <already-escaped>Link: https://example.com/a_(b)?x=a_b+c&y=2#part_2\n> const selected = primary || fallback;\n> const html = \"<span>keep me</span>\";\n> console.log(selected, html);\n> Paragraph three: Cherries are sweet.\n\nQUOTE-CAPTURE-7429"
+			want := "> DingTalk quote testParagraph one: Apples are red.Paragraph two: Bananas are yellow. Marker: QUOTE-CONTEXT-7429.Literal HTML: keep this visible\n> [quoted content unavailable]\n> Link: https://example.com/a_(b)?x=a_b+c&y=2#part_2\n> [quoted content unavailable]\n> Paragraph three: Cherries are sweet.\n\nQUOTE-CAPTURE-7429"
 			if !ok || msg.Text != want {
 				t.Fatalf("got %q (ok=%v), want %q", msg.Text, ok, want)
 			}
@@ -142,6 +142,8 @@ func TestQuotedCardNodeContract(t *testing.T) {
 		{"link", `{"elementType":"LINK","value":"https://example.com/a_(b)?x=a_b+c&y=2#part_2"}`, "https://example.com/a_(b)?x=a_b+c&y=2#part_2"},
 		{"mixed order", `{"elementType":"TEXT","value":"before"},{"elementType":"LINK","value":"https://example.com/one"},{"elementType":"LINK","value":"https://example.com/two"},{"elementType":"IMAGE"},{"elementType":"UNKNOWN","value":"layout"},{"elementType":"TEXT","value":"after"}`, "before\nhttps://example.com/one\nhttps://example.com/two\n[Image]\nafter"},
 		{"label and suffix", `{"elementType":"TEXT","value":"Link: "},{"elementType":"LINK","value":"https://example.com/a"},{"elementType":"TEXT","value":"suffix"}`, "Link: https://example.com/a\nsuffix"},
+		{"filtered text keeps neighbors", `{"elementType":"TEXT","value":"before"},{"elementType":"TEXT","value":"primary || fallback"},{"elementType":"LINK","value":"https://example.com/ok"},{"elementType":"IMAGE"},{"elementType":"TEXT","value":"after"}`, "before\n[quoted content unavailable]\nhttps://example.com/ok\n[Image]\nafter"},
+		{"filtered link keeps neighbors", `{"elementType":"TEXT","value":"before"},{"elementType":"LINK","value":"https://example.com/a||b"},{"elementType":"LINK","value":"https://example.com/ok"},{"elementType":"IMAGE"},{"elementType":"TEXT","value":"after"}`, "before\n[quoted content unavailable]\nhttps://example.com/ok\n[Image]\nafter"},
 		{"missing link", `{"elementType":"LINK"}`, "[quoted content unavailable]"},
 		{"null link", `{"elementType":"LINK","value":null}`, "[quoted content unavailable]"},
 		{"object link", `{"elementType":"LINK","value":{"url":"https://example.com"}}`, "[quoted content unavailable]"},
