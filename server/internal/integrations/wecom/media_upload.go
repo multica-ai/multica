@@ -325,6 +325,22 @@ func (s *wsSender) sendMedia(ctx context.Context, chatID string, chatType int, m
 	if err != nil {
 		return err
 	}
+	// The same per-chat lock every text push takes, for the same reason and
+	// against the same reader: a file delivered while an answer is still being
+	// written lands between two of its pieces, and the counters in "(1/3)" no
+	// longer say which text they belong to. Attachment delivery is spawned
+	// (deliverAttachmentsByID), so the two ARE concurrent by construction.
+	//
+	// Taken here and not around the upload above it. The lock's job is the
+	// order of what the chat receives, and an upload puts nothing in the chat
+	// — it is megabytes over several round trips, and holding the chat's turn
+	// for it would park every other message to that chat behind a transfer
+	// that has not yet decided to become a message.
+	release, err := s.chats.acquire(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if _, err := s.request(ctx, cmdSendMsg, body); err != nil {
 		// A verdict that never came is not a refusal. The frame went out, and
 		// the read loop can simply have been busy. Resending on that would put

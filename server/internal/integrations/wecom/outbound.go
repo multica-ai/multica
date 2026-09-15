@@ -290,10 +290,16 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// as the words that answered the turn also tells the file below it that
 	// the reply has already been accounted for.
 	if hasVisibleChar(content) {
-		if err := sender.sendTextCtx(ctx, binding.ChannelChatID, chatType, content); err != nil {
-			return err
+		err := sender.sendTextCtx(ctx, binding.ChannelChatID, chatType, content)
+		// Recorded here rather than returned, so this send and the relay's
+		// go through the one mapping in recordSend. Returning it as well
+		// would have handleChatDone classify the same send a second time.
+		o.recordSend(ctx, e.ChatSessionID, e.Type, err)
+		if err != nil && !errors.Is(err, errPartiallySent) {
+			// Nothing of the answer landed. The files are not an answer on
+			// their own, so the turn ends here.
+			return nil
 		}
-		o.delivered()
 	}
 	// Then whatever the agent produced alongside them, as its own message — a
 	// WeCom reply cannot carry a file inline.

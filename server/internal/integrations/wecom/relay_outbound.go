@@ -138,10 +138,15 @@ func dedupeTTLFor(replayGrace time.Duration) time.Duration {
 // A zero field takes its documented default.
 type RelayConfig struct {
 	// DeliveryBudget is the longest one delivery attempt may take once it
-	// holds the claim — the send and its ack wait. Zero means ackTimeout. It
-	// sizes the publisher's outcome grace (outcomeGrace): the last offer of
-	// the chain may still be inside its ack wait when the chain's timing is
-	// over. Tests shrink it with everything else.
+	// holds the claim, and it bounds the WHOLE logical delivery: the wait for
+	// the target chat's turn, and every piece a long answer is split into with
+	// its own ack wait. Zero means ackTimeout.
+	//
+	// One budget for all of it, because that is what the publisher's outcome
+	// grace reserves (outcomeGrace) — the last offer of the chain may still be
+	// mid-delivery when the chain's timing is over, and a grace sized for one
+	// ack while the delivery waits for several is a Resolve that fences a
+	// reply its holder is still writing. Tests shrink it with everything else.
 	DeliveryBudget time.Duration
 
 	// Shards is how many independent queues carry frames, and it is a
@@ -863,7 +868,21 @@ func (r *RelayOutbound) perform(ctx context.Context, item queued) bool {
 			return false
 		}
 	}
-	res := r.handler.deliverRelayed(ctx, item.frame)
+	// DeliveryBudget is what the publisher's outcomeGrace is computed from —
+	// "the last offer's own delivery" below — so it has to be what this
+	// delivery actually gets. It was documented as the bound and never
+	// applied: the send's only limit was ackTimeout, the constant, whatever
+	// the config said. An operator who lowered the budget shrank the grace
+	// without shortening the delivery, and a Resolve landing inside an ack
+	// wait fences a reply that is on its way.
+	//
+	// The default is ackTimeout, so a deployment that sets nothing sees no
+	// change. A delivery cut here ends in a context error, which
+	// unconfirmedReason reads as unknown rather than failed — correct: the
+	// frame was written and no verdict came back.
+	dctx, cancelDelivery := context.WithTimeout(ctx, r.cfg.deliveryBudget())
+	res := r.handler.deliverRelayed(dctx, item.frame)
+	cancelDelivery()
 	if res.outcome == outcomeDone {
 		// FINISHED. The holder's record is made only once the claim says
 		// so: Settle is a compare-and-set on this replica's token, and a
@@ -1062,7 +1081,13 @@ func (r *RelayOutbound) outcomeGrace() time.Duration {
 	// Plus the last offer's own delivery: a claim taken on the final attempt
 	// is still being written and acked when the chain's timing says the chain
 	// is over, and a Resolve that lands inside that ack wait fences a reply
-	// that is about to be delivered. The send waits at most ackTimeout.
+	// that is about to be delivered.
+	//
+	// ONE budget is enough only because perform applies the same one budget to
+	// the whole delivery. A split answer waits for the chat's turn and then
+	// for several acks in a row, so the alternative — reserving one ack here
+	// and letting the delivery take as many as it needs — is the mismatch
+	// this term exists to prevent, in the other direction.
 	total += r.cfg.deliveryBudget()
 	return total
 }
@@ -1288,13 +1313,11 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult
 			}
 			sendErr := err
 			if f.Kind == relayKindReply {
-				record = func() {
-					if reason := unconfirmedReason(sendErr); reason != "" {
-						o.unconfirmedFor(ctx, f.SessionID, f.Kind, reason, sendErr)
-					} else {
-						o.droppedFor(ctx, f.SessionID, f.Kind, classifyDrop(sendErr), sendErr)
-					}
-				}
+				// The same mapping the direct path uses. A partial send in
+				// particular has to agree across the two, or one reply counts
+				// as delivered or dropped depending on which replica held the
+				// socket — see recordSend.
+				record = func() { o.recordSend(ctx, f.SessionID, f.Kind, sendErr) }
 			} else {
 				record = func() {
 					o.logger.WarnContext(ctx, "wecom relay: inbox push failed on the lease holder",
@@ -1346,12 +1369,25 @@ func provablyNotSent(err error) bool {
 	switch {
 	case err == nil:
 		return false
+	case errors.Is(err, errPartiallySent):
+		// An answer past the cap goes out as several frames, and a failure on
+		// the second says nothing about the first, which the user is already
+		// reading. Retrying such a send would repeat what landed.
+		return false
 	case errors.As(err, &apiErr):
 		return false
 	case errors.Is(err, errAckTimeout):
 		return false
 	case errors.Is(err, errWriteAttempted):
 		return false
+	case errors.Is(err, errChatBusy):
+		// AHEAD of the context branch below, which this error also matches:
+		// it wraps the ctx.Err() that ended the wait. The chat lock is taken
+		// before a frame is built, so a delivery that gave up waiting for it
+		// wrote nothing — and this is the most retryable failure the path
+		// has. Reading it as the ambiguous context error underneath settles
+		// the claim on a message that was never offered to the socket.
+		return true
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return false
 	default:
