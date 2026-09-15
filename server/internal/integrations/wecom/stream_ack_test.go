@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -316,5 +317,68 @@ func TestTheClosingFrameGoesOutOnceTheOwedVerdictArrives(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("the closing frame never read its verdict")
+	}
+}
+
+// An entry that was never sealed used to live for the life of the connection:
+// prune only retired entries that were BOTH sealed and old, so a turn whose
+// closing frame never went out — the gate refused it while a verdict was owed,
+// the answer fell back — left its counters behind for good.
+//
+// Settled is the condition that matters, not sealed: with acked == sent the
+// server owes this req_id nothing, so no verdict can arrive later to be read
+// against counters that were reset. An entry still owed one stays however old
+// it is — that is the misattribution the sequence numbers exist to prevent,
+// and age cannot rule it out, because a new stream id on the same req_id is
+// accepted after the stream itself has expired (STRATEGY §6.1).
+//
+// REVERSE VERIFICATION: put the len(st.sealed) > 0 condition back and this
+// fails with the unsealed entries still there.
+func TestBookkeepingForATurnThatNeverSealedIsStillRetired(t *testing.T) {
+	t.Parallel()
+	conn := &silentConn{}
+	sender := newWSSender(conn, nil)
+
+	sender.ackMu.Lock()
+	for i := 0; i < streamAcksMax+1; i++ {
+		// The opening frame was answered and no closing frame ever went out:
+		// the shape a fallback leaves behind, settled but never sealed.
+		sender.streams[fmt.Sprintf("REQ-OLD-%d", i)] = &streamAcks{
+			sent: 1, acked: 1, at: time.Now().Add(-streamMaxAge - time.Minute),
+		}
+	}
+	sender.ackMu.Unlock()
+
+	sender.ackMu.Lock()
+	sender.pruneStreamsLocked()
+	left := len(sender.streams)
+	sender.ackMu.Unlock()
+
+	if left != 0 {
+		t.Fatalf("%d entries survived, want 0 — a turn whose closing frame never went out keeps its counters for the life of the connection", left)
+	}
+}
+
+// And a turn still in flight is not touched, however full the map is. Its
+// counters are what keep a later verdict from being read as the closing
+// frame's, which is the misattribution the sequence numbers exist to prevent.
+func TestBookkeepingForALiveTurnSurvivesTheCap(t *testing.T) {
+	t.Parallel()
+	conn := &silentConn{}
+	sender := newWSSender(conn, nil)
+
+	sender.ackMu.Lock()
+	sender.streams["REQ-LIVE"] = &streamAcks{sent: 1, at: time.Now()}
+	for i := 0; i < streamAcksMax+1; i++ {
+		sender.streams[fmt.Sprintf("REQ-OLD-%d", i)] = &streamAcks{
+			sent: 1, acked: 1, at: time.Now().Add(-streamMaxAge - time.Minute),
+		}
+	}
+	sender.pruneStreamsLocked()
+	_, live := sender.streams["REQ-LIVE"]
+	sender.ackMu.Unlock()
+
+	if !live {
+		t.Fatal("the live turn's counters were retired: its next verdict now matches by a position that was reset under it")
 	}
 }
