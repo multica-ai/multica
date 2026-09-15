@@ -503,6 +503,13 @@ type slowAckConn struct {
 	texts  []string
 	sender *wsSender
 	delay  time.Duration
+
+	// swallowFrom, when non-zero, is the 1-based aibot_send_msg from which no
+	// verdict ever comes back — a peer that took the bytes and went quiet.
+	// The frame is still recorded: it reached the wire, which is the half this
+	// models.
+	swallowFrom int
+	sends       int
 }
 
 func (c *slowAckConn) WriteMessage(_ int, data []byte) error {
@@ -511,12 +518,15 @@ func (c *slowAckConn) WriteMessage(_ int, data []byte) error {
 		return err
 	}
 	c.mu.Lock()
+	swallow := false
 	if env.Cmd == cmdSendMsg {
 		c.texts = append(c.texts, sendMsgLabel(env))
+		c.sends++
+		swallow = c.swallowFrom > 0 && c.sends >= c.swallowFrom
 	}
 	s, d := c.sender, c.delay
 	c.mu.Unlock()
-	if s != nil {
+	if s != nil && !swallow {
 		go func() {
 			time.Sleep(d)
 			s.routeResponse(frameEnvelope{Headers: frameHeaders{ReqID: env.Headers.ReqID}})
