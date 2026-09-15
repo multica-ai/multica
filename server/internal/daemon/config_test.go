@@ -1175,6 +1175,59 @@ func TestLoadConfig_AutoReload_OffSwitches(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_RuntimeMcpInherit_DefaultsOn keeps the opt-out an opt-out:
+// folding the host's own MCP servers into managed agents is what every
+// existing deployment already gets, so the default must not move (#6283 asks
+// for a way off, not for a different default).
+func TestLoadConfig_RuntimeMcpInherit_DefaultsOn(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_DAEMON_RUNTIME_MCP", "")
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "https://api.multica.ai",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !cfg.RuntimeMcpInheritEnabled {
+		t.Fatalf("RuntimeMcpInheritEnabled = false by default, want true")
+	}
+}
+
+// TestLoadConfig_RuntimeMcpInherit_OffSwitches pins both layers the operator
+// can turn inheritance off from. The config-file layer resolves to
+// overrides.DisableRuntimeMcpInherit in cmd_daemon.go, so the flag assertion
+// covers it too.
+func TestLoadConfig_RuntimeMcpInherit_OffSwitches(t *testing.T) {
+	cases := []struct {
+		name      string
+		env       string
+		overrides Overrides
+	}{
+		{name: "env false", env: "false"},
+		{name: "env 0", env: "0"},
+		{name: "env off", env: "off"},
+		{name: "flag or config file", env: "", overrides: Overrides{DisableRuntimeMcpInherit: true}},
+		{name: "flag beats a truthy env", env: "true", overrides: Overrides{DisableRuntimeMcpInherit: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stageFakeAgent(t)
+			t.Setenv("MULTICA_DAEMON_RUNTIME_MCP", tc.env)
+			overrides := tc.overrides
+			overrides.ServerURL = "https://api.multica.ai"
+			overrides.WorkspacesRoot = t.TempDir()
+			cfg, err := LoadConfig(overrides)
+			if err != nil {
+				t.Fatalf("LoadConfig: %v", err)
+			}
+			if cfg.RuntimeMcpInheritEnabled {
+				t.Fatalf("RuntimeMcpInheritEnabled = true, want false")
+			}
+		})
+	}
+}
+
 // TestResolveAgentsViaLoginShell_StripsAliasShadowing locks down the fix for
 // #2512: when the user's rc file declares an alias with the same name as the
 // agent CLI, the resolver must still return the real binary on PATH, not the

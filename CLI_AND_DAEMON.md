@@ -153,6 +153,30 @@ availability stays independent of a third party's release cadence.
 Desktop-managed daemons ignore both, because the Desktop app owns its bundled
 CLI's lifecycle.
 
+#### Host MCP servers in agent tasks
+
+When an agent has MCP servers managed by Multica, the daemon merges this host's
+own MCP configuration (`~/.claude.json`, `~/.cursor/mcp.json`,
+`$CODEX_HOME/config.toml`, ...) underneath them before writing the task-local
+config, so adding one managed server does not silently disable the servers you
+already had. The merge happens on your machine — runtime URLs, headers, commands
+and env values never leave it.
+
+On a host whose personal MCP configuration is not every run's business, turn the
+inheritance off. Each agent then gets exactly the servers its own configuration
+declares — which also keeps unrelated tool schemas out of the model's context:
+
+```bash
+MULTICA_DAEMON_RUNTIME_MCP=0 multica daemon start
+# or
+multica daemon start --no-runtime-mcp
+# or persist it
+multica config set disable_runtime_mcp_inherit true
+```
+
+Agents with no managed `mcp_config` are unaffected either way: Multica writes no
+config for them, so the runtime keeps its own native inheritance.
+
 ### Stop
 
 ```bash
