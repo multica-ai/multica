@@ -115,20 +115,17 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 	// Triage refuses one outright (MUL-7189 §2.3). Deciding it here is what
 	// keeps the trigger PREVIEW honest — the queue door would refuse the insert
 	// either way, but silently, and the preview would have promised a run.
-	if currentStatus == issuestatus.Triage {
+	//
+	// Leaving Triage needs no case of its own. Triage is not a status, so accept
+	// clears this field and then takes the ordinary create / assign path; there
+	// is no "was in triage" transition for this predicate to recognise.
+	if issue.TriageState.Valid {
 		return IssueRunTrigger{}, false
 	}
 
-	// Leaving Triage is not a status change like any other: accept is the point
-	// at which the issue becomes work at all, so it starts a run on the same
-	// terms as a newly created assigned issue rather than on the narrow
-	// backlog→elsewhere rule (which would refuse everything, since the issue was
-	// never in backlog).
-	acceptedFromTriage := in.StatusChanged && prevStatus == issuestatus.Triage
-
 	var source RunEnqueueSource
 	switch {
-	case in.IsCreate || in.AssigneeChanged || acceptedFromTriage:
+	case in.IsCreate || in.AssigneeChanged:
 		// Backlog is the parking lot: assigning into backlog never starts a run.
 		if currentStatus == "backlog" {
 			return IssueRunTrigger{}, false

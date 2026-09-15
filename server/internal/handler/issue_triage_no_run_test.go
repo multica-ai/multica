@@ -8,7 +8,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/dispatch"
-	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -67,19 +66,31 @@ func newTriageRunFixture(t *testing.T) triageRunFixture {
 	return triageRunFixture{agentID: agentID, squadID: squadID, leaderID: leaderID, actionID: actionID, runtimeID: runtimeID}
 }
 
-// issueFor creates an issue in the given status assigned to the fixture agent.
-func (f triageRunFixture) issueFor(t *testing.T, status, title string) string {
+// issueFor creates an issue assigned to the fixture agent. triageState is the
+// value of the column that puts it in Triage; "" is an ordinary issue.
+//
+// Both halves carry status `todo`, which is the point: Triage is no longer a
+// status, so the two issues differ in exactly one field and nothing else can
+// explain a difference in behavior between them.
+func (f triageRunFixture) issueFor(t *testing.T, triageState, title string) string {
 	t.Helper()
-	issueID := dbfx.Issue(t, title, testutil.Cols{
-		"status":        status,
+	cols := testutil.Cols{
+		"status":        "todo",
 		"assignee_type": "agent",
 		"assignee_id":   f.agentID,
 		"number":        nextWorkspaceIssueNumber(t),
-	})
+	}
+	if triageState != "" {
+		cols["triage_state"] = triageState
+	}
+	issueID := dbfx.Issue(t, title, cols)
 	dbfx.Cleanup(t, `DELETE FROM comment WHERE issue_id = $1`, issueID)
 	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
 	return issueID
 }
+
+// triagePending is the only Triage state today.
+const triagePending = "pending"
 
 func tasksOn(t *testing.T, issueID string) int {
 	t.Helper()
@@ -135,8 +146,9 @@ func triageEntryPoints() []triageEntryPoint {
 			return testutil.Call(t, testHandler.RerunIssue, withURLParam(
 				newRequest(http.MethodPost, "/api/issues/"+issueID+"/rerun", nil), "id", issueID))
 		}},
-		// A quick action names an agent, but it asks it to DO the action, which
-		// is the executor Triage does not have.
+		// A quick action carries its own target, so the rule would let it
+		// through; the first phase refuses it because it is an instruction to
+		// DO the action rather than an invitation to talk.
 		{"quick action", false, func(t *testing.T, f triageRunFixture, issueID string) *testutil.Response {
 			return testutil.Call(t, testHandler.RunQuickAction, testutil.WithURLParams(
 				newRequest(http.MethodPost, "/api/issues/"+issueID+"/quick-actions/"+f.actionID+"/run", nil),
@@ -158,7 +170,7 @@ func TestTriageNoRunEntryPointsRunOnAnOrdinaryIssue(t *testing.T) {
 	f := newTriageRunFixture(t)
 	for _, entry := range triageEntryPoints() {
 		t.Run(entry.name, func(t *testing.T) {
-			issueID := f.issueFor(t, "todo", "ordinary issue: "+entry.name)
+			issueID := f.issueFor(t, "", "ordinary issue: "+entry.name)
 			entry.call(t, f, issueID).WantOneOf(http.StatusOK, http.StatusCreated, http.StatusAccepted)
 			if n := tasksOn(t, issueID); n == 0 {
 				t.Fatalf("%s started no run on a todo issue, so the triage half of this test proves nothing", entry.name)
@@ -171,7 +183,7 @@ func TestTriageRunsOnlyWhatAMemberNamed(t *testing.T) {
 	f := newTriageRunFixture(t)
 	for _, entry := range triageEntryPoints() {
 		t.Run(entry.name, func(t *testing.T) {
-			issueID := f.issueFor(t, issuestatus.Triage, "triage issue: "+entry.name)
+			issueID := f.issueFor(t, triagePending, "triage issue: "+entry.name)
 			entry.call(t, f, issueID)
 			n := tasksOn(t, issueID)
 			if entry.runsInTriage && n == 0 {
@@ -190,7 +202,7 @@ func TestTriageRefusesRerunAndQuickActionWithAReason(t *testing.T) {
 	f := newTriageRunFixture(t)
 
 	t.Run("rerun", func(t *testing.T) {
-		issueID := f.issueFor(t, issuestatus.Triage, "triage rerun")
+		issueID := f.issueFor(t, triagePending, "triage rerun")
 		resp := testutil.Call(t, testHandler.RerunIssue, withURLParam(
 			newRequest(http.MethodPost, "/api/issues/"+issueID+"/rerun", nil), "id", issueID))
 		if got := resp.Want(http.StatusForbidden).Map()["reason_code"]; got != string(dispatch.ReasonIssueInTriage) {
@@ -201,7 +213,7 @@ func TestTriageRefusesRerunAndQuickActionWithAReason(t *testing.T) {
 	// A quick action is a comment AND a run. Refusing it after the comment was
 	// written would leave a prompt addressed to nobody, so nothing is written.
 	t.Run("quick action writes no comment", func(t *testing.T) {
-		issueID := f.issueFor(t, issuestatus.Triage, "triage quick action")
+		issueID := f.issueFor(t, triagePending, "triage quick action")
 		resp := testutil.Call(t, testHandler.RunQuickAction, testutil.WithURLParams(
 			newRequest(http.MethodPost, "/api/issues/"+issueID+"/quick-actions/"+f.actionID+"/run", nil),
 			"id", issueID, "quickActionId", f.actionID))
@@ -219,7 +231,7 @@ func TestTriageRefusesRerunAndQuickActionWithAReason(t *testing.T) {
 // normal queued outcome — no issue_in_triage, no silent nothing.
 func TestTriageCommentMentionDispatchesNormally(t *testing.T) {
 	f := newTriageRunFixture(t)
-	issueID := f.issueFor(t, issuestatus.Triage, "triage mention outcomes")
+	issueID := f.issueFor(t, triagePending, "triage mention outcomes")
 
 	var body struct {
 		TriggerOutcomes []struct {
@@ -262,39 +274,29 @@ func TestTriageCommentMentionDispatchesNormally(t *testing.T) {
 // error, so nothing would ever report the difference.
 func TestPreviewIssueTriggerReportsNoRunForTriage(t *testing.T) {
 	f := newTriageRunFixture(t)
-	issueID := f.issueFor(t, issuestatus.Triage, "triage preview")
+	issueID := f.issueFor(t, triagePending, "triage preview")
 
-	if preview := previewIssueTrigger(t, map[string]any{
-		"is_create":     true,
-		"assignee_type": "agent",
-		"assignee_id":   f.agentID,
-		"status":        issuestatus.Triage,
-	}); preview.TotalCount != 0 {
-		t.Errorf("triage create previews %+v, want no run", preview)
-	}
-
-	// Reassigning inside Triage is allowed and would otherwise preview a run,
-	// since assignment is the one trigger source that does not look at status.
-	if preview := previewIssueTrigger(t, map[string]any{
+	// Reassigning inside Triage is allowed and would otherwise preview a run:
+	// assignment is the one trigger source that never looked at status.
+	reassign := map[string]any{
 		"issue_ids":     []string{issueID},
 		"assignee_type": "agent",
 		"assignee_id":   f.leaderID,
-	}); preview.TotalCount != 0 {
+	}
+	if preview := previewIssueTrigger(t, reassign); preview.TotalCount != 0 {
 		t.Errorf("triage reassign previews %+v, want no run", preview)
 	}
 
-	// Accept is the way out, and it previews as the issue's first appearance as
-	// work rather than as a status change: the backlog-to-elsewhere rule would
-	// refuse it, since the issue was never in backlog.
-	accepted := previewIssueTrigger(t, map[string]any{
-		"issue_ids": []string{issueID},
-		"status":    "todo",
-	})
+	// Accept clears the column and the issue becomes ordinary work. The same
+	// request now previews a run, which is what makes the zero above the
+	// column's doing rather than the fixture's.
+	dbfx.Exec(t, `UPDATE issue SET triage_state = NULL WHERE id = $1`, issueID)
+	accepted := previewIssueTrigger(t, reassign)
 	if accepted.TotalCount != 1 || len(accepted.Triggers) != 1 {
-		t.Fatalf("accept previews %+v, want exactly one run", accepted)
+		t.Fatalf("accepted issue previews %+v, want exactly one run", accepted)
 	}
-	if accepted.Triggers[0].Source != "assign" || accepted.Triggers[0].AgentID != f.agentID {
-		t.Errorf("accept preview = %+v, want the assignee started by an assign", accepted.Triggers[0])
+	if accepted.Triggers[0].Source != "assign" || accepted.Triggers[0].AgentID != f.leaderID {
+		t.Errorf("accepted preview = %+v, want the new assignee started by an assign", accepted.Triggers[0])
 	}
 }
 
@@ -309,7 +311,7 @@ func TestPreviewIssueTriggerReportsNoRunForTriage(t *testing.T) {
 func TestEnqueueRefusesADerivedRunInTriage(t *testing.T) {
 	ctx := context.Background()
 	f := newTriageRunFixture(t)
-	issueID := f.issueFor(t, issuestatus.Triage, "triage queue door")
+	issueID := f.issueFor(t, triagePending, "triage queue door")
 	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
 	if err != nil {
 		t.Fatal(err)
@@ -379,7 +381,7 @@ func TestEnqueueRefusesADerivedRunInTriage(t *testing.T) {
 func TestAutoRetrySkipsAnIssueInTriage(t *testing.T) {
 	ctx := context.Background()
 	f := newTriageRunFixture(t)
-	issueID := f.issueFor(t, issuestatus.Triage, "triage auto retry")
+	issueID := f.issueFor(t, triagePending, "triage auto retry")
 	taskID := dbfx.Task(t, f.agentID, testutil.Cols{
 		"runtime_id":     f.runtimeID,
 		"issue_id":       issueID,
@@ -430,7 +432,7 @@ func TestRerunRefusesAHistoricalTriageTaskAfterAccept(t *testing.T) {
 	f := newTriageRunFixture(t)
 	// Already accepted: the issue itself runs fine, which is what makes the
 	// source task the only thing left to refuse.
-	issueID := f.issueFor(t, "todo", "accepted out of triage")
+	issueID := f.issueFor(t, "", "accepted out of triage")
 
 	sourceTask := func(cols testutil.Cols) string {
 		base := testutil.Cols{
@@ -475,7 +477,7 @@ func TestRerunRefusesAHistoricalTriageTaskAfterAccept(t *testing.T) {
 // does not have (covered by the queue-door test above).
 func TestRerunInTriageFollowsItsSource(t *testing.T) {
 	f := newTriageRunFixture(t)
-	issueID := f.issueFor(t, issuestatus.Triage, "triage rerun by source")
+	issueID := f.issueFor(t, triagePending, "triage rerun by source")
 
 	// A discussion run: what a member's @mention leaves behind on a Triage entry.
 	discussionID := dbfx.Task(t, f.agentID, testutil.Cols{
@@ -537,15 +539,16 @@ func TestFailTaskRetryStartsNoRunForATriageIssue(t *testing.T) {
 	f := newTriageRunFixture(t)
 
 	for _, tc := range []struct {
-		status     string
-		wantChild  bool
-		wantOnFail string
+		name        string
+		triageState string
+		wantChild   bool
+		wantOnFail  string
 	}{
-		{"todo", true, "an ordinary issue retries, so the triage case below proves nothing"},
-		{issuestatus.Triage, false, "an issue in Triage was given a retry"},
+		{"ordinary", "", true, "an ordinary issue retries, so the triage case below proves nothing"},
+		{"triage", triagePending, false, "an issue in Triage was given a retry"},
 	} {
-		t.Run(tc.status, func(t *testing.T) {
-			issueID := f.issueFor(t, tc.status, "fail task retry: "+tc.status)
+		t.Run(tc.name, func(t *testing.T) {
+			issueID := f.issueFor(t, tc.triageState, "fail task retry: "+tc.name)
 			taskID := dbfx.Task(t, f.agentID, testutil.Cols{
 				"runtime_id":   f.runtimeID,
 				"issue_id":     issueID,

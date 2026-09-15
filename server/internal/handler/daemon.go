@@ -5568,9 +5568,12 @@ type batchIssueGCCheckItem struct {
 // status onto a built-in key here grants it no built-in behavior anywhere else.
 //
 // A status with no lifecycle category — an unresolvable key after a failed
-// catalog read or a status created since the resolver's snapshot, and Triage,
-// which is deliberately outside the four — is returned raw with no category, so
-// every daemon fails closed and reclaims artifacts only. (MUL-7364)
+// catalog read, or a status created since the resolver's snapshot — is returned
+// raw with no category, so every daemon fails closed and reclaims artifacts
+// only. (MUL-7364)
+//
+// Triage does not reach this: it is not a status, and a Triage entry carries an
+// ordinary non-terminal one, which already reclaims artifacts only.
 func issueGCWire(status, category string) (wireStatus, wireCategory string) {
 	if !issuestatus.IsCategory(category) {
 		return status, ""

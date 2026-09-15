@@ -3459,13 +3459,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
 
-	if prevIssue.Status == issuestatus.Triage {
-		if field := triageLockedField(req.Status != nil, rawFields); field != "" {
-			writeIssueInTriage(w, field)
-			return
-		}
-	}
-
 	// Pre-fill nullable fields (bare sqlc.narg) with current values
 	params := db.UpdateIssueParams{
 		ID:            prevIssue.ID,
@@ -3892,7 +3885,7 @@ func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bo
 	// Only the fixed backlog key parks work; custom unstarted statuses do not.
 	// An issue in Triage is not parked but refused: it produces no run from any
 	// entry point until it is accepted (MUL-7189 §2.3).
-	if status := issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status); status == "backlog" || status == issuestatus.Triage {
+	if issue.TriageState.Valid || issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
 		return false
 	}
 	return h.isAgentAssigneeReady(ctx, issue)
@@ -4213,9 +4206,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-	}
-	if !h.validateBatchTriageLocks(w, r, wsUUID, req.IssueIDs, req.Updates.Status != nil, rawUpdates) {
-		return
 	}
 	// The batch shares one project_id, so it is checked once here rather than
 	// per issue, and rejected instead of skipped like the per-item guards in

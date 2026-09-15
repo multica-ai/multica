@@ -5758,12 +5758,15 @@ WHERE recovery.author_type = 'system'
   -- for open work; parking belongs exclusively to the fixed Backlog status.
   -- Built-ins resolve without catalog rows; unknown custom states stay pending.
   AND source_issue.status <> 'backlog'
+  -- A coordinator waiting in Triage is the entry's proposed owner, not its
+  -- owner, so a worker failure must not wake it (MUL-7189 §2.3). Triage is not
+  -- a status, so it is a predicate of its own rather than a CASE arm.
+  AND source_issue.triage_state IS NULL
   AND CASE
       WHEN source_issue.status IN ('backlog', 'todo') THEN 'unstarted'
       WHEN source_issue.status IN ('in_progress', 'in_review', 'blocked') THEN 'started'
       WHEN source_issue.status = 'done' THEN 'done'
       WHEN source_issue.status = 'cancelled' THEN 'closed'
-      WHEN source_issue.status = 'triage' THEN 'triage'
       ELSE issue_status_category(source_status.category)
   END IN ('unstarted', 'started')
   AND source_agent.archived_at IS NULL

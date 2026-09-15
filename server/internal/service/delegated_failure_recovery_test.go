@@ -94,7 +94,6 @@ func TestDelegatedFailureRecoveryStatusEligibility(t *testing.T) {
 				{status: "blocked", allowed: true},
 				{status: "done"},
 				{status: "cancelled"},
-				{status: "triage"},
 				{status: "missing_recovery_status", unresolved: true},
 				{status: "custom_unstarted", category: "unstarted", allowed: true},
 				{status: "custom_started", category: "started", allowed: true},
@@ -1176,10 +1175,9 @@ func TestDelegatedFailureRecoveryTaskDoesNotRecursivelyWake(t *testing.T) {
 // coordinator is the issue's own assignee, the derived executor Triage does not
 // have (MUL-7189 §2.3).
 //
-// Triage needs no check of its own here. It is its own lifecycle category, so
-// it is neither unstarted nor started, and both the pending-recovery query and
-// canDispatchDelegatedFailureRecovery already exclude it — which is why the
-// sweep does not even scan the comment. This test is what keeps that true.
+// Both the pending-recovery query and canDispatchDelegatedFailureRecovery
+// exclude a Triage source, which is why the sweep does not even scan the
+// comment. This test is what keeps that true.
 //
 // The obligation is not discharged either: the comment stays in the outbox and
 // dispatches once the issue is accepted.
@@ -1208,7 +1206,7 @@ func TestPendingDelegatedFailureSweepSkipsTriageSourceIssue(t *testing.T) {
 		return n
 	}
 
-	if _, err := f.pool.Exec(ctx, `UPDATE issue SET status = 'triage' WHERE id = $1`, f.issueID); err != nil {
+	if _, err := f.pool.Exec(ctx, `UPDATE issue SET triage_state = 'pending' WHERE id = $1`, f.issueID); err != nil {
 		t.Fatalf("move source issue into triage: %v", err)
 	}
 	result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
@@ -1222,9 +1220,10 @@ func TestPendingDelegatedFailureSweepSkipsTriageSourceIssue(t *testing.T) {
 		t.Fatalf("recovery tasks = %d, want none while the source issue is in Triage", n)
 	}
 
-	// Accept, and the same pending comment wakes the coordinator — which is
-	// what makes the zero above Triage's doing and not an inert fixture.
-	if _, err := f.pool.Exec(ctx, `UPDATE issue SET status = 'in_progress' WHERE id = $1`, f.issueID); err != nil {
+	// Accept clears the marker and the same pending comment wakes the
+	// coordinator — which is what makes the zero above the column's doing and
+	// not an inert fixture. The status never moved: only triage_state did.
+	if _, err := f.pool.Exec(ctx, `UPDATE issue SET triage_state = NULL WHERE id = $1`, f.issueID); err != nil {
 		t.Fatalf("accept source issue: %v", err)
 	}
 	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result.Replayed != 1 {

@@ -6,21 +6,26 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
-// Triage write protection (MUL-7212). A triage issue can only be made by
-// Triage intake, which does not exist yet, so these tests insert one directly.
+// The reserved `triage` status key (MUL-7212, narrowed by MUL-7213).
+//
+// Triage itself lives in issue.triage_state, so there is no "issue in Triage is
+// read-only" rule left here — what remains is that no status may be named
+// `triage`. A Triage entry can only be made by Triage intake, which does not
+// exist yet, so these tests set the column directly.
 
 // The number comes from the workspace counter, not the fixture's MAX+1, so an
 // HTTP create later in the same test cannot be handed the same number.
 func triageIssueForTest(t *testing.T, title string) string {
 	t.Helper()
 	return dbfx.Issue(t, title, testutil.Cols{
-		"status": issuestatus.Triage,
-		"number": nextWorkspaceIssueNumber(t),
+		"triage_state": "pending",
+		"number":       nextWorkspaceIssueNumber(t),
 	})
 }
 
@@ -29,6 +34,13 @@ func issueStatusOf(t *testing.T, issueID string) string {
 	var status string
 	dbfx.QueryRow(t, `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&status)
 	return status
+}
+
+func triageStateOf(t *testing.T, issueID string) string {
+	t.Helper()
+	var state pgtype.Text
+	dbfx.QueryRow(t, `SELECT triage_state FROM issue WHERE id = $1`, issueID).Scan(&state)
+	return state.String
 }
 
 func wantErrorCode(t *testing.T, resp *testutil.Response, code string) {
@@ -111,77 +123,26 @@ func TestCustomStatusCannotClaimTriage(t *testing.T) {
 	}
 }
 
-func TestIssueInTriageKeepsStatusProjectAndParent(t *testing.T) {
+// Status, project and parent on a Triage entry are the triager's proposal, and
+// accept is what confirms them — so ordinary writes reach them like any other
+// issue. What no write can reach is the Triage marker itself: it is not a field
+// of the issue API, so there is nothing to lock.
+func TestIssueInTriageAcceptsOrdinaryFieldWrites(t *testing.T) {
+	seedTestCatalog(t)
 	issueID := triageIssueForTest(t, "waiting in triage")
 	projectID := dbfx.Project(t, "triage target project")
-	parentID := dbfx.Issue(t, "triage target parent")
 
-	update := func(body map[string]any) *testutil.Response {
-		return testutil.Call(t, testHandler.UpdateIssue, withURLParam(
-			newRequest(http.MethodPut, "/api/issues/"+issueID, body), "id", issueID))
-	}
-
-	for name, body := range map[string]map[string]any{
-		"status":           {"status": "todo"},
-		"status unchanged": {"status": "triage"},
-		"project":          {"project_id": projectID},
-		"clear project":    {"project_id": nil},
-		"parent":           {"parent_issue_id": parentID},
-		"status and title": {"status": "done", "title": "sneaky"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			wantErrorCode(t, update(body), "issue_in_triage")
-		})
-	}
-	var status, title string
-	var projectSet, parentSet bool
-	dbfx.QueryRow(t, `SELECT status, title, project_id IS NOT NULL, parent_issue_id IS NOT NULL FROM issue WHERE id = $1`, issueID).
-		Scan(&status, &title, &projectSet, &parentSet)
-	if status != issuestatus.Triage || title != "waiting in triage" || projectSet || parentSet {
-		t.Fatalf("refused writes changed the issue: status=%q title=%q project=%v parent=%v", status, title, projectSet, parentSet)
-	}
-
-	// Everything accept does not decide stays editable.
 	var resp IssueResponse
-	update(map[string]any{"priority": "high", "title": "retitled in triage"}).Want(http.StatusOK).JSON(&resp)
-	if resp.Status != issuestatus.Triage || resp.Priority != "high" || resp.Title != "retitled in triage" {
-		t.Fatalf("allowed update = {status:%q priority:%q title:%q}", resp.Status, resp.Priority, resp.Title)
+	testutil.Call(t, testHandler.UpdateIssue, withURLParam(
+		newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{
+			"status": "in_progress", "project_id": projectID, "priority": "high",
+		}), "id", issueID)).Want(http.StatusOK).JSON(&resp)
+	if resp.Status != "in_progress" || resp.Priority != "high" {
+		t.Fatalf("proposal write = {status:%q priority:%q}, want it applied", resp.Status, resp.Priority)
 	}
-	// A reserved key is its own category, with no catalog read.
-	if resp.StatusCategory != issuestatus.Triage {
-		t.Errorf("status_category = %q, want triage", resp.StatusCategory)
-	}
-}
-
-// A batch that would move an issue out of Triage is refused whole, before any
-// write, rather than updating the rest and skipping it silently.
-func TestBatchUpdateRefusesIssuesInTriage(t *testing.T) {
-	triageID := triageIssueForTest(t, "batch triage member")
-	todoID := dbfx.Issue(t, "batch todo member")
-
-	batch := func(updates map[string]any) *testutil.Response {
-		return testutil.Call(t, testHandler.BatchUpdateIssues, newRequest(http.MethodPatch,
-			"/api/issues/batch?workspace_id="+testWorkspaceID, map[string]any{
-				"issue_ids": []string{todoID, triageID},
-				"updates":   updates,
-			}))
-	}
-
-	wantErrorCode(t, batch(map[string]any{"status": "done"}), "issue_in_triage")
-	wantErrorCode(t, batch(map[string]any{"project_id": nil}), "issue_in_triage")
-	if got := issueStatusOf(t, todoID); got != "todo" {
-		t.Errorf("refused batch still updated its other issue: status = %q", got)
-	}
-
-	var out struct {
-		Updated int `json:"updated"`
-	}
-	batch(map[string]any{"priority": "urgent"}).Want(http.StatusOK).JSON(&out)
-	if out.Updated != 2 {
-		t.Errorf("priority batch updated %d issue(s), want 2", out.Updated)
-	}
-	if got := issueStatusOf(t, triageID); got != issuestatus.Triage {
-		t.Errorf("triage issue status after priority batch = %q, want triage", got)
+	// The write moved the proposal, not the entry: it is still in Triage.
+	if got := triageStateOf(t, issueID); got != "pending" {
+		t.Fatalf("triage_state after an ordinary write = %q, want pending", got)
 	}
 }
 
@@ -204,19 +165,10 @@ func TestPullRequestMergeDoesNotAdvanceTriageIssue(t *testing.T) {
 		t.Fatalf("load issue: %v", err)
 	}
 	testHandler.advanceIssueToDone(context.Background(), issue, testWorkspaceID)
-	if got := issueStatusOf(t, issueID); got != issuestatus.Triage {
-		t.Fatalf("status after merged PR = %q, want triage", got)
+	if got := issueStatusOf(t, issueID); got == "done" {
+		t.Fatalf("merged PR moved a Triage entry to done")
 	}
-}
-
-// Triage has no board column; in a status sort it leads, ahead of Backlog.
-func TestStatusOrderRanksTriageFirst(t *testing.T) {
-	rank := func(status string) int {
-		var got int
-		dbfx.QueryRow(t, `SELECT `+statusOrderExpression("$1::text"), status).Scan(&got)
-		return got
-	}
-	if triage, backlog := rank(issuestatus.Triage), rank(issuestatus.Backlog); triage >= backlog {
-		t.Fatalf("status rank triage=%d backlog=%d, want triage first", triage, backlog)
+	if got := triageStateOf(t, issueID); got != "pending" {
+		t.Fatalf("triage_state after merged PR = %q, want pending", got)
 	}
 }

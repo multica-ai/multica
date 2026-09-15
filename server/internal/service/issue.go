@@ -742,7 +742,7 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 	//
 	// Triage refuses for a different reason and so returns just as quietly: the
 	// entry is not yet work anyone agreed to do (MUL-7189 §2.3).
-	if status := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status); status == "backlog" || status == issuestatus.Triage {
+	if issue.TriageState.Valid || issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
 		return pgtype.UUID{}
 	}
 	verdict, admitted := agentAssigneeVerdict(ctx, s.runtimeLookup(s.Queries), issue)
@@ -790,7 +790,7 @@ func (s *IssueService) shouldEnqueueAgentTaskWithQueries(ctx context.Context, q 
 	// transaction and must see the same snapshot as the rest of it. (MUL-6243)
 	// That snapshot is also the only place a just-created Triage issue is
 	// visible, which is why the Triage check belongs on the same read.
-	if status := issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status); status == "backlog" || status == issuestatus.Triage {
+	if issue.TriageState.Valid || issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status) == "backlog" {
 		return false
 	}
 	return isAgentAssigneeReadyWithQueries(ctx, s.runtimeLookup(q), issue)
@@ -823,7 +823,7 @@ func agentAssigneeVerdict(ctx context.Context, lookup RuntimeLookup, issue db.Is
 }
 
 func (s *IssueService) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db.Issue) bool {
-	if status := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status); status == "backlog" || status == issuestatus.Triage {
+	if issue.TriageState.Valid || issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
 		return false
 	}
 	return s.isSquadLeaderReady(ctx, issue)

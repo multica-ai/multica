@@ -5527,7 +5527,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 	rerunOrigin := OriginDerived
 	if sourceTaskID.Valid {
 		rerunOrigin = OriginNamed
-	} else if issue.Status == issuestatus.Triage {
+	} else if issue.TriageState.Valid {
 		return nil, ErrIssueInTriage
 	}
 
@@ -6136,6 +6136,11 @@ func loadDelegatedFailureRecoveryTarget(ctx context.Context, q *db.Queries, fail
 // ListPendingDelegatedFailureRecoveries. It must not gate signal creation:
 // catalog failures are retryable only after the outbox comment is committed.
 func canDispatchDelegatedFailureRecovery(ctx context.Context, q *db.Queries, issue db.Issue) (bool, error) {
+	// A coordinator waiting in Triage is the entry's proposed owner, not its
+	// owner, so a worker failure must not wake it (MUL-7189 §2.3).
+	if issue.TriageState.Valid {
+		return false, nil
+	}
 	category, err := issuestatus.CategoryWithError(ctx, q, issue.WorkspaceID, issue.Status)
 	if err != nil {
 		return false, err

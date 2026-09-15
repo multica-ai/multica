@@ -8,7 +8,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/issuestatus"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -62,7 +61,7 @@ const (
 // ErrIssueInTriage is returned by a derived enqueue path when the issue is
 // waiting in Triage. Handlers render it as 403 issue_in_triage; background
 // callers log it and drop the trigger.
-var ErrIssueInTriage = errors.New("the issue is in triage, so it does not run")
+var ErrIssueInTriage = errors.New("the issue is in triage, so nothing derived from it runs")
 
 // ErrRerunSourceIsTriage is returned when a manual rerun names a triage run as
 // the task to repeat. Handlers render it as 400: the request is well-formed and
@@ -86,14 +85,14 @@ func guardIssueNotInTriage(ctx context.Context, q *db.Queries, issueID pgtype.UU
 	if origin == OriginNamed || !issueID.Valid {
 		return nil
 	}
-	row, err := q.GetIssueGCStatus(ctx, issueID)
+	state, err := q.GetIssueTriageState(ctx, issueID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
-		return fmt.Errorf("triage guard: load issue status: %w", err)
+		return fmt.Errorf("triage guard: load issue triage state: %w", err)
 	}
-	if row.Status == issuestatus.Triage {
+	if state.Valid {
 		return ErrIssueInTriage
 	}
 	return nil

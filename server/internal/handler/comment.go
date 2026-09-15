@@ -16,7 +16,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -2973,7 +2972,7 @@ func (h *Handler) routeAssigneeFallback(ctx context.Context, issue db.Issue, aut
 	// The queue door refuses these anyway. Stopping here is what keeps the
 	// server from attempting an enqueue it already knows will be refused, and
 	// logging a failure for every comment on a Triage entry.
-	if issue.Status == issuestatus.Triage {
+	if issue.TriageState.Valid {
 		return commentAgentTrigger{}, false
 	}
 	switch issue.AssigneeType.String {
@@ -2993,7 +2992,7 @@ func (h *Handler) routeAssigneeFallback(ctx context.Context, issue db.Issue, aut
 func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db.Issue, authorType, authorID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool) {
 	// Checked here as well as in routeAssigneeFallback: an agent-authored
 	// comment reaches this one directly, without passing through that caller.
-	if issue.Status == issuestatus.Triage {
+	if issue.TriageState.Valid {
 		return commentAgentTrigger{}, false
 	}
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
