@@ -38,11 +38,22 @@ func configureProcessGroup(cmd *exec.Cmd) {
 //
 // It is still the only way this package starts a long-lived runtime process,
 // so the two platforms share one call site per backend.
-func startOwnedProcessTree(cmd *exec.Cmd, _ *slog.Logger) error { return cmd.Start() }
+//
+// Tags the pid with recordStartTime the instant Start() returns — see
+// pidtag_unix.go — so a later signalProcessGroup call can tell this exact
+// process apart from anything that comes to hold the same pid number after
+// it exits.
+func startOwnedProcessTree(cmd *exec.Cmd, _ *slog.Logger) error {
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	recordStartTime(cmd)
+	return nil
+}
 
-// releaseProcessGroup is a no-op on non-Windows platforms: a process group needs
-// no handle and is gone once its members are.
-func releaseProcessGroup(cmd *exec.Cmd) {}
+// releaseProcessGroup is a no-op on non-Windows platforms beyond dropping the
+// pid tag: a process group needs no handle and is gone once its members are.
+func releaseProcessGroup(cmd *exec.Cmd) { forgetStartTime(cmd) }
 
 func codexInitializeRetrySupported() bool { return true }
 
@@ -50,8 +61,18 @@ func codexInitializeRetrySupported() bool { return true }
 // (when it was started with configureProcessGroup), falling back to the single
 // process if the group send fails. Targeting the group (negative pid) reaches
 // the descendants the agent spawned, not just the leader.
+//
+// Guarded by stillOurProcess: pids get reused, and the caller may be invoking
+// this well after the process it originally meant to signal has already
+// exited (a version-detection probe finishing before its own cleanup timer
+// fires is the common case here). Without the guard, a pid recycled to an
+// unrelated process — worst case, this daemon's own runtime process group —
+// receives the signal instead. See https://github.com/multica-ai/multica/issues/8306.
 func signalProcessGroup(cmd *exec.Cmd, sig syscall.Signal) {
 	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	if !stillOurProcess(cmd) {
 		return
 	}
 	if err := syscall.Kill(-cmd.Process.Pid, sig); err != nil {
