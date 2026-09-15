@@ -486,6 +486,12 @@ func sendOutcome(err error) deliveryState {
 	switch {
 	case err == nil:
 		return deliveryDelivered
+	case errors.Is(err, errChatBusy):
+		// AHEAD of the context arm below, which this also matches: it wraps
+		// the ctx.Err() that ended the wait. A push that never got the chat's
+		// turn was never built, let alone written, so the file is definitely
+		// not there — and the person can be told so plainly.
+		return deliveryDefinitelyFailed
 	case errors.Is(err, errAckTimeout),
 		errors.Is(err, errWriteAttempted),
 		errors.Is(err, context.Canceled),

@@ -166,14 +166,46 @@ func (c *chatLocks) acquire(ctx context.Context, chatID string) (func(), error) 
 		c.mu.Unlock()
 	}
 
+	// A free chat is taken without consulting the context at all. select picks
+	// at RANDOM among ready cases, so a caller whose context is already dead
+	// arriving at a chat nobody holds would have been classified two different
+	// ways from one run to the next — errChatBusy here, or the bare ctx.Err()
+	// from request's pre-write check a line later. Same situation, same "no
+	// frame was written", two different answers to "may this be retried".
+	//
+	// Taking it first also keeps errChatBusy honest: it is returned only when
+	// the chat really was somebody else's and the wait ran out.
+	select {
+	case l.ch <- struct{}{}:
+		return release, nil
+	default:
+	}
 	select {
 	case l.ch <- struct{}{}:
 		return release, nil
 	case <-ctx.Done():
 		drop()
-		return nil, ctx.Err()
+		return nil, fmt.Errorf("%w: %w", errChatBusy, ctx.Err())
 	}
 }
+
+// errChatBusy — the wait for this chat's turn ended before the turn came, and
+// NOT ONE BYTE went anywhere. The lock is taken before a frame is built, so
+// this is the one failure on the send path that is provably a non-delivery.
+//
+// It exists because the bare ctx.Err() this used to return said the opposite.
+// Every classifier in this package reads a context error as "the frame may be
+// in front of the person already" — the right reading for a context that ended
+// while waiting for a VERDICT, and the exact inversion of one that ended
+// before the write. So the direct path filed a message it had never sent as
+// "outcome unknown", which is the one outcome nobody may resend, and the relay
+// settled its claim and stopped offering it. The user got nothing and the
+// party whose job is to try again was told not to.
+//
+// It WRAPS ctx.Err() rather than replacing it: the cause is worth having in a
+// log line. That is also why every classifier has to test for this ahead of
+// its generic context branch — errors.Is finds context.Canceled in here too.
+var errChatBusy = errors.New("wecom: nothing was written; the wait for this chat's turn ended first")
 
 func newWSSender(conn wsConn, log *slog.Logger) *wsSender {
 	if log == nil {
@@ -434,6 +466,11 @@ func (s *wsSender) sendTextCtx(ctx context.Context, chatID string, chatTypeInt i
 	// exactly what used to arrive between piece one and piece two, and with
 	// two long answers in flight at once the (n/total) counters could not be
 	// matched back to their own text.
+	//
+	// A caller whose context ends while queued here gets errChatBusy, not the
+	// bare ctx.Err(): nothing has been built yet, let alone written, and the
+	// classifiers have to be able to tell that from a context that ended while
+	// waiting for a verdict.
 	release, err := s.chats.acquire(ctx, chatID)
 	if err != nil {
 		return err

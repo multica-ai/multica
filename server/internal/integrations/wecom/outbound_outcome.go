@@ -119,6 +119,12 @@ func unconfirmedReason(err error) string {
 		return "ack_timeout"
 	case errors.Is(err, errWriteAttempted):
 		return "write_attempted"
+	case errors.Is(err, errChatBusy):
+		// AHEAD of the context branch below, which this error also matches:
+		// it wraps the ctx.Err() that ended the wait. The wait was for the
+		// chat's turn and it ended before a frame existed, so this is the one
+		// context failure on the path that is certain rather than unknown.
+		return ""
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return "interrupted"
 	}

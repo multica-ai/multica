@@ -163,6 +163,14 @@ func newRelaySendRig(t *testing.T, failOn func(n int) bool) *relaySendRig {
 // claim gate takes part in.
 func newRelaySendRigWithDedupe(t *testing.T, failOn func(n int) bool, dedupe DedupeStore) *relaySendRig {
 	t.Helper()
+	return newRelaySendRigWithConfig(t, failOn, dedupe, relayRetryConfig)
+}
+
+// newRelaySendRigWithConfig is the rig with the chain sized by the test, for
+// the ones that have to watch a whole re-offer chain run against something
+// slower than a millisecond.
+func newRelaySendRigWithConfig(t *testing.T, failOn func(n int) bool, dedupe DedupeStore, cfg RelayConfig) *relaySendRig {
+	t.Helper()
 	reg := newSendersRegistry()
 	instID := mustTestUUID(t)
 	conn := &deadlineFlakyConn{failOn: failOn}
@@ -174,7 +182,7 @@ func newRelaySendRigWithDedupe(t *testing.T, failOn func(n int) bool, dedupe Ded
 
 	// No dedupe store: that is the single-replica claim gate, and it leaves the
 	// retry chain — the thing under test — exactly as it is in production.
-	router := NewRelayOutbound(&fanoutRelay{}, dedupe, relayRetryConfig, testLogger())
+	router := NewRelayOutbound(&fanoutRelay{}, dedupe, cfg, testLogger())
 	router.SetMetrics(mx)
 	router.Attach(o)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -492,6 +500,68 @@ func TestRelayedReply_ALostAckOnTheSecondPieceCountsDelivered(t *testing.T) {
 	}
 	if got := rig.mx.get("outbound_dropped"); got != 0 {
 		t.Errorf("outbound_dropped = %d, want 0", got)
+	}
+}
+
+// A routed reply that never reached the socket because the chat was busy is
+// OFFERED AGAIN, and arrives. This is the retryable failure of the whole set:
+// sendTextCtx takes the chat's turn before it builds a frame, so a delivery
+// whose budget runs out while queued put nothing anywhere.
+//
+// It used to end the reply. acquire returned a bare ctx.Err(), provablyNotSent
+// read that as "may have been sent", and the dispatcher settled the claim and
+// stopped — a message the user never received, with the one party that could
+// have re-sent it told not to.
+//
+// The lock is held here for less than the retry chain lasts, which is the real
+// shape of the thing: the chat is busy with the answer before this one, not
+// broken.
+//
+// REVERSE VERIFICATION: return ctx.Err() bare from chatLocks.acquire again and
+// this fails with "timed out waiting for the reply to reach the chat", the
+// chat having received nothing and outbound_unconfirmed = 1.
+func TestRelayedReply_AReplyThatNeverGotTheChatsTurnIsOfferedAgain(t *testing.T) {
+	t.Parallel()
+	// Its own chain rather than the millisecond one the rest of the file uses,
+	// sized by the two things this test needs to keep apart. The chat is busy
+	// for LONGER than one delivery budget, so the first offers really do give
+	// up waiting — that is the failure under test — and for far less than the
+	// whole re-offer chain, so a later offer still has one to spare. Ten
+	// offers over ~1.3s of backoff against a chat busy for 120ms.
+	budget := 40 * time.Millisecond
+	rig := newRelaySendRigWithConfig(t, nil, nil, RelayConfig{
+		Shards: 1, LeaseSettle: 800 * time.Millisecond,
+		RetryBackoff: 20 * time.Millisecond, DeliveryBudget: budget,
+	})
+
+	// Somebody else has the chat's turn — an answer already going out on this
+	// socket. The first offer's budget runs out inside the wait.
+	release, err := rig.conn.sender.chats.acquire(context.Background(), "CHAT_1")
+	if err != nil {
+		t.Fatalf("taking the chat's turn: %v", err)
+	}
+	go func() {
+		time.Sleep(3 * budget)
+		release()
+	}()
+
+	rig.route(t, "答案")
+	waitFor(t, "the reply to reach the chat on a later offer", func() bool {
+		return len(rig.conn.sent()) > 0
+	})
+	rig.stop()
+
+	if got := rig.conn.sent(); len(got) != 1 {
+		t.Fatalf("the chat received %d message(s), want 1: %v", len(got), got)
+	}
+	if got := rig.mx.get("outbound_delivered"); got != 1 {
+		t.Errorf("outbound_delivered = %d, want 1", got)
+	}
+	if got := rig.mx.get("outbound_unconfirmed"); got != 0 {
+		t.Errorf("outbound_unconfirmed = %d, want 0 — a delivery that never got the chat's turn wrote nothing, so its outcome is not unknown", got)
+	}
+	if got := rig.mx.get("outbound_dropped"); got != 0 {
+		t.Errorf("outbound_dropped = %d, want 0 — the frame was re-offered and arrived", got)
 	}
 }
 
