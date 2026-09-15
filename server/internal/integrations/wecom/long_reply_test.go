@@ -706,6 +706,63 @@ func TestAnAnswerToOneChatDoesNotHoldUpAnother(t *testing.T) {
 	<-done
 }
 
+// The lock has a second outcome, and before this nothing had a name for it:
+// the WAIT runs out. sendTextCtx takes the chat's turn first and builds a
+// frame second, so a caller whose context ends while queued has put not one
+// byte anywhere — and that is the most retryable failure this package has.
+//
+// Both classifiers read it as the opposite. acquire returned a bare ctx.Err(),
+// so unconfirmedReason filed it under "interrupted" — an outcome nobody may
+// resend, because the message might be on the person's screen — and
+// provablyNotSent said false, which tells the relay to settle the claim and
+// stop offering the frame. The user gets nothing and the party whose job is to
+// try again is told not to.
+//
+// REVERSE VERIFICATION: return ctx.Err() bare from chatLocks.acquire again and
+// this reports provablyNotSent = false and unconfirmedReason = "interrupted",
+// with the same zero frames on the wire.
+func TestGivingUpOnTheChatsTurnIsAProvableNonDelivery(t *testing.T) {
+	t.Parallel()
+	conn := &slowAckConn{delay: time.Millisecond}
+	sender := newWSSender(conn, testLogger())
+	conn.sender = sender
+
+	// Somebody else is mid-answer to this chat; the lock is theirs.
+	release, err := sender.chats.acquire(context.Background(), "CHAT_1")
+	if err != nil {
+		t.Fatalf("taking the chat's turn: %v", err)
+	}
+	defer release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	sendErr := sender.sendTextCtx(ctx, "CHAT_1", chatTypeSingleInt, "答案")
+
+	if sendErr == nil {
+		t.Fatal("the send reported success while another caller held the chat's turn")
+	}
+	if got := conn.wire(); len(got) != 0 {
+		t.Fatalf("%d frame(s) reached the wire: %v — nothing here is a send that never started", len(got), summarize(got))
+	}
+	if !provablyNotSent(sendErr) {
+		t.Errorf("provablyNotSent(%v) = false, want true — the relay settles the claim on that answer and stops re-offering a message that never reached the socket", sendErr)
+	}
+	if got := unconfirmedReason(sendErr); got != "" {
+		t.Errorf("unconfirmedReason(%v) = %q, want \"\" — %q says the message may be on the person's screen, and nothing was written", sendErr, got, got)
+	}
+
+	// And the direct path's own verdict, through the one mapping it uses.
+	mx := newCountingMetrics()
+	o := NewOutbound(&fakeOutboundQueries{}, newSendersRegistry(), testLogger(), WithOutboundMetrics(mx))
+	o.recordSend(context.Background(), testSessionID, "chat:done", sendErr)
+	if got := mx.get("outbound_dropped"); got != 1 {
+		t.Errorf("outbound_dropped = %d, want 1 — the reply is definitely not delivered", got)
+	}
+	if got := mx.get("outbound_unconfirmed"); got != 0 {
+		t.Errorf("outbound_unconfirmed = %d, want 0 — \"result unknown\" is what stops an operator resending a message nobody ever sent", got)
+	}
+}
+
 // summarize keeps a failure message readable when the pieces are 20KB each.
 func summarize(wire []string) []string {
 	out := make([]string, 0, len(wire))
