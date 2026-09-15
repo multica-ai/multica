@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "motion/react";
-import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Archive, Pencil, Loader2, Square } from "lucide-react";
+import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Archive, Pencil, Loader2, Square, Pin, PinOff } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -51,6 +51,7 @@ import {
   pendingChatTasksOptions,
   chatKeys,
   isTaskMessageTaskId,
+  chatPinnedAgentsOptions,
 } from "@multica/core/chat/queries";
 import {
   useCreateChatSession,
@@ -59,6 +60,8 @@ import {
   useSetChatSessionArchived,
   useSetChatSessionProject,
   useUpdateChatSession,
+  usePinChatAgent,
+  useUnpinChatAgent,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
@@ -1038,6 +1041,10 @@ export function ChatWindow() {
  * different agent = switch agent + start a fresh chat (session=null).
  * The current agent is marked with a check and not clickable.
  */
+// Keep in sync with the server cap (maxChatPinnedAgents) and the chat-list
+// quick-agent bar — pinning shares the same per-user/workspace state.
+const MAX_PINNED_AGENTS = 5;
+
 export function AgentDropdown({
   agents,
   activeAgent,
@@ -1050,34 +1057,79 @@ export function AgentDropdown({
   onSelect: (agent: Agent) => void;
 }) {
   const { t } = useT("chat");
+  const wsId = useWorkspaceId();
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
-  // Split into the user's own agents and everyone else so the menu groups
-  // them — matches the old AgentSelector layout.
+
+  // Pinned agents (per user · workspace, server-side) drive the top section and
+  // its custom order. This is the same state the chat-list quick-agent bar
+  // uses, so pinning here persists across refreshes/logins and stays in sync.
+  const { data: pinned = [] } = useQuery(chatPinnedAgentsOptions(wsId));
+  const pin = usePinChatAgent();
+  const unpin = useUnpinChatAgent();
+
+  const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
+  // Pinned agents in explicit position order (server sorts by position, but be
+  // defensive). Drop pins whose agent is no longer available to the caller.
+  const pinnedAgents = useMemo(
+    () =>
+      [...pinned]
+        .sort((a, b) => a.position - b.position)
+        .map((p) => agentById.get(p.agent_id))
+        .filter((a): a is Agent => !!a),
+    [pinned, agentById],
+  );
+  const pinnedIds = useMemo(() => new Set(pinnedAgents.map((a) => a.id)), [pinnedAgents]);
+
+  // Remaining agents keep the old grouping (mine / others) and their existing
+  // order, excluding anything already surfaced in the pinned section.
   const { mine, others } = useMemo(() => {
     const mine: Agent[] = [];
     const others: Agent[] = [];
     for (const a of agents) {
+      if (pinnedIds.has(a.id)) continue;
       if (a.owner_id === userId) mine.push(a);
       else others.push(a);
     }
     return { mine, others };
-  }, [agents, userId]);
+  }, [agents, userId, pinnedIds]);
 
   const query = filter.trim().toLowerCase();
   const matches = (name: string) =>
     !query || name.toLowerCase().includes(query) || matchesPinyin(name, query);
+  const filteredPinned = pinnedAgents.filter((agent) => matches(agent.name));
   const filteredMine = mine.filter((agent) => matches(agent.name));
   const filteredOthers = others.filter((agent) => matches(agent.name));
+
+  const atPinLimit = pinnedAgents.length >= MAX_PINNED_AGENTS;
 
   const handlePick = (agent: Agent) => {
     onSelect(agent);
     setOpen(false);
   };
+  const handleTogglePin = (agent: Agent, isPinned: boolean) => {
+    if (isPinned) unpin.mutate(agent.id);
+    else pin.mutate(agent.id);
+  };
 
   if (!activeAgent) {
     return <span className="text-caption text-muted-foreground">{t(($) => $.window.no_agents)}</span>;
   }
+
+  const renderItem = (agent: Agent) => {
+    const isPinned = pinnedIds.has(agent.id);
+    return (
+      <AgentPickerItem
+        key={agent.id}
+        agent={agent}
+        isCurrent={agent.id === activeAgent.id}
+        isPinned={isPinned}
+        canPin={isPinned || !atPinLimit}
+        onSelect={handlePick}
+        onTogglePin={handleTogglePin}
+      />
+    );
+  };
 
   return (
     <PropertyPicker
@@ -1109,32 +1161,25 @@ export function AgentDropdown({
         </>
       }
     >
-      {filteredMine.length === 0 && filteredOthers.length === 0 ? (
+      {filteredPinned.length === 0 &&
+      filteredMine.length === 0 &&
+      filteredOthers.length === 0 ? (
         <PickerEmpty />
       ) : (
         <>
+          {filteredPinned.length > 0 && (
+            <PickerSection label={t(($) => $.window.pinned_agents)}>
+              {filteredPinned.map(renderItem)}
+            </PickerSection>
+          )}
           {filteredMine.length > 0 && (
             <PickerSection label={t(($) => $.window.my_agents)}>
-              {filteredMine.map((agent) => (
-                <AgentPickerItem
-                  key={agent.id}
-                  agent={agent}
-                  isCurrent={agent.id === activeAgent.id}
-                  onSelect={handlePick}
-                />
-              ))}
+              {filteredMine.map(renderItem)}
             </PickerSection>
           )}
           {filteredOthers.length > 0 && (
             <PickerSection label={t(($) => $.window.others)}>
-              {filteredOthers.map((agent) => (
-                <AgentPickerItem
-                  key={agent.id}
-                  agent={agent}
-                  isCurrent={agent.id === activeAgent.id}
-                  onSelect={handlePick}
-                />
-              ))}
+              {filteredOthers.map(renderItem)}
             </PickerSection>
           )}
         </>
@@ -1146,14 +1191,73 @@ export function AgentDropdown({
 function AgentPickerItem({
   agent,
   isCurrent,
+  isPinned,
+  canPin,
   onSelect,
+  onTogglePin,
 }: {
   agent: Agent;
   isCurrent: boolean;
+  isPinned: boolean;
+  canPin: boolean;
   onSelect: (agent: Agent) => void;
+  onTogglePin: (agent: Agent, isPinned: boolean) => void;
 }) {
   const { t } = useT("chat");
   const runtimeBound = isAgentRuntimeBound(agent);
+  // The pin control is disabled only when pinning a new agent would exceed the
+  // cap; unpinning an already-pinned agent is always allowed.
+  const pinDisabled = !isPinned && !canPin;
+  const pinLabel = isPinned
+    ? t(($) => $.window.unpin_agent)
+    : pinDisabled
+      ? t(($) => $.window.pin_limit_reached)
+      : t(($) => $.window.pin_agent);
+  const PinIcon = isPinned ? PinOff : Pin;
+  // Rendered as a span (not a button) because PickerItem is itself a <button>
+  // and nesting interactive buttons is invalid. Keyboard-activatable via
+  // role/tabIndex; clicks are stopped from selecting the agent.
+  const pinControl = (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            role="button"
+            tabIndex={pinDisabled ? -1 : 0}
+            aria-label={pinLabel}
+            aria-disabled={pinDisabled}
+            aria-pressed={isPinned}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!pinDisabled) onTogglePin(agent, isPinned);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!pinDisabled) onTogglePin(agent, isPinned);
+              }
+            }}
+            className={cn(
+              "shrink-0 rounded p-0.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+              pinDisabled
+                ? "cursor-not-allowed text-faint-foreground"
+                : "cursor-pointer text-muted-foreground hover:bg-accent hover:text-foreground",
+              // Always show the control for pinned rows; reveal on hover/focus
+              // for unpinned rows so the row stays clean until acted on.
+              isPinned
+                ? "opacity-100"
+                : "opacity-0 [@media(hover:hover)]:group-hover/agent-row:opacity-100 group-focus-within/agent-row:opacity-100",
+            )}
+          >
+            <PinIcon className="size-3.5" />
+          </span>
+        }
+      />
+      <TooltipContent side="top">{pinLabel}</TooltipContent>
+    </Tooltip>
+  );
   return (
     <PickerItem
       selected={isCurrent}
@@ -1163,19 +1267,22 @@ function AgentPickerItem({
       }
       onClick={() => onSelect(agent)}
     >
-      <ActorAvatar
-        actorType="agent"
-        actorId={agent.id}
-        size="md"
-        enableHoverCard
-        showStatusDot
-      />
-      <span className="truncate flex-1">{agent.name}</span>
-      {!runtimeBound && (
-        <span className="shrink-0 text-micro text-amber-600 dark:text-amber-400">
-          {t(($) => $.window.agent_needs_runtime)}
-        </span>
-      )}
+      <span className="group/agent-row flex min-w-0 flex-1 items-center gap-2">
+        <ActorAvatar
+          actorType="agent"
+          actorId={agent.id}
+          size="md"
+          enableHoverCard
+          showStatusDot
+        />
+        <span className="truncate flex-1">{agent.name}</span>
+        {!runtimeBound && (
+          <span className="shrink-0 text-micro text-amber-600 dark:text-amber-400">
+            {t(($) => $.window.agent_needs_runtime)}
+          </span>
+        )}
+        {pinControl}
+      </span>
     </PickerItem>
   );
 }
