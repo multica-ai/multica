@@ -61,6 +61,18 @@ import {
   NotificationGate,
   parseNativeNotificationPayload,
 } from "./notification-gate";
+import {
+  DEFAULT_DESKTOP_PREFERENCES,
+  desktopPreferencesPath,
+  loadDesktopPreferences,
+  saveDesktopPreferences,
+} from "./desktop-preferences";
+import {
+  isCloseBehavior,
+  type DesktopPreferences,
+} from "../shared/desktop-preferences";
+import { applyMainWindowCloseBehavior } from "./window-close-behavior";
+import { setupTray } from "./tray-manager";
 
 // Guards against registering the will-download handler more than once on the
 // same session. window.webContents.session is shared, and createWindow() can
@@ -140,6 +152,10 @@ const notificationGate = new NotificationGate();
 const mainRendererMessages = new MainRendererMessageQueue();
 let desktopInitialized = false;
 let authSessionGeneration = 0;
+let desktopPreferences: DesktopPreferences = {
+  ...DEFAULT_DESKTOP_PREFERENCES,
+};
+let appIsQuitting = false;
 const rendererRouteContexts = new WeakMap<
   Electron.WebContents,
   RendererRouteContext
@@ -149,6 +165,16 @@ let runtimeConfigResult: RuntimeConfigResult = {
   ok: false,
   error: { message: "Runtime config has not loaded yet" },
 };
+
+function requestAppQuit(): void {
+  if (appIsQuitting) return;
+  appIsQuitting = true;
+  app.quit();
+}
+
+app.on("before-quit", () => {
+  appIsQuitting = true;
+});
 
 // --- Deep link helpers ---------------------------------------------------
 
@@ -341,9 +367,16 @@ function createWindow(): BrowserWindow {
   };
   window.on("resize", schedulePersistWindowState);
   window.on("move", schedulePersistWindowState);
-  window.on("close", () => {
+  window.on("close", (event) => {
     if (persistTimer) clearTimeout(persistTimer);
     persistWindowState();
+    applyMainWindowCloseBehavior({
+      event,
+      window,
+      closeBehavior: desktopPreferences.closeBehavior,
+      isQuitting: appIsQuitting,
+      requestQuit: requestAppQuit,
+    });
   });
 
   window.on("closed", () => {
@@ -633,6 +666,23 @@ if (!gotTheLock) {
       },
     });
 
+    const preferencesFilePath = desktopPreferencesPath(app.getPath("userData"));
+    desktopPreferences = await loadDesktopPreferences(preferencesFilePath);
+
+    ipcMain.handle("desktop-preferences:get", () => desktopPreferences);
+    ipcMain.handle(
+      "desktop-preferences:set-close-behavior",
+      async (_event, closeBehavior: unknown): Promise<DesktopPreferences> => {
+        if (!isCloseBehavior(closeBehavior)) {
+          throw new TypeError("Invalid desktop close behavior");
+        }
+        const next = { closeBehavior };
+        await saveDesktopPreferences(preferencesFilePath, next);
+        desktopPreferences = next;
+        return desktopPreferences;
+      },
+    );
+
     electronApp.setAppUserModelId(
       is.dev ? "ai.multica.desktop.dev" : "ai.multica.desktop",
     );
@@ -834,6 +884,15 @@ if (!gotTheLock) {
 
     desktopInitialized = true;
     createWindow();
+
+    setupTray({
+      iconPath: BUNDLED_ICON_PATH,
+      showWindow: () => {
+        const window = ensureMainWindow();
+        if (window) focusMainWindow(window);
+      },
+      requestQuit: requestAppQuit,
+    });
 
     setupAutoUpdater(() => mainWindow);
     setupDaemonManager(() => mainWindow);

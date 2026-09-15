@@ -4,6 +4,10 @@ import type { NavigationGesture } from "../shared/navigation-gestures";
 import type { RendererRouteContextInput } from "../shared/renderer-route-context";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
+  CloseBehavior,
+  DesktopPreferences,
+} from "../shared/desktop-preferences";
+import type {
   DesktopWindowContext,
   IssueWindowRequest,
 } from "../shared/issue-window";
@@ -166,12 +170,20 @@ interface UpdaterAPI {
   checkForUpdates: () => Promise<ManualUpdateCheckResult>;
 }
 
+interface DesktopPreferencesAPI {
+  get: () => Promise<DesktopPreferences>;
+  setCloseBehavior: (
+    closeBehavior: CloseBehavior,
+  ) => Promise<DesktopPreferences>;
+}
+
 declare global {
   interface Window {
     electron: ElectronAPI;
     desktopAPI: DesktopAPI;
     daemonAPI: DaemonAPI;
     updater: UpdaterAPI;
+    desktopPreferences: DesktopPreferencesAPI;
   }
 }
 
