@@ -898,5 +898,23 @@
     "surface_loading": "{{name}} を読み込んでいます…",
     "surface_unavailable": "{{name}} のインターフェースを読み込めません。インストール済みのバージョンに含まれていない可能性があります。",
     "surface_navigated": "{{name}} がパネルを外部から読み込んだページに置き換えようとしました。停止して接続を切りました。ワークスペース管理者に知らせてください。"
+  },
+  "wakeups": {
+    "title": "ウェイクアップ",
+    "retry": "読み込めませんでした。再試行",
+    "every": "{{minutes}} 分ごと",
+    "once": "一回",
+    "continuous": "継続",
+    "disable": "{{agent}} のウェイクアップを停止",
+    "disable_error": "停止できませんでした",
+    "source_run": "対象の実行",
+    "source_agent": "対象のエージェント",
+    "next": "次回：",
+    "last_run": "最新の実行",
+    "run_completed": "実行完了",
+    "run_failed": "実行失敗",
+    "run_cancelled": "実行キャンセル",
+    "comment_created": "新しいコメント",
+    "status_changed": "タスクの状態変更"
   }
 }

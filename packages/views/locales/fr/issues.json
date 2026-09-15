@@ -929,5 +929,23 @@
     "surface_loading": "Chargement de {{name}}…",
     "surface_unavailable": "{{name}} n'a pas pu charger son interface. La version installée ne la contient peut-être pas.",
     "surface_navigated": "{{name}} a tenté de remplacer son panneau par une page chargée depuis une autre source. Il a été arrêté et déconnecté : prévenez l'administrateur de votre espace de travail."
+  },
+  "wakeups": {
+    "title": "Réveils",
+    "retry": "Chargement impossible. Réessayer",
+    "every": "Toutes les {{minutes}} min",
+    "once": "Une fois",
+    "continuous": "Continu",
+    "disable": "Désactiver le réveil de {{agent}}",
+    "disable_error": "Impossible de désactiver le réveil",
+    "source_run": "Exécution source",
+    "source_agent": "Agent source",
+    "next": "Prochain :",
+    "last_run": "Dernière exécution",
+    "run_completed": "Exécution terminée",
+    "run_failed": "Échec de l’exécution",
+    "run_cancelled": "Exécution annulée",
+    "comment_created": "Nouveau commentaire",
+    "status_changed": "Statut de la tâche modifié"
   }
 }

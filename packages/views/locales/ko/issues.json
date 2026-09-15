@@ -898,5 +898,23 @@
     "surface_loading": "{{name}} 불러오는 중…",
     "surface_unavailable": "{{name}}의 인터페이스를 불러올 수 없습니다. 설치된 버전에 포함되어 있지 않을 수 있습니다.",
     "surface_navigated": "{{name}}이(가) 패널을 외부에서 불러온 페이지로 바꾸려 했습니다. 중지하고 연결을 끊었습니다. 워크스페이스 관리자에게 알리세요."
+  },
+  "wakeups": {
+    "title": "깨우기",
+    "retry": "불러오지 못했습니다. 다시 시도",
+    "every": "{{minutes}}분마다",
+    "once": "한 번",
+    "continuous": "계속",
+    "disable": "{{agent}} 깨우기 끄기",
+    "disable_error": "깨우기를 끌 수 없습니다",
+    "source_run": "대상 실행",
+    "source_agent": "대상 에이전트",
+    "next": "다음:",
+    "last_run": "최근 실행",
+    "run_completed": "실행 완료",
+    "run_failed": "실행 실패",
+    "run_cancelled": "실행 취소",
+    "comment_created": "새 댓글",
+    "status_changed": "작업 상태 변경"
   }
 }

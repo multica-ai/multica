@@ -1,3 +1,5 @@
+import type { IssueWakeup } from "../types/issue-wakeup";
+import { IssueWakeupSchema } from "./schemas";
 import { configStore } from "../config";
 import type {
   Issue,
@@ -1067,6 +1069,17 @@ export class ApiClient {
    * an ApiError 404, so `issueIdentifierOptions` propagates it instead of
    * caching it as "no such issue".
    */
+  async listIssueWakeups(issueId: string): Promise<IssueWakeup[]> {
+    const raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/wakeups`);
+    const parsed = parseWithFallback<IssueWakeup[] | null>(raw, IssueWakeupSchema.array(), null, { endpoint: "GET /api/issues/:id/wakeups" });
+    if (!parsed) throw new Error("Could not load wakeups");
+    return parsed;
+  }
+
+  async disableIssueWakeup(issueId: string, wakeupId: string): Promise<void> {
+    await this.fetch(`/api/issues/${encodeURIComponent(issueId)}/wakeups/${encodeURIComponent(wakeupId)}/disable`, { method: "POST" });
+  }
+
   async getIssue(id: string, options?: { signal?: AbortSignal }): Promise<Issue> {
     const raw = await this.fetch<unknown>(
       `/api/issues/${encodeURIComponent(id)}`,

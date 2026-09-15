@@ -199,6 +199,17 @@ func BuildPrompt(task Task, provider string, options ...PromptOption) string {
 }
 
 func buildPromptBody(task Task, provider string) string {
+	if task.WakeupID != "" {
+		var b strings.Builder
+		fmt.Fprintf(&b, "You are running as a local coding agent for a Multica workspace.\n\nYour assigned issue ID is: %s\n\n[WAKEUP]\n%s\n\n", task.IssueID, task.HandoffNote)
+		fmt.Fprintf(&b, "Start by running `multica issue get %s --output json`, then read current run/comment state. Decide whether the instruction's goal is met; the trigger reports a fact, not business completion. This is an ordinary run with normal result delivery.\n", task.IssueID)
+		fmt.Fprintf(&b, "Scan comment threads with `multica issue comment list %s --roots-only --summary --compact --output json`, then expand relevant threads with `--thread <id> --tail 30`.\n", task.IssueID)
+		fmt.Fprintf(&b, "Inspect this configuration with `multica issue wakeup get %s %s --output json`. If recurring work is no longer needed, disable it with `multica issue wakeup disable %s %s`.\n", task.IssueID, task.WakeupID, task.IssueID, task.WakeupID)
+		if task.TriggerCommentID != "" {
+			fmt.Fprintf(&b, "Post your result using `multica issue comment add %s --parent %s --content-file ./reply.md --output table && rm ./reply.md`. This is the original delivery thread, not a new comment trigger.\n", task.IssueID, task.TriggerCommentID)
+		}
+		return b.String()
+	}
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}

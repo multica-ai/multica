@@ -929,5 +929,23 @@
     "surface_loading": "Loading {{name}}…",
     "surface_unavailable": "{{name}} could not load its interface. The installed version may not include it.",
     "surface_navigated": "{{name}} tried to replace its panel with a page loaded from elsewhere. It has been stopped and disconnected — tell your workspace admin."
+  },
+  "wakeups": {
+    "title": "Wakeups",
+    "retry": "Could not load wakeups. Retry",
+    "every": "Every {{minutes}} min",
+    "once": "Once",
+    "continuous": "Continuous",
+    "disable": "Turn off wakeup for {{agent}}",
+    "disable_error": "Could not turn off wakeup",
+    "source_run": "Source run",
+    "source_agent": "Source agent",
+    "next": "Next:",
+    "last_run": "Latest run",
+    "run_completed": "Run completed",
+    "run_failed": "Run failed",
+    "run_cancelled": "Run cancelled",
+    "comment_created": "New comment",
+    "status_changed": "Issue status changed"
   }
 }

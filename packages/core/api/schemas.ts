@@ -3421,3 +3421,12 @@ export const EMPTY_JOIN_SHARE_LINK_RESPONSE: {
   workspace_id: "",
   workspace_slug: "",
 };
+
+export const IssueWakeupSchema = z.object({
+  id: z.string(), issue_id: z.string(), agent_id: z.string(), agent_name: z.string().default(""),
+  instruction: z.string(), kind: z.enum(["event", "at", "every", "cron"]), mode: z.enum(["once", "continuous"]),
+  event_types: z.array(z.string()), filter_agent_id: z.string().nullable(), filter_task_id: z.string().nullable(),
+  interval_seconds: z.number().nullable(), cron_expression: z.string().nullable(), timezone: z.string(),
+  next_fire_at: z.string().nullable(), enabled: z.boolean(), disabled_at: z.string().nullable(),
+  last_task_id: z.string().nullable(), last_error: z.string().nullable(),
+});

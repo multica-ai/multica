@@ -529,7 +529,11 @@ DELETE FROM lark_installation WHERE lark_installation.workspace_id = $1;
 DELETE FROM comment WHERE comment.workspace_id = $1;
 
 -- name: DeleteWorkspaceIssueRoots :exec
-WITH
+WITH deleted_wakeup_receipts AS (
+ DELETE FROM issue_wakeup_receipt WHERE wakeup_id IN (SELECT id FROM issue_wakeup WHERE workspace_id=$1)
+), deleted_wakeups AS (
+ DELETE FROM issue_wakeup WHERE workspace_id=$1
+),
 deleted_issues AS (
     DELETE FROM issue WHERE issue.workspace_id = $1
 ),

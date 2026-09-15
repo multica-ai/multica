@@ -3457,6 +3457,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	// Pre-fill nullable fields (bare sqlc.narg) with current values
 	params := db.UpdateIssueParams{
+		SourceTaskID:  h.wakeupSourceTaskID(r),
 		ID:            prevIssue.ID,
 		AssigneeType:  prevIssue.AssigneeType,
 		AssigneeID:    prevIssue.AssigneeID,
@@ -4253,6 +4254,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 
 		params := db.UpdateIssueParams{
+			SourceTaskID:  h.wakeupSourceTaskID(r),
 			ID:            prevIssue.ID,
 			AssigneeType:  prevIssue.AssigneeType,
 			AssigneeID:    prevIssue.AssigneeID,

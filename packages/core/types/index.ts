@@ -332,3 +332,4 @@ export type {
   WorkspaceSubscriptionSeatReconcileResult,
   CreateWorkspaceSubscriptionPortalResponse,
 } from "./billing";
+export type { IssueWakeup } from "./issue-wakeup";

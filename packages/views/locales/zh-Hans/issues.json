@@ -898,5 +898,23 @@
     "surface_loading": "正在加载 {{name}}…",
     "surface_unavailable": "{{name}} 的界面无法加载，已安装的版本可能不包含它。",
     "surface_navigated": "{{name}} 试图把面板替换成从别处加载的页面。已经拦下并断开连接，建议告知工作区管理员。"
+  },
+  "wakeups": {
+    "title": "唤醒",
+    "retry": "唤醒加载失败，点击重试",
+    "every": "每 {{minutes}} 分钟",
+    "once": "单次",
+    "continuous": "持续",
+    "disable": "关闭 {{agent}} 的唤醒",
+    "disable_error": "无法关闭唤醒",
+    "source_run": "来源运行",
+    "source_agent": "来源智能体",
+    "next": "下次：",
+    "last_run": "最近运行",
+    "run_completed": "运行完成",
+    "run_failed": "运行失败",
+    "run_cancelled": "运行取消",
+    "comment_created": "新增评论",
+    "status_changed": "任务状态变化"
   }
 }
