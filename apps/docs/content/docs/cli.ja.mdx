@@ -98,6 +98,7 @@ multica issue assign MUL-123 --to "Backend Agent"
 # コメントと実行履歴
 multica issue comment list MUL-123
 multica issue comment add MUL-123 --content "まず回帰テストを確認してください"
+multica issue comment update <comment-id> --expected-revision 2 --content "回帰テストとリリースノートを確認してください"
 multica issue runs MUL-123
 ```
 
@@ -106,6 +107,7 @@ multica issue runs MUL-123
 ```bash
 multica issue create --title "アップグレードメモ" --description-stdin < notes.md
 multica issue comment add MUL-123 --content-stdin < review.md
+multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
 ```
 
 1 回の実行のメッセージを表示する、または実行を停止する:

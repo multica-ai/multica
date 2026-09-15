@@ -98,6 +98,7 @@ multica issue assign MUL-123 --to "Backend Agent"
 # Comments and runs
 multica issue comment list MUL-123
 multica issue comment add MUL-123 --content "Check the regression tests first"
+multica issue comment update <comment-id> --expected-revision 2 --content "Check the regression tests and release notes"
 multica issue runs MUL-123
 ```
 
@@ -106,6 +107,7 @@ Read long descriptions or comments from stdin to avoid dealing with newlines and
 ```bash
 multica issue create --title "Upgrade notes" --description-stdin < notes.md
 multica issue comment add MUL-123 --content-stdin < review.md
+multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
 ```
 
 View the messages of a single run, or stop one:
