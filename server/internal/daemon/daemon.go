@@ -7867,8 +7867,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// task dispatch.
 	var openclawMode string
 	var openclawGateway execenv.OpenclawGatewayPin
+	var openclawModelOverride string
 	if task.Agent != nil && provider == "openclaw" {
-		openclawMode, openclawGateway = decodeOpenclawRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
+		openclawMode, openclawGateway, openclawModelOverride = decodeOpenclawRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
 	}
 	var agentEnvOverrides map[string]string
 	var agentCustomArgs []string
@@ -8601,6 +8602,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ThinkingLevel:          thinkingLevel,
 		ServiceTier:            serviceTier,
 		OpenclawMode:           openclawMode,
+		OpenclawModelOverride:  openclawModelOverride,
 		ClaudeSettingsPath:     env.ClaudeSettingsPath,
 		QwenpawWorkspace:       env.QwenpawWorkspace,
 	}
