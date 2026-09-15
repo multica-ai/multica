@@ -233,6 +233,25 @@ describe("useIssueDetailScrollRestore", () => {
     expect(scroller.scrollTop).toBe(520);
   });
 
+  it("restores again when late attachment layout shifts scroll", () => {
+    const issueA = nextKey("issue-a");
+    const issueB = nextKey("issue-b");
+    const { getByTestId, rerender } = render(<Harness restoreKey={issueA} />);
+    const scroller = getByTestId("scroller") as HTMLElement;
+
+    setScroll(scroller, 520);
+    rerender(<Harness restoreKey={issueB} />);
+    rerender(<Harness restoreKey={issueA} />);
+    flushNextAnimationFrame();
+    flushNextAnimationFrame();
+    flushNextAnimationFrame();
+
+    scroller.scrollTop = 214;
+    flushNextAnimationFrame();
+
+    expect(scroller.scrollTop).toBe(520);
+  });
+
   it("cancels a pending restore retry when the issue key changes", () => {
     const issueA = nextKey("issue-a");
     const issueB = nextKey("issue-b");

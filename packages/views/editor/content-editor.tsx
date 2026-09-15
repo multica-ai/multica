@@ -102,6 +102,75 @@ function normalizeEditorMarkdown(editor: Editor): string {
   return normalizeMarkdown(editor.getMarkdown());
 }
 
+// MUL-7095 mount attribution: `performance.mark/measure` spans around the
+// deferred mount phases (chunk parse, view construction, fallback dispatch,
+// repair, baseline) so the navigation-trace A/B can attribute the
+// click-to-commit window without a second renderer. Measurement-only: safe
+// no-ops outside the browser and never throws into the editor lifecycle.
+function markMountPhase(name: string): void {
+  try {
+    if (
+      typeof performance !== "undefined" &&
+      typeof performance.mark === "function"
+    ) {
+      performance.mark(name);
+    }
+  } catch {
+    // A failed mark must never break editor creation.
+  }
+}
+
+function measureMountPhase(
+  name: string,
+  startMark: string,
+  endMark: string,
+): void {
+  // No per-measure `clearMarks` here: `mul7095-mount-start` is reused by
+  // both `mul7095-create-view` and `mul7095-mount-total`, so clearing on
+  // first use silently dropped the total (measure threw into the catch).
+  // Marks live until `clearMountMarks` at the end of `onMount` instead.
+  try {
+    if (
+      typeof performance !== "undefined" &&
+      typeof performance.measure === "function"
+    ) {
+      performance.measure(name, startMark, endMark);
+    }
+  } catch {
+    // A failed measure must never break editor creation.
+  }
+}
+
+/** Drop the mount-attribution marks once `onMount` has measured them all.
+ *  Called once per mount (never per measure) so a mark reused across two
+ *  spans survives until its last consumer. Measurement-only. */
+function clearMountMarks(): void {
+  try {
+    if (
+      typeof performance !== "undefined" &&
+      typeof performance.clearMarks === "function"
+    ) {
+      for (const mark of [
+        "mul7095-before-create-start",
+        "mul7095-chunk-parse-start",
+        "mul7095-chunk-parse-end",
+        "mul7095-mount-start",
+        "mul7095-mount-dispatch-start",
+        "mul7095-mount-dispatch-end",
+        "mul7095-mount-repair-start",
+        "mul7095-mount-repair-end",
+        "mul7095-mount-baseline-start",
+        "mul7095-mount-baseline-end",
+        "mul7095-mount-end",
+      ]) {
+        performance.clearMarks(mark);
+      }
+    }
+  } catch {
+    // Clearing must never break editor creation.
+  }
+}
+
 /** True when any node in the document is mid-upload (`attrs.uploading`). The
  *  `return !found` early-out matches the original inline scans verbatim: in
  *  ProseMirror it only stops descending into the matched node's subtree (not
@@ -225,10 +294,14 @@ interface ContentEditorBaseProps {
    */
   flushPendingOnUnmount?: boolean;
   /**
-   * Called once when the Tiptap instance exists and its initial content is
-   * set (creation is deferred past first paint by `immediatelyRender: false`).
-   * Readonly-first hosts such as comment and reply composers use this as the
-   * signal to swap their static shell for the live editor.
+   * Create the ProseMirror view during the first client render. Opt-in
+   * only; existing editor hosts keep deferred creation by default.
+   */
+  eagerClientRender?: boolean;
+  /**
+   * Called once the initial document is usable in the connected editor DOM.
+   * This also waits for the client commit when hydrating. Readonly-first
+   * hosts use this to swap their static shell for the live editor.
    */
   onReady?: () => void;
 }
@@ -263,6 +336,12 @@ interface ContentEditorRef {
    * when no position resolves (click below the last line). Must be called
    * while the editor element is laid out (not display: none).
    */
+  /**
+   * True while the deferred instance exists. Lets a host forward a click
+   * only in the pre-instance window and leave live clicks to the editor's
+   * own container handler.
+   */
+  hasEditorInstance: () => boolean;
   focusAtCoords: (coords: { x: number; y: number }) => void;
   /**
    * Focus and place the caret at the document position a text anchor
@@ -381,6 +460,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       quickActionMenu,
       attachments,
       flushPendingOnUnmount = false,
+      eagerClientRender = false,
       onReady,
     },
     ref,
@@ -553,30 +633,88 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           cdnDomain: configStore.getState().cdnDomain,
         })
       : "";
-    // With `immediatelyRender: false` the Tiptap instance is created after
-    // mount, so an imperative `focus()` fired on the same tick (e.g. chat
-    // auto-focusing a brand-new conversation) would hit a null editor and no-op.
-    // Latch the intent here and honor it in `onCreate` once the editor exists.
+    // Hydration uses Tiptap's null server snapshot. Latch imperative focus
+    // until that snapshot has been replaced with the client editor.
     const focusOnReadyRef = useRef(false);
+    // A startup click carries a position, not just "focus me": keep the
+    // coordinates/anchor so `onCreate` can land the caret where the user
+    // clicked instead of degrading to the end of the document. Plain
+    // `focus()` leaves this null and `onCreate` falls back to `"end"`.
+    const focusTargetRef = useRef<
+      | { kind: "coords"; x: number; y: number }
+      | { kind: "anchor"; anchor: TextAnchor }
+      | null
+    >(null);
+    // Drops that land before the deferred Tiptap instance exists must not
+    // vanish: queue them here and flush once the editor commits. The queue
+    // lives inside this mount, and the description host remounts per issue
+    // (key={id}), so queued files stay issue-keyed without a shared cache.
+    const pendingUploadsRef = useRef<File[]>([]);
+    // Set once per mount when `onBeforeCreate` prepares the initial JSON for
+    // a chunked document. `onMount` consults it to skip the post-mount
+    // `setContent` dispatch. This component remounts per issue (key={id}), so
+    // the prepared doc stays issue-keyed with no shared cache.
+    const preparedInitialJsonRef = useRef(false);
     // Large markdown is parsed in chunks to dodge marked's O(n²) tokenizer (see
     // parseMarkdownChunked). Small docs stay on the single-parse fast path.
     const mountChunked = initialContent.length > MARKDOWN_CHUNK_THRESHOLD;
 
     const editor = useEditor({
-      immediatelyRender: false,
+      // Keep deferred creation as the default for existing hosts. Explicit
+      // eager opt-ins remain available for hydration-sensitive test hosts.
+      immediatelyRender: eagerClientRender && typeof window !== "undefined",
       // Explicit for clarity — the real perf win is useEditorState in BubbleMenu.
       shouldRerenderOnTransaction: false,
-      onCreate: ({ editor: ed }) => {
-        // For large docs we mount empty (below) and parse in chunks here, so the
-        // O(n²) marked tokenizer never sees the whole document at once.
+      onBeforeCreate: ({ editor: ed }) => {
+        // Markdown's beforeCreate hook has initialized the manager, but
+        // Tiptap has not constructed its document or view yet. Build the
+        // initial JSON once here so the first view mounts populated: this
+        // removes the post-mount `setContent` dispatch that dominated the
+        // click-to-commit LongTask (MUL-7095 deep-dive), without restoring
+        // eager creation on the route (INV-1) or an empty first frame (F3).
+        markMountPhase("mul7095-before-create-start");
+        markMountPhase("mul7095-chunk-parse-start");
         if (mountChunked) {
           const manager = (
             ed.storage as { markdown?: { manager?: MarkdownManagerLike } }
           ).markdown?.manager;
           if (manager) {
+            ed.options.content = parseMarkdownChunked(
+              manager,
+              initialContent,
+            );
+            preparedInitialJsonRef.current = true;
+          }
+        }
+        markMountPhase("mul7095-chunk-parse-end");
+        measureMountPhase(
+          "mul7095-chunk-parse",
+          "mul7095-chunk-parse-start",
+          "mul7095-chunk-parse-end",
+        );
+      },
+      onMount: ({ editor: ed }) => {
+        markMountPhase("mul7095-mount-start");
+        // View construction between beforeCreate and mount (createView).
+        measureMountPhase(
+          "mul7095-create-view",
+          "mul7095-before-create-start",
+          "mul7095-mount-start",
+        );
+        if (mountChunked && !preparedInitialJsonRef.current) {
+          // Fallback when the markdown manager was unavailable in
+          // onBeforeCreate: populate from markdown so the first frame is
+          // never empty. Expected to stay cold; its measure proves it.
+          const manager = (
+            ed.storage as { markdown?: { manager?: MarkdownManagerLike } }
+          ).markdown?.manager;
+          markMountPhase("mul7095-mount-dispatch-start");
+          if (manager) {
             ed.commands.setContent(
               parseMarkdownChunked(manager, initialContent),
-              { emitUpdate: false },
+              {
+                emitUpdate: false,
+              },
             );
           } else {
             ed.commands.setContent(initialContent, {
@@ -584,15 +722,78 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
               contentType: "markdown",
             });
           }
+          markMountPhase("mul7095-mount-dispatch-end");
+          measureMountPhase(
+            "mul7095-mount-dispatch",
+            "mul7095-mount-dispatch-start",
+            "mul7095-mount-dispatch-end",
+          );
         }
+        // Normalize the populated view and establish the save baseline before
+        // it accepts input. The later create task must not reset either one.
         // A markdown draft ending in an empty list item (e.g. `"1. \n\n"` left
         // after typing `1.`) parses into a caretless, schema-invalid item;
         // repair it so the mounted editor has a real cursor in the list.
+        markMountPhase("mul7095-mount-repair-start");
         repairEmptyListItems(ed);
+        markMountPhase("mul7095-mount-repair-end");
+        measureMountPhase(
+          "mul7095-mount-repair",
+          "mul7095-mount-repair-start",
+          "mul7095-mount-repair-end",
+        );
+        markMountPhase("mul7095-mount-baseline-start");
         lastEmittedRef.current = normalizeEditorMarkdown(ed);
+        markMountPhase("mul7095-mount-baseline-end");
+        measureMountPhase(
+          "mul7095-mount-baseline",
+          "mul7095-mount-baseline-start",
+          "mul7095-mount-baseline-end",
+        );
+        markMountPhase("mul7095-mount-end");
+        measureMountPhase(
+          "mul7095-mount-total",
+          "mul7095-mount-start",
+          "mul7095-mount-end",
+        );
+        // Drop the attribution marks only after every span above consumed
+        // them (`mul7095-mount-start` feeds both create-view and total).
+        clearMountMarks();
+      },
+      onCreate: ({ editor: ed }) => {
         if (focusOnReadyRef.current) {
           focusOnReadyRef.current = false;
-          ed.commands.focus("end");
+          const target = focusTargetRef.current;
+          focusTargetRef.current = null;
+          // A real user click carries a DOM position; landing the caret
+          // there (not "end") is what lets a startup click become a valid
+          // ProseMirror selection on WebKit as well as Chromium.
+          if (target?.kind === "anchor") {
+            ed.commands.focus(posFromAnchor(ed.state.doc, target.anchor));
+          } else if (target?.kind === "coords") {
+            const pos = ed.view.posAtCoords({ left: target.x, top: target.y });
+            if (pos) ed.commands.focus(pos.pos);
+            else ed.commands.focus("end");
+          } else {
+            ed.commands.focus("end");
+          }
+        }
+        // Startup drops latched before the instance existed become real
+        // uploads only through the same public path as a live-editor drop
+        // (`uploadFile` → `uploadAndInsertFile`): the `uploading` node is
+        // drawn first, so the queued file is visible and settle-tracked
+        // exactly like a drop that arrived after readiness.
+        if (pendingUploadsRef.current.length > 0 && onUploadFileRef.current) {
+          const pending = pendingUploadsRef.current;
+          pendingUploadsRef.current = [];
+          for (const file of pending) {
+            uploadAndInsertFile(
+              ed,
+              file,
+              onUploadFileRef.current,
+              ed.state.doc.content.size,
+            );
+          }
         }
       },
       content: mountChunked ? "" : initialContent,
@@ -687,14 +888,20 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       },
     });
 
-    // Signal hosts that the deferred editor instance now exists. Fired from a
-    // passive effect (not `onCreate`) so it runs after the commit in which
-    // <EditorContent> attached the editor DOM — callers can measure/focus it.
+    // Subscribe after EditorContent has committed its DOM. During hydration
+    // the create task can precede that commit, so handle both orderings without
+    // a readiness setState/render in every editor (including non-consumers).
     const readyFiredRef = useRef(false);
     useEffect(() => {
-      if (!editor || readyFiredRef.current) return;
-      readyFiredRef.current = true;
-      onReadyRef.current?.();
+      if (!editor || !onReadyRef.current || readyFiredRef.current) return;
+      const ready = () => {
+        if (editor.isDestroyed || readyFiredRef.current) return;
+        readyFiredRef.current = true;
+        onReadyRef.current?.();
+      };
+      if (editor.isInitialized) ready();
+      else editor.on("create", ready);
+      return () => { editor.off("create", ready); };
     }, [editor]);
 
     // Publish upload-queue transitions to the host so it can gate submit.
@@ -834,7 +1041,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       lastSyncedValueRef.current = value;
 
       // The initial value was already parsed through useEditor's
-      // `content` option (or in onCreate for the chunked path). Comparing that
+      // `content` option (or in onBeforeCreate for the chunked path). Comparing that
       // source Markdown to Tiptap's canonical serialization can differ even
       // when they represent the same document, and used to cause an immediate
       // second full parse. Only later prop changes belong to this sync effect.
@@ -897,6 +1104,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     }, [editor, placeholderText]);
 
     useImperativeHandle(ref, () => ({
+      // MUL-7095: explicit pre-instance-window probe. The description
+      // wrapper calls `focusAtCoords` only when this is false; a live
+      // editor's clicks stay with the editor's own container handler.
+      hasEditorInstance: () => !!editor && !editor.isDestroyed,
       // Intentionally NOT routed through `normalizeMarkdown` — see the "stays
       // untrimmed" safety net in content-editor.test.tsx. It used to also pass
       // through `stripBlobUrls`; that wrapper is gone because an in-flight
@@ -913,8 +1124,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       },
       focusAtCoords: (coords: { x: number; y: number }) => {
         if (!editor) {
-          // Editor not mounted yet — degrade to the latched plain focus.
+          // Editor not mounted yet — latch the click position so `onCreate`
+          // lands the caret at the user's click, not at the document end.
           focusOnReadyRef.current = true;
+          focusTargetRef.current = { kind: "coords", ...coords };
           return;
         }
         const pos = editor.view.posAtCoords({ left: coords.x, top: coords.y });
@@ -923,8 +1136,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       },
       focusAtAnchor: (anchor: TextAnchor) => {
         if (!editor) {
-          // Editor not mounted yet — degrade to the latched plain focus.
+          // Editor not mounted yet — latch the logical anchor so `onCreate`
+          // resolves it against the populated document.
           focusOnReadyRef.current = true;
+          focusTargetRef.current = { kind: "anchor", anchor };
           return;
         }
         editor.commands.focus(posFromAnchor(editor.state.doc, anchor));
@@ -933,7 +1148,15 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         editor?.commands.blur();
       },
       uploadFile: (file: File) => {
-        if (!editor || !onUploadFileRef.current) return;
+        if (!onUploadFileRef.current) return;
+        if (!editor) {
+          // Deferred creation hasn't produced an instance yet (the same
+          // window the focus latch covers): queue the file and flush it in
+          // `onCreate` through the live `uploadFile` path, so a startup
+          // drop is never silently discarded.
+          pendingUploadsRef.current.push(file);
+          return;
+        }
         const endPos = editor.state.doc.content.size;
         uploadAndInsertFile(editor, file, onUploadFileRef.current, endPos);
       },

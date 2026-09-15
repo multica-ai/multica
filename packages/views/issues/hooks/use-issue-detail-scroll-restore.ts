@@ -85,7 +85,9 @@ function restoreScrollTopWithRetry(el: HTMLElement, target: number) {
   let attempts = 0;
   let stableFrames = 0;
   const maxAttempts = 30;
-  const requiredStableFrames = 2;
+  // Attachment metadata can replace an image URL a few frames after the first
+  // decode. Keep the restore alive through that second layout pass.
+  const requiredStableFrames = 8;
 
   el.scrollTop = target;
 

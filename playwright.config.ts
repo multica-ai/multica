@@ -18,6 +18,16 @@ export default defineConfig({
       name: "chromium",
       use: { browserName: "chromium" },
     },
+    // MUL-7095 / PR #8092 Revision 3 §4: the same description specs also
+    // run on WebKit, where first edit/drop determinism is a merge blocker
+    // (spec: 10 consecutive passes from a clean checkout). WebKit browsers
+    // install via `pnpm exec playwright install --with-deps webkit`; the
+    // Chromium project stays first so a bare `playwright test` keeps its
+    // existing default-project behavior.
+    {
+      name: "webkit",
+      use: { browserName: "webkit" },
+    },
   ],
   // Don't auto-start servers — they must be running already
   // This avoids complexity and port conflicts during testing

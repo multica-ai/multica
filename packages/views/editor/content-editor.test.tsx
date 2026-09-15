@@ -82,6 +82,11 @@ vi.mock("./attachment-download-context", () => ({
 
 const editorRef = vi.hoisted<{ current: unknown }>(() => ({ current: null }));
 const onCreateFired = vi.hoisted(() => ({ value: false }));
+// Stands in for Tiptap's deferred creation: while true, `useEditor`
+// returns null so startup-intent tests can latch focus/uploads against
+// the pre-instance window, then release it with a rerender. Default
+// false: every other test keeps the existing immediate-editor behavior.
+const deferEditor = vi.hoisted(() => ({ value: false }));
 // Transaction listeners registered via `editor.on("transaction", …)`. The
 // upload-state publisher subscribes here; `emitTransaction` stands in for
 // ProseMirror dispatching a doc change.
@@ -90,15 +95,24 @@ const emitTransaction = () => {
   for (const listener of [...transactionListeners.current]) listener();
 };
 const latestEditorOptions = vi.hoisted<{
-  current?: { onUpdate?: (args: { editor: unknown }) => void };
+  current?: {
+    immediatelyRender?: boolean;
+    onUpdate?: (args: { editor: unknown }) => void;
+  };
 }>(() => ({}));
 
 vi.mock("@tiptap/react", () => ({
   useEditor: (options: {
+    immediatelyRender?: boolean;
+    onBeforeCreate?: (args: { editor: unknown }) => void;
+    onMount?: (args: { editor: unknown }) => void;
     onCreate?: (args: { editor: unknown }) => void;
     onUpdate?: (args: { editor: unknown }) => void;
   }) => {
     latestEditorOptions.current = options;
+    // Deferred creation: the import-time `immediatelyRender: false` editor
+    // does not exist yet — imperative focus/uploads must latch, not drop.
+    if (deferEditor.value) return null;
     if (!editorRef.current) {
       editorRef.current = {
         get isFocused() {
@@ -113,6 +127,8 @@ vi.mock("@tiptap/react", () => ({
           setContent: mockSetContent,
           setTextSelection: mockSetTextSelection,
         },
+        options: {},
+        storage: {},
         getMarkdown: () => editorState.markdown,
         on: (event: string, cb: () => void) => {
           if (event === "transaction") transactionListeners.current.push(cb);
@@ -123,7 +139,9 @@ vi.mock("@tiptap/react", () => ({
             (listener) => listener !== cb,
           );
         },
-        view: { dispatch: mockDispatch },
+        // jsdom has no layout: `posAtCoords` never resolves, so latched
+        // coordinates exercise the pre-existing coords→end fallback.
+        view: { dispatch: mockDispatch, posAtCoords: () => null },
         state: {
           get tr() {
             return emptyTr;
@@ -140,8 +158,17 @@ vi.mock("@tiptap/react", () => ({
         },
       };
     }
+    // Mirror Tiptap's real ordering: `beforeCreate` prepares the initial
+    // document (manager already initialized, no view yet), then `mount`
+    // fires synchronously during construction (view populated before
+    // attach), `create` in a later task. ContentEditor prepares chunked
+    // JSON in onBeforeCreate and baselines in onMount, so fire both here;
+    // the old onCreate-only mock would leave lastEmittedRef unset and
+    // mislead the dirty-guard tests.
     if (!onCreateFired.value) {
       onCreateFired.value = true;
+      options?.onBeforeCreate?.({ editor: editorRef.current });
+      options?.onMount?.({ editor: editorRef.current });
       options?.onCreate?.({ editor: editorRef.current });
     }
     return editorRef.current;
@@ -155,20 +182,32 @@ vi.mock("@tiptap/react", () => ({
 
 import { ContentEditor, type ContentEditorRef } from "./content-editor";
 
+const resetEditorHarness = () => {
+  vi.clearAllMocks();
+  uploadAndInsertFileMock.mockReset();
+  editorState.isFocused = false;
+  editorState.isDestroyed = false;
+  editorState.markdown = "";
+  editorState.uploadingNodes = [];
+  editorRef.current = null;
+  transactionListeners.current = [];
+  onCreateFired.value = false;
+  deferEditor.value = false;
+  latestEditorOptions.current = undefined;
+  providerProps.attachments = undefined;
+  capturedExtOptions.current = undefined;
+  preprocessMarkdownMock.mockImplementation((value: string) => value);
+};
+
+// Keep every describe block isolated; the startup queue cases live outside
+// the original ContentEditor describe and otherwise inherit its editor/mock
+// state from the preceding tests.
+beforeEach(resetEditorHarness);
+afterEach(() => vi.useRealTimers());
+
 describe("ContentEditor", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    editorState.isFocused = false;
-    editorState.isDestroyed = false;
-    editorState.markdown = "";
-    editorState.uploadingNodes = [];
-    editorRef.current = null;
-    transactionListeners.current = [];
-    onCreateFired.value = false;
-    latestEditorOptions.current = undefined;
-    providerProps.attachments = undefined;
-    capturedExtOptions.current = undefined;
-    preprocessMarkdownMock.mockImplementation((value: string) => value);
+    resetEditorHarness();
   });
 
   afterEach(() => {
@@ -192,6 +231,15 @@ describe("ContentEditor", () => {
     fireEvent.mouseDown(screen.getByTestId("prosemirror"));
 
     expect(mockFocus).not.toHaveBeenCalled();
+  });
+
+  it("keeps client rendering deferred unless a host explicitly opts in", () => {
+    const defaultEditor = render(<ContentEditor value="Deferred by default." />);
+    expect(latestEditorOptions.current?.immediatelyRender).toBe(false);
+
+    defaultEditor.unmount();
+    render(<ContentEditor value="Eager issue description." eagerClientRender />);
+    expect(latestEditorOptions.current?.immediatelyRender).toBe(true);
   });
 
   it("syncs editor content when value changes externally and editor is unfocused", () => {
@@ -309,7 +357,7 @@ describe("ContentEditor", () => {
     const { rerender } = render(<ContentEditor value="old content" />);
 
     // User is typing — focused AND dirty (markdown diverges from
-    // lastEmittedRef, which was seeded with "old content" by onCreate).
+    // lastEmittedRef, which was seeded with "old content" by onMount).
     editorState.isFocused = true;
     editorState.markdown = "user-typed-content";
 
@@ -929,5 +977,124 @@ describe("ContentEditor — in-session attachment tracking (MUL-3192)", () => {
 
     expect(providerProps.attachments).toHaveLength(1);
     expect(providerProps.attachments?.[0]?.id).toBe("dedup-1");
+  });
+});
+
+// MUL-7095 / PR #8092 Revision 3 — startup intent queue. The deferred
+// (`immediatelyRender: false`) editor does not exist on the same tick the
+// host mounts, so an imperative focus/upload fired in that window must be
+// latched and honored in `onCreate` — never silently dropped. These pin
+// that contract without Tiptap: the deferred mock returns null first, the
+// test fires intent against the null editor, then releases the instance
+// with a rerender and asserts the latched intent landed.
+describe("ContentEditor — startup intent queue (MUL-7095)", () => {
+  it("flushes a focus latched before the editor existed", () => {
+    deferEditor.value = true;
+    let imperativeRef: {
+      focus: () => void;
+    } | null = null;
+    const { rerender } = render(
+      <ContentEditor
+        ref={(r) => {
+          imperativeRef = r;
+        }}
+      />,
+    );
+
+    // Same-tick focus against the not-yet-created editor latches.
+    act(() => {
+      imperativeRef?.focus();
+    });
+    expect(mockFocus).not.toHaveBeenCalled();
+
+    // Deferred creation arrives: `onCreate` flushes the latch.
+    deferEditor.value = false;
+    rerender(
+      <ContentEditor
+        ref={(r) => {
+          imperativeRef = r;
+        }}
+      />,
+    );
+    expect(mockFocus).toHaveBeenCalledWith("end");
+  });
+
+  it("routes a pre-instance wrapper click through focusAtCoords without dropping it", () => {
+    // MUL-7095 BLOCKER ①: the real failure window is BEFORE `useEditor`
+    // returns an instance — `handleContainerMouseDown` early-returns there,
+    // and the old `.ProseMirror visible → h1.click()` E2E never covered it.
+    // This pins the wrapper-owns-the-click contract: a mousedown against a
+    // not-yet-created editor must latch coordinates via `focusAtCoords`, and
+    // releasing the instance must land the caret at that point via the
+    // existing `posAtCoords` path — not degrade to document end.
+    // NOTE: the wrapper-DOM mousedown→latch path itself (exclusions +
+    // null-window guard) is pinned in issue-detail.test.tsx against the real
+    // wrapper; this pins the latch→onCreate flush half of the same path.
+    deferEditor.value = true;
+    let imperativeRef: {
+      hasEditorInstance: () => boolean;
+      focusAtCoords: (coords: { x: number; y: number }) => void;
+    } | null = null;
+    const { rerender } = render(
+      <ContentEditor
+        ref={(r) => {
+          imperativeRef = r;
+        }}
+      />,
+    );
+    // No editor yet — this must NOT throw or focus, only latch.
+    act(() => {
+      imperativeRef?.focusAtCoords({ x: 120, y: 80 });
+    });
+    expect(mockFocus).not.toHaveBeenCalled();
+    // Deferred creation arrives: `onCreate` resolves the latched coords.
+    deferEditor.value = false;
+    rerender(
+      <ContentEditor
+        ref={(r) => {
+          imperativeRef = r;
+        }}
+      />,
+    );
+    // posAtCoords is unresolvable in jsdom (no layout), so the latch lands
+    // via the pre-existing coords→end fallback without dropping the click.
+    expect(mockFocus).toHaveBeenCalledWith("end");
+  });
+
+  it("flushes an upload dropped before the editor existed through the live upload path", async () => {
+    deferEditor.value = true;
+    const onUploadFile = vi.fn(async () => null);
+    uploadAndInsertFileMock.mockImplementation(async () => {});
+    let imperativeRef: {
+      uploadFile: (file: File) => void;
+    } | null = null;
+    const { rerender } = render(
+      <ContentEditor
+        onUploadFile={onUploadFile}
+        ref={(r) => {
+          imperativeRef = r;
+        }}
+      />,
+    );
+
+    // Startup drop against the not-yet-created editor queues, not drops.
+    await act(async () => {
+      imperativeRef?.uploadFile(
+        new File(["payload"], "startup.png", { type: "image/png" }),
+      );
+    });
+    expect(uploadAndInsertFileMock).not.toHaveBeenCalled();
+
+    // Deferred creation arrives: `onCreate` flushes via `uploadAndInsertFile`.
+    deferEditor.value = false;
+    rerender(
+      <ContentEditor
+        onUploadFile={onUploadFile}
+        ref={(r) => {
+          imperativeRef = r;
+        }}
+      />,
+    );
+    expect(uploadAndInsertFileMock).toHaveBeenCalledTimes(1);
   });
 });
