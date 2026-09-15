@@ -818,7 +818,7 @@ func buildClaudeInput(prompt string) ([]byte, error) {
 
 // resumeRejectedPhrases are the provider messages that positively identify a
 // refused resume, as opposed to a failure that merely happened to occur during
-// a resumed run. Shared by the stream-json backends (claude, codebuddy, qwen);
+// a resumed run. Shared by the stream-json backends (claude, qwen);
 // the ACP backends match structured error codes via isACPSessionNotFound
 // instead.
 //

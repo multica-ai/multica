@@ -105,7 +105,8 @@ type ExecOptions struct {
 	// "use the runtime/model default" —
 	// every backend that consumes this skips its --effort / reasoning_effort
 	// injection so the upstream CLI's own default applies. Currently honoured
-	// by the claude, codex, opencode, codebuddy, dsh, and grok (ACP
+	// by the claude, codex, opencode, codebuddy (ACP
+	// session/set_config_option), dsh, and grok (ACP
 	// `--effort` on `grok agent`) backends; other backends ignore
 	// the field rather than fail (so MUL-2339 can grow runtime support
 	// incrementally without breaking unrelated agents).
@@ -502,7 +503,7 @@ func DetectVersion(ctx context.Context, cmd Command) (string, error) {
 var launchHeaders = map[string]string{
 	"antigravity": "agy -p (non-interactive)",
 	"claude":      "claude (stream-json)",
-	"codebuddy":   "codebuddy (stream-json)",
+	"codebuddy":   "codebuddy --acp",
 	"codex":       "codex app-server",
 	"copilot":     "copilot (json)",
 	"cursor":      "cursor-agent (stream-json)",

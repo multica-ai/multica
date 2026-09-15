@@ -547,11 +547,11 @@ func applyCodebuddyStaticThinking(models []Model) {
 // codebuddyFlagEffortValues are the tokens `codebuddy --effort <level>` accepts.
 //
 // The ACP `thought_level` option advertises one extra choice, `enabled`
-// ("On (default)"), which is a session-level toggle rather than a flag argument.
-// The daemon passes the selected level straight through to `--effort`
-// (codebuddy.go), so surfacing `enabled` in the picker would let a user build a
-// command line CodeBuddy rejects. Filter against this set instead of trusting
-// the advertised list wholesale.
+// ("On (default)"), which is a session-level toggle rather than a reasoning
+// level. The picker and the server-side gate keep the `--effort` vocabulary
+// (minimal|low|medium|high|xhigh|max); Execute applies those tokens with
+// session/set_config_option. Filter `enabled` out instead of trusting the
+// advertised list wholesale.
 var codebuddyFlagEffortValues = map[string]bool{
 	"minimal": true,
 	"low":     true,
@@ -593,11 +593,11 @@ func annotateCodebuddyThinkingFromACP(models []Model, sessionResult json.RawMess
 // recognisable effort option, which makes the caller fall back to the static
 // set rather than hiding the thinking picker entirely.
 //
-// This is the shared parser (parseACPEffortOption) plus CodeBuddy's flag
-// overlay. The overlay stays CodeBuddy-specific on purpose: it exists because
-// this backend applies the level through `--effort` rather than over ACP, so
-// its usable vocabulary is narrower than what its session advertises. Every
-// other runtime takes the advertised list verbatim.
+// This is the shared parser (parseACPEffortOption) plus CodeBuddy's overlay.
+// The overlay stays CodeBuddy-specific: `enabled` is a session toggle, not a
+// reasoning level, so the picker must not offer it even though Execute now
+// applies effort over ACP. Every other runtime takes the advertised list
+// verbatim.
 func parseACPCodebuddyEffort(raw json.RawMessage) (levels []string, defaultLevel string) {
 	option, ok := parseACPEffortOption(raw)
 	if !ok {

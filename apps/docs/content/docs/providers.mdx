@@ -70,6 +70,25 @@ Multica stores the session identifier the tool returns. The next time work conti
 
 Retry and session-resumption rules are in [Runs](/tasks#manual-retry).
 
+## CodeBuddy ACP execution
+
+CodeBuddy runs through `codebuddy --acp`, using the shared ACP client for
+streaming text, reasoning, tool events, permission requests, and usage.
+Multica creates sessions with `session/new` and restores them with
+`session/load`. Model selection and reasoning effort use session RPCs;
+Multica-managed MCP servers are passed when creating or loading the session.
+CodeBuddy must already be signed in on the runtime computer.
+
+Each run still owns its CLI process and task credentials. ACP session
+resumption does not keep the process alive between runs or guarantee faster
+startup. File and terminal tools continue to run inside CodeBuddy; Multica
+does not advertise client-side file or terminal proxy capabilities for this
+provider. CodeBuddy-specific slash-command and Agent Teams interfaces are
+not exposed by this integration.
+
+References: [CodeBuddy ACP](https://www.codebuddy.cn/docs/cli/acp) and
+[headless mode](https://www.codebuddy.cn/docs/cli/headless).
+
 ## MCP configuration
 
 Antigravity, GitHub Copilot CLI, DevEco Code, and Pi do not read the MCP configuration on an agent yet, so the field is not shown when creating agents for them.
