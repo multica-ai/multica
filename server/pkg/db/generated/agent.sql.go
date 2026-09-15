@@ -2839,7 +2839,7 @@ SELECT
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
-    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
+    p.work_dir,
     p.attempt + 1, COALESCE($3::int, p.max_attempts), p.id,
     p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
     p.is_leader_task,
@@ -2896,8 +2896,11 @@ type CreateRetryTaskParams struct {
 // agent's resume context (session_id/work_dir) so the child can continue
 // the conversation when the backend supports it. Resume-unsafe failures are
 // retried as fresh sessions so the child does not inherit a stuck agent
-// conversation. Keep the CASE WHEN predicates in sync with
-// resumeUnsafeFailureReason and the resume lookup blacklists. attempt is
+// conversation, but work_dir is still carried forward: a poisoned
+// conversation says nothing about the files it left behind, and the claim
+// handler offers that workdir to the fresh session (MUL-7034). Keep the CASE
+// WHEN predicates in sync with resumeUnsafeFailureReason and the resume lookup
+// blacklists. attempt is
 // incremented; max_attempts, trigger_comment_id, coalesced_comment_ids,
 // is_leader_task, and squad_id are inherited so the retried task receives the
 // parent's complete planned comment batch and keeps the same squad-role
@@ -5722,7 +5725,7 @@ func (q *Queries) ListChatFinalizeDeferredExpired(ctx context.Context, arg ListC
 }
 
 const listPendingDelegatedFailureRecoveries = `-- name: ListPendingDelegatedFailureRecoveries :many
-SELECT recovery.id, recovery.issue_id, recovery.author_type, recovery.author_id, recovery.content, recovery.type, recovery.created_at, recovery.updated_at, recovery.parent_id, recovery.workspace_id, recovery.resolved_at, recovery.resolved_by_type, recovery.resolved_by_id, recovery.source_task_id, recovery.quick_action_id, recovery.via_plugin_id, recovery.revision, recovery.recovery_settled_at
+SELECT recovery.id, recovery.issue_id, recovery.author_type, recovery.author_id, recovery.content, recovery.type, recovery.created_at, recovery.updated_at, recovery.parent_id, recovery.workspace_id, recovery.resolved_at, recovery.resolved_by_type, recovery.resolved_by_id, recovery.source_task_id, recovery.quick_action_id, recovery.via_plugin_id, recovery.revision, recovery.recovery_settled_at, recovery.deleted_at
 FROM comment recovery
 JOIN agent_task_queue failed ON failed.id = recovery.source_task_id
 JOIN agent_task_queue source ON source.id = failed.delegated_from_task_id
@@ -5735,6 +5738,8 @@ WHERE recovery.author_type = 'system'
   AND recovery.type = 'progress_update'
   AND recovery.source_task_id IS NOT NULL
   AND recovery.recovery_settled_at IS NULL
+  -- A deleted recovery signal is withdrawn, even when replies keep its row.
+  AND recovery.deleted_at IS NULL
   AND recovery.issue_id = source_issue.id
   AND recovery.workspace_id = source_issue.workspace_id
   AND failed.status = 'failed'
@@ -5744,7 +5749,18 @@ WHERE recovery.author_type = 'system'
   AND source.autopilot_run_id IS NULL
   AND source.issue_id IS NOT NULL
   AND source.agent_id <> failed.agent_id
-  AND COALESCE(source_status.category, source_issue.status) NOT IN ('done', 'cancelled', 'backlog')
+  -- Match canDispatchDelegatedFailureRecovery: lifecycle permits recovery only
+  -- for open work; parking belongs exclusively to the fixed Backlog status.
+  -- Built-ins resolve without catalog rows; unknown custom states stay pending.
+  AND source_issue.status <> 'backlog'
+  AND CASE
+      WHEN source_issue.status IN ('backlog', 'todo') THEN 'unstarted'
+      WHEN source_issue.status IN ('in_progress', 'in_review', 'blocked') THEN 'started'
+      WHEN source_issue.status = 'done' THEN 'done'
+      WHEN source_issue.status = 'cancelled' THEN 'closed'
+      WHEN source_issue.status = 'triage' THEN 'triage'
+      ELSE issue_status_category(source_status.category)
+  END IN ('unstarted', 'started')
   AND source_agent.archived_at IS NULL
   AND source_agent.runtime_id IS NOT NULL
   AND source_agent.workspace_id = source_issue.workspace_id
@@ -5793,7 +5809,8 @@ LIMIT $1
 // that one condition is recorded as durable state instead of being re-proven
 // through four joins and two NOT EXISTS subqueries on every tick. The predicate
 // of idx_comment_delegated_failure_unsettled matches the first four conditions,
-// so LIMIT now bounds the rows CHECKED and not just the rows RETURNED.
+// narrowing the scan to unsettled signals. Reversible eligibility must still
+// be checked before LIMIT so paused signals cannot starve executable ones.
 func (q *Queries) ListPendingDelegatedFailureRecoveries(ctx context.Context, maxPerTick int32) ([]Comment, error) {
 	rows, err := q.db.Query(ctx, listPendingDelegatedFailureRecoveries, maxPerTick)
 	if err != nil {
@@ -5822,6 +5839,7 @@ func (q *Queries) ListPendingDelegatedFailureRecoveries(ctx context.Context, max
 			&i.ViaPluginID,
 			&i.Revision,
 			&i.RecoverySettledAt,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -7955,6 +7973,7 @@ WHERE id = (
     ORDER BY t.created_at DESC
     LIMIT 1
 )
+AND status IN ('dispatched', 'running', 'waiting_local_directory')
 RETURNING id, coalesced_comment_ids
 `
 
@@ -7993,6 +8012,9 @@ type RegisterPlannedCommentForActiveTaskRow struct {
 // could execute under the first member's identity/connected-apps (MUL-4302).
 // Only claim-receipt statuses (already-built delivered set) are safe planned-id
 // targets.
+// Recheck status on the UPDATE target after a concurrent row-lock wait. The
+// subquery can see an active snapshot while completion commits; appending to
+// that completed row would be too late for its completion replay to see it.
 func (q *Queries) RegisterPlannedCommentForActiveTask(ctx context.Context, arg RegisterPlannedCommentForActiveTaskParams) (RegisterPlannedCommentForActiveTaskRow, error) {
 	row := q.db.QueryRow(ctx, registerPlannedCommentForActiveTask,
 		arg.CommentID,

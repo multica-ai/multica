@@ -10,7 +10,10 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
-import { STATUS_ORDER } from "@multica/core/issues/config";
+import {
+  BUILT_IN_STATUS_CATEGORY,
+  BUILT_IN_STATUS_ORDER,
+} from "@multica/core/issues/config";
 import {
   type InboxPriorityFilterSupport,
   useInboxFilterStore,
@@ -32,14 +35,14 @@ vi.mock("@multica/core/workspace/hooks", () => ({
   }),
 }));
 
-function statusEntry(category: (typeof STATUS_ORDER)[number]): IssueStatusEntry {
+function statusEntry(key: (typeof BUILT_IN_STATUS_ORDER)[number]): IssueStatusEntry {
   return {
-    id: `status-${category}`,
+    id: `status-${key}`,
     workspace_id: "ws-1",
-    key: category,
-    name: category,
+    key,
+    name: key,
     description: "",
-    category,
+    category: BUILT_IN_STATUS_CATEGORY[key],
     color: "#888888",
     is_system: true,
     position: 0,
@@ -91,9 +94,9 @@ function renderMenu({
 } = {}) {
   setApiInstance({
     listIssueStatuses: async () => ({
-      statuses: STATUS_ORDER.map(statusEntry),
+      statuses: BUILT_IN_STATUS_ORDER.map(statusEntry),
       categories: [],
-      total: STATUS_ORDER.length,
+      total: BUILT_IN_STATUS_ORDER.length,
     }),
   } as unknown as ApiClient);
   const queryClient = new QueryClient({

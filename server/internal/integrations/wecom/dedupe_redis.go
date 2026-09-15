@@ -18,12 +18,13 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/database"
 	"github.com/redis/go-redis/v9"
 )
 
 // redisDedupe is a DedupeStore backed by one Redis key per delivery.
 type redisDedupe struct {
-	rdb    *redis.Client
+	rdb    redis.UniversalClient
 	log    *slog.Logger
 	budget time.Duration
 }
@@ -32,7 +33,7 @@ type redisDedupe struct {
 // which RelayOutbound reads as "no cross-restart claim" — correct only where
 // there is no relay either. A budget of zero takes defaultClaimBudget; tests
 // shrink it so the outcome grace derived from it stays a test's worth of time.
-func NewRedisDedupe(rdb *redis.Client, budget time.Duration, log *slog.Logger) DedupeStore {
+func NewRedisDedupe(rdb redis.UniversalClient, budget time.Duration, log *slog.Logger) DedupeStore {
 	if rdb == nil {
 		return nil
 	}
@@ -50,7 +51,7 @@ func NewRedisDedupe(rdb *redis.Client, budget time.Duration, log *slog.Logger) D
 	// exit budget it promised by however far the socket timeout reaches.
 	// Production passes a client built for this (cmd/server: newClaimRedisClient);
 	// anything else is a wiring mistake, and a silent one, so it is named here.
-	if !rdb.Options().ContextTimeoutEnabled {
+	if enabled, known := database.RedisContextTimeoutEnabled(rdb); known && !enabled {
 		log.Warn("wecom relay: claim store client ignores context deadlines; " +
 			"claim budgets and the shutdown drain budget will not be honoured " +
 			"(set redis.Options.ContextTimeoutEnabled)")

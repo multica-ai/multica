@@ -3,6 +3,7 @@ package issuestatus
 import (
 	"context"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -14,13 +15,49 @@ import (
 
 var testWorkspace = pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
 
+func TestCategoryWithError(t *testing.T) {
+	ctx := context.Background()
+	q := newFakeQuerier()
+	q.err = errors.New("catalog unavailable")
+	for _, status := range append(Canonical(), Triage) {
+		want, _ := CategoryForBehavior(status)
+		if got, err := CategoryWithError(ctx, q, testWorkspace, status); err != nil || got != want {
+			t.Errorf("built-in %s: category=%q err=%v; want %q", status, got, err, want)
+		}
+	}
+	if q.lookups != 0 {
+		t.Fatalf("built-in resolution read the catalog %d times", q.lookups)
+	}
+	if got, err := CategoryWithError(ctx, q, testWorkspace, "custom"); got != "" || !errors.Is(err, q.err) {
+		t.Fatalf("catalog error: category=%q err=%v; want the original read error", got, err)
+	}
+	q.err = nil
+	if got, err := CategoryWithError(ctx, q, testWorkspace, "missing"); got != "" || !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("missing status: category=%q err=%v; want no rows", got, err)
+	}
+	for _, category := range Categories() {
+		q.entries["custom"] = db.IssueStatus{Key: "custom", Category: category, Name: "Custom", ArchivedAt: pgtype.Timestamptz{Valid: true}}
+		if got, err := CategoryWithError(ctx, q, testWorkspace, "custom"); err != nil || got != category {
+			t.Errorf("archived custom %s: category=%q err=%v", category, got, err)
+		}
+	}
+	q.entries["custom"] = db.IssueStatus{Key: "custom", Category: "invalid", Name: "Custom"}
+	if got, err := CategoryWithError(ctx, q, testWorkspace, "custom"); got != "" || err == nil {
+		t.Fatalf("invalid category: category=%q err=%v; want an error", got, err)
+	}
+	if category, name := CategoryAndName(ctx, q, testWorkspace, "custom"); category != "" || name != "Custom" {
+		t.Fatalf("display lookup changed: category=%q name=%q", category, name)
+	}
+}
+
 // fakeQuerier is an in-memory catalog keyed by (workspace, key). It records
 // lookups so a test can assert that the built-in fast path issues NO query.
 type fakeQuerier struct {
-	entries map[string]db.IssueStatus
-	lookups int
-	lists   int
-	err     error
+	entries  map[string]db.IssueStatus
+	lookups  int
+	lists    int
+	keyLists int
+	err      error
 }
 
 func newFakeQuerier(entries ...db.IssueStatus) *fakeQuerier {
@@ -63,6 +100,7 @@ func (f *fakeQuerier) SeedIssueStatusEntries(_ context.Context, _ pgtype.UUID) e
 }
 
 func (f *fakeQuerier) ListIssueStatusKeysByCategories(_ context.Context, arg db.ListIssueStatusKeysByCategoriesParams) ([]string, error) {
+	f.keyLists++
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -80,6 +118,9 @@ func (f *fakeQuerier) ListIssueStatusKeysByCategories(_ context.Context, arg db.
 }
 
 func custom(key, category string) db.IssueStatus {
+	if normalized, ok := ParseCategory(category); ok {
+		category = normalized
+	}
 	return db.IssueStatus{Key: key, Category: category, WorkspaceID: testWorkspace}
 }
 
@@ -107,10 +148,10 @@ func TestEffectiveMapsCustomStatusToItsCategory(t *testing.T) {
 	)
 
 	cases := map[string]string{
-		"human_review":        InReview,
-		"rework":              Todo,
+		"human_review":        "human_review",
+		"rework":              "rework",
 		"gate_approved":       Done,
-		"waiting_on_customer": Blocked,
+		"waiting_on_customer": "waiting_on_customer",
 	}
 	for key, want := range cases {
 		if got := Effective(context.Background(), q, testWorkspace, key); got != want {
@@ -158,7 +199,8 @@ func TestResolveAcceptsBuiltInsWithoutACatalogRow(t *testing.T) {
 			t.Errorf("Resolve(%q) with an empty catalog failed: %v", key, err)
 			continue
 		}
-		if entry.Key != key || entry.Category != key {
+		category, _ := CategoryForBehavior(key)
+		if entry.Key != key || entry.Category != category {
 			t.Errorf("synthesized entry for %q = {key:%q category:%q}, want both %q",
 				key, entry.Key, entry.Category, key)
 		}
@@ -188,28 +230,131 @@ func TestResolveRejectsUnknownAndArchived(t *testing.T) {
 	}
 }
 
-// Every category must be the key of a built-in, and every built-in the name of
-// a category. This one-to-one correspondence is what lets Effective return
-// entry.Category directly as a status key, with no mapping step.
-func TestCategoriesAndBuiltInsAreTheSameSet(t *testing.T) {
-	for _, key := range Canonical() {
-		if !IsCategory(key) {
-			t.Errorf("built-in %q is not a valid category", key)
-		}
-	}
+func TestCategoriesCollapseBuiltInsIntoFourLifecycleGroups(t *testing.T) {
 	if len(Canonical()) != 7 {
 		t.Fatalf("expected 7 canonical statuses, got %d", len(Canonical()))
 	}
+	want := map[string]string{
+		Backlog: CategoryUnstarted, Todo: CategoryUnstarted,
+		InProgress: CategoryStarted, InReview: CategoryStarted, Blocked: CategoryStarted,
+		Done: CategoryDone, Cancelled: CategoryClosed,
+	}
+	for status, category := range want {
+		if got, ok := CategoryForBehavior(status); !ok || got != category {
+			t.Errorf("CategoryForBehavior(%q) = %q, %v; want %q, true", status, got, ok, category)
+		}
+	}
 }
 
-// The display order is shared with the frontend board and keeps actionable
-// Blocked work before the completed column.
-func TestCategoryRankMatchesBoardStatusOrder(t *testing.T) {
-	want := []string{"backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"}
-	got := Canonical()
+// Triage is reserved like a built-in but is not one of the four lifecycle
+// categories. Were it one, `{key: "foo", category: "triage"}` would pass
+// custom-status validation and give the catalog a row that resolves to it,
+// breaking the equivalence of `status = 'triage'` with the Go check. (MUL-7212)
+func TestTriageIsReservedButNotACategory(t *testing.T) {
+	if !IsBuiltIn(Triage) {
+		t.Error("triage must be built-in so no custom status can reuse the key")
+	}
+	if IsCategory(Triage) {
+		t.Error("triage must not be a stored category a custom status can declare")
+	}
+	if slices.Contains(Canonical(), Triage) {
+		t.Error("triage must not be a canonical status: it is not a board column or a settings row")
+	}
+	if slices.Contains(Categories(), Triage) {
+		t.Error("triage must not appear among the four lifecycle categories")
+	}
+	if _, err := ValidateKey("Triage"); err == nil {
+		t.Error("ValidateKey must refuse triage as a custom key")
+	}
+	if _, err := DeriveKey("Triage", CategoryUnstarted, takenSet()); err == nil {
+		t.Error("DeriveKey must refuse a name that slugs onto triage")
+	}
+	if _, err := DeriveKey("待分诊", Triage, takenSet()); err == nil {
+		t.Error("DeriveKey must refuse triage as the fallback category")
+	}
+	// A name that merely starts with it is unrelated and keeps its slug.
+	if got, err := DeriveKey("Triage Later", CategoryUnstarted, takenSet()); err != nil || got != "triage_later" {
+		t.Errorf("DeriveKey(Triage Later) = %q, %v; want triage_later", got, err)
+	}
+}
+
+// Triage resolves to itself on every read path without a catalog read, and is
+// never a write target. (MUL-7212)
+func TestTriageResolvesWithoutTheCatalog(t *testing.T) {
+	ctx := context.Background()
+	q := newFakeQuerier(custom("human_review", InReview))
+
+	if got := Effective(ctx, q, testWorkspace, Triage); got != Triage {
+		t.Errorf("Effective(triage) = %q, want triage", got)
+	}
+	behavior, name := EffectiveAndName(ctx, q, testWorkspace, Triage)
+	if behavior != Triage || name != "" {
+		t.Errorf("EffectiveAndName(triage) = (%q, %q), want (triage, \"\") — clients localize it from the key", behavior, name)
+	}
+	// Triage is its own category, so the lifecycle question stays answerable
+	// for an issue whose status has no catalog row.
+	if got, ok := CategoryForBehavior(Triage); !ok || got != Triage {
+		t.Errorf("CategoryForBehavior(triage) = %q, %v; want triage, true", got, ok)
+	}
+	if got := Category(ctx, q, testWorkspace, Triage); got != Triage {
+		t.Errorf("Category(triage) = %q, want triage", got)
+	}
+	// ParseCategory is the input side: naming triage as a category must fail,
+	// or a custom status could declare it and land a row the catalog's CHECK
+	// rejects.
+	if got, ok := ParseCategory(Triage); ok {
+		t.Errorf("ParseCategory(triage) = %q, %v; want refused", got, ok)
+	}
+	if got := WireCategory(Triage, Triage); got != Triage {
+		t.Errorf("WireCategory(triage) = %q, want triage", got)
+	}
+	r := NewResolver(testWorkspace)
+	if got := r.Effective(ctx, q, Triage); got != Triage {
+		t.Errorf("Resolver.Effective(triage) = %q, want triage", got)
+	}
+	if got := r.Category(ctx, q, Triage); got != Triage {
+		t.Errorf("Resolver.Category(triage) = %q, want triage", got)
+	}
+	if got := r.Name(ctx, q, Triage); got != "" {
+		t.Errorf("Resolver.Name(triage) = %q, want empty", got)
+	}
+	for _, input := range []string{Triage, "  TRIAGE "} {
+		if _, err := Resolve(ctx, q, testWorkspace, input); !errors.Is(err, ErrReservedStatus) {
+			t.Errorf("Resolve(%q) = %v, want ErrReservedStatus", input, err)
+		}
+	}
+	if q.lookups != 0 || q.lists != 0 {
+		t.Errorf("triage resolution touched the catalog: %d lookup(s), %d list(s)", q.lookups, q.lists)
+	}
+
+	// A key that merely starts with triage still needs a catalog row: the
+	// reservation covers the exact key, not a prefix.
+	if _, err := Resolve(ctx, q, testWorkspace, "triage_2"); !errors.Is(err, ErrUnknownStatus) {
+		t.Errorf("Resolve(triage_2) with no row = %v, want ErrUnknownStatus", err)
+	}
+}
+
+// With Triage occupying its key, disambiguation lands on triage_2 — the same
+// replacement migration 476 picks for a workspace that already owned a custom
+// `triage`. The two must agree, or a renamed status and a newly derived one
+// could disagree about which key is next.
+func TestFirstFreeKeySkipsTriage(t *testing.T) {
+	got, err := firstFreeKey(Triage, takenSet())
+	if err != nil || got != "triage_2" {
+		t.Errorf("firstFreeKey(triage) = %q, %v; want triage_2", got, err)
+	}
+	got, err = firstFreeKey(Triage, takenSet("triage_2"))
+	if err != nil || got != "triage_3" {
+		t.Errorf("firstFreeKey(triage) with triage_2 taken = %q, %v; want triage_3", got, err)
+	}
+}
+
+func TestCategoryRankUsesFourLifecycleOrder(t *testing.T) {
+	want := []string{"unstarted", "started", "done", "closed"}
+	got := Categories()
 	for i := range want {
 		if got[i] != want[i] {
-			t.Fatalf("Canonical()[%d] = %q, want %q (order matches frontend STATUS_ORDER)", i, got[i], want[i])
+			t.Fatalf("Categories()[%d] = %q, want %q", i, got[i], want[i])
 		}
 		if CategoryRank(want[i]) != i {
 			t.Errorf("CategoryRank(%q) = %d, want %d", want[i], CategoryRank(want[i]), i)
@@ -224,6 +369,11 @@ func TestValidateKeyRejectsReservedAndMalformed(t *testing.T) {
 	for _, key := range Canonical() {
 		if _, err := ValidateKey(key); err == nil {
 			t.Errorf("built-in key %q must be reserved against reuse", key)
+		}
+	}
+	for _, category := range Categories() {
+		if _, err := ValidateKey(category); err == nil {
+			t.Errorf("category key %q must be reserved against reuse", category)
 		}
 	}
 	for _, key := range []string{"", "  ", "In Review", "in-review", "_leading", "Ünicode", strings.Repeat("a", 33)} {
@@ -261,7 +411,7 @@ func TestDeriveKeyKeepsTheSlugForSluggableNames(t *testing.T) {
 		"Waiting — 客户":   "waiting",
 	}
 	for name, want := range cases {
-		got, err := DeriveKey(name, InReview, takenSet())
+		got, err := DeriveKey(name, CategoryStarted, takenSet())
 		if err != nil {
 			t.Errorf("DeriveKey(%q) failed: %v", name, err)
 			continue
@@ -283,32 +433,32 @@ func TestDeriveKeyKeepsTheSlugForSluggableNames(t *testing.T) {
 // 2 because the category's own built-in already owns the bare key.
 func TestDeriveKeyFallsBackToCategoryForNonLatinNames(t *testing.T) {
 	for _, name := range []string{"客户确认", "고객 확인", "確認待ち", "تأكيد العميل", "客戶確認"} {
-		got, err := DeriveKey(name, InReview, takenSet())
+		got, err := DeriveKey(name, CategoryStarted, takenSet())
 		if err != nil {
 			t.Fatalf("DeriveKey(%q) failed: %v", name, err)
 		}
-		if got != "in_review_2" {
-			t.Errorf("DeriveKey(%q) = %q, want %q", name, got, "in_review_2")
+		if got != "started_2" {
+			t.Errorf("DeriveKey(%q) = %q, want %q", name, got, "started_2")
 		}
 	}
 
 	// A second non-Latin status in the same category takes the next ordinal
 	// rather than colliding with the first.
-	got, err := DeriveKey("供应商确认", InReview, takenSet("in_review_2"))
+	got, err := DeriveKey("供应商确认", CategoryStarted, takenSet("started_2"))
 	if err != nil {
 		t.Fatalf("DeriveKey on a second non-Latin name failed: %v", err)
 	}
-	if got != "in_review_3" {
-		t.Errorf("second non-Latin in_review status = %q, want %q", got, "in_review_3")
+	if got != "started_3" {
+		t.Errorf("second non-Latin started status = %q, want %q", got, "started_3")
 	}
 
 	// The ordinal is per category, so a different category starts over.
-	got, err = DeriveKey("待排期", Todo, takenSet("in_review_2", "in_review_3"))
+	got, err = DeriveKey("待排期", CategoryUnstarted, takenSet("started_2", "started_3"))
 	if err != nil {
 		t.Fatalf("DeriveKey in another category failed: %v", err)
 	}
-	if got != "todo_2" {
-		t.Errorf("first non-Latin todo status = %q, want %q", got, "todo_2")
+	if got != "unstarted_2" {
+		t.Errorf("first non-Latin unstarted status = %q, want %q", got, "unstarted_2")
 	}
 }
 
@@ -318,7 +468,7 @@ func TestDeriveKeyFallsBackToCategoryForNonLatinNames(t *testing.T) {
 // built-in — and let it shadow one. Built-ins count as occupied regardless of
 // what the workspace reports.
 func TestDeriveKeyEvenWhenTheWorkspaceIsUnseeded(t *testing.T) {
-	got, err := DeriveKey("客户确认", InReview, takenSet())
+	got, err := DeriveKey("客户确认", CategoryStarted, takenSet())
 	if err != nil {
 		t.Fatalf("DeriveKey on an unseeded workspace failed: %v", err)
 	}
@@ -382,7 +532,7 @@ func TestDeriveKeyStillRefusesABuiltInSlug(t *testing.T) {
 // builds the key OUT of the category, so an unvalidated one would mint a key
 // that the storage CHECK may not even accept.
 func TestDeriveKeyRejectsAnUnknownCategory(t *testing.T) {
-	if _, err := DeriveKey("客户确认", "started", takenSet()); err == nil {
+	if _, err := DeriveKey("客户确认", "not_a_category", takenSet()); err == nil {
 		t.Error("a non-Latin name in an unknown category should be rejected")
 	}
 }
@@ -436,14 +586,14 @@ func TestDeriveKeyScanIsBoundedByTheCatalogNotAConstant(t *testing.T) {
 	// Same for the non-Latin fallback: the ordinal walks past any fixed cap.
 	keys = nil
 	for n := 2; n <= 1100; n++ {
-		keys = append(keys, "todo_"+strconv.Itoa(n))
+		keys = append(keys, "unstarted_"+strconv.Itoa(n))
 	}
-	got, err = DeriveKey("待排期", Todo, takenSet(keys...))
+	got, err = DeriveKey("待排期", CategoryUnstarted, takenSet(keys...))
 	if err != nil {
 		t.Fatalf("non-Latin fallback gave up on a large catalog: %v", err)
 	}
-	if got != "todo_1101" {
-		t.Errorf("non-Latin fallback = %q, want %q", got, "todo_1101")
+	if got != "unstarted_1101" {
+		t.Errorf("non-Latin fallback = %q, want %q", got, "unstarted_1101")
 	}
 }
 
@@ -472,7 +622,7 @@ func TestResolverAmortizesTheCatalogRead(t *testing.T) {
 
 	// Custom keys: the catalog is read once and reused.
 	for range 50 {
-		if got := r.Effective(ctx, q, "human_review"); got != InReview {
+		if got := r.Effective(ctx, q, "human_review"); got != "human_review" {
 			t.Fatalf("Effective(human_review) = %q, want %q", got, InReview)
 		}
 		if got := r.Effective(ctx, q, "gate_approved"); got != Done {
@@ -526,7 +676,7 @@ func TestResolverReportsCachedLoadFailure(t *testing.T) {
 		t.Fatalf("failure was not cached: status=%q, err=%v, reads=%d", got, r.Err(), q.lists)
 	}
 	fresh := NewResolver(testWorkspace)
-	if got := fresh.Effective(ctx, q, "parked"); got != Backlog || fresh.Err() != nil || q.lists != 2 {
+	if got := fresh.Effective(ctx, q, "parked"); got != "parked" || fresh.Err() != nil || q.lists != 2 {
 		t.Fatalf("fresh resolver did not recover: status=%q, err=%v, reads=%d", got, fresh.Err(), q.lists)
 	}
 	if got := fresh.Effective(ctx, q, "unknown"); got != "unknown" || fresh.Err() != nil || q.lists != 2 {
@@ -540,24 +690,24 @@ func TestResolverReportsCachedLoadFailure(t *testing.T) {
 func TestExpandCategories(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("no catalog rows still yields the canonical keys", func(t *testing.T) {
-		got, err := ExpandCategories(ctx, newFakeQuerier(), testWorkspace, []string{"blocked"})
+	t.Run("no catalog rows still yields every built-in behavior", func(t *testing.T) {
+		got, err := ExpandCategories(ctx, newFakeQuerier(), testWorkspace, []string{CategoryStarted})
 		if err != nil {
 			t.Fatalf("expand: %v", err)
 		}
-		if len(got) != 1 || got[0] != "blocked" {
-			t.Errorf("expand(blocked) on an empty catalog = %v, want [blocked]", got)
+		if strings.Join(got, ",") != "in_progress,in_review,blocked" {
+			t.Errorf("expand(started) on an empty catalog = %v", got)
 		}
 	})
 
 	t.Run("includes custom keys and never duplicates the canonical one", func(t *testing.T) {
 		q := newFakeQuerier(custom("in_review", InReview), custom("human_review", InReview))
-		got, err := ExpandCategories(ctx, q, testWorkspace, []string{"in_review"})
+		got, err := ExpandCategories(ctx, q, testWorkspace, []string{CategoryStarted})
 		if err != nil {
 			t.Fatalf("expand: %v", err)
 		}
-		if len(got) != 2 {
-			t.Fatalf("expand(in_review) = %v, want exactly 2 keys with no duplicate", got)
+		if len(got) != 4 {
+			t.Fatalf("expand(started) = %v, want 3 built-ins plus custom with no duplicate", got)
 		}
 	})
 
@@ -568,6 +718,29 @@ func TestExpandCategories(t *testing.T) {
 		}
 		if got != nil {
 			t.Errorf("expand of a non-category = %v, want nil", got)
+		}
+	})
+
+	t.Run("triage expands to exactly itself", func(t *testing.T) {
+		q := newFakeQuerier(custom("human_review", InReview))
+		got, err := ExpandCategories(ctx, q, testWorkspace, []string{Triage, Triage})
+		if err != nil {
+			t.Fatalf("expand: %v", err)
+		}
+		if !slices.Equal(got, []string{Triage}) {
+			t.Errorf("expand(triage) = %v, want [triage] — no custom status can carry it", got)
+		}
+	})
+
+	t.Run("triage rides along with real categories", func(t *testing.T) {
+		q := newFakeQuerier(custom("shipped", CategoryDone))
+		got, err := ExpandCategories(ctx, q, testWorkspace, []string{CategoryDone, CategoryClosed, Triage})
+		if err != nil {
+			t.Fatalf("expand: %v", err)
+		}
+		slices.Sort(got)
+		if want := []string{Cancelled, Done, "shipped", Triage}; !slices.Equal(got, want) {
+			t.Errorf("expand(done, closed, triage) = %v, want %v", got, want)
 		}
 	})
 }

@@ -991,6 +991,10 @@ func TestDaemonHeartbeat_SlowProbeDoesNotWedge(t *testing.T) {
 	}
 
 	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	origProbeTimeout := heartbeatHasPendingTimeout
+	// Both stub probes wait this budget out in full.
+	heartbeatHasPendingTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { heartbeatHasPendingTimeout = origProbeTimeout })
 
 	origList := testHandler.LocalSkillListStore
 	origImport := testHandler.LocalSkillImportStore
@@ -1013,8 +1017,8 @@ func TestDaemonHeartbeat_SlowProbeDoesNotWedge(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("DaemonHeartbeat with slow probes: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	// Two bounded probes at 1s each + a small fixed slack.
-	if elapsed > 3*time.Second {
+	// Two bounded probes plus a small fixed slack.
+	if elapsed > time.Second {
 		t.Fatalf("DaemonHeartbeat took %s; expected fast return despite slow probes", elapsed)
 	}
 }
@@ -2730,10 +2734,20 @@ type claimRuntimeGuardTask struct {
 
 func claimTaskForRuntimeGuard(t *testing.T, runtimeID, daemonID string) *claimRuntimeGuardTask {
 	t.Helper()
+	return claimTaskForRuntimeGuardWithCapabilities(t, runtimeID, daemonID, "")
+}
+
+// claimTaskForRuntimeGuardWithCapabilities claims as a daemon advertising the
+// given X-Client-Capabilities value ("" for a daemon that advertises none).
+func claimTaskForRuntimeGuardWithCapabilities(t *testing.T, runtimeID, daemonID, capabilities string) *claimRuntimeGuardTask {
+	t.Helper()
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
 		testWorkspaceID, daemonID)
+	if capabilities != "" {
+		req.Header.Set("X-Client-Capabilities", capabilities)
+	}
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("runtimeId", runtimeID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
@@ -3180,6 +3194,141 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 			t.Fatal("cross-agent rerun must disclose that the requested source was not resumable")
 		}
 	})
+}
+
+// createAutoRetryForTest runs the production retry insert against a failed
+// parent, so a claim test exercises the row CreateRetryTask actually writes.
+func createAutoRetryForTest(t *testing.T, ctx context.Context, parentID string) {
+	t.Helper()
+	child, err := testHandler.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{ID: parseUUID(parentID)})
+	if err != nil {
+		t.Fatalf("setup: CreateRetryTask: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, child.ID)
+	})
+}
+
+// TestClaimTask_AutoRetryFreshSessionReusesParentWorkdir is the MUL-7034
+// claim-layer contract for an automatic retry of a conversation-poisoning
+// failure: a fresh session, the parent's workdir, and a disclosed continuity
+// gap. The retry row comes from the real CreateRetryTask so the query and the
+// claim are pinned together; the workdir reaches the daemon only when both
+// carry it (GH #7998). The workdir is offered only to a daemon whose
+// `multica repo checkout` keeps an existing checkout's work; an older daemon
+// keeps getting a fresh directory, because its checkout would reset the very
+// checkout being kept. Contrast a
+// force_fresh task with no retry lineage, which resumes nothing
+// (TestClaimTask_IssuePriorSessionRuntimeGuard).
+func TestClaimTask_AutoRetryFreshSessionReusesParentWorkdir(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	for _, tc := range []struct {
+		name         string
+		capabilities string
+		wantWorkDir  string
+	}{
+		{
+			name:         "daemon_checkout_keeps_work",
+			capabilities: protocol.DaemonCapabilityCheckoutKeepsWorkV1,
+			wantWorkDir:  "/tmp/codex-stuck-workdir",
+		},
+		{
+			name:         "older_daemon_gets_fresh_directory",
+			capabilities: protocol.DaemonCapabilityCoalescedCommentsV1,
+			wantWorkDir:  "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+			issueID := dbfx.Issue(t, "auto-retry fresh-session fixture", testutil.Cols{"status": "in_progress"})
+
+			// An earlier healthy turn is what the (agent, issue) resume lookup
+			// returns, since it skips the poisoned parent. Getting its session or
+			// workdir back would mean the retry fell through to that lookup.
+			dbfx.Task(t, agentID, testutil.Cols{
+				"runtime_id":   runtimeID,
+				"issue_id":     issueID,
+				"status":       "completed",
+				"started_at":   testutil.Raw("now() - interval '30 minutes'"),
+				"completed_at": testutil.Raw("now() - interval '25 minutes'"),
+				"session_id":   "earlier-healthy-session",
+				"work_dir":     "/tmp/earlier-healthy-workdir",
+			})
+			parentID := dbfx.Task(t, agentID, testutil.Cols{
+				"runtime_id":     runtimeID,
+				"issue_id":       issueID,
+				"status":         "failed",
+				"failure_reason": "codex_semantic_inactivity",
+				"started_at":     testutil.Raw("now() - interval '20 minutes'"),
+				"completed_at":   testutil.Raw("now() - interval '1 minute'"),
+				"session_id":     "codex-stuck-session",
+				"work_dir":       "/tmp/codex-stuck-workdir",
+				"attempt":        1,
+				"max_attempts":   2,
+			})
+			createAutoRetryForTest(t, ctx, parentID)
+
+			task := claimTaskForRuntimeGuardWithCapabilities(t, runtimeID, daemonID, tc.capabilities)
+			if task.PriorWorkDir != tc.wantWorkDir {
+				t.Fatalf("PriorWorkDir = %q, want %q", task.PriorWorkDir, tc.wantWorkDir)
+			}
+			if task.PriorSessionID != "" {
+				t.Fatalf("PriorSessionID = %q, want empty (the poisoned session must not resume)", task.PriorSessionID)
+			}
+			if !task.PriorSessionResumeUnavailable {
+				t.Fatal("auto-retry must disclose that the failed attempt's context did not come back")
+			}
+		})
+	}
+}
+
+// TestClaimTask_ChatAutoRetryFreshSessionReusesParentWorkdir is the chat half
+// of the same contract. The chat_session pointer names a different session and
+// workdir, so the assertions prove the retry continues its parent rather than
+// the conversation-wide pointer. Contrast a force_fresh chat task with no retry
+// lineage, which inherits nothing
+// (TestClaimTask_ChatForceFreshSessionSkipsPriorSession).
+func TestClaimTask_ChatAutoRetryFreshSessionReusesParentWorkdir(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title":      "auto-retry fresh chat",
+		"session_id": "chat-pointer-session",
+		"work_dir":   "/tmp/chat-pointer-workdir",
+		"runtime_id": runtimeID,
+	})
+	parentID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":      runtimeID,
+		"chat_session_id": chatSessionID,
+		"status":          "failed",
+		"failure_reason":  "codex_semantic_inactivity",
+		"started_at":      testutil.Raw("now() - interval '20 minutes'"),
+		"completed_at":    testutil.Raw("now() - interval '1 minute'"),
+		"session_id":      "codex-stuck-chat-session",
+		"work_dir":        "/tmp/codex-stuck-chat-workdir",
+		"attempt":         1,
+		"max_attempts":    2,
+	})
+	createAutoRetryForTest(t, ctx, parentID)
+
+	task := claimTaskForRuntimeGuardWithCapabilities(t, runtimeID, daemonID, protocol.DaemonCapabilityCheckoutKeepsWorkV1)
+	if task.PriorWorkDir != "/tmp/codex-stuck-chat-workdir" {
+		t.Fatalf("PriorWorkDir = %q, want the failed parent's /tmp/codex-stuck-chat-workdir", task.PriorWorkDir)
+	}
+	if task.PriorSessionID != "" {
+		t.Fatalf("PriorSessionID = %q, want empty (the poisoned session must not resume)", task.PriorSessionID)
+	}
+	if !task.PriorSessionResumeUnavailable {
+		t.Fatal("chat auto-retry must disclose that the failed attempt's context did not come back")
+	}
 }
 
 func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
@@ -4358,21 +4507,22 @@ func TestAckTaskCancelled(t *testing.T) {
 	}
 }
 
-// The daemon GC decides whether a task workdir can be reclaimed by testing the
-// issue status against the terminal set — `gc.go:509` compares it to
-// "done"/"cancelled", and `isKnownIssueStatus` is a hardcoded switch over the 7
-// built-ins. Neither knows custom statuses exist, and it must stay that way: an
-// installed daemon has no database, and daemons predating MUL-6243 keep running
-// against upgraded servers.
+// The daemon GC decides whether a task workdir can be reclaimed from two fields
+// of the gc-check response, and the SERVER owns what goes in both.
 //
-// So the normalization is the SERVER's job. Both gc-check endpoints resolve the
-// stored key to its category before answering. Without that:
+//   - `category` is the real answer: the four-value lifecycle a current daemon
+//     tests for terminality (issueGCLifecycle in daemon/gc.go).
+//   - `status` is the legacy seven-value enum. Installed daemons match it
+//     literally against the built-ins and fail closed on anything else, so a
+//     custom status has to be projected back onto that vocabulary here.
+//
+// Handing back the raw stored key instead breaks both kinds of daemon:
 //
 //   - an issue parked on a `done`-category custom status is never terminal, so
 //     its workdir is retained forever, and
 //   - `isKnownIssueStatus` rejects the raw key, silently disabling the
-//     GCCompletedTaskTTL full-cleanup path for that issue.
-func TestIssueGCChecksReportCategoryNotRawCustomStatus(t *testing.T) {
+//     GCCompletedTaskTTL full-cleanup path for that issue (MUL-7364).
+func TestIssueGCChecksReportWireStatusNotRawCustomStatus(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -4388,6 +4538,20 @@ func TestIssueGCChecksReportCategoryNotRawCustomStatus(t *testing.T) {
 		"status": humanReview.Key, "priority": "medium", "number": 92502,
 	})
 
+	// An installed daemon rejects anything outside the 7 built-in keys, so a
+	// status it cannot recognize disables full cleanup however correct it looks.
+	wantLegacyEnum := func(t *testing.T, status string) {
+		t.Helper()
+		for _, key := range issuestatus.Canonical() {
+			if status == key {
+				return
+			}
+		}
+		t.Errorf("status %q is outside the legacy seven-value enum — isKnownIssueStatus rejects it, silently disabling the GCCompletedTaskTTL full-cleanup path", status)
+	}
+
+	type wire struct{ status, category string }
+
 	t.Run("batch endpoint", func(t *testing.T) {
 		req := newDaemonTokenRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check",
 			map[string]any{"issue_ids": []string{doneID, openID}}, testWorkspaceID, "legit-daemon")
@@ -4395,45 +4559,56 @@ func TestIssueGCChecksReportCategoryNotRawCustomStatus(t *testing.T) {
 
 		var resp struct {
 			Issues []struct {
-				ID     string `json:"id"`
-				Found  bool   `json:"found"`
-				Status string `json:"status"`
+				ID       string `json:"id"`
+				Found    bool   `json:"found"`
+				Status   string `json:"status"`
+				Category string `json:"category"`
 			} `json:"issues"`
 		}
 		testutil.Call(t, testHandler.BatchIssueGCCheck, req).Want(http.StatusOK).JSON(&resp)
 
-		byID := map[string]string{}
+		byID := map[string]wire{}
 		for _, issue := range resp.Issues {
 			if !issue.Found {
 				t.Fatalf("issue %s not found", issue.ID)
 			}
-			byID[issue.ID] = issue.Status
+			wantLegacyEnum(t, issue.Status)
+			byID[issue.ID] = wire{issue.Status, issue.Category}
 		}
-		// The category, never the stored key — the daemon's terminal test is a
-		// literal string comparison and has no way to resolve one.
-		if byID[doneID] != issuestatus.Done {
-			t.Errorf("done-category custom status reported as %q, want %q — the daemon would keep this workdir forever",
-				byID[doneID], issuestatus.Done)
+		if got, want := byID[doneID], (wire{issuestatus.Done, issuestatus.CategoryDone}); got != want {
+			t.Errorf("done-category custom status reported as %+v, want %+v — the daemon would keep this workdir forever", got, want)
 		}
-		if byID[openID] != issuestatus.InReview {
-			t.Errorf("in_review-category custom status reported as %q, want %q",
-				byID[openID], issuestatus.InReview)
+		if got, want := byID[openID], (wire{issuestatus.InProgress, issuestatus.CategoryStarted}); got != want {
+			t.Errorf("nonterminal custom status reported as %+v, want %+v", got, want)
 		}
 	})
 
 	// The per-issue endpoint is the fallback older daemons still call, so it
 	// carries the same obligation.
 	t.Run("legacy per-issue endpoint", func(t *testing.T) {
-		req := newDaemonTokenRequest("GET", "/api/daemon/issues/"+doneID+"/gc-check", nil, testWorkspaceID, "legit-daemon")
-		req = withURLParam(req, "issueId", doneID)
+		for _, tc := range []struct {
+			name    string
+			issueID string
+			want    wire
+		}{
+			{"terminal custom status", doneID, wire{issuestatus.Done, issuestatus.CategoryDone}},
+			{"nonterminal custom status", openID, wire{issuestatus.InProgress, issuestatus.CategoryStarted}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				req := newDaemonTokenRequest("GET", "/api/daemon/issues/"+tc.issueID+"/gc-check", nil, testWorkspaceID, "legit-daemon")
+				req = withURLParam(req, "issueId", tc.issueID)
 
-		var resp struct {
-			Status string `json:"status"`
-		}
-		testutil.Call(t, testHandler.GetIssueGCCheck, req).Want(http.StatusOK).JSON(&resp)
+				var resp struct {
+					Status   string `json:"status"`
+					Category string `json:"category"`
+				}
+				testutil.Call(t, testHandler.GetIssueGCCheck, req).Want(http.StatusOK).JSON(&resp)
 
-		if resp.Status != issuestatus.Done {
-			t.Errorf("status = %q, want %q", resp.Status, issuestatus.Done)
+				wantLegacyEnum(t, resp.Status)
+				if got := (wire{resp.Status, resp.Category}); got != tc.want {
+					t.Errorf("status/category = %+v, want %+v", got, tc.want)
+				}
+			})
 		}
 	})
 }
@@ -4472,9 +4647,10 @@ func TestBatchIssueGCCheckReadsCatalogOnceForManyCustomStatuses(t *testing.T) {
 
 	var resp struct {
 		Issues []struct {
-			ID     string `json:"id"`
-			Found  bool   `json:"found"`
-			Status string `json:"status"`
+			ID       string `json:"id"`
+			Found    bool   `json:"found"`
+			Status   string `json:"status"`
+			Category string `json:"category"`
 		} `json:"issues"`
 	}
 	testutil.Call(t, testHandler.BatchIssueGCCheck, req).Want(http.StatusOK).JSON(&resp)
@@ -4483,16 +4659,16 @@ func TestBatchIssueGCCheckReadsCatalogOnceForManyCustomStatuses(t *testing.T) {
 	// also score zero on the counters below.
 	byID := map[string]string{}
 	for _, issue := range resp.Issues {
-		byID[issue.ID] = issue.Status
+		byID[issue.ID] = issue.Status + "/" + issue.Category
 	}
 	for _, id := range ids[:2] {
-		if byID[id] != issuestatus.Done {
-			t.Fatalf("issue %s reported %q, want %q", id, byID[id], issuestatus.Done)
+		if want := issuestatus.Done + "/" + issuestatus.CategoryDone; byID[id] != want {
+			t.Fatalf("issue %s reported %q, want %q", id, byID[id], want)
 		}
 	}
 	for _, id := range ids[2:4] {
-		if byID[id] != issuestatus.InReview {
-			t.Fatalf("issue %s reported %q, want %q", id, byID[id], issuestatus.InReview)
+		if want := issuestatus.InProgress + "/" + issuestatus.CategoryStarted; byID[id] != want {
+			t.Fatalf("issue %s reported %q, want %q", id, byID[id], want)
 		}
 	}
 

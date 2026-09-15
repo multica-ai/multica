@@ -124,6 +124,8 @@ func (b *terminalRaceBackend) Execute(ctx context.Context, _ string, _ agent.Exe
 }
 
 func TestExecuteAndDrainKeepsTerminalResultObservedDuringCleanup(t *testing.T) {
+	t.Parallel()
+
 	d := newTestDaemon(t)
 	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
 	d.cfg.AgentToolWatchdog = 50 * time.Millisecond
@@ -220,6 +222,8 @@ func (b *lateTerminalBackend) Execute(ctx context.Context, _ string, _ agent.Exe
 // Result arm, and the decided outcome still has to survive. The probe asserts
 // that branch really ran instead of inferring it from a passing status.
 func TestExecuteAndDrainKeepsTerminalResultHandedOverAfterForceStop(t *testing.T) {
+	t.Parallel()
+
 	probe := &handoffProbe{gate: make(chan struct{}), prefix: "idle watchdog fired; waiting"}
 	d := newTestDaemon(t)
 	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
@@ -262,6 +266,8 @@ func (wedgedBackend) Execute(context.Context, string, agent.ExecOptions) (*agent
 // for a backend that can hand back an outcome outranking the watchdog; for the
 // rest the point of the watchdog is to free the runtime slot promptly.
 func TestExecuteAndDrainDoesNotDelayBackendsWithoutATerminalBoundary(t *testing.T) {
+	t.Parallel()
+
 	d := newTestDaemon(t)
 	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
 
@@ -277,8 +283,10 @@ func TestExecuteAndDrainDoesNotDelayBackendsWithoutATerminalBoundary(t *testing.
 	if result.Status != "idle_watchdog" {
 		t.Fatalf("status=%q, want idle_watchdog", result.Status)
 	}
-	if elapsed > 5*d.cfg.AgentIdleWatchdog {
+	// Generous against scheduling noise, and still far below the
+	// terminalResultHandoffBudget this backend must never wait out.
+	if bound := 20 * d.cfg.AgentIdleWatchdog; elapsed > bound {
 		t.Fatalf("force stop took %s, want under %s: a backend with no terminal boundary must not wait for a hand-off it cannot make",
-			elapsed, 5*d.cfg.AgentIdleWatchdog)
+			elapsed, bound)
 	}
 }

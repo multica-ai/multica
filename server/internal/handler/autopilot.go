@@ -1222,7 +1222,7 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 	// changed what the rule does. Cosmetic edits (title / description / template)
 	// write no version (MUL-4302 §3.4). Since MUL-6951 the rule publisher is an
 	// AUDIT value only — it is the coarse fallback a run degrades to when its
-	// trigger records no creator, and such a run carries no authorization.
+	// trigger has no created_by principal, and such a run carries no authorization.
 	if autopilotRuleSubstantiveChange(prev, autopilot) {
 		if err := h.recordAutopilotRuleVersion(r.Context(), qtx, autopilot, "member", actor.UserID); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to update autopilot")
@@ -1232,7 +1232,7 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		// responsibility for each one transfers to this editor. A trigger-scoped edit
 		// re-stamps only its own row (see UpdateAutopilotTrigger). Since MUL-6951 this
 		// moves published_by alone: the runs each trigger fires keep acting as, and
-		// stay accountable to, that trigger's immutable created_by.
+		// stay accountable to, that trigger's created_by, which no edit rewrites.
 		if err := qtx.SetAutopilotTriggerPublishersByAutopilot(r.Context(), db.SetAutopilotTriggerPublishersByAutopilotParams{
 			AutopilotID:     autopilot.ID,
 			PublishedByType: pgtype.Text{String: "member", Valid: true},

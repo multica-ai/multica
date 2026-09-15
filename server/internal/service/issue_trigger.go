@@ -104,19 +104,10 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		canAccess = allowAllAgents
 	}
 
-	// The status source also requires LEAVING the backlog category, not merely
-	// changing the status key. Before custom statuses a key change out of
-	// `backlog` was always a category change, so the two were the same
-	// condition; now `backlog` → a custom status in the `backlog` category is a
-	// move within the parking lot, and starting a run on it would break the one
-	// promise backlog makes. (MUL-6463)
-	//
-	// Both sides of the transition are normalized to the canonical status they
-	// inherit, so a custom status in the `backlog` category parks exactly like
-	// Backlog and a custom status in the `todo` category starts a run exactly
-	// like Todo. Built-in keys resolve to themselves without a query, leaving
-	// this decision bit-identical for workspaces with no custom statuses —
-	// which is the whole set of them until an admin defines one. (MUL-6243)
+	// Only the fixed backlog key parks work. Leaving it for another unstarted
+	// or started status can enqueue a run; custom statuses do not inherit parking.
+	// Effective preserves built-in behavior and resolves custom terminal categories
+	// so moving to done/closed cannot start work.
 	currentStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
 	prevStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, in.PrevStatus)
 

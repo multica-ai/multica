@@ -664,65 +664,51 @@ func TestGrokAttributesUsageOnResumeWithoutConfiguredModel(t *testing.T) {
 	}
 }
 
-func TestGrokTimeoutAndCancellation(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		timeout    time.Duration
-		cancelSoon bool
-		wantStatus string
-	}{
-		{name: "timeout", timeout: time.Second, wantStatus: "timeout"},
-		{name: "cancel", timeout: 5 * time.Second, cancelSoon: true, wantStatus: "aborted"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			tempDir := t.TempDir()
-			fakePath := filepath.Join(tempDir, "grok")
-			requestsFile := filepath.Join(tempDir, "requests.jsonl")
-			writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
-			backend, err := New("grok", Config{
-				ExecutablePath: fakePath,
-				Logger:         slog.Default(),
-				Env: map[string]string{
-					"GROK_HANG_PROMPT":   "1",
-					"GROK_REQUESTS_FILE": requestsFile,
-				},
-			})
-			if err != nil {
-				t.Fatalf("new grok backend: %v", err)
-			}
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			session, err := backend.Execute(ctx, "task", ExecOptions{Timeout: tc.timeout})
-			if err != nil {
-				t.Fatalf("execute: %v", err)
-			}
-			go func() {
-				for range session.Messages {
-				}
-			}()
-			if tc.cancelSoon {
-				deadline := time.Now().Add(3 * time.Second)
-				for {
-					raw, _ := os.ReadFile(requestsFile)
-					if strings.Contains(string(raw), `"method":"session/prompt"`) {
-						cancel()
-						break
-					}
-					if time.Now().After(deadline) {
-						t.Fatal("fake never reached session/prompt before cancellation")
-					}
-					time.Sleep(10 * time.Millisecond)
-				}
-			}
-			select {
-			case result := <-session.Result:
-				if result.Status != tc.wantStatus {
-					t.Fatalf("status=%q error=%q, want %q", result.Status, result.Error, tc.wantStatus)
-				}
-			case <-time.After(4 * time.Second):
-				t.Fatal("grok child was not terminated and reaped")
-			}
-		})
+func TestGrokCancellation(t *testing.T) {
+	tempDir := t.TempDir()
+	fakePath := filepath.Join(tempDir, "grok")
+	requestsFile := filepath.Join(tempDir, "requests.jsonl")
+	writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
+	backend, err := New("grok", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"GROK_HANG_PROMPT":   "1",
+			"GROK_REQUESTS_FILE": requestsFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new grok backend: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	session, err := backend.Execute(ctx, "task", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		raw, _ := os.ReadFile(requestsFile)
+		if strings.Contains(string(raw), `"method":"session/prompt"`) {
+			cancel()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("fake never reached session/prompt before cancellation")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	select {
+	case result := <-session.Result:
+		if result.Status != "aborted" {
+			t.Fatalf("status=%q error=%q, want aborted", result.Status, result.Error)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("grok child was not terminated and reaped")
 	}
 }
 

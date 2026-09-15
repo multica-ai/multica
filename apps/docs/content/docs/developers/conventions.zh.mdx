@@ -62,7 +62,7 @@ Web 和 Desktop 都有的逻辑，**必须**抽到共享包。"小段重复"也�
 - 标准 `gofmt` + `go vet`，无例外
 - Handler 文件按域命名：`agent.go`、`auth.go`、`runtime.go`
 - 测试：`<file>_test.go` 同目录
-- handler 里 UUID 解析遵守根 `CLAUDE.md` 的规则：边界输入用 `parseUUIDOrBadRequest`，可信回环用 `parseUUID`（panic 版），永远不要直接用 `util.ParseUUID` 不查 error
+- handler 里 UUID 解析遵守根 `AGENTS.md` 的规则：边界输入用 `parseUUIDOrBadRequest`，可信回环用 `parseUUID`（panic 版），永远不要直接用 `util.ParseUUID` 不查 error
 
 ### TypeScript
 
@@ -202,6 +202,7 @@ Multica 的产品名词分两类：
 
 - 角色：`owner` / `admin` / `member`
 - Issue 状态：`backlog` / `todo` / `in_progress` / `in_review` / `done` / `blocked` / `cancelled`
+- Issue 状态分类：`unstarted` / `started` / `done` / `closed`
 
 UI 里展示这些值时保持英文（必要时用 code-style 包起来）：
 
@@ -318,7 +319,7 @@ i18next 用 `_one` / `_other`；中文不区分语法单复数，只填 `_other`
 
 改本页规则的同时还要：
 
-1. 把规则在相关 locale JSON / CLAUDE.md / docs 页面里同步落地
+1. 把规则在相关 locale JSON / AGENTS.md / docs 页面里同步落地
 2. PR 描述里写明改了什么，方便 reviewer 检查下游是否跟着改了
 
 本页是契约，其他文档不能 override。

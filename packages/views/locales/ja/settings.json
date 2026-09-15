@@ -1,7 +1,7 @@
 {
   "issue_statuses": {
     "title": "タスクステータス",
-    "description": "タスクが辿るワークフローを定義します。各ステータスの挙動は所属するカテゴリが決めます。",
+    "description": "タスクのステータスを4つのライフサイクルカテゴリに整理します。",
     "loading": "ステータスを読み込み中…",
     "add": "ステータスを追加",
     "show_archived": "アーカイブ済みを表示（{{count}}）",
@@ -9,43 +9,78 @@
     "archived_hint": "新規の割り当てには使えません。すでにこのステータスのタスクはそのままです。",
     "reorder_failed": "並び順を保存できませんでした。",
     "actions": {
+      "move_up": "上に移動",
+      "move_down": "下に移動",
       "open": "{{name}} の操作",
       "edit": "編集",
       "archive": "アーカイブ",
       "reorder": "{{name}} を並べ替え"
     },
+    "reorder_hint": "カテゴリー内でステータスをドラッグすると、ボード、リスト、ステータスメニューの順序を変更できます。",
+    "built_in_dialog": {
+      "title": "組み込みステータスは変更できません",
+      "description": "組み込みステータスは Multica のシステム動作に使われるため、編集やアーカイブはできません。カテゴリー内の順序は変更できます。",
+      "confirm": "確認"
+    },
     "editor": {
       "create_title": "新しいステータス",
       "edit_title": "ステータスを編集",
-      "behavior_hint": "このステータスは「{{category}}」とまったく同じ挙動になります。",
       "name": "名前",
       "name_placeholder": "例: Code Review",
       "key_hint": "API と CLI では {{key}} として参照されます。",
       "created": "ステータスを作成しました。API と CLI では {{key}} として参照されます。",
       "category": "カテゴリ",
-      "category_locked": "カテゴリは変更できません。すでにこのステータスのタスクが依存しています。",
+      "category_locked": "ステータスの作成後はカテゴリを変更できません。",
       "description": "説明",
       "description_placeholder": "チームにとってこのステータスが意味すること",
       "color": "色",
+      "icon": "アイコンの形",
+      "icon_shapes": {
+        "default": "デフォルト",
+        "dotted": "点線の円",
+        "circle": "円",
+        "half": "半分塗りつぶし",
+        "three_quarters": "4分の3塗りつぶし",
+        "check": "チェック",
+        "slash": "斜線",
+        "cross": "バツ"
+      },
       "cancel": "キャンセル",
       "save": "保存",
       "saving": "保存中…",
       "save_failed": "ステータスを保存できませんでした。"
     },
     "archive_dialog": {
+      "retry": "アーカイブを再試行",
       "title": "このステータスをアーカイブしますか？",
-      "description": "「{{name}}」は新しいタスクに割り当てられなくなります。すでにこのステータスのタスクはそのまま残り、挙動も変わりません。",
+      "description": "「{{name}}」のすべてのタスクを別のステータスに移動してください。空になってからアーカイブすると、ボードとステータスの選択肢から削除されます。",
+      "in_use_title": "アーカイブ前にタスクを移動",
+      "in_use": "このステータスを使用中のタスクは {{count}} 件です。完了・キャンセル済みのタスクも別のステータスに移動してから、もう一度お試しください。",
+      "view_issues": "タスクを表示",
+      "archiving": "アーカイブ中...",
       "cancel": "キャンセル",
       "confirm": "アーカイブ",
       "failed": "アーカイブできませんでした。"
     },
+    "category_labels": {
+      "unstarted": "未着手",
+      "started": "開始済み",
+      "done": "完了",
+      "closed": "終了"
+    },
     "categories": {
+      "unstarted": "バックログや計画済みを含む、まだ始まっていない作業。",
+      "started": "進行中、レビュー中、またはブロック中の作業。",
+      "done": "完了した作業。",
+      "closed": "完了しないことになった作業。"
+    },
+    "built_in_descriptions": {
       "backlog": "保留。ここに移動してもエージェントは起動しません。",
       "todo": "待機中。ここに移動すると担当エージェントが起動します。",
       "in_progress": "作業中。",
       "in_review": "納品済み、レビュー待ち。オートパイロットの実行を完了します。",
-      "done": "完了。",
       "blocked": "外部依存でブロック中。",
+      "done": "完了。",
       "cancelled": "見送り。"
     }
   },

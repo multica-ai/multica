@@ -209,6 +209,10 @@ type Message struct {
 }
 
 // TokenUsage tracks token consumption for a single model.
+// Its four token counts are mutually exclusive: InputTokens excludes cache
+// reads and writes, and OutputTokens already includes reasoning/thinking.
+// Provider-specific breakdowns must not be added to those totals again.
+// Zero counters alone do not establish that the provider reported complete usage.
 type TokenUsage struct {
 	InputTokens      int64
 	OutputTokens     int64

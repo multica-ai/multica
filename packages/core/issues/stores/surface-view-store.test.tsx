@@ -80,7 +80,7 @@ describe("issue surface view store registry", () => {
                   childProgress: true,
                   labels: true,
                 },
-                hiddenStatusCategories: [],
+                hiddenStatuses: [],
               },
               updatedAt: "2026-01-01T00:00:00Z",
             },
@@ -89,7 +89,7 @@ describe("issue surface view store registry", () => {
                 sortBy: "title",
                 sortDirection: "desc",
                 cardProperties: { description: false },
-                hiddenStatusCategories: ["done"],
+                hiddenStatuses: ["done"],
               },
               updatedAt: "2026-01-01T00:00:00Z",
             },
@@ -106,12 +106,12 @@ describe("issue surface view store registry", () => {
       "desc",
     ]);
     expect(legacy.cardProperties.description).toBe(false);
-    expect(legacy.hiddenStatusCategories).toEqual(["cancelled"]);
+    expect(legacy.hiddenStatuses).toEqual(["cancelled"]);
 
     const custom = getIssueSurfaceViewStore("workspace:custom").getState();
     expect([custom.sortBy, custom.sortDirection]).toEqual(["title", "desc"]);
     expect(custom.cardProperties.description).toBe(false);
-    expect(custom.hiddenStatusCategories).toEqual(["done"]);
+    expect(custom.hiddenStatuses).toEqual(["done"]);
   });
 
   it("omits the redundant project property only on fresh project surfaces", async () => {

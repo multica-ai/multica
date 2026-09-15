@@ -1,8 +1,8 @@
 /**
  * @vitest-environment jsdom
  */
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook } from "@testing-library/react";
+import { QueryClient, QueryClientProvider, type InvalidateQueryFilters } from "@tanstack/react-query";
+import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { WSClient } from "../api/ws-client";
@@ -101,7 +101,7 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(invalidateSpy).not.toHaveBeenCalled();
   });
 
-  it("invalidates exactly once when a new ws instance appears after null gap", () => {
+  it("invalidates exactly once when a new ws instance appears after null gap", async () => {
     const ws1 = createMockWs();
     const { rerender } = renderHook(
       ({ ws }) => useRealtimeSync(ws, stores),
@@ -120,8 +120,12 @@ describe("useRealtimeSync — ws instance change", () => {
     // (16 workspace-scoped [incl. property definitions] + 6 per-issue
     // prefixes + the workspace working-agents projection + 5 per-chat
     // prefixes + 1 workspaceKeys.list() + 1 cross-workspace inbox unread
-    // summary = 31 calls)
-    expect(invalidateSpy).toHaveBeenCalledTimes(31);
+    // summary = 31 calls).
+    //
+    // Awaited rather than counted synchronously: the inbox unread summary
+    // refresh cancels any in-flight request before invalidating (see
+    // onInboxSummaryInvalidate), so that one lands after the synchronous ones.
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(31));
   });
 
   it("does not re-invalidate when rerendered with the same ws instance", () => {
@@ -279,6 +283,11 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: issueStatusKeys.all("ws-1"),
     });
+    const groupRefresh = invalidateSpy.mock.calls.find(([options]: [InvalidateQueryFilters?]) => options?.predicate);
+    expect(groupRefresh?.[0]?.queryKey).toEqual([...issueKeys.tableAll("ws-1"), "groups"]);
+    const predicate = groupRefresh![0]!.predicate!;
+    expect(predicate({ queryKey: ["issues", "ws-1", "table-query", "groups", {}, { kind: "status" }] } as never)).toBe(true);
+    expect(predicate({ queryKey: ["issues", "ws-1", "table-query", "groups", {}, { kind: "assignee" }] } as never)).toBe(false);
     // Deliberately NOT the issue caches. A row stores the status KEY; its name,
     // color and category are resolved from the catalog at render time, so no
     // cached issue field can go stale here. Dragging every board and list along

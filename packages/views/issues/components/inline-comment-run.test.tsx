@@ -18,7 +18,7 @@ vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
 vi.mock("../../editor", () => ({ ReadonlyContent: ({ content }: { content: string }) => <div>{content}</div> }));
 vi.mock("../../common/task-transcript/agent-transcript-dialog", () => ({
   AgentTranscriptDialog: ({ contentState, isLive }: { contentState?: ReactNode; isLive?: boolean }) => <div role="dialog" data-live={isLive}>{contentState ?? "Full transcript"}</div>,
-  StepBody: ({ item }: { item: { output?: string } }) => <div>{item.output}</div>,
+  StepBody: ({ item }: { item: { content?: string; output?: string } }) => <div data-testid="step-body">{item.content ?? item.output}</div>,
 }));
 
 const id = "4a2e8d1c-7f9b-4e2a-9c1d-123456789abc";
@@ -43,6 +43,55 @@ function setup(initialTask: AgentTask, hasReply = false, presentation: "inline" 
 }
 
 describe("InlineCommentRun", () => {
+  it("previews streamed thinking in the header and collapsed steps, and expands its body", async () => {
+    const thought: TaskMessagePayload = {
+      task_id: id, issue_id: "issue", seq: 1, type: "thinking", content: "Checking the runtime",
+    };
+    vi.mocked(api.listTaskMessages).mockResolvedValue([thought]);
+    const { client } = setup(task());
+    const header = await screen.findByText("Checking the runtime");
+    const textNode = header.firstChild;
+    act(() => client.setQueryData(chatKeys.taskMessages(id), [
+      thought,
+      { ...thought, seq: 2, content: " logs.\nThe reasoning is present." },
+    ]));
+    await waitFor(() => expect(header).toHaveTextContent("Checking the runtime logs."));
+    expect(header.firstChild).toBe(textNode);
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    const preview = screen.getAllByText("Checking the runtime logs.").find((node) => node.closest("summary"))!;
+    expect(preview).toHaveAttribute("title", "Checking the runtime logs.");
+    const details = preview.closest("details")!;
+    expect(details).not.toHaveAttribute("open");
+    expect(screen.queryByTestId("step-body")).not.toBeInTheDocument();
+    fireEvent.click(preview.closest("summary")!, { detail: 0 });
+    expect(await screen.findByTestId("step-body")).toHaveTextContent("Checking the runtime logs. The reasoning is present.");
+  });
+
+  it("redacts thinking before clipping its preview and tooltip", async () => {
+    const prefix = "Reviewing ".repeat(18);
+    const secret = `ghp_${"x".repeat(36)}`;
+    vi.mocked(api.listTaskMessages).mockResolvedValue([
+      { task_id: id, issue_id: "issue", seq: 1, type: "thinking", content: `${prefix}${secret}` },
+    ]);
+    setup(task());
+    await screen.findByText(/REDACTED/);
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    const preview = screen.getAllByText(/REDACTED/).find((node) => node.closest("summary"))!;
+    expect(preview.getAttribute("title")).toContain("REDACTED");
+    expect(document.body.innerHTML).not.toContain("ghp_");
+    expect(preview.textContent!.length).toBeLessThanOrEqual(201);
+  });
+
+  it("keeps a Thinking label when the runtime supplies no preview text", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([
+      { task_id: id, issue_id: "issue", seq: 1, type: "thinking", content: " \n " },
+    ]);
+    setup(task());
+    await screen.findByText("Thinking");
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    expect(screen.getAllByText("Thinking").some((node) => node.closest("summary"))).toBe(true);
+  });
+
   it("opens completed reply logs from a compact header button and loads only on demand", async () => {
     let resolve!: (value: TaskMessagePayload[]) => void;
     vi.mocked(api.listTaskMessages).mockImplementation(() => new Promise((done) => { resolve = done; }));

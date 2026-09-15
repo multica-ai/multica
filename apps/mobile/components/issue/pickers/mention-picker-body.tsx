@@ -268,7 +268,7 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
                 <StatusIcon
                   status={item.issue.status}
                   category={issueColumnCategory(item.issue)}
-                  color={catalog.colorOf(item.issue.status)}
+                  icon={catalog.iconOf(item.issue.status)} color={catalog.colorOf(item.issue.status)}
                   size={22}
                 />
               </View>

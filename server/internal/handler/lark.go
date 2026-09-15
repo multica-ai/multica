@@ -401,7 +401,7 @@ func (h *Handler) GetLarkInstallStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "session id is required")
 		return
 	}
-	state, err := h.LarkRegistration.GetSession(wsUUID, sessionID)
+	state, err := h.LarkRegistration.GetSession(r.Context(), wsUUID, sessionID)
 	if err != nil {
 		if errors.Is(err, lark.ErrRegistrationSessionNotFound) {
 			writeError(w, http.StatusNotFound, "install session not found")

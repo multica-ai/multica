@@ -563,9 +563,10 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 		}
 	}
 	// Autopilot-origin issues (origin_id is the autopilot id) from a schedule /
-	// webhook trigger attribute to the firing trigger's CREATOR — trigger_owner
-	// (MUL-4302; MUL-6951) — degrading to the audit-only rule publisher when no
-	// creator is recoverable. That human is the originator as well as the
+	// webhook trigger attribute to the firing trigger's persisted created_by
+	// principal — trigger_owner (MUL-4302; MUL-6951; legacy semantics in
+	// ResolveAutopilotTriggerPrincipal) — degrading to the audit-only rule publisher
+	// when the trigger has none. That human is the originator as well as the
 	// accountable, so a create_issue-mode run carries the same authorization a
 	// manual "run now" by that member would; an edit of the trigger does not move
 	// it. Resolved the same way
@@ -609,8 +610,9 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 // from its active (latest) rule version snapshot (MUL-4302 §3.4). Shared by both
 // autopilot execution modes — run_only dispatch and the create_issue enqueue path —
 // so they attribute identically. originator stays NULL: an autopilot DOES carry a
-// human's authority since MUL-6951, but it comes from the trigger's creator, and
-// this is the fallback for when that creator cannot be proven. Only the
+// human's authority since MUL-6951, but it comes from the trigger's created_by
+// principal (see ResolveAutopilotTriggerPrincipal), and this is the fallback for a
+// trigger that has none. Only the
 // audit-accountable side is set, to the version's member publisher. A missing version (autopilot published before this feature, or
 // none yet) or a non-member/absent publisher degrades to unattributed rather than
 // fabricating a human. Never returns an error: attribution must not fail an
@@ -634,23 +636,24 @@ func ruleOwnerAttribution(ctx context.Context, q *db.Queries, workspaceID, autop
 }
 
 // triggerOwnerAttribution resolves an autopilot schedule/webhook run to the firing
-// trigger's CREATOR (MUL-4302; MUL-6951). triggerID is the autopilot_run's
-// trigger_id.
+// trigger's dispatch principal, created_by (MUL-4302; MUL-6951) — see
+// ResolveAutopilotTriggerPrincipal for what that column does and does not prove.
+// triggerID is the autopilot_run's trigger_id.
 //
-// The creator is immutable — a substantive edit re-stamps published_by, not
-// created_by, so it cannot re-authorize the automation as the editor (MUL-6951,
-// Bohan's ruling). Because the DB invariant forces accountable == originator once
-// the originator is set, BOTH columns on the task name the creator; the editor's
-// responsibility for the config lives on autopilot_trigger.published_by.
+// No edit rewrites created_by — a substantive edit re-stamps published_by — so it
+// cannot re-authorize the automation as the editor (MUL-6951, Bohan's ruling).
+// Because the DB invariant forces accountable == originator once the originator is
+// set, BOTH columns on the task name that principal; the editor's responsibility
+// for the config lives on autopilot_trigger.published_by.
 //
-// A trigger with no recoverable creator degrades to ruleOwnerAttribution, which is
+// A trigger with no principal degrades to ruleOwnerAttribution, which is
 // audit-only — the run then carries no originator and the invoke gate fails closed.
 // Never errors: attribution must not fail an enqueue.
 func triggerOwnerAttribution(ctx context.Context, q *db.Queries, triggerID, workspaceID, autopilotID pgtype.UUID, evidenceKind attribution.EvidenceKind, evidenceRefID pgtype.UUID) attribution.Result {
 	if principal := ResolveAutopilotTriggerPrincipal(ctx, q, triggerID, autopilotID, workspaceID); principal.Valid {
 		return attribution.TriggerOwner(principal, evidenceKind, evidenceRefID)
 	}
-	// No provable principal: degrade to the rule publisher, which is AUDIT-ONLY.
+	// No principal: degrade to the rule publisher, which is AUDIT-ONLY.
 	// rule_owner must never become an authorization identity — it is a guess at
 	// "who probably owns this rule", and promoting it would hand a legacy trigger
 	// somebody's invoke rights without that person ever arming anything. The run
@@ -659,8 +662,9 @@ func triggerOwnerAttribution(ctx context.Context, q *db.Queries, triggerID, work
 }
 
 // ResolveAutopilotTriggerPrincipal returns the human a schedule/webhook dispatch
-// ACTS AS, or an invalid UUID when none can be proven — in which case every
-// caller must fail closed rather than substitute a different human.
+// ACTS AS — the trigger's created_by — or an invalid UUID when there is none, in
+// which case every caller must fail closed rather than substitute a different
+// human.
 //
 // This is the single source of that answer (MUL-6951). Admission
 // (autopilotAdmitInvoke), the originator stamped on the task, and every run
@@ -668,11 +672,19 @@ func triggerOwnerAttribution(ctx context.Context, q *db.Queries, triggerID, work
 // person A and then run with person B's rights — a combination neither of them
 // could produce by hand, and the exact fork Elon's review found.
 //
-// The principal is the trigger's IMMUTABLE created_by, not published_by:
-// published_by transfers to whoever last substantively edits the trigger, so
-// using it would let a collaborator adjusting a cron expression silently hand the
-// automation their own rights (MUL-6951, Bohan's ruling: the run always acts as
-// the trigger's creator).
+// The principal is the trigger's created_by, not published_by: published_by
+// transfers to whoever last substantively edits the trigger, so using it would let
+// a collaborator adjusting a cron expression silently hand the automation their
+// own rights (MUL-6951, Bohan's ruling: the run always acts as the trigger's
+// creator).
+//
+// What created_by records depends on the trigger's age. For a trigger created
+// since MUL-6951 it is the member who created it, written at creation. For a legacy
+// trigger it is a principal inferred once by backfill and frozen — the last
+// publisher (migration 449), else the autopilot's creator (migration 467) — so it
+// is NOT proof of who created that trigger; treat it only as the dispatch
+// principal. Nothing here infers a principal at dispatch time, and no edit
+// rewrites it.
 //
 // Three conditions, all required, all fail-closed:
 //
@@ -681,8 +693,8 @@ func triggerOwnerAttribution(ctx context.Context, q *db.Queries, triggerID, work
 //     cannot select the principal. The membership check below is not a substitute:
 //     it proves the resolved human is in the workspace passed in, which a member of
 //     two workspaces satisfies even when the trigger came from the other one;
-//   - created_by names a member — a legacy trigger predating the column (and with
-//     no published_by to backfill from) resolves nobody rather than a guess;
+//   - created_by names a member — a legacy trigger that neither backfill could
+//     fill resolves nobody;
 //   - that member is STILL in the autopilot's workspace, re-checked on every
 //     dispatch, so removing someone actually revokes what their triggers can do.
 func ResolveAutopilotTriggerPrincipal(ctx context.Context, q *db.Queries, triggerID, autopilotID, workspaceID pgtype.UUID) pgtype.UUID {
@@ -748,13 +760,19 @@ func isDuplicatePendingTaskErr(err error) bool {
 // pendingSlotTakenErr reports whether err means "the (issue, agent) pending slot
 // was already occupied when we tried to enqueue".
 //
-// Two shapes reach RerunIssue. The issue-assignee path surfaces the raw unique
-// violation, while enqueueMentionTaskWithCommentPlan normalizes it into the bare
-// ErrDuplicatePendingTask sentinel — and that is the path taken by EVERY rerun
-// whose target is not the issue's current agent assignee: a squad leader, a
-// displaced agent re-fired by task_id, a mentioned agent. Matching only the raw
-// pgconn error meant the reclaim never ran for those, so a system retry winning
-// the slot surfaced as a hard error instead.
+// Both paths behind RerunIssue now normalize the unique violation into the bare
+// ErrDuplicatePendingTask sentinel: enqueueMentionTaskWithCommentPlan since
+// #5958, and enqueueIssueTaskWithCommentPlan as of #5914 above. The sentinel
+// half is therefore what matches in practice, and it has to be here — the
+// mention path is the one taken by EVERY rerun whose target is not the issue's
+// current agent assignee (a squad leader, a displaced agent re-fired by
+// task_id, a mentioned agent), and matching only the raw pgconn error meant the
+// reclaim never ran for those, so a system retry winning the slot surfaced as a
+// hard error instead.
+//
+// The raw-violation half is kept deliberately, as a cheap defensive net: one
+// errors.As, and it keeps this predicate honest for any caller that reaches it
+// without passing through one of those two normalizing paths.
 func pendingSlotTakenErr(err error) bool {
 	return isDuplicatePendingTaskErr(err) || errors.Is(err, ErrDuplicatePendingTask)
 }
@@ -1346,6 +1364,16 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		task, err = s.Queries.CreateAgentTask(ctx, createParams)
 	}
 	if err != nil {
+		// A concurrent enqueue for the same (issue, agent) won the race and the
+		// unique index rejected this insert. That is benign — a sibling run
+		// already covers this target — so log it at debug and return a typed
+		// sentinel the caller maps to a coalesced outcome / 409 rather than a
+		// 500 that leaks the raw constraint name (#5914). Mirrors the mention
+		// path in enqueueMentionTaskWithCommentPlan.
+		if isDuplicatePendingTaskErr(err) {
+			slog.Debug("task enqueue coalesced: pending task already exists", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(issue.AssigneeID))
+			return db.AgentTaskQueue{}, ErrDuplicatePendingTask
+		}
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}
@@ -5542,7 +5570,18 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		// when the caller didn't pass one explicitly.
 		if !triggerCommentID.Valid {
 			coalescedCommentIDs = append([]pgtype.UUID{}, sourceTask.CoalescedCommentIds...)
-			if sourceTask.TriggerCommentID.Valid {
+			sourceTriggerLive := sourceTask.TriggerCommentID.Valid
+			if sourceTriggerLive {
+				// A trigger deleted while it had replies keeps its row as a
+				// tombstone instead of clearing trigger_comment_id; repair the
+				// plan exactly as for a removed trigger.
+				trigger, err := s.Queries.GetComment(ctx, sourceTask.TriggerCommentID)
+				if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+					return nil, fmt.Errorf("load source trigger comment: %w", err)
+				}
+				sourceTriggerLive = err == nil && !trigger.DeletedAt.Valid
+			}
+			if sourceTriggerLive {
 				triggerCommentID = sourceTask.TriggerCommentID
 			} else if len(coalescedCommentIDs) > 0 {
 				triggerCommentID, coalescedCommentIDs, err = s.promoteNewestSurvivingComment(ctx, coalescedCommentIDs)
@@ -5668,10 +5707,11 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 }
 
 // promoteNewestSurvivingComment repairs a manual rerun whose original trigger
-// was deleted (the FK clears trigger_comment_id while the UUID-array plan
-// survives). Promoting before enqueue lets the normal enqueue path recompute
-// originator and user-scoped connected-app capabilities from the real comment,
-// rather than carrying the deleted trigger's stale security context.
+// was deleted (the FK clears trigger_comment_id, or the trigger is a tombstone,
+// while the UUID-array plan survives). Tombstones never count as survivors.
+// Promoting before enqueue lets the normal enqueue path recompute originator
+// and user-scoped connected-app capabilities from the real comment, rather
+// than carrying the deleted trigger's stale security context.
 func (s *TaskService) promoteNewestSurvivingComment(ctx context.Context, ids []pgtype.UUID) (pgtype.UUID, []pgtype.UUID, error) {
 	type survivingComment struct {
 		id        pgtype.UUID
@@ -5694,6 +5734,9 @@ func (s *TaskService) promoteNewestSurvivingComment(ctx context.Context, ids []p
 		}
 		if err != nil {
 			return pgtype.UUID{}, nil, err
+		}
+		if comment.DeletedAt.Valid {
+			continue
 		}
 		survivors = append(survivors, survivingComment{id: comment.ID, createdAt: comment.CreatedAt.Time})
 	}
@@ -6039,8 +6082,10 @@ func delegatedFailureRecoveryContent(failed, source db.AgentTaskQueue) string {
 // loadDelegatedFailureRecoveryTarget resolves and validates the backward edge
 // from a failed delegated task to its source coordinator. Returning nil is an
 // intentional no-op: non-terminal rows, retry-pending rows, autopilot work,
-// recovery tasks themselves, terminal/backlog source issues, unavailable
-// source agents, and self-delegation must never start a recovery loop.
+// recovery tasks themselves, unavailable source agents, and self-delegation
+// must never start a recovery loop.
+// Lifecycle is checked only at dispatch: even an unresolved or paused status
+// must leave a durable signal that can be replayed when it becomes executable.
 func loadDelegatedFailureRecoveryTarget(ctx context.Context, q *db.Queries, failed db.AgentTaskQueue) (*delegatedFailureRecoveryTarget, error) {
 	if failed.Status != "failed" || !failed.DelegatedFromTaskID.Valid || failed.AutopilotRunID.Valid ||
 		(failed.TriggerEvidenceKind.Valid && failed.TriggerEvidenceKind.String == string(attribution.EvidenceDelegatedFailure)) {
@@ -6070,10 +6115,6 @@ func loadDelegatedFailureRecoveryTarget(ctx context.Context, q *db.Queries, fail
 		}
 		return nil, fmt.Errorf("load source issue: %w", err)
 	}
-	effectiveStatus := issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status)
-	if effectiveStatus == issuestatus.Done || effectiveStatus == issuestatus.Cancelled || effectiveStatus == issuestatus.Backlog {
-		return nil, nil
-	}
 	agent, err := q.GetAgent(ctx, source.AgentID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -6085,6 +6126,18 @@ func loadDelegatedFailureRecoveryTarget(ctx context.Context, q *db.Queries, fail
 		return nil, nil
 	}
 	return &delegatedFailureRecoveryTarget{failed: failed, source: source, issue: issue, agent: agent}, nil
+}
+
+// canDispatchDelegatedFailureRecovery matches the lifecycle predicate in
+// ListPendingDelegatedFailureRecoveries. It must not gate signal creation:
+// catalog failures are retryable only after the outbox comment is committed.
+func canDispatchDelegatedFailureRecovery(ctx context.Context, q *db.Queries, issue db.Issue) (bool, error) {
+	category, err := issuestatus.CategoryWithError(ctx, q, issue.WorkspaceID, issue.Status)
+	if err != nil {
+		return false, err
+	}
+	return issue.Status != issuestatus.Backlog &&
+		(category == issuestatus.CategoryUnstarted || category == issuestatus.CategoryStarted), nil
 }
 
 // ensureDelegatedFailureRecoveryComment creates one durable recovery signal
@@ -6339,6 +6392,21 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 // reconciliation schedule the follow-up. The three-pass loop closes state
 // changes around those writes.
 func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, target *delegatedFailureRecoveryTarget, excludeTaskID pgtype.UUID) (delegatedFailureRecoveryDispatchOutcome, error) {
+	// Signal creation has committed before reaching this shared dispatch path.
+	// Refresh the issue because its status may have changed since creation or
+	// sweep selection; a paused/unreadable lifecycle never settles the signal.
+	issue, err := s.Queries.GetIssue(ctx, target.issue.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return delegatedFailureRecoveryCovered, nil
+	}
+	if err != nil {
+		return delegatedFailureRecoveryCovered, fmt.Errorf("reload recovery source issue: %w", err)
+	}
+	allowed, err := canDispatchDelegatedFailureRecovery(ctx, s.Queries, issue)
+	if err != nil || !allowed {
+		return delegatedFailureRecoveryCovered, err
+	}
+	target.issue = issue
 	const maxAttempts = 3
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		covered, err := s.Queries.HasTaskCoveringDelegatedFailureComment(ctx, db.HasTaskCoveringDelegatedFailureCommentParams{
@@ -7066,27 +7134,74 @@ func (s *TaskService) broadcastTaskFailedEvent(ctx context.Context, task db.Agen
 	s.publishTaskFailedEvent(workspaceID, task, errMsg, failureReason, retryPending)
 }
 
-// ResolveTaskWorkspaceID determines the workspace ID for a task.
-// For issue tasks, it comes from the issue. For chat tasks, from the chat session.
-// For autopilot tasks, from the autopilot via its run.
-// Returns "" when none of the links resolve — callers treat that as "not found".
+// ResolveTaskWorkspaceID determines the workspace ID for a task, best-effort.
+// Returns "" when the workspace could not be determined, whether because the
+// link target is genuinely gone or because a lookup failed.
+//
+// Use this only where "" is an acceptable answer — event broadcasts skip
+// themselves rather than fabricating a workspace. Anything that turns the
+// result into an HTTP status MUST use ResolveTaskWorkspaceIDChecked instead:
+// collapsing both cases to "" is what let a transient DB error be reported to
+// the daemon as `404 task not found`, which it acts on by killing a healthy
+// run (MUL-7259 / GH #8272).
 func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentTaskQueue) string {
-	if task.IssueID.Valid {
-		if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
-			return util.UUIDToString(issue.WorkspaceID)
+	workspaceID, _ := s.ResolveTaskWorkspaceIDChecked(ctx, task)
+	return workspaceID
+}
+
+// ResolveTaskWorkspaceIDChecked resolves a task's workspace and keeps the two
+// failure modes apart:
+//
+//   - ("", nil)  — every link this task carries was looked up successfully and
+//     the target is genuinely absent. The task is unreachable; a 404 is honest.
+//   - ("", err)  — a lookup could not be completed (DB timeout, pool exhaustion,
+//     …). We do not know whether the task is reachable, and the caller must NOT
+//     report absence. This is a 5xx.
+//
+// For issue tasks the workspace comes from the issue, for chat tasks from the
+// chat session, for autopilot tasks from the autopilot via its run, and for
+// quick-create tasks from the context JSONB (they carry no link at all).
+//
+// A failed lookup does not stop the walk. If a later link resolves, its
+// workspace is returned and the earlier error is dropped, because that answer
+// is still trustworthy; the error is surfaced only when nothing resolved. That
+// keeps a task carrying several links working during a partial outage while
+// still refusing to call an unknown state "not found".
+func (s *TaskService) ResolveTaskWorkspaceIDChecked(ctx context.Context, task db.AgentTaskQueue) (string, error) {
+	// isNotFound is the "genuinely absent" signal; every other error means the
+	// lookup itself did not complete. pgx.ErrNoRows is the only error the
+	// queries below use to say "this row does not exist".
+	var lookupErr error
+	note := func(err error) {
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) && lookupErr == nil {
+			lookupErr = err
 		}
+	}
+
+	if task.IssueID.Valid {
+		issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+		if err == nil {
+			return util.UUIDToString(issue.WorkspaceID), nil
+		}
+		note(err)
 	}
 	if task.ChatSessionID.Valid {
-		if cs, err := s.Queries.GetChatSession(ctx, task.ChatSessionID); err == nil {
-			return util.UUIDToString(cs.WorkspaceID)
+		cs, err := s.Queries.GetChatSession(ctx, task.ChatSessionID)
+		if err == nil {
+			return util.UUIDToString(cs.WorkspaceID), nil
 		}
+		note(err)
 	}
 	if task.AutopilotRunID.Valid {
-		if run, err := s.Queries.GetAutopilotRun(ctx, task.AutopilotRunID); err == nil {
-			if ap, err := s.Queries.GetAutopilot(ctx, run.AutopilotID); err == nil {
-				return util.UUIDToString(ap.WorkspaceID)
+		run, err := s.Queries.GetAutopilotRun(ctx, task.AutopilotRunID)
+		if err == nil {
+			ap, apErr := s.Queries.GetAutopilot(ctx, run.AutopilotID)
+			if apErr == nil {
+				return util.UUIDToString(ap.WorkspaceID), nil
 			}
+			note(apErr)
 		}
+		note(err)
 	}
 	// Quick-create tasks have no issue / chat / autopilot link — workspace
 	// lives in the context JSONB. Returning "" here is what blocked
@@ -7094,9 +7209,12 @@ func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentT
 	// for the daemon) and silently dropped task:dispatch / task:completed
 	// broadcasts, which is why quick-create tasks appeared stuck queued.
 	if qc, ok := s.parseQuickCreateContext(task); ok {
-		return qc.WorkspaceID
+		return qc.WorkspaceID, nil
 	}
-	return ""
+	if lookupErr != nil {
+		return "", fmt.Errorf("resolve task workspace: %w", lookupErr)
+	}
+	return "", nil
 }
 
 func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQueue, msg *db.ChatMessage, quickActionsPending bool) {
@@ -7306,11 +7424,11 @@ func (s *TaskService) AutoUnresolveThreadOnReply(ctx context.Context, parent *db
 // field missing here is a field that reads back undefined until the next
 // refetch — see TestIssueToMap_KeysMatchIssueResponse, which fails if the two
 // renderings drift apart.
-// builtInStatusCategory returns a status's category when it can be known
-// without a catalog read — i.e. for the 7 built-ins, where key == category.
+// builtInStatusCategory returns a status's public lifecycle category when it
+// can be known without a catalog read.
 func builtInStatusCategory(status string) string {
-	if issuestatus.IsBuiltIn(status) {
-		return status
+	if category, ok := issuestatus.CategoryForBehavior(status); ok {
+		return issuestatus.WireCategory(status, category)
 	}
 	return ""
 }
@@ -7325,8 +7443,8 @@ func builtInStatusCategory(status string) string {
 // rendering already shares a single read through its Resolver. (MUL-6749)
 func IssueToMapResolved(ctx context.Context, q issuestatus.Querier, issue db.Issue, issuePrefix string) map[string]any {
 	m := IssueToMap(issue, issuePrefix)
-	category, name := issuestatus.EffectiveAndName(ctx, q, issue.WorkspaceID, issue.Status)
-	m["status_category"] = category
+	category, name := issuestatus.CategoryAndName(ctx, q, issue.WorkspaceID, issue.Status)
+	m["status_category"] = issuestatus.WireCategory(issue.Status, category)
 	m["status_name"] = name
 	return m
 }
@@ -7340,9 +7458,9 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"title":        issue.Title,
 		"description":  util.TextToPtr(issue.Description),
 		"status":       issue.Status,
-		// Mirrors handler.IssueResponse.StatusCategory: a built-in status IS
-		// its own category, so this resolves with no catalog lookup. Empty for
-		// a custom status, which consumers resolve via the catalog. (MUL-6243)
+		// Mirrors handler.IssueResponse.StatusCategory. Built-ins map to a
+		// public lifecycle category without a catalog lookup; custom statuses
+		// are filled by IssueToMapResolved. (MUL-6243)
 		"status_category": builtInStatusCategory(issue.Status),
 		// Mirrors handler.IssueResponse.StatusName. A built-in carries no name
 		// — clients localize those from the key — and a CUSTOM one is filled in

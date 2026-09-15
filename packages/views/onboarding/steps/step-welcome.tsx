@@ -8,7 +8,7 @@ import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { cn } from "@multica/ui/lib/utils";
 import { DragStrip } from "@multica/views/platform";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
-import type { IssueStatus } from "@multica/core/types";
+import type { BuiltInIssueStatus } from "@multica/core/types";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { useT } from "../../i18n";
@@ -300,7 +300,7 @@ function MockActivityCard({
   actor: ActivityActor;
   issueId: string;
   content: React.ReactNode;
-  status?: Extract<IssueStatus, "in_progress" | "done" | "in_review">;
+  status?: Extract<BuiltInIssueStatus, "in_progress" | "done" | "in_review">;
   timestamp?: string;
   className?: string;
 }) {
@@ -362,7 +362,7 @@ function StatusFooter({
   status,
   timestamp,
 }: {
-  status: IssueStatus;
+  status: BuiltInIssueStatus;
   timestamp?: string;
 }) {
   // The illustration's statuses are hard-coded BUILT-IN keys, so the label
@@ -384,7 +384,7 @@ function StatusFooter({
             status === "in_progress" && "animate-pulse",
           )}
         />
-        {t(($) => $.status[category])}
+        {t(($) => $.status[status])}
       </span>
       {timestamp && (
         <>

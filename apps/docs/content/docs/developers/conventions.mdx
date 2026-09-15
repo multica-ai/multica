@@ -62,7 +62,7 @@ If logic appears in both apps, it MUST be extracted to a shared package. There a
 - Standard `gofmt` + `go vet`. No exceptions.
 - Handler files mirror domain: `agent.go`, `auth.go`, `runtime.go`
 - Tests: `<file>_test.go` colocated
-- For UUID parsing in handlers, follow the rule in the root `CLAUDE.md` — `parseUUIDOrBadRequest` for boundary input, `parseUUID` (panicking) for trusted round-trips, never `util.ParseUUID` directly without checking the error.
+- For UUID parsing in handlers, follow the rule in the root `AGENTS.md` — `parseUUIDOrBadRequest` for boundary input, `parseUUID` (panicking) for trusted round-trips, never `util.ParseUUID` directly without checking the error.
 
 ### TypeScript
 
@@ -202,6 +202,7 @@ These are schema-level identifiers; render as lowercase English even in Chinese 
 
 - Roles: `owner` / `admin` / `member`
 - Issue status: `backlog` / `todo` / `in_progress` / `in_review` / `done` / `blocked` / `cancelled`
+- Issue status category: `unstarted` / `started` / `done` / `closed`
 
 In UI, surface them in English (optionally `code-style` wrapped):
 
@@ -318,7 +319,7 @@ When the glossary doesn't cover a term, look at:
 
 If you change a rule here, also:
 
-1. Apply it in the relevant locale JSONs / CLAUDE.md / docs page
+1. Apply it in the relevant locale JSONs / AGENTS.md / docs page
 2. Note the change in the PR description so reviewers know to look for downstream sweep
 
 This page is the contract; nothing else overrides it.

@@ -101,10 +101,14 @@ func (l *fakeMediaLedger) RecordPendingMediaObject(_ context.Context, p engine.R
 // notifierWithLiveSocket is the production notifier — a real sendersRegistry
 // — holding a wsSender over a recording connection, so a failure notice is
 // asserted as the aibot frame it actually is.
+//
+// The connection acknowledges, as a live one does. The notice's verdict only
+// ever reaches a log line, so nothing here depends on it — but a socket that
+// never answered left every notice waiting out the full ack timeout.
 func notifierWithLiveSocket(id pgtype.UUID) (*sendersRegistry, *recordingConn) {
 	conn := &recordingConn{}
 	reg := newSendersRegistry()
-	reg.set(id, newWSSender(conn, slog.Default()))
+	reg.set(id, conn.autoAck(newWSSender(conn, slog.Default())))
 	return reg, conn
 }
 

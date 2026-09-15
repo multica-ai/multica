@@ -54,6 +54,18 @@ Add the Bot to a DingTalk group, then send `@your-bot <message>`. You must @-men
 
 Direct messages and group chats both support messages containing text and images. Supported image formats are PNG, JPEG, GIF, WebP, and BMP. Each message can contain up to 4 images, with a maximum size of 10 MB per image. Files and voice messages are not currently supported.
 
+In group messages containing both text and images, the @-mention of the Bot is also included in the message sent to the agent. To remove the Bot's name precisely, add the **DingTalk Group Basic Information Management** permission (`qyapi_chat_manage`).
+
+### Follow up with a quoted message
+
+Use DingTalk's quote action to select a message, then enter your current input. In groups, you must still @-mention the Bot. Multica prepends supported quoted content supplied by the DingTalk callback to your current message as agent context. An `/issue`, `/new`, or `/clear` inside the quote is quoted content, not a command for the current turn.
+
+### Message processing feedback
+
+After receiving a DingTalk message, Multica attempts to add DingTalk's `RogerThat` reaction to the original user message to indicate that it has been passed to the agent for processing. Once the agent finishes processing and the reply is successfully sent to DingTalk, `RogerThat` is replaced with `Done`. If processing is cancelled, `RogerThat` is removed.
+
+Reactions depend on DingTalk's API and may not update immediately. Check the Bot's reply and the run record in Multica when assessing the outcome.
+
 ### Create an issue with `/issue`
 
 Send `/issue <title>` or `/issue <title>{newline}<detailed description>` to create a new Multica issue and automatically assign it to the agent connected to the Bot. Images in the same message are also added to the issue as attachments. Unlike regular chat messages, the `/issue` command leaves no record in Multica [Chat](/chat).

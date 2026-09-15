@@ -22,6 +22,7 @@ const mockViewport = vi.hoisted(() => ({ isMobile: false }));
 // Counts MockContentEditor mounts. This pins the description to exactly one
 // eager editor per issue and catches stale editor reuse across issue switches.
 const contentEditorMounts = vi.hoisted(() => ({ count: 0 }));
+const descriptionSelectionAction = vi.hoisted(() => ({ current: undefined as { label: string; onSelect: () => void } | undefined }));
 // Stable empty-attachments reference: the real store returns a shared constant
 // so the `useCommentDraftStore(s => s.getAttachments(key))` selector keeps a
 // stable identity. A fresh `[]` per call would loop useSyncExternalStore.
@@ -177,10 +178,12 @@ vi.mock("../../editor", async () => ({
       placeholder,
       flushPendingOnUnmount,
       onReady,
+      selectionAction,
     }: any,
     ref: any,
   ) {
     const initialValue = syncedValue ?? defaultValue ?? "";
+    if (syncedValue !== undefined) descriptionSelectionAction.current = selectionAction;
     const valueRef = useRef(initialValue);
     const baseRef = useRef(initialValue);
     const [editorValue, setEditorValue] = useState(initialValue);
@@ -337,28 +340,7 @@ vi.mock("@multica/core/api", () => ({
 }));
 
 // Mock issue config
-vi.mock("@multica/core/issues/config", () => ({
-  ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  STATUS_CONFIG: {
-    backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
-    todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
-    in_progress: { label: "In Progress", iconColor: "text-warning", hoverBg: "hover:bg-warning/10" },
-    in_review: { label: "In Review", iconColor: "text-success", hoverBg: "hover:bg-success/10" },
-    done: { label: "Done", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
-    blocked: { label: "Blocked", iconColor: "text-destructive", hoverBg: "hover:bg-destructive/10" },
-    cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
-  },
-  PRIORITY_ORDER: ["urgent", "high", "medium", "low", "none"],
-  PRIORITY_DISPLAY_ORDER: ["none", "urgent", "high", "medium", "low"],
-  PRIORITY_CONFIG: {
-    urgent: { label: "Urgent", bars: 4, color: "text-destructive", badgeBg: "bg-destructive/10", badgeText: "text-destructive" },
-    high: { label: "High", bars: 3, color: "text-warning", badgeBg: "bg-warning/10", badgeText: "text-warning" },
-    medium: { label: "Medium", bars: 2, color: "text-warning", badgeBg: "bg-warning/10", badgeText: "text-warning" },
-    low: { label: "Low", bars: 1, color: "text-info", badgeBg: "bg-info/10", badgeText: "text-info" },
-    none: { label: "No priority", bars: 0, color: "text-muted-foreground", badgeBg: "bg-muted", badgeText: "text-muted-foreground" },
-  },
-}));
+// Use the real status configuration so category fixtures cannot drift.
 
 // Mock recent issues store
 const mockRecordVisit = vi.fn();
@@ -406,6 +388,7 @@ vi.mock("@multica/core/issues/stores", async () => ({
       const state = {
         drafts: {} as Record<string, { content: string; attachments: unknown[]; updatedAt: number }>,
         getDraft: () => undefined,
+        getAnnotations: () => emptyDraftAttachments,
         getAttachments: () => emptyDraftAttachments,
         getUploads: () => emptyDraftAttachments,
         setDraft: () => {},
@@ -422,6 +405,7 @@ vi.mock("@multica/core/issues/stores", async () => ({
       getState: () => ({
         drafts: {} as Record<string, { content: string; attachments: unknown[]; updatedAt: number }>,
         getDraft: () => undefined,
+        getAnnotations: () => emptyDraftAttachments,
         getAttachments: () => emptyDraftAttachments,
         getUploads: () => emptyDraftAttachments,
         setDraft: () => {},
@@ -692,6 +676,7 @@ describe("IssueDetail (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     contentEditorMounts.count = 0;
+    descriptionSelectionAction.current = undefined;
     mockViewport.isMobile = false;
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
@@ -808,6 +793,13 @@ describe("IssueDetail (shared)", () => {
     expect(skeletonGutters).toEqual(
       horizontalGutters(container.querySelector(".max-w-4xl")),
     );
+  });
+
+  it("wires the description selection toolbar to annotation collection", async () => {
+    renderIssueDetail();
+    await screen.findByDisplayValue("Add JWT auth to the backend");
+    expect(descriptionSelectionAction.current?.label).toBe("Add to comment");
+    expect(descriptionSelectionAction.current?.onSelect).toBeTypeOf("function");
   });
 
   it("renders issue title and description after loading", async () => {
@@ -1770,7 +1762,7 @@ describe("IssueDetail (shared)", () => {
     key: "in_review",
     name: "In Review",
     description: "",
-    category: "in_review",
+    category: "started",
     color: "#8b5cf6",
     is_system: true,
     position: 0,
@@ -1994,6 +1986,29 @@ describe("IssueDetail (shared)", () => {
       await waitFor(() => expect(document.getElementById(`comment-${target.id}`)).not.toBeNull());
       await waitFor(() => expect(document.getElementById(`comment-${target.id}`)).toHaveClass(highlightedCommentBackgroundClass));
     });
+    it("lands on the reply above a deleted one when a notification targets it", async () => {
+      // A deleted reply renders nothing (#8296 keeps its row only so its own
+      // replies keep a parent), so the id the notification carries has no
+      // anchor left. The landing rule's matrix lives in
+      // packages/core/issues/comment-deletion.test.ts.
+      const root = { ...mockTimeline[0]!, id: "thread-root", parent_id: null };
+      const previous = { ...mockTimeline[1]!, id: "reply-before", parent_id: root.id,
+        content: "Still here", created_at: "2026-01-18T00:00:00Z" };
+      const target = { ...mockTimeline[1]!, id: "deleted-reply", parent_id: root.id,
+        content: "", deleted_at: "2026-01-19T00:00:00Z", created_at: "2026-01-19T00:00:00Z" };
+      const kept = { ...mockTimeline[1]!, id: "reply-under-deleted", parent_id: target.id,
+        content: "Kept below it", created_at: "2026-01-20T00:00:00Z" };
+      mockApiObj.listTimeline.mockResolvedValue([root, previous, target, kept]);
+      mockApiObj.listTasksByIssue.mockResolvedValue([]);
+      renderIssueDetailWithHighlight(target.id);
+
+      await waitFor(() => expect(
+        hasHighlightedCommentBackground(document.getElementById(`comment-${previous.id}`)),
+      ).toBe(true));
+      // The tombstone itself never renders, so nothing waits on its anchor.
+      expect(document.getElementById(`comment-${target.id}`)).toBeNull();
+    });
+
     it("scrolls to the highlighted comment after both issue and timeline finish loading", async () => {
       renderIssueDetailWithHighlight("comment-2");
 

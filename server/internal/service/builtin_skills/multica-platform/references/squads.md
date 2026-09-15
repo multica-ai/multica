@@ -183,8 +183,7 @@ Current behavior:
   — on those paths the protocol instead carries an explicit "do not change this
   issue's status".
 
-The status names above are category rules: a custom status inherits its
-category's behavior in full.
+The status names above are fixed built-in keys, not categories.
 
 Assignment validation rejects a missing type/id pair, non-existent squad,
 archived squad, archived leader, and private leader when the actor cannot access
@@ -194,6 +193,11 @@ it.
 
 If an issue is assigned to a squad, a new comment can wake the squad leader. This
 is leader routing, not member fan-out.
+
+A worker's reply also wakes the assigned leader without an explicit mention. If
+the leader's current run started before the reply arrived, the reply is
+delivered in a follow-up run after that run completes, so the worker does not
+need to mention the leader again.
 
 Squad mention format:
 

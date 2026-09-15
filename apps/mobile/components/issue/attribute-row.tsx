@@ -80,7 +80,7 @@ export function AttributeRow({ issue }: { issue: Issue }) {
   // The chip shows the issue's own status, which may be a custom one — name
   // and colour come from the workspace catalog, the glyph from its category.
   // (MUL-6243)
-  const { categoryOf, colorOf, labelOf } = useIssueStatuses();
+  const { categoryOf, colorOf, labelOf, iconOf } = useIssueStatuses();
 
   // Project read-only — fetch list to look up the title + icon. Cheap
   // (cached after first issue-detail visit).
@@ -118,7 +118,7 @@ export function AttributeRow({ issue }: { issue: Issue }) {
           <StatusIcon
             status={issue.status}
             category={categoryOf(issue.status)}
-            color={colorOf(issue.status)}
+            icon={iconOf(issue.status)} color={colorOf(issue.status)}
             size={14}
           />
         }

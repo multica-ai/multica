@@ -156,7 +156,8 @@ allowlist의 정확한 판단 순서는 [로그인과 가입](/auth-setup#가입
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `REDIS_URL` | 비어 있음 | 공유 rate limit, 실시간 이벤트, token cache에 사용. 설정하지 않으면 실시간 이벤트와 초대 제한은 프로세스 메모리로 fallback하고 인증 rate limit은 비활성화 |
+| `REDIS_URL` | 비어 있음 | 공유 rate limit, 실시간 이벤트, 채널 WebSocket lease, token cache 등 모든 Redis 기능이 사용하는 유일한 연결 URL |
+| `REDIS_CLUSTER_MODE` | `false` | `true`로 설정하면 `REDIS_URL`이 단일 구성 엔드포인트여도 Redis Cluster 클라이언트를 사용합니다. 클러스터 모드에서는 데이터베이스 0과 `REALTIME_RELAY_MODE=sharded`가 필요합니다 |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | 관리형 Redis가 `CLIENT SETNAME`을 금지하면 `true`로 설정 |
 | `RATE_LIMIT_AUTH` | `5` | IP당 1분에 인증 코드 전송 또는 Google 로그인 시작 허용 횟수 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | IP당 1분에 인증 코드 검증 허용 횟수 |
@@ -249,7 +250,7 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 
 데몬이 에이전트 작업에 주입하는 내부 컨텍스트는 [작업 런타임 환경](/daemon-runtimes#작업-런타임-환경)을 참고하세요.
 
-각 AI 코딩 도구는 `MULTICA_<PROVIDER>_PATH`로 명령 경로를 덮어쓸 수 있으며 모델 재정의를 지원하는 도구는 `MULTICA_<PROVIDER>_MODEL`도 사용할 수 있습니다. QwenPaw와 MiniMax Code에는 모델 변수가 없고 MiniMax Code의 경로 변수는 `MULTICA_MCODE_PATH`입니다. 자세한 내용은 [AI 코딩 도구 비교](/providers#모델-출처)를 참고하세요. DeepSeek Harness는 `MULTICA_DSH_PATH`와 `MULTICA_DSH_MODEL`을 지원합니다(값은 dsh 모델 카탈로그의 모델 ID, 예: `deepseek-official/deepseek-chat`). ZeroClaw는 `MULTICA_ZEROCLAW_PATH`를 지원하지만 모델 변수는 없습니다. 모델은 ZeroClaw의 에이전트 설정에서 관리합니다. 컴퓨터 전체 기본 인수 `MULTICA_<PROVIDER>_ARGS`는 현재 Claude Code, Codex, CodeBuddy, Qwen Code, QwenPaw 다섯 도구를 지원합니다. 해당 변수는 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_QWENPAW_ARGS`입니다. 예시:
+각 AI 코딩 도구는 `MULTICA_<PROVIDER>_PATH`로 명령 경로를 덮어쓸 수 있으며 모델 재정의를 지원하는 도구는 `MULTICA_<PROVIDER>_MODEL`도 사용할 수 있습니다. QwenPaw와 MiniMax Code에는 모델 변수가 없고 MiniMax Code의 경로 변수는 `MULTICA_MCODE_PATH`입니다. 자세한 내용은 [AI 코딩 도구 비교](/providers#모델-출처)를 참고하세요. DeepSeek Harness는 `MULTICA_DSH_PATH`와 `MULTICA_DSH_MODEL`을 지원합니다(값은 dsh 모델 카탈로그의 모델 ID, 예: `deepseek-official/deepseek-chat`). DeepSeek Harness는 `MULTICA_DSH_PROFILE_BUNDLE`도 지원합니다. `multica` 프로필이 없을 때 설치할 번들을 지정하며, 쉼표로 구분한 여러 후보를 순서대로 시도합니다. 각 항목은 npm 패키지 이름, 디렉터리 또는 패키징된 tarball입니다. 기본값은 설정하지 않는 것입니다. Multica가 사용하는 `--stdio` 프로토콜은 이 프로필이 제공하므로, 설정하지 않으면 DSH 설치를 건드리지 않고 데몬은 사용할 수 없는 런타임을 등록하는 대신 프로필 누락을 보고합니다. Multica 자체 브리지는 아직 공개 npm 레지스트리에 없으므로 값 선택 방법은 [에이전트 런타임 설치](/install-agent-runtime)를 참고하세요. 여기에 설정한 값은 추가 확인 없이 모든 데몬 호스트의 DSH 홈에 설치되므로 공급망에 관한 결정으로 다루세요. `MULTICA_DSH_PROFILE_BUNDLE`이 활성화하는 설치는 범위를 의도적으로 제한합니다. 실행은 데몬 수명당 최대 한 번, 프로브가 프로필 부재를 확인한 경우에만 수행됩니다. 실패하면 패키지 관리자 자체의 출력을 로그에 남기고 재시도는 데몬을 재시작한 뒤에만 이루어집니다. 프로브가 시간 초과되거나 이 데몬이 다루지 않는 프로토콜 버전을 반환하면 보고만 하고 덮어쓰지 않습니다. 의도적으로 설치된 프로필을 데몬이 덮어쓰는 일은 없습니다. 진단은 데몬 로그에서 `DSH runtime profile`을 검색하세요. 되돌리려면 `$DSH_HOME/profiles/multica`(기본값 `~/.dsh/profiles/multica`)를 삭제합니다. `MULTICA_DSH_PLUGIN_PATH`는 설치 시 pnpm을 찾을 디렉터리를 덮어씁니다. `dsh plugin`이 전달하는 pnpm은 macOS와 Windows 모두 DSH Desktop 전용 runtime-commands 디렉터리에 있으며, 데몬이 이를 자동으로 찾아 PATH 앞에 추가합니다(최신 Desktop이 쓰는 버전별 구조도 포함). 따라서 이 변수는 데몬이 찾지 못하는 위치에 설치된 경우나 직접 준비한 pnpm을 쓰게 하려는 경우에만 필요합니다. 설정하면 자동 탐색을 완전히 대체하며, 지정한 디렉터리가 없으면 설치는 번들된 pnpm이 아니라 데몬 `PATH`의 pnpm으로 넘어갑니다. Linux에는 DSH Desktop이 없으므로 항상 `PATH`를 사용합니다. ZeroClaw는 `MULTICA_ZEROCLAW_PATH`를 지원하지만 모델 변수는 없습니다. 모델은 ZeroClaw의 에이전트 설정에서 관리합니다. 컴퓨터 전체 기본 인수 `MULTICA_<PROVIDER>_ARGS`는 현재 Claude Code, Codex, CodeBuddy, Qwen Code, QwenPaw 다섯 도구를 지원합니다. 해당 변수는 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_QWENPAW_ARGS`입니다. 예시:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude

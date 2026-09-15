@@ -102,7 +102,7 @@ while IFS= read -r line; do
         # notification after a short delay — exercises the notification
         # quiescence drain (the late text must survive into Result.Output).
         printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":10,"outputTokens":20}}}\n' "$id"
-        sleep 0.1
+        sleep 0.05
         printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"%s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"late-answer"}}}}\n' "$DIM_SESSION_ID"
       else
         printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":10,"outputTokens":20}}}\n' "$id"

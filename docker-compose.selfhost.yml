@@ -67,6 +67,8 @@ services:
       DATABASE_REPLICA_URL: ${DATABASE_REPLICA_URL:-}
       DATABASE_REPLICA_MAX_CONNS: ${DATABASE_REPLICA_MAX_CONNS:-}
       DATABASE_REPLICA_MIN_CONNS: ${DATABASE_REPLICA_MIN_CONNS:-}
+      REDIS_URL: ${REDIS_URL:-}
+      REDIS_CLUSTER_MODE: ${REDIS_CLUSTER_MODE:-false}
       PORT: "8080"
       METRICS_ADDR: ${METRICS_ADDR:-}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set to a strong random value — generate one with 'openssl rand -hex 32'}
