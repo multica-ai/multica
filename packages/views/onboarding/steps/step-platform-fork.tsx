@@ -14,6 +14,7 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import type { AgentRuntime } from "@multica/core/types";
 import { runtimeDisplayLabel } from "@multica/core/runtimes";
+import { useConfigStore } from "@multica/core/config";
 import {
   StepFooter,
   StepHeading,
@@ -24,6 +25,7 @@ import {
 } from "../../runtimes/components/mika-runtime-choice";
 import { useRuntimePicker } from "../components/use-runtime-picker";
 import { useT } from "../../i18n";
+import { daemonSetupCommands } from "../../common/daemon-setup-commands";
 
 /**
  * Step 3 on **web**. The user is in a browser and hasn't downloaded
@@ -391,6 +393,9 @@ function formatElapsed(seconds: number) {
  */
 function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
   const { t } = useT("onboarding");
+  const daemonServerUrl = useConfigStore((s) => s.daemonServerUrl);
+  const daemonAppUrl = useConfigStore((s) => s.daemonAppUrl);
+  const { setupCmd } = daemonSetupCommands(daemonServerUrl, daemonAppUrl);
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
@@ -446,21 +451,21 @@ function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
         {stage === "normal" && (
           <>
             {t(($) => $.step_platform.stage_normal_prefix)}
-            <span className="font-mono">{"multica setup"}</span>
+            <span className="font-mono">{setupCmd}</span>
             {t(($) => $.step_platform.stage_normal_suffix)}
           </>
         )}
         {stage === "midway" && (
           <>
             {t(($) => $.step_platform.stage_midway_prefix)}
-            <span className="font-mono">{"multica setup"}</span>
+            <span className="font-mono">{setupCmd}</span>
             {t(($) => $.step_platform.stage_midway_suffix)}
           </>
         )}
         {stage === "slow" && (
           <>
             {t(($) => $.step_platform.stage_slow_prefix)}
-            <span className="font-mono">{"multica setup"}</span>
+            <span className="font-mono">{setupCmd}</span>
             {t(($) => $.step_platform.stage_slow_suffix)}
           </>
         )}
