@@ -359,7 +359,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		}
 
 		streamingCurrentTurn.Store(true)
-		_, err = c.request(runCtx, "session/prompt", map[string]any{
+		promptResult, err := c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
 			"prompt": []map[string]any{
 				{"type": "text", "text": userText},
@@ -418,6 +418,15 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		finalOutput, providerErrorOutput := deliverable.result()
 		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, providerErr)
 
+		var response struct {
+			Meta struct {
+				RequestID string `json:"codebuddy.ai/conversationRequestId"`
+			} `json:"_meta"`
+		}
+		_ = json.Unmarshal(promptResult, &response)
+		if err := vendorUsage.reconcileTranscript(cmd.Env, opts.Cwd, sessionID, response.Meta.RequestID); err != nil {
+			b.cfg.Logger.Warn("codebuddy transcript metering unavailable", "error", err)
+		}
 		u := c.accumulatedUsage()
 		if !acpTokenUsagePresent(u) {
 			vendor := vendorUsage.total()
