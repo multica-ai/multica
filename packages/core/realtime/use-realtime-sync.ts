@@ -1313,20 +1313,40 @@ export function useRealtimeSync(
       );
     });
 
-    // invitation:accepted / declined / revoked — refresh invitation lists
-    const unsubInvitationAccepted = ws.on("invitation:accepted", () => {
-      const currentWsId = getCurrentWsId();
-      if (currentWsId) {
-        qc.invalidateQueries({ queryKey: workspaceKeys.invitations(currentWsId) });
-        qc.invalidateQueries({ queryKey: workspaceKeys.members(currentWsId) });
-      }
-    });
-    const unsubInvitationDeclined = ws.on("invitation:declined", () => {
-      const currentWsId = getCurrentWsId();
-      if (currentWsId) {
-        qc.invalidateQueries({ queryKey: workspaceKeys.invitations(currentWsId) });
-      }
-    });
+    // invitation:accepted / declined / revoked — refresh invitation lists.
+    // The workspace broadcast reaches every online member, so the admin lists
+    // refresh unconditionally. The account-level pending list is gated on the
+    // acting user: only the invitee who concluded the invite (possibly from
+    // another surface or device) needs their stale pending row dropped —
+    // staleTime is Infinity, so nothing refetches it on its own. Without the
+    // gate every accept/decline fanout refetches the list once per online
+    // member. The actor rides the frame envelope (ws-client hands it to the
+    // handler as its second argument), not the event payload.
+    const unsubInvitationAccepted = ws.on(
+      "invitation:accepted",
+      (_payload, actorId) => {
+        const currentWsId = getCurrentWsId();
+        if (currentWsId) {
+          qc.invalidateQueries({ queryKey: workspaceKeys.invitations(currentWsId) });
+          qc.invalidateQueries({ queryKey: workspaceKeys.members(currentWsId) });
+        }
+        if (actorId === authStore.getState().user?.id) {
+          qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
+        }
+      },
+    );
+    const unsubInvitationDeclined = ws.on(
+      "invitation:declined",
+      (_payload, actorId) => {
+        const currentWsId = getCurrentWsId();
+        if (currentWsId) {
+          qc.invalidateQueries({ queryKey: workspaceKeys.invitations(currentWsId) });
+        }
+        if (actorId === authStore.getState().user?.id) {
+          qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
+        }
+      },
+    );
     const unsubInvitationRevoked = ws.on("invitation:revoked", () => {
       qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
     });
