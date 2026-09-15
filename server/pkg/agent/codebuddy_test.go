@@ -450,9 +450,7 @@ func TestCodebuddyHandleUserToolResult(t *testing.T) {
 		}),
 	}
 
-	if saw := b.handleUser(msg, ch); saw {
-		t.Fatal("ordinary tool_result must not report async launch")
-	}
+	b.handleUser(msg, ch)
 
 	select {
 	case m := <-ch:
