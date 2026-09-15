@@ -523,69 +523,46 @@ func TestCodebuddyHandleControlRequestApprovesInCodebuddyShape(t *testing.T) {
 	}
 }
 
-func TestCodebuddyTerminalReasonFailure(t *testing.T) {
+func TestBuildCodebuddyEnvDisablesBackgroundTasks(t *testing.T) {
 	t.Parallel()
 
-	got := codebuddyTerminalReasonFailure("prompt_too_long", "Prompt is too long")
-	if got == "" {
-		t.Fatal("expected prompt_too_long to produce a failure")
+	env := buildCodebuddyEnv(map[string]string{"FOO": "bar"})
+	got := ""
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok && key == codebuddyDisableBackgroundTasksEnv {
+			got = value
+		}
 	}
-	if !strings.Contains(got, "codebuddy") || !strings.Contains(got, "prompt_too_long") {
-		t.Fatalf("unexpected failure text: %q", got)
+	if got != "1" {
+		t.Fatalf("expected %s=1 in child env, got %q (env=%v)", codebuddyDisableBackgroundTasksEnv, got, env)
 	}
-	if codebuddyTerminalReasonFailure("completed", "") != "" {
-		t.Fatal("ordinary terminal_reason must not fail")
+	// Caller must not be able to override the disable — Multica always forces it.
+	env = buildCodebuddyEnv(map[string]string{codebuddyDisableBackgroundTasksEnv: "0"})
+	got = ""
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok && key == codebuddyDisableBackgroundTasksEnv {
+			got = value
+		}
+	}
+	if got != "1" {
+		t.Fatalf("expected forced %s=1 even when caller passes 0, got %q", codebuddyDisableBackgroundTasksEnv, got)
 	}
 }
 
-func TestCodebuddyHandleUserDetectsAsyncLaunch(t *testing.T) {
+func TestCodebuddySystemIsBackgroundTask(t *testing.T) {
 	t.Parallel()
 
-	b := &codebuddyBackend{cfg: Config{Logger: slog.Default()}}
-	ch := make(chan Message, 10)
-	msg := codebuddySDKMessage{
-		Type: "user",
-		Message: mustMarshal(t, codebuddyMessageContent{
-			Role: "user",
-			Content: []codebuddyContentBlock{
-				{
-					Type:      "tool_result",
-					ToolUseID: "call-async",
-					Content:   mustMarshal(t, map[string]any{"status": "async_launched", "message": "background"}),
-				},
-			},
-		}),
+	for _, subtype := range []string{"task_started", "task_progress", "task_updated", "task_notification"} {
+		if !codebuddySystemIsBackgroundTask(subtype) {
+			t.Fatalf("expected %q to be a background-task system subtype", subtype)
+		}
 	}
-	if !b.handleUser(msg, ch) {
-		t.Fatal("expected async_launched tool_result to be detected")
-	}
-	<-ch
-}
-
-func TestCodebuddyControlRequestForcesForeground(t *testing.T) {
-	t.Parallel()
-
-	b := &codebuddyBackend{cfg: Config{Logger: slog.Default()}}
-	var written bytes.Buffer
-	msg := codebuddySDKMessage{
-		Type:      "control_request",
-		RequestID: "req-bg",
-		Request: mustMarshal(t, codebuddyControlRequestPayload{
-			Subtype:  "tool_use",
-			ToolName: "Bash",
-			Input:    mustMarshal(t, map[string]any{"command": "sleep 60", "run_in_background": true}),
-		}),
-	}
-	b.handleControlRequest(msg, &written)
-
-	var resp map[string]any
-	if err := json.Unmarshal(bytes.TrimSpace(written.Bytes()), &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	inner := resp["response"].(map[string]any)["response"].(map[string]any)
-	updated := inner["updatedInput"].(map[string]any)
-	if updated["run_in_background"] != false {
-		t.Fatalf("expected run_in_background forced to false, got %v", updated["run_in_background"])
+	for _, subtype := range []string{"init", "status", "", "session_started"} {
+		if codebuddySystemIsBackgroundTask(subtype) {
+			t.Fatalf("did not expect %q to be treated as background-task", subtype)
+		}
 	}
 }
 
@@ -637,16 +614,23 @@ func TestCodebuddyExecuteResumeRejectedFromStderr(t *testing.T) {
 	}
 }
 
-func TestCodebuddyExecuteFailsOnPromptTooLong(t *testing.T) {
+func TestCodebuddyExecuteFailsOnBackgroundTaskStarted(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
 
+	// Replay the CodeBuddy 2.150.0 background-task shape from the headless
+	// docs: Bash tool_use → system/task_started → text tool_result → success
+	// result. Without a completion guard this used to report completed.
 	fakePath := filepath.Join(t.TempDir(), "codebuddy")
 	script := "#!/bin/sh\n" +
 		"IFS= read -r _\n" +
-		`printf '%s\n' '{"type":"result","subtype":"success","is_error":true,"terminal_reason":"prompt_too_long","session_id":"sess-full","result":"Prompt is too long"}'` + "\n" +
+		`printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-bg"}'` + "\n" +
+		`printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"sleep 60","run_in_background":true}}]}}'` + "\n" +
+		`printf '%s\n' '{"type":"system","subtype":"task_started","task_id":"bash-1","tool_use_id":"toolu_01","description":"sleep 60","task_type":"Bash","session_id":"sess-bg"}'` + "\n" +
+		`printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"Started the build in the background."}]}}'` + "\n" +
+		`printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-bg","result":"Started the build in the background."}'` + "\n" +
 		"exit 0\n"
 	writeTestExecutable(t, fakePath, []byte(script))
 
@@ -669,10 +653,10 @@ func TestCodebuddyExecuteFailsOnPromptTooLong(t *testing.T) {
 			t.Fatal("result channel closed without a value")
 		}
 		if result.Status != "failed" {
-			t.Fatalf("expected failed for prompt_too_long, got %q (%q)", result.Status, result.Error)
+			t.Fatalf("expected failed when system/task_started appears, got %q (%q)", result.Status, result.Error)
 		}
-		if !strings.Contains(result.Error, "prompt_too_long") {
-			t.Fatalf("expected prompt_too_long in error, got %q", result.Error)
+		if !strings.Contains(result.Error, "background task") {
+			t.Fatalf("expected background-task error, got %q", result.Error)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")

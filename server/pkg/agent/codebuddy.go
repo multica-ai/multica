@@ -10,8 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // codebuddyBackend implements Backend by spawning the CodeBuddy CLI
@@ -144,7 +142,11 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	// Multica closes stdin after the first result and cannot wait for
+	// cross-turn task_notification events. Force CodeBuddy's documented
+	// headless disable so Bash/PowerShell/Agent never take the background
+	// path (CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS; see CLI headless docs).
+	cmd.Env = buildCodebuddyEnv(b.cfg.Env)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -203,8 +205,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		var finalResultText string
 		sawResult := false
 		resultIsError := false
-		var terminalReasonError string
-		sawAsyncLaunch := false
+		sawBackgroundTask := false
 		var sessionID string
 		usage := make(map[string]TokenUsage)
 		eventCount := 0
@@ -245,19 +246,24 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 				}
 				lastAssistantText = turn.resolveFallback(lastAssistantText)
 			case "user":
-				if b.handleUser(msg, msgCh) {
-					sawAsyncLaunch = true
-				}
+				b.handleUser(msg, msgCh)
 			case "system":
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
+				}
+				// CodeBuddy background lifecycle rides on system subtypes
+				// (task_started / task_progress / task_updated /
+				// task_notification), not Claude's async_launched tool_result.
+				// With CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS these should
+				// never appear; if they do, fail rather than report success.
+				if codebuddySystemIsBackgroundTask(msg.Subtype) {
+					sawBackgroundTask = true
 				}
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 			case "result":
 				sawResult = true
 				finalResultText = msg.ResultText
 				resultIsError = msg.IsError
-				terminalReasonError = codebuddyTerminalReasonFailure(msg.TerminalReason, msg.ResultText)
 				sessionID = msg.SessionID
 				if resultUsage := codebuddyResultUsage(msg, opts.Model); len(resultUsage) > 0 {
 					usage = resultUsage
@@ -294,8 +300,8 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		writeErr := <-writeDone
 
 		completionGuardError := ""
-		if sawAsyncLaunch {
-			completionGuardError = "codebuddy launched an async background task; Multica-managed runs require foreground execution"
+		if sawBackgroundTask {
+			completionGuardError = "codebuddy emitted a background task system event; Multica-managed runs require foreground execution (set CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS=1)"
 		}
 		finalStatus, finalOutput, finalError := finalizeStreamResult(
 			"codebuddy",
@@ -305,12 +311,11 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			exitErr,
 			sessionID,
 			streamTerminalState{
-				lastAssistantText:   lastAssistantText,
-				finalResultText:     finalResultText,
-				sawResult:           sawResult,
-				resultIsError:       resultIsError,
-				scanErr:             scanErr,
-				terminalReasonError: terminalReasonError,
+				lastAssistantText: lastAssistantText,
+				finalResultText:   finalResultText,
+				sawResult:         sawResult,
+				resultIsError:     resultIsError,
+				scanErr:           scanErr,
 			},
 			completionGuardError,
 		)
@@ -421,23 +426,17 @@ func (b *codebuddyBackend) handleAssistant(msg codebuddySDKMessage, ch chan<- Me
 	return turn
 }
 
-func (b *codebuddyBackend) handleUser(msg codebuddySDKMessage, ch chan<- Message) bool {
+func (b *codebuddyBackend) handleUser(msg codebuddySDKMessage, ch chan<- Message) {
 	var content codebuddyMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
-		return false
+		return
 	}
 
-	sawAsyncLaunch := false
 	for _, block := range content.Content {
 		if block.Type == "tool_result" {
 			resultStr := ""
 			if block.Content != nil {
 				resultStr = string(block.Content)
-				// Same stream-json tool_result shape as Claude Code; reuse the
-				// shared detector so background Bash cannot silently "complete".
-				if claudeToolResultHasAsyncLaunch(block.Content) {
-					sawAsyncLaunch = true
-				}
 			}
 			trySend(ch, Message{
 				Type:   MessageToolResult,
@@ -446,7 +445,6 @@ func (b *codebuddyBackend) handleUser(msg codebuddySDKMessage, ch chan<- Message
 			})
 		}
 	}
-	return sawAsyncLaunch
 }
 
 func (b *codebuddyBackend) handleControlRequest(msg codebuddySDKMessage, stdin interface{ Write([]byte) (int, error) }) {
@@ -463,12 +461,10 @@ func (b *codebuddyBackend) handleControlRequest(msg codebuddySDKMessage, stdin i
 	if inputMap == nil {
 		inputMap = map[string]any{}
 	}
-	if forceClaudeToolInputForeground(inputMap) {
-		b.cfg.Logger.Info("codebuddy: forced foreground tool execution",
-			"request_id", msg.RequestID,
-			"tool", req.ToolName,
-		)
-	}
+	// Do not rewrite run_in_background here: under bypassPermissions most
+	// tools never emit control_request, and CodeBuddy does not use Claude's
+	// async_launched tool_result shape. Background work is disabled via
+	// CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS before tool execution.
 
 	response := map[string]any{
 		"type": "control_response",
@@ -522,19 +518,43 @@ func writeCodebuddyInput(w io.Writer, prompt string) error {
 	return nil
 }
 
-// codebuddyTerminalReasonFailure mirrors claudeTerminalReasonFailure for the
-// Claude-Code-fork stream-json contract: only prompt_too_long is treated as a
-// silent-success failure that must surface as an error (GH #6402 class).
-func codebuddyTerminalReasonFailure(terminalReason, resultText string) string {
-	if strings.TrimSpace(terminalReason) != taskfailure.TerminalReasonPromptTooLong {
-		return ""
+const codebuddyDisableBackgroundTasksEnv = "CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS"
+
+// buildCodebuddyEnv merges task env and always forces background tasks off.
+// Multica's adapter closes stdin after the first result; CodeBuddy's
+// background lifecycle can push task_notification after that point, which we
+// cannot observe. The official CLI documents this variable for exactly that
+// headless shape (https://www.codebuddy.ai/docs/cli/headless).
+func buildCodebuddyEnv(extra map[string]string) []string {
+	merged := make(map[string]string, len(extra)+1)
+	for k, v := range extra {
+		merged[k] = v
 	}
-	msg := "codebuddy ended the turn with terminal_reason=" + taskfailure.TerminalReasonPromptTooLong +
-		": the session's context window is exhausted and compaction could not recover it"
-	if detail := strings.TrimSpace(resultText); detail != "" {
-		msg += " (" + detail + ")"
+	merged[codebuddyDisableBackgroundTasksEnv] = "1"
+	env := buildEnv(merged)
+	// Unix getenv is first-wins; put our forced value first and drop any
+	// inherited / merged duplicates so a parent "=0" cannot outvote us.
+	out := make([]string, 0, len(env)+1)
+	out = append(out, codebuddyDisableBackgroundTasksEnv+"=1")
+	for _, entry := range env {
+		key, _, _ := strings.Cut(entry, "=")
+		if key == codebuddyDisableBackgroundTasksEnv {
+			continue
+		}
+		out = append(out, entry)
 	}
-	return msg
+	return out
+}
+
+// codebuddySystemIsBackgroundTask reports CodeBuddy's real background-task
+// system subtypes (not Claude's async_launched tool_result).
+func codebuddySystemIsBackgroundTask(subtype string) bool {
+	switch strings.TrimSpace(subtype) {
+	case "task_started", "task_progress", "task_updated", "task_notification":
+		return true
+	default:
+		return false
+	}
 }
 
 // ── Codebuddy SDK JSON types ──
@@ -546,17 +566,15 @@ type codebuddySDKMessage struct {
 	SessionID string          `json:"session_id,omitempty"`
 	Model     string          `json:"model,omitempty"`
 
-	// result fields
-	ResultText string `json:"result,omitempty"`
-	IsError    bool   `json:"is_error,omitempty"`
-	// TerminalReason mirrors Claude Code's structured end-of-turn reason.
-	// CodeBuddy is a Claude Code fork and emits the same field; see
-	// codebuddyTerminalReasonFailure for the prompt_too_long mapping.
-	TerminalReason string                               `json:"terminal_reason,omitempty"`
-	DurationMs     float64                              `json:"duration_ms,omitempty"`
-	NumTurns       int                                  `json:"num_turns,omitempty"`
-	Usage          *codebuddyUsage                      `json:"usage,omitempty"`
-	ModelUsage     map[string]codebuddyResultModelUsage `json:"modelUsage,omitempty"`
+	// result fields — CodeBuddy failures use is_error + errors/errors_info;
+	// there is no Claude-style terminal_reason=prompt_too_long signal in the
+	// shipped @tencent-ai/codebuddy-code 2.150.0 protocol.
+	ResultText string                               `json:"result,omitempty"`
+	IsError    bool                                 `json:"is_error,omitempty"`
+	DurationMs float64                              `json:"duration_ms,omitempty"`
+	NumTurns   int                                  `json:"num_turns,omitempty"`
+	Usage      *codebuddyUsage                      `json:"usage,omitempty"`
+	ModelUsage map[string]codebuddyResultModelUsage `json:"modelUsage,omitempty"`
 
 	// log fields
 	Log *codebuddyLogEntry `json:"log,omitempty"`
