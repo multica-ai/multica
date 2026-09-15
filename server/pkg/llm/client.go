@@ -145,6 +145,13 @@ type Config struct {
 	// 6, so a budget larger than the caller's timeout only converts a
 	// recoverable failure into a deadline-exceeded one.
 	MaxRetries *RetryOverride
+	// DisableThinking, when true, adds
+	// {"chat_template_kwargs": {"enable_thinking": false}} to every Chat
+	// Completions request this client sends. Maps to
+	// MULTICA_LLM_DISABLE_THINKING. It is a request policy only: it never
+	// makes Enabled() report true (see the disabled-client invariant). Off by
+	// default, so standard OpenAI endpoints see byte-identical requests.
+	DisableThinking bool
 	// HTTPClient, when set, replaces the SDK's default transport. Primarily a
 	// test seam.
 	HTTPClient option.HTTPClient
@@ -215,10 +222,11 @@ type RetryBudget struct {
 // Client is a configured, reusable LLM caller. It is safe for concurrent use;
 // the underlying SDK client holds no per-request state.
 type Client struct {
-	sdk          openai.Client
-	defaultModel string
-	enabled      bool
-	retry        RetryBudget
+	sdk             openai.Client
+	defaultModel    string
+	enabled         bool
+	retry           RetryBudget
+	disableThinking bool
 }
 
 // New builds a Client from cfg. It never returns an error: an unconfigured
@@ -262,8 +270,11 @@ func New(cfg Config) *Client {
 		defaultModel: defaultModel,
 		// A deployment is "configured" if it gave us either a key or a base
 		// URL. A bare base URL (no key) is valid for keyless local gateways.
+		// DisableThinking deliberately plays no part here: it is a request
+		// policy, not a credential, so it must never enable the client.
 		enabled: strings.TrimSpace(cfg.APIKey) != "" || strings.TrimSpace(cfg.BaseURL) != "",
 		retry:   retry,
+		disableThinking: cfg.DisableThinking,
 	}
 }
 
@@ -275,6 +286,12 @@ func (c *Client) RetryBudget() RetryBudget {
 	}
 	return c.retry
 }
+
+// DisableThinking reports the effective thinking-disable policy, for
+// startup diagnostics. Read off the client, not off cfg, so the log line
+// cannot drift from what requests actually carry (same invariant as
+// RetryBudget).
+func (c *Client) DisableThinking() bool { return c != nil && c.disableThinking }
 
 // Enabled reports whether the client was given any credentials or base URL.
 // Handlers use this to short-circuit with a 503 before doing any work.
@@ -290,6 +307,35 @@ func (c *Client) applyDefaultModel(params *openai.ChatCompletionNewParams) {
 	}
 }
 
+// applyThinkingPolicy adds {"chat_template_kwargs": {"enable_thinking":
+// false}} to params when the client was built with DisableThinking. It uses
+// the pinned SDK's params.SetExtraFields API (present in v3.41.1) rather than
+// option.WithJSONSet, which has a body-update bug at this pin. Existing
+// unrelated extras and surviving chat_template_kwargs siblings are preserved;
+// only enable_thinking is overridden to false. Idempotent, so the
+// GenerateJSON compatibility loop (which re-calls Chat) is safe.
+func (c *Client) applyThinkingPolicy(params *openai.ChatCompletionNewParams) {
+	if !c.disableThinking {
+		return
+	}
+	// SetExtraFields replaces the whole extras map, so merge first: read the
+	// caller's current extras, then write back the union.
+	extras := params.ExtraFields()
+	merged := make(map[string]any, len(extras)+1)
+	for k, v := range extras {
+		merged[k] = v
+	}
+	kwargs := make(map[string]any)
+	if existing, ok := merged["chat_template_kwargs"].(map[string]any); ok {
+		for k, v := range existing {
+			kwargs[k] = v
+		}
+	}
+	kwargs["enable_thinking"] = false
+	merged["chat_template_kwargs"] = kwargs
+	params.SetExtraFields(merged)
+}
+
 // Chat performs a non-streaming chat completion. The params are passed through
 // to the SDK verbatim (so tools, response_format, temperature, etc. are all
 // honored); only the model default is applied. The returned *ChatCompletion
@@ -299,6 +345,7 @@ func (c *Client) Chat(ctx context.Context, params openai.ChatCompletionNewParams
 		return nil, ErrNotConfigured
 	}
 	c.applyDefaultModel(&params)
+	c.applyThinkingPolicy(&params)
 
 	// Give the request a bounded lifetime when the caller supplied none, so a
 	// hung upstream cannot pin a goroutine indefinitely.
@@ -323,6 +370,7 @@ func (c *Client) ChatStream(ctx context.Context, params openai.ChatCompletionNew
 		return nil, ErrNotConfigured
 	}
 	c.applyDefaultModel(&params)
+	c.applyThinkingPolicy(&params)
 	return c.sdk.Chat.Completions.NewStreaming(ctx, params), nil
 }
 
