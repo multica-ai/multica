@@ -39,9 +39,12 @@ Multica 当前会检测以下命令：
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 官方站](https://www.trae.cn/) |
+| WorkBuddy | — | [WorkBuddy](https://www.workbuddy.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/docs/cli) |
 
 "受支持"表示 Multica 能够调用对应 CLI，不代表 Multica 会替你提供该工具的账号、订阅或模型额度。
+
+WorkBuddy 无需单独安装：守护进程会检测 [WorkBuddy 桌面版](https://www.workbuddy.cn/) 内置的 CodeBuddy CLI。在所有平台上，内置 CLI 都通过 Node.js 运行时启动——WorkBuddy 会把运行时放在 `~/.workbuddy/binaries/node/versions/`，守护进程会选用最新的已安装版本（找不到时回退到 `PATH` 上的 `node`）。只需在 WorkBuddy 桌面版中登录一次——内置 CLI 共享其会话。如需用自己的 `codebuddy` 安装替代自动发现，可设置 `MULTICA_WORKBUDDY_PATH`。
 
 ## 2. 在本机完成登录
 
