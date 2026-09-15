@@ -832,6 +832,27 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"xhigh":   true,
 		"max":     true,
 	},
+	// Muse reasoning effort: none|minimal|low|medium|high|xhigh|max|ultra.
+	// This is a CLI-level flag, not a per-model one. Verified against
+	// `muse exec --help` on Muse Code 1.0.1, 1.0.2 and 1.0.3; 1.0.3 added
+	// `max`.
+	//
+	// `ultra` is accepted by the parser but gated per account. Where the gate
+	// is closed the CLI prints "reasoning effort ultra is not available (gate
+	// ultra_reasoning_effort is closed); using xhigh" on stderr and SILENTLY
+	// RUNS AT xhigh -- i.e. below `max`. Treat `max` as the effective ceiling
+	// unless the account is known to have the gate open; the interactive
+	// picker likewise stops at `max`.
+	"muse": {
+		"none":    true,
+		"minimal": true,
+		"low":     true,
+		"medium":  true,
+		"high":    true,
+		"xhigh":   true,
+		"max":     true,
+		"ultra":   true,
+	},
 }
 
 // thinkingDynamicCatalogProviders are the runtimes whose effort vocabulary is
