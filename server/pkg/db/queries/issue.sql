@@ -66,6 +66,14 @@ LIMIT $2 OFFSET $3;
 SELECT * FROM issue
 WHERE id = $1;
 
+-- name: CountIssuesInTriage :one
+-- How many of these issues are in Triage. The batch parent-write guard only
+-- needs "any", and a count keeps the check one round trip regardless of size.
+SELECT count(*) FROM issue
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND id = ANY(sqlc.arg('issue_ids')::uuid[])
+  AND triage_state IS NOT NULL;
+
 -- name: GetIssueTriageState :one
 -- Answers "is this issue in Triage" for the queue door, which runs immediately
 -- before an INSERT and must see the status its own transaction wrote. NULL is

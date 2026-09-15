@@ -146,6 +146,76 @@ func TestIssueInTriageAcceptsOrdinaryFieldWrites(t *testing.T) {
 	}
 }
 
+// The parent is the one field held back. A Triage child is never terminal, so
+// it would wedge stageBarrierClosed and land in ChildIssueProgress's
+// denominator — both reached through parent_issue_id, so the write is where it
+// has to be stopped.
+func TestIssueInTriageRefusesAParent(t *testing.T) {
+	seedTestCatalog(t)
+	issueID := triageIssueForTest(t, "must not become a child")
+	parentID := dbfx.Issue(t, "triage target parent")
+
+	update := func(body map[string]any) *testutil.Response {
+		return testutil.Call(t, testHandler.UpdateIssue, withURLParam(
+			newRequest(http.MethodPut, "/api/issues/"+issueID, body), "id", issueID))
+	}
+	// Both directions count as writing it: null clears, which is equally a
+	// parent decision the triager does not get to make.
+	for name, body := range map[string]map[string]any{
+		"set":                  {"parent_issue_id": parentID},
+		"clear":                {"parent_issue_id": nil},
+		"alongside a proposal": {"parent_issue_id": parentID, "priority": "high"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			wantErrorCode(t, update(body), "issue_in_triage")
+		})
+	}
+	var parentSet bool
+	var priority string
+	dbfx.QueryRow(t, `SELECT parent_issue_id IS NOT NULL, priority FROM issue WHERE id = $1`, issueID).Scan(&parentSet, &priority)
+	if parentSet {
+		t.Fatal("refused write still set a parent")
+	}
+	if priority == "high" {
+		t.Fatal("refused write applied the proposal it was carrying alongside")
+	}
+}
+
+// The batch is refused whole, before any write, rather than updating the rest
+// and skipping the Triage entry with a short count and no reason.
+func TestBatchUpdateRefusesAParentForIssuesInTriage(t *testing.T) {
+	seedTestCatalog(t)
+	triageID := triageIssueForTest(t, "batch triage member")
+	todoID := dbfx.Issue(t, "batch todo member")
+	parentID := dbfx.Issue(t, "batch target parent")
+
+	batch := func(updates map[string]any) *testutil.Response {
+		return testutil.Call(t, testHandler.BatchUpdateIssues, newRequest(http.MethodPatch,
+			"/api/issues/batch?workspace_id="+testWorkspaceID, map[string]any{
+				"issue_ids": []string{todoID, triageID},
+				"updates":   updates,
+			}))
+	}
+
+	wantErrorCode(t, batch(map[string]any{"parent_issue_id": parentID}), "issue_in_triage")
+	if n := dbfx.Count(t, `SELECT count(*) FROM issue WHERE id = $1 AND parent_issue_id IS NOT NULL`, todoID); n != 0 {
+		t.Error("refused batch still re-parented its other issue")
+	}
+
+	// Everything else in a batch still reaches a Triage entry: the lock is one
+	// field, not the whole row.
+	var out struct {
+		Updated int `json:"updated"`
+	}
+	batch(map[string]any{"priority": "urgent"}).Want(http.StatusOK).JSON(&out)
+	if out.Updated != 2 {
+		t.Errorf("priority batch updated %d issue(s), want 2", out.Updated)
+	}
+	if got := triageStateOf(t, triageID); got != "pending" {
+		t.Errorf("triage_state after priority batch = %q, want pending", got)
+	}
+}
+
 // An item waiting in Triage has not been taken on, so it must not block anyone
 // filing the same work by hand.
 func TestTriageIssueIsNotAnActiveDuplicate(t *testing.T) {

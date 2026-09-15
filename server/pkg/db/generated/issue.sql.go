@@ -175,6 +175,27 @@ func (q *Queries) CountIssues(ctx context.Context, arg CountIssuesParams) (int64
 	return count, err
 }
 
+const countIssuesInTriage = `-- name: CountIssuesInTriage :one
+SELECT count(*) FROM issue
+WHERE workspace_id = $1
+  AND id = ANY($2::uuid[])
+  AND triage_state IS NOT NULL
+`
+
+type CountIssuesInTriageParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	IssueIds    []pgtype.UUID `json:"issue_ids"`
+}
+
+// How many of these issues are in Triage. The batch parent-write guard only
+// needs "any", and a count keeps the check one round trip regardless of size.
+func (q *Queries) CountIssuesInTriage(ctx context.Context, arg CountIssuesInTriageParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countIssuesInTriage, arg.WorkspaceID, arg.IssueIds)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countIssuesUpTo = `-- name: CountIssuesUpTo :one
 SELECT COUNT(*)::bigint
 FROM (

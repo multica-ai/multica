@@ -3459,6 +3459,13 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
 
+	if prevIssue.TriageState.Valid {
+		if field := triageLockedField(rawFields); field != "" {
+			writeIssueInTriage(w, field)
+			return
+		}
+	}
+
 	// Pre-fill nullable fields (bare sqlc.narg) with current values
 	params := db.UpdateIssueParams{
 		ID:            prevIssue.ID,
@@ -4206,6 +4213,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
+	}
+	if !h.validateBatchTriageLocks(w, r, wsUUID, req.IssueIDs, rawUpdates) {
+		return
 	}
 	// The batch shares one project_id, so it is checked once here rather than
 	// per issue, and rejected instead of skipped like the per-item guards in
