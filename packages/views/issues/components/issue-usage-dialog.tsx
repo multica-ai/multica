@@ -12,6 +12,8 @@ import {
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { TaskUsageCoverage } from "../../common/task-usage-coverage";
+import { usageCoverage } from "../../common/usage-coverage";
 import { useT } from "../../i18n";
 import { formatDuration } from "../../agents/components/agent-activity-hover-content";
 import {
@@ -65,6 +67,7 @@ export function IssueUsageDialog({
     [tasks],
   );
   const unpricedCount = tasks.length - priced.length;
+  const limitedCount = priced.filter((task) => usageCoverage(task.usage_sources) !== "all_agents").length;
 
   const total = useMemo(
     () => summarizeTaskUsageAcross(priced.map((task) => task.usage)),
@@ -156,6 +159,9 @@ export function IssueUsageDialog({
             <RunTable tasks={priced} total={total} />
 
             <div className="space-y-1 text-micro text-muted-foreground">
+              {limitedCount > 0 && (
+                <p>{t(($) => $.usage_coverage.total_detail)}</p>
+              )}
               {unpricedCount > 0 && (
                 <p>{t(($) => $.usage_detail.note_unpriced, { count: unpricedCount })}</p>
               )}
@@ -386,7 +392,12 @@ function RunRow({ task, maxTokens }: { task: AgentTask; maxTokens: number }) {
           </span>
         </div>
       </td>
-      <td className="!pr-0 font-medium">{formatUsd(summary.cost)}</td>
+      <td className="!pr-0 font-medium">
+        <div className="flex flex-col items-end gap-1">
+          <span>{formatUsd(summary.cost)}</span>
+          <TaskUsageCoverage task={task} />
+        </div>
+      </td>
     </tr>
   );
 }

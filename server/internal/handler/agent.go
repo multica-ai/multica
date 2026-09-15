@@ -540,6 +540,8 @@ type AgentTaskResponse struct {
 	// model call, genuinely has no number, and showing 0 would assert it was
 	// free. omitempty keeps both off the wire.
 	Usage []TaskUsageData `json:"usage,omitempty"`
+	// Run-level sources include attempts with no per-model usage row.
+	UsageSources []string `json:"usage_sources,omitempty"`
 	// AuthToken is the task-scoped `mat_` token the daemon must inject as
 	// MULTICA_TOKEN in the agent process environment. The server binds it to
 	// this (agent_id, task_id) pair at claim time and treats any request
@@ -809,6 +811,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		handoffNote = t.HandoffNote.String
 	}
 	return AgentTaskResponse{
+		UsageSources: t.UsageSources,
 		// Task-scoped provenance must not transfer through copied retry context.
 		CancelledByCommentChange: t.Status == "cancelled" && cancellation.TaskID != "" && cancellation.TaskID == uuidToString(t.ID),
 		CancelledBy:              taskCancellationActorToResponse(t),

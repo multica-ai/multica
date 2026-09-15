@@ -48,6 +48,11 @@ omit response IDs retain best-effort per-event input/cache accounting. These
 fallback figures can be incomplete; use the provider's billing records for
 actual charges. This correction applies to new runs, not historical usage rows.
 
+The execution log, transcript, and issue usage breakdown show each run's
+accounting scope. A successful retry can still have partial usage from an earlier
+attempt. Unknown coverage or unavailable statistics do not establish zero spend.
+Runtime/dashboard totals do not yet show these coverage limits.
+
 `runtime update` and `runtime delete` are writes. Starting a runtime update is
 limited to its owner or a workspace owner/admin; the original initiator may keep
 polling that specific in-flight request if their admin role changes.

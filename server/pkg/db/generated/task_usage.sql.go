@@ -11,6 +11,16 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteTaskUsage = `-- name: DeleteTaskUsage :exec
+DELETE FROM task_usage WHERE task_id = $1
+`
+
+// Provenance-aware reports replace one run's accounting snapshot atomically.
+func (q *Queries) DeleteTaskUsage(ctx context.Context, taskID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteTaskUsage, taskID)
+	return err
+}
+
 const getIssueUsageSummary = `-- name: GetIssueUsageSummary :one
 WITH usage AS (
     SELECT
@@ -767,6 +777,20 @@ func (q *Queries) ListIssueTaskUsage(ctx context.Context, issueID pgtype.UUID) (
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateTaskUsageSources = `-- name: UpdateTaskUsageSources :exec
+UPDATE agent_task_queue SET usage_sources = $2 WHERE id = $1
+`
+
+type UpdateTaskUsageSourcesParams struct {
+	ID           pgtype.UUID `json:"id"`
+	UsageSources []string    `json:"usage_sources"`
+}
+
+func (q *Queries) UpdateTaskUsageSources(ctx context.Context, arg UpdateTaskUsageSourcesParams) error {
+	_, err := q.db.Exec(ctx, updateTaskUsageSources, arg.ID, arg.UsageSources)
+	return err
 }
 
 const upsertTaskUsage = `-- name: UpsertTaskUsage :exec

@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -5824,8 +5825,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// goroutine. Both claude.go and codex.go populate result.Usage even when
 	// runCtx is cancelled, so dropping this on the cancelled path silently
 	// under-reports billing.
-	if len(result.Usage) > 0 {
-		if usageErr := d.client.ReportTaskUsage(ctx, task.ID, result.Usage); usageErr != nil {
+	if len(result.Usage) > 0 || len(result.UsageSources) > 0 {
+		if usageErr := d.client.ReportTaskUsage(ctx, task.ID, result.Usage, result.UsageSources); usageErr != nil {
 			taskLog.Warn("report task usage failed", "error", usageErr)
 		}
 	}
@@ -8765,6 +8766,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	)
 
 	// Convert agent usage map to task usage entries.
+	defer func() { taskResult.UsageSources = result.UsageSources }()
 	var usageEntries []TaskUsageEntry
 	for model, u := range result.Usage {
 		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
@@ -9132,6 +9134,12 @@ func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, too
 //
 // Usage is merged across both attempts in every branch so billing is complete.
 func reconcileFreshRetryResult(first agent.Result, firstUsage map[string]agent.TokenUsage, firstTools int32, retry agent.Result, retryTools int32, retryErr error) (agent.Result, int32) {
+	if retryErr == nil {
+		// The last attempt's final totals cannot recover missing counters from
+		// an earlier attempt. Keep both sources even when the retry succeeds.
+		sources := mergeUsageSources(first.UsageSources, retry.UsageSources)
+		first.UsageSources, retry.UsageSources = sources, sources
+	}
 	switch {
 	case retryErr != nil:
 		first.Usage = firstUsage
@@ -9798,6 +9806,27 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow ti
 			return
 		}
 	}
+}
+
+func mergeUsageSources(a, b []string) []string {
+	if len(a) == 0 && len(b) == 0 {
+		return nil
+	}
+	if len(a) == 0 {
+		a = []string{"unknown"}
+	}
+	if len(b) == 0 {
+		b = []string{"unknown"}
+	}
+	merged := make([]string, 0, len(a)+len(b))
+	for _, sources := range [][]string{a, b} {
+		for _, source := range sources {
+			if !slices.Contains(merged, source) {
+				merged = append(merged, source)
+			}
+		}
+	}
+	return merged
 }
 
 func mergeUsage(a, b map[string]agent.TokenUsage) map[string]agent.TokenUsage {

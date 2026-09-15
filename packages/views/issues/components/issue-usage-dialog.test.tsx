@@ -56,6 +56,15 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("IssueUsageDialog", () => {
+  // The source/retry matrix lives in common/usage-coverage.test.ts. This
+  // regression keeps successful partial runs visibly qualified in the table.
+  it("qualifies a successful run's partial counters and the issue total", () => {
+    open([makeTask({ status: "completed", usage_sources: ["assistant_fallback", "final_model_usage"], usage: [usage({ output_tokens: 0 })] })]);
+    expect(screen.getByText("Partial usage")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Partial usage:.*Output or subagent usage may be missing/)).toBeInTheDocument();
+    expect(screen.getByText(/Some runs have limited or unknown usage coverage/)).toBeInTheDocument();
+  });
+
   it("floors the cache hit rate instead of rounding it up to 100%", () => {
     // 99.55% — rounding would print "100% hit rate" and claim every token came
     // from cache on an issue that plainly read some fresh input.

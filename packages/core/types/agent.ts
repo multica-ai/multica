@@ -432,6 +432,11 @@ export interface AgentTask {
    * reporting was not free, we just don't know what it cost.
    */
   usage?: TaskUsage[];
+  /** Accounting sources across this run's attempts; absent/empty means unknown.
+   * `none` is an explicit report without usable counters, never proof of zero
+   * consumption. Unknown future strings must remain unknown in older clients.
+   */
+  usage_sources?: string[];
 }
 
 /**

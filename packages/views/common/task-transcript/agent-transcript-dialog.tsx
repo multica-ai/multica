@@ -97,6 +97,7 @@ import {
 } from "./detail-surfaces";
 import { languageForPath } from "./diff-highlight";
 import { useLocale, useT } from "../../i18n";
+import { TaskUsageCoverage } from "../task-usage-coverage";
 import {
   formatTokens,
   formatUsd,
@@ -936,6 +937,8 @@ export function AgentTranscriptDialog({
                 <span className="text-muted-foreground">{formatUsd(usage.cost)}</span>
               </span>
             )}
+
+            <TaskUsageCoverage task={task} />
 
             <div className="flex shrink-0 items-center gap-0.5">
               {hasRunDetails && (

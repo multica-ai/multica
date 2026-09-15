@@ -554,12 +554,13 @@ func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, s
 	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), body, nil, defaultTerminalRetrySchedule)
 }
 
-func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []TaskUsageEntry) error {
-	if len(usage) == 0 {
+func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []TaskUsageEntry, sources []string) error {
+	if len(usage) == 0 && len(sources) == 0 {
 		return nil
 	}
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/usage", taskID), map[string]any{
-		"usage": usage,
+		"usage":         usage,
+		"usage_sources": sources,
 	}, nil)
 }
 

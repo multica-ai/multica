@@ -1,3 +1,10 @@
+-- name: UpdateTaskUsageSources :exec
+UPDATE agent_task_queue SET usage_sources = $2 WHERE id = $1;
+
+-- name: DeleteTaskUsage :exec
+-- Provenance-aware reports replace one run's accounting snapshot atomically.
+DELETE FROM task_usage WHERE task_id = $1;
+
 -- name: UpsertTaskUsage :exec
 -- Bumps `updated_at` on INSERT and on conflict so the hourly-rollup worker
 -- detects the row as dirty and re-aggregates its bucket.

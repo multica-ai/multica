@@ -307,6 +307,7 @@ type TaskResult struct {
 	// precisely when the abandoned id would otherwise stay selectable.
 	RetiredSessionID string           `json:"-"`
 	Usage            []TaskUsageEntry `json:"usage,omitempty"` // per-model token usage
+	UsageSources     []string         `json:"usage_sources,omitempty"`
 }
 
 // PluginHookTool is one agent-trigger plugin hook, as the agent will see it.

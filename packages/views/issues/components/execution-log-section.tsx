@@ -28,6 +28,7 @@ import {
 } from "../../runtimes/utils";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { IssueUsageDialog } from "./issue-usage-dialog";
+import { TaskUsageCoverage } from "../../common/task-usage-coverage";
 import { TaskStatusIcon } from "./task-status-icon";
 import { useStatusLabel, useTriggerText } from "./task-run-labels";
 
@@ -516,6 +517,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
         ) : (
           <span className="text-faint-foreground">—</span>
         )}
+        <TaskUsageCoverage task={task} compact />
       </RowStatus>
       <RowActions>
         <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
