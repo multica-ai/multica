@@ -110,8 +110,10 @@ var delegatedAlwaysNotifTypes = map[string]bool{
 // in_progress synonym now notifies where it did not — an accepted cost, since a
 // missed handoff strands the issue while a spare inbox row costs one dismissal.
 //
-// Triage resolves to its own category and is not a handoff: intake nobody has
-// accepted is not work anybody is waiting on.
+// Triage never reaches this predicate: it is not a status but a column of its
+// own (MUL-7213), so an entry waiting in Triage carries whatever status the
+// triager has proposed and is answered on that. Suppressing notifications for
+// Triage entries is a separate rule and belongs to MUL-7219.
 //
 // The error is preserved rather than swallowed so each caller can choose its
 // own failure direction; built-ins answer without touching the catalog, so only

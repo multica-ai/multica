@@ -544,10 +544,6 @@ func TestIssueStatusIsHandoff(t *testing.T) {
 		{"custom started is a review gate", custom("awaiting_response", issuestatus.CategoryStarted), true},
 		{"custom done is terminal", custom("shipped", issuestatus.CategoryDone), true},
 		{"custom closed is terminal", custom("wont_do", issuestatus.CategoryClosed), true},
-
-		// Reserved intake key: its own category, and nobody is waiting on an
-		// issue that has not been accepted yet.
-		{"triage is not a handoff", issuestatus.Triage, false},
 	}
 
 	for _, tc := range cases {
