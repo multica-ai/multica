@@ -540,7 +540,7 @@ func renderDingTalkQuotedMessage(replied *botCallbackRepliedMessage) (string, []
 
 	switch msgType {
 	case "text":
-		appendText(replied.Content.Text)
+		appendText(dingTalkReadableQuotedText(replied.Content.Text))
 	case "interactiveCard":
 		quotedBody := renderDingTalkQuotedCard(replied.Content.CardContent)
 		appendText(quotedBody)
@@ -563,7 +563,7 @@ func renderDingTalkQuotedMessage(replied *botCallbackRepliedMessage) (string, []
 		}
 	case "audio":
 		if recognition := strings.TrimSpace(replied.Content.Recognition); recognition != "" {
-			appendText(recognition)
+			appendText(dingTalkReadableQuotedText(recognition))
 		} else {
 			appendText("[Audio message]")
 		}
@@ -577,7 +577,6 @@ func renderDingTalkQuotedMessage(replied *botCallbackRepliedMessage) (string, []
 	if quotedBody == "" {
 		quotedBody = "[quoted content unavailable]"
 	}
-	quotedBody = escapeDingTalkQuotedHTML(quotedBody)
 	block := channel.FormatQuotedMessage(sender, quotedBody)
 	// The final Markdown is the media-position authority. Formatting only adds
 	// an author prefix and blockquote markers, so account for any placeholders
@@ -610,7 +609,7 @@ func renderDingTalkQuotedRichText(content botCallbackRepliedContent, placeholder
 	}
 	markerCount := placeholderOffset
 	for _, item := range content.RichText {
-		text := item.Text
+		text := dingTalkReadableQuotedText(item.Text)
 		body.WriteString(text)
 		markerCount += strings.Count(text, dingtalkImagePlaceholder)
 		if item.Type != "picture" && item.DownloadCode == "" && item.PictureDownloadCode == "" {
@@ -672,6 +671,21 @@ func normalizeDingTalkRichTextControlLayout(msg *channel.InboundMessage, items [
 		}
 	}
 	msg.Text = strings.TrimSpace(visible.String())
+}
+
+// dingTalkReadableQuotedText defines a conservative projection policy, not an
+// opaque-envelope decoder. The public sample in
+// https://github.com/open-dingtalk/dingtalk-stream-sdk-go/issues/22 contains ||,
+// but does not establish lengths, alphabets, versions, or trailer field counts.
+// Selected text containing that ambiguous separator is therefore unavailable,
+// including legitimate quoted code/prose containing ||. Current input is never
+// filtered. Apply this only to provider text values, not rendered quote blocks,
+// so a fallback cannot discard generated image markers and their media slots.
+func dingTalkReadableQuotedText(value string) string {
+	if strings.Contains(value, "||") {
+		return "[quoted content unavailable]"
+	}
+	return value
 }
 
 // normalizeDingTalkRichTextBotMention removes the bot-addressing envelope from

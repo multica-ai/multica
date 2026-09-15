@@ -85,7 +85,7 @@ type replyMarkdownChunk struct{ text, title string }
 func replyMarkdownChunks(text, quote string) ([]replyMarkdownChunk, error) {
 	for budget := markdownByteBudget; budget >= 512; budget /= 2 {
 		chunks := replyMarkdownChunksWithBudget(text, quote, budget)
-		fits := len(chunks) > 0
+		fits := true
 		for _, chunk := range chunks {
 			payload, err := json.Marshal(markdownParam{Title: chunk.title, Text: chunk.text})
 			if err != nil {

@@ -3,6 +3,7 @@ package dingtalk
 import (
 	"encoding/json"
 	"strings"
+	"unicode"
 )
 
 // Project the observed rendered-card snapshot, not a template's cardParamMap.
@@ -10,6 +11,9 @@ import (
 // group snapshots put source attribution and layout there. We deliberately do
 // not decode their serialized values. Unsupported non-UNKNOWN nodes still mark
 // missing content. TEXT nodes are inline runs, not necessarily paragraphs.
+// The public robot message-type list is not a card-node schema. This projection
+// covers observed RICHTEXT children: TEXT prose, LINK destination strings, IMAGE
+// placeholders, and UNKNOWN layout/source data. Do not infer other node shapes.
 func renderDingTalkQuotedCard(data json.RawMessage) string {
 	const unavailable = "[quoted content unavailable]"
 	var blocks []json.RawMessage
@@ -53,11 +57,22 @@ func renderDingTalkQuotedCard(data json.RawMessage) string {
 			}
 			blockStarted = true
 			switch node.ElementType {
-			case "TEXT":
+			case "TEXT", "LINK":
 				var value string
 				if len(node.Value) == 0 || string(node.Value) == "null" || json.Unmarshal(node.Value, &value) != nil {
 					missing()
 					continue
+				}
+				if node.ElementType == "LINK" {
+					if strings.TrimSpace(value) == "" {
+						missing()
+						continue
+					}
+					// Keep the observed destination verbatim, separate from an
+					// adjacent run. A link label/URL object is not a known shape.
+					if body.Len() > 0 && len(strings.TrimRightFunc(body.String(), unicode.IsSpace)) == body.Len() {
+						appendText("\n")
+					}
 				}
 				// A URL at a run boundary must not absorb the following run into its
 				// destination. Other runs concatenate, preserving inline emphasis splits.

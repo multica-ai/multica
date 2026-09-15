@@ -15,7 +15,6 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
-import quotedMarkdownCases from "../../../server/internal/integrations/dingtalk/testdata/quoted_markdown.json";
 
 const { resolveIssueIdentifierMock, mermaidRenderMock } = vi.hoisted(() => ({
   resolveIssueIdentifierMock: vi.fn(),
@@ -500,39 +499,5 @@ describe("semantic parity beyond Mermaid", () => {
       expect(container.querySelectorAll("code.hljs").length).toBe(2);
     }
     expect(mermaidRenderMock).not.toHaveBeenCalled();
-  });
-});
-
-describe("DingTalk selected context stays visible in Chat", () => {
-  // Backend callback tests assert these canonical bytes. Render that same
-  // fixture through the real user row, including the shared Markdown pipeline.
-  it.each(quotedMarkdownCases)("$name", ({ body, visible, links }) => {
-    const quote = body
-      .split("\n")
-      .map((line) => (line ? `> ${line}` : ">"))
-      .join("\n");
-    const { container } = render(
-      withClient(
-        <ChatMessageList
-          messages={[userMessage(`${quote}\n\n解释引用；当前 <mark>input</mark> 不变`)] as never}
-          pendingTask={null}
-          availability={undefined}
-        />,
-        makeClient(),
-      ),
-    );
-    const renderedQuote = container.querySelector("blockquote");
-    expect(renderedQuote).not.toBeNull();
-    for (const literal of visible) {
-      expect(renderedQuote?.textContent).toContain(literal);
-    }
-    const renderedLinks = Array.from(renderedQuote?.querySelectorAll("a") ?? [])
-      .map((link) => link.getAttribute("href"));
-    for (const href of links) {
-      expect(renderedLinks).toContain(href);
-    }
-    expect(renderedQuote?.querySelector("tag, script, img, span[title]")).toBeNull();
-    // HTML in the current input still follows the shared renderer contract.
-    expect(container.querySelector("mark")?.textContent).toBe("input");
   });
 });

@@ -8,7 +8,7 @@ import (
 )
 
 // Sanitized real community DingTalk callback captured on 2026-09-14. UNKNOWN
-// nodes include serialized layout data; only RICHTEXT/TEXT is readable prose.
+// nodes include serialized layout data; the readable answer is carried by RICHTEXT children.
 func TestInboundQuotedCardObservedSnapshot(t *testing.T) {
 	wire, err := os.ReadFile("testdata/quoted_interactive_card.json")
 	if err != nil {
@@ -109,5 +109,52 @@ func TestInboundCardInlineAndMediaOrder(t *testing.T) {
 	raw, err := decodeDingTalkRaw(msg)
 	if err != nil || len(raw.Media) != 1 || raw.Media[0].Ref != "current-code" || raw.Media[0].InlineIndex != 2 {
 		t.Fatalf("media association lost: %+v (%v)", raw, err)
+	}
+}
+
+// Captured community callbacks retain LINK values even when the visible quote
+// preview is truncated. Source/layout values and sender identity are sanitized.
+func TestInboundQuotedCardCapturedLinks(t *testing.T) {
+	for _, kind := range []string{"private", "group"} {
+		t.Run(kind, func(t *testing.T) {
+			wire, err := os.ReadFile("testdata/quoted_card_link_" + kind + ".json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var cb botCallbackData
+			if err := json.Unmarshal(wire, &cb); err != nil {
+				t.Fatal(err)
+			}
+			msg, ok := inboundFromCallback(&cb, "app")
+			want := "> DingTalk quote testParagraph one: Apples are red.Paragraph two: Bananas are yellow. Marker: QUOTE-CONTEXT-7429.Literal HTML: keep this visible Literal operators: primary || fallback Escaped entity: <already-escaped>Link: https://example.com/a_(b)?x=a_b+c&y=2#part_2\n> const selected = primary || fallback;\n> const html = \"<span>keep me</span>\";\n> console.log(selected, html);\n> Paragraph three: Cherries are sweet.\n\nQUOTE-CAPTURE-7429"
+			if !ok || msg.Text != want {
+				t.Fatalf("got %q (ok=%v), want %q", msg.Text, ok, want)
+			}
+			if msg.CommandText != "QUOTE-CAPTURE-7429" || msg.ForceFresh || !msg.HasSelectedContext {
+				t.Fatalf("routing changed: %+v", msg)
+			}
+		})
+	}
+}
+
+func TestQuotedCardNodeContract(t *testing.T) {
+	for _, tc := range []struct{ name, children, want string }{
+		{"link", `{"elementType":"LINK","value":"https://example.com/a_(b)?x=a_b+c&y=2#part_2"}`, "https://example.com/a_(b)?x=a_b+c&y=2#part_2"},
+		{"mixed order", `{"elementType":"TEXT","value":"before"},{"elementType":"LINK","value":"https://example.com/one"},{"elementType":"LINK","value":"https://example.com/two"},{"elementType":"IMAGE"},{"elementType":"UNKNOWN","value":"layout"},{"elementType":"TEXT","value":"after"}`, "before\nhttps://example.com/one\nhttps://example.com/two\n[Image]\nafter"},
+		{"label and suffix", `{"elementType":"TEXT","value":"Link: "},{"elementType":"LINK","value":"https://example.com/a"},{"elementType":"TEXT","value":"suffix"}`, "Link: https://example.com/a\nsuffix"},
+		{"missing link", `{"elementType":"LINK"}`, "[quoted content unavailable]"},
+		{"null link", `{"elementType":"LINK","value":null}`, "[quoted content unavailable]"},
+		{"object link", `{"elementType":"LINK","value":{"url":"https://example.com"}}`, "[quoted content unavailable]"},
+		{"numeric link", `{"elementType":"LINK","value":42}`, "[quoted content unavailable]"},
+		{"empty link", `{"elementType":"LINK","value":""}`, "[quoted content unavailable]"},
+		{"blank link", `{"elementType":"LINK","value":"  "}`, "[quoted content unavailable]"},
+		{"future node", `{"elementType":"FUTURE_NODE","value":"do not guess"},{"elementType":"TEXT","value":"after"}`, "[quoted content unavailable]\nafter"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			card := json.RawMessage(`[{"elementType":"RICHTEXT","children":[` + tc.children + `]}]`)
+			if got := renderDingTalkQuotedCard(card); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
