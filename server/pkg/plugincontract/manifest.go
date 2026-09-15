@@ -99,6 +99,11 @@ const (
 	ScopeMembersRead      = "members:read"
 	ScopeStorageUser      = "storage:user"
 	ScopeStorageWorkspace = "storage:workspace"
+	// ScopeChannelsSend lets a plugin message a workspace member over a chat
+	// channel (Telegram, Slack, …) the member has linked to the workspace. The
+	// host resolves the binding and speaks to the platform; the plugin never
+	// sees a bot token or the member's platform identity.
+	ScopeChannelsSend = "channels:send"
 
 	// ScopeNetPrefix guards outbound network access: both the iframe CSP
 	// connect-src allowlist and the hook transport host check derive from it.
@@ -127,6 +132,7 @@ var fixedScopes = map[string]bool{
 	ScopeMembersRead:      true,
 	ScopeStorageUser:      true,
 	ScopeStorageWorkspace: true,
+	ScopeChannelsSend:     true,
 }
 
 func hasScope(scopes []string, want string) bool {

@@ -109,6 +109,7 @@ func registerPluginActionRoutes(r chi.Router, h *handler.Handler) {
 	r.Get(publicapiv1.PathStorageValue, h.GetPluginStorage)
 	r.Put(publicapiv1.PathStorageValue, h.PutPluginStorage)
 	r.Delete(publicapiv1.PathStorageValue, h.DeletePluginStorage)
+	r.Post(publicapiv1.PathChannelSend, h.SendPluginChannelMessage)
 }
 
 func allowedOrigins() []string {
@@ -520,6 +521,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// connection of its own outside the per-installation supervisor. The Router
 	// is the single shared inbound handler injected into every Channel.
 	channelRegistry := channel.NewRegistry()
+	h.ChannelRegistry = channelRegistry
 	channelRouter := engine.NewRouter(h.IssueService, h.TaskService, queries, engine.RouterConfig{
 		Logger: slog.Default(), Lifecycle: h,
 	})
