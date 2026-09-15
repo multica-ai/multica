@@ -247,6 +247,7 @@ type qwenStreamEvent struct {
 }
 
 type qwenMessage struct {
+	ID      string             `json:"id,omitempty"`
 	Model   string             `json:"model,omitempty"`
 	Content []qwenContentBlock `json:"content"`
 	Usage   *qwenUsage         `json:"usage,omitempty"`
@@ -273,6 +274,10 @@ type qwenStreamState struct {
 	sessionID, model, lastAssistantText, finalResultText, lastEventType string
 	sawResult, resultIsError                                            bool
 	usage                                                               map[string]TokenUsage
+	fallbackUsage                                                       map[string]TokenUsage
+	seenUsageMessageIDs                                                 map[string]struct{}
+	anonymousUsage                                                      map[string]TokenUsage
+	hasResultUsage                                                      bool
 	eventCount, invalidEventCount, assistantEventCount, toolUseCount    int
 	unreadableAssistantCount                                            int
 }
@@ -289,7 +294,7 @@ func handleQwenEvent(event qwenStreamEvent, ch chan<- Message, state *qwenStream
 		trySend(ch, Message{Type: MessageStatus, Status: "running", SessionID: state.sessionID})
 	case "assistant":
 		state.assistantEventCount++
-		turn, model := handleQwenAssistant(event.Message, ch, state.usage)
+		turn, model := handleQwenAssistant(event.Message, ch, state)
 		if model != "" {
 			state.model = model
 		}
@@ -312,6 +317,7 @@ func handleQwenEvent(event qwenStreamEvent, ch chan<- Message, state *qwenStream
 		}
 		if usage := qwenResultUsage(event.Usage, state.model); len(usage) > 0 {
 			state.usage = usage
+			state.hasResultUsage = true
 		}
 	case "error":
 		// Be fail-closed if a later Qwen release emits a terminal error event.
@@ -321,7 +327,7 @@ func handleQwenEvent(event qwenStreamEvent, ch chan<- Message, state *qwenStream
 	}
 }
 
-func handleQwenAssistant(raw json.RawMessage, ch chan<- Message, usage map[string]TokenUsage) (assistantTurn, string) {
+func handleQwenAssistant(raw json.RawMessage, ch chan<- Message, state *qwenStreamState) (assistantTurn, string) {
 	var message qwenMessage
 	if json.Unmarshal(raw, &message) != nil {
 		// Unreadable body: understood stays false so the caller drops any
@@ -330,7 +336,7 @@ func handleQwenAssistant(raw json.RawMessage, ch chan<- Message, usage map[strin
 	}
 	turn := assistantTurn{understood: true}
 	if message.Usage != nil && message.Model != "" {
-		usage[message.Model] = qwenTokenUsage(message.Usage)
+		state.accumulateAssistantUsage(message)
 	}
 	var text strings.Builder
 	tools := 0
@@ -363,6 +369,39 @@ func handleQwenAssistant(raw json.RawMessage, ch chan<- Message, usage map[strin
 	turn.text = text.String()
 	turn.toolUses = tools
 	return turn, message.Model
+}
+
+func (s *qwenStreamState) accumulateAssistantUsage(message qwenMessage) {
+	if s.fallbackUsage == nil {
+		s.fallbackUsage = make(map[string]TokenUsage)
+		s.seenUsageMessageIDs = make(map[string]struct{})
+		s.anonymousUsage = make(map[string]TokenUsage)
+	}
+	current := qwenTokenUsage(message.Usage)
+	var previous TokenUsage
+	if message.ID != "" {
+		// Qwen emits full assistant messages at finalization. Count the first
+		// non-empty snapshot once by ID, keeping its counters and model together.
+		if current.InputTokens == 0 && current.OutputTokens == 0 && current.CacheReadTokens == 0 {
+			return
+		}
+		if _, seen := s.seenUsageMessageIDs[message.ID]; seen {
+			return
+		}
+		s.seenUsageMessageIDs[message.ID] = struct{}{}
+	} else {
+		// Without an ID, preserve the existing latest-per-model best effort.
+		previous = s.anonymousUsage[message.Model]
+		s.anonymousUsage[message.Model] = current
+	}
+	total := s.fallbackUsage[message.Model]
+	total.InputTokens += current.InputTokens - previous.InputTokens
+	total.OutputTokens += current.OutputTokens - previous.OutputTokens
+	total.CacheReadTokens += current.CacheReadTokens - previous.CacheReadTokens
+	s.fallbackUsage[message.Model] = total
+	if !s.hasResultUsage {
+		s.usage = s.fallbackUsage
+	}
 }
 
 func handleQwenUser(raw json.RawMessage, ch chan<- Message) {

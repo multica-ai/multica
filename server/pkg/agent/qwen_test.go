@@ -85,6 +85,11 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 case "$QWEN_MODE" in
+  usage-fallback)
+    printf '%s\n' '{"type":"assistant","message":{"id":"message-1","model":"qwen-test","content":[{"type":"text","text":"first"}],"usage":{"input_tokens":100,"output_tokens":50}}}'
+    printf '%s\n' '{"type":"assistant","message":{"id":"message-2","model":"qwen-test","content":[{"type":"text","text":"second"}],"usage":{"input_tokens":200,"output_tokens":20}}}'
+    exit 7
+    ;;
   error)
     printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-error","model":"qwen-test"}'
     printf '%s\n' '{"type":"result","subtype":"error_during_execution","session_id":"sess-error","is_error":true,"error":{"type":"authentication_error","message":"synthetic Qwen authentication failure"}}'
