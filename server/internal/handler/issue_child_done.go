@@ -705,10 +705,12 @@ func sanitizeMentionLabel(name string) string {
 //     parent silently stalled in in_progress (MUL-3969). The squad path now
 //     mirrors the agent path (MUL-2808): always dispatch, bounded only by
 //     idempotency.
-//   - Idempotency: HasPendingTaskForIssueAndAgent dedupes rapid-fire enqueues
-//     for the same parent (e.g. two children finishing back-to-back). It also
-//     bounds any re-trigger, since a leader waking on the parent does not by
-//     itself push a child back into a terminal transition.
+//   - Idempotency is scoped to the system comment's thread, matching the
+//     pending-task unique index. An unrelated assignment or comment run has
+//     not received this signal and must not suppress its wake. Distinct
+//     notifications queue independently but still execute serially for the
+//     same (parent, agent). A leader waking on the parent does not by itself
+//     push a child back into a terminal transition.
 //   - Readiness: archived agents / missing runtimes are silently skipped
 //     so a closed-out agent does not surface as a phantom assignee.
 func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent db.Issue, systemComment db.Comment) {
@@ -727,16 +729,15 @@ func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent db.I
 // triggerChildDoneAgent enqueues a mention-style task for the parent's
 // agent assignee.
 //
-// There is intentionally NO same-agent self-trigger guard here, unlike the
-// squad path. Waking the parent agent when one of its children finishes is a
-// serial sub-task handoff between two DIFFERENT issues, which the platform
+// There is intentionally NO same-agent self-trigger guard here. Waking the
+// parent agent when one of its children finishes is a serial sub-task handoff
+// between two DIFFERENT issues, which the platform
 // loop model treats as legitimate ("not a loop and must fire" — see
 // isAgentRunningOnIssue); only re-entering the SAME issue is a loop. A lone
 // agent that decomposes its parent into sub-issues it owns itself has no
 // other wake path, so the old "child owner == parent agent" guard silently
-// stranded those parents (MUL-2808). Runaway re-triggering is prevented by
-// the HasPendingTaskForIssueAndAgent dedup below, exactly as the @mention
-// self-trigger path relies on it (see computeMentionedAgentCommentTriggers).
+// stranded those parents (MUL-2808). Pending re-dispatch of the same system
+// comment is deduplicated below; unrelated pending work cannot cover it.
 func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, triggerCommentID pgtype.UUID) {
 	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
 		ID:          parent.AssigneeID,
@@ -746,9 +747,10 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, tr
 		return
 	}
 
-	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
-		IssueID: parent.ID,
-		AgentID: parent.AssigneeID,
+	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgentInThread(ctx, db.HasPendingTaskForIssueAndAgentInThreadParams{
+		IssueID:         parent.ID,
+		AgentID:         parent.AssigneeID,
+		ThreadCommentID: triggerCommentID,
 		// Key dedup on the reviewed head (TEN-356).
 		HeadSha: h.TaskService.ResolveIssueReviewSHAParam(ctx, parent.ID),
 	})
@@ -787,8 +789,8 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, tr
 //     child-done follow one path; if invocation permission is ever reintroduced
 //     it must be added to BOTH paths together.
 //
-// Re-triggering is bounded by the HasPendingTaskForIssueAndAgent idempotency
-// check below, exactly as the agent path relies on it.
+// Pending re-dispatch is deduplicated within the system comment's thread,
+// exactly as on the agent path.
 func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, triggerCommentID pgtype.UUID) {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          parent.AssigneeID,
@@ -803,9 +805,10 @@ func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, tr
 		return
 	}
 
-	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
-		IssueID: parent.ID,
-		AgentID: squad.LeaderID,
+	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgentInThread(ctx, db.HasPendingTaskForIssueAndAgentInThreadParams{
+		IssueID:         parent.ID,
+		AgentID:         squad.LeaderID,
+		ThreadCommentID: triggerCommentID,
 		// Key dedup on the reviewed head (TEN-356).
 		HeadSha: h.TaskService.ResolveIssueReviewSHAParam(ctx, parent.ID),
 	})
