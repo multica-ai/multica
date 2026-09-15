@@ -139,6 +139,24 @@ describe("useIssueDetailScrollRestore", () => {
     expect(scroller.scrollTop).toBe(640);
   });
 
+  it("does not pull an unseen issue back to top after the user scrolls while it loads", () => {
+    const issue = nextKey("issue");
+
+    const { getByTestId, rerender } = render(
+      <Harness restoreKey={issue} ready={false} />,
+    );
+    const scroller = getByTestId("scroller") as HTMLElement;
+
+    expect(scroller.scrollTop).toBe(0);
+    fireEvent.wheel(scroller);
+    setScroll(scroller, 360);
+
+    rerender(<Harness restoreKey={issue} ready />);
+    flushNextAnimationFrame();
+
+    expect(scroller.scrollTop).toBe(360);
+  });
+
   it("does not save a new issue scroll position before that issue is ready", () => {
     const issueA = nextKey("issue-a");
     const issueB = nextKey("issue-b");
