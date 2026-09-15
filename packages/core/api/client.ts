@@ -290,6 +290,7 @@ import {
   EMPTY_SQUAD_MEMBER_STATUS_LIST,
   EMPTY_TIMELINE_ENTRIES,
   EMPTY_USER,
+  LoginResponseSchema,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
   AppConfigSchema,
@@ -797,17 +798,48 @@ export class ApiClient {
   }
 
   async verifyCode(email: string, code: string): Promise<LoginResponse> {
-    return this.fetch("/auth/verify-code", {
+    const raw = await this.fetch<unknown>("/auth/verify-code", {
       method: "POST",
       body: JSON.stringify({ email, code }),
     });
+    const response = parseWithFallback<LoginResponse | null>(
+      raw,
+      LoginResponseSchema,
+      null,
+      { endpoint: "POST /auth/verify-code" },
+    );
+    if (!response) throw new Error("Invalid verify-code response");
+    return response;
   }
 
   async googleLogin(code: string, redirectUri: string): Promise<LoginResponse> {
-    return this.fetch("/auth/google", {
+    const raw = await this.fetch<unknown>("/auth/google", {
       method: "POST",
       body: JSON.stringify({ code, redirect_uri: redirectUri }),
     });
+    const response = parseWithFallback<LoginResponse | null>(
+      raw,
+      LoginResponseSchema,
+      null,
+      { endpoint: "POST /auth/google" },
+    );
+    if (!response) throw new Error("Invalid Google login response");
+    return response;
+  }
+
+  async giteaLogin(code: string, state: string): Promise<LoginResponse> {
+    const raw = await this.fetch<unknown>("/auth/gitea", {
+      method: "POST",
+      body: JSON.stringify({ code, state }),
+    });
+    const response = parseWithFallback<LoginResponse | null>(
+      raw,
+      LoginResponseSchema,
+      null,
+      { endpoint: "POST /auth/gitea" },
+    );
+    if (!response) throw new Error("Invalid Gitea login response");
+    return response;
   }
 
   async logout(): Promise<void> {

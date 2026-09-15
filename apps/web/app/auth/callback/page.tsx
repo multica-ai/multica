@@ -8,7 +8,11 @@ import { workspaceKeys } from "@multica/core/workspace/queries";
 import { paths, resolvePostAuthDestination } from "@multica/core/paths";
 import { api } from "@multica/core/api";
 import { createLogger } from "@multica/core/logger";
-import { validateCliCallback, redirectToCliCallback } from "@multica/views/auth";
+import {
+  validateCliCallback,
+  redirectToCliCallback,
+  decodeGiteaOAuthState,
+} from "@multica/views/auth";
 import {
   Card,
   CardHeader,
@@ -29,6 +33,7 @@ function CallbackContent() {
   const searchParams = useSearchParams();
   const qc = useQueryClient();
   const loginWithGoogle = useAuthStore((s) => s.loginWithGoogle);
+  const loginWithGitea = useAuthStore((s) => s.loginWithGitea);
   const [error, setError] = useState<CallbackError | null>(null);
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
 
@@ -36,7 +41,7 @@ function CallbackContent() {
     const code = searchParams.get("code");
     const errorParam = searchParams.get("error");
     if (errorParam) {
-      authLogger.warn("Google OAuth returned an error parameter", errorParam);
+      authLogger.warn("OAuth provider returned an error parameter", errorParam);
       setError(
         errorParam === "access_denied"
           ? { kind: "access_denied" }
@@ -51,7 +56,10 @@ function CallbackContent() {
     }
 
     const state = searchParams.get("state") || "";
-    const stateParts = state.split(",");
+    const giteaState = decodeGiteaOAuthState(state);
+    const clientState = giteaState ?? state;
+    const stateParts = clientState.split(",");
+    const provider = giteaState !== null ? "gitea" : "google";
     const isDesktop = stateParts.includes("platform:desktop");
     const nextPart = stateParts.find((p) => p.startsWith("next:"));
     // Strip "next:" prefix, then drop anything that isn't a safe relative path
@@ -71,6 +79,10 @@ function CallbackContent() {
       : "";
 
     const redirectUri = `${window.location.origin}/auth/callback`;
+    const exchangeCode = () =>
+      provider === "gitea"
+        ? api.giteaLogin(code, state)
+        : api.googleLogin(code, redirectUri);
 
     // Validate the CLI callback URL before redirecting — the state parameter
     // passes through Google OAuth and must be treated as attacker-controlled.
@@ -80,32 +92,30 @@ function CallbackContent() {
         : null;
 
     if (cliCallback) {
-      // CLI login flow: exchange the Google code for a JWT, then redirect the
+      // CLI login flow: exchange the OAuth code for a JWT, then redirect the
       // token back to the CLI's local HTTP listener (e.g. WSL2 host).
-      api
-        .googleLogin(code, redirectUri)
+      exchangeCode()
         .then(({ token }) => {
           redirectToCliCallback(cliCallback, token, cliState);
         })
         .catch((err) => {
-          authLogger.error("CLI Google OAuth callback failed", err);
+          authLogger.error("CLI OAuth callback failed", err);
           setError(callbackErrorFrom(err));
         });
     } else if (isDesktop) {
-      // Desktop flow: exchange code for token, then redirect via deep link
-      api
-        .googleLogin(code, redirectUri)
+      // Desktop flow: exchange the OAuth code for a token, then redirect via deep link
+      exchangeCode()
         .then(({ token }) => {
           setDesktopToken(token);
           window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
         })
         .catch((err) => {
-          authLogger.error("Desktop Google OAuth callback failed", err);
+          authLogger.error("Desktop OAuth callback failed", err);
           setError(callbackErrorFrom(err));
         });
     } else {
       // Normal web flow
-      loginWithGoogle(code, redirectUri)
+      (provider === "gitea" ? loginWithGitea(code, state) : loginWithGoogle(code, redirectUri))
         .then(async (loggedInUser) => {
           const wsList = await api.listWorkspaces();
           qc.setQueryData(workspaceKeys.list(), wsList);
@@ -151,11 +161,11 @@ function CallbackContent() {
           router.push(resolvePostAuthDestination(wsList, onboarded));
         })
         .catch((err) => {
-          authLogger.error("Web Google OAuth callback failed", err);
+          authLogger.error("Web OAuth callback failed", err);
           setError(callbackErrorFrom(err));
         });
     }
-  }, [searchParams, loginWithGoogle, router, qc]);
+  }, [searchParams, loginWithGoogle, loginWithGitea, router, qc]);
 
   const errorDescription = (() => {
     if (!error) return null;

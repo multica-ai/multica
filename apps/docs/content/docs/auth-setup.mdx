@@ -97,6 +97,23 @@ Do not enable a fixed code on a publicly reachable instance. The production comb
 
 The URLs in the Google Console and in `GOOGLE_REDIRECT_URI` must match exactly, including protocol, port, and trailing slash. Once configured, the sign-in page shows a Google sign-in button; the frontend image needs no rebuild.
 
+## Self-hosted Gitea sign-in
+
+Create an OAuth2 application in the Gitea instance and register the same
+frontend callback URL used by Multica. Set the following on the API service:
+
+```dotenv
+GITEA_ISSUER_URL=https://git.example.com
+GITEA_CLIENT_ID=...
+GITEA_CLIENT_SECRET=...
+GITEA_REDIRECT_URI=https://multica.example.com/auth/callback
+```
+
+After restarting the API, the login page shows a Gitea button. The issuer must
+be reachable by both the user's browser and the API container. Multica requires
+a verified primary Gitea email for first-time account creation, then uses the
+stable Gitea user ID for subsequent sign-ins.
+
 ## Signup restrictions
 
 Three variables together decide whether a new account can be created:
