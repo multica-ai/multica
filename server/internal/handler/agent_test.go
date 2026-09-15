@@ -1350,9 +1350,12 @@ func TestMergeAgentEnv_PureFunction(t *testing.T) {
 // TestUpdateAgent_RedactsMcpConfigForAgentActor closes the second leg
 // of MUL-2600 review #2: an agent process with a task token (or with
 // the X-Actor-Source server marker) must not be able to scrape another
-// agent's mcp_config via an unrelated mutation response. Even when the
-// host PAT would otherwise satisfy canManageAgent, the response body
-// must come back with mcp_config redacted.
+// agent's mcp_config via an unrelated mutation response. #8459 closed
+// the whole leg one level earlier — requireHumanAgentManager now rejects
+// machine credentials before the mutation runs — so the contract this
+// test locks is: 403, no change applied, and no mcp_config in the error
+// body. The response redaction helpers stay as defense-in-depth for any
+// future surface that forgets the guard.
 func TestUpdateAgent_RedactsMcpConfigForAgentActor(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -1369,9 +1372,8 @@ func TestUpdateAgent_RedactsMcpConfigForAgentActor(t *testing.T) {
 	caller := createHandlerTestAgent(t, "mut-mcp-caller", nil)
 	taskID := insertHandlerTestTask(t, caller)
 
-	desc := "trivial mutation that should NOT leak target mcp_config"
 	req := newRequest(http.MethodPut, "/api/agents/"+target, map[string]any{
-		"description": desc,
+		"description": "mutation that must not run",
 	})
 	req = withURLParam(req, "id", target)
 	// Simulate a task-token-authenticated agent request. The auth
@@ -1383,24 +1385,18 @@ func TestUpdateAgent_RedactsMcpConfigForAgentActor(t *testing.T) {
 	req.Header.Set("X-Task-ID", taskID)
 	w := httptest.NewRecorder()
 	testHandler.UpdateAgent(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("UpdateAgent: expected 403 for agent actor, got %d: %s", w.Code, w.Body.String())
+	}
+	if bytes.Contains(w.Body.Bytes(), []byte("secret-config")) {
+		t.Errorf("UpdateAgent error response leaked mcp_config to agent actor: %s", w.Body.String())
 	}
 
-	var resp AgentResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	// The response contract keeps `mcp_config` always-present so clients
-	// can distinguish "no config" vs "redacted" via the companion flag.
-	// `json.RawMessage` of a JSON null decodes to the literal bytes
-	// `null`, not Go nil — so check for "no secret-bearing content"
-	// rather than `!= nil`.
-	if len(resp.McpConfig) > 0 && !bytes.Equal(bytes.TrimSpace(resp.McpConfig), []byte("null")) {
-		t.Errorf("UpdateAgent response leaked mcp_config to agent actor: %s", string(resp.McpConfig))
-	}
-	if !resp.McpConfigRedacted {
-		t.Errorf("UpdateAgent response should set mcp_config_redacted=true for agent actor")
+	// The mutation itself must not have been applied.
+	var desc string
+	dbfx.QueryRow(t, `SELECT description FROM agent WHERE id = $1`, target).Scan(&desc)
+	if desc == "mutation that must not run" {
+		t.Errorf("UpdateAgent applied the description change despite the 403")
 	}
 }
 

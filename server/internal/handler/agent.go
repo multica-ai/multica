@@ -1359,15 +1359,22 @@ func normaliseAgentConversationStarters(starters []AgentConversationStarter) ([]
 func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 
+	ownerID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	// Agent creation is a human action (#8459): without this guard an agent
+	// process executing on a runtime could mint a new agent owned by the
+	// runtime owner — which then inherits that owner's Composio overlay
+	// (MUL-3963) — with attacker-chosen instructions.
+	if !h.requireHumanAgentManager(w, r, workspaceID) {
+		return
+	}
+
 	var req CreateAgentRequest
 	rawFields, err := decodeJSONBodyWithRawFields(r.Body, &req)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	ownerID, ok := requireUserID(w, r)
-	if !ok {
 		return
 	}
 
@@ -1828,11 +1835,41 @@ func redactAgentResponseForActor(resp *AgentResponse, actorType string) {
 	}
 }
 
+// requireHumanAgentManager is the machine-credential guard shared by the
+// agent management and creation surfaces (#8459). An agent process
+// authenticates with an `mat_` task token whose bound user is the RUNTIME
+// owner (daemon.go FinalizeTaskClaim), so the auth middleware stamps
+// X-User-ID with that owner — an admin-owned runtime would otherwise lend
+// the admin's authority to every agent executing on it, letting an agent
+// rewrite a private sibling's instructions or mint agents under the admin's
+// identity. Managing and creating agents are human actions, same ruling as
+// agent env (MUL-2600) and agent MCP-server assignments
+// (requireAgentMcpWriter). Daemon traffic is unaffected: DaemonAuth requests
+// carry no X-Actor-Source and resolve as members.
+func (h *Handler) requireHumanAgentManager(w http.ResponseWriter, r *http.Request, workspaceID string) bool {
+	if isMachineCredentialActor(r) {
+		// task_token / cloud_pat — the stamped X-User-ID belongs to a human
+		// whose credentials a machine is holding, not to the machine itself.
+		writeError(w, http.StatusForbidden, "agents may not create or manage agents")
+		return false
+	}
+	if actorType, _ := h.resolveActor(r, requestUserID(r), workspaceID); actorType == "agent" {
+		// In-process / header-pair fallback path, mirroring authorizeAgentEnv.
+		writeError(w, http.StatusForbidden, "agents may not create or manage agents")
+		return false
+	}
+	return true
+}
+
 // canManageAgent checks whether the current user can update or archive an agent.
 // Only the agent owner or workspace owner/admin can manage any agent,
-// regardless of whether it is public or private.
+// regardless of whether it is public or private. Machine credentials are
+// rejected first — see requireHumanAgentManager.
 func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent db.Agent) bool {
 	wsID := uuidToString(agent.WorkspaceID)
+	if !h.requireHumanAgentManager(w, r, wsID) {
+		return false
+	}
 	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
 	if !ok {
 		return false
