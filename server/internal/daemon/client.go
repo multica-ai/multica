@@ -435,7 +435,12 @@ func (c *Client) ExtendTaskPrepareLease(ctx context.Context, runtimeID, taskID s
 }
 
 func (c *Client) StartTask(ctx context.Context, taskID string) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/start", taskID), map[string]any{}, nil)
+	// The server acknowledges an already-running task without repeating the
+	// transition, so retrying also recovers a committed start whose reply was lost.
+	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/start", taskID), map[string]any{}, nil, []time.Duration{
+		500 * time.Millisecond,
+		2 * time.Second,
+	})
 }
 
 // MarkTaskWaitingLocalDirectory parks a freshly-dispatched task in the

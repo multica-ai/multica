@@ -419,3 +419,14 @@ multica issue create --title "Step 1" --parent <issue-id> --assignee <agent> --s
 multica issue create --title "Step 2" --parent <issue-id> --assignee <agent> --stage 2 --status backlog
 multica issue create --title "Step 3" --parent <issue-id> --assignee <agent> --stage 3 --status backlog
 ```
+
+## Windows description files
+
+For quick-create and other issue writes on Windows, prefer the agent's file-write
+tool for UTF-8 descriptions. A sandboxed PowerShell can use `ConstrainedLanguage`,
+which rejects .NET file APIs. If a write method is denied, retry using the
+file-write tool or `Set-Content -LiteralPath ./description.md -Value $description
+-Encoding utf8 -ErrorAction Stop`, with literal content. Do not disable the
+sandbox or elevate just to write a description. Run `issue create
+--description-file` only after the replacement write succeeds; never submit a
+stale or partially written description when all permitted writers fail.

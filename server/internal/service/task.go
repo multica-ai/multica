@@ -4113,6 +4113,18 @@ func (s *TaskService) maybeLogClaimSlow(agentID pgtype.UUID, outcome string, sta
 // Issue status is NOT changed here — the agent manages it via the CLI.
 func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
 	task, err := s.Queries.StartAgentTask(ctx, taskID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The first request may have committed before the daemon lost its
+		// response. Acknowledge that start without resetting started_at or
+		// repeating analytics, reconciliation, and task-running events.
+		existing, lookupErr := s.Queries.GetAgentTask(ctx, taskID)
+		if lookupErr != nil {
+			return nil, fmt.Errorf("look up task after start: %w", lookupErr)
+		}
+		if existing.Status == "running" {
+			return &existing, nil
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("start task: %w", err)
 	}
