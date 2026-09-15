@@ -168,12 +168,17 @@ const sendRetryBackoff = 2 * time.Second
 // Written as first attempt / decision / second attempt rather than a loop,
 // because the two attempts do not report failure the same way. The first one's
 // refusal is a FACT — the server named an errcode — and it stays in hand for
-// the rest of the function, so no later ambiguity can overwrite it. As a loop
-// it could not: the second pass's return value was simply the function's, and
-// a context error raised inside request (either from its pre-write check or
-// from the wait for the verdict, ws_sender.go) replaced a definite refusal
-// with an unknown outcome, which is the one thing on this path that sends a
-// person to resend a message by hand.
+// the rest of the function. As a loop it could not: the second pass's return
+// value was simply the function's, so a context error raised inside request
+// replaced a definite refusal with an unknown outcome, which is the one thing
+// on this path that sends a person to resend a message by hand.
+//
+// That fact has a limit, and the closing switch turns on it. The refusal is
+// the outcome of the FIRST frame. It can answer for the second attempt only
+// while that attempt put nothing new on the wire; once the second frame is
+// written, the refusal says nothing about where it ended up, and the unknown
+// the attempt came back with is the only honest report. request marks which
+// of the two happened — see errAckAbandoned.
 func (s *wsSender) sendMsgFrame(ctx context.Context, chatID string, body map[string]any) error {
 	if err := s.quota.reserve(ctx, chatID); err != nil {
 		// No chat id on either line. In a one-to-one chat the chat id IS
@@ -216,19 +221,28 @@ func (s *wsSender) sendMsgFrame(ctx context.Context, chatID string, body map[str
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, errAckTimeout), errors.Is(err, errWriteAttempted):
+	case errors.Is(err, errAckTimeout), errors.Is(err, errWriteAttempted), errors.Is(err, errAckAbandoned):
 		// The retry's own outcome is genuinely unknown, and unknown outranks
 		// the first refusal here: the second frame may be in front of the
 		// person right now, and saying "refused" would deny a delivery that
 		// happened. This is the one direction in which the first refusal is
 		// NOT the better answer.
+		//
+		// errAckAbandoned is the case that looks most like the arm below and
+		// belongs here. It IS a context error — errors.Is answers yes for
+		// context.Canceled — but request raises it only after s.write returned
+		// without error, so the second frame is on the wire and the first
+		// attempt's errcode establishes nothing about where it ended up
+		// (ws_sender.go). Tested ahead of the context arm for that reason: the
+		// same error satisfies both, and the specific answer is the true one.
 		return err
 	case errors.Is(err, errRateLimited), errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		// Neither of these adds anything to what the server already told us,
-		// and both are ambiguous where the refusal is not. Report the refusal:
-		// it files as platform_refused, it is provablyNotSent(false) either
-		// way so no duplicate can follow from it, and it does not send anybody
-		// to resend a message by hand.
+		// Nothing was written this time — the gate turned the frame away
+		// before the socket, or request's pre-write check did — so the first
+		// refusal is still the whole story and it is the better half of it. It
+		// files as platform_refused, it is provablyNotSent(false) either way
+		// so no duplicate can follow from it, and it does not send anybody to
+		// resend a message by hand.
 		return refusal
 	default:
 		return err

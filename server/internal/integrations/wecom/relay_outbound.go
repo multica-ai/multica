@@ -1336,11 +1336,18 @@ func (o *Outbound) ownsSocket(installationID string) bool {
 // provablyNotSent reports whether a send error is one that certainly occurred
 // before any byte could leave. ws_sender marks the boundary itself: a failure
 // raised by the write is wrapped in errWriteAttempted, a missing verdict is
-// errAckTimeout, and a stated refusal is a *wecomAPIError — all three mean the
-// peer may have (or, for a refusal, definitely did) see the frame. A bare
-// context error is ambiguous — request() returns one both from its pre-write
-// check and from the post-write wait — so it is treated as possibly sent,
-// which costs an un-retried delivery rather than a duplicate.
+// errAckTimeout, a verdict the caller stopped waiting for is errAckAbandoned,
+// and a stated refusal is a *wecomAPIError — all four mean the peer may have
+// (or, for a refusal, definitely did) see the frame.
+//
+// A bare context error is read the same way, and that is a choice rather than
+// an inability. request() marks the post-write case itself now, so what is
+// left is a cancellation raised before anything was written. Releasing the
+// claim on it would be correct and is deliberately not done here: this is the
+// last gate before the frame is offered to another replica, the two mistakes
+// cost different amounts — an un-retried delivery against a second copy of the
+// answer in the person's chat — and widening what gets re-offered is a change
+// to the relay's retry behaviour, not to how an error is read.
 func provablyNotSent(err error) bool {
 	var apiErr *wecomAPIError
 	switch {

@@ -17,8 +17,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -118,6 +121,39 @@ func quotaSender(codes ...int) (*wsSender, *quotaConn) {
 	return s, conn
 }
 
+// logHook calls fn the first time a record's message contains want, and passes
+// every record on. A log line is an unusual place to hang a test hook, and on
+// the retry path it is the only exact one: "the refusal is in hand, the retry
+// is decided, and nothing has been written yet" is a window sendMsgFrame is
+// inside for exactly one statement, and that statement is this WARN. Hooking
+// the conn instead would race the FIRST attempt's ack — both would be ready in
+// request's select and which one it takes is a coin toss.
+type logHook struct {
+	slog.Handler
+	want  string
+	fn    func()
+	once  sync.Once
+	fired atomic.Bool
+}
+
+func (h *logHook) Handle(ctx context.Context, r slog.Record) error {
+	if strings.Contains(r.Message, h.want) {
+		h.once.Do(func() {
+			h.fired.Store(true)
+			h.fn()
+		})
+	}
+	return h.Handler.Handle(ctx, r)
+}
+
+// hookedSender is quotaSender with fn wired to run the moment msg is logged.
+func hookedSender(msg string, fn func(), codes ...int) (*wsSender, *quotaConn, *logHook) {
+	s, conn := quotaSender(codes...)
+	h := &logHook{Handler: slog.NewTextHandler(io.Discard, nil), want: msg, fn: fn}
+	s.log = slog.New(h)
+	return s, conn, h
+}
+
 // spentMinute is a gate running on WeCom's real published windows whose
 // per-minute allowance for chatID is already gone, with the next slot freeing
 // freeIn from now. The only way to reach the interesting states at the
@@ -130,6 +166,123 @@ func spentMinute(chatID string, freeIn time.Duration) *sendQuota {
 		q.admit(chatID, at)
 	}
 	return q
+}
+
+// ---- what a cancellation from request establishes ----
+//
+// The retry's closing switch weighs the first attempt's refusal against
+// whatever the second attempt came back with, and for a cancellation the
+// answer flips on one fact: had the second frame been written yet. These two
+// pin that fact at the only place that holds it.
+
+// Cancelled before the write: request has to say so, and nothing may reach the
+// socket. This is what lets sendMsgFrame keep reporting the first refusal —
+// with no second frame on the wire there is no second delivery to deny.
+//
+// REVERSE VERIFICATION: delete the ctx.Err() check at the top of request and
+// this fails with
+//
+//	1 frame(s) reached the socket after a cancelled context, want 0
+func TestARequestCancelledBeforeTheWriteReportsNothingWritten(t *testing.T) {
+	t.Parallel()
+	s, conn := quotaSender()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := s.request(ctx, cmdSendMsg, map[string]any{"chatid": "CHAT_1"})
+
+	if got := conn.pushCount(); got != 0 {
+		t.Fatalf("%d frame(s) reached the socket after a cancelled context, want 0", got)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want the caller's own cancellation", err)
+	}
+	if errors.Is(err, errAckAbandoned) {
+		t.Fatalf("error = %v claims the frame went out, and nothing was written", err)
+	}
+}
+
+// The context lost after the write, waiting for the verdict: request has to
+// mark it, whichever way it was lost. The frame is gone — WriteMessage took
+// the bytes — so the outcome is the same unknown errAckTimeout stands for, and
+// a caller weighing it against anything else in hand needs to see that from
+// the error itself.
+//
+// Both ways, because they are the two the reply path actually ends on: a
+// cancelled delivery and a deadline that ran out, and the write is equally
+// gone under either.
+//
+// REVERSE VERIFICATION: return a bare ctx.Err() from request's post-write
+// select and this fails with
+//
+//	error = context canceled does not carry errAckAbandoned, so a caller cannot tell it from a cancellation that wrote nothing
+func TestARequestThatLosesItsContextAfterTheWriteSaysTheFrameWentOut(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		// ctxFor builds the caller's context and, for the cancelled case, the
+		// hook that ends it once the frame is on the wire. onPush runs after
+		// WriteMessage has taken the bytes, which is what makes "after the
+		// write" a fact here rather than a hope.
+		ctxFor func(t *testing.T, conn *quotaConn) context.Context
+		want   error
+	}{
+		{
+			name: "the caller cancelled",
+			ctxFor: func(t *testing.T, conn *quotaConn) context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				t.Cleanup(cancel)
+				conn.onPush = func(n int) {
+					if n == 1 {
+						cancel()
+					}
+				}
+				return ctx
+			},
+			want: context.Canceled,
+		},
+		{
+			name: "the delivery's deadline ran out",
+			ctxFor: func(t *testing.T, conn *quotaConn) context.Context {
+				// Well inside ackTimeout, so the deadline is what ends the
+				// wait and not the ack timer.
+				ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+				t.Cleanup(cancel)
+				return ctx
+			},
+			want: context.DeadlineExceeded,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s, conn := quotaSender()
+			conn.silentFrom = 1 // nothing answers, so the wait is the caller's to lose
+			ctx := tc.ctxFor(t, conn)
+
+			_, err := s.request(ctx, cmdSendMsg, map[string]any{"chatid": "CHAT_1"})
+
+			if got := conn.pushCount(); got != 1 {
+				t.Fatalf("%d frame(s) reached the socket, want 1 — this test's premise is that the write happened", got)
+			}
+			if !errors.Is(err, errAckAbandoned) {
+				t.Fatalf("error = %v does not carry errAckAbandoned, so a caller cannot tell it from a cancellation that wrote nothing", err)
+			}
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("error = %v no longer reads as %v; every existing errors.Is on this path stops matching", err, tc.want)
+			}
+			// And it keeps landing on the side of the classifiers that means
+			// "the user may already have this", which is what the wrapping is
+			// for: the mark is for the one caller that has something else to
+			// weigh it against, not a new outcome for everyone else.
+			if r := unconfirmedReason(err); r == "" {
+				t.Fatalf("error = %v files as a definite outcome", err)
+			}
+			if provablyNotSent(err) {
+				t.Fatalf("error = %v is reported as provably unsent, which hands the frame back for another offer and duplicates it", err)
+			}
+		})
+	}
 }
 
 // ---- the retry ----
@@ -255,23 +408,71 @@ func TestARetryTheCallerCannotAffordKeepsTheRefusal(t *testing.T) {
 	}
 }
 
-// Same rule from the other side: the retry was affordable, was attempted, and
-// STILL ended in a context error, because the caller went away while the
-// verdict was outstanding. The first refusal is the better report even then.
-// It is definite where the context error is ambiguous, provablyNotSent is
-// false for both so neither can produce a duplicate, and only one of the two
-// sends a person to resend a message by hand.
+// The retry was affordable and was about to run, and the caller went away
+// BEFORE the second frame could reach the socket. Nothing new can have been
+// delivered, so the first refusal is still the whole story — and it is the
+// better half of it: definite where a context error is ambiguous, and only one
+// of the two sends a person to resend a message by hand.
 //
-// REVERSE VERIFICATION: return err rather than refusal from the context arm of
-// sendMsgFrame's closing switch and this fails with
+// The cancellation is driven off the retry's own WARN line, for the reason on
+// logHook: it is the one moment in this function that is provably after the
+// refusal and provably before the write.
+//
+// REVERSE VERIFICATION: return ctx.Err() rather than refusal from the context
+// arm of sendMsgFrame's backoff select and this fails with
 //
 //	error = context canceled, want the 45009 refusal the server stated
-func TestASecondAttemptCutShortReportsTheFirstRefusal(t *testing.T) {
+func TestASecondAttemptCutShortBeforeItWroteReportsTheFirstRefusal(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s, conn, hook := hookedSender("push throttled, retrying once", cancel, errCodeAPIFreqLimit)
+	// Long enough that the backoff cannot elapse on its own: the only way out
+	// of it here is the cancellation, so a second push means the write went
+	// ahead after the caller was gone.
+	s.retryBackoff = time.Hour
+
+	err := s.sendTextCtx(ctx, "CHAT_1", chatTypeSingleInt, "the answer")
+
+	if !hook.fired.Load() {
+		t.Fatal("the retry was never started — this test's premise is a retry cut short, not one skipped")
+	}
+	var apiErr *wecomAPIError
+	if !errors.As(err, &apiErr) || apiErr.Code != errCodeAPIFreqLimit {
+		t.Fatalf("error = %v, want the 45009 refusal the server stated", err)
+	}
+	if r := unconfirmedReason(err); r != "" {
+		t.Errorf("the refusal was filed as an unknown outcome (%q); nothing was written, so nothing is unknown", r)
+	}
+	if got := conn.pushCount(); got != 1 {
+		t.Fatalf("%d push(es) reached the socket, want 1", got)
+	}
+}
+
+// The same cancellation one step later, and the answer is the opposite. The
+// retry ran, the second frame IS on the wire, and the caller went away while
+// its verdict was outstanding.
+//
+// The first refusal is a fact about the FIRST attempt — WeCom stated it did not
+// act on that frame — and it establishes nothing about the second one, which
+// may be in front of the person right now. Reporting it here files
+// platform_refused and unconfirmedReason "", which together tell an operator
+// the reply was refused and never shown; the operator resends, and the person
+// gets the answer twice. The unknown is the honest report: nobody is told a
+// delivery failed that may have happened.
+//
+// REVERSE VERIFICATION: drop errAckAbandoned from the unknown arm of
+// sendMsgFrame's closing switch, so the context arm catches it again, and this
+// fails with
+//
+//	error = wecom: aibot_send_msg rejected errcode=45009 errmsg=scripted, want the second attempt's own outcome — the first refusal is a fact about the first frame, and the second one is already out
+func TestASecondAttemptCutShortAfterItWroteKeepsTheUnknown(t *testing.T) {
 	t.Parallel()
 	s, conn := quotaSender(errCodeAPIFreqLimit)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// Nothing answers the retry, and the caller gives up while it waits.
+	// Nothing answers the retry, and the caller gives up once its frame is on
+	// the wire: onPush runs after WriteMessage has taken the bytes.
 	conn.silentFrom = 2
 	conn.onPush = func(n int) {
 		if n == 2 {
@@ -281,15 +482,18 @@ func TestASecondAttemptCutShortReportsTheFirstRefusal(t *testing.T) {
 
 	err := s.sendTextCtx(ctx, "CHAT_1", chatTypeSingleInt, "the answer")
 
-	var apiErr *wecomAPIError
-	if !errors.As(err, &apiErr) || apiErr.Code != errCodeAPIFreqLimit {
-		t.Fatalf("error = %v, want the 45009 refusal the server stated", err)
-	}
-	if r := unconfirmedReason(err); r != "" {
-		t.Errorf("the refusal was filed as an unknown outcome (%q)", r)
-	}
 	if got := conn.pushCount(); got != 2 {
 		t.Fatalf("%d push(es) reached the socket, want 2 — this test's premise is that the retry ran", got)
+	}
+	var apiErr *wecomAPIError
+	if errors.As(err, &apiErr) {
+		t.Fatalf("error = %v, want the second attempt's own outcome — the first refusal is a fact about the first frame, and the second one is already out", err)
+	}
+	if r := unconfirmedReason(err); r == "" {
+		t.Fatalf("error = %v is filed as a definite outcome; the frame went out and no verdict came back, so this reads as unknown", err)
+	}
+	if provablyNotSent(err) {
+		t.Fatalf("error = %v is reported as provably unsent, which hands the frame back for another offer and duplicates it", err)
 	}
 }
 
