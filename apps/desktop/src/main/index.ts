@@ -107,15 +107,21 @@ const BUNDLED_ICON_PATH = join(__dirname, "../../resources/icon.png").replace(
 // or any daemon-manager spawn.
 if (process.platform !== "win32") {
   fixPath();
-  // Fallback: prepend common install locations in case fix-path came up
-  // short (broken shell rc, non-interactive $SHELL, missing entries). Safe
-  // to duplicate — PATH lookups short-circuit on first match.
+  // Fallback: ensure common install locations are on PATH when fix-path came
+  // up short (broken shell rc, non-interactive $SHELL, missing entries).
+  // Append only missing dirs — never prepend. Prepending /usr/local/bin over
+  // a recovered login PATH shadows nvm/fnm Node with a stale system binary
+  // (e.g. Node 12), which breaks shebang CLIs (`#!/usr/bin/env node`) such as
+  // CodeBuddy and OpenClaw during daemon --version probes.
   const fallbackPaths = [
     "/opt/homebrew/bin",
     "/usr/local/bin",
     join(homedir(), ".local/bin"),
   ];
-  process.env.PATH = `${fallbackPaths.join(":")}:${process.env.PATH ?? ""}`;
+  const current = (process.env.PATH ?? "").split(":").filter(Boolean);
+  const existing = new Set(current);
+  const missing = fallbackPaths.filter((p) => !existing.has(p));
+  process.env.PATH = [...current, ...missing].join(":");
 }
 
 const PROTOCOL = "multica";
