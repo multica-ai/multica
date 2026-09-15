@@ -1909,6 +1909,71 @@ func TestAddAgentSkillsRejectsCrossWorkspaceSkillID(t *testing.T) {
 	assertAgentSkillRowCount(t, agentID, 0)
 }
 
+// A workspace-skill binding is part of the persisted agent definition even
+// though it lives in agent_skill. Before #8329 these endpoints changed the
+// junction row without advancing agent.updated_at, so skill-only edits were
+// invisible to consumers that use the parent timestamp as their version.
+// Keep disable (the row remains with enabled=false) distinct from unassign
+// (the row is deleted) while proving both changes advance the parent version.
+func TestAgentSkillToggleAndRemoveAdvanceAgentUpdatedAt(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler Skill Timestamp", nil)
+	skillA := insertHandlerTestSkill(t, "timestamp-a", "a body")
+	skillB := insertHandlerTestSkill(t, "timestamp-b", "b body")
+	dbfx.Exec(t,
+		`INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2), ($1, $3)`,
+		agentID, skillA, skillB,
+	)
+
+	backdate := func() time.Time {
+		t.Helper()
+		past := time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+		dbfx.Exec(t, `UPDATE agent SET updated_at = $2 WHERE id = $1`, agentID, past)
+		return past
+	}
+	readUpdatedAt := func() time.Time {
+		t.Helper()
+		var got time.Time
+		dbfx.QueryRow(t, `SELECT updated_at FROM agent WHERE id = $1`, agentID).Scan(&got)
+		return got
+	}
+
+	past := backdate()
+	toggleReq := newRequest("PUT", "/api/agents/"+agentID+"/skills/"+skillA+"/enabled", map[string]any{
+		"enabled": false,
+	})
+	toggleReq = withURLParams(toggleReq, "id", agentID, "skillId", skillA)
+	toggleW := testutil.Call(t, testHandler.SetAgentSkillEnabled, toggleReq).Want(http.StatusOK)
+	if !readUpdatedAt().After(past) {
+		t.Fatal("disabling a skill did not advance agent.updated_at")
+	}
+	var toggled []SkillSummaryResponse
+	toggleW.JSON(&toggled)
+	for _, skill := range toggled {
+		if skill.ID == skillA && (skill.Enabled == nil || *skill.Enabled) {
+			t.Fatalf("disabled skill response = %+v, want enabled=false", skill)
+		}
+	}
+	assertSkillIDsPresent(t, toggled, skillA, skillB)
+	assertAgentSkillRowCount(t, agentID, 2)
+
+	past = backdate()
+	removeReq := newRequest("DELETE", "/api/agents/"+agentID+"/skills/"+skillA, nil)
+	removeReq = withURLParams(removeReq, "id", agentID, "skillId", skillA)
+	removeW := testutil.Call(t, testHandler.RemoveAgentSkill, removeReq).Want(http.StatusOK)
+	if !readUpdatedAt().After(past) {
+		t.Fatal("removing a skill did not advance agent.updated_at")
+	}
+	var remaining []SkillSummaryResponse
+	removeW.JSON(&remaining)
+	assertSkillIDsPresent(t, remaining, skillB)
+	for _, skill := range remaining {
+		if skill.ID == skillA {
+			t.Fatalf("removed skill still present in response: %+v", remaining)
+		}
+	}
+	assertAgentSkillRowCount(t, agentID, 1)
+}
+
 func insertHandlerTestSkillInForeignWorkspace(t *testing.T, namePrefix, content string) string {
 	t.Helper()
 	slug := "foreign-skill-" + strings.ToLower(strings.ReplaceAll(t.Name(), "_", "-"))
