@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -404,16 +405,32 @@ func writeCommentFormatting(b *strings.Builder) {
 	b.WriteString(commentReceiptRule)
 }
 
-// writeRepositories emits the Repositories section when at least one repo
-// is configured. The closing paragraph from the legacy version is dropped
-// (it re-stated the opening); intro is tightened into one line.
+// writeRepositories emits the Repositories section for the workspace repos
+// this task does not already see through its project.
+//
+// A repo that is also a github_repo project resource is rendered by
+// writeProjectContext, with its ref, default-branch hint and label. Listing
+// the bare URL again here spends tokens on a line that says strictly less
+// than the one above it, and leaves the agent to work out that the two are
+// the same repository. Everything unmatched still belongs here — a workspace
+// repo is reachable whether or not a project points at it. Only the prompt
+// changes: the runtime repo list used for checkout authorization is
+// untouched.
 func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
-	if len(ctx.Repos) == 0 {
+	inProject := projectRepoURLs(ctx.ProjectResources)
+	repos := make([]RepoContextForEnv, 0, len(ctx.Repos))
+	for _, repo := range ctx.Repos {
+		if _, ok := inProject[normalizeRepoURL(repo.URL)]; ok {
+			continue
+		}
+		repos = append(repos, repo)
+	}
+	if len(repos) == 0 {
 		return
 	}
 	b.WriteString("## Repositories\n\n")
 	b.WriteString("Available in this workspace — `multica repo checkout <url> [--ref <branch-or-sha>]` to fetch (creates a repository checkout on a dedicated branch).\n\n")
-	for _, repo := range ctx.Repos {
+	for _, repo := range repos {
 		if repo.Description != "" {
 			fmt.Fprintf(b, "- %s — %s\n", repo.URL, repo.Description)
 		} else {
@@ -421,6 +438,39 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 		}
 	}
 	b.WriteString("\n")
+}
+
+// projectRepoURLs indexes the github_repo resources by normalized URL.
+func projectRepoURLs(resources []ProjectResourceForEnv) map[string]struct{} {
+	out := make(map[string]struct{}, len(resources))
+	for _, r := range resources {
+		if r.ResourceType != "github_repo" {
+			continue
+		}
+		var payload struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal(r.ResourceRef, &payload); err != nil {
+			continue
+		}
+		if key := normalizeRepoURL(payload.URL); key != "" {
+			out[key] = struct{}{}
+		}
+	}
+	return out
+}
+
+// normalizeRepoURL is the identity two prompt sections agree on. The same
+// repository is written both ways in practice — a project resource stored
+// with the `.git` suffix and a workspace repo without it are one repo, and
+// deduping only exact strings would leave the pair that motivated this.
+// Deliberately narrow: it never rewrites the host or path, so two genuinely
+// different URLs cannot collapse into one.
+func normalizeRepoURL(raw string) string {
+	u := strings.TrimSpace(raw)
+	u = strings.TrimSuffix(u, "/")
+	u = strings.TrimSuffix(u, ".git")
+	return strings.ToLower(strings.TrimSuffix(u, "/"))
 }
 
 // writeProjectContext emits the Project Context section when the task carries
