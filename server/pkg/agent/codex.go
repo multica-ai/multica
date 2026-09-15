@@ -1541,7 +1541,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			}
 			return
 		}
-		c.threadID = threadID
+		c.setThreadID(threadID)
 		if resumed {
 			b.cfg.Logger.Info("codex thread resumed", "thread_id", threadID)
 		} else {
@@ -2303,6 +2303,7 @@ type codexClient struct {
 	activeLaunches         int64
 	threadSetupMethod      string
 	threadSetupStarted     time.Time
+	threadIDMu             sync.RWMutex
 	threadID               string
 	turnIDMu               sync.RWMutex
 	turnID                 string
@@ -2420,6 +2421,22 @@ func (c *codexClient) getTurnError() string {
 	c.turnErrorMu.Lock()
 	defer c.turnErrorMu.Unlock()
 	return c.turnError
+}
+
+// setThreadID publishes the thread ID resolved by thread/start or
+// thread/resume. The task goroutine writes it while the stdout goroutine is
+// already dispatching notifications for that same thread, so the field needs
+// the same synchronization as turnID (GH #8422).
+func (c *codexClient) setThreadID(threadID string) {
+	c.threadIDMu.Lock()
+	c.threadID = threadID
+	c.threadIDMu.Unlock()
+}
+
+func (c *codexClient) getThreadID() string {
+	c.threadIDMu.RLock()
+	defer c.threadIDMu.RUnlock()
+	return c.threadID
 }
 
 func (c *codexClient) setActiveTurnID(turnID string) {
@@ -3256,7 +3273,7 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 	switch msgType {
 	case "task_started":
 		if c.onMessage != nil {
-			c.onMessage(Message{Type: MessageStatus, Status: "running", SessionID: c.threadID})
+			c.onMessage(Message{Type: MessageStatus, Status: "running", SessionID: c.getThreadID()})
 		}
 	case "agent_message":
 		text, _ := msg["message"].(string)
@@ -3356,7 +3373,7 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 			c.setActiveTurnID(turnID)
 		}
 		if c.onMessage != nil {
-			c.onMessage(Message{Type: MessageStatus, Status: "running", SessionID: c.threadID})
+			c.onMessage(Message{Type: MessageStatus, Status: "running", SessionID: c.getThreadID()})
 		}
 
 	case "turn/completed":
@@ -3426,7 +3443,13 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 
 func (c *codexClient) isNotificationFromOtherThread(params map[string]any) bool {
 	threadID, ok := params["threadId"].(string)
-	return ok && c.threadID != "" && threadID != c.threadID
+	if !ok {
+		return false
+	}
+	// Compare against one snapshot: this runs on the stdout goroutine, ahead of
+	// the current-turn gate, so the gate's state cannot serialize the read.
+	currentThreadID := c.getThreadID()
+	return currentThreadID != "" && threadID != currentThreadID
 }
 
 func (c *codexClient) handleItemNotification(method string, params map[string]any) {
@@ -3561,10 +3584,11 @@ func (c *codexClient) updateThreadTokenUsage(params map[string]any) {
 	}
 	c.usageTotal = total
 	c.usageTotalSet = true
-	c.usage.InputTokens += codexPlainInputTokens(delta.InputTokens, delta.CachedInputTokens, delta.CacheWriteInputTokens)
-	c.usage.OutputTokens += delta.OutputTokens + delta.ReasoningOutputTokens
-	c.usage.CacheReadTokens += delta.CachedInputTokens
-	c.usage.CacheWriteTokens += delta.CacheWriteInputTokens
+	u := codexTokenUsage(delta)
+	c.usage.InputTokens += u.InputTokens
+	c.usage.OutputTokens += u.OutputTokens
+	c.usage.CacheReadTokens += u.CacheReadTokens
+	c.usage.CacheWriteTokens += u.CacheWriteTokens
 	c.usageMu.Unlock()
 }
 
@@ -3826,6 +3850,9 @@ func codexSessionRoot(codexHome string) string {
 	return ""
 }
 
+// codexRawTokenUsage retains ReasoningOutputTokens to mirror the provider payload
+// and keep resume-baseline subtraction symmetric. No downstream consumer uses
+// this breakdown; normalized usage reads OutputTokens, which already includes it.
 type codexRawTokenUsage struct {
 	InputTokens           int64 `json:"input_tokens"`
 	OutputTokens          int64 `json:"output_tokens"`
@@ -3833,6 +3860,19 @@ type codexRawTokenUsage struct {
 	CacheReadInputTokens  int64 `json:"cache_read_input_tokens"`
 	CacheWriteInputTokens int64 `json:"cache_write_input_tokens"`
 	ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
+}
+
+// codexTokenUsage converts either event or rollout counters to the shared
+// TokenUsage contract. Codex input includes cache reads/writes; its output
+// already includes reasoning_output_tokens, which is only a breakdown.
+func codexTokenUsage(raw codexRawTokenUsage) TokenUsage {
+	u := normalizeCodexRawTokenUsage(raw)
+	return TokenUsage{
+		InputTokens:      codexPlainInputTokens(u.InputTokens, u.CachedInputTokens, u.CacheWriteInputTokens),
+		OutputTokens:     u.OutputTokens,
+		CacheReadTokens:  u.CachedInputTokens,
+		CacheWriteTokens: u.CacheWriteInputTokens,
+	}
 }
 
 // codexSessionTokenCount represents a token_count event in Codex JSONL.
@@ -3932,14 +3972,7 @@ func parseCodexSessionFileSince(path string, startTime time.Time, resumed bool) 
 	if !finalUsageFound {
 		return nil
 	}
-	cacheReadTokens := finalUsage.CachedInputTokens
-	cacheWriteTokens := finalUsage.CacheWriteInputTokens
-	result.usage = TokenUsage{
-		InputTokens:      codexPlainInputTokens(finalUsage.InputTokens, cacheReadTokens, cacheWriteTokens),
-		OutputTokens:     finalUsage.OutputTokens + finalUsage.ReasoningOutputTokens,
-		CacheReadTokens:  cacheReadTokens,
-		CacheWriteTokens: cacheWriteTokens,
-	}
+	result.usage = codexTokenUsage(finalUsage)
 	return &result
 }
 

@@ -249,13 +249,27 @@ func buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID strin
 	if squadLeader {
 		lead = "Unless your outcome is `no_action`, post your reply as a comment — always use the trigger comment ID below, "
 	}
+	// Cleanup is GATED on the post succeeding, never a separate statement.
+	// Agents hand the whole snippet to one shell call, and an unconditional
+	// cleanup line runs — and SUCCEEDS — after a failed post, so the call's
+	// exit status becomes the cleanup's 0. Under `--output table` a failed
+	// and a successful post both write nothing to stdout, which leaves the
+	// exit status as the only machine-checkable signal; masking it lets an
+	// agent end its turn believing an unposted result was delivered. The
+	// gate also keeps ./reply.md on disk after a failure, so the retry does
+	// not have to regenerate the body.
 	if runtimeGOOS == "windows" {
+		// PowerShell 5.1 has no `&&` (it landed in PowerShell 7), so the
+		// Windows variant checks $LASTEXITCODE — which carries the exit
+		// code of the last NATIVE command — and propagates it instead.
 		return fmt.Sprintf(
 			lead+
 				"do NOT reuse --parent values from previous turns in this session.\n\n"+
 				"Write the body file first — never pipe via `--content-stdin` (PowerShell drops non-ASCII; full rules: ## Comment Formatting above):\n\n"+
-				"    multica issue comment add %s --parent %s --content-file ./reply.md\n"+
+				"    multica issue comment add %s --parent %s --content-file ./reply.md --output table\n"+
+				"    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n"+
 				"    Remove-Item ./reply.md\n\n"+
+				"Do NOT drop the exit-code check: a bare `Remove-Item` after a failed post reports success and deletes the body.\n\n"+
 				"Do NOT write literal `\\n` escapes to simulate line breaks; the file preserves real newlines.\n",
 			issueID, triggerCommentID,
 		)
@@ -264,8 +278,8 @@ func buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID strin
 		lead+
 			"do NOT reuse --parent values from previous turns in this session.\n\n"+
 			"Write the body file first (rules: ## Comment Formatting above — MUL-2904 / #4182):\n\n"+
-			"    multica issue comment add %s --parent %s --content-file ./reply.md\n"+
-			"    rm ./reply.md\n\n"+
+			"    multica issue comment add %s --parent %s --content-file ./reply.md --output table && rm ./reply.md\n\n"+
+			"Keep the `&&`: as two separate statements a failed post is masked by the cleanup's success, and the body file is deleted.\n\n"+
 			"Do NOT write literal `\\n` escapes to simulate line breaks; the file preserves real newlines.\n",
 		issueID, triggerCommentID,
 	)

@@ -2641,10 +2641,12 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 // AgentActivityBucket is one day-bucketed throughput sample for the
 // Agents-list ACTIVITY sparkline. bucket_at is midnight UTC of the day.
 type AgentActivityBucket struct {
-	AgentID     string `json:"agent_id"`
-	BucketAt    string `json:"bucket_at"`
-	TaskCount   int32  `json:"task_count"`
-	FailedCount int32  `json:"failed_count"`
+	AgentID        string `json:"agent_id"`
+	BucketAt       string `json:"bucket_at"`
+	TaskCount      int32  `json:"task_count"`
+	FailedCount    int32  `json:"failed_count"`
+	CompletedCount int32  `json:"completed_count"`
+	CancelledCount int32  `json:"cancelled_count"`
 }
 
 // AgentRunCount is the trailing-30-day total task run count per agent,
@@ -2860,10 +2862,12 @@ func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Re
 			continue
 		}
 		resp = append(resp, AgentActivityBucket{
-			AgentID:     agentID,
-			BucketAt:    timestampToString(row.Bucket),
-			TaskCount:   row.TaskCount,
-			FailedCount: row.FailedCount,
+			AgentID:        agentID,
+			BucketAt:       timestampToString(row.Bucket),
+			TaskCount:      row.TaskCount,
+			FailedCount:    row.FailedCount,
+			CompletedCount: row.CompletedCount,
+			CancelledCount: row.CancelledCount,
 		})
 	}
 

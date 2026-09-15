@@ -1,1 +1,2 @@
-ALTER TABLE issue_status DROP CONSTRAINT IF EXISTS issue_status_key_not_reserved;
+-- Intentionally empty: the up migration is a no-op. Migration 490 owns dropping
+-- the constraint on any database that applied the original 475.

@@ -79,7 +79,7 @@ func TestIssueTableAcceptsLegacyLifecycleGroupInputs(t *testing.T) {
 	legacyKey := "status_category:in_review"
 	w := httptest.NewRecorder()
 	testHandler.ListIssueTableRows(w, newRequest(http.MethodPost, "/api/issues/table/rows", issueTableRowsRequest{
-		Query: statusCategoryQuery(projectID), Group: issueTableGroupSpec{Kind: "status_category"},
+		Query: statusCategoryQuery(projectID), Group: issueTableGroupSpec{Kind: "status_category", CategoryFormat: "lifecycle"},
 		GroupKey: &legacyKey, Page: issueTablePageRequest{Limit: 50},
 	}))
 	if w.Code != http.StatusOK {
@@ -97,7 +97,7 @@ func TestIssueTableAcceptsLegacyLifecycleGroupInputs(t *testing.T) {
 	// rejected by the existing validation contract.
 	w = httptest.NewRecorder()
 	group, ok := testHandler.resolveIssueTableGroup(w, newRequest(http.MethodPost, "/api/issues/table/groups", nil), parseUUID(testWorkspaceID), issueTableGroupSpec{
-		Kind: "compound", Primary: "project", Secondary: "status_category",
+		Kind: "compound", Primary: "project", Secondary: "status_category", CategoryFormat: "lifecycle",
 		SecondaryValues: []string{"in_progress", "in_review", "blocked"},
 	}, false)
 	if !ok {
@@ -118,7 +118,7 @@ func TestIssueTableStatusCategoryGroupsFoldCustomStatuses(t *testing.T) {
 	w := httptest.NewRecorder()
 	testHandler.ListIssueTableGroups(w, newRequest(http.MethodPost, "/api/issues/table/groups", issueTableGroupsRequest{
 		Query: statusCategoryQuery(projectID),
-		Group: issueTableGroupSpec{Kind: "status_category"},
+		Group: issueTableGroupSpec{Kind: "status_category", CategoryFormat: "lifecycle"},
 		Page:  issueTablePageRequest{Limit: 100},
 	}))
 	if w.Code != http.StatusOK {
@@ -155,7 +155,7 @@ func TestIssueTableStatusCategoryRowsReturnCustomStatusIssues(t *testing.T) {
 	w := httptest.NewRecorder()
 	testHandler.ListIssueTableRows(w, newRequest(http.MethodPost, "/api/issues/table/rows", issueTableRowsRequest{
 		Query:    statusCategoryQuery(projectID),
-		Group:    issueTableGroupSpec{Kind: "status_category"},
+		Group:    issueTableGroupSpec{Kind: "status_category", CategoryFormat: "lifecycle"},
 		GroupKey: &groupKey,
 		Page:     issueTablePageRequest{Limit: 50},
 	}))
@@ -200,7 +200,7 @@ func TestIssueTableCompoundStatusCategoryCellsFoldCustomStatuses(t *testing.T) {
 		Group: issueTableGroupSpec{
 			Kind:      "compound",
 			Primary:   "project",
-			Secondary: "status_category",
+			Secondary: "status_category", CategoryFormat: "lifecycle",
 		},
 		Page: issueTablePageRequest{Limit: 100},
 	}))
@@ -236,7 +236,7 @@ func TestIssueTableCompoundStatusCategoryCellsFoldCustomStatuses(t *testing.T) {
 		Group: issueTableGroupSpec{
 			Kind:      "compound",
 			Primary:   "project",
-			Secondary: "status_category",
+			Secondary: "status_category", CategoryFormat: "lifecycle",
 		},
 		GroupKey: &cellKey,
 		Page:     issueTablePageRequest{Limit: 50},
@@ -290,7 +290,7 @@ func TestIssueTableStatusCategoryFoldsBuiltInsWithoutCustomStatuses(t *testing.T
 		w := httptest.NewRecorder()
 		testHandler.ListIssueTableGroups(w, newRequest(http.MethodPost, "/api/issues/table/groups", issueTableGroupsRequest{
 			Query: statusCategoryQuery(projectID),
-			Group: issueTableGroupSpec{Kind: kind},
+			Group: issueTableGroupSpec{Kind: kind, CategoryFormat: "lifecycle"},
 			Page:  issueTablePageRequest{Limit: 100},
 		}))
 		if w.Code != http.StatusOK {
@@ -376,7 +376,7 @@ func TestIssueTableStatusCategoryReadsCatalogOncePerRequest(t *testing.T) {
 	w := httptest.NewRecorder()
 	testHandler.ListIssueTableGroups(w, newRequest(http.MethodPost, "/api/issues/table/groups", issueTableGroupsRequest{
 		Query: statusCategoryQuery(projectID),
-		Group: issueTableGroupSpec{Kind: "status_category"},
+		Group: issueTableGroupSpec{Kind: "status_category", CategoryFormat: "lifecycle"},
 		Page:  issueTablePageRequest{Limit: 100},
 	}))
 	if w.Code != http.StatusOK {
@@ -405,7 +405,7 @@ func TestIssueTableCompoundStatusCategoryReadsCatalogOncePerRequest(t *testing.T
 		Group: issueTableGroupSpec{
 			Kind:      "compound",
 			Primary:   "project",
-			Secondary: "status_category",
+			Secondary: "status_category", CategoryFormat: "lifecycle",
 		},
 		Page: issueTablePageRequest{Limit: 100},
 	}))
@@ -535,7 +535,7 @@ func TestIssueTableFiltersAcceptCustomStatusKeys(t *testing.T) {
 	w := httptest.NewRecorder()
 	testHandler.ListIssueTableGroups(w, newRequest(http.MethodPost, "/api/issues/table/groups", issueTableGroupsRequest{
 		Query: query,
-		Group: issueTableGroupSpec{Kind: "status_category"},
+		Group: issueTableGroupSpec{Kind: "status_category", CategoryFormat: "lifecycle"},
 		Page:  issueTablePageRequest{Limit: 100},
 	}))
 	if w.Code != http.StatusOK {
@@ -553,7 +553,7 @@ func TestIssueTableFiltersAcceptCustomStatusKeys(t *testing.T) {
 	rowsRecorder := httptest.NewRecorder()
 	testHandler.ListIssueTableRows(rowsRecorder, newRequest(http.MethodPost, "/api/issues/table/rows", issueTableRowsRequest{
 		Query:    query,
-		Group:    issueTableGroupSpec{Kind: "status_category"},
+		Group:    issueTableGroupSpec{Kind: "status_category", CategoryFormat: "lifecycle"},
 		GroupKey: &groupKey,
 		Page:     issueTablePageRequest{Limit: 50},
 	}))

@@ -332,7 +332,33 @@ func (s *AutopilotService) ensureWebhookCreateIssueTask(ctx context.Context, aut
 	if err != nil {
 		return fmt.Errorf("dispatch for webhook delivery: load linked issue: %w", err)
 	}
-	if effective := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status); effective != "todo" && effective != "in_progress" {
+	// Repair only work that is still waiting to be picked up. Decided on
+	// lifecycle plus the two exact keys whose behavior does not generalize,
+	// the split MUL-7364 established (MUL-7379):
+	//
+	//   - the fixed in_progress key means an agent is already working, so the
+	//     lost task is still the right thing to create;
+	//   - an unstarted status other than the fixed backlog key is queued work.
+	//     Backlog is parked, and only the literal key parks — a custom
+	//     unstarted status does not inherit parking, exactly as WillEnqueueRun
+	//     treats it;
+	//   - anything else — in_review, blocked, a CUSTOM started status, or a
+	//     terminal one — means a human took the issue over during the crash
+	//     window. Starting an agent on it then is the surprise this guard
+	//     exists to prevent.
+	//
+	// Before MUL-7240 this read Effective() and compared against todo /
+	// in_progress, which also matched custom statuses because every one of them
+	// projected onto a built-in key. Collapsing to four categories left those
+	// custom keys raw, so the guard silently stopped repairing any workspace
+	// with a custom status and the run sat in issue_created with no task.
+	category, err := issuestatus.CategoryWithError(ctx, s.Queries, issue.WorkspaceID, issue.Status)
+	if err != nil {
+		return fmt.Errorf("dispatch for webhook delivery: resolve issue lifecycle: %w", err)
+	}
+	runnable := issue.Status == issuestatus.InProgress ||
+		(category == issuestatus.CategoryUnstarted && issue.Status != issuestatus.Backlog)
+	if !runnable {
 		return nil
 	}
 	if autopilot.AssigneeType == "squad" {
@@ -340,7 +366,7 @@ func (s *AutopilotService) ensureWebhookCreateIssueTask(ctx context.Context, aut
 		if err != nil {
 			return fmt.Errorf("dispatch for webhook delivery: resolve squad leader: %w", err)
 		}
-		if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, autopilot.AssigneeID, pgtype.UUID{}); err != nil {
+		if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, autopilot.AssigneeID, pgtype.UUID{}, OriginDerived); err != nil {
 			return fmt.Errorf("dispatch for webhook delivery: repair squad task: %w", err)
 		}
 		return nil
@@ -823,7 +849,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 			if _, err := s.TaskSvc.EnqueueTaskForSquadLeaderByActor(ctx, issue, leader.ID, ap.AssigneeID, actorUserID); err != nil {
 				return fmt.Errorf("enqueue squad leader task: %w", err)
 			}
-		} else if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, ap.AssigneeID, pgtype.UUID{}); err != nil {
+		} else if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, ap.AssigneeID, pgtype.UUID{}, OriginDerived); err != nil {
 			return fmt.Errorf("enqueue squad leader task: %w", err)
 		}
 	} else if actorUserID.Valid {

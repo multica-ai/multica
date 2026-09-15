@@ -921,8 +921,8 @@ func TestParseCodexSessionFileSubtractsCachedInput(t *testing.T) {
 	if got.usage.CacheReadTokens != 300 {
 		t.Fatalf("cache read tokens = %d, want 300", got.usage.CacheReadTokens)
 	}
-	if got.usage.OutputTokens != 50 {
-		t.Fatalf("output tokens = %d, want 50", got.usage.OutputTokens)
+	if got.usage.OutputTokens != 40 {
+		t.Fatalf("output tokens = %d, want 40 (including reasoning)", got.usage.OutputTokens)
 	}
 }
 
@@ -1008,7 +1008,7 @@ func TestScanCodexSessionUsageSubtractsResumeBaseline(t *testing.T) {
 	}
 	// total_token_usage is cumulative for the resumed Codex session. This task
 	// should report only the delta after startTime, not the whole session total.
-	want := TokenUsage{InputTokens: 100, OutputTokens: 65, CacheReadTokens: 700}
+	want := TokenUsage{InputTokens: 100, OutputTokens: 50, CacheReadTokens: 700}
 	if got.usage != want {
 		t.Fatalf("usage = %+v, want resumed-task delta %+v", got.usage, want)
 	}
@@ -3428,7 +3428,7 @@ func TestCodexThreadTokenUsageUpdatedAccumulatesCurrentTurnResponses(t *testing.
 	c.usageMu.Lock()
 	got := c.usage
 	c.usageMu.Unlock()
-	want := (TokenUsage{InputTokens: 160, OutputTokens: 35, CacheReadTokens: 80, CacheWriteTokens: 10})
+	want := (TokenUsage{InputTokens: 160, OutputTokens: 30, CacheReadTokens: 80, CacheWriteTokens: 10})
 	if got != want {
 		t.Fatalf("multi-response usage = %+v, want %+v", got, want)
 	}

@@ -46,6 +46,24 @@ type opencodeBackend struct {
 	cfg Config
 }
 
+// opencodeSeparatesReasoning recognizes the released OpenCode 1.x wire contract.
+// v1.3.15 included reasoning in output; v1.3.16 separated it in upstream #21047:
+// https://github.com/anomalyco/opencode/pull/21047
+// Use the daemon's already-resolved version, never an extra per-run probe.
+// Unknown/dev versions and custom commands keep the existing output count:
+// their version string does not establish which usage convention they speak.
+func opencodeSeparatesReasoning(cfg Config) bool {
+	if !cfg.BuiltinRuntime {
+		return false
+	}
+	raw := strings.TrimSpace(cfg.CLIVersion)
+	if raw == "" || versionRe.FindString(raw) != raw {
+		return false
+	}
+	version, err := parseSemver(raw)
+	return err == nil && version.Major == 1 && !version.lessThan(semver{Major: 1, Minor: 3, Patch: 16})
+}
+
 func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
@@ -345,6 +363,7 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	var output strings.Builder
 	var sessionID string
 	var usage TokenUsage
+	separateReasoning := opencodeSeparatesReasoning(b.cfg)
 	finalStatus := "completed"
 	var finalError string
 
@@ -436,6 +455,9 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 			if t := event.Part.Tokens; t != nil {
 				usage.InputTokens += t.Input
 				usage.OutputTokens += t.Output
+				if separateReasoning && t.Reasoning > 0 {
+					usage.OutputTokens += t.Reasoning
+				}
 				if t.Cache != nil {
 					usage.CacheReadTokens += t.Cache.Read
 					usage.CacheWriteTokens += t.Cache.Write
@@ -503,10 +525,9 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 // the protocol reports counts. Only an across-the-board zero means no model
 // call happened.
 //
-// The reasoning and total counters are read as evidence only, deliberately not
-// folded into TokenUsage: total is derived (adding it would double-count) and
-// TokenUsage has no reasoning bucket, so recording either here would change
-// billing figures rather than fix this bug.
+// This predicate only checks for evidence of a provider round-trip.
+// processEvents separately normalizes reasoning into output for releases whose
+// output excludes it; the aggregate total is never added to the usage buckets.
 func stepReportedUsage(part *opencodeEventPart) bool {
 	if part.Cost > 0 {
 		return true
@@ -704,10 +725,9 @@ type opencodePartMetadata struct {
 	ProviderExecuted bool `json:"providerExecuted,omitempty"`
 }
 
-// opencodeTokens represents token usage in a step_finish event. Reasoning and
-// Total are separate counters in the protocol, not components of Input/Output,
-// so a step can report either while both of those are zero; they are parsed so
-// stepReportedUsage can see them.
+// opencodeTokens represents token usage in a step_finish event. OpenCode 1.x
+// since v1.3.16 separates Reasoning from Output; older releases include it.
+// Total is an aggregate, and both fields also provide step-liveness evidence.
 type opencodeTokens struct {
 	Input     int64                `json:"input"`
 	Output    int64                `json:"output"`

@@ -772,8 +772,14 @@ func (c *Client) usesLegacyWorkspaceEndpoint() bool {
 }
 
 // IssueGCStatus holds the minimal issue info returned by the GC check endpoint.
+//
+// Category is the issue's lifecycle (unstarted/started/done/closed) and is what
+// GC decides on. Status is the legacy seven-value enum, still populated by the
+// server for installed daemons and used here only when Category is absent —
+// a server predating MUL-7364 — or unrecognized. See issueGCLifecycle in gc.go.
 type IssueGCStatus struct {
 	Status    string    `json:"status"`
+	Category  string    `json:"category,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
@@ -785,6 +791,7 @@ type IssueGCCheckResult struct {
 	ID        string    `json:"id"`
 	Found     bool      `json:"found"`
 	Status    string    `json:"status,omitempty"`
+	Category  string    `json:"category,omitempty"`
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
 	Err       error     `json:"-"`
 }
@@ -853,6 +860,7 @@ func (c *Client) getLegacyIssueGCChecks(ctx context.Context, issueIDs []string) 
 			ID:        issueID,
 			Found:     true,
 			Status:    status.Status,
+			Category:  status.Category,
 			UpdatedAt: status.UpdatedAt,
 		}
 	}

@@ -24,7 +24,7 @@ SELECT * FROM issue_status
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND (sqlc.arg('include_archived')::bool OR archived_at IS NULL)
 ORDER BY
-    CASE category WHEN 'unstarted' THEN 0 WHEN 'started' THEN 1 WHEN 'done' THEN 2 WHEN 'closed' THEN 3 ELSE 4 END,
+    CASE issue_status_category(category) WHEN 'unstarted' THEN 0 WHEN 'started' THEN 1 WHEN 'done' THEN 2 WHEN 'closed' THEN 3 ELSE 4 END,
     position,
 	CASE WHEN is_system THEN 0 ELSE 1 END,
 	CASE key
@@ -64,7 +64,7 @@ VALUES (
     COALESCE(
         (SELECT MAX(position) + 1 FROM issue_status
          WHERE workspace_id = sqlc.arg('workspace_id')::uuid
-		   AND category = sqlc.arg('category')::text),
+		   AND issue_status_category(category) = sqlc.arg('category')::text),
         0
     )
 )
@@ -75,6 +75,7 @@ RETURNING *;
 -- The is_system guard is what enforces "built-in name and color are locked" at
 -- the storage layer, so a handler bug cannot rename a built-in.
 UPDATE issue_status SET
+    category = issue_status_category(category),
     name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
     color = COALESCE(sqlc.narg('color'), color),
@@ -95,6 +96,7 @@ RETURNING *;
 -- it — Effective ignores archived_at, so their behavior is unchanged — while
 -- Resolve rejects it, so nothing new can be assigned to it.
 UPDATE issue_status SET
+    category = issue_status_category(category),
     archived_at = now(),
     updated_at = now()
 WHERE id = sqlc.arg('id')::uuid
@@ -142,7 +144,7 @@ SELECT pg_advisory_xact_lock_shared(hashtextextended(sqlc.arg('workspace_id')::u
 -- still appear in their category's column.
 SELECT key FROM issue_status
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
-  AND category = ANY(sqlc.arg('categories')::text[]);
+  AND issue_status_category(category) = ANY(sqlc.arg('categories')::text[]);
 
 -- name: ListActiveCustomIssueStatusEntries :many
 -- One category's ACTIVE custom statuses — the exact set a reorder must cover.
@@ -150,7 +152,7 @@ WHERE workspace_id = sqlc.arg('workspace_id')::uuid
 -- archived concurrently cannot slip in or out between validation and write.
 SELECT * FROM issue_status
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
-  AND category = sqlc.arg('category')::text
+  AND issue_status_category(category) = sqlc.arg('category')::text
   AND is_system = FALSE
   AND archived_at IS NULL
 ORDER BY position, key;
@@ -164,7 +166,8 @@ ORDER BY position, key;
 -- Legacy custom-only callers preserve the positions occupied by custom rows.
 -- Archived rows remain frozen.
 UPDATE issue_status s
-SET position = (sqlc.arg('positions')::float8[])[v.ordinality],
+SET category = issue_status_category(s.category),
+    position = (sqlc.arg('positions')::float8[])[v.ordinality],
     updated_at = now()
 FROM unnest(sqlc.arg('ids')::uuid[]) WITH ORDINALITY AS v(id, ordinality)
 WHERE s.id = v.id

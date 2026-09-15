@@ -378,7 +378,13 @@ func handleQwenUser(raw json.RawMessage, ch chan<- Message) {
 }
 
 func qwenTokenUsage(usage *qwenUsage) TokenUsage {
-	return TokenUsage{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, CacheReadTokens: usage.CacheReadInputTokens}
+	// Qwen includes cache reads in input_tokens on both assistant and result
+	// messages. Keep the shared input and cache buckets mutually exclusive.
+	return TokenUsage{
+		InputTokens:     max(0, usage.InputTokens-usage.CacheReadInputTokens),
+		OutputTokens:    usage.OutputTokens,
+		CacheReadTokens: usage.CacheReadInputTokens,
+	}
 }
 
 func qwenResultUsage(usage *qwenUsage, model string) map[string]TokenUsage {

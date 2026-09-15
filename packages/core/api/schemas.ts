@@ -1376,6 +1376,8 @@ const IssueTableParentRefSchema = z.object({
 const IssueTableGroupValueSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("status"),
+    // Preserve the requested bucket vocabulary (legacy wire, lifecycle, or
+    // concrete status). Normalizing here would disconnect values from keys.
     status: z.string(),
   }).loose(),
   z.object({
@@ -1799,6 +1801,19 @@ export const AgentTaskSchema = z.object({
   // the UI already renders as an em dash.
   usage: z.array(TaskUsageSchema).optional().catch(undefined),
 }).loose();
+
+// Outcome counts are required: every backend that serves this endpoint
+// reports them, so a response missing them is a contract drift, not an
+// older peer. `parseWithFallback` then degrades the whole list to `[]`
+// rather than letting a partial window masquerade as measured outcomes.
+export const AgentActivityBucketListSchema = z.array(z.object({
+  agent_id: z.string(),
+  bucket_at: z.string(),
+  task_count: z.number().int().nonnegative(),
+  failed_count: z.number().int().nonnegative(),
+  completed_count: z.number().int().nonnegative(),
+  cancelled_count: z.number().int().nonnegative(),
+}).loose());
 
 export const AgentTaskListSchema = z.array(AgentTaskSchema);
 

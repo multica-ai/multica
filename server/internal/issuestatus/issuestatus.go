@@ -8,9 +8,6 @@
 // to done/cancelled; nonterminal custom keys remain distinct. Category resolves
 // lifecycle independently. WireCategory adapts response enums for installed
 // clients without persisting or granting legacy behavior.
-//
-// One key sits outside the catalog and outside the four categories: Triage,
-// reserved for issues waiting in Triage — see Triage.
 package issuestatus
 
 import (
@@ -36,21 +33,6 @@ const (
 	Blocked    = "blocked"
 	Cancelled  = "cancelled"
 )
-
-// Triage is the RESERVED status key of an issue waiting in Triage (MUL-7189).
-//
-// It is platform-owned like the 7 canonical keys — no workspace can mint a
-// custom status with it — but it is deliberately not one of them: it has no
-// catalog row, it is not one of the four lifecycle categories, and it is not a
-// board column. An issue enters it only through Triage intake and leaves it
-// only by being accepted, so no ordinary write may set it or move an issue out
-// of it. It is its own category, which is what lets Category answer for it
-// without a catalog read.
-//
-// Because no custom key can resolve to it, the SQL literal `status = 'triage'`
-// is exactly equivalent to the Go-side check, and read paths can filter on the
-// bare indexed column.
-const Triage = "triage"
 
 // The four stored lifecycle categories.
 const (
@@ -100,10 +82,6 @@ var categoryRank = func() map[string]int {
 // catalog, or present but archived.
 var ErrUnknownStatus = errors.New("unknown issue status")
 
-// ErrReservedStatus is returned by Resolve for Triage: the key is valid to
-// read but never a target an ordinary write may set.
-var ErrReservedStatus = errors.New("issue status is reserved for triage")
-
 // keyPattern mirrors the issue_status.key CHECK constraint. Keys are lowercase
 // so `multica issue status <id> human_review` is unambiguous to type.
 var keyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{0,31}$`)
@@ -117,21 +95,18 @@ type Querier interface {
 	ListIssueStatusKeysByCategories(ctx context.Context, arg db.ListIssueStatusKeysByCategoriesParams) ([]string, error)
 }
 
-// Canonical returns the 7 canonical status keys in display order. Triage is
-// not among them: it is not a board column and not a settings row.
+// Canonical returns the 7 canonical status keys in display order.
 func Canonical() []string {
 	out := make([]string, len(canonicalOrder))
 	copy(out, canonicalOrder)
 	return out
 }
 
-// IsBuiltIn reports whether key is platform-owned: one of the 7 canonical
-// statuses or the reserved Triage key. Each is its own category, so callers
-// can read the category off the key without a catalog lookup, and none can be
-// reused as a custom key.
+// IsBuiltIn reports whether key is one of the 7 canonical, platform-owned
+// statuses. None of them can be reused as a custom key.
 func IsBuiltIn(key string) bool {
 	_, ok := canonicalRank[key]
-	return ok || key == Triage
+	return ok
 }
 
 // Categories returns the four lifecycle categories in display order.
@@ -168,10 +143,6 @@ func CategoryForBehavior(behavior string) (string, bool) {
 		return CategoryDone, true
 	case Cancelled:
 		return CategoryClosed, true
-	case Triage:
-		// Not one of the four stored categories: no catalog row may hold it,
-		// and the pair below keeps Triage answerable without a catalog read.
-		return Triage, true
 	default:
 		return "", false
 	}
@@ -189,23 +160,13 @@ func BehaviorsForCategory(category string) []string {
 		return []string{Done}
 	case CategoryClosed:
 		return []string{Cancelled}
-	case Triage:
-		return []string{Triage}
 	default:
 		return nil
 	}
 }
 
-// ParseCategory accepts previous API enum spellings at the boundary only.
-//
-// Triage is refused: CategoryForBehavior answers for it so a Triage issue can
-// still be rendered and grouped, but it is not a category a caller may name —
-// accepting it here would let `{key: "foo", category: "triage"}` reach the
-// catalog, whose CHECK holds only the four stored categories.
+// ParseCategory normalizes API spellings and pre-backfill stored categories.
 func ParseCategory(value string) (string, bool) {
-	if value == Triage {
-		return "", false
-	}
 	if IsCategory(value) {
 		return value, true
 	}
@@ -223,6 +184,9 @@ func ParseCategory(value string) (string, bool) {
 // clients. This is a presentation adapter, NEVER an execution policy. New clients
 // normalize it into four lifecycle categories. No legacy behavior is persisted.
 func WireCategory(status, category string) string {
+	if normalized, ok := ParseCategory(category); ok {
+		category = normalized
+	}
 	if IsBuiltIn(status) {
 		return status
 	}
@@ -243,6 +207,7 @@ func WireCategory(status, category string) string {
 // Custom statuses inherit only terminal lifecycle semantics, not parked, review,
 // blocked or active-agent recovery behavior. Nonterminal keys stay distinct.
 func customBehavior(status, category string) string {
+	category, _ = ParseCategory(category)
 	switch category {
 	case CategoryDone:
 		return Done
@@ -353,22 +318,18 @@ func DeriveKey(name, category string, taken map[string]bool) (string, error) {
 //
 // The scan is bounded by the CATALOG, not by a policy number. Every candidate
 // it tests is distinct, and only len(taken) plus the reserved names (the 7
-// canonical keys, the 4 category names and Triage) can be occupied, so by the
-// pigeonhole
-// principle a free one has to turn up within that many attempts plus one.
+// canonical keys and the 4 category names) can be occupied, so by the
+// pigeonhole principle a free one has to turn up within that many attempts
+// plus one.
 // Picking a round constant instead would invent a cap on custom statuses that
 // exists nowhere else in the product, and would fail with "provide one
 // explicitly" — the very error this package was changed to stop showing a UI
 // that has no key field.
-//
-// Migration 476 applies this same rule in SQL to rename a pre-existing custom
-// `triage` key; keep the two in step.
 func firstFreeKey(base string, taken map[string]bool) (string, error) {
 	if !keyOccupied(base, taken) {
 		return ValidateKey(base)
 	}
-	// +1 for Triage, which keyOccupied also treats as taken.
-	limit := len(taken) + len(canonicalOrder) + len(categoryOrder) + 1 + 2
+	limit := len(taken) + len(canonicalOrder) + len(categoryOrder) + 2
 	for n := 2; n <= limit; n++ {
 		suffix := "_" + strconv.Itoa(n)
 		candidate := truncateForSuffix(base, len(suffix)) + suffix
@@ -415,8 +376,7 @@ func Ensure(ctx context.Context, q Querier, workspaceID pgtype.UUID) error {
 // carries. This is THE function that keeps existing logic correct:
 //
 //   - a built-in key returns itself, unchanged, WITHOUT touching the database,
-//     so no existing code path gains a query or changes behavior. Triage
-//     takes that path too: it has no catalog row to read;
+//     so no existing code path gains a query or changes behavior;
 //   - a custom terminal key returns done/cancelled; other custom keys stay raw.
 //
 // On an unresolvable key it returns the key unchanged. That is the fail-safe
@@ -469,21 +429,35 @@ func Category(ctx context.Context, q Querier, workspaceID pgtype.UUID, status st
 	return category
 }
 
+// CategoryWithError resolves lifecycle for side-effect decisions. Unlike
+// Category, it preserves catalog failures so a caller can defer work and retry.
+// Built-ins still resolve without reading the catalog.
+func CategoryWithError(ctx context.Context, q Querier, workspaceID pgtype.UUID, status string) (string, error) {
+	category, _, err := categoryAndName(ctx, q, workspaceID, status)
+	return category, err
+}
+
 // CategoryAndName is the payload-oriented counterpart to EffectiveAndName.
 // It shares one catalog read while returning the public category rather than
 // the internal behavior projection.
 func CategoryAndName(ctx context.Context, q Querier, workspaceID pgtype.UUID, status string) (string, string) {
+	category, name, _ := categoryAndName(ctx, q, workspaceID, status)
+	return category, name
+}
+
+func categoryAndName(ctx context.Context, q Querier, workspaceID pgtype.UUID, status string) (string, string, error) {
 	if category, ok := CategoryForBehavior(status); ok {
-		return category, ""
+		return category, "", nil
 	}
 	entry, err := q.GetIssueStatusEntryByKey(ctx, db.GetIssueStatusEntryByKeyParams{WorkspaceID: workspaceID, Key: status})
 	if err != nil {
-		return "", ""
+		return "", "", fmt.Errorf("resolve issue status %q category: %w", status, err)
 	}
-	if !IsCategory(entry.Category) {
-		return "", entry.Name
+	category, ok := ParseCategory(entry.Category)
+	if !ok {
+		return "", entry.Name, fmt.Errorf("invalid category %q for issue status %q", entry.Category, status)
 	}
-	return entry.Category, entry.Name
+	return category, entry.Name, nil
 }
 
 // Resolve validates that status is usable in this workspace, returning the
@@ -497,17 +471,10 @@ func CategoryAndName(ctx context.Context, q Querier, workspaceID pgtype.UUID, st
 // feature, or mid-rollout before migration 339 runs — could not create or
 // update an issue at all. Failing open here is limited precisely to the set
 // that was valid before this feature existed; anything else still needs a row.
-//
-// Triage never reaches the catalog: it resolves to ErrReservedStatus, so every
-// write path that validates through here refuses it without having to know
-// about it.
 func Resolve(ctx context.Context, q Querier, workspaceID pgtype.UUID, status string) (db.IssueStatus, error) {
 	key := strings.ToLower(strings.TrimSpace(status))
 	if key == "" {
 		return db.IssueStatus{}, ErrUnknownStatus
-	}
-	if key == Triage {
-		return db.IssueStatus{}, ErrReservedStatus
 	}
 	entry, err := q.GetIssueStatusEntryByKey(ctx, db.GetIssueStatusEntryByKeyParams{
 		WorkspaceID: workspaceID,
@@ -650,7 +617,7 @@ func (r *Resolver) load(ctx context.Context, q Querier) {
 	r.categories = make(map[string]string, len(entries))
 	r.names = make(map[string]string, len(entries))
 	for _, e := range entries {
-		r.categories[e.Key] = e.Category
+		r.categories[e.Key], _ = ParseCategory(e.Category)
 		r.names[e.Key] = e.Name
 	}
 }
@@ -725,17 +692,10 @@ func (r *Resolver) Name(ctx context.Context, q Querier, status string) string {
 // category's column.
 //
 // An unseeded workspace yields no rows; the concrete built-in behavior keys are
-// added explicitly so filtering remains complete. The reserved Triage key
-// expands to exactly itself — no custom status can carry it.
+// added explicitly so filtering remains complete.
 func ExpandCategories(ctx context.Context, q Querier, workspaceID pgtype.UUID, categories []string) ([]string, error) {
 	behaviors := make([]string, 0, len(categories)*2)
-	triage := false
 	for _, c := range categories {
-		if c == Triage {
-			// The reserved key owns no catalog row, so it expands to itself.
-			triage = true
-			continue
-		}
 		if IsCategory(c) {
 			behaviors = append(behaviors, c)
 			continue
@@ -748,9 +708,6 @@ func ExpandCategories(ctx context.Context, q Querier, workspaceID pgtype.UUID, c
 		}
 	}
 	if len(behaviors) == 0 {
-		if triage {
-			return []string{Triage}, nil
-		}
 		return nil, nil
 	}
 	seenBehaviors := make(map[string]bool, len(behaviors))
@@ -786,9 +743,6 @@ func ExpandCategories(ctx context.Context, q Querier, workspaceID pgtype.UUID, c
 			}
 		}
 	}
-	if triage {
-		out = append(out, Triage)
-	}
 	return out, nil
 }
 
@@ -814,10 +768,11 @@ func CustomKeyCategories(ctx context.Context, q Querier, workspaceID pgtype.UUID
 	}
 	out := make(map[string]string, len(entries))
 	for _, e := range entries {
-		if IsBuiltIn(e.Key) || !IsCategory(e.Category) {
+		category, ok := ParseCategory(e.Category)
+		if IsBuiltIn(e.Key) || !ok {
 			continue
 		}
-		out[e.Key] = e.Category
+		out[e.Key] = category
 	}
 	return out, nil
 }

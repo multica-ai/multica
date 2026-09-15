@@ -202,6 +202,10 @@ export interface AgentActivityBucket {
   bucket_at: string;
   task_count: number;
   failed_count: number;
+  // task_count = completed_count + failed_count + cancelled_count; the
+  // back-end always reports all three.
+  completed_count: number;
+  cancelled_count: number;
 }
 
 // 30-day total run count per agent, drives the Agents-list RUNS column.

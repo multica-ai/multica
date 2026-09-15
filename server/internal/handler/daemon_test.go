@@ -4507,21 +4507,22 @@ func TestAckTaskCancelled(t *testing.T) {
 	}
 }
 
-// The daemon GC decides whether a task workdir can be reclaimed by testing the
-// issue status against the terminal set — `gc.go:509` compares it to
-// "done"/"cancelled", and `isKnownIssueStatus` is a hardcoded switch over the 7
-// built-ins. Neither knows custom statuses exist, and it must stay that way: an
-// installed daemon has no database, and daemons predating MUL-6243 keep running
-// against upgraded servers.
+// The daemon GC decides whether a task workdir can be reclaimed from two fields
+// of the gc-check response, and the SERVER owns what goes in both.
 //
-// So the normalization is the SERVER's job. Both gc-check endpoints resolve the
-// stored key to its category before answering. Without that:
+//   - `category` is the real answer: the four-value lifecycle a current daemon
+//     tests for terminality (issueGCLifecycle in daemon/gc.go).
+//   - `status` is the legacy seven-value enum. Installed daemons match it
+//     literally against the built-ins and fail closed on anything else, so a
+//     custom status has to be projected back onto that vocabulary here.
+//
+// Handing back the raw stored key instead breaks both kinds of daemon:
 //
 //   - an issue parked on a `done`-category custom status is never terminal, so
 //     its workdir is retained forever, and
 //   - `isKnownIssueStatus` rejects the raw key, silently disabling the
-//     GCCompletedTaskTTL full-cleanup path for that issue.
-func TestIssueGCChecksReportCategoryNotRawCustomStatus(t *testing.T) {
+//     GCCompletedTaskTTL full-cleanup path for that issue (MUL-7364).
+func TestIssueGCChecksReportWireStatusNotRawCustomStatus(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -4537,6 +4538,20 @@ func TestIssueGCChecksReportCategoryNotRawCustomStatus(t *testing.T) {
 		"status": humanReview.Key, "priority": "medium", "number": 92502,
 	})
 
+	// An installed daemon rejects anything outside the 7 built-in keys, so a
+	// status it cannot recognize disables full cleanup however correct it looks.
+	wantLegacyEnum := func(t *testing.T, status string) {
+		t.Helper()
+		for _, key := range issuestatus.Canonical() {
+			if status == key {
+				return
+			}
+		}
+		t.Errorf("status %q is outside the legacy seven-value enum — isKnownIssueStatus rejects it, silently disabling the GCCompletedTaskTTL full-cleanup path", status)
+	}
+
+	type wire struct{ status, category string }
+
 	t.Run("batch endpoint", func(t *testing.T) {
 		req := newDaemonTokenRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check",
 			map[string]any{"issue_ids": []string{doneID, openID}}, testWorkspaceID, "legit-daemon")
@@ -4544,44 +4559,56 @@ func TestIssueGCChecksReportCategoryNotRawCustomStatus(t *testing.T) {
 
 		var resp struct {
 			Issues []struct {
-				ID     string `json:"id"`
-				Found  bool   `json:"found"`
-				Status string `json:"status"`
+				ID       string `json:"id"`
+				Found    bool   `json:"found"`
+				Status   string `json:"status"`
+				Category string `json:"category"`
 			} `json:"issues"`
 		}
 		testutil.Call(t, testHandler.BatchIssueGCCheck, req).Want(http.StatusOK).JSON(&resp)
 
-		byID := map[string]string{}
+		byID := map[string]wire{}
 		for _, issue := range resp.Issues {
 			if !issue.Found {
 				t.Fatalf("issue %s not found", issue.ID)
 			}
-			byID[issue.ID] = issue.Status
+			wantLegacyEnum(t, issue.Status)
+			byID[issue.ID] = wire{issue.Status, issue.Category}
 		}
-		// The category, never the stored key — the daemon's terminal test is a
-		// literal string comparison and has no way to resolve one.
-		if byID[doneID] != issuestatus.Done {
-			t.Errorf("done-category custom status reported as %q, want %q — the daemon would keep this workdir forever",
-				byID[doneID], issuestatus.Done)
+		if got, want := byID[doneID], (wire{issuestatus.Done, issuestatus.CategoryDone}); got != want {
+			t.Errorf("done-category custom status reported as %+v, want %+v — the daemon would keep this workdir forever", got, want)
 		}
-		if byID[openID] != "gc_human_review" {
-			t.Errorf("nonterminal custom status reported as %q, want gc_human_review", byID[openID])
+		if got, want := byID[openID], (wire{issuestatus.InProgress, issuestatus.CategoryStarted}); got != want {
+			t.Errorf("nonterminal custom status reported as %+v, want %+v", got, want)
 		}
 	})
 
 	// The per-issue endpoint is the fallback older daemons still call, so it
 	// carries the same obligation.
 	t.Run("legacy per-issue endpoint", func(t *testing.T) {
-		req := newDaemonTokenRequest("GET", "/api/daemon/issues/"+doneID+"/gc-check", nil, testWorkspaceID, "legit-daemon")
-		req = withURLParam(req, "issueId", doneID)
+		for _, tc := range []struct {
+			name    string
+			issueID string
+			want    wire
+		}{
+			{"terminal custom status", doneID, wire{issuestatus.Done, issuestatus.CategoryDone}},
+			{"nonterminal custom status", openID, wire{issuestatus.InProgress, issuestatus.CategoryStarted}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				req := newDaemonTokenRequest("GET", "/api/daemon/issues/"+tc.issueID+"/gc-check", nil, testWorkspaceID, "legit-daemon")
+				req = withURLParam(req, "issueId", tc.issueID)
 
-		var resp struct {
-			Status string `json:"status"`
-		}
-		testutil.Call(t, testHandler.GetIssueGCCheck, req).Want(http.StatusOK).JSON(&resp)
+				var resp struct {
+					Status   string `json:"status"`
+					Category string `json:"category"`
+				}
+				testutil.Call(t, testHandler.GetIssueGCCheck, req).Want(http.StatusOK).JSON(&resp)
 
-		if resp.Status != issuestatus.Done {
-			t.Errorf("status = %q, want %q", resp.Status, issuestatus.Done)
+				wantLegacyEnum(t, resp.Status)
+				if got := (wire{resp.Status, resp.Category}); got != tc.want {
+					t.Errorf("status/category = %+v, want %+v", got, tc.want)
+				}
+			})
 		}
 	})
 }
@@ -4620,9 +4647,10 @@ func TestBatchIssueGCCheckReadsCatalogOnceForManyCustomStatuses(t *testing.T) {
 
 	var resp struct {
 		Issues []struct {
-			ID     string `json:"id"`
-			Found  bool   `json:"found"`
-			Status string `json:"status"`
+			ID       string `json:"id"`
+			Found    bool   `json:"found"`
+			Status   string `json:"status"`
+			Category string `json:"category"`
 		} `json:"issues"`
 	}
 	testutil.Call(t, testHandler.BatchIssueGCCheck, req).Want(http.StatusOK).JSON(&resp)
@@ -4631,16 +4659,16 @@ func TestBatchIssueGCCheckReadsCatalogOnceForManyCustomStatuses(t *testing.T) {
 	// also score zero on the counters below.
 	byID := map[string]string{}
 	for _, issue := range resp.Issues {
-		byID[issue.ID] = issue.Status
+		byID[issue.ID] = issue.Status + "/" + issue.Category
 	}
 	for _, id := range ids[:2] {
-		if byID[id] != issuestatus.Done {
-			t.Fatalf("issue %s reported %q, want %q", id, byID[id], issuestatus.Done)
+		if want := issuestatus.Done + "/" + issuestatus.CategoryDone; byID[id] != want {
+			t.Fatalf("issue %s reported %q, want %q", id, byID[id], want)
 		}
 	}
 	for _, id := range ids[2:4] {
-		if byID[id] != "gc_batch_review" {
-			t.Fatalf("issue %s reported %q, want gc_batch_review", id, byID[id])
+		if want := issuestatus.InProgress + "/" + issuestatus.CategoryStarted; byID[id] != want {
+			t.Fatalf("issue %s reported %q, want %q", id, byID[id], want)
 		}
 	}
 

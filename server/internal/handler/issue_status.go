@@ -597,7 +597,7 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 	}
 	active := make([]db.IssueStatus, 0, len(catalog))
 	for _, entry := range catalog {
-		if entry.Category == category && (req.IncludeSystem || !entry.IsSystem) {
+		if normalized, _ := issuestatus.ParseCategory(entry.Category); normalized == category && (req.IncludeSystem || !entry.IsSystem) {
 			active = append(active, entry)
 		}
 	}
@@ -627,7 +627,7 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "include_system is required to reorder built-in statuses")
 		case entry.ArchivedAt.Valid:
 			writeError(w, http.StatusConflict, "archived statuses cannot be reordered")
-		case entry.Category != category:
+		case normalizedStatusCategory(entry.Category) != category:
 			writeError(w, http.StatusBadRequest, "ids must all belong to the requested category")
 		default:
 			writeError(w, http.StatusConflict, "issue status catalog changed during reorder")
@@ -697,4 +697,9 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 		"categories": issuestatus.Canonical(),
 		"total":      len(resp),
 	})
+}
+
+func normalizedStatusCategory(category string) string {
+	normalized, _ := issuestatus.ParseCategory(category)
+	return normalized
 }

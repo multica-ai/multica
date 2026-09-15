@@ -46,9 +46,9 @@ When the assignee is a [squad](/squads), the same rule applies: Multica enqueues
 
 `backlog` doesn't start a run on assignment either. Execution only follows after you move the issue out of `backlog`, or ask the assignee for something in a follow-up comment.
 
-When the issue already has an agent or squad owner, moving it out of `backlog` opens the same dialog: that status change is what starts the run, so it offers the same **Don't start yet**, which moves the issue without waking the agent. The dialog appears for every target outside the `backlog`, `done`, and `cancelled` categories.
+When the issue already has an agent or squad owner, moving it out of `backlog` opens the same dialog: that status change is what starts the run, so it offers the same **Don't start yet**, which moves the issue without waking the agent. The dialog appears for every target other than `backlog` itself and any status in the `done` or `closed` category.
 
-Only the `backlog` category works this way, and a [custom status](/issues#custom-statuses) in that category behaves identically. Issues already in `done` or `cancelled` still start a run immediately when assigned or reassigned to an agent.
+Only the fixed `backlog` status works this way. A [custom status](/issues#custom-statuses) in the `unstarted` category does **not** park work — assigning an agent to an issue there starts a run right away. Issues already in `done` or `cancelled` still start a run immediately when assigned or reassigned to an agent.
 
 ## Assignment permissions
 

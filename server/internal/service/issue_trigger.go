@@ -111,6 +111,18 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 	currentStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
 	prevStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, in.PrevStatus)
 
+	// Triage is stricter than the backlog parking lot: backlog defers a run,
+	// Triage refuses one outright (MUL-7189 §2.3). Deciding it here is what
+	// keeps the trigger PREVIEW honest — the queue door would refuse the insert
+	// either way, but silently, and the preview would have promised a run.
+	//
+	// Leaving Triage needs no case of its own. Triage is not a status, so accept
+	// clears this field and then takes the ordinary create / assign path; there
+	// is no "was in triage" transition for this predicate to recognise.
+	if issue.TriageState.Valid {
+		return IssueRunTrigger{}, false
+	}
+
 	var source RunEnqueueSource
 	switch {
 	case in.IsCreate || in.AssigneeChanged:

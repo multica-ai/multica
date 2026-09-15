@@ -70,6 +70,7 @@ services:
       REDIS_URL: ${REDIS_URL:-}
       REDIS_CLUSTER_MODE: ${REDIS_CLUSTER_MODE:-false}
       PORT: "8080"
+      MAINTENANCE_PORT: ${MAINTENANCE_PORT:-}
       METRICS_ADDR: ${METRICS_ADDR:-}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set to a strong random value — generate one with 'openssl rand -hex 32'}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
@@ -110,6 +111,7 @@ services:
       ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
       DISABLE_WORKSPACE_CREATION: ${DISABLE_WORKSPACE_CREATION:-}
+      DO_NOT_TRACK: ${DO_NOT_TRACK:-}
       # Managed Cloud stays off for self-hosting. All managed Cloud clients use
       # this single URL when it is configured.
       MULTICA_CLOUD_URL: ${MULTICA_CLOUD_URL:-}

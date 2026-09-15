@@ -1,7 +1,7 @@
 {
   "issue_statuses": {
     "title": "태스크 상태",
-    "description": "태스크 상태를 다섯 가지 수명 주기 카테고리로 구성합니다.",
+    "description": "태스크 상태를 네 가지 수명 주기 카테고리로 구성합니다.",
     "loading": "상태를 불러오는 중…",
     "add": "상태 추가",
     "show_archived": "보관됨 표시 ({{count}})",

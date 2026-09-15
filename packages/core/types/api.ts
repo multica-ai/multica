@@ -340,10 +340,12 @@ export type IssueTableGroupSpec =
    * Retained for installed clients. New Board/List/Swimlane surfaces group by
    * concrete status keys, not categories. The descriptor still reports
    * `value.kind === "status"` for response compatibility; the group KEY is
-   * what distinguishes lifecycle categories from concrete statuses.
+   * what distinguishes category buckets from concrete statuses. By default
+   * buckets use the seven-value wire enum; category_format=lifecycle opts into
+   * unstarted/started/done/closed.
    * (MUL-6243)
    */
-  | { kind: "status_category" }
+  | { kind: "status_category"; category_format?: "lifecycle" }
   | { kind: "assignee" }
   | { kind: "project" }
   | { kind: "parent" }
@@ -352,6 +354,8 @@ export type IssueTableGroupSpec =
       primary: "assignee" | "project" | "parent";
       /** `status_category` folds custom statuses into their category's cell. */
       secondary: "status" | "status_category";
+      /** Omit for legacy seven-value category buckets; only for status_category. */
+      category_format?: "lifecycle";
       /** Optional visible secondary buckets. When present, the server pages
        * only primary groups that contain at least one matching card and
        * returns `total` for that complete visible result set. */

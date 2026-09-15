@@ -62,7 +62,7 @@ Multica のコードを書く、翻訳を変更する、あるいは中国語の
 - 標準の `gofmt` + `go vet`。例外なし。
 - Handler ファイルはドメインを反映する: `agent.go`, `auth.go`, `runtime.go`
 - テスト: `<file>_test.go` を同じ場所に配置
-- handler での UUID パースは、ルートの `CLAUDE.md` のルールに従ってください — 境界の入力には `parseUUIDOrBadRequest`、信頼できる往復には `parseUUID`（panic 版）を使い、error を確認せずに `util.ParseUUID` を直接使用しないでください。
+- handler での UUID パースは、ルートの `AGENTS.md` のルールに従ってください — 境界の入力には `parseUUIDOrBadRequest`、信頼できる往復には `parseUUID`（panic 版）を使い、error を確認せずに `util.ParseUUID` を直接使用しないでください。
 
 ### TypeScript
 
@@ -308,7 +308,7 @@ i18next は `_one` / `_other` を使います。中国語には文法的な数�
 
 ここのルールを変更した場合は、次も併せて行ってください。
 
-1. 関連する locale JSON / CLAUDE.md / ドキュメントページに適用する
+1. 関連する locale JSON / AGENTS.md / ドキュメントページに適用する
 2. PR の説明に変更点を記録し、レビュアーが下流の一括対応を確認できるようにする
 
 このページが契約です。他の何ものもこれを上書きできません。

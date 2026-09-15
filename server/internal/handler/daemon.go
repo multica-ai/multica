@@ -2150,6 +2150,15 @@ func rerunSourceMatchesTaskScope(task, source db.AgentTaskQueue) bool {
 	if task.AgentID != source.AgentID {
 		return false
 	}
+	// A triage run is never a source to continue from (MUL-7189 §5.6). The
+	// exclusion GetLastTaskSession applies cannot reach this branch, which
+	// resolves the session from the task the user named rather than from the
+	// (agent, issue) lookup. RerunIssue already refuses a triage source, so this
+	// is the second lock on the same door — and the one that still holds for a
+	// row written by an older server mid rolling-deploy.
+	if service.IsTriageTask(source) {
+		return false
+	}
 	if task.IssueID.Valid {
 		return source.IssueID.Valid && task.IssueID == source.IssueID
 	}
@@ -5563,7 +5572,34 @@ type batchIssueGCCheckItem struct {
 	ID        string     `json:"id"`
 	Found     bool       `json:"found"`
 	Status    string     `json:"status,omitempty"`
+	Category  string     `json:"category,omitempty"`
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
+// issueGCWire encodes an issue's lifecycle for both GC check endpoints: the
+// four-value `category` a current daemon decides on, and the legacy
+// seven-value `status` enum installed daemons still match literally.
+//
+// `status` predates custom statuses — the daemon tests it against the 7
+// built-in keys and fails closed on anything else (isKnownIssueStatus in
+// daemon/gc.go) — so the stored key cannot be handed back raw. A nonterminal
+// custom key silently disables the GCCompletedTaskTTL full-cleanup path, and a
+// four-value category is not in that vocabulary either. GC consumes exactly one
+// lifecycle fact ("is this issue terminal?"), which is why projecting a custom
+// status onto a built-in key here grants it no built-in behavior anywhere else.
+//
+// A status with no lifecycle category — an unresolvable key after a failed
+// catalog read, or a status created since the resolver's snapshot — is returned
+// raw with no category, so every daemon fails closed and reclaims artifacts
+// only. (MUL-7364)
+//
+// Triage does not reach this: it is not a status, and a Triage entry carries an
+// ordinary non-terminal one, which already reclaims artifacts only.
+func issueGCWire(status, category string) (wireStatus, wireCategory string) {
+	if !issuestatus.IsCategory(category) {
+		return status, ""
+	}
+	return issuestatus.WireCategory(status, category), category
 }
 
 // BatchIssueGCCheck returns one explicit result for every requested issue ID.
@@ -5621,8 +5657,8 @@ func (h *Handler) BatchIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ONE resolver for the whole batch, not a point lookup per row. The
-	// package-level Effective issues a GetIssueStatusEntryByKey for every custom
-	// key it sees, so resolving inside this loop cost up to maxIssueGCBatchSize
+	// package-level helpers issue a GetIssueStatusEntryByKey for every custom
+	// key they see, so resolving inside this loop cost up to maxIssueGCBatchSize
 	// catalog queries per request — on an endpoint whose entire purpose is to
 	// replace per-issue requests, and which every installed daemon runs on a
 	// timer. The resolver reads the catalog lazily and at most once, so an
@@ -5635,10 +5671,11 @@ func (h *Handler) BatchIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 		if found {
 			// The daemon consumes this purely as a machine signal ("is this
 			// issue terminal, so its workdir can be reclaimed?") and has no
-			// database of its own, so the canonical status is resolved here.
+			// database of its own, so the lifecycle is resolved here.
 			// Normalizing server-side also means daemons that predate custom
 			// statuses keep making correct GC decisions. (MUL-6243)
-			item.Status = resolver.Effective(r.Context(), h.issueStatusCatalog(), row.Status)
+			item.Status, item.Category = issueGCWire(row.Status,
+				resolver.Category(r.Context(), h.issueStatusCatalog(), row.Status))
 			updatedAt := row.UpdatedAt.Time
 			item.UpdatedAt = &updatedAt
 		}
@@ -5664,10 +5701,13 @@ func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(issue.WorkspaceID)) {
 		return
 	}
+	// Same reasoning as BatchIssueGCCheck: normalize server-side so the
+	// daemon's terminal-status test stays correct. (MUL-6243)
+	status, category := issueGCWire(issue.Status,
+		issuestatus.Category(r.Context(), h.issueStatusCatalog(), issue.WorkspaceID, issue.Status))
 	writeJSON(w, http.StatusOK, map[string]any{
-		// Same reasoning as BatchIssueGCCheck: normalize server-side so the
-		// daemon's terminal-status test stays correct. (MUL-6243)
-		"status":     issuestatus.Effective(r.Context(), h.issueStatusCatalog(), issue.WorkspaceID, issue.Status),
+		"status":     status,
+		"category":   category,
 		"updated_at": issue.UpdatedAt.Time,
 	})
 }

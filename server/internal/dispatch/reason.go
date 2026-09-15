@@ -70,6 +70,18 @@ const (
 	// success: nothing new runs. (Named to avoid implying the NEW comment was
 	// already processed.)
 	ReasonSelfTriggerSuppressed ReasonCode = "self_trigger_suppressed"
+	// ReasonIssueInTriage: the issue is waiting in Triage, which has no executor
+	// to act on (MUL-7189 §2.3). Returned when a trigger would have had to
+	// derive one from the issue — running its assignee again, or asking it to
+	// perform an action. An @mention is not refused: naming an agent by hand is
+	// a conversation, and it dispatches normally.
+	//
+	// It is a property of the ISSUE, not of the target, so it is
+	// enumeration-safe by construction: every target on the same issue gets the
+	// same code, and the caller already sees the issue. Nothing is queued and
+	// nothing is pending — the trigger is answered by accepting the issue out of
+	// Triage, not by waiting.
+	ReasonIssueInTriage ReasonCode = "issue_in_triage"
 	// ReasonQuotaExceeded is a policy-neutral refusal for an exhausted
 	// Cloud-provided autopilot interval.
 	ReasonQuotaExceeded ReasonCode = "quota_exceeded"

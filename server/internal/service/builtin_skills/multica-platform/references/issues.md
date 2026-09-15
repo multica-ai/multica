@@ -237,15 +237,6 @@ Backlog parking, In Review completion, Blocked failure, or In Progress recovery.
 Use the built-in key when its special behavior is needed. Built-in definitions
 cannot be edited or archived.
 
-Task claims send custom status categories using the legacy wire enum so older
-daemons can display the catalog: unstarted → todo, started → in_progress,
-done → done, closed → cancelled. This presentation mapping does not restore
-built-in automation behavior. Older daemon instructions may still describe
-inheritance; upgrading the daemon is required for current behavior guidance.
-If the brief reports unrecognized categories, upgrade the daemon to display
-those entries. That omission count is separate from the server's 30-custom-status
-catalog limit.
-
 Archive a custom status only after moving every issue off it, including
 completed/canceled issues. An occupied status returns HTTP 409 with code
 `issue_status_in_use` and `issue_count`; it remains active. Use Settings >

@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Agent } from "@multica/core/types";
+import type { Agent, AgentActivityBucket } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
 import enAgents from "../../../locales/en/agents.json";
@@ -18,35 +18,36 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
-// api / paths are only reached from a rendered TaskRow, which never mounts in
-// the loading and empty states under test — stub them so the module graph
-// resolves without dragging in platform wiring.
+// TaskRow never mounts in these aggregate/loading/empty-state tests.
 vi.mock("@multica/core/api", () => ({ api: {} }));
 
-// The tab reads three data sources. Snapshot ("Now") and the activity map
-// ("Last 30 days") stay empty; the per-agent task list is the one under test,
-// its queryFn swapped per test to stay pending or resolve.
+// Keep "Now" empty while varying activity outcomes and task-list loading.
 const agentTasksRef = vi.hoisted(() => ({
   current: () => new Promise<unknown>(() => {}),
 }));
-vi.mock("@multica/core/agents", () => ({
-  agentTaskSnapshotOptions: () => ({
-    queryKey: ["snapshot"],
-    queryFn: () => Promise.resolve([]),
-  }),
-  agentTasksOptions: () => ({
-    queryKey: ["agent-tasks"],
-    queryFn: () => agentTasksRef.current(),
-  }),
-  useWorkspaceActivityMap: () => ({ byAgent: new Map() }),
-  summarizeActivityWindow: () => ({
-    totalRuns: 0,
-    totalFailed: 0,
-    buckets: [],
-  }),
-}));
+const activityRef = vi.hoisted(() => ({ current: [] as AgentActivityBucket[] }));
+vi.mock("@multica/core/agents", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/agents")>();
+  return {
+    ...actual,
+    agentTaskSnapshotOptions: () => ({
+      queryKey: ["snapshot"],
+      queryFn: () => Promise.resolve([]),
+    }),
+    agentTasksOptions: () => ({
+      queryKey: ["agent-tasks"],
+      queryFn: () => agentTasksRef.current(),
+    }),
+    useWorkspaceActivityMap: () => ({
+      byAgent: new Map([[
+        "agent-1",
+        actual.deriveAgentActivity(activityRef.current, "2026-01-01", Date.now()),
+      ]]),
+    }),
+  };
+});
 
-import { ActivityTab } from "./activity-tab";
+import { ActivityTab, AgentPerformanceSummary } from "./activity-tab";
 
 const baseAgent = {
   id: "agent-1",
@@ -55,7 +56,7 @@ const baseAgent = {
 
 const EMPTY_RECENT = "This agent hasn't completed anything yet.";
 
-function renderTab() {
+function renderTab(performance = false) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -72,7 +73,8 @@ function renderTab() {
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <NavigationProvider value={navigation}>
         <QueryClientProvider client={queryClient}>
-          <ActivityTab agent={baseAgent} showPerformance={false} />
+          {performance && <AgentPerformanceSummary agent={baseAgent} />}
+          <ActivityTab agent={baseAgent} showPerformance={performance} />
         </QueryClientProvider>
       </NavigationProvider>
     </I18nProvider>,
@@ -81,6 +83,41 @@ function renderTab() {
 
 beforeEach(() => {
   agentTasksRef.current = () => new Promise<unknown>(() => {});
+  activityRef.current = [];
+});
+
+describe("agent outcome presentation", () => {
+  it("uses completed and failed outcomes in both summaries and shows cancellations separately", () => {
+    activityRef.current = [{
+      agent_id: "agent-1",
+      bucket_at: new Date().toISOString(),
+      task_count: 10,
+      failed_count: 1,
+      completed_count: 1,
+      cancelled_count: 8,
+    }];
+    renderTab(true);
+    expect(screen.getByText("50%")).toBeInTheDocument();
+    expect(screen.getByText("50% success")).toBeInTheDocument();
+    expect(screen.getAllByText("8 cancelled")).toHaveLength(2);
+    expect(screen.queryByText("90%")).not.toBeInTheDocument();
+  });
+
+  it("does not claim success for cancelled-only data", () => {
+    activityRef.current = [{
+      agent_id: "agent-1",
+      bucket_at: new Date().toISOString(),
+      task_count: 8,
+      failed_count: 0,
+      completed_count: 0,
+      cancelled_count: 8,
+    }];
+    const { container } = renderTab(true);
+    expect(screen.queryByText("100%")).not.toBeInTheDocument();
+    expect(screen.queryByText("100% success")).not.toBeInTheDocument();
+    expect(container.querySelectorAll('rect[fill="var(--color-brand)"]')).toHaveLength(0);
+    expect(screen.getByText("success rate").parentElement).toHaveTextContent("—");
+  });
 });
 
 describe("ActivityTab Recent work loading state", () => {

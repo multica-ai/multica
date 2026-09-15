@@ -384,7 +384,7 @@ func TestCodebuddyHandleAssistantText(t *testing.T) {
 		}),
 	}
 
-	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage), make(map[string]struct{}))
 	output, tools := turn.text, turn.toolUses
 
 	if output != "codebuddy says hi" {

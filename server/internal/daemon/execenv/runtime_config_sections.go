@@ -303,10 +303,19 @@ var briefStatusCategoryOrder = issuestatus.Categories()
 // With custom statuses it replaces the seven-value enumeration with the
 // workspace's catalog, grouped by lifecycle category. Special workflow rules
 // still name fixed built-in keys; a custom status inherits only lifecycle.
-// Each line leads with the category key, then the statuses inside it. Name and
-// description ride along because instructions and users refer to statuses by
-// display name ("move it to Human Review"), and the description is the
-// admin's disambiguator when a category holds more than one status.
+//
+// Each line leads with the category name as PLAIN TEXT, not a code token.
+// Three of the four category names — unstarted, started, closed — are not
+// status keys at all: ValidateKey reserves them, so no catalog row can hold
+// one, and Resolve returns ErrUnknownStatus. `done` is the exception, being
+// both a lifecycle category and a built-in key. Backticking the group label
+// the way the settable keys beside it are backticked therefore invited
+// `multica issue status <id> started`, which is a 400, so only keys are
+// backticked here (MUL-7379).
+//
+// Name and description ride along because instructions and users refer to
+// statuses by display name ("move it to Human Review"), and the description is
+// the admin's disambiguator when a category holds more than one status.
 //
 // Name/description are user-authored: they pass through
 // sanitizeNameForBriefMarkdown so a crafted status name cannot inject
@@ -334,7 +343,7 @@ func writeIssueStatusCommand(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("- `multica issue status <id> <status> [--no-start]` — flip status. Available statuses by lifecycle category:\n")
 	for _, category := range briefStatusCategoryOrder {
 		customs := byCategory[category]
-		fmt.Fprintf(b, "  - `%s`: `%s` (built-in)", category, strings.Join(issuestatus.BehaviorsForCategory(category), "`, `"))
+		fmt.Fprintf(b, "  - %s category: `%s` (built-in)", category, strings.Join(issuestatus.BehaviorsForCategory(category), "`, `"))
 		for _, s := range customs {
 			name := sanitizeNameForBriefMarkdown(s.Name)
 			desc := sanitizeNameForBriefMarkdown(s.Description)
@@ -351,7 +360,7 @@ func writeIssueStatusCommand(b *strings.Builder, ctx TaskContextForEnv) {
 	// Count only otherwise renderable entries, without echoing untrusted
 	// category values or conflating these omissions with the server's cap.
 	if unknownCategories > 0 {
-		fmt.Fprintf(b, "  - %d custom statuses not listed because this daemon does not recognize their categories; upgrade the daemon to display them.\n", unknownCategories)
+		fmt.Fprintf(b, "  - Custom statuses omitted due to unrecognized categories: %d.\n", unknownCategories)
 	}
 	if ctx.IssueStatusesOmitted > 0 {
 		fmt.Fprintf(b, "  - …and %d more custom statuses not listed; an invalid status errors with the full valid list.\n", ctx.IssueStatusesOmitted)
@@ -379,6 +388,14 @@ func writeIssueBodyFormatting(b *strings.Builder) {
 	b.WriteString("An issue title already serves as its H1. By default, do not add a Markdown H1 (`# ...`) to an issue body or description; start with prose or `##` subheadings. Only add an H1 when the user specifically requests one.\n\n")
 }
 
+// commentReceiptRule picks the receipt mode for a posting command. It trails
+// the file-first guardrail in both OS variants of `## Comment Formatting`:
+// the guardrail is the section's correctness red line (a body mangled by the
+// shell is a wrong comment), while the receipt mode only decides how much of
+// an already-correct comment is echoed back, so it must not displace the
+// guardrail from the section lede.
+const commentReceiptRule = "For final-result comments, use `--output table` to confirm success without echoing the body. Use `--output json` instead when you need the returned comment ID, attachment details, or other response fields. Gate the cleanup on the post succeeding (`&&`, or an `$LASTEXITCODE` check on Windows): a cleanup command run unconditionally succeeds after a failed post and makes the whole shell call exit 0, and under `--output table` empty stdout alone does not prove success.\n\n"
+
 // writeCommentFormatting emits the cross-platform file-first guardrail.
 // The Windows branch carries the `$OutputEncoding` rationale: Windows
 // PowerShell 5.1 defaults $OutputEncoding to ASCII and may replace
@@ -388,10 +405,12 @@ func writeIssueBodyFormatting(b *strings.Builder) {
 func writeCommentFormatting(b *strings.Builder) {
 	b.WriteString("## Comment Formatting\n\n")
 	if runtimeGOOS == "windows" {
-		b.WriteString("On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`** — do NOT pipe via `--content-stdin` (Windows PowerShell 5.1's `$OutputEncoding` may replace non-ASCII characters with `?`). Never use inline `--content` for agent-authored comments. Write the file inside your working directory, never `/tmp` or shared paths (MUL-4252). Keep the same `--parent` value from the trigger comment when replying. Delete the temp file (`Remove-Item ./reply.md`) after posting; do not rely on `\\n` escapes.\n\n")
+		b.WriteString("On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`** — do NOT pipe via `--content-stdin` (Windows PowerShell 5.1's `$OutputEncoding` may replace non-ASCII characters with `?`). Never use inline `--content` for agent-authored comments. Write the file inside your working directory, never `/tmp` or shared paths (MUL-4252). Keep the same `--parent` value from the trigger comment when replying. Delete the temp file (`Remove-Item ./reply.md`) only after the post succeeded; do not rely on `\\n` escapes.\n\n")
+		b.WriteString(commentReceiptRule)
 		return
 	}
-	b.WriteString("For issue comments, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`**. Never use inline `--content` for agent-authored comments (MUL-2904); never use `--content-stdin` HEREDOCs alongside other flags (#4182). Write the file inside your working directory, never `/tmp` or shared paths (MUL-4252). Keep the same `--parent` value from the trigger comment when replying; delete the temp file (`rm ./reply.md`) after posting; do not rely on `\\n` escapes.\n\n")
+	b.WriteString("For issue comments, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`**. Never use inline `--content` for agent-authored comments (MUL-2904); never use `--content-stdin` HEREDOCs alongside other flags (#4182). Write the file inside your working directory, never `/tmp` or shared paths (MUL-4252). Keep the same `--parent` value from the trigger comment when replying; delete the temp file (`rm ./reply.md`) only after the post succeeded; do not rely on `\\n` escapes.\n\n")
+	b.WriteString(commentReceiptRule)
 }
 
 // writeRepositories emits the Repositories section when at least one repo

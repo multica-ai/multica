@@ -62,7 +62,7 @@ Multica 코드를 작성하거나, 번역을 변경하거나, 중국어 제품 �
 - 표준 `gofmt` + `go vet`. 예외 없음.
 - Handler 파일은 도메인을 반영: `agent.go`, `auth.go`, `runtime.go`
 - 테스트: `<file>_test.go`로 같은 위치에 배치
-- handler에서의 UUID 파싱은 루트 `CLAUDE.md`의 규칙을 따릅니다 — 경계 입력에는 `parseUUIDOrBadRequest`, 신뢰할 수 있는 왕복에는 `parseUUID`(panic 버전), 절대 error를 확인하지 않고 `util.ParseUUID`를 직접 사용하지 마세요.
+- handler에서의 UUID 파싱은 루트 `AGENTS.md`의 규칙을 따릅니다 — 경계 입력에는 `parseUUIDOrBadRequest`, 신뢰할 수 있는 왕복에는 `parseUUID`(panic 버전), 절대 error를 확인하지 않고 `util.ParseUUID`를 직접 사용하지 마세요.
 
 ### TypeScript
 
@@ -308,7 +308,7 @@ i18next는 `_one` / `_other`를 사용합니다; 중국어에는 문법적 수�
 
 이곳의 규칙을 변경하면 다음도 함께 수행하세요:
 
-1. 관련 locale JSON / CLAUDE.md / 문서 페이지에 적용
+1. 관련 locale JSON / AGENTS.md / 문서 페이지에 적용
 2. PR 설명에 변경 사항을 기록하여 리뷰어가 다운스트림 정리를 살펴보도록 알리기
 
 이 페이지가 계약입니다; 다른 어떤 것도 이를 무시할 수 없습니다.

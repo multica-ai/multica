@@ -37,6 +37,13 @@ require_rendered_value "$default_config" 'MULTICA_CLOUD_URL: ""'
 require_rendered_value "$default_config" 'MULTICA_DATABASE_STARTUP_TIMEOUT: "3m"'
 require_rendered_value "$default_config" 'MULTICA_DATABASE_CONNECT_TIMEOUT: "5s"'
 
+require_rendered_value "$default_config" 'MAINTENANCE_PORT: ""'
+maintenance_config="$(helm template multica "$CHART_DIR" --show-only templates/configmap.yaml --set-string backend.config.maintenancePort=6061)"
+require_rendered_value "$maintenance_config" 'MAINTENANCE_PORT: "6061"'
+maintenance_backend="$(helm template multica "$CHART_DIR" --show-only templates/backend.yaml --set-string backend.config.maintenancePort=6061)"
+reject_rendered_value "$maintenance_backend" 'containerPort: 6061'
+reject_rendered_value "$maintenance_backend" 'port: 6061'
+
 default_backend="$(
   helm template multica "$CHART_DIR" \
     --show-only templates/backend.yaml

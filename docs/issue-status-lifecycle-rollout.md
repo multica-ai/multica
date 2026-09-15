@@ -40,46 +40,92 @@ instruction to start, finish or fail an agent. The built-in platform skill and
 new daemon task briefs describe this distinction. This is not a workflow engine;
 PR #7990 is subsequent work, not part of this release.
 
-## Migration and release
+## Migration and release (MUL-7365, phase 1)
 
-1. Before deploying, count catalog rows by category and active/archive state;
-   identify custom Backlog, In Review and Blocked usages, especially issues in
-   active autopilot runs. Also check historical custom keys named `unstarted`,
-   `started`, or `closed`: exact-key filters must continue selecting those statuses,
-   not interpret their keys as category filters. Tell affected users that those custom statuses will
-   no longer park, finish or fail automation. The decision applies to historical
-   custom statuses too; no legacy behavior is retained.
-2. Apply migration 469 (categories) and 470 (icon), then deploy the matching backend. The catalog rewrite,
-   constraints and SQL behavior function change in one atomic statement. It
-   preserves every status ID/key/name/color/order/archive marker and every issue
-   reference. It does not update issues, replay events, or enqueue tasks.
-3. The approximately one-minute mixed-backend window is an accepted maintenance
-   window, not a zero-downtime guarantee. Old pods may reject catalog writes in
-   that window. Finish replacing them before acceptance testing.
-4. Deploy the Web/Desktop/Mobile client changes and update local daemons. New
-   skills/prompts take effect in newly prepared task environments; already
-   running agents do not have their prompt rewritten. Do not replay or restart
-   tasks automatically. Review affected in-flight work and move it to an
-   appropriate fixed built-in status only when that action is intended.
-5. Verify four stored categories, seven unchanged fixed keys, unchanged row and
-   issue-reference counts, custom status CRUD/archive, terminal filtering, independent built-in/custom status
-   columns, counts, pagination and drag/create targets, and lack of unintended task enqueues. Check API error rates and
-   automation completion/failure paths.
+The supported upgrade entrypoint is the **matching revision's migration runner**
+(`cd server && go run ./cmd/migrate up`, with the approved target DATABASE_URL).
+Do not apply pending 469 directly with psql or use an older migration binary:
+469 contains the historical unbounded rewrite and is intentionally unchanged.
+Production deployment and database execution require a separate operator handoff.
 
-Release policy is fix-forward. Do not roll back application code over the new
-schema or restore a second behavior model. If migration fails, its atomic
-statement leaves the prior catalog intact: diagnose and apply the corrected
-forward migration. If it committed, repair with a new forward migration or
-patch. The paired down file deliberately refuses reversal; reapplying the up
-statement after an uncertain acknowledgement is idempotent.
+Before execution, collect a fresh read-only snapshot on the approved target:
 
-Before merging, these migrations were renumbered from 467/468, then 468/469,
-to 469/470 to follow main's existing 468 migrations. Main's two distinct 468
-filenames are preserved, with an exact-pair exception in the numbering lint;
-new collisions remain forbidden. The runner keys its ledger by the full
-filename stem, not just the number. A local preview that ran the earlier names
-will therefore replay the new names; both up statements are idempotent, and
-icon replay preserves saved shapes. Do not rewrite or delete ledger entries.
+```sql
+SELECT version FROM schema_migrations
+WHERE version LIKE '469_%' OR version LIKE '477_%' OR version LIKE '478_%';
+SELECT category, is_system, archived_at IS NOT NULL AS archived, count(*)
+FROM issue_status GROUP BY 1, 2, 3 ORDER BY 1, 2, 3;
+SELECT conname, convalidated, pg_get_constraintdef(oid)
+FROM pg_constraint WHERE conrelid = 'issue_status'::regclass;
+```
+
+The September 14 snapshot of 591,052 legacy rows is historical, not proof of the
+current target's state. Compare actual constraints/data as well as the ledger:
+a skipped migration is recorded, so a 469 ledger row alone does not prove a backfill.
+
+| Starting environment | Runner behavior | Phase-1 result |
+| --- | --- | --- |
+| 469 has not run | Record 469 as superseded without executing its SQL; continue through 478 | Old rows remain; old/new constraints and readers coexist |
+| 469 already committed | Preserve its ledger and SQL; apply additive 478 | New rows remain; the same compatibility schema is installed |
+| 478 failed waiting for a lock | No 478 ledger entry; retry after contention is resolved | Its transaction rolls back; committed earlier migration entries remain |
+| 478 committed but acknowledgement was lost | Resume runner; replay is safe if its ledger write was lost | No row rewrites or duplicate objects |
+
+478 replaces only constraints and functions. The entire file is one implicit
+transaction under pgx's multi-statement Exec. `SET LOCAL lock_timeout = '2s'` and
+`statement_timeout = '10s'` bound this step; they do not leak to following files.
+Both expanded CHECKs use NOT VALID, avoiding a validation scan under the
+ACCESS EXCLUSIVE lock while still checking every subsequent write. There is no
+unconstrained commit window. The constraints remain unvalidated in phase 1.
+A deployment is not ready if this migration fails; diagnose contention and retry
+the same runner rather than deleting ledger rows or bypassing readiness.
+
+Release sequence:
+
+1. Phase 1 is based on main, including the GC/recovery fix merged in PR #8405
+   (MUL-7364). It builds on that GC lifecycle protocol and adds the legacy
+   `cancelled` spelling to its recovery prefilter. Both are required before
+   permitting data conversion.
+2. Apply the matching runner through 478, then finish the agreed full backend
+   replacement. Mixed storage is supported; long-lived old backend instances
+   and application rollback are not part of the agreed fix-forward policy.
+3. Verify old/mixed/new catalog reads, custom terminal resolution, archived
+   references, create/update/reorder, old and new grouped requests, claim, both
+   GC endpoints and delegated-failure recovery. No backfill needs to run for
+   this release to work. New catalog inserts use four values; metadata updates,
+   archive and reorder normalize touched legacy rows. All issue keys, identities,
+   and custom lifecycle behavior remain unchanged by storage normalization.
+4. Update clients/daemons for the new feature. Old clients remain supported by
+   the wire adapters below. Old daemon prompts can still describe obsolete
+   custom-status automation inheritance; upgrading the daemon is required to
+   replace those instructions. Do not automatically restart or replay tasks.
+
+**Phase 2 is an explicitly driven internal API**, documented in
+[the maintenance jobs runbook](maintenance-jobs.md). It uses a shared
+maintenance_job record, one indexed ID page per request, and atomic
+data/checkpoint commits. It supports dry-run/progress/retry/pause and includes
+system, custom and archived catalog rows. Before starting, prove
+all writers use the new format and the compatible backend is fully deployed.
+Set workload limits from the environment's API latency, lock wait, I/O, WAL and
+replication budgets. Pausing the job must leave normal reads/writes working.
+Do not treat a skipped or failed batch as completion.
+
+**Phase 3 is separately released after verification, never triggered by the job.**
+Require zero residual old values, no old writers, correct mapping and business
+invariants, and no unfinished batches. Add strict CHECKs NOT VALID in a short
+transaction, commit, then VALIDATE in a separate transaction/file. Only then
+retire old-storage readers. Keep the audited completion evidence. Do not put
+these strict migrations into the phase-1 automatic deployment path.
+
+Release policy is fix-forward. 478's down file preserves the compatible schema;
+469 already refuses reversal. Do not roll back to code that only understands one
+storage vocabulary. If any later stage fails, keep compatibility active, repair
+forward and resume that stage. Do not remove client wire adapters with storage
+cleanup: no minimum supported client version or retirement date has been agreed.
+
+Migration versions 469/470 were previously renumbered during development.
+Main's two historical 468 filenames retain their existing lint exception; 478
+adds no collision. The runner ledger uses the full filename stem. Do not rewrite
+or delete existing entries, including earlier preview-version entries.
 
 ## Installed-client compatibility
 
@@ -92,11 +138,19 @@ four categories. This is one API-boundary adapter, not a second stored model
 or behavior mapping. Old category inputs are accepted on catalog creation,
 reordering and category filters, and normalized to the new lifecycle.
 
-This prevents enum changes from breaking ordinary reads and writes after the
-backend upgrade. It does not promise identical old UI grouping or old agent
-instructions: old filters can broaden when categories combine, old saved
-grouping views can require refresh/upgrade, and old daemons cannot render the
-new lifecycle brief reliably. Update clients/daemons for the new feature.
+The retained `group.kind: status_category` and compound
+`secondary: status_category` protocols default to seven-value **wire buckets**.
+Built-ins keep their own bucket; custom statuses use the same bucket as their
+per-row wire category. Headers, counts, secondary_values and row pagination share
+that mapping, including archived statuses and mixed storage. A category grouping
+request can explicitly set `category_format: lifecycle` to use four buckets;
+other values or use with a non-category group are rejected. Both group and row
+cursors bind the category format; stale or cross-format cursors return the
+existing 409 cursor_query_mismatch response and must restart from the first page.
+These changes restore the old consumer's whitelist contract without modifying
+installed clients. The general list API's legacy category-filter aliases still
+normalize to lifecycle (and can broaden as categories combine), as established
+in MUL-7240. Exact status filters keep their existing meanings.
 Board/List/Swimlane status grouping uses concrete keys, with independent custom
 columns, counts and cursors. Hidden/collapsed preferences preserve exact keys;
 old category-named storage is read on load without merging sibling statuses.
@@ -109,8 +163,14 @@ will succeed, especially during the accepted mixed-version window.
 
 ## Regression coverage
 
-- Actual 332-to-469 migration and replay against an isolated transactional
-  schema; non-category field preservation and SQL tenant isolation.
+- Real runner upgrade tests with pending and applied 469, 478 lock timeout,
+  retry/replay, unchanged system/archived rows and released DDL locks. The
+  historical 332-to-469 test remains as coverage of the preserved historical SQL.
+- Old/mixed/new storage matrices for seven-value legacy groups, explicit
+  four-value groups, concrete status groups, per-bucket pagination and counts;
+  visible parent lanes, format-bound cursors, cross-workspace isolation and GC.
+- 100 historical terminal signals cannot starve a live recovery in another
+  workspace; old custom Backlog retains the agreed non-parking semantics.
 - Built-in identity, custom lifecycle vs special behavior, unknown-key handling,
   archived status reads, category filtering, table/swimlane grouping.
 - Old/current category inputs and legacy response encoding, including realtime

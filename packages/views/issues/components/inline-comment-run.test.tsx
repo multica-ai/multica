@@ -43,6 +43,64 @@ function setup(initialTask: AgentTask, hasReply = false, presentation: "inline" 
 }
 
 describe("InlineCommentRun", () => {
+  it("previews streamed agent messages in collapsed steps and expands the full body", async () => {
+    const message: TaskMessagePayload = {
+      task_id: id, issue_id: "issue", seq: 1, type: "text", content: "Checking the PR",
+    };
+    vi.mocked(api.listTaskMessages).mockResolvedValue([message]);
+    const { client } = setup(task());
+    await screen.findByText("Checking the PR");
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    const preview = screen.getAllByText("Checking the PR").find((node) => node.closest("summary"))!;
+    expect(preview).toHaveAttribute("title", "Checking the PR");
+    expect(screen.queryByTestId("step-body")).not.toBeInTheDocument();
+    act(() => client.setQueryData(chatKeys.taskMessages(id), [
+      message,
+      { ...message, seq: 2, content: " changes.\nReviewing migration safety." },
+    ]));
+    await waitFor(() => expect(preview).toHaveTextContent("Checking the PR changes."));
+    expect(preview).toHaveAttribute("title", "Checking the PR changes.");
+    fireEvent.click(preview.closest("summary")!, { detail: 0 });
+    expect(await screen.findByTestId("step-body")).toHaveTextContent("Checking the PR changes. Reviewing migration safety.");
+  });
+
+  it("shows the first file in a collapsed Grok read_file group and retains its step count", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue(
+      ["queries.sql", "models.go", "schema.sql", "migrations.go"].flatMap((file, index) => [
+        { task_id: id, issue_id: "issue", seq: index * 2 + 1, type: "tool_use" as const,
+          tool: "read_file", input: { path: `/workdir/multica/server/db/${file}` } },
+        { task_id: id, issue_id: "issue", seq: index * 2 + 2, type: "tool_result" as const,
+          tool: "read_file", output: `Contents of ${file}` },
+      ]),
+    );
+    setup(task());
+    await screen.findByText(".../db/migrations.go");
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    const preview = screen.getByText("read_file · .../db/queries.sql");
+    const summary = preview.closest("summary")!;
+    expect(summary).toHaveTextContent("4 steps");
+    expect(preview).toHaveAttribute("title", "read_file · .../db/queries.sql");
+    fireEvent.click(summary, { detail: 0 });
+    expect(await screen.findByText(".../db/queries.sql")).toBeInTheDocument();
+    expect(screen.getByText(".../db/models.go")).toBeInTheDocument();
+    expect(screen.getByText(".../db/schema.sql")).toBeInTheDocument();
+  });
+
+  it("redacts message previews and keeps a label for empty messages", async () => {
+    const secret = `ghp_${"x".repeat(36)}`;
+    vi.mocked(api.listTaskMessages).mockResolvedValue([
+      { task_id: id, issue_id: "issue", seq: 1, type: "text", content: `Checking ${secret}` },
+      { task_id: id, issue_id: "issue", seq: 2, type: "thinking", content: "Checking logs" },
+      { task_id: id, issue_id: "issue", seq: 3, type: "text", content: " \n " },
+    ]);
+    setup(task());
+    await screen.findByText("Checking logs");
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    expect(screen.getByText("Checking [REDACTED GITHUB TOKEN]")).toHaveAttribute("title", "Checking [REDACTED GITHUB TOKEN]");
+    expect(screen.getByText("Agent message").closest("summary")).not.toBeNull();
+    expect(document.body.innerHTML).not.toContain(secret);
+  });
+
   it("previews streamed thinking in the header and collapsed steps, and expands its body", async () => {
     const thought: TaskMessagePayload = {
       task_id: id, issue_id: "issue", seq: 1, type: "thinking", content: "Checking the runtime",
