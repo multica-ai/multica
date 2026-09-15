@@ -531,12 +531,29 @@ func (s *wsSender) pruneStreamsLocked() {
 	}
 	now := time.Now()
 	for k, st := range s.streams {
-		if len(st.sealed) > 0 && now.Sub(st.at) > streamMaxAge {
+		// SETTLED, NOT SEALED, IS THE CONDITION. Requiring a seal kept the
+		// counters of every turn whose closing frame never went out — the gate
+		// refused it while a verdict was owed, or the answer fell back — for
+		// the life of the connection, and after the seal/fallback rules those
+		// are not rare.
+		//
+		// What actually has to be true is that no verdict is still coming for
+		// this req_id: with acked == sent the server owes nothing, so nothing
+		// can arrive later to be matched against counters that have been
+		// reset. An entry still owed one stays, however old, because that is
+		// the misattribution the sequence numbers exist to prevent.
+		//
+		// Age is not sufficient on its own, and it is worth saying why the
+		// shorter argument fails: a req_id outlives its stream. The platform
+		// ends a STREAM at ten minutes (doc 101463) but a new stream id on the
+		// same req_id is accepted — measured 2026-08-09, STRATEGY §6.1 — so
+		// "there will be no next frame" is not something age can establish.
+		if st.acked >= st.sent && now.Sub(st.at) > streamMaxAge {
 			delete(s.streams, k)
 		}
 	}
-	// Whatever is left is either sealed and young, or still open. Neither may
-	// be thrown away. A live turn whose counters are gone has its next frame
+	// Whatever is left is young, which means it may still be a live turn.
+	// Those may not be thrown away. A live turn whose counters are gone has its next frame
 	// stamped from zero: a stale verdict for an earlier frame then matches the
 	// closing one, the refusal that closing frame actually got is never seen,
 	// and the answer is reported delivered while it went nowhere — the exact
