@@ -3214,6 +3214,7 @@ export const SkillFileSchema = z.object({
   skill_id: z.string(),
   path: z.string(),
   content: z.string().optional().default(""),
+  content_omitted: z.boolean().optional().catch(false),
   created_at: z.string().optional().default(""),
   updated_at: z.string().optional().default(""),
 }).loose();

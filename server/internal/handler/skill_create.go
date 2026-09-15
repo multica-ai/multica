@@ -48,21 +48,32 @@ func createSkillWithFilesInTx(ctx context.Context, qtx *db.Queries, input skillC
 	}
 
 	fileResps := make([]SkillFileResponse, 0, len(input.Files))
+	var responseBytes int64
 	for _, f := range input.Files {
 		// SKILL.md is reserved for the primary skill content (skill.Content).
 		// Supporting files must carry additional assets, not duplicate the main file.
 		if skillpkg.IsReservedContentPath(f.Path) {
 			continue
 		}
+		content, err := f.readContent()
+		if err != nil {
+			return SkillWithFilesResponse{}, err
+		}
 		sf, err := qtx.UpsertSkillFile(ctx, db.UpsertSkillFileParams{
 			SkillID: skill.ID,
 			Path:    sanitizeNullBytes(f.Path),
-			Content: sanitizeNullBytes(f.Content),
+			Content: sanitizeNullBytes(content),
 		})
 		if err != nil {
 			return SkillWithFilesResponse{}, err
 		}
-		fileResps = append(fileResps, skillFileToResponse(sf))
+		response := skillFileToResponse(sf)
+		if f.contentFile != "" && int64(len(response.Content)) > maxInlineSkillFilesSize-responseBytes {
+			response.Content = ""
+			response.ContentOmitted = true
+		}
+		responseBytes += int64(len(response.Content))
+		fileResps = append(fileResps, response)
 	}
 
 	return SkillWithFilesResponse{
@@ -214,16 +225,27 @@ func (h *Handler) overwriteSkillWithFiles(ctx context.Context, input skillOverwr
 		return SkillWithFilesResponse{}, err
 	}
 	fileResps := make([]SkillFileResponse, 0, len(input.Files))
+	var responseBytes int64
 	for _, f := range input.Files {
+		content, err := f.readContent()
+		if err != nil {
+			return SkillWithFilesResponse{}, err
+		}
 		sf, err := qtx.UpsertSkillFile(ctx, db.UpsertSkillFileParams{
 			SkillID: skill.ID,
 			Path:    sanitizeNullBytes(f.Path),
-			Content: sanitizeNullBytes(f.Content),
+			Content: sanitizeNullBytes(content),
 		})
 		if err != nil {
 			return SkillWithFilesResponse{}, err
 		}
-		fileResps = append(fileResps, skillFileToResponse(sf))
+		response := skillFileToResponse(sf)
+		if f.contentFile != "" && int64(len(response.Content)) > maxInlineSkillFilesSize-responseBytes {
+			response.Content = ""
+			response.ContentOmitted = true
+		}
+		responseBytes += int64(len(response.Content))
+		fileResps = append(fileResps, response)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

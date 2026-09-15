@@ -210,12 +210,12 @@ describe("prepareSkillArchiveFromPickerFiles", () => {
     const prepared = await prepareSkillArchiveFromPickerFiles([
       skill,
       ignored,
-      oversized,
       binary,
     ]);
     expect(prepared.ok).toBe(true);
     if (!prepared.ok) return;
     expect(prepared.preview.fileCount).toBe(1);
+    expect(await prepareSkillArchiveFromPickerFiles([skill, oversized])).toEqual({ ok: false, error: "too_large" });
   });
 });
 

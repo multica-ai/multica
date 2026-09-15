@@ -855,6 +855,8 @@ export interface Skill extends SkillSummary {
 }
 
 export interface SkillFile {
+  /** Import responses may omit bodies; fetch the file detail before editing. */
+  content_omitted?: boolean;
   id: string;
   skill_id: string;
   path: string;

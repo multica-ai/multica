@@ -3,6 +3,8 @@ package handler
 import (
 	"archive/zip"
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,7 +21,8 @@ import (
 // per-file / total / file-count caps (maxImportFileSize, maxImportTotalSize,
 // maxImportFileCount); this outer cap just stops a client from streaming an
 // unbounded compressed body before those decompression limits can apply.
-const maxImportArchiveUploadSize = 16 << 20 // 16 MiB
+const maxImportArchiveUploadSize int64 = 1 << 40 // 1 TiB
+const maxImportMultipartOverhead int64 = 1 << 20 // 1 MiB for form fields and framing
 
 // isMultipartForm reports whether the request carries a multipart/form-data
 // body (an uploaded skill archive) rather than the JSON URL-import body.
@@ -34,8 +37,13 @@ func isMultipartForm(r *http.Request) bool {
 // produces structured (status / skill / existing_skill) results — there is no
 // legacy pre-on_conflict client for it to stay compatible with.
 func (h *Handler) importSkillFromArchive(w http.ResponseWriter, r *http.Request, workspaceID string, workspaceUUID, creatorUUID pgtype.UUID, creatorID string) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxImportArchiveUploadSize)
-	if err := r.ParseMultipartForm(maxImportArchiveUploadSize); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportArchiveUploadSize+maxImportMultipartOverhead)
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "skill archive exceeds 1 TiB plus multipart framing limit")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid multipart upload or file exceeds the size limit")
 		return
 	}
@@ -62,18 +70,16 @@ func (h *Handler) importSkillFromArchive(w http.ResponseWriter, r *http.Request,
 	}
 	defer file.Close()
 
-	data, err := io.ReadAll(file)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "failed to read uploaded file")
+	if header.Size > maxImportArchiveUploadSize {
+		writeError(w, http.StatusRequestEntityTooLarge, "skill archive exceeds 1 TiB limit")
 		return
 	}
-
-	filename := ""
-	if header != nil {
-		filename = header.Filename
-	}
-	imported, err := parseSkillArchive(data, filename)
+	imported, err := parseSkillArchiveReader(r.Context(), file, header.Size, header.Filename, skillSpoolDir(r.Context()))
 	if err != nil {
+		if isCapError(err) {
+			writeError(w, http.StatusRequestEntityTooLarge, err.Error())
+			return
+		}
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -93,7 +99,14 @@ func (h *Handler) importSkillFromArchive(w http.ResponseWriter, r *http.Request,
 // bounded while reading (so a lying zip header can't blow up memory), and the
 // shared addFile enforces the per-bundle byte and file-count caps.
 func parseSkillArchive(data []byte, filename string) (*importedSkill, error) {
-	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	return parseSkillArchiveReader(context.Background(), bytes.NewReader(data), int64(len(data)), filename, "")
+}
+
+func parseSkillArchiveReader(ctx context.Context, data io.ReaderAt, size int64, filename, spoolDir string) (*importedSkill, error) {
+	if size < 0 || size > maxImportArchiveUploadSize {
+		return nil, fmt.Errorf("%w: skill archive exceeds 1 TiB limit", errImportCapExceeded)
+	}
+	zr, err := zip.NewReader(data, size)
 	if err != nil {
 		return nil, fmt.Errorf("uploaded file is not a valid .skill/.zip archive")
 	}
@@ -107,6 +120,9 @@ func parseSkillArchive(data []byte, filename string) (*importedSkill, error) {
 	rootPrefix := ""
 	skillMdEntries := make(map[string]string)
 	for _, f := range zr.File {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		// Compress-Archive directory markers may have no directory attributes.
 		if f.FileInfo().IsDir() || strings.HasSuffix(f.Name, `\`) {
 			continue
@@ -146,6 +162,7 @@ func parseSkillArchive(data []byte, filename string) (*importedSkill, error) {
 	}
 
 	imported := &importedSkill{
+		spoolDir:    spoolDir,
 		name:        name,
 		description: description,
 		content:     content,
@@ -153,6 +170,9 @@ func parseSkillArchive(data []byte, filename string) (*importedSkill, error) {
 
 	seenFiles := make(map[string]string)
 	for _, f := range zr.File {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		// Compress-Archive directory markers may have no directory attributes.
 		if f.FileInfo().IsDir() || strings.HasSuffix(f.Name, `\`) {
 			continue
@@ -183,11 +203,15 @@ func parseSkillArchive(data []byte, filename string) (*importedSkill, error) {
 			return nil, fmt.Errorf("archive entries %q and %q resolve to the same path %q", previous, f.Name, rel)
 		}
 		seenFiles[rel] = f.Name
+		if skillpkg.IsLikelyBinaryFilePath(rel) {
+			continue
+		}
+		if f.UncompressedSize64 > uint64(maxImportFileSize) {
+			return nil, fmt.Errorf("%w: file %q exceeds 100 MiB limit", errImportCapExceeded, rel)
+		}
 		fileContent, ferr := readZipFile(f, maxImportFileSize)
 		if ferr != nil {
-			// An oversize or unreadable individual asset is skipped rather than
-			// failing the whole import, matching the local-runtime importer.
-			continue
+			return nil, fmt.Errorf("read %s: %w", rel, ferr)
 		}
 		// addFile enforces the per-bundle caps and drops binary assets; a cap
 		// breach aborts the import instead of silently truncating it.
@@ -287,7 +311,7 @@ func readZipFile(f *zip.File, maxSize int64) (string, error) {
 		return "", err
 	}
 	if int64(len(data)) > maxSize {
-		return "", fmt.Errorf("file %q exceeds %d bytes", f.Name, maxSize)
+		return "", fmt.Errorf("%w: file %q exceeds %d bytes", errImportCapExceeded, f.Name, maxSize)
 	}
 	return string(data), nil
 }

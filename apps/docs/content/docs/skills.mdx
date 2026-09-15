@@ -110,3 +110,26 @@ Skills imported from external sources may contain scripts, commands, or unsafe i
 - [Squads](/squads) — let a leader pick the right member for the work.
 - [Daemon and runtimes](/daemon-runtimes) — how skills reach the actual execution environment.
 - [AI coding tools comparison](/providers) — how different tools support skills.
+
+## Import size limits
+
+URL, archive, and source-refresh imports accept up to **100 MiB per file**,
+**1 TiB of supporting files**, and **100000 supporting files**. Compressed
+`.skill`/`.zip` archives have a separate **1 TiB** ceiling. MiB and TiB are
+binary units: 104857600 bytes and 1099511627776 bytes respectively.
+
+The CLI streams uploads; the server uses temporary disk for archives and
+supporting bodies and removes it when the request finishes. Folder imports in
+web/desktop use ZIP64 and retain disk-backed file parts instead of collecting
+all file bodies in one buffer. Available disk, browser storage limits, upstream
+source deadlines, and deployment proxy limits can lower the usable size. URL
+fetches still have a 45-second overall deadline. For long CLI uploads, configure
+`MULTICA_HTTP_TIMEOUT`.
+
+Whole-bundle reads and inline bulk editing support up to **8 MiB** of supporting
+content. Larger import responses mark excluded bodies with `content_omitted`;
+the editor does not treat them as empty editable files. Use the metadata view
+(`GET /api/skills/{id}?include=metadata`) and individual files
+(`GET /api/skills/{id}/files/{fileId}`, `PUT /api/skills/{id}/files`) for larger
+bundles. These import ceilings do not certify TiB-scale runtime materialization
+or execution; runtime-local discovery retains its existing limits.

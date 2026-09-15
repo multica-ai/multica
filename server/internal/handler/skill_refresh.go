@@ -148,6 +148,13 @@ func (h *Handler) RefreshSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r, cleanup, err := prepareSkillSpool(r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot create skill import temporary storage")
+		return
+	}
+	defer cleanup()
+
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	ctx, cancel := context.WithTimeout(r.Context(), importFetchTimeout)
 	defer cancel()

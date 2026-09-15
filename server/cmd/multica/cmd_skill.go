@@ -518,9 +518,20 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 
 	var result map[string]any
 	if importFile != "" {
-		fileData, readErr := os.ReadFile(importFile)
+		fileData, readErr := os.Open(importFile)
 		if readErr != nil {
 			return fmt.Errorf("read skill archive: %w", readErr)
+		}
+		defer fileData.Close()
+		info, err := fileData.Stat()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("skill archive must be a regular file")
+		}
+		if info.Size() > 1<<40 {
+			return fmt.Errorf("skill archive exceeds 1 TiB limit")
 		}
 		if err := client.ImportSkillFile(ctx, fileData, filepath.Base(importFile), onConflict, &result); err != nil {
 			if handledErr := handleSkillImportError(cmd, err); handledErr != nil {

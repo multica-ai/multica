@@ -112,6 +112,7 @@
     "section_columns": "表示する列"
   },
   "detail": {
+    "large_import_readonly": "スキルはインポートされました。補助ファイルがインライン編集の上限 8 MiB を超えています。内容は個別ファイル API から取得できます。",
     "all_skills": "すべてのスキル",
     "read_only": "読み取り専用",
     "delete_aria": "スキルを削除",

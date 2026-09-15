@@ -535,7 +535,7 @@ func TestFetchFromSkillsSh_TreeFileCountCapFailsFastWithoutDownloads(t *testing.
 // The total-byte cap is likewise enforced from tree sizes before any download.
 func TestFetchFromSkillsSh_TreeTotalByteCapFailsFast(t *testing.T) {
 	tree := []githubTreeEntry{{Path: "skills/foo/SKILL.md", Type: "blob"}}
-	for i := 0; i < 9; i++ { // 9 MiB total > 8 MiB bundle cap, each at the per-file cap
+	for i := 0; i < int(maxImportTotalSize/maxImportFileSize)+1; i++ { // Metadata only; no large allocation.
 		tree = append(tree, githubTreeEntry{
 			Path: fmt.Sprintf("skills/foo/big-%d.md", i),
 			Type: "blob",
@@ -1387,8 +1387,8 @@ func TestImportedSkill_AddFileEnforcesBundleLimits(t *testing.T) {
 		}
 	})
 	t.Run("total bytes", func(t *testing.T) {
-		s := &importedSkill{}
-		big := strings.Repeat("y", maxImportTotalSize)
+		s := &importedSkill{bundleSize: maxImportTotalSize - 1}
+		big := "y"
 		if err := s.addFile("a", big); err != nil {
 			t.Fatalf("addFile at cap: %v", err)
 		}

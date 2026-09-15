@@ -652,27 +652,27 @@ func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, file
 // ImportSkillFile imports a skill from a local archive (.skill / .zip) by
 // POSTing it as multipart/form-data to /api/skills/import, alongside the
 // on_conflict strategy. The structured import result is decoded into out.
-func (c *APIClient) ImportSkillFile(ctx context.Context, fileData []byte, filename, onConflict string, out any) error {
+func (c *APIClient) ImportSkillFile(ctx context.Context, fileData io.Reader, filename, onConflict string, out any) error {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
-	part, err := writer.CreateFormFile("file", filepath.Base(filename))
+	_, err := writer.CreateFormFile("file", filepath.Base(filename))
 	if err != nil {
 		return fmt.Errorf("create form file: %w", err)
 	}
-	if _, err := part.Write(fileData); err != nil {
-		return fmt.Errorf("write file data: %w", err)
-	}
+	// Only multipart framing is buffered; the archive stays in its source reader.
+	prefix := append([]byte(nil), body.Bytes()...)
+	body.Reset()
 	if onConflict != "" {
 		if err := writer.WriteField("on_conflict", onConflict); err != nil {
-			return fmt.Errorf("write on_conflict field: %w", err)
+			return err
 		}
 	}
 	if err := writer.Close(); err != nil {
-		return fmt.Errorf("close multipart writer: %w", err)
+		return err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/skills/import", &body)
+	source := io.MultiReader(bytes.NewReader(prefix), io.LimitReader(fileData, (1<<40)+1), bytes.NewReader(body.Bytes()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/skills/import", source)
 	if err != nil {
 		return err
 	}

@@ -1,13 +1,13 @@
 import { parseFrontmatter } from "./frontmatter";
 
 /** Mirrors server/internal/handler maxImportFileSize. */
-export const MAX_SKILL_FILE_BYTES = 1 << 20; // 1 MiB
+export const MAX_SKILL_FILE_BYTES = 100 * 2 ** 20; // 100 MiB
 /** Mirrors server/internal/handler maxImportTotalSize (supporting files). */
-export const MAX_SKILL_BUNDLE_BYTES = 8 << 20; // 8 MiB
+export const MAX_SKILL_BUNDLE_BYTES = 2 ** 40; // 1 TiB
 /** Mirrors server/internal/handler maxImportFileCount. */
-export const MAX_SKILL_FILE_COUNT = 256;
+export const MAX_SKILL_FILE_COUNT = 100000;
 /** Mirrors server/internal/handler maxImportArchiveUploadSize. */
-export const MAX_SKILL_ARCHIVE_BYTES = 16 << 20; // 16 MiB
+export const MAX_SKILL_ARCHIVE_BYTES = 2 ** 40; // 1 TiB
 
 const SKILL_MD = "skill.md";
 
@@ -98,13 +98,13 @@ function buildPreparedArchive(
   const wrapperName = wrapperNameFromPrefix(selection.prefix);
   const skillName = frontmatter?.name?.trim() || wrapperName || "skill";
   const description = frontmatter?.description?.trim() ?? "";
-  const zip = packStoreZip(packed);
-  if (zip.byteLength > MAX_SKILL_ARCHIVE_BYTES) {
+  const zip = packStoreZipBlob(packed.map((entry) => ({ path: entry.path, data: new Blob([uint8ToArrayBuffer(entry.data)]), crc: crc32(entry.data) })));
+  if (zip.size > MAX_SKILL_ARCHIVE_BYTES) {
     return { ok: false, error: "too_large" };
   }
 
   const filename = `${sanitizeArchiveBasename(skillName)}.skill`;
-  const file = new File([uint8ToArrayBuffer(zip)], filename, {
+  const file = new File([zip], filename, {
     type: "application/zip",
   });
   return {
@@ -181,7 +181,9 @@ export function selectSkillArchiveMembers(
       continue;
     }
     if (isLikelyBinaryFilePath(rel)) continue;
-    if (file.size > MAX_SKILL_FILE_BYTES) continue;
+    if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > MAX_SKILL_FILE_BYTES) {
+      return { ok: false, error: "too_large" };
+    }
     supportingCount += 1;
     if (supportingCount > MAX_SKILL_FILE_COUNT) {
       return { ok: false, error: "too_many_files" };
@@ -209,8 +211,8 @@ function pickerRelativePath(file: File): string {
 }
 
 /**
- * Pack a directory picker result. Ignored, binary, oversized and out-of-root
- * files are dropped from path + `File.size` before any `arrayBuffer()` call.
+ * Pack a directory picker result. Ignored, binary and out-of-root files are dropped from metadata.
+ * Oversized supporting files reject the import before any arrayBuffer() call.
  */
 export async function prepareSkillArchiveFromPickerFiles(
   files: File[],
@@ -226,16 +228,36 @@ export async function prepareSkillArchiveFromPickerFiles(
   const picked = selectSkillArchiveMembers(members);
   if (!picked.ok) return picked;
 
-  const data = new Map<string, Uint8Array>();
+  const packed: BlobZipEntry[] = [];
+  let content = "";
   for (const member of picked.selected) {
-    if (data.has(member.path)) continue;
     const source = sources.get(member.path);
-    data.set(
-      member.path,
-      source ? new Uint8Array(await source.arrayBuffer()) : EMPTY_BYTES,
-    );
+    if (!source) continue;
+    // Read at most one bounded file at a time for CRC, retaining the original
+    // disk-backed File in the output instead of retaining every arrayBuffer.
+    const data = new Uint8Array(await source.arrayBuffer());
+    if (data.byteLength !== member.size || data.byteLength > MAX_SKILL_FILE_BYTES) {
+      return { ok: false, error: "too_large" };
+    }
+    if (member.path === picked.skillMdPath) content = new TextDecoder().decode(data);
+    packed.push({ path: member.path, data: source, crc: crc32(data) });
   }
-  return buildPreparedArchive(picked, (path) => data.get(path) ?? EMPTY_BYTES);
+  const { frontmatter } = parseFrontmatter(content);
+  const wrapperName = wrapperNameFromPrefix(picked.prefix);
+  const skillName = frontmatter?.name?.trim() || wrapperName || "skill";
+  const zip = packStoreZipBlob(packed);
+  if (zip.size > MAX_SKILL_ARCHIVE_BYTES) return { ok: false, error: "too_large" };
+  return {
+    ok: true,
+    file: new File([zip], `${sanitizeArchiveBasename(skillName)}.skill`, { type: "application/zip" }),
+    preview: {
+      displayName: wrapperName || skillName,
+      skillName,
+      description: frontmatter?.description?.trim() ?? "",
+      fileCount: packed.length,
+      source: "folder",
+    },
+  };
 }
 
 // --- zip (STORE / uncompressed) -------------------------------------------
@@ -343,6 +365,78 @@ export function packStoreZip(entries: { path: string; data: Uint8Array }[]): Uin
   view.setUint32(offset + 16, centralStart, true);
   view.setUint16(offset + 20, 0, true);
   return out;
+}
+
+type BlobZipEntry = { path: string; data: Blob; crc: number };
+
+/** ZIP64 offsets/counts keep large archives valid without aggregating bodies. */
+export function packStoreZipBlob(entries: BlobZipEntry[]): Blob {
+  const local: BlobPart[] = [];
+  const central: BlobPart[] = [];
+  let offset = 0;
+  let centralSize = 0;
+  for (const entry of entries) {
+    const name = utf8(entry.path.replace(/\\/g, "/"));
+    const size = entry.data.size;
+    if (size > MAX_SKILL_FILE_BYTES || name.length > 65535) throw new Error("ZIP member exceeds supported limits");
+    const largeOffset = offset >= 0xffffffff;
+    const header = new Uint8Array(30 + name.length);
+    const h = new DataView(header.buffer);
+    h.setUint32(0, 0x04034b50, true);
+    h.setUint16(4, 20, true);
+    h.setUint16(6, 0x0800, true);
+    h.setUint32(14, entry.crc, true);
+    h.setUint32(18, size, true);
+    h.setUint32(22, size, true);
+    h.setUint16(26, name.length, true);
+    header.set(name, 30);
+    local.push(header.buffer, entry.data);
+    const record = new Uint8Array(46 + name.length + (largeOffset ? 12 : 0));
+    const c = new DataView(record.buffer);
+    c.setUint32(0, 0x02014b50, true);
+    c.setUint16(4, largeOffset ? 45 : 20, true);
+    c.setUint16(6, largeOffset ? 45 : 20, true);
+    c.setUint16(8, 0x0800, true);
+    c.setUint32(16, entry.crc, true);
+    c.setUint32(20, size, true);
+    c.setUint32(24, size, true);
+    c.setUint16(28, name.length, true);
+    c.setUint16(30, largeOffset ? 12 : 0, true);
+    c.setUint32(42, largeOffset ? 0xffffffff : offset, true);
+    record.set(name, 46);
+    if (largeOffset) {
+      const start = 46 + name.length;
+      c.setUint16(start, 1, true);
+      c.setUint16(start + 2, 8, true);
+      c.setBigUint64(start + 4, BigInt(offset), true);
+    }
+    central.push(record.buffer);
+    centralSize += record.length;
+    offset += header.length + size;
+  }
+  const zip64 = entries.length >= 65535 || offset >= 0xffffffff || centralSize >= 0xffffffff;
+  const tail = new Uint8Array((zip64 ? 76 : 0) + 22);
+  const t = new DataView(tail.buffer);
+  if (zip64) {
+    t.setUint32(0, 0x06064b50, true);
+    t.setBigUint64(4, 44n, true);
+    t.setUint16(12, 45, true);
+    t.setUint16(14, 45, true);
+    t.setBigUint64(24, BigInt(entries.length), true);
+    t.setBigUint64(32, BigInt(entries.length), true);
+    t.setBigUint64(40, BigInt(centralSize), true);
+    t.setBigUint64(48, BigInt(offset), true);
+    t.setUint32(56, 0x07064b50, true);
+    t.setBigUint64(64, BigInt(offset + centralSize), true);
+    t.setUint32(72, 1, true);
+  }
+  const end = zip64 ? 76 : 0;
+  t.setUint32(end, 0x06054b50, true);
+  t.setUint16(end + 8, Math.min(entries.length, 65535), true);
+  t.setUint16(end + 10, Math.min(entries.length, 65535), true);
+  t.setUint32(end + 12, Math.min(centralSize, 0xffffffff), true);
+  t.setUint32(end + 16, Math.min(offset, 0xffffffff), true);
+  return new Blob([...local, ...central, tail.buffer], { type: "application/zip" });
 }
 
 // --- path helpers (mirror skill_import_archive.go) ------------------------

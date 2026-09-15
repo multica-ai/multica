@@ -77,13 +77,13 @@ skill folder works too. The server:
 - takes the name/description from `SKILL.md` frontmatter, falling back to the
   wrapper directory name and then the uploaded filename;
 - carries the supporting files — dropping any `SKILL.md`, dotfiles, `__MACOSX`,
-  license files, and binary assets — under the same per-file (1 MiB),
-  per-bundle (8 MiB), and file-count (256) caps as URL imports, and rejects path
+  license files, and binary assets — under the same per-file (100 MiB),
+  per-bundle (1 TiB), and file-count (100000) caps as URL imports, and rejects path
   traversal (zip-slip);
 - returns the same structured result envelope and honors the same
   `--on-conflict` strategies as URL imports.
 
-The upload itself is capped at 16 MiB (compressed). Any source that is not a
+The upload itself is capped at 1 TiB (compressed). Any source that is not a
 local archive still goes through `--url`.
 
 ## Direct URL flow
@@ -310,3 +310,36 @@ agent's skill assignments:
 multica agent skills add <agent-id> --skill-ids <skill-id> --output json
 multica agent skills list <agent-id> --output json
 ```
+
+
+### Large import limits and resources
+
+URL imports, uploaded archives, and source refresh share a 100 MiB
+(104857600 bytes) per-file limit, 1 TiB (1099511627776 bytes) of supporting
+files, and 100000 supporting files. SKILL.md uses the per-file limit but is
+not counted in the supporting-file total. Uploaded ZIP/ZIP64 archives may be
+up to 1 TiB, with a separate 1 MiB multipart framing/field allowance.
+
+The CLI streams archive bytes. The server spools uploaded archives and supporting
+file bodies to temporary disk, reads bounded individual files during persistence,
+and removes request temporary files on success, conflict, failure or cancellation.
+Import/refresh responses retain at most 8 MiB of supporting-file bodies; additional
+bodies have `content_omitted: true`. Fetch `GET /api/skills/{id}/files/{fileId}` for
+its content before using or editing it. Missing response content is not an empty
+stored file. Web/desktop folder archives use Blob parts and ZIP64 counts/offsets.
+
+These are acceptance ceilings, not a throughput guarantee. Temporary disk must
+accommodate the compressed archive plus the extracted bundle; PostgreSQL needs
+space for file rows, transaction/WAL overhead and existing versions on overwrite.
+URL fetches retain the existing 45-second overall / 30-second per-request timeouts
+and upstream enumeration limits. CLI imports default to at least 60 seconds;
+set `MULTICA_HTTP_TIMEOUT` for longer uploads. Reverse-proxy/CDN body-size and
+request-timeout limits can be lower and must be configured by the operator.
+Browser implementations also impose Blob/storage limits. Runtime-local discovery
+and its daemon transport remain a separate path with their existing limits.
+Whole-bundle reads and bulk inline editing are limited to 8 MiB of supporting
+content; larger requests return 413 and must use `include=metadata` plus
+individual-file GET/PUT operations. Older clients must not treat omitted import
+response bodies as editable empty files. Runtime execution/materialization of
+TiB-scale skills is not validated by these import changes.
+Boundary and small-fixture tests do not constitute a TiB-scale performance test.

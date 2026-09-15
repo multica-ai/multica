@@ -503,3 +503,17 @@ describe("SkillDetailPage rail", () => {
     expect(railed.length).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe("large imported skill bodies", () => {
+  it("does not offer bulk editing when an import response omitted a file body", async () => {
+    const skill = skillRef.current as Skill;
+    skillRef.current = {
+      ...skill,
+      files: skill.files.map((file) => ({ ...file, content: "", content_omitted: true })),
+    };
+    renderPage(new URLSearchParams("view=files"));
+    expect(await screen.findByText(enSkills.detail.large_import_readonly)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Save changes/ })).toBeNull();
+  });
+});

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -87,12 +88,13 @@ type AgentSkillSummary struct {
 }
 
 type SkillFileResponse struct {
-	ID        string `json:"id"`
-	SkillID   string `json:"skill_id"`
-	Path      string `json:"path"`
-	Content   string `json:"content"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	ID             string `json:"id"`
+	SkillID        string `json:"skill_id"`
+	Path           string `json:"path"`
+	Content        string `json:"content"`
+	ContentOmitted bool   `json:"content_omitted,omitempty"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
 }
 
 // SkillFileMetadataResponse is the file-listing shape: everything
@@ -278,8 +280,9 @@ type CreateSkillRequest struct {
 }
 
 type CreateSkillFileRequest struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
+	contentFile string // Request-owned spool; never accepted from JSON.
+	Path        string `json:"path"`
+	Content     string `json:"content"`
 }
 
 type UpdateSkillRequest struct {
@@ -431,6 +434,9 @@ func (h *Handler) GetSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !h.requireInlineSkillSize(w, r, skill.ID) {
+		return
+	}
 	files, err := h.Queries.ListSkillFiles(r.Context(), skill.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list skill files")
@@ -589,6 +595,10 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 	params := db.UpdateSkillParams{
 		ID: parseUUID(id),
 	}
+	if req.Files != nil && !h.requireInlineSkillSize(w, r, skill.ID) {
+		return
+	}
+
 	if req.Name != nil {
 		params.Name = pgtype.Text{String: sanitizeNullBytes(*req.Name), Valid: true}
 	}
@@ -721,29 +731,31 @@ func validImportOnConflict(strategy string) bool {
 	return false
 }
 
-// Per-import bundle limits. These mirror the local-runtime importer so that
-// URL imports cannot smuggle in payloads that the rest of the stack would
-// reject. fetchRawFile enforces the per-file cap; importedSkill.addFile
-// enforces the bundle-wide caps.
+// URL, archive and refresh import limits. fetchRawFile enforces the
+// per-file cap; importedSkill.addFile enforces the bundle-wide caps.
 const (
-	maxImportFileSize  = 1 << 20 // 1 MiB per file
-	maxImportTotalSize = 8 << 20 // 8 MiB per import bundle (sum of supporting files)
-	maxImportFileCount = 256     // max number of supporting files
+	maxImportFileSize        = 100 << 20 // 100 MiB per file
+	maxImportTotalSize int64 = 1 << 40   // 1 TiB of supporting files
+	maxImportFileCount       = 100000    // max number of supporting files
 )
+
+const maxInlineSkillFilesSize int64 = 8 << 20 // 8 MiB of supporting response bodies
 
 // importedSkill holds the data extracted from an external source.
 type importedSkill struct {
+	spoolDir    string
 	name        string
 	description string
 	content     string // SKILL.md body
 	files       []importedFile
-	bundleSize  int            // running sum of file content bytes for cap enforcement
+	bundleSize  int64          // running sum of file content bytes for cap enforcement
 	origin      map[string]any // written into skill.config.origin so the UI can show provenance
 }
 
 type importedFile struct {
-	path    string
-	content string
+	contentFile string
+	path        string
+	content     string
 }
 
 // errImportCapExceeded marks an error caused by a per-file or per-bundle cap.
@@ -775,14 +787,25 @@ func (s *importedSkill) addFile(path, content string) error {
 		slog.Info("skill import: skipping binary file", "path", path, "size", len(content))
 		return nil
 	}
+	if len(content) > maxImportFileSize {
+		return fmt.Errorf("%w: file exceeds 100 MiB limit", errImportCapExceeded)
+	}
 	if len(s.files) >= maxImportFileCount {
 		return fmt.Errorf("%w: import bundle exceeds %d file limit", errImportCapExceeded, maxImportFileCount)
 	}
-	if s.bundleSize+len(content) > maxImportTotalSize {
+	if int64(len(content)) > maxImportTotalSize-s.bundleSize {
 		return fmt.Errorf("%w: import bundle exceeds %d byte limit", errImportCapExceeded, maxImportTotalSize)
 	}
-	s.bundleSize += len(content)
-	s.files = append(s.files, importedFile{path: path, content: content})
+	s.bundleSize += int64(len(content))
+	f := importedFile{path: path, content: content}
+	if s.spoolDir != "" {
+		name, err := spoolSkillContent(s.spoolDir, content)
+		if err != nil {
+			return err
+		}
+		f.contentFile, f.content = name, ""
+	}
+	s.files = append(s.files, f)
 	return nil
 }
 
@@ -1087,6 +1110,7 @@ func fetchFromClawHub(ctx context.Context, httpClient *http.Client, rawURL strin
 
 	// 3. Download each file
 	result := &importedSkill{
+		spoolDir:    skillSpoolDir(ctx),
 		name:        chSkill.DisplayName,
 		description: chSkill.Summary,
 		origin: map[string]any{
@@ -1192,6 +1216,7 @@ func fetchFromSkillsSh(ctx context.Context, httpClient *http.Client, rawURL stri
 	}
 
 	result := newSkillsShImportedSkill(skillMdBody, skillName, rawURL, owner, repo)
+	result.spoolDir = skillSpoolDir(ctx)
 
 	if truncated {
 		// The tree is incomplete, so it can't drive enumeration; use the legacy
@@ -1494,6 +1519,9 @@ func addSupportingFilesFromTree(ctx context.Context, httpClient *http.Client, re
 
 	// Download concurrently, then append in the pre-sorted order.
 	contents := make([]string, len(eligible))
+	contentFiles := make([]string, len(eligible))
+	var downloadMu sync.Mutex
+	downloadSize := result.bundleSize
 	fetched := make([]bool, len(eligible))
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(treeDownloadConcurrency)
@@ -1520,7 +1548,22 @@ func addSupportingFilesFromTree(ctx context.Context, httpClient *http.Client, re
 				slog.Warn("github import: file download failed", "path", f.repoPath, "error", err)
 				return nil
 			}
-			contents[i] = string(body)
+			downloadMu.Lock()
+			if int64(len(body)) > maxImportTotalSize-downloadSize {
+				downloadMu.Unlock()
+				return fmt.Errorf("%w: import bundle exceeds 1 TiB byte limit", errImportCapExceeded)
+			}
+			downloadSize += int64(len(body))
+			downloadMu.Unlock()
+			if result.spoolDir != "" {
+				name, err := spoolSkillContent(result.spoolDir, string(body))
+				if err != nil {
+					return err
+				}
+				contentFiles[i] = name
+			} else {
+				contents[i] = string(body)
+			}
 			fetched[i] = true
 			return nil
 		})
@@ -1531,6 +1574,18 @@ func addSupportingFilesFromTree(ctx context.Context, httpClient *http.Client, re
 
 	for i, f := range eligible {
 		if !fetched[i] {
+			continue
+		}
+		if contentFiles[i] != "" {
+			info, err := os.Stat(contentFiles[i])
+			if err != nil {
+				return err
+			}
+			if info.Size() > maxImportTotalSize-result.bundleSize {
+				return fmt.Errorf("%w: import bundle exceeds 1 TiB byte limit", errImportCapExceeded)
+			}
+			result.bundleSize += info.Size()
+			result.files = append(result.files, importedFile{path: f.relPath, contentFile: contentFiles[i]})
 			continue
 		}
 		if err := result.addFile(f.relPath, contents[i]); err != nil {
@@ -2019,6 +2074,7 @@ func fetchFromGitHub(ctx context.Context, httpClient *http.Client, rawURL string
 	}
 
 	result := &importedSkill{
+		spoolDir:    skillSpoolDir(ctx),
 		name:        name,
 		description: description,
 		content:     string(skillMdBody),
@@ -2272,6 +2328,13 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 	}
 	creatorUUID := parseUUID(creatorID)
 
+	r, cleanup, err := prepareSkillSpool(r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot create skill import temporary storage")
+		return
+	}
+	defer cleanup()
+
 	// An uploaded skill archive (.skill / .zip) arrives as multipart/form-data;
 	// a hosted-URL import arrives as JSON. Both converge on the same create +
 	// conflict tail via finishSkillImport.
@@ -2361,8 +2424,9 @@ func importedSkillFileRequests(imported *importedSkill) []CreateSkillFileRequest
 			continue
 		}
 		files = append(files, CreateSkillFileRequest{
-			Path:    f.path,
-			Content: f.content,
+			Path:        f.path,
+			Content:     f.content,
+			contentFile: f.contentFile,
 		})
 	}
 	return files
@@ -2452,6 +2516,9 @@ func (h *Handler) ListSkillFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !h.requireInlineSkillSize(w, r, skill.ID) {
+		return
+	}
 	files, err := h.Queries.ListSkillFiles(r.Context(), skill.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list skill files")
@@ -2760,4 +2827,40 @@ func (h *Handler) writeUpdatedAgentSkills(w http.ResponseWriter, r *http.Request
 	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(agent.WorkspaceID))
 	h.publish(protocol.EventAgentStatus, uuidToString(agent.WorkspaceID), actorType, actorID, map[string]any{"agent_id": uuidToString(agent.ID), "skills": resp})
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// Inline content and bulk editing retain their bounded response contract.
+// Large imports are accessed through metadata plus individual-file endpoints.
+func (h *Handler) requireInlineSkillSize(w http.ResponseWriter, r *http.Request, skillID pgtype.UUID) bool {
+	files, err := h.Queries.ListSkillFileMetadata(r.Context(), skillID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to inspect skill size")
+		return false
+	}
+	var total int64
+	for _, file := range files {
+		if file.Size > maxInlineSkillFilesSize-total {
+			writeError(w, http.StatusRequestEntityTooLarge, "skill supporting files exceed the 8 MiB inline editing limit; use include=metadata and individual file endpoints")
+			return false
+		}
+		total += file.Size
+	}
+	return true
+}
+
+func (h *Handler) GetSkillFile(w http.ResponseWriter, r *http.Request) {
+	skill, ok := h.loadSkillForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	id, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "fileId"), "file id")
+	if !ok {
+		return
+	}
+	file, err := h.Queries.GetSkillFile(r.Context(), id)
+	if err != nil || file.SkillID != skill.ID {
+		writeError(w, http.StatusNotFound, "skill file not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, skillFileToResponse(file))
 }

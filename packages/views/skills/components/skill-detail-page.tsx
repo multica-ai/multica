@@ -781,7 +781,9 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
 
   const assignments = useMemo(() => selectSkillAssignments(agents), [agents]);
 
-  const canEdit = useCanEditSkill(skill, wsId);
+  const canManage = useCanEditSkill(skill, wsId);
+  const hasOmittedContent = skill?.files?.some((file) => file.content_omitted === true) ?? false;
+  const canEdit = canManage && !hasOmittedContent;
   const skillPermissions = useSkillPermissions(skill ?? null, wsId);
 
   // Context for the shared "Add to agent" dialog (also used by the skills
@@ -1229,7 +1231,13 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         }
       />
 
-      {!canEdit && (
+      {hasOmittedContent && (
+        <div role="status" className={cn(PAGE_RAIL, PAGE_GUTTER, "pt-3 text-body text-muted-foreground")}>
+          {t(($) => $.detail.large_import_readonly)}
+        </div>
+      )}
+
+      {!canManage && (
         <div className={cn(PAGE_RAIL, PAGE_GUTTER, "pt-3")}>
           <CapabilityBanner
             reason={skillPermissions.canEdit.reason}
