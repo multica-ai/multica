@@ -118,7 +118,7 @@ func realOpenclawConfigValid(t *testing.T, bin string) bool {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), openclawCLITimeout)
 	defer cancel()
-	out, _ := openclawExec(ctx, bin, "config", "validate", "--json")
+	out, _ := openclawExec(ctx, nil, bin, "config", "validate", "--json")
 	var payload struct {
 		Valid bool `json:"valid"`
 	}
@@ -132,7 +132,7 @@ func realOpenclawConfigGetJSON(t *testing.T, bin, keyPath string) any {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), openclawCLITimeout)
 	defer cancel()
-	out, err := openclawExec(ctx, bin, "config", "get", keyPath, "--json")
+	out, err := openclawExec(ctx, nil, bin, "config", "get", keyPath, "--json")
 	if err != nil {
 		t.Fatalf("resolve %s through the real CLI: %v", keyPath, annotateOpenclawJSONError(err, out))
 	}

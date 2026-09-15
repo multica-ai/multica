@@ -106,7 +106,7 @@ func TestProvisionDshMulticaProfile_UnconfiguredIsANoOp(t *testing.T) {
 	t.Setenv(dshProfileBundleEnv, "")
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := provisionDshMulticaProfile(context.Background(), dshPath, logger); err != nil {
+	if err := provisionDshMulticaProfile(context.Background(), dshPath, nil, logger); err != nil {
 		t.Fatalf("provision returned %v, want nil", err)
 	}
 	if got := readRecord(t, record); got != "" {
@@ -124,7 +124,7 @@ func TestProvisionDshMulticaProfile_InstallsTheFirstWorkingCandidate(t *testing.
 	t.Setenv(dshPluginPathEnv, pluginDir)
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := provisionDshMulticaProfile(context.Background(), dshPath, logger); err != nil {
+	if err := provisionDshMulticaProfile(context.Background(), dshPath, nil, logger); err != nil {
 		t.Fatalf("provision returned %v, want nil once a later candidate succeeds", err)
 	}
 
@@ -167,7 +167,7 @@ func TestProvisionDshMulticaProfile_ForwardsTheSpecVerbatim(t *testing.T) {
 	t.Setenv(dshPluginPathEnv, "")
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := provisionDshMulticaProfile(context.Background(), dshPath, logger); err != nil {
+	if err := provisionDshMulticaProfile(context.Background(), dshPath, nil, logger); err != nil {
 		t.Fatalf("provision returned %v, want nil", err)
 	}
 	want := "args=plugin --profile multica add /Users/someone/builds/dsh-multica-runtime"
@@ -185,7 +185,7 @@ func TestProvisionDshMulticaProfile_ReportsEveryCandidateFailure(t *testing.T) {
 	t.Setenv(dshPluginPathEnv, "")
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	err := provisionDshMulticaProfile(context.Background(), dshPath, logger)
+	err := provisionDshMulticaProfile(context.Background(), dshPath, nil, logger)
 	if err == nil {
 		t.Fatal("provision returned nil, want the last failure")
 	}
@@ -214,7 +214,7 @@ func TestProvisionDshMulticaProfile_ExitZeroWithoutAProfileIsAFailedCandidate(t 
 	t.Setenv(dshPluginPathEnv, "")
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	err := provisionDshMulticaProfile(context.Background(), dshPath, logger)
+	err := provisionDshMulticaProfile(context.Background(), dshPath, nil, logger)
 	if err == nil {
 		t.Fatal("provision returned nil while the profile is still absent")
 	}
@@ -248,10 +248,10 @@ func TestStartDshProfileProvision_RunsAtMostOnce(t *testing.T) {
 		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		workspaces: map[string]*workspaceState{"ws-1": {}},
 	}
-	if !d.startDshProfileProvision(dshPath) {
+	if !d.startDshProfileProvision(dshPath, nil) {
 		t.Fatal("first call did not start the install")
 	}
-	if d.startDshProfileProvision(dshPath) {
+	if d.startDshProfileProvision(dshPath, nil) {
 		t.Fatal("second call started another install; the guard is per-round instead of per-daemon")
 	}
 
@@ -268,7 +268,7 @@ func TestStartDshProfileProvision_RunsAtMostOnce(t *testing.T) {
 func TestStartDshProfileProvision_UnconfiguredNeverStarts(t *testing.T) {
 	t.Setenv(dshProfileBundleEnv, "")
 	d := &Daemon{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	if d.startDshProfileProvision("/nonexistent/dsh") {
+	if d.startDshProfileProvision("/nonexistent/dsh", nil) {
 		t.Fatal("provision started with no configured bundle, which would mutate the user's DSH install unasked")
 	}
 }
@@ -298,7 +298,7 @@ func TestStartDshProfileProvision_KicksDiscoveryWhenTheInstallFinishes(t *testin
 		// (registerAfterDshProfileInstall). That path has its own test.
 		workspaces: map[string]*workspaceState{"ws-1": {}},
 	}
-	if !d.startDshProfileProvision(dshPath) {
+	if !d.startDshProfileProvision(dshPath, nil) {
 		t.Fatal("the install did not start")
 	}
 	select {
@@ -339,7 +339,7 @@ func TestStartDshProfileProvision_SuccessWithoutAProfileWithdrawsTheWait(t *test
 		},
 	}}
 
-	if !d.startDshProfileProvision(dshPath) {
+	if !d.startDshProfileProvision(dshPath, nil) {
 		t.Fatal("the install did not start")
 	}
 
@@ -466,7 +466,7 @@ func TestDshProvisionCommand(t *testing.T) {
 	pluginDir := t.TempDir()
 	t.Setenv(dshPluginPathEnv, pluginDir)
 
-	cmd := dshProvisionCommand("/usr/local/bin/dsh", "@multica-ai/dsh-runtime")
+	cmd := dshProvisionCommand("/usr/local/bin/dsh", "@multica-ai/dsh-runtime", nil)
 	want := []string{"/usr/local/bin/dsh", "plugin", "--profile", "multica", "add", "@multica-ai/dsh-runtime"}
 	if strings.Join(cmd.Args, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("argv = %q, want %q", cmd.Args, want)
@@ -573,7 +573,7 @@ func TestProvisionDshMulticaProfile_CancellationKillsTheWholeTree(t *testing.T) 
 	defer cancel()
 	provisionDone := make(chan error, 1)
 	go func() {
-		provisionDone <- provisionDshMulticaProfile(ctx, dshPath,
+		provisionDone <- provisionDshMulticaProfile(ctx, dshPath, nil,
 			slog.New(slog.NewTextHandler(io.Discard, nil)))
 	}()
 
