@@ -143,7 +143,7 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	defer d.clearWSHeartbeatAcks()
 
 	d.logger.Info("task wakeup websocket connected", "runtimes", len(runtimeIDs))
-	signalTaskWakeup(taskWakeups, "")
+	d.signalTaskWakeup(taskWakeups, "")
 	// signalTaskWakeup only wakes idle ClaimTask pollers. In-flight tasks and
 	// the workspace sync loop park on coarse tickers (5s and 30s) that do not
 	// observe the wakeup channel, so anything the server changed during the
@@ -235,7 +235,7 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 		// A healthy WS connection lets the claim poller use a longer fallback
 		// interval. Wake it as soon as the connection drops so it immediately
 		// observes the detach and resumes the configured HTTP cadence.
-		signalTaskWakeup(taskWakeups, "")
+		d.signalTaskWakeup(taskWakeups, "")
 		sendMu.Lock()
 		sendClosed = true
 		sendMu.Unlock()
@@ -402,7 +402,7 @@ func (d *Daemon) readTaskWakeupMessagesForConnection(conn *websocket.Conn, taskW
 			if payload.RuntimeID != "" {
 				d.logger.Debug("task wakeup received", "runtime_id", payload.RuntimeID, "task_id", payload.TaskID)
 			}
-			signalTaskWakeup(taskWakeups, payload.RuntimeID)
+			d.signalTaskWakeup(taskWakeups, payload.RuntimeID)
 		case protocol.EventDaemonRuntimeProfilesChanged:
 			var payload protocol.RuntimeProfilesChangedPayload
 			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
@@ -481,10 +481,28 @@ func (d *Daemon) handleRuntimeProfilesChanged(payload protocol.RuntimeProfilesCh
 	}
 }
 
-func signalTaskWakeup(taskWakeups chan<- taskWakeup, runtimeID string) {
+// signalTaskWakeup delivers a targeted (or catch-up) task wakeup to the poller.
+// For a targeted wakeup the runtime id is the #7452 force-recheck signal, so it
+// is recorded in the woken set BEFORE the send is attempted. Recording after the
+// send would race: the `default` branch is only reached because a nudge is
+// already queued, and between a failed send and a late note the poller can
+// consume that queued nudge AND drain the woken set — stranding the id in a set
+// nobody will drain, with no nudge left to trigger a claim, until the next
+// scheduled poll. Recording first is strictly safe: if a drain races in, it
+// picks the id up and the subsequent nudge is merely redundant. The channel is a
+// coalescing nudge, so a full channel already carries a pending wakeup that will
+// drive the next claim, where the runtime is now forced. A catch-up wakeup
+// (empty runtimeID) has nothing to preserve.
+func (d *Daemon) signalTaskWakeup(taskWakeups chan<- taskWakeup, runtimeID string) {
+	if runtimeID != "" {
+		d.noteWokenRuntime(runtimeID)
+	}
 	select {
 	case taskWakeups <- taskWakeup{runtimeID: runtimeID}:
 	default:
+		if runtimeID != "" {
+			d.logger.Debug("task wakeup channel full; coalesced runtime into force-recheck set", "runtime_id", runtimeID)
+		}
 	}
 }
 

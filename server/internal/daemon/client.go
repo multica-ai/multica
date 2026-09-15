@@ -274,11 +274,22 @@ const batchClaimRequestTimeout = 5 * time.Second
 // daemons advertising claim-poll-hints-v1. A zero-value result is deliberately
 // conservative: it makes the poller retain PollInterval, which protects new
 // daemons talking to old servers and claims whose WS outcome was uncertain.
+//
+// ForceRecheckedRuntimeIDs is the server's force_rechecked_runtime_ids
+// acknowledgement (#7452): the forced runtimes the server actually observed
+// genuinely idle this cycle (a zero-candidate scan, cache re-armed). It is a
+// POINTER so absence is distinguishable from emptiness: a non-nil empty slice
+// means an upgraded server ran the re-check and acknowledged nothing (keep every
+// forced runtime forced), while nil means the server omitted the field entirely
+// — either it predates #7452, or this claim executed no server-side re-check at
+// all (uncertain WS outcome, cooldown, legacy fallback) — so the caller
+// preserves the hint rather than consuming it on a re-check that never ran.
 type claimTasksResult struct {
-	Tasks                       []*Task `json:"tasks"`
-	ClaimPollHintSupported      bool    `json:"claim_poll_hint_supported,omitempty"`
-	NextDeferredTaskAfterMillis int64   `json:"next_deferred_task_after_ms,omitempty"`
-	ClaimedOverWS               bool    `json:"-"`
+	Tasks                       []*Task   `json:"tasks"`
+	ClaimPollHintSupported      bool      `json:"claim_poll_hint_supported,omitempty"`
+	NextDeferredTaskAfterMillis int64     `json:"next_deferred_task_after_ms,omitempty"`
+	ForceRecheckedRuntimeIDs    *[]string `json:"force_rechecked_runtime_ids,omitempty"`
+	ClaimedOverWS               bool      `json:"-"`
 }
 
 // ClaimTasks is the machine-level (MUL-4257) batch counterpart of ClaimTask:
@@ -296,18 +307,36 @@ func (c *Client) ClaimTasks(ctx context.Context, daemonID string, runtimeIDs []s
 	return result.Tasks, err
 }
 
-func (c *Client) claimTasksWithHints(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) (claimTasksResult, error) {
+// claimTasksWithHints issues the HTTP batch claim and returns the full
+// claimTasksResult, including any scheduling hints and the #7452
+// force_rechecked_runtime_ids acknowledgement. forceRecheckIDs are the runtimes
+// woken since the last claim; they ride along in the request body so the server
+// bypasses their cached "empty" verdict for exactly this claim.
+func (c *Client) claimTasksWithHints(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int, forceRecheckIDs ...string) (claimTasksResult, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, batchClaimRequestTimeout)
 	defer cancel()
 	var resp claimTasksResult
-	if err := c.postJSON(reqCtx, "/api/daemon/tasks/claim", map[string]any{
-		"daemon_id":   daemonID,
-		"runtime_ids": runtimeIDs,
-		"max_tasks":   maxTasks,
-	}, &resp); err != nil {
+	if err := c.postJSON(reqCtx, "/api/daemon/tasks/claim", claimTasksBody(daemonID, runtimeIDs, maxTasks, forceRecheckIDs...), &resp); err != nil {
 		return claimTasksResult{}, err
 	}
 	return resp, nil
+}
+
+// claimTasksBody builds the batch-claim request body shared by the HTTP and
+// WS-first transports so both stay byte-identical. force_recheck_runtime_ids
+// (#7452) is an optional, additive field: it is omitted when no runtime was
+// woken so a steady-state poll is exactly the pre-#7452 request, and an older
+// server that does not know the field simply ignores it.
+func claimTasksBody(daemonID string, runtimeIDs []string, maxTasks int, forceRecheckIDs ...string) map[string]any {
+	body := map[string]any{
+		"daemon_id":   daemonID,
+		"runtime_ids": runtimeIDs,
+		"max_tasks":   maxTasks,
+	}
+	if len(forceRecheckIDs) > 0 {
+		body["force_recheck_runtime_ids"] = forceRecheckIDs
+	}
+	return body
 }
 
 // isBatchClaimUnsupported reports whether err is a 404 from the batch claim
