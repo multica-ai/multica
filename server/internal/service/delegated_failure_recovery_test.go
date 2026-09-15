@@ -1172,14 +1172,17 @@ func TestDelegatedFailureRecoveryTaskDoesNotRecursivelyWake(t *testing.T) {
 	}
 }
 
-// A source issue in Triage runs nothing, so a worker failure must not wake its
-// coordinator (MUL-7189 §2.3). This path builds its coordinator task with a
-// direct CreateAgentTask call, bypassing both enqueue funnels, so it needs the
-// queue door of its own.
+// A worker failure must not wake a coordinator whose issue is in Triage: that
+// coordinator is the issue's own assignee, the derived executor Triage does not
+// have (MUL-7189 §2.3).
 //
-// The obligation is not discharged — the comment stays in the outbox and
-// dispatches once the issue is accepted — so the sweep reports it as scanned
-// and replays nothing.
+// Triage needs no check of its own here. It is its own lifecycle category, so
+// it is neither unstarted nor started, and both the pending-recovery query and
+// canDispatchDelegatedFailureRecovery already exclude it — which is why the
+// sweep does not even scan the comment. This test is what keeps that true.
+//
+// The obligation is not discharged either: the comment stays in the outbox and
+// dispatches once the issue is accepted.
 func TestPendingDelegatedFailureSweepSkipsTriageSourceIssue(t *testing.T) {
 	f, svc := seedDelegatedFailureFixture(t)
 	ctx := context.Background()
@@ -1212,8 +1215,8 @@ func TestPendingDelegatedFailureSweepSkipsTriageSourceIssue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("triage-source recovery sweep: %v", err)
 	}
-	if result.Scanned != 1 || result.Replayed != 0 || result.Exhausted != 0 {
-		t.Fatalf("triage-source sweep = %+v, want the comment scanned and nothing replayed", result)
+	if result != (DelegatedFailureRecoverySweepResult{}) {
+		t.Fatalf("triage-source sweep = %+v, want nothing selected and nothing replayed", result)
 	}
 	if n := recoveryTasks(); n != 0 {
 		t.Fatalf("recovery tasks = %d, want none while the source issue is in Triage", n)

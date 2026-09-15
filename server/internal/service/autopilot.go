@@ -366,7 +366,7 @@ func (s *AutopilotService) ensureWebhookCreateIssueTask(ctx context.Context, aut
 		if err != nil {
 			return fmt.Errorf("dispatch for webhook delivery: resolve squad leader: %w", err)
 		}
-		if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, autopilot.AssigneeID, pgtype.UUID{}); err != nil {
+		if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, autopilot.AssigneeID, pgtype.UUID{}, OriginDerived); err != nil {
 			return fmt.Errorf("dispatch for webhook delivery: repair squad task: %w", err)
 		}
 		return nil
@@ -849,7 +849,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 			if _, err := s.TaskSvc.EnqueueTaskForSquadLeaderByActor(ctx, issue, leader.ID, ap.AssigneeID, actorUserID); err != nil {
 				return fmt.Errorf("enqueue squad leader task: %w", err)
 			}
-		} else if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, ap.AssigneeID, pgtype.UUID{}); err != nil {
+		} else if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, ap.AssigneeID, pgtype.UUID{}, OriginDerived); err != nil {
 			return fmt.Errorf("enqueue squad leader task: %w", err)
 		}
 	} else if actorUserID.Valid {

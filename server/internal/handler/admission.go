@@ -130,7 +130,7 @@ func dispatchBlockedFallbackMessage(code DispatchReasonCode) string {
 	case ReasonAlreadyActive:
 		return "a run is already active for this target"
 	case ReasonIssueInTriage:
-		return "the issue is in Triage, so it does not run; accept it out of Triage first"
+		return "the issue is in Triage and has no owner to run yet; accept it out of Triage first"
 	default:
 		return "the run was blocked"
 	}

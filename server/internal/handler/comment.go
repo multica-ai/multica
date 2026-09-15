@@ -2589,7 +2589,7 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 	switch trigger.Source {
 	case commentTriggerSourceIssueAssignee:
 		if trigger.Squad != nil {
-			if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID); err != nil {
+			if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID, service.OriginDerived); err != nil {
 				logCommentEnqueueFailure("enqueue squad leader task failed", err,
 					"issue_id", uuidToString(issue.ID),
 					"squad_id", uuidToString(trigger.Squad.ID),
@@ -2609,14 +2609,14 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 			return err
 		}
 	case commentTriggerSourceMentionSquadLeader:
-		if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID); err != nil {
+		if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID, service.OriginNamed); err != nil {
 			logCommentEnqueueFailure("enqueue squad leader mention task failed", err,
 				"issue_id", uuidToString(issue.ID),
 				"agent_id", uuidToString(trigger.Agent.ID))
 			return err
 		}
 	case commentTriggerSourceMentionAgent:
-		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, trigger.Agent.ID, triggerCommentID); err != nil {
+		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, trigger.Agent.ID, triggerCommentID, service.OriginNamed); err != nil {
 			logCommentEnqueueFailure("enqueue mention agent task failed", err,
 				"issue_id", uuidToString(issue.ID),
 				"agent_id", uuidToString(trigger.Agent.ID))
@@ -2630,7 +2630,7 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 		// for the thread-parent path. Gating on the source as well would keep
 		// the thread-parent path demoted for no reason (MUL-7006).
 		if trigger.Squad != nil {
-			_, err = h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID)
+			_, err = h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID, service.OriginNamed)
 		} else {
 			_, err = h.TaskService.EnqueueTaskForThreadParent(ctx, issue, trigger.Agent.ID, triggerCommentID)
 		}
@@ -2671,16 +2671,6 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	// creator's authority by commenting on that autopilot's issue.
 
 	mentions := util.ParseMentions(content)
-
-	// An issue in Triage produces no execution run, in any status and from any
-	// route (MUL-7189 §2.3) — comments are the one trigger that otherwise fires
-	// regardless of status. A target the author named by hand still gets an
-	// outcome, because the alternative is a mention that visibly does nothing;
-	// the implicit routes below (thread owner, assignee fallback) just resolve
-	// to nothing, which is what they already do when no route exists.
-	if issue.Status == issuestatus.Triage {
-		return nil, triageBlockedMentionTargets(mentions)
-	}
 
 	// EXPLICIT @agent / @squad mentions are a direct request and win over the
 	// @all broadcast (MUL-5411). @all only suppresses the IMPLICIT routing
@@ -2749,35 +2739,6 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 		return []commentAgentTrigger{trigger}, nil
 	}
 	return nil, nil
-}
-
-// triageBlockedMentionTargets reports one blocked outcome per explicitly named
-// @agent / @squad, deduped by the target the author wrote.
-//
-// Nothing is resolved and nothing is read: issue_in_triage is a fact about the
-// issue, identical for every target, so unlike the per-target reasons it cannot
-// be used to enumerate an agent the author may not invoke. The ids echoed back
-// are the ones the author just typed.
-func triageBlockedMentionTargets(mentions []util.Mention) []commentMentionTarget {
-	var targets []commentMentionTarget
-	seen := make(map[string]struct{}, len(mentions))
-	for _, m := range mentions {
-		if m.Type != "agent" && m.Type != "squad" {
-			continue
-		}
-		key := m.Type + ":" + m.ID
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		targets = append(targets, commentMentionTarget{
-			TargetType: m.Type,
-			TargetID:   m.ID,
-			Status:     DispatchBlocked,
-			ReasonCode: ReasonIssueInTriage,
-		})
-	}
-	return targets
 }
 
 func hasAgentOrSquadMention(mentions []util.Mention) bool {
@@ -3004,6 +2965,17 @@ func (h *Handler) routeAssigneeFallback(ctx context.Context, issue db.Issue, aut
 	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
 		return commentAgentTrigger{}, false
 	}
+	// In Triage the assignee is a proposal the triager is still making, not an
+	// owner, so there is nobody to fall back TO (MUL-7189 §2.3). This route and
+	// the squad-leader one below are the two that derive an executor from the
+	// issue; a comment naming an agent by hand is routed above and still runs.
+	//
+	// The queue door refuses these anyway. Stopping here is what keeps the
+	// server from attempting an enqueue it already knows will be refused, and
+	// logging a failure for every comment on a Triage entry.
+	if issue.Status == issuestatus.Triage {
+		return commentAgentTrigger{}, false
+	}
 	switch issue.AssigneeType.String {
 	case "agent":
 		agent, hasPending, ok := h.assigneeFallbackAgent(ctx, issue, authorType, authorID, opts)
@@ -3019,6 +2991,11 @@ func (h *Handler) routeAssigneeFallback(ctx context.Context, issue db.Issue, aut
 }
 
 func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db.Issue, authorType, authorID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool) {
+	// Checked here as well as in routeAssigneeFallback: an agent-authored
+	// comment reaches this one directly, without passing through that caller.
+	if issue.Status == issuestatus.Triage {
+		return commentAgentTrigger{}, false
+	}
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          issue.AssigneeID,
 		WorkspaceID: issue.WorkspaceID,

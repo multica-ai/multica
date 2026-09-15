@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -755,7 +756,7 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, tr
 		return
 	}
 
-	if _, err := h.TaskService.EnqueueTaskForMention(ctx, parent, parent.AssigneeID, triggerCommentID); err != nil {
+	if _, err := h.TaskService.EnqueueTaskForMention(ctx, parent, parent.AssigneeID, triggerCommentID, service.OriginDerived); err != nil {
 		slog.Warn("child done: enqueue parent agent task failed",
 			"error", err,
 			"parent_id", uuidToString(parent.ID),
@@ -812,7 +813,7 @@ func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, tr
 		return
 	}
 
-	if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, parent, squad.LeaderID, squad.ID, triggerCommentID); err != nil {
+	if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, parent, squad.LeaderID, squad.ID, triggerCommentID, service.OriginDerived); err != nil {
 		slog.Warn("child done: enqueue parent squad leader task failed",
 			"error", err,
 			"parent_id", uuidToString(parent.ID),
