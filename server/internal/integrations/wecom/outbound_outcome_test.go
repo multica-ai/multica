@@ -545,12 +545,12 @@ func TestAReapedTaskRowIsStillADrop(t *testing.T) {
 	}
 }
 
-// Another channel's turn must not pay for the origin gate. This subscriber is
-// on the bus every channel publishes to, so the common exit — a delivery row
-// that exists and says slack or lark — has to stay at the one query it costs
-// today. The gate is asked only where its answer changes what is recorded:
-// inside the no-row branch, where it separates a channel turn nobody can
-// address from a question typed in a browser.
+// Another channel's turn must not pay for the origin gate. A delivery row that
+// exists and says slack or lark has already answered everything this subscriber
+// needs, and this subscriber is on the bus every channel publishes to, so that
+// exit stays at the one query it costs today. The gate is asked only where its
+// answer changes what is recorded — see the price it carries there in the test
+// below, and the branch comment in processEvent for why it is worth paying.
 //
 // REVERSE VERIFICATION: hoist the gate ahead of GetChannelTaskDelivery and
 // this fails with one task lookup for a turn that was never WeCom's.
@@ -568,5 +568,46 @@ func TestAnotherPlatformsTurnDoesNotPayForTheOriginGate(t *testing.T) {
 	}
 	if got := r.mx.get("outbound_skipped:" + string(skipNotWecomTurn)); got != 1 {
 		t.Fatalf("outbound_skipped:%s = %d, want 1", skipNotWecomTurn, got)
+	}
+}
+
+// And the path that DOES pay for it, with the price written down. Every
+// completion of a question typed in the Multica web UI arrives in the
+// no-delivery-row branch — EnqueueChatTask writes no delivery row, only
+// EnqueueChannelChatTask does — so on a deployment running WeCom this branch,
+// not the one with a row, carries most of the traffic. Two keyed reads each
+// time: the task row, then the channel_ingested stamp on the batch it owns.
+//
+// Pinned because a cost paid once per web message is the kind that is measured
+// once, written into a comment, and then grows. The exit table is
+// TestNonWecomSessionIsNotADrop's; what this one owns is the price and what the
+// price buys.
+//
+// REVERSE VERIFICATION: drop the gate from that branch and record
+// skipNoDeliveryRow unconditionally — the cheap version the cost argument
+// pushes toward — and this fails with 0 lookups and no_delivery_row in place of
+// origin_not_channel, which is the loudest line in the file firing once per web
+// message.
+func TestTheWebUITurnWithNoRowPaysForTheOriginGate(t *testing.T) {
+	t.Parallel()
+	q := deliverableTurn(t)
+	q.channelIngested = askedInTheWebUI()
+	q.sessionErr = pgx.ErrNoRows
+	r := newOutcomeRig(t, q, true)
+
+	r.o.handleEvent(outcomeEvent())
+
+	if q.taskGets != 1 {
+		t.Errorf("task lookups = %d, want 1 — this runs on every web-UI completion in the deployment",
+			q.taskGets)
+	}
+	if got := len(q.originAskedFor); got != 1 {
+		t.Errorf("channel_ingested reads = %d, want 1 — same traffic, same multiplier", got)
+	}
+	// What the two reads buy: this turn leaves by the web UI's exit at DEBUG
+	// instead of the missing-route WARN.
+	if got := r.mx.get("outbound_skipped:" + string(skipOriginNotChannel)); got != 1 {
+		t.Fatalf("outbound_skipped:%s = %d, want 1 — then the lookups bought nothing. log:\n%s",
+			skipOriginNotChannel, got, r.logs.String())
 	}
 }

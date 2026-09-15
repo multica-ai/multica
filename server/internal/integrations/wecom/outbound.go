@@ -214,10 +214,22 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 			// asked HERE rather than ahead of the lookup: every question typed
 			// in the Multica web UI reaches this same branch, and warning
 			// about those would bury the one case that matters under the
-			// ordinary traffic of a shared bus. Asking here also keeps the
-			// common path — a turn whose row exists — at the one query it
-			// costs today, which matters because every channel's chat:done
-			// passes through this subscriber.
+			// ordinary traffic of a shared bus.
+			//
+			// WHAT THAT COSTS, AND WHO PAYS IT. This branch is the busy one,
+			// not the exception: EnqueueChatTask writes no delivery row — only
+			// EnqueueChannelChatTask does — so every web-UI completion in the
+			// deployment arrives here, and this subscriber is on every
+			// chat:done there is. Each of them pays the gate's two keyed reads,
+			// the task row and then the channel_ingested stamp on the batch
+			// that task owns, where before it returned at once. Both are async,
+			// off the user's path, and the alternative is to pay for the
+			// distinction in the other currency: a WARN on every web message,
+			// or the silent return this used to be, which is #7215's shape — an
+			// answer in the transcript, a quiet chat, and nothing server-side
+			// that says which of the two happened.
+			// TestTheWebUITurnWithNoRowPaysForTheOriginGate holds that count at
+			// two, so a third read cannot arrive here unnoticed.
 			//
 			// Behind the gate, a missing row means a turn the channel DID
 			// ingest and nobody can now address. In a steady-state deployment
