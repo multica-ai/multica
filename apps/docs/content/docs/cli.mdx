@@ -254,7 +254,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | | `cancel-task <task-id>` | Cancel a running or queued run | `--issue` |
 | `project` | `list/get/create/update/delete` | Manage projects | |
 | | `status <id> <status>` | Change project status | |
-| | `resource list/add/update/remove` | Manage project resources | `--type`, `--url`, `--local-path`, `--daemon-id`, `--execution-mode` (`in_place` / `worktree` for a local directory) |
+| | `resource list/add/update/remove` | Manage project resources | `--type`, `--url`, `--local-path`, `--daemon-id`, `--agent-id` (optional exact agent binding), `--execution-mode` (`in_place` / `worktree` for a local directory) |
 | `label` | `list/get/create/update/delete` | Manage workspace labels | |
 | `property` | `list/get/create/update/archive/unarchive` | Manage workspace custom properties | `create`: `--name`, `--type` (`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`), `--option` (repeatable, select types only); `list`: `--include-archived`; the type cannot be changed after creation |
 | `agent` | `list/get/create/update/archive/restore` | Manage agents | `--name`, `--runtime-id` (required for `create`), `--instructions`, `--conversation-starters`, `--model`, `--thinking-level`, `--mcp-config`, `--permission-mode`, `--max-concurrent-tasks` |

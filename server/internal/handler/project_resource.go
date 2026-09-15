@@ -141,6 +141,7 @@ const (
 type localDirectoryRef struct {
 	LocalPath     string `json:"local_path"`
 	DaemonID      string `json:"daemon_id"`
+	AgentID       string `json:"agent_id,omitempty"`
 	Label         string `json:"label,omitempty"`
 	ExecutionMode string `json:"execution_mode,omitempty"`
 }
@@ -284,6 +285,7 @@ func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
 	if payload.DaemonID == "" {
 		return nil, errors.New("local_directory: daemon_id is required")
 	}
+	payload.AgentID = strings.TrimSpace(payload.AgentID)
 	payload.Label = strings.TrimSpace(payload.Label)
 	payload.ExecutionMode = strings.TrimSpace(payload.ExecutionMode)
 	switch payload.ExecutionMode {
@@ -516,7 +518,7 @@ func (h *Handler) CreateProjectResource(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to check existing resources")
 		return
 	} else if conflict {
-		writeError(w, http.StatusConflict, "this daemon already has a local_directory attached to the project; remove it before adding another")
+		writeError(w, http.StatusConflict, "this daemon already has a local_directory attached to the project for this agent binding; remove it before adding another")
 		return
 	}
 
@@ -623,7 +625,7 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to check existing resources")
 		return
 	} else if conflict {
-		writeError(w, http.StatusConflict, "another local_directory on this daemon is already attached to the project")
+		writeError(w, http.StatusConflict, "another local_directory on this daemon for this agent binding is already attached to the project")
 		return
 	}
 
@@ -753,12 +755,10 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// findLocalDirectoryConflict enforces "at most one local_directory resource
-// per (project, daemon)". The daemon picks the first matching daemon_id row
-// out of a task's resources (findLocalDirectoryAssignment), so letting a
-// project carry two rows for the same daemon would mean the agent silently
-// writes into whichever happens to come back first — a safety hazard for a
-// feature that operates directly on the user's real working directory.
+// findLocalDirectoryConflict enforces one default local_directory resource per
+// (project, daemon), plus at most one exact binding per agent. An empty agent_id
+// is the backward-compatible daemon default. The daemon resolves an exact
+// agent binding first and falls back to that default.
 //
 // The DB-level UNIQUE(project_id, resource_type, resource_ref) constraint
 // alone is not enough here: it only fires on full ref-JSON equality, so a
@@ -789,11 +789,8 @@ func (h *Handler) findLocalDirectoryConflict(ctx context.Context, projectID pgty
 		if err := json.Unmarshal(row.ResourceRef, &existing); err != nil {
 			continue
 		}
-		// Daemon-scoped uniqueness: one local_directory per daemon per
-		// project. Different daemons can each carry one row (one per
-		// user device); the daemon-side resolver routes each daemon to
-		// its own assignment by daemon_id.
-		if existing.DaemonID == incoming.DaemonID {
+		if strings.TrimSpace(existing.DaemonID) == strings.TrimSpace(incoming.DaemonID) &&
+			strings.TrimSpace(existing.AgentID) == strings.TrimSpace(incoming.AgentID) {
 			return true, nil
 		}
 	}

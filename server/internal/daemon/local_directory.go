@@ -34,6 +34,7 @@ const (
 type localDirectoryRef struct {
 	LocalPath     string `json:"local_path"`
 	DaemonID      string `json:"daemon_id"`
+	AgentID       string `json:"agent_id,omitempty"`
 	Label         string `json:"label,omitempty"`
 	ExecutionMode string `json:"execution_mode,omitempty"`
 }
@@ -122,7 +123,7 @@ func localDirectoryAssignmentForTask(task Task, daemonID string) (*localDirector
 	if task.IsLeaderTask {
 		return nil, nil
 	}
-	return findLocalDirectoryAssignment(task.ProjectResources, daemonID)
+	return findLocalDirectoryAssignment(task.ProjectResources, daemonID, task.AgentID)
 }
 
 // localDirectoryLockExempt reports whether a task may run inside an in_place
@@ -153,7 +154,8 @@ func localDirectoryLockExempt(task Task) bool {
 }
 
 // findLocalDirectoryAssignment scans the task's project resources for one of
-// type local_directory whose daemon_id matches this daemon. Returns nil
+// type local_directory whose daemon_id matches this daemon. An exact agent_id
+// binding wins; otherwise a ref without agent_id is the daemon default. Returns nil
 // (without error) when no such resource exists — the task takes the regular
 // github_repo / worktree code path. Returns an error only when the matching
 // resource is structurally broken (bad JSON, missing fields) OR when more
@@ -161,12 +163,11 @@ func localDirectoryLockExempt(task Task) bool {
 // invariant violation, and silently picking the first match would let the
 // agent write into an arbitrary directory the user didn't intend.
 //
-// Server-side `findLocalDirectoryConflict` enforces a single local_directory
-// per (project, daemon), so two matches here means either the constraint
-// was bypassed (older API client) or the data was corrupted. Either way,
-// fail fast rather than guess.
-func findLocalDirectoryAssignment(resources []ProjectResourceData, daemonID string) (*localDirectoryAssignment, error) {
-	var match *localDirectoryAssignment
+// Server-side `findLocalDirectoryConflict` enforces a single row for each
+// (project, daemon, agent selector), so duplicate defaults or duplicate exact
+// matches mean the constraint was bypassed or the data was corrupted.
+func findLocalDirectoryAssignment(resources []ProjectResourceData, daemonID, agentID string) (*localDirectoryAssignment, error) {
+	var exactRef, defaultRef *localDirectoryRef
 	for _, r := range resources {
 		if r.ResourceType != localDirectoryResourceType {
 			continue
@@ -176,6 +177,7 @@ func findLocalDirectoryAssignment(resources []ProjectResourceData, daemonID stri
 			return nil, fmt.Errorf("local_directory: parse resource_ref: %w", err)
 		}
 		ref.DaemonID = strings.TrimSpace(ref.DaemonID)
+		ref.AgentID = strings.TrimSpace(ref.AgentID)
 		if ref.DaemonID == "" {
 			return nil, errors.New("local_directory: resource_ref missing daemon_id")
 		}
@@ -185,32 +187,37 @@ func findLocalDirectoryAssignment(resources []ProjectResourceData, daemonID stri
 			// per daemon, and other daemons will resolve their own row.
 			continue
 		}
-		if match != nil {
-			// Server-side invariant: at most one local_directory per
-			// (project, daemon). Two matches here means the constraint
-			// was bypassed by an older API client or by direct DB writes.
-			// Either way, refuse to guess which directory the user meant.
-			return nil, fmt.Errorf(
-				"local_directory: project has multiple local_directory resources for this daemon (%q and %q); remove the extra in project settings",
-				match.AbsPath,
-				strings.TrimSpace(ref.LocalPath),
-			)
+		var target **localDirectoryRef
+		switch {
+		case ref.AgentID != "" && ref.AgentID == strings.TrimSpace(agentID):
+			target = &exactRef
+		case ref.AgentID == "":
+			target = &defaultRef
+		default:
+			continue
 		}
-		absPath, err := normalizeLocalPath(ref.LocalPath)
-		if err != nil {
-			return nil, err
+		if *target != nil {
+			return nil, fmt.Errorf("local_directory: project has multiple local_directory resources for this daemon and agent binding; remove the extra in project settings")
 		}
-		realPath, err := resolveRealPath(absPath)
-		if err != nil {
-			return nil, err
-		}
-		match = &localDirectoryAssignment{
-			Ref:      ref,
-			AbsPath:  absPath,
-			RealPath: realPath,
-		}
+		copyRef := ref
+		*target = &copyRef
 	}
-	return match, nil
+	selected := exactRef
+	if selected == nil {
+		selected = defaultRef
+	}
+	if selected == nil {
+		return nil, nil
+	}
+	absPath, err := normalizeLocalPath(selected.LocalPath)
+	if err != nil {
+		return nil, err
+	}
+	realPath, err := resolveRealPath(absPath)
+	if err != nil {
+		return nil, err
+	}
+	return &localDirectoryAssignment{Ref: *selected, AbsPath: absPath, RealPath: realPath}, nil
 }
 
 // normalizeLocalPath strips whitespace and resolves the path to an absolute

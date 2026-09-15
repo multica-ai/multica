@@ -52,7 +52,9 @@ Preselection applies only to a directory you are linking now. A directory linked
 
 The directory must be an absolute path, must already exist, and must be readable and writable by the current daemon. These paths are rejected: system roots and drive roots (`/`, `C:\`), home directories themselves and the parents of home directories (such as `/Users`, `/home`, `/root`), and system directories such as `/etc`, `/var`, `/tmp`, `/usr`, and `/opt`. If the chosen path is a symlink, it is resolved to its real path first and validated again by the same rules; the serial lock also applies to the real path.
 
-Each project can link at most one local directory per daemon. Different computers on a team can each link their own directory for the same project.
+Each project can link one default local directory per daemon and optional
+agent-specific directories on that daemon. Different computers on a team can
+each link their own directories for the same project.
 
 <Callout type="warning">
 In the default `in_place` mode a local directory is not an isolated environment: the agent directly sees and modifies your current branch and uncommitted files, and Multica does not automatically switch branches, stash, commit, push, or open PRs. Worktree mode changes this — see "How runs share the directory" below.
@@ -123,6 +125,13 @@ multica project resource add <project-id> \
   --local-path /absolute/path/to/repo \
   --daemon-id <daemon-id>
 
+# Override that daemon default for one agent with a persistent workspace root
+multica project resource add <project-id> \
+  --type local_directory \
+  --local-path /absolute/path/to/agent-workspace \
+  --daemon-id <daemon-id> \
+  --agent-id <agent-id>
+
 # Link a local git repo and let runs execute concurrently in their own worktrees
 multica project resource add <project-id> \
   --type local_directory \
@@ -139,6 +148,11 @@ multica project resource remove <project-id> <resource-id>
 ```
 
 Resource changes affect runs created afterwards; they do not rewrite records of runs that already ended.
+
+An agent-specific local directory takes precedence over the daemon default for
+that agent. Agents without an exact binding continue to use the default. If a
+binding change selects a different persistent directory, the next run starts a
+fresh provider session instead of resuming a session created in the old root.
 
 ## Next steps
 

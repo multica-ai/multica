@@ -6529,6 +6529,27 @@ func gateResumeToReachableSession(task *Task, taskCtx *execenv.TaskContextForEnv
 	return reachable
 }
 
+// gateLocalDirectoryResumeBinding prevents a provider with a cwd-independent
+// session store (notably Pi/OMP) from resuming a conversation in a different
+// persistent workspace after an agent's local_directory binding changes.
+// Worktree mode is excluded: changing per-task workdirs is its normal contract.
+func gateLocalDirectoryResumeBinding(task *Task, taskCtx *execenv.TaskContextForEnv, assignment *localDirectoryAssignment, taskLog *slog.Logger) bool {
+	if assignment == nil || assignment.UsesWorktree() || task.PriorSessionID == "" ||
+		sameExistingDir(assignment.AbsPath, task.PriorWorkDir) {
+		return true
+	}
+	taskLog.Info("dropping prior session: local_directory binding changed",
+		"session_id", task.PriorSessionID,
+		"prior_workdir", task.PriorWorkDir,
+		"workdir", assignment.AbsPath,
+	)
+	task.PriorSessionID = ""
+	taskCtx.PriorSessionResumed = false
+	taskCtx.PriorSessionResumeUnavailable = true
+	task.PriorSessionResumeUnavailable = true
+	return false
+}
+
 func providerUsesPiSessionFile(provider string) bool {
 	if provider == "pi" {
 		return true
@@ -8323,7 +8344,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// agent.Config.BuiltinRuntime: it separates the provider's own discovered
 	// binary from an arbitrary command speaking its protocol. Reused here so
 	// the gate and the backend cannot disagree about which one is running.
-	resumeReachable := gateResumeToReachableSession(
+	resumeReachable := gateLocalDirectoryResumeBinding(&task, &taskCtx, localAssignment, taskLog) && gateResumeToReachableSession(
 		&task, &taskCtx, provider, env.WorkDir,
 		sessionHomeReachable(provider, env, envReused),
 		providerRefusesMissingSessionCwd(provider, !usesCustomProfileCommand),
