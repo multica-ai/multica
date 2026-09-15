@@ -17,6 +17,26 @@ import (
 
 func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 
+// applyPATWorkspaceScope pins a workspace-scoped PAT to its tenant before the
+// workspace middleware resolves request context. It returns false when an
+// explicit selector attempts to cross the token boundary.
+func applyPATWorkspaceScope(r *http.Request, workspaceID pgtype.UUID) bool {
+	if !workspaceID.Valid {
+		return true
+	}
+
+	requested := r.Header.Get("X-Workspace-ID")
+	if requested == "" {
+		requested = r.URL.Query().Get("workspace_id")
+	}
+	boundWorkspaceID := uuidToString(workspaceID)
+	if requested != "" && requested != boundWorkspaceID {
+		return false
+	}
+	r.Header.Set("X-Workspace-ID", boundWorkspaceID)
+	return true
+}
+
 func rejectTemporarilyDisabledUser(w http.ResponseWriter, r *http.Request, userID, email, authPath string) bool {
 	if !auth.IsTemporarilyDisabledUser(userID, email) {
 		return false
@@ -218,6 +238,10 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				}
 
 				userID := uuidToString(pat.UserID)
+				if !applyPATWorkspaceScope(r, pat.WorkspaceID) {
+					http.Error(w, `{"error":"token is not valid for this workspace"}`, http.StatusForbidden)
+					return
+				}
 				if rejectTemporarilyDisabledUser(w, r, userID, "", "pat") {
 					return
 				}
@@ -230,7 +254,12 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				if pat.ExpiresAt.Valid {
 					expiresAt = pat.ExpiresAt.Time
 				}
-				patCache.Set(r.Context(), hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
+				// Workspace-bound tokens carry more identity than the legacy
+				// user-only cache value; keep them on the DB path until the cache
+				// stores the complete token scope.
+				if !pat.WorkspaceID.Valid {
+					patCache.Set(r.Context(), hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
+				}
 
 				// Cache miss = TTL expired (or first use after revoke /
 				// process restart). Refresh last_used_at; subsequent hits
