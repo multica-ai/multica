@@ -28,6 +28,7 @@ import {
   type IssueScope,
 } from "@multica/core/issues/surface/scope";
 import type { Issue } from "@multica/core/types";
+import { SurfaceWorkflowContext } from "./workflow-context";
 import { BoardView } from "../components/board-view";
 import { BatchActionToolbar } from "../components/batch-action-toolbar";
 import { GanttView } from "../components/gantt-view";
@@ -102,8 +103,10 @@ export function IssueSurface({
   // An open saved view swaps the surface onto its own view-preference key:
   // display/extra-filter adjustments persist per user per view, and the
   // underlying built-in surface state is never touched (no draft machinery).
+  const projectSelectionKey = (scope.type === "workspace" || scope.type === "my") && scope.projectId !== undefined
+    ? `:project:${scope.projectId ?? "workspace"}` : "";
   const resolvedSurfaceKey = activeView
-    ? `view:${activeView.id}`
+    ? `view:${activeView.id}${projectSelectionKey}`
     : (surfaceKey ?? issueScopeKey(scope));
   const seedDefinition = activeView
     ? { ...activeView.query, ...activeView.display }
@@ -248,6 +251,7 @@ function IssueSurfaceContent({
       controller.viewMode === "table");
 
   return (
+    <SurfaceWorkflowContext value={{ statuses: controller.filterWorkflowStatuses, groups: controller.groupBranches?.descriptors }}>
     <IssueSurfaceActionsProvider actions={controller.actions}>
       {/* One shared right-click menu for every card/row this surface renders
           — see IssueContextMenuProvider. Inside the actions provider so the
@@ -330,6 +334,7 @@ function IssueSurfaceContent({
                 onCreateIssue={openCreateIssue}
                 statusPagination={controller.statusPagination}
                 groupBranches={controller.groupBranches}
+                workflowStatuses={controller.workflowStatuses}
               />
             )}
             {controller.viewMode === "list" && (
@@ -343,6 +348,8 @@ function IssueSurfaceContent({
                 onMoveIssue={controller.moveIssue}
                 onCreateIssue={openCreateIssue}
                 statusPagination={controller.statusPagination!}
+                groupBranches={controller.groupBranches}
+                workflowStatuses={controller.workflowStatuses}
               />
             )}
             {controller.viewMode === "table" && (
@@ -387,6 +394,7 @@ function IssueSurfaceContent({
       </IssueSurfaceSelectionProvider>
       </IssueContextMenuProvider>
     </IssueSurfaceActionsProvider>
+    </SurfaceWorkflowContext>
   );
 }
 

@@ -2,6 +2,8 @@ import type { ProjectStatus, ProjectPriority } from "../types";
 import { createDraftStore } from "../drafts/create-draft-store";
 
 interface ProjectDraft {
+  workflow?: import("../issue-workflows/workflow").WorkflowDraft;
+  workflowWorkspaceId?: string;
   title: string;
   description: string;
   status: ProjectStatus;
@@ -15,6 +17,8 @@ interface ProjectDraft {
 }
 
 const EMPTY_DRAFT: ProjectDraft = {
+  workflow: undefined,
+  workflowWorkspaceId: undefined,
   title: "",
   description: "",
   status: "planned",

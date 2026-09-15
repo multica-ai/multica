@@ -1,4 +1,10 @@
 {
+  "project_scope": {
+    "workspace": "ワークスペース",
+    "label": "ワークスペースまたはプロジェクトを選択",
+    "search": "プロジェクトを検索...",
+    "retry": "プロジェクトを再読み込み"
+  },
   "inline_run": {
     "label": "{{name}} の実行",
     "stop": "停止",
@@ -900,5 +906,35 @@
     "surface_loading": "{{name}} を読み込んでいます…",
     "surface_unavailable": "{{name}} のインターフェースを読み込めません。インストール済みのバージョンに含まれていない可能性があります。",
     "surface_navigated": "{{name}} がパネルを外部から読み込んだページに置き換えようとしました。停止して接続を切りました。ワークスペース管理者に知らせてください。"
+  },
+  "automation": {
+    "title": "自動化",
+    "manual": "手動",
+    "entry_count_other": "{{count}} 件の実行",
+    "take_over": "引き継ぐ"
+  },
+  "handoff": {
+    "enter": "{{name}} に進む",
+    "starts": "{{name}} を開始します",
+    "manual": "自動実行なし",
+    "stops": "現在の実行を停止します。完了済みの作業は保持されます。",
+    "transition_title": "{{name}} に進みますか？",
+    "cancel": "キャンセル",
+    "pending": "更新中...",
+    "error": "タスクを更新できません。更新して再試行してください。",
+    "loading": "操作を読み込み中...",
+    "effects_intro": "このステータスに進むと、次のルールが適用されます。"
+  },
+  "workflow_selection": {
+    "choose": "ステータスを選択",
+    "loading": "ワークフローを読み込み中…",
+    "load_error": "ワークフローを読み込めません。",
+    "retry": "再試行",
+    "mixed": "同じワークフローのタスクを選択してステータスを一括変更してください。",
+    "move_title": "タスクをプロジェクトに移動",
+    "move_description": "移動すると、タスクは移動先のワークフローの初期ステータスに入り、設定されたアクションを実行します。",
+    "move_initial_status": "初期ステータス：{{name}}",
+    "move": "タスクを移動",
+    "batch_failed": "{{count}} 件のタスクを更新できませんでした。成功した変更は保持されています。更新してから再試行してください。"
   }
 }

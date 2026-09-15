@@ -1,5 +1,7 @@
 "use client";
 
+import { useIssueProjectScope } from "@multica/core/issues/use-project-scope";
+import { IssueProjectScopePicker } from "./issue-project-scope-picker";
 import { ListTodo } from "lucide-react";
 import type {
   Issue,
@@ -16,6 +18,8 @@ import { IssueSurface } from "../surface/issue-surface";
 import { IssuesHeader } from "./issues-header";
 
 function IssuesSurfaceHeader({
+  projectId,
+  onProjectChange,
   issues,
   workingAgents,
   isRefreshing,
@@ -23,6 +27,8 @@ function IssuesSurfaceHeader({
   tableFacetCounts,
   onTableFacetChange,
 }: {
+  projectId: string | null;
+  onProjectChange: (id: string | null) => void;
   issues: Issue[];
   workingAgents: WorkingAgentSummary[] | undefined;
   isRefreshing: boolean;
@@ -41,6 +47,7 @@ function IssuesSurfaceHeader({
           <ListTodo className="size-4" />
         </RefreshablePageIcon>
         <h1 className="text-body font-medium">{t(($) => $.page.breadcrumb_title)}</h1>
+        <IssueProjectScopePicker projectId={projectId} onChange={onProjectChange} />
       </PageHeader>
       <IssuesHeader
         scopedIssues={issues}
@@ -57,16 +64,19 @@ function IssuesSurfaceHeader({
 
 export function IssuesPage() {
   const { t } = useT("issues");
+  const { projectId, setProjectId } = useIssueProjectScope("issues");
   const scope = useIssuesScope("issues");
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       <IssueSurface
-        scope={{ type: "workspace", actorKind: scope }}
+        scope={{ type: "workspace", actorKind: scope, projectId }}
         modes={["board", "list", "table", "swimlane"]}
         batchToolbar="list"
         renderHeader={({ controller }) => (
           <IssuesSurfaceHeader
+            projectId={projectId}
+            onProjectChange={setProjectId}
             issues={controller.surfaceIssues}
             workingAgents={controller.workingAgents}
             isRefreshing={controller.isRefreshing}

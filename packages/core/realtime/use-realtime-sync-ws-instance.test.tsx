@@ -13,6 +13,7 @@ import { runtimeKeys } from "../runtimes/queries";
 import { workspaceWorkingAgentsKeys } from "../agents/queries";
 import { workspaceKeys } from "../workspace/queries";
 import { issueStatusKeys } from "../issue-statuses/queries";
+import { issueWorkflowKeys } from "../issue-workflows/queries";
 import {
   markWorkspaceDeletePending,
   unmarkWorkspaceDeletePending,
@@ -283,6 +284,9 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: issueStatusKeys.all("ws-1"),
     });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: issueWorkflowKeys.all("ws-1"),
+    });
     const groupRefresh = invalidateSpy.mock.calls.find(([options]: [InvalidateQueryFilters?]) => options?.predicate);
     expect(groupRefresh?.[0]?.queryKey).toEqual([...issueKeys.tableAll("ws-1"), "groups"]);
     const predicate = groupRefresh![0]!.predicate!;
@@ -393,6 +397,9 @@ describe("useRealtimeSync — Table server membership invalidation", () => {
     onAny!({ type: "task:completed", payload: {} } as never);
     vi.advanceTimersByTime(100);
 
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: issueWorkflowKeys.executionsAll("ws-1"),
+    });
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: issueKeys.tableAll("ws-1"),
     });

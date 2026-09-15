@@ -1,4 +1,10 @@
 {
+  "project_scope": {
+    "workspace": "工作区",
+    "label": "选择工作区或项目",
+    "search": "搜索项目...",
+    "retry": "重新加载项目"
+  },
   "inline_run": {
     "label": "{{name}} 的运行",
     "stop": "停止",
@@ -900,5 +906,35 @@
     "surface_loading": "正在加载 {{name}}…",
     "surface_unavailable": "{{name}} 的界面无法加载，已安装的版本可能不包含它。",
     "surface_navigated": "{{name}} 试图把面板替换成从别处加载的页面。已经拦下并断开连接，建议告知工作区管理员。"
+  },
+  "automation": {
+    "title": "自动化",
+    "manual": "手动",
+    "entry_count_other": "{{count}} 次进入",
+    "take_over": "人工接管"
+  },
+  "handoff": {
+    "enter": "进入 {{name}}",
+    "starts": "将启动 {{name}}",
+    "manual": "不会自动启动执行",
+    "stops": "将停止当前执行，已完成的工作会保留。",
+    "transition_title": "进入 {{name}}？",
+    "cancel": "取消",
+    "pending": "更新中...",
+    "error": "无法更新任务，请刷新后重试。",
+    "loading": "加载状态操作...",
+    "effects_intro": "进入此状态将应用以下规则。"
+  },
+  "workflow_selection": {
+    "choose": "选择状态",
+    "loading": "正在加载工作流…",
+    "load_error": "无法加载此工作流。",
+    "retry": "重试",
+    "mixed": "请选择同一工作流中的任务，再批量修改状态。",
+    "move_title": "移动任务到项目",
+    "move_description": "移动后，任务将进入目标任务流程的初始状态，并执行该状态配置的操作。",
+    "move_initial_status": "初始状态：{{name}}",
+    "move": "移动任务",
+    "batch_failed": "有 {{count}} 个任务更新失败。成功的修改已保留，请刷新后重试。"
   }
 }

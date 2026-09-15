@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -29,12 +30,9 @@ type noRow struct{}
 
 func (noRow) Scan(...any) error { return pgx.ErrNoRows }
 
-// TestBroadcastIssueUpdated_EmitsStatusChange pins the realtime contract behind
-// #4648 / MUL-3782: when a background path resets an issue's status (e.g. the
-// failed-task handler flipping a stuck in_progress issue back to todo), it must
-// publish issue:updated with status_changed=true and the new status so the
-// frontend's onIssueUpdated reconcile moves the card between status columns /
-// filters instead of leaving it stale until the next unrelated write.
+// TestBroadcastIssueUpdated_EmitsStatusChange pins both sides of the additive
+// lifecycle event contract: legacy clients still receive issue:updated, while
+// status-specific consumers receive issue:transitioned with the same payload.
 func TestBroadcastIssueUpdated_EmitsStatusChange(t *testing.T) {
 	bus := events.New()
 	var got []events.Event
@@ -53,8 +51,8 @@ func TestBroadcastIssueUpdated_EmitsStatusChange(t *testing.T) {
 	}
 	svc.broadcastIssueUpdated(context.Background(), issue, "in_progress")
 
-	if len(got) != 1 {
-		t.Fatalf("expected exactly 1 published event, got %d", len(got))
+	if len(got) != 2 {
+		t.Fatalf("expected exactly 2 published events, got %d", len(got))
 	}
 	e := got[0]
 	if e.Type != protocol.EventIssueUpdated {
@@ -83,6 +81,13 @@ func TestBroadcastIssueUpdated_EmitsStatusChange(t *testing.T) {
 	}
 	if issueMap["id"] != util.UUIDToString(issue.ID) {
 		t.Errorf("issue.id mismatch: got %v want %q", issueMap["id"], util.UUIDToString(issue.ID))
+	}
+	transitioned := got[1]
+	if transitioned.Type != protocol.EventIssueTransitioned {
+		t.Fatalf("expected event type %q, got %q", protocol.EventIssueTransitioned, transitioned.Type)
+	}
+	if !reflect.DeepEqual(transitioned.Payload, e.Payload) {
+		t.Fatal("expected legacy and transition events to share the canonical payload")
 	}
 }
 

@@ -67,6 +67,7 @@ type issueTableActorRef struct {
 }
 
 type issueTableScope struct {
+	WorkflowID    string              `json:"workflow_id,omitempty"`
 	Kind          string              `json:"kind"`
 	AssigneeTypes []string            `json:"assignee_types,omitempty"`
 	ProjectID     string              `json:"project_id,omitempty"`
@@ -81,6 +82,7 @@ type issueTableDateFilterRequest struct {
 }
 
 type issueTableFiltersRequest struct {
+	WorkflowStatusIDs []string             `json:"workflow_status_ids,omitempty"`
 	Statuses          []string             `json:"statuses,omitempty"`
 	Priorities        []string             `json:"priorities,omitempty"`
 	Assignees         []issueTableActorRef `json:"assignees,omitempty"`
@@ -252,10 +254,12 @@ func canonicalIssueTableFingerprint(workspaceID string, spec issueTableQuerySpec
 		spec.Filters.Assignees != nil && len(spec.Filters.Assignees) == 0
 	explicitEmptyWorkingIssues :=
 		spec.Filters.WorkingIssueIDs != nil && len(spec.Filters.WorkingIssueIDs) == 0
+	explicitEmptyWorkflowStatuses := spec.Filters.WorkflowStatusIDs != nil && len(spec.Filters.WorkflowStatusIDs) == 0
 	normalized := spec
 	normalized.Search = strings.TrimSpace(normalized.Search)
 	normalized.Scope.AssigneeTypes = sortedUniqueStrings(normalized.Scope.AssigneeTypes)
 	normalized.Filters.Statuses = sortedUniqueStrings(normalized.Filters.Statuses)
+	normalized.Filters.WorkflowStatusIDs = sortedUniqueStrings(normalized.Filters.WorkflowStatusIDs)
 	normalized.Filters.Priorities = sortedUniqueStrings(normalized.Filters.Priorities)
 	normalized.Filters.ProjectIDs = sortedUniqueStrings(normalized.Filters.ProjectIDs)
 	normalized.Filters.LabelIDs = sortedUniqueStrings(normalized.Filters.LabelIDs)
@@ -266,15 +270,17 @@ func canonicalIssueTableFingerprint(workspaceID string, spec issueTableQuerySpec
 		normalized.Filters.Properties[key] = sortedUniqueRawJSON(values)
 	}
 	encoded, err := json.Marshal(struct {
-		WorkspaceID                string              `json:"workspace_id"`
-		Query                      issueTableQuerySpec `json:"query"`
-		ExplicitEmptyAssignees     bool                `json:"explicit_empty_assignees,omitempty"`
-		ExplicitEmptyWorkingIssues bool                `json:"explicit_empty_working_issues,omitempty"`
+		ExplicitEmptyWorkflowStatuses bool                `json:"explicit_empty_workflow_statuses,omitempty"`
+		WorkspaceID                   string              `json:"workspace_id"`
+		Query                         issueTableQuerySpec `json:"query"`
+		ExplicitEmptyAssignees        bool                `json:"explicit_empty_assignees,omitempty"`
+		ExplicitEmptyWorkingIssues    bool                `json:"explicit_empty_working_issues,omitempty"`
 	}{
-		WorkspaceID:                workspaceID,
-		Query:                      normalized,
-		ExplicitEmptyAssignees:     explicitEmptyAssignees,
-		ExplicitEmptyWorkingIssues: explicitEmptyWorkingIssues,
+		ExplicitEmptyWorkflowStatuses: explicitEmptyWorkflowStatuses,
+		WorkspaceID:                   workspaceID,
+		Query:                         normalized,
+		ExplicitEmptyAssignees:        explicitEmptyAssignees,
+		ExplicitEmptyWorkingIssues:    explicitEmptyWorkingIssues,
 	})
 	if err != nil {
 		return "", err
@@ -443,6 +449,29 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		return "$" + strconv.Itoa(len(args))
 	}
 
+	if spec.Scope.WorkflowID != "" {
+		id, ok := parseUUIDOrBadRequest(w, spec.Scope.WorkflowID, "scope.workflow_id")
+		if !ok {
+			return issueTableSQL{}, false
+		}
+		where = append(where, fmt.Sprintf("i.workflow_id = %s::uuid", addArg(id)))
+	}
+	if spec.Scope.ProjectID != "" && spec.Scope.Kind != "project" {
+		id, ok := parseUUIDOrBadRequest(w, spec.Scope.ProjectID, "scope.project_id")
+		if !ok {
+			return issueTableSQL{}, false
+		}
+		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(id)))
+	}
+	statusPredicates := []string{}
+	if spec.Filters.WorkflowStatusIDs != nil {
+		ids, ok := parseIssueTableUUIDList(w, spec.Filters.WorkflowStatusIDs, "filters.workflow_status_ids")
+		if !ok {
+			return issueTableSQL{}, false
+		}
+		statusPredicates = append(statusPredicates, fmt.Sprintf("i.workflow_status_id = ANY(%s::uuid[])", addArg(ids)))
+	}
+
 	// Any non-empty status KEY, not just the 7 built-ins. A status filter names
 	// the exact statuses the user picked, and since MUL-6243 those can be custom
 	// — rejecting them here 400'd the entire request, so filtering a board by a
@@ -456,7 +485,10 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		}
 	}
 	if len(spec.Filters.Statuses) > 0 {
-		where = append(where, fmt.Sprintf("i.status = ANY(%s::text[])", addArg(sortedUniqueStrings(spec.Filters.Statuses))))
+		statusPredicates = append(statusPredicates, fmt.Sprintf("i.status = ANY(%s::text[])", addArg(sortedUniqueStrings(spec.Filters.Statuses))))
+	}
+	if len(statusPredicates) > 0 {
+		where = append(where, "("+strings.Join(statusPredicates, " OR ")+")")
 	}
 	for _, priority := range spec.Filters.Priorities {
 		if !issueTableContainsString(validIssuePriorities, priority) {

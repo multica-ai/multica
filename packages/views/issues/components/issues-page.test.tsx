@@ -265,6 +265,8 @@ vi.mock("@multica/core/api", () => ({
     listIssueTableRows: (request: any) => mockListIssueTableRows(request),
     listIssueTableFacets: (request: any) => mockListIssueTableFacets(request),
     listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
+    getEffectiveIssueWorkflow: async () => ({ workflow: { id: "" }, statuses: [] }),
+    listProjects: async () => ({ projects: [] }),
     updateIssue: vi.fn(),
     listMembers: (...args: any[]) => mockListMembers(...args),
     listAgents: (...args: any[]) => mockListAgents(...args),
@@ -277,6 +279,8 @@ vi.mock("@multica/core/api", () => ({
     listIssueTableRows: (request: any) => mockListIssueTableRows(request),
     listIssueTableFacets: (request: any) => mockListIssueTableFacets(request),
     listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
+    getEffectiveIssueWorkflow: async () => ({ workflow: { id: "" }, statuses: [] }),
+    listProjects: async () => ({ projects: [] }),
     updateIssue: vi.fn(),
     listMembers: (...args: any[]) => mockListMembers(...args),
     listAgents: (...args: any[]) => mockListAgents(...args),
@@ -402,10 +406,10 @@ let mockScope = "all";
 vi.mock("@multica/core/issues/stores/issues-scope-store", () => ({
   useIssuesScopeStore: Object.assign(
     (selector?: any) => {
-      const state = { scopes: { issues: mockScope }, setScope: vi.fn() };
+      const state = { scopes: { issues: mockScope }, projects: {}, setProject: vi.fn(), setScope: vi.fn() };
       return selector ? selector(state) : state;
     },
-    { getState: () => ({ scopes: { issues: mockScope }, setScope: vi.fn() }) },
+    { getState: () => ({ scopes: { issues: mockScope }, projects: {}, setProject: vi.fn(), setScope: vi.fn() }) },
   ),
   useIssuesScope: () => mockScope,
 }));

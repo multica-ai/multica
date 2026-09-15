@@ -117,6 +117,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { cn } from "@multica/ui/lib/utils";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { useT } from "../../i18n";
+import { useSurfaceWorkflow, useSurfaceStatusCatalog } from "../surface/workflow-context";
 import { useStatusOptions } from "../utils/status-options";
 import { NO_PROPERTY_VALUE } from "../utils/filter";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
@@ -1436,7 +1437,12 @@ export function IssueFilterMenu({
   const viewStoreApi = useViewStoreApi();
   const act = viewStoreApi.getState();
   const wsId = useWorkspaceId();
-  const statusOptions = useStatusOptions(wsId);
+  const workspaceStatusOptions = useStatusOptions(wsId);
+  const surfaceWorkflow = useSurfaceWorkflow();
+  const surfaceCatalog = useSurfaceStatusCatalog(wsId);
+  const statusOptions = surfaceWorkflow.statuses ? surfaceCatalog.statuses.filter((status) => !status.archived_at || statusFilters.includes(status.id)).map((status) => ({
+    key: status.key, label: status.name, category: status.category, color: status.color, icon: status.icon,
+  })) : workspaceStatusOptions;
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const filterableProperties = useMemo(
     () =>

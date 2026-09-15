@@ -4,7 +4,7 @@ import { useIssuesScopeStore } from "./issues-scope-store";
 
 describe("issues scope store", () => {
   beforeEach(() => {
-    useIssuesScopeStore.setState({ scopes: {} });
+    useIssuesScopeStore.setState({ scopes: {}, projects: {} });
   });
 
   it("keeps each page's tab independent", () => {
@@ -28,4 +28,22 @@ describe("issues scope store", () => {
     expect(migrate({ bogus: true }, 0)).toEqual({ scopes: {} });
     expect(migrate(undefined, 0)).toEqual({ scopes: {} });
   });
+});
+
+
+it("remembers project selection independently for Issues and My Issues", () => {
+  const { setProject } = useIssuesScopeStore.getState();
+  setProject("issues", "p1");
+  setProject("my-issues", "p2");
+  expect(useIssuesScopeStore.getState().projects).toEqual({ issues: "p1", "my-issues": "p2" });
+  setProject("issues", null);
+  expect(useIssuesScopeStore.getState().projects).toEqual({ issues: null, "my-issues": "p2" });
+});
+
+
+it("resets selection when rehydrating a workspace with no saved preferences", () => {
+  const state = useIssuesScopeStore.getState();
+  const merge = useIssuesScopeStore.persist.getOptions().merge!;
+  expect(merge(undefined, { ...state, projects: { issues: "p1" } }).projects).toEqual({});
+  expect(merge({ scopes: { issues: "agents" } }, { ...state, projects: { issues: "p1" } }).projects).toEqual({});
 });

@@ -428,6 +428,7 @@ var validIssueFields = []string{
 	"assignee_id", "creator_type", "creator_id", "parent_issue_id",
 	"project_id", "position", "stage", "start_date", "due_date", "created_at",
 	"updated_at", "revision", "last_activity_at", "metadata", "properties",
+	"workflow_id", "workflow_status_id", "transition_id",
 	"labels",
 }
 
@@ -545,6 +546,7 @@ func init() {
 	issueCreateCmd.Flags().String("description-file", "", "Read issue description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
 	issueCreateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
 	issueCreateCmd.Flags().String("status", "", "Issue status")
+	issueCreateCmd.Flags().String("workflow-status", "", "Workflow status ID, stable key, or exact name")
 	issueCreateCmd.Flags().String("priority", "", "Issue priority")
 	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member, agent, or squad; fuzzy match)")
 	issueCreateCmd.Flags().String("assignee-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
@@ -1284,6 +1286,10 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--title is required")
 	}
 	statusFlag, _ := cmd.Flags().GetString("status")
+	workflowStatusFlag, _ := cmd.Flags().GetString("workflow-status")
+	if statusFlag != "" && workflowStatusFlag != "" {
+		return errors.New("--status and --workflow-status are mutually exclusive")
+	}
 	if statusFlag != "" {
 		if err := validateIssueStatus(statusFlag); err != nil {
 			return err
@@ -1335,12 +1341,32 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		}
 		body["parent_issue_id"] = parent.ID
 	}
+	projectID := ""
 	if v, _ := cmd.Flags().GetString("project"); v != "" {
 		project, err := resolveProjectID(ctx, client, v)
 		if err != nil {
 			return fmt.Errorf("resolve project: %w", err)
 		}
 		body["project_id"] = project.ID
+		projectID = project.ID
+	}
+	if workflowStatusFlag != "" {
+		// The service inherits the parent's project when --project is omitted;
+		// resolve stage names against the same effective project.
+		if parentID, ok := body["parent_issue_id"].(string); ok && projectID == "" {
+			var parent struct {
+				ProjectID string `json:"project_id"`
+			}
+			if err := client.GetJSON(ctx, "/api/issues/"+parentID, &parent); err != nil {
+				return fmt.Errorf("resolve parent project for workflow status: %w", err)
+			}
+			projectID = parent.ProjectID
+		}
+		statusID, err := resolveWorkflowStatusRef(ctx, client, projectID, workflowStatusFlag)
+		if err != nil {
+			return fmt.Errorf("resolve workflow status: %w", err)
+		}
+		body["workflow_status_id"] = statusID
 	}
 	if cmd.Flags().Changed("stage") {
 		stage, _ := cmd.Flags().GetInt("stage")

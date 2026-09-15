@@ -16,10 +16,12 @@ import type {
   AgentTask,
   Issue,
   IssueStatus,
+  IssueWorkflowResponse,
   ListIssuesParams,
   ListIssuesResponse,
   WorkspaceWorkingAgent,
 } from "@multica/core/types";
+import { effectiveIssueWorkflowOptions } from "@multica/core/issue-workflows/queries";
 import { useIssueSurfaceController } from "./use-issue-surface-controller";
 import { IssueTableExportIntegrityError } from "../components/table-view-model";
 import { statusTableMethodsFromLegacy } from "./status-table-test-api";
@@ -49,6 +51,14 @@ function makeIssue(
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...overrides,
+  };
+}
+
+function scopeWorkflow(id: string, nodeId?: string): IssueWorkflowResponse {
+  return {
+    workflow: { id, workspace_id: "ws-1", scope_type: "project", scope_id: "p1", name: "Workflow", revision: 1, initial_status_id: nodeId ?? null, created_at: "", updated_at: "" },
+    mode: "custom",
+    statuses: nodeId ? [{ id: nodeId, workflow_id: id, legacy_status_key: null, spec_key: "build", name: "Build", description: "", color: "#123456", position: 0, phase: "started", outcome: null, entry_policy: { executor: { type: "none" }, instructions: "" }, entry_policy_revision: 1, archived_at: null, created_at: "", updated_at: "" }] : [],
   };
 }
 
@@ -207,6 +217,73 @@ describe("useIssueSurfaceController", () => {
     vi.restoreAllMocks();
   });
 
+
+  it.each(["board", "list", "table", "swimlane"] as const)("keeps project and personal relation above %s filters", async (mode) => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const nodeId = "22222222-2222-4222-8222-222222222222";
+    const key = "my:user-1:assigned:project:" + projectId;
+    const store = getIssueSurfaceViewStore(key);
+    store.getState().setViewMode(mode);
+    store.getState().toggleStatusFilter(nodeId);
+    store.getState().togglePriorityFilter("high");
+    qc.setQueryData(effectiveIssueWorkflowOptions("ws-1", projectId, true).queryKey, scopeWorkflow("workflow-project", nodeId));
+    const { result } = renderHook(() => useIssueSurfaceController({
+      scope: { type: "my", userId: "user-1", relation: "assigned", projectId },
+      modes: ["board", "list", "table", "swimlane"],
+    }), { wrapper: makeWrapper(qc, key) });
+    expect(result.current.tableQuerySpec).toMatchObject({
+      scope: { kind: "my", relation: "assigned", project_id: projectId },
+      filters: { workflow_status_ids: [nodeId], priorities: ["high"] },
+    });
+    expect(result.current.tableQuerySpec.filters.statuses).toBeUndefined();
+    expect(result.current.createDefaults).toMatchObject({ project_id: projectId, assignee_id: "user-1" });
+    if (mode === "board" || mode === "list") expect(result.current.workflowStatuses?.map((node) => node.id)).toEqual([nodeId]);
+    act(() => store.getState().clearFilters());
+    expect(result.current.tableQuerySpec.scope.project_id).toBe(projectId);
+    expect(result.current.tableQuerySpec.scope.kind).toBe("my");
+  });
+
+  it("loads native swimlane cell rows and does not restore unrelated workspace columns", async () => {
+    const nodeId = "22222222-2222-4222-8222-222222222222";
+    const issue = makeIssue({ id: "native-row", status: "in_progress", workflow_status_id: nodeId });
+    const cellKey = `compound:assignee:none:workflow_status:${nodeId}`;
+    const rows = vi.fn(async () => ({ query_fingerprint: "test", total: 1, branch_total: 1,
+      rows: [{ issue, has_children: false }], next_cursor: null }));
+    setApiInstance({
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
+      getEffectiveIssueWorkflow: async () => scopeWorkflow("workflow", nodeId),
+      listIssueTableGroups: async () => ({ query_fingerprint: "test", total: 1, next_cursor: null, groups: [{
+        key: "assignee:none", value: { kind: "assignee", actor: null }, count: 1,
+        secondary_groups: [{ key: cellKey, value: { kind: "workflow_status", workflow_status_id: nodeId, name: "Build", status: "in_progress" }, count: 1 }],
+      }] }),
+      listIssueTableRows: rows,
+      listIssueTableFacets,
+      getWorkspaceWorkingAgents,
+    } as unknown as ApiClient);
+    const store = getIssueSurfaceViewStore("native-swimlane");
+    store.getState().setViewMode("swimlane");
+    const { result } = renderHook(() => useIssueSurfaceController({
+      scope: { type: "workspace", projectId: "p1" }, modes: ["swimlane"],
+    }), { wrapper: makeWrapper(qc, "native-swimlane") });
+    await waitFor(() => expect(result.current.groupBranches?.descriptors).toHaveLength(1));
+    await waitFor(() => expect(result.current.groupBranches?.pagination[cellKey]).toBeDefined());
+    act(() => result.current.groupBranches!.pagination[cellKey]!.loadMore());
+    await waitFor(() => expect(rows).toHaveBeenCalledWith(expect.objectContaining({ group_key: cellKey })));
+    await waitFor(() => expect(result.current.groupBranches?.issues.map((row) => row.id)).toContain("native-row"));
+    expect(result.current.visibleStatuses).toEqual([nodeId]);
+    expect(result.current.hiddenStatuses).not.toContain("cancelled");
+  });
+
+  it("defaults the explicit Workspace selection to its own workflow", () => {
+    qc.setQueryData(effectiveIssueWorkflowOptions("ws-1", null, true).queryKey, scopeWorkflow("workflow-workspace"));
+    const { result } = renderHook(() => useIssueSurfaceController({
+      scope: { type: "workspace", projectId: null, actorKind: "agents" },
+      modes: ["board", "list", "table", "swimlane"],
+    }), { wrapper: makeWrapper(qc, "workspace:agents:project:workspace") });
+    expect(result.current.tableQuerySpec.scope).toEqual({ kind: "workspace", assignee_types: ["agent", "squad"], workflow_id: "workflow-workspace" });
+    expect(result.current.projectId).toBeUndefined();
+  });
+
   it("derives the project scope and canonical server query", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setSortBy("priority");
@@ -241,6 +318,118 @@ describe("useIssueSurfaceController", () => {
         group: { kind: "status" },
       }),
     );
+  });
+
+  it("uses workflow status-node branches for a project Board", async () => {
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode("board");
+    store.getState().setGrouping("status");
+    const workflowIssue = makeIssue({
+      id: "issue-workflow",
+      status: "todo",
+      workflow_id: "workflow-1",
+      workflow_status_id: "node-implementation",
+    });
+    const listIssueTableGroups = vi.fn(async () => ({
+      query_fingerprint: "test",
+      total: 1,
+      groups: [
+        {
+          key: "workflow_status:node-implementation",
+          value: {
+            kind: "workflow_status" as const,
+            workflow_id: "workflow-1",
+            workflow_status_id: "node-implementation",
+            status: "todo",
+            name: "Implementation",
+            color: "#2563eb",
+            position: 1,
+          },
+          count: 1,
+        },
+      ],
+      next_cursor: null,
+    }));
+    const workflowRows = vi.fn(async () => ({
+      query_fingerprint: "test",
+      group_key: "workflow_status:node-implementation",
+      parent_id: null,
+      total: 1,
+      branch_total: 1,
+      rows: [{ issue: workflowIssue, has_children: false }],
+      next_cursor: null,
+    }));
+    setApiInstance({
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
+      getEffectiveIssueWorkflow: async () => ({
+        workflow: {
+          id: "workflow-1",
+          workspace_id: "ws-1",
+          scope_type: "project",
+          scope_id: "p1",
+          name: "SDLC",
+          revision: 1,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+        statuses: [
+          {
+            id: "node-implementation",
+            workflow_id: "workflow-1",
+            legacy_status_key: "todo",
+            name: "Implementation",
+            description: "",
+            color: "#2563eb",
+            position: 1,
+            phase: "unstarted",
+            outcome: null,
+            entry_policy: {
+              executor: { type: "none" },
+              instructions: "",
+            },
+            entry_policy_revision: 1,
+            archived_at: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+        mode: "custom",
+      }),
+      listIssueTableGroups,
+      listIssueTableRows: workflowRows,
+      listIssueTableFacets: async () => ({
+        query_fingerprint: "test",
+        total: 1,
+        facets: [{ kind: "working_agents" as const, values: [] }],
+      }),
+      listProjects: async () => ({ projects: [], total: 0 }),
+      getWorkspaceWorkingAgents: async () => [],
+      getChildIssueProgress: async () => new Map(),
+    } as unknown as ApiClient);
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["board", "list"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => expect(listIssueTableGroups).toHaveBeenCalled());
+    expect(listIssueTableGroups).toHaveBeenCalledWith(
+      expect.objectContaining({ group: { kind: "workflow_status" } }),
+    );
+    await waitFor(() => expect(workflowRows).toHaveBeenCalled());
+    expect(workflowRows).toHaveBeenCalledWith(
+      expect.objectContaining({
+        group: { kind: "workflow_status" },
+        group_key: "workflow_status:node-implementation",
+      }),
+    );
+    expect(result.current.workflowStatuses?.map((status) => status.name)).toEqual([
+      "Implementation",
+    ]);
   });
 
   // MUL-5477. `tableQuerySpec` is the identity every downstream consumer keys
@@ -485,7 +674,7 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.selection.selectedIds).toEqual(new Set());
   });
 
-  it("delegates drag movement as a server-owned relative intent", () => {
+  it("resolves a project/status drag before sending its relative move intent", () => {
     const { result } = renderHook(
       () =>
         useIssueSurfaceController({
@@ -510,28 +699,12 @@ describe("useIssueSurfaceController", () => {
       );
     });
 
-    expect(updateIssueMutate).toHaveBeenCalledWith(
-      {
-        id: "issue-1",
-        status: "in_progress",
-        position: 42,
-        project_id: "p2",
-        move_intent: {
-          before_id: "issue-0",
-          after_id: "issue-2",
-        },
-      },
-      expect.objectContaining({
-        onError: expect.any(Function),
-        onSettled: expect.any(Function),
-      }),
-    );
-
-    const options = updateIssueMutate.mock.calls[0]?.[1] as
-      | { onSettled?: () => void }
-      | undefined;
-    options?.onSettled?.();
-    expect(onSettled).toHaveBeenCalled();
+    expect(updateIssueMutate).not.toHaveBeenCalled();
+    expect(onSettled).toHaveBeenCalledOnce();
+    expect(openModal).toHaveBeenCalledWith("issue-workflow-change", {
+      issueId: "issue-1",
+      updates: { status: "in_progress", position: 42, project_id: "p2", move_intent: { before_id: "issue-0", after_id: "issue-2" } },
+    });
   });
 
   it("never reports isEmpty in gantt mode — an empty scheduled subset cannot prove the window is empty", async () => {

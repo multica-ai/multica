@@ -8,11 +8,14 @@ export interface CreateIssueRequest {
   title: string;
   description?: string;
   status?: IssueStatus;
+  /** Status node in the selected project’s effective workflow; excludes status. */
+  workflow_status_id?: string;
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType;
   assignee_id?: string;
   parent_issue_id?: string;
-  project_id?: string;
+  /** Omit to inherit the parent project; null explicitly creates without a project. */
+  project_id?: string | null;
   /** Ordered stage (>= 1) grouping this sub-issue under its parent. */
   stage?: number;
   start_date?: string;
@@ -51,6 +54,8 @@ export interface UpdateIssueRequest {
   /** Legacy aggregate compare-and-swap token. New text editors use field
    * baselines so unrelated issue activity does not reject their edits. */
   expected_revision?: number;
+  /** Rejects a stale agent/client after a newer human transition. */
+  expected_transition_id?: string;
   title?: string;
   /** Authoritative title the editor adopted before producing this update. */
   title_base?: string;
@@ -59,6 +64,10 @@ export interface UpdateIssueRequest {
    * update. The server uses it to merge channel media that landed meanwhile. */
   description_base?: string;
   status?: IssueStatus;
+  /** Canonical status within the current workflow; project moves use the destination's initial status. */
+  workflow_status_id?: string;
+  /** Reject a project move if the previewed destination workflow has changed. */
+  expected_workflow_revision?: number;
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType | null;
   assignee_id?: string | null;
@@ -88,6 +97,7 @@ export interface MoveIssueRequest
   extends Pick<
     UpdateIssueRequest,
     | "status"
+    | "workflow_status_id"
     | "assignee_type"
     | "assignee_id"
     | "parent_issue_id"
@@ -278,14 +288,16 @@ export interface GroupedIssuesResponse {
 // Server-authoritative Table query contract. Membership, grouping and counts
 // are evaluated against the complete result set; the browser only owns view
 // state such as collapsed groups/parents.
-export type IssueTableScope =
+export type IssueTableScope = (
   | { kind: "workspace"; assignee_types?: IssueAssigneeType[] }
   | { kind: "project"; project_id: string; assignee_types?: IssueAssigneeType[] }
   | { kind: "assignee"; actor: IssueActorRef }
   | { kind: "creator"; actor: IssueActorRef }
-  | { kind: "my"; relation: "assigned" | "created" | "involved" | "any" };
+  | { kind: "my"; relation: "assigned" | "created" | "involved" | "any" }
+) & { project_id?: string; workflow_id?: string };
 
 export interface IssueTableFilters {
+  workflow_status_ids?: string[];
   statuses?: IssueStatus[];
   priorities?: IssuePriority[];
   assignees?: IssueActorRef[];
@@ -334,6 +346,8 @@ export interface IssueTableQuerySpec {
 export type IssueTableGroupSpec =
   | { kind: "none" }
   | { kind: "status" }
+  /** Group project work by stable workflow Status Node identity. */
+  | { kind: "workflow_status" }
   /**
    * Group by the CATEGORY a status behaves as, not by the status key.
    *
@@ -353,7 +367,7 @@ export type IssueTableGroupSpec =
       kind: "compound";
       primary: "assignee" | "project" | "parent";
       /** `status_category` folds custom statuses into their category's cell. */
-      secondary: "status" | "status_category";
+      secondary: "status" | "status_category" | "workflow_status";
       /** Omit for legacy seven-value category buckets; only for status_category. */
       category_format?: "lifecycle";
       /** Optional visible secondary buckets. When present, the server pages
@@ -380,6 +394,19 @@ export interface IssueTableParentRef {
 
 export type IssueTableGroupValue =
   | { kind: "status"; status: string }
+  | {
+      kind: "workflow_status";
+      workflow_id?: string;
+      workflow_status_id?: string;
+      /** Legacy adapter key used by older create paths. */
+      status: string;
+      name: string;
+      color?: string;
+      icon?: string;
+      position?: number;
+      phase?: string;
+      archived?: boolean;
+    }
   | { kind: "assignee"; actor: IssueTableActorRef | null }
   | { kind: "project"; project_id: string | null }
   | {
@@ -447,6 +474,7 @@ export interface IssueTableRowsResponse {
 }
 
 export type IssueTableFacetSpec =
+  | { kind: "workflow_status" }
   | { kind: "status" }
   | { kind: "priority" }
   | { kind: "assignee" }

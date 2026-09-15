@@ -51,8 +51,9 @@ func issueTableQueryWithoutFacet(input issueTableQuerySpec, facet issueTableFace
 	}
 
 	switch facet.Kind {
-	case "status":
+	case "status", "workflow_status":
 		output.Filters.Statuses = nil
+		output.Filters.WorkflowStatusIDs = nil
 	case "priority":
 		output.Filters.Priorities = nil
 	case "assignee":
@@ -87,6 +88,8 @@ func issueTableFacetIdentity(facet issueTableFacetSpec) string {
 
 func issueTableBaseFacetExpression(query issueTableQuerySpec, facet issueTableFacetSpec) (string, bool) {
 	switch facet.Kind {
+	case "workflow_status":
+		return "COALESCE(i.workflow_status_id::text, 'legacy:' || i.status)", len(query.Filters.WorkflowStatusIDs) == 0 && len(query.Filters.Statuses) == 0
 	case "status":
 		return "i.status", len(query.Filters.Statuses) == 0
 	case "priority":
@@ -191,6 +194,8 @@ func (h *Handler) issueTableFacetQuery(w http.ResponseWriter, r *http.Request, r
 
 	query := ""
 	switch facet.Kind {
+	case "workflow_status":
+		query = fmt.Sprintf(`SELECT COALESCE(i.workflow_status_id::text, 'legacy:' || i.status), COUNT(*)::bigint FROM issue i WHERE %s GROUP BY COALESCE(i.workflow_status_id::text, 'legacy:' || i.status)`, compiled.where)
 	case "status":
 		query = fmt.Sprintf(`SELECT i.status, COUNT(*)::bigint FROM issue i WHERE %s GROUP BY i.status`, compiled.where)
 	case "priority":

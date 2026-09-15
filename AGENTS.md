@@ -53,6 +53,7 @@ Root frontend commands and `make check` do not verify mobile. Docs-only changes 
 - Web/desktop shared stores live in `packages/core/`. Desktop platform stores remain in desktop; mobile stores remain in mobile. Do not define stores in `packages/views/`.
 - On web/desktop, workspace identity is route-driven; platform mirrors exist only for request headers, storage namespaces, and reconnects. React Context is for platform plumbing, not a second server-state store.
 - Among stores, only auth/workspace stores may call `api.*` directly; other server interactions belong in queries/mutations.
+- Global Issues/My Issues select Workspace or a project before display/filter controls. Workspace means issues pinned to the workspace workflow, including inheriting projects. Apply this scope in server table queries and include it in surface/cache/preference keys; never scope only the loaded page of rows.
 - Workspace-scoped query keys include `wsId`; account-level keys remain account-scoped. Hooks needing workspace context accept `wsId` unless guaranteed to run under its provider.
 - Zustand selectors return stable references; use shallow comparison for allocated objects/arrays.
 - WebSocket events patch or invalidate Query caches, not server payloads in Zustand. Clearing client-owned pointers is allowed with one responder and a self-initiated guard when this client can cause the event.
@@ -84,6 +85,8 @@ In `server/internal/handler/`, distinguish UUID sources before using them in wri
 - Outside handlers: `util.ParseUUID(s)` and check the error.
 
 Workspace-scoped queries filter by `workspace_id`; membership gates access and `X-Workspace-ID` selects the workspace. Assignees are polymorphic: interpret `assignee_id` together with `assignee_type`.
+
+Runtime issue status writes use `service.EnterIssueWorkflowStatus` inside the same transaction as the issue mutation, or the `IssueService.TransitionStatus` / `TransitionStatusNode` wrappers. Record the transition, snapshot the entry policy, and enqueue its task atomically; publish task notifications after commit. Workflow execution retries do not re-enter the business status. Triage proposal changes record transitions without starting workflow entry executors.
 
 ## Desktop Rules
 

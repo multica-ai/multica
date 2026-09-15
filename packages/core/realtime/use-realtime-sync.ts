@@ -17,6 +17,7 @@ import { runtimeKeys } from "../runtimes/queries";
 import { labelKeys } from "../labels/queries";
 import { propertyKeys } from "../properties/queries";
 import { issueStatusKeys } from "../issue-statuses/queries";
+import { issueWorkflowKeys } from "../issue-workflows/queries";
 import {
   agentTaskSnapshotKeys,
   workspaceWorkingAgentsKeys,
@@ -831,6 +832,7 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) {
           qc.invalidateQueries({ queryKey: issueStatusKeys.all(wsId) });
+          qc.invalidateQueries({ queryKey: issueWorkflowKeys.all(wsId) });
           // Status-group order is server-owned and depends on catalog positions.
           // Rows/facets and unrelated groupings do not change on catalog edits.
           qc.invalidateQueries({
@@ -907,6 +909,7 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (!wsId) return;
         qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
+        qc.invalidateQueries({ queryKey: issueWorkflowKeys.executionsAll(wsId) });
         qc.invalidateQueries({ queryKey: workspaceWorkingAgentsKeys.all(wsId) });
         // The Table working-agent shortcut derives an assignee set from the
         // projection above. Refresh its server-owned graph alongside that set

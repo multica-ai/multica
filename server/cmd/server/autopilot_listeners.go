@@ -18,13 +18,9 @@ func registerAutopilotListeners(bus *events.Bus, svc *service.AutopilotService) 
 
 	// When an issue with origin_type='autopilot' reaches a terminal status,
 	// update the corresponding autopilot run.
-	bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) {
+	bus.Subscribe(protocol.EventIssueTransitioned, func(e events.Event) {
 		payload, ok := e.Payload.(map[string]any)
 		if !ok {
-			return
-		}
-		statusChanged, _ := payload["status_changed"].(bool)
-		if !statusChanged {
 			return
 		}
 		issue, ok := payload["issue"].(handler.IssueResponse)

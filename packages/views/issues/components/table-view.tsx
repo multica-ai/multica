@@ -1,5 +1,6 @@
 "use client";
 
+import { useSurfaceWorkflow } from "../surface/workflow-context";
 import { useStatusLabel } from "../utils/status-label";
 import {
   useCallback,
@@ -137,6 +138,7 @@ import {
   PriorityPicker,
   StartDatePicker,
   StatusPicker,
+  WorkflowStatusPicker,
 } from "./pickers";
 import { CustomPropertyValueEditor } from "./pickers/custom-property-picker";
 import {
@@ -1155,6 +1157,7 @@ function IssueTableBodyCell({
     case "status":
       return (
         <div onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
+          {issue.workflow_id ? <WorkflowStatusPicker issue={issue} open={editorOpen} onOpenChange={setEditorOpen} /> : (
           <StatusPicker
             status={issue.status}
             onUpdate={onUpdate}
@@ -1162,6 +1165,7 @@ function IssueTableBodyCell({
             open={editorOpen}
             onOpenChange={setEditorOpen}
           />
+          )}
         </div>
       );
     case "priority":
@@ -1367,9 +1371,10 @@ export function TableView({
     t,
   ]);
 
+  const { statuses: workflowStatuses } = useSurfaceWorkflow();
   const serverGroupSpec = useMemo(
-    () => tableGroupSpec(effectiveTableGrouping),
-    [effectiveTableGrouping],
+    () => effectiveTableGrouping === "status" && workflowStatuses ? { kind: "workflow_status" } as const : tableGroupSpec(effectiveTableGrouping),
+    [effectiveTableGrouping, workflowStatuses],
   );
   const usesServerGrouping = serverGroupSpec.kind !== "none";
   // Project group rows carry only a project id; the title comes from the
@@ -1785,6 +1790,7 @@ export function TableView({
         // of collapsing to the schema fallback or an empty label. (MUL-6243)
         return resolveStatusLabel(value.status);
       }
+      if (value.kind === "workflow_status") return value.name;
       if (value.kind === "assignee") {
         return value.actor
           ? getActorName(value.actor.type, value.actor.id)
@@ -1820,7 +1826,7 @@ export function TableView({
           ?.name ?? String(value.value ?? "")
       );
     },
-    [getActorName, groupProjectMap, propertyById, t],
+    [getActorName, groupProjectMap, propertyById, resolveStatusLabel, t],
   );
 
   const serverDisplayRows = useMemo<IssueTableDisplayRow[]>(() => {
@@ -2128,6 +2134,10 @@ export function TableView({
   // starts a run, and must confirm rather than fire from one click (MUL-6463).
   const updateIssue = useCallback(
     (issue: Issue, updates: Partial<UpdateIssueRequest>) => {
+      if (issue.workflow_id && (updates.project_id !== undefined || updates.status !== undefined || updates.workflow_status_id !== undefined)) {
+        actions?.updateIssue(issue.id, updates);
+        return;
+      }
       const intent = runConfirmIntent(issue, updates, { entryOf });
       if (intent) {
         openModal("issue-run-confirm", intent);
@@ -2157,7 +2167,7 @@ export function TableView({
       onCreateIssue({
         parent_issue_id: issue.id,
         parent_issue_identifier: issue.identifier,
-        ...(issue.project_id ? { project_id: issue.project_id } : {}),
+        project_id: issue.project_id,
       }),
     [onCreateIssue],
   );

@@ -1,5 +1,6 @@
 export { PropertyPicker, PickerItem, PickerSection, PickerEmpty } from "./property-picker";
 export { StatusPicker } from "./status-picker";
+export { WorkflowStatusPicker } from "./workflow-status-picker";
 export { PriorityPicker } from "./priority-picker";
 export { StagePicker } from "./stage-picker";
 export { AssigneePicker, canAssignAgent } from "./assignee-picker";

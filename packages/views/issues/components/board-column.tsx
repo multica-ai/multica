@@ -23,6 +23,9 @@ import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { useViewBaseline } from "../surface/view-baseline-context";
+import { BoardWorkflowActions } from "./board-workflow-actions";
+import { StatusIcon } from "./status-icon";
+import { statusCategoryOfKey } from "@multica/core/issues";
 import { StatusHeading } from "./status-heading";
 import { DraggableBoardCard } from "./board-card";
 import type { ChildProgress } from "./list-row";
@@ -77,8 +80,19 @@ const EMPTY_VIRTUOSO_COMPONENTS = {};
 export interface BoardColumnGroup {
   id: string;
   title: string;
-  /** Status columns carry exact built-in or custom status keys. */
+  /** Status columns use concrete keys; project workflows use stable status IDs. */
   status?: IssueStatus;
+  /** Stable project workflow node. `null` is a legacy unbound fallback
+   * bucket; `undefined` means this is not a workflow-status column. */
+  workflowStatusId?: string | null;
+  workflowId?: string;
+  workflowStatusLegacyKey?: string;
+  workflowStatusColor?: string;
+  workflowStatusIcon?: string;
+  workflowStatusPhase?: string;
+  workflowStatusPosition?: number;
+  workflowStatusArchived?: boolean;
+  workflowStatusHistorical?: boolean;
   assigneeType?: IssueAssigneeType | null;
   assigneeId?: string | null;
   /** Project id for this column; null = the "No project" column. Set only
@@ -197,7 +211,10 @@ export const BoardColumn = memo(function BoardColumn({
         <BoardGroupHeading group={group} count={totalCount ?? issueIds.length} />
 
         {/* Right: add + menu */}
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
+          {projectId && group.workflowStatusId && !group.workflowStatusArchived && !group.workflowStatusHistorical && (
+            <BoardWorkflowActions projectId={projectId} statusId={group.workflowStatusId} />
+          )}
           {/* Column-header popups mount lazily: a board/swimlane renders one
               header per column and almost none of these menus/tooltips are
               ever opened — eagerly mounting them dominated surface mount
@@ -234,27 +251,29 @@ export const BoardColumn = memo(function BoardColumn({
               )}
             </DeferredPopup>
           )}
-          {onCreateIssue && !archived && (
-            <DeferredTooltip
-              content={t(($) => $.board.add_issue_tooltip)}
-              trigger={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="rounded-full text-muted-foreground"
-                  onClick={() => {
-                    const data = {
-                      ...(group.createData ?? {}),
-                      ...(projectId ? { project_id: projectId } : {}),
-                    };
-                    onCreateIssue(data);
-                  }}
-                >
-                  <Plus className="size-3.5" />
-                </Button>
-              }
-            />
-          )}
+          {onCreateIssue && !archived &&
+            (group.workflowStatusId === undefined ||
+              group.createData !== undefined) && (
+              <DeferredTooltip
+                content={t(($) => $.board.add_issue_tooltip)}
+                trigger={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="rounded-full text-muted-foreground"
+                    onClick={() => {
+                      const data = {
+                        ...(group.createData ?? {}),
+                        ...(projectId ? { project_id: projectId } : {}),
+                      };
+                      onCreateIssue(data);
+                    }}
+                  >
+                    <Plus className="size-3.5" />
+                  </Button>
+                }
+              />
+            )}
         </div>
       </div>
       <div className="relative min-h-[200px] flex-1 rounded-lg">
@@ -348,6 +367,26 @@ function BoardGroupHeading({
   group: BoardColumnGroup;
   count: number;
 }) {
+  if (group.workflowStatusId !== undefined) {
+    return (
+      <div className="flex min-w-0 items-center gap-2">
+        <StatusIcon
+          status={group.workflowStatusLegacyKey ?? group.id}
+          category={statusCategoryOfKey(group.workflowStatusPhase ?? "unstarted")}
+          color={group.workflowStatusColor}
+          icon={group.workflowStatusIcon}
+          className="size-3"
+        />
+        <span className="truncate text-body font-medium" title={group.title}>
+          {group.title}
+        </span>
+        <span className="shrink-0 rounded-full bg-background px-1.5 py-0.5 text-micro font-medium tabular-nums text-muted-foreground">
+          {count}
+        </span>
+      </div>
+    );
+  }
+
   if (group.status) {
     return <StatusHeading status={group.status} count={count} />;
   }

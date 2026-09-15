@@ -8,7 +8,7 @@
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-       i.revision
+       i.revision, i.workflow_id, i.workflow_status_id, i.last_transition_id
 FROM issue i
 WHERE i.workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
@@ -182,10 +182,12 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    stage, last_activity_at, id
+    stage, last_activity_at, id, workflow_id, workflow_status_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    sqlc.narg('stage'), now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+    sqlc.narg('stage'), now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
+    sqlc.arg('workflow_id')::uuid,
+    sqlc.arg('workflow_status_id')::uuid
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
@@ -238,6 +240,7 @@ WITH candidate AS (
     FROM issue AS i
     WHERE i.id = $1
       AND (sqlc.narg('expected_revision')::bigint IS NULL OR i.revision = sqlc.narg('expected_revision')::bigint)
+      AND (sqlc.narg('expected_transition_id')::uuid IS NULL OR i.last_transition_id = sqlc.narg('expected_transition_id')::uuid)
 ), changed AS (
     SELECT
         candidate.*,
@@ -272,6 +275,25 @@ UPDATE issue AS i SET
     parent_issue_id = changed.next_parent_issue_id,
     project_id = changed.next_project_id,
     stage = changed.next_stage,
+    workflow_id = COALESCE(
+        i.workflow_id,
+        (SELECT default_issue_workflow_id FROM project WHERE id = changed.next_project_id AND workspace_id = i.workspace_id),
+        (SELECT default_issue_workflow_id FROM workspace WHERE id = i.workspace_id)
+    ),
+    workflow_status_id = CASE
+        WHEN i.status IS DISTINCT FROM changed.next_status OR i.workflow_status_id IS NULL THEN (
+            SELECT s.id
+            FROM issue_workflow_status AS s
+            WHERE s.workspace_id = i.workspace_id
+              AND s.workflow_id = COALESCE(
+                  i.workflow_id,
+                  (SELECT default_issue_workflow_id FROM project WHERE id = changed.next_project_id AND workspace_id = i.workspace_id),
+                  (SELECT default_issue_workflow_id FROM workspace WHERE id = i.workspace_id)
+              )
+              AND s.legacy_status_key = changed.next_status
+        )
+        ELSE i.workflow_status_id
+    END,
     revision = i.revision + changed.did_change::integer,
     last_activity_at = CASE WHEN changed.did_activity
         THEN GREATEST(COALESCE(i.last_activity_at, i.updated_at), now())
@@ -285,6 +307,7 @@ WHERE i.id = changed.id
   -- from the same snapshot; EvalPlanQual re-evaluates this target-row predicate
   -- after waiting for the first writer, leaving the stale writer with 0 rows.
   AND (sqlc.narg('expected_revision')::bigint IS NULL OR i.revision = sqlc.narg('expected_revision')::bigint)
+  AND (sqlc.narg('expected_transition_id')::uuid IS NULL OR i.last_transition_id = sqlc.narg('expected_transition_id')::uuid)
 RETURNING i.*;
 
 -- name: UpdateIssueStatus :one
@@ -295,6 +318,25 @@ RETURNING i.*;
 -- next_position CASE in UpdateIssue for the policy.
 UPDATE issue AS i SET
     status = $2,
+    workflow_id = COALESCE(
+        i.workflow_id,
+        (SELECT default_issue_workflow_id FROM project WHERE id = i.project_id AND workspace_id = i.workspace_id),
+        (SELECT default_issue_workflow_id FROM workspace WHERE id = i.workspace_id)
+    ),
+    workflow_status_id = CASE
+        WHEN i.status IS DISTINCT FROM $2 OR i.workflow_status_id IS NULL THEN (
+            SELECT s.id
+            FROM issue_workflow_status AS s
+            WHERE s.workspace_id = i.workspace_id
+              AND s.workflow_id = COALESCE(
+                  i.workflow_id,
+                  (SELECT default_issue_workflow_id FROM project WHERE id = i.project_id AND workspace_id = i.workspace_id),
+                  (SELECT default_issue_workflow_id FROM workspace WHERE id = i.workspace_id)
+              )
+              AND s.legacy_status_key = $2
+        )
+        ELSE i.workflow_status_id
+    END,
     position = CASE WHEN i.status IS DISTINCT FROM $2 THEN (
         SELECT COALESCE(MIN(target.position), 0) - 1
         FROM issue AS target
@@ -315,10 +357,12 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    origin_type, origin_id, stage, last_activity_at, id
+    origin_type, origin_id, stage, last_activity_at, id, workflow_id, workflow_status_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage'), now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+    sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage'), now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
+    sqlc.arg('workflow_id')::uuid,
+    sqlc.arg('workflow_status_id')::uuid
 ) RETURNING *;
 
 -- name: LockIssueDuplicateKey :exec
@@ -385,6 +429,12 @@ WITH target AS (
 ),
 cleared_vcs_pr_links AS (
     DELETE FROM issue_vcs_pull_request WHERE issue_id IN (SELECT target.id FROM target)
+),
+cleared_automation_executions AS (
+    DELETE FROM automation_execution WHERE issue_id IN (SELECT target.id FROM target)
+),
+cleared_issue_transitions AS (
+    DELETE FROM issue_transition WHERE issue_id IN (SELECT target.id FROM target)
 )
 DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target);
 
@@ -394,7 +444,7 @@ DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target);
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-       i.revision
+       i.revision, i.workflow_id, i.workflow_status_id, i.last_transition_id
 FROM issue i
 WHERE i.workspace_id = $1
   -- Negate only known terminal keys so an unknown legacy key remains visible.
@@ -594,10 +644,24 @@ GROUP BY assignee_type, assignee_id;
 -- name: ChildIssueProgress :many
 SELECT parent_issue_id,
        COUNT(*)::bigint AS total,
-       COUNT(*) FILTER (WHERE status = ANY(sqlc.arg('terminal_status_keys')::text[]))::bigint AS done
-FROM issue
-WHERE workspace_id = $1
-  AND parent_issue_id IS NOT NULL
+       COUNT(*) FILTER (WHERE
+           CASE WHEN sqlc.arg('workflow_enabled')::bool THEN
+               CASE WHEN EXISTS (
+                   SELECT 1 FROM issue_workflow_status AS coherent
+                   WHERE coherent.id = i.workflow_status_id
+                     AND coherent.workflow_id = i.workflow_id
+                     AND coherent.workspace_id = i.workspace_id
+                     AND coherent.legacy_status_key = i.status
+               ) THEN EXISTS (
+                   SELECT 1 FROM issue_workflow_status AS terminal
+                   WHERE terminal.id = i.workflow_status_id
+                     AND terminal.outcome IN ('completed', 'cancelled')
+               ) ELSE i.status = ANY(sqlc.arg('terminal_status_keys')::text[]) END
+           ELSE i.status = ANY(sqlc.arg('terminal_status_keys')::text[]) END
+       )::bigint AS done
+FROM issue AS i
+WHERE i.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND i.parent_issue_id IS NOT NULL
 GROUP BY parent_issue_id;
 
 -- SearchIssues: moved to handler (dynamic SQL for multi-word search support).

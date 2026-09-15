@@ -447,6 +447,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.Metrics = opts.BusinessMetrics
 	h.FeatureFlags = opts.FeatureFlags
 	h.TaskService.FeatureFlags = opts.FeatureFlags
+	h.IssueService.FeatureFlags = opts.FeatureFlags
+	h.AutopilotService.FeatureFlags = opts.FeatureFlags
 	h.TaskService.Metrics = opts.BusinessMetrics
 	h.IssueService.Metrics = opts.BusinessMetrics
 	entitlementClient, entitlementErr := entitlement.New(entitlement.Config{
@@ -1900,6 +1902,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
 					r.Put("/", h.UpdateIssue)
+					r.Post("/transitions", h.TransitionIssueStatusNode)
+					r.Get("/automation-executions", h.ListIssueAutomationExecutions)
+					r.Post("/automation-executions/{executionId}/take-over", h.TakeOverAutomationExecution)
 					r.Post("/move", h.MoveIssue)
 					r.Delete("/", h.DeleteIssue)
 					r.Post("/comments/trigger-preview", h.PreviewCommentTriggers)
@@ -1982,6 +1987,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Workflow API. The issue-status catalog routes above remain
+			// installed-client adapters while new clients address stable status
+			// nodes and project inheritance explicitly.
+			r.Get("/api/issue-workflows/effective", h.GetEffectiveIssueWorkflow)
+			r.Route("/api/issue-workflows/{workflowId}", func(r chi.Router) {
+				r.Get("/", h.GetIssueWorkflow)
+				r.Patch("/statuses/reorder", h.ReorderIssueWorkflowStatuses)
+				r.Patch("/statuses/{statusId}", h.UpdateIssueWorkflowStatus)
+				r.Delete("/statuses/{statusId}", h.ArchiveIssueWorkflowStatus)
+			})
+
 			// Projects
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Get("/search", h.SearchProjects)
@@ -1991,6 +2007,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
+					r.Put("/issue-workflow", h.UpdateProjectIssueWorkflow)
 					r.Get("/resources", h.ListProjectResources)
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)

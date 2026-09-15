@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { SurfaceWorkflowContext } from "../surface/workflow-context";
 import { SwimLaneView } from "./swimlane-view";
 import { IssueContextMenuProvider } from "../actions";
 import { ScrollRestorationProvider } from "../../platform";
 import type {
   Issue,
+  IssueWorkflowStatusNode,
   IssueTableGroupDescriptor,
 } from "@multica/core/types";
 import type { IssueGroupBranches } from "../surface/use-issue-group-branches";
@@ -1386,6 +1388,30 @@ describe("SwimLaneView", () => {
     expect(screen.getByText("Issue X")).toBeInTheDocument();
     expect(screen.getByText("Issue Y")).toBeInTheDocument();
     expect(screen.getByText("Issue Z")).toBeInTheDocument();
+  });
+
+  it("renders same-phase workflow nodes separately and moves with the node id", () => {
+    mockViewState.swimlaneGrouping = "assignee";
+    const nodes: IssueWorkflowStatusNode[] = ["Build", "Review"].map((name, position) => ({
+      id: `node-${name}`, workflow_id: "workflow", legacy_status_key: null, spec_key: name,
+      name, description: "", color: "#123456", position, phase: "started", outcome: null,
+      entry_policy: { executor: { type: "none" }, instructions: "" }, entry_policy_revision: 1,
+      archived_at: null, created_at: "", updated_at: "",
+    }));
+    const issue: Issue = { ...mockIssues[0]!, id: "native-issue", title: "Native build task", parent_issue_id: null,
+      assignee_type: null, assignee_id: null, status: "in_progress", workflow_id: "workflow", workflow_status_id: "node-Build" };
+    const onMove = vi.fn();
+    renderWithI18n(<SurfaceWorkflowContext value={{ statuses: nodes }}>
+      <SwimLaneView issues={[issue]} visibleStatuses={nodes.map((node) => node.id)} onMoveIssue={onMove} />
+    </SurfaceWorkflowContext>);
+    expect(screen.getByText("Build")).toBeInTheDocument();
+    expect(screen.getByText("Review")).toBeInTheDocument();
+    expect(screen.getByText("Native build task")).toBeInTheDocument();
+    const target = "swim:assignee:none:node-Review";
+    act(() => lastOnDragOver({ active: { id: issue.id }, over: { id: target } }));
+    act(() => lastOnDragEnd({ active: { id: issue.id }, over: { id: target } }));
+    expect(onMove).toHaveBeenCalledWith(issue.id, expect.objectContaining({ workflow_status_id: "node-Review" }), expect.any(Function));
+    expect(onMove.mock.calls[0]![1]).not.toHaveProperty("status");
   });
 
   it("emits assignee_type + assignee_id when a card is dropped into an actor lane", () => {

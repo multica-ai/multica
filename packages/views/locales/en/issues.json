@@ -1,4 +1,10 @@
 {
+  "project_scope": {
+    "workspace": "Workspace",
+    "label": "Select workspace or project",
+    "search": "Search projects...",
+    "retry": "Retry loading projects"
+  },
   "inline_run": {
     "label": "{{name}} run",
     "stop": "Stop",
@@ -931,5 +937,36 @@
     "surface_loading": "Loading {{name}}…",
     "surface_unavailable": "{{name}} could not load its interface. The installed version may not include it.",
     "surface_navigated": "{{name}} tried to replace its panel with a page loaded from elsewhere. It has been stopped and disconnected — tell your workspace admin."
+  },
+  "automation": {
+    "title": "Automation",
+    "manual": "Manual",
+    "entry_count_one": "{{count}} entry",
+    "entry_count_other": "{{count}} entries",
+    "take_over": "Take over"
+  },
+  "handoff": {
+    "enter": "Enter {{name}}",
+    "starts": "Starts {{name}}",
+    "manual": "No automatic execution",
+    "stops": "Stops the current execution. Work already performed will be preserved.",
+    "transition_title": "Enter {{name}}?",
+    "cancel": "Cancel",
+    "pending": "Updating...",
+    "error": "Unable to update this task. Refresh and try again.",
+    "loading": "Loading status actions...",
+    "effects_intro": "Entering this status applies the following rules."
+  },
+  "workflow_selection": {
+    "choose": "Choose a status",
+    "loading": "Loading workflow…",
+    "load_error": "Unable to load this workflow.",
+    "retry": "Retry",
+    "mixed": "Select tasks from the same workflow to change their status together.",
+    "move_title": "Move task to project",
+    "move_description": "Moving this task enters the destination workflow’s initial status and applies its entry action.",
+    "move_initial_status": "Initial status: {{name}}",
+    "move": "Move task",
+    "batch_failed": "{{count}} tasks could not be updated. Successful changes were kept; refresh before retrying."
   }
 }

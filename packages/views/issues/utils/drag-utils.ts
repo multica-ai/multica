@@ -10,7 +10,7 @@ import type { BoardColumnGroup } from "../components/board-column";
 
 export type DragMoveTargetUpdates = Pick<
   UpdateIssueRequest,
-  "status" | "assignee_type" | "assignee_id" | "project_id" | "position"
+  "status" | "workflow_status_id" | "assignee_type" | "assignee_id" | "project_id" | "position"
 >;
 
 export type DragMoveUpdates = DragMoveTargetUpdates & {
@@ -57,9 +57,16 @@ export function getIssueGroupId(
   issue: Issue,
   grouping: IssueGrouping,
   knownOptionIds?: ReadonlySet<string>,
+  workflowStatusGrouping = false,
 ): string {
-  // Column identity is the exact status key, including custom statuses.
-  if (grouping === "status") return statusGroupId(issue.status);
+  if (grouping === "status") {
+    if (workflowStatusGrouping) {
+      return issue.workflow_status_id
+        ? `workflow_status:${issue.workflow_status_id}`
+        : `workflow_status:legacy:${issue.status}`;
+    }
+    return statusGroupId(issue.status);
+  }
   if (grouping === "project") return projectGroupId(issue.project_id ?? null);
   const propertyId = propertyIdFromViewKey(grouping);
   if (propertyId) {
@@ -85,8 +92,16 @@ export function buildColumns(
 ): Record<string, string[]> {
   const cols: Record<string, string[]> = {};
   for (const group of groups) cols[group.id] = [];
+  const workflowStatusGrouping =
+    grouping === "status" &&
+    groups.some((group) => group.workflowStatusId !== undefined);
   for (const issue of issues) {
-    const gid = getIssueGroupId(issue, grouping, knownOptionIds);
+    const gid = getIssueGroupId(
+      issue,
+      grouping,
+      knownOptionIds,
+      workflowStatusGrouping,
+    );
     if (cols[gid]) cols[gid].push(issue.id);
   }
   return cols;
@@ -147,6 +162,12 @@ export function findColumn(
 }
 
 export function issueMatchesGroup(issue: Issue, group: BoardColumnGroup): boolean {
+  if (group.workflowStatusId !== undefined) {
+    return group.workflowStatusId
+      ? issue.workflow_status_id === group.workflowStatusId
+      : issue.workflow_status_id == null &&
+          issue.status === group.workflowStatusLegacyKey;
+  }
   if (group.status) return issue.status === group.status;
   if (group.propertyId !== undefined) {
     const value = issue.properties?.[group.propertyId];
@@ -166,8 +187,18 @@ export function getMoveUpdates(
   group: BoardColumnGroup,
   position: number,
   /** Same-key reordering must not emit a status write or trigger automation. */
-  issue?: Pick<Issue, "status" | "status_category">,
+  issue?: Pick<Issue, "status" | "status_category" | "workflow_status_id">,
 ): DragMoveTargetUpdates {
+  if (group.workflowStatusId !== undefined) {
+    if (group.workflowStatusId) {
+      return issue?.workflow_status_id === group.workflowStatusId
+        ? { position }
+        : { workflow_status_id: group.workflowStatusId, position };
+    }
+    return group.workflowStatusLegacyKey
+      ? { status: group.workflowStatusLegacyKey, position }
+      : { position };
+  }
   if (group.status) {
     const keepsStatus =
       issue !== undefined &&

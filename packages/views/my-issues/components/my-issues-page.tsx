@@ -1,6 +1,8 @@
 "use client";
 
 import { useStore } from "zustand";
+import { useIssueProjectScope } from "@multica/core/issues/use-project-scope";
+import { IssueProjectScopePicker } from "../../issues/components/issue-project-scope-picker";
 import { ListTodo } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
 import {
@@ -15,6 +17,7 @@ import { MyIssuesHeader } from "./my-issues-header";
 
 export function MyIssuesPage() {
   const { t } = useT("my-issues");
+  const { projectId, setProjectId } = useIssueProjectScope("my-issues");
   const user = useAuthStore((s) => s.user);
   const scope = useStore(myIssuesViewStore, (s) => s.scope);
   const setScope = useStore(myIssuesViewStore, (s) => s.setScope);
@@ -25,6 +28,7 @@ export function MyIssuesPage() {
         <ListTodo className="size-4" />
       </RefreshablePageIcon>
       <h1 className="text-body font-medium">{t(($) => $.page.breadcrumb)}</h1>
+      <IssueProjectScopePicker projectId={projectId} onChange={setProjectId} />
     </PageHeader>
   );
 
@@ -34,6 +38,7 @@ export function MyIssuesPage() {
         <IssueSurface
           scope={{
             type: "my",
+            projectId,
             userId: user.id,
             relation: myIssuesRelationFromScope(scope),
           }}

@@ -18,13 +18,17 @@ import (
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issuepolicy"
 	"github.com/multica-ai/multica/server/internal/issueposition"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -40,6 +44,7 @@ type AutopilotService struct {
 	TaskSvc      *TaskService
 	Entitlements entitlement.Provider
 	QuotaMetrics AutopilotQuotaMetrics
+	FeatureFlags *featureflag.Service
 }
 
 // DefaultAutopilotTriggerTimezone is the timezone used to render Autopilot
@@ -331,6 +336,15 @@ func (s *AutopilotService) ensureWebhookCreateIssueTask(ctx context.Context, aut
 	issue, err := s.Queries.GetIssue(ctx, run.IssueID)
 	if err != nil {
 		return fmt.Errorf("dispatch for webhook delivery: load linked issue: %w", err)
+	}
+	if issue.WorkflowID.Valid {
+		workflow, err := s.Queries.GetIssueWorkflowByID(ctx, db.GetIssueWorkflowByIDParams{ID: issue.WorkflowID, WorkspaceID: issue.WorkspaceID})
+		if err != nil {
+			return err
+		}
+		if workflow.ScopeType == "project" {
+			return nil
+		}
 	}
 	// Repair only work that is still waiting to be picked up. Decided on
 	// lifecycle plus the two exact keys whose behavior does not generalize,
@@ -706,6 +720,39 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("refresh autopilot: %w", err)
 	}
 	projectID := currentAutopilot.ProjectID
+	workflow, err := issueworkflow.Effective(ctx, qtx, ap.WorkspaceID, projectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if seedErr := qtx.SeedIssueStatusEntries(ctx, ap.WorkspaceID); seedErr != nil {
+			return fmt.Errorf("seed issue status catalog: %w", seedErr)
+		}
+		if _, ensureErr := issueworkflow.EnsureDefault(ctx, qtx, ap.WorkspaceID); ensureErr != nil {
+			return ensureErr
+		}
+		workflow, err = issueworkflow.Effective(ctx, qtx, ap.WorkspaceID, projectID)
+	}
+	if err != nil {
+		return fmt.Errorf("resolve issue workflow: %w", err)
+	}
+	var workflowStatus db.IssueWorkflowStatus
+	if workflow.InitialStatusID.Valid {
+		workflowStatus, err = qtx.LockActiveIssueWorkflowStatus(ctx, db.LockActiveIssueWorkflowStatusParams{
+			WorkspaceID: ap.WorkspaceID, WorkflowID: workflow.ID, ID: workflow.InitialStatusID,
+		})
+	} else {
+		workflowStatus, err = qtx.GetIssueWorkflowStatusByLegacyKey(ctx, db.GetIssueWorkflowStatusByLegacyKeyParams{
+			WorkspaceID: ap.WorkspaceID, WorkflowID: workflow.ID,
+			LegacyStatusKey: pgtype.Text{String: "todo", Valid: true},
+		})
+		if err == nil {
+			workflowStatus, err = qtx.LockActiveIssueWorkflowStatus(ctx, db.LockActiveIssueWorkflowStatusParams{
+				WorkspaceID: ap.WorkspaceID, WorkflowID: workflow.ID, ID: workflowStatus.ID,
+			})
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("resolve initial workflow status: %w", err)
+	}
+	compatibilityStatus := issueworkflow.LegacyProjection(workflowStatus)
 
 	if duplicate, found, err := issueguard.LockAndFindRecentAutopilotDuplicate(
 		ctx, qtx, ap.WorkspaceID, ap.ID, projectID, title, autopilotRecentDuplicateWindow,
@@ -727,7 +774,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("allocate issue number: %w", err)
 	}
 
-	newPosition, err := issueposition.NextTopPosition(ctx, tx, ap.WorkspaceID, "todo")
+	newPosition, err := issueposition.NextTopPosition(ctx, tx, ap.WorkspaceID, compatibilityStatus)
 	if err != nil {
 		return fmt.Errorf("get next issue position: %w", err)
 	}
@@ -737,7 +784,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		WorkspaceID:  ap.WorkspaceID,
 		Title:        title,
 		Description:  description,
-		Status:       "todo",
+		Status:       compatibilityStatus,
 		Priority:     "none",
 		AssigneeType: pgtype.Text{String: ap.AssigneeType, Valid: true},
 		AssigneeID:   ap.AssigneeID,
@@ -746,20 +793,38 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		// is captured separately via origin_type=autopilot + origin_id. For
 		// squad-assigned autopilots, the creator is the resolved leader —
 		// the same agent the issue listener will end up enqueueing.
-		CreatorType:   "agent",
-		CreatorID:     leader.ID,
-		ParentIssueID: pgtype.UUID{},
-		Position:      newPosition,
-		StartDate:     pgtype.Date{},
-		DueDate:       pgtype.Date{},
-		Number:        issueNumber,
-		ProjectID:     projectID,
-		OriginType:    pgtype.Text{String: "autopilot", Valid: true},
-		OriginID:      ap.ID,
+		CreatorType:      "agent",
+		CreatorID:        leader.ID,
+		ParentIssueID:    pgtype.UUID{},
+		Position:         newPosition,
+		StartDate:        pgtype.Date{},
+		DueDate:          pgtype.Date{},
+		Number:           issueNumber,
+		ProjectID:        projectID,
+		OriginType:       pgtype.Text{String: "autopilot", Valid: true},
+		OriginID:         ap.ID,
+		WorkflowID:       workflow.ID,
+		WorkflowStatusID: workflowStatus.ID,
 	})
 	if err != nil {
 		return fmt.Errorf("create issue: %w", err)
 	}
+	// Link before entry so its task resolves the firing trigger's principal.
+	updatedRun, err := qtx.UpdateAutopilotRunIssueCreated(ctx, db.UpdateAutopilotRunIssueCreatedParams{
+		ID: run.ID, IssueID: issue.ID,
+	})
+	if err != nil {
+		return fmt.Errorf("link run to issue: %w", err)
+	}
+	actor := issueworkflow.TransitionActor{Type: "agent", ID: leader.ID}
+	if actorUserID.Valid {
+		actor = issueworkflow.TransitionActor{Type: "member", ID: actorUserID}
+	}
+	entry, err := EnterIssueWorkflowStatus(ctx, qtx, nil, issue, actor, "autopilot_issue_created")
+	if err != nil {
+		return fmt.Errorf("apply initial workflow entry: %w", err)
+	}
+	issue = entry.Issue
 
 	// Fan out the default subscriber template inside the same tx as the
 	// issue insert, before EventIssueCreated fires — so notification
@@ -780,18 +845,6 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		}
 	}
 
-	// Link the run inside the same tx as the issue insert. This makes the
-	// recent-duplicate guard count only fully observable autopilot issues and
-	// avoids a crash window where recovery would see an orphan issue but no
-	// linked run.
-	updatedRun, err := qtx.UpdateAutopilotRunIssueCreated(ctx, db.UpdateAutopilotRunIssueCreatedParams{
-		ID:      run.ID,
-		IssueID: issue.ID,
-	})
-	if err != nil {
-		return fmt.Errorf("link run to issue: %w", err)
-	}
-	*run = updatedRun
 	if _, err := settleAutopilotQuota(ctx, qtx, run.QuotaReservationID, true); err != nil {
 		return fmt.Errorf("consume quota reservation: %w", err)
 	}
@@ -799,6 +852,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
 	}
+	*run = updatedRun
 
 	// Publish issue:created so the existing event chain fires
 	// (subscriber listeners, activity listeners, notification listeners). For
@@ -826,6 +880,16 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// the inbox rows directly here. Done after commit so a failure here doesn't
 	// roll back the issue itself.
 	s.notifyAutopilotSubscribersOnCreate(ctx, ap, issue, leader.ID, templateSubs)
+
+	// Workflow entry is durable with the issue. Project workflows own their
+	// initial action, including an explicitly manual entry; do not also dispatch
+	// the autopilot assignee through the legacy workspace path.
+	if s.TaskSvc != nil {
+		s.TaskSvc.NotifyWorkflowEntry(ctx, entry)
+	}
+	if entry.Task.ID.Valid || workflow.ScopeType == "project" {
+		return nil
+	}
 
 	// Enqueue agent task via the existing flow. Squad-assigned autopilots
 	// route to the resolved leader as the executing agent (Path A from
@@ -1103,10 +1167,10 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 	// The failure reason below deliberately keeps issue.Status, not the
 	// normalized key, so the audit trail names the status a human actually
 	// chose. (MUL-6243)
-	effectiveStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
+	state := issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueWorkflowV1Enabled(ctx, s.FeatureFlags))
 
-	switch effectiveStatus {
-	case "done", "in_review":
+	switch state.AutopilotResolution() {
+	case issuepolicy.AutopilotComplete:
 		updatedRun, err := s.completeAutopilotRun(ctx, db.UpdateAutopilotRunCompletedParams{
 			ID: run.ID,
 		})
@@ -1116,7 +1180,7 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 		}
 		s.captureAutopilotRunCompleted(autopilot, updatedRun)
 		s.publishRunDone(wsID, updatedRun, "completed")
-	case "cancelled", "blocked":
+	case issuepolicy.AutopilotFail:
 		reason := "issue " + issue.Status
 		updatedRun, err := s.failAutopilotRun(ctx, db.UpdateAutopilotRunFailedParams{
 			ID:            run.ID,

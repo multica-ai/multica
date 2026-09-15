@@ -68,7 +68,7 @@ import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { errorCode } from "@multica/core/api";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
+import { StatusIcon, PriorityIcon, StatusPicker, WorkflowStatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { maxSiblingStage } from "./pickers/stage-picker";
 import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { Switch } from "@multica/ui/components/ui/switch";
@@ -300,8 +300,8 @@ function formatActivity(
       return t(($) => $.activity.created);
     case "status_changed":
       return t(($) => $.activity.status_changed, {
-        from: statusLabel(details.from ?? "?", t, resolveStatusLabel),
-        to: statusLabel(details.to ?? "?", t, resolveStatusLabel),
+        from: details.from_name || statusLabel(details.from ?? "?", t, resolveStatusLabel),
+        to: details.to_name || statusLabel(details.to ?? "?", t, resolveStatusLabel),
       });
     case "priority_changed":
       return t(($) => $.activity.priority_changed, {
@@ -779,6 +779,7 @@ function SubIssueRow({
             )}
           />
         </div>
+        {child.workflow_id ? <WorkflowStatusPicker issue={child} trigger={<StatusIcon status={child.status} category={child.status_category} className="h-[15px] w-[15px] shrink-0" />} /> : (
         <StatusPicker
           status={child.status}
           onUpdate={handleUpdate}
@@ -793,6 +794,7 @@ function SubIssueRow({
             />
           }
         />
+        )}
         <AppLink
           href={paths.issueDetail(child.id)}
           className="flex min-w-0 flex-1 items-center gap-2.5"
@@ -1392,7 +1394,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       anchor_comment_id: commentId,
       parent_issue_id: issue.id,
       parent_issue_identifier: issue.identifier,
-      ...(issue.project_id ? { project_id: issue.project_id } : {}),
+      project_id: issue.project_id,
       ...(issue.assignee_type && issue.assignee_id
         ? { assignee_type: issue.assignee_type, assignee_id: issue.assignee_id }
         : {}),
@@ -2315,7 +2317,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
           {/* Core props — always rendered. */}
           <PropRow label={t(($) => $.detail.prop_status)}>
-            <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
+            {issue.workflow_id && issue.workflow_status_id ? (
+              <WorkflowStatusPicker issue={issue} align="start" />
+            ) : (
+              <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
+            )}
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
@@ -2797,7 +2803,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       variant="ghost"
                       size="icon-sm"
                       className="text-muted-foreground"
-                      onClick={() => { handleUpdateField({ status: "done" }); onDone?.(); }}
+                      onClick={() => { handleUpdateField({ status: "done" }, { onSuccess: () => onDone?.() }); }}
                     >
                       <CircleCheck />
                     </Button>

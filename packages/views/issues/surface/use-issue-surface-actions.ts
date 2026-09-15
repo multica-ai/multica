@@ -20,6 +20,7 @@ import { useT } from "../../i18n";
 export type MoveIssueUpdates = Pick<
   UpdateIssueRequest,
   | "status"
+  | "workflow_status_id"
   | "assignee_type"
   | "assignee_id"
   | "position"
@@ -57,6 +58,10 @@ export function useIssueSurfaceActions({
       updates: Partial<UpdateIssueRequest>,
       options?: IssueSurfaceMutationOptions,
     ) => {
+      if (updates.status !== undefined || updates.workflow_status_id !== undefined || updates.project_id !== undefined) {
+        useModalStore.getState().open("issue-workflow-change", { issueId, updates, options });
+        return;
+      }
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
         {
@@ -86,6 +91,14 @@ export function useIssueSurfaceActions({
       onSettled?: () => void,
     ) => {
       const { before_id, after_id, ...optimisticUpdates } = updates;
+      if (updates.status !== undefined || updates.workflow_status_id !== undefined || updates.project_id !== undefined) {
+        // Drop state is temporary; reset it before opening the explicit destination picker.
+        onSettled?.();
+        useModalStore.getState().open("issue-workflow-change", {
+          issueId, updates: { ...optimisticUpdates, move_intent: { before_id, after_id } },
+        });
+        return;
+      }
       updateIssueMutation.mutate(
         {
           id: issueId,

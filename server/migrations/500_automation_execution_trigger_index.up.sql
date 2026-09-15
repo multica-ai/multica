@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY idx_automation_execution_trigger ON automation_execution(trigger_transition_id);
