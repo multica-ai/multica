@@ -87,6 +87,16 @@ type wsSender struct {
 	// chats serializes whole logical messages per target chat. mu orders one
 	// frame write; it is released before the ack wait, which is where an
 	// unrelated send used to land between two pieces of one answer.
+	//
+	// EVERY push the reader sees takes it: text through sendTextCtx and files
+	// through sendMedia. Half of that is no rule at all — a picture between
+	// "(1/3)" and "(2/3)" is the same unreadable chat as a stray sentence
+	// there, and attachment delivery is spawned alongside the answer it came
+	// with, so the two are concurrent by construction rather than by
+	// coincidence. What it does NOT cover is the upload: that puts nothing in
+	// the chat, and holding the chat's turn for a multi-megabyte transfer
+	// would queue every other message behind bytes that have not yet become a
+	// message.
 	chats chatLocks
 }
 
@@ -383,10 +393,11 @@ func (s *wsSender) sendText(chatID string, chatTypeInt int, content string) erro
 func (s *wsSender) sendTextCtx(ctx context.Context, chatID string, chatTypeInt int, content string) error {
 	pieces := splitForWire(content)
 	// Held for every send, not only a split one: a single-frame push from
-	// another caller — an inbox card, a media receipt, the unsupported-type
-	// notice — is exactly what used to arrive between piece one and piece two,
-	// and with two long answers in flight at once the (n/total) counters could
-	// not be matched back to their own text.
+	// another caller — an inbox card, the file this same answer produced
+	// (sendMedia takes the same lock), the unsupported-type notice — is
+	// exactly what used to arrive between piece one and piece two, and with
+	// two long answers in flight at once the (n/total) counters could not be
+	// matched back to their own text.
 	release, err := s.chats.acquire(ctx, chatID)
 	if err != nil {
 		return err

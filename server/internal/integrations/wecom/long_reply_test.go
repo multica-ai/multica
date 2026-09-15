@@ -97,6 +97,31 @@ func markdownContentOf(env frameEnvelope) string {
 	return s
 }
 
+// sendMsgLabel is what one aibot_send_msg put in front of the reader: the
+// markdown body for text, and "<msgtype> <media_id>" for a file. Both go out
+// on the same push, so a test of the ORDER of what the reader sees has to hold
+// both — a wire record that keeps only the text cannot tell whether a picture
+// landed in the middle of an answer.
+func sendMsgLabel(env frameEnvelope) string {
+	if env.Cmd != cmdSendMsg {
+		return ""
+	}
+	if md := markdownContentOf(env); md != "" {
+		return md
+	}
+	var body map[string]any
+	if json.Unmarshal(env.Body, &body) != nil {
+		return ""
+	}
+	kind, _ := body["msgtype"].(string)
+	nested, _ := body[kind].(map[string]any)
+	if nested == nil {
+		return kind
+	}
+	id, _ := nested["media_id"].(string)
+	return kind + " " + id
+}
+
 // pieceMarker is the continuation counter splitForWire appends. It is stripped
 // before reassembly because it is the adapter's word, not the agent's.
 var pieceMarker = regexp.MustCompile(`\n\n\(\d+/\d+\)$`)
@@ -487,7 +512,7 @@ func (c *slowAckConn) WriteMessage(_ int, data []byte) error {
 	}
 	c.mu.Lock()
 	if env.Cmd == cmdSendMsg {
-		c.texts = append(c.texts, markdownContentOf(env))
+		c.texts = append(c.texts, sendMsgLabel(env))
 	}
 	s, d := c.sender, c.delay
 	c.mu.Unlock()
@@ -550,10 +575,17 @@ func TestThePiecesOfOneAnswerAreContiguousOnTheWire(t *testing.T) {
 	}()
 	wg.Wait()
 
-	wire := conn.wire()
+	assertAnswerIsUninterrupted(t, conn.wire(), "INTERLOPER")
+}
+
+// assertAnswerIsUninterrupted reads the wire as the person does: every push
+// that is not the interloper is a piece of the one answer, and the interloper
+// must sit before all of them or after all of them, never inside the run.
+func assertAnswerIsUninterrupted(t *testing.T, wire []string, interloper string) {
+	t.Helper()
 	first, last := -1, -1
 	for i, f := range wire {
-		if f == "INTERLOPER" {
+		if f == interloper {
 			continue
 		}
 		if first < 0 {
@@ -565,10 +597,58 @@ func TestThePiecesOfOneAnswerAreContiguousOnTheWire(t *testing.T) {
 		t.Fatalf("the answer produced %d piece(s) on the wire: %v", last-first+1, summarize(wire))
 	}
 	for i := first; i <= last; i++ {
-		if wire[i] == "INTERLOPER" {
-			t.Fatalf("an unrelated message landed at position %d, between pieces of one answer: %v", i+1, summarize(wire))
+		if wire[i] == interloper {
+			t.Fatalf("%q landed at position %d, between pieces of one answer: %v", interloper, i+1, summarize(wire))
 		}
 	}
+}
+
+// The same rule, for the push the lock never covered. sendTextCtx takes the
+// per-chat lock and sendMedia went straight to request(), so a file delivered
+// while an answer was still being written landed between two of its pieces —
+// and the comment above sendTextCtx says in as many words that the lock is
+// held for every send and names media as the thing it keeps out.
+//
+// Attachment delivery is asynchronous (deliverAttachmentsByID spawns it), so
+// this is not a rare interleaving: the answer's pieces and the file it came
+// with are in flight at the same time by construction.
+//
+// The ack delay is what reproduces it. The sender's write mutex is released
+// before the wait, so the media push wins that mutex while piece one is still
+// unacknowledged.
+//
+// REVERSE VERIFICATION: drop the s.chats.acquire/release pair from sendMedia
+// and this fails with the file between two pieces.
+func TestAFileDoesNotLandBetweenThePiecesOfOneAnswer(t *testing.T) {
+	t.Parallel()
+	conn := &slowAckConn{delay: 30 * time.Millisecond}
+	sender := newWSSender(conn, testLogger())
+	conn.sender = sender
+
+	answer := aLongAnswer()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if err := sender.sendTextCtx(context.Background(), "CHAT_1", chatTypeSingleInt, answer); err != nil {
+			t.Errorf("sending the long answer: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		// A beat later, so the answer is already mid-flight — the shape of a
+		// file the same turn produced, delivered by its own goroutine.
+		time.Sleep(10 * time.Millisecond)
+		if err := sender.sendMedia(context.Background(), "CHAT_1", chatTypeSingleInt, mediaSend{
+			Kind:    mediaTypeImage,
+			MediaID: "MEDIA_1",
+		}); err != nil {
+			t.Errorf("sending the file: %v", err)
+		}
+	}()
+	wg.Wait()
+
+	assertAnswerIsUninterrupted(t, conn.wire(), "image MEDIA_1")
 }
 
 // The other side of the same rule: the lock is per chat, so an answer to one
