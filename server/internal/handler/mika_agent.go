@@ -85,6 +85,13 @@ func (h *Handler) CreateMikaAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
+	// Mika provisioning is an onboarding action ("Start with Mika") and also
+	// opens a chat session for the caller — both must stay human-initiated
+	// (#8459), so a task-token request cannot provision or converse under
+	// the runtime owner's identity.
+	if !h.requireHumanAgentManager(w, r, workspaceID) {
+		return
+	}
 
 	var req createMikaAgentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

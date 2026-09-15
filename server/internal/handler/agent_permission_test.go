@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -731,5 +732,223 @@ func TestUpdateAgent_LegacyVisibilityNoOpForMemberOnlyPublicTo(t *testing.T) {
 	// Admin submitting a REAL legacy change (workspace) is still rejected.
 	if code := put(adminID, map[string]any{"visibility": "workspace"}); code != http.StatusForbidden {
 		t.Errorf("admin legacy visibility=workspace (real change): expected 403, got %d", code)
+	}
+}
+
+// matRequest returns a request stamped the way the auth middleware leaves it
+// after authenticating an `mat_` task token: X-User-ID carries the runtime
+// owner (newRequest seeds the workspace-owner fixture user, which is exactly
+// the admin-owned-runtime shape), plus the agent/task pair and the
+// server-set X-Actor-Source. Shared by the machine-credential rejection
+// tests (#8459).
+func matRequest(method, path string, body any, hostAgentID, hostTaskID string) *http.Request {
+	req := newRequest(method, path, body)
+	req.Header.Set("X-Agent-ID", hostAgentID)
+	req.Header.Set("X-Task-ID", hostTaskID)
+	req.Header.Set("X-Actor-Source", "task_token")
+	return req
+}
+
+// machineCredentialHostAgent seeds an agent plus a running task on the
+// fixture's admin-owned runtime, returning the pair a task-token request
+// would carry.
+func machineCredentialHostAgent(t *testing.T, name string) (agentID, taskID string) {
+	t.Helper()
+	agentID = dbfx.Agent(t, name, handlerTestRuntimeID(t), testutil.Cols{
+		"visibility":      "workspace",
+		"permission_mode": "public_to",
+		"instructions":    "",
+		"custom_env":      testutil.Raw("'{}'::jsonb"),
+		"custom_args":     testutil.Raw("'[]'::jsonb"),
+	})
+	return agentID, createHandlerTestTaskForAgent(t, agentID)
+}
+
+// TestUpdateAgent_AgentActorCannotRewritePrivateAgentInstructions locks the
+// lateral-movement fix for the agent-management surface (#8459): an agent
+// PROCESS (request authenticated by an `mat_` task token minted for the
+// runtime owner, per daemon.go FinalizeTaskClaim) must not be able to
+// rewrite another user's PRIVATE agent's instructions, even when the runtime
+// it runs on belongs to a workspace admin. canManageAgent admits workspace
+// owner/admin, and the mat_ branch stamps X-User-ID with the runtime owner —
+// so without the actor guard the admin's authority is silently lent to every
+// agent executing on their runtime, and the server log attributes the edit
+// to the admin. Mirrors TestAgentEnv_AgentActorRejected (MUL-2600) on the
+// update surface.
+func TestUpdateAgent_AgentActorCannotRewritePrivateAgentInstructions(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	// Victim: a private ("only me") agent owned by a plain member.
+	victimID, _, _ := privateAgentTestFixture(t)
+
+	hostAgentID, hostTaskID := machineCredentialHostAgent(t, "instructions-host-agent")
+
+	req := matRequest(http.MethodPut, "/api/agents/"+victimID, map[string]any{
+		"instructions": "hijacked system prompt",
+	}, hostAgentID, hostTaskID)
+	req = withURLParam(req, "id", victimID)
+	rec := httptest.NewRecorder()
+	testHandler.UpdateAgent(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("agent actor rewriting private agent instructions: expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	a, err := testHandler.Queries.GetAgent(ctx, util.MustParseUUID(victimID))
+	if err != nil {
+		t.Fatalf("reload victim agent: %v", err)
+	}
+	if a.Instructions != "" {
+		t.Fatalf("victim agent instructions must be unchanged, got %q", a.Instructions)
+	}
+}
+
+// TestCreateAgent_AgentActorRejected locks the creation half of #8459: an
+// agent process must not mint a new agent owned by the runtime owner, which
+// would inherit that owner's Composio overlay (MUL-3963) and carry
+// attacker-chosen instructions under the admin's identity.
+func TestCreateAgent_AgentActorRejected(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	hostAgentID, hostTaskID := machineCredentialHostAgent(t, "create-host-agent")
+
+	req := matRequest(http.MethodPost, "/api/agents", map[string]any{
+		"name":       "agent-actor-created-agent",
+		"runtime_id": handlerTestRuntimeID(t),
+	}, hostAgentID, hostTaskID)
+	rec := httptest.NewRecorder()
+	testHandler.CreateAgent(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("agent actor creating an agent: expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var n int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent WHERE workspace_id = $1 AND name = 'agent-actor-created-agent'
+	`, testWorkspaceID).Scan(&n); err != nil {
+		t.Fatalf("count created agents: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("agent row must not exist after the rejected create, found %d", n)
+	}
+}
+
+// TestCreateAgentBuilderSession_AgentActorRejected locks the builder-session
+// half of #8459: the creation studio is a human flow, so a task-token
+// request cannot open a builder session (hidden system carrier + draft)
+// under the runtime owner's identity.
+func TestCreateAgentBuilderSession_AgentActorRejected(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	hostAgentID, hostTaskID := machineCredentialHostAgent(t, "builder-host-agent")
+
+	req := matRequest(http.MethodPost, "/api/agent-builder/sessions", map[string]any{
+		"runtime_id": testRuntimeID,
+	}, hostAgentID, hostTaskID)
+	rec := httptest.NewRecorder()
+	testHandler.CreateAgentBuilderSession(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("agent actor creating a builder session: expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestCreateMikaAgent_AgentActorRejected locks the Mika half of #8459:
+// provisioning the workspace's built-in agent (and opening its chat session)
+// is a human onboarding action, not something a task-token request may do
+// under the runtime owner's identity.
+func TestCreateMikaAgent_AgentActorRejected(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	hostAgentID, hostTaskID := machineCredentialHostAgent(t, "mika-host-agent")
+
+	req := matRequest(http.MethodPost, "/api/agents/mika", map[string]any{
+		"language":   "en",
+		"runtime_id": handlerTestRuntimeID(t),
+	}, hostAgentID, hostTaskID)
+	rec := httptest.NewRecorder()
+	testHandler.CreateMikaAgent(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("agent actor provisioning Mika: expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestSaveAgentBuilderDraft_AgentActorRejected locks the draft half of
+// #8459's builder surface: loadChatSessionForUser is creator-only, but the
+// user a task token stamps IS the runtime owner, so without the actor guard
+// an agent process could write drafts into that human's builder sessions —
+// poisoning the configuration they are about to review and confirm.
+func TestSaveAgentBuilderDraft_AgentActorRejected(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	session := newBuilderSession(t)
+	hostAgentID, hostTaskID := machineCredentialHostAgent(t, "draft-host-agent")
+
+	req := matRequest(http.MethodPut, "/api/agent-builder/sessions/"+session.SessionID+"/draft",
+		map[string]any{"draft": map[string]any{"name": "hijacked draft"}}, hostAgentID, hostTaskID)
+	req = withURLParams(req, "sessionId", session.SessionID)
+	rec := httptest.NewRecorder()
+	testHandler.SaveAgentBuilderDraft(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("agent actor saving a builder draft: expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var n int
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM agent_builder_draft WHERE chat_session_id = $1`,
+		session.SessionID,
+	).Scan(&n); err != nil {
+		t.Fatalf("count draft rows: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("draft row must not exist after the rejected save, found %d", n)
+	}
+}
+
+// TestSwitchAgentBuilderRuntime_AgentActorRejected locks the runtime-rebind
+// half of #8459's builder surface: rebinding a builder carrier moves where
+// its next task executes, and must stay a human action like every other
+// builder write.
+func TestSwitchAgentBuilderRuntime_AgentActorRejected(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	session := newBuilderSession(t)
+	target := newTestRuntime(t, "Builder Switch Denied Target", "online")
+	hostAgentID, hostTaskID := machineCredentialHostAgent(t, "switch-host-agent")
+
+	req := matRequest(http.MethodPatch, "/api/agent-builder/sessions/"+session.SessionID+"/runtime",
+		map[string]any{"runtime_id": target}, hostAgentID, hostTaskID)
+	req = withURLParams(req, "sessionId", session.SessionID)
+	rec := httptest.NewRecorder()
+	testHandler.SwitchAgentBuilderRuntime(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("agent actor switching builder runtime: expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var boundRuntimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT runtime_id::text FROM agent WHERE id = $1`,
+		session.BuilderAgentID,
+	).Scan(&boundRuntimeID); err != nil {
+		t.Fatalf("load builder carrier: %v", err)
+	}
+	if boundRuntimeID != testRuntimeID {
+		t.Fatalf("carrier runtime must stay %q after the rejected switch, got %q", testRuntimeID, boundRuntimeID)
 	}
 }

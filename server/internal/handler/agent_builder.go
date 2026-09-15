@@ -60,6 +60,13 @@ func (h *Handler) CreateAgentBuilderSession(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
+	// The creation studio is a human flow (#8459): the builder carrier and
+	// its draft inherit the caller's identity, which for a task-token
+	// request is the runtime owner — an agent process must not open builder
+	// sessions under that human's name.
+	if !h.requireHumanAgentManager(w, r, workspaceID) {
+		return
+	}
 
 	var req CreateAgentBuilderSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -259,6 +266,13 @@ func (h *Handler) SaveAgentBuilderDraft(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
+	// The loadChatSessionForUser gate below is creator-only, but a task
+	// token's stamped user IS the runtime owner (#8459): an agent process
+	// could otherwise write drafts into that human's builder sessions while
+	// they appear to be editing themselves. Same guard as session create.
+	if !h.requireHumanAgentManager(w, r, workspaceID) {
+		return
+	}
 
 	var req SaveAgentBuilderDraftRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -402,6 +416,13 @@ func (h *Handler) SwitchAgentBuilderRuntime(w http.ResponseWriter, r *http.Reque
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
 	if !ok {
+		return
+	}
+	// Rebinding a builder carrier moves where its next task executes; like
+	// every builder write it is a human action (#8459), so a task token
+	// cannot do it under the runtime owner's identity even though that user
+	// is the session creator. Same guard as session create.
+	if !h.requireHumanAgentManager(w, r, workspaceID) {
 		return
 	}
 
