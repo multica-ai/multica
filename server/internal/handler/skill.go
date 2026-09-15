@@ -300,19 +300,9 @@ type AddAgentSkillsRequest struct {
 
 // --- Helpers ---
 
-// validateFilePath checks that a file path is safe (no traversal, no absolute paths).
+// validateFilePath checks that a file path uses the shared supporting-file contract.
 func validateFilePath(p string) bool {
-	if p == "" {
-		return false
-	}
-	if filepath.IsAbs(p) {
-		return false
-	}
-	cleaned := filepath.Clean(p)
-	if strings.HasPrefix(cleaned, "..") {
-		return false
-	}
-	return true
+	return skillpkg.IsSafeFilePath(p)
 }
 
 func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id string) (db.Skill, bool) {
