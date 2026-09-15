@@ -1,0 +1,31 @@
+diff --git a/build/src/start/doctor/apple/SimulatorAppPrerequisite.js b/build/src/start/doctor/apple/SimulatorAppPrerequisite.js
+index 886f915e3e031f7aa97d7da89b0f44056d3040d6..078efd440f6357e3bb4b2cc23459502792097687 100644
+--- a/build/src/start/doctor/apple/SimulatorAppPrerequisite.js
++++ b/build/src/start/doctor/apple/SimulatorAppPrerequisite.js
+@@ -114,7 +114,25 @@ const debug = require('debug')('expo:doctor:apple:simulatorApp');
+     return null;
+ }
+ async function getSimulatorAppIdAsync() {
+-    return await getSimulatorAppIdViaAppleScriptAsync() ?? await getSimulatorAppIdFromBundleAsync();
++    const viaAppleScript = await getSimulatorAppIdViaAppleScriptAsync();
++    if (viaAppleScript) {
++        return viaAppleScript;
++    }
++    const viaBundle = await getSimulatorAppIdFromBundleAsync();
++    if (viaBundle) {
++        return viaBundle;
++    }
++    // Xcode 27+ no longer bundles Simulator.app; simctl works without it.
++    // Return the trampoline bundle id that this prerequisite already accepts.
++    try {
++        await (0, _spawnasync().default)('xcrun', [
++            'simctl',
++            'help'
++        ]);
++        return 'com.apple.CoreSimulator.SimulatorTrampoline';
++    } catch {
++        return null;
++    }
+ }
+ class SimulatorAppPrerequisite extends _Prerequisite.Prerequisite {
+     static #_ = this.instance = new SimulatorAppPrerequisite();
