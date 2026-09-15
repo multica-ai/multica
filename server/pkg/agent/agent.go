@@ -130,6 +130,8 @@ type ExecOptions struct {
 	// through Claude Code's --settings flag. It currently carries restrictive
 	// runtime-skill overrides only; other providers ignore it.
 	ClaudeSettingsPath string
+	// ClaudePluginDirs holds daemon-owned, filtered plugin copies for this run.
+	ClaudePluginDirs []string
 }
 
 // runContext derives the execution context for an agent subprocess from the

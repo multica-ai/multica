@@ -296,6 +296,9 @@ type Environment struct {
 	// ClaudeSettingsPath is a task-local --settings JSON file that applies
 	// disabled runtime-skill policy without mutating the user's Claude config.
 	ClaudeSettingsPath string
+	// ClaudePluginDirs are task-local copies with disabled plugin skill
+	// entrypoints removed. Never point these at the host's plugin install.
+	ClaudePluginDirs []string
 	// OpenclawConfigPath is the path to the per-task synthesized OpenClaw
 	// config (set only for openclaw provider). The daemon exports this as
 	// OPENCLAW_CONFIG_PATH on the openclaw subprocess so its native skill
@@ -835,6 +838,10 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		// (GC writes meta from Prepare's result, not Reuse's).
 		rootDir = ""
 	}
+	if params.Provider == "claude" && rootDir == "" && len(params.Task.DisabledRuntimeSkills) != 0 {
+		logger.Warn("execenv: Claude skill filtering needs a task-local root; forcing fresh prepare")
+		return nil
+	}
 	env := &Environment{
 		RootDir:        rootDir,
 		WorkDir:        params.WorkDir,
@@ -935,10 +942,10 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if params.Provider == "claude" && env.RootDir != "" {
 		settingsPath, err := prepareClaudeSkillSettings(env.RootDir, params.Task.DisabledRuntimeSkills, params.Task.AgentSkills)
 		if err != nil {
-			logger.Warn("execenv: refresh claude skill settings failed", "error", err)
-		} else {
-			env.ClaudeSettingsPath = settingsPath
+			logger.Warn("execenv: refresh claude skill settings failed; forcing fresh prepare", "error", err)
+			return nil
 		}
+		env.ClaudeSettingsPath = settingsPath
 	}
 
 	// Re-deny Reasonix's `ask` tool on reuse: CleanupSidecars above removed the
