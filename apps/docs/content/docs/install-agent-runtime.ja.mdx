@@ -33,6 +33,7 @@ Multica は現在、次のコマンドを検出します。
 | OpenCode | `opencode` | [OpenCode クイックスタート](https://opencode.ai/en/docs) |
 | Pi coding agent | `pi` | [Pi coding agent](https://github.com/earendil-works/pi) |
 | Oh-My-Pi | `omp` | [Oh-My-Pi インストール](https://omp.sh) |
+| Prime Agent | `prime-agent` | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) |
 | Qoder CLI | `qodercli` | [Qoder CLI クイックスタート](https://docs.qoder.com/en/cli/quick-start) |
 | Qoder CN CLI | `qoderclicn` | [Qoder CN CLI クイックスタート](https://help.aliyun.com/en/lingma/qodercli-cn/user-guide/qoder-cli-cn-get-started-quickly) |
 | Qwen Code | `qwen` | [Qwen Code](https://github.com/QwenLM/qwen-code) |
@@ -56,6 +57,8 @@ QwenPaw を使う場合は、QwenPaw 側の設定でプロバイダーとモデ�
 MiniMax Code を使う場合は、対応する Node.js バージョン（`>=22.19 <23` または `>=24 <27`）をインストールし、`npm install --global @minimax-ai/code@latest` を実行してください。npm のグローバルインストールによって `mcode` は npm のグローバル実行ファイルディレクトリに配置されます。`command -v mcode` または `Get-Command mcode` で見つからない場合は、そのディレクトリを `PATH` に追加してください。その後 `mcode login` を実行します。モデルは MiniMax Code が管理し、Multica から ACP 経由で上書きすることはできません。
 
 DeepSeek Harness を使う場合は、Node.js 20+ をインストールして `npm install -g @deepseek-ai/dsh` を実行し、Multica ランタイムプロファイルを追加してください。このバンドルが Multica の利用する `--stdio` プロトコルを提供しており、素の `dsh` だけでは使えない理由でもあります。`MULTICA_DSH_PROFILE_BUNDLE` にインストールするバンドルを設定すればデーモンが追加します。手動で行う場合は `dsh plugin --profile multica add <bundle>` を実行します。`<bundle>` は `dsh plugin` が受け付けるもの、つまり npm のパッケージ名、ディレクトリ、パック済み tarball のいずれかで、Multica 自身のブリッジは [multica-ai/dsh-multica-runtime](https://github.com/multica-ai/dsh-multica-runtime) にあります。これはまだ公開 npm レジストリに公開されていないため（[multica#6936](https://github.com/multica-ai/multica/issues/6936)）、現時点でセルフホストのチームはそのリポジトリからビルドし、変数をビルド出力のディレクトリに向けます。デーモンを動かすマシンとビルドしたマシンが別なら、`npm pack` が生成する tarball を指定してください。ブリッジが公開されれば、パッケージ名を指定するのが最も簡単になります。いずれの場合も、自チームが公開・ビルドしたものを優先してください。この値は追加の確認なしに各デーモンホストの DSH ホームへインストールされるため、素性の分からないサードパーティのパッケージを指定することは利便性の問題ではなくサプライチェーンの判断です。npm パッケージではなく DeepSeek Harness Desktop をインストールした場合、デーモンはそのアプリが生成する CLI シムも、アプリ自身のユーザーデータディレクトリから探します。macOS は `~/Library/Application Support/DSH Desktop`、Windows は `%APPDATA%\DSH Desktop` です。Windows のそれはローミングのアプリケーションデータであり、インストール先ではありません。アプリ自体は Program Files または `%LOCALAPPDATA%\Programs` に入りますが、駆動される CLI はユーザーごとの他の状態と同じ場所に置かれます。これらのパスのバージョン部分は生成された ID なので、デーモンは列挙して最新のものを優先します。PATH に他のものは必要ありません。生成されたシムはアプリ同梱のランタイムを絶対パスで起動します。DSH Desktop が既定以外の場所にある場合は `MULTICA_DSH_PATH` でそのシムを指定してください。デーモンは `dsh --profile multica --probe` が成功した場合のみ DeepSeek Harness を登録し、失敗した場合は `/health` にプロファイルの欠落を報告します。デーモンを起動する前に `DEEPSEEK_API_KEY` を設定（または dsh の設定に保存）してください。
+
+Prime Agent を使う場合は、先にログイン（サブスクリプションまたは API key）を済ませ、Prime Agent 側の設定でモデルを選んでください。Multica は実行時に Prime Agent のモデルを選択できず、Prime Agent は以前のセッションを再開せず、Multica が管理する MCP 設定も読み取りません — 詳しくは [AI コーディングツール比較](/providers) を参照してください。
 
 ログイン情報はツールがローカル環境に保存します。Multica が Claude、Codex、Cursor などの CLI のログイントークンを受け取ることはありません。
 
