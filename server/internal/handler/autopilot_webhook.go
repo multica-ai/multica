@@ -147,21 +147,27 @@ func normalizeWebhookPayload(body []byte, headers http.Header) (WebhookEnvelope,
 	}
 
 	// 1. Caller-provided envelope.
-	if obj, ok := asAny.(map[string]any); ok {
-		if eventStr, ok := obj["event"].(string); ok && eventStr != "" {
-			if rawPayload, ok := obj["eventPayload"]; ok {
-				inner, err := json.Marshal(rawPayload)
-				if err == nil {
+	if _, ok := asAny.(map[string]any); ok {
+		// Read the caller-provided envelope as RawMessage values so numeric IDs
+		// and other scalar representations survive normalization unchanged.
+		var rawObject map[string]json.RawMessage
+		if err := json.Unmarshal(body, &rawObject); err == nil {
+			var eventStr string
+			if rawEvent, ok := rawObject["event"]; ok {
+				_ = json.Unmarshal(rawEvent, &eventStr)
+			}
+			if eventStr != "" {
+				if rawPayload, ok := rawObject["eventPayload"]; ok {
 					env.Event = eventStr
-					env.EventPayload = inner
+					env.EventPayload = rawPayload
 					return env, nil
 				}
+				// `event` present but no eventPayload: still preserve event
+				// string, fall through to use whole body as payload.
+				env.Event = eventStr
+				env.EventPayload = json.RawMessage(body)
+				return env, nil
 			}
-			// `event` present but no eventPayload: still preserve event
-			// string, fall through to use whole body as payload.
-			env.Event = eventStr
-			env.EventPayload = json.RawMessage(body)
-			return env, nil
 		}
 	}
 

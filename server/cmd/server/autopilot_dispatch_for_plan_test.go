@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -219,6 +220,110 @@ func TestDispatchAutopilotSuppressesRecentDuplicateIssue(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("recent duplicate autopilot dispatch should leave 1 matching issue, got %d", count)
+	}
+}
+
+func TestDispatchAutopilotUsesPayloadTitleToDistinguishWebhookDeliveries(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	fx := testutil.New(testPool, testWorkspaceID, testUserID)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+
+	titlePrefix := "Webhook delivery " + time.Now().UTC().Format("20060102150405.000000000")
+	apID := fx.Insert(t, "autopilot", testutil.Cols{
+		"workspace_id":         testWorkspaceID,
+		"title":                "Per-delivery title variables",
+		"description":          "Per-delivery title test",
+		"assignee_type":        "agent",
+		"assignee_id":          agentID,
+		"status":               "active",
+		"execution_mode":       "create_issue",
+		"issue_title_template": titlePrefix + " {{payload.identifier}}",
+		"created_by_type":      "member",
+		"created_by_id":        testUserID,
+	})
+	ap, err := queries.GetAutopilot(ctx, parseUUID(apID))
+	if err != nil {
+		t.Fatalf("GetAutopilot fixture: %v", err)
+	}
+	// Dispatch creates the remaining rows rather than the test fixture itself.
+	// Register their cleanup in parent-to-child order: Fixture cleanup runs in
+	// reverse, so queued tasks go first, then runs, issues, and the autopilot.
+	fx.Cleanup(t, `DELETE FROM issue WHERE origin_type = 'autopilot' AND origin_id = $1`, ap.ID)
+	fx.Cleanup(t, `DELETE FROM autopilot_run WHERE autopilot_id = $1`, ap.ID)
+	fx.Cleanup(t, `
+		DELETE FROM agent_task_queue
+		WHERE autopilot_run_id IN (SELECT id FROM autopilot_run WHERE autopilot_id = $1)
+		   OR issue_id IN (SELECT issue_id FROM autopilot_run WHERE autopilot_id = $1)
+	`, ap.ID)
+	triggerID := parseUUID(fx.Insert(t, "autopilot_trigger", testutil.Cols{
+		"autopilot_id":    ap.ID,
+		"kind":            "webhook",
+		"enabled":         true,
+		"created_by_type": "member",
+		"created_by_id":   testUserID,
+	}))
+
+	payload := func(identifier string) []byte {
+		return []byte(`{"event":"ticket.updated","eventPayload":{"identifier":"` + identifier + `"}}`)
+	}
+
+	first, err := autopilotSvc.DispatchAutopilot(ctx, ap, triggerID, "webhook", payload("ABC-101"))
+	if err != nil {
+		t.Fatalf("first DispatchAutopilot: %v", err)
+	}
+	if first == nil || first.Status != "issue_created" {
+		t.Fatalf("first dispatch = %+v, want issue_created", first)
+	}
+
+	second, err := autopilotSvc.DispatchAutopilot(ctx, ap, triggerID, "webhook", payload("ABC-102"))
+	if err != nil {
+		t.Fatalf("second DispatchAutopilot: %v", err)
+	}
+	if second == nil || second.Status != "issue_created" {
+		t.Fatalf("distinct delivery = %+v, want issue_created", second)
+	}
+
+	redelivery, err := autopilotSvc.DispatchAutopilot(ctx, ap, triggerID, "webhook", payload("ABC-101"))
+	if err != nil {
+		t.Fatalf("redelivery DispatchAutopilot: %v", err)
+	}
+	if redelivery == nil || redelivery.Status != "skipped" {
+		t.Fatalf("matching redelivery = %+v, want skipped", redelivery)
+	}
+
+	var titles []string
+	rows, err := testPool.Query(ctx,
+		`SELECT title FROM issue WHERE workspace_id = $1 AND title LIKE $2 ORDER BY title`,
+		testWorkspaceID, titlePrefix+"%",
+	)
+	if err != nil {
+		t.Fatalf("list created issues: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var title string
+		if err := rows.Scan(&title); err != nil {
+			t.Fatalf("scan title: %v", err)
+		}
+		titles = append(titles, title)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate titles: %v", err)
+	}
+	wantTitles := []string{titlePrefix + " ABC-101", titlePrefix + " ABC-102"}
+	if len(titles) != len(wantTitles) || titles[0] != wantTitles[0] || titles[1] != wantTitles[1] {
+		t.Fatalf("created issue titles = %v, want %v", titles, wantTitles)
 	}
 }
 
