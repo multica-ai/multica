@@ -25,6 +25,7 @@ import { CharCounter } from "../components/char-counter";
 import { ServiceTierSettingField } from "../components/inspector/service-tier-setting-field";
 import { ThinkingSettingField } from "../components/inspector/thinking-prop-row";
 import { ModelDropdown } from "../components/model-dropdown";
+import { QoderAgentSelect } from "../components/qoder-agent-select";
 import { RuntimePicker } from "../components/runtime-picker";
 import { SkillMultiSelect } from "../components/skill-multi-select";
 import { ConversationStartersEditor } from "../components/conversation-starters-editor";
@@ -219,15 +220,25 @@ export function AgentConfigurationPanel({
                 </p>
               )}
             </div>
-            <ModelDropdown
-              runtimeId={selectedRuntime?.id ?? null}
-              runtimeOnline={selectedRuntime?.status === "online"}
-              value={draft.model}
-              onChange={(value) => onChange(applyDraftModelChange(draft, value))}
-              // A successful switch clears the model, so an edit made while the
-              // rebind is in flight would be silently discarded.
-              disabled={!selectedRuntime || runtimeSwitchInFlight}
-            />
+            {selectedRuntime?.provider === "qoder_cloud" ? (
+              <QoderAgentSelect
+                value={draft.qoderAgentId}
+                onChange={(value) => set("qoderAgentId", value)}
+                disabled={runtimeLocked}
+              />
+            ) : (
+              <ModelDropdown
+                runtimeId={selectedRuntime?.id ?? null}
+                runtimeOnline={selectedRuntime?.status === "online"}
+                value={draft.model}
+                onChange={(value) =>
+                  onChange(applyDraftModelChange(draft, value))
+                }
+                // A successful switch clears the model, so an edit made while the
+                // rebind is in flight would be silently discarded.
+                disabled={!selectedRuntime || runtimeSwitchInFlight}
+              />
+            )}
           </div>
           {/* Both fields fail closed: they render only when the exact selected
               model's live catalog advertises the capability (or a value is

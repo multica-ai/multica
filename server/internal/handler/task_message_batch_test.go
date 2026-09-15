@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -247,7 +248,7 @@ func TestCreateTaskMessagesBatchIsAtomic(t *testing.T) {
 	ctx := context.Background()
 	taskID := seedBatchTask(t, "batch-atomic")
 
-	// The colliding row is built as a fixture, not through the query under
+	// The existing row is built as a fixture, not through the query under
 	// test: test setup that shares code with the code being exercised can pass
 	// for the wrong reason.
 	const dupID = "018f0000-0000-7000-8000-000000000001"
@@ -261,18 +262,18 @@ func TestCreateTaskMessagesBatchIsAtomic(t *testing.T) {
 
 	_, err := testHandler.Queries.CreateTaskMessages(ctx, db.CreateTaskMessagesParams{
 		TaskID:            util.MustParseUUID(taskID),
-		Ids:               []pgtype.UUID{util.MustParseUUID("018f0000-0000-7000-8000-000000000002"), util.MustParseUUID(dupID)},
+		Ids:               []pgtype.UUID{util.MustParseUUID("018f0000-0000-7000-8000-000000000002"), util.MustParseUUID("018f0000-0000-7000-8000-000000000003")},
 		Seqs:              []int32{2, 3},
 		Types:             []string{"text", "text"},
 		Tools:             []string{"", ""},
-		Contents:          []string{"ok", "collides"},
-		Inputs:            []string{"", ""},
+		Contents:          []string{"ok", "invalid input"},
+		Inputs:            []string{"", "not-json"},
 		Outputs:           []string{"", ""},
 		CreatedAts:        []string{"", ""},
 		OutputTruncations: []string{"", ""},
 	})
 	if err == nil {
-		t.Fatal("CreateTaskMessages accepted a batch with a duplicate primary key")
+		t.Fatal("CreateTaskMessages accepted a batch with invalid JSON input")
 	}
 
 	count := dbfx.Count(t, `SELECT COUNT(*) FROM task_message WHERE task_id = $1`, taskID)
@@ -336,5 +337,66 @@ func TestTaskMessageCreatedAtsFallsBackWholeBatch(t *testing.T) {
 	}, serverNow)
 	if want := []string{valid.Format(time.RFC3339Nano), serverNow.Format(time.RFC3339Nano)}; !slices.Equal(got, want) {
 		t.Fatalf("taskMessageCreatedAts() = %q, want %q", got, want)
+	}
+}
+
+func TestReportTaskMessagesIdempotencyIsTaskScoped(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	first := seedBatchTask(t, "idempotent-first")
+	second := seedBatchTask(t, "idempotent-second")
+	sharedBus := testHandler.Bus
+	testHandler.Bus = events.New()
+	t.Cleanup(func() { testHandler.Bus = sharedBus })
+	var mu sync.Mutex
+	published := 0
+	testHandler.Bus.Subscribe(protocol.EventTaskMessage, func(e events.Event) {
+		if e.TaskID == first || e.TaskID == second {
+			mu.Lock()
+			published++
+			mu.Unlock()
+		}
+	})
+	eventTime := time.Now().UTC().Truncate(time.Microsecond)
+	message := map[string]any{"seq": 1, "type": "text", "content": "original", "idempotency_key": "qoder:evt_1", "created_at": eventTime, "output_truncated": true}
+	for _, taskID := range []string{first, first, second} {
+		testutil.Call(t, testHandler.ReportTaskMessages, batchMessagesRequest(t, taskID, []any{message})).Want(http.StatusOK)
+	}
+	// Replaying the key with a changed payload must not overwrite the first report.
+	message["content"] = "changed"
+	message["created_at"] = eventTime.Add(time.Second)
+	message["output_truncated"] = false
+	testutil.Call(t, testHandler.ReportTaskMessages, batchMessagesRequest(t, first, []any{message})).Want(http.StatusOK)
+	for _, taskID := range []string{first, second} {
+		rows, err := testHandler.Queries.ListTaskMessages(context.Background(), util.MustParseUUID(taskID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 1 || rows[0].Content.String != "original" {
+			t.Fatalf("task %s replay changed persisted messages: %+v", taskID, rows)
+		}
+		if !rows[0].CreatedAt.Time.Equal(eventTime) || !rows[0].OutputTruncated.Valid || !rows[0].OutputTruncated.Bool {
+			t.Fatalf("task %s replay changed event metadata: %+v", taskID, rows[0])
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if published != 2 {
+		t.Fatalf("published %d events, want one per task", published)
+	}
+}
+
+func TestReportTaskMessagesRejectsOversizedIdempotencyKeyAtomically(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	taskID := seedBatchTask(t, "idempotency-key-limit")
+	testutil.Call(t, testHandler.ReportTaskMessages, batchMessagesRequest(t, taskID, []any{
+		map[string]any{"seq": 1, "type": "text", "content": "valid"},
+		map[string]any{"seq": 2, "type": "text", "idempotency_key": strings.Repeat("x", 513)},
+	})).Want(http.StatusBadRequest)
+	if n := dbfx.Count(t, `SELECT COUNT(*) FROM task_message WHERE task_id=$1`, taskID); n != 0 {
+		t.Fatalf("persisted %d rows before validation failed", n)
 	}
 }

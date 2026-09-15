@@ -1434,6 +1434,13 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if runtime.Provider == "qoder_cloud" {
+		raw, _ := json.Marshal(req.RuntimeConfig)
+		if err := validateQoderAgentConfig(raw); err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+	}
 	// thinking_level validation: fixed-enum providers reject unknown literals;
 	// dynamic-catalog providers (Codex/OpenCode) reject malformed tokens here.
 	// Pi has a fixed token universe and a daemon-discovered per-model subset.
@@ -1961,6 +1968,27 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 		targetRuntimeID = runtime.ID
 		targetProvider = runtime.Provider
+	}
+	if req.RuntimeConfig != nil || req.RuntimeID != nil {
+		provider := targetProvider
+		if provider == "" {
+			var ok bool
+			provider, ok = h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+			if !ok {
+				writeError(w, 400, "cannot resolve agent runtime")
+				return
+			}
+		}
+		if provider == "qoder_cloud" {
+			raw := existing.RuntimeConfig
+			if req.RuntimeConfig != nil {
+				raw, _ = json.Marshal(req.RuntimeConfig)
+			}
+			if err := validateQoderAgentConfig(raw); err != nil {
+				writeError(w, 400, err.Error())
+				return
+			}
+		}
 	}
 	// Invocation permission (MUL-3963). OWNER-ONLY write: access is the one
 	// agent property a workspace admin may NOT change (only the owner decides

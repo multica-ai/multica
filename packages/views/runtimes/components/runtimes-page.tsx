@@ -13,13 +13,22 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { memberNeedsMikaSetup, useBootstrapMika } from "@multica/core/onboarding";
+import {
+  memberNeedsMikaSetup,
+  useBootstrapMika,
+} from "@multica/core/onboarding";
 import { MIKA_PLACEHOLDER_EMOJI } from "../../onboarding/components/mika-intro";
-import { useRequiredWorkspaceSlug, useWorkspacePaths } from "@multica/core/paths";
+import {
+  useRequiredWorkspaceSlug,
+  useWorkspacePaths,
+} from "@multica/core/paths";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { runtimeProfileListOptions } from "@multica/core/runtimes";
-import { runtimeListOptions, runtimeKeys } from "@multica/core/runtimes/queries";
+import {
+  runtimeListOptions,
+  runtimeKeys,
+} from "@multica/core/runtimes/queries";
 import { useWSEvent } from "@multica/core/realtime";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import type { AgentRuntime } from "@multica/core/types";
@@ -45,10 +54,12 @@ import {
 import { PAGE_GUTTER, PAGE_RAIL, PageHeader } from "../../layout/page-header";
 import { cn } from "@multica/ui/lib/utils";
 import { AppLink, useNavigation } from "../../navigation";
-import {
-  getMikaOnboarding,
-  pickContentLang,
-} from "../../onboarding/templates";
+import { getMikaOnboarding, pickContentLang } from "../../onboarding/templates";
+import { qoderOptions } from "@multica/core/runtimes/qoder";
+import { isRuntimeUsableForUser } from "@multica/core/runtimes";
+import { QoderCloudCard } from "./qoder-cloud-card";
+import { AddQoderAgentDialog } from "../../agents/components/add-qoder-agent-dialog";
+import { RemoteRuntimeDialog } from "./remote-runtime-dialog";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
 import { ProviderLogo } from "./provider-logo";
@@ -88,10 +99,16 @@ export function RuntimesPage({
   bootstrapping,
   cloudRuntimeEnabled = false,
 }: RuntimesPageProps = {}) {
+  const { t } = useT("runtimes");
   const isAuthLoading = useAuthStore((state) => state.isLoading);
   const currentUserId = useAuthStore((state) => state.user?.id);
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
+  const paths = useWorkspacePaths();
+  const { data: qoderConnection } = useQuery(qoderOptions(wsId));
+  const [showAddQoderAgent, setShowAddQoderAgent] = useState(false);
+  const [configureQoder, setConfigureQoder] = useState(false);
+  const [showRemoteRuntimeDialog, setShowRemoteRuntimeDialog] = useState(false);
   const [showConnectDialog, setShowConnectDialog] = useState(false);
   const [showCloudRuntimeDialog, setShowCloudRuntimeDialog] = useState(false);
 
@@ -158,7 +175,52 @@ export function RuntimesPage({
     return <RuntimesPageSkeleton />;
   }
 
+  const showQoderCard = qoderConnection?.available === true;
+  const qoderRuntime = runtimes.find(
+    (runtime) =>
+      runtime.provider === "qoder_cloud" &&
+      runtime.status === "online" &&
+      isRuntimeUsableForUser(runtime, currentUserId ?? null),
+  );
+  const qoderMachine = machines.find((machine) =>
+    machine.runtimes.some((runtime) => runtime.id === qoderRuntime?.id),
+  );
+  const listedMachines = showQoderCard
+    ? machines.filter(
+        (machine) =>
+          !(
+            machine.runtimes.length > 0 &&
+            machine.runtimes.every(
+              (runtime) => runtime.provider === "qoder_cloud",
+            )
+          ),
+      )
+    : machines;
+  const remoteMachines = listedMachines.filter(
+    (machine) => machine.section === "cloud",
+  );
+  const computers = listedMachines.filter(
+    (machine) => machine.section !== "cloud",
+  );
+  const remoteCount =
+    remoteMachines.length +
+    (showQoderCard && qoderConnection?.configured ? 1 : 0);
+  const qoderAgentCount = agents.filter((agent) =>
+    runtimes.some(
+      (runtime) =>
+        runtime.id === agent.runtime_id && runtime.provider === "qoder_cloud",
+    ),
+  ).length;
+  const canAddQoderAgent =
+    !!qoderRuntime &&
+    qoderConnection?.enabled === true &&
+    qoderConnection.status === "online";
+  const addQoderAgent = () => {
+    setShowRemoteRuntimeDialog(false);
+    setShowAddQoderAgent(true);
+  };
   const showEmpty =
+    !showQoderCard &&
     machines.length === 0 &&
     orphanProfileRuntimes.length === 0 &&
     !bootstrapping &&
@@ -167,8 +229,13 @@ export function RuntimesPage({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <PageHeaderBar
-        totalCount={machines.length}
+        remoteCount={remoteCount}
+        computerCount={computers.length}
         onConnectRemote={() => setShowConnectDialog(true)}
+        onRemoteRuntime={() => {
+          setConfigureQoder(false);
+          setShowRemoteRuntimeDialog(true);
+        }}
         cloudRuntimeEnabled={cloudRuntimeEnabled}
         onOpenCloudRuntime={() => setShowCloudRuntimeDialog(true)}
       />
@@ -183,19 +250,55 @@ export function RuntimesPage({
             {!agentsLoading &&
               !chatSessionsLoading &&
               memberNeedsMikaSetup(agents, chatSessions) &&
-              runtimes.length > 0 && (
-              <MikaSetupCard
-                workspaceId={wsId}
-                runtimes={runtimes}
-                runtimesLoading={runtimesLoading}
-                currentUserId={currentUserId ?? null}
-              />
+              runtimes.some(
+                (runtime) => runtime.provider !== "qoder_cloud",
+              ) && (
+                <MikaSetupCard
+                  workspaceId={wsId}
+                  runtimes={runtimes.filter(
+                    (runtime) => runtime.provider !== "qoder_cloud",
+                  )}
+                  runtimesLoading={runtimesLoading}
+                  currentUserId={currentUserId ?? null}
+                />
+              )}
+            {(showQoderCard || remoteMachines.length > 0) && (
+              <section className="mb-6 space-y-3">
+                <h2 className="text-body font-medium">
+                  {t(($) => $.page.remote_runtimes)}
+                </h2>
+                {showQoderCard && qoderConnection && (
+                  <QoderCloudCard
+                    connection={qoderConnection}
+                    agentCount={qoderAgentCount}
+                    canAddAgent={canAddQoderAgent}
+                    detailHref={
+                      qoderMachine
+                        ? paths.runtimeDetail(qoderMachine.id)
+                        : undefined
+                    }
+                    onConfigure={() => {
+                      setConfigureQoder(true);
+                      setShowRemoteRuntimeDialog(true);
+                    }}
+                    onAddAgent={addQoderAgent}
+                  />
+                )}
+                {remoteMachines.length > 0 && (
+                  <MachineList machines={remoteMachines} />
+                )}
+              </section>
             )}
-            {(machines.length > 0 || bootstrapping) && (
-              <MachineList
-                machines={machines}
-                bootstrapping={bootstrapping}
-              />
+            {(computers.length > 0 || bootstrapping) && (
+              <section className="space-y-3">
+                <h2 className="text-body font-medium">
+                  {t(($) => $.page.computers)}
+                </h2>
+                <MachineList
+                  machines={computers}
+                  bootstrapping={bootstrapping}
+                />
+              </section>
             )}
             {orphanProfileRuntimes.length > 0 && (
               <OrphanRuntimeProfiles
@@ -208,6 +311,19 @@ export function RuntimesPage({
         </div>
       )}
 
+      {showRemoteRuntimeDialog && (
+        <RemoteRuntimeDialog
+          configure={configureQoder}
+          onAddAgent={canAddQoderAgent ? addQoderAgent : undefined}
+          onClose={() => setShowRemoteRuntimeDialog(false)}
+        />
+      )}
+      {showAddQoderAgent && qoderRuntime && (
+        <AddQoderAgentDialog
+          runtime={qoderRuntime}
+          onClose={() => setShowAddQoderAgent(false)}
+        />
+      )}
       {showConnectDialog && (
         <ConnectRemoteDialog onClose={() => setShowConnectDialog(false)} />
       )}
@@ -374,12 +490,16 @@ function OrphanRuntimeProfiles({
 }
 
 function PageHeaderBar({
-  totalCount,
+  onRemoteRuntime,
+  remoteCount,
+  computerCount,
   onConnectRemote,
   cloudRuntimeEnabled,
   onOpenCloudRuntime,
 }: {
-  totalCount: number;
+  onRemoteRuntime: () => void;
+  remoteCount: number;
+  computerCount: number;
   onConnectRemote: () => void;
   cloudRuntimeEnabled: boolean;
   onOpenCloudRuntime: () => void;
@@ -389,14 +509,18 @@ function PageHeaderBar({
     <CollectionPageHeader
       icon={Server}
       title={t(($) => $.page.title)}
-      count={totalCount}
-      description={t(($) => $.page.tagline)}
+      description={`${t(($) => $.page.remote_count, { count: remoteCount })} · ${t(($) => $.page.computer_count, { count: computerCount })}`}
       learnMore={{
         href: daemonRuntimesDocsHref(i18n.language),
         label: t(($) => $.page.learn_more),
       }}
       actions={
         <>
+          <CollectionPageHeaderAction
+            icon={Cloud}
+            label={t(($) => $.remote_runtime.action)}
+            onClick={onRemoteRuntime}
+          />
           {cloudRuntimeEnabled && (
             <CollectionPageHeaderAction
               icon={Cloud}
@@ -579,7 +703,10 @@ function RuntimesPageSkeleton() {
       <div className={cn(PAGE_RAIL, PAGE_GUTTER, "py-6")}>
         <div className="overflow-hidden rounded-lg border">
           {Array.from({ length: 5 }).map((_, index) => (
-            <div key={index} className="flex h-[76px] items-center gap-3 border-b px-4 last:border-b-0">
+            <div
+              key={index}
+              className="flex h-[76px] items-center gap-3 border-b px-4 last:border-b-0"
+            >
               <Skeleton className="h-10 w-10 rounded-lg" />
               <div className="flex-1">
                 <Skeleton className="h-4 w-44" />

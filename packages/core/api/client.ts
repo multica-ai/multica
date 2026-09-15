@@ -1,3 +1,4 @@
+import { parseQoderConnection, parseQoderCatalog, type QoderInput } from "../runtimes/qoder-schema";
 import { configStore } from "../config";
 import type {
   Issue,
@@ -1638,6 +1639,25 @@ export class ApiClient {
   // surfaces can clear their live cards.
   async cancelAgentTasks(id: string): Promise<{ cancelled: number }> {
     return this.fetch(`/api/agents/${id}/cancel-tasks`, { method: "POST" });
+  }
+
+  async listQoderEnvironments(wsId: string, token: string, signal?: AbortSignal) {
+    return parseQoderCatalog(await this.fetch(`/api/workspaces/${wsId}/qoder/environments`, { method: "POST", body: JSON.stringify({ qoder_token: token }), signal }));
+  }
+  async listQoderAgents(wsId: string) {
+    return parseQoderCatalog(await this.fetch(`/api/workspaces/${wsId}/qoder/agents`));
+  }
+  async stopQoderConnection(wsId: string) {
+    return parseQoderConnection(await this.fetch(`/api/workspaces/${wsId}/qoder/stop`, { method: "POST" }));
+  }
+  async getQoderConnection(wsId: string) {
+    return parseQoderConnection(await this.fetch(`/api/workspaces/${wsId}/qoder`));
+  }
+  async saveQoderConnection(wsId: string, input: QoderInput) {
+    return parseQoderConnection(await this.fetch(`/api/workspaces/${wsId}/qoder`, { method: "PUT", body: JSON.stringify({ name: input.name, base_url: input.baseUrl, environment_id: input.environmentId, qoder_token: input.qoderToken, github_tokens: input.githubTokens }) }));
+  }
+  async checkQoderConnection(wsId: string, input: QoderInput): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/qoder/check`, { method: "POST", body: JSON.stringify({ name: input.name, base_url: input.baseUrl, environment_id: input.environmentId, qoder_token: input.qoderToken, github_tokens: input.githubTokens }) });
   }
 
   async listRuntimes(

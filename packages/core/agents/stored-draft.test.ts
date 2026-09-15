@@ -7,6 +7,7 @@ import {
 } from "./stored-draft";
 
 const draft = (): AgentDraft => ({
+  qoderAgentId: "agent_qca",
   name: "Release manager",
   description: "Ships carefully",
   instructions: "# Role\nShip.",

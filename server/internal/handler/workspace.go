@@ -1213,6 +1213,16 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return deleteWorkspaceTasks(ctx, qtx, requester.WorkspaceID) },
 		},
 		{
+			name: "delete QCA connection",
+			run: func() error {
+				if _, err := tx.Exec(ctx, `UPDATE personal_access_token SET revoked=true WHERE id IN (SELECT token_id FROM qoder_connection WHERE workspace_id=$1)`, requester.WorkspaceID); err != nil {
+					return err
+				}
+				_, err := tx.Exec(ctx, `DELETE FROM qoder_connection WHERE workspace_id=$1`, requester.WorkspaceID)
+				return err
+			},
+		},
+		{
 			name: "delete leaf data",
 			run:  func() error { return qtx.DeleteWorkspaceLeafData(ctx, requester.WorkspaceID) },
 		},

@@ -709,6 +709,7 @@ func main() {
 	// Queued work now expires on the same runtime-liveness signal as in-flight
 	// work, so there is no separate queue TTL to tune: a busy runtime keeps its
 	// backlog, and a departed one retires everything it owned at once.
+	go h.RunQoderConnections(sweepCtx, pool, "http://localhost:"+port, os.Getenv("MULTICA_QODER_STATE_DIR"))
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus, runtimeReconnectGrace)
 	go runDelegatedFailureRecoverySweeper(sweepCtx, taskSvc)
 	// Seven-day runtime retention does not share the 30-second liveness tick:

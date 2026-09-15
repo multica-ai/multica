@@ -12,6 +12,7 @@ import {
 } from "./draft";
 
 const draft = (): AgentDraft => ({
+  qoderAgentId: "",
   name: "Old name",
   description: "Old description",
   instructions: "Old instructions",
@@ -313,4 +314,10 @@ describe("agent draft execution overrides", () => {
     expect(isDraftDescriptionWithinLimit("汉".repeat(255))).toBe(true);
     expect(isDraftDescriptionWithinLimit("汉".repeat(256))).toBe(false);
   });
+});
+
+it("persists a per-agent QCA binding and clears it on runtime change", () => {
+  const current = { ...draft(), qoderAgentId: "agent_qca" };
+  expect(buildCreateAgentRequest({ draft: current, runtimeId: current.runtimeId }).runtime_config).toEqual({ qoder_agent_id: "agent_qca" });
+  expect(applyDraftRuntimeChange(current, "another-runtime").qoderAgentId).toBe("");
 });

@@ -88,6 +88,7 @@ WITH incoming AS (
         COALESCE(NULLIF(m.created_at, '')::timestamptz, now()),
         NULLIF(m.output_truncated, '')::bool
     FROM incoming AS m
+    ON CONFLICT (id) DO NOTHING
     RETURNING id, task_id, seq, type, tool, content, input, output, created_at, output_truncated
 )
 SELECT id, task_id, seq, type, tool, content, input, output, created_at, output_truncated FROM inserted ORDER BY seq ASC
@@ -153,8 +154,9 @@ type CreateTaskMessagesRow struct {
 // loop this replaces could persist part of a batch and then fail, leaving the
 // transcript with a prefix of the batch and no way to complete it — the daemon
 // does not retry this endpoint. One statement makes the batch all-or-nothing,
-// which buys consistency; a batch that fails is still lost whole, so closing
-// the gap for real needs a retry plus a (task_id, seq) uniqueness rule.
+// which buys consistency. Callers that supply a task-scoped idempotency key
+// derive a stable message UUID; the primary-key conflict below deduplicates
+// retries without changing the append-only behavior of legacy random IDs.
 //
 // The ORDER BY is a contract, not decoration. A bare `INSERT ... RETURNING`
 // has no defined row order, and the caller republishes these rows as realtime

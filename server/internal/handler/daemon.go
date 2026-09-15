@@ -204,10 +204,11 @@ type DaemonRegisterRequest struct {
 	CLIVersion      string   `json:"cli_version"` // multica CLI version
 	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
 	Runtimes        []struct {
-		Name    string `json:"name"`
-		Type    string `json:"type"`
-		Version string `json:"version"` // agent CLI version (claude/codex)
-		Status  string `json:"status"`
+		Name        string `json:"name"`
+		RuntimeMode string `json:"runtime_mode,omitempty"`
+		Type        string `json:"type"`
+		Version     string `json:"version"` // agent CLI version (claude/codex)
+		Status      string `json:"status"`
 		// ProfileID, when non-empty, marks this as an instance of a custom
 		// runtime_profile (MUL-3284). Empty = built-in runtime (legacy path).
 		// Type carries the protocol family for both built-in and custom rows
@@ -424,6 +425,18 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "at least one runtime or failed profile is required")
 		return
 	}
+	// Validate all entries before writing any registration. Custom profiles
+	// launch a local command and cannot declare managed cloud execution.
+	for i := range req.Runtimes {
+		rt := &req.Runtimes[i]
+		if rt.RuntimeMode == "" {
+			rt.RuntimeMode = "local"
+		}
+		if (rt.RuntimeMode != "local" && rt.RuntimeMode != "cloud") || (rt.ProfileID != "" && rt.RuntimeMode != "local") {
+			writeError(w, http.StatusBadRequest, "invalid runtime_mode for registration")
+			return
+		}
+	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, req.WorkspaceID, "workspace_id")
 	if !ok {
 		return
@@ -567,7 +580,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				WorkspaceID: wsUUID,
 				DaemonID:    strToText(req.DaemonID),
 				Name:        name,
-				RuntimeMode: "local",
+				RuntimeMode: runtime.RuntimeMode,
 				Provider:    provider,
 				Status:      status,
 				DeviceInfo:  deviceInfo,
@@ -4736,6 +4749,8 @@ type TaskMessageRequest struct {
 	// never as false. Recording an unmeasured output as complete is the one
 	// claim this data is not entitled to make.
 	OutputTruncated *bool `json:"output_truncated,omitempty"`
+	// IdempotencyKey scopes provider event replays to this task.
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
 
 type TaskMessageBatchRequest struct {
@@ -4784,7 +4799,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 	// string means SQL NULL, applied by the query's NULLIF.
 	n := len(req.Messages)
 	params := db.CreateTaskMessagesParams{
-		TaskID:   parseUUID(taskID),
+		TaskID:   task.ID,
 		Ids:      make([]pgtype.UUID, 0, n),
 		Seqs:     make([]int32, 0, n),
 		Types:    make([]string, 0, n),
@@ -4802,11 +4817,21 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	createdAts := taskMessageCreatedAts(req.Messages, time.Now().UTC())
 	for i, msg := range req.Messages {
-		id, err := uuid.NewV7()
-		if err != nil {
-			slog.Error("failed to generate task message id", "task_id", taskID, "error", err)
-			writeError(w, http.StatusInternalServerError, "failed to persist task message")
+		if len(msg.IdempotencyKey) > 512 {
+			writeError(w, http.StatusBadRequest, "message idempotency_key exceeds 512 bytes")
 			return
+		}
+		var id uuid.UUID
+		if msg.IdempotencyKey != "" {
+			id = uuid.NewSHA1(uuid.UUID(task.ID.Bytes), []byte(msg.IdempotencyKey))
+		} else {
+			var err error
+			id, err = uuid.NewV7()
+			if err != nil {
+				slog.Error("failed to generate task message id", "task_id", taskID, "error", err)
+				writeError(w, http.StatusInternalServerError, "failed to persist task message")
+				return
+			}
 		}
 
 		// Redact sensitive information before persisting or broadcasting.

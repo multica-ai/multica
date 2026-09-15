@@ -7,6 +7,15 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 Multica は作業の記録と調整を担い、接続されたコンピュータが実行を担います。コンピュータ上の**デーモン**（daemon）が実行を取得し、そのマシンにインストールされた AI コーディングツールを呼び出します。
 
+## Qoder Cloud Agent リモートランタイム
+
+Qoder Cloud Agent は割り当てられたタスクをリモートセッションで実行します。Multica サーバーが既存のデーモンプロトコルを使うブリッジを管理するため、ユーザーがローカルデーモンを起動する必要はありません。
+
+セルフホスト環境では `MULTICA_VCS_SECRET_KEY` と永続化された `MULTICA_QODER_STATE_DIR` を設定してください。ランタイム画面で Qoder Cloud Agent を追加し、QCA PAT を設定すると、利用可能な環境が読み込まれます。接続を保存して起動した後、既存の QCA Agent に紐づく Multica エージェントを追加します。認証情報は暗号化され、ワークスペース内で共有されます。GitHub 認証情報はリポジトリごとに設定し、QCA のセッション作成時に送信されます。
+
+初期版はタスク実行、進捗同期、キャンセル、永続化された実行記録からの復旧に対応します。チャット、ローカルディレクトリ、添付ファイル、リモート QCA Agent の新規作成は未対応です。詳細は [README](https://github.com/multica-ai/multica/blob/main/server/cmd/qoder-runtime/README.md) を参照してください。
+
+
 ## デーモンとランタイムの違い
 
 - **デーモン**は、1 台のコンピュータで動く Multica のバックグラウンドプロセスです。サーバーへの接続、ローカルツールの検出、実行の取得、結果の報告を担当します。

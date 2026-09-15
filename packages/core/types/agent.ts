@@ -696,6 +696,7 @@ export type AgentPermissionScope = "private" | "workspace" | "members";
  * over edits the user made after it.
  */
 export interface StoredAgentDraft {
+  qoder_agent_id?: string;
   name: string;
   description: string;
   instructions: string;
