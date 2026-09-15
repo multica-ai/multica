@@ -1772,6 +1772,34 @@ func TestPerTurnContextBlocksCarryMovedBriefSections(t *testing.T) {
 	}
 }
 
+func TestFeishuDocumentsConnectedAppGuidanceIsScopedAndSecretFree(t *testing.T) {
+	prompt := BuildPrompt(Task{
+		IssueID: "issue-feishu-documents",
+		ConnectedApps: []ConnectedAppData{{
+			Provider:    "feishu",
+			ServerName:  "feishu-documents",
+			ToolkitSlug: "feishu-documents",
+			ToolkitName: "Feishu Documents",
+		}},
+	}, "codex")
+	for _, want := range []string{
+		"Feishu Documents",
+		"current Agent's connected Feishu bot identity",
+		"explicit Feishu document URL",
+		"permission_denied",
+		"Preview destructive or large edits",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("Feishu document prompt missing %q\n---\n%s", want, prompt)
+		}
+	}
+	for _, banned := range []string{"app_secret", "tenant_access_token", "mdt_", "cli_pikachu_secret"} {
+		if strings.Contains(prompt, banned) {
+			t.Fatalf("Feishu document prompt leaked %q\n---\n%s", banned, prompt)
+		}
+	}
+}
+
 // The blocks are per-run, so they must be absent when their preconditions are.
 func TestPerTurnContextBlocksOmittedWhenEmpty(t *testing.T) {
 	t.Parallel()
