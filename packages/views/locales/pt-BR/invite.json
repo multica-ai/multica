@@ -1,0 +1,54 @@
+{
+  "header": {
+    "back": "Voltar",
+    "log_out": "Sair"
+  },
+  "not_found": {
+    "title": "Convite não encontrado",
+    "description": "Este convite pode ter expirado, sido revogado ou não pertencer à sua conta.",
+    "go_to_dashboard": "Ir para o painel"
+  },
+  "accepted": {
+    "title": "Você entrou em {{workspace_name}}!",
+    "redirecting": "Redirecionando para o workspace..."
+  },
+  "declined": {
+    "title": "Convite recusado",
+    "description": "Você não será adicionado a este workspace.",
+    "go_to_dashboard": "Ir para o painel"
+  },
+  "main": {
+    "join_title": "Entrar em {{workspace_name}}",
+    "fallback_workspace_name": "workspace",
+    "invited_role_admin": "convidou você para entrar como admin.",
+    "invited_role_member": "convidou você para entrar como membro.",
+    "already_handled_accepted": "Este convite já foi aceito.",
+    "already_handled_declined": "Este convite já foi recusado.",
+    "expired": "Este convite expirou.",
+    "decline": "Recusar",
+    "declining": "Recusando...",
+    "accept": "Aceitar e entrar",
+    "joining": "Entrando..."
+  },
+  "errors": {
+    "accept_failed": "Falha ao aceitar o convite",
+    "decline_failed": "Falha ao recusar o convite"
+  },
+  "batch": {
+    "log_out": "Sair",
+    "empty_title": "Nenhum convite pendente",
+    "empty_hint": "Continue para configurar seu próprio workspace.",
+    "empty_continue": "Continuar para a configuração",
+    "title": "Você foi convidado",
+    "subtitle": "Escolha os workspaces que deseja entrar. Você sempre pode cuidar do resto depois pela barra lateral.",
+    "submit_skip": "Pular e configurar meu próprio workspace",
+    "submit_join_one": "Entrar em 1 workspace",
+    "submit_join_other": "Entrar em {{count}} workspaces",
+    "joining": "Entrando...",
+    "error_generic": "Falha ao processar os convites. Tente novamente.",
+    "row_workspace_fallback": "Workspace",
+    "row_inviter_fallback": "Alguém",
+    "row_invited_admin": "{{inviter}} convidou você como admin",
+    "row_invited_member": "{{inviter}} convidou você como membro"
+  }
+}

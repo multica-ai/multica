@@ -1,0 +1,75 @@
+{
+  "title": "Cobrança (página de teste)",
+  "subtitle": "Repasse direto para /api/v1/billing/* do multica-cloud. Não é uma UI finalizada — apenas todos os endpoints reunidos em uma página para verificarmos o fluxo de proxy + Stripe.",
+  "endpoints": {
+    "balance": "GET /api/cloud-billing/balance",
+    "transactions": "GET /api/cloud-billing/transactions",
+    "batches": "GET /api/cloud-billing/batches",
+    "topups": "GET /api/cloud-billing/topups",
+    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
+  },
+  "balance": {
+    "title": "Saldo",
+    "credits_suffix": "créditos",
+    "meta": "micro bruto: {{micro}} · proprietário: {{owner}}… · atualizado em {{updated}}"
+  },
+  "buy": {
+    "title": "Comprar créditos / Gerenciar cobrança",
+    "no_tiers": "Nenhum nível de preço configurado. Provavelmente a Cloud não tem uma chave do Stripe definida — o checkout vai retornar 503.",
+    "tier_money_to_credits": "{{money}} → {{credits}} créditos",
+    "tier_bonus": " + {{credits}} de bônus",
+    "tier_bonus_with_expiry": " + {{credits}} de bônus ({{expiry}})",
+    "tier_id": "id: {{id}}",
+    "open_portal": "Abrir o Portal de Cobrança do Stripe",
+    "portal_hint": "400 é esperado para usuários que ainda não pagaram (não existe registro de cliente no Stripe).",
+    "toast_no_url": "A Cloud não retornou uma URL de checkout",
+    "toast_checkout_failed": "Falha no checkout",
+    "toast_no_portal_url": "Nenhuma URL de portal retornada",
+    "toast_portal_failed": "Falha no portal"
+  },
+  "checkout": {
+    "session_label": "Sessão de checkout {{prefix}}…",
+    "loading": "Carregando status do pedido…",
+    "fetch_failed": "Falha ao buscar status: {{error}}",
+    "fetch_failed_unknown": "erro desconhecido",
+    "final_status": "Status final: {{status}}",
+    "polling_status": "Consultando status… atual: {{status}}",
+    "status_unknown": "desconhecido",
+    "label_order": "Pedido",
+    "label_tier": "Nível",
+    "label_charged": "Cobrado",
+    "charged_value": "{{money}} · {{credits}} créditos",
+    "charged_with_bonus": "{{money}} · {{credits}} créditos + {{bonus}} de bônus",
+    "clear_url": "Limpar da URL"
+  },
+  "transactions": {
+    "title": "Transações",
+    "empty": "Ainda não há transações.",
+    "credits_value": "{{value}} créditos",
+    "row_meta": "{{date}} · saldo após: {{balance}} créditos · ref: {{ref}}",
+    "ref_empty": "—"
+  },
+  "batches": {
+    "title": "Lotes de créditos",
+    "empty": "Ainda não há lotes.",
+    "remaining_over_total": "{{remaining}} / {{total}} créditos",
+    "id_suffix": "{{id}}…",
+    "consumed": "Consumido: {{value}} créditos",
+    "expires_suffix": " · expira em {{value}}",
+    "never_expires_suffix": " · nunca expira"
+  },
+  "topups": {
+    "title": "Pedidos de recarga",
+    "empty": "Ainda não há pedidos de recarga.",
+    "amount_to_credits": "{{money}} → {{credits}} créditos",
+    "amount_to_credits_with_bonus": "{{money}} → {{credits}} créditos + {{bonus}} de bônus",
+    "row_meta": "{{date}} · stripe: {{checkout}}",
+    "stripe_empty": "—"
+  },
+  "shared": {
+    "request_failed": "Falha na requisição",
+    "refresh": "Atualizar",
+    "paging": "página {{page}} / {{totalPages}} · {{total}} no total",
+    "date_dash": "—"
+  }
+}

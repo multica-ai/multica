@@ -1,0 +1,120 @@
+{
+  "bubble_menu": {
+    "bold": "Negrito",
+    "italic": "Itálico",
+    "strikethrough": "Tachado",
+    "code": "Código",
+    "highlight": "Destaque",
+    "link": "Link",
+    "list": "Lista",
+    "task_list": "Lista de tasks",
+    "quote": "Citação",
+    "url_aria_label": "URL",
+    "heading_dropdown": {
+      "text": "Texto",
+      "normal_text": "Texto normal",
+      "heading_1": "Título 1",
+      "heading_2": "Título 2",
+      "heading_3": "Título 3"
+    },
+    "list_dropdown": {
+      "bullet_list": "Lista com marcadores",
+      "ordered_list": "Lista numerada",
+      "task_list": "Lista de tasks"
+    },
+    "sub_issue": {
+      "tooltip": "Criar sub-issue a partir da seleção",
+      "created": "{{identifier}} criada",
+      "create_failed": "Falha ao criar a sub-issue"
+    }
+  },
+  "image": {
+    "view": "Ver imagem",
+    "download": "Baixar",
+    "copy_link": "Copiar link",
+    "delete": "Excluir",
+    "link_copied": "Link copiado",
+    "copy_link_failed": "Falha ao copiar o link",
+    "canvas_label": "Tela da imagem. Arraste para navegar, role para dar zoom, clique duas vezes para alternar o tamanho real.",
+    "previous": "Imagem anterior",
+    "next": "Próxima imagem",
+    "sequence_position": "{{index}} / {{total}}",
+    "unavailable": "Essa imagem não está mais disponível — foi ignorada."
+  },
+  "canvas": {
+    "zoom_in": "Aumentar zoom",
+    "zoom_out": "Diminuir zoom",
+    "zoom_fit": "Ajustar à tela",
+    "zoom_actual": "Tamanho real"
+  },
+  "attachment": {
+    "download_failed": "Não foi possível obter um link de download. Tente novamente em instantes.",
+    "preview": "Visualizar",
+    "preview_loading": "Carregando visualização…",
+    "preview_failed": "Não foi possível carregar a visualização",
+    "preview_too_large": "O arquivo é grande demais para visualizar. Baixe-o.",
+    "preview_unsupported": "Este tipo de arquivo não pode ser visualizado.",
+    "close": "Fechar",
+    "open_in_new_tab": "Abrir em nova aba",
+    "remove": "Remover anexo"
+  },
+  "link_hover": {
+    "copy_link": "Copiar link",
+    "open_link": "Abrir link",
+    "link_copied": "Link copiado",
+    "copy_failed": "Falha ao copiar"
+  },
+  "mention": {
+    "group_users": "Usuários",
+    "group_issues": "Issues",
+    "all_members": "Todos os membros",
+    "searching": "Buscando...",
+    "no_results": "Nenhum resultado",
+    "group_current": "Página atual",
+    "group_recent": "Visualizados recentemente",
+    "group_search": "Resultados da busca",
+    "group_cancelled": "Cancelado"
+  },
+  "slash_command": {
+    "no_skills_configured": "Nenhuma skill configurada",
+    "no_results": "Nenhuma skill correspondente",
+    "commands": {
+      "note": "Adicionar uma nota — não vai acionar nenhum agent"
+    }
+  },
+  "code_block": {
+    "copy_code": "Copiar código",
+    "show_preview": "Mostrar visualização",
+    "show_source": "Mostrar código-fonte",
+    "fullscreen": "Tela cheia"
+  },
+  "file_card": {
+    "uploading": "Enviando {{filename}}"
+  },
+  "upload": {
+    "failed": "Não foi possível enviar {{filename}}: {{reason}}",
+    "in_progress": "Enviando…",
+    "interrupted": "Envio interrompido — o arquivo não foi salvo. Anexe-o novamente.",
+    "remove": "Remover",
+    "uploading_label": "Enviando {{filename}}…",
+    "failed_label": "Não foi possível enviar {{filename}}"
+  },
+  "title_editor": {
+    "title_aria_label": "Título"
+  },
+  "mermaid": {
+    "render_error": "Não foi possível renderizar o diagrama Mermaid.",
+    "rendering": "Renderizando diagrama…",
+    "viewer_title": "Diagrama",
+    "canvas_label": "Tela do diagrama. Arraste para navegar, role para dar zoom.",
+    "open_viewer": "Abrir visualizador de diagrama",
+    "close_viewer": "Fechar",
+    "copy_source": "Copiar código-fonte do diagrama",
+    "show_source": "Mostrar código-fonte",
+    "show_diagram": "Mostrar diagrama",
+    "export": "Exportar",
+    "export_png": "Baixar PNG",
+    "export_svg": "Baixar SVG",
+    "export_source": "Baixar .mmd"
+  }
+}

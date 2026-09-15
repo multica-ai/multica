@@ -1,0 +1,272 @@
+{
+  "welcome": {
+    "wordmark": "Bem-vindo ao Multica",
+    "headline_line1": "Seus colegas de equipe com IA,",
+    "headline_line2": "em",
+    "headline_emphasis": "um único workspace.",
+    "lede": "Atribua trabalho a eles como faria com um colega — eles pegam a tarefa, atualizam o status e comentam quando terminam.",
+    "lede_web": "O Desktop já vem com o runtime — nada para instalar. Continue na web para conectar sua própria CLI.",
+    "lede_desktop": "No final, um agent de verdade vai responder à sua primeira issue.",
+    "download_desktop": "Baixar o Desktop",
+    "continue_on_web": "Continuar na web",
+    "start_exploring": "Começar a explorar",
+    "skip_existing": "Já fiz isso antes",
+    "illustration_caption": "Cada issue, cada thread, cada decisão — compartilhada pela sua equipe e pelos agents.",
+    "illustration": {
+      "card1_actor_name": "Você",
+      "card1_actor_initial": "N",
+      "card1_body_prefix": " pode rascunhar um post curto de lançamento? Puxe informações das descobertas da entrevista do ",
+      "card1_body_suffix": ".",
+      "card1_mention_content": "@Content Agent",
+      "card1_mention_research": "@Research Agent",
+      "card2_actor_name": "Content Agent",
+      "card2_body": "Já estou nisso. Puxando as citações do Research e rascunhando em torno do ângulo de \"tempo economizado\"…",
+      "card3_actor_name": "Research Agent",
+      "card3_body": "Resumo das entrevistas com usuários desta semana — 12 chamadas, 4 temas recorrentes, 3 citações de destaque.",
+      "card3_timestamp": "há 15 min",
+      "card4_actor_name": "Review Agent",
+      "card4_body": "Revisei o rascunho de segunda-feira — deixei 4 observações sobre o tom. Aguardando a próxima versão.",
+      "card5_actor_name": "Coding Agent",
+      "card5_body_prefix": "Lancei a funcionalidade de exportação que ",
+      "card5_body_suffix": " sinalizou. Link de preview no PR.",
+      "card5_mention_you": "@você",
+      "card5_timestamp": "agora mesmo"
+    }
+  },
+  "common": {
+    "back": "Voltar",
+    "continue": "Continuar",
+    "skip": "Pular",
+    "cancel": "Cancelar",
+    "close": "Fechar",
+    "log_out": "Sair"
+  },
+  "source_backfill": {
+    "eyebrow": "Pergunta rápida",
+    "lede": "Uma pergunta rápida — ela nos ajuda a entender quem acha o Multica útil. Responda uma vez e volte ao seu trabalho.",
+    "submit": "Enviar",
+    "hint_ready": "Ótimo. Clique em Enviar quando estiver pronto."
+  },
+  "questions": {
+    "about_you": {
+      "question": "Conte um pouco sobre você."
+    },
+    "source": {
+      "question": "Como você conheceu o Multica?",
+      "friends_colleagues": "Amigos ou colegas",
+      "search": "Google / busca",
+      "social_x": "X / Twitter",
+      "social_linkedin": "LinkedIn",
+      "social_youtube": "YouTube",
+      "social_github": "GitHub",
+      "social_misc": "Outra rede social",
+      "blog_newsletter": "Blog / newsletter",
+      "ai_assistant": "ChatGPT / Claude / Cursor",
+      "from_work": "No trabalho",
+      "event_conference": "Conferência / meetup",
+      "dont_remember": "Não me lembro",
+      "other": "Outro",
+      "other_placeholder": "ex.: um podcast que eu escuto"
+    },
+    "role": {
+      "question": "Qual das opções melhor descreve você?",
+      "engineer": "Engenheiro(a) / desenvolvedor(a)",
+      "product": "Gerente de produto",
+      "designer": "Designer",
+      "founder": "Fundador(a) / executivo(a)",
+      "marketing": "Marketing / growth",
+      "writer": "Redator(a) / conteúdo",
+      "research": "Pesquisador(a) / analista",
+      "ops": "Operações / gestão de projetos",
+      "student": "Estudante / uso pessoal",
+      "other": "Outro",
+      "other_placeholder": "ex.: professor(a), líder de suporte"
+    },
+    "use_case": {
+      "question": "Para que você quer usar o Multica?",
+      "ship_code": "Lançar código com agents de IA",
+      "manage_team": "Gerenciar tarefas da minha equipe",
+      "personal_tasks": "Organizar minhas próprias tarefas",
+      "plan_research": "Planejar, gerar ideias, pesquisar",
+      "write_publish": "Escrever, editar, publicar",
+      "automate_ops": "Automatizar operações e fluxos de trabalho",
+      "evaluate": "Só estou explorando",
+      "other": "Outro",
+      "other_placeholder": "ex.: coordenação de grupo de estudos"
+    }
+  },
+  "option_card": {
+    "other_label": "Outro",
+    "other_aria": "Descrever outra coisa"
+  },
+  "step_question": {
+    "hint_pick": "Escolha uma opção para continuar — ou pule se preferir não dizer.",
+    "hint_continue": "Ótimo. Clique em Continuar quando estiver pronto."
+  },
+  "cli_install": {
+    "copy_aria": "Copiar",
+    "intro": "Você vai precisar de um agent runtime neste computador (Claude Code, Codex, Cursor, …) para que ele execute seu agent. Também funciona em servidores e máquinas de desenvolvimento remotas.",
+    "step1_label": "Instale a CLI do Multica",
+    "step2_label": "Inicie o daemon"
+  },
+  "cloud_waitlist": {
+    "intro_main": "Os runtimes na nuvem ainda não estão disponíveis. Deixe seu e-mail e entraremos em contato assim que estiverem.",
+    "intro_warning": "Atenção: os agents não conseguem executar tarefas sem um runtime — se você pular agora, seu workspace ficará somente leitura até você voltar e instalar um.",
+    "email_label": "E-mail",
+    "email_placeholder": "voce@trabalho.com",
+    "reason_label": "Por que nuvem?",
+    "optional": "Opcional",
+    "reason_placeholder": "ex.: queremos agents rodando 24/7, ou minha equipe trabalha em dispositivos diferentes.",
+    "join": "Entrar na lista de espera",
+    "on_list": "Você está na lista",
+    "success_toast": "Você está na lista. Vamos te avisar por e-mail quando os runtimes na nuvem estiverem disponíveis.",
+    "failed_toast": "Falha ao entrar na lista de espera"
+  },
+  "welcome_after_onboarding": {
+    "skip": {
+      "loading": "Configurando seu workspace…",
+      "title": "Bem-vindo ao Multica!",
+      "subtitle": "Adicionamos duas tarefas para te ajudar no próximo passo.",
+      "got_it": "Entendi",
+      "status_in_progress": "Em andamento",
+      "cards": {
+        "install_runtime": {
+          "title": "Conecte um runtime",
+          "subtitle": "Instale o Codex ou o Kimi para colocar os agents online."
+        }
+      },
+      "error_title": "Não conseguimos configurar isso",
+      "error_body": "O guia de runtime não foi criado. Você pode tentar novamente ou conectar um runtime pela página de Runtimes quando estiver pronto.",
+      "retry": "Tentar novamente",
+      "dismiss": "Agora não"
+    }
+  },
+  "step_workspace": {
+    "eyebrow_first": "Seu primeiro workspace",
+    "eyebrow_resume": "Retome ou comece do zero",
+    "headline_first": "Dê um nome ao seu workspace.",
+    "headline_resume": "Continue com {{name}}, ou comece outro.",
+    "lede_first": "Um workspace é onde vivem suas issues, agents e projetos. Você pode convidar colegas de equipe ou criar mais workspaces depois.",
+    "lede_resume": "Retome a configuração com o workspace que você já tem, ou crie um novo ao lado dele — você pode fazer parte de quantos workspaces quiser.",
+    "name_label": "Nome do workspace",
+    "name_placeholder": "Acme Inc, Meu Laboratório, Projetos Paralelos…",
+    "url_label": "URL",
+    "slug_placeholder": "acme",
+    "issue_prefix_label": "Prefixo de issue",
+    "issue_prefix_prefix": "As issues vão ficar assim: ",
+    "issue_prefix_suffix": ". Você pode mudar isso depois nas configurações.",
+    "create_new_title": "Criar um novo workspace",
+    "create_new_subtitle": "Comece do zero — um espaço separado para um lado diferente do seu trabalho.",
+    "hint_opening": "Abrindo {{name}}.",
+    "hint_creating": "Criando {{name}}.",
+    "hint_creating_pending": "Criando {{name}}…",
+    "hint_creating_fallback": "seu workspace",
+    "hint_name_first": "Dê um nome ao seu workspace para criá-lo.",
+    "hint_pick": "Escolha seu workspace ou comece um novo.",
+    "cta_open": "Abrir {{name}}",
+    "cta_create_named": "Criar {{name}}",
+    "cta_create_workspace": "Criar workspace",
+    "cta_creating": "Criando…",
+    "slug_format_error": "Apenas letras minúsculas, números e hífens",
+    "slug_taken_error": "Essa URL de workspace já está em uso.",
+    "slug_reserved_error": "Essa URL de workspace é reservada e não pode ser usada.",
+    "slug_conflict_toast": "Escolha uma URL de workspace diferente",
+    "create_failed_toast": "Falha ao criar workspace",
+    "creation_disabled_eyebrow": "A criação de workspace está desativada",
+    "creation_disabled_headline": "Peça um convite ao seu administrador.",
+    "creation_disabled_lede": "Esta instância do Multica não permite a criação de novos workspaces. Assim que um administrador te convidar para um workspace, aceite o convite e atualize a página para continuar.",
+    "creation_disabled_logout": "Sair",
+    "creation_disabled_eyebrow_resume": "Seu workspace",
+    "creation_disabled_headline_resume": "Continue com {{name}}.",
+    "creation_disabled_lede_resume": "A criação de workspace está desativada nesta instância, então você vai continuar no seu workspace existente.",
+    "random_name": "Aleatório"
+  },
+  "step_runtime": {
+    "scanning_headline": "Conectando este computador…",
+    "scanning_lede_prefix": "Seu agent trabalha por meio de uma ferramenta de codificação de IA que você já tem — como ",
+    "scanning_lede_suffix": ", entre outras. Estamos verificando quais você tem instaladas neste computador.",
+    "found_headline": "Este computador está conectado. Escolha um agent runtime.",
+    "found_lede": "Estes são os agent runtimes que encontramos neste computador. Escolha um para o seu primeiro agent — você pode trocar ou adicionar mais depois.",
+    "runtime_count_one": "{{count}} agent runtime",
+    "runtime_count_other": "{{count}} agent runtimes",
+    "status_all_online": "todos online",
+    "status_none_online": "nenhum online",
+    "status_n_online": "{{count}} online",
+    "online_label": "online",
+    "offline_label": "offline",
+    "empty_headline": "Nenhum agent runtime encontrado neste computador ainda.",
+    "empty_lede_prefix": "Um agent runtime é uma ferramenta de codificação de IA à qual nos conectamos — como ",
+    "empty_lede_suffix": ". Instale uma e atualize a página, ou escolha um caminho abaixo.",
+    "empty_skip_title": "Pular por enquanto",
+    "empty_skip_subtitle": "Entre no seu workspace em modo somente leitura. Seu agent não pode executar tarefas até que um agent runtime seja conectado neste computador — mas você ainda pode navegar, planejar e convidar colegas de equipe.",
+    "empty_skip_action": "Pular",
+    "empty_waitlist_title": "Usar um computador na nuvem",
+    "empty_waitlist_subtitle": "Vamos rodar um computador para você na nuvem. Ainda não disponível.",
+    "empty_waitlist_action": "Em breve",
+    "skip": "Pular por enquanto",
+    "refresh": "Atualizar",
+    "refreshing": "Atualizando…",
+    "hint_selected": "Selecionado: {{name}}",
+    "hint_pick": "Escolha um agent runtime acima para continuar.",
+    "hint_waiting": "Aguardando o primeiro resultado…",
+    "hint_skip_or_refresh": "Atualize depois de instalar um, ou pule para entrar no seu workspace.",
+    "continue": "Começar com a Mika"
+  },
+  "step_platform": {
+    "eyebrow": "Conecte um computador",
+    "headline": "Conecte um computador para rodar seu agent.",
+    "lede": "Seu agent roda em um computador de verdade que você conecta ao Multica. Escolha como quer conectar um.",
+    "hint_default": "Escolha uma forma de conectar — ou pule e conecte um computador depois.",
+    "download_title": "Usar este computador",
+    "download_subtitle": "Instale nosso app desktop para conectar este computador. Configuração zero — escolha sua plataforma na próxima página.",
+    "download_button": "Baixar",
+    "cli_title": "Conectar pelo terminal",
+    "cli_subtitle": "Conecte um servidor, uma máquina de desenvolvimento remota ou qualquer computador sem interface gráfica. Requer terminal.",
+    "cli_action": "Mostrar passos",
+    "cloud_title": "Usar um computador na nuvem",
+    "cloud_subtitle": "Vamos rodar um computador para você na nuvem. Ainda não disponível.",
+    "cloud_action": "Em breve",
+    "cli_dialog_title": "Conectar pelo terminal",
+    "cli_dialog_description": "Mesma conexão do Desktop, configurada pelo terminal. Use para servidores, máquinas de desenvolvimento remotas ou qualquer computador sem interface gráfica.",
+    "cli_dialog_pick_hint": "Escolha um computador acima.",
+    "cli_dialog_connect": "Conectar e continuar",
+    "runtimes_connected_one": "{{count}} computador conectado",
+    "runtimes_connected_other": "{{count}} computadores conectados",
+    "live_listening": "Ao vivo · Aguardando seu computador",
+    "stage_normal_prefix": "Execute o comando acima. Assim que ",
+    "stage_normal_suffix": " terminar o login pelo navegador, seu computador vai aparecer aqui automaticamente (geralmente 10 a 30 segundos).",
+    "stage_midway_prefix": "Ainda aguardando. Confirme se você terminou a aba do navegador que ",
+    "stage_midway_suffix": " abriu — ela precisa que você aprove o login antes que seu computador possa se conectar.",
+    "stage_slow_prefix": "Está demorando mais que o normal. Verifique o terminal onde você executou ",
+    "stage_slow_suffix": " em busca de erros.",
+    "stage_stalled_prefix": "Nada chegando ainda. Se você não se sente confortável com o terminal, ",
+    "stage_stalled_term": "o Desktop",
+    "stage_stalled_suffix": " é o caminho mais tranquilo — um clique e este computador está conectado. Feche esta janela e escolha o Desktop, ou clique em Pular para continuar."
+  },
+  "errors": {
+    "skip_failed": "Falha ao concluir o onboarding",
+    "mika_setup_failed": "Não foi possível iniciar seu workspace da Mika"
+  },
+  "step_nav": {
+    "wordmark": "Multica",
+    "label": "Etapas de onboarding",
+    "about_you": {
+      "label": "Sobre você",
+      "description": "Sua função e o que você quer fazer."
+    },
+    "workspace": {
+      "label": "Workspace",
+      "description": "Dê um nome e escolha a URL."
+    },
+    "runtime": {
+      "label": "Conheça a Mika",
+      "description": "Seu primeiro agent de equipe e onde ele roda."
+    }
+  },
+  "mika_intro": {
+    "headline": "Conheça a Mika, seu primeiro agent de equipe.",
+    "name": "Mika",
+    "role": "Chefe de Gabinete",
+    "blurb": "Diga à Mika o que você quer fazer. Isso vira uma issue, com o agent certo cuidando dela."
+  }
+}
