@@ -531,6 +531,14 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"pi", "max", true},
 		{"pi", "ultra", false},
 		{"pi", "future-level", false},
+		{"omp", "", true},
+		{"omp", "off", true},
+		{"omp", "minimal", true},
+		{"omp", "max", true},
+		// omp's --thinking accepts `auto`, but it picks an effort rather than
+		// being one, so Multica deliberately does not expose it (MUL-7412).
+		{"omp", "auto", false},
+		{"omp", "future-level", false},
 		{"kimi", "", true},
 		{"kimi", "low", true},
 		{"kimi", "max", true},
@@ -577,6 +585,7 @@ func TestThinkingControlSupported(t *testing.T) {
 		{"dsh", true},      // dynamic catalog from the installed DSH profile
 		{"opencode", true}, // dynamic variant names from opencode.json
 		{"pi", true},       // fixed tokens, per-model subset discovered over RPC
+		{"omp", true},      // pi backend identity; per-model subset from `omp models --json`
 		{"hermes", true},   // jcode applies it; Hermes Agent gets an empty catalog
 		{"kimi", true},     // dynamic catalog; ACP session/set_config_option applies it
 		{"qwenpaw", false},
@@ -597,7 +606,7 @@ func TestThinkingControlSupported(t *testing.T) {
 // reject a level while claiming the runtime supports one, or vice versa.
 func TestThinkingControlSupportedMatchesTokenGate(t *testing.T) {
 	t.Parallel()
-	providers := []string{"claude", "codebuddy", "grok", "codex", "opencode", "pi", "hermes", "kimi", "cursor"}
+	providers := []string{"claude", "codebuddy", "grok", "codex", "opencode", "pi", "omp", "hermes", "kimi", "cursor"}
 	// "medium" is in every fixed enum and is a well-formed dynamic token, so a
 	// provider with any reasoning control accepts it.
 	for _, provider := range providers {

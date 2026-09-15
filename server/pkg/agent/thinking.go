@@ -648,6 +648,9 @@ func catalogLoader(ctx context.Context, providerType string, cmd Command) func()
 //     "unknown model → reject" (the misjudgement flagged in an earlier
 //     review). opencode has no single default, so it accepts a level any
 //     advertised model supports.
+//   - omp: fails closed as well. Its catalog marks no default and omp
+//     clamps the level to whichever model its own default role resolves to,
+//     so a level validated against another entry is not the one that runs.
 //
 // The lookup goes through ListModels so it sees the *current* CLI
 // catalog (including dynamic discovery for codex), not just a static
@@ -698,6 +701,17 @@ func ValidateThinkingLevelWith(loadCatalog func() (Catalog, error), providerType
 			}
 		}
 		if target == "" {
+			// opencode has no single default model, so it accepts a level any
+			// advertised model supports.
+			//
+			// omp deliberately does NOT join it. Its `models --json` catalog marks
+			// no default at all and sorts by provider/id, so no entry here is the
+			// one that would run; at task time omp resolves its own default role
+			// model and then clamps the requested level to what THAT model
+			// supports. Passing a level because some other entry advertises it
+			// would let a user save `max` and silently run at whatever the real
+			// default tops out at — the mismatch MUL-7412 exists to remove. An omp
+			// agent must pin a model to carry an effort.
 			if providerType == "opencode" {
 				return anyModelSupportsThinkingValue(models, value), nil
 			}
@@ -824,6 +838,20 @@ var providerThinkingEnums = map[string]map[string]bool{
 	// Pi owns a fixed CLI vocabulary; RPC discovery narrows this universe to
 	// the exact subset supported by each model before execution.
 	"pi": {
+		"off":     true,
+		"minimal": true,
+		"low":     true,
+		"medium":  true,
+		"high":    true,
+		"xhigh":   true,
+		"max":     true,
+	},
+	// omp (Oh-My-Pi) dispatches to the pi backend (see BuiltinRuntimes), so it
+	// inherits pi's fixed CLI vocabulary; discoverOmpModels narrows it to each
+	// model's advertised efforts before execution. `auto` is deliberately absent
+	// even though omp's --thinking accepts it — see ompThinkingFromCatalogEntry
+	// (MUL-7412).
+	"omp": {
 		"off":     true,
 		"minimal": true,
 		"low":     true,
