@@ -130,6 +130,18 @@ func newWSSender(conn wsConn, log *slog.Logger) *wsSender {
 // lockWriter takes the writer, or gives up when ctx does. A caller with no
 // deadline of its own — the ping, the subscribe handshake, a proactive push —
 // passes context.Background() and waits as long as it takes.
+// tryLockWriter takes the writer if it is free, without waiting. It exists for
+// the same reason sync.Mutex.TryLock does: a probe that needs to know whether
+// somebody else is inside, and must not queue behind them to find out.
+func (s *wsSender) tryLockWriter() bool {
+	select {
+	case s.wmu <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *wsSender) lockWriter(ctx context.Context) error {
 	select {
 	case s.wmu <- struct{}{}:
