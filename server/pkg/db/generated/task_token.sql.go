@@ -69,6 +69,39 @@ func (q *Queries) DeleteTaskTokensByTask(ctx context.Context, taskID pgtype.UUID
 	return err
 }
 
+const getTaskTokenAutopilotRunByIssue = `-- name: GetTaskTokenAutopilotRunByIssue :one
+SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, planned_at, webhook_delivery_id, quota_reservation_id, reason_code FROM autopilot_run WHERE issue_id = $1
+ORDER BY triggered_at DESC, id DESC LIMIT 1
+`
+
+// Completed schedule roots still authorize their queued descendants. The
+// general dispatch lookup only returns active runs and cannot prove this.
+func (q *Queries) GetTaskTokenAutopilotRunByIssue(ctx context.Context, issueID pgtype.UUID) (AutopilotRun, error) {
+	row := q.db.QueryRow(ctx, getTaskTokenAutopilotRunByIssue, issueID)
+	var i AutopilotRun
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.TriggerID,
+		&i.Source,
+		&i.Status,
+		&i.IssueID,
+		&i.TaskID,
+		&i.TriggeredAt,
+		&i.CompletedAt,
+		&i.FailureReason,
+		&i.TriggerPayload,
+		&i.Result,
+		&i.CreatedAt,
+		&i.SquadID,
+		&i.PlannedAt,
+		&i.WebhookDeliveryID,
+		&i.QuotaReservationID,
+		&i.ReasonCode,
+	)
+	return i, err
+}
+
 const getTaskTokenByHash = `-- name: GetTaskTokenByHash :one
 SELECT id, token_hash, task_id, agent_id, workspace_id, user_id, expires_at, created_at FROM task_token
 WHERE token_hash = $1 AND expires_at > now()
@@ -86,6 +119,58 @@ func (q *Queries) GetTaskTokenByHash(ctx context.Context, tokenHash string) (Tas
 		&i.UserID,
 		&i.ExpiresAt,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getTaskTokenChainRoot = `-- name: GetTaskTokenChainRoot :one
+WITH RECURSIVE lineage AS (
+    SELECT atq.id, atq.originator_user_id, atq.originator_source,
+           atq.delegated_from_task_id, atq.autopilot_run_id, atq.issue_id, 0 AS depth
+    FROM agent_task_queue atq
+    JOIN agent a ON a.id = atq.agent_id
+    WHERE atq.id = $1 AND a.workspace_id = $2
+
+    UNION ALL
+
+    SELECT parent.id, parent.originator_user_id, parent.originator_source,
+           parent.delegated_from_task_id, parent.autopilot_run_id, parent.issue_id, child.depth + 1
+    FROM lineage child
+    JOIN agent_task_queue parent ON parent.id = child.delegated_from_task_id
+    JOIN agent a ON a.id = parent.agent_id
+    WHERE child.originator_source IN ('delegation', 'comment_source')
+      AND parent.originator_user_id = child.originator_user_id
+      AND a.workspace_id = $2
+      AND child.depth < 32
+)
+SELECT id, originator_user_id, originator_source, autopilot_run_id, issue_id
+FROM lineage ORDER BY depth DESC LIMIT 1
+`
+
+type GetTaskTokenChainRootParams struct {
+	TaskID      pgtype.UUID `json:"task_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type GetTaskTokenChainRootRow struct {
+	ID               pgtype.UUID `json:"id"`
+	OriginatorUserID pgtype.UUID `json:"originator_user_id"`
+	OriginatorSource pgtype.Text `json:"originator_source"`
+	AutopilotRunID   pgtype.UUID `json:"autopilot_run_id"`
+	IssueID          pgtype.UUID `json:"issue_id"`
+}
+
+// Follow only same-human, same-workspace delegation edges. A broken edge,
+// cycle, or excessive depth leaves a hop label, which the signer refuses.
+func (q *Queries) GetTaskTokenChainRoot(ctx context.Context, arg GetTaskTokenChainRootParams) (GetTaskTokenChainRootRow, error) {
+	row := q.db.QueryRow(ctx, getTaskTokenChainRoot, arg.TaskID, arg.WorkspaceID)
+	var i GetTaskTokenChainRootRow
+	err := row.Scan(
+		&i.ID,
+		&i.OriginatorUserID,
+		&i.OriginatorSource,
+		&i.AutopilotRunID,
+		&i.IssueID,
 	)
 	return i, err
 }

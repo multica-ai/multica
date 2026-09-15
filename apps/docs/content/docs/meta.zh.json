@@ -48,6 +48,7 @@
     "---自托管---",
     "security-model",
     "environment-variables",
+    "task-identity-tokens",
     "auth-setup",
     "troubleshooting",
     "---参考---",
