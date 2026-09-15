@@ -178,6 +178,17 @@ multica runtime activity <runtime-id>
 
 `multica chat`은 **에이전트가 현재 처리 중인 외부 채팅 대화**를 읽으며 주로 채팅 연동의 에이전트가 사용합니다. 워크스페이스의 임의 대화를 탐색하는 일반 명령이 아닙니다.
 
+## 에이전트 아바타
+
+에이전트를 생성할 때 아바타를 설정하거나 이후 `--avatar-emoji`로 업데이트합니다:
+
+```bash
+multica agent create --name Fox --runtime-id <runtime-id> --avatar-emoji '🦊'
+multica agent update <agent-id> --avatar-emoji '🦊'
+```
+
+이 옵션은 이모지를 받으며 빈 문자열이나 공백만으로는 설정할 수 없습니다. 생성 시 생략하면 무작위 기본 아바타가 유지되고, 업데이트 시 생략하면 현재 아바타가 유지됩니다. 로컬 이미지를 업로드하려면 `multica agent avatar <agent-id> --file <image>`를 사용하세요.
+
 ## ID와 출력 형식
 
 태스크에는 `MUL-123` 같은 key 또는 전체 UUID를 사용하며 UUID 짧은 접두사는 허용하지 않습니다.
@@ -249,7 +260,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `resource list/add/update/remove` | 프로젝트 추가 리소스 관리 | `--type`, `--url`, `--local-path`, `--daemon-id`, `--execution-mode`(로컬 디렉터리의 `in_place` / `worktree`) |
 | `label` | `list/get/create/update/delete` | 워크스페이스 라벨 관리 | |
 | `property` | `list/get/create/update/archive/unarchive` | 워크스페이스 사용자 지정 속성 관리 | `create`: `--name`, `--type`(`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`), `--option`(반복 가능, select 유형만). `list`: `--include-archived`. 유형은 생성 후 변경 불가 |
-| `agent` | `list/get/create/update/archive/restore` | 에이전트 관리 | `--name`, `--runtime-id`(`create`에서 필수), `--instructions`, `--conversation-starters`, `--model`, `--thinking-level`, `--mcp-config`, `--permission-mode`, `--max-concurrent-tasks` |
+| `agent` | `list/get/create/update/archive/restore` | 에이전트 관리 | `--name`, `--avatar-emoji`(이모지), `--runtime-id`(`create`에서 필수), `--instructions`, `--conversation-starters`, `--model`, `--thinking-level`, `--mcp-config`, `--permission-mode`, `--max-concurrent-tasks` |
 | | `copy <agent-id>` | 원래 에이전트에 영향 없이 새 에이전트로 복사 | `--name`(기본값은 원래 이름 + ` (copy)`), `--runtime-id`(다른 런타임으로 복사할 때 `--model`도 필수), `--no-skills`. `custom_env`, `mcp_config`, `runtime_config` 같은 기밀 설정은 복사되지 않으며 `create`와 같은 flag로 다시 제공해야 함 |
 | | `tasks <id>` | 에이전트 실행 확인 | |
 | | `avatar <id>` | 아바타 업로드 | |
