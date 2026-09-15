@@ -1774,6 +1774,7 @@ export const AgentTaskSchema = z.object({
   completed_at: z.string().nullable().default(null),
   result: z.unknown().default(null),
   error: z.string().nullable().default(null),
+  warnings: OptionalStringArraySchema,
   failure_reason: z.string().optional(),
   created_at: z.string().default(""),
   chat_session_id: z.string().optional(),
