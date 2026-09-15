@@ -7,6 +7,11 @@ version tag such as `v0.18.4`. The Release workflow intentionally has no manual
 trigger: a tag push is the only event that can publish binaries, Homebrew
 formulae, and container images.
 
+The macOS Desktop artifacts are still signed and notarized on the designated
+release Mac. Use the repository's
+[`release-desktop`](../.agents/skills/release-desktop/SKILL.md) skill after the
+matching GitHub Release and CLI assets exist.
+
 The verification job runs the Go tests and `govulncheck` before any publishing
 job starts. The vulnerability scan is fail-closed by default.
 
