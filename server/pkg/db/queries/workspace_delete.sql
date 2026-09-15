@@ -454,6 +454,9 @@ deleted_channel_chat_bindings AS (
 deleted_dingtalk_group_routes AS (
     DELETE FROM dingtalk_group_route WHERE workspace_id = $1
 ),
+deleted_issue_scheduled_triggers AS (
+    DELETE FROM issue_scheduled_trigger WHERE workspace_id = $1
+),
 deleted_channel_inbound_dedup AS (
     DELETE FROM channel_inbound_message_dedup
     WHERE installation_id IN (SELECT id FROM ws_channel_installations)
