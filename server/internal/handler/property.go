@@ -50,6 +50,12 @@ const (
 	// bag shares one 16KB row budget, and a property holding hundreds of
 	// actors would crowd out every other property on the same issue.
 	maxPropertyActorValues = 20
+
+	// scalarPropertyFacetLimit bounds the per-value scalar facet (text / url /
+	// date / number): the filter menu lists at most this many observed values
+	// by count, and the free input covers anything the limit drops. Matched to
+	// maxPropertySelectOptions so scalar pick lists feel like select lists.
+	scalarPropertyFacetLimit = 50
 )
 
 var validPropertyTypes = []string{"text", "number", "select", "multi_select", "date", "checkbox", "url", "actor", "multi_actor"}
@@ -1073,7 +1079,18 @@ func (h *Handler) withPropertyLock(r *http.Request, lockKeys []string, fn func(q
 
 const (
 	maxPropertiesFilterDefinitions = 20
-	maxPropertiesFilterValues      = 50
+	// The cap must exceed the largest member set the UI can produce in one
+	// definition: 50 select options or scalar observed values, plus the
+	// scalar input's unlisted value, plus the "__none__" sentinel — 52 — so
+	// checking every offered checkbox cannot build a filter the server then
+	// rejects on every issues query.
+	maxPropertiesFilterValues = 64
+	// Plain string members can expand to three containment alternatives (string,
+	// array element, and numeric/boolean forms). Bound the aggregate at the
+	// maximum across every allowed definition while retaining the per-definition
+	// cap above, so a valid UI selection cannot be rejected by a smaller global
+	// fan-out limit.
+	maxPropertiesFilterAlternatives = maxPropertiesFilterDefinitions * maxPropertiesFilterValues * 3
 	// noPropertyValue is the filter value that means "unset" — it compiles to a
 	// key-absence predicate instead of a jsonb containment pattern. The string
 	// cannot collide with a real option id (select option ids are UUIDs and
@@ -1321,7 +1338,7 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 	}
 	// Bound the OR fan-out: each alternative becomes one bind parameter in
 	// the SQL below, and a runaway filter would bloat the statement.
-	if totalAlternatives > 256 {
+	if totalAlternatives > maxPropertiesFilterAlternatives {
 		writeError(w, http.StatusBadRequest, "properties filter is too large")
 		return nil, false
 	}
