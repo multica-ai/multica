@@ -18,6 +18,9 @@ from typing import Optional
 from retention_worker import atomic_write_failure_report, send_alert
 
 
+DEFAULT_TIMEOUT_SECONDS = 870
+
+
 class SingleInstanceLock:
     def __init__(self, path: Path):
         self.path = path
@@ -165,7 +168,7 @@ def main() -> int:
     parser.add_argument("--trigger", required=True)
     parser.add_argument("--receipt", required=True)
     parser.add_argument("--label", default="com.multica.storage-retention")
-    parser.add_argument("--timeout", type=int, default=7200)
+    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--lock")
     parser.add_argument("--alert-log")
     parser.add_argument("--config")

@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from retention_cron_bridge import (  # noqa: E402
+    DEFAULT_TIMEOUT_SECONDS,
     SingleInstanceLock,
     launchctl_kickstart_command,
     receipt_exit_code,
@@ -17,6 +18,10 @@ from retention_cron_bridge import (  # noqa: E402
 
 
 class CronBridgeTest(unittest.TestCase):
+    def test_default_timeout_stays_below_cron_interval(self) -> None:
+        self.assertEqual(DEFAULT_TIMEOUT_SECONDS, 870)
+        self.assertLess(DEFAULT_TIMEOUT_SECONDS, 15 * 60)
+
     def test_kickstart_does_not_force_kill_an_existing_retention_run(self) -> None:
         command = launchctl_kickstart_command("com.multica.storage-retention", uid=501)
         self.assertEqual(
