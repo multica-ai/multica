@@ -396,6 +396,13 @@ type AgentTaskResponse struct {
 	// owning user; the daemon must not fall back to its own credential. See
 	// MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
+	// RequestSecretRef is an opaque reference (never the secret) to a
+	// request-scoped visitor credential exchanged upstream (WS-11 P1). The
+	// daemon resolves it to a short-lived secret at child-launch time and
+	// injects a single controlled child-env key; unresolvable → fail-closed.
+	// Empty for owner-scoped tasks. The plaintext secret is never carried on
+	// the wire, never logged, and never enters the prompt/task body.
+	RequestSecretRef string `json:"request_secret_ref,omitempty"`
 }
 
 // TaskAttribution is the wire shape of a run's accountable-human provenance

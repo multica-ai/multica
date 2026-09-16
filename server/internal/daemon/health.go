@@ -141,6 +141,7 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
 	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
+	mux.HandleFunc("/request-secret/fetch", d.requestSecretFetchHandler())
 
 	srv := &http.Server{Handler: mux}
 
@@ -223,5 +224,67 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(result)
+	}
+}
+
+// requestSecretFetchRequest is the body of a POST /request-secret/fetch. Only
+// the task id is supplied; the caller authenticates with the task's own token
+// in the Authorization header.
+type requestSecretFetchRequest struct {
+	TaskID string `json:"task_id"`
+}
+
+// requestSecretFetchResponse carries the visitor secret to the whitelisted
+// query child. It exists only in this loopback response body.
+type requestSecretFetchResponse struct {
+	Secret string `json:"secret"`
+}
+
+// requestSecretFetchHandler serves a redeemed visitor secret from the per-task
+// in-memory broker to the whitelisted Accel/Titan query child (WS-11 P1). This
+// is the ONLY path by which the plaintext leaves the daemon into a child; it is
+// deliberately NOT in agentEnv or the Codex shell allowlist.
+//
+// Defense in depth on a loopback-only (127.0.0.1) surface:
+//   - the caller must present the task's own token (Authorization: Bearer …),
+//     the same MULTICA_TOKEN the launched child already holds; the broker
+//     binds each secret to that token and rejects a mismatch WITHOUT burning
+//     the entry;
+//   - the fetch is one-shot — Take removes the entry, so a replay (or any other
+//     tool that scrapes the token) gets nothing;
+//   - entries are short-TTL and swept, so a secret for a child that never
+//     launched does not linger.
+//
+// Every failure returns 404 with no body detail so a caller cannot distinguish
+// "wrong token" from "already taken" from "expired".
+func (d *Daemon) requestSecretFetchHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+		if token == "" {
+			http.Error(w, "request secret not available", http.StatusNotFound)
+			return
+		}
+		var req requestSecretFetchRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		taskID := strings.TrimSpace(req.TaskID)
+		if taskID == "" {
+			http.Error(w, "task_id is required", http.StatusBadRequest)
+			return
+		}
+		secret, ok := d.requestSecrets.Take(taskID, token)
+		if !ok {
+			// Missing / wrong-token / expired / already-taken all collapse here.
+			http.Error(w, "request secret not available", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(requestSecretFetchResponse{Secret: secret})
 	}
 }

@@ -32,6 +32,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/requestsecret"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -672,6 +673,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// as "no cache, always hit DB" (existing behavior).
 	h.TaskService.EmptyClaim = service.NewEmptyClaimCache(rdb)
 
+	// WS-11 P1: request-scoped visitor-credential store. Always wire the
+	// in-memory store so the claim path has somewhere to mint one-time,
+	// TTL-bound handles into. TaskService.VisitorCredentials stays nil until a
+	// real upstream issuer (Accel / AIME delegation) is available — with no
+	// provider, ResolveRequestSecretRef is a no-op and every task's ref is
+	// empty (fail-closed), so this is inert for ordinary non-identity tasks.
+	// Wiring the concrete issuer is the single remaining change:
+	//   h.TaskService.VisitorCredentials = <issuer implementing
+	//   service.VisitorCredentialProvider>
+	// mirroring the Composio hook above.
+	h.TaskService.RequestSecrets = requestsecret.New(requestsecret.DefaultTTL)
+
 	// Wire WS heartbeat after stores are finalized so the WS path uses the
 	// same (possibly Redis-backed) stores as the HTTP path.
 	daemonHub.SetHeartbeatHandler(h.HandleDaemonWSHeartbeat)
@@ -845,6 +858,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 		r.Post("/runtimes/{runtimeId}/recover-orphans", h.RecoverOrphanedTasks)
 		r.Post("/tasks/{taskId}/session", h.PinTaskSession)
+
+		// Request-scoped secret redeem (WS-11 P1). Authorized by DAEMON
+		// identity (middleware.DaemonAuth above) — NOT the mat_ task token,
+		// which the agent runtime also holds. The daemon exchanges its task's
+		// RequestSecretRef handle + task_id for the short-lived visitor secret
+		// here at child-launch time; the handler binds the task to the
+		// daemon's workspace and derives the Consume principal from the task's
+		// server-side originator, never from the client body.
+		r.Post("/tasks/request-secret/redeem", h.RedeemRequestSecret)
 	})
 
 	// Protected API routes

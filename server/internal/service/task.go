@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/requestsecret"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -56,6 +57,19 @@ type TaskService struct {
 	// exactly as before. Wired in router.go after composiointeg.NewService
 	// succeeds; the concrete type is *composio.Service.
 	Composio ComposioOverlayBuilder
+
+	// VisitorCredentials is the optional, injectable issuer for a run's
+	// short-lived visitor credential (WS-11 P1 front half). Nil is valid and
+	// is the intended default until a real upstream issuer (Accel / AIME
+	// delegation) is wired here in cmd/server/router.go — mirroring how
+	// Composio is wired. Nil → no request-secret ref is minted → the daemon
+	// injects nothing and the downstream query fails closed. See
+	// visitor_credential.go. There is no service-account fallback.
+	VisitorCredentials VisitorCredentialProvider
+	// RequestSecrets is the server-side store handles are minted into. Nil is
+	// valid and degrades to fail-closed (no ref). Wired in router.go alongside
+	// VisitorCredentials; the concrete type is *requestsecret.Store.
+	RequestSecrets *requestsecret.Store
 
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext

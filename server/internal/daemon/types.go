@@ -139,6 +139,16 @@ type Task struct {
 	// Empty or non-task-scoped values are fatal for writable agent tasks; the
 	// daemon must not fall back to its own token. See MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
+	// RequestSecretRef is an OPAQUE reference (never the secret itself) to a
+	// request-scoped credential a server-authenticated visitor exchanged
+	// upstream (WS-11 P1 per-visitor identity passthrough). The daemon resolves
+	// it to a short-lived secret only at child-process launch time (see
+	// resolveRequestSecretIntoBroker) and hands that secret to the whitelisted
+	// query child over the daemon-local loopback broker. The plaintext secret
+	// never lives on this struct, never
+	// enters the prompt / task body, and is never logged. When set but
+	// unresolvable, the task fails closed. Empty for owner-scoped tasks.
+	RequestSecretRef string `json:"request_secret_ref,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon

@@ -361,6 +361,14 @@ type Daemon struct {
 	// New() and overridable in tests so the auto-update poller can be exercised
 	// without touching the real network or the brew CLI.
 	runUpdateFn func(targetVersion string) (string, error)
+
+	// requestSecrets is the per-task in-memory broker for WS-11 P1 visitor
+	// credentials. The daemon redeems a task's opaque handle over the
+	// server↔daemon boundary at launch time and stashes the plaintext here,
+	// keyed by task id. The whitelisted Accel/Titan query child fetches it over
+	// the daemon's loopback control server (never through agentEnv, the Codex
+	// shell allowlist, the prompt, or a log line). Lazily created in New().
+	requestSecrets *requestSecretBroker
 }
 
 type profileLaunchSpec struct {
@@ -409,6 +417,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	d.executionEnvironmentCommand = defaultExecutionEnvironmentCommand
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
+	d.requestSecrets = newRequestSecretBroker(requestSecretBrokerTTL)
 	return d
 }
 
@@ -4543,6 +4552,25 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"TMPDIR":               taskTempDir,
 		"TMP":                  taskTempDir,
 		"TEMP":                 taskTempDir,
+	}
+	// WS-11 P1: resolve a request-scoped visitor secret into the daemon-local
+	// broker ONLY — never into agentEnv. The Task carries an opaque handle, never
+	// the secret; resolveRequestSecretIntoBroker redeems it over the
+	// daemon-authenticated server endpoint (using the daemon's own token, bound
+	// to this task id) at launch time and stashes the short-lived plaintext in
+	// d.requestSecrets keyed by task id. The whitelisted Accel/Titan query child
+	// fetches it over the daemon's 127.0.0.1 loopback control server; it is never
+	// seeded into agentEnv, the Codex shell-env allowlist, the prompt, task/comment
+	// bodies, logs, or disk. Fail-closed: a task that declares a handle but cannot
+	// redeem it refuses to start. Tasks with no handle are unaffected (nil).
+	if err := resolveRequestSecretIntoBroker(ctx, d.client, d.requestSecrets, task.ID, agentToken, task.RequestSecretRef); err != nil {
+		taskLog.Error("request secret ref present but unresolvable; refusing to start agent (fail-closed)", "error", err)
+		return TaskResult{}, err
+	}
+	// The broker entry is task-scoped: drop it when this launch returns so a
+	// secret never outlives its task even if the child never fetched it.
+	if task.RequestSecretRef != "" {
+		defer d.requestSecrets.Discard(task.ID)
 	}
 	if checkoutMode := repoCheckoutModeFor(provider, runtime.GOOS); checkoutMode != "" {
 		agentEnv[repoCheckoutModeEnv] = checkoutMode

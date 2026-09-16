@@ -1590,6 +1590,19 @@ type claimBuildFailure struct {
 func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQueue, runtime db.AgentRuntime, runtimeID, runtimeWorkspaceID string) (resp AgentTaskResponse, deliveredCommentIDs []pgtype.UUID, agentSkillCount, builtinSkillCount int, failure *claimBuildFailure) {
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp = taskToResponse(*task, runtimeWorkspaceID)
+	// WS-11 P1: claim-time mint of the request-scoped visitor credential.
+	// Using the run's SERVER-AUTHENTICATED originator (top-of-chain human,
+	// never a browser-supplied value) plus this task's id, mint a one-time,
+	// TTL-bound opaque handle and carry it on the runtime response only —
+	// nothing is persisted (no agent_task_queue column). The daemon resolves
+	// the handle to a single controlled child-env key at child launch.
+	// ResolveRequestSecretRef is fail-closed in every degraded case (nil
+	// provider/store, no originator, provider error, no credential for this
+	// principal) → "" → no injection → identity-requiring queries fail closed
+	// downstream. A nil provider (the default until an issuer is wired) makes
+	// this a no-op for every task, so ordinary non-identity tasks are
+	// unaffected. Called exactly once per claimed task, here.
+	resp.RequestSecretRef = h.TaskService.ResolveRequestSecretRef(r.Context(), task.OriginatorUserID, task.ID)
 	supportsCoalescedComments := requestHasClientCapability(r, protocol.DaemonCapabilityCoalescedCommentsV1)
 	// Empty-but-non-nil so pgx persists '{}' rather than NULL for tasks without
 	// comment input. Comment tasks replace this with the ids actually embedded

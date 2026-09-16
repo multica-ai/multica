@@ -975,6 +975,85 @@ func (c *Client) postJSONVia(ctx context.Context, httpClient *http.Client, path 
 	return json.NewDecoder(resp.Body).Decode(respBody)
 }
 
+// requestSecretRedeemPath is the server endpoint that exchanges a
+// request-secret handle for its short-lived secret. Authorized by the DAEMON
+// token (NOT the task-scoped mat_ token, which the agent runtime also holds),
+// bound server-side to the daemon's workspace + the task's originator.
+const requestSecretRedeemPath = "/api/daemon/tasks/request-secret/redeem"
+
+// errRequestSecretHandleRejected reports that the server refused to redeem the
+// handle (not found / expired / replayed / wrong task or principal — all
+// collapsed server-side to 404 so the daemon cannot probe which dimension
+// failed). Callers treat this as fail-closed: the task must not start.
+var errRequestSecretHandleRejected = errors.New("request secret handle rejected by server")
+
+// RedeemRequestSecret exchanges an opaque request-secret handle for its
+// short-lived secret using the DAEMON's own token as authorization. The server
+// enforces the handle↔task↔principal binding and consumes the handle
+// atomically (one-time). The secret is returned in memory only — the daemon
+// stores it in the per-task in-memory broker and serves it to the whitelisted
+// query child over the loopback control server; it is never placed in agentEnv,
+// the Codex shell allowlist, the prompt, a log line, or on disk.
+//
+// Authorization is by daemon identity precisely so the raw secret stays on the
+// server↔daemon trusted boundary. The mat_ task token is NOT used here: the
+// agent runtime also holds it, so a mat_-authorized redeem would let the agent
+// fetch its own visitor plaintext. The daemon sends its task_id explicitly so
+// the server can bind the handle to a task in the daemon's own workspace and
+// derive the Consume principal from that task's server-side originator.
+func (c *Client) RedeemRequestSecret(ctx context.Context, taskID, handle string) (string, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return "", errors.New("redeem request secret: task id required")
+	}
+	if strings.TrimSpace(handle) == "" {
+		return "", errors.New("redeem request secret: empty handle")
+	}
+	if strings.TrimSpace(c.token) == "" {
+		return "", errors.New("redeem request secret: daemon token required")
+	}
+
+	data, err := json.Marshal(map[string]string{"handle": handle, "task_id": taskID})
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+requestSecretRedeemPath, bytes.NewReader(data))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	// Daemon credential authorizes this call — the server requires daemon
+	// identity for redemption and rejects a bare task token.
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	c.setIdentityHeaders(req)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return "", errRequestSecretHandleRejected
+	}
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", &requestError{Method: http.MethodPost, Path: requestSecretRedeemPath, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
+	}
+	var out struct {
+		Secret string `json:"secret"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(out.Secret) == "" {
+		// A 200 with no secret is a contract violation; fail closed rather than
+		// launch the child with an empty identity credential.
+		return "", errors.New("redeem request secret: server returned empty secret")
+	}
+	return out.Secret, nil
+}
+
 func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
