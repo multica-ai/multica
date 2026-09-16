@@ -66,6 +66,11 @@ fresh evidence. On or after `electron_updater_audit.day_of_month`, the worker
 validates the exact canonical schema and fails closed unless
 `scan_complete=true` and `scan_errors=[]`.
 
+When the monthly producer actually runs, that cron slot ends after publishing
+and validating its receipt. The next 15-minute slot performs the ordinary
+canary and GC pass. This keeps an FDA scan and the normal retention workload
+from sharing one sub-900-second launch budget.
+
 The canonical report's totals, per-candidate sizes, and mtimes feed the
 `warn_total_gib`, `warn_candidate_gib`, and stale thresholds. Threshold findings
 emit the existing alert once per evidence revision. They never move or delete a

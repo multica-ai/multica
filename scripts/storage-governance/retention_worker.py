@@ -1624,6 +1624,28 @@ def run_worker(config: Dict[str, Any]) -> Dict[str, Any]:
             except Exception:
                 pass
         raise
+    if scheduled_producer.get("status") == "green":
+        # A Full Disk Access scan can be materially slower than the ordinary
+        # retention pass. Reserve this cron slot for the producer so the
+        # AppleScript and bridge limits remain below the next 15-minute slot.
+        report = {
+            "schema": "multica.storage-retention-run.v1",
+            "status": "green",
+            "recorded_at": utc_now().isoformat(),
+            "pid": os.getpid(),
+            "parent_pid": os.getppid(),
+            "invocation_source": "verified-cron-launchd-bridge" if trigger else "manual",
+            "process_ancestry": ancestry,
+            "cron_bridge_ancestry": cron_lineage,
+            "cron_trigger_token": trigger.get("token") if trigger else None,
+            "scheduled_electron_updater_audit_producer": scheduled_producer,
+            "producer_only": True,
+            "eligible_count": 0,
+            "archives": [],
+        }
+        if trigger:
+            write_cron_bridge_receipt(config, token=str(trigger["token"]), status="green")
+        return report
     electron_audit = maybe_run_electron_updater_audit(
         config,
         invocation_source="verified-cron-launchd-bridge" if trigger else "manual-worker",

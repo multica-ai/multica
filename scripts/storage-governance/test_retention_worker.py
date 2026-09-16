@@ -823,6 +823,21 @@ class ElectronUpdaterAuditTest(unittest.TestCase):
 
             self.assertEqual(events, ["audit", "external"])
 
+    def test_scheduled_producer_gets_a_dedicated_cron_slot(self) -> None:
+        config = {"require_cron_lineage": False}
+        with mock.patch(
+            "retention_worker.maybe_run_canonical_electron_audit_producer",
+            return_value={"status": "green", "audit_month": "2026-08"},
+        ), mock.patch(
+            "retention_worker.maybe_run_electron_updater_audit"
+        ) as audit, mock.patch.object(ExternalVolumeGuard, "check") as external:
+            report = run_worker(config)
+
+        self.assertTrue(report["producer_only"])
+        self.assertEqual(report["scheduled_electron_updater_audit_producer"]["status"], "green")
+        audit.assert_not_called()
+        external.assert_not_called()
+
     def test_audit_only_cli_bypasses_cron_lineage_and_external_volume(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

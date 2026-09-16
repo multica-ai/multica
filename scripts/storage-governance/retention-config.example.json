@@ -30,7 +30,7 @@
     "report_dir": "/Users/example/.org/metrics",
     "producer_script_path": "/Users/example/.org/scripts/st1-electron-updater-audit.py",
     "producer_receipt_path": "/Users/example/.local/state/storage-governance/st1-scheduled-producer-receipt.json",
-    "producer_timeout_seconds": 120,
+    "producer_timeout_seconds": 600,
     "attention_receipt_path": "/Users/example/.local/state/storage-governance/st1-attention-receipt.json",
     "patterns": [
       {
