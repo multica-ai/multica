@@ -39,6 +39,11 @@ const (
 	// machine is already on, and the fix is a command the user runs on it, which
 	// the daemon reports with this verdict so clients can show it.
 	ReasonRuntimeUnusable ReasonCode = "runtime_unusable"
+	// ReasonRuntimeAccessDenied: the target is permitted, but its agent owner
+	// cannot execute it on the private runtime selected for the task. This is
+	// distinct from invocation_not_allowed: the caller may invoke the agent,
+	// while the runtime/agent ownership binding still prevents execution.
+	ReasonRuntimeAccessDenied ReasonCode = "runtime_access_denied"
 	// ReasonRuntimeProfileMissing: the target is bound to a reachable runtime
 	// whose agent CLI runs fine, but a runtime profile that CLI needs in order
 	// to speak Multica's protocol is not installed on that machine — DeepSeek

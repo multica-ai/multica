@@ -3074,8 +3074,9 @@ type commentMentionTarget struct {
 	ExecAgentID string
 	Status      DispatchStatus
 	ReasonCode  DispatchReasonCode
-	// unusable carries the refused agent and its verdict for the one reason
-	// that needs a durable trace (runtime_unusable). Internal to the handler:
+	// unusable carries the refused agent and its verdict for the reasons that
+	// need a durable trace (runtime_unusable or runtime_access_denied). Internal
+	// to the handler:
 	// the resolver runs for the composer PREVIEW as well, so it only records
 	// what happened — writing the notice is the trigger path's job.
 	unusable *blockedRuntimeNotice
@@ -3131,7 +3132,7 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 	blockTarget := func(targetType, targetID string, reason DispatchReasonCode) {
 		addTarget(commentMentionTarget{TargetType: targetType, TargetID: targetID, Status: DispatchBlocked, ReasonCode: reason})
 	}
-	// blockUnusableTarget is blockTarget for the one verdict that also needs a
+	// blockUnusableTarget is blockTarget for the verdicts that also need a
 	// durable trace. Every author gets it, including a human: the chip and toast
 	// carry the reason code but not the repair command, and an agent-authored
 	// mention has nobody watching a response at all.

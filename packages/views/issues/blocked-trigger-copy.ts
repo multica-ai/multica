@@ -24,7 +24,12 @@ import type { useT } from "../i18n";
 // reinstall on that machine, and the system comment the server leaves on the
 // issue carries the exact command.
 //
-// `runtime_profile_missing` is the fourth, and is split from `runtime_unusable`
+// `runtime_access_denied` is another member of that family (PUCK-89): the
+// target is permitted but its agent owner cannot execute it on the selected
+// private runtime. No retry helps — the fix is making the runtime public or
+// rebinding/copying the agent to a runtime its owner can use.
+//
+// `runtime_profile_missing` is split from `runtime_unusable`
 // on the same rule: the CLI there runs perfectly and is missing a runtime
 // profile (DSH's `multica` profile, which supplies the protocol Multica
 // drives). "Reinstall the CLI" copy sends the user to re-run an install that
@@ -46,6 +51,8 @@ export function blockedReasonLabel(reasonCode: string, t: IssuesT): string {
       return t(($) => $.comment.trigger_blocked_runtime_profile_missing);
     case "agent_runtime_required":
       return t(($) => $.comment.trigger_blocked_agent_runtime_required);
+    case "runtime_access_denied":
+      return t(($) => $.comment.trigger_blocked_runtime_access_denied);
     default:
       return t(($) => $.comment.trigger_blocked_generic);
   }
@@ -67,6 +74,8 @@ export function blockedShortReasonLabel(reasonCode: string, t: IssuesT): string 
       return t(($) => $.comment.trigger_blocked_short_runtime_profile_missing);
     case "agent_runtime_required":
       return t(($) => $.comment.trigger_blocked_short_agent_runtime_required);
+    case "runtime_access_denied":
+      return t(($) => $.comment.trigger_blocked_short_runtime_access_denied);
     default:
       return t(($) => $.comment.trigger_blocked_short_generic);
   }
