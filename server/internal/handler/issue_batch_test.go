@@ -365,8 +365,8 @@ func TestBatchChildDoneCrossStage_OneComment(t *testing.T) {
 }
 
 // TestBatchChildDoneCrossStage_Cancelled — cancelling every stage in one batch
-// is terminal too and must behave identically: one accurate final comment, no
-// stale advance instruction.
+// is terminal too, but the notification must distinguish cancellation from
+// successful completion while still emitting one accurate final comment.
 func TestBatchChildDoneCrossStage_Cancelled(t *testing.T) {
 	fx := newStagedBatchFixture(t)
 	batchSetStatus(t, []string{fx.stage1[0].ID, fx.stage1[1].ID, fx.stage2[0].ID, fx.stage2[1].ID}, "cancelled")
@@ -375,8 +375,11 @@ func TestBatchChildDoneCrossStage_Cancelled(t *testing.T) {
 		t.Fatalf("expected exactly 1 system comment on parent, got %d", got)
 	}
 	content, _, _, _ := systemCommentOn(t, fx.parent.ID)
-	if !strings.Contains(content, "Stage 2 of this issue is complete") {
-		t.Errorf("expected Stage 2 completion announcement, got: %s", content)
+	if !strings.Contains(content, "Stage 2 of this issue is closed") {
+		t.Errorf("expected Stage 2 closed announcement for cancelled work, got: %s", content)
+	}
+	if !strings.Contains(content, "Stage 1: 0/2 done, 2 cancelled; Stage 2: 0/2 done, 2 cancelled") {
+		t.Errorf("expected cancelled children to be counted separately from done, got: %s", content)
 	}
 	if strings.Contains(content, "is next") || strings.Contains(content, "(next)") {
 		t.Errorf("comment must not carry a stale next-stage instruction, got: %s", content)
