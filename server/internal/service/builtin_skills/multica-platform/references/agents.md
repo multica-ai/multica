@@ -35,6 +35,12 @@ binds it again. Unbound is orthogonal to archived.
 `thinking_level`, `service_tier`, `custom_args`, `has_custom_env`,
 `custom_env_key_count`, and `skills`. It never returns plaintext `custom_env`.
 
+CodeBuddy executes over ACP. Configure `model`, `thinking_level`, and MCP
+through the agent fields: the backend sends them through session RPCs,
+including MCP on session load. Do not configure print/stream-json flags or
+`--resume` in custom arguments. Session resumption still starts a new process
+per run; it does not enable process keep-alive.
+
 ## Core model
 
 An agent is a workspace-scoped record. Creation is a single `POST /api/agents`

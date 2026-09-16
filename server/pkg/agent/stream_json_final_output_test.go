@@ -279,7 +279,7 @@ printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"tool_
 		},
 	}
 
-	for _, provider := range []string{"claude", "codebuddy"} {
+	for _, provider := range []string{"claude"} {
 		provider := provider
 		for _, tt := range tests {
 			tt := tt
