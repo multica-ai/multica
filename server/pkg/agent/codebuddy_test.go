@@ -525,28 +525,48 @@ func TestBuildCodebuddyEnvDisablesBackgroundTasks(t *testing.T) {
 	t.Parallel()
 
 	env := buildCodebuddyEnv(map[string]string{"FOO": "bar"})
-	got := ""
-	for _, entry := range env {
-		key, value, ok := strings.Cut(entry, "=")
-		if ok && key == codebuddyDisableBackgroundTasksEnv {
-			got = value
-		}
-	}
-	if got != "1" {
+	if got := lastEnvValueFold(env, codebuddyDisableBackgroundTasksEnv); got != "1" {
 		t.Fatalf("expected %s=1 in child env, got %q (env=%v)", codebuddyDisableBackgroundTasksEnv, got, env)
 	}
-	// Caller must not be able to override the disable — Multica always forces it.
+
+	// Exact-key override in caller env must still lose to the appended force.
 	env = buildCodebuddyEnv(map[string]string{codebuddyDisableBackgroundTasksEnv: "0"})
-	got = ""
+	if got := lastEnvValueFold(env, codebuddyDisableBackgroundTasksEnv); got != "1" {
+		t.Fatalf("expected forced %s=1 even when caller passes 0, got %q", codebuddyDisableBackgroundTasksEnv, got)
+	}
+
+	// Windows os/exec dedups case-insensitively and keeps the last entry. A
+	// lowercase custom_env key must not outvote the forced disable.
+	env = buildCodebuddyEnv(map[string]string{
+		strings.ToLower(codebuddyDisableBackgroundTasksEnv): "0",
+	})
+	if got := lastEnvValueFold(env, codebuddyDisableBackgroundTasksEnv); got != "1" {
+		t.Fatalf("expected forced %s=1 to win over lowercase override, got %q (env=%v)",
+			codebuddyDisableBackgroundTasksEnv, got, env)
+	}
+	lastExact := ""
 	for _, entry := range env {
 		key, value, ok := strings.Cut(entry, "=")
 		if ok && key == codebuddyDisableBackgroundTasksEnv {
-			got = value
+			lastExact = value
 		}
 	}
-	if got != "1" {
-		t.Fatalf("expected forced %s=1 even when caller passes 0, got %q", codebuddyDisableBackgroundTasksEnv, got)
+	if lastExact != "1" {
+		t.Fatalf("forced entry must be last exact key so os/exec Windows dedup keeps it, got last=%q env=%v", lastExact, env)
 	}
+}
+
+// lastEnvValueFold mirrors os/exec's Windows dedup: case-insensitive key match,
+// last occurrence wins.
+func lastEnvValueFold(env []string, key string) string {
+	got := ""
+	for _, entry := range env {
+		k, v, ok := strings.Cut(entry, "=")
+		if ok && strings.EqualFold(k, key) {
+			got = v
+		}
+	}
+	return got
 }
 
 func TestCodebuddySystemIsBackgroundTask(t *testing.T) {

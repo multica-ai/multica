@@ -525,25 +525,12 @@ const codebuddyDisableBackgroundTasksEnv = "CODEBUDDY_CODE_DISABLE_BACKGROUND_TA
 // background lifecycle can push task_notification after that point, which we
 // cannot observe. The official CLI documents this variable for exactly that
 // headless shape (https://www.codebuddy.ai/docs/cli/headless).
+//
+// Append the forced entry last so os/exec's platform-aware dedup
+// (case-insensitive on Windows, last-wins) keeps our "=1" even when the
+// inherited or custom_env key differs only by case.
 func buildCodebuddyEnv(extra map[string]string) []string {
-	merged := make(map[string]string, len(extra)+1)
-	for k, v := range extra {
-		merged[k] = v
-	}
-	merged[codebuddyDisableBackgroundTasksEnv] = "1"
-	env := buildEnv(merged)
-	// Unix getenv is first-wins; put our forced value first and drop any
-	// inherited / merged duplicates so a parent "=0" cannot outvote us.
-	out := make([]string, 0, len(env)+1)
-	out = append(out, codebuddyDisableBackgroundTasksEnv+"=1")
-	for _, entry := range env {
-		key, _, _ := strings.Cut(entry, "=")
-		if key == codebuddyDisableBackgroundTasksEnv {
-			continue
-		}
-		out = append(out, entry)
-	}
-	return out
+	return append(buildEnv(extra), codebuddyDisableBackgroundTasksEnv+"=1")
 }
 
 // codebuddySystemIsBackgroundTask reports CodeBuddy's real background-task

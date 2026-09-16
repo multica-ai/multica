@@ -27,6 +27,7 @@ import {
   type RendererRecoveryWindow,
 } from "./renderer-recovery";
 import { createBestEffortDevLog } from "./dev-log";
+import { appendMissingPathDirs } from "./path-fallback";
 import {
   writeFreezeBreadcrumb,
   readFreezeBreadcrumb,
@@ -113,15 +114,11 @@ if (process.platform !== "win32") {
   // a recovered login PATH shadows nvm/fnm Node with a stale system binary
   // (e.g. Node 12), which breaks shebang CLIs (`#!/usr/bin/env node`) such as
   // CodeBuddy and OpenClaw during daemon --version probes.
-  const fallbackPaths = [
+  process.env.PATH = appendMissingPathDirs(process.env.PATH ?? "", [
     "/opt/homebrew/bin",
     "/usr/local/bin",
     join(homedir(), ".local/bin"),
-  ];
-  const current = (process.env.PATH ?? "").split(":").filter(Boolean);
-  const existing = new Set(current);
-  const missing = fallbackPaths.filter((p) => !existing.has(p));
-  process.env.PATH = [...current, ...missing].join(":");
+  ]);
 }
 
 const PROTOCOL = "multica";
