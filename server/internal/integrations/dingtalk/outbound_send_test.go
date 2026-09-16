@@ -425,7 +425,7 @@ func TestSender_LongSingleLineAnswerBlockquotePreservesEveryChunk(t *testing.T) 
 		if err := json.Unmarshal([]byte(raw), &param); err != nil {
 			t.Fatal(err)
 		}
-		if len(raw) > 15000 || !strings.HasPrefix(param.Text, "> ") || param.Title != defaultMarkdownTitle {
+		if len(raw) > 15000 || !strings.HasPrefix(param.Text, "> ") || param.Title != param.Text {
 			t.Fatalf("chunk %d lost its blockquote/title or exceeded the payload budget: %q", i, raw)
 		}
 		joined.WriteString(strings.TrimPrefix(param.Text, "> "))
