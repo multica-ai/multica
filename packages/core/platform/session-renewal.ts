@@ -93,6 +93,15 @@ export function createSessionRenewal({
   // attempt is what keeps those two from sharing one number.
   let nextCheckAt = 0;
   let consecutiveFailures = 0;
+
+  /** Push the next allowed check out by the current backoff step. */
+  function scheduleRetryAfterFailure(): number {
+    const delay =
+      RETRY_DELAYS_MS[Math.min(consecutiveFailures, RETRY_DELAYS_MS.length - 1)]!;
+    consecutiveFailures += 1;
+    nextCheckAt = Date.now() + delay;
+    return delay;
+  }
   // Collapses concurrent triggers — a foreground event and a click in the
   // same moment must not produce two renewals, which would leave two valid
   // tokens racing to be the one written to storage.
@@ -111,12 +120,23 @@ export function createSessionRenewal({
     inFlight = api
       .refreshSession()
       .then((result) => {
-        consecutiveFailures = 0;
-        if (result.check_again_in_seconds > 0) {
+        // A response that carries no cadence is not a usable answer. The
+        // schema fallback produces exactly this shape — `parseWithFallback`
+        // returns zeroes for a body that failed validation instead of
+        // throwing — and a real server always sends a positive interval. Left
+        // untreated it would reset the failure count without moving the
+        // deadline, so every subsequent interaction fires another request.
+        // Back off exactly as for a failure.
+        if (result.check_again_in_seconds <= 0) {
+          scheduleRetryAfterFailure();
+        } else {
+          consecutiveFailures = 0;
           nextCheckAt =
             Date.now() +
             Math.max(MIN_CHECK_INTERVAL_MS, result.check_again_in_seconds * 1000);
         }
+        // A token that did arrive is still worth applying, whatever the
+        // cadence field said.
         if (!result.renewed || !result.token) return;
 
         // Late-result guard. Between the request and this line the user may
@@ -145,10 +165,7 @@ export function createSessionRenewal({
         // A genuine 401 is not handled here either, but for the opposite
         // reason: ApiClient already routed it to the session-expiry path
         // before this catch ran.
-        const delay =
-          RETRY_DELAYS_MS[Math.min(consecutiveFailures, RETRY_DELAYS_MS.length - 1)]!;
-        consecutiveFailures += 1;
-        nextCheckAt = Date.now() + delay;
+        const delay = scheduleRetryAfterFailure();
         logger?.debug("session renewal did not complete; keeping the current session", {
           error: err instanceof Error ? err.message : String(err),
           retryInMs: delay,

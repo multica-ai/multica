@@ -189,6 +189,33 @@ describe("mobile session renewal", () => {
     vi.mocked(Date.now).mockRestore();
   });
 
+  // A 200 whose body failed schema validation comes back as zeroes rather
+  // than as a throw; without treating it as a failure the deadline never
+  // moves and every touch fires another request.
+  it("backs off on a response that carries no cadence", async () => {
+    apiMock.refreshSession.mockResolvedValue({
+      expires_at: "",
+      renewed: false,
+      check_again_in_seconds: 0,
+    });
+
+    const start = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(start);
+    await renewSessionNow();
+    expect(apiMock.refreshSession).toHaveBeenCalledTimes(1);
+
+    for (let i = 0; i < 20; i++) maybeRenewSession();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(apiMock.refreshSession).toHaveBeenCalledTimes(1);
+
+    vi.mocked(Date.now).mockReturnValue(start + 1_100);
+    maybeRenewSession();
+    await vi.waitFor(() =>
+      expect(apiMock.refreshSession).toHaveBeenCalledTimes(2),
+    );
+    vi.mocked(Date.now).mockRestore();
+  });
+
   it("discards a response that arrives after sign-out", async () => {
     let resolve!: (value: unknown) => void;
     apiMock.refreshSession.mockReturnValue(

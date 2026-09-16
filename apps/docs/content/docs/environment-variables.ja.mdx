@@ -42,7 +42,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `PORT` | `8080` | API のリッスンポート |
 | `JWT_SECRET` | 本番環境で必須 | ログイン JWT と一部の署名フローに使うシークレット。本番では空または既知のプレースホルダーだと起動を拒否 |
 | `APP_ENV` | 空 | プロダクションでは `production` を設定 |
-| `AUTH_TOKEN_TTL` | `720h`（30 日） | ブラウザ JWT と cookie の有効期間。Go duration または正の整数秒を受け付けます。セッションはスライド更新され、使い続けている限り失効しません。`60s` 未満は `60s` に補正されます |
+| `AUTH_TOKEN_TTL` | `720h`（30 日） | ブラウザ JWT と cookie の有効期間。Go duration または正の整数秒を受け付けます。セッションは有効期間の半分を過ぎるとスライド更新され、使い続けている限り失効しません。`60s` 未満は `60s` に補正されます |
 | `LOG_LEVEL` | アプリのデフォルト | ログレベル |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 終了シグナル受信後、グレースフルシャットダウンを開始するまでの待機時間 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | オフラインのランタイムが処理中の作業を失敗させずに再接続できる猶予時間。`150s` 未満は `150s` に補正されます |

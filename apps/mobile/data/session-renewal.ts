@@ -51,6 +51,14 @@ const MIN_CHECK_INTERVAL_MS = 5 * 1000;
 // attempt is what keeps those two from sharing one number.
 let nextCheckAt = 0;
 let consecutiveFailures = 0;
+
+/** Push the next allowed check out by the current backoff step. */
+function scheduleRetryAfterFailure(): void {
+  const delay =
+    RETRY_DELAYS_MS[Math.min(consecutiveFailures, RETRY_DELAYS_MS.length - 1)]!;
+  consecutiveFailures += 1;
+  nextCheckAt = Date.now() + delay;
+}
 // Collapses concurrent triggers: launch and a foreground transition can land
 // together, and two renewals would leave two valid tokens racing to be the
 // one written to the Keychain.
@@ -84,12 +92,23 @@ export async function renewSessionNow(): Promise<void> {
       if (!startedFrom || sessionEpochChanged(epochAtStart)) return;
 
       const result = await api.refreshSession();
-      consecutiveFailures = 0;
-      if (result.check_again_in_seconds > 0) {
+      // A response that carries no cadence is not a usable answer. The schema
+      // fallback produces exactly this shape — `parseWithFallback` returns
+      // zeroes for a body that failed validation instead of throwing — and a
+      // real server always sends a positive interval. Left untreated it would
+      // reset the failure count without moving the deadline, so every
+      // subsequent interaction fires another request. Back off as for a
+      // failure.
+      if (result.check_again_in_seconds <= 0) {
+        scheduleRetryAfterFailure();
+      } else {
+        consecutiveFailures = 0;
         nextCheckAt =
           Date.now() +
           Math.max(MIN_CHECK_INTERVAL_MS, result.check_again_in_seconds * 1000);
       }
+      // A token that did arrive is still worth applying, whatever the cadence
+      // field said.
       if (!result.renewed || !result.token) return;
 
       // The decision to keep this result and the write that acts on it happen
@@ -114,10 +133,7 @@ export async function renewSessionNow(): Promise<void> {
       // portal, a 5xx — says nothing about the session, which just
       // authenticated this request. Keep it, and come back soon: the window
       // this failed inside is still closing.
-      const delay =
-        RETRY_DELAYS_MS[Math.min(consecutiveFailures, RETRY_DELAYS_MS.length - 1)]!;
-      consecutiveFailures += 1;
-      nextCheckAt = Date.now() + delay;
+      scheduleRetryAfterFailure();
       if (!(err instanceof ApiError) || err.status !== 401) {
         console.log("[auth] session renewal deferred", err);
       }

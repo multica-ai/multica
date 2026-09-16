@@ -169,6 +169,38 @@ describe("createSessionRenewal", () => {
     vi.mocked(Date.now).mockRestore();
   });
 
+  // A 200 whose body failed schema validation comes back through
+  // parseWithFallback as zeroes rather than as a throw. Without treating that
+  // as a failure the deadline never moves, and every click fires another
+  // request at a server that is already answering badly.
+  it("backs off on a response that carries no cadence", async () => {
+    const h = makeHarness();
+    h.api.refreshSession.mockResolvedValue({
+      expires_at: "",
+      renewed: false,
+      check_again_in_seconds: 0,
+    } satisfies RefreshSessionResponse);
+
+    const renewal = renewalFor(h);
+    const start = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(start);
+    await renewal.renewNow();
+    expect(h.api.refreshSession).toHaveBeenCalledTimes(1);
+
+    // Busy user, well inside the backoff: no further requests.
+    for (let i = 0; i < 20; i++) renewal.maybeRenew();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.api.refreshSession).toHaveBeenCalledTimes(1);
+
+    // And it does come back, on the backoff rather than never.
+    vi.mocked(Date.now).mockReturnValue(start + 1_100);
+    renewal.maybeRenew();
+    await vi.waitFor(() =>
+      expect(h.api.refreshSession).toHaveBeenCalledTimes(2),
+    );
+    vi.mocked(Date.now).mockRestore();
+  });
+
   // Recovering fast must not mean hammering a server that is genuinely down.
   it("backs off across consecutive failures and resets on success", async () => {
     const h = makeHarness();
