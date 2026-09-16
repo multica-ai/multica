@@ -11,6 +11,7 @@ from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -26,9 +27,11 @@ from retention_worker import (  # noqa: E402
     build_workspace_stale_report,
     consumed_approval_tokens,
     main,
+    maybe_run_canonical_electron_audit_producer,
     maybe_run_electron_updater_audit,
     run_worker,
     send_alert,
+    send_electron_audit_attention_once,
     tree_manifest,
     verify_cron_bridge,
     write_cron_bridge_receipt,
@@ -502,6 +505,49 @@ class ElectronUpdaterAuditTest(unittest.TestCase):
             home,
         )
 
+    def canonical_report(
+        self,
+        home: Path,
+        *,
+        total_bytes: int = 0,
+        matches: list[dict] | None = None,
+    ) -> dict:
+        rows = matches or []
+        total_size_bytes = sum(int(row.get("size_bytes") or 0) for row in rows)
+        return {
+            "schema_version": "org.st1-electron-updater-audit.v1",
+            "audit_month": "2026-08",
+            "scanned_at": "2026-08-15T10:00:01+08:00",
+            "scan_started_at": "2026-08-15T10:00:00+08:00",
+            "scan_finished_at": "2026-08-15T10:00:01+08:00",
+            "host": "test-host",
+            "home": str(home),
+            "safety": {
+                "mode": "read_only_audit",
+                "cleanup_performed": False,
+                "cleanup_requires_app_or_daemon_exit_confirmation": True,
+            },
+            "scan_complete": True,
+            "coverage": [],
+            "matches": rows,
+            "summary": {
+                "match_count": len(rows),
+                "total_bytes": total_bytes,
+                "total_size_bytes": total_size_bytes,
+                "by_category": {},
+            },
+            "total_bytes": total_bytes,
+            "total_size_bytes": total_size_bytes,
+            "scan_errors": [],
+        }
+
+    def write_canonical(self, config: dict, home: Path, **kwargs: object) -> Path:
+        report_dir = Path(config["electron_updater_audit"]["report_dir"])
+        report_dir.mkdir(parents=True, exist_ok=True)
+        path = report_dir / "st1-electron-updater-audit-2026-08.json"
+        path.write_text(json.dumps(self.canonical_report(home, **kwargs)), encoding="utf-8")
+        return path
+
     def test_discovers_deduplicates_and_does_not_modify_updater_residue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -608,13 +654,10 @@ class ElectronUpdaterAuditTest(unittest.TestCase):
             self.assertIn("stale", reasons)
             self.assertTrue(payload.exists())
 
-    def test_month_gate_runs_once_and_force_bypasses_day_and_existing_evidence(self) -> None:
+    def test_month_gate_validates_canonical_evidence_without_rewriting_it(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             config, home = self.make_config(root)
-            updater = home / "Library" / "Caches" / "demo-updater"
-            updater.mkdir(parents=True)
-            (updater / "update.zip").write_bytes(b"z")
             before_due = lambda: datetime(2026, 8, 5, tzinfo=timezone.utc)
             on_due = lambda: datetime(2026, 8, 15, tzinfo=timezone.utc)
 
@@ -622,22 +665,131 @@ class ElectronUpdaterAuditTest(unittest.TestCase):
             self.assertEqual(skipped["status"], "skipped")
             self.assertIn("before day", skipped["reason"])
 
-            forced = maybe_run_electron_updater_audit(config, now=before_due, force=True)
-            self.assertEqual(forced["status"], "green")
-            report_path = Path(forced["report_path"])
-            self.assertTrue(report_path.is_file())
-            # The production gate deliberately verifies the evidence file's
-            # calendar-month mtime. Pin it to the test clock so this time-travel
-            # test remains deterministic after August 2026.
-            os.utime(report_path, (before_due().timestamp(), before_due().timestamp()))
-
+            report_path = self.write_canonical(config, home)
+            before = report_path.read_bytes()
             already_recorded = maybe_run_electron_updater_audit(config, now=on_due)
             self.assertEqual(already_recorded["status"], "skipped")
-            self.assertIn("already exists", already_recorded["reason"])
+            self.assertEqual(already_recorded["evidence_status"], "green")
+            self.assertEqual(before, report_path.read_bytes())
 
-            rerun = maybe_run_electron_updater_audit(config, now=on_due, force=True)
-            self.assertEqual(rerun["status"], "green")
-            self.assertEqual(rerun["audit_month"], "2026-08")
+    def test_canonical_evidence_restores_total_candidate_and_stale_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, home = self.make_config(root)
+            audit_config = config["electron_updater_audit"]
+            audit_config["warn_total_gib"] = 1
+            audit_config["warn_candidate_gib"] = 0.5
+            audit_config["stale_days"] = 45
+            audit_config["stale_min_mib"] = 100
+            candidate_bytes = 700 * 1024**2
+            self.write_canonical(
+                config,
+                home,
+                total_bytes=2 * 1024**3,
+                matches=[
+                    {
+                        "path": "/Users/test/old-updater",
+                        "bytes": candidate_bytes,
+                        "size_bytes": candidate_bytes,
+                        "latest_mtime": "2026-05-01T00:00:00Z",
+                    }
+                ],
+            )
+
+            result = maybe_run_electron_updater_audit(
+                config,
+                now=lambda: datetime(2026, 8, 16, tzinfo=timezone.utc),
+            )
+
+            self.assertEqual(result["status"], "attention")
+            reasons = " ".join(result["attention_reasons"])
+            self.assertIn("total updater residue", reasons)
+            self.assertIn("candidate exceeds", reasons)
+            self.assertIn("stale candidate", reasons)
+
+    def test_canonical_evidence_rejects_naive_scanned_timestamp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, home = self.make_config(root)
+            report = self.canonical_report(home)
+            report["scanned_at"] = "2026-08-15T10:00:01"
+            report_dir = Path(config["electron_updater_audit"]["report_dir"])
+            report_dir.mkdir(parents=True, exist_ok=True)
+            (report_dir / "st1-electron-updater-audit-2026-08.json").write_text(
+                json.dumps(report), encoding="utf-8"
+            )
+
+            result = maybe_run_electron_updater_audit(
+                config,
+                now=lambda: datetime(2026, 8, 16, tzinfo=timezone.utc),
+            )
+
+            self.assertEqual(result["status"], "red")
+            self.assertTrue(any("timezone-aware" in error for error in result["errors"]))
+
+    def test_formal_lineage_runs_canonical_producer_once_and_writes_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, home = self.make_config(root)
+            script = root / "st1-electron-updater-audit.py"
+            script.write_text("# fixture\n", encoding="utf-8")
+            audit_config = config["electron_updater_audit"]
+            audit_config.update(
+                {
+                    "producer_day_of_month": 14,
+                    "producer_script_path": str(script),
+                    "producer_receipt_path": str(root / "producer-receipt.json"),
+                    "producer_timeout_seconds": 30,
+                }
+            )
+
+            def producer(command: list[str], **_: object) -> mock.Mock:
+                output = Path(command[command.index("--output") + 1])
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_text(json.dumps(self.canonical_report(home)), encoding="utf-8")
+                return mock.Mock(returncode=0, stdout="{}", stderr="")
+
+            now = lambda: datetime(2026, 8, 16, tzinfo=timezone.utc)
+            with mock.patch("retention_worker.subprocess.run", side_effect=producer) as run:
+                first = maybe_run_canonical_electron_audit_producer(
+                    config,
+                    trigger_token="scheduled-token",
+                    now=now,
+                )
+                second = maybe_run_canonical_electron_audit_producer(
+                    config,
+                    trigger_token="new-token",
+                    now=now,
+                )
+
+            self.assertEqual(first["status"], "green")
+            self.assertEqual(second["status"], "skipped")
+            self.assertEqual(run.call_count, 1)
+            receipt = json.loads(Path(audit_config["producer_receipt_path"]).read_text())
+            self.assertEqual(receipt["status"], "green")
+            self.assertEqual(receipt["audit_month"], "2026-08")
+            self.assertEqual(receipt["trigger_token"], "scheduled-token")
+            self.assertTrue(receipt["scan_complete"])
+            self.assertEqual(receipt["scan_errors"], [])
+
+    def test_attention_alert_is_deduplicated_per_evidence_revision(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, _ = self.make_config(root)
+            config["alert_log_path"] = str(root / "alerts.jsonl")
+            audit = {
+                "status": "attention",
+                "audit_month": "2026-08",
+                "evidence_scanned_at": "2026-08-15T10:00:01+08:00",
+                "attention_reasons": ["threshold"],
+                "candidate_count": 1,
+                "total_bytes": 1024,
+                "report_path": str(root / "report.json"),
+            }
+            with mock.patch("retention_worker.send_alert") as alert:
+                self.assertTrue(send_electron_audit_attention_once(config, audit))
+                self.assertFalse(send_electron_audit_attention_once(config, audit))
+            alert.assert_called_once()
 
     def test_formal_worker_audits_before_external_volume_checks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -683,9 +835,19 @@ class ElectronUpdaterAuditTest(unittest.TestCase):
                     "archive_root": str(root / "missing-external" / "archive"),
                 }
             )
-            updater = home / "Library" / "Caches" / "demo-updater"
-            updater.mkdir(parents=True)
-            (updater / "update.zip").write_bytes(b"z")
+            local_now = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai"))
+            current_month = local_now.strftime("%Y-%m")
+            report = self.canonical_report(home)
+            report["audit_month"] = current_month
+            timestamp = local_now.replace(hour=10, minute=0, second=1, microsecond=0).isoformat()
+            report["scanned_at"] = timestamp
+            report["scan_started_at"] = timestamp
+            report["scan_finished_at"] = timestamp
+            report_dir = Path(config["electron_updater_audit"]["report_dir"])
+            report_dir.mkdir(parents=True, exist_ok=True)
+            (report_dir / ("st1-electron-updater-audit-%s.json" % current_month)).write_text(
+                json.dumps(report), encoding="utf-8"
+            )
             config_path = root / "config.json"
             config_path.write_text(json.dumps(config), encoding="utf-8")
             output = io.StringIO()
@@ -699,7 +861,7 @@ class ElectronUpdaterAuditTest(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             summary = json.loads(output.getvalue())
-            self.assertEqual(summary["status"], "green")
+            self.assertEqual(summary["status"], "skipped")
             self.assertTrue(Path(summary["report_path"]).is_file())
 
 

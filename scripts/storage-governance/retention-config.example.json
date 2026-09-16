@@ -24,9 +24,14 @@
   "electron_updater_audit": {
     "enabled": true,
     "timezone": "Asia/Shanghai",
+    "producer_day_of_month": 14,
     "day_of_month": 15,
     "home_path": "/Users/example",
     "report_dir": "/Users/example/.org/metrics",
+    "producer_script_path": "/Users/example/.org/scripts/st1-electron-updater-audit.py",
+    "producer_receipt_path": "/Users/example/.local/state/storage-governance/st1-scheduled-producer-receipt.json",
+    "producer_timeout_seconds": 120,
+    "attention_receipt_path": "/Users/example/.local/state/storage-governance/st1-attention-receipt.json",
     "patterns": [
       {
         "label": "sandbox_update_packages",

@@ -52,19 +52,24 @@ lease-gated value. The stale signal never supplies an archive approval token.
 
 ## ST-1 Electron updater audit
 
-The retention worker also owns the read-only monthly audit for Electron updater
-residue. On or after `electron_updater_audit.day_of_month`, it scans only the
-configured home-relative globs and atomically writes
-`st1-electron-updater-audit-YYYY-MM.json` below the configured report directory.
-It does this before external-volume checks, so an unavailable archive disk does
-not erase the month's ST-1 evidence.
+The canonical producer is `~/.org/scripts/st1-electron-updater-audit.py`. The
+retention worker invokes that script once per Shanghai month, on or after
+`electron_updater_audit.producer_day_of_month`, from the verified cron-to-
+LaunchAgent lineage. The default producer day is 14, one day before the hard
+evidence gate opens. This preserves the LaunchAgent's Full Disk Access and
+prevents a permission-truncated report from being mistaken for valid evidence.
 
-Matches are de-duplicated and recursively sized without following symlinks.
-The report records file counts, bytes, mtimes, stale candidates, and threshold
-reasons. It never moves or deletes a match. `attention` sends the existing Lark
-alert once for that month's report; an incomplete `red` scan fails the formal
-worker closed. A valid `green` or `attention` report suppresses later scans in
-the same Shanghai calendar month.
+A separate monthly producer receipt proves that the scheduled owner actually
+ran. Merely finding a report created by hand does not satisfy that receipt, so
+the first scheduled run after deployment commissions the schedule by producing
+fresh evidence. On or after `electron_updater_audit.day_of_month`, the worker
+validates the exact canonical schema and fails closed unless
+`scan_complete=true` and `scan_errors=[]`.
+
+The canonical report's totals, per-candidate sizes, and mtimes feed the
+`warn_total_gib`, `warn_candidate_gib`, and stale thresholds. Threshold findings
+emit the existing alert once per evidence revision. They never move or delete a
+match; an incomplete `red` scan fails the formal worker closed.
 
 Commission the exact same scanner without cron lineage or the external archive:
 
@@ -74,9 +79,9 @@ Commission the exact same scanner without cron lineage or the external archive:
   --electron-audit-only
 ```
 
-Audit-only mode still takes the retention worker's single-instance lock and
-forces a fresh report. It is for commissioning and incident response; scheduled
-evidence continues to come from the existing formal cron owner.
+Audit-only mode still takes the retention worker's single-instance lock, but is
+validation-only. Run the canonical script directly for manual incident
+response; scheduled evidence continues to come from the formal cron owner.
 
 ## Formal cron lineage
 
@@ -90,9 +95,14 @@ LaunchAgent, and waits for a token-matched receipt. The worker refuses a green
 result unless that bridge process and its cron parent are still alive:
 
 ```cron
-*/15 * * * * /usr/bin/python3 /Users/example/.local/libexec/storage-governance/retention_cron_bridge.py --trigger /Users/example/.local/state/storage-governance/cron-trigger.json --receipt /Users/example/.local/state/storage-governance/cron-receipt.json --alert-log /Users/example/.local/state/storage-governance/retention-alerts.jsonl --config /Users/example/.local/libexec/storage-governance/retention-config.json
+*/15 * * * * /usr/bin/python3 /Users/example/.local/libexec/storage-governance/retention_cron_bridge.py --trigger /Users/example/.local/state/storage-governance/cron-trigger.json --receipt /Users/example/.local/state/storage-governance/cron-receipt.json --alert-log /Users/example/.local/state/storage-governance/retention-alerts.jsonl --config /Users/example/.local/libexec/storage-governance/retention-config.json --timeout 870
 ```
 
 Keep the lock and report on the internal volume, and the archive root on the
 external volume. A lock collision or canary failure exits nonzero and records
 an alert; it never starts a second copy or removes a source.
+
+Keep the compiled AppleScript and its source at an 840-second timeout, and the
+bridge at 870 seconds. Both bounds stay below the 900-second cron interval;
+the bridge gets 30 seconds to observe the worker result after AppleScript's
+deadline instead of holding the overlap lock for hours.

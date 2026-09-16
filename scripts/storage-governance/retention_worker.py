@@ -431,6 +431,304 @@ def audit_electron_updaters(
     return report
 
 
+CANONICAL_ELECTRON_AUDIT_SCHEMA = "org.st1-electron-updater-audit.v1"
+CANONICAL_ELECTRON_AUDIT_KEYS = frozenset(
+    {
+        "schema_version",
+        "audit_month",
+        "scanned_at",
+        "scan_started_at",
+        "scan_finished_at",
+        "host",
+        "home",
+        "safety",
+        "scan_complete",
+        "coverage",
+        "matches",
+        "summary",
+        "total_bytes",
+        "total_size_bytes",
+        "scan_errors",
+    }
+)
+CANONICAL_ELECTRON_AUDIT_SAFETY_KEYS = frozenset(
+    {
+        "mode",
+        "cleanup_performed",
+        "cleanup_requires_app_or_daemon_exit_confirmation",
+    }
+)
+CANONICAL_ELECTRON_AUDIT_SUMMARY_KEYS = frozenset(
+    {"match_count", "total_bytes", "total_size_bytes", "by_category"}
+)
+
+
+def _canonical_electron_audit_errors(
+    evidence: Any,
+    *,
+    expected_month: str,
+    timezone_name: str,
+) -> List[str]:
+    errors: List[str] = []
+    if not isinstance(evidence, dict):
+        return ["evidence must be a JSON object"]
+
+    actual_keys = frozenset(evidence)
+    if actual_keys != CANONICAL_ELECTRON_AUDIT_KEYS:
+        missing = sorted(CANONICAL_ELECTRON_AUDIT_KEYS - actual_keys)
+        unexpected = sorted(actual_keys - CANONICAL_ELECTRON_AUDIT_KEYS)
+        if missing:
+            errors.append("canonical top-level keys missing: %s" % ", ".join(missing))
+        if unexpected:
+            errors.append("canonical top-level keys unexpected: %s" % ", ".join(unexpected))
+
+    if evidence.get("schema_version") != CANONICAL_ELECTRON_AUDIT_SCHEMA:
+        errors.append("schema_version must equal %s" % CANONICAL_ELECTRON_AUDIT_SCHEMA)
+    if evidence.get("audit_month") != expected_month:
+        errors.append("audit_month must equal %s" % expected_month)
+    if evidence.get("scan_complete") is not True:
+        errors.append("scan_complete must be true")
+    if evidence.get("scan_errors") != []:
+        errors.append("scan_errors must be an empty list")
+
+    try:
+        scanned_at = datetime.fromisoformat(
+            str(evidence.get("scanned_at") or "").replace("Z", "+00:00")
+        )
+        if scanned_at.tzinfo is None:
+            raise ValueError("timestamp has no timezone")
+        scanned_local = scanned_at.astimezone(ZoneInfo(timezone_name))
+        if "%04d-%02d" % (scanned_local.year, scanned_local.month) != expected_month:
+            errors.append("scanned_at must fall in audit_month under %s" % timezone_name)
+    except (TypeError, ValueError):
+        errors.append("scanned_at must be a timezone-aware ISO-8601 timestamp")
+
+    for key in ("scan_started_at", "scan_finished_at"):
+        try:
+            parsed = datetime.fromisoformat(str(evidence.get(key) or "").replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                raise ValueError("timestamp has no timezone")
+        except (TypeError, ValueError):
+            errors.append("%s must be a timezone-aware ISO-8601 timestamp" % key)
+
+    safety = evidence.get("safety")
+    if not isinstance(safety, dict) or frozenset(safety) != CANONICAL_ELECTRON_AUDIT_SAFETY_KEYS:
+        errors.append("safety keys must exactly match the canonical schema")
+    else:
+        if safety.get("mode") != "read_only_audit":
+            errors.append("safety.mode must equal read_only_audit")
+        if safety.get("cleanup_performed") is not False:
+            errors.append("safety.cleanup_performed must be false")
+        if safety.get("cleanup_requires_app_or_daemon_exit_confirmation") is not True:
+            errors.append("safety cleanup confirmation guard must be true")
+
+    matches = evidence.get("matches")
+    if not isinstance(matches, list):
+        errors.append("matches must be a list")
+        matches = []
+    if not isinstance(evidence.get("coverage"), list):
+        errors.append("coverage must be a list")
+
+    summary = evidence.get("summary")
+    if not isinstance(summary, dict) or frozenset(summary) != CANONICAL_ELECTRON_AUDIT_SUMMARY_KEYS:
+        errors.append("summary keys must exactly match the canonical schema")
+    else:
+        if summary.get("match_count") != len(matches):
+            errors.append("summary.match_count must equal len(matches)")
+        if summary.get("total_bytes") != evidence.get("total_bytes"):
+            errors.append("summary.total_bytes must equal total_bytes")
+        if summary.get("total_size_bytes") != evidence.get("total_size_bytes"):
+            errors.append("summary.total_size_bytes must equal total_size_bytes")
+        if not isinstance(summary.get("by_category"), dict):
+            errors.append("summary.by_category must be an object")
+
+    for key in ("total_bytes", "total_size_bytes"):
+        value = evidence.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            errors.append("%s must be a non-negative integer" % key)
+    return errors
+
+
+def _load_canonical_electron_audit(
+    report_path: Path,
+    *,
+    expected_month: str,
+    timezone_name: str,
+) -> Tuple[Optional[Dict[str, Any]], List[str]]:
+    try:
+        evidence = json.loads(report_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None, ["canonical evidence file is missing"]
+    except (OSError, json.JSONDecodeError) as error:
+        return None, ["canonical evidence is unreadable: %s" % error]
+    errors = _canonical_electron_audit_errors(
+        evidence,
+        expected_month=expected_month,
+        timezone_name=timezone_name,
+    )
+    return evidence if isinstance(evidence, dict) else None, errors
+
+
+def maybe_run_canonical_electron_audit_producer(
+    config: Dict[str, Any],
+    *,
+    trigger_token: Optional[str],
+    now: Callable[[], datetime] = utc_now,
+) -> Dict[str, Any]:
+    """Run the one canonical producer once per Shanghai month.
+
+    This is called only from the FDA-capable cron/LaunchAgent lineage.  A
+    receipt, rather than the existence of an evidence file, proves that the
+    scheduled owner actually ran the producer for the month.  That distinction
+    intentionally forces one scheduled commissioning run after rollout even if
+    an operator previously created valid evidence by hand.
+    """
+
+    audit_config = config.get("electron_updater_audit")
+    if not isinstance(audit_config, dict) or not audit_config.get("enabled", False):
+        return {"status": "skipped", "reason": "electron updater audit is disabled"}
+    if not trigger_token:
+        return {"status": "skipped", "reason": "canonical producer requires verified cron lineage"}
+
+    timezone_name = str(audit_config.get("timezone") or "Asia/Shanghai")
+    checked_at, local_time = _audit_clock(now, timezone_name)
+    producer_day = int(audit_config.get("producer_day_of_month", 14))
+    if producer_day < 1 or producer_day > 28:
+        raise ArchiveError("electron updater producer_day_of_month must be between 1 and 28")
+    if local_time.day < producer_day:
+        return {"status": "skipped", "reason": "current month is before producer day %d" % producer_day}
+
+    expected_month = "%04d-%02d" % (local_time.year, local_time.month)
+    receipt_value = audit_config.get("producer_receipt_path")
+    script_value = audit_config.get("producer_script_path")
+    if not receipt_value or not script_value:
+        raise ArchiveError("canonical electron audit producer paths are not configured")
+    receipt_path = Path(str(receipt_value))
+    script_path = Path(str(script_value))
+    report_path = _audit_report_path(audit_config, local_time)
+
+    try:
+        previous = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        previous = {}
+    if (
+        isinstance(previous, dict)
+        and previous.get("schema") == "multica.st1-scheduled-producer-receipt.v1"
+        and previous.get("status") == "green"
+        and previous.get("audit_month") == expected_month
+    ):
+        _, errors = _load_canonical_electron_audit(
+            report_path,
+            expected_month=expected_month,
+            timezone_name=timezone_name,
+        )
+        if not errors:
+            return {
+                "status": "skipped",
+                "reason": "scheduled canonical producer already completed this month",
+                "audit_month": expected_month,
+                "receipt_path": str(receipt_path),
+            }
+
+    if script_path.is_symlink() or not script_path.is_file():
+        raise ArchiveError("canonical electron audit producer is unavailable: %s" % script_path)
+    home_path = Path(str(audit_config["home_path"]))
+    timeout_seconds = int(audit_config.get("producer_timeout_seconds", 120))
+    if timeout_seconds < 1 or timeout_seconds > 600:
+        raise ArchiveError("electron updater producer_timeout_seconds must be between 1 and 600")
+    command = [
+        "/usr/bin/python3",
+        str(script_path),
+        "--home",
+        str(home_path),
+        "--audit-month",
+        expected_month,
+        "--output",
+        str(report_path),
+    ]
+    try:
+        process = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout_seconds,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ArchiveError("canonical electron audit producer failed to start: %s" % error) from error
+    if process.returncode != 0:
+        detail = (process.stderr or process.stdout).strip()
+        raise ArchiveError(
+            "canonical electron audit producer exited %d: %s"
+            % (process.returncode, detail or "no diagnostic")
+        )
+
+    evidence, errors = _load_canonical_electron_audit(
+        report_path,
+        expected_month=expected_month,
+        timezone_name=timezone_name,
+    )
+    if errors:
+        raise ArchiveError("scheduled canonical evidence is invalid: %s" % "; ".join(errors))
+    assert evidence is not None
+    digest = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    receipt = {
+        "schema": "multica.st1-scheduled-producer-receipt.v1",
+        "status": "green",
+        "audit_month": expected_month,
+        "recorded_at": checked_at.isoformat(),
+        "trigger_token": trigger_token,
+        "report_path": str(report_path),
+        "report_sha256": digest,
+        "scan_complete": evidence.get("scan_complete"),
+        "scan_errors": evidence.get("scan_errors"),
+        "scanned_at": evidence.get("scanned_at"),
+    }
+    atomic_write_json(receipt_path, receipt)
+    return {
+        "status": "green",
+        "audit_month": expected_month,
+        "report_path": str(report_path),
+        "receipt_path": str(receipt_path),
+        "report_sha256": digest,
+    }
+
+
+def _canonical_electron_audit_attention(
+    evidence: Dict[str, Any],
+    audit_config: Dict[str, Any],
+    *,
+    checked_at: datetime,
+) -> List[str]:
+    reasons: List[str] = []
+    total_bytes = int(evidence.get("total_bytes") or 0)
+    warn_total_gib = float(audit_config.get("warn_total_gib", 5))
+    if warn_total_gib > 0 and total_bytes >= int(warn_total_gib * GIB):
+        reasons.append("total updater residue exceeds %.3f GiB threshold" % warn_total_gib)
+
+    warn_candidate_gib = float(audit_config.get("warn_candidate_gib", 1))
+    warn_candidate_bytes = int(warn_candidate_gib * GIB)
+    stale_seconds = int(float(audit_config.get("stale_days", 45)) * 86400)
+    stale_min_mib = float(audit_config.get("stale_min_mib", 100))
+    stale_min_bytes = int(stale_min_mib * 1024**2)
+    for match in evidence.get("matches") or []:
+        if not isinstance(match, dict):
+            continue
+        path = str(match.get("path") or "missing")
+        allocated = match.get("bytes")
+        if isinstance(allocated, int) and warn_candidate_bytes > 0 and allocated >= warn_candidate_bytes:
+            reasons.append("candidate exceeds %.3f GiB threshold: %s" % (warn_candidate_gib, path))
+        if not isinstance(allocated, int) or allocated < stale_min_bytes:
+            continue
+        try:
+            modified = parse_timestamp(str(match.get("latest_mtime") or ""))
+        except (TypeError, ValueError):
+            continue
+        if max(0.0, (checked_at - modified).total_seconds()) >= stale_seconds:
+            reasons.append("stale candidate exceeds %.3f MiB floor: %s" % (stale_min_mib, path))
+    return reasons
+
+
 def maybe_run_electron_updater_audit(
     config: Dict[str, Any],
     *,
@@ -438,38 +736,57 @@ def maybe_run_electron_updater_audit(
     force: bool = False,
     invocation_source: str = "manual",
 ) -> Dict[str, Any]:
+    # The canonical scanner is the only producer. This path validates its
+    # exact schema and derives alert findings without rewriting the evidence.
+    del invocation_source
     audit_config = config.get("electron_updater_audit")
     if not isinstance(audit_config, dict) or not audit_config.get("enabled", False):
         return {"status": "skipped", "reason": "electron updater audit is disabled"}
-    _, local_time = _audit_clock(now, str(audit_config.get("timezone") or "Asia/Shanghai"))
+    checked_at, local_time = _audit_clock(now, str(audit_config.get("timezone") or "Asia/Shanghai"))
     due_day = int(audit_config.get("day_of_month", 15))
     if due_day < 1 or due_day > 28:
         raise ArchiveError("electron updater audit day_of_month must be between 1 and 28")
     if not force and local_time.day < due_day:
         return {"status": "skipped", "reason": "current month is before day %d" % due_day}
     report_path = _audit_report_path(audit_config, local_time)
-    if not force and report_path.is_file():
-        try:
-            existing = json.loads(report_path.read_text(encoding="utf-8"))
-            modified = datetime.fromtimestamp(report_path.stat().st_mtime, ZoneInfo(str(audit_config.get("timezone") or "Asia/Shanghai")))
-        except (OSError, ValueError, json.JSONDecodeError):
-            existing = {}
-            modified = None
-        if (
-            isinstance(existing, dict)
-            and existing.get("schema") == "multica.st1-electron-updater-audit.v1"
-            and existing.get("audit_month") == "%04d-%02d" % (local_time.year, local_time.month)
-            and existing.get("status") in {"green", "attention"}
-            and modified is not None
-            and (modified.year, modified.month) == (local_time.year, local_time.month)
-        ):
-            return {
-                "status": "skipped",
-                "reason": "valid current-month evidence already exists",
-                "report_path": str(report_path),
-                "evidence_status": existing["status"],
-            }
-    return audit_electron_updaters(config, now=now, invocation_source=invocation_source)
+    expected_month = "%04d-%02d" % (local_time.year, local_time.month)
+    evidence, errors = _load_canonical_electron_audit(
+        report_path,
+        expected_month=expected_month,
+        timezone_name=str(audit_config.get("timezone") or "Asia/Shanghai"),
+    )
+    if errors:
+        return {
+            "status": "red",
+            "audit_month": expected_month,
+            "report_path": str(report_path),
+            "evidence_status": "invalid",
+            "errors": errors,
+        }
+    assert evidence is not None
+    attention_reasons = _canonical_electron_audit_attention(
+        evidence,
+        audit_config,
+        checked_at=checked_at,
+    )
+    common = {
+        "audit_month": expected_month,
+        "report_path": str(report_path),
+        "candidate_count": len(evidence.get("matches") or []),
+        "stale_candidate_count": sum(
+            1 for reason in attention_reasons if reason.startswith("stale candidate exceeds")
+        ),
+        "total_bytes": int(evidence.get("total_bytes") or 0),
+        "evidence_scanned_at": str(evidence.get("scanned_at") or ""),
+        "evidence_status": "green",
+    }
+    if attention_reasons:
+        return {"status": "attention", "attention_reasons": attention_reasons, **common}
+    return {
+        "status": "skipped",
+        "reason": "strict canonical current-month evidence already exists",
+        **common,
+    }
 
 
 class Canary:
@@ -1128,6 +1445,59 @@ def send_alert(config: Dict[str, Any], message: str) -> None:
             pass
 
 
+def send_electron_audit_attention_once(
+    config: Dict[str, Any],
+    electron_audit: Dict[str, Any],
+) -> bool:
+    audit_config = config.get("electron_updater_audit")
+    if not isinstance(audit_config, dict):
+        raise ArchiveError("electron_updater_audit config is missing")
+    receipt_value = audit_config.get("attention_receipt_path")
+    if receipt_value:
+        receipt_path = Path(str(receipt_value))
+    else:
+        receipt_path = Path(str(config["alert_log_path"])).with_name(
+            "st1-electron-updater-attention-receipt.json"
+        )
+    fingerprint_payload = {
+        "audit_month": electron_audit.get("audit_month"),
+        "evidence_scanned_at": electron_audit.get("evidence_scanned_at"),
+        "attention_reasons": electron_audit.get("attention_reasons") or [],
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    try:
+        previous = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        previous = {}
+    if isinstance(previous, dict) and previous.get("fingerprint") == fingerprint:
+        return False
+
+    reasons = [str(value) for value in electron_audit.get("attention_reasons") or []]
+    send_alert(
+        config,
+        "ST-1 Electron updater audit needs review: %d candidates, %.3f GiB; %s; report: %s"
+        % (
+            int(electron_audit.get("candidate_count") or 0),
+            int(electron_audit.get("total_bytes") or 0) / GIB,
+            "; ".join(reasons) or "threshold exceeded",
+            str(electron_audit.get("report_path") or "missing"),
+        ),
+    )
+    atomic_write_json(
+        receipt_path,
+        {
+            "schema": "multica.st1-attention-receipt.v1",
+            "fingerprint": fingerprint,
+            "audit_month": electron_audit.get("audit_month"),
+            "evidence_scanned_at": electron_audit.get("evidence_scanned_at"),
+            "recorded_at": utc_now().isoformat(),
+        },
+    )
+    return True
+
+
 def process_ancestry(start_pid: Optional[int] = None, limit: int = 8) -> List[Dict[str, Any]]:
     pid = os.getpid() if start_pid is None else start_pid
     values: List[Dict[str, Any]] = []
@@ -1232,20 +1602,34 @@ def run_worker(config: Dict[str, Any]) -> Dict[str, Any]:
         trigger, cron_lineage = verify_cron_bridge(config)
         config["_verified_cron_token"] = str(trigger["token"])
         write_cron_bridge_receipt(config, token=str(trigger["token"]), status="running")
+    try:
+        scheduled_producer = maybe_run_canonical_electron_audit_producer(
+            config,
+            trigger_token=str(trigger["token"]) if trigger else None,
+        )
+    except Exception as error:
+        audit_config = config.get("electron_updater_audit")
+        if isinstance(audit_config, dict) and audit_config.get("producer_receipt_path"):
+            try:
+                atomic_write_json(
+                    Path(str(audit_config["producer_receipt_path"])),
+                    {
+                        "schema": "multica.st1-scheduled-producer-receipt.v1",
+                        "status": "red",
+                        "recorded_at": utc_now().isoformat(),
+                        "trigger_token": str(trigger["token"]) if trigger else None,
+                        "error": str(error),
+                    },
+                )
+            except Exception:
+                pass
+        raise
     electron_audit = maybe_run_electron_updater_audit(
         config,
         invocation_source="verified-cron-launchd-bridge" if trigger else "manual-worker",
     )
     if electron_audit.get("status") == "attention":
-        send_alert(
-            config,
-            "ST-1 Electron updater audit needs review: %d candidates, %.3f GiB; report: %s"
-            % (
-                int(electron_audit.get("candidate_count") or 0),
-                int(electron_audit.get("total_bytes") or 0) / GIB,
-                str(electron_audit.get("report_path") or "missing"),
-            ),
-        )
+        send_electron_audit_attention_once(config, electron_audit)
     elif electron_audit.get("status") == "red":
         raise ArchiveError(
             "ST-1 Electron updater audit was incomplete: %s"
@@ -1299,6 +1683,7 @@ def run_worker(config: Dict[str, Any]) -> Dict[str, Any]:
         "cron_bridge_ancestry": cron_lineage,
         "cron_trigger_token": trigger.get("token") if trigger else None,
         "canary": canary,
+        "scheduled_electron_updater_audit_producer": scheduled_producer,
         "electron_updater_audit": electron_audit,
         "gc_mode": "dry-run",
         "gc_candidates": candidates,
@@ -1347,7 +1732,7 @@ def main() -> int:
     mode.add_argument(
         "--electron-audit-only",
         action="store_true",
-        help="force the read-only ST-1 updater audit without cron lineage or external-volume checks",
+        help="validate canonical ST-1 evidence without cron lineage or external-volume checks",
     )
     args = parser.parse_args()
     config: Dict[str, Any] = {}
@@ -1425,9 +1810,9 @@ def main() -> int:
                 {
                     "status": audit_only_report["status"],
                     "audit_month": audit_only_report["audit_month"],
-                    "candidate_count": audit_only_report["candidate_count"],
-                    "stale_candidate_count": audit_only_report["stale_candidate_count"],
-                    "total_bytes": audit_only_report["total_bytes"],
+                    "candidate_count": int(audit_only_report.get("candidate_count") or 0),
+                    "stale_candidate_count": int(audit_only_report.get("stale_candidate_count") or 0),
+                    "total_bytes": int(audit_only_report.get("total_bytes") or 0),
                     "report_path": audit_only_report["report_path"],
                 },
                 ensure_ascii=False,
