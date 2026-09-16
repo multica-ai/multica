@@ -1,10 +1,10 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -12,157 +12,105 @@ import (
 	"time"
 )
 
-func TestBuildCodebuddyArgs_Basic(t *testing.T) {
+func fakeCodebuddyACPScript() string {
+	return `#!/bin/sh
+# Fake codebuddy — ACP over stdin/stdout. Records argv and JSON-RPC.
+if [ -n "$CODEBUDDY_ARGS_FILE" ]; then
+  for arg in "$@"; do
+    printf '%s\n' "$arg" >> "$CODEBUDDY_ARGS_FILE"
+  done
+fi
+while IFS= read -r line; do
+  if [ -n "$CODEBUDDY_RPC_FILE" ]; then printf '%s\n' "$line" >> "$CODEBUDDY_RPC_FILE"; fi
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true,"sse":true}},"authMethods":[{"id":"external","name":"Login with Google/Github"}]}}\n' "$id"
+      ;;
+    *'"method":"authenticate"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"authenticate must not be called for a logged-in CLI"}}\n' "$id"
+      exit 0
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses-cb-001","models":{"currentModelId":"hy3"},"configOptions":[{"id":"thought_level","currentValue":"enabled","options":[{"value":"enabled","name":"On (default)"},{"value":"high","name":"High"}]}]}}\n' "$id"
+      ;;
+    *'"method":"session/load"'*)
+      printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses-resume","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"OLD HISTORY"}}}}'
+      if [ -n "$CODEBUDDY_STALE_LOAD" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Session not found"}}\n' "$id"
+        exit 0
+      fi
+      sid=$(printf '%s' "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"%s","models":{"currentModelId":"hy3"},"configOptions":[{"id":"thought_level","currentValue":"enabled","options":[{"value":"high","name":"High"}]}]}}\n' "$id" "$sid"
+      ;;
+    *'"method":"session/set_model"'*)
+      if [ -n "$CODEBUDDY_SET_MODEL_FAIL" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32602,"message":"model not available: bogus-model"}}\n' "$id"
+        exit 0
+      fi
+      if [ -n "$CODEBUDDY_STALE_SET_MODEL" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Session not found"}}\n' "$id"
+        exit 0
+      fi
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"session/set_config_option"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"id":"thought_level","currentValue":"high","options":[{"value":"high","name":"High"}]}]}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      if [ -n "$CODEBUDDY_STALE_PROMPT" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Session not found"}}\n' "$id"
+        exit 0
+      fi
+      if [ -n "$CODEBUDDY_TOOL_EVENTS" ]; then
+        printf '%s\n' \
+          '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses-cb-001","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"Checking a file"}}}}' \
+          '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses-cb-001","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Interim narration"}}}}' \
+          '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses-cb-001","update":{"sessionUpdate":"tool_call","toolCallId":"call-1","title":"read_file","kind":"read","status":"in_progress","rawInput":{"path":"test.txt"}}}}' \
+          '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses-cb-001","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"file contents"}}]}}}'
+      fi
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses-cb-001","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"Hello from codebuddy"}}}}\n'
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":100,"outputTokens":50,"cachedReadTokens":10,"cachedWriteTokens":5}}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+func TestBuildCodebuddyArgs_ACP(t *testing.T) {
 	t.Parallel()
 
 	args := buildCodebuddyArgs(ExecOptions{
-		Model:        "claude-sonnet-4-20250514",
-		MaxTurns:     25,
-		SystemPrompt: "You are an agent.",
+		Model:           "hy3",
+		ThinkingLevel:   "high",
+		ResumeSessionID: "sess-abc123",
+		MaxTurns:        25,
+		SystemPrompt:    "You are an agent.",
+		ExtraArgs:       []string{"--output-format", "text", "--max-budget-usd", "1.00"},
+		CustomArgs:      []string{"--max-budget-usd", "2.00", "--acp", "--multitask", "--permission-mode", "plan"},
 	}, slog.Default())
 
-	expected := []string{
-		"-p",
-		"--output-format", "stream-json",
-		"--input-format", "stream-json",
-		"--verbose",
-		"--permission-mode", "bypassPermissions",
-		"--disallowedTools", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode",
-		"--model", "claude-sonnet-4-20250514",
-		"--max-turns", "25",
-		"--append-system-prompt", "You are an agent.",
+	if len(args) < 1 || args[0] != "--acp" {
+		t.Fatalf("expected --acp first, got %v", args)
 	}
-
-	if len(args) != len(expected) {
-		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
-	}
-	for i, want := range expected {
-		if args[i] != want {
-			t.Fatalf("args[%d] = %q, want %q\nfull args: %v", i, args[i], want, args)
-		}
-	}
-}
-
-// --strict-mcp-config must never be passed, with or without a managed config.
-// It means "only use servers from --mcp-config" and drops CodeBuddy's user,
-// project and local scopes; measured against the real CLI, strict + a managed
-// config loaded ONLY the managed server, and strict alone loaded nothing at
-// all. The union is what mergeRuntimeAndAgentMcpConfig promises (MUL-5846).
-func TestBuildCodebuddyArgsNeverPassesStrictMCP(t *testing.T) {
-	t.Parallel()
-
-	for _, mcpConfig := range []json.RawMessage{
-		nil,
-		json.RawMessage("null"),
-		json.RawMessage(`{}`),
-		json.RawMessage(`{"mcpServers":{"paper":{"command":"paper"}}}`),
-	} {
-		args := buildCodebuddyArgs(ExecOptions{McpConfig: mcpConfig}, slog.Default())
-		for _, arg := range args {
-			if arg == "--strict-mcp-config" {
-				t.Fatalf("mcp_config %q must not disable CodeBuddy's own MCP scopes, got %v", string(mcpConfig), args)
-			}
-		}
-	}
-}
-
-func TestBuildCodebuddyArgs_DisallowsInteractiveTools(t *testing.T) {
-	t.Parallel()
-
-	// The daemon runs CodeBuddy headless, so every tool that waits on a human
-	// confirmation stalls the turn instead of ending it (GitHub #6012).
-	// CodeBuddy matches each --disallowedTools entry against the tool name
-	// exactly, so each tool must arrive as its own argv value.
-	args := buildCodebuddyArgs(ExecOptions{}, slog.Default())
-
-	idx := -1
-	for i, a := range args {
-		if a == "--disallowedTools" {
-			idx = i
-			break
-		}
-	}
-	if idx == -1 {
-		t.Fatalf("expected --disallowedTools in args: %v", args)
-	}
-
-	for offset, want := range []string{"AskUserQuestion", "EnterPlanMode", "ExitPlanMode"} {
-		got := ""
-		if idx+1+offset < len(args) {
-			got = args[idx+1+offset]
-		}
-		if got != want {
-			t.Fatalf("disallowed tool %d = %q, want %q\nfull args: %v", offset, got, want, args)
-		}
-	}
-}
-
-func TestBuildCodebuddyArgs_InjectsEffort(t *testing.T) {
-	t.Parallel()
-
-	args := buildCodebuddyArgs(ExecOptions{
-		ThinkingLevel: "high",
-	}, slog.Default())
-
-	found := false
-	for i := 0; i+1 < len(args); i++ {
-		if args[i] == "--effort" && args[i+1] == "high" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected --effort high in args: %v", args)
-	}
-}
-
-func TestBuildCodebuddyArgs_OmitsEffortWhenEmpty(t *testing.T) {
-	t.Parallel()
-
-	args := buildCodebuddyArgs(ExecOptions{}, slog.Default())
-
-	for _, a := range args {
-		if a == "--effort" {
-			t.Fatalf("--effort should not appear when ThinkingLevel is empty: %v", args)
-		}
-	}
-}
-
-func TestBuildCodebuddyArgs_BlocksUserEffortOverride(t *testing.T) {
-	t.Parallel()
-
-	args := buildCodebuddyArgs(ExecOptions{
-		ThinkingLevel: "medium",
-		CustomArgs:    []string{"--effort", "max"},
-	}, slog.Default())
-
-	// Should have exactly one --effort (the daemon-injected one).
-	count := 0
-	for i, a := range args {
-		if a == "--effort" {
-			count++
-			if i+1 < len(args) && args[i+1] != "medium" {
-				t.Fatalf("expected --effort medium, got --effort %s", args[i+1])
-			}
-		}
-	}
-	if count != 1 {
-		t.Fatalf("expected exactly 1 --effort, got %d in: %v", count, args)
-	}
-}
-
-func TestBuildCodebuddyArgs_ExtraArgsBeforeCustomArgs(t *testing.T) {
-	t.Parallel()
-
-	args := buildCodebuddyArgs(ExecOptions{
-		ExtraArgs:  []string{"--output-format", "text", "--max-budget-usd", "1.00"},
-		CustomArgs: []string{"--max-budget-usd", "2.00", "--permission-mode", "plan"},
-	}, slog.Default())
-
 	joined := strings.Join(args, " ")
-	// Blocked flags should be filtered from both layers.
-	if strings.Contains(joined, "--output-format text") || strings.Contains(joined, "--permission-mode plan") {
-		t.Fatalf("blocked args should be filtered from both layers: %v", args)
+	for _, blocked := range []string{"--output-format text", "--permission-mode plan", "--multitask"} {
+		if strings.Contains(joined, blocked) {
+			t.Fatalf("blocked %q should be filtered: %v", blocked, args)
+		}
+	}
+	acpCount := 0
+	for _, a := range args {
+		if a == "--acp" {
+			acpCount++
+		}
+	}
+	if !strings.Contains(joined, "--max-turns 25") {
+		t.Fatalf("max-turns must survive the ACP migration: %v", args)
+	}
+	if acpCount != 1 {
+		t.Fatalf("expected exactly one --acp, got %d in %v", acpCount, args)
 	}
 
 	extraIdx, customIdx := -1, -1
@@ -179,22 +127,36 @@ func TestBuildCodebuddyArgs_ExtraArgsBeforeCustomArgs(t *testing.T) {
 	}
 }
 
-func TestBuildCodebuddyArgs_Resume(t *testing.T) {
+func TestBuildCodebuddyArgsNeverPassesStrictMCP(t *testing.T) {
 	t.Parallel()
 
-	args := buildCodebuddyArgs(ExecOptions{
-		ResumeSessionID: "sess-abc123",
-	}, slog.Default())
-
-	found := false
-	for i := 0; i+1 < len(args); i++ {
-		if args[i] == "--resume" && args[i+1] == "sess-abc123" {
-			found = true
-			break
+	for _, mcpConfig := range []json.RawMessage{
+		nil,
+		json.RawMessage("null"),
+		json.RawMessage(`{}`),
+		json.RawMessage(`{"mcpServers":{"paper":{"command":"paper"}}}`),
+	} {
+		args := buildCodebuddyArgs(ExecOptions{McpConfig: mcpConfig}, slog.Default())
+		for _, arg := range args {
+			if arg == "--strict-mcp-config" || arg == "--mcp-config" {
+				t.Fatalf("ACP launch must not pass MCP via argv, mcp_config %q got %v", string(mcpConfig), args)
+			}
 		}
 	}
-	if !found {
-		t.Fatalf("expected --resume sess-abc123 in args: %v", args)
+}
+
+func TestCodebuddyExecute_NotFound(t *testing.T) {
+	t.Parallel()
+
+	b := &codebuddyBackend{cfg: Config{ExecutablePath: "/nonexistent/path/codebuddy", Logger: slog.Default()}}
+
+	ctx := context.Background()
+	_, err := b.Execute(ctx, "prompt", ExecOptions{})
+	if err == nil {
+		t.Fatal("expected error for missing executable")
+	}
+	if !strings.Contains(err.Error(), "codebuddy executable not found") {
+		t.Fatalf("expected 'codebuddy executable not found' in error, got %q", err.Error())
 	}
 }
 
@@ -205,12 +167,7 @@ func TestCodebuddyExecute_Success(t *testing.T) {
 	}
 
 	fakePath := filepath.Join(t.TempDir(), "codebuddy")
-	script := "#!/bin/sh\n" +
-		"IFS= read -r _\n" +
-		`printf '%s\n' '{"type":"system","session_id":"sess-cb-001"}'` + "\n" +
-		`printf '%s\n' '{"type":"assistant","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"Hello from codebuddy"}]}}'` + "\n" +
-		`printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-cb-001","result":"Hello from codebuddy","modelUsage":{"claude-sonnet-4-20250514":{"inputTokens":100,"outputTokens":50,"cacheReadInputTokens":10,"cacheCreationInputTokens":5}}}'` + "\n"
-	writeTestExecutable(t, fakePath, []byte(script))
+	writeTestExecutable(t, fakePath, []byte(fakeCodebuddyACPScript()))
 
 	b := &codebuddyBackend{cfg: Config{ExecutablePath: fakePath, Logger: slog.Default()}}
 
@@ -222,7 +179,6 @@ func TestCodebuddyExecute_Success(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 
-	// Drain messages.
 	var gotText bool
 	for msg := range session.Messages {
 		if msg.Type == MessageText && msg.Content == "Hello from codebuddy" {
@@ -244,12 +200,12 @@ func TestCodebuddyExecute_Success(t *testing.T) {
 		if result.Output != "Hello from codebuddy" {
 			t.Fatalf("expected output 'Hello from codebuddy', got %q", result.Output)
 		}
-		if result.SessionID != "sess-cb-001" {
-			t.Fatalf("expected session_id=sess-cb-001, got %q", result.SessionID)
+		if result.SessionID != "ses-cb-001" {
+			t.Fatalf("expected session_id=ses-cb-001, got %q", result.SessionID)
 		}
-		usage, ok := result.Usage["claude-sonnet-4-20250514"]
+		usage, ok := result.Usage["hy3"]
 		if !ok {
-			t.Fatalf("expected usage for claude-sonnet-4-20250514, got %#v", result.Usage)
+			t.Fatalf("expected usage for hy3, got %#v", result.Usage)
 		}
 		if usage.InputTokens != 100 || usage.OutputTokens != 50 || usage.CacheReadTokens != 10 || usage.CacheWriteTokens != 5 {
 			t.Fatalf("unexpected usage: %+v", usage)
@@ -259,147 +215,278 @@ func TestCodebuddyExecute_Success(t *testing.T) {
 	}
 }
 
-func TestCodebuddyExecute_NotFound(t *testing.T) {
+func TestCodebuddyACPInvokesFlagAndSkipsAuthenticate(t *testing.T) {
 	t.Parallel()
-
-	b := &codebuddyBackend{cfg: Config{ExecutablePath: "/nonexistent/path/codebuddy", Logger: slog.Default()}}
-
-	ctx := context.Background()
-	_, err := b.Execute(ctx, "prompt", ExecOptions{})
-	if err == nil {
-		t.Fatal("expected error for missing executable")
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
 	}
-	if !strings.Contains(err.Error(), "codebuddy executable not found") {
-		t.Fatalf("expected 'codebuddy executable not found' in error, got %q", err.Error())
+
+	tempDir := t.TempDir()
+	argsFile := filepath.Join(tempDir, "argv.txt")
+	rpcFile := filepath.Join(tempDir, "rpc.jsonl")
+	fakePath := filepath.Join(tempDir, "codebuddy")
+	writeTestExecutable(t, fakePath, []byte(fakeCodebuddyACPScript()))
+
+	b := &codebuddyBackend{cfg: Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"CODEBUDDY_ARGS_FILE": argsFile,
+			"CODEBUDDY_RPC_FILE":  rpcFile,
+		},
+	}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := b.Execute(ctx, "hi", ExecOptions{
+		Timeout:    5 * time.Second,
+		CustomArgs: []string{"--acp", "--multitask", "--model", "extra"},
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("status=%q err=%q", result.Status, result.Error)
+	}
+
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) < 1 || lines[0] != "--acp" {
+		t.Fatalf("expected --acp first, got %q", lines)
+	}
+	for _, got := range lines[1:] {
+		if got == "--acp" || got == "--multitask" {
+			t.Fatalf("blocked arg leaked: %q", lines)
+		}
+	}
+
+	rpc, err := os.ReadFile(rpcFile)
+	if err != nil {
+		t.Fatalf("read rpc: %v", err)
+	}
+	body := string(rpc)
+	if strings.Contains(body, `"method":"authenticate"`) {
+		t.Fatalf("logged-in CodeBuddy must skip authenticate, got:\n%s", body)
+	}
+	if !strings.Contains(body, `"method":"session/new"`) {
+		t.Fatalf("expected session/new, got:\n%s", body)
+	}
+	initFrame := findRecordedFrame(t, rpcFile, "initialize")
+	params, _ := initFrame["params"].(map[string]any)
+	caps, _ := params["clientCapabilities"].(map[string]any)
+	if len(caps) != 0 {
+		t.Fatalf("clientCapabilities must be empty so fs/terminal stay on the agent, got %#v", caps)
 	}
 }
 
-func TestCodebuddyExecuteSurfacesStderr(t *testing.T) {
+func TestCodebuddyACPSetModelFailureFailsTask(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
 
 	fakePath := filepath.Join(t.TempDir(), "codebuddy")
-	script := "#!/bin/sh\n" +
-		"IFS= read -r _\n" +
-		"echo \"FATAL ERROR: segfault in codebuddy runtime\" >&2\n" +
-		"exit 1\n"
-	writeTestExecutable(t, fakePath, []byte(script))
-
-	b := &codebuddyBackend{cfg: Config{ExecutablePath: fakePath, Logger: slog.Default()}}
+	writeTestExecutable(t, fakePath, []byte(fakeCodebuddyACPScript()))
+	b := &codebuddyBackend{cfg: Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"CODEBUDDY_SET_MODEL_FAIL": "1"},
+	}}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
-	session, err := b.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	session, err := b.Execute(ctx, "hi", ExecOptions{Model: "bogus-model", Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-
-	// Drain messages.
 	go func() {
 		for range session.Messages {
 		}
 	}()
-
-	select {
-	case result, ok := <-session.Result:
-		if !ok {
-			t.Fatal("result channel closed without a value")
-		}
-		if result.Status != "failed" {
-			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
-		}
-		if !strings.Contains(result.Error, "codebuddy exited with error") {
-			t.Fatalf("expected error to mention exit, got %q", result.Error)
-		}
-		if !strings.Contains(result.Error, "segfault in codebuddy runtime") {
-			t.Fatalf("expected error to include stderr content, got %q", result.Error)
-		}
-		if !strings.Contains(result.Error, "codebuddy stderr:") {
-			t.Fatalf("expected stderr label in error, got %q", result.Error)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("timeout waiting for result")
+	result := <-session.Result
+	if result.Status != "failed" {
+		t.Fatalf("status=%q, want failed", result.Status)
+	}
+	if !strings.Contains(result.Error, "bogus-model") {
+		t.Fatalf("error=%q, want model failure", result.Error)
 	}
 }
 
-func TestWriteCodebuddyInput(t *testing.T) {
+func TestCodebuddyACPResumeUsesSessionLoad(t *testing.T) {
 	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
 
-	var buf strings.Builder
-	err := writeCodebuddyInput(&buf, "hello world")
+	tempDir := t.TempDir()
+	rpcFile := filepath.Join(tempDir, "rpc.jsonl")
+	fakePath := filepath.Join(tempDir, "codebuddy")
+	writeTestExecutable(t, fakePath, []byte(fakeCodebuddyACPScript()))
+	b := &codebuddyBackend{cfg: Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"CODEBUDDY_RPC_FILE": rpcFile},
+	}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := b.Execute(ctx, "continue", ExecOptions{
+		ResumeSessionID: "ses-resume",
+		ThinkingLevel:   "high",
+		Timeout:         5 * time.Second,
+	})
 	if err != nil {
-		t.Fatalf("writeCodebuddyInput: %v", err)
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("status=%q err=%q", result.Status, result.Error)
+	}
+	if strings.Contains(result.Output, "OLD HISTORY") {
+		t.Fatal("resume replay leaked into this turn")
+	}
+	if result.SessionID != "ses-resume" {
+		t.Fatalf("session=%q", result.SessionID)
 	}
 
-	data := buf.String()
-	if len(data) == 0 || data[len(data)-1] != '\n' {
-		t.Fatalf("expected newline-terminated payload, got %q", data)
+	rpc, err := os.ReadFile(rpcFile)
+	if err != nil {
+		t.Fatalf("read rpc: %v", err)
 	}
-
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(strings.TrimSpace(data)), &payload); err != nil {
-		t.Fatalf("unmarshal payload: %v", err)
+	body := string(rpc)
+	if !strings.Contains(body, `"method":"session/load"`) {
+		t.Fatalf("expected session/load on resume, got:\n%s", body)
 	}
-	if payload["type"] != "user" {
-		t.Fatalf("expected type user, got %v", payload["type"])
+	if strings.Contains(body, `"method":"session/resume"`) {
+		t.Fatalf("codebuddy must use session/load, not session/resume:\n%s", body)
 	}
-
-	message, ok := payload["message"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected message object, got %T", payload["message"])
-	}
-	if message["role"] != "user" {
-		t.Fatalf("expected role user, got %v", message["role"])
-	}
-
-	content, ok := message["content"].([]any)
-	if !ok || len(content) != 1 {
-		t.Fatalf("expected one content block, got %v", message["content"])
-	}
-	block, ok := content[0].(map[string]any)
-	if !ok {
-		t.Fatalf("expected content block object, got %T", content[0])
-	}
-	if block["type"] != "text" || block["text"] != "hello world" {
-		t.Fatalf("unexpected content block: %v", block)
+	if !strings.Contains(body, `"method":"session/set_config_option"`) {
+		t.Fatalf("expected thought_level via set_config_option, got:\n%s", body)
 	}
 }
 
-func TestCodebuddyHandleAssistantText(t *testing.T) {
+func TestCodebuddyACPStaleResumeAtPrompt(t *testing.T) {
 	t.Parallel()
-
-	b := &codebuddyBackend{cfg: Config{Logger: slog.Default()}}
-	ch := make(chan Message, 10)
-
-	msg := codebuddySDKMessage{
-		Type: "assistant",
-		Message: mustMarshal(t, codebuddyMessageContent{
-			Role: "assistant",
-			Content: []codebuddyContentBlock{
-				{Type: "text", Text: "codebuddy says hi"},
-			},
-		}),
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
 	}
 
-	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage), make(map[string]struct{}))
-	output, tools := turn.text, turn.toolUses
+	fakePath := filepath.Join(t.TempDir(), "codebuddy")
+	writeTestExecutable(t, fakePath, []byte(fakeCodebuddyACPScript()))
+	b := &codebuddyBackend{cfg: Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"CODEBUDDY_STALE_PROMPT": "1"},
+	}}
 
-	if output != "codebuddy says hi" {
-		t.Fatalf("expected output 'codebuddy says hi', got %q", output)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := b.Execute(ctx, "hi", ExecOptions{
+		ResumeSessionID: "dead-session",
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
 	}
-	if tools != 0 {
-		t.Fatalf("expected no tool uses, got %d", tools)
-	}
-	select {
-	case m := <-ch:
-		if m.Type != MessageText || m.Content != "codebuddy says hi" {
-			t.Fatalf("unexpected message: %+v", m)
+	go func() {
+		for range session.Messages {
 		}
-	default:
-		t.Fatal("expected message on channel")
+	}()
+	result := <-session.Result
+	if result.Status != "failed" || !result.ResumeRejected {
+		t.Fatalf("status=%q resumeRejected=%v err=%q", result.Status, result.ResumeRejected, result.Error)
+	}
+	if result.SessionID != "" {
+		t.Fatalf("stale resume must clear session id, got %q", result.SessionID)
+	}
+}
+
+func TestCodebuddyACPStaleResumeAtSetModel(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "codebuddy")
+	writeTestExecutable(t, fakePath, []byte(fakeCodebuddyACPScript()))
+	b := &codebuddyBackend{cfg: Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"CODEBUDDY_STALE_SET_MODEL": "1"},
+	}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := b.Execute(ctx, "hi", ExecOptions{
+		ResumeSessionID: "dead-session",
+		Model:           "hy3",
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "failed" || !result.ResumeRejected {
+		t.Fatalf("status=%q resumeRejected=%v err=%q", result.Status, result.ResumeRejected, result.Error)
+	}
+}
+
+func TestCodebuddyACPForwardsMCPOnSessionNew(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	tempDir := t.TempDir()
+	rpcFile := filepath.Join(tempDir, "rpc.jsonl")
+	fakePath := filepath.Join(tempDir, "codebuddy")
+	writeTestExecutable(t, fakePath, []byte(fakeCodebuddyACPScript()))
+	b := &codebuddyBackend{cfg: Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"CODEBUDDY_RPC_FILE": rpcFile},
+	}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := b.Execute(ctx, "hi", ExecOptions{
+		Timeout:   5 * time.Second,
+		McpConfig: json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"]}}}`),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	<-session.Result
+
+	frame := findRecordedFrame(t, rpcFile, "session/new")
+	params, _ := frame["params"].(map[string]any)
+	servers, ok := params["mcpServers"].([]any)
+	if !ok || len(servers) != 1 {
+		t.Fatalf("session/new.mcpServers: got %#v", params["mcpServers"])
+	}
+	entry, _ := servers[0].(map[string]any)
+	if entry["name"] != "fetch" {
+		t.Fatalf("mcp server name=%v want fetch", entry["name"])
 	}
 }
 
@@ -415,11 +502,8 @@ func TestIsKnownThinkingValue_Codebuddy(t *testing.T) {
 		{"medium", true},
 		{"high", true},
 		{"xhigh", true},
-		// CodeBuddy 2.130.0 advertises `max`; the gate used to reject it.
 		{"max", true},
 		{"none", false},
-		// ACP advertises `enabled` as a session toggle, but `--effort enabled`
-		// is not a valid command line, so the gate must not accept it.
 		{"enabled", false},
 	}
 	for _, tc := range cases {
@@ -430,93 +514,93 @@ func TestIsKnownThinkingValue_Codebuddy(t *testing.T) {
 	}
 }
 
-func TestCodebuddyHandleUserToolResult(t *testing.T) {
+func TestCodebuddyACPStaleResumeAtLoad(t *testing.T) {
 	t.Parallel()
-
-	b := &codebuddyBackend{cfg: Config{Logger: slog.Default()}}
-	ch := make(chan Message, 10)
-
-	msg := codebuddySDKMessage{
-		Type: "user",
-		Message: mustMarshal(t, codebuddyMessageContent{
-			Role: "user",
-			Content: []codebuddyContentBlock{
-				{
-					Type:      "tool_result",
-					ToolUseID: "call-cb-1",
-					Content:   mustMarshal(t, "tool output here"),
-				},
-			},
-		}),
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX fixture")
 	}
-
-	b.handleUser(msg, ch)
-
-	select {
-	case m := <-ch:
-		if m.Type != MessageToolResult || m.CallID != "call-cb-1" {
-			t.Fatalf("unexpected message: %+v", m)
-		}
-	default:
-		t.Fatal("expected message on channel")
+	path := filepath.Join(t.TempDir(), "codebuddy")
+	writeTestExecutable(t, path, []byte(fakeCodebuddyACPScript()))
+	b := &codebuddyBackend{cfg: Config{ExecutablePath: path, Logger: slog.Default(), Env: map[string]string{"CODEBUDDY_STALE_LOAD": "1"}}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	session, err := b.Execute(ctx, "continue", ExecOptions{ResumeSessionID: "missing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "failed" || !result.ResumeRejected || result.SessionID != "" {
+		t.Fatalf("stale load must allow a fresh-session retry: %+v", result)
 	}
 }
 
-func TestCodebuddyHandleControlRequestApprovesInCodebuddyShape(t *testing.T) {
+func TestCodebuddyACPInitializeFailureCleansUpProcess(t *testing.T) {
 	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX fixture")
+	}
+	path := filepath.Join(t.TempDir(), "codebuddy")
+	writeTestExecutable(t, path, []byte(`#!/bin/sh
+IFS= read -r line
+printf '%s\n' '{"jsonrpc":"2.0","id":0,"error":{"code":-32603,"message":"initialization failed"}}'
+# Simulate a child that ignores stdin EOF after a failed handshake.
+exec sleep 30
+`))
+	b := &codebuddyBackend{cfg: Config{ExecutablePath: path, Logger: slog.Default()}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	session, err := b.Execute(ctx, "hello", ExecOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := <-session.Result
+	if result.Status != "failed" {
+		t.Fatalf("expected handshake failure: %+v", result)
+	}
+	select {
+	case _, ok := <-session.Messages:
+		if ok {
+			t.Fatal("expected closed message stream")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("handshake failure left the execution waiting on the child")
+	}
+}
 
-	b := &codebuddyBackend{cfg: Config{Logger: slog.Default()}}
-
-	var written bytes.Buffer
-
-	msg := codebuddySDKMessage{
-		Type:      "control_request",
-		RequestID: "perm_1730000000000_1",
-		Request: mustMarshal(t, codebuddyControlRequestPayload{
-			Subtype:  "can_use_tool",
-			ToolName: "Bash",
-			Input:    mustMarshal(t, map[string]any{"command": "ls"}),
-		}),
+func TestCodebuddyACPStreamsToolsAndKeepsFinalAnswer(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX fixture")
 	}
-
-	b.handleControlRequest(msg, &written)
-
-	var resp map[string]any
-	if err := json.Unmarshal(bytes.TrimSpace(written.Bytes()), &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
+	path := filepath.Join(t.TempDir(), "codebuddy")
+	writeTestExecutable(t, path, []byte(fakeCodebuddyACPScript()))
+	b := &codebuddyBackend{cfg: Config{ExecutablePath: path, Logger: slog.Default(), Env: map[string]string{"CODEBUDDY_TOOL_EVENTS": "1"}}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	session, err := b.Execute(ctx, "read a file", ExecOptions{})
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	if resp["type"] != "control_response" {
-		t.Fatalf("expected type control_response, got %v", resp["type"])
+	var thought, narration, tool, output bool
+	for msg := range session.Messages {
+		switch msg.Type {
+		case MessageThinking:
+			thought = msg.Content == "Checking a file"
+		case MessageText:
+			narration = narration || msg.Content == "Interim narration"
+		case MessageToolUse:
+			tool = msg.CallID == "call-1" && msg.Input["path"] == "test.txt"
+		case MessageToolResult:
+			output = msg.CallID == "call-1" && strings.Contains(msg.Output, "file contents")
+		}
 	}
-	respInner, ok := resp["response"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected response object, got %v", resp["response"])
+	result := <-session.Result
+	if !thought || !narration || !tool || !output {
+		t.Fatalf("missing streamed events: thought=%v narration=%v tool=%v output=%v", thought, narration, tool, output)
 	}
-	if respInner["subtype"] != "success" {
-		t.Fatalf("expected subtype success, got %v", respInner["subtype"])
-	}
-	if respInner["request_id"] != "perm_1730000000000_1" {
-		t.Fatalf("expected the request_id to be echoed back, got %v", respInner["request_id"])
-	}
-
-	innerResp, ok := respInner["response"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected inner response object, got %v", respInner["response"])
-	}
-	// CodeBuddy reads `allowed`; a missing key is read as a denial, which
-	// leaves the CLI waiting on a confirmation the daemon can never deliver.
-	if innerResp["allowed"] != true {
-		t.Fatalf("expected allowed=true, got %v", innerResp["allowed"])
-	}
-	if innerResp["behavior"] != "allow" {
-		t.Fatalf("expected behavior allow, got %v", innerResp["behavior"])
-	}
-	updatedInput, ok := innerResp["updatedInput"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected updatedInput object, got %v", innerResp["updatedInput"])
-	}
-	if updatedInput["command"] != "ls" {
-		t.Fatalf("expected the original tool input to be preserved, got %v", updatedInput["command"])
+	if result.Status != "completed" || result.Output != "Hello from codebuddy" {
+		t.Fatalf("expected final answer without pre-tool narration: %+v", result)
 	}
 }

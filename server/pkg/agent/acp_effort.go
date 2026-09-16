@@ -80,8 +80,8 @@ func (o acpEffortOption) values() []string {
 //
 // Values are taken verbatim: the CLI owns its vocabulary, and a whitelist here
 // would silently drop levels a backend genuinely accepts. Callers that must
-// narrow the set — CodeBuddy, whose `--effort` flag rejects a session-only
-// choice the ACP surface still advertises — apply their own overlay on top.
+// narrow the set — CodeBuddy excludes the session-only `enabled` toggle
+// from its reasoning-level picker — apply their own overlay on top.
 func parseACPEffortOption(raw json.RawMessage) (acpEffortOption, bool) {
 	type acpChoice struct {
 		Value string `json:"value"`
