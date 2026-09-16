@@ -93,11 +93,15 @@ response; scheduled evidence continues to come from the formal cron owner.
 Use the same command for canary, GC audit, and archive. The environment marker
 prevents a normal manual invocation from being mistaken for a cron result:
 
-On macOS, `/usr/sbin/cron` normally lacks Full Disk Access to external media.
-The formal entry therefore runs a synchronous bridge. The bridge proves its
-own live `cron` ancestry, writes a fresh one-time token, starts the FDA-capable
-LaunchAgent, and waits for a token-matched receipt. The worker refuses a green
-result unless that bridge process and its cron parent are still alive:
+On macOS, `/usr/sbin/cron` and `/usr/bin/osascript` normally lack Full Disk
+Access. The formal entry therefore runs a receipt-synchronous bridge. The
+bridge proves its own live `cron` ancestry, writes a fresh one-time token, and
+starts a LaunchAgent whose AppleScript asks the FDA-approved Terminal app to
+execute the worker. The bridge then waits for a token-matched receipt. The
+worker refuses a green result unless that bridge process and its cron parent
+are still alive. Grant Terminal Full Disk Access before commissioning; a plain
+`do shell script` remains attributed to `osascript` and is insufficient for
+protected user containers:
 
 ```cron
 */15 * * * * /usr/bin/python3 /Users/example/.local/libexec/storage-governance/retention_cron_bridge.py --trigger /Users/example/.local/state/storage-governance/cron-trigger.json --receipt /Users/example/.local/state/storage-governance/cron-receipt.json --alert-log /Users/example/.local/state/storage-governance/retention-alerts.jsonl --config /Users/example/.local/libexec/storage-governance/retention-config.json --timeout 870
@@ -107,7 +111,8 @@ Keep the lock and report on the internal volume, and the archive root on the
 external volume. A lock collision or canary failure exits nonzero and records
 an alert; it never starts a second copy or removes a source.
 
-Keep the compiled AppleScript and its source at an 840-second timeout, and the
-bridge at 870 seconds. Both bounds stay below the 900-second cron interval;
-the bridge gets 30 seconds to observe the worker result after AppleScript's
-deadline instead of holding the overlap lock for hours.
+Keep the compiled AppleScript and its source on the same Terminal-mediated
+command, with the worker bounded by the 840-second Perl alarm and the bridge at
+870 seconds. Both bounds stay below the 900-second cron interval; the bridge
+gets 30 seconds to observe the worker result after the worker deadline instead
+of holding the overlap lock for hours.

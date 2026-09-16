@@ -22,6 +22,12 @@ class CronBridgeTest(unittest.TestCase):
         self.assertEqual(DEFAULT_TIMEOUT_SECONDS, 870)
         self.assertLess(DEFAULT_TIMEOUT_SECONDS, 15 * 60)
 
+    def test_applescript_uses_fda_approved_terminal_with_bounded_worker(self) -> None:
+        source = Path(__file__).with_name("retention-cron.applescript.example").read_text()
+        self.assertIn('tell application "Terminal"', source)
+        self.assertIn("alarm shift @ARGV; exec @ARGV' 840", source)
+        self.assertNotIn("do shell script", source)
+
     def test_kickstart_does_not_force_kill_an_existing_retention_run(self) -> None:
         command = launchctl_kickstart_command("com.multica.storage-retention", uid=501)
         self.assertEqual(
