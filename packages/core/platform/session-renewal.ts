@@ -28,22 +28,23 @@ import type { Logger } from "../logger";
 const TOKEN_STORAGE_KEY = "multica_token";
 
 /**
- * How long to wait before the first check may repeat, until the server says
- * otherwise. It only ever applies between app start and the first answered
- * check, because every response carries the real cadence — so the one case it
- * governs is "the launch check failed and we have to try again". Five minutes
- * is short enough to stay inside the renewal window of even a deliberately
- * short AUTH_TOKEN_TTL, and long enough that an offline app is not retrying
- * in a loop.
+ * Governs one case only: the launch check failed and has to be retried before
+ * any server cadence is known — every answered check replaces it. Thirty
+ * seconds fits inside the renewal window of even the shortest supported
+ * AUTH_TOKEN_TTL (one minute, window 30s), so it cannot be the reason an
+ * actively used session expires, and it is long enough that an offline app is
+ * not retrying in a loop.
  */
-const FALLBACK_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+const FALLBACK_CHECK_INTERVAL_MS = 30 * 1000;
 
 /**
- * Anti-busy-loop floor, not a policy. The server owns the cadence and already
+ * Anti-busy-loop floor, not a policy. The server owns the cadence and
  * guarantees its value fits inside the renewal window; this only stops a
  * nonsense `check_again_in_seconds` from turning activity into a request per
  * event. It matches the server's own floor, so it never overrides a value the
- * server actually chose.
+ * server actually chose — a floor above that would silently let an active
+ * session expire. See minSessionRenewCheckInterval in
+ * server/internal/auth/session.go.
  */
 const MIN_CHECK_INTERVAL_MS = 5 * 1000;
 

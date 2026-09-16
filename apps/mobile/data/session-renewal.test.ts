@@ -17,9 +17,13 @@ const keychain = vi.hoisted(() => ({
   releaseClear: null as null | (() => void),
 }));
 
-vi.mock("./secure-storage", () => ({
-  getToken: vi.fn(async () => keychain.value),
-  setToken: vi.fn(async (token: string) => {
+// The real module is used, not a hand-written stand-in: its serialization is
+// the mechanism under test here, so replacing it would test nothing. Only
+// expo-secure-store underneath is faked, with hold/release so a test can pin
+// an interleaving instead of guessing at microtask counts.
+vi.mock("expo-secure-store", () => ({
+  getItemAsync: vi.fn(async () => keychain.value),
+  setItemAsync: vi.fn(async (_key: string, token: string) => {
     if (keychain.holdSet) {
       await new Promise<void>((resolve) => {
         keychain.releaseSet = resolve;
@@ -28,7 +32,7 @@ vi.mock("./secure-storage", () => ({
     }
     keychain.value = token;
   }),
-  clearToken: vi.fn(async () => {
+  deleteItemAsync: vi.fn(async () => {
     if (keychain.holdClear) {
       await new Promise<void>((resolve) => {
         keychain.releaseClear = resolve;
@@ -73,6 +77,7 @@ import {
 } from "./session-renewal";
 import { invalidateSessionEpoch } from "./session-epoch";
 import { sessionActivityResponderConfig } from "./session-activity";
+import * as SecureStore from "expo-secure-store";
 import { clearToken, getToken, setToken } from "./secure-storage";
 
 function renewed(token: string, checkAgainInSeconds = 3600) {
@@ -114,7 +119,7 @@ describe("mobile session renewal", () => {
     await renewSessionNow();
 
     expect(await getToken()).toBe("token-v1");
-    expect(vi.mocked(setToken)).not.toHaveBeenCalled();
+    expect(vi.mocked(SecureStore.setItemAsync)).not.toHaveBeenCalled();
   });
 
   // Launch and a foreground transition land together all the time on iOS.
@@ -195,6 +200,35 @@ describe("mobile session renewal", () => {
 // Both completion orders are covered, because the two guards catch different
 // halves: the epoch is true the instant logout starts, the token comparison
 // only once the delete lands.
+/**
+ * Starts a renewal and returns once its request is genuinely in flight — i.e.
+ * once the early "is this session still current?" checks have already passed.
+ *
+ * Without waiting for that, a test that logs out immediately is caught by
+ * those early checks and never reaches the commit, so it would pass whether
+ * or not the commit guards the write at all.
+ */
+async function renewalInFlight(): Promise<{
+  pending: Promise<void>;
+  respond: (value: unknown) => void;
+}> {
+  let respond!: (value: unknown) => void;
+  let requestStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    requestStarted = resolve;
+  });
+  apiMock.refreshSession.mockImplementation(() => {
+    requestStarted();
+    return new Promise((resolve) => {
+      respond = resolve;
+    });
+  });
+
+  const pending = renewSessionNow();
+  await started;
+  return { pending, respond };
+}
+
 describe("mobile session renewal — logout races", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -202,68 +236,63 @@ describe("mobile session renewal — logout races", () => {
     resetSessionRenewalForTest();
   });
 
-  it("discards the result when logout has STARTED but its delete has not landed", async () => {
-    let resolveRefresh!: (value: unknown) => void;
-    apiMock.refreshSession.mockReturnValue(
-      new Promise((r) => {
-        resolveRefresh = r;
-      }),
-    );
+  it("refuses the result when logout has STARTED but its delete has not landed", async () => {
+    const { pending, respond } = await renewalInFlight();
 
-    const pending = renewSessionNow();
-
-    // Logout begins: the epoch moves synchronously, the Keychain delete is
-    // left hanging so storage still holds the old token.
+    // Logout begins: the epoch moves synchronously and the Keychain delete is
+    // left in flight, so a plain read would still return the old token.
     keychain.holdClear = true;
     invalidateSessionEpoch();
     const logout = clearToken();
 
-    resolveRefresh(renewed("token-v2"));
-    await pending;
+    respond(renewed("token-v2"));
 
-    expect(apiMock.setToken).not.toHaveBeenCalledWith("token-v2");
-    expect(vi.mocked(setToken)).not.toHaveBeenCalledWith("token-v2");
-
-    // Let logout finish; the session must still be gone.
+    // The renewal's commit queues behind the in-flight delete — that is the
+    // serialization doing its job. Release the delete so both can finish.
     keychain.holdClear = false;
     keychain.releaseClear?.();
-    await logout;
-    expect(await getToken()).toBeNull();
-  });
-
-  it("discards the result when logout lands DURING the renewal's own write", async () => {
-    let resolveRefresh!: (value: unknown) => void;
-    apiMock.refreshSession.mockReturnValue(
-      new Promise((r) => {
-        resolveRefresh = r;
-      }),
-    );
-
-    const pending = renewSessionNow();
-
-    // Hold the renewal's own write open, and wait until it is genuinely
-    // suspended inside setToken. Only from there can logout complete strictly
-    // between the renewal's last check and its write landing — the ordering
-    // the post-write guard exists for.
-    keychain.holdSet = true;
-    const writeInFlight = new Promise<void>((resolve) => {
-      keychain.onSetEnter = resolve;
-    });
-    resolveRefresh(renewed("token-v2"));
-    await writeInFlight;
-
-    invalidateSessionEpoch();
-    await clearToken();
-
-    // Release the renewal's write. It lands AFTER the delete, so without a
-    // post-write check the Keychain would be left holding a live credential
-    // for a signed-out app.
-    keychain.holdSet = false;
-    keychain.releaseSet?.();
-    await pending;
+    await Promise.all([logout, pending]);
 
     expect(await getToken()).toBeNull();
     expect(apiMock.setToken).not.toHaveBeenCalledWith("token-v2");
+  });
+
+  // The three-party case: a stale renewal must not disturb a session that
+  // started AFTER it. Refusing has to mean "write nothing" — deleting instead
+  // would wipe the new account's credential and leave the app logged in in
+  // memory but signed out on the next launch.
+  it("leaves a newer sign-in untouched when a stale renewal lands last", async () => {
+    const { pending, respond } = await renewalInFlight();
+
+    // Logout, then a fresh sign-in as someone else — both complete while the
+    // renewal is still waiting on its response.
+    invalidateSessionEpoch();
+    await clearToken();
+    invalidateSessionEpoch();
+    await setToken("new-account-token");
+
+    respond(renewed("stale-token-v2"));
+    await pending;
+
+    expect(await getToken()).toBe("new-account-token");
+    expect(apiMock.setToken).not.toHaveBeenCalledWith("stale-token-v2");
+  });
+
+  // Same shape, but the stale renewal's own write is the one still pending
+  // when the newer session arrives. Serialization means it cannot land in the
+  // middle of the sign-in; it is simply refused when its turn comes.
+  it("refuses a stale renewal even when its write is the last to be queued", async () => {
+    const { pending, respond } = await renewalInFlight();
+
+    invalidateSessionEpoch();
+    const logout = clearToken();
+    const login = setToken("new-account-token");
+    respond(renewed("stale-token-v2"));
+
+    await Promise.all([logout, login, pending]);
+
+    expect(await getToken()).toBe("new-account-token");
+    expect(apiMock.setToken).not.toHaveBeenCalledWith("stale-token-v2");
   });
 
   it("still applies the renewal when no logout happened", async () => {

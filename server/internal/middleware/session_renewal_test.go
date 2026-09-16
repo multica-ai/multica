@@ -257,13 +257,19 @@ func csrfHeadersFor(t *testing.T, req *http.Request, mintedFor string) {
 	if err := auth.SetAuthCookies(rec, mintedFor); err != nil {
 		t.Fatalf("SetAuthCookies: %v", err)
 	}
+	// Clients prefer the session-bound cookie, so mirror that here: the one
+	// header carries it when present, and the token-bound value otherwise.
+	var tokenBound string
 	for _, c := range rec.Result().Cookies() {
 		switch c.Name {
 		case auth.CSRFCookieName:
-			req.Header.Set(auth.CSRFHeaderName, c.Value)
+			tokenBound = c.Value
 		case auth.SessionCSRFCookieName:
-			req.Header.Set(auth.SessionCSRFHeaderName, c.Value)
+			req.Header.Set(auth.CSRFHeaderName, c.Value)
 		}
+	}
+	if req.Header.Get(auth.CSRFHeaderName) == "" {
+		req.Header.Set(auth.CSRFHeaderName, tokenBound)
 	}
 }
 
@@ -295,20 +301,18 @@ func TestAuth_ExpiredSessionFailsAuthenticationNotCSRF(t *testing.T) {
 	}
 }
 
-// The session-bound header ALONE must behave the same way. This is the case
-// that isolates the fix: the token-bound cookie is only still issued for
-// rollback safety and goes away a release from now, so a client presenting
-// just the session binding is the steady state, and it has no second binding
-// to fall back on when `sid` cannot be read.
+// A client echoing the SESSION-bound value is the case that isolates the fix:
+// that value verifies only through `sid`, so if `sid` cannot be read from an
+// expired cookie there is no second binding to fall back on. It is also the
+// steady state, since the token-bound cookie goes away a release from now.
 func TestAuth_ExpiredSessionWithOnlySessionCSRFStillGets401(t *testing.T) {
 	live := sessionToken(t, auth.AuthRenewThreshold()*2, "sid-expired-only")
 	expired := sessionToken(t, -time.Minute, "sid-expired-only")
 
 	req := cookieRequest(http.MethodPost, expired)
 	csrfHeadersFor(t, req, live)
-	req.Header.Del(auth.CSRFHeaderName)
-	if req.Header.Get(auth.SessionCSRFHeaderName) == "" {
-		t.Fatal("test needs a session-bound CSRF header")
+	if req.Header.Get(auth.CSRFHeaderName) == "" {
+		t.Fatal("test needs a CSRF header carrying the session-bound value")
 	}
 
 	rec, called := runAuth(t, req)

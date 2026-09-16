@@ -135,25 +135,23 @@ func TestSetAuthCookies_HTTPSProduction(t *testing.T) {
 
 // csrfHeaderFor builds the request a browser would send: the auth cookie the
 // server set, plus the CSRF cookie's value echoed in the header.
-// csrfRequest presents authToken as the auth cookie and csrfValue as the
-// SESSION-bound header, which is what a current client sends.
+// csrfRequest presents authToken as the auth cookie and echoes csrfValue in
+// the single CSRF header. Which of the two cookie values a client puts there
+// is the client's choice; the server tries both bindings either way.
 func csrfRequest(t *testing.T, authToken, csrfValue string) *http.Request {
-	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/api/issues", nil)
-	req.AddCookie(&http.Cookie{Name: AuthCookieName, Value: authToken})
-	req.Header.Set(SessionCSRFHeaderName, csrfValue)
-	return req
-}
-
-// legacyCSRFRequest presents the token-bound header instead — what a client
-// that has not picked up the new cookie sends, and what a rolled-back server
-// would be verifying.
-func legacyCSRFRequest(t *testing.T, authToken, csrfValue string) *http.Request {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/api/issues", nil)
 	req.AddCookie(&http.Cookie{Name: AuthCookieName, Value: authToken})
 	req.Header.Set(CSRFHeaderName, csrfValue)
 	return req
+}
+
+// legacyCSRFRequest is the same request; the name records that the value came
+// from the token-bound cookie — what a client that has not picked up the new
+// cookie sends, and what a rolled-back server would be verifying.
+func legacyCSRFRequest(t *testing.T, authToken, csrfValue string) *http.Request {
+	t.Helper()
+	return csrfRequest(t, authToken, csrfValue)
 }
 
 // cookieValues runs the real cookie-setting path and returns the readable
@@ -309,26 +307,33 @@ func TestSetAuthCookies_TokenBindingTracksRenewal(t *testing.T) {
 	}
 }
 
-// A request carrying both headers is accepted on the strength of either, so a
-// client mid-upgrade — new cookie, stale token-bound value or vice versa — is
-// never wedged.
-func TestValidateCSRF_AcceptsEitherHeaderWhenBothAreSent(t *testing.T) {
+// One header, two acceptable bindings: whichever cookie value a client
+// chooses to echo, the server has to recognise it. This is what lets the
+// single header name serve every client/server version combination without a
+// CORS change — see CSRFHeaderName.
+func TestValidateCSRF_AcceptsEitherCookieValueInTheOneHeader(t *testing.T) {
 	sid, _ := NewSessionID()
-	original := signSession(t, sessionClaims(t, time.Now().Add(20*24*time.Hour), sid))
-	values := cookieValues(t, original)
+	token := signSession(t, sessionClaims(t, time.Now().Add(20*24*time.Hour), sid))
+	values := cookieValues(t, token)
 
-	renewedClaims := sessionClaims(t, time.Now().Add(20*24*time.Hour), sid)
-	renewed, _, err := RenewSessionToken(renewedClaims)
+	if !ValidateCSRF(csrfRequest(t, token, values[SessionCSRFCookieName])) {
+		t.Error("the session-bound value must validate")
+	}
+	if !ValidateCSRF(csrfRequest(t, token, values[CSRFCookieName])) {
+		t.Error("the token-bound value must validate")
+	}
+
+	// After a renewal the token-bound value from BEFORE it is stale, and the
+	// session-bound one is not — which is the whole reason clients prefer it.
+	renewed, _, err := RenewSessionToken(sessionClaims(t, time.Now().Add(20*24*time.Hour), sid))
 	if err != nil {
 		t.Fatalf("RenewSessionToken: %v", err)
 	}
-
-	// Post-renewal the token-bound value is stale (it was keyed to the old
-	// token) but the session-bound one is not.
-	req := csrfRequest(t, renewed, values[SessionCSRFCookieName])
-	req.Header.Set(CSRFHeaderName, values[CSRFCookieName])
-	if !ValidateCSRF(req) {
-		t.Error("a stale token-bound header must not veto a valid session-bound one")
+	if !ValidateCSRF(csrfRequest(t, renewed, values[SessionCSRFCookieName])) {
+		t.Error("a session-bound value must survive renewal")
+	}
+	if ValidateCSRF(csrfRequest(t, renewed, values[CSRFCookieName])) {
+		t.Error("a pre-renewal token-bound value must NOT still validate; clients fall back to the re-minted one")
 	}
 }
 

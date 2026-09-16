@@ -105,9 +105,8 @@ func TestSessionRenewCheckInterval_TracksTTL(t *testing.T) {
 		{"24h", 144 * time.Minute, "short TTL → proportionally short cadence"},
 		{"30m", 3 * time.Minute, "TTL/10, comfortably inside the 15m window"},
 		{"10m", time.Minute, "the TTL the PR's manual test plan uses"},
-		{"1m", 6 * time.Second, "TTL/10 is still above the anti-busy-loop floor"},
-		{"20s", 5 * time.Second, "TTL/10 would be 2s; the floor lifts it, and it still fits the 10s window"},
-		{"10s", 2500 * time.Millisecond, "floor would be 5s, but half the 5s window wins — correctness outranks politeness"},
+		{"1m", 6 * time.Second, "the shortest supported TTL; 6s is expressible in whole seconds"},
+		{"20s", 6 * time.Second, "below MinAuthTokenTTL, so the TTL itself is clamped up to 1m first"},
 		{"87600h", 7 * 24 * time.Hour, "10y → clamped at the ceiling"},
 	}
 	for _, tc := range cases {
@@ -125,21 +124,73 @@ func TestSessionRenewCheckInterval_TracksTTL(t *testing.T) {
 // TTL: a client that follows it gets at least two chances inside the renewal
 // window. Without that a short TTL produces an interval LONGER than the window
 // — and a client doing everything right is logged out while actively using the
-// app. The previous flat 5-minute floor did that for any TTL under 10 minutes.
-func TestSessionRenewCheckInterval_AlwaysFitsInsideTheRenewalWindow(t *testing.T) {
-	for _, ttl := range []string{"10s", "20s", "1m", "5m", "10m", "30m", "1h", "24h", "720h", "8760h", "87600h"} {
+// app. A flat five-minute floor did that for any TTL under ten minutes.
+//
+// The assertion is made against the value that actually reaches a client —
+// whole seconds, as it is serialised — not the internal time.Duration. Those
+// differ, and only the serialised one governs client behaviour.
+func TestSessionRenewCheckInterval_WireValueFitsInsideTheRenewalWindow(t *testing.T) {
+	for _, ttl := range []string{"1s", "10s", "1m", "5m", "10m", "30m", "1h", "24h", "720h", "8760h", "87600h"} {
 		t.Run(ttl, func(t *testing.T) {
 			t.Setenv("AUTH_TOKEN_TTL", ttl)
 			resetAuthTokenTTLForTest(t)
 
-			interval := SessionRenewCheckInterval()
-			threshold := AuthRenewThreshold()
-			if interval > threshold/2 {
-				t.Errorf("interval %s leaves fewer than two attempts inside a %s window (TTL=%s)",
-					interval, threshold, ttl)
+			// Exactly what handler.RefreshSession puts on the wire.
+			wireSeconds := int(SessionRenewCheckInterval().Seconds())
+			if wireSeconds < 1 {
+				t.Fatalf("cadence serialises to %ds — a client is told to check immediately, forever (TTL=%s)", wireSeconds, ttl)
 			}
-			if interval <= 0 {
-				t.Errorf("interval %s is not a usable cadence", interval)
+
+			asClientSeesIt := time.Duration(wireSeconds) * time.Second
+			threshold := AuthRenewThreshold()
+			if asClientSeesIt > threshold/2 {
+				t.Errorf("client-visible cadence %s leaves fewer than two attempts inside a %s window (TTL=%s)",
+					asClientSeesIt, threshold, ttl)
+			}
+		})
+	}
+}
+
+// Clients floor the server's cadence to protect themselves from a nonsense
+// value. That floor must never be the thing that decides the cadence, so the
+// server's own smallest possible value has to sit above it.
+func TestSessionRenewCheckInterval_StaysAboveTheClientFloors(t *testing.T) {
+	// packages/core/platform/session-renewal.ts and
+	// apps/mobile/data/session-renewal.ts both floor at 5 seconds.
+	const clientFloor = 5 * time.Second
+
+	for _, ttl := range []string{"1s", "30s", "1m", "10m", "720h"} {
+		t.Run(ttl, func(t *testing.T) {
+			t.Setenv("AUTH_TOKEN_TTL", ttl)
+			resetAuthTokenTTLForTest(t)
+
+			asClientSeesIt := time.Duration(int(SessionRenewCheckInterval().Seconds())) * time.Second
+			if asClientSeesIt < clientFloor {
+				t.Errorf("server cadence %s is below the %s client floor, so clients would silently override it (TTL=%s)",
+					asClientSeesIt, clientFloor, ttl)
+			}
+		})
+	}
+}
+
+// A TTL too short to serve correctly is clamped up rather than honoured or
+// replaced by the default. Honouring it would mean telling clients to check
+// on a cadence the wire cannot carry; falling back to 30 days would be a far
+// bigger surprise than the one-minute floor.
+func TestAuthTokenTTL_ClampsBelowTheSupportedMinimum(t *testing.T) {
+	cases := map[string]time.Duration{
+		"1s":  MinAuthTokenTTL,
+		"30s": MinAuthTokenTTL,
+		"59s": MinAuthTokenTTL,
+		"1m":  time.Minute,
+		"10m": 10 * time.Minute,
+	}
+	for raw, want := range cases {
+		t.Run(raw, func(t *testing.T) {
+			t.Setenv("AUTH_TOKEN_TTL", raw)
+			resetAuthTokenTTLForTest(t)
+			if got := AuthTokenTTL(); got != want {
+				t.Errorf("AuthTokenTTL() = %s, want %s (AUTH_TOKEN_TTL=%s)", got, want, raw)
 			}
 		})
 	}

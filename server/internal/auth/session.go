@@ -50,12 +50,16 @@ const (
 	sessionRenewCheckDivisor = 10
 
 	// minSessionRenewCheckInterval is a pure anti-busy-loop floor, not a
-	// policy: it only exists so a degenerate AUTH_TOKEN_TTL cannot turn
-	// every client into a request generator. It is small enough that it
-	// never decides the cadence for any TTL an operator would actually
-	// configure — the window cap below outranks it, because an interval
-	// that cannot fit inside the renewal window is not a cadence, it is a
-	// guaranteed logout.
+	// policy. With MinAuthTokenTTL enforced the smallest cadence this can
+	// ever produce is six seconds, so this floor never actually binds; it
+	// stays as a backstop, and the window cap below outranks it either way,
+	// because an interval that cannot fit inside the renewal window is not a
+	// cadence, it is a guaranteed logout.
+	//
+	// Every client floor must be at or below this value, or the client would
+	// silently override a cadence the server chose for correctness. See
+	// packages/core/platform/session-renewal.ts and
+	// apps/mobile/data/session-renewal.ts.
 	minSessionRenewCheckInterval = 5 * time.Second
 
 	// maxSessionRenewCheckInterval bounds the other end: a client that has

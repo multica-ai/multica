@@ -2826,56 +2826,123 @@ describe("ApiClient sliding session renewal", () => {
 // This file runs in the node environment, so `document` is stubbed rather
 // than relying on jsdom — readCookie only ever reads `document.cookie`, and a
 // stub keeps these tests next to the rest of the client's coverage.
+// This file runs in the node environment, so `document` is stubbed rather
+// than relying on jsdom — readCookie only ever reads `document.cookie`, and a
+// stub keeps these tests next to the rest of the client's coverage.
 describe("ApiClient CSRF headers", () => {
   function stubCookies(cookie: string) {
     vi.stubGlobal("document", { cookie });
   }
 
-  function jsonFetchMock() {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
-    );
+  function jsonResponse(body: unknown, status = 200) {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  function capturedHeaders(fetchMock: ReturnType<typeof vi.fn>, call = 0) {
+    return (fetchMock.mock.calls[call]?.[1]?.headers ?? {}) as Record<string, string>;
+  }
+
+  // One header name, deliberately. A second one would have to be in the
+  // server's CORS allowlist, and a rolled-back server allowlists only the
+  // names it shipped with — the preflight would fail and no retry could help.
+  it("sends exactly one CSRF header, preferring the session-bound value", async () => {
+    stubCookies("multica_csrf=token-bound; multica_csrf_session=session-bound");
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({}));
     vi.stubGlobal("fetch", fetchMock);
-    return fetchMock;
-  }
-
-  function capturedHeaders(fetchMock: ReturnType<typeof vi.fn>) {
-    return (fetchMock.mock.calls[0]?.[1]?.headers ?? {}) as Record<string, string>;
-  }
-
-  it("echoes both cookies, so either binding can satisfy the server", async () => {
-    stubCookies("multica_csrf=token-bound-value; multica_csrf_session=session-bound-value");
-    const fetchMock = jsonFetchMock();
 
     await new ApiClient("https://api.example.test").markOnboardingComplete();
 
     const headers = capturedHeaders(fetchMock);
-    expect(headers["X-CSRF-Token"]).toBe("token-bound-value");
-    expect(headers["X-CSRF-Session"]).toBe("session-bound-value");
-  });
-
-  // A server running the previous release only understands the token-bound
-  // header, so it has to keep going out on its own after a rollback — and a
-  // session that predates the session-bound cookie has no other binding.
-  it("still sends the token-bound header when no session cookie exists", async () => {
-    stubCookies("multica_csrf=token-bound-value");
-    const fetchMock = jsonFetchMock();
-
-    await new ApiClient("https://api.example.test").markOnboardingComplete();
-
-    const headers = capturedHeaders(fetchMock);
-    expect(headers["X-CSRF-Token"]).toBe("token-bound-value");
+    expect(headers["X-CSRF-Token"]).toBe("session-bound");
     expect(headers["X-CSRF-Session"]).toBeUndefined();
   });
 
-  it("sends neither header when there is no cookie to echo", async () => {
+  // A session that predates the session-bound cookie, and every request after
+  // a rollback, has only the token-bound value to offer.
+  it("falls back to the token-bound value when no session cookie exists", async () => {
+    stubCookies("multica_csrf=token-bound");
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new ApiClient("https://api.example.test").markOnboardingComplete();
+
+    expect(capturedHeaders(fetchMock)["X-CSRF-Token"]).toBe("token-bound");
+  });
+
+  it("sends no CSRF header when there is no cookie to echo", async () => {
     stubCookies("");
-    const fetchMock = jsonFetchMock();
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
 
     await new ApiClient("https://api.example.test").markOnboardingComplete();
 
-    const headers = capturedHeaders(fetchMock);
-    expect(headers["X-CSRF-Token"]).toBeUndefined();
-    expect(headers["X-CSRF-Session"]).toBeUndefined();
+    expect(capturedHeaders(fetchMock)["X-CSRF-Token"]).toBeUndefined();
+  });
+
+  // The rollback path end to end: a server running the previous release
+  // cannot verify the session-bound value, and the client has to discover that
+  // and switch — otherwise the user is authenticated for reads and rejected
+  // for every write.
+  it("retries with the token-bound value when the server rejects the session-bound one", async () => {
+    stubCookies("multica_csrf=token-bound; multica_csrf_session=session-bound");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ error: "CSRF validation failed" }, 403))
+      // A factory, not a fixed value: a Response body can only be read once,
+      // so a shared instance breaks on the second call.
+      .mockImplementation(async () => jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.markOnboardingComplete();
+
+    expect(capturedHeaders(fetchMock, 0)["X-CSRF-Token"]).toBe("session-bound");
+    expect(capturedHeaders(fetchMock, 1)["X-CSRF-Token"]).toBe("token-bound");
+  });
+
+  // ...and it stays switched, so a rolled-back server does not cost two
+  // requests per write for the rest of the session.
+  it("keeps using the token-bound value while the rejected cookie is current", async () => {
+    stubCookies("multica_csrf=token-bound; multica_csrf_session=session-bound");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ error: "CSRF validation failed" }, 403))
+      // A factory, not a fixed value: a Response body can only be read once,
+      // so a shared instance breaks on the second call.
+      .mockImplementation(async () => jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.markOnboardingComplete();
+    await client.markOnboardingComplete();
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(capturedHeaders(fetchMock, 2)["X-CSRF-Token"]).toBe("token-bound");
+  });
+
+  // But only while it is current. A renewal or a new login replaces the
+  // session cookie, and the preferred binding is worth trying again — keying
+  // on the value rather than a boolean is what stops this oscillating once
+  // per renewal against a server that understands it perfectly well.
+  it("prefers the session-bound value again once the cookie changes", async () => {
+    stubCookies("multica_csrf=token-bound; multica_csrf_session=session-bound");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ error: "CSRF validation failed" }, 403))
+      // A factory, not a fixed value: a Response body can only be read once,
+      // so a shared instance breaks on the second call.
+      .mockImplementation(async () => jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.markOnboardingComplete();
+
+    stubCookies("multica_csrf=token-bound-2; multica_csrf_session=session-bound-2");
+    await client.markOnboardingComplete();
+
+    expect(capturedHeaders(fetchMock, 2)["X-CSRF-Token"]).toBe("session-bound-2");
   });
 });

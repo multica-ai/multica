@@ -678,6 +678,11 @@ function dingTalkGroupSearch(params: ListDingTalkGroupsParams): string {
 // be retried.
 const CSRF_REJECTED_ERROR = "CSRF validation failed";
 
+// One header, two possible values — see ApiClient.readCsrfValue.
+const CSRF_HEADER = "X-CSRF-Token";
+const CSRF_COOKIE = "multica_csrf";
+const SESSION_CSRF_COOKIE = "multica_csrf_session";
+
 /**
  * Whether a request body can be sent a second time. Strings and multipart
  * forms can; a stream cannot, and silently replaying a half-consumed one
@@ -721,6 +726,35 @@ export class ApiClient {
     return this.token;
   }
 
+  /**
+   * Which of the two CSRF cookies to echo (MUL-7436).
+   *
+   * The session-bound value is preferred: it survives a sliding renewal, so a
+   * request another tab built before a renewal still validates after it. The
+   * token-bound value is the fallback, and it is what a server running the
+   * PREVIOUS release can verify — after a rollback the session-bound value is
+   * meaningless to it.
+   *
+   * Both travel in the same header. A second header name would have to be in
+   * that server's CORS allowlist, and a rolled-back server allowlists only the
+   * names it shipped with: the preflight would fail and no retry could help.
+   *
+   * `csrfSessionValueRejected` records the exact session-bound value a server
+   * refused, so the fallback is used for as long as that value is current and
+   * no longer — a renewal or a new login replaces the cookie and the preferred
+   * binding is tried again. Keying on the value rather than a boolean is what
+   * stops this from oscillating once per renewal against a current server.
+   */
+  private csrfSessionValueRejected: string | null = null;
+
+  private readCsrfValue(): string | null {
+    const sessionBound = this.readCookie(SESSION_CSRF_COOKIE);
+    if (sessionBound && sessionBound !== this.csrfSessionValueRejected) {
+      return sessionBound;
+    }
+    return this.readCookie(CSRF_COOKIE) ?? sessionBound;
+  }
+
   private readCookie(name: string): string | null {
     if (typeof document === "undefined") return null;
     const prefix = `${name}=`;
@@ -733,15 +767,8 @@ export class ApiClient {
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
     const slug = getCurrentSlug();
     if (slug) headers["X-Workspace-Slug"] = slug;
-    // Both CSRF cookies are echoed when present, and the server accepts
-    // either. The session-bound one survives a sliding renewal; the
-    // token-bound one is the only binding a server running the previous
-    // release can verify, so it keeps a rollback from leaving this client
-    // able to read and unable to write (MUL-7436).
-    const csrf = this.readCookie("multica_csrf");
-    if (csrf) headers["X-CSRF-Token"] = csrf;
-    const sessionCsrf = this.readCookie("multica_csrf_session");
-    if (sessionCsrf) headers["X-CSRF-Session"] = sessionCsrf;
+    const csrf = this.readCsrfValue();
+    if (csrf) headers[CSRF_HEADER] = csrf;
     const id = this.options.identity;
     if (id?.platform) headers["X-Client-Platform"] = id.platform;
     if (id?.version) headers["X-Client-Version"] = id.version;
@@ -815,17 +842,24 @@ export class ApiClient {
 
     let res = await send();
 
-    // A CSRF token is bound to the session, so a renewed session normally
-    // leaves the one this request carried perfectly valid (MUL-7436). One
-    // case escapes that: the first renewal of a session predating the
-    // session-bound binding rotates a cookie the old token was keyed to, and
-    // a request another tab had already built goes out with a CSRF token for
-    // the previous cookie. That is a stale token, not an attack — re-reading
-    // the cookie and sending again resolves it, once.
+    // Two things can make a CSRF value the server refuses, and one retry
+    // covers both (MUL-7436):
+    //
+    //   - It went stale. The first renewal of a session that predates the
+    //     session-bound binding rotates the cookie the old value was keyed to,
+    //     and a request another tab had already built carries the previous
+    //     one. Rebuilding the headers re-reads the cookie.
+    //   - The server does not understand it. After a rollback, the previous
+    //     release can only verify the token-bound binding. Recording the
+    //     rejected value switches this client to that binding until the cookie
+    //     changes again.
+    //
+    // Neither is an attack, and neither should surface as a failed write.
     if (res.status === 403 && isReplayableBody(init?.body)) {
       const { message } = await this.parseErrorBody(res.clone(), "");
       if (message === CSRF_REJECTED_ERROR) {
-        this.logger.info(`↻ ${method} ${path} (stale CSRF token, retrying once)`, { rid });
+        this.csrfSessionValueRejected = this.readCookie(SESSION_CSRF_COOKIE);
+        this.logger.info(`↻ ${method} ${path} (CSRF token rejected, retrying once)`, { rid });
         res = await send();
       }
     }

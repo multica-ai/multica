@@ -18,15 +18,25 @@
  * a session, and `onUnauthorized` in app/_layout.tsx already owns that.
  */
 import { api, ApiError } from "./api";
-import { clearToken, getToken, setToken } from "./secure-storage";
+import { commitRenewedToken, getToken } from "./secure-storage";
 import { currentSessionEpoch, sessionEpochChanged } from "./session-epoch";
 
-/** Applies only between launch and the first response; every response carries
- *  the server's own cadence, derived from the deployment's token TTL. */
-const FALLBACK_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+/**
+ * Governs one case only: the launch check failed and has to be retried before
+ * any server cadence is known. Thirty seconds fits inside the renewal window
+ * of even the shortest supported AUTH_TOKEN_TTL (one minute, window 30s), so
+ * it cannot be the reason an actively used session expires. Every answered
+ * check replaces it with the server's value.
+ */
+const FALLBACK_CHECK_INTERVAL_MS = 30 * 1000;
 
-/** Floor, so a nonsensical `check_again_in_seconds` cannot spin the app. */
-const MIN_CHECK_INTERVAL_MS = 60 * 1000;
+/**
+ * Anti-busy-loop floor, not a policy. It matches the server's own floor, so it
+ * never overrides a cadence the server actually chose — a floor above the
+ * server's smallest value would silently let an active session expire. See
+ * minSessionRenewCheckInterval in server/internal/auth/session.go.
+ */
+const MIN_CHECK_INTERVAL_MS = 5 * 1000;
 
 let checkIntervalMs = FALLBACK_CHECK_INTERVAL_MS;
 let lastAttemptAt = 0;
@@ -73,24 +83,21 @@ export async function renewSessionNow(): Promise<void> {
       }
       if (!result.renewed || !result.token) return;
 
-      // Late-result guard, epoch first: it is true the instant logout STARTS,
-      // while the token comparison below only becomes true once the Keychain
-      // delete has finished. Both are checked because they catch different
-      // things — the epoch catches a teardown in progress, the comparison
-      // catches a credential swapped by some path that did not bump it.
-      if (sessionEpochChanged(epochAtStart)) return;
-      const current = await getToken();
-      if (current !== startedFrom || sessionEpochChanged(epochAtStart)) return;
+      // The decision to keep this result and the write that acts on it happen
+      // together, inside the credential writer's serialization — so a logout
+      // or a sign-in cannot slip between them. A refusal is just a no-op:
+      // nothing is deleted, because by the time a renewal is stale whatever is
+      // stored may belong to a session that started after it.
+      const applied = await commitRenewedToken(result.token, {
+        epoch: epochAtStart,
+        previousToken: startedFrom,
+      });
+      if (!applied) return;
 
-      await setToken(result.token);
-      if (sessionEpochChanged(epochAtStart)) {
-        // A teardown landed while this write was in flight, so its own
-        // delete may have run before ours. Undo the write rather than
-        // leaving a live credential in the Keychain of a signed-out app —
-        // this is the one place that can tell the difference.
-        await clearToken();
-        return;
-      }
+      // The write is committed; publishing it in memory is the last step. A
+      // teardown that lands in this gap has already cleared storage and will
+      // clear the in-memory token too, so stay out of its way.
+      if (sessionEpochChanged(epochAtStart)) return;
       api.setToken(result.token);
     } catch (err) {
       // A 401 has already been routed to the sign-out path by the client's

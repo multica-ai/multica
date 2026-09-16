@@ -30,13 +30,39 @@ const (
 	// replaces the very token it is keyed to.
 	SessionCSRFCookieName = "multica_csrf_session"
 
-	// CSRFHeaderName / SessionCSRFHeaderName are where clients echo the two
-	// cookies back. A client may send either or both; the server accepts a
-	// request if EITHER verifies.
-	CSRFHeaderName        = "X-CSRF-Token"
-	SessionCSRFHeaderName = "X-CSRF-Session"
+	// CSRFHeaderName is where clients echo ONE of the two cookies back, and
+	// there is deliberately only one header name.
+	//
+	// A second header would have to be added to corsAllowedHeaders, and that
+	// list is version-specific: a browser holding a cookie issued by this
+	// release, talking to a rolled-back server, would send a header that
+	// server does not allowlist. The preflight fails, the request never
+	// reaches a handler, and no amount of client retrying helps — which is
+	// exactly the half-logged-in state the second cookie exists to prevent.
+	// Keeping one header name means the rollback path has no preflight
+	// dependency at all; the server simply tries both bindings against
+	// whatever value arrives.
+	CSRFHeaderName = "X-CSRF-Token"
 
 	defaultAuthTokenTTL = 30 * 24 * time.Hour // 30 days
+
+	// MinAuthTokenTTL is the shortest session lifetime this system can serve
+	// CORRECTLY, and it exists because the renewal cadence has to survive a
+	// round trip through JSON.
+	//
+	// Clients are told when to check again in whole seconds
+	// (RefreshSessionResponse.CheckAgainInSeconds). The cadence is derived
+	// from the TTL and must land inside the renewal window, so a very short
+	// TTL asks the wire to carry a sub-second value: it truncates, and below
+	// about four seconds it serialises to 0. At that point the contract is not
+	// merely imprecise, it is unrepresentable — clients would be told to check
+	// immediately and forever, or never.
+	//
+	// One minute is the smallest TTL whose cadence (six seconds) is expressible
+	// with room to spare, and it still leaves short lifetimes usable for
+	// testing. Anything shorter is clamped up to it rather than honoured,
+	// because honouring it would mean silently logging active users out.
+	MinAuthTokenTTL = time.Minute
 )
 
 var (
@@ -91,6 +117,16 @@ func AuthTokenTTL() time.Duration {
 	authTokenTTLOnce.Do(func() {
 		raw := os.Getenv("AUTH_TOKEN_TTL")
 		if ttl, ok := parseAuthTokenTTL(raw); ok {
+			if ttl < MinAuthTokenTTL {
+				// Clamping up, not falling back to the default: someone who
+				// asked for 30 seconds is far better served by 1 minute than
+				// by the 30-day default they did not ask for, and the warning
+				// says exactly what happened.
+				slog.Warn("AUTH_TOKEN_TTL is below the shortest supported session lifetime; using the minimum",
+					"value", raw, "minimum_seconds", int(MinAuthTokenTTL.Seconds()),
+					"reason", "the renewal cadence derived from a shorter TTL cannot be expressed in whole seconds")
+				ttl = MinAuthTokenTTL
+			}
 			authTokenTTLCached = ttl
 			slog.Info("auth token TTL configured", "seconds", int(ttl.Seconds()))
 			return
@@ -303,20 +339,18 @@ func IsSafeMethod(method string) bool {
 	return false
 }
 
-// ValidateCSRF checks the CSRF headers against the auth cookie. The values are
+// ValidateCSRF checks the CSRF header against the auth cookie. The value is
 // HMAC-signed, so the server verifies a signature rather than comparing
 // cookie == header.
 // Returns true if validation passes (including for safe methods that don't need CSRF).
 //
-// Either binding is accepted, and the order matters only for clarity:
+// One header, two acceptable bindings. Clients prefer the session-bound
+// cookie, which survives a sliding renewal; a client that has not picked up
+// that cookie, or is talking to us right after a rollback, sends the
+// token-bound one. Trying both here is what lets a single header name serve
+// every combination of client and server version — see CSRFHeaderName.
 //
-//   - The session-bound header is what a current client sends and what
-//     survives a sliding renewal.
-//   - The token-bound header is what a client that has not picked up the new
-//     cookie sends, what every pre-MUL-7436 cookie pair carries, and what a
-//     rolled-back server would be verifying.
-//
-// The `sid` here is read from the cookie WITHOUT enforcing expiry
+// The `sid` is read from the cookie WITHOUT enforcing expiry
 // (SessionIDFromToken). That is what keeps an expired session from failing
 // here: this function must not be the thing that answers a user whose session
 // just ended, because a 403 leaves the client retrying a write instead of
@@ -327,26 +361,25 @@ func ValidateCSRF(r *http.Request) bool {
 		return true
 	}
 
+	presented := r.Header.Get(CSRFHeaderName)
+	if presented == "" {
+		return false
+	}
+
 	authCookie, err := r.Cookie(AuthCookieName)
 	if err != nil || authCookie.Value == "" {
 		return false
 	}
 
-	if presented := r.Header.Get(SessionCSRFHeaderName); presented != "" {
-		if sid := SessionIDFromToken(authCookie.Value); sid != "" {
-			if verifyCSRFToken(presented, func(nonce []byte) []byte {
-				return sessionCSRFSignature(sid, nonce)
-			}) {
-				return true
-			}
+	if sid := SessionIDFromToken(authCookie.Value); sid != "" {
+		if verifyCSRFToken(presented, func(nonce []byte) []byte {
+			return sessionCSRFSignature(sid, nonce)
+		}) {
+			return true
 		}
 	}
 
-	if presented := r.Header.Get(CSRFHeaderName); presented != "" {
-		return verifyCSRFToken(presented, func(nonce []byte) []byte {
-			return tokenCSRFSignature(authCookie.Value, nonce)
-		})
-	}
-
-	return false
+	return verifyCSRFToken(presented, func(nonce []byte) []byte {
+		return tokenCSRFSignature(authCookie.Value, nonce)
+	})
 }
