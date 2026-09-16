@@ -1136,7 +1136,7 @@
   },
   "sharecrm": {
     "section_title": "ShareCRM",
-    "page_description": "Connect each Multica Agent to its own ShareCRM bot. Members can DM the bot, @mention it in a group, and type /issue to spin up a new Multica issue.",
+    "page_description": "Chat with agents in ShareCRM or use /issue to create an issue.",
     "not_enabled_title": "ShareCRM integration not enabled",
     "not_enabled_description_prefix": "Set",
     "not_enabled_description_suffix": "on the server to enable ShareCRM bot installations.",

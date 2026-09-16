@@ -1133,7 +1133,7 @@
   },
   "sharecrm": {
     "section_title": "ShareCRM",
-    "page_description": "各 Multica エージェントを専用の ShareCRM ボットに接続します。メンバーはボットに DM したり、グループで @メンションしたり、/issue と入力して新しい Multica タスクを作成できます。",
+    "page_description": "ShareCRM でエージェントと対話し、/issue でタスクを作成できます。",
     "not_enabled_title": "ShareCRM integration not enabled",
     "not_enabled_description_prefix": "Set",
     "not_enabled_description_suffix": "on the server to enable ShareCRM bot installations.",

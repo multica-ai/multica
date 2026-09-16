@@ -874,7 +874,7 @@
   },
   "sharecrm": {
     "section_title": "ShareCRM",
-    "page_description": "각 Multica 에이전트를 전용 ShareCRM 봇에 연결하세요. 멤버는 봇에게 DM을 보내거나 그룹에서 @멘션하고, /issue를 입력해 Multica 태스크를 만들 수 있습니다.",
+    "page_description": "ShareCRM에서 에이전트와 대화하거나 /issue로 태스크를 만드세요.",
     "not_enabled_title": "ShareCRM integration not enabled",
     "not_enabled_description_prefix": "Set",
     "not_enabled_description_suffix": "on the server to enable ShareCRM bot installations.",

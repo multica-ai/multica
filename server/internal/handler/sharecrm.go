@@ -93,7 +93,7 @@ type RegisterShareCRMBYORequest struct {
 // configured (ShareCRMInstall != nil).
 func (h *Handler) RegisterShareCRMBYO(w http.ResponseWriter, r *http.Request) {
 	if h.ShareCRMInstall == nil {
-		writeError(w, http.StatusServiceUnavailable, "sharecrm integration not enabled")
+		writeFeatureDisabled(w, "sharecrm_not_configured", "sharecrm integration not enabled")
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -182,7 +182,7 @@ func (h *Handler) publishShareCRMInstallationCreated(row db.ChannelInstallation,
 // 'active'.
 func (h *Handler) RevokeShareCRMInstallation(w http.ResponseWriter, r *http.Request) {
 	if h.ShareCRMInstall == nil {
-		writeError(w, http.StatusServiceUnavailable, "sharecrm integration not configured")
+		writeFeatureDisabled(w, "sharecrm_not_configured", "sharecrm integration not configured")
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -228,7 +228,7 @@ type RedeemShareCRMBindingTokenResponse struct {
 // RedeemShareCRMBindingToken POST /api/sharecrm/binding/redeem
 func (h *Handler) RedeemShareCRMBindingToken(w http.ResponseWriter, r *http.Request) {
 	if h.ShareCRMBindingTokens == nil {
-		writeError(w, http.StatusServiceUnavailable, "sharecrm integration not configured")
+		writeFeatureDisabled(w, "sharecrm_not_configured", "sharecrm integration not configured")
 		return
 	}
 	userID, ok := requireUserID(w, r)
