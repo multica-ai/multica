@@ -153,6 +153,7 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 		freshSource = msg.Body
 	}
 	startChat := false
+	_, isControl := engine.ParseControlCommand(freshSource)
 	if control, ok := engine.ParseControlCommand(freshSource); ok {
 		msg.Body = control.Body
 		switch control.Kind {
@@ -252,6 +253,10 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 			core = fmt.Sprintf("[%s]: %s", name, msg.Body)
 		}
 	}
+	if wantRecent && !isControl && !isForward {
+		msg.Body = e.currentRequestBody(msg, recentItems, quotedItems, recentErr, quotedErr, b.String(), core)
+		return msg
+	}
 	if b.Len() > 0 && core != "" {
 		b.WriteString("\n\n")
 	}
@@ -339,7 +344,8 @@ func (e *inboundEnricher) fetchRecentItems(ctx context.Context, creds Installati
 		params.ThreadID = msg.ThreadID
 	} else {
 		// 0 tells the client "no end_time" (newest N).
-		params.EndTime = triggerMillis / 1000
+		// Include messages from the trigger second, then anchor in milliseconds below.
+		params.EndTime = (triggerMillis + 999) / 1000
 	}
 	var items []LarkMessage
 	var err error
@@ -390,12 +396,6 @@ func (e *inboundEnricher) fetchRecentItems(ctx context.Context, creds Installati
 		if exclude[it.MessageID] {
 			continue
 		}
-		// The Bot's markdown replies are sent as schema-2.0 interactive
-		// cards, which flatten to a zero-signal "[interactive card]"
-		// placeholder — drop them rather than render noise (#5835).
-		if it.SenderType == "app" && it.MessageType == "interactive" {
-			continue
-		}
 		if inThread {
 			// Fail-closed topic isolation: the thread container should only
 			// return this topic's messages, but if Lark ever returns an item
@@ -410,6 +410,9 @@ func (e *inboundEnricher) fetchRecentItems(ctx context.Context, creds Installati
 			if triggerMillis > 0 && parseLarkMillis(it.CreateTime) > triggerMillis {
 				continue
 			}
+		}
+		if triggerMillis > 0 && parseLarkMillis(it.CreateTime) > triggerMillis {
+			continue
 		}
 		kept = append(kept, it)
 	}
@@ -443,6 +446,10 @@ func (e *inboundEnricher) renderRecentContextBlock(kept []LarkMessage, names map
 	labeler := newSpeakerLabeler(names)
 	lines := make([]string, 0, len(kept))
 	for _, m := range kept {
+		// Cards still delimit inference, but do not render opaque placeholders.
+		if m.SenderType == "app" && m.MessageType == "interactive" {
+			continue
+		}
 		label := labeler.label(m)
 		var text string
 		switch {
@@ -456,8 +463,11 @@ func (e *inboundEnricher) renderRecentContextBlock(kept []LarkMessage, names map
 		}
 		lines = append(lines, fmt.Sprintf("[%s]: %s", label, text))
 	}
+	if len(lines) == 0 {
+		return ""
+	}
 	return fmt.Sprintf("<recent_context count=\"%d\">\n%s\n</recent_context>",
-		len(kept), strings.Join(lines, "\n"))
+		len(lines), strings.Join(lines, "\n"))
 }
 
 type recentContextFetchClassification struct {
