@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-09-10
+// Snapshot: 2026-09-16
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
@@ -42,9 +42,10 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "deepseek-chat": { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
   "deepseek-flash": { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0.15 },
   "deepseek-reasoner": { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
-  "deepseek-v4-flash": { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
-  "deepseek-v4-flash-vision-exp": { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
+  "deepseek-v4-flash": { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0.15 },
+  "deepseek-v4-flash-vision-exp": { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0.15 },
   "deepseek-v4-pro": { input: 0.435, output: 0.87, cacheRead: 0.003625, cacheWrite: 0.435 },
+  "deepseek-v4.1-flash": { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0.15 },
   "gemini-2.5-computer-use-preview-10-2025": { input: 1.25, output: 10, cacheRead: 1.25, cacheWrite: 1.25 },
   "gemini-2.5-flash": { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0.3 },
   "gemini-2.5-flash-image": { input: 0.3, output: 30, cacheRead: 0.075, cacheWrite: 0.3 },
@@ -179,8 +180,6 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "openai/gpt-4o-2024-05-13": { input: 5, output: 15, cacheRead: 5, cacheWrite: 5 },
   "openai/gpt-5.2-chat-latest": { input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 1.75 },
   "openai/gpt-5.3-chat-latest": { input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 1.75 },
-  "opencode-go/deepseek-v4-flash": { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0.15 },
-  "opencode-go/deepseek-v4-flash-vision-exp": { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0.15 },
   "opencode-go/deepseek-v4-pro": { input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0.66 },
   "opencode-go/glm-5": { input: 1, output: 3.2, cacheRead: 0.2, cacheWrite: 1 },
   "opencode-go/glm-5.1": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
