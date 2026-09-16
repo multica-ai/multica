@@ -17,25 +17,34 @@ import type { Logger } from "../logger";
  * lifetime is for.
  *
  * Renewal is not a session event. It replaces a credential in place; it must
- * never look like a login or a logout to anything downstream. A failed
- * renewal is a no-op — the session it was trying to extend is still valid for
- * at least another half TTL, so offline, 5xx and a malformed response all
- * leave everything exactly as it was. Only the server actually rejecting the
- * credential ends a session, and that path already exists (ApiClient's 401
- * handling).
+ * never look like a login or a logout to anything downstream. Offline, 5xx and
+ * a malformed response all leave everything exactly as it was — but "leave it
+ * alone" is not the same as "wait": a failure happens INSIDE the renewal
+ * window, where the remaining lifetime is by definition under half a TTL and
+ * shrinking, so the retry has to come back quickly rather than consume the
+ * normal cadence. Only the server actually rejecting the credential ends a
+ * session, and that path already exists (ApiClient's 401 handling).
  */
 
 const TOKEN_STORAGE_KEY = "multica_token";
 
 /**
- * Governs one case only: the launch check failed and has to be retried before
- * any server cadence is known — every answered check replaces it. Thirty
- * seconds fits inside the renewal window of even the shortest supported
- * AUTH_TOKEN_TTL (one minute, window 30s), so it cannot be the reason an
- * actively used session expires, and it is long enough that an offline app is
- * not retrying in a loop.
+ * How long to wait after a FAILED check before another is allowed, by
+ * consecutive failure. This is deliberately not the normal cadence.
+ *
+ * The normal cadence is derived from the token's lifetime and can be days. A
+ * failure that consumed it would be fatal in the ordinary case, not just at
+ * short TTLs: a client that learned "check again in 3 days" on day 12, comes
+ * back on day 29 with one day left, and hits a single 503 would not be allowed
+ * to try again until day 32 — two days after the session it was trying to save
+ * had already expired.
+ *
+ * So a failure buys a short, backing-off delay instead, reset by the next
+ * success. The shape mirrors the identity-probe recovery in auth-initializer,
+ * for the same reason: recover in seconds when the blip was brief, and stop
+ * hammering a server that is genuinely down.
  */
-const FALLBACK_CHECK_INTERVAL_MS = 30 * 1000;
+const RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000] as const;
 
 /**
  * Anti-busy-loop floor, not a policy. The server owns the cadence and
@@ -78,8 +87,12 @@ export function createSessionRenewal({
   isAuthenticated,
   logger,
 }: SessionRenewalOptions): SessionRenewal {
-  let checkIntervalMs = FALLBACK_CHECK_INTERVAL_MS;
-  let lastAttemptAt = 0;
+  // The earliest a check may run. Zero at start, so the launch check fires on
+  // the first trigger; a success pushes it out by the server's cadence and a
+  // failure by a short backoff. Tracking the deadline rather than the last
+  // attempt is what keeps those two from sharing one number.
+  let nextCheckAt = 0;
+  let consecutiveFailures = 0;
   // Collapses concurrent triggers — a foreground event and a click in the
   // same moment must not produce two renewals, which would leave two valid
   // tokens racing to be the one written to storage.
@@ -95,16 +108,14 @@ export function createSessionRenewal({
     const startedFrom = storage.getItem(TOKEN_STORAGE_KEY);
     if (!startedFrom) return;
 
-    lastAttemptAt = Date.now();
-
     inFlight = api
       .refreshSession()
       .then((result) => {
+        consecutiveFailures = 0;
         if (result.check_again_in_seconds > 0) {
-          checkIntervalMs = Math.max(
-            MIN_CHECK_INTERVAL_MS,
-            result.check_again_in_seconds * 1000,
-          );
+          nextCheckAt =
+            Date.now() +
+            Math.max(MIN_CHECK_INTERVAL_MS, result.check_again_in_seconds * 1000);
         }
         if (!result.renewed || !result.token) return;
 
@@ -127,13 +138,20 @@ export function createSessionRenewal({
         // Offline, 5xx, a server-side signing failure, a response that failed
         // its schema — none of these say anything about whether the session
         // is still good, and it demonstrably is: it authenticated this very
-        // request path moments ago. Keep it and try again later.
+        // request path moments ago. Keep it, and come back SOON — this failure
+        // happened inside the renewal window, so the session it was trying to
+        // extend is running out while we wait.
         //
         // A genuine 401 is not handled here either, but for the opposite
         // reason: ApiClient already routed it to the session-expiry path
         // before this catch ran.
+        const delay =
+          RETRY_DELAYS_MS[Math.min(consecutiveFailures, RETRY_DELAYS_MS.length - 1)]!;
+        consecutiveFailures += 1;
+        nextCheckAt = Date.now() + delay;
         logger?.debug("session renewal did not complete; keeping the current session", {
           error: err instanceof Error ? err.message : String(err),
+          retryInMs: delay,
         });
       })
       .finally(() => {
@@ -144,7 +162,7 @@ export function createSessionRenewal({
   }
 
   function maybeRenew(): void {
-    if (Date.now() - lastAttemptAt < checkIntervalMs) return;
+    if (Date.now() < nextCheckAt) return;
     void renewNow();
   }
 
@@ -152,8 +170,8 @@ export function createSessionRenewal({
     maybeRenew,
     renewNow,
     reset: () => {
-      lastAttemptAt = 0;
-      checkIntervalMs = FALLBACK_CHECK_INTERVAL_MS;
+      nextCheckAt = 0;
+      consecutiveFailures = 0;
       inFlight = null;
     },
   };
@@ -165,7 +183,11 @@ export function createSessionRenewal({
  * teardown.
  *
  * Deliberately no interval timer. `maybeRenew` is cheap when it declines, and
- * an app nobody is touching should not be renewing anything.
+ * a token-mode app nobody is touching should not be renewing anything.
+ *
+ * Note this is only true of token mode. A cookie-mode browser is renewed by
+ * the server on any authenticated request, so an open tab that polls in the
+ * background keeps its session alive without anyone touching it.
  */
 export function watchSessionActivity(renewal: SessionRenewal): () => void {
   if (typeof window === "undefined" || typeof document === "undefined") {

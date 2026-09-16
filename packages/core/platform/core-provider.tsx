@@ -90,6 +90,13 @@ function initCore({
     onUnauthorized: () => {
       authStore.getState().sessionExpired();
     },
+    // Token mode only. Desktop runs one ApiClient per window over one shared
+    // localStorage, so the credential has to be read through to storage rather
+    // than cached per instance — otherwise a session renewed in one window
+    // leaves the others sending a token that is on its way out (MUL-7436).
+    getToken: cookieAuth
+      ? undefined
+      : () => storage.getItem("multica_token"),
     identity,
   });
   setApiInstance(api);

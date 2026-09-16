@@ -2946,3 +2946,111 @@ describe("ApiClient CSRF headers", () => {
     expect(capturedHeaders(fetchMock, 2)["X-CSRF-Token"]).toBe("session-bound-2");
   });
 });
+
+// Desktop runs one ApiClient per window over one shared localStorage. Before
+// MUL-7436 each instance cached the bearer token, so a session renewed in one
+// window left every other window sending the credential it happened to be
+// holding — until that one expired and took the whole session down with it,
+// clearing tabs and drafts on the way (MUL-7028).
+describe("ApiClient shared credential across windows", () => {
+  function sharedStorage(initial: string | null) {
+    let token = initial;
+    return {
+      read: () => token,
+      write: (next: string | null) => {
+        token = next;
+      },
+    };
+  }
+
+  function jsonResponse(body: unknown, status = 200) {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  function authHeaderOf(fetchMock: ReturnType<typeof vi.fn>, call: number) {
+    const headers = (fetchMock.mock.calls[call]?.[1]?.headers ?? {}) as Record<string, string>;
+    return headers["Authorization"];
+  }
+
+  it("reads the current token per request, so a renewal in one window reaches the others", async () => {
+    const storage = sharedStorage("token-v1");
+    const windowA = new ApiClient("https://api.example.test", { getToken: storage.read });
+    const windowB = new ApiClient("https://api.example.test", { getToken: storage.read });
+
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await windowB.markOnboardingComplete();
+    expect(authHeaderOf(fetchMock, 0)).toBe("Bearer token-v1");
+
+    // Window A renews; only shared storage is updated, exactly as the renewal
+    // controller does it.
+    storage.write("token-v2");
+    windowA.setToken("token-v2");
+
+    await windowB.markOnboardingComplete();
+    expect(authHeaderOf(fetchMock, 1)).toBe("Bearer token-v2");
+  });
+
+  // The other half: a request that went out with the previous credential can
+  // 401 AFTER the renewal landed. Ending the session on that would tear down
+  // one that is demonstrably alive.
+  it("ignores a 401 for a credential that has since been replaced", async () => {
+    const storage = sharedStorage("token-v1");
+    const onUnauthorized = vi.fn();
+    const client = new ApiClient("https://api.example.test", {
+      getToken: storage.read,
+      onUnauthorized,
+    });
+
+    const fetchMock = vi.fn().mockImplementation(async () => {
+      // The renewal lands while this request is in flight.
+      storage.write("token-v2");
+      return jsonResponse({ error: "invalid token" }, 401);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
+
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  // ...but a genuine expiry still ends the session: nothing replaced the
+  // credential, so the 401 is about the one still in use.
+  it("still ends the session on a 401 for the credential in use", async () => {
+    const storage = sharedStorage("token-v1");
+    const onUnauthorized = vi.fn();
+    const client = new ApiClient("https://api.example.test", {
+      getToken: storage.read,
+      onUnauthorized,
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async () => jsonResponse({ error: "invalid token" }, 401)),
+    );
+
+    await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
+
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  // Cookie mode has no bearer token to compare, so the guard must not swallow
+  // its expiries.
+  it("ends the session on a 401 in cookie mode", async () => {
+    const onUnauthorized = vi.fn();
+    const client = new ApiClient("https://api.example.test", { onUnauthorized });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async () => jsonResponse({ error: "invalid token" }, 401)),
+    );
+
+    await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
+
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+});

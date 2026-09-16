@@ -164,6 +164,31 @@ describe("mobile session renewal", () => {
     expect(apiMock.setToken).not.toHaveBeenCalled();
   });
 
+  // A failure must not consume the normal cadence. With the 30-day default
+  // that cadence is three days, so a single 503 near the end of a session
+  // would otherwise push the next attempt past the expiry it was trying to
+  // prevent.
+  it("retries within seconds after a failure, not after the server cadence", async () => {
+    apiMock.refreshSession.mockResolvedValue(notYet(3 * 24 * 60 * 60));
+    await renewSessionNow();
+    expect(apiMock.refreshSession).toHaveBeenCalledTimes(1);
+
+    apiMock.refreshSession.mockRejectedValue(new TypeError("Network request failed"));
+    const start = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(start + 3 * 24 * 60 * 60 * 1000);
+    await renewSessionNow();
+    expect(apiMock.refreshSession).toHaveBeenCalledTimes(2);
+
+    // Connectivity returns a second later and the user is still working.
+    apiMock.refreshSession.mockResolvedValue(notYet(3 * 24 * 60 * 60));
+    vi.mocked(Date.now).mockReturnValue(start + 3 * 24 * 60 * 60 * 1000 + 1_500);
+    maybeRenewSession();
+    await vi.waitFor(() =>
+      expect(apiMock.refreshSession).toHaveBeenCalledTimes(3),
+    );
+    vi.mocked(Date.now).mockRestore();
+  });
+
   it("discards a response that arrives after sign-out", async () => {
     let resolve!: (value: unknown) => void;
     apiMock.refreshSession.mockReturnValue(

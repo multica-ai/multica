@@ -138,6 +138,101 @@ describe("createSessionRenewal", () => {
     expect(h.api.refreshSession).toHaveBeenCalledTimes(1);
   });
 
+  // A failure must not consume the normal cadence. This is the ordinary-case
+  // version of the bug, not a short-TTL curiosity: a client told "check again
+  // in 3 days", returning with one day of session left and hitting a single
+  // 503, would otherwise not be allowed to retry until two days after the
+  // session it was trying to save had expired.
+  it("retries within seconds after a failure, not after the server cadence", async () => {
+    const h = makeHarness();
+    // Establish a long cadence the way a real client would: one good check.
+    h.api.refreshSession.mockResolvedValue(notYetResponse(3 * 24 * 60 * 60));
+    const renewal = renewalFor(h);
+    await renewal.renewNow();
+    expect(h.api.refreshSession).toHaveBeenCalledTimes(1);
+
+    // Now the network blips.
+    h.api.refreshSession.mockRejectedValue(new TypeError("Failed to fetch"));
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now + 3 * 24 * 60 * 60 * 1000);
+    await renewal.renewNow();
+    expect(h.api.refreshSession).toHaveBeenCalledTimes(2);
+
+    // It recovers a second later and the user is still working. The next
+    // attempt must go out now, not in another three days.
+    h.api.refreshSession.mockResolvedValue(notYetResponse(3 * 24 * 60 * 60));
+    vi.mocked(Date.now).mockReturnValue(now + 3 * 24 * 60 * 60 * 1000 + 1_500);
+    renewal.maybeRenew();
+    await vi.waitFor(() =>
+      expect(h.api.refreshSession).toHaveBeenCalledTimes(3),
+    );
+    vi.mocked(Date.now).mockRestore();
+  });
+
+  // Recovering fast must not mean hammering a server that is genuinely down.
+  it("backs off across consecutive failures and resets on success", async () => {
+    const h = makeHarness();
+    h.api.refreshSession.mockRejectedValue(new TypeError("Failed to fetch"));
+    const renewal = renewalFor(h);
+
+    const start = Date.now();
+    const at = (ms: number) => vi.mocked(Date.now).mockReturnValue(start + ms);
+    // Let the promise chain — including the finally that clears `inFlight` —
+    // settle, so the next step is not blocked by the previous one.
+    const settle = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    };
+    vi.spyOn(Date, "now").mockReturnValue(start);
+
+    at(0);
+    await renewal.renewNow(); // failure 1 → retry allowed 1s later
+    expect(h.api.refreshSession).toHaveBeenCalledTimes(1);
+
+    at(999);
+    renewal.maybeRenew();
+    await settle();
+    expect(h.api.refreshSession).toHaveBeenCalledTimes(1);
+
+    at(1_000);
+    await renewal.renewNow(); // failure 2 → the delay has doubled to 2s
+    expect(h.api.refreshSession).toHaveBeenCalledTimes(2);
+
+    at(2_999);
+    renewal.maybeRenew();
+    await settle();
+    expect(h.api.refreshSession).toHaveBeenCalledTimes(2);
+
+    at(3_000);
+    renewal.maybeRenew();
+    await settle();
+    expect(h.api.refreshSession).toHaveBeenCalledTimes(3);
+
+    // A success clears the streak and installs the server's cadence...
+    h.api.refreshSession.mockResolvedValue(notYetResponse(3600));
+    at(10_000);
+    await renewal.renewNow();
+    expect(h.api.refreshSession).toHaveBeenCalledTimes(4);
+
+    // ...so the next failure starts from one second again, not from where the
+    // earlier streak left off.
+    h.api.refreshSession.mockRejectedValue(new TypeError("Failed to fetch"));
+    at(4_000_000);
+    await renewal.renewNow();
+    expect(h.api.refreshSession).toHaveBeenCalledTimes(5);
+
+    at(4_000_999);
+    renewal.maybeRenew();
+    await settle();
+    expect(h.api.refreshSession).toHaveBeenCalledTimes(5);
+
+    at(4_001_000);
+    renewal.maybeRenew();
+    await settle();
+    expect(h.api.refreshSession).toHaveBeenCalledTimes(6);
+
+    vi.mocked(Date.now).mockRestore();
+  });
+
   // The server computes a cadence that fits inside the renewal window, which
   // for a short AUTH_TOKEN_TTL can be seconds. A client-side floor above that
   // value would silently override the server and let an actively used session

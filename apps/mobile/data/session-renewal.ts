@@ -13,22 +13,29 @@
  *
  * Renewal is not a session event. It swaps a credential in place and must
  * never look like a login or a logout. Offline, 5xx and a malformed response
- * all leave the current session untouched: it is still valid for at least
- * another half TTL, so there is nothing to recover from. Only a real 401 ends
- * a session, and `onUnauthorized` in app/_layout.tsx already owns that.
+ * all leave the current session untouched — but leaving it alone is not the
+ * same as waiting: a failure happens INSIDE the renewal window, where the
+ * remaining lifetime is under half a TTL and shrinking, so the retry has to
+ * come back quickly instead of consuming the normal cadence. Only a real 401
+ * ends a session, and `onUnauthorized` in app/_layout.tsx already owns that.
  */
 import { api, ApiError } from "./api";
 import { commitRenewedToken, getToken } from "./secure-storage";
 import { currentSessionEpoch, sessionEpochChanged } from "./session-epoch";
 
 /**
- * Governs one case only: the launch check failed and has to be retried before
- * any server cadence is known. Thirty seconds fits inside the renewal window
- * of even the shortest supported AUTH_TOKEN_TTL (one minute, window 30s), so
- * it cannot be the reason an actively used session expires. Every answered
- * check replaces it with the server's value.
+ * How long to wait after a FAILED check before another is allowed, by
+ * consecutive failure — deliberately not the normal cadence.
+ *
+ * The normal cadence comes from the token's lifetime and can be days. A
+ * failure that consumed it would be fatal in the ordinary case, not only at
+ * short TTLs: a client told "check again in 3 days" on day 12, returning on
+ * day 29 with one day left and hitting a single 503, would not be allowed to
+ * retry until day 32 — two days after the session expired. A failure buys a
+ * short backoff instead, reset by the next success. Mirrors
+ * RETRY_DELAYS_MS in packages/core/platform/session-renewal.ts.
  */
-const FALLBACK_CHECK_INTERVAL_MS = 30 * 1000;
+const RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000] as const;
 
 /**
  * Anti-busy-loop floor, not a policy. It matches the server's own floor, so it
@@ -38,8 +45,12 @@ const FALLBACK_CHECK_INTERVAL_MS = 30 * 1000;
  */
 const MIN_CHECK_INTERVAL_MS = 5 * 1000;
 
-let checkIntervalMs = FALLBACK_CHECK_INTERVAL_MS;
-let lastAttemptAt = 0;
+// The earliest a check may run. Zero at start, so the launch check fires on
+// the first trigger; a success pushes it out by the server's cadence and a
+// failure by a short backoff. Tracking the deadline rather than the last
+// attempt is what keeps those two from sharing one number.
+let nextCheckAt = 0;
+let consecutiveFailures = 0;
 // Collapses concurrent triggers: launch and a foreground transition can land
 // together, and two renewals would leave two valid tokens racing to be the
 // one written to the Keychain.
@@ -72,14 +83,12 @@ export async function renewSessionNow(): Promise<void> {
       const startedFrom = await getToken();
       if (!startedFrom || sessionEpochChanged(epochAtStart)) return;
 
-      lastAttemptAt = Date.now();
-
       const result = await api.refreshSession();
+      consecutiveFailures = 0;
       if (result.check_again_in_seconds > 0) {
-        checkIntervalMs = Math.max(
-          MIN_CHECK_INTERVAL_MS,
-          result.check_again_in_seconds * 1000,
-        );
+        nextCheckAt =
+          Date.now() +
+          Math.max(MIN_CHECK_INTERVAL_MS, result.check_again_in_seconds * 1000);
       }
       if (!result.renewed || !result.token) return;
 
@@ -103,7 +112,12 @@ export async function renewSessionNow(): Promise<void> {
       // A 401 has already been routed to the sign-out path by the client's
       // onUnauthorized hook. Everything else — airplane mode, a captive
       // portal, a 5xx — says nothing about the session, which just
-      // authenticated this request. Keep it.
+      // authenticated this request. Keep it, and come back soon: the window
+      // this failed inside is still closing.
+      const delay =
+        RETRY_DELAYS_MS[Math.min(consecutiveFailures, RETRY_DELAYS_MS.length - 1)]!;
+      consecutiveFailures += 1;
+      nextCheckAt = Date.now() + delay;
       if (!(err instanceof ApiError) || err.status !== 401) {
         console.log("[auth] session renewal deferred", err);
       }
@@ -115,15 +129,15 @@ export async function renewSessionNow(): Promise<void> {
   return inFlight;
 }
 
-/** Run a check unless one ran inside the current interval. */
+/** Run a check unless one is not due yet. */
 export function maybeRenewSession(): void {
-  if (Date.now() - lastAttemptAt < checkIntervalMs) return;
+  if (Date.now() < nextCheckAt) return;
   void renewSessionNow();
 }
 
 /** Test seam: forget the cadence and the last-attempt timestamp. */
 export function resetSessionRenewalForTest(): void {
-  checkIntervalMs = FALLBACK_CHECK_INTERVAL_MS;
-  lastAttemptAt = 0;
+  nextCheckAt = 0;
+  consecutiveFailures = 0;
   inFlight = null;
 }

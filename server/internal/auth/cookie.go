@@ -47,21 +47,24 @@ const (
 	defaultAuthTokenTTL = 30 * 24 * time.Hour // 30 days
 
 	// MinAuthTokenTTL is the shortest session lifetime this system can serve
-	// CORRECTLY, and it exists because the renewal cadence has to survive a
-	// round trip through JSON.
+	// correctly, and what sets it is the CLIENT FLOOR, not the wire format.
 	//
-	// Clients are told when to check again in whole seconds
-	// (RefreshSessionResponse.CheckAgainInSeconds). The cadence is derived
-	// from the TTL and must land inside the renewal window, so a very short
-	// TTL asks the wire to carry a sub-second value: it truncates, and below
-	// about four seconds it serialises to 0. At that point the contract is not
-	// merely imprecise, it is unrepresentable — clients would be told to check
-	// immediately and forever, or never.
+	// The renewal cadence is TTL/10, and every client floors what the server
+	// sends at five seconds so a nonsense value cannot turn activity into a
+	// request per event. Once TTL/10 drops below that floor the floor wins,
+	// and the client is checking on a schedule the server did not choose —
+	// which is exactly how a cadence ends up longer than the window it has to
+	// land in. TTL/10 >= 5s means TTL >= 50 seconds; one minute is that bound
+	// rounded to something an operator would actually write, and it leaves
+	// the cadence (six seconds) comfortably above the floor.
 	//
-	// One minute is the smallest TTL whose cadence (six seconds) is expressible
-	// with room to spare, and it still leaves short lifetimes usable for
-	// testing. Anything shorter is clamped up to it rather than honoured,
-	// because honouring it would mean silently logging active users out.
+	// Whole-second serialisation (RefreshSessionResponse.CheckAgainInSeconds)
+	// is a second, looser constraint: it only bites below about four seconds
+	// of cadence, i.e. a TTL under 40 seconds, so the client floor is the one
+	// that actually decides this number.
+	//
+	// Anything shorter is clamped up rather than honoured, because honouring
+	// it would mean silently logging active users out.
 	MinAuthTokenTTL = time.Minute
 )
 
@@ -124,7 +127,7 @@ func AuthTokenTTL() time.Duration {
 				// says exactly what happened.
 				slog.Warn("AUTH_TOKEN_TTL is below the shortest supported session lifetime; using the minimum",
 					"value", raw, "minimum_seconds", int(MinAuthTokenTTL.Seconds()),
-					"reason", "the renewal cadence derived from a shorter TTL cannot be expressed in whole seconds")
+					"reason", "a shorter TTL derives a renewal cadence below the floor every client applies, so clients would check on a schedule this server did not choose")
 				ttl = MinAuthTokenTTL
 			}
 			authTokenTTLCached = ttl
