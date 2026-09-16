@@ -109,7 +109,7 @@ func TestStageProgressSummary(t *testing.T) {
 		child(2, "backlog"), child(2, "backlog"), child(2, "backlog"), child(2, "backlog"),
 		child(3, "backlog"), child(3, "backlog"),
 	}
-	summary, next := stageProgressSummary(children, 1, literalTerminalChild)
+	summary, next := stageProgressSummary(children, 1, literalChildStatus)
 	want := "Stage 1: 3/3 done; Stage 2: 0/4 done (next); Stage 3: 0/2 done"
 	if summary != want {
 		t.Fatalf("summary = %q, want %q", summary, want)
@@ -124,7 +124,7 @@ func TestStageProgressSummary_FinalStageNoNext(t *testing.T) {
 		child(1, "done"), child(1, "done"),
 		child(2, "done"),
 	}
-	_, next := stageProgressSummary(children, 2, literalTerminalChild)
+	_, next := stageProgressSummary(children, 2, literalChildStatus)
 	if next != 0 {
 		t.Fatalf("nextStage = %d, want 0 (no further stages)", next)
 	}
@@ -137,13 +137,36 @@ func TestStageProgressSummary_SkipsUnstaged(t *testing.T) {
 		child(1, "done"), child(1, "done"),
 		child(2, "backlog"),
 	}
-	summary, next := stageProgressSummary(children, 1, literalTerminalChild)
+	summary, next := stageProgressSummary(children, 1, literalChildStatus)
 	want := "Stage 1: 2/2 done; Stage 2: 0/1 done (next)"
 	if summary != want {
 		t.Fatalf("summary = %q, want %q", summary, want)
 	}
 	if next != 2 {
 		t.Fatalf("nextStage = %d, want 2", next)
+	}
+}
+
+// A stage whose children were all cancelled must not be reported as done by
+// the counter — the work did not happen, even though the barrier closed (GH
+// #8462, acceptance point 1). The cancelled clause is omitted when its count is
+// zero, and a fully-cancelled stage must not be named "next" (it is closed).
+func TestStageProgressSummary_CountsCancelledSeparately(t *testing.T) {
+	children := []db.Issue{
+		child(1, "done"), child(1, "done"),
+		child(2, "cancelled"), child(2, "cancelled"),
+		child(3, "backlog"), child(3, "backlog"),
+		child(4, "cancelled"), child(4, "done"),
+	}
+	summary, next := stageProgressSummary(children, 2, literalChildStatus)
+	want := "Stage 1: 2/2 done; Stage 2: 0/2 done, 2 cancelled; Stage 3: 0/2 done (next); Stage 4: 1/2 done, 1 cancelled"
+	if summary != want {
+		t.Fatalf("summary = %q, want %q", summary, want)
+	}
+	// Stage 2 is fully cancelled — closed, so it must not be "next"; Stage 3 is
+	// the first still-open stage.
+	if next != 3 {
+		t.Fatalf("nextStage = %d, want 3", next)
 	}
 }
 
@@ -155,14 +178,14 @@ func TestStageAdvanceInstruction(t *testing.T) {
 	const parentID = "parent-uuid"
 
 	t.Run("a known next stage points the leader at it", func(t *testing.T) {
-		got := stageAdvanceInstruction(3, parentID)
+		got := stageAdvanceInstruction(3, parentID, false)
 		if !strings.Contains(got, "Stage 3 is next") {
 			t.Fatalf("expected next-stage instruction, got %q", got)
 		}
 	})
 
 	t.Run("no created next stage does not assert finality", func(t *testing.T) {
-		got := stageAdvanceInstruction(0, parentID)
+		got := stageAdvanceInstruction(0, parentID, false)
 		// Regression guard for MUL-4062: an intermediate stage in a lazily
 		// created workflow also reaches nextStage==0, so the message must not
 		// claim this was definitively the final stage.
@@ -184,6 +207,62 @@ func TestStageAdvanceInstruction(t *testing.T) {
 			t.Fatalf("expected explicit in_review instruction for confirmed completion, got %q", got)
 		}
 	})
+
+	t.Run("next stage instruction asks the leader to confirm cancelled work is not a dependency", func(t *testing.T) {
+		got := stageAdvanceInstruction(3, parentID, true)
+		if !strings.Contains(got, "confirm that cancelled work is not a dependency of Stage 3") {
+			t.Fatalf("expected cancellation confirm line, got %q", got)
+		}
+	})
+
+	t.Run("wrap-up instruction asks the leader to confirm cancelled work is not needed", func(t *testing.T) {
+		got := stageAdvanceInstruction(0, parentID, true)
+		if !strings.Contains(got, "If any sub-issues were cancelled") {
+			t.Fatalf("expected wrap-up cancellation confirm line, got %q", got)
+		}
+	})
+}
+
+func TestStageHasCancelled(t *testing.T) {
+	cases := []struct {
+		name        string
+		children    []db.Issue
+		staged      bool
+		closedStage int32
+		want        bool
+	}{
+		{
+			name:     "staged: no cancellation in the closed stage",
+			children: []db.Issue{child(1, "done"), child(2, "cancelled")},
+			staged:   true, closedStage: 1,
+			want: false,
+		},
+		{
+			name:     "staged: cancellation in the closed stage",
+			children: []db.Issue{child(1, "done"), child(1, "cancelled")},
+			staged:   true, closedStage: 1,
+			want: true,
+		},
+		{
+			name:     "staged: unstaged child is not in any stage and is ignored",
+			children: []db.Issue{child(1, "done"), child(0, "cancelled")},
+			staged:   true, closedStage: 1,
+			want: false,
+		},
+		{
+			name:     "unstaged: any cancelled child counts",
+			children: []db.Issue{child(0, "done"), child(0, "cancelled")},
+			staged:   false, closedStage: 0,
+			want: true,
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := stageHasCancelled(tt.children, tt.staged, tt.closedStage, literalChildStatus); got != tt.want {
+				t.Fatalf("stageHasCancelled = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
 
 // A stage can close because its last open child is *cancelled*, not only
@@ -236,4 +315,13 @@ func TestStageBarrierClosed_UnstagedIgnoredInStagedSet(t *testing.T) {
 // resolution (which has its own coverage in issue_status_test.go).
 func literalTerminalChild(c db.Issue) bool {
 	return isTerminalChildStatus(c.Status)
+}
+
+// literalChildStatus returns a child's stored status verbatim, mirroring
+// literalTerminalChild for the status-carried helpers (stageProgressSummary /
+// stageHasCancelled). Those tests cover pure logic and operate on CANONICAL
+// statuses, so pinning with a literal status keeps them testing the summary
+// itself rather than clustering resolution (covered separately).
+func literalChildStatus(c db.Issue) string {
+	return c.Status
 }

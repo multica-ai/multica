@@ -147,11 +147,12 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 			"parent_id", uuidToString(parent.ID))
 		return
 	}
-	isTerminal, err := resolveTerminalChildren(children, effective)
+	childStatus, err := resolveTerminalChildren(children, effective)
 	if err != nil {
 		slog.Warn("child done: failed to resolve sibling statuses", "error", err, "parent_id", uuidToString(parent.ID))
 		return
 	}
+	isTerminal := func(c db.Issue) bool { return isTerminalChildStatus(childStatus(c)) }
 	if !stageBarrierClosed(children, issue, isTerminal) {
 		return
 	}
@@ -163,7 +164,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	if staged {
 		closedStage = issue.Stage.Int32
 	}
-	h.postChildDoneComment(ctx, parent, issue, children, staged, closedStage, false, isTerminal)
+	h.postChildDoneComment(ctx, parent, issue, children, staged, closedStage, false, childStatus)
 }
 
 // notifyParentsOfBatchChildDone emits child-done parent notifications for a
@@ -239,11 +240,12 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 			continue
 		}
 
-		isTerminal, err := resolveTerminalChildren(children, effective)
+		childStatus, err := resolveTerminalChildren(children, effective)
 		if err != nil {
 			slog.Warn("batch child done: failed to resolve sibling statuses", "error", err, "parent_id", uuidToString(parent.ID))
 			continue
 		}
+		isTerminal := func(c db.Issue) bool { return isTerminalChildStatus(childStatus(c)) }
 		batch := len(g.children) > 1
 		if !siblingsAreStaged(children) {
 			// Unstaged: one implicit stage. Fire once iff every child is terminal
@@ -252,7 +254,7 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 			if !stageBarrierClosed(children, g.children[0], isTerminal) {
 				continue
 			}
-			h.postChildDoneComment(ctx, parent, g.children[0], children, false, 0, batch, isTerminal)
+			h.postChildDoneComment(ctx, parent, g.children[0], children, false, 0, batch, childStatus)
 			continue
 		}
 
@@ -268,7 +270,7 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 		if !found {
 			continue
 		}
-		h.postChildDoneComment(ctx, parent, rep, children, true, rep.Stage.Int32, batch, isTerminal)
+		h.postChildDoneComment(ctx, parent, rep, children, true, rep.Stage.Int32, batch, childStatus)
 	}
 }
 
@@ -326,7 +328,11 @@ func highestClosedBatchStage(children, completed []db.Issue, isTerminal func(db.
 // an unstaged set). `batch` selects batch-aware wording: a single update keeps
 // its historical byte-identical copy, while a batch that finished several
 // children at once must not claim "the last sub-issue just finished".
-func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db.Issue, children []db.Issue, staged bool, closedStage int32, batch bool, isTerminal func(db.Issue) bool) {
+// `childStatus` returns each child's canonical status (from resolveTerminalChildren),
+// so the comment can tell a stage that closed from cancelled work apart from one
+// that completed for real and adjust its sentence and advance instruction
+// (GH #8462).
+func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db.Issue, children []db.Issue, staged bool, closedStage int32, batch bool, childStatus func(db.Issue) string) {
 	prefix := h.getIssuePrefix(ctx, completed.WorkspaceID)
 	identifier := prefix + "-" + strconv.Itoa(int(completed.Number))
 	childID := uuidToString(completed.ID)
@@ -338,31 +344,50 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 	// agent the workspace lost track of, etc.).
 	mentionPrefix := h.buildParentAssigneeMention(ctx, parent)
 
+	// A stage that closed through cancelled work did NOT get its work done, so
+	// the sentence must not claim completion. The representative child names
+	// whether it finished or was cancelled; the counter + advance instruction
+	// get the closing-stage context.
+	cancelledStage := stageHasCancelled(children, staged, closedStage, childStatus)
+	repCancelled := childStatus(completed) == "cancelled"
+	stageWord := "complete"
+	if cancelledStage {
+		stageWord = "closed"
+	}
+	singleFinish := "just finished"
+	if repCancelled {
+		singleFinish = "was just cancelled"
+	}
+	batchFinish := "just finished together"
+	if cancelledStage {
+		batchFinish = "just closed together"
+	}
+
 	var content string
 	if staged {
-		summary, nextStage := stageProgressSummary(children, closedStage, isTerminal)
-		advance := stageAdvanceInstruction(nextStage, parentID)
+		summary, nextStage := stageProgressSummary(children, closedStage, childStatus)
+		advance := stageAdvanceInstruction(nextStage, parentID, cancelledStage)
 		if batch {
 			content = fmt.Sprintf(
-				"%sStage %d of this issue is complete — its sub-issues just finished together in a batch update, most recently [%s](mention://issue/%s) — \"%s\". Stage progress — %s.%s",
-				mentionPrefix, closedStage, identifier, childID, title, summary, advance,
+				"%sStage %d of this issue is %s — its sub-issues %s in a batch update, most recently [%s](mention://issue/%s) — \"%s\". Stage progress — %s.%s",
+				mentionPrefix, closedStage, stageWord, batchFinish, identifier, childID, title, summary, advance,
 			)
 		} else {
 			content = fmt.Sprintf(
-				"%sStage %d of this issue is complete — its last sub-issue [%s](mention://issue/%s) — \"%s\" — just finished. Stage progress — %s.%s",
-				mentionPrefix, closedStage, identifier, childID, title, summary, advance,
+				"%sStage %d of this issue is %s — its last sub-issue [%s](mention://issue/%s) — \"%s\" — %s. Stage progress — %s.%s",
+				mentionPrefix, closedStage, stageWord, identifier, childID, title, singleFinish, summary, advance,
 			)
 		}
 	} else {
 		if batch {
 			content = fmt.Sprintf(
-				"%sAll sub-issues are complete — they just finished together in a batch update, most recently [%s](mention://issue/%s) — \"%s\". Continue the parent: synthesize the children's results and move it forward, or — if nothing remains — run `multica issue status %s in_review` to mark the parent ready for review.",
-				mentionPrefix, identifier, childID, title, parentID,
+				"%sAll sub-issues are %s — they %s in a batch update, most recently [%s](mention://issue/%s) — \"%s\". Continue the parent: synthesize the children's results and move it forward, or — if nothing remains — run `multica issue status %s in_review` to mark the parent ready for review.",
+				mentionPrefix, stageWord, batchFinish, identifier, childID, title, parentID,
 			)
 		} else {
 			content = fmt.Sprintf(
-				"%sAll sub-issues are complete — the last one, [%s](mention://issue/%s) — \"%s\", just finished. Continue the parent: synthesize the children's results and move it forward, or — if nothing remains — run `multica issue status %s in_review` to mark the parent ready for review.",
-				mentionPrefix, identifier, childID, title, parentID,
+				"%sAll sub-issues are %s — the last one, [%s](mention://issue/%s) — \"%s\", %s. Continue the parent: synthesize the children's results and move it forward, or — if nothing remains — run `multica issue status %s in_review` to mark the parent ready for review.",
+				mentionPrefix, stageWord, identifier, childID, title, singleFinish, parentID,
 			)
 		}
 	}
@@ -450,23 +475,33 @@ func (h *Handler) childStatusResolver(ctx context.Context) func(db.Issue) (strin
 }
 
 // resolveTerminalChildren checks every status needed by the stage barrier and
-// progress summary before either can produce a notification. The returned
-// predicate only reads this snapshot, so a late catalog failure cannot be
-// hidden by the bool-only stage helpers. Stored status keys stay untouched.
-func resolveTerminalChildren(children []db.Issue, effective func(db.Issue) (string, error)) (func(db.Issue) bool, error) {
-	terminal := make(map[pgtype.UUID]bool, len(children))
+// progress summary before either can produce a notification. The returned func
+// only reads this snapshot, so a late catalog failure cannot be hidden by the
+// bool-only stage helpers. Stored status keys stay untouched.
+//
+// It carries each child's CANONICAL status through rather than collapsing to a
+// bool, so the barrier ("is this stage still open") and the report ("did the
+// work actually happen") can each answer from the same three-state status with
+// one comparison — isTerminalChildStatus for the former, a `done`/`cancelled`
+// test for the latter — with no second parallel predicate to keep in sync when
+// the lifecycle work lands (GH #8462). Custom closed-category statuses resolve
+// to `cancelled` here, so the progress counter and the report both render them
+// canonically without naming the custom key. Returns "" for an unstaged
+// sibling in a staged set, which neither stage helper considers.
+func resolveTerminalChildren(children []db.Issue, effective func(db.Issue) (string, error)) (func(db.Issue) string, error) {
+	status := make(map[pgtype.UUID]string, len(children))
 	staged := siblingsAreStaged(children)
 	for _, child := range children {
 		if staged && !child.Stage.Valid {
 			continue // Neither stage helper considers unstaged siblings.
 		}
-		status, err := effective(child)
+		resolved, err := effective(child)
 		if err != nil {
 			return nil, fmt.Errorf("resolve child %s status %q: %w", uuidToString(child.ID), child.Status, err)
 		}
-		terminal[child.ID] = isTerminalChildStatus(status)
+		status[child.ID] = resolved
 	}
-	return func(child db.Issue) bool { return terminal[child.ID] }, nil
+	return func(child db.Issue) string { return status[child.ID] }, nil
 }
 
 // siblingsAreStaged reports whether any child in the set carries an explicit
@@ -527,8 +562,18 @@ func stageBarrierClosed(children []db.Issue, completed db.Issue, isTerminal func
 // children — the next group to promote — or 0 when none remain. Unstaged
 // children are skipped (they are not part of any stage), so the breakdown
 // never renders a "Stage 0".
-func stageProgressSummary(children []db.Issue, closedStage int32, isTerminal func(db.Issue) bool) (summary string, nextStage int32) {
-	type agg struct{ total, done int }
+//
+// `childStatus` returns each child's CANONICAL status, so the counter separates
+// genuinely-completed (`done`) from cancelled children in the same loop that
+// decides openness. A stage whose children were all cancelled renders as
+// "0/2 done, 2 cancelled" instead of "2/2 done" — the work did not happen, and
+// claiming otherwise silently hands the leader (and any automation reading the
+// comment) a false completion (GH #8462). The cancelled clause is omitted when
+// its count is zero so stages with no cancellations keep byte-identical output.
+// Next-stage selection still keys on terminal count (done + cancelled): a
+// cancelled stage is closed, so it must not be named "next".
+func stageProgressSummary(children []db.Issue, closedStage int32, childStatus func(db.Issue) string) (summary string, nextStage int32) {
+	type agg struct{ total, done, cancelled int }
 	byStage := map[int32]*agg{}
 	order := []int32{}
 	for _, c := range children {
@@ -543,8 +588,11 @@ func stageProgressSummary(children []db.Issue, closedStage int32, isTerminal fun
 			order = append(order, s)
 		}
 		a.total++
-		if isTerminal(c) {
+		switch childStatus(c) {
+		case "done":
 			a.done++
+		case "cancelled":
+			a.cancelled++
 		}
 	}
 	sort.Slice(order, func(i, j int) bool { return order[i] < order[j] })
@@ -552,7 +600,10 @@ func stageProgressSummary(children []db.Issue, closedStage int32, isTerminal fun
 	for _, s := range order {
 		a := byStage[s]
 		label := fmt.Sprintf("Stage %d: %d/%d done", s, a.done, a.total)
-		if nextStage == 0 && s > closedStage && a.done < a.total {
+		if a.cancelled > 0 {
+			label += fmt.Sprintf(", %d cancelled", a.cancelled)
+		}
+		if nextStage == 0 && s > closedStage && (a.done+a.cancelled) < a.total {
 			nextStage = s
 			label += " (next)"
 		}
@@ -577,14 +628,49 @@ func stageProgressSummary(children []db.Issue, closedStage int32, isTerminal fun
 //     asserted a finality the server cannot know and pushed leaders to wrap up
 //     mid-workflow (MUL-4062 / #4927). The message now names both possibilities
 //     and hands the create-next-vs-wrap-up decision back to the leader.
-func stageAdvanceInstruction(nextStage int32, parentID string) string {
+//
+// `hasCancellation` reports that the closed stage released cancelled work,
+// which means the stage produced no real result to pass on. The server has no
+// workflow model to tell whether that dropped work matters, so rather than
+// block it hands the decision back: the leader must confirm the cancelled work
+// is not a dependency of the next stage, comment rather than promote/wrap up
+// if unsure (GH #8462).
+func stageAdvanceInstruction(nextStage int32, parentID string, hasCancellation bool) string {
 	if nextStage > 0 {
-		return fmt.Sprintf(
+		msg := fmt.Sprintf(
 			" Stage %d is next. Review the full layout with `multica issue children %s`, and if Stage %d's dependencies are satisfied promote its `backlog` sub-issues to `todo` to continue. Read each sub-issue's description first and only promote items whose stated dependencies are already met — do not rely on this parent's higher-level breakdown alone. If a description conflicts with that breakdown, leave it `backlog` and post a comment to confirm first.",
 			nextStage, parentID, nextStage,
 		)
+		if hasCancellation {
+			msg += fmt.Sprintf(" Some sub-issues were cancelled when the stage closed — confirm that cancelled work is not a dependency of Stage %d before promoting; if any of it is still required, recreate it and park it in `backlog` first, and post a comment rather than promote if unsure.", nextStage)
+		}
+		return msg
 	}
-	return fmt.Sprintf(" Completing this stage does not mean the whole issue is done. Decide whether the issue is actually complete — if so, synthesize the results and run `multica issue status %s in_review` to mark the parent ready for review — or whether the next stage still needs to be created, in which case create that stage and its sub-issues now.", parentID)
+	msg := fmt.Sprintf(" Completing this stage does not mean the whole issue is done. Decide whether the issue is actually complete — if so, synthesize the results and run `multica issue status %s in_review` to mark the parent ready for review — or whether the next stage still needs to be created, in which case create that stage and its sub-issues now.", parentID)
+	if hasCancellation {
+		msg += " If any sub-issues were cancelled, confirm whether they were actually needed for the outcome — if any cancelled work is required, recreate it as a new sub-issue rather than wrapping up, and post a comment to confirm if unsure."
+	}
+	return msg
+}
+
+// stageHasCancelled reports whether the stage about to be announced contains at
+// least one cancelled child. For a staged set that is the closed stage (the one
+// named by the comment); for the single implicit stage of an unstaged set it is
+// any child. A cancelled sibling closes the barrier without doing its work, so
+// the comment must say the stage is `closed` rather than `complete` and ask the
+// leader to confirm the dropped work is not a dependency of the next stage
+// (GH #8462). Keys off the canonical status, so a custom closed-category status
+// that resolves to `cancelled` counts here too.
+func stageHasCancelled(children []db.Issue, staged bool, closedStage int32, childStatus func(db.Issue) string) bool {
+	for _, c := range children {
+		if staged && (!c.Stage.Valid || c.Stage.Int32 != closedStage) {
+			continue
+		}
+		if childStatus(c) == "cancelled" {
+			return true
+		}
+	}
+	return false
 }
 
 // sanitizeChildTitleForSystemComment removes mention-style markdown from a

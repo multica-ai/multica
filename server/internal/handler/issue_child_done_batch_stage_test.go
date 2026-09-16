@@ -247,10 +247,22 @@ func TestBatchChildDonePreservesRepresentativeAndParentOrder(t *testing.T) {
 					if !strings.Contains(content, "together in a batch update") || !strings.Contains(content, "](mention://issue/"+rep+")") {
 						t.Fatalf("lost batch wording or first representative: %s", content)
 					}
-					if staged && (!strings.Contains(content, "Stage 7 of this issue is complete") || !strings.Contains(content, "Stage 2: 1/1 done; Stage 7: 2/2 done; Stage 20: 0/1 done (next)") || !strings.Contains(content, "Stage 20 is next")) {
-						t.Fatalf("inaccurate final-state summary: %s", content)
+					// A stage closed by cancelled children must be announced as
+					// `closed` and counted as cancelled, not done (GH #8462). A
+					// fully-done stage keeps the historical `complete` wording.
+					stageWord := "complete"
+					if status == "cancelled" {
+						stageWord = "closed"
 					}
-					if !staged && !strings.Contains(content, "All sub-issues are complete") {
+					if staged {
+						sum := "Stage 2: 1/1 done; Stage 7: 2/2 done; Stage 20: 0/1 done (next)"
+						if status == "cancelled" {
+							sum = "Stage 2: 0/1 done, 1 cancelled; Stage 7: 0/2 done, 2 cancelled; Stage 20: 0/1 done (next)"
+						}
+						if !strings.Contains(content, "Stage 7 of this issue is "+stageWord) || !strings.Contains(content, sum) || !strings.Contains(content, "Stage 20 is next") {
+							t.Fatalf("inaccurate final-state summary: %s", content)
+						}
+					} else if !strings.Contains(content, "All sub-issues are "+stageWord) {
 						t.Fatalf("lost unstaged completion: %s", content)
 					}
 					if got, want := triggerCommentIDForAgentTask(t, parent, agents[p]), systemCommentIDOn(t, parent); got != want {
@@ -284,10 +296,11 @@ func BenchmarkBatchStageSelection(b *testing.B) {
 			children[0].Status = shape.firstStatus
 			// Both algorithms use the same pre-resolved snapshot as production.
 			// Fixture construction and status resolution are outside the timed loop.
-			terminal, err := resolveTerminalChildren(children, func(c db.Issue) (string, error) { return c.Status, nil })
+			childStatus, err := resolveTerminalChildren(children, func(c db.Issue) (string, error) { return c.Status, nil })
 			if err != nil {
 				b.Fatal(err)
 			}
+			terminal := func(c db.Issue) bool { return isTerminalChildStatus(childStatus(c)) }
 			for _, tc := range []struct {
 				name string
 				pick func([]db.Issue, []db.Issue, func(db.Issue) bool) (db.Issue, bool)

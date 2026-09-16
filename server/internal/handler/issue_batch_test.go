@@ -375,8 +375,17 @@ func TestBatchChildDoneCrossStage_Cancelled(t *testing.T) {
 		t.Fatalf("expected exactly 1 system comment on parent, got %d", got)
 	}
 	content, _, _, _ := systemCommentOn(t, fx.parent.ID)
-	if !strings.Contains(content, "Stage 2 of this issue is complete") {
-		t.Errorf("expected Stage 2 completion announcement, got: %s", content)
+	// GH #8462: a stage whose children were all cancelled did NOT get done — it
+	// is `closed`, the counter reports 0/2 done + 2 cancelled, and the leader is
+	// asked to confirm the cancelled work is not needed before wrapping up.
+	if !strings.Contains(content, "Stage 2 of this issue is closed") {
+		t.Errorf("expected Stage 2 to be announced as closed (cancelled, not done), got: %s", content)
+	}
+	if !strings.Contains(content, "Stage 2: 0/2 done, 2 cancelled") {
+		t.Errorf("expected cancelled stage to count 0/2 done, 2 cancelled, got: %s", content)
+	}
+	if !strings.Contains(content, "confirm whether") {
+		t.Errorf("expected the cancelled-work confirmation line, got: %s", content)
 	}
 	if strings.Contains(content, "is next") || strings.Contains(content, "(next)") {
 		t.Errorf("comment must not carry a stale next-stage instruction, got: %s", content)
