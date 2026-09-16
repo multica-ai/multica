@@ -154,6 +154,62 @@ func TestChildDoneStatusResolver(t *testing.T) {
 	}
 }
 
+// TestCustomCancelledStatusRendersAsCancelled pins GH #8462 acceptance point 3:
+// a custom status in the closed/cancelled category (here `dropped`) must resolve
+// to the canonical `cancelled` in the child-done output — the counter, the stage
+// sentence, the representative-child verb, and the cancellation confirm line —
+// rather than leaking the custom key or being misreported as `done`. This is the
+// focused output assertion the review flagged missing on TestChildDoneStatusResolver
+// (which only checks that a comment exists and carries stage labels).
+func TestCustomCancelledStatusRendersAsCancelled(t *testing.T) {
+	ctx := context.Background()
+	ws := dbfx.Workspace(t, "Custom cancelled status", "custom-cancelled-render")
+	fx := testutil.New(testPool, ws, testUserID)
+	fx.Insert(t, "issue_status", testutil.Cols{"workspace_id": ws, "key": "dropped", "name": "Dropped", "category": "cancelled", "color": "#123456"})
+	agentID := fx.Agent(t, "Parent assignee", fx.Runtime(t, "Parent runtime"))
+	parentID := fx.Issue(t, "Parent", testutil.Cols{"status": "in_progress", "assignee_type": "agent", "assignee_id": agentID})
+	fx.Cleanup(t, "DELETE FROM comment WHERE issue_id = $1", parentID)
+	fx.Cleanup(t, "DELETE FROM agent_task_queue WHERE issue_id = $1", parentID)
+	fx.Issue(t, "First dropped child", testutil.Cols{"parent_issue_id": parentID, "status": "dropped", "stage": 1})
+	lastID := fx.Issue(t, "Second dropped child", testutil.Cols{"parent_issue_id": parentID, "status": "dropped", "stage": 1})
+	fx.Issue(t, "Parked next stage", testutil.Cols{"parent_issue_id": parentID, "status": "backlog", "stage": 2})
+
+	// The last child moves in_progress -> dropped (a custom cancelled-category
+	// status). That transition closes stage 1 exactly like a bare Cancelled would.
+	last, err := testHandler.Queries.GetIssue(ctx, parseUUID(lastID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := last
+	prev.Status = "in_progress"
+	testHandler.notifyParentOfChildDone(ctx, prev, last)
+
+	if got := countSystemCommentsOn(t, parentID); got != 1 {
+		t.Fatalf("expected 1 system comment, got %d", got)
+	}
+	content, _, _, _ := systemCommentOn(t, parentID)
+	// The custom `dropped` status must read as canonical `cancelled` everywhere:
+	// "0/2 done, 2 cancelled" (not "2/2 done"), "closed" (not "complete"), and the
+	// representative child "was just cancelled" (not "just finished"), plus the
+	// cancelled-work confirm line.
+	want := []string{
+		"Stage 1 of this issue is closed",
+		"Stage 1: 0/2 done, 2 cancelled",
+		"was just cancelled",
+		"Some sub-issues were cancelled when the stage closed",
+	}
+	for _, s := range want {
+		if !strings.Contains(content, s) {
+			t.Errorf("expected %q in output, got: %s", s, content)
+		}
+	}
+	for _, bad := range []string{"2/2 done", "is complete", "just finished"} {
+		if strings.Contains(content, bad) {
+			t.Errorf("custom cancelled status must not render as done (%q), got: %s", bad, content)
+		}
+	}
+}
+
 func TestChildStatusResolverRefreshesForNextPass(t *testing.T) {
 	ctx := context.Background()
 	ws := dbfx.Workspace(t, "Resolver refresh", "child-resolver-refresh")
