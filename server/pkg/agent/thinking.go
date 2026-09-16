@@ -789,6 +789,20 @@ func anyModelSupportsThinkingValue(models []Model, value string) bool {
 	return false
 }
 
+// piThinkingVocabulary is pi's native `--thinking` token universe. omp is a pi
+// fork and speaks it verbatim, so the pi entry below and pi-family identities
+// share one list instead of copies that can drift apart.
+var piThinkingVocabulary = []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+// thinkingVocabularySet turns a token list into the accept-gate map.
+func thinkingVocabularySet(levels []string) map[string]bool {
+	set := make(map[string]bool, len(levels))
+	for _, level := range levels {
+		set[level] = true
+	}
+	return set
+}
+
 // providerThinkingEnums is the server-side accept-list for runtimes with a
 // fixed reasoning-effort vocabulary. Codex and OpenCode are deliberately
 // absent because their values come from daemon-local model catalogs, which can
@@ -822,16 +836,23 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"max":     true,
 	},
 	// Pi owns a fixed CLI vocabulary; RPC discovery narrows this universe to
-	// the exact subset supported by each model before execution.
-	"pi": {
-		"off":     true,
-		"minimal": true,
-		"low":     true,
-		"medium":  true,
-		"high":    true,
-		"xhigh":   true,
-		"max":     true,
-	},
+	// the exact subset supported by each model before execution. Pi-family
+	// identities resolve here through thinkingGateProvider.
+	"pi": thinkingVocabularySet(piThinkingVocabulary),
+}
+
+// thinkingGateProvider maps a built-in runtime identity to the protocol family
+// that owns its reasoning-effort contract, the way ListModels and
+// localSkillRootsForProvider already resolve identities before switching on the
+// family. An identity shares its family's CLI and injection path — piBackend
+// applies `--thinking` for pi and omp alike — so the family's vocabulary is the
+// right answer, and an identity missing from providerThinkingEnums would have
+// no reachable effort control at all.
+func thinkingGateProvider(providerType string) string {
+	if desc, ok := BuiltinRuntimeByID(providerType); ok {
+		return desc.ProtocolFamily
+	}
+	return providerType
 }
 
 // thinkingDynamicCatalogProviders are the runtimes whose effort vocabulary is
@@ -937,6 +958,7 @@ func UsesACPCatalogThinking(providerType string) bool {
 // true here and the per-session catalog decides whether a picker actually
 // appears. See acpCatalogThinkingProviders for the evidence on each.
 func ThinkingControlSupported(providerType string) bool {
+	providerType = thinkingGateProvider(providerType)
 	if usesDynamicThinkingCatalog(providerType) {
 		return true
 	}
@@ -960,6 +982,7 @@ func IsKnownThinkingValue(providerType, value string) bool {
 	if value == "" {
 		return true
 	}
+	providerType = thinkingGateProvider(providerType)
 	if usesDynamicThinkingCatalog(providerType) {
 		return isValidDynamicThinkingValue(value)
 	}

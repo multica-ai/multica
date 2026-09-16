@@ -577,6 +577,7 @@ func TestThinkingControlSupported(t *testing.T) {
 		{"dsh", true},      // dynamic catalog from the installed DSH profile
 		{"opencode", true}, // dynamic variant names from opencode.json
 		{"pi", true},       // fixed tokens, per-model subset discovered over RPC
+		{"omp", true},      // pi fork: same --thinking injection, per-model subset from `omp models --json`
 		{"hermes", true},   // jcode applies it; Hermes Agent gets an empty catalog
 		{"kimi", true},     // dynamic catalog; ACP session/set_config_option applies it
 		{"qwenpaw", false},
@@ -597,7 +598,7 @@ func TestThinkingControlSupported(t *testing.T) {
 // reject a level while claiming the runtime supports one, or vice versa.
 func TestThinkingControlSupportedMatchesTokenGate(t *testing.T) {
 	t.Parallel()
-	providers := []string{"claude", "codebuddy", "grok", "codex", "opencode", "pi", "hermes", "kimi", "cursor"}
+	providers := []string{"claude", "codebuddy", "grok", "codex", "opencode", "pi", "omp", "hermes", "kimi", "cursor"}
 	// "medium" is in every fixed enum and is a well-formed dynamic token, so a
 	// provider with any reasoning control accepts it.
 	for _, provider := range providers {
@@ -605,6 +606,51 @@ func TestThinkingControlSupportedMatchesTokenGate(t *testing.T) {
 		if got := ThinkingControlSupported(provider); got != accepts {
 			t.Errorf("provider %q: ThinkingControlSupported = %v but IsKnownThinkingValue(%q, \"medium\") = %v",
 				provider, got, provider, accepts)
+		}
+	}
+}
+
+// TestBuiltinRuntimeIdentitiesMatchTheirFamily requires every registered
+// runtime identity to answer the reasoning-effort gate exactly as its protocol
+// family does. An identity is a derivative of the family's CLI with the same
+// injection path, so an identity less capable than its family is a wiring bug.
+func TestBuiltinRuntimeIdentitiesMatchTheirFamily(t *testing.T) {
+	t.Parallel()
+	if len(BuiltinRuntimes) == 0 {
+		t.Fatal("no built-in runtime identities registered")
+	}
+	for _, desc := range BuiltinRuntimes {
+		if desc.ID == desc.ProtocolFamily {
+			t.Errorf("built-in runtime %q names its own ID as its protocol family", desc.ID)
+			continue
+		}
+		if got, want := ThinkingControlSupported(desc.ID), ThinkingControlSupported(desc.ProtocolFamily); got != want {
+			t.Errorf("ThinkingControlSupported(%q) = %v, but family %q answers %v",
+				desc.ID, got, desc.ProtocolFamily, want)
+		}
+		for _, level := range piThinkingLevelOrder {
+			if got, want := IsKnownThinkingValue(desc.ID, level), IsKnownThinkingValue(desc.ProtocolFamily, level); got != want {
+				t.Errorf("IsKnownThinkingValue(%q, %q) = %v, but family %q answers %v",
+					desc.ID, level, got, desc.ProtocolFamily, want)
+			}
+		}
+	}
+}
+
+// TestPiThinkingVocabularyIsTheFixedEnum keeps the shared token list and the pi
+// entry from drifting, since the enum is derived from the list.
+func TestPiThinkingVocabularyIsTheFixedEnum(t *testing.T) {
+	t.Parallel()
+	enum, ok := providerThinkingEnums["pi"]
+	if !ok {
+		t.Fatal(`providerThinkingEnums has no "pi" entry`)
+	}
+	if len(enum) != len(piThinkingVocabulary) {
+		t.Errorf("pi enum has %d tokens, piThinkingVocabulary has %d", len(enum), len(piThinkingVocabulary))
+	}
+	for _, level := range piThinkingVocabulary {
+		if !enum[level] {
+			t.Errorf("piThinkingVocabulary token %q is missing from the pi enum", level)
 		}
 	}
 }

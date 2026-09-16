@@ -238,7 +238,7 @@ func TestOmpExecuteCompletesFromEventStream(t *testing.T) {
 // so buildPiArgs can hand the whole selector to --model.
 func TestParseOmpModels(t *testing.T) {
 	sample := `{"models":[` +
-		`{"provider":"anthropic","id":"claude-sonnet-5","selector":"anthropic/claude-sonnet-5","name":"Claude Sonnet 5","contextWindow":200000,"maxTokens":64000,"reasoning":true},` +
+		`{"provider":"anthropic","id":"claude-sonnet-5","selector":"anthropic/claude-sonnet-5","name":"Claude Sonnet 5","contextWindow":200000,"maxTokens":64000,"reasoning":true,"thinking":["low","medium","high","xhigh","max"]},` +
 		`{"provider":"openai","id":"gpt-5","selector":"openai/gpt-5","name":"GPT-5"},` +
 		`{"provider":"","id":"local-model","selector":"local-model","name":"Local Model"}` +
 		`]}`
@@ -260,6 +260,91 @@ func TestParseOmpModels(t *testing.T) {
 	if models[2].ID != "local-model" || models[2].Provider != "" || models[2].Label != "Local Model" {
 		t.Errorf("models[2] = %+v", models[2])
 	}
+	// reasoning entries carry omp's per-model list; entries without one stay
+	// nil so the picker stays hidden.
+	if models[0].Thinking == nil {
+		t.Fatalf("models[0].Thinking = nil, want the advertised catalog")
+	}
+	if got, want := ompThinkingValues(models[0].Thinking), "low,medium,high,xhigh,max"; got != want {
+		t.Errorf("models[0] thinking levels = %q, want %q", got, want)
+	}
+	if models[1].Thinking != nil {
+		t.Errorf("models[1].Thinking = %+v, want nil (no reasoning bit)", models[1].Thinking)
+	}
+	if models[2].Thinking != nil {
+		t.Errorf("models[2].Thinking = %+v, want nil (no reasoning bit)", models[2].Thinking)
+	}
+}
+
+// TestOmpThinkingCatalog pins what omp's `thinking` list becomes: pi's order
+// and labels, no control when `reasoning` is false, and unknown tokens dropped
+// so the picker cannot offer a level the gate rejects.
+func TestOmpThinkingCatalog(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		reasoning bool
+		levels    []string
+		want      string
+	}{
+		{"devin swe-2 subset", true, []string{"medium", "high", "max"}, "medium,high,max"},
+		{"muse-spark tops out at xhigh", true, []string{"minimal", "low", "medium", "high", "xhigh"}, "minimal,low,medium,high,xhigh"},
+		{"full vocabulary", true, []string{"max", "off", "xhigh", "low"}, "off,low,xhigh,max"},
+		{"unknown token dropped", true, []string{"high", "ultra"}, "high"},
+		{"only unknown tokens", true, []string{"ultra"}, ""},
+		{"reasoning false", false, []string{"low", "high"}, ""},
+		{"empty list", true, nil, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			thinking := ompThinkingFromCatalog(tc.reasoning, tc.levels)
+			if got := ompThinkingValues(thinking); got != tc.want {
+				t.Errorf("ompThinkingFromCatalog(%v, %v) = %q, want %q", tc.reasoning, tc.levels, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestOmpThinkingCatalogLabels never advertises a level without a label: the
+// picker renders the label verbatim, and an empty one shows as a blank row.
+func TestOmpThinkingCatalogLabels(t *testing.T) {
+	t.Parallel()
+	thinking := ompThinkingFromCatalog(true, piThinkingLevelOrder)
+	if thinking == nil {
+		t.Fatal("ompThinkingFromCatalog returned nil for the full vocabulary")
+	}
+	for _, level := range thinking.SupportedLevels {
+		if level.Value == "" || level.Label == "" {
+			t.Errorf("level %+v has an empty value or label", level)
+		}
+	}
+}
+
+// TestOmpAdvertisedLevelsArePersistable is the catalog → API contract for omp,
+// mirroring the Codex test: every level discovery can advertise must pass the
+// server's Create/Update gate, or the picker offers a level that fails to save.
+func TestOmpAdvertisedLevelsArePersistable(t *testing.T) {
+	t.Parallel()
+	thinking := ompThinkingFromCatalog(true, piThinkingLevelOrder)
+	if thinking == nil {
+		t.Fatal("ompThinkingFromCatalog returned nil for the full vocabulary")
+	}
+	for _, level := range thinking.SupportedLevels {
+		if !IsKnownThinkingValue("omp", level.Value) {
+			t.Errorf("omp advertises %q but IsKnownThinkingValue rejects it; keep providerThinkingEnums[\"omp\"] in step with the CLI vocabulary", level.Value)
+		}
+	}
+}
+
+func ompThinkingValues(thinking *ModelThinking) string {
+	if thinking == nil {
+		return ""
+	}
+	values := make([]string, 0, len(thinking.SupportedLevels))
+	for _, level := range thinking.SupportedLevels {
+		values = append(values, level.Value)
+	}
+	return strings.Join(values, ",")
 }
 
 // TestParseOmpModelsEmptyCatalog verifies an empty {"models":[]} wrapper

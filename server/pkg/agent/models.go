@@ -1367,10 +1367,12 @@ func discoverOmpModels(ctx context.Context, runtimeCmd Command) ([]Model, error)
 func parseOmpModels(data []byte) ([]Model, error) {
 	var wrapper struct {
 		Models []struct {
-			ID       string `json:"id"`
-			Provider string `json:"provider"`
-			Selector string `json:"selector"`
-			Name     string `json:"name"`
+			ID        string   `json:"id"`
+			Provider  string   `json:"provider"`
+			Selector  string   `json:"selector"`
+			Name      string   `json:"name"`
+			Reasoning bool     `json:"reasoning"`
+			Thinking  []string `json:"thinking"`
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(data, &wrapper); err != nil {
@@ -1404,9 +1406,44 @@ func parseOmpModels(data []byte) ([]Model, error) {
 		if label == "" {
 			label = selector
 		}
-		models = append(models, Model{ID: selector, Label: label, Provider: provider})
+		models = append(models, Model{
+			ID:       selector,
+			Label:    label,
+			Provider: provider,
+			Thinking: ompThinkingFromCatalog(e.Reasoning, e.Thinking),
+		})
 	}
 	return models, nil
+}
+
+// ompThinkingFromCatalog builds the per-model reasoning catalog from the
+// `reasoning` bit and `thinking` list in `omp models --json`, e.g.
+//
+//	{"reasoning":true,"thinking":["medium","high","max"]}
+//
+// omp is a pi fork and already narrows the list per model, so it is advertised
+// as-is apart from ordering and labels. Tokens outside pi's fixed vocabulary
+// are dropped: advertising a level the accept gate would reject is the drift
+// TestOmpAdvertisedLevelsArePersistable guards against.
+func ompThinkingFromCatalog(reasoning bool, levels []string) *ModelThinking {
+	if !reasoning || len(levels) == 0 {
+		return nil
+	}
+	advertised := make(map[string]bool, len(levels))
+	for _, level := range levels {
+		advertised[strings.TrimSpace(level)] = true
+	}
+	out := make([]ThinkingLevel, 0, len(advertised))
+	for _, value := range piThinkingLevelOrder {
+		if !advertised[value] {
+			continue
+		}
+		out = append(out, ThinkingLevel{Value: value, Label: piThinkingLevelLabels[value]})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return &ModelThinking{SupportedLevels: out}
 }
 
 // discoverHermesModels spins up a throwaway `hermes acp` process,
