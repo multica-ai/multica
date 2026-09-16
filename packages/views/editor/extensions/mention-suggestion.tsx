@@ -47,6 +47,7 @@ import { cn } from "@multica/ui/lib/utils";
 import type { IssueStatus, IssueStatusCategory, ProjectStatus } from "@multica/core/types";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import type { SuggestionOptions } from "@tiptap/suggestion";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { PluginKey } from "@tiptap/pm/state";
 import {
   getRecencyMap,
@@ -690,6 +691,32 @@ function projectToMention(p: { id: string; title: string; description?: string |
   };
 }
 
+/**
+ * Characters that make an `@` part of the word it follows. An `@` typed at the
+ * end of one of these is an address or a handle (`user@example.com`), not an
+ * invitation to pick a target: the picker must stay shut there, because with
+ * `allowSpaces` its match runs to the end of the line and then swallows Enter.
+ */
+const WORD_CHAR_BEFORE_MENTION = /[A-Za-z0-9_]/;
+
+/**
+ * True when the `@` at `pos` starts a token instead of continuing one.
+ *
+ * Tiptap's own boundary rule is `allowedPrefixes`, defaulting to `[" "]` — a
+ * half-width space and nothing else. That makes a mention unreachable in the
+ * two ways CJK text is actually typed: with no separator at all, and after the
+ * full-width space (U+3000) an IME inserts, neither of which is a half-width
+ * space. The rule it is protecting against is narrower than "not a space": an
+ * `@` glued to the end of an ASCII word. Anchoring on that instead keeps the
+ * address case shut while leaving the rest of the line open.
+ */
+function isMentionBoundary(doc: ProseMirrorNode, pos: number): boolean {
+  if (pos <= 0) return true;
+  // One character wide. Across a block boundary this is the separator, which
+  // is not a word character either.
+  return !WORD_CHAR_BEFORE_MENTION.test(doc.textBetween(pos - 1, pos, "\n", "\n"));
+}
+
 function matchesMentionQuery(item: MentionItem, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
@@ -817,10 +844,15 @@ export function createMentionSuggestion(
   return {
     pluginKey,
     allowSpaces: true,
+    // The boundary rule is isMentionBoundary's, not Tiptap's default of "a
+    // half-width space and nothing else" (see the note there).
+    allowedPrefixes: null,
     // Only open over an `@` the user actually typed. Tiptap matches on document
     // content alone, so without this a pasted, dropped, undone or server-loaded
     // `@` opens the picker just as readily (MUL-5429).
-    shouldShow: ({ editor, range }) => isTriggerArmedAt(editor, range.from),
+    shouldShow: ({ editor, range, transaction }) =>
+      isTriggerArmedAt(editor, range.from) &&
+      isMentionBoundary(transaction.doc, range.from),
     items: ({ query }) => {
       if (options.mode === "context") {
         const normalizedQuery = query.trim();
