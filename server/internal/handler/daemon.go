@@ -4566,7 +4566,8 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Usage []TaskUsagePayload `json:"usage"`
+		Usage        []TaskUsagePayload `json:"usage"`
+		UsageSources []string           `json:"usage_sources"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -4579,7 +4580,7 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 	// resolve to a provider instead of landing as '' and pricing $0.
 	var runtimeProvider string
 	runtimeProviderLoaded := false
-	for _, u := range req.Usage {
+	for i, u := range req.Usage {
 		provider := normalizeProvider(u.Provider)
 		if provider == "" {
 			if !runtimeProviderLoaded {
@@ -4593,9 +4594,42 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			}
 			provider = runtimeProvider
 		}
-		if err := h.Queries.UpsertTaskUsage(r.Context(), db.UpsertTaskUsageParams{
-			TaskID:           parseUUID(taskID),
-			Provider:         provider,
+		req.Usage[i].Provider = provider
+	}
+
+	// Serialize whole-run reports and commit counters and provenance together.
+	// Without this, a failed model-row write could still label a run as having
+	// final totals. Legacy reports retain their per-row upsert contract, but
+	// clear provenance because their replacement counters have unknown scope.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save task usage")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	sources := req.UsageSources
+	if sources == nil {
+		sources = []string{}
+	}
+	if err := qtx.UpdateTaskUsageSources(r.Context(), db.UpdateTaskUsageSourcesParams{ID: task.ID, UsageSources: sources}); err != nil {
+		slog.Warn("update task usage sources failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to save task usage")
+		return
+	}
+	if req.UsageSources != nil {
+		// A new report is a complete snapshot, including explicit no-usage.
+		// Remove models absent from a corrected snapshot rather than pricing
+		// stale rows under the new report's provenance.
+		if err := qtx.DeleteTaskUsage(r.Context(), task.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to save task usage")
+			return
+		}
+	}
+	for _, u := range req.Usage {
+		if err := qtx.UpsertTaskUsage(r.Context(), db.UpsertTaskUsageParams{
+			TaskID:           task.ID,
+			Provider:         u.Provider,
 			Model:            u.Model,
 			InputTokens:      u.InputTokens,
 			OutputTokens:     u.OutputTokens,
@@ -4604,9 +4638,17 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			CostUsdTicks:     authoritativeCostTicks(u.CostUSDTicks),
 		}); err != nil {
 			slog.Warn("upsert task usage failed", "task_id", taskID, "model", u.Model, "error", err)
-			continue
+			writeError(w, http.StatusInternalServerError, "failed to save task usage")
+			return
 		}
-		h.TaskService.CaptureTaskUsage(r.Context(), task, provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.CostUSDTicks)
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Warn("commit task usage failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to save task usage")
+		return
+	}
+	for _, u := range req.Usage {
+		h.TaskService.CaptureTaskUsage(r.Context(), task, u.Provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.CostUSDTicks)
 
 		// Surface prompt-cache effectiveness per run so cache hit rates are
 		// observable in logs, not just queryable from runtime_usage. The ratio
@@ -4616,7 +4658,7 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 		if totalInput := u.InputTokens + u.CacheReadTokens + u.CacheWriteTokens; totalInput > 0 {
 			slog.Info("task prompt-cache usage",
 				"task_id", taskID,
-				"provider", provider,
+				"provider", u.Provider,
 				"model", u.Model,
 				"input_tokens", u.InputTokens,
 				"output_tokens", u.OutputTokens,

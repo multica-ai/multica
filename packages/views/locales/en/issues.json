@@ -1,4 +1,17 @@
 {
+  "usage_coverage": {
+    "all_agents": "All agents",
+    "all_agents_detail": "Final per-model totals reported by the CLI include the main agent and subagents. Costs remain estimates.",
+    "main_agent": "Main agent only",
+    "main_agent_detail": "At least one attempt uses final main-agent totals, which exclude subagents. Subagent usage may be missing from tokens and estimated cost.",
+    "partial": "Partial usage",
+    "partial_detail": "At least one attempt has only recovered input/cache counts or no usable statistics. Output or subagent usage may be missing. Tokens and estimated cost are incomplete.",
+    "unavailable": "Usage unavailable",
+    "unavailable_detail": "The CLI reported no usable token statistics. This does not mean the run used zero tokens.",
+    "unknown": "Coverage unknown",
+    "unknown_detail": "The runtime did not report a recognized accounting source. Completeness of tokens and estimated cost is unknown.",
+    "total_detail": "Some runs have limited or unknown usage coverage. The totals may omit output or subagent usage."
+  },
   "inline_run": {
     "label": "{{name}} run",
     "stop": "Stop",

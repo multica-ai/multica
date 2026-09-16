@@ -171,6 +171,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var sessionID string
 		sawAsyncLaunch := false
 		usage := make(map[string]TokenUsage)
+		usageSource := ""
 		seenUsage := make(map[string]struct{})
 		eventCount := 0
 		invalidEventCount := 0
@@ -249,8 +250,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				resultIsError = msg.IsError
 				terminalReasonError = claudeTerminalReasonFailure(msg.TerminalReason, msg.ResultText)
 				sessionID = msg.SessionID
-				if resultUsage := claudeResultUsage(msg, opts.Model); len(resultUsage) > 0 {
+				if resultUsage, source := claudeResultUsage(msg, opts.Model); len(resultUsage) > 0 {
 					usage = resultUsage
+					usageSource = source
 				}
 				closeStdin()
 			case "log":
@@ -350,6 +352,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			)
 		}
 
+		if usageSource == "" {
+			usageSource = "none"
+			if len(usage) > 0 {
+				usageSource = "assistant_fallback"
+			}
+		}
 		resCh <- Result{
 			Status:         finalStatus,
 			Output:         finalOutput,
@@ -357,6 +365,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			DurationMs:     duration.Milliseconds(),
 			SessionID:      reportedSessionID,
 			Usage:          usage,
+			UsageSources:   []string{usageSource},
 			ResumeRejected: resumeRejected,
 		}
 	}()
@@ -635,7 +644,7 @@ func claudeTerminalReasonFailure(terminalReason, resultText string) string {
 	return msg
 }
 
-func claudeResultUsage(msg claudeSDKMessage, fallbackModel string) map[string]TokenUsage {
+func claudeResultUsage(msg claudeSDKMessage, fallbackModel string) (map[string]TokenUsage, string) {
 	if len(msg.ModelUsage) > 0 {
 		usage := make(map[string]TokenUsage, len(msg.ModelUsage))
 		for model, u := range msg.ModelUsage {
@@ -650,7 +659,7 @@ func claudeResultUsage(msg claudeSDKMessage, fallbackModel string) map[string]To
 			}
 		}
 		if len(usage) > 0 {
-			return usage
+			return usage, "final_model_usage"
 		}
 	}
 
@@ -664,7 +673,7 @@ func claudeResultUsage(msg claudeSDKMessage, fallbackModel string) map[string]To
 		msg.Usage.CacheReadInputTokens,
 		msg.Usage.CacheCreationInputTokens,
 	) {
-		return nil
+		return nil, ""
 	}
 	return map[string]TokenUsage{
 		model: {
@@ -673,7 +682,7 @@ func claudeResultUsage(msg claudeSDKMessage, fallbackModel string) map[string]To
 			CacheReadTokens:  msg.Usage.CacheReadInputTokens,
 			CacheWriteTokens: msg.Usage.CacheCreationInputTokens,
 		},
-	}
+	}, "final_usage"
 }
 
 func claudeUsageHasTokens(input, output, cacheRead, cacheWrite int64) bool {

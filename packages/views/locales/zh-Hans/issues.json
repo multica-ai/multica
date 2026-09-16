@@ -1,4 +1,17 @@
 {
+  "usage_coverage": {
+    "all_agents": "包含子智能体",
+    "all_agents_detail": "CLI 上报的最终分模型统计包含主智能体和子智能体。费用仍为估算值。",
+    "main_agent": "仅主智能体",
+    "main_agent_detail": "至少一次尝试使用了不含子智能体的主智能体最终统计。Token 和费用估算可能缺少子智能体用量。",
+    "partial": "部分统计",
+    "partial_detail": "至少一次尝试只恢复了输入和缓存计数，或未取得可用统计。可能缺少输出或子智能体用量，Token 和费用估算不完整。",
+    "unavailable": "用量不可用",
+    "unavailable_detail": "CLI 未上报可用的 Token 统计，不代表此次运行未消耗 Token。",
+    "unknown": "统计范围未知",
+    "unknown_detail": "运行时未上报可识别的统计来源，无法确认 Token 和费用估算是否完整。",
+    "total_detail": "部分运行的统计范围有限或未知，合计可能缺少输出或子智能体用量。"
+  },
   "inline_run": {
     "label": "{{name}} 的运行",
     "stop": "停止",
