@@ -88,6 +88,15 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3000/auth/callback}
+      # DingTalk OAuth login (企业内部应用, must live inside the org whose
+      # members should log in): both set = the login page shows the DingTalk
+      # button. The MULTICA_DINGTALK_AUTH_ prefix keeps these login
+      # credentials separate from the bot integration's MULTICA_DINGTALK_*.
+      # The backend resolves the member's enterprise email server-side; the
+      # app needs 成员信息读 (qyapi_get_member) plus the sensitive
+      # 邮箱/手机号 permission, or every login is rejected.
+      MULTICA_DINGTALK_AUTH_CLIENT_ID: ${MULTICA_DINGTALK_AUTH_CLIENT_ID:-}
+      MULTICA_DINGTALK_AUTH_CLIENT_SECRET: ${MULTICA_DINGTALK_AUTH_CLIENT_SECRET:-}
       S3_BUCKET: ${S3_BUCKET:-}
       S3_REGION: ${S3_REGION:-us-west-2}
       AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
@@ -178,6 +187,10 @@ services:
       # in the database, so this single deployment-wide key is all the operator
       # needs to set here.
       MULTICA_SLACK_SECRET_KEY: ${MULTICA_SLACK_SECRET_KEY:-}
+      # DingTalk bot integration. Same opt-in shape as Slack: unset = disabled.
+      # Base64 32-byte key (openssl rand -base64 32) that encrypts each
+      # workspace's BYO bot AppSecret at rest.
+      MULTICA_DINGTALK_SECRET_KEY: ${MULTICA_DINGTALK_SECRET_KEY:-}
       # Self-hosted Git provider integration (Forgejo / Gitea / GitLab). This
       # is a self-host-only feature, so the compose file turns it on by default;
       # the managed cloud leaves it unset (off). It still needs a valid
