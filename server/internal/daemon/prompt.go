@@ -84,8 +84,8 @@ type promptOpts struct {
 type PromptOption func(*promptOpts)
 
 // WithSharedLocalDirectory marks a turn that runs inside the user's own
-// directory WITHOUT holding its path mutex — today, a chat turn on an in_place
-// local_directory resource (see localDirectoryLockExempt). Such a turn may
+// directory WITHOUT holding its path mutex — a shared-mode task or a chat turn
+// on an in_place local_directory resource. Such a turn may
 // overlap a coding task writing to the same tree, and unlike every other task
 // it got there by design rather than by winning the lock, so it is the one that
 // has to be told (issue #7344).
@@ -115,8 +115,8 @@ func buildSharedLocalDirectoryBlock(shared bool) string {
 	}
 	var b strings.Builder
 	b.WriteString("## Shared working directory\n\n")
-	b.WriteString("Your working directory is the user's own checkout, and another task on this machine may be editing it while you run. This turn deliberately neither holds nor waits for the directory lock — that is what keeps a conversation from queueing behind a long build.\n\n")
-	b.WriteString("Read freely. Treat writing the way the user treats saving a file in their own editor: reasonable for a small change they just asked for, wrong for a broad refactor, a dependency install, or a build that rewrites many files. Work that size belongs in an issue task, which is serialised against the other writers. If you do write, say so in your reply — a sibling task may be looking at the same file.\n\n")
+	b.WriteString("Your working directory is the user's own checkout, and another task on this machine may be editing it while you run. This turn deliberately neither holds nor waits for the directory lock.\n\n")
+	b.WriteString("Read freely. Before writing, inspect the current changes, stay inside the files needed for this task, and do not overwrite unrelated work. Treat Git index and refs, dependency installs, generated output, build caches, test databases, and ports as shared resources that require separate coordination. Report the files you changed.\n\n")
 	return b.String()
 }
 

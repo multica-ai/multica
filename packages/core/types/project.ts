@@ -78,6 +78,9 @@ export interface GithubRepoResourceRef {
  * - `in_place`: the agent works directly in the user's directory and tasks run
  *   one at a time — a second task waits in `waiting_local_directory`. Edits
  *   land in the user's working copy.
+ * - `shared`: tasks work directly in the same directory without waiting for
+ *   the directory mutex. Work must be partitioned by file and other shared
+ *   state coordinated separately.
  * - `worktree`: each task gets its own git worktree of that repo inside the
  *   runtime's workspace, so tasks run concurrently and deliver their work as a
  *   branch instead of touching the working copy. Every task of one conversation
@@ -90,7 +93,7 @@ export interface GithubRepoResourceRef {
  * Absent means `in_place`: resources created before the mode existed keep their
  * original behavior, so this is optional rather than defaulted on the server.
  */
-export type LocalDirectoryExecutionMode = "in_place" | "worktree";
+export type LocalDirectoryExecutionMode = "in_place" | "shared" | "worktree";
 
 export interface LocalDirectoryResourceRef {
   local_path: string;

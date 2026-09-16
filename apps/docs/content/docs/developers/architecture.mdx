@@ -117,7 +117,7 @@ WebSocket reduces latency, but the database remains the final state. Clients mus
 6. The tool runs locally while the daemon uploads progress, messages, and final status.
 7. The server updates the task and issue, then refreshes clients through realtime events.
 
-The provider adapter layer normalizes startup, streaming events, cancellation, and usage data across AI coding tools, while the daemon still owns local directories and sessions.
+The provider adapter layer normalizes startup, streaming events, cancellation, and usage data across AI coding tools, while the daemon still owns local directories and sessions. A `local_directory` always carries the durable project path; its `execution_mode` independently decides whether the daemon takes the per-path mutex (`in_place`), skips it for explicitly file-partitioned work (`shared`), or creates an isolated checkout (`worktree`).
 
 ## Multi-workspace boundaries
 

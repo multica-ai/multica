@@ -1327,8 +1327,8 @@ func TestCreateProjectBundledLocalDirectoryDaemonConflict(t *testing.T) {
 	}
 }
 
-// execution_mode selects between the historical exclusive in-place run and
-// worktree mode. It is validated at the API boundary so a typo is caught at
+// execution_mode selects between exclusive in-place, unlocked shared, and
+// isolated worktree runs. It is validated at the API boundary so a typo is caught at
 // save time; a daemon new enough to know the field refuses unknown values
 // rather than falling back to in_place, so the two checks together keep a
 // mistyped mode from ever running.
@@ -1340,8 +1340,9 @@ func TestValidateLocalDirectoryRefExecutionMode(t *testing.T) {
 	}{
 		{"absent means in_place", "", ""},
 		{"explicit in_place", "in_place", "in_place"},
+		{"shared", "shared", "shared"},
 		{"worktree", "worktree", "worktree"},
-		{"surrounding whitespace is trimmed", "  worktree  ", "worktree"},
+		{"surrounding whitespace is trimmed", "  shared  ", "shared"},
 	}
 	for _, tc := range accepted {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1367,7 +1368,7 @@ func TestValidateLocalDirectoryRefExecutionMode(t *testing.T) {
 		})
 	}
 
-	rejected := []string{"snapshot", "WORKTREE", "in-place", "true"}
+	rejected := []string{"snapshot", "WORKTREE", "SHARED", "in-place", "true"}
 	for _, mode := range rejected {
 		t.Run("rejects "+mode, func(t *testing.T) {
 			raw, err := json.Marshal(map[string]any{

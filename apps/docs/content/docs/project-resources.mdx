@@ -39,14 +39,14 @@ The UI for adding a local directory is Desktop-only, because browsers cannot pic
 <Callout type="warning">
 **This is an escape hatch, not a more convenient default.** `local_directory` exists for people who have no other option — the canonical case is a game project whose checkout is tens of gigabytes, where re-cloning per run is simply not viable.
 
-If your directory is an ordinary git repo you can clone, **use `github_repo` instead**: it uses worktree mode by default, allowing unlimited concurrent runs on the same repo. A `local_directory` processes **one run at a time by default**; if the directory is a git repo you can opt into worktree mode to get concurrency back (see "How runs share the directory"). Read "When to pick" below before you commit to it.
+If your directory is an ordinary git repo you can clone, **use `github_repo` instead**: it uses worktree mode by default, allowing unlimited concurrent runs on the same repo. A `local_directory` processes **one run at a time by default**. You can opt into isolated worktrees, or deliberately share the original directory between runs when the work is already partitioned by file (see "How runs share the directory"). Read "When to pick" below before you commit to it.
 </Callout>
 
 
 1. Make sure Desktop's local daemon is online.
 2. Open the project's **Resources**, or the **Local directory** tab of the create-project dialog — the same choice is available before the project exists.
 3. Choose "Add local directory", then pick the folder to use.
-4. Pick how runs should use it — **Direct** or **Parallel**, described under "How runs share the directory". Desktop preselects **Parallel** when the folder is a git repository the runtime on that machine can isolate, and **Direct** otherwise. Change it right there, or later from **Resources** with the pencil next to the directory.
+4. Pick how runs should use it — **Direct**, **Shared**, or **Parallel**, described under "How runs share the directory". Desktop preselects **Parallel** when the folder is a git repository the runtime on that machine can isolate, and **Direct** otherwise. Change it right there, or later from **Resources** with the pencil next to the directory.
 
 Preselection applies only to a directory you are linking now. A directory linked earlier keeps the mode it was saved with — an existing setup is never switched under you.
 
@@ -62,13 +62,19 @@ In the default `in_place` mode a local directory is not an isolated environment:
 
 ## How runs share the directory
 
-A local directory has two execution modes, set per resource with `execution_mode`. Desktop labels them **Direct** and **Parallel**; the API, the CLI and the rest of this page use the identifiers.
+A local directory has three execution modes, set per resource with `execution_mode`. Desktop labels them **Direct**, **Shared**, and **Parallel**; the API, the CLI and the rest of this page use the identifiers.
 
 ### `in_place` (default) — "Direct"
 
 The agent works directly in your directory, and runs execute one at a time. When two runs use the same real directory, the later one enters `waiting_local_directory` and continues after the earlier one releases the directory. Two paths that reach the same directory through different symlinks serialize the same way.
 
 Waiting does not modify the directory. A waiting run can be cancelled; otherwise it waits until the directory becomes available.
+
+### `shared` — "Shared"
+
+Agents work directly in the same original directory and runs do not wait for the directory mutex. The project resource still supplies the authoritative path and project context; only the directory-wide scheduling lock is skipped.
+
+Use this only when an orchestrator or the people assigning work keep concurrent runs on different files. Multica tells every shared run that the checkout is live, but it does not sandbox file writes. Git index and refs, dependency installation, generated output, build caches, test databases, and ports are shared state even when source files do not overlap; serialize those operations or give each run separate instances.
 
 ### `worktree` — "Parallel"
 
@@ -129,6 +135,9 @@ multica project resource add <project-id> \
   --local-path /absolute/path/to/repo \
   --daemon-id <daemon-id> \
   --execution-mode worktree
+
+# Share the original directory between file-partitioned runs
+multica project resource update <project-id> <resource-id> --execution-mode shared
 
 # Switch an existing local directory between modes
 multica project resource update <project-id> <resource-id> --execution-mode worktree

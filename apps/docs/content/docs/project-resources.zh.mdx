@@ -39,14 +39,14 @@ import { Callout } from "fumadocs-ui/components/callout";
 <Callout type="warning">
 **这是逃生舱，不是更方便的默认项。** `local_directory` 是给那些"不得不这么开发"的人准备的 —— 典型是一个 checkout 就几十 GB 的游戏项目，不可能每来一次运行就重新 clone 一份。
 
-如果你的目录只是一个能正常 clone 的普通 git 仓库，**请用 `github_repo`**：它默认走 worktree 模式，同一个仓库上的运行可以无限并发。`local_directory` **默认同一时间只进行一次运行**；如果这个目录本身是 git 仓库，可以主动开启 worktree 模式把并发拿回来（见“运行如何共享这个目录”）。先看上面的两种资源对照再决定。
+如果你的目录只是一个能正常 clone 的普通 git 仓库，**请用 `github_repo`**：它默认走 worktree 模式，同一个仓库上的运行可以无限并发。`local_directory` **默认同一时间只进行一次运行**。可以改用隔离 worktree，也可以在工作已经按文件拆开的前提下，让多次运行直接共享原目录（见“运行如何共享这个目录”）。先看上面的资源对照再决定。
 </Callout>
 
 
 1. 确认 Desktop 的本地守护进程在线。
 2. 打开项目的 **资源**，或者创建项目对话框里的 **本地目录** 标签页 —— 项目还没建出来时也能做同样的选择。
 3. 选择"添加本地目录"，再选择要使用的文件夹。
-4. 选择运行如何使用它 —— **原地** 还是 **并行**，两者的区别见"运行如何共享这个目录"。如果这个文件夹是 git 仓库、并且那台机器上的运行时能做隔离，Desktop 会预选 **并行**，否则预选 **原地**。当场可以改，之后也可以在 **资源** 里点目录旁边的铅笔图标改。
+4. 选择运行如何使用它 —— **原地**、**共享** 或 **并行**，区别见“运行如何共享这个目录”。如果这个文件夹是 git 仓库、并且那台机器上的运行时能做隔离，Desktop 会预选 **并行**，否则预选 **原地**。当场可以改，之后也可以在 **资源** 里点目录旁边的铅笔图标改。
 
 预选只作用于你此刻正在关联的目录。之前关联好的目录仍然保持保存时的模式 —— 已有的配置不会在你不知情的情况下被切换。
 
@@ -63,13 +63,19 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 运行如何共享这个目录
 
-本地目录有两种执行模式，按资源逐个设置。在资源面板里可以直接切换，CLI 用 `--execution-mode`。Desktop 里这两种模式显示为 **原地** 和 **并行**；API、CLI 和本页其余部分都使用标识符。
+本地目录有三种执行模式，按资源逐个设置。在资源面板里可以直接切换，CLI 用 `--execution-mode`。Desktop 里显示为 **原地**、**共享** 和 **并行**；API、CLI 和本页其余部分都使用标识符。
 
 ### `in_place`（默认）—— “原地”
 
 智能体直接在你的目录里工作，同一时间只进行一次运行。两次运行使用同一个真实目录时，后到的运行进入 `waiting_local_directory`，等前一次释放目录后继续。两个路径经不同符号链接指向同一目录时，同样串行。
 
 等待不会修改目录。等待中的运行可以取消，否则会一直等到目录可用。
+
+### `shared` —— “共享”
+
+智能体直接在同一个原目录中工作，多次运行不会等待整目录互斥锁。项目资源仍然提供权威路径和项目上下文，只跳过目录级调度锁。
+
+仅在负责人已经把并发工作拆到不同文件时使用。Multica 会明确告诉每个运行当前 checkout 正被共享，但不会用沙箱拦截越界写入。即使源码文件不重叠，Git index/ref、依赖安装、生成物、构建缓存、测试数据库和端口仍是共享状态；这些操作需要串行，或为每次运行提供独立实例。
 
 ### `worktree` —— “并行”
 
@@ -130,6 +136,9 @@ multica project resource add <project-id> \
  --local-path /absolute/path/to/repo \
  --daemon-id <daemon-id> \
  --execution-mode worktree
+
+# 让按文件拆分的运行共享原目录
+multica project resource update <project-id> <resource-id> --execution-mode shared
 
 # 为已有的本地目录切换模式
 multica project resource update <project-id> <resource-id> --execution-mode worktree

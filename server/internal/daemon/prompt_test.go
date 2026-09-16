@@ -1942,6 +1942,9 @@ func TestSharedLocalDirectoryBlock(t *testing.T) {
 		if !strings.Contains(out, "another task on this machine may be editing it") {
 			t.Fatalf("notice does not state that a sibling task may be writing:\n%s", out)
 		}
+		if !strings.Contains(out, "Git index and refs") {
+			t.Fatalf("notice omits non-file shared state:\n%s", out)
+		}
 		// It must stay guidance: turning it into a prohibition would promise an
 		// isolation the daemon does not enforce for the user's own editor either.
 		if strings.Contains(out, "Do NOT write") || strings.Contains(out, "must not write") {

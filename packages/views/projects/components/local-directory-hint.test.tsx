@@ -170,6 +170,29 @@ describe("LocalDirectoryHint", () => {
     expect(screen.queryByText(/isolated worktree/i)).not.toBeInTheDocument();
   });
 
+  it("warns that shared mode has concurrent writers", async () => {
+    mockDaemonStatus.daemonId = "daemon-A";
+    mockDaemonStatus.running = true;
+    mockListResources.mockResolvedValue({
+      resources: [
+        makeLocalDirectoryResource({
+          daemon_id: "daemon-A",
+          local_path: "/Users/foo/work",
+          label: "work",
+          execution_mode: "shared",
+        }),
+      ],
+      total: 1,
+    });
+    renderHint("proj-1");
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Runs may edit this working copy at the same time/i),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Users\/foo\/work/)).toBeInTheDocument();
+  });
+
   // Absent (pre-mode resources) and anything a newer server might send both
   // mean "assume the working copy is at stake" — claiming isolation we cannot
   // verify is the one wrong answer here.

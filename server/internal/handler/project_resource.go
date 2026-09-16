@@ -120,6 +120,9 @@ const (
 	// directory, serialised by the daemon's per-path mutex: one task at a
 	// time, edits land in the user's working tree.
 	localDirectoryModeInPlace = "in_place"
+	// localDirectoryModeShared runs tasks directly in the user's directory
+	// without the daemon's per-path mutex. Callers must partition writes.
+	localDirectoryModeShared = "shared"
 	// localDirectoryModeWorktree runs each task in its own git worktree of
 	// the user's repo, created inside the daemon's env root. Tasks on the
 	// same directory run concurrently and deliver their work as a branch.
@@ -136,8 +139,9 @@ const (
 // column remains the generic column for any resource type.
 //
 // execution_mode selects how tasks share that directory: in_place (default)
-// keeps the historical one-task-at-a-time behavior, worktree gives each task an
-// isolated git worktree so tasks run concurrently.
+// keeps the historical one-task-at-a-time behavior, shared lets explicitly
+// file-partitioned tasks use the original directory concurrently, and worktree
+// gives each task an isolated git worktree.
 type localDirectoryRef struct {
 	LocalPath     string `json:"local_path"`
 	DaemonID      string `json:"daemon_id"`
@@ -287,10 +291,10 @@ func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
 	payload.Label = strings.TrimSpace(payload.Label)
 	payload.ExecutionMode = strings.TrimSpace(payload.ExecutionMode)
 	switch payload.ExecutionMode {
-	case "", localDirectoryModeInPlace, localDirectoryModeWorktree:
+	case "", localDirectoryModeInPlace, localDirectoryModeShared, localDirectoryModeWorktree:
 	default:
-		return nil, fmt.Errorf("local_directory: execution_mode must be %q or %q, got %q",
-			localDirectoryModeInPlace, localDirectoryModeWorktree, payload.ExecutionMode)
+		return nil, fmt.Errorf("local_directory: execution_mode must be %q, %q, or %q, got %q",
+			localDirectoryModeInPlace, localDirectoryModeShared, localDirectoryModeWorktree, payload.ExecutionMode)
 	}
 	out, err := json.Marshal(payload)
 	if err != nil {

@@ -794,57 +794,60 @@ func TestAcquireLocalDirectoryLock_EarlyFailureReportsWithCancelledParent(t *tes
 	}
 }
 
-// Worktree mode exists to let sibling tasks on one directory run at the same
-// time, so the per-path mutex must not be taken at all. If it were, the mode
-// would look implemented while still serialising every task.
-func TestAcquireLocalDirectoryLockSkipsWorktreeMode(t *testing.T) {
+// Shared and worktree modes both let sibling tasks on one directory run at the
+// same time, so the per-path mutex must not be taken at all.
+func TestAcquireLocalDirectoryLockSkipsConcurrentModes(t *testing.T) {
 	t.Parallel()
 
-	const daemonID = "d-mine"
-	tmp := t.TempDir()
-	raw, err := json.Marshal(localDirectoryRef{
-		LocalPath:     tmp,
-		DaemonID:      daemonID,
-		ExecutionMode: localDirectoryModeWorktree,
-	})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	resources := []ProjectResourceData{
-		{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw},
-	}
+	for _, mode := range []string{localDirectoryModeShared, localDirectoryModeWorktree} {
+		t.Run(mode, func(t *testing.T) {
+			const daemonID = "d-mine"
+			tmp := t.TempDir()
+			raw, err := json.Marshal(localDirectoryRef{
+				LocalPath:     tmp,
+				DaemonID:      daemonID,
+				ExecutionMode: mode,
+			})
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			resources := []ProjectResourceData{
+				{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw},
+			}
 
-	assignment, err := localDirectoryAssignmentForTask(Task{ID: "t1", ProjectResources: resources}, daemonID)
-	if err != nil {
-		t.Fatalf("assignment: %v", err)
-	}
-	if !assignment.UsesWorktree() {
-		t.Fatal("UsesWorktree() = false for execution_mode=worktree")
-	}
+			assignment, err := localDirectoryAssignmentForTask(Task{ID: "t1", ProjectResources: resources}, daemonID)
+			if err != nil {
+				t.Fatalf("assignment: %v", err)
+			}
+			if mode == localDirectoryModeShared && !assignment.UsesShared() {
+				t.Fatal("UsesShared() = false for execution_mode=shared")
+			}
+			if mode == localDirectoryModeWorktree && !assignment.UsesWorktree() {
+				t.Fatal("UsesWorktree() = false for execution_mode=worktree")
+			}
 
-	d := &Daemon{
-		cfg:            Config{DaemonID: daemonID},
-		localPathLocks: NewLocalPathLocker(),
-		logger:         slog.Default(),
-	}
-
-	// Two tasks on the same path must both proceed without a release callback
-	// and without either becoming the lock holder.
-	for _, taskID := range []string{"task-a", "task-b"} {
-		release, abort := d.acquireLocalDirectoryLockIfNeeded(
-			context.Background(),
-			Task{ID: taskID, ProjectResources: resources},
-			slog.Default(),
-		)
-		if abort {
-			t.Fatalf("%s: acquisition aborted", taskID)
-		}
-		if release != nil {
-			t.Fatalf("%s: got a release callback, so the path mutex was taken", taskID)
-		}
-	}
-	if got := d.localPathLocks.Holder(assignment.RealPath); got != "" {
-		t.Fatalf("holder = %q, want empty: worktree mode must not lock the path", got)
+			d := &Daemon{
+				cfg:            Config{DaemonID: daemonID},
+				localPathLocks: NewLocalPathLocker(),
+				logger:         slog.Default(),
+			}
+			for _, taskID := range []string{"task-a", "task-b"} {
+				release, abort := d.acquireLocalDirectoryLockIfNeeded(
+					context.Background(),
+					Task{ID: taskID, ProjectResources: resources},
+					slog.Default(),
+				)
+				if abort {
+					t.Fatalf("%s: acquisition aborted", taskID)
+				}
+				if release != nil {
+					t.Fatalf("%s: got a release callback, so the path mutex was taken", taskID)
+				}
+			}
+			if got := d.localPathLocks.Holder(assignment.RealPath); got != "" {
+				t.Fatalf("holder = %q, want empty: %s mode must not lock the path", got, mode)
+			}
+		})
 	}
 }
 
@@ -877,9 +880,34 @@ func TestUsesWorktreeDefaultsToExclusive(t *testing.T) {
 	}
 }
 
+func TestUsesSharedOnlyMatchesShared(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		mode string
+		want bool
+	}{
+		{"", false},
+		{localDirectoryModeInPlace, false},
+		{localDirectoryModeShared, true},
+		{" shared ", true},
+		{localDirectoryModeWorktree, false},
+		{"SHARED", false},
+	} {
+		a := &localDirectoryAssignment{Ref: localDirectoryRef{ExecutionMode: tc.mode}}
+		if got := a.UsesShared(); got != tc.want {
+			t.Errorf("UsesShared(%q) = %v, want %v", tc.mode, got, tc.want)
+		}
+	}
+	var nilAssignment *localDirectoryAssignment
+	if nilAssignment.UsesShared() {
+		t.Error("UsesShared() on nil assignment = true, want false")
+	}
+}
+
 // An unknown execution_mode means the resource was written by a newer server
-// than this daemon. Running in_place anyway would edit the very directory the
-// user asked to be isolated from, so the task must fail instead.
+// than this daemon. Running in_place anyway would change its requested
+// isolation or concurrency semantics, so the task must fail instead.
 func TestAcquireLocalDirectoryLockRejectsUnknownExecutionMode(t *testing.T) {
 	t.Parallel()
 
@@ -956,7 +984,7 @@ func TestAcquireLocalDirectoryLockRejectsUnknownExecutionMode(t *testing.T) {
 func TestValidateExecutionModeAcceptsKnownModes(t *testing.T) {
 	t.Parallel()
 
-	for _, mode := range []string{"", localDirectoryModeInPlace, localDirectoryModeWorktree, "  worktree  "} {
+	for _, mode := range []string{"", localDirectoryModeInPlace, localDirectoryModeShared, "  shared  ", localDirectoryModeWorktree, "  worktree  "} {
 		a := &localDirectoryAssignment{Ref: localDirectoryRef{ExecutionMode: mode}}
 		if err := a.ValidateExecutionMode(); err != nil {
 			t.Errorf("ValidateExecutionMode(%q) = %v, want nil", mode, err)

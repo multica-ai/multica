@@ -328,10 +328,26 @@ func TestBuildResourceRefFromFlagsLocalDirectoryMerges(t *testing.T) {
 	})
 }
 
-// Switching an existing resource between in_place and worktree is a one-flag
+// Switching an existing resource between execution modes is a one-flag
 // edit, and an unrelated edit must not silently reset the mode — that would
 // drop a user back to serialised tasks without telling them.
 func TestBuildResourceRefFromFlagsLocalDirectoryExecutionMode(t *testing.T) {
+	t.Run("sets shared mode", func(t *testing.T) {
+		cmd := newProjectResourceUpdateTestCmd()
+		_ = cmd.Flags().Set("execution-mode", "shared")
+		existing := map[string]any{"local_path": "/Users/foo/work/a", "daemon_id": "d1"}
+		ref, has, err := buildResourceRefFromFlags(cmd, "local_directory", existing)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !has {
+			t.Fatal("expected has=true")
+		}
+		if ref["execution_mode"] != "shared" {
+			t.Errorf("execution_mode = %v, want shared", ref["execution_mode"])
+		}
+	})
+
 	t.Run("sets worktree mode", func(t *testing.T) {
 		cmd := newProjectResourceUpdateTestCmd()
 		_ = cmd.Flags().Set("execution-mode", "worktree")

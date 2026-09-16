@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { GitBranch, Pencil, TriangleAlert } from "lucide-react";
+import { Files, GitBranch, Pencil, TriangleAlert } from "lucide-react";
 import type { LocalDirectoryExecutionMode } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -42,6 +42,8 @@ interface LocalDirectoryModeDialogProps {
   value: LocalDirectoryExecutionMode;
   /** Set when worktree cannot be chosen; the option renders disabled with a reason. */
   unavailableReason?: WorktreeUnavailableReason;
+  /** An old server drops unknown execution modes instead of rejecting them. */
+  sharedUnavailable?: boolean;
   /** Server-side rejection to show inline (e.g. a 422 that only the API can detect). */
   errorMessage?: string;
   saving?: boolean;
@@ -53,11 +55,10 @@ interface LocalDirectoryModeDialogProps {
 /**
  * Mode picker for a local_directory resource.
  *
- * Deliberately does NOT surface the raw `in_place` / `worktree` identifiers as
- * the primary label. The choice a user is actually making is about how they get
- * their results back — edits appearing in their working copy versus a branch
- * they review — so the options lead with that, and the identifier is only a
- * secondary hint for anyone matching this against the CLI or the docs.
+ * Deliberately does NOT surface the raw execution-mode identifiers as
+ * the primary label. The user is choosing whether runs wait, share a working
+ * copy, or deliver isolated branches, so the options lead with that behavior;
+ * the identifier is only a secondary hint for matching the CLI or docs.
  */
 export function LocalDirectoryModeDialog({
   open,
@@ -65,6 +66,7 @@ export function LocalDirectoryModeDialog({
   path,
   value,
   unavailableReason,
+  sharedUnavailable,
   errorMessage,
   saving = false,
   confirmLabel,
@@ -97,6 +99,7 @@ export function LocalDirectoryModeDialog({
           value={selected}
           onChange={setSelected}
           unavailableReason={unavailableReason}
+          sharedUnavailable={sharedUnavailable}
         />
 
         {errorMessage && (
@@ -127,10 +130,11 @@ interface LocalDirectoryModeOptionsProps {
   value: LocalDirectoryExecutionMode;
   onChange: (mode: LocalDirectoryExecutionMode) => void;
   unavailableReason?: WorktreeUnavailableReason;
+  sharedUnavailable?: boolean;
 }
 
 /**
- * The two-option choice itself, without any surrounding chrome.
+ * The execution-mode choice itself, without any surrounding chrome.
  *
  * Shared so the dialog (editing an existing resource) and the compact picker in
  * the create-project modal offer literally the same options, copy and blocked
@@ -140,6 +144,7 @@ export function LocalDirectoryModeOptions({
   value,
   onChange,
   unavailableReason,
+  sharedUnavailable = false,
 }: LocalDirectoryModeOptionsProps) {
   const { t } = useT("projects");
   const worktreeDisabled = unavailableReason !== undefined;
@@ -153,6 +158,20 @@ export function LocalDirectoryModeOptions({
         identifier="in_place"
         selected={value === "in_place"}
         onSelect={() => onChange("in_place")}
+      />
+      <ModeOption
+        icon={<Files className="size-4" />}
+        title={t(($) => $.resources.mode_shared_title)}
+        description={t(($) => $.resources.mode_shared_description)}
+        identifier="shared"
+        selected={value === "shared"}
+        disabled={sharedUnavailable}
+        disabledReason={
+          sharedUnavailable
+            ? t(($) => $.resources.mode_shared_needs_server_upgrade)
+            : undefined
+        }
+        onSelect={() => onChange("shared")}
       />
       <ModeOption
         icon={<GitBranch className="size-4" />}

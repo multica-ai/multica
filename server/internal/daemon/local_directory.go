@@ -25,6 +25,7 @@ const localDirectoryResourceType = "local_directory"
 // their original behavior.
 const (
 	localDirectoryModeInPlace  = "in_place"
+	localDirectoryModeShared   = "shared"
 	localDirectoryModeWorktree = "worktree"
 )
 
@@ -59,6 +60,13 @@ func (a *localDirectoryAssignment) UsesWorktree() bool {
 	return a != nil && strings.TrimSpace(a.Ref.ExecutionMode) == localDirectoryModeWorktree
 }
 
+// UsesShared reports whether tasks work directly in the user's directory
+// without taking the daemon's directory-wide mutex. The project resource still
+// supplies the path and context; only scheduling changes.
+func (a *localDirectoryAssignment) UsesShared() bool {
+	return a != nil && strings.TrimSpace(a.Ref.ExecutionMode) == localDirectoryModeShared
+}
+
 // DisplayName is the human-facing name for this directory, safe to render in
 // UI. It is deliberately NOT the absolute path: the wait reason built from it
 // is stored server-side and pushed to every client on the session, and a chip
@@ -81,26 +89,22 @@ func (a *localDirectoryAssignment) DisplayName() string {
 
 // ValidateExecutionMode rejects a mode this daemon does not implement.
 //
-// Falling back to in_place would be the wrong direction, even though it is the
-// older and more conservative code path. execution_mode is how a user asks for
-// ISOLATION, not merely for concurrency: silently running in_place instead
-// would let the agent edit the working copy the user explicitly asked it to
-// stay out of. Losing concurrency is a nuisance; ignoring a request to not
-// touch someone's files is a broken promise. So an unrecognised mode fails the
+// Falling back to in_place would silently change the user's requested
+// isolation or concurrency semantics. An unrecognised mode therefore fails the
 // task with a message naming the version skew.
 func (a *localDirectoryAssignment) ValidateExecutionMode() error {
 	if a == nil {
 		return nil
 	}
 	switch strings.TrimSpace(a.Ref.ExecutionMode) {
-	case "", localDirectoryModeInPlace, localDirectoryModeWorktree:
+	case "", localDirectoryModeInPlace, localDirectoryModeShared, localDirectoryModeWorktree:
 		return nil
 	default:
 		return fmt.Errorf(
 			"local_directory: this daemon does not support execution_mode %q for %q "+
-				"(update the daemon, or set the resource's execution mode to %q or %q); "+
-				"refusing to run in place, since that would modify a directory the resource asked to isolate",
-			a.Ref.ExecutionMode, a.AbsPath, localDirectoryModeInPlace, localDirectoryModeWorktree)
+				"(update the daemon, or set the resource's execution mode to %q, %q, or %q); "+
+				"refusing to guess by running with different semantics",
+			a.Ref.ExecutionMode, a.AbsPath, localDirectoryModeInPlace, localDirectoryModeShared, localDirectoryModeWorktree)
 	}
 }
 

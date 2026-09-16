@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { CalendarClock, CalendarDays, ChevronRight, FolderOpen, GitBranch, Maximize2, Minimize2, MoreHorizontal, Pencil, Search, X as XIcon, UserMinus } from "lucide-react";
+import { CalendarClock, CalendarDays, ChevronRight, Files, FolderOpen, GitBranch, Maximize2, Minimize2, MoreHorizontal, Pencil, Search, X as XIcon, UserMinus } from "lucide-react";
 
 /**
  * GitHub mark — lucide-react v1 dropped brand icons, so we inline the
@@ -245,10 +245,13 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   // Never submit a mode the picker would have blocked — the folder can change
   // after a mode was chosen (pick a git repo, choose worktree, then pick a
   // plain folder), and the stale choice would fail at task time.
+  const selectedLocalMode = localMode ?? preselectedLocalMode;
   const effectiveLocalMode: LocalDirectoryExecutionMode =
-    worktreeUnavailableReason !== undefined
+    selectedLocalMode === "worktree" && worktreeUnavailableReason !== undefined
       ? "in_place"
-      : (localMode ?? preselectedLocalMode);
+      : selectedLocalMode === "shared" && !serverValidatesWorktree
+        ? "in_place"
+        : selectedLocalMode;
 
   const handleSourceModeChange = (mode: "repos" | "local") => {
     setSourceMode(mode);
@@ -880,6 +883,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                               >
                                 {effectiveLocalMode === "worktree" ? (
                                   <GitBranch className="size-3 shrink-0" />
+                                ) : effectiveLocalMode === "shared" ? (
+                                  <Files className="size-3 shrink-0" />
                                 ) : (
                                   <Pencil className="size-3 shrink-0" />
                                 )}
@@ -890,7 +895,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                                 <span className="truncate">
                                   {effectiveLocalMode === "worktree"
                                     ? tProjects(($) => $.resources.mode_badge_worktree)
-                                    : tProjects(($) => $.resources.mode_badge_in_place)}
+                                    : effectiveLocalMode === "shared"
+                                      ? tProjects(($) => $.resources.mode_badge_shared)
+                                      : tProjects(($) => $.resources.mode_badge_in_place)}
                                 </span>
                               </Button>
                             }
@@ -903,6 +910,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                                 setLocalModeOpen(false);
                               }}
                               unavailableReason={worktreeUnavailableReason}
+                              sharedUnavailable={!serverValidatesWorktree}
                             />
                           </PopoverContent>
                         </Popover>

@@ -15,6 +15,7 @@ function renderDialog(
   overrides: {
     value?: LocalDirectoryExecutionMode;
     unavailableReason?: WorktreeUnavailableReason;
+    sharedUnavailable?: boolean;
     errorMessage?: string;
     onConfirm?: (mode: LocalDirectoryExecutionMode) => void;
   } = {},
@@ -28,6 +29,7 @@ function renderDialog(
         path="/Users/dev/work/game-client"
         value={overrides.value ?? "in_place"}
         unavailableReason={overrides.unavailableReason}
+        sharedUnavailable={overrides.sharedUnavailable}
         errorMessage={overrides.errorMessage}
         confirmLabel="Save"
         onConfirm={onConfirm}
@@ -38,6 +40,10 @@ function renderDialog(
 }
 
 function worktreeOption(): HTMLElement {
+  return screen.getAllByRole("radio")[2] as HTMLElement;
+}
+
+function sharedOption(): HTMLElement {
   return screen.getAllByRole("radio")[1] as HTMLElement;
 }
 
@@ -59,6 +65,25 @@ describe("LocalDirectoryModeDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(onConfirm).toHaveBeenCalledWith("worktree");
+  });
+
+  it("offers shared mode without requiring a git repository", () => {
+    const onConfirm = vi.fn();
+    renderDialog({ unavailableReason: "not_git", onConfirm });
+
+    const option = sharedOption();
+    expect(option.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(option);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onConfirm).toHaveBeenCalledWith("shared");
+  });
+
+  it("blocks shared mode when the server cannot preserve it", () => {
+    renderDialog({ sharedUnavailable: true });
+
+    expect(sharedOption().hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(/Update the Multica server.*shared mode/i)).toBeTruthy();
   });
 
   // A non-git folder cannot produce a branch, so offering the option would

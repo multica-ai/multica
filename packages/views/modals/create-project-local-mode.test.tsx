@@ -310,6 +310,17 @@ describe("CreateProjectModal — local directory execution mode", () => {
     expect(screen.getByRole("radio", { name: /Run in parallel, isolated/i })).toBeDisabled();
     expect(screen.getByText(/not a git repository/i)).toBeInTheDocument();
   });
+
+  it("allows a plain folder to use shared mode", async () => {
+    pickedIsGitRepo = false;
+    const user = userEvent.setup();
+    renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
+
+    await pickLocalDirectory(user);
+    await user.click(screen.getByRole("radio", { name: /Share this folder directly/i }));
+
+    expect(screen.getByRole("button", { name: /^Shared$/i })).toBeInTheDocument();
+  });
 });
 
 // The payload is what the server stores and the daemon later reads; a missing
@@ -330,6 +341,21 @@ describe("buildLocalDirectoryResourceRef", () => {
       daemon_id: "daemon-1",
       label: "game-client",
       execution_mode: "worktree",
+    });
+  });
+
+  it("carries shared mode", () => {
+    expect(
+      buildLocalDirectoryResourceRef({
+        localPath: "/Users/dev/work/game-client",
+        daemonId: "daemon-1",
+        label: null,
+        mode: "shared",
+      }),
+    ).toEqual({
+      local_path: "/Users/dev/work/game-client",
+      daemon_id: "daemon-1",
+      execution_mode: "shared",
     });
   });
 

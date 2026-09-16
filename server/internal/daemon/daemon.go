@@ -6089,6 +6089,12 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		taskLog.Info("local_directory: worktree mode, skipping path mutex")
 		return nil, false
 	}
+	// Shared mode deliberately trades directory-wide isolation for concurrency.
+	// The prompt below tells each task to stay within its allocated file scope.
+	if assignment.UsesShared() {
+		taskLog.Info("local_directory: shared mode, skipping path mutex")
+		return nil, false
+	}
 
 	// A conversation is not a second writer. Everything above still applied —
 	// the mode was checked, the path was validated, and the assignment stands,
@@ -8348,7 +8354,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// is the one thing it cannot work out from its own context — tell it.
 	// Worktree mode is excluded: there the tree is this task's private checkout.
 	var promptOptions []PromptOption
-	if localAssignment != nil && !localAssignment.UsesWorktree() && localDirectoryLockExempt(task) {
+	if localAssignment != nil && !localAssignment.UsesWorktree() && (localAssignment.UsesShared() || localDirectoryLockExempt(task)) {
 		promptOptions = append(promptOptions, WithSharedLocalDirectory())
 	}
 	// Worktree mode hands this turn a tree that is mid-merge when the user's

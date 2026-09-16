@@ -64,7 +64,7 @@ type CodexHomeOptions struct {
 	// expose). See prepareCodexSessionsDir (MUL-4424).
 	ResumeSessionID string
 	// IsLocalDirectory marks a task whose env root is never reused across task
-	// IDs — every local_directory task, in_place or worktree. Worktree tasks
+	// IDs — every local_directory task, in_place, shared, or worktree. Worktree tasks
 	// get a fresh env root per task just like in-place ones do
 	// (shouldReusePriorWorkdir refuses any local assignment), so they need the
 	// same per-issue session store; keying this on "runs in the user's

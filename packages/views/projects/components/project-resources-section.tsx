@@ -6,6 +6,7 @@ import {
   ChevronRight,
   FolderGit,
   FolderOpen,
+  Files,
   GitBranch,
   Pencil,
   Plus,
@@ -86,7 +87,9 @@ function isLocalDirectoryRef(r: ProjectResource): r is ProjectResource & {
 function executionModeOf(
   ref: LocalDirectoryResourceRef,
 ): LocalDirectoryExecutionMode {
-  return ref.execution_mode === "worktree" ? "worktree" : "in_place";
+  return ref.execution_mode === "worktree" || ref.execution_mode === "shared"
+    ? ref.execution_mode
+    : "in_place";
 }
 
 /** Pending mode edit — either for a directory being added, or an existing row. */
@@ -538,6 +541,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
             modeDialog.isGitRepo,
             serverValidatesWorktree,
           )}
+          sharedUnavailable={!serverValidatesWorktree}
           errorMessage={modeError ?? undefined}
           saving={modeSaving}
           confirmLabel={
@@ -775,6 +779,21 @@ function LocalDirectoryRow({
           />
           <TooltipContent side="top">
             {t(($) => $.resources.mode_badge_worktree_tooltip)}
+          </TooltipContent>
+        </Tooltip>
+      )}
+      {mode === "shared" && !editing && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Badge variant="secondary" className="shrink-0 gap-1 font-normal">
+                <Files className="size-3" />
+                {t(($) => $.resources.mode_badge_shared)}
+              </Badge>
+            }
+          />
+          <TooltipContent side="top">
+            {t(($) => $.resources.mode_badge_shared_tooltip)}
           </TooltipContent>
         </Tooltip>
       )}

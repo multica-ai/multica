@@ -17,6 +17,8 @@ import { localDirectoryLabel } from "./local-directory-label";
  *
  * - `in_place`: the agent edits {label} ({path}) itself, so the user should
  *   expect their working copy to change under them.
+ * - `shared`: the same working copy is used without the directory mutex, so
+ *   the user must also expect concurrent writers.
  * - `worktree`: the agent never touches that working copy — it runs in an
  *   isolated worktree of the repo and hands back a branch. Saying "in-place"
  *   here would be a plain factual error, and it would send the user looking
@@ -60,9 +62,9 @@ export function LocalDirectoryHint({
       {matches.map((resource) => {
         const ref = resource.resource_ref;
         const label = localDirectoryLabel(resource);
-        // Anything other than an explicit "worktree" is in_place: the mode is
-        // absent on resources created before it existed, and an unknown value
-        // from a newer server must not claim isolation we cannot verify.
+        // Anything other than an explicit "worktree" uses the original path:
+        // that includes in_place, shared, legacy resources, and unknown future
+        // values for which we must not claim isolation we cannot verify.
         const isWorktree = ref.execution_mode === "worktree";
         return (
           <div key={resource.id} className="space-y-0.5">
@@ -80,11 +82,16 @@ export function LocalDirectoryHint({
                 <span className="font-mono opacity-70">({ref.local_path})</span>
               </span>
             </div>
-            {/* Where the work ends up. Only worktree mode needs saying: in
-                place, the answer is the directory already named above. */}
+            {/* Worktree mode explains where the branch lands; shared mode
+                explains the concurrent-writer risk. */}
             {isWorktree && (
               <div className="pl-5 opacity-80">
                 {t(($) => $.resources.chat_hint_worktree_note)}
+              </div>
+            )}
+            {ref.execution_mode === "shared" && (
+              <div className="pl-5 opacity-80">
+                {t(($) => $.resources.chat_hint_shared_note)}
               </div>
             )}
           </div>
