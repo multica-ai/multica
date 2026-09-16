@@ -359,6 +359,124 @@ func TestDelegatedSubscribe_ForeignLineageResolvesNobody(t *testing.T) {
 	}
 }
 
+// TestNotification_MikaPendingHandoffFallsBackToInbox pins the at-least-one
+// visible notification contract. A previous Mika handoff can leave the member
+// with an unanswered question; a later background completion is then stored as
+// hidden context for the next member turn. That hidden row is not a delivery,
+// so it must not suppress the ordinary in_review inbox notification.
+func TestNotification_MikaPendingHandoffFallsBackToInbox(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	fixture := workspaceFixture(t)
+	runtimeID := fixture.Runtime(t, "Mika notification fallback runtime")
+	mikaID := fixture.Agent(t, "Mika notification fallback", runtimeID, testutil.Cols{
+		"system_key": "mika",
+	})
+	chatSessionID := fixture.ChatSession(t, mikaID)
+	sourceTaskID := fixture.Task(t, mikaID, testutil.Cols{
+		"runtime_id":          runtimeID,
+		"chat_session_id":     chatSessionID,
+		"status":              "completed",
+		"initiator_user_id":   testUserID,
+		"originator_user_id":  testUserID,
+		"accountable_user_id": testUserID,
+		"originator_source":   "direct_human",
+		"completed_at":        testutil.Raw("now()"),
+	})
+	installationID := fixture.Insert(t, "channel_installation", testutil.Cols{
+		"workspace_id":      testWorkspaceID,
+		"agent_id":          mikaID,
+		"channel_type":      "feishu",
+		"config":            testutil.Raw("'{}'::jsonb"),
+		"status":            "active",
+		"installer_user_id": testUserID,
+	})
+	bindingID := fixture.Insert(t, "channel_chat_session_binding", testutil.Cols{
+		"chat_session_id":  chatSessionID,
+		"installation_id":  installationID,
+		"channel_type":     "feishu",
+		"channel_chat_id":  "oc_notification_fallback",
+		"chat_type":        "p2p",
+		"last_message_id":  "om_notification_fallback",
+		"config":           testutil.Raw("'{}'::jsonb"),
+		"context_revision": 1,
+		"route_revision":   1,
+	})
+	fixture.InsertNoID(t, "channel_task_delivery", testutil.Cols{
+		"task_id":            sourceTaskID,
+		"binding_id":         bindingID,
+		"installation_id":    installationID,
+		"channel_type":       "feishu",
+		"channel_chat_id":    "oc_notification_fallback",
+		"chat_type":          "p2p",
+		"channel_message_id": "om_notification_fallback",
+		"route_revision":     1,
+		"config":             testutil.Raw("'{}'::jsonb"),
+	}, "task_id = $1", sourceTaskID)
+
+	issueID := fixture.Issue(t, "Mika notification fallback", testutil.Cols{
+		"status":        "in_review",
+		"creator_type":  "agent",
+		"creator_id":    mikaID,
+		"assignee_type": "agent",
+		"assignee_id":   mikaID,
+	})
+	backgroundTaskID := fixture.Task(t, mikaID, testutil.Cols{
+		"runtime_id":             runtimeID,
+		"issue_id":               issueID,
+		"status":                 "running",
+		"started_at":             testutil.Raw("now()"),
+		"originator_user_id":     testUserID,
+		"accountable_user_id":    testUserID,
+		"originator_source":      "delegation",
+		"delegated_from_task_id": sourceTaskID,
+	})
+	fixture.Task(t, mikaID, testutil.Cols{
+		"runtime_id":              runtimeID,
+		"chat_session_id":         chatSessionID,
+		"status":                  "completed",
+		"completed_at":            testutil.Raw("now()"),
+		"trigger_evidence_kind":   "delegated_completion",
+		"trigger_evidence_ref_id": backgroundTaskID,
+	})
+	addTestSubscriber(t, issueID, "member", testUserID, "delegated")
+	t.Cleanup(func() { cleanupInboxForIssue(t, issueID) })
+
+	bus := newNotificationBus(t, queries)
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "agent",
+		ActorID:     mikaID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "Mika notification fallback",
+				Status:      "in_review",
+				Priority:    "none",
+				CreatorType: "agent",
+				CreatorID:   mikaID,
+			},
+			"status_changed": true,
+			"prev_status":    "in_progress",
+			"source_task_id": backgroundTaskID,
+		},
+	})
+
+	if got := fixture.Count(t, `
+		SELECT count(*) FROM inbox_item
+		WHERE issue_id = $1 AND recipient_id = $2 AND type = 'status_changed'
+	`, issueID, testUserID); got != 1 {
+		t.Fatalf("status_changed inbox rows = %d, want 1 when the Mika handoff is hidden", got)
+	}
+	if recipient := mikaDelegatedHandoffRecipient(ctx, queries, map[string]any{
+		"source_task_id": backgroundTaskID,
+	}, "in_review"); recipient != "" {
+		t.Fatalf("suppressed recipient = %q, want empty when an unanswered Mika handoff exists", recipient)
+	}
+}
+
 // TestDelegatedSubscribe_RespectsSubtreeOptOut is the reason the tombstone
 // exists. Without it "stop watching this tree" is undone by the very next child
 // the agent files under it: the rule fires per issue, and an agent-built tree

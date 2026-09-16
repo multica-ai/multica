@@ -771,10 +771,12 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				}
 			}
 			statusDetails, _ := json.Marshal(detailsMap)
-			// A Feishu task delegated directly from Mika already returns to that
-			// same member conversation on completion. Exclude only that originator
-			// from the generic push; other subscribers keep their normal signal. If
-			// completion fails, task_failed remains the originator's fallback.
+			// A Feishu task delegated directly from Mika can return to that same
+			// member conversation on completion. Exclude only that originator when
+			// the conversation can start a visible handoff now. If Mika is already
+			// running or waiting for an answer, CompleteTask only stores hidden
+			// context for a later turn; the status notification must remain visible.
+			// Any lookup failure also fails open to the generic notification.
 			var statusExclude map[string]bool
 			if recipient := mikaDelegatedHandoffRecipient(ctx, queries, payload, effectiveStatus); recipient != "" {
 				statusExclude = map[string]bool{recipient: true}
@@ -1084,6 +1086,18 @@ func mikaDelegatedHandoffRecipient(ctx context.Context, queries *db.Queries, pay
 	}
 	mika, err := queries.GetAgent(ctx, source.AgentID)
 	if err != nil || !mika.SystemKey.Valid || mika.SystemKey.String != service.MikaSystemKey {
+		return ""
+	}
+	binding, err := queries.GetChannelChatSessionBindingBySessionAny(ctx, source.ChatSessionID)
+	if err != nil || binding.RetiredAt.Valid || binding.ChannelType != "feishu" {
+		return ""
+	}
+	active, err := queries.HasActiveChatTaskForSession(ctx, source.ChatSessionID)
+	if err != nil || active {
+		return ""
+	}
+	alreadyAsked, err := queries.HasDelegationHandoffSinceLastMemberMessage(ctx, source.ChatSessionID)
+	if err != nil || alreadyAsked {
 		return ""
 	}
 	return util.UUIDToString(source.InitiatorUserID)
