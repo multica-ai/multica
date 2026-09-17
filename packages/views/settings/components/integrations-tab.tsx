@@ -69,6 +69,18 @@ export function IntegrationsTab() {
 
   // Reuse the detail pages' query caches. Never report a failed or pending read
   // as disconnected, and do not issue deployment-disabled integration queries.
+  //
+  // Two different "is it connected" shapes live here, and the difference is the
+  // provider's uninstall semantics — not a style choice (#8496):
+  //   - GitHub / VCS hard-delete the row on uninstall
+  //     (DeleteGitHubInstallationByInstallationID, DeleteVCSConnection), so the
+  //     row count IS the connection state and falls back to zero.
+  //   - The IM channels soft-revoke: status flips to 'revoked' and the row is
+  //     kept for audit (server/internal/handler/lark.go RevokeLarkInstallation
+  //     and its slack/dingtalk/wecom/telegram siblings). A count there can never
+  //     return to zero, so it must read status — otherwise a fully torn-down bot
+  //     keeps reporting a green "Connected" here while its own detail tab
+  //     correctly shows 已撤销/Revoked.
   const github = useQuery({
     ...githubInstallationsOptions(wsId),
     enabled: canView,
@@ -77,27 +89,32 @@ export function IntegrationsTab() {
   const lark = useQuery({
     ...larkInstallationsOptions(wsId),
     enabled: canView,
-    select: (data) => (data.installations?.length ?? 0) > 0,
+    select: (data) =>
+      data.installations?.some((inst) => inst.status === "active") ?? false,
   });
   const slack = useQuery({
     ...slackInstallationsOptions(wsId),
     enabled: canView,
-    select: (data) => (data.installations?.length ?? 0) > 0,
+    select: (data) =>
+      data.installations?.some((inst) => inst.status === "active") ?? false,
   });
   const dingtalk = useQuery({
     ...dingtalkInstallationsOptions(wsId),
     enabled: canView,
-    select: (data) => (data.installations?.length ?? 0) > 0,
+    select: (data) =>
+      data.installations?.some((inst) => inst.status === "active") ?? false,
   });
   const wecom = useQuery({
     ...wecomInstallationsOptions(wsId),
     enabled: canView,
-    select: (data) => (data.installations?.length ?? 0) > 0,
+    select: (data) =>
+      data.installations?.some((inst) => inst.status === "active") ?? false,
   });
   const telegram = useQuery({
     ...telegramInstallationsOptions(wsId),
     enabled: canView,
-    select: (data) => (data.installations?.length ?? 0) > 0,
+    select: (data) =>
+      data.installations?.some((inst) => inst.status === "active") ?? false,
   });
   const vcs = useQuery({
     ...vcsConnectionsOptions(wsId),
