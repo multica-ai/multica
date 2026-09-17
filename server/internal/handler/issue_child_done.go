@@ -344,12 +344,11 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 		stageCancelled := stageHasCancelled(children, closedStage, statuses.status)
 		advanceHasCancelled := stageCancelled
 		if batch {
-			// A single batch can close several stages. The headline names only the
-			// highest closed stage, but the advance decision must account for a
-			// cancellation in any stage this same batch just closed. Intersect the
-			// final sibling snapshot with the batch IDs so an older cancellation in
-			// an already-closed stage does not cause a repeated warning.
-			advanceHasCancelled = batchClosedScopeHasCancelled(children, batchCompleted, closedStage, statuses.status)
+			// A single batch can close several stages. Always preserve cancellation
+			// already present in the named stage, and also account for lower stages
+			// newly cancelled by this same batch without repeating older lower-stage
+			// warnings.
+			advanceHasCancelled = stageCancelled || batchClosedScopeHasCancelled(children, batchCompleted, closedStage, statuses.status)
 		}
 		summary, nextStage := stageProgressSummary(children, closedStage, statuses.status)
 		advance := stageAdvanceInstruction(nextStage, parentID, advanceHasCancelled)
