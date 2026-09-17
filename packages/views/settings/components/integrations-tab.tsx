@@ -50,6 +50,14 @@ interface IntegrationEntry {
   state: ConnectionState;
 }
 
+// The IM channels soft-revoke: the row survives with status 'revoked', so a row
+// count never falls back to zero and would report a torn-down bot as connected
+// forever. GitHub and VCS hard-delete instead, so their count-based reads below
+// are correct and deliberately left as they are (#8496).
+const hasActiveInstallation = (data: {
+  installations?: { status: string }[];
+}) => data.installations?.some((inst) => inst.status === "active") ?? false;
+
 export function IntegrationsTab() {
   const { t } = useT("settings");
   const navigation = useNavigation();
@@ -69,18 +77,6 @@ export function IntegrationsTab() {
 
   // Reuse the detail pages' query caches. Never report a failed or pending read
   // as disconnected, and do not issue deployment-disabled integration queries.
-  //
-  // Two different "is it connected" shapes live here, and the difference is the
-  // provider's uninstall semantics — not a style choice (#8496):
-  //   - GitHub / VCS hard-delete the row on uninstall
-  //     (DeleteGitHubInstallationByInstallationID, DeleteVCSConnection), so the
-  //     row count IS the connection state and falls back to zero.
-  //   - The IM channels soft-revoke: status flips to 'revoked' and the row is
-  //     kept for audit (server/internal/handler/lark.go RevokeLarkInstallation
-  //     and its slack/dingtalk/wecom/telegram siblings). A count there can never
-  //     return to zero, so it must read status — otherwise a fully torn-down bot
-  //     keeps reporting a green "Connected" here while its own detail tab
-  //     correctly shows 已撤销/Revoked.
   const github = useQuery({
     ...githubInstallationsOptions(wsId),
     enabled: canView,
@@ -89,32 +85,27 @@ export function IntegrationsTab() {
   const lark = useQuery({
     ...larkInstallationsOptions(wsId),
     enabled: canView,
-    select: (data) =>
-      data.installations?.some((inst) => inst.status === "active") ?? false,
+    select: hasActiveInstallation,
   });
   const slack = useQuery({
     ...slackInstallationsOptions(wsId),
     enabled: canView,
-    select: (data) =>
-      data.installations?.some((inst) => inst.status === "active") ?? false,
+    select: hasActiveInstallation,
   });
   const dingtalk = useQuery({
     ...dingtalkInstallationsOptions(wsId),
     enabled: canView,
-    select: (data) =>
-      data.installations?.some((inst) => inst.status === "active") ?? false,
+    select: hasActiveInstallation,
   });
   const wecom = useQuery({
     ...wecomInstallationsOptions(wsId),
     enabled: canView,
-    select: (data) =>
-      data.installations?.some((inst) => inst.status === "active") ?? false,
+    select: hasActiveInstallation,
   });
   const telegram = useQuery({
     ...telegramInstallationsOptions(wsId),
     enabled: canView,
-    select: (data) =>
-      data.installations?.some((inst) => inst.status === "active") ?? false,
+    select: hasActiveInstallation,
   });
   const vcs = useQuery({
     ...vcsConnectionsOptions(wsId),
