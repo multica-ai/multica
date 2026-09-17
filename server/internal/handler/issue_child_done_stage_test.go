@@ -217,8 +217,12 @@ func TestStageAdvanceInstruction(t *testing.T) {
 
 	t.Run("wrap-up instruction asks the leader to confirm cancelled work is not needed", func(t *testing.T) {
 		got := stageAdvanceInstruction(0, parentID, true)
-		if !strings.Contains(got, "If any sub-issues were cancelled") {
+		// Declarative, not hedged: the server already knows the cancellation.
+		if !strings.Contains(got, "Some sub-issues were cancelled — confirm they are not actually needed") {
 			t.Fatalf("expected wrap-up cancellation confirm line, got %q", got)
+		}
+		if !strings.Contains(got, "post a comment rather than wrap up if unsure") {
+			t.Fatalf("expected wrap-up comment-before-wrap-up guard, got %q", got)
 		}
 	})
 }

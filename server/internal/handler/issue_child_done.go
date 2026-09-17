@@ -379,16 +379,25 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 			)
 		}
 	} else {
+		// The unstaged instruction mirrors the staged wrap-up: when the stage
+		// closed from cancelled work, "or — if nothing remains — run in_review"
+		// is exactly the cancelled case, so that offer would walk a parent that
+		// did no work into review. Append the same declarative confirmation the
+		// staged wrap-up carries (GH #8462, must-fix 1).
+		instruction := fmt.Sprintf("Continue the parent: synthesize the children's results and move it forward, or — if nothing remains — run `multica issue status %s in_review` to mark the parent ready for review.", parentID)
 		if batch {
 			content = fmt.Sprintf(
-				"%sAll sub-issues are %s — they %s in a batch update, most recently [%s](mention://issue/%s) — \"%s\". Continue the parent: synthesize the children's results and move it forward, or — if nothing remains — run `multica issue status %s in_review` to mark the parent ready for review.",
-				mentionPrefix, stageWord, batchFinish, identifier, childID, title, parentID,
+				"%sAll sub-issues are %s — they %s in a batch update, most recently [%s](mention://issue/%s) — \"%s\". %s",
+				mentionPrefix, stageWord, batchFinish, identifier, childID, title, instruction,
 			)
 		} else {
 			content = fmt.Sprintf(
-				"%sAll sub-issues are %s — the last one, [%s](mention://issue/%s) — \"%s\", %s. Continue the parent: synthesize the children's results and move it forward, or — if nothing remains — run `multica issue status %s in_review` to mark the parent ready for review.",
-				mentionPrefix, stageWord, identifier, childID, title, singleFinish, parentID,
+				"%sAll sub-issues are %s — the last one, [%s](mention://issue/%s) — \"%s\", %s. %s",
+				mentionPrefix, stageWord, identifier, childID, title, singleFinish, instruction,
 			)
+		}
+		if cancelledStage {
+			content += cancelledWorkConfirmation()
 		}
 	}
 
@@ -648,9 +657,19 @@ func stageAdvanceInstruction(nextStage int32, parentID string, hasCancellation b
 	}
 	msg := fmt.Sprintf(" Completing this stage does not mean the whole issue is done. Decide whether the issue is actually complete — if so, synthesize the results and run `multica issue status %s in_review` to mark the parent ready for review — or whether the next stage still needs to be created, in which case create that stage and its sub-issues now.", parentID)
 	if hasCancellation {
-		msg += " If any sub-issues were cancelled, confirm whether they were actually needed for the outcome — if any cancelled work is required, recreate it as a new sub-issue rather than wrapping up, and post a comment to confirm if unsure."
+		msg += cancelledWorkConfirmation()
 	}
 	return msg
+}
+
+// cancelledWorkConfirmation returns the trailing line appended to the wrap-up
+// and unstaged instructions when the just-closed work released cancelled
+// children. It is declarative rather than hedged ("If any…") because the server
+// already knows cancellations happened, and it hands the wrap-up decision back:
+// confirm the cancelled work is not a dependency of the outcome, recreate any
+// that is required, and comment rather than wrap up if unsure (GH #8462).
+func cancelledWorkConfirmation() string {
+	return " Some sub-issues were cancelled — confirm they are not actually needed for the outcome; recreate any cancelled work that is still required instead of wrapping up, and post a comment rather than wrap up if unsure."
 }
 
 // stageHasCancelled reports whether the stage about to be announced contains at

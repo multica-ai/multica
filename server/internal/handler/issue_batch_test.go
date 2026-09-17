@@ -384,7 +384,7 @@ func TestBatchChildDoneCrossStage_Cancelled(t *testing.T) {
 	if !strings.Contains(content, "Stage 2: 0/2 done, 2 cancelled") {
 		t.Errorf("expected cancelled stage to count 0/2 done, 2 cancelled, got: %s", content)
 	}
-	if !strings.Contains(content, "confirm whether") {
+	if !strings.Contains(content, "Some sub-issues were cancelled — confirm they are not actually needed") {
 		t.Errorf("expected the cancelled-work confirmation line, got: %s", content)
 	}
 	if strings.Contains(content, "is next") || strings.Contains(content, "(next)") {

@@ -165,7 +165,9 @@ func TestCustomCancelledStatusRendersAsCancelled(t *testing.T) {
 	ctx := context.Background()
 	ws := dbfx.Workspace(t, "Custom cancelled status", "custom-cancelled-render")
 	fx := testutil.New(testPool, ws, testUserID)
-	fx.Insert(t, "issue_status", testutil.Cols{"workspace_id": ws, "key": "dropped", "name": "Dropped", "category": "cancelled", "color": "#123456"})
+	// #8466 removed the per-key categories for the closed lifecycle; a
+	// closed/cancelled-category custom status now carries `category: "closed"`.
+	fx.Insert(t, "issue_status", testutil.Cols{"workspace_id": ws, "key": "dropped", "name": "Dropped", "category": "closed", "color": "#123456"})
 	agentID := fx.Agent(t, "Parent assignee", fx.Runtime(t, "Parent runtime"))
 	parentID := fx.Issue(t, "Parent", testutil.Cols{"status": "in_progress", "assignee_type": "agent", "assignee_id": agentID})
 	fx.Cleanup(t, "DELETE FROM comment WHERE issue_id = $1", parentID)
@@ -206,6 +208,57 @@ func TestCustomCancelledStatusRendersAsCancelled(t *testing.T) {
 	for _, bad := range []string{"2/2 done", "is complete", "just finished"} {
 		if strings.Contains(content, bad) {
 			t.Errorf("custom cancelled status must not render as done (%q), got: %s", bad, content)
+		}
+	}
+}
+
+// TestUnstagedCancelledAppendsConfirmation pins GH #8462 must-fix 1: the
+// unstaged path is the default shape (sub-issues carry no --stage), and when it
+// closes from cancelled work the instruction after the honest sentence must not
+// leave "or — if nothing remains — run in_review" undefended — that offer is
+// exactly the cancelled case and would mark a no-work parent delivered. Append
+// the same declarative cancellation confirmation the staged wrap-up carries, and
+// assert the instruction half (not just the sentence).
+func TestUnstagedCancelledAppendsConfirmation(t *testing.T) {
+	ctx := context.Background()
+	ws := dbfx.Workspace(t, "Unstaged cancelled", "unstaged-cancelled-confirm")
+	fx := testutil.New(testPool, ws, testUserID)
+	fx.Insert(t, "issue_status", testutil.Cols{"workspace_id": ws, "key": "dropped", "name": "Dropped", "category": "closed", "color": "#123456"})
+	agentID := fx.Agent(t, "Parent assignee", fx.Runtime(t, "Parent runtime"))
+	parentID := fx.Issue(t, "Parent", testutil.Cols{"status": "in_progress", "assignee_type": "agent", "assignee_id": agentID})
+	fx.Cleanup(t, "DELETE FROM comment WHERE issue_id = $1", parentID)
+	fx.Cleanup(t, "DELETE FROM agent_task_queue WHERE issue_id = $1", parentID)
+	// Unstaged siblings form one implicit stage.
+	fx.Issue(t, "First dropped child", testutil.Cols{"parent_issue_id": parentID, "status": "dropped"})
+	lastID := fx.Issue(t, "Second dropped child", testutil.Cols{"parent_issue_id": parentID, "status": "dropped"})
+
+	last, err := testHandler.Queries.GetIssue(ctx, parseUUID(lastID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := last
+	prev.Status = "in_progress"
+	testHandler.notifyParentOfChildDone(ctx, prev, last)
+
+	if got := countSystemCommentsOn(t, parentID); got != 1 {
+		t.Fatalf("expected 1 system comment, got %d", got)
+	}
+	content, _, _, _ := systemCommentOn(t, parentID)
+	// Both halves: the honest sentence AND the appended instruction
+	// confirmation that defends the in_review offer against a no-work parent.
+	for _, want := range []string{
+		"All sub-issues are closed",
+		"was just cancelled",
+		"Some sub-issues were cancelled — confirm they are not actually needed",
+		"post a comment rather than wrap up if unsure",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("expected %q in output, got: %s", want, content)
+		}
+	}
+	for _, bad := range []string{"All sub-issues are complete", "just finished"} {
+		if strings.Contains(content, bad) {
+			t.Errorf("cancelled work must not render as done (%q), got: %s", bad, content)
 		}
 	}
 }
