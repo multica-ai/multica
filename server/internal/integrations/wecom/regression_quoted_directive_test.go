@@ -89,6 +89,75 @@ func TestABareClearBehindAQuoteKeepsTheQuoteAndForcesFresh(t *testing.T) {
 	}
 }
 
+// TestAQuotedScreenshotHandsRouterTheSendersOwnBody is the enrichment
+// invariant at engine/router.go:200-208, from the adapter's side: once this
+// adapter puts content in Text that the member did not type, it owes Router a
+// CommandText, because Router's fallback assigns the ALREADY enriched Text.
+//
+// The trigger is ordinary in WeCom: quote a message, then reply with only a
+// screenshot. ownCommandSource answers "" for a standalone photo on purpose —
+// a placeholder is not words anybody typed — so before this fix the message
+// arrived with an enriched Text and an empty command source, and the Chat was
+// named after the message the sender had quoted: "[Quote] 生产库连接数打满了".
+//
+// The body before enrichment is the honest answer. It is still only what the
+// sender sent, and the placeholder in it is dropped downstream by
+// deriveFirstMessageTitle, which lands the title on the same media path the
+// identical screenshot takes when it arrives with no quote.
+func TestAQuotedScreenshotHandsRouterTheSendersOwnBody(t *testing.T) {
+	t.Parallel()
+	mc := aibotMsgCallback{MsgID: "m-quoted-image", ChatID: "TUSER", ChatType: "single", MsgType: "image"}
+	mc.From.UserID = "TUSER"
+	mc.Image.URL = "https://example.com/screenshot.png"
+	mc.Quote.MsgType = "text"
+	mc.Quote.Text.Content = "生产库连接数打满了"
+
+	own, _ := mc.ownText()
+	msg := channelMessageFromCallback("bot-1", "", mc, own, "req-qimg")
+
+	if msg.Text != "> [Quote] 生产库连接数打满了\n\n[Image]" {
+		t.Fatalf("Text = %q, want the quote above the placeholder", msg.Text)
+	}
+	if msg.CommandText == "" {
+		t.Fatal("CommandText is empty behind an enriched Text: Router fills it from Text, and the " +
+			"quoted message becomes the Chat title")
+	}
+	if strings.Contains(msg.CommandText, "[Quote]") {
+		t.Fatalf("CommandText = %q — the quote is content the sender did not type; it must not reach "+
+			"the command source", msg.CommandText)
+	}
+	if msg.CommandText != "[Image]" {
+		t.Fatalf("CommandText = %q, want the body as it stood before enrichment", msg.CommandText)
+	}
+}
+
+// TestAQuotedScreenshotWithWordsKeepsTheTypedCommand guards the other side:
+// the snapshot must not overwrite a command source the sender really did type.
+// A screenshot with "/issue …" under it, sent as a reply, still files that
+// issue — the case ownCommandSource exists for.
+func TestAQuotedScreenshotWithWordsKeepsTheTypedCommand(t *testing.T) {
+	t.Parallel()
+	mc := aibotMsgCallback{MsgID: "m-quoted-mixed", ChatID: "TUSER", ChatType: "single", MsgType: "mixed"}
+	mc.From.UserID = "TUSER"
+	shot := mixedItem{MsgType: "image"}
+	shot.Image.URL = "https://example.com/screenshot.png"
+	words := mixedItem{MsgType: "text"}
+	words.Text.Content = "/issue 登录坏了"
+	mc.Mixed.MsgItem = []mixedItem{shot, words}
+	mc.Quote.MsgType = "text"
+	mc.Quote.Text.Content = "生产库连接数打满了"
+
+	own, _ := mc.ownText()
+	msg := channelMessageFromCallback("bot-1", "", mc, own, "req-qmixed")
+
+	if msg.CommandText != "/issue 登录坏了" {
+		t.Fatalf("CommandText = %q, want the sender's own typed command", msg.CommandText)
+	}
+	if !msg.SkipAgentRun {
+		t.Fatal("a pure /issue must still skip the agent run")
+	}
+}
+
 // TestABareDirectiveWithNoQuoteIsStillTheSentinel is the gate's other side: no
 // quote, no media, nothing to say. Consuming the directive here would open a
 // session with an empty turn — a worse bug than the one being fixed.

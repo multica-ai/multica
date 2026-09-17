@@ -37,6 +37,36 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 )
 
+// TestAnEnrichedWeComBodyDoesNotBecomeTheChatTitle is the title half of the
+// enrichment invariant in Handle (router.go:200-208), driven with the exact
+// strings the wecom adapter emits.
+//
+// It exists because CI was green through three rounds of review with the bug
+// present: the invariant's own comment predicts that, since no title test
+// drove an enriching WeCom message. A quoted screenshot must name the Chat the
+// way the same screenshot does without a quote — off the media path — and not
+// after the message the sender was replying to.
+func TestAnEnrichedWeComBodyDoesNotBecomeTheChatTitle(t *testing.T) {
+	const enriched = "> [Quote] 生产库连接数打满了\n\n[Image]"
+
+	// What the adapter sends now: CommandText is the body as it stood before
+	// the quote went on.
+	withQuote := deriveFirstMessageTitle(chatTitleSource(enriched, "[Image]", false), true)
+	// The same screenshot, no quote, straight off main's path.
+	withoutQuote := deriveFirstMessageTitle(chatTitleSource("[Image]", "", false), true)
+	if withQuote != withoutQuote {
+		t.Fatalf("quoted screenshot titles the Chat %q, the same screenshot alone titles it %q; "+
+			"replying to a message must not rename the conversation after it", withQuote, withoutQuote)
+	}
+
+	// And the shape this guards against: an enriching adapter that leaves
+	// CommandText empty gets the fallback, which assigns the enriched Text.
+	if leaked := deriveFirstMessageTitle(chatTitleSource(enriched, "", false), true); !strings.Contains(leaked, "[Quote]") {
+		t.Fatalf("the empty-CommandText fallback no longer leaks the quote (title %q); this test "+
+			"guards nothing and the invariant it pins has moved", leaked)
+	}
+}
+
 // quotedDirectiveMessage is what an adapter hands Router for a bare directive
 // sent as a reply: the quote is the whole visible body, and the directive
 // survives only as the command source.

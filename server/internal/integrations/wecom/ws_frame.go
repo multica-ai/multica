@@ -545,6 +545,7 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 	// The quoted message goes on last, so everything above — the control-layout
 	// rewrite and the command source it may hand back — still reads the body
 	// the sender actually composed. Only the stored, agent-visible text grows.
+	ownBody := text
 	if quoted != "" {
 		if text == "" {
 			text = quoted
@@ -566,6 +567,21 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 	// as a command.
 	if controlNormalized && control.Kind == engine.ControlCommandFreshSession && control.Body == "" {
 		command = text
+	}
+
+	// An enriching adapter owes Router a command source (router.go:200-208).
+	// ownCommandSource answers "" for a standalone photo, file or video on
+	// purpose — a placeholder is not words the sender typed — but once a quote
+	// is prepended, Router's empty-CommandText fallback assigns the ALREADY
+	// enriched Text, and the quote becomes the Chat title (#8058's shape).
+	//
+	// So hand over the body as it stood before enrichment: still no words the
+	// sender did not type, and the placeholder is dropped again downstream by
+	// deriveFirstMessageTitle, which lands the title back on the media path it
+	// takes when the same screenshot arrives without a quote. lark snapshots
+	// its own body for this reason (ws_frame_decoder.go:113).
+	if command == "" && quoted != "" {
+		command = ownBody
 	}
 
 	wm := InboundMessage{
