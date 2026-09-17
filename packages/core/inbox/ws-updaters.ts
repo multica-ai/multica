@@ -1,5 +1,5 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
-import { inboxKeys } from "./queries";
+import { inboxKeys, mapArchivedInboxCache, type ArchivedInboxCache } from "./queries";
 import type { InboxItem, IssuePriority, IssueStatus } from "../types";
 
 // Re-read a query because the server changed — in a way that is never answered
@@ -53,11 +53,11 @@ function patchInboxLists(
   wsId: string,
   patch: (items: InboxItem[]) => InboxItem[],
 ) {
-  for (const queryKey of [inboxKeys.list(wsId), inboxKeys.archived(wsId)]) {
+  for (const queryKey of [inboxKeys.list(wsId), ...qc.getQueryCache().findAll({ queryKey: inboxKeys.archived(wsId) }).map((query) => query.queryKey)]) {
     const invalidated = qc.getQueryState(queryKey)?.isInvalidated === true;
-    qc.setQueryData<InboxItem[]>(queryKey, (old) => {
+    qc.setQueryData<ArchivedInboxCache>(queryKey, (old) => {
       if (!old) return undefined;
-      const next = patch(old);
+      const next = mapArchivedInboxCache(old, patch);
       return next === old ? undefined : next;
     });
     if (invalidated) {
@@ -111,6 +111,7 @@ export function onInboxIssueStatusChanged(
   issueId: string,
   status: IssueStatus,
 ) {
+  // The issue cache coordinator owns membership invalidation after commit.
   patchInboxIssueStatus(qc, wsId, issueId, status);
 }
 
@@ -133,7 +134,40 @@ export async function onInboxIssueDeleted(
   patchInboxLists(qc, wsId, (items) =>
     items.filter((i) => i.issue_id !== issueId),
   );
-  await onInboxSummaryInvalidate(qc);
+  await Promise.all([
+    onInboxSummaryInvalidate(qc),
+    refreshInboxQuery(qc, inboxKeys.pages(wsId)),
+    refreshInboxQuery(qc, inboxKeys.lookup(wsId)),
+    refreshInboxQuery(qc, inboxKeys.facets(wsId)),
+  ]);
+}
+
+// Whether a request for either inbox list is out (paused ones included).
+export function isInboxListRequestInFlight(
+  qc: QueryClient,
+  wsId: string,
+): boolean {
+  return qc
+    .getQueryCache()
+    .findAll({ queryKey: inboxKeys.all(wsId) })
+    .some((query) => query.state.fetchStatus !== "idle");
+}
+
+// An optimistic issue write patches the status / priority on inbox rows, so it
+// first cancels the lists' in-flight requests: a response read before the write
+// would land on top of the patch. Returns whether a request was interrupted.
+//
+// The interrupted request may be the only one carrying a server change (an
+// `inbox:new`, a reconnect), and nothing asks again. The cancel can also drop
+// the invalidation mark: TanStack reverts to its pre-fetch snapshot, and a
+// `setQueryData` during the fetch overwrites that snapshot with a
+// non-invalidated state. So a write that interrupted a request owes the lists
+// a re-read once the writes settle (MUL-7286). Writes that interrupt nothing
+// stay request-free.
+export function cancelInboxLists(qc: QueryClient, wsId: string): boolean {
+  const interrupted = isInboxListRequestInFlight(qc, wsId);
+  void qc.cancelQueries({ queryKey: inboxKeys.all(wsId) });
+  return interrupted;
 }
 
 // THE entry point for refreshing the workspace's inbox lists — main and
@@ -141,11 +175,12 @@ export async function onInboxIssueDeleted(
 // unarchive, or a new notification reviving an archived issue), and the split
 // is decided server-side, so the two are always refreshed together.
 //
-// Cancels first, like the summary refresh below, and for the same reason. The
-// list's first load is where the hole bites hardest: nothing outside the Inbox
-// page observes the list, so on web it is collected once the user has been
-// away, and every return is a first load again — with notifications arriving
-// while a large, unbounded list is still downloading.
+// Cancels first, like the summary refresh below, and for the same reason: the
+// Inbox page is the only observer that fetches the list, so its first visit
+// downloads a large, unbounded list while notifications keep arriving. After
+// that the cache outlives the page — tab titles hold disabled observers on it
+// (`useTabPresentation`) — so a return reuses it and refetches only while it
+// is still marked invalidated.
 export async function onInboxInvalidate(qc: QueryClient, wsId: string) {
   await refreshInboxQuery(qc, inboxKeys.all(wsId));
 }

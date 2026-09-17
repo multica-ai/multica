@@ -161,9 +161,6 @@ export function AgentMcpTab({ agent }: { agent: Agent }) {
           <p className="text-body font-medium">
             {t(($) => $.tab_body.composio_mcp.empty_title)}
           </p>
-          <p className="text-caption text-muted-foreground">
-            {t(($) => $.tab_body.composio_mcp.empty_hint)}
-          </p>
           <AppLink
             href={settingsHref}
             className="inline-flex items-center gap-1.5 text-caption font-medium text-primary hover:underline"

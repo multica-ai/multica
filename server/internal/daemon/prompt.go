@@ -67,7 +67,6 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	if task.PriorSessionResumeUnavailable {
 		b.WriteString(sessionContinuityNoticeFor(task))
 	}
-	b.WriteString(buildReusedWorkdirBlock(opts.reusedWorkdir))
 	b.WriteString(execenv.BuildTaskInitiatorBlock(task.InitiatorType, task.InitiatorName, task.InitiatorEmail))
 	b.WriteString(execenv.BuildConnectedAppsBlock(task.ConnectedApps))
 	return b.String()
@@ -79,7 +78,6 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 type promptOpts struct {
 	sharedLocalDirectory    bool
 	worktreeReplayConflicts []string
-	reusedWorkdir           bool
 }
 
 // PromptOption tunes per-turn prompt copy with run-scoped context.
@@ -105,14 +103,6 @@ func WithWorktreeReplayConflicts(files []string) PromptOption {
 	return func(o *promptOpts) { o.worktreeReplayConflicts = files }
 }
 
-// WithReusedWorkdir marks a turn that runs a fresh provider session inside a
-// workdir an earlier run left behind: an automatic or manual retry after a
-// failure that poisoned the conversation, or a resume the daemon had to drop.
-// The files are there; the memory of producing them is not (MUL-7034).
-func WithReusedWorkdir() PromptOption {
-	return func(o *promptOpts) { o.reusedWorkdir = true }
-}
-
 // buildSharedLocalDirectoryBlock warns an unlocked turn that its working
 // directory is shared live. Deliberately guidance and not a prohibition: the
 // mutex never covered the user's own editor either, so refusing writes here
@@ -127,25 +117,6 @@ func buildSharedLocalDirectoryBlock(shared bool) string {
 	b.WriteString("## Shared working directory\n\n")
 	b.WriteString("Your working directory is the user's own checkout, and another task on this machine may be editing it while you run. This turn deliberately neither holds nor waits for the directory lock — that is what keeps a conversation from queueing behind a long build.\n\n")
 	b.WriteString("Read freely. Treat writing the way the user treats saving a file in their own editor: reasonable for a small change they just asked for, wrong for a broad refactor, a dependency install, or a build that rewrites many files. Work that size belongs in an issue task, which is serialised against the other writers. If you do write, say so in your reply — a sibling task may be looking at the same file.\n\n")
-	return b.String()
-}
-
-// buildReusedWorkdirBlock tells a fresh session that its working directory
-// already holds an earlier run's files. Nothing else says so: the brief points
-// at `multica repo checkout` for fetching code, and on an existing checkout
-// that command runs `git reset --hard` and `git clean -fd` before branching
-// from the default branch, so following the brief would delete the
-// uncommitted work the reuse exists to keep. Per-turn, not in the brief: it is
-// true of this run only, and the brief must stay byte-stable across runs
-// (MUL-5377).
-func buildReusedWorkdirBlock(reused bool) string {
-	if !reused {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("## Files from an earlier run\n\n")
-	b.WriteString("Your working directory was kept from an earlier run, but this run does not continue that run's conversation, so you have no memory of what it did here. Repository checkouts in it may hold that work, including uncommitted changes.\n\n")
-	b.WriteString("Look before you fetch anything: list the working directory, and in each existing checkout run `git status` and `git log` to see what was changed. Continue from that work where it serves this task. Do not run `multica repo checkout` for a repository that is already checked out here unless you have confirmed nothing in it needs keeping — on an existing checkout it discards uncommitted changes, untracked files included, and starts a new branch from the default branch.\n\n")
 	return b.String()
 }
 
@@ -449,7 +420,7 @@ func buildCommentPrompt(task Task, provider string) string {
 			//   - A retry inherits the previous attempt's coalesced_comment_ids
 			//     verbatim (queries/agent.sql RetryTask), while the anchor is
 			//     recomputed from the last STARTED task's started_at
-			//     (GetLastTaskStartedAtForIssueAndAgent). An inherited id can
+			//     (the resumed run, via GetLastTaskSession). An inherited id can
 			//     therefore predate the anchor.
 			//   - The anchor is only populated when some comment landed after it,
 			//     which is independent of where these ids sit.
@@ -465,7 +436,16 @@ func buildCommentPrompt(task Task, provider string) string {
 				task.IssueID)
 		}
 	}
-	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
+	// Issue-reading pointer (MUL-7344). Same gate as the comment hint below —
+	// `resumed` is computed once for both, so one turn can never claim the
+	// session is warm enough to skip the issue read while treating it as cold
+	// for comments. On anything but a real resume with a server-computed
+	// comparison this renders the unconditional read, byte for byte.
+	resumed := task.PriorSessionID != "" && !task.PriorSessionResumeUnavailable
+	b.WriteString(execenv.BuildIssueStateHint(
+		task.IssueID, task.IssueStatus, task.IssueAssigneeType, task.IssueAssigneeID,
+		task.IssueChangedFields, task.IssueStateDeltaKnown, resumed,
+	))
 	// Comment-reading pointer. Which hint renders is decided by whether this
 	// run actually RESUMES a provider session, and only then by the new-comment
 	// delta — never by the delta alone.
@@ -500,7 +480,7 @@ func buildCommentPrompt(task Task, provider string) string {
 	// that; these hints carry this turn's facts and exact commands. Final
 	// fallback (no trigger id, shouldn't happen here): plain read.
 	var hint string
-	if task.PriorSessionID != "" && !task.PriorSessionResumeUnavailable {
+	if resumed {
 		hint = execenv.BuildNewCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID, task.NewCommentsSince, task.NewCommentCount)
 		if hint == "" {
 			if task.NewCommentsDeltaKnown {

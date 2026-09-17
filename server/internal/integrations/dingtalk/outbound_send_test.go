@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -20,10 +21,12 @@ type dingtalkSendServer struct {
 	tokenCalls int32
 	lastPath   string
 	lastBody   map[string]any
+	sendBodies []map[string]any
 	// failFirstSendAuth makes the first send return 401 so the token-refresh
 	// retry path is exercised.
-	failFirstSendAuth bool
-	sendCalls         int32
+	failFirstSendAuth   bool
+	emotionSuccessFalse bool
+	sendCalls           int32
 }
 
 func newDingtalkSendServer(t *testing.T) *dingtalkSendServer {
@@ -35,7 +38,7 @@ func newDingtalkSendServer(t *testing.T) *dingtalkSendServer {
 		case accessTokenPath:
 			atomic.AddInt32(&d.tokenCalls, 1)
 			_, _ = w.Write([]byte(`{"accessToken":"tok","expireIn":7200}`))
-		case pathSendP2P, pathSendGroup:
+		case pathSendP2P, pathSendGroup, pathReplyEmotion, pathRecallEmotion:
 			n := atomic.AddInt32(&d.sendCalls, 1)
 			if d.failFirstSendAuth && n == 1 {
 				w.WriteHeader(http.StatusUnauthorized)
@@ -46,7 +49,16 @@ func newDingtalkSendServer(t *testing.T) *dingtalkSendServer {
 			d.lastPath = r.URL.Path
 			d.lastBody = map[string]any{}
 			_ = json.Unmarshal(body, &d.lastBody)
-			_, _ = w.Write([]byte(`{"processQueryKey":"pqk-1"}`))
+			d.sendBodies = append(d.sendBodies, d.lastBody)
+			if r.URL.Path == pathReplyEmotion || r.URL.Path == pathRecallEmotion {
+				if d.emotionSuccessFalse {
+					_, _ = w.Write([]byte(`{"success":false}`))
+				} else {
+					_, _ = w.Write([]byte(`{"success":true}`))
+				}
+			} else {
+				_, _ = w.Write([]byte(`{"processQueryKey":"pqk-1"}`))
+			}
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -79,6 +91,23 @@ func TestSender_P2PSendHitsBatchSend(t *testing.T) {
 	if ids, ok := d.lastBody["userIds"].([]any); !ok || len(ids) != 1 || ids[0] != "staff-1" {
 		t.Errorf("userIds = %v", d.lastBody["userIds"])
 	}
+	if got := d.lastBody["msgKey"]; got != "sampleMarkdown" {
+		t.Fatalf("msgKey = %v, want documented sampleMarkdown", got)
+	}
+	if _, ok := d.lastBody["atUserIds"]; ok {
+		t.Fatalf("1:1 send must not contain atUserIds: %v", d.lastBody)
+	}
+	paramRaw, ok := d.lastBody["msgParam"].(string)
+	if !ok {
+		t.Fatalf("msgParam = %T", d.lastBody["msgParam"])
+	}
+	var param markdownParam
+	if err := json.Unmarshal([]byte(paramRaw), &param); err != nil {
+		t.Fatalf("decode msgParam: %v", err)
+	}
+	if param.Text != "hi" {
+		t.Fatalf("1:1 Markdown = %q, want no sender mention", param.Text)
+	}
 }
 
 func TestSender_GroupSendHitsGroupMessages(t *testing.T) {
@@ -93,6 +122,116 @@ func TestSender_GroupSendHitsGroupMessages(t *testing.T) {
 	}
 	if d.lastBody["openConversationId"] != "cid-g" {
 		t.Errorf("openConversationId = %v", d.lastBody["openConversationId"])
+	}
+	if got := d.lastBody["msgKey"]; got != "sampleMarkdown" {
+		t.Fatalf("msgKey = %v, want upstream sampleMarkdown", got)
+	}
+	if _, ok := d.lastBody["atUserIds"]; ok {
+		t.Fatalf("group send without a sender target must not contain atUserIds: %v", d.lastBody)
+	}
+}
+
+func TestPrependMarkdownQuoteSkipsEmptyQuote(t *testing.T) {
+	if got := prependMarkdownQuote("answer", " \n "); got != "answer" {
+		t.Fatalf("empty quote changed answer: %q", got)
+	}
+}
+
+func TestPrependMarkdownQuoteSeparatesQuoteFromReply(t *testing.T) {
+	if got := prependMarkdownQuote("answer", "question"); got != "> question\n\n---\n\nanswer" {
+		t.Fatalf("quoted reply = %q", got)
+	}
+}
+
+func TestSender_EmojiReactionUsesDefaultRobotReaction(t *testing.T) {
+	if emotionAcknowledged != "收到" || emotionDone != "Done" {
+		t.Fatalf("emoji reaction names = %q / %q", emotionAcknowledged, emotionDone)
+	}
+	d := newDingtalkSendServer(t)
+	s := newTestSender(NewClient(nil, d.srv.URL))
+	target := sendTarget{ConversationType: convTypeGroup, ConversationID: "cid-g", SourceMessageID: "msg-original"}
+
+	if err := s.setEmojiReaction(context.Background(), target, emotionAcknowledged, false); err != nil {
+		t.Fatalf("add emotion: %v", err)
+	}
+	if d.lastPath != pathReplyEmotion || d.lastBody["emotionType"] != float64(1) || d.lastBody["emotionName"] != emotionAcknowledged {
+		t.Fatalf("reaction request path/body = %q / %v", d.lastPath, d.lastBody)
+	}
+	if _, exists := d.lastBody["textEmotion"]; exists {
+		t.Fatalf("default emoji request contains textEmotion: %v", d.lastBody)
+	}
+	if err := s.setEmojiReaction(context.Background(), target, emotionDone, false); err != nil {
+		t.Fatalf("add done emotion: %v", err)
+	}
+	if d.lastPath != pathReplyEmotion || d.lastBody["emotionType"] != float64(1) || d.lastBody["emotionName"] != emotionDone {
+		t.Fatalf("done request path/body = %q / %v", d.lastPath, d.lastBody)
+	}
+	if err := s.setEmojiReaction(context.Background(), target, emotionAcknowledged, true); err != nil {
+		t.Fatalf("recall emotion: %v", err)
+	}
+	if d.lastPath != pathRecallEmotion || d.lastBody["emotionType"] != float64(1) || d.lastBody["emotionName"] != emotionAcknowledged {
+		t.Fatalf("recall request path/body = %q / %v", d.lastPath, d.lastBody)
+	}
+}
+
+func TestSender_EmojiReactionRejectsUnknownName(t *testing.T) {
+	s := newTestSender(NewClient(nil, "https://api.dingtalk.test"))
+	target := sendTarget{ConversationID: "cid", SourceMessageID: "msg"}
+	if err := s.setEmojiReaction(context.Background(), target, "未注册名称", false); err == nil {
+		t.Fatal("unknown default emoji name must be rejected")
+	}
+}
+
+func TestSender_EmojiReactionSupportsP2P(t *testing.T) {
+	d := newDingtalkSendServer(t)
+	s := newTestSender(NewClient(nil, d.srv.URL))
+	target := sendTarget{
+		ConversationType: convTypeP2P,
+		ConversationID:   "cid-p2p",
+		SourceMessageID:  "msg-p2p",
+	}
+
+	if err := s.setEmojiReaction(context.Background(), target, emotionAcknowledged, false); err != nil {
+		t.Fatalf("add p2p emotion: %v", err)
+	}
+	if d.lastPath != pathReplyEmotion || d.lastBody["openConversationId"] != "cid-p2p" || d.lastBody["openMsgId"] != "msg-p2p" {
+		t.Fatalf("p2p emotion request path/body = %q / %v", d.lastPath, d.lastBody)
+	}
+}
+
+func TestSender_EmojiReactionRequiresConversationAndMessageIDs(t *testing.T) {
+	s := newTestSender(NewClient(nil, "https://api.dingtalk.test"))
+	if err := s.setEmojiReaction(context.Background(), sendTarget{ConversationID: "cid"}, emotionAcknowledged, false); err == nil {
+		t.Fatal("missing source message id must fail before an API call")
+	}
+	if err := s.setEmojiReaction(context.Background(), sendTarget{SourceMessageID: "msg"}, emotionAcknowledged, false); err == nil {
+		t.Fatal("missing conversation id must fail before an API call")
+	}
+}
+
+func TestSender_EmojiReactionRefreshesTokenOn401(t *testing.T) {
+	d := newDingtalkSendServer(t)
+	d.failFirstSendAuth = true
+	s := newTestSender(NewClient(nil, d.srv.URL))
+	target := sendTarget{ConversationID: "cid", SourceMessageID: "msg"}
+	if err := s.setEmojiReaction(context.Background(), target, emotionAcknowledged, false); err != nil {
+		t.Fatalf("emotion should succeed after token refresh: %v", err)
+	}
+	if got := atomic.LoadInt32(&d.tokenCalls); got != 2 {
+		t.Fatalf("token calls = %d, want 2", got)
+	}
+	if got := atomic.LoadInt32(&d.sendCalls); got != 2 {
+		t.Fatalf("emotion calls = %d, want 2", got)
+	}
+}
+
+func TestSender_EmojiReactionRejectsSuccessFalse(t *testing.T) {
+	d := newDingtalkSendServer(t)
+	d.emotionSuccessFalse = true
+	s := newTestSender(NewClient(nil, d.srv.URL))
+	target := sendTarget{ConversationID: "cid", SourceMessageID: "msg"}
+	if err := s.setEmojiReaction(context.Background(), target, emotionAcknowledged, false); err == nil {
+		t.Fatal("success=false must fail")
 	}
 }
 
@@ -262,5 +401,36 @@ func TestClient_AccessToken_CancelledCallerDoesNotCancelSharedMint(t *testing.T)
 	}
 	if got := atomic.LoadInt32(&tokenCalls); got != 1 {
 		t.Fatalf("cancelled first caller caused %d token mints, want 1", got)
+	}
+}
+
+func TestSender_LongSingleLineAnswerBlockquotePreservesEveryChunk(t *testing.T) {
+	// Use an answer blockquote: source QuoteText is capped before chunking.
+	source := strings.Repeat("界", 15000)
+	d := newDingtalkSendServer(t)
+	_, err := newTestSender(NewClient(nil, d.srv.URL)).send(context.Background(), sendTarget{
+		ConversationType: convTypeGroup,
+		ConversationID:   "group",
+	}, "> "+source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.sendBodies) < 2 {
+		t.Fatal("long answer must exercise chunking")
+	}
+	var joined strings.Builder
+	for i, body := range d.sendBodies {
+		raw := body["msgParam"].(string)
+		var param markdownParam
+		if err := json.Unmarshal([]byte(raw), &param); err != nil {
+			t.Fatal(err)
+		}
+		if len(raw) > 15000 || !strings.HasPrefix(param.Text, "> ") || param.Title != defaultMarkdownTitle {
+			t.Fatalf("chunk %d lost its blockquote/title or exceeded the payload budget: %q", i, raw)
+		}
+		joined.WriteString(strings.TrimPrefix(param.Text, "> "))
+	}
+	if joined.String() != source {
+		t.Fatal("answer blockquote content was lost or duplicated across chunks")
 	}
 }

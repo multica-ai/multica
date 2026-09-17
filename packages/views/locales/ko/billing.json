@@ -89,7 +89,7 @@
     },
     "load_failed": {
       "title": "결제 서비스를 일시적으로 사용할 수 없습니다",
-      "description": "신뢰할 수 있는 구독 정보를 불러오지 못했습니다. 요금제는 변경되지 않았습니다."
+      "description": "구독 정보를 불러올 수 없습니다. 다시 시도하세요."
     },
     "actions": {
       "retry": "다시 시도",
@@ -103,6 +103,7 @@
     "errors": {
       "action_title": "결제 작업 실패",
       "temporarily_unavailable": "결제 서비스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.",
+      "not_enabled": "이 배포에서는 워크스페이스 구독을 사용할 수 없습니다. 관리자에게 문의하세요.",
       "permission_changed": "현재 워크스페이스 역할로는 이 작업을 수행할 수 없습니다. 페이지를 새로고침해 현재 권한을 확인하세요.",
       "checkout_response": "서버 응답을 읽을 수 없어 Checkout을 열지 못했습니다. 선택한 결제 주기를 유지하고 다시 시도하세요.",
       "already_subscribed": "이 워크스페이스에는 이미 구독이 있습니다. 현재 요금제를 새로고침했습니다.",
@@ -115,7 +116,6 @@
       "cancel_title": "Checkout 취소됨",
       "cancel_description": "요금제는 변경되지 않았습니다.",
       "portal_title": "결제 정보 새로고침됨",
-      "portal_description": "아래에 최신 구독 정보를 표시합니다.",
       "syncing_title": "구독 활성화 중",
       "syncing_description": "결제가 완료되었습니다. Stripe의 요금제 변경 확인을 기다리고 있습니다.",
       "timeout_description": "결제는 접수되었지만 구독이 아직 동기화 중입니다. 잠시 후 페이지를 새로고침하세요.",
@@ -124,12 +124,12 @@
     },
     "past_due": {
       "title": "결제 정보를 확인해야 합니다",
-      "description": "Billing Portal에서 결제 수단을 업데이트하세요. 위의 요금제 배지는 현재 이용 가능한 액세스를 표시합니다.",
+      "description": "결제 관리에서 결제 수단을 업데이트하세요.",
       "grace_description": "Pro 이용을 유지하려면 {{date}}까지 결제 수단을 업데이트하세요."
     },
     "subscription_notice": {
       "canceling_title": "구독 취소가 예정되어 있습니다",
-      "canceling_description": "이 구독은 {{date}}에 취소될 예정입니다. 위의 플랜 배지는 현재 적용 중인 액세스를 표시합니다.",
+      "canceling_description": "구독이 {{date}}에 취소됩니다.",
       "canceling_description_without_date": "이 구독은 현재 결제 기간 종료 시 취소될 예정입니다.",
       "incomplete_title": "구독 설정이 완료되지 않았습니다",
       "incomplete_description": "결제 관리를 열어 결제 설정을 완료하거나 확인하세요.",
@@ -139,20 +139,16 @@
       "paused_description": "결제 관리를 열어 일시 중지 상태와 복구 방법을 확인하세요.",
       "unpaid_title": "구독이 미결제 상태입니다",
       "unpaid_description": "결제 관리를 열어 미결제 잔액을 해결하세요.",
-      "canceled_title": "구독이 취소되었습니다",
-      "canceled_description": "위 요금제 배지는 이 워크스페이스에 현재 적용되는 요금제를 보여 줍니다."
+      "canceled_title": "구독이 취소되었습니다"
     },
     "current": {
       "title": "현재 요금제",
       "plan": "워크스페이스 요금제",
-      "plan_description": "이 워크스페이스에 현재 적용되는 entitlement입니다.",
       "members": "사용자 좌석",
       "members_description": "에이전트와 대기 중인 초대는 좌석에 포함되지 않습니다.",
       "member_count_other": "멤버 {{count}}명",
       "billing_interval": "결제 주기",
-      "billing_interval_description": "활성 구독에 저장된 결제 주기입니다.",
-      "period_end": "현재 결제 기간 종료일",
-      "period_end_description": "현재 구독 정보에 보고된 날짜입니다."
+      "period_end": "현재 결제 기간 종료일"
     },
     "upgrade": {
       "title": "Pro로 업그레이드",
@@ -167,18 +163,14 @@
     },
     "management": {
       "title": "구독 관리",
-      "description": "결제 수단, 청구서 및 구독 취소는 Stripe에서 안전하게 관리됩니다.",
+      "description": "결제 수단, 청구서, 구독 취소.",
       "portal": "Stripe Billing Portal",
-      "portal_description": "Stripe에서 이 워크스페이스의 구독을 관리합니다.",
       "portal_unavailable": "이 워크스페이스에서 사용할 수 있는 Stripe Billing Portal이 없습니다."
     },
     "limits": {
       "title": "사용량 및 한도",
-      "description": "한도와 사용량은 서버의 현재 entitlement와 쿼터 집계에서 가져옵니다.",
       "issues": "태스크 수",
-      "issues_description": "현재 태스크 사용량과 서버에서 반환한 유효 한도입니다.",
       "autopilots": "자동화 실행",
-      "autopilots_description": "현재 자동화 사용량과 서버에서 반환한 초기화 시각입니다.",
       "unlimited": "무제한",
       "per_month": "월 {{count}}회",
       "usage_loading": "자동화 사용량 불러오는 중",
@@ -194,15 +186,13 @@
       "title": "좌석",
       "description": "구매한 좌석은 현재 사용자 멤버와 대기 중인 초대에 사용됩니다. 에이전트는 좌석을 사용하지 않습니다.",
       "human_members": "사용 중인 좌석",
-      "human_members_description": "구매한 용량을 사용 중인 확인된 사용자 멤버입니다. 멤버 변경 후 새로고침할 수 있습니다.",
       "billed": "구매한 좌석",
-      "billed_description": "현재 Stripe를 통해 구매한 좌석 수입니다.",
       "pending_invitations": "대기 중인 초대",
       "pending_invitations_description": "유효한 초대는 수락되거나 만료될 때까지 구매한 좌석을 예약합니다.",
       "available": "사용 가능한 좌석",
-      "available_description": "멤버가 사용하지 않고 초대에도 예약되지 않은 구매 좌석입니다.",
+      "available_description": "구매한 좌석에서 멤버와 초대 예약분을 뺀 수입니다.",
       "pending": "예정 좌석 수",
-      "pending_description": "Cloud Billing이 다음 결제 기간에 대해 보고한 더 적은 좌석 수입니다.",
+      "pending_description": "다음 결제 주기에 적용됩니다.",
       "seat_count_other": "좌석 {{count}}개",
       "pending_with_date_other": "{{date}}부터 좌석 {{count}}개",
       "none_pending": "예정된 변경 없음",
@@ -214,7 +204,8 @@
       "members_over_capacity_title": "멤버 수가 구매한 좌석 수를 초과합니다",
       "members_over_capacity_description": "이 워크스페이스에는 멤버가 {{actual}}명이지만 구매한 좌석은 {{purchased}}개입니다. 더 초대하기 전에 좌석을 추가하거나 멤버를 제거하세요.",
       "occupancy_over_capacity_description": "이 워크스페이스는 구매한 좌석 {{purchased}}개에 대해 {{occupied}}개를 점유하고 있습니다(멤버 {{members}}명, 대기 중인 초대 {{reserved}}건). 더 초대하기 전에 좌석을 추가하거나 멤버를 제거하거나 대기 중인 초대를 취소하세요.",
-      "updated": "좌석 구매를 제출했습니다"
+      "updated": "좌석 구매를 제출했습니다",
+      "available_help": "사용 가능한 좌석 계산 방법"
     },
     "seat_purchase": {
       "title": "좌석 추가",

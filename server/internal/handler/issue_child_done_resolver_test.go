@@ -68,9 +68,9 @@ func TestChildDoneStatusResolver(t *testing.T) {
 						ws := dbfx.Workspace(t, "Child resolver", fmt.Sprintf("child-resolver-%t-%t-%s-%d", batch, staged, mode, workspace), testutil.Cols{"issue_prefix": "CHD"})
 						workspaces = append(workspaces, parseUUID(ws))
 						fixture := testutil.New(testPool, ws, testUserID)
-						for key, category := range map[string]string{"approved": "done", "dropped": "cancelled", "review": "in_review"} {
+						for key, category := range map[string]string{"approved": "done", "dropped": "closed", "review": "started"} {
 							if workspace == 1 && key == "approved" {
-								category = "in_progress"
+								category = "started"
 							}
 							cols := testutil.Cols{"workspace_id": ws, "key": key, "name": key, "category": category, "color": "#123456"}
 							if key == "dropped" {
@@ -183,11 +183,11 @@ func TestChildStatusResolverRefreshesForNextPass(t *testing.T) {
 func TestChildDoneCatalogSnapshotPredatesParent(t *testing.T) {
 	ctx := context.Background()
 	for _, batch := range []bool{false, true} {
-		for _, category := range []string{"backlog", "done", "cancelled"} {
+		for _, category := range []string{"unstarted", "done", "closed"} {
 			t.Run(fmt.Sprintf("batch=%t/%s", batch, category), func(t *testing.T) {
 				ws := dbfx.Workspace(t, "New parent status", "child-status-snapshot")
 				fx := testutil.New(testPool, ws, testUserID)
-				for key, category := range map[string]string{"working": "in_progress", "parked": "backlog"} {
+				for key, category := range map[string]string{"working": "started", "parked": "unstarted"} {
 					fx.Insert(t, "issue_status", testutil.Cols{"workspace_id": ws, "key": key, "name": key, "category": category, "color": "#123456"})
 				}
 				agentID := fx.Agent(t, "Parent assignee", fx.Runtime(t, "Parent runtime"))
@@ -279,7 +279,7 @@ func TestChildDoneUnknownStatusSkipsNotification(t *testing.T) {
 				ws := dbfx.Workspace(t, "Unknown notification status", "child-status-unknown")
 				fx := testutil.New(testPool, ws, testUserID)
 				if tc.name == "deleted_parent_status" {
-					id := fx.Insert(t, "issue_status", testutil.Cols{"workspace_id": ws, "key": "missing", "name": "Deleted", "category": "backlog", "color": "#123456"})
+					id := fx.Insert(t, "issue_status", testutil.Cols{"workspace_id": ws, "key": "missing", "name": "Deleted", "category": "unstarted", "color": "#123456"})
 					fx.Exec(t, "DELETE FROM issue_status WHERE id = $1", id)
 				}
 				agentID := fx.Agent(t, "Parent assignee", fx.Runtime(t, "Parent runtime"))
@@ -332,9 +332,9 @@ func TestBatchChildDoneUnknownStatusIsolation(t *testing.T) {
 	ws := dbfx.Workspace(t, "Missing key", "child-missing-key")
 	otherWS := dbfx.Workspace(t, "Known key", "child-known-key")
 	for _, workspace := range []string{ws, otherWS} {
-		dbfx.Insert(t, "issue_status", testutil.Cols{"workspace_id": workspace, "key": "working", "name": "Working", "category": "in_progress", "color": "#123456"})
+		dbfx.Insert(t, "issue_status", testutil.Cols{"workspace_id": workspace, "key": "working", "name": "Working", "category": "started", "color": "#123456"})
 	}
-	dbfx.Insert(t, "issue_status", testutil.Cols{"workspace_id": otherWS, "key": "missing", "name": "Known elsewhere", "category": "in_progress", "color": "#123456"})
+	dbfx.Insert(t, "issue_status", testutil.Cols{"workspace_id": otherWS, "key": "missing", "name": "Known elsewhere", "category": "started", "color": "#123456"})
 	cases := []struct {
 		workspace, status string
 		want              int
@@ -398,7 +398,7 @@ func TestChildDoneCatalogFailureSkipsNotification(t *testing.T) {
 			t.Run(fmt.Sprintf("batch=%t/%s", batch, tc.name), func(t *testing.T) {
 				ws := dbfx.Workspace(t, "Transient status read", "child-status-failure")
 				fx := testutil.New(testPool, ws, testUserID)
-				for key, category := range map[string]string{"working": "in_progress", "parked": "backlog", "approved": "done"} {
+				for key, category := range map[string]string{"working": "started", "parked": "unstarted", "approved": "done"} {
 					fx.Insert(t, "issue_status", testutil.Cols{"workspace_id": ws, "key": key, "name": key, "category": category, "color": "#123456"})
 				}
 				agentID := fx.Agent(t, "Parent assignee", fx.Runtime(t, "Parent runtime"))
@@ -444,7 +444,7 @@ func TestChildDoneCatalogFailureSkipsNotification(t *testing.T) {
 				// automatic retry of the already-committed child status update.
 				notify()
 				want := 0
-				if tc.parent == "in_progress" {
+				if tc.parent == "in_progress" || tc.parent == "parked" {
 					want = 1
 				}
 				if got := countSystemCommentsOn(t, parentID); got != want {
@@ -467,7 +467,7 @@ func TestBatchChildDoneCatalogFailureIsolation(t *testing.T) {
 	healthyWS := dbfx.Workspace(t, "Healthy catalog", "child-healthy-catalog")
 	for _, ws := range []string{failedWS, healthyWS} {
 		fx := testutil.New(testPool, ws, testUserID)
-		for key, category := range map[string]string{"working": "in_progress", "parked": "backlog"} {
+		for key, category := range map[string]string{"working": "started", "parked": "unstarted"} {
 			fx.Insert(t, "issue_status", testutil.Cols{"workspace_id": ws, "key": key, "name": key, "category": category, "color": "#123456"})
 		}
 	}

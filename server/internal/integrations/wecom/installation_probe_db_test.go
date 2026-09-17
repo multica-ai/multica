@@ -282,8 +282,11 @@ func TestUpsert_ConcurrentInstallDoesNotSubscribeBehindTheWinner(t *testing.T) {
 	}()
 
 	// Give the second install every chance to overtake. It must be parked on
-	// the advisory lock, not talking to WeCom.
-	time.Sleep(500 * time.Millisecond)
+	// the advisory lock, not talking to WeCom — and parked there is observed
+	// rather than waited for: once it waits on the slot's lock it can get no
+	// further until the winner commits, so there is no chance left to give.
+	// Reaching the probe first ends the wait too, and is the failure below.
+	waitForSlotLockWaiter(t, ctx, pool, wcPrbBotFree, func() bool { return loserProbe.callCount() != 0 })
 	if n := loserProbe.callCount(); n != 0 {
 		t.Errorf("the racing install subscribed %d time(s) while another install held the bot's slot — that displaces the connection the winner is about to establish", n)
 	}
@@ -308,5 +311,34 @@ func TestUpsert_ConcurrentInstallDoesNotSubscribeBehindTheWinner(t *testing.T) {
 	}
 	if n := winnerProbe.callCount(); n != 1 {
 		t.Fatalf("the winning install probed %d time(s), want 1", n)
+	}
+}
+
+// waitForSlotLockWaiter returns once some session is waiting on the bot's
+// routing-slot advisory lock (LockChannelInstallationAppIDSlot's two-key form,
+// which pg_locks reports as classid/objid with objsubid 2), or once overtaken
+// reports true. Keyed on this bot alone, so a concurrent test elsewhere in the
+// shared database cannot satisfy it.
+func waitForSlotLockWaiter(t *testing.T, ctx context.Context, pool *pgxpool.Pool, botID string, overtaken func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !overtaken() {
+		var parked bool
+		if err := pool.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_locks
+				WHERE locktype = 'advisory' AND NOT granted
+				  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+				  AND classid = hashtext($1)::oid AND objid = hashtext($2)::oid AND objsubid = 2
+			)`, channelTypeWecom, botID).Scan(&parked); err != nil {
+			t.Fatalf("observe the bot's slot lock: %v", err)
+		}
+		if parked {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the racing install never reached the bot's slot lock")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }

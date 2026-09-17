@@ -79,6 +79,24 @@ const CODEX_DEFAULT_MODEL: RuntimeModel = {
   },
 };
 
+// omp advertises a per-model effort catalog but marks no Default at all, and
+// `omp models --json` sorts by provider/id — so no entry here is the one omp
+// would actually run for an empty model. It also clamps a requested level to
+// whichever model its own default role resolves to, which is why an empty omp
+// model must not preview any entry (MUL-7412).
+const OMP_MODEL: RuntimeModel = {
+  id: "devin/swe-2",
+  label: "SWE-2",
+  thinking: {
+    supported_levels: [
+      { value: "off", label: "Off" },
+      { value: "medium", label: "Medium" },
+      { value: "high", label: "High" },
+      { value: "max", label: "Max" },
+    ],
+  },
+};
+
 function listResult(models: RuntimeModel[]): RuntimeModelListRequest {
   return {
     id: "req-1",
@@ -265,14 +283,62 @@ describe("ThinkingPropRow", () => {
     expect(onChange).toHaveBeenCalledWith("");
   });
 
-  it("still previews the Default model's levels for an empty non-codex model", async () => {
-    // Non-codex providers keep the existing behavior: an empty model previews
-    // the flagged Default entry's catalog. Only codex is fenced off, because
-    // only its empty-model resolution is config-driven and unknowable here.
+  it("still previews the Default model's levels for an empty model on other providers", async () => {
+    // Other providers keep the existing behavior: an empty model previews the
+    // flagged Default entry's catalog. Only codex and omp are fenced off,
+    // because only their empty-model resolution is unknowable here.
     renderRow({ provider: "claude", model: "", value: "" });
 
     await screen.findByText("Thinking");
     // CLAUDE_MODEL (Default) advertises Low/Medium/High — the picker shows them.
     expect((await screen.findAllByText("Follow CLI config")).length).toBeGreaterThan(0);
+  });
+
+  it("hides the picker for an empty omp model — no catalog entry is omp's real default (MUL-7412)", async () => {
+    // omp marks no Default and sorts by provider/id, so previewing any entry
+    // would offer levels the model omp actually resolves may silently clamp.
+    mockInitiateListModels.mockResolvedValue(listResult([OMP_MODEL]));
+    mockGetListModelsResult.mockResolvedValue(listResult([OMP_MODEL]));
+    renderRow({ provider: "omp", model: "", value: "" });
+
+    await waitFor(() => {
+      expect(mockInitiateListModels).toHaveBeenCalled();
+    });
+    // findByText, not queryByText: the catalog arrives asynchronously, so a
+    // synchronous "is it absent yet" check passes before the data could have
+    // rendered and would hold even if the row were about to appear. This waits
+    // the full timeout and fails if the row ever shows up.
+    await expect(screen.findByText("Thinking")).rejects.toThrow();
+    // None of the entry's levels leak into the picker.
+    expect(screen.queryByText("Max")).toBeNull();
+  });
+
+  it("previews the catalog for an omp model that is pinned", async () => {
+    // The pinned case is the whole point of the fix: the picker must appear.
+    mockInitiateListModels.mockResolvedValue(listResult([OMP_MODEL]));
+    mockGetListModelsResult.mockResolvedValue(listResult([OMP_MODEL]));
+    renderRow({ provider: "omp", model: "devin/swe-2", value: "" });
+
+    await screen.findByText("Thinking");
+    expect(
+      (await screen.findAllByText("Follow CLI config")).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("still surfaces a persisted level on an empty omp model so it can be cleared", async () => {
+    mockInitiateListModels.mockResolvedValue(listResult([OMP_MODEL]));
+    mockGetListModelsResult.mockResolvedValue(listResult([OMP_MODEL]));
+    const { onChange } = renderRow({
+      provider: "omp",
+      model: "",
+      value: "max",
+    });
+
+    await screen.findByText("Thinking");
+    expect(await screen.findByText("max")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button"));
+    const clearButton = await screen.findByTitle(/Clear the override/i);
+    fireEvent.click(clearButton);
+    expect(onChange).toHaveBeenCalledWith("");
   });
 });

@@ -8,8 +8,8 @@ import (
 
 // Synthetic boundary fixtures, not captured callbacks. The supported node
 // schema comes from https://open.dingtalk.com/document/orgapp/receive-message.
-// Its public contract does not describe repliedMsg, structured text aliases,
-// encoded richText arrays, or template-independent cardContent rendering.
+// Current-message nodes follow that schema. Reply snapshots additionally use
+// scoped aliases; encoded arrays and card templates stay unsupported.
 func TestInboundRichTextContractKeepsSupportedNeighbors(t *testing.T) {
 	for _, node := range []string{
 		`{"text":{"content":"/clear hidden"}}`,

@@ -22,7 +22,7 @@
   },
   "status_catalog_error": {
     "title": "状态列表加载失败",
-    "hint": "没有它就无法应用状态筛选，因此暂时不显示任务。",
+    "hint": "加载状态后才能显示任务。",
     "retry": "重试"
   },
   "source_context": {
@@ -99,7 +99,6 @@
     "breadcrumb_title": "任务",
     "breadcrumb_workspace_fallback": "工作区",
     "empty_title": "还没有任务",
-    "empty_hint": "创建一个任务开始使用。",
     "move_failed": "移动任务失败"
   },
   "status": {
@@ -110,6 +109,12 @@
     "done": "已完成",
     "blocked": "已阻塞",
     "cancelled": "已取消"
+  },
+  "status_category": {
+    "unstarted": "未开始",
+    "started": "已开始",
+    "done": "已完成",
+    "closed": "已关闭"
   },
   "priority": {
     "urgent": "紧急",
@@ -313,12 +318,10 @@
     },
     "empty": {
       "assigned": {
-        "title": "没有已分配的任务",
-        "description": "分配到这里的任务会显示在此视图中。"
+        "title": "没有已分配的任务"
       },
       "created": {
-        "title": "没有已创建的任务",
-        "description": "由这里创建的任务会显示在此视图中。"
+        "title": "没有已创建的任务"
       }
     },
     "search_placeholder": "搜索任务...",
@@ -379,7 +382,6 @@
     "quick_action_blocked_body": "\"{{name}}\"由一个你无权触发的智能体执行。可以请工作区管理员把该智能体开放给团队，或把这条操作改绑一个共享的智能体。",
     "quick_action_blocked_ok": "知道了",
     "pull_requests_loading": "加载中...",
-    "pull_requests_empty": "还没有关联的 PR。把本任务的 identifier 写进 PR 的分支名或标题，或者在正文里写在 Closes 后面，即可自动关联。",
     "pull_request_state_open": "Open",
     "pull_request_state_draft": "Draft",
     "pull_request_state_merged": "Merged",
@@ -450,7 +452,8 @@
     "workdir_path_copy_failed": "复制本地 workdir 路径失败",
     "workdir_path_unavailable": "暂无本地 workdir — 这个任务还没被本地智能体运行过",
     "unsubscribe_subtree_succeeded": "已取消订阅此任务及其子任务。",
-    "subscription_update_failed": "无法更新订阅状态，请重试。"
+    "subscription_update_failed": "无法更新订阅状态，请重试。",
+    "pull_requests_empty_title": "暂无关联 PR。"
   },
   "timeline": {
     "loading": "加载中…"
@@ -489,6 +492,8 @@
     "delete_title": "删除评论",
     "delete_desc": "这条评论会被永久删除，无法撤销。",
     "delete_desc_with_replies": "这条评论及其全部回复会被永久删除，无法撤销。",
+    "delete_desc_replies_kept": "这条评论会被永久删除，它的回复会保留在讨论中，无法撤销。",
+    "deleted_placeholder": "评论已删除",
     "delete_action": "删除",
     "cancel_action": "取消",
     "edit_placeholder": "编辑评论...",
@@ -507,12 +512,14 @@
     "trigger_blocked_target_unavailable": "该目标不可用",
     "trigger_blocked_runtime_offline": "该目标的运行时已离线",
     "trigger_blocked_runtime_unusable": "该目标的 CLI 在它所在的机器上无法运行 —— 需要在那台机器上重装",
+    "trigger_blocked_runtime_profile_missing": "该目标的 CLI 在它所在的机器上缺少运行时 profile —— 需要在那台机器上安装",
     "trigger_blocked_agent_runtime_required": "该目标未绑定运行时——绑定后才能运行",
     "trigger_blocked_generic": "该目标不会被触发",
     "trigger_blocked_short_invocation_not_allowed": "找不到或无权限",
     "trigger_blocked_short_target_unavailable": "不可用",
     "trigger_blocked_short_runtime_offline": "运行时离线",
     "trigger_blocked_short_runtime_unusable": "CLI 无法运行",
+    "trigger_blocked_short_runtime_profile_missing": "缺少运行时 profile",
     "trigger_blocked_short_agent_runtime_required": "需绑定运行时",
     "trigger_blocked_short_generic": "不会触发",
     "send_reply_failed": "发送回复失败",
@@ -554,7 +561,25 @@
     }
   },
   "reply": {
-    "placeholder": "回复..."
+    "placeholder": "回复...",
+    "annotations": {
+      "confirm_add": "添加批注",
+      "save": "保存批注",
+      "add_comment": "加入评论",
+      "add": "加入回复",
+      "note_label": "批注",
+      "count_other": "{{count}} 条批注",
+      "quote_limit": "每次最多选择 {{count}} 个字符。",
+      "count_limit": "一条评论最多包含 {{count}} 条批注。",
+      "remove": "移除第 {{number}} 条批注",
+      "source_changed": "原文已更改或不可用，已保留你保存的引用。",
+      "intent_hint": "请填写至少一条批注意见或评论正文后再发送。",
+      "target_deleted": "回复目标已删除。请移除此草稿中的全部批注，再选择仍存在的评论文字重新添加批注。",
+      "selection_failed": "未能获取选中文字。请在同一条评论或任务描述内重新选择后再试。",
+      "source_label": "{{name}} 的评论",
+      "edit": "编辑批注 {{number}}",
+      "note_placeholder": "添加意见..."
+    }
   },
   "agent_activity": {
     "hover_header_other": "{{count}} 个智能体工作中",
@@ -572,7 +597,6 @@
   },
   "filtered_empty": {
     "title": "没有符合筛选条件的任务",
-    "hint": "调整或清除筛选条件，就能看到这个视图里的任务。",
     "clear_button": "清除筛选"
   },
   "agent_live": {

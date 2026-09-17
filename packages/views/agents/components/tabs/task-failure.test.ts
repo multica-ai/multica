@@ -4,6 +4,7 @@ import { createI18n } from "@multica/core/i18n/react";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { describe, expect, it } from "vitest";
 import enAgents from "../../../locales/en/agents.json";
+import frAgents from "../../../locales/fr/agents.json";
 import jaAgents from "../../../locales/ja/agents.json";
 import koAgents from "../../../locales/ko/agents.json";
 import zhHansAgents from "../../../locales/zh-Hans/agents.json";
@@ -20,6 +21,7 @@ const AGENT_RESOURCES = {
   "zh-Hans": zhHansAgents,
   ja: jaAgents,
   ko: koAgents,
+  fr: frAgents,
 } as const;
 
 function fixedT(locale: SupportedLocale): TFunction<"agents"> {
@@ -105,6 +107,7 @@ describe("cancelReasonLabel", () => {
       "zh-Hans": "已由系统取消",
       ja: "システムによってキャンセルされました",
       ko: "시스템에서 취소함",
+      fr: "Annulée par le système",
     };
 
     for (const locale of Object.keys(expected) as SupportedLocale[]) {

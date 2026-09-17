@@ -352,7 +352,14 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 		group.primary != nil &&
 		group.primary.kind == "parent" &&
 		group.secondaryFiltered {
-		visibleRef := addArg(group.secondaryValues)
+		visibleKeys := group.secondaryValues
+		if group.secondaryCategory {
+			visibleKeys = nil
+			for _, category := range group.secondaryValues {
+				visibleKeys = append(visibleKeys, group.categoryKeysFor(category)...)
+			}
+		}
+		visibleRef := addArg(visibleKeys)
 		ctePrefix += fmt.Sprintf(`membership AS NOT MATERIALIZED (
   SELECT i.*
   FROM issue i

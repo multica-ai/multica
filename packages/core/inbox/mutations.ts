@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import { inboxKeys } from "./queries";
+import { inboxKeys, mapArchivedInboxCache, patchArchivedInboxCaches, type ArchivedInboxCache } from "./queries";
 import { onInboxInvalidate, onInboxSummaryInvalidate } from "./ws-updaters";
 import { useWorkspaceId } from "../hooks";
 import type { InboxItem } from "../types";
@@ -50,19 +50,18 @@ export function useMarkInboxRead() {
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: inboxKeys.all(wsId) });
       const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
-      const prevArchived = qc.getQueryData<InboxItem[]>(inboxKeys.archived(wsId));
       const markRead = (old: InboxItem[] | undefined) =>
         old?.map((item) => (item.id === id ? { ...item, read: true } : item));
       qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), markRead);
       // Opening a notification from the archived sub-view marks it read too —
       // patch that cache as well, or its unread dot would sit there until the
       // next refetch.
-      qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), markRead);
+      const prevArchived = patchArchivedInboxCaches(qc, wsId, (items) => markRead(items) ?? items);
       return { prev, prevArchived };
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
-      if (ctx?.prevArchived) qc.setQueryData(inboxKeys.archived(wsId), ctx.prevArchived);
+      for (const [key, data] of ctx?.prevArchived ?? []) qc.setQueryData(key, data);
     },
     onSettled: () => {
       refreshInboxAfterWrite(qc, wsId);
@@ -100,16 +99,15 @@ export function useMarkInboxUnread() {
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: inboxKeys.all(wsId) });
       const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
-      const prevArchived = qc.getQueryData<InboxItem[]>(inboxKeys.archived(wsId));
       const markUnread = (old: InboxItem[] | undefined) =>
         old?.map((item) => (item.id === id ? { ...item, read: false } : item));
       qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), markUnread);
-      qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), markUnread);
+      const prevArchived = patchArchivedInboxCaches(qc, wsId, (items) => markUnread(items) ?? items);
       return { prev, prevArchived };
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
-      if (ctx?.prevArchived) qc.setQueryData(inboxKeys.archived(wsId), ctx.prevArchived);
+      for (const [key, data] of ctx?.prevArchived ?? []) qc.setQueryData(key, data);
     },
     onSettled: () => {
       // The switcher dot must light again when the workspace goes back to
@@ -166,23 +164,20 @@ export function useUnarchiveInbox() {
     mutationFn: (id: string) => api.unarchiveInbox(id),
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: inboxKeys.archived(wsId) });
-      const prev = qc.getQueryData<InboxItem[]>(inboxKeys.archived(wsId));
-      // Restore every sibling for the same issue — the server unarchives the
-      // whole issue group, so the optimistic patch must too or the rest of the
-      // group would linger in the archived list until the refetch lands.
-      const target = prev?.find((i) => i.id === id);
-      const issueId = target?.issue_id;
-      qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), (old) =>
-        old?.map((item) =>
-          item.id === id || (issueId && item.issue_id === issueId)
-            ? { ...item, archived: false }
-            : item,
-        ),
-      );
+      // Resolve the group once across every page and deep-link cache.
+      let issueId: string | null | undefined;
+      for (const [, data] of qc.getQueriesData<ArchivedInboxCache>({ queryKey: inboxKeys.archived(wsId) })) {
+        if (data) mapArchivedInboxCache(data, (items) => {
+          issueId ??= items.find((item) => item.id === id)?.issue_id;
+          return items;
+        });
+      }
+      const prev = patchArchivedInboxCaches(qc, wsId, (items) => items.map((item) =>
+        item.id === id || (issueId && item.issue_id === issueId) ? { ...item, archived: false } : item));
       return { prev };
     },
     onError: (_err, _id, ctx) => {
-      if (ctx?.prev) qc.setQueryData(inboxKeys.archived(wsId), ctx.prev);
+      for (const [key, data] of ctx?.prev ?? []) qc.setQueryData(key, data);
     },
     onSettled: () => {
       // Both lists: the item moves from one to the other, and the unread badge

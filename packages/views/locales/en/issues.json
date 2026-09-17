@@ -23,7 +23,7 @@
   },
   "status_catalog_error": {
     "title": "Couldn't load the status list",
-    "hint": "Issues are hidden until it loads, because a status filter can't be applied without it.",
+    "hint": "Issues can't be shown until statuses load.",
     "retry": "Try again"
   },
   "source_context": {
@@ -101,7 +101,6 @@
     "breadcrumb_title": "Issues",
     "breadcrumb_workspace_fallback": "Workspace",
     "empty_title": "No issues yet",
-    "empty_hint": "Create an issue to get started.",
     "move_failed": "Failed to move issue"
   },
   "status": {
@@ -112,6 +111,12 @@
     "done": "Done",
     "blocked": "Blocked",
     "cancelled": "Cancelled"
+  },
+  "status_category": {
+    "unstarted": "Unstarted",
+    "started": "Started",
+    "done": "Done",
+    "closed": "Closed"
   },
   "priority": {
     "urgent": "Urgent",
@@ -317,12 +322,10 @@
     },
     "empty": {
       "assigned": {
-        "title": "No assigned issues",
-        "description": "Issues assigned here will appear in this view."
+        "title": "No assigned issues"
       },
       "created": {
-        "title": "No created issues",
-        "description": "Issues created here will appear in this view."
+        "title": "No created issues"
       }
     },
     "search_placeholder": "Search issues...",
@@ -383,7 +386,6 @@
     "quick_action_blocked_body": "“{{name}}” runs as an agent you’re not allowed to trigger. Ask a workspace admin to make that agent available to the team, or to point this action at a shared one.",
     "quick_action_blocked_ok": "Got it",
     "pull_requests_loading": "Loading…",
-    "pull_requests_empty": "No linked pull requests yet. Put this issue's identifier in a PR's branch name or title, or write it after Closes in the PR body, to auto-link it.",
     "pull_request_state_open": "Open",
     "pull_request_state_draft": "Draft",
     "pull_request_state_merged": "Merged",
@@ -455,7 +457,8 @@
     "project_directory_path_copied": "Project directory path copied",
     "project_directory_path_copied_with_branch": "Project directory path copied — work is on {{branch}}",
     "workdir_path_copy_failed": "Failed to copy workdir path",
-    "workdir_path_unavailable": "No local workdir yet — issue has not been run by a local agent"
+    "workdir_path_unavailable": "No local workdir yet — issue has not been run by a local agent",
+    "pull_requests_empty_title": "No linked pull requests."
   },
   "timeline": {
     "loading": "Loading..."
@@ -498,6 +501,8 @@
     "delete_title": "Delete comment",
     "delete_desc": "This comment will be permanently deleted. This cannot be undone.",
     "delete_desc_with_replies": "This comment and all its replies will be permanently deleted. This cannot be undone.",
+    "delete_desc_replies_kept": "This comment will be permanently deleted. Its replies stay in the thread. This cannot be undone.",
+    "deleted_placeholder": "This comment was deleted",
     "delete_action": "Delete",
     "cancel_action": "Cancel",
     "edit_placeholder": "Edit comment...",
@@ -517,12 +522,14 @@
     "trigger_blocked_target_unavailable": "This target is unavailable",
     "trigger_blocked_runtime_offline": "This target's runtime is offline",
     "trigger_blocked_runtime_unusable": "This target's agent CLI can't run on its machine — reinstall it there",
+    "trigger_blocked_runtime_profile_missing": "This target's agent CLI is missing a runtime profile on its machine — install it there",
     "trigger_blocked_agent_runtime_required": "This target has no runtime — bind one to run it",
     "trigger_blocked_generic": "This target won't be triggered",
     "trigger_blocked_short_invocation_not_allowed": "Not found or no permission",
     "trigger_blocked_short_target_unavailable": "Unavailable",
     "trigger_blocked_short_runtime_offline": "Runtime offline",
     "trigger_blocked_short_runtime_unusable": "CLI can't run",
+    "trigger_blocked_short_runtime_profile_missing": "Runtime profile missing",
     "trigger_blocked_short_agent_runtime_required": "Needs a runtime",
     "trigger_blocked_short_generic": "Won't start",
     "send_reply_failed": "Failed to send reply",
@@ -569,7 +576,26 @@
     }
   },
   "reply": {
-    "placeholder": "Leave a reply..."
+    "placeholder": "Leave a reply...",
+    "annotations": {
+      "confirm_add": "Add annotation",
+      "save": "Save annotation",
+      "add_comment": "Add to comment",
+      "add": "Add to reply",
+      "note_label": "Comment",
+      "count_one": "{{count}} annotation",
+      "count_other": "{{count}} annotations",
+      "quote_limit": "Select up to {{count}} characters at a time.",
+      "count_limit": "A comment can contain up to {{count}} annotations.",
+      "remove": "Remove annotation {{number}}",
+      "source_changed": "The source changed or is unavailable. Your saved quote is kept.",
+      "intent_hint": "Add a note to an annotation or write a message before sending.",
+      "target_deleted": "The reply target was deleted. Remove all annotations in this draft, then annotate a remaining comment to start a new reply.",
+      "selection_failed": "Could not capture the selection. Select text within one comment or description and try again.",
+      "source_label": "Comment by {{name}}",
+      "edit": "Edit annotation {{number}}",
+      "note_placeholder": "Add a comment…"
+    }
   },
   "agent_activity": {
     "hover_header_one": "{{count}} active agent",
@@ -593,7 +619,6 @@
   },
   "filtered_empty": {
     "title": "No issues match these filters",
-    "hint": "Adjust or clear the filters to see the issues in this view.",
     "clear_button": "Clear filters"
   },
   "agent_live": {

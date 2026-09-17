@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ var issuePropertiesBigramMigrations = []string{
 //
 // 447 is not gated, so its statistics refresh must land in both environments.
 func TestIssuePropertiesBigramIndexBuildsOnlyWherePGBigmExists(t *testing.T) {
+	t.Parallel()
 	adminPool := openTestPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
@@ -121,6 +123,7 @@ func TestIssuePropertiesBigramIndexBuildsOnlyWherePGBigmExists(t *testing.T) {
 // index, and it takes a production-sized table for the same error to flip to a
 // sequential scan.
 func TestIssuePropertiesBigramIndexNeedsAnalyzeForItsExpression(t *testing.T) {
+	t.Parallel()
 	adminPool := openTestPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
@@ -261,13 +264,12 @@ func reversed(versions []string) []string {
 // every gated migration forever, and one that answered true for an absent
 // opclass would abort the run it exists to protect.
 func TestOperatorClassAvailabilityFailsClosed(t *testing.T) {
+	t.Parallel()
 	adminPool := openTestPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if _, err := adminPool.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_trgm"); err != nil {
-		t.Fatalf("install pg_trgm test dependency: %v", err)
-	}
+	createTestExtension(t, ctx, adminPool, "pg_trgm")
 	pgBigmUsable := installExtensionIfAvailable(t, ctx, adminPool, "pg_bigm")
 
 	conn, err := adminPool.Acquire(ctx)
@@ -328,10 +330,24 @@ func installExtensionIfAvailable(t *testing.T, ctx context.Context, pool *pgxpoo
 		t.Logf("%s is not provided by this Postgres; asserting the skipped path", name)
 		return false
 	}
+	createTestExtension(t, ctx, pool, name)
+	return true
+}
+
+// extensionMu serializes CREATE EXTENSION across this package's parallel tests.
+// Two sessions running CREATE EXTENSION IF NOT EXISTS for an extension that is
+// not installed yet can both pass the existence check, and the second then
+// fails on pg_extension's unique index instead of finding it installed.
+var extensionMu sync.Mutex
+
+// createTestExtension installs name unless it is installed already.
+func createTestExtension(t *testing.T, ctx context.Context, pool *pgxpool.Pool, name string) {
+	t.Helper()
+	extensionMu.Lock()
+	defer extensionMu.Unlock()
 	if _, err := pool.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS "+pgx.Identifier{name}.Sanitize()); err != nil {
 		t.Fatalf("install %s test dependency: %v", name, err)
 	}
-	return true
 }
 
 // createScratchSchema gives a migration test its own namespace so the real

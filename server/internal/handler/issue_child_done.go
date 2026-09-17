@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -105,8 +106,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 			"parent_id", uuidToString(issue.ParentIssueID))
 		return
 	}
-	// Custom statuses inherit the canonical status they name, so a custom
-	// terminal status closes this out and a custom backlog status parks it,
+	// Custom terminal statuses close this out. Only the fixed backlog key parks it,
 	// exactly like Done/Cancelled and Backlog do. (MUL-6243)
 	parentStatus, err := effective(parent)
 	if err != nil {
@@ -442,7 +442,7 @@ func (h *Handler) childStatusResolver(ctx context.Context) func(db.Issue) (strin
 		if err := resolver.Err(); err != nil {
 			return "", err
 		}
-		if !issuestatus.IsCategory(status) {
+		if !issuestatus.IsCategory(resolver.Category(ctx, h.issueStatusCatalog(), c.Status)) {
 			return "", fmt.Errorf("unresolved status %q in workspace %s", c.Status, uuidToString(c.WorkspaceID))
 		}
 		return status, nil
@@ -756,7 +756,7 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, tr
 		return
 	}
 
-	if _, err := h.TaskService.EnqueueTaskForMention(ctx, parent, parent.AssigneeID, triggerCommentID); err != nil {
+	if _, err := h.TaskService.EnqueueTaskForMention(ctx, parent, parent.AssigneeID, triggerCommentID, service.OriginDerived); err != nil {
 		slog.Warn("child done: enqueue parent agent task failed",
 			"error", err,
 			"parent_id", uuidToString(parent.ID),
@@ -813,7 +813,7 @@ func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, tr
 		return
 	}
 
-	if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, parent, squad.LeaderID, squad.ID, triggerCommentID); err != nil {
+	if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, parent, squad.LeaderID, squad.ID, triggerCommentID, service.OriginDerived); err != nil {
 		slog.Warn("child done: enqueue parent squad leader task failed",
 			"error", err,
 			"parent_id", uuidToString(parent.ID),

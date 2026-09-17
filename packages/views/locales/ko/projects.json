@@ -74,7 +74,7 @@
     "description_placeholder": "설명 추가...",
     "description_hint": "이 프로젝트의 모든 실행에서 컨텍스트로 에이전트에게 공유됩니다.",
     "empty_issues_title": "연결된 태스크가 없습니다",
-    "empty_issues_hint": "새 태스크를 만들거나 기존 태스크를 이 프로젝트에 할당하세요.",
+    "empty_issues_hint": "기존 태스크를 이 프로젝트에 추가할 수도 있습니다.",
     "empty_issues_new_button": "새 태스크",
     "no_issues_yet": "아직 태스크가 없습니다",
     "toast_link_copied": "링크를 복사했습니다",

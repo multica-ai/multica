@@ -42,7 +42,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `PORT` | `8080` | API のリッスンポート |
 | `JWT_SECRET` | 本番環境で必須 | ログイン JWT と一部の署名フローに使うシークレット。本番では空または既知のプレースホルダーだと起動を拒否 |
 | `APP_ENV` | 空 | プロダクションでは `production` を設定 |
-| `AUTH_TOKEN_TTL` | `720h`（30 日） | ブラウザ JWT と cookie の有効期間。Go duration または正の整数秒を受け付けます |
+| `AUTH_TOKEN_TTL` | `720h`（30 日） | ブラウザ JWT と cookie の有効期間。Go duration または正の整数秒を受け付けます。セッションは有効期間の半分を過ぎるとスライド更新され、使い続けている限り失効しません。`60s` 未満は `60s` に補正されます |
 | `LOG_LEVEL` | アプリのデフォルト | ログレベル |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 終了シグナル受信後、グレースフルシャットダウンを開始するまでの待機時間 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | オフラインのランタイムが処理中の作業を失敗させずに再接続できる猶予時間。`150s` 未満は `150s` に補正されます |
@@ -250,7 +250,7 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 
 デーモンがエージェント作業に注入する内部コンテキストについては、[作業ランタイム環境](/daemon-runtimes#作業ランタイム環境)を参照してください。
 
-各 AI コーディングツールは `MULTICA_<PROVIDER>_PATH` でコマンドパスを上書きでき、モデル上書き対応ツールでは `MULTICA_<PROVIDER>_MODEL` も利用できます。QwenPaw と MiniMax Code にはモデル変数がなく、MiniMax Code のパス変数は `MULTICA_MCODE_PATH` です。詳しくは [AI コーディングツール比較](/providers#モデルの取得元) を参照してください。DeepSeek Harness は `MULTICA_DSH_PATH` と `MULTICA_DSH_MODEL` に対応しています（値は dsh のモデルカタログにあるモデル ID、例: `deepseek-official/deepseek-chat`）。ZeroClaw は `MULTICA_ZEROCLAW_PATH` に対応しますが、モデル変数はありません。モデルは ZeroClaw のエージェント設定で管理します。マシン全体のデフォルト引数 `MULTICA_<PROVIDER>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code、QwenPaw の 5 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_QWENPAW_ARGS` です。例:
+各 AI コーディングツールは `MULTICA_<PROVIDER>_PATH` でコマンドパスを上書きでき、モデル上書き対応ツールでは `MULTICA_<PROVIDER>_MODEL` も利用できます。QwenPaw と MiniMax Code にはモデル変数がなく、MiniMax Code のパス変数は `MULTICA_MCODE_PATH` です。詳しくは [AI コーディングツール比較](/providers#モデルの取得元) を参照してください。DeepSeek Harness は `MULTICA_DSH_PATH` と `MULTICA_DSH_MODEL` に対応しています（値は dsh のモデルカタログにあるモデル ID、例: `deepseek-official/deepseek-chat`）。 DeepSeek Harness はさらに `MULTICA_DSH_PROFILE_BUNDLE` に対応しています。`multica` プロファイルが存在しない場合にインストールするバンドルを指定するもので、カンマ区切りで複数の候補を順に試します。各項目は npm のパッケージ名、ディレクトリ、またはパック済み tarball です。既定では未設定です。Multica が利用する `--stdio` プロトコルはこのプロファイルが提供するため、未設定の場合は DSH のインストールには手を加えず、デーモンは使用できないランタイムを登録する代わりにプロファイルの欠落を報告します。Multica 自身のブリッジはまだ公開 npm レジストリにないため、値の選び方は[エージェントランタイムのインストール](/install-agent-runtime)を参照してください。ここに設定した値は追加の確認なしに各デーモンホストの DSH ホームへインストールされるので、サプライチェーンの判断として扱ってください。`MULTICA_DSH_PROFILE_BUNDLE` が有効にするインストールは範囲を意図的に限定しています。実行はデーモンのライフタイムにつき最大 1 回、プローブがプロファイルの不在を確認できた場合のみです。失敗時はパッケージマネージャー自身の出力をログに記録し、再試行はデーモンの再起動後のみ行います。プローブがタイムアウトした場合や、このデーモンが扱わないプロトコルバージョンを返した場合は報告のみで、上書きインストールは行いません。意図して用意されたプロファイルをデーモンが上書きすることはありません。調査はデーモンログで `DSH runtime profile` を検索してください。取り消す場合は `$DSH_HOME/profiles/multica`（既定は `~/.dsh/profiles/multica`）を削除します。`MULTICA_DSH_PLUGIN_PATH` はインストール時に pnpm を解決するディレクトリを上書きします。`dsh plugin` が転送する pnpm は macOS でも Windows でも DSH Desktop 独自の runtime-commands ディレクトリに置かれており、デーモンはそれを自動で見つけて PATH の先頭に追加します（新しい Desktop が使うバージョン付きの構成も含みます）。したがってこの変数が必要なのは、デーモンが見つけられない場所にインストールされている場合か、独自の pnpm を使わせたい場合だけです。設定すると自動探索は完全に置き換わり、指定したディレクトリが存在しなければ、インストールは同梱の pnpm ではなくデーモンの `PATH` 上の pnpm にフォールバックします。Linux には DSH Desktop がないため、常に `PATH` が使われます。ZeroClaw は `MULTICA_ZEROCLAW_PATH` に対応しますが、モデル変数はありません。モデルは ZeroClaw のエージェント設定で管理します。マシン全体のデフォルト引数 `MULTICA_<PROVIDER>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code、QwenPaw の 5 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_QWENPAW_ARGS` です。例:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
@@ -304,11 +304,16 @@ multica config show
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
+| `DO_NOT_TRACK` | 空（テレメトリー有効） | `1` または `true`（大文字小文字を区別しない）で、ファーストパーティの匿名セルフホストテレメトリーの収集と送信を停止 |
 | `ANALYTICS_DISABLED` | `false` | `true` で PostHog への送信を無効化 |
 | `POSTHOG_API_KEY` | 空 | 未設定の場合は分析送信が無効。自前の PostHog プロジェクトを使う場合に設定 |
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog アドレス |
 | `METRICS_ADDR` | 空 | Prometheus metrics のリッスンアドレス。空なら起動しません |
 | `REALTIME_METRICS_TOKEN` | 空 | `/health/realtime` を保護する bearer token |
+
+ファーストパーティのセルフホストテレメトリーは、UTC 日ごとにデプロイ単位のスナップショットを、固定かつ設定変更不可の `https://telemetry.multica.ai/v1/telemetry/events` へ送信します。正式リリース版、ワークスペース数・重複を除いたメンバー数・アクティブなエージェント数・過去 24 時間のアクティブなデーモン数のバケット、および過去 24 時間に開始・完了・失敗・キャンセルされた実行の集計値だけを含みます。名前、メールアドレスやドメイン、IP、業務 ID、ホストやデバイス情報、リポジトリ、モデルや plugin、prompt/output、コメントやチャット、ファイルパス、token/費用、認証情報、エラー、stack、ログは送信しません。このデータはセルフホスト版の採用状況、デプロイ規模、集計利用量の把握だけに使われ、課金、ライセンス、認証、セキュリティ判断には使われません。
+
+`DO_NOT_TRACK` と `ANALYTICS_DISABLED` は独立しています。前者はこの匿名スナップショットを、後者は任意の PostHog 連携を制御します。
 
 ## 次のステップ
 

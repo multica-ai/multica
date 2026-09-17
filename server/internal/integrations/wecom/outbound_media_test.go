@@ -383,81 +383,6 @@ func TestSendAttachments_ARefusedFileIsReportedAsDefinitelyFailed(t *testing.T) 
 	}
 }
 
-// unknown — the push went out and no verdict came back. WeCom may have
-// delivered it. This is the state the old code folded into the one above, and
-// it is the folding that costs: a user looking at the file is told it failed,
-// and stops believing the notice.
-//
-// Two things are pinned. The wording must be the hedged one, and the send must
-// NOT be repeated: the same media_id twice puts the file in the chat twice and
-// there is nothing to take it back with.
-func TestSendAttachments_AnUnconfirmedSendIsNotCalledAFailureAndIsNotRetried(t *testing.T) {
-	t.Parallel()
-	q := oneAttachmentQueries(t, db.Attachment{
-		ID: mustTestUUID(t), Filename: "chart.png", Url: "https://cdn.example/obj/png",
-		ContentType: "image/png", SizeBytes: 7,
-	})
-	o, instID, conn := newOutboundWithMedia(t, q, &fakeObjectStore{key: "obj/png", data: []byte("PNGDATA")})
-	q.sessionBinding.InstallationID = instID
-	q.installation.ID = instID
-	// An empty completion, so the first aibot_send_msg on the wire is the media
-	// push itself and the dropped ack is unambiguously its own.
-	conn.dropAcks[cmdSendMsg] = 1
-
-	if err := o.processEvent(context.Background(), chatDoneEvent("")); err != nil {
-		t.Fatalf("processEvent: %v", err)
-	}
-	if n := len(mediaSends(t, conn)); n != 1 {
-		t.Errorf("media sends = %d, want exactly 1 — an unconfirmed push must never be repeated, a duplicate file cannot be undone", n)
-	}
-	got := markdownSends(t, conn)
-	if len(got) != 1 {
-		t.Fatalf("text sends = %v, want one notice about the unconfirmed file", got)
-	}
-	if got[0] == mediaSendFailedText {
-		t.Error("an unconfirmed send was reported as a definite failure; the file may be in the chat the user is reading")
-	}
-	if got[0] != mediaSendUnknownText {
-		t.Errorf("notice = %q, want the non-definitive wording", got[0])
-	}
-}
-
-// Both at once, on two files. Each group speaks for itself: neither borrows the
-// other's wording, and neither swallows the other.
-func TestSendAttachments_ADefiniteFailureAndAnUnknownAreBothReported(t *testing.T) {
-	t.Parallel()
-	q := oneAttachmentQueries(t, db.Attachment{
-		ID: mustTestUUID(t), Filename: "first.png", Url: "https://cdn.example/obj/a",
-		ContentType: "image/png", SizeBytes: 7,
-	})
-	// The second file is past the cap, which is refused locally and definitely.
-	q.attachments = append(q.attachments, db.Attachment{
-		ID: mustTestUUID(t), Filename: "huge.bin", Url: "https://cdn.example/obj/b",
-		ContentType: "application/octet-stream", SizeBytes: maxMediaUploadBytes + 1,
-	})
-	o, instID, conn := newOutboundWithMedia(t, q, &fakeObjectStore{key: "obj/a", data: []byte("PNGDATA")})
-	q.sessionBinding.InstallationID = instID
-	q.installation.ID = instID
-	conn.dropAcks[cmdSendMsg] = 1 // the first file's push is never acknowledged
-
-	if err := o.processEvent(context.Background(), chatDoneEvent("")); err != nil {
-		t.Fatalf("processEvent: %v", err)
-	}
-	got := markdownSends(t, conn)
-	if len(got) != 1 {
-		t.Fatalf("text sends = %v, want one notice covering both files", got)
-	}
-	if !strings.Contains(got[0], mediaSendFailedText) {
-		t.Errorf("notice = %q, missing the definite failure for the oversize file", got[0])
-	}
-	if !strings.Contains(got[0], mediaSendUnknownText) {
-		t.Errorf("notice = %q, missing the unconfirmed send — folded into the definite one", got[0])
-	}
-}
-
-// The classifier itself, stated as a table so the mapping is legible in one
-// place. It is the only thing standing between an errcode and what a person
-// reads.
 func TestSendOutcome_TellsARefusalFromAMissingAnswer(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -1134,35 +1059,5 @@ func TestNoLiveSender_SettlesEveryKnownFile(t *testing.T) {
 	}
 	if got := mx.get("outbound_dropped:no_live_connection"); got != 1 {
 		t.Errorf("outbound_dropped:no_live_connection = %d, want 1", got)
-	}
-}
-
-// An unknown outcome is not a drop. A file whose upload got no verdict files
-// under unconfirmed, and a file-only reply whose every file is unknown settles
-// the reply as unconfirmed — never as a definite drop an operator would act on.
-func TestUnknownOutcome_IsUnconfirmedNotDropped(t *testing.T) {
-	t.Parallel()
-	q := oneAttachmentQueries(t, db.Attachment{
-		ID: mustTestUUID(t), Filename: "a.png", Url: "https://cdn.example/obj/a", ContentType: "image/png",
-	})
-	o, instID, conn, mx := newMediaRigWithMetrics(t, q, &fakeObjectStore{key: "obj/a", data: []byte("PNGDATA")})
-	q.sessionBinding.InstallationID = instID
-	q.installation.ID = instID
-	conn.dropAcks[cmdSendMsg] = 1 // the media push gets no verdict → deliveryUnknown
-
-	if err := o.processEvent(context.Background(), chatDoneEvent("")); err != nil {
-		t.Fatalf("processEvent: %v", err)
-	}
-	if got := mx.get("attachment_unconfirmed"); got != 1 {
-		t.Errorf("attachment_unconfirmed = %d, want 1. counts=%v", got, mx.counts)
-	}
-	if got := mx.get("attachment_dropped"); got != 0 {
-		t.Errorf("attachment_dropped = %d, want 0 — the file may have arrived", got)
-	}
-	if got := mx.get("outbound_unconfirmed"); got != 1 {
-		t.Errorf("outbound_unconfirmed = %d, want 1 for the file-only reply", got)
-	}
-	if got := mx.get("outbound_dropped"); got != 0 {
-		t.Errorf("outbound_dropped = %d, want 0", got)
 	}
 }

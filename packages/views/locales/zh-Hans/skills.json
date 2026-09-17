@@ -25,7 +25,7 @@
     },
     "empty": {
       "title": "还没有 skill",
-      "description": "创建第一个 skill、从 URL 或本地文件夹导入、或从已连接的运行时复制——之后工作区里每个智能体都能用它。"
+      "description": "创建或导入一个 skill。"
     },
     "no_matches": {
       "title": "无匹配",
@@ -93,7 +93,6 @@
     "update_updating": "更新中 {{done}}/{{total}}...",
     "updated_toast_other": "已从来源更新 {{count}} 个 skill",
     "update_partial_toast": "已更新 {{count}} 个，{{failed}} 个失败",
-    "add_dialog_description": "选择要获得所选 skill 的智能体。",
     "cancel": "取消",
     "add_confirm": "添加（{{num}}）",
     "adding": "添加中...",
@@ -105,6 +104,10 @@
     "filter_active_count_other": "{{count}} 项筛选",
     "clear_filters": "清除筛选",
     "section_usage": "使用状态",
+    "section_labels": "标签",
+    "filter_search_placeholder": "筛选...",
+    "no_labels": "还没有标签",
+    "no_results": "无结果",
     "display": "显示",
     "sort_by": "排序",
     "direction_asc": "升序",
@@ -205,13 +208,15 @@
       "properties_hint": "这些字段与 SKILL.md 的 frontmatter 保持同步。",
       "name": "名称",
       "description": "描述",
-      "description_hint": "{{count}} 个字符。智能体根据这段文字判断是否加载该技能。",
+      "description_hint": "智能体据此决定何时加载 skill。",
       "labels": "标签",
       "used_by_other": "被 {{count}} 个智能体使用",
       "used_by_empty": "还未分配给任何智能体。打开某个智能体的 Skills 标签页进行分配。",
       "permissions_owner": "你可以编辑和删除该技能。改动将在智能体下次运行时生效。",
       "permissions_locked_creator": "只有创建者（{{name}}）或工作区管理员可以编辑该技能。",
-      "permissions_locked": "只有创建者或工作区管理员可以编辑该技能。"
+      "permissions_locked": "只有创建者或工作区管理员可以编辑该技能。",
+      "properties_help": "关于 skill 属性",
+      "character_count": "{{count}} 个字符"
     },
     "files": {
       "list_aria": "技能文件",
@@ -306,9 +311,7 @@
     "load_failed": "加载本地 skill 失败",
     "not_supported": "这个 provider 暂不支持本地 skill 列表。",
     "no_skills_title": "未找到本地 skill",
-    "no_skills_hint": "这个运行时上还没有可发现的本地 skill。",
     "search_placeholder": "搜索本地 skill",
-    "no_search_results_title": "没有匹配的本地 skill",
     "no_search_results_hint": "没有本地 skill 匹配 \"{{query}}\"。",
     "ignored_files_hint": "导入时会忽略软链、不可读文件、超大文件以及超大目录。",
     "ready": "准备导入",

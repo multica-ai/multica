@@ -4,12 +4,30 @@ Product contracts the runtime brief does not fully encode.
 
 - [PR linking and close intent are two distinct contracts](#pr-linking-and-close-intent-are-two-distinct-contracts)
 - [Reading a linked PR's real state](#reading-a-linked-prs-real-state)
+- [Editing comments without overwriting concurrent work](#editing-comments-without-overwriting-concurrent-work)
 - [Custom properties: typed workflow state](#custom-properties-typed-workflow-state)
 - [Status changes have server side effects](#status-changes-have-server-side-effects)
 - [Claim ownership without duplicating a run](#claim-ownership-without-duplicating-a-run)
 - [Who else is running right now](#who-else-is-running-right-now)
 - [Sub-issues: todo starts work now, backlog parks it](#sub-issues-todo-starts-work-now-backlog-parks-it)
 - [Incorrect to correct](#incorrect-to-correct)
+
+## Editing comments without overwriting concurrent work
+
+Read the comment's current `revision`, then supply that positive value when
+updating its body. Agent-authored bodies must use `--content-file`.
+
+```bash
+multica issue comment list <issue-id> --output json
+multica issue comment update <comment-id> --content-file ./comment.md --expected-revision <revision>
+```
+
+If another editor changed the comment, the server rejects the stale revision.
+Read the latest body and reconcile the edits before retrying; do not simply
+advance the revision and overwrite the other edit. Authors can edit their own
+comments; workspace owners and admins can edit any comment. Existing attachments
+remain unchanged. Content edits have the same agent-trigger behavior as edits
+in the app, so do not use an update as a silent bookkeeping operation.
 
 ## PR linking and close intent are two distinct contracts
 
@@ -230,10 +248,21 @@ multica issue get <issue-id> --resolve-properties
 A status change is not cosmetic — the server enqueues or skips agent work based
 on it. These are the contracts, not advice.
 
-Read them as category rules: a custom status inherits its category's behavior in
-full. Two writes are literal-key exceptions, not category rules — the failed-task
-rollback below writes the literal `todo` key, and a merged PR with close intent
-writes the literal `done` key.
+The rules below name fixed built-in status keys, not category-wide behaviors.
+Custom statuses have only lifecycle semantics: unstarted, started, done
+(successful terminal), or closed (cancelled terminal). They do not inherit
+Backlog parking, In Review completion, Blocked failure, or In Progress recovery.
+Use the built-in key when its special behavior is needed. Built-in definitions
+cannot be edited or archived.
+
+Archive a custom status only after moving every issue off it, including
+completed/canceled issues. An occupied status returns HTTP 409 with code
+`issue_status_in_use` and `issue_count`; it remains active. Use Settings >
+View issues to inspect and move its issues, then retry. For terminal-status
+replacement, preserve the lifecycle meaning (`done` to `done`, `closed` to
+`closed`); do not reopen or cancel completed work just to retire a status.
+Archival does not move issues automatically. Historical issues on previously
+archived statuses remain readable via an explicit status filter.
 
 - **`backlog`** parks an agent-assigned issue: the assignee is set but no task
   fires. Moving `backlog → todo` (or any non-done/non-cancelled status) enqueues
@@ -371,10 +400,15 @@ multica issue children <parent-id>             # sub-issues grouped by stage
 multica issue status <stage-2-child-id> todo   # promote when its deps are met
 ```
 
-`issue children --output json` reports per-stage `done` counts. A custom status
-counts as done here when its category is `done` or `cancelled`, which is what
-`status_category` on each child carries. Read `status_category` rather than
-matching `status` against the built-in names.
+`issue children --output json` reports per-stage `done` counts, including custom
+statuses in terminal categories. When reading issue JSON, `status` is the exact
+key; `status_category` retains the seven-value API enum for installed clients:
+`backlog` / `todo` mean unstarted, `in_progress` / `in_review` / `blocked` mean
+started, `done` means successful terminal, and `cancelled` means cancelled
+terminal (the internal closed category). These values encode lifecycle, not
+built-in automation behavior. Check `status_category` for `done` / `cancelled`
+(or use the stage counts), not just the concrete `status` key, to recognize
+terminal children.
 
 Read each sub-issue's description before promoting and only promote items whose
 stated dependencies are met; if a description conflicts with the parent's

@@ -145,7 +145,7 @@ func TestRunRuntimeDeleteCascadeConfirmsActiveAgentSnapshot(t *testing.T) {
 			gotExpectedIDs = body.ExpectedActiveAgentIDs
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"status":          "ok",
-				"agents_unbound": 2,
+				"agents_unbound":  2,
 				"tasks_cancelled": 1,
 			})
 		default:
@@ -177,5 +177,59 @@ func TestRunRuntimeDeleteCascadeConfirmsActiveAgentSnapshot(t *testing.T) {
 	}
 	if got["id"] != "rt-1" || got["deleted"] != true || got["agents_unbound"] != float64(2) {
 		t.Fatalf("stdout = %#v, want cascade result", got)
+	}
+}
+
+// A profile-backed instance refusal is not something --cascade can retry past,
+// and the server already explains what to do instead. Wrapping it in
+// HTTPError.Error() used to print the whole JSON response at the user, burying
+// that guidance (GH #8456).
+func TestRunRuntimeDeleteProfileInstanceConflictShowsServerGuidance(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	const guidance = `cannot delete "MSI-S3TEST" on its own: it is registered from the custom runtime profile "Devin CLI (WSL)". It is offline, and Multica removes offline runtimes automatically after 7 days.`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code":                    "runtime_profile_instance_delete_unsupported",
+			"error":                   guidance,
+			"profile_name":            "Devin CLI (WSL)",
+			"auto_cleanup_after_days": 7,
+		})
+	}))
+	defer srv.Close()
+
+	err := runRuntimeDelete(newRuntimeDeleteTestCmd(srv.URL), []string{"rt-1"})
+	if err == nil {
+		t.Fatal("expected the profile-instance refusal to surface as an error")
+	}
+	if err.Error() != guidance {
+		t.Fatalf("error = %q, want the server's guidance verbatim", err.Error())
+	}
+	if strings.Contains(err.Error(), "auto_cleanup_after_days") {
+		t.Fatalf("raw JSON leaked into the user-facing error: %q", err.Error())
+	}
+}
+
+// A 409 with no readable sentence must still fall back to the wrapper rather
+// than surfacing an empty error.
+func TestRunRuntimeDeleteConflictWithoutMessageKeepsWrapper(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"code":"something_new"}`))
+	}))
+	defer srv.Close()
+
+	err := runRuntimeDelete(newRuntimeDeleteTestCmd(srv.URL), []string{"rt-1"})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "delete runtime:") {
+		t.Fatalf("error = %q, want the generic wrapper", err.Error())
 	}
 }

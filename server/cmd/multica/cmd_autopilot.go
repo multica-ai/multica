@@ -221,13 +221,14 @@ func runAutopilotList(cmd *cobra.Command, _ []string) error {
 	// NEXT_RUN is what distinguishes a scheduled autopilot from one with no
 	// trigger at all. The list payload has carried next_run_at all along, but
 	// the table dropped it, leaving the two indistinguishable here (MUL-6680).
-	headers := []string{"ID", "TITLE", "STATUS", "MODE", "ASSIGNEE", "NEXT_RUN", "LAST_RUN"}
+	headers := []string{"ID", "TITLE", "STATUS", "LAST_STATUS", "MODE", "ASSIGNEE", "NEXT_RUN", "LAST_RUN"}
 	rows := make([][]string, 0, len(resp.Autopilots))
 	for _, a := range resp.Autopilots {
 		rows = append(rows, []string{
 			displayID(strVal(a, "id"), fullID),
 			strVal(a, "title"),
 			strVal(a, "status"),
+			displayLastRunStatus(strVal(a, "last_run_status")),
 			strVal(a, "execution_mode"),
 			actors.agent(strVal(a, "assignee_id")),
 			relativeTimestamp(strVal(a, "next_run_at")),
@@ -236,6 +237,14 @@ func runAutopilotList(cmd *cobra.Command, _ []string) error {
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+func displayLastRunStatus(status string) string {
+	trimmed := strings.TrimSpace(status)
+	if trimmed == "" {
+		return "—"
+	}
+	return trimmed
 }
 
 func runAutopilotGet(cmd *cobra.Command, args []string) error {

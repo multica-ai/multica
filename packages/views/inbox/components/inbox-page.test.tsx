@@ -17,17 +17,31 @@ vi.mock("react-resizable-panels", () => ({
 // The page runs two queries — the active list and the archived one. They are
 // told apart by the queryKey their options carry, so each test can stock the
 // two lists independently.
-const listData: { active: InboxItem[]; archived: InboxItem[] } = {
+const listData: { active: InboxItem[]; archived: InboxItem[]; lookup?: InboxItem[] } = {
   active: [],
   archived: [],
 };
 
+const queryCalls: Array<{ queryKey: readonly unknown[]; enabled?: boolean }> = [];
+const lookupState = { isLoading: false, isError: false, refetch: vi.fn() };
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: (options: { queryKey: readonly unknown[] }) => ({
-    data: options.queryKey.includes("archived") ? listData.archived : listData.active,
+  useQuery: (options: { queryKey: readonly unknown[]; enabled?: boolean }) => {
+    queryCalls.push(options);
+    return ({
+    data: options.queryKey.includes("archived") ? { items: listData.lookup ?? listData.archived, hasMore: false, nextCursor: null } : listData.active,
     isLoading: false,
     isError: false,
-  }),
+    refetch: vi.fn(),
+    ...(options.queryKey.includes("lookup") ? lookupState : {}),
+  }); },
+  useInfiniteQuery: (options: { queryKey: readonly unknown[]; enabled?: boolean }) => {
+    queryCalls.push(options);
+    return ({
+    data: { pages: [{ items: listData.archived, hasMore: false, nextCursor: null }] },
+    isLoading: false, isError: false, hasNextPage: false,
+    isFetchingNextPage: false, isFetchNextPageError: false,
+    fetchNextPage: vi.fn(), refetch: vi.fn(),
+  }); },
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -55,7 +69,8 @@ vi.mock("@multica/core/issues/stores/draft-store", () => ({
 
 vi.mock("@multica/core/inbox/queries", () => ({
   inboxListOptions: () => ({ queryKey: ["inbox", "workspace-1", "list"] }),
-  archivedInboxListOptions: () => ({ queryKey: ["inbox", "workspace-1", "archived"] }),
+  archivedInboxPagesOptions: () => ({ queryKey: ["inbox", "workspace-1", "archived", "pages"] }),
+  archivedInboxLookupOptions: () => ({ queryKey: ["inbox", "workspace-1", "archived", "lookup"] }),
   deduplicateInboxItems: (items: InboxItem[]) => items.filter((i) => !i.archived),
   deduplicateArchivedInboxItems: (items: InboxItem[]) => items.filter((i) => i.archived),
   useInboxUnreadCount: () => 2,
@@ -256,6 +271,11 @@ function item(overrides: Partial<InboxItem> = {}): InboxItem {
 function reset() {
   listData.active = [];
   listData.archived = [];
+  listData.lookup = undefined;
+  lookupState.isLoading = false;
+  lookupState.isError = false;
+  lookupState.refetch.mockClear();
+  queryCalls.length = 0;
   searchParams = new URLSearchParams();
   replace.mockClear();
   markReadMutate.mockClear();
@@ -402,6 +422,79 @@ describe("InboxPage", () => {
     expect(screen.getByTestId("row")).toHaveTextContent("legacy-todo");
   });
 
+  it("only enables the current inbox view's list", () => {
+    reset();
+    const main = render(<InboxPage />);
+    expect(queryCalls.find((q) => q.queryKey.includes("list"))?.enabled).toBe(true);
+    expect(queryCalls.find((q) => q.queryKey.includes("pages"))?.enabled).toBe(false);
+    main.unmount();
+    reset();
+    searchParams = new URLSearchParams("view=archived");
+    render(<InboxPage />);
+    expect(queryCalls.find((q) => q.queryKey.includes("list"))?.enabled).toBe(false);
+    expect(queryCalls.find((q) => q.queryKey.includes("pages"))?.enabled).toBe(true);
+  });
+
+  it("opens a deep-linked archive group outside the loaded pages with its comment anchor", () => {
+    reset();
+    searchParams = new URLSearchParams("view=archived&issue=old-issue");
+    listData.archived = [item({ id: "recent", archived: true })];
+    listData.lookup = [item({ id: "older", issue_id: "old-issue", archived: true, details: { comment_id: "old-comment" } })];
+    render(<InboxPage />);
+    expect(replace).not.toHaveBeenCalled();
+    expect(issueDetailProps.at(-1)).toMatchObject({ issueId: "old-issue", highlightCommentId: "old-comment" });
+    expect(queryCalls.find((q) => q.queryKey.includes("lookup"))?.enabled).toBe(true);
+  });
+
+  describe.each([PHONE, DESKTOP])("archive deep links at width %s", (width) => {
+    function setupLookup() {
+      reset();
+      layout.width = width;
+      searchParams = new URLSearchParams("view=archived&issue=old-issue");
+      listData.archived = [item({ id: "recent", issue_id: "recent-issue", archived: true })];
+      listData.lookup = [];
+    }
+
+    it("keeps loaded rows visible while resolving the selection, then opens its detail", () => {
+      setupLookup();
+      lookupState.isLoading = true;
+      const { rerender } = render(<InboxPage />);
+      expect(screen.getByTestId("row")).toHaveTextContent("recent");
+      expect(replace).not.toHaveBeenCalled();
+      expect(issueDetailProps).toHaveLength(0);
+
+      lookupState.isLoading = false;
+      listData.lookup = [item({ id: "older", issue_id: "old-issue", archived: true })];
+      rerender(<InboxPage />);
+      expect(issueDetailProps.at(-1)).toMatchObject({ issueId: "old-issue" });
+      expect(replace).not.toHaveBeenCalled();
+    });
+
+    it("keeps the list usable on lookup failure and retries only the lookup", () => {
+      setupLookup();
+      lookupState.isError = true;
+      render(<InboxPage />);
+      expect(screen.getByTestId("row")).toHaveTextContent("recent");
+      expect(replace).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("alert").querySelector("button")!);
+      expect(lookupState.refetch).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByTestId("row"));
+      expect(issueDetailProps.at(-1)).toMatchObject({ issueId: "recent-issue" });
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+
+    it("only falls back to the issue after the lookup confirms the group is absent", () => {
+      setupLookup();
+      lookupState.isLoading = true;
+      const { rerender } = render(<InboxPage />);
+      expect(replace).not.toHaveBeenCalled();
+      lookupState.isLoading = false;
+      rerender(<InboxPage />);
+      expect(replace).toHaveBeenCalledWith("/acme/issues/old-issue");
+    });
+  });
+
   it("renders the archived list when the URL asks for it", () => {
     // ?view=archived is what makes a refresh, a back/forward step, or a mobile
     // detail-back land in the archive instead of the main inbox.
@@ -429,16 +522,13 @@ describe("InboxPage", () => {
     expect(archivedView.querySelector('[aria-haspopup="menu"]')).toBeNull();
   });
 
-  it("falls back to the main inbox when the archive drains", () => {
-    // Restoring the last archived item must not strand the user on an empty
-    // archive — same fallback chat's archived view has.
+  it("keeps the archive open when it is empty", () => {
     reset();
     searchParams = new URLSearchParams("view=archived");
     listData.archived = [];
-
     render(<InboxPage />);
-
-    expect(replace).toHaveBeenCalledWith("/acme/inbox");
+    expect(replace).not.toHaveBeenCalled();
+    expect(screen.getByTestId("list").dataset.view).toBe("archived");
   });
 
   it("replays the comment highlight when the already-open row is clicked again", () => {

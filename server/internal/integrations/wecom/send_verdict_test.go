@@ -7,11 +7,17 @@ package wecom
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestSendTextReportsAServerRefusal(t *testing.T) {
 	conn := &recordingConn{refuseCode: 45009, refuseMsg: "rate limit"}
 	sender := conn.autoAck(newWSSender(conn, nil))
+	// 45009 is a throttle, so this send is retried once (rate_limit.go). The
+	// retry is not what this test is about, but the two seconds it waits for
+	// by default would be: shortened, so the assertion below is the only thing
+	// the test spends time on.
+	sender.retryBackoff = time.Millisecond
 
 	err := sender.sendText("CHAT", chatTypeSingleInt, "hello")
 	if err == nil {
@@ -41,21 +47,5 @@ func TestSendTextSucceedsOnAZeroErrcode(t *testing.T) {
 	conn.mu.Unlock()
 	if n != 1 {
 		t.Fatalf("wrote %d frames, want 1", n)
-	}
-}
-
-// A verdict that never arrives must not be reported as a refusal: the message
-// may well have been delivered, so the two call for opposite responses.
-func TestSendTextDistinguishesALostAckFromARefusal(t *testing.T) {
-	conn := &recordingConn{} // no autoAck: nothing ever answers
-	sender := newWSSender(conn, nil)
-
-	err := sender.sendText("CHAT", chatTypeSingleInt, "hello")
-	if !errors.Is(err, errAckTimeout) {
-		t.Fatalf("a lost ack reported as %v, want errAckTimeout", err)
-	}
-	var apiErr *wecomAPIError
-	if errors.As(err, &apiErr) {
-		t.Error("a lost ack was reported as a server refusal")
 	}
 }

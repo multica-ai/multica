@@ -598,7 +598,10 @@ Pass `--to-id <uuid>` to assign by canonical UUID (mutually exclusive with `--to
 multica issue status <id> in_progress
 ```
 
-Valid statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`.
+Built-in statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`,
+`cancelled`. A workspace can define custom statuses on top of these; their keys are
+shown in **Settings → Issue Statuses**, and passing an unknown value returns the full
+list.
 
 ### Comments
 

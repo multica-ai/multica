@@ -1,4 +1,14 @@
-//go:build linux || darwin || windows
+//go:build linux || darwin
+
+// Windows is excluded deliberately, not by omission: this test was flaky there
+// and nowhere else. Over 40 main pushes it never failed on the ubuntu runner,
+// while the Windows arm failed twice in 43 -- once as `Access is denied.` and
+// once as `not an owned descendant`, both from the same capture call. Those are
+// two faces of one race: cursorWindowsProcessParents snapshots every PID->PPID
+// pair on the machine, Windows keeps a child's recorded PPID after the parent
+// exits, and the PID is then free to be reused, so the walk can reach a PID now
+// owned by someone else. Restoring `windows` here without fixing that race
+// restores the flake; MUL-7417 tracks the fix.
 
 package agent
 

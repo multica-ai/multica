@@ -20,7 +20,7 @@
 
 ## 为什么叫 "Multica"
 
-Multica —— **Mul**tiplexed **I**nformation and **C**omputing **A**gent。
+Multica —— **Mult**iplexed **I**nformation and **C**omputing **A**gent。
 
 这个名字是在向 Multics 致意。那是 20 世纪 60 年代的一个开创性操作系统，它首创了分时：多个人共享
 同一台机器，却又都像独占它一样。后来的 Unix，正是对 Multics 的一次有意简化——一个用户、一个任务、

@@ -102,7 +102,7 @@ func (h *Handler) ExecCloudRuntimeNode(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) proxyCloudRuntime(w http.ResponseWriter, r *http.Request, method, path string, opts cloudRuntimeProxyOptions) {
 	if h.CloudRuntime == nil || !h.CloudRuntime.Enabled() {
-		writeError(w, http.StatusServiceUnavailable, "cloud runtime is not configured")
+		writeFeatureDisabled(w, "cloud_runtime_not_configured", "cloud runtime is not configured")
 		return
 	}
 
@@ -196,9 +196,9 @@ func writeCloudRuntimeResponse(w http.ResponseWriter, resp *cloudruntime.Respons
 func writeCloudRuntimeError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, cloudruntime.ErrDisabled):
-		writeError(w, http.StatusServiceUnavailable, "cloud runtime is not configured")
+		writeFeatureDisabled(w, "cloud_runtime_not_configured", "cloud runtime is not configured")
 	case errors.Is(err, cloudruntime.ErrInvalidBaseURL):
-		writeError(w, http.StatusServiceUnavailable, "cloud runtime is misconfigured")
+		writeErrorCode(w, http.StatusInternalServerError, "cloud_runtime_misconfigured", "cloud runtime is misconfigured")
 	case errors.Is(err, context.DeadlineExceeded):
 		writeError(w, http.StatusGatewayTimeout, "cloud runtime request timed out")
 	default:

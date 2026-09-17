@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS instance_telemetry_state_singleton_uidx;

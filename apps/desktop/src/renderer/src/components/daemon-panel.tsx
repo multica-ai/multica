@@ -651,7 +651,7 @@ function EmptyState({
     subtitle = t(($) => $.desktop.daemon.not_running_description);
   } else if (!hasLogs) {
     title = t(($) => $.desktop.daemon.waiting_logs);
-    subtitle = t(($) => $.desktop.daemon.waiting_logs_description);
+    subtitle = "";
   } else {
     title = "";
     subtitle = "";
@@ -659,7 +659,7 @@ function EmptyState({
   return (
     <div className="flex h-full flex-col items-center justify-center gap-1 text-center text-muted-foreground">
       <p className="text-body">{title}</p>
-      <p className="text-caption text-muted-foreground">{subtitle}</p>
+      {subtitle && <p className="text-caption text-muted-foreground">{subtitle}</p>}
     </div>
   );
 }

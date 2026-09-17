@@ -11,7 +11,30 @@ import {
   issueColumnCategory,
   issueStatusColor,
   statusOptions,
+  statusIconRenderer,
 } from "./issue-status";
+
+describe("custom icon parity", () => {
+  it.each([
+    ["dotted", "backlog"], ["circle", "todo"], ["half", "in_progress"],
+    ["three_quarters", "in_review"], ["check", "done"], ["slash", "blocked"], ["cross", "cancelled"],
+  ])("uses %s geometry independent of lifecycle", (icon, expected) => {
+    expect(statusIconRenderer("qa", "started", icon)).toBe(expected);
+    expect(statusIconRenderer("qa", "closed", icon)).toBe(expected);
+    expect(statusIconRenderer("todo", "unstarted", icon)).toBe("todo");
+  });
+  it("falls back for missing, unknown and prototype-shaped icon names", () => {
+    for (const icon of [null, undefined, "new-shape", "constructor", "__proto__"]) {
+      expect(statusIconRenderer("shipped", "done", icon)).toBe("done");
+    }
+  });
+  it("passes stored shapes to picker options without changing category", () => {
+    const catalog = buildIssueStatusCatalog([entry("qa", "started", { icon: "slash" })]);
+    expect(catalog.iconOf("qa")).toBe("slash");
+    expect(catalog.iconOf("unknown")).toBeNull();
+    expect(statusOptions(catalog).find((option) => option.key === "qa")).toMatchObject({ icon: "slash", category: "started" });
+  });
+});
 
 function entry(
   key: string,
@@ -44,25 +67,25 @@ describe("issueColumnCategory", () => {
   // already resolved onto the payload.
   it("prefers the server-resolved category", () => {
     expect(
-      issueColumnCategory(issue({ status: "human_review", status_category: "in_review" })),
-    ).toBe("in_review");
+      issueColumnCategory(issue({ status: "human_review", status_category: "started" })),
+    ).toBe("started");
   });
 
   it("falls back to the key when it is a built-in", () => {
-    expect(issueColumnCategory(issue({ status: "blocked" }))).toBe("blocked");
+    expect(issueColumnCategory(issue({ status: "blocked" }))).toBe("started");
   });
 
   // An unresolvable custom key lands SOMEWHERE rather than nowhere: a row in a
   // possibly-wrong section is recoverable, a row in no section is invisible —
   // which is the bug this file exists to prevent (MUL-6457).
   it("never leaves an unresolved custom status without a section", () => {
-    expect(issueColumnCategory(issue({ status: "qa" }))).toBe("todo");
+    expect(issueColumnCategory(issue({ status: "qa" }))).toBe("unstarted");
   });
 
   it("ignores a category value this build does not know", () => {
     expect(
-      issueColumnCategory(issue({ status: "qa", status_category: "started" as never })),
-    ).toBe("todo");
+      issueColumnCategory(issue({ status: "qa", status_category: "future" as never })),
+    ).toBe("unstarted");
   });
 
   it("puts every built-in in a board section except cancelled", () => {
@@ -81,15 +104,15 @@ describe("buildIssueStatusCatalog", () => {
     const c = buildIssueStatusCatalog(undefined);
     expect(c.isLoaded).toBe(false);
     for (const key of ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"]) {
-      expect(c.categoryOf(key)).toBe(key);
+      expect(c.categoryOf(key)).toBe(issueColumnCategory(issue({ status: key })));
     }
     expect(c.labelOf("in_review")).toBe("In Review");
     expect(c.colorOf("in_review")).toBeNull();
   });
 
   it("maps a custom status to its category and name", () => {
-    const c = buildIssueStatusCatalog([entry("human_review", "in_review", { name: "Human Review" })]);
-    expect(c.categoryOf("human_review")).toBe("in_review");
+    const c = buildIssueStatusCatalog([entry("human_review", "started", { name: "Human Review" })]);
+    expect(c.categoryOf("human_review")).toBe("started");
     expect(c.labelOf("human_review")).toBe("Human Review");
     expect(c.colorOf("human_review")).toBe("#123456");
   });
@@ -98,7 +121,7 @@ describe("buildIssueStatusCatalog", () => {
   // it by its raw key beats rendering blank.
   it("falls back for a status the catalog does not know", () => {
     const c = buildIssueStatusCatalog([]);
-    expect(c.categoryOf("ghost")).toBe("todo");
+    expect(c.categoryOf("ghost")).toBe("unstarted");
     expect(c.labelOf("ghost")).toBe("ghost");
     expect(c.entryOf("ghost")).toBeUndefined();
   });
@@ -112,7 +135,7 @@ describe("buildIssueStatusCatalog", () => {
       is_system: true,
       color: "#22c55e",
     });
-    const c = buildIssueStatusCatalog([builtIn, entry("qa", "in_review", { name: "QA" })]);
+    const c = buildIssueStatusCatalog([builtIn, entry("qa", "started", { name: "QA" })]);
     expect(c.labelOf("in_review")).toBe("In Review");
     expect(c.colorOf("in_review")).toBeNull();
     expect(c.colorOf("qa")).toBe("#123456");
@@ -133,7 +156,7 @@ describe("archived statuses stay resolvable", () => {
     name: "Gate Approved",
     archived_at: "2026-01-01T00:00:00Z",
   });
-  const active = entry("human_review", "in_review", { name: "Human Review" });
+  const active = entry("human_review", "started", { name: "Human Review" });
   const c = buildIssueStatusCatalog([active, archived]);
 
   it("keeps name and category for an issue left on an archived status", () => {
@@ -170,10 +193,10 @@ describe("statusOptions", () => {
   // statuses would silently remove "In Review" from the picker.
   it("keeps the built-in alongside its category's custom statuses", () => {
     const c = buildIssueStatusCatalog([
-      entry("in_review", "in_review", { name: "In Review", is_system: true }),
-      entry("human_review", "in_review", { name: "Human Review" }),
+      entry("in_review", "started", { name: "In Review", is_system: true }),
+      entry("human_review", "started", { name: "Human Review" }),
     ]);
-    const inReview = statusOptions(c).filter((o) => o.category === "in_review");
+    const inReview = statusOptions(c).filter((o) => o.category === "started");
     expect(inReview.map((o) => o.key)).toEqual(["in_review", "human_review"]);
     expect(inReview.map((o) => o.label)).toEqual(["In Review", "Human Review"]);
     expect(inReview.map((o) => o.color)).toEqual([null, "#123456"]);
@@ -201,7 +224,7 @@ describe("issueBehavesAs", () => {
 
   it("treats a custom status in the cancelled category as closed", () => {
     expect(
-      issueBehavesAsAny(issue({ status: "wont_do", status_category: "cancelled" }), CLOSED_CATEGORIES),
+      issueBehavesAsAny(issue({ status: "wont_do", status_category: "closed" }), CLOSED_CATEGORIES),
     ).toBe(true);
   });
 
@@ -222,13 +245,13 @@ describe("isCustomStatus", () => {
   // Drives the row chip: a section header already names the category, so the
   // chip must speak only when the status adds something the header does not.
   it("is true for a custom status the catalog knows", () => {
-    const c = buildIssueStatusCatalog([entry("qa", "in_review", { name: "QA" })]);
+    const c = buildIssueStatusCatalog([entry("qa", "started", { name: "QA" })]);
     expect(isCustomStatus(c, "qa")).toBe(true);
   });
 
   it("stays silent for a built-in", () => {
     const c = buildIssueStatusCatalog([
-      entry("in_review", "in_review", { name: "In Review", is_system: true }),
+      entry("in_review", "started", { name: "In Review", is_system: true }),
     ]);
     expect(isCustomStatus(c, "in_review")).toBe(false);
   });

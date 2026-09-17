@@ -1248,7 +1248,14 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult
 	// a delivered reply, a dropped reply, or nothing at all depending on
 	// which replica happened to hold the socket.
 	var record func()
-	if f.Content != "" {
+	// hasVisibleChar, not `!= ""`, and the same predicate the local path uses
+	// (outbound.go). A completion of "\n" carrying a file is words to neither
+	// of them: the local path sends nothing and lets the file carry the
+	// reply's outcome, and a frame routed here has to reach the same two
+	// conclusions or which replica held the socket decides whether the user
+	// sees a blank message and whether the text or the file is what the reply
+	// counter is counting.
+	if hasVisibleChar(f.Content) {
 		if err := sender.sendTextCtx(ctx, f.ChatID, f.ChatType, f.Content); err != nil {
 			// WHETHER THIS FRAME IS FINISHED IS SETTLED BEFORE ANY COUNTER
 			// MOVES. A frame that is owed another offer is still in flight,
@@ -1309,7 +1316,7 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult
 			ChatID:         f.ChatID,
 			ChatType:       f.ChatType,
 			SessionID:      f.SessionID,
-		}, f.Content == "")
+		}, !hasVisibleChar(f.Content))
 	}
 	return relayResult{outcome: outcomeDone, record: record}
 }
@@ -1329,11 +1336,18 @@ func (o *Outbound) ownsSocket(installationID string) bool {
 // provablyNotSent reports whether a send error is one that certainly occurred
 // before any byte could leave. ws_sender marks the boundary itself: a failure
 // raised by the write is wrapped in errWriteAttempted, a missing verdict is
-// errAckTimeout, and a stated refusal is a *wecomAPIError — all three mean the
-// peer may have (or, for a refusal, definitely did) see the frame. A bare
-// context error is ambiguous — request() returns one both from its pre-write
-// check and from the post-write wait — so it is treated as possibly sent,
-// which costs an un-retried delivery rather than a duplicate.
+// errAckTimeout, a verdict the caller stopped waiting for is errAckAbandoned,
+// and a stated refusal is a *wecomAPIError — all four mean the peer may have
+// (or, for a refusal, definitely did) see the frame.
+//
+// A bare context error is read the same way, and that is a choice rather than
+// an inability. request() marks the post-write case itself now, so what is
+// left is a cancellation raised before anything was written. Releasing the
+// claim on it would be correct and is deliberately not done here: this is the
+// last gate before the frame is offered to another replica, the two mistakes
+// cost different amounts — an un-retried delivery against a second copy of the
+// answer in the person's chat — and widening what gets re-offered is a change
+// to the relay's retry behaviour, not to how an error is read.
 func provablyNotSent(err error) bool {
 	var apiErr *wecomAPIError
 	switch {

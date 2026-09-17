@@ -32,7 +32,6 @@ type RealtimeCollector struct {
 	redisMaxMemoryBytes    *prometheus.Desc
 	redisEvictedKeys       *prometheus.Desc
 	redisStreamEntries     *prometheus.Desc
-	redisStreamMemory      *prometheus.Desc
 	redisStreamPTTL        *prometheus.Desc
 }
 
@@ -63,7 +62,6 @@ func NewRealtimeCollector(m *realtime.Metrics) *RealtimeCollector {
 		redisMaxMemoryBytes:    newRealtimeDesc("redis_maxmemory_bytes", "Redis maxmemory sampled by the realtime relay; zero means unlimited."),
 		redisEvictedKeys:       newRealtimeDesc("redis_evicted_keys", "Redis instance evicted_keys sampled by the realtime relay."),
 		redisStreamEntries:     prometheus.NewDesc("multica_realtime_redis_stream_entries", "Current entry count of a sampled relay stream.", []string{"stream"}, nil),
-		redisStreamMemory:      prometheus.NewDesc("multica_realtime_redis_stream_memory_bytes", "Sampled memory usage of a relay stream.", []string{"stream"}, nil),
 		redisStreamPTTL:        prometheus.NewDesc("multica_realtime_redis_stream_pttl_milliseconds", "Remaining relay stream TTL in milliseconds; -1 means no TTL and -2 means missing.", []string{"stream"}, nil),
 	}
 }
@@ -97,7 +95,6 @@ func (c *RealtimeCollector) Describe(ch chan<- *prometheus.Desc) {
 		c.redisMaxMemoryBytes,
 		c.redisEvictedKeys,
 		c.redisStreamEntries,
-		c.redisStreamMemory,
 		c.redisStreamPTTL,
 	} {
 		ch <- desc
@@ -134,7 +131,6 @@ func (c *RealtimeCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(c.redisEvictedKeys, prometheus.GaugeValue, float64(m.RedisEvictedKeys.Load()))
 	for stream, observation := range m.RedisStreamObservations() {
 		ch <- prometheus.MustNewConstMetric(c.redisStreamEntries, prometheus.GaugeValue, float64(observation.Entries), stream)
-		ch <- prometheus.MustNewConstMetric(c.redisStreamMemory, prometheus.GaugeValue, float64(observation.MemoryBytes), stream)
 		ch <- prometheus.MustNewConstMetric(c.redisStreamPTTL, prometheus.GaugeValue, float64(observation.PTTLMillis), stream)
 	}
 }

@@ -25,7 +25,7 @@
     },
     "empty": {
       "title": "아직 스킬이 없습니다",
-      "description": "첫 스킬을 만들거나, URL이나 로컬 폴더에서 가져오거나, 연결된 런타임에서 복사하세요. 워크스페이스의 모든 에이전트가 사용할 수 있습니다."
+      "description": "skill을 만들거나 가져오세요."
     },
     "no_matches": {
       "title": "일치하는 결과 없음",
@@ -93,7 +93,6 @@
     "update_updating": "업데이트하는 중 {{done}}/{{total}}...",
     "updated_toast_other": "소스에서 스킬 {{count}}개를 업데이트했습니다",
     "update_partial_toast": "{{count}}개 업데이트, {{failed}}개 실패",
-    "add_dialog_description": "선택한 스킬을 추가할 에이전트를 선택하세요.",
     "cancel": "취소",
     "add_confirm": "추가 ({{num}})",
     "adding": "추가 중...",
@@ -105,6 +104,10 @@
     "filter_active_count_other": "필터 {{count}}개",
     "clear_filters": "필터 해제",
     "section_usage": "사용 상태",
+    "section_labels": "라벨",
+    "filter_search_placeholder": "필터...",
+    "no_labels": "아직 라벨이 없습니다",
+    "no_results": "결과 없음",
     "display": "표시",
     "sort_by": "정렬",
     "direction_asc": "오름차순",
@@ -205,13 +208,15 @@
       "properties_hint": "이 필드는 SKILL.md 프런트매터와 동기화됩니다.",
       "name": "이름",
       "description": "설명",
-      "description_hint": "{{count}}자. 에이전트는 이 설명을 읽고 스킬을 불러올지 판단합니다.",
+      "description_hint": "에이전트가 이를 보고 skill을 불러올 시점을 판단합니다.",
       "labels": "라벨",
       "used_by_other": "에이전트 {{count}}개가 사용 중",
       "used_by_empty": "아직 어떤 에이전트에도 할당되지 않았습니다. 에이전트의 스킬 탭에서 할당하세요.",
       "permissions_owner": "이 스킬을 편집하고 삭제할 수 있습니다. 변경 사항은 다음 에이전트 실행부터 적용됩니다.",
       "permissions_locked_creator": "작성자({{name}}) 또는 워크스페이스 관리자만 이 스킬을 편집할 수 있습니다.",
-      "permissions_locked": "작성자 또는 워크스페이스 관리자만 이 스킬을 편집할 수 있습니다."
+      "permissions_locked": "작성자 또는 워크스페이스 관리자만 이 스킬을 편집할 수 있습니다.",
+      "properties_help": "skill 속성 정보",
+      "character_count": "{{count}}자"
     },
     "files": {
       "list_aria": "스킬 파일",
@@ -306,9 +311,7 @@
     "load_failed": "런타임의 로컬 스킬을 불러오지 못했습니다",
     "not_supported": "이 런타임 제공자는 아직 로컬 스킬 목록 조회를 지원하지 않습니다.",
     "no_skills_title": "로컬 스킬을 찾을 수 없습니다",
-    "no_skills_hint": "이 런타임에는 아직 검색 가능한 로컬 스킬이 없습니다.",
     "search_placeholder": "로컬 스킬 검색",
-    "no_search_results_title": "일치하는 로컬 스킬이 없습니다",
     "no_search_results_hint": "\"{{query}}\"와 일치하는 로컬 스킬이 없습니다.",
     "ignored_files_hint": "심볼릭 링크, 읽을 수 없는 파일, 너무 큰 파일과 번들은 가져오기에서 제외됩니다.",
     "ready": "가져올 준비 완료",

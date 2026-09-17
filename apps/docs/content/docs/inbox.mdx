@@ -45,7 +45,7 @@ The inbox is only for workspace members. Even when an agent is the assignee or a
 
 ## Handle notifications
 
-Selecting a notification marks it as read. Archive it when you're done; archiving doesn't modify or delete the corresponding issue. Once an issue reaches a status in the `in_review`, `done`, or `cancelled` category, its run-failure notifications archive automatically.
+Selecting a notification marks it as read. Archive it when you're done; archiving doesn't modify or delete the corresponding issue. Once an issue reaches a status that hands it back to a person — `in_review`, a custom status in the `started` category, or any status in the `done` or `closed` category — its run-failure notifications archive automatically. `blocked` is the exception: it hands the issue over, but the work is still stuck, so past failures stay worth reading.
 
 Right-click a notification for **Mark as read** / **Mark as unread** and **Archive** (**Unarchive** in the Archived view). Mark as unread is the "I looked, but I'm not done with this" action: the notification goes back to unread and raises the unread count again, and it stays unread even while you keep it open — opening it again later marks it read as usual. Archived notifications keep their read state, so restoring one brings it back exactly as you left it.
 
@@ -55,6 +55,8 @@ From the inbox menu you can also:
 - archive all, or archive all read;
 - archive notifications for issues in `done` or `cancelled`;
 - open Archived and restore a notification.
+
+Open **Archived** at the bottom of the inbox to browse older notifications. More records load as you scroll. Filters apply to the entire archive, including records that have not loaded yet.
 
 ## Tune notification types
 

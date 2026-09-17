@@ -536,6 +536,16 @@ func TestVCSWebhook_DisabledDeploymentReturns404(t *testing.T) {
 	}
 }
 
+func TestVCSWebhook_UnconfiguredDeploymentReturns404(t *testing.T) {
+	h := &Handler{cfg: Config{VCSIntegrationEnabled: true}}
+	w := httptest.NewRecorder()
+	h.HandleVCSWebhook(w, vcsWebhookReq("00000000-0000-0000-0000-000000000000", nil, []byte(`{}`)))
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when integration is unconfigured, got %d (%s)", w.Code, w.Body.String())
+	}
+}
+
 func TestVCSWebhook_MalformedTolerated(t *testing.T) {
 	ctx := context.Background()
 	box := withVCSBox(t)

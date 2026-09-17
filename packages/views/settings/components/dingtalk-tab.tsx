@@ -601,13 +601,6 @@ export function DingTalkTab() {
             <h2 className="text-body font-semibold">
               {t(($) => $.dingtalk.connections_title)}
             </h2>
-            {!isLoading &&
-              displayedInstallations.length > 0 &&
-              groupDiscoverySupported && (
-              <p className="max-w-3xl text-caption leading-relaxed text-muted-foreground">
-                {t(($) => $.dingtalk.groups_overview_description)}
-              </p>
-            )}
           </div>
           {isLoading || (!canManage && agentsLoading) ? (
             <Card>

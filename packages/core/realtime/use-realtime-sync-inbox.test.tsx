@@ -95,7 +95,8 @@ it("refreshes an inactive Inbox after inbox:new then issue:updated (MUL-7286)", 
   let page = mountInbox();
   try {
     await waitFor(() => expect(page.result.current.data).toEqual([oldItem]));
-    // Switching desktop tabs unmounts the page but keeps its cache for 10 min.
+    // Switching tabs unmounts the page; its cache stays (tab titles hold
+    // disabled observers on it), so the return reuses it.
     page.unmount();
     const newItem = {
       ...oldItem,

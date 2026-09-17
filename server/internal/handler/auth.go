@@ -58,6 +58,7 @@ var supportedLanguages = map[string]struct{}{
 	"zh-Hans": {},
 	"ko":      {},
 	"ja":      {},
+	"fr":      {},
 }
 
 type UserResponse struct {
@@ -162,10 +163,20 @@ func (h *Handler) issueJWT(user db.User) (string, error) {
 	if auth.IsTemporarilyDisabledUser(uuidToString(user.ID), user.Email) {
 		return "", auth.ErrTemporarilyDisabledUser
 	}
+	// `sid` identifies this login for as long as it lasts: sliding renewal
+	// copies it forward, so it stays put while `exp` moves. The CSRF token is
+	// bound to it rather than to the token string, which is what lets the
+	// auth cookie be re-issued mid-session without invalidating CSRF tokens
+	// other tabs are already holding (MUL-7436).
+	sid, err := auth.NewSessionID()
+	if err != nil {
+		return "", err
+	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":   uuidToString(user.ID),
 		"email": user.Email,
 		"name":  user.Name,
+		"sid":   sid,
 		"exp":   time.Now().Add(auth.AuthTokenTTL()).Unix(),
 		"iat":   time.Now().Unix(),
 	})
@@ -547,7 +558,7 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	clientID := os.Getenv("GOOGLE_CLIENT_ID")
 	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
 	if clientID == "" || clientSecret == "" {
-		writeError(w, http.StatusServiceUnavailable, "Google login is not configured")
+		writeFeatureDisabled(w, "google_login_not_configured", "Google login is not configured")
 		return
 	}
 

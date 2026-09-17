@@ -10,13 +10,12 @@ import (
 )
 
 func TestCommentContentSearchIndexesRetirement(t *testing.T) {
+	t.Parallel()
 	adminPool := openTestPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	if _, err := adminPool.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_trgm"); err != nil {
-		t.Fatalf("install pg_trgm test dependency: %v", err)
-	}
+	createTestExtension(t, ctx, adminPool, "pg_trgm")
 	pgBigmUsable := installExtensionIfAvailable(t, ctx, adminPool, "pg_bigm")
 	schema := createScratchSchema(t, ctx, adminPool, "migrate_comment_content_indexes_retirement_")
 	pool := openTestPoolWithSearchPath(t, schema+", public")

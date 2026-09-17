@@ -65,6 +65,7 @@ func TestResolveOpenclawCLITimeout(t *testing.T) {
 // The pre-existing context contract must survive alongside it: callers that
 // check errors.Is(err, context.DeadlineExceeded) keep working.
 func TestExecOpenclawCLITimeoutIsTypedSentinel(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("shell shim shape is covered by the windows-tagged tests")
 	}
@@ -117,6 +118,7 @@ func TestPrepareOpenclawConfigPropagatesTimeoutSentinel(t *testing.T) {
 // but it is not a slow CLI — labelling it as one would tell the user to raise
 // a deadline that was never involved.
 func TestExecOpenclawCLICancellationIsNotATimeout(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("shell shim shape is covered by the windows-tagged tests")
 	}
@@ -155,6 +157,7 @@ func TestExecOpenclawCLICancellationIsNotATimeout(t *testing.T) {
 // non-retryable reason — rather than doubling the time spent inside the outer
 // preparation budget to reach an identical conclusion.
 func TestOpenclawActiveConfigPathSpendsOneBudgetAcrossBothAttempts(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("shell shim shape is covered by the windows-tagged tests")
 	}
@@ -171,7 +174,7 @@ func TestOpenclawActiveConfigPathSpendsOneBudgetAcrossBothAttempts(t *testing.T)
 			"  'config file') printf '/tmp/openclaw.json\\n' ;;\n"+
 			"esac\n", "")
 
-	const budget = 1500 * time.Millisecond
+	const budget = 300 * time.Millisecond
 	start := time.Now()
 	_, _, err = openclawActiveConfigPath(shim, budget)
 	elapsed := time.Since(start)
