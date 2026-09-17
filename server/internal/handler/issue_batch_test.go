@@ -366,7 +366,8 @@ func TestBatchChildDoneCrossStage_OneComment(t *testing.T) {
 
 // TestBatchChildDoneCrossStage_Cancelled — cancelling every stage in one batch
 // is terminal too and must behave identically: one accurate final comment, no
-// stale advance instruction.
+// stale advance instruction. It closes the stages without doing their work,
+// so the comment says so instead of announcing completion (#8462).
 func TestBatchChildDoneCrossStage_Cancelled(t *testing.T) {
 	fx := newStagedBatchFixture(t)
 	batchSetStatus(t, []string{fx.stage1[0].ID, fx.stage1[1].ID, fx.stage2[0].ID, fx.stage2[1].ID}, "cancelled")
@@ -375,8 +376,19 @@ func TestBatchChildDoneCrossStage_Cancelled(t *testing.T) {
 		t.Fatalf("expected exactly 1 system comment on parent, got %d", got)
 	}
 	content, _, _, _ := systemCommentOn(t, fx.parent.ID)
-	if !strings.Contains(content, "Stage 2 of this issue is complete") {
-		t.Errorf("expected Stage 2 completion announcement, got: %s", content)
+	for _, want := range []string{
+		"Stage 2 of this issue is closed — its sub-issues just closed together in a batch update",
+		"— which was cancelled.",
+		"Stage 1: 0/2 done, 2 cancelled; Stage 2: 0/2 done, 2 cancelled",
+		"Closing this stage does not mean the whole issue is done",
+		"2 sub-issues cancelled",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("expected %q in the cancelled-batch announcement, got: %s", want, content)
+		}
+	}
+	if strings.Contains(content, "is complete") || strings.Contains(content, "just finished") {
+		t.Errorf("a cancelled batch must not be announced as completed work, got: %s", content)
 	}
 	if strings.Contains(content, "is next") || strings.Contains(content, "(next)") {
 		t.Errorf("comment must not carry a stale next-stage instruction, got: %s", content)

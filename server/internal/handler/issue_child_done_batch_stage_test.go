@@ -247,11 +247,21 @@ func TestBatchChildDonePreservesRepresentativeAndParentOrder(t *testing.T) {
 					if !strings.Contains(content, "together in a batch update") || !strings.Contains(content, "](mention://issue/"+rep+")") {
 						t.Fatalf("lost batch wording or first representative: %s", content)
 					}
-					if staged && (!strings.Contains(content, "Stage 7 of this issue is complete") || !strings.Contains(content, "Stage 2: 1/1 done; Stage 7: 2/2 done; Stage 20: 0/1 done (next)") || !strings.Contains(content, "Stage 20 is next")) {
+					// A cancelled batch closes its stages without doing the work,
+					// and the comment says so; a done batch keeps the historical
+					// wording byte-for-byte (#8462).
+					stageState, summary, unstagedState := "complete", "Stage 2: 1/1 done; Stage 7: 2/2 done; Stage 20: 0/1 done (next)", "All sub-issues are complete"
+					if status == "cancelled" {
+						stageState, summary, unstagedState = "closed", "Stage 2: 0/1 done, 1 cancelled; Stage 7: 0/2 done, 2 cancelled; Stage 20: 0/1 done (next)", "All sub-issues are closed"
+					}
+					if staged && (!strings.Contains(content, "Stage 7 of this issue is "+stageState) || !strings.Contains(content, summary) || !strings.Contains(content, "Stage 20 is next")) {
 						t.Fatalf("inaccurate final-state summary: %s", content)
 					}
-					if !staged && !strings.Contains(content, "All sub-issues are complete") {
+					if !staged && !strings.Contains(content, unstagedState) {
 						t.Fatalf("lost unstaged completion: %s", content)
+					}
+					if status == "cancelled" && (!strings.Contains(content, "— which was cancelled.") || strings.Contains(content, "is complete") || strings.Contains(content, "just finished")) {
+						t.Fatalf("cancelled batch announced as completed work: %s", content)
 					}
 					if got, want := triggerCommentIDForAgentTask(t, parent, agents[p]), systemCommentIDOn(t, parent); got != want {
 						t.Fatalf("run trigger=%s, want final comment %s", got, want)
@@ -284,10 +294,11 @@ func BenchmarkBatchStageSelection(b *testing.B) {
 			children[0].Status = shape.firstStatus
 			// Both algorithms use the same pre-resolved snapshot as production.
 			// Fixture construction and status resolution are outside the timed loop.
-			terminal, err := resolveTerminalChildren(children, func(c db.Issue) (string, error) { return c.Status, nil })
+			statuses, err := resolveChildStatuses(children, func(c db.Issue) (string, error) { return c.Status, nil })
 			if err != nil {
 				b.Fatal(err)
 			}
+			terminal := statuses.terminal
 			for _, tc := range []struct {
 				name string
 				pick func([]db.Issue, []db.Issue, func(db.Issue) bool) (db.Issue, bool)

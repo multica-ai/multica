@@ -18,6 +18,18 @@ func child(stage int32, status string) db.Issue {
 	return c
 }
 
+// withStatuses stamps a distinct ID on every child (child() leaves the zero
+// UUID) and returns the snapshot resolveChildStatuses would build from their
+// literal statuses, which is what the summary helpers consume.
+func withStatuses(children []db.Issue) ([]db.Issue, childStatuses) {
+	statuses := make(childStatuses, len(children))
+	for i := range children {
+		children[i].ID = pgtype.UUID{Bytes: [16]byte{byte(i + 1), byte((i + 1) >> 8)}, Valid: true}
+		statuses[children[i].ID] = children[i].Status
+	}
+	return children, statuses
+}
+
 func TestStageBarrierClosed_Unstaged(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -104,12 +116,12 @@ func TestStageBarrierClosed_Staged(t *testing.T) {
 }
 
 func TestStageProgressSummary(t *testing.T) {
-	children := []db.Issue{
+	children, statuses := withStatuses([]db.Issue{
 		child(1, "done"), child(1, "done"), child(1, "done"),
 		child(2, "backlog"), child(2, "backlog"), child(2, "backlog"), child(2, "backlog"),
 		child(3, "backlog"), child(3, "backlog"),
-	}
-	summary, next := stageProgressSummary(children, 1, literalTerminalChild)
+	})
+	summary, next := stageProgressSummary(children, 1, statuses)
 	want := "Stage 1: 3/3 done; Stage 2: 0/4 done (next); Stage 3: 0/2 done"
 	if summary != want {
 		t.Fatalf("summary = %q, want %q", summary, want)
@@ -120,11 +132,11 @@ func TestStageProgressSummary(t *testing.T) {
 }
 
 func TestStageProgressSummary_FinalStageNoNext(t *testing.T) {
-	children := []db.Issue{
+	children, statuses := withStatuses([]db.Issue{
 		child(1, "done"), child(1, "done"),
 		child(2, "done"),
-	}
-	_, next := stageProgressSummary(children, 2, literalTerminalChild)
+	})
+	_, next := stageProgressSummary(children, 2, statuses)
 	if next != 0 {
 		t.Fatalf("nextStage = %d, want 0 (no further stages)", next)
 	}
@@ -132,18 +144,70 @@ func TestStageProgressSummary_FinalStageNoNext(t *testing.T) {
 
 func TestStageProgressSummary_SkipsUnstaged(t *testing.T) {
 	// An unstaged child must not appear as "Stage 0" nor inflate any stage.
-	children := []db.Issue{
+	children, statuses := withStatuses([]db.Issue{
 		child(0, "backlog"), // unstaged — ignored
 		child(1, "done"), child(1, "done"),
 		child(2, "backlog"),
-	}
-	summary, next := stageProgressSummary(children, 1, literalTerminalChild)
+	})
+	summary, next := stageProgressSummary(children, 1, statuses)
 	want := "Stage 1: 2/2 done; Stage 2: 0/1 done (next)"
 	if summary != want {
 		t.Fatalf("summary = %q, want %q", summary, want)
 	}
 	if next != 2 {
 		t.Fatalf("nextStage = %d, want 2", next)
+	}
+}
+
+// A cancelled sibling closes its stage but did not do its work, so it must
+// not be counted as done (#8462). The clause is omitted at zero, which keeps
+// the three summaries above byte-identical to their pre-#8462 wording.
+func TestStageProgressSummary_CancelledIsNotDone(t *testing.T) {
+	children, statuses := withStatuses([]db.Issue{
+		child(1, "done"),
+		child(2, "cancelled"), child(2, "cancelled"),
+		child(3, "done"), child(3, "cancelled"), child(3, "todo"),
+		child(4, "backlog"),
+	})
+	summary, next := stageProgressSummary(children, 2, statuses)
+	want := "Stage 1: 1/1 done; Stage 2: 0/2 done, 2 cancelled; Stage 3: 1/3 done, 1 cancelled (next); Stage 4: 0/1 done"
+	if summary != want {
+		t.Fatalf("summary = %q, want %q", summary, want)
+	}
+	// Cancelled still closes a stage: stage 2 is fully terminal, so the next
+	// open stage is 3, exactly as before.
+	if next != 3 {
+		t.Fatalf("nextStage = %d, want 3", next)
+	}
+}
+
+// A custom status in the cancelled category ("Won't Do", "Duplicate")
+// resolves to the canonical key before the summary sees it, so it folds into
+// the cancelled counter and wording rather than being reported as done. The
+// only reader of this comment is an agent whose vocabulary is the built-in
+// one; the custom display name adds nothing to its decision (#8462).
+func TestResolveChildStatuses_CustomCancelledCategoryReadsAsCancelled(t *testing.T) {
+	children, _ := withStatuses([]db.Issue{child(1, "done"), child(1, "wont_do")})
+	effective := func(c db.Issue) (string, error) {
+		if c.Status == "wont_do" {
+			return "cancelled", nil
+		}
+		return c.Status, nil
+	}
+	statuses, err := resolveChildStatuses(children, effective)
+	if err != nil {
+		t.Fatalf("resolveChildStatuses: %v", err)
+	}
+	if !statuses.terminal(children[1]) || !statuses.cancelled(children[1]) {
+		t.Fatalf("custom cancelled-category child must read as terminal and cancelled, got terminal=%v cancelled=%v",
+			statuses.terminal(children[1]), statuses.cancelled(children[1]))
+	}
+	if statuses.cancelled(children[0]) {
+		t.Fatal("a done child must not read as cancelled")
+	}
+	summary, _ := stageProgressSummary(children, 1, statuses)
+	if want := "Stage 1: 1/2 done, 1 cancelled"; summary != want {
+		t.Fatalf("summary = %q, want %q", summary, want)
 	}
 }
 
@@ -155,14 +219,40 @@ func TestStageAdvanceInstruction(t *testing.T) {
 	const parentID = "parent-uuid"
 
 	t.Run("a known next stage points the leader at it", func(t *testing.T) {
-		got := stageAdvanceInstruction(3, parentID)
+		got := stageAdvanceInstruction(3, parentID, 0)
 		if !strings.Contains(got, "Stage 3 is next") {
 			t.Fatalf("expected next-stage instruction, got %q", got)
+		}
+		if strings.Contains(got, "cancelled") {
+			t.Fatalf("no cancellation must add no cancellation note, got %q", got)
+		}
+	})
+
+	// #8462: a stage closed by cancellation hands the "is the next stage still
+	// valid" decision back, with the count, instead of the server deciding.
+	t.Run("cancelled sub-issues in the closed stage ask for confirmation before promoting", func(t *testing.T) {
+		got := stageAdvanceInstruction(3, parentID, 2)
+		for _, want := range []string{"Stage 3 is next", "2 sub-issues cancelled", "Stage 3 depends on", "post a comment asking for confirmation instead of promoting"} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("expected %q in %q", want, got)
+			}
+		}
+	})
+
+	t.Run("no created next stage with a cancellation says closed, not completed", func(t *testing.T) {
+		got := stageAdvanceInstruction(0, parentID, 1)
+		if !strings.HasPrefix(got, " Closing this stage does not mean the whole issue is done.") {
+			t.Fatalf("expected the closing wording, got %q", got)
+		}
+		for _, want := range []string{"1 sub-issue cancelled", "before creating the next stage or marking the parent ready for review", "post a comment asking for confirmation first"} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("expected %q in %q", want, got)
+			}
 		}
 	})
 
 	t.Run("no created next stage does not assert finality", func(t *testing.T) {
-		got := stageAdvanceInstruction(0, parentID)
+		got := stageAdvanceInstruction(0, parentID, 0)
 		// Regression guard for MUL-4062: an intermediate stage in a lazily
 		// created workflow also reaches nextStage==0, so the message must not
 		// claim this was definitively the final stage.
