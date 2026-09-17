@@ -119,6 +119,24 @@ export function WSProvider({
     identityOS,
   ]);
 
+  // A tab returning from the background (or the OS waking up) and a network
+  // coming back online are the moments a half-open socket is most likely to
+  // be discovered: interval timers are throttled while hidden, so the socket
+  // may have silently died during the gap without a single checkHealth()
+  // running. Probe now instead of waiting for the next heartbeat tick —
+  // checkHealth() only force-closes sockets silent past the silence window,
+  // so a healthy connection is left untouched.
+  useEffect(() => {
+    if (!wsClient) return;
+    const probe = () => wsClient.checkHealth();
+    document.addEventListener("visibilitychange", probe);
+    window.addEventListener("online", probe);
+    return () => {
+      document.removeEventListener("visibilitychange", probe);
+      window.removeEventListener("online", probe);
+    };
+  }, [wsClient]);
+
   const stores: RealtimeSyncStores = { authStore };
 
   // Centralized WS -> store sync (uses state so it re-subscribes when WS changes)
