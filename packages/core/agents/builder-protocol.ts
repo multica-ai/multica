@@ -34,9 +34,27 @@ export interface BuilderDraftPayload {
   member_ids?: unknown;
 }
 
-export function parseBuilderDraft(content: string): BuilderDraftPayload | null {
+export function parseBuilderDraft(
+  content: string,
+  { completed = false }: { completed?: boolean } = {},
+): BuilderDraftPayload | null {
   const match = content.match(/<agent_draft>([\s\S]*?)<\/agent_draft>/);
-  if (!match?.[1]) return null;
+  if (!match?.[1]) {
+    // Completed CLI replies can omit the closing tag and include literal
+    // string control characters. Apply the same repair as closed blocks,
+    // but never recover a live stream or truncate trailing text.
+    if (!completed || content.includes("</agent_draft>")) return null;
+    const parts = content.split("<agent_draft>");
+    if (parts.length !== 2 || !parts[1]) return null;
+    try {
+      const value = JSON.parse(escapeJsonStringControlCharacters(parts[1]));
+      return value && typeof value === "object" && !Array.isArray(value)
+        ? (value as BuilderDraftPayload)
+        : null;
+    } catch {
+      return null;
+    }
+  }
   try {
     const value = JSON.parse(match[1]);
     return value && typeof value === "object"

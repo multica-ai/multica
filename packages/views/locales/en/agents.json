@@ -339,6 +339,7 @@
       "setup_description": "This runtime powers setup and is the default for the new agent.",
       "start": "Start conversation",
       "connect_runtime": "Connect a runtime",
+      "draft_parse_failed": "This reply could not fill the form. Ask the assistant to generate the draft again, or fill it in manually.",
       "start_failed": "Could not start Agent Builder.",
       "send_failed": "Could not send your message.",
       "stop_failed": "Could not stop the current generation.",

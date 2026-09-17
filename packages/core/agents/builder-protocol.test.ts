@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import {
   decodeBuilderInput,
@@ -291,5 +293,54 @@ Return findings."}</agent_draft>`;
       thinkingLevel: "",
       serviceTier: "",
     });
+  });
+});
+
+describe("completed builder reply recovery", () => {
+  const reply = 'Here is your draft.\n<agent_draft>{"name":"Poet","instructions":"# Role\\nWrite poetry."}';
+
+  it("recovers a complete JSON object only after the reply completes", () => {
+    expect(parseBuilderDraft(reply)).toBeNull();
+    expect(parseBuilderDraft(reply, { completed: false })).toBeNull();
+    expect(parseBuilderDraft(reply, { completed: true })).toEqual({
+      name: "Poet",
+      instructions: "# Role\nWrite poetry.",
+    });
+  });
+
+  it("recovers an unclosed completed draft with literal string control characters", () => {
+    const content = '<agent_draft>{"name":"诗仙李白","instructions":"第一行\n\n## 交流方式\r\n- 以第一人称对话。\t保持诗意。","permission_scope":"private"}';
+    expect(parseBuilderDraft(content)).toBeNull();
+    expect(parseBuilderDraft(content, { completed: false })).toBeNull();
+    expect(parseBuilderDraft(content, { completed: true })).toEqual({
+      name: "诗仙李白",
+      instructions: "第一行\n\n## 交流方式\r\n- 以第一人称对话。\t保持诗意。",
+      permission_scope: "private",
+    });
+  });
+
+  it.each([
+    '<agent_draft>{"name":"Poet"',
+    '<agent_draft>{"instructions":"line one\nline two"',
+    '<agent_draft>{"instructions":"line one\nline two"} trailing prose',
+    '<agent_draft>{"name":"Poet",}',
+    '<agent_draft>{"name":"Poet"} trailing prose',
+    '<agent_draft>{"name":"Poet"}<agent_draft>{"name":"Other"}',
+    '<agent_draft>[]',
+    '<agent_draft>',
+    '<agent_draft></agent_draft>',
+    '<agent_draft>{"name":"Poet"}</agent_draft',
+    '<agent_draft>null',
+    '<agent_draft>"Poet"',
+    '{"name":"Poet"}',
+  ])("rejects malformed or ambiguous completed drafts: %s", (content) => {
+    expect(parseBuilderDraft(content, { completed: true })).toBeNull();
+  });
+
+  it("preserves closed-block parsing and literal-newline repair", () => {
+    expect(parseBuilderDraft('<agent_draft>{"instructions":"line one\nline two"}</agent_draft>'))
+      .toEqual({ instructions: "line one\nline two" });
+    expect(parseBuilderDraft(`${reply}</agent_draft>`, { completed: true }))
+      .toEqual(parseBuilderDraft(`${reply}</agent_draft>`));
   });
 });
