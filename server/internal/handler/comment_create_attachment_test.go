@@ -105,6 +105,39 @@ func TestCreateCommentRollsBackWhenAttachmentLinkFails(t *testing.T) {
 	}
 }
 
+// A keyed retry must not turn the durable retry record into a second visible
+// outcome. The attachment link still belongs to the create transaction: an
+// injected link failure leaves neither a comment nor an idempotency replay row
+// for a caller to recover later.
+func TestCreateCommentWithIdempotencyKeyRollsBackWhenAttachmentLinkFails(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	issueID := dbfx.Issue(t, "keyed comment attachment link failure")
+	attachmentID := unlinkedIssueAttachment(t, issueID)
+
+	h := *testHandler
+	h.TxStarter = &failLinkAttachmentsTxStarter{delegate: testPool}
+	key := "keyed-attachment-link-failure"
+	req := newRequest(http.MethodPost, "/api/issues/"+issueID+"/comments", map[string]any{
+		"content":        "see the screenshot",
+		"attachment_ids": []string{attachmentID},
+	})
+	req = withURLParam(req, "id", issueID)
+	req.Header.Set("Idempotency-Key", key)
+	testutil.Call(t, h.CreateComment, req).Want(http.StatusInternalServerError)
+
+	if n := dbfx.Count(t, `SELECT count(*) FROM comment WHERE issue_id = $1`, issueID); n != 0 {
+		t.Fatalf("issue has %d comments after a failed keyed link, want none", n)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM attachment WHERE id = $1 AND comment_id IS NULL`, attachmentID); n != 1 {
+		t.Fatalf("attachment was left linked after keyed rollback")
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM comment_idempotency WHERE workspace_id = $1 AND idempotency_key = $2`, testWorkspaceID, key); n != 0 {
+		t.Fatalf("keyed rollback retained %d idempotency rows, want none", n)
+	}
+}
+
 // Every mutation here takes its owners first — the issue, then the comment,
 // then the attachment. A comment created with an attachment takes the issue in
 // its CreateComment statement and only then locks the attachment rows, so it
