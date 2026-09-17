@@ -147,6 +147,12 @@ describe("mention picker boundary", () => {
       // CJK text is written without a separator before @, so requiring a space
       // made the picker unreachable for the most common way to address someone.
       ["after CJK text with no separator", "你好@Mi"],
+      ["after katakana", "テレビ@Mi"],
+      // U+30FC carries Katakana only as a Script_Extensions value; the shared
+      // rule lists it by hand so the word still ends here.
+      ["after a prolonged sound mark", "コーヒー@Mi"],
+      ["after hangul with no separator", "안녕하세요@Mi"],
+      ["after thai with no separator", "สวัสดี@Mi"],
       ["after punctuation", "hello(@Mi"],
       ["on a new line", "hello\n@Mi"],
     ];
@@ -176,7 +182,15 @@ describe("mention picker boundary", () => {
     const cases: Array<[string, string]> = [
       ["after an ASCII word", "hello@Mi"],
       ["after a digit", "2024@Mi"],
+      ["after an underscore", "snake_case@Mi"],
       ["inside an address", "user@example.com"],
+      // Non-ASCII word characters count too. An ASCII-only class made every one
+      // of these a boundary, re-opening the address case the rule exists to
+      // keep shut.
+      ["inside an accented address", "josé@example.com"],
+      ["inside a cyrillic address", "почта@mail.ru"],
+      ["inside a greek address", "αλφα@example.com"],
+      ["after an accented word", "café@Mi"],
     ];
 
     it.each(cases)("%s", (_name, typed) => {

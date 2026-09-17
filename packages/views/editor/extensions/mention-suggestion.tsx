@@ -25,6 +25,7 @@ import {
   isProjectDirectHit,
 } from "@multica/core/search/cancelled-rank";
 import { isImeComposing } from "@multica/core/utils";
+import { isMentionBoundaryAfter } from "@multica/core/markdown";
 import type {
   Issue,
   ListIssuesCache,
@@ -692,29 +693,18 @@ function projectToMention(p: { id: string; title: string; description?: string |
 }
 
 /**
- * Characters that make an `@` part of the word it follows. An `@` typed at the
- * end of one of these is an address or a handle (`user@example.com`), not an
- * invitation to pick a target: the picker must stay shut there, because with
- * `allowSpaces` its match runs to the end of the line and then swallows Enter.
- */
-const WORD_CHAR_BEFORE_MENTION = /[A-Za-z0-9_]/;
-
-/**
  * True when the `@` at `pos` starts a token instead of continuing one.
  *
- * Tiptap's own boundary rule is `allowedPrefixes`, defaulting to `[" "]` — a
- * half-width space and nothing else. That makes a mention unreachable in the
- * two ways CJK text is actually typed: with no separator at all, and after the
- * full-width space (U+3000) an IME inserts, neither of which is a half-width
- * space. The rule it is protecting against is narrower than "not a space": an
- * `@` glued to the end of an ASCII word. Anchoring on that instead keeps the
- * address case shut while leaving the rest of the line open.
+ * The rule itself — which characters make an `@` part of the word it follows,
+ * and why CJK needs the exception — lives in @multica/core/markdown, shared
+ * with the mobile composer so the two clients cannot drift apart.
  */
 function isMentionBoundary(doc: ProseMirrorNode, pos: number): boolean {
   if (pos <= 0) return true;
-  // One character wide. Across a block boundary this is the separator, which
-  // is not a word character either.
-  return !WORD_CHAR_BEFORE_MENTION.test(doc.textBetween(pos - 1, pos, "\n", "\n"));
+  // Two units wide, so a code point outside the BMP arrives whole; one would
+  // hand back a lone surrogate. Across a block boundary this is the separator,
+  // which is not a word character either.
+  return isMentionBoundaryAfter(doc.textBetween(Math.max(0, pos - 2), pos, "\n", "\n"));
 }
 
 function matchesMentionQuery(item: MentionItem, query: string): boolean {
