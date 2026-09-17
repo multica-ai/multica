@@ -18,6 +18,7 @@ import (
 )
 
 var errRuntimeSetChanged = errors.New("runtime set changed")
+var errControlPlaneAuthRejected = errors.New("daemon control-plane authentication rejected")
 
 const (
 	taskWakeupMaxBackoff = 30 * time.Second
@@ -97,6 +98,9 @@ func jitterDuration(d time.Duration) time.Duration {
 }
 
 func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []string, taskWakeups chan<- taskWakeup, runtimeSetCh <-chan struct{}) (time.Duration, error) {
+	if d.authRejected.Load() {
+		return 0, errControlPlaneAuthRejected
+	}
 	wsURL, err := taskWakeupURL(d.cfg.ServerBaseURL, runtimeIDs)
 	if err != nil {
 		return 0, err
@@ -135,6 +139,10 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	if err != nil {
 		return 0, err
 	}
+	if d.authRejected.Load() {
+		_ = conn.Close()
+		return 0, errControlPlaneAuthRejected
+	}
 	connectedAt := time.Now()
 	uptime := func() time.Duration { return time.Since(connectedAt) }
 	defer conn.Close()
@@ -143,6 +151,7 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	defer d.clearWSHeartbeatAcks()
 
 	d.logger.Info("task wakeup websocket connected", "runtimes", len(runtimeIDs))
+	d.signalTerminalOutboxReplay()
 	signalTaskWakeup(taskWakeups, "")
 	// signalTaskWakeup only wakes idle ClaimTask pollers. In-flight tasks and
 	// the workspace sync loop park on coarse tickers (5s and 30s) that do not
@@ -248,6 +257,8 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	select {
 	case <-ctx.Done():
 		return uptime(), ctx.Err()
+	case <-d.authRejectedCh:
+		return uptime(), errControlPlaneAuthRejected
 	case <-runtimeSetCh:
 		return uptime(), errRuntimeSetChanged
 	case err := <-errCh:
@@ -354,7 +365,7 @@ func (d *Daemon) handleWSHeartbeatAck(ctx context.Context, ack *HeartbeatRespons
 }
 
 func (d *Daemon) handleWSHeartbeatAckForConnection(ctx context.Context, ack *HeartbeatResponse, wsRPCGeneration uint64) {
-	if ack == nil || ack.RuntimeID == "" {
+	if ack == nil || ack.RuntimeID == "" || d.authRejected.Load() {
 		return
 	}
 	if ack.RuntimeGone {
@@ -389,6 +400,9 @@ func (d *Daemon) readTaskWakeupMessagesForConnection(conn *websocket.Conn, taskW
 		if err := json.Unmarshal(raw, &msg); err != nil {
 			d.logger.Debug("task wakeup websocket invalid message", "error", err)
 			continue
+		}
+		if d.authRejected.Load() {
+			return errControlPlaneAuthRejected
 		}
 		switch msg.Type {
 		case protocol.EventDaemonTaskAvailable:

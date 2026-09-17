@@ -96,6 +96,9 @@ type Client struct {
 	token   string
 	client  *http.Client
 
+	unauthorizedMu      sync.RWMutex
+	unauthorizedHandler func(error)
+
 	// bundleClient downloads skill bundles. Unlike client it carries no fixed
 	// Timeout: bundles can be large and slow on jittery links, so the caller
 	// supplies a per-request, size-scaled deadline via context instead of
@@ -144,6 +147,28 @@ func (c *Client) CloseIdleConnections() {
 		return
 	}
 	c.client.CloseIdleConnections()
+}
+
+// SetUnauthorizedHandler installs the callback used when the shared daemon
+// PAT is rejected by the control plane. Explicit-token helpers deliberately do
+// not call it: those requests carry task-scoped or Remote MCP credentials and
+// a 401 there says nothing about the daemon's WebSocket authentication.
+func (c *Client) SetUnauthorizedHandler(handler func(error)) {
+	c.unauthorizedMu.Lock()
+	c.unauthorizedHandler = handler
+	c.unauthorizedMu.Unlock()
+}
+
+func (c *Client) notifyUnauthorized(err error) {
+	if !isUnauthorizedError(err) {
+		return
+	}
+	c.unauthorizedMu.RLock()
+	handler := c.unauthorizedHandler
+	c.unauthorizedMu.RUnlock()
+	if handler != nil {
+		handler(err)
+	}
 }
 
 // normalizeGOOS maps Go's runtime.GOOS values to the protocol vocabulary
@@ -735,7 +760,9 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 	}
 	if resp.StatusCode >= 400 {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, &requestError{Method: http.MethodGet, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+		err := &requestError{Method: http.MethodGet, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+		c.notifyUnauthorized(err)
+		return nil, err
 	}
 
 	var workspaces []WorkspaceInfo
@@ -1165,7 +1192,9 @@ func (c *Client) postJSONViaObserved(ctx context.Context, httpClient *http.Clien
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return &requestError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+		err := &requestError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+		c.notifyUnauthorized(err)
+		return err
 	}
 	stats.observeResponseStarted()
 	respReader := stats.wrap(resp.Body)
@@ -1177,7 +1206,9 @@ func (c *Client) postJSONViaObserved(ctx context.Context, httpClient *http.Clien
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {
-	return c.getJSONWithToken(ctx, path, c.token, respBody)
+	err := c.getJSONWithToken(ctx, path, c.token, respBody)
+	c.notifyUnauthorized(err)
+	return err
 }
 
 // getJSONWithToken performs one GET with an explicit credential. It is used by

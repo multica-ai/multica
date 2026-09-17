@@ -477,6 +477,19 @@ type Daemon struct {
 
 	wsHBMu      sync.RWMutex         // guards wsHBLastAck
 	wsHBLastAck map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
+	// authRejected is set by the shared-PAT HTTP client after any 401. Closing
+	// authRejectedCh tears down the already-authenticated WebSocket immediately,
+	// so its heartbeat cannot keep runtimes looking healthy after the control
+	// plane has rejected the same credential. A daemon restart is required after
+	// re-login, which gives the process one immutable authentication epoch.
+	authRejected   atomic.Bool
+	authRejectedCh chan struct{}
+
+	// terminalOutbox durably owns complete/fail callbacks until the server
+	// acknowledges them. The wake channel coalesces periodic and WS-reconnect
+	// replay hints into the single replay loop.
+	terminalOutbox     *terminalOutbox
+	terminalOutboxWake chan struct{}
 
 	// reconcile fans out a "re-check server state now" signal to subscribers
 	// (watchTaskCancellation, workspaceSyncLoop) so the WS connect/reconnect
@@ -640,6 +653,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	// Tag every daemon HTTP request with the daemon's CLI version so the
 	// server can split logs/metrics by client version (parallel to the CLI).
 	client.SetVersion(cfg.CLIVersion)
+	outbox := newTerminalOutbox(cfg.TerminalOutboxDir, cfg.ServerBaseURL)
 	d := &Daemon{
 		cfg:                       cfg,
 		client:                    client,
@@ -654,6 +668,9 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		skippedAgents:             make(map[string]string),
 		resolvedPaths:             make(map[string]healedAgent),
 		wsHBLastAck:               make(map[string]time.Time),
+		authRejectedCh:            make(chan struct{}),
+		terminalOutbox:            outbox,
+		terminalOutboxWake:        make(chan struct{}, 1),
 		activeEnvRoots:            make(map[string]int),
 		deletingEnvRoots:          make(map[string]bool),
 		activeStores:              make(map[string]int),
@@ -684,6 +701,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	d.executionEnvironmentCommand = defaultExecutionEnvironmentCommand
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
+	client.SetUnauthorizedHandler(d.handleControlPlaneUnauthorized)
 	return d
 }
 
@@ -1923,7 +1941,7 @@ func (d *Daemon) wsHeartbeatFreshness() time.Duration {
 // recordWSHeartbeatAck stamps the runtime as having received a fresh WS
 // heartbeat ack from the server. Called by the WS read pump.
 func (d *Daemon) recordWSHeartbeatAck(runtimeID string) {
-	if runtimeID == "" {
+	if runtimeID == "" || d.authRejected.Load() {
 		return
 	}
 	d.wsHBMu.Lock()
@@ -2053,6 +2071,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.gcLoop(ctx)
 	go d.autoUpdateLoop(ctx)
 	go d.tokenRenewalLoop(ctx)
+	go d.terminalOutboxLoop(ctx)
 
 	// Preflight succeeded and the background loops are up: the daemon has
 	// registered its runtimes and can now claim and run tasks. Flip /health
@@ -2111,6 +2130,29 @@ func (d *Daemon) resolveAuth() error {
 	d.logger.Info("authenticated")
 	d.logger.Debug("auth token loaded", "profile", d.cfg.Profile, "token_len", len(cfg.Token))
 	return nil
+}
+
+// handleControlPlaneUnauthorized invalidates this daemon process's shared-PAT
+// authentication epoch. The WebSocket handshake used the same PAT, so leaving
+// an already-open socket alive after an HTTP 401 would let its heartbeat acks
+// mask the authentication failure and keep runtimes online indefinitely.
+//
+// Explicit-token Client methods never call this hook: task-scoped and Remote
+// MCP credentials have independent lifetimes and must not take down the daemon
+// control connection when one of them is rejected.
+func (d *Daemon) handleControlPlaneUnauthorized(err error) {
+	if d == nil || !d.authRejected.CompareAndSwap(false, true) {
+		return
+	}
+	d.clearWSHeartbeatAcks()
+	if d.authRejectedCh != nil {
+		close(d.authRejectedCh)
+	}
+	loginHint := "'multica login'"
+	if d.cfg.Profile != "" {
+		loginHint = fmt.Sprintf("'multica login --profile %s'", d.cfg.Profile)
+	}
+	d.logger.Warn("daemon authentication rejected; WebSocket disabled — run "+loginHint+" and restart the daemon", "error", err)
 }
 
 // allRuntimeIDs returns all runtime IDs across all watched workspaces.
@@ -4175,6 +4217,9 @@ func (d *Daemon) runRuntimeHeartbeat(ctx context.Context, rid string) {
 // runHeartbeatTick returns true when the HTTP heartbeat hit a transient
 // failure that should count toward stale idle-connection cleanup.
 func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
+	if d.authRejected.Load() {
+		return false
+	}
 	// Skip HTTP heartbeat for runtimes that successfully acked a recent
 	// WebSocket heartbeat. The WS path keeps last_seen_at fresh and delivers
 	// actions, so the HTTP write would be a duplicate DB update. If the WS
@@ -5910,13 +5955,20 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		if err == nil {
 			return
 		}
+		// A 401 rejects the daemon credential, not the completed result. The
+		// original /complete is durable in the outbox and must remain the source
+		// of truth after re-login; downgrading it to /fail would turn successful
+		// agent work into a red task merely because authentication drifted.
+		if isUnauthorizedError(err) {
+			taskLog.Error("complete task rejected by daemon authentication; queued for replay after re-login", "error", err)
+			return
+		}
 		// CompleteTask retries transient errors internally. A transient
 		// error reaching us here means the schedule was exhausted while
 		// the upstream was still 5xx / unreachable. Converting that into
 		// a fail would lose the agent's actual result and surface a
-		// misleading red badge in the UI — leave the task in running
-		// instead so a future fix (server-side stuck-task reaper, or a
-		// daemon-side persistent pending queue) can recover it. Only
+		// misleading red badge in the UI — leave the task in running while
+		// the durable terminal outbox retries the original completion. Only
 		// permanent server-side rejections (4xx other than 408/429)
 		// warrant the legacy fallback, because at that point the server
 		// has already refused this task and the only useful UI signal
@@ -5999,9 +6051,37 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 // 30-second drain, but terminal callbacks must still use that remaining window.
 // The explicit timeout keeps this detached work bounded during normal runs.
 func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTaskReport) error {
+	outboxPath, persistErr := d.terminalOutbox.put(report)
+	if persistErr != nil {
+		logTerminalOutboxPersistFailure(d.logger, report, persistErr)
+	}
+
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parentCtx), terminalTaskReportTimeout)
 	defer cancel()
+	err := d.sendTerminalTaskReport(ctx, report)
+	if err == nil {
+		if removeErr := d.terminalOutbox.remove(outboxPath); removeErr != nil {
+			d.logger.Warn("terminal outbox acknowledgement cleanup failed", "task_id", report.taskID, "kind", terminalReportKindName(report.kind), "error", removeErr)
+		}
+		return nil
+	}
 
+	// A deterministic rejection cannot become valid by replaying the same
+	// payload forever. Authentication is the exception: a new PAT can make the
+	// exact callback valid after re-login, so keep that record alongside
+	// transient transport/5xx failures.
+	if !isTransientError(err) && !isUnauthorizedError(err) {
+		if removeErr := d.terminalOutbox.remove(outboxPath); removeErr != nil {
+			d.logger.Warn("terminal outbox rejected record cleanup failed", "task_id", report.taskID, "kind", terminalReportKindName(report.kind), "error", removeErr)
+		}
+	}
+	if persistErr != nil {
+		return errors.Join(err, fmt.Errorf("persist terminal callback: %w", persistErr))
+	}
+	return err
+}
+
+func (d *Daemon) sendTerminalTaskReport(ctx context.Context, report terminalTaskReport) error {
 	switch report.kind {
 	case terminalTaskReportComplete:
 		return d.client.CompleteTask(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir)

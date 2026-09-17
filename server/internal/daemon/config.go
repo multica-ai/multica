@@ -111,6 +111,7 @@ type Config struct {
 	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
+	TerminalOutboxDir              string                // profile-scoped root for durable complete/fail callbacks
 	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, codearts, deveco, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, dim, zeroclaw (plus built-in runtime identities from agent.BuiltinRuntimes, e.g. omp)
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
@@ -610,6 +611,10 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if overrides.DisableAutoReload {
 		autoReloadEnabled = false
 	}
+	profileDir, err := cli.ProfileDir(profile)
+	if err != nil {
+		return Config{}, fmt.Errorf("resolve terminal outbox directory: %w", err)
+	}
 
 	return Config{
 		ServerBaseURL:                   serverBaseURL,
@@ -618,6 +623,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		DeviceName:                      deviceName,
 		RuntimeName:                     runtimeName,
 		Profile:                         profile,
+		TerminalOutboxDir:               filepath.Join(profileDir, "terminal-outbox"),
 		Agents:                          agents,
 		WorkspacesRoot:                  workspacesRoot,
 		KeepEnvAfterTask:                keepEnv,
