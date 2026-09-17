@@ -140,7 +140,7 @@ func TestCreateCommentWithIdempotencyKeyRollsBackWhenAttachmentLinkFails(t *test
 
 // Every mutation here takes its owners first — the issue, then the comment,
 // then the attachment. A comment created with an attachment takes the issue in
-// its CreateComment statement and only then locks the attachment rows, so it
+// its LockIssueForDescriptionUpdate statement and only then locks the attachment rows, so it
 // cannot close a cycle with the two writers that reach an attachment through
 // its issue: DeleteAttachment (issue, then the row) and issue teardown (issue,
 // then the rows its cascade removes). The holders below play each of those one
@@ -247,7 +247,7 @@ func TestCreateCommentWithAttachmentFollowsOwnerFirstLockOrder(t *testing.T) {
 			// lock. Under a weaker owner lock it gets past the issue and waits
 			// on the attachment instead, which the bump below then deadlocks
 			// against.
-			blockedIn := waitForBlockedQuery(t, done, "CreateComment", "LockAttachmentsForCommentLink")
+			blockedIn := waitForBlockedQuery(t, done, "LockIssueForDescriptionUpdate")
 
 			// The issue revision bump the delete statement performs last. The
 			// create is already waiting for the issue, so this cannot wait for
@@ -260,8 +260,8 @@ func TestCreateCommentWithAttachmentFollowsOwnerFirstLockOrder(t *testing.T) {
 			if holdErr != nil {
 				t.Fatalf("attachment delete deadlocked or failed while the create waited in %s: %v", blockedIn, holdErr)
 			}
-			if blockedIn != "CreateComment" {
-				t.Fatalf("create blocked in %s, want the owner issue in CreateComment", blockedIn)
+			if blockedIn != "LockIssueForDescriptionUpdate" {
+				t.Fatalf("create blocked in %s, want the owner issue in LockIssueForDescriptionUpdate", blockedIn)
 			}
 			got.Want(tt.wantCode)
 			if n := dbfx.Count(t, `SELECT count(*) FROM comment WHERE issue_id = $1`, issueID); n != tt.wantComments {
@@ -306,7 +306,7 @@ func TestCreateCommentWithAttachmentDoesNotDeadlockWithIssueTeardown(t *testing.
 		got = createCommentWithAttachment(t, testHandler, issueID, attachmentID)
 		done <- nil
 	}()
-	waitForCommentMutationLock(t, "CreateComment", done)
+	waitForCommentMutationLock(t, "LockIssueForDescriptionUpdate", done)
 
 	// The cascade reaches the attachment the blocked create asked for.
 	deleteErr := qtx.DeleteIssue(ctx, db.DeleteIssueParams{

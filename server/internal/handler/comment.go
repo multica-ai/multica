@@ -2017,6 +2017,11 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: issue.WorkspaceID,
 		})
 		if issueLockErr != nil {
+			if errors.Is(issueLockErr, pgx.ErrNoRows) {
+				// The issue was deleted, possibly while this waited for its row lock.
+				writeError(w, http.StatusNotFound, "issue not found")
+				return
+			}
 			h.Metrics.RecordReplyAdmission(obsmetrics.ReplyAdmissionPathCreateComment, obsmetrics.ReplyAdmissionOutcomeError, "transaction_error", 0)
 			writeError(w, http.StatusInternalServerError, "failed to prepare reply admission")
 			return
