@@ -53,6 +53,7 @@ var modelPrices = map[string]ModelPrice{
 	"anthropic:claude-haiku-4.5":  {Provider: "anthropic", Model: "claude-haiku-4.5", InputPerM: 1.00, CacheReadPerM: 0.10, CacheWritePerM: 1.25, OutputPerM: 5.00},
 	"deepseek:v4-pro":             {Provider: "deepseek", Model: "v4-pro", InputPerM: 1.74, CacheReadPerM: 0.0145, CacheWritePerM: 1.74, OutputPerM: 3.48},
 	"deepseek:v4-flash":           {Provider: "deepseek", Model: "v4-flash", InputPerM: 0.56, CacheReadPerM: 0.0112, CacheWritePerM: 0.56, OutputPerM: 1.12},
+	"deepseek:flash":              {Provider: "deepseek", Model: "flash", InputPerM: 0.15, CacheReadPerM: 0.003, CacheWritePerM: 0.15, OutputPerM: 0.60},
 	"minimax:m2.7":                {Provider: "minimax", Model: "m2.7", InputPerM: 0.30, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 1.20},
 	"minimax:m2.7-highspeed":      {Provider: "minimax", Model: "m2.7-highspeed", InputPerM: 0.60, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 2.40},
 	"google:gemini-3-flash":       {Provider: "google", Model: "gemini-3-flash", InputPerM: 0.50, CacheReadPerM: 0.05, CacheWritePerM: 0.50, OutputPerM: 3.00},
@@ -165,6 +166,11 @@ var modelAliasRules = []struct {
 	{regexp.MustCompile(`claude-sonnet-4[-.]5|claude-4[-.]5-sonnet`), "anthropic:claude-sonnet-4.5"},
 	{regexp.MustCompile(`claude-haiku-4[-.]5`), "anthropic:claude-haiku-4.5"},
 	{regexp.MustCompile(`deepseek-v4-pro`), "deepseek:v4-pro"},
+	// DeepSeek V4.1 Flash's static row follows models.dev's published off-peak
+	// rate because usage records do not carry the peak/off-peak billing window.
+	// Provider-qualified forms arrive from routed runtimes. Anchor the current
+	// ID so a future suffixed SKU cannot silently borrow this tier.
+	{regexp.MustCompile(`(^|/|:)deepseek-flash$`), "deepseek:flash"},
 	{regexp.MustCompile(`deepseek-v4-flash|^deepseek-chat$|^deepseek-reasoner$`), "deepseek:v4-flash"},
 	{regexp.MustCompile(`minimax-m2[.]7.*highspeed|highspeed.*minimax-m2[.]7`), "minimax:m2.7-highspeed"},
 	{regexp.MustCompile(`minimax-m2[.]7`), "minimax:m2.7"},
