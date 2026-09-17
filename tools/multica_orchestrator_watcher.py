@@ -14,8 +14,6 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_PROJECT_ID = "072b1862-109e-43c3-98d8-c18515961b93"
-DEFAULT_STATE_PATH = Path("/Volumes/itsmefelix SSD/appdata/multica/orchestrator-state/watcher_state.json")
-DEFAULT_INBOX_DIR = Path("/Volumes/itsmefelix SSD/appdata/multica/orchestrator-inbox")
 FALLBACK_MULTICA = "/opt/homebrew/bin/multica"
 # The Multica CLI exposes issue-list --limit but not --offset; use a high,
 # explicit bound so the watcher does not inherit the CLI default page window.
@@ -31,6 +29,18 @@ def utc_now() -> str:
 
 def default_multica() -> str:
     return os.environ.get("MULTICA_BIN") or shutil.which("multica") or FALLBACK_MULTICA
+
+
+def default_state_path() -> Path:
+    if env := os.environ.get("MULTICA_ORCHESTRATOR_STATE"):
+        return Path(env)
+    return Path.home() / ".multica" / "orchestrator-state" / "watcher_state.json"
+
+
+def default_inbox_dir() -> Path:
+    if env := os.environ.get("MULTICA_ORCHESTRATOR_INBOX"):
+        return Path(env)
+    return Path.home() / ".multica" / "orchestrator-inbox"
 
 
 def run_json(command: list[str], *, timeout: int = 30) -> Any:
@@ -253,8 +263,8 @@ def check_once(args: argparse.Namespace) -> int:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-id", default=DEFAULT_PROJECT_ID)
-    parser.add_argument("--state-path", type=Path, default=DEFAULT_STATE_PATH)
-    parser.add_argument("--inbox-dir", type=Path, default=DEFAULT_INBOX_DIR)
+    parser.add_argument("--state-path", type=Path, default=default_state_path())
+    parser.add_argument("--inbox-dir", type=Path, default=default_inbox_dir())
     parser.add_argument("--multica", "--cli-path", dest="multica", default=default_multica())
     parser.add_argument(
         "--issue-scan-limit",
