@@ -344,7 +344,7 @@ describe("InlineCommentRun", () => {
     vi.mocked(api.cancelTask).mockResolvedValue(task({ status: "cancelled" }));
     setup(task({ status: state }));
     if (state === "queued") {
-      expect(screen.getByText("Waiting for an available agent.")).toBeInTheDocument();
+      expect(screen.getByText("Waiting for a runtime to claim this run.")).toBeInTheDocument();
       expect(api.listTaskMessages).not.toHaveBeenCalled();
       vi.mocked(api.listTaskMessages).mockResolvedValue([]);
       fireEvent.click(screen.getByRole("button", { name: /View activity/ }));

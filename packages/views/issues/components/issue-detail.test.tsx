@@ -1224,7 +1224,7 @@ describe("IssueDetail (shared)", () => {
     expect(container.querySelector(`[data-run-id="${taskId}"]`)).toBeNull();
     mockApiObj.listTimeline.mockResolvedValue([root]);
     act(() => client.setQueryData(issueKeys.timeline("issue-1"), [root]));
-    await screen.findByText("Waiting for an available agent.");
+    await screen.findByText("Waiting for a runtime to claim this run.");
     const userBlock = container.querySelector(`#comment-body-${root.id}`)!.parentElement!;
     const agentBlock = container.querySelector(`[data-run-comment-id="${taskId}"]`)!;
     expect(agentBlock).not.toBeNull();
@@ -1290,7 +1290,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listTasksByIssue.mockResolvedValue([task]);
     const { container } = renderIssueDetail();
 
-    await screen.findByText("Waiting for an available agent.");
+    await screen.findByText("Waiting for a runtime to claim this run.");
     const run = container.querySelector(`[data-run-comment-id="${task.id}"]`)!;
     expect(run).not.toBeNull();
     const latestComment = container.querySelector(`#comment-${latest.id}`);
@@ -1365,7 +1365,7 @@ describe("IssueDetail (shared)", () => {
         </QueryClientProvider>
       </I18nProvider>,
     );
-    await screen.findByText("Waiting for an available agent.");
+    await screen.findByText("Waiting for a runtime to claim this run.");
     expect(container.querySelector(`[data-run-comment-id="${task.id}"]`)).not.toBeNull();
     const assignmentSlot = container.querySelector(`[data-run-slot-id="${task.id}"]`);
     const running: AgentTask = { ...task, status: "running", started_at: task.created_at };
@@ -1440,7 +1440,7 @@ describe("IssueDetail (shared)", () => {
     expect(slots[0]!.nextElementSibling?.id).toBe("comment-request-two");
     expect(slots[1]!.nextElementSibling?.id).toBe("comment-request-three");
     expect(container.querySelector(`[data-run-slot-id="${tasks[2]!.id}"]`)).toBe(slots[2]);
-    expect(within(slots[2] as HTMLElement).getByText("Waiting for an available agent.")).toBeInTheDocument();
+    expect(within(slots[2] as HTMLElement).getByText("Waiting for a runtime to claim this run.")).toBeInTheDocument();
   });
 
   it("keeps a downstream run in the thread after its triggering agent reply is projected there", async () => {
