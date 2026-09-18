@@ -189,7 +189,14 @@ describe("Integration directory", () => {
     expect(
       screen.getByRole("link", { name: /GitHub Connected/ }),
     ).toBeInTheDocument();
-    for (const channel of ["Lark", "Slack", "DingTalk", "WeCom", "Telegram"]) {
+    for (const channel of [
+      "Lark",
+      "Slack",
+      "DingTalk",
+      "WeCom",
+      "Telegram",
+      "ShareCRM",
+    ]) {
       expect(
         screen.getByRole("link", { name: new RegExp(`${channel} Not connected`) }),
       ).toBeInTheDocument();

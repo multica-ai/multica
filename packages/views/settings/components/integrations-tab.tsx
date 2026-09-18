@@ -112,7 +112,7 @@ export function IntegrationsTab() {
   const sharecrm = useQuery({
     ...sharecrmInstallationsOptions(wsId),
     enabled: canView,
-    select: (data) => (data.installations?.length ?? 0) > 0,
+    select: hasActiveInstallation,
   });
   const vcs = useQuery({
     ...vcsConnectionsOptions(wsId),
