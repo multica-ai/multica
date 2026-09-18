@@ -223,6 +223,7 @@ func TestCreateMediaGatedIssueCommitsDeferredTaskAtomicallyBeforeCreatedEvent(t 
 			AgentID:                 agentUUID,
 			NewTriggerCommentID:     mergedCommentID,
 			NewOriginatorUserID:     userUUID,
+			NewExecutionUserID:      userUUID,
 			NewAccountableUserID:    userUUID,
 			NewOriginatorSource:     pgtype.Text{String: "direct_human", Valid: true},
 			NewTriggerEvidenceKind:  pgtype.Text{String: "comment", Valid: true},
@@ -288,7 +289,9 @@ func TestHydrateDeferredChannelIssueTaskOverlayDoesNotOverwriteMergedCommentPlan
 	workspaceID, userID, agentID, issueID := seedAttributionFixture(t, pool)
 	userUUID := util.MustParseUUID(userID)
 
-	plainService := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	mergedOverlay := json.RawMessage(`{"mcpServers":{"merged":{"url":"https://merged.example"}}}`)
+	plainService := &TaskService{Queries: q, TxStarter: pool, Bus: events.New(),
+		Composio: &stubOverlayBuilder{resp: mergedOverlay}, FeatureFlags: composioMCPAppsTestFlags(true)}
 	task, err := plainService.EnqueueDeferredChannelIssueTask(ctx, db.Issue{
 		ID:           util.MustParseUUID(issueID),
 		WorkspaceID:  util.MustParseUUID(workspaceID),
@@ -312,12 +315,12 @@ func TestHydrateDeferredChannelIssueTaskOverlayDoesNotOverwriteMergedCommentPlan
 	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET trigger_comment_id=$2 WHERE id=$1`, task.ID, commentID); err != nil {
 		t.Fatal(err)
 	}
-	mergedOverlay := json.RawMessage(`{"mcpServers":{"merged":{"url":"https://merged.example"}}}`)
 	if _, err := q.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
 		IssueID:                 task.IssueID,
 		AgentID:                 task.AgentID,
 		NewTriggerCommentID:     commentID,
 		NewOriginatorUserID:     userUUID,
+		NewExecutionUserID:      userUUID,
 		NewAccountableUserID:    userUUID,
 		NewRuntimeMcpOverlay:    mergedOverlay,
 		NewOriginatorSource:     pgtype.Text{String: "direct_human", Valid: true},

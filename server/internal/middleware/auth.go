@@ -80,6 +80,9 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// be resolved as that agent — and, since MUL-6951, act with the
 			// authority of that run's originator. MUL-3428, reported and
 			// fixed in #4313.
+			suppliedTaskID := r.Header.Get("X-Task-ID")
+			suppliedAgentID := r.Header.Get("X-Agent-ID")
+			suppliedWorkspaceID := r.Header.Get("X-Workspace-ID")
 			r.Header.Del("X-Agent-ID")
 			r.Header.Del("X-Task-ID")
 
@@ -101,8 +104,8 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// task-claim time and injected by the daemon into the agent
 			// process. Authoritative for actor identity — the bound
 			// (user_id, agent_id, task_id, workspace_id) triple is
-			// written into request headers here, OVERRIDING whatever the
-			// client sent, so a downstream actor-resolver cannot be
+			// written into request headers here after rejecting conflicting
+			// client execution context, so a downstream actor-resolver cannot be
 			// tricked by a client that strips or forges X-Agent-ID /
 			// X-Task-ID. Human-only endpoints (e.g. agent env
 			// management) reject requests authenticated this way; see
@@ -117,6 +120,12 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				if err != nil {
 					slog.Warn("auth: invalid task token", "path", r.URL.Path, "error", err)
 					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+					return
+				}
+				if (suppliedTaskID != "" && suppliedTaskID != uuidToString(tt.TaskID)) ||
+					(suppliedAgentID != "" && suppliedAgentID != uuidToString(tt.AgentID)) ||
+					(suppliedWorkspaceID != "" && suppliedWorkspaceID != uuidToString(tt.WorkspaceID)) {
+					http.Error(w, `{"error":"task token does not match execution context"}`, http.StatusForbidden)
 					return
 				}
 				userID := uuidToString(tt.UserID)

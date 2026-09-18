@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -23,7 +24,13 @@ const maxPreviewTriggerIssues = 500
 // allow-all. The self-loop check needs the request's X-Task-ID header.
 func (h *Handler) issueTriggerWriteProbe(r *http.Request, actorType, actorID string, issue db.Issue) service.IssueTriggerProbe {
 	return service.IssueTriggerProbe{
-		CanAccessAgent: nil, // allow-all; gate lives at the write boundary
+		CanAccessAgent: func(agent db.Agent) bool {
+			_, err := h.runtimeForRequest(r, agent, actorType, actorID)
+			return err == nil
+		},
+		IsRuntimeReady: func(agent db.Agent) bool {
+			return h.runtimeReadyForRequest(r, agent, actorType, actorID)
+		},
 		IsSelfLoop: func() bool {
 			return h.isAgentRunningOnIssue(r, actorType, issue)
 		},
@@ -48,7 +55,14 @@ func (h *Handler) issueTriggerPreviewProbe(r *http.Request, actorType, actorID, 
 	originatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
 	return service.IssueTriggerProbe{
 		CanAccessAgent: func(agent db.Agent) bool {
-			return h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID)
+			if !h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID) {
+				return false
+			}
+			_, err := h.runtimeForRequest(r, agent, actorType, actorID)
+			return err == nil
+		},
+		IsRuntimeReady: func(agent db.Agent) bool {
+			return h.runtimeReadyForRequest(r, agent, actorType, actorID)
 		},
 		IsSelfLoop: func() bool {
 			return h.isAgentRunningOnIssue(r, actorType, issue)
@@ -81,15 +95,25 @@ func (h *Handler) shouldSuppressActiveSelfAssignment(ctx context.Context, actorT
 // clients and travels only with a run that actually starts. The squad path
 // still flows through enqueueSquadLeaderTask so the leader access gate and
 // pending dedup stay in one place.
-func (h *Handler) dispatchIssueRun(ctx context.Context, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID, handoffNote string) {
+func (h *Handler) dispatchIssueRun(r *http.Request, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID, handoffNote string) {
+	ctx := r.Context()
+	var sourceTaskID pgtype.UUID
+	if actorType == "agent" {
+		task, ok := h.taskFromRequestHeader(r)
+		if !ok || r.Header.Get("X-Actor-Source") != "task_token" || uuidToString(task.AgentID) != actorID {
+			return
+		}
+		sourceTaskID = task.ID
+	}
 	switch trigger.AssigneeType {
 	case "agent":
 		// The member who performed this assign/promote is the accountable human
 		// for the run (MUL-4302 §4). An agent actor is not a human, so only a
-		// member actor is threaded; otherwise attribution falls back to the chain.
-		_, _ = h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote, memberActorUserID(actorType, actorID))
+		// member actor is threaded. Agent actors also carry their trusted parent
+		// task so an existing issue cannot replace the active execution chain.
+		_, _ = h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote, memberActorUserID(actorType, actorID), sourceTaskID)
 	case "squad":
-		h.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, actorType, actorID, handoffNote)
+		h.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, actorType, actorID, handoffNote, sourceTaskID)
 	}
 }
 
@@ -248,4 +272,32 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 
 	resp.TotalCount = len(resp.Triggers)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// runtimeForRequest only inherits execution authority from a verified task token.
+func (h *Handler) runtimeForRequest(r *http.Request, agent db.Agent, actorType, actorID string) (pgtype.UUID, error) {
+	userID := memberActorUserID(actorType, actorID)
+	var sourceTaskID pgtype.UUID
+	if actorType == "agent" {
+		if r.Header.Get("X-Actor-Source") != "task_token" {
+			return pgtype.UUID{}, service.ErrTaskRuntimeUnavailable
+		}
+		task, ok := h.taskFromRequestHeader(r)
+		if !ok || uuidToString(task.AgentID) != actorID {
+			return pgtype.UUID{}, service.ErrTaskRuntimeUnavailable
+		}
+		sourceTaskID = task.ID
+		userID = task.OriginatorUserID
+	}
+	return h.TaskService.RuntimeForExecution(r.Context(), agent, userID, sourceTaskID)
+}
+
+func (h *Handler) runtimeReadyForRequest(r *http.Request, agent db.Agent, actorType, actorID string) bool {
+	runtimeID, err := h.runtimeForRequest(r, agent, actorType, actorID)
+	if err != nil {
+		return false
+	}
+	agent.RuntimeID = runtimeID
+	verdict, err := service.AgentReadiness(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceIssue), agent)
+	return err == nil && verdict.Ready()
 }

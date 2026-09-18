@@ -374,6 +374,10 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 		return nil
 	}
 
+	if messageID, threadID, ok := engine.TaskReplyTarget(task); ok {
+		binding.LastMessageID = pgtype.Text{String: messageID, Valid: messageID != ""}
+		binding.LastThreadID = pgtype.Text{String: threadID, Valid: threadID != ""}
+	}
 	inst, err := p.queries.GetLarkInstallation(ctx, binding.InstallationID)
 	if err != nil {
 		return fmt.Errorf("load installation: %w", err)

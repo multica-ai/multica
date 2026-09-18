@@ -153,7 +153,7 @@ export function useAgentPresenceDetail(
     if (!agent) return MISSING_AGENT_DETAIL;
     // Missing runtime is a legitimate state (offline) — pass null and let
     // derive handle it.
-    const runtime = safeRuntimes.find((r) => r.id === agent.runtime_id) ?? null;
+    const runtime = safeRuntimes.find((r) => r.id === (agent.personal_runtime_id || agent.runtime_id)) ?? null;
 
     const tasks = safeSnapshot.filter((t) => t.agent_id === agentId);
     return deriveAgentPresenceDetail({ agent, runtime, tasks, now: Date.now() });

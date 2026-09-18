@@ -17,7 +17,7 @@ SET status = 'cancelled', completed_at = now(),
     cancelled_by_type = 'system', cancelled_by_id = NULL, cancelled_by_name = NULL
 WHERE (runtime_id = ANY($1::uuid[]) OR agent_id = ANY($2::uuid[]))
   AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, runtime_routing, reconciliation_comment_ids
 `
 
 type CancelAgentTasksByRuntimeOrAgentParams struct {
@@ -116,6 +116,8 @@ func (q *Queries) CancelAgentTasksByRuntimeOrAgent(ctx context.Context, arg Canc
 			&i.CancelledByID,
 			&i.CancelledByName,
 			&i.IssueSnapshot,
+			&i.RuntimeRouting,
+			&i.ReconciliationCommentIds,
 		); err != nil {
 			return nil, err
 		}
@@ -218,7 +220,7 @@ SET status = 'failed', completed_at = now(), error = 'runtime went offline',
 FROM victims
 WHERE task.id = victims.id
   AND task.status IN ('dispatched', 'running', 'waiting_local_directory')
-RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.issue_snapshot
+RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.issue_snapshot, task.runtime_routing, task.reconciliation_comment_ids
 `
 
 type FailTasksForOfflineRuntimesParams struct {
@@ -303,6 +305,8 @@ func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context, arg FailTasks
 			&i.CancelledByID,
 			&i.CancelledByName,
 			&i.IssueSnapshot,
+			&i.RuntimeRouting,
+			&i.ReconciliationCommentIds,
 		); err != nil {
 			return nil, err
 		}
@@ -582,6 +586,18 @@ func (q *Queries) GetAgentRuntimes(ctx context.Context, ids []pgtype.UUID) ([]Ag
 		return nil, err
 	}
 	return items, nil
+}
+
+const hasRoutedTasksByRuntime = `-- name: HasRoutedTasksByRuntime :one
+SELECT EXISTS (SELECT 1 FROM agent_task_queue WHERE runtime_id = $1 AND runtime_routing IS NOT NULL)
+`
+
+// Legacy-runtime deduplication may not rewrite immutable routed task selection.
+func (q *Queries) HasRoutedTasksByRuntime(ctx context.Context, runtimeID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, hasRoutedTasksByRuntime, runtimeID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const isAgentRuntimeEligibleForGC = `-- name: IsAgentRuntimeEligibleForGC :one
@@ -1122,7 +1138,11 @@ WITH fence AS MATERIALIZED (
     -- Once per statement rather than once per row: the predicate is VOLATILE, so
     -- calling it from the WHERE clause of a bulk UPDATE would re-run it for every
     -- candidate row.
-    SELECT lock_task_owner_rows(NULL, NULL, $1) AS ok
+    SELECT COALESCE(lock_task_owner_rows(NULL, NULL, $1)
+      AND NOT EXISTS (
+        SELECT 1 FROM agent_task_queue routed_task
+        WHERE routed_task.runtime_id = $2 AND routed_task.runtime_routing IS NOT NULL
+      ), FALSE)::boolean AS ok
 ),
 reassigned AS (
     UPDATE agent_task_queue
@@ -1150,7 +1170,9 @@ type ReassignTasksToRuntimeRow struct {
 // locks the owners' workspace rows in the writer's own transaction and returns
 // false once they are gone, so this statement writes no row instead of stranding
 // a task in a workspace that has just been deleted (MUL-5999).
-// Re-points every queued/running/completed task referencing old_runtime_id.
+// Re-points legacy queued/running/completed tasks referencing old_runtime_id.
+// A routed row freezes its selected runtime, so any routed history refuses
+// the entire merge through the existing fence verdict.
 // Required before deleting the old runtime row because agent_task_queue has
 // an ON DELETE CASCADE FK that would otherwise drop historical tasks.
 //

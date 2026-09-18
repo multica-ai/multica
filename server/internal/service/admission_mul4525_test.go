@@ -125,7 +125,7 @@ func TestAutopilotDispatchAdmitsClickerNotCreator(t *testing.T) {
 		CreatedByType: "member",
 		CreatedByID:   util.MustParseUUID(apCreatorID),
 	}
-	svc := &AutopilotService{Queries: q}
+	svc := &AutopilotService{Queries: q, TaskSvc: &TaskService{Queries: q}}
 
 	// Manual dispatch by the agent owner is admitted. actorUserID is the human who
 	// ORDERED the run — the clicking member, or the originator an agent acts for;

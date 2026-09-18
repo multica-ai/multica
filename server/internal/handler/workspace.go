@@ -1296,6 +1296,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspacePluginData(ctx, requester.WorkspaceID) },
 		},
 		{
+			name: "delete runtime preferences",
+			run:  func() error { return qtx.DeleteAgentRuntimePreferencesByWorkspace(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete agents",
 			run:  func() error { return qtx.DeleteWorkspaceAgents(ctx, requester.WorkspaceID) },
 		},

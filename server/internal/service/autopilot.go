@@ -837,6 +837,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// webhook dispatch has no actor and takes the plain entry points, where the
 	// autopilot-origin issue resolves to the trigger's created_by principal
 	// (MUL-6951). The *ByActor variants are the actor-carrying enqueue methods.
+	var rootTask db.AgentTaskQueue
 	if ap.AssigneeType == "squad" {
 		// Fail-closed invocation gate: verify the admission principal (manual
 		// clicker, else the trigger's created_by — see autopilotAdmitInvoke) may
@@ -846,19 +847,24 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 			return fmt.Errorf("not allowed to invoke private squad leader")
 		}
 		if actorUserID.Valid {
-			if _, err := s.TaskSvc.EnqueueTaskForSquadLeaderByActor(ctx, issue, leader.ID, ap.AssigneeID, actorUserID); err != nil {
+			if rootTask, err = s.TaskSvc.EnqueueTaskForSquadLeaderByActor(ctx, issue, leader.ID, ap.AssigneeID, actorUserID); err != nil {
 				return fmt.Errorf("enqueue squad leader task: %w", err)
 			}
-		} else if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, ap.AssigneeID, pgtype.UUID{}, OriginDerived); err != nil {
+		} else if rootTask, err = s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, ap.AssigneeID, pgtype.UUID{}, OriginDerived); err != nil {
 			return fmt.Errorf("enqueue squad leader task: %w", err)
 		}
 	} else if actorUserID.Valid {
-		if _, err := s.TaskSvc.EnqueueTaskForIssueByActor(ctx, issue, actorUserID); err != nil {
+		if rootTask, err = s.TaskSvc.EnqueueTaskForIssueByActor(ctx, issue, actorUserID); err != nil {
 			return fmt.Errorf("enqueue task for issue: %w", err)
 		}
-	} else if _, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue); err != nil {
+	} else if rootTask, err = s.TaskSvc.EnqueueTaskForIssue(ctx, issue); err != nil {
 		return fmt.Errorf("enqueue task for issue: %w", err)
 	}
+
+	if err := s.Queries.SetAutopilotRunTask(ctx, db.SetAutopilotRunTaskParams{ID: run.ID, TaskID: rootTask.ID}); err != nil {
+		return fmt.Errorf("record autopilot execution root: %w", err)
+	}
+	run.TaskID = rootTask.ID
 
 	slog.Info("autopilot dispatched (create_issue)",
 		"autopilot_id", util.UUIDToString(ap.ID),
@@ -989,7 +995,7 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		}
 		return fmt.Errorf("resolve leader: %w", err)
 	}
-	verdict, err := AgentReadiness(ctx, s.runtimeLookup(), agent)
+	verdict, err := s.autopilotRuntimeReadiness(ctx, ap, agent, actorUserID, run.TriggerID)
 	if err != nil {
 		return fmt.Errorf("check agent readiness: %w", err)
 	}
@@ -1031,12 +1037,20 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "workspace fail-closed: no accountable human for autopilot run"), code: dispatch.ReasonAttributionBlocked}
 	}
 	apSource, _, apEvidenceKind, apEvidenceRef := attributionCreateParams(autopilotAttr)
+	selection, err := s.TaskSvc.resolveTaskRuntime(ctx, s.Queries, agent, autopilotAttr.UserID, pgtype.UUID{})
+	if err != nil {
+		return &errDispatchSkipped{reason: err.Error(), code: dispatch.ReasonInvocationNotAllowed}
+	}
+	overlay := s.TaskSvc.buildRoutedRuntimeMCPOverlay(ctx, autopilotAttr.UserID, agent, selection)
 	task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
-		ID:             dbid.NewV7(),
-		AgentID:        agent.ID,
-		RuntimeID:      agent.RuntimeID,
-		Priority:       0,
-		AutopilotRunID: run.ID,
+		ID:                   dbid.NewV7(),
+		AgentID:              agent.ID,
+		RuntimeID:            selection.RuntimeID,
+		RuntimeRouting:       selection.Routing,
+		RuntimeMcpOverlay:    overlay.Overlay,
+		RuntimeConnectedApps: overlay.ConnectedApps,
+		Priority:             0,
+		AutopilotRunID:       run.ID,
 		// Snapshot the autopilot title so task rows self-describe later
 		// without joining back to autopilot. Truncated for the same
 		// transmission-cost reason as comment-driven summaries.
@@ -1356,7 +1370,7 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 		// chance to succeed.
 		return "", "", false
 	}
-	verdict, err := AgentReadiness(ctx, s.runtimeLookup(), agent)
+	verdict, err := s.autopilotRuntimeReadiness(ctx, ap, agent, actorUserID, triggerID)
 	if err != nil {
 		slog.Warn("autopilot admission: failed to load runtime",
 			"autopilot_id", util.UUIDToString(ap.ID),
@@ -1960,4 +1974,29 @@ func (s *AutopilotService) canMemberInvokeAgent(ctx context.Context, agent db.Ag
 		}
 	}
 	return false
+}
+
+// Execution follows the upstream trigger principal: manual runs use the
+// clicking member, scheduled/webhook runs use the trigger's creator.
+func (s *AutopilotService) autopilotRuntimeReadiness(ctx context.Context, ap db.Autopilot, agent db.Agent, actorUserID, triggerID pgtype.UUID) (AgentVerdict, error) {
+	if s.TaskSvc == nil || agent.ArchivedAt.Valid {
+		return AgentReadiness(ctx, s.runtimeLookup(), agent)
+	}
+	userID := actorUserID
+	if !userID.Valid {
+		userID = ResolveAutopilotTriggerPrincipal(ctx, s.Queries, triggerID, ap.ID, ap.WorkspaceID)
+	}
+	runtimeID, err := s.TaskSvc.EffectiveRuntimeForUser(ctx, agent, userID)
+	if err != nil {
+		reason := dispatch.ReasonInvocationNotAllowed
+		if errors.Is(err, ErrTaskRuntimeOffline) {
+			reason = dispatch.ReasonRuntimeOffline
+		}
+		if errors.Is(err, ErrTaskRuntimeUnavailable) {
+			return AgentVerdict{Availability: AgentBlocked, Reason: reason, Detail: err.Error()}, nil
+		}
+		return AgentVerdict{}, err
+	}
+	agent.RuntimeID = runtimeID
+	return AgentReadiness(ctx, s.runtimeLookup(), agent)
 }

@@ -314,7 +314,7 @@ INSERT INTO agent_task_queue (
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
     squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id,
-    id
+    runtime_routing, id
 )
 SELECT
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
@@ -339,6 +339,7 @@ SELECT
     sqlc.narg(rerun_of_task_id),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
+    sqlc.narg(runtime_routing),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, $3, $2)
 RETURNING *;
@@ -357,7 +358,7 @@ INSERT INTO agent_task_queue (
     squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id,
     trigger_evidence_kind, trigger_evidence_ref_id, fire_at,
-    id
+    runtime_routing, id
 )
 SELECT
     $1, $2, $3, 'deferred', $4, sqlc.narg(trigger_comment_id),
@@ -382,6 +383,7 @@ SELECT
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
     @fire_at,
+    sqlc.narg(runtime_routing),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, $3, $2)
 RETURNING *;
@@ -422,7 +424,7 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, context, originator_user_id,
     accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
-    id
+    runtime_routing, id
 )
 SELECT
     $1, $2, NULL, 'queued', $3, $4,
@@ -433,6 +435,7 @@ SELECT
     sqlc.narg(originator_source),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
+    sqlc.narg(runtime_routing),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, NULL, $2)
 RETURNING *;
@@ -538,7 +541,7 @@ INSERT INTO agent_task_queue (
     originator_source, delegated_from_task_id, rule_version_id,
     trigger_evidence_kind, trigger_evidence_ref_id, retry_of_task_id,
     chat_input_task_id, fire_at,
-    channel_context_revision, id
+    channel_context_revision, runtime_routing, reconciliation_comment_ids, id
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
@@ -558,7 +561,7 @@ SELECT
     p.originator_source, p.delegated_from_task_id, p.rule_version_id,
     p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id,
     p.chat_input_task_id, sqlc.narg(fire_at),
-    p.channel_context_revision,
+    p.channel_context_revision, p.runtime_routing, p.reconciliation_comment_ids,
     -- Named new_task_id, not id: $1 above is the PARENT task's id.
     COALESCE(sqlc.narg('new_task_id')::uuid, gen_random_uuid())
 FROM agent_task_queue p
@@ -584,21 +587,21 @@ INSERT INTO agent_task_queue (
     force_fresh_session, is_leader_task, squad_id,
     originator_user_id, accountable_user_id,
     runtime_mcp_overlay, runtime_connected_apps,
-    originator_source, rerun_of_task_id, id
+    originator_source, rerun_of_task_id, runtime_routing, id
 )
 SELECT
-    p.agent_id, p.runtime_id, 'queued', p.priority, p.context,
+    p.agent_id, sqlc.arg(runtime_id), 'queued', p.priority, p.context,
     TRUE, p.is_leader_task, p.squad_id,
     sqlc.arg(actor_user_id), sqlc.arg(actor_user_id),
     sqlc.narg(runtime_mcp_overlay), sqlc.narg(runtime_connected_apps),
-    'direct_human', p.id, sqlc.arg(new_task_id)
+    'direct_human', p.id, sqlc.narg(runtime_routing), sqlc.arg(new_task_id)
 FROM agent_task_queue p
 WHERE p.id = sqlc.arg(source_task_id)
   AND p.status = 'failed'
   AND p.issue_id IS NULL
   AND p.chat_session_id IS NULL
   AND p.autopilot_run_id IS NULL
-  AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
+  AND lock_task_owner_rows(p.agent_id, p.issue_id, sqlc.arg(runtime_id))
 RETURNING *;
 
 -- name: DeleteUnstartedQuickCreateRetryTask :execrows
@@ -759,29 +762,28 @@ WHERE id = (
     WHERE atq.agent_id = @agent_id
       AND atq.runtime_id = @runtime_id
       AND atq.status = 'queued'
+      -- The caller holds the agent row lock, serializing capacity checks.
+      -- Modern executions have independent per-user capacity across machines.
+      -- NULL routing keeps the legacy shared-agent capacity bucket.
+      AND (
+          SELECT count(*) FROM agent_task_queue running
+          WHERE running.agent_id = atq.agent_id
+            AND running.status IN ('dispatched', 'running', 'waiting_local_directory')
+            AND (running.runtime_routing->>'execution_user_id') IS NOT DISTINCT FROM (atq.runtime_routing->>'execution_user_id')
+      ) < (
+          SELECT COALESCE(p.max_concurrent_tasks, a.max_concurrent_tasks)
+          FROM agent a
+          LEFT JOIN agent_runtime_preference p ON p.agent_id = a.id
+            AND p.workspace_id = a.workspace_id
+            AND p.user_id::text = atq.runtime_routing->>'execution_user_id'
+          WHERE a.id = atq.agent_id
+      )
       AND EXISTS (
           SELECT 1
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            -- A task's persisted runtime is not authority after an agent rebind.
-            AND a.runtime_id = atq.runtime_id
-            -- Private runtimes only execute their owner's agents. Ownerless
-            -- runtime/agent rows remain claimable only so the handler can
-            -- settle them explicitly before daemon delivery; filtering them
-            -- here would leave every task silently queued until the TTL.
-            -- Public runtimes remain shareable across agent owners.
-            AND (
-                r.visibility = 'public'
-                OR (
-                    r.visibility = 'private'
-                    AND (
-                        r.owner_id IS NULL
-                        OR a.owner_id IS NULL
-                        OR r.owner_id = a.owner_id
-                    )
-                )
-            )
+            AND task_runtime_allowed(atq.agent_id, atq.runtime_id, atq.runtime_routing)
             AND r.status = 'online'
             AND COALESCE(r.last_seen_at, r.updated_at) >=
                 now() - make_interval(secs => @runtime_stale_secs::double precision)
@@ -890,18 +892,7 @@ WHERE id = (
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            AND a.runtime_id = atq.runtime_id
-            AND (
-                r.visibility = 'public'
-                OR (
-                    r.visibility = 'private'
-                    AND (
-                        r.owner_id IS NULL
-                        OR a.owner_id IS NULL
-                        OR r.owner_id = a.owner_id
-                    )
-                )
-            )
+            AND task_runtime_allowed(atq.agent_id, atq.runtime_id, atq.runtime_routing)
             AND r.status = 'online'
             AND COALESCE(r.last_seen_at, r.updated_at) >=
                 now() - make_interval(secs => @runtime_stale_secs::double precision)
@@ -936,18 +927,7 @@ WHERE id IN (
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            AND a.runtime_id = atq.runtime_id
-            AND (
-                r.visibility = 'public'
-                OR (
-                    r.visibility = 'private'
-                    AND (
-                        r.owner_id IS NULL
-                        OR a.owner_id IS NULL
-                        OR r.owner_id = a.owner_id
-                    )
-                )
-            )
+            AND task_runtime_allowed(atq.agent_id, atq.runtime_id, atq.runtime_routing)
             AND r.status = 'online'
             AND COALESCE(r.last_seen_at, r.updated_at) >=
                 now() - make_interval(secs => @runtime_stale_secs::double precision)
@@ -1155,7 +1135,7 @@ WITH retired_sessions AS (
       )
 ), latest_per_session AS (
     SELECT DISTINCT ON (t.session_id)
-        t.session_id, t.work_dir, t.runtime_id, t.status, t.failure_reason, t.error,
+        t.session_id, t.work_dir, t.runtime_id, t.runtime_routing, t.status, t.failure_reason, t.error,
         t.started_at, t.issue_snapshot,
         COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) AS terminal_at
     FROM agent_task_queue t
@@ -1176,7 +1156,7 @@ WITH retired_sessions AS (
 -- and retired sessions, so it can legitimately return an OLDER run than the
 -- newest one. Measuring against the newest one would then tell an agent whose
 -- resumed memory predates an edit that the issue is unchanged.
-SELECT session_id, work_dir, runtime_id, status, started_at, issue_snapshot FROM latest_per_session
+SELECT session_id, work_dir, runtime_id, runtime_routing, status, started_at, issue_snapshot FROM latest_per_session
 WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
   AND (
     status IN ('completed', 'cancelled')
@@ -1890,7 +1870,10 @@ WHERE issue_id = @issue_id
 -- plan; the claim path records the actual embedded subset in
 -- delivered_comment_ids.
 --
--- Recompute-on-merge (MUL-4195 review must-fix #1): originator_user_id,
+-- Routed tasks only merge the same execution user and keep their frozen
+-- routing, delegation and connected-app snapshot. Other users are registered
+-- separately as reconciliation obligations.
+-- Legacy recompute-on-merge (MUL-4195 review must-fix #1): originator_user_id,
 -- runtime_mcp_overlay and runtime_connected_apps are re-stamped to the NEW
 -- trigger comment's originator (computed by the caller). Earlier this only
 -- repointed the trigger and kept the old originator's overlay/attribution, so a
@@ -1926,16 +1909,17 @@ SET coalesced_comment_ids = (
     originator_user_id = sqlc.narg('new_originator_user_id')::uuid,
     accountable_user_id = sqlc.narg('new_accountable_user_id')::uuid,
     originator_source = sqlc.narg('new_originator_source'),
-    delegated_from_task_id = sqlc.narg('new_delegated_from_task_id')::uuid,
+    delegated_from_task_id = CASE WHEN runtime_routing IS NULL THEN sqlc.narg('new_delegated_from_task_id')::uuid ELSE delegated_from_task_id END,
     rule_version_id = sqlc.narg('new_rule_version_id')::uuid,
     trigger_evidence_kind = sqlc.narg('new_trigger_evidence_kind'),
     trigger_evidence_ref_id = sqlc.narg('new_trigger_evidence_ref_id')::uuid,
-    runtime_mcp_overlay = sqlc.narg('new_runtime_mcp_overlay'),
-    runtime_connected_apps = sqlc.narg('new_runtime_connected_apps')
+    runtime_mcp_overlay = CASE WHEN runtime_routing IS NULL THEN sqlc.narg('new_runtime_mcp_overlay') ELSE runtime_mcp_overlay END,
+    runtime_connected_apps = CASE WHEN runtime_routing IS NULL THEN sqlc.narg('new_runtime_connected_apps') ELSE runtime_connected_apps END
 WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.issue_id = @issue_id
       AND t.agent_id = @agent_id
+      AND (t.runtime_routing IS NULL OR t.runtime_routing->>'execution_user_id' = sqlc.narg('new_execution_user_id')::uuid::text)
       AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(@new_trigger_comment_id::uuid)
       AND (
           t.status = 'queued'
@@ -1953,6 +1937,8 @@ WHERE id = (
     ORDER BY t.created_at DESC
     LIMIT 1
 )
+  AND (status = 'queued' OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true'))
+  AND (runtime_routing IS NULL OR runtime_routing->>'execution_user_id' = sqlc.narg('new_execution_user_id')::uuid::text)
 RETURNING id, coalesced_comment_ids;
 
 -- name: RegisterPlannedCommentForActiveTask :one
@@ -1992,6 +1978,7 @@ WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.issue_id = @issue_id
       AND t.agent_id = @agent_id
+      AND t.runtime_routing IS NULL
       AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(@comment_id::uuid)
       AND t.status IN ('dispatched', 'running', 'waiting_local_directory')
       AND (
@@ -2002,6 +1989,7 @@ WHERE id = (
     LIMIT 1
 )
 AND status IN ('dispatched', 'running', 'waiting_local_directory')
+AND runtime_routing IS NULL
 RETURNING id, coalesced_comment_ids;
 
 -- name: MergeDelegatedFailureCommentIntoPendingTask :one
@@ -2023,6 +2011,7 @@ WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.issue_id = @issue_id
       AND t.agent_id = @agent_id
+      AND (t.runtime_routing IS NULL OR t.runtime_routing->>'execution_user_id' = sqlc.narg('execution_user_id')::uuid::text)
       AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(@comment_id::uuid)
       AND (
           t.status = 'queued'
@@ -2033,6 +2022,8 @@ WHERE id = (
     ORDER BY t.created_at DESC
     LIMIT 1
 )
+  AND (status = 'queued' OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true'))
+  AND (runtime_routing IS NULL OR runtime_routing->>'execution_user_id' = sqlc.narg('execution_user_id')::uuid::text)
 RETURNING *;
 
 -- name: HasTaskCoveringDelegatedFailureComment :one
@@ -2196,7 +2187,14 @@ WHERE recovery.author_type = 'system'
       ELSE source_status.category
   END IN ('unstarted', 'started')
   AND source_agent.archived_at IS NULL
-  AND source_agent.runtime_id IS NOT NULL
+  -- Modern recovery inherits the failed descendant's frozen chain routes;
+  -- the coordinator's current default may have been unbound since admission.
+  -- Service dispatch validates the selected route and its live permissions.
+  -- Legacy chains still require a current default runtime.
+  AND (
+      source_agent.runtime_id IS NOT NULL
+      OR (failed.runtime_routing IS NOT NULL AND failed.runtime_routing <> 'null'::jsonb)
+  )
   AND source_agent.workspace_id = source_issue.workspace_id
   AND NOT EXISTS (
       SELECT 1
@@ -2290,18 +2288,7 @@ WHERE atq.runtime_id = $1
       FROM agent a
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
-        AND a.runtime_id = atq.runtime_id
-        AND (
-            r.visibility = 'public'
-            OR (
-                r.visibility = 'private'
-                AND (
-                    r.owner_id IS NULL
-                    OR a.owner_id IS NULL
-                    OR r.owner_id = a.owner_id
-                )
-            )
-        )
+        AND task_runtime_allowed(atq.agent_id, atq.runtime_id, atq.runtime_routing)
   )
 ORDER BY atq.priority DESC, atq.created_at ASC;
 
@@ -2417,18 +2404,7 @@ WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
       FROM agent a
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
-        AND a.runtime_id = atq.runtime_id
-        AND (
-            r.visibility = 'public'
-            OR (
-                r.visibility = 'private'
-                AND (
-                    r.owner_id IS NULL
-                    OR a.owner_id IS NULL
-                    OR r.owner_id = a.owner_id
-                )
-            )
-        )
+        AND task_runtime_allowed(atq.agent_id, atq.runtime_id, atq.runtime_routing)
   )
 ORDER BY atq.priority DESC, atq.created_at ASC;
 
@@ -2849,3 +2825,26 @@ RETURNING *;
 
 -- name: GetCommentThreadRootID :one
 SELECT comment_thread_root_id(@comment_id::uuid)::uuid AS id;
+
+-- name: RegisterRoutedCommentReconciliation :one
+-- This obligation is deliberately separate from coalesced/delivered inputs:
+-- a queued task may belong to another execution user or another reviewed HEAD.
+-- Serialize against completion so a successful write always has a future
+-- terminal event that can replay this comment through its own authorization.
+UPDATE agent_task_queue
+SET reconciliation_comment_ids = (
+    SELECT COALESCE(array_agg(DISTINCT e), '{}')
+    FROM unnest(array_append(reconciliation_comment_ids, @comment_id::uuid)) AS e
+    WHERE e IS NOT NULL
+)
+WHERE id = (
+    SELECT t.id FROM agent_task_queue t
+    WHERE t.issue_id = @issue_id AND t.agent_id = @agent_id
+      AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(@comment_id::uuid)
+      AND t.runtime_routing IS NOT NULL
+      AND t.status IN ('queued', 'deferred', 'dispatched', 'running', 'waiting_local_directory')
+    ORDER BY t.created_at DESC
+    LIMIT 1
+)
+  AND status IN ('queued', 'deferred', 'dispatched', 'running', 'waiting_local_directory')
+RETURNING id;

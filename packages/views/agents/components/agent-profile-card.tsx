@@ -56,7 +56,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
   const owner = agent.owner_id
     ? members.find((m) => m.user_id === agent.owner_id) ?? null
     : null;
-  const runtime = runtimes.find((r) => r.id === agent.runtime_id) ?? null;
+  const runtime = runtimes.find((r) => r.id === (agent.personal_runtime_id || agent.runtime_id)) ?? null;
   const isArchived = !!agent.archived_at;
   const initials = agent.name
     .split(" ")

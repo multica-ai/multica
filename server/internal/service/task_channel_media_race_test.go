@@ -116,9 +116,9 @@ func TestEnqueueChannelChatTask_ContextClearFailureRollsBackTaskAndSeal(t *testi
 		t.Fatalf("seed channel context: %v", err)
 	}
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO chat_message (
+		INSERT INTO chat_message (channel_sender_user_id,
 			chat_session_id, role, content, channel_ingested, channel_context_revision
-		) VALUES ($1, 'user', 'keep me unowned', TRUE, 1)
+		) VALUES ((SELECT creator_id FROM chat_session WHERE id = $1), $1, 'user', 'keep me unowned', TRUE, 1)
 		RETURNING id
 	`, chatSessionID).Scan(&messageID); err != nil {
 		t.Fatalf("seed channel message: %v", err)
@@ -303,8 +303,8 @@ func TestEnqueueChatTaskDefersWhenMediaMessageCommitsDuringEnqueue(t *testing.T)
 	seedChannelTaskBinding(t, pool, chatSessionID)
 	// The message that armed this flush: plain text, no media marker.
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO chat_message (chat_session_id, role, content)
-		VALUES ($1, 'user', 'look at this')`, chatSessionID); err != nil {
+		INSERT INTO chat_message (chat_session_id, role, content,channel_sender_user_id,channel_ingested)
+		VALUES ($1, 'user', 'look at this',$2,true)`, chatSessionID, userID); err != nil {
 		t.Fatalf("seed text message: %v", err)
 	}
 
@@ -316,8 +316,8 @@ func TestEnqueueChatTaskDefersWhenMediaMessageCommitsDuringEnqueue(t *testing.T)
 			// A concurrent Handle appends an image message (with its media
 			// marker) and commits — after the deadline read, before the seal.
 			if err := pool.QueryRow(ctx, `
-				INSERT INTO chat_message (chat_session_id, role, content, channel_media_pending_until)
-				VALUES ($1, 'user', '[Image]', $2) RETURNING id`, chatSessionID, deadline).Scan(&mediaMessageID); err != nil {
+				INSERT INTO chat_message (chat_session_id, role, content, channel_media_pending_until,channel_sender_user_id,channel_ingested)
+				VALUES ($1, 'user', '[Image]', $2,$3,true) RETURNING id`, chatSessionID, deadline, userID).Scan(&mediaMessageID); err != nil {
 				t.Errorf("inject media message: %v", err)
 			}
 		}},
@@ -406,8 +406,8 @@ func TestEnqueueChatTaskLocksOutAConcurrentArchiveButNotInboundMessages(t *testi
 	})
 	seedChannelTaskBinding(t, pool, chatSessionID)
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO chat_message (chat_session_id, role, content, channel_ingested)
-		VALUES ($1, 'user', 'first', TRUE)`, chatSessionID); err != nil {
+		INSERT INTO chat_message (channel_sender_user_id, chat_session_id, role, content, channel_ingested)
+		VALUES ((SELECT creator_id FROM chat_session WHERE id = $1), $1, 'user', 'first', TRUE)`, chatSessionID); err != nil {
 		t.Fatalf("seed inbound message: %v", err)
 	}
 
@@ -421,8 +421,8 @@ func TestEnqueueChatTaskLocksOutAConcurrentArchiveButNotInboundMessages(t *testi
 			archiveErr = probeUnderLock(ctx, pool,
 				`UPDATE chat_session SET status = 'archived' WHERE id = $1`, chatSessionID)
 			appendErr = probeUnderLock(ctx, pool,
-				`INSERT INTO chat_message (chat_session_id, role, content, channel_ingested)
-				 VALUES ($1, 'user', 'second', TRUE)`, chatSessionID)
+				`INSERT INTO chat_message (channel_sender_user_id, chat_session_id, role, content, channel_ingested)
+				 VALUES ((SELECT creator_id FROM chat_session WHERE id = $1), $1, 'user', 'second', TRUE)`, chatSessionID)
 		}},
 		Bus: events.New(),
 	}
@@ -545,6 +545,7 @@ func TestDeferredChannelIssueTaskPromotesAfterMediaSettlement(t *testing.T) {
 		AgentID:                 util.MustParseUUID(agentID),
 		NewTriggerCommentID:     commentID,
 		NewOriginatorUserID:     util.MustParseUUID(userID),
+		NewExecutionUserID:      util.MustParseUUID(userID),
 		NewAccountableUserID:    util.MustParseUUID(userID),
 		NewOriginatorSource:     pgtype.Text{String: "direct_human", Valid: true},
 		NewTriggerEvidenceKind:  pgtype.Text{String: "comment", Valid: true},

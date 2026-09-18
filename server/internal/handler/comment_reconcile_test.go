@@ -507,9 +507,9 @@ func handlerWorkspaceMember(t *testing.T, slug string) string {
 // originator) then comments before the run starts. The earlier build returned
 // ErrNoRows from the originator gate and fell through to a fresh enqueue that
 // tripped the one-pending-per-(issue,agent) unique index, silently dropping B's
-// comment. With recompute-on-merge, B's comment folds into the single task:
-// still one task (no drop, no collision), trigger repointed to B, originator
-// re-stamped to B, and A's comment preserved as coalesced.
+// comment. Modern routed tasks preserve A's authority and register B's
+// request for a separate execution after A settles. Legacy rows retain the
+// historical recompute-on-merge behavior.
 func TestConsecutiveCommentsDifferentOriginatorsFullEnqueuePath(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -558,7 +558,7 @@ func TestConsecutiveCommentsDifferentOriginatorsFullEnqueuePath(t *testing.T) {
 		t.Fatalf("after A's comment expected exactly 1 queued task, got %d", n)
 	}
 
-	// B's comment (different originator) before start → must fold in, NOT drop.
+	// B's comment before start must remain a separate execution obligation.
 	cB := insertMemberComment(userB, "second, from B — different user")
 	dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE id=$1`, cB.ID, cA.ID)
 	cB.ParentID = cA.ID
@@ -568,16 +568,21 @@ func TestConsecutiveCommentsDifferentOriginatorsFullEnqueuePath(t *testing.T) {
 	if n := pendingTaskCountForAgentIssue(t, issueID, agentID); n != 1 {
 		t.Fatalf("after B's comment expected still exactly 1 task (folded in, not dropped/duplicated), got %d", n)
 	}
-	// Trigger repointed to B, originator re-stamped to B, A coalesced.
+	// A retains its task; B is replayed separately after A settles.
 	trigger, originator, coalesced := taskTriggerOriginatorCoalesced(t, issueID, agentID)
-	if trigger != uuidToString(cB.ID) {
-		t.Errorf("expected trigger repointed to B's comment %s, got %s", uuidToString(cB.ID), trigger)
+	if trigger != uuidToString(cA.ID) {
+		t.Errorf("expected original A comment %s, got %s", uuidToString(cA.ID), trigger)
 	}
-	if originator != userB {
-		t.Errorf("expected originator re-stamped to B (%s), got %s", userB, originator)
+	if originator != testUserID {
+		t.Errorf("expected original execution user (%s), got %s", testUserID, originator)
 	}
-	if !containsUUID(coalesced, uuidToString(cA.ID)) {
-		t.Errorf("expected A's comment %s preserved as coalesced, got %v", uuidToString(cA.ID), coalesced)
+	if len(coalesced) != 0 {
+		t.Errorf("unexpected cross-user coalesced inputs: %v", coalesced)
+	}
+	var deferred bool
+	dbfx.QueryRow(t, `SELECT $3::uuid=ANY(reconciliation_comment_ids) FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2 AND status='queued'`, issueID, agentID, cB.ID).Scan(&deferred)
+	if !deferred {
+		t.Fatal("B request was not registered for reconciliation")
 	}
 }
 

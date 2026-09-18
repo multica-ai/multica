@@ -485,7 +485,7 @@ WHERE id = $1;
 INSERT INTO chat_message (
     chat_session_id, role, content, task_id, failure_reason, elapsed_ms,
     message_kind, quick_actions, channel_media_pending_until, channel_ingested,
-    channel_context_revision, id
+    channel_context_revision, channel_sender_user_id, channel_source_message_id, channel_source_thread_id, channel_source_sender_id, id
 )
 VALUES (
     $1, $2, $3, sqlc.narg(task_id), sqlc.narg(failure_reason), sqlc.narg(elapsed_ms),
@@ -501,6 +501,7 @@ VALUES (
          ELSE now() + make_interval(secs => sqlc.narg(channel_media_pending_secs)::float8) END,
     COALESCE(sqlc.narg(channel_ingested)::boolean, FALSE),
     sqlc.narg(channel_context_revision),
+    sqlc.narg(channel_sender_user_id), sqlc.narg(channel_source_message_id), sqlc.narg(channel_source_thread_id), sqlc.narg(channel_source_sender_id),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 )
 RETURNING *;
@@ -603,7 +604,8 @@ SET task_id = $2
 WHERE id = $1 AND role = 'user';
 
 -- name: LinkUnownedChannelChatMessagesToTask :exec
--- Seals the trailing channel-message batch to its task. The task row and these
+-- Seals each trusted sender independently; unknown legacy senders retain the
+-- trailing-message boundary and cannot enter a routed task. The task row and these
 -- links are committed together, so an older in-flight task cannot absorb a
 -- newer media message and a later assistant row cannot hide that message.
 -- channel_command turns were already handled synchronously by Router. They stay
@@ -642,38 +644,49 @@ WHERE message.chat_session_id = @chat_session_id
           AND message.channel_context_revision IS NULL
       )
   )
-  AND NOT EXISTS (
-      SELECT 1
-      FROM chat_message AS prior
-      LEFT JOIN agent_task_queue AS prior_turn
-        ON prior_turn.id = prior.task_id
-      LEFT JOIN agent_task_queue AS prior_batch
-        ON prior_batch.id = COALESCE(prior_turn.chat_input_task_id, prior_turn.id)
-      WHERE prior.chat_session_id = @chat_session_id
-        AND prior.role != 'user'
-        AND (prior.created_at, prior.id) > (message.created_at, message.id)
-        AND (prior_batch.id IS NULL OR prior_batch.created_at > message.created_at)
+  AND (
+    message.channel_sender_user_id = sqlc.narg(sender_user_id)::uuid
+    OR (
+      message.channel_sender_user_id IS NULL
+      AND task.runtime_routing IS NULL
+      AND NOT EXISTS (
+          SELECT 1
+          FROM chat_message AS prior
+          LEFT JOIN agent_task_queue AS prior_turn
+            ON prior_turn.id = prior.task_id
+          LEFT JOIN agent_task_queue AS prior_batch
+            ON prior_batch.id = COALESCE(prior_turn.chat_input_task_id, prior_turn.id)
+          WHERE prior.chat_session_id = @chat_session_id
+            AND prior.role != 'user'
+            AND (prior.created_at, prior.id) > (message.created_at, message.id)
+            AND (prior_batch.id IS NULL OR prior_batch.created_at > message.created_at)
+      )
+    )
   );
 
 -- name: ListUnownedChannelChatContextRevisions :many
--- Returns every durable context generation that still has channel input without
+-- Returns every durable context generation and authenticated sender partition that still has channel input without
 -- a task owner. A process crash drops in-memory debounce timers; the next normal
 -- inbound message uses this list to re-arm older generations instead of only
 -- recovering the current one. Legacy NULL revisions are generation 1.
+-- A missing sender stays NULL: generation initiator is legacy metadata and
+-- cannot authorize an unknown message as another user.
 WITH pending AS (
-    SELECT DISTINCT COALESCE(channel_context_revision, 1)::bigint AS context_revision
+    SELECT DISTINCT COALESCE(channel_context_revision, 1)::bigint AS context_revision,
+        channel_sender_user_id
     FROM chat_message
     WHERE chat_session_id = $1
       AND role = 'user'
       AND task_id IS NULL
       AND message_kind != 'channel_command'
 )
-SELECT pending.context_revision, generation.initiator_user_id
+SELECT pending.context_revision, generation.initiator_user_id,
+    pending.channel_sender_user_id AS sender_user_id
 FROM pending
 LEFT JOIN channel_chat_context_generation AS generation
   ON generation.chat_session_id = $1
  AND generation.revision = pending.context_revision
-ORDER BY pending.context_revision;
+ORDER BY pending.context_revision, pending.channel_sender_user_id;
 
 -- name: DeferChatTaskForSealedPendingMedia :one
 -- Closes the enqueue-vs-append race: under READ COMMITTED a media message can
@@ -1069,7 +1082,7 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
     initiator_user_id, originator_user_id, accountable_user_id, force_fresh_session, runtime_mcp_overlay,
     runtime_connected_apps, originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
-    fire_at, channel_context_revision, id
+    fire_at, channel_context_revision, runtime_routing, id
 )
 SELECT
     $1, $2, NULL,
@@ -1085,6 +1098,7 @@ SELECT
     sqlc.narg(trigger_evidence_ref_id),
     sqlc.narg('fire_at')::timestamptz,
     sqlc.narg('channel_context_revision')::bigint,
+    sqlc.narg(runtime_routing),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, NULL, $2)
 RETURNING *;
@@ -1194,7 +1208,7 @@ WITH retired_sessions AS (
       )
 ), latest_per_session AS (
     SELECT DISTINCT ON (t.session_id)
-        t.session_id, t.work_dir, t.runtime_id, t.status, t.failure_reason, t.error, t.completed_at
+        t.session_id, t.work_dir, t.runtime_id, t.runtime_routing, t.status, t.failure_reason, t.error, t.completed_at
     FROM agent_task_queue t
     WHERE t.chat_session_id = sqlc.arg('chat_session_id')
       AND (
@@ -1205,7 +1219,7 @@ WITH retired_sessions AS (
       AND t.status IN ('completed', 'failed', 'cancelled')
     ORDER BY t.session_id, t.completed_at DESC
 )
-SELECT session_id, work_dir, runtime_id FROM latest_per_session
+SELECT session_id, work_dir, runtime_id, runtime_routing FROM latest_per_session
 WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
   AND (
     status IN ('completed', 'cancelled')
@@ -1658,3 +1672,50 @@ WHERE workspace_id = $1
   AND status = 'active'
 ORDER BY created_at ASC
 LIMIT 1;
+
+-- name: HasUnownedChannelMessagesWithoutSender :one
+SELECT EXISTS (
+    SELECT 1 FROM chat_message m
+    WHERE m.chat_session_id = $1 AND m.role = 'user' AND m.task_id IS NULL
+      AND m.message_kind != 'channel_command'
+      AND m.channel_ingested AND m.channel_sender_user_id IS NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM chat_message prior
+          LEFT JOIN agent_task_queue prior_turn ON prior_turn.id = prior.task_id
+          LEFT JOIN agent_task_queue prior_batch
+            ON prior_batch.id = COALESCE(prior_turn.chat_input_task_id, prior_turn.id)
+          WHERE prior.chat_session_id = m.chat_session_id
+            AND prior.role != 'user'
+            AND (prior.created_at, prior.id) > (m.created_at, m.id)
+            AND (prior_batch.id IS NULL OR prior_batch.created_at > m.created_at)
+      )
+);
+
+-- name: StampChannelTaskReplyTarget :one
+-- Call after sealing the input batch and creating its channel delivery row.
+-- Native message, thread and sender must come from the same owned message;
+-- the generation's latest trigger can belong to another execution user.
+WITH target AS MATERIALIZED (
+    SELECT channel_source_message_id, channel_source_thread_id, channel_source_sender_id
+    FROM chat_message
+    WHERE task_id = $1 AND channel_ingested AND channel_sender_user_id IS NOT NULL
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+), delivery AS (
+    UPDATE channel_task_delivery d
+    SET channel_message_id = m.channel_source_message_id,
+        channel_thread_id = m.channel_source_thread_id,
+        channel_sender_id = m.channel_source_sender_id
+    FROM target m
+    WHERE d.task_id = $1
+)
+UPDATE agent_task_queue t
+SET context = COALESCE(t.context, '{}'::jsonb) || jsonb_build_object(
+    'channel_reply_target', jsonb_build_object(
+        'message_id', m.channel_source_message_id,
+        'thread_id', m.channel_source_thread_id
+    )
+)
+FROM target m
+WHERE t.id = $1
+RETURNING t.*;

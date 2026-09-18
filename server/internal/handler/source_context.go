@@ -791,6 +791,13 @@ func (h *Handler) prepareAgentCommentSubIssue(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		return nil, sourceContextBadRequest("agent not found")
 	}
+	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(workspaceID))
+	effectiveRuntimeID, err := h.runtimeForRequest(r, agent, actorType, actorID)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return nil, errSourceContextResponseWritten
+	}
+	agent.RuntimeID = effectiveRuntimeID
 	verdict, err := service.AgentReadiness(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceSourceContext), agent)
 	if err != nil {
 		return nil, err
@@ -852,7 +859,7 @@ func (h *Handler) createAgentCommentSubIssue(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"code": "source_context_quick_create_unsupported", "error": "selected agent runtime must be updated before using captured context"})
 		return errSourceContextResponseWritten
 	}
-	task, err := h.TaskService.EnqueueQuickCreateTaskWithSourceContext(r.Context(), workspaceID, userID, prepared.agentID, prepared.squadID, prepared.prompt, prepared.priority, prepared.dueDate, prepared.projectID, capture.SourceIssueID, prepared.attachmentIDs, capture)
+	task, err := h.TaskService.EnqueueQuickCreateTaskWithSourceContext(r.Context(), workspaceID, userID, prepared.agentID, prepared.squadID, prepared.prompt, prepared.priority, prepared.dueDate, prepared.projectID, capture.SourceIssueID, prepared.attachmentIDs, capture, prepared.runtimeID)
 	if err != nil {
 		return err
 	}

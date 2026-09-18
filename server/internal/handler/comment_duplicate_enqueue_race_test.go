@@ -402,14 +402,9 @@ func TestRegisterPlannedCommentForActiveTaskExcludesQueued(t *testing.T) {
 	}
 }
 
-// TestCommentEnqueueRaceQueuedWinnerReattributesOriginator is the regression for
-// Elon round-3 must-fix 2: when the lost-race winner is a same-head QUEUED task,
-// the losing comment must fold through the ATOMIC merge, which re-stamps the run
-// to the NEW comment's originator — never a bare planned append that would leave
-// a second member's comment executing under the first member's identity. Two
-// different members: the winner is attributed to M1, the losing comment is M2's,
-// and after the race the run must be re-attributed to M2.
-func TestCommentEnqueueRaceQueuedWinnerReattributesOriginator(t *testing.T) {
+// A losing comment from a different execution user cannot change a queued
+// task's frozen route. It remains a deferred obligation for its own execution.
+func TestCommentEnqueueRaceQueuedWinnerPreservesExecutionUser(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -455,12 +450,12 @@ func TestCommentEnqueueRaceQueuedWinnerReattributesOriginator(t *testing.T) {
 
 	trigger := commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionAgent}
 	results := testHandler.enqueueCommentAgentTriggers(ctx, issue, util.MustParseUUID(loserCommentID), []commentAgentTrigger{trigger})
-	if res := results[agentID]; res.status != DispatchCoalesced {
-		t.Fatalf("queued-winner reattribution race: got status %q reason %q, want coalesced", res.status, res.reason)
+	if res := results[agentID]; res.status != DispatchDeferred {
+		t.Fatalf("queued-winner reattribution race: got status %q reason %q, want deferred", res.status, res.reason)
 	}
 
-	// The run is now attributed to M2 (the folded comment's author) and triggered
-	// by M2's comment — proving the atomic merge ran, not a bare planned append.
+	// A lost enqueue race must preserve the winner's execution user and defer
+	// the other human's request as an obligation.
 	var trig, orig string
 	if err := testPool.QueryRow(ctx, `
 		SELECT COALESCE(trigger_comment_id::text,''), COALESCE(originator_user_id::text,'')
@@ -468,11 +463,11 @@ func TestCommentEnqueueRaceQueuedWinnerReattributesOriginator(t *testing.T) {
 	`, issueID, agentID).Scan(&trig, &orig); err != nil {
 		t.Fatalf("read winner attribution: %v", err)
 	}
-	if trig != loserCommentID {
-		t.Fatalf("trigger_comment_id = %s, want repointed to M2's comment %s", trig, loserCommentID)
+	if trig != winnerCommentID {
+		t.Fatalf("trigger_comment_id = %s, want original M1 comment %s", trig, winnerCommentID)
 	}
-	if orig != m2 {
-		t.Fatalf("originator_user_id = %s, want re-attributed to M2 %s (bare append would leave M1)", orig, m2)
+	if orig != testUserID {
+		t.Fatalf("originator_user_id = %s, want original execution user %s", orig, testUserID)
 	}
 }
 

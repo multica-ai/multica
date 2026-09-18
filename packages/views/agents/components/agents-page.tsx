@@ -881,7 +881,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       const activity = activityMap.get(agent.id) ?? null;
       return {
         agent,
-        runtime: runtimesById.get(agent.runtime_id) ?? null,
+        runtime: runtimesById.get(agent.personal_runtime_id || agent.runtime_id) ?? null,
         presence: presenceMap.get(agent.id) ?? null,
         activity,
         runCount: runCountsById.get(agent.id) ?? 0,

@@ -13,6 +13,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -1186,7 +1187,7 @@ func commentMentionsAnyone(content string) bool {
 // paths go through computeCommentAgentTriggers so preview and create share the
 // same trigger set.
 // It returns true only when a leader task was actually enqueued.
-func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID, handoffNote string) bool {
+func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID, handoffNote string, sourceTaskID ...pgtype.UUID) bool {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          issue.AssigneeID,
 		WorkspaceID: issue.WorkspaceID,
@@ -1208,6 +1209,17 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 	leaderOriginator := ""
 	if authorType == "member" {
 		leaderOriginator = authorID
+	} else if len(sourceTaskID) > 0 && sourceTaskID[0].Valid {
+		parent, err := h.Queries.GetAgentTask(ctx, sourceTaskID[0])
+		if err != nil || uuidToString(parent.AgentID) != authorID {
+			return false
+		}
+		leaderOriginator = uuidToString(parent.OriginatorUserID)
+		if snapshot, err := service.ParseRuntimeRouting(parent.RuntimeRouting); err != nil {
+			return false
+		} else if snapshot != nil {
+			leaderOriginator = snapshot.ExecutionUserID
+		}
 	} else {
 		leaderOriginator = uuidToString(h.TaskService.OriginatorForIssueTask(ctx, issue, pgtype.UUID{}))
 	}
@@ -1231,7 +1243,7 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 	// The member who performed the assign/promote is the accountable human for the
 	// leader run (MUL-4302 §4) — the same principal the gate above judged. An agent
 	// author is not a human, so only a member actor is threaded.
-	if _, err := h.TaskService.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, squad.LeaderID, squad.ID, handoffNote, memberActorUserID(authorType, authorID)); err != nil {
+	if _, err := h.TaskService.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, squad.LeaderID, squad.ID, handoffNote, memberActorUserID(authorType, authorID), sourceTaskID...); err != nil {
 		slog.Warn("enqueue squad leader task failed",
 			"issue_id", uuidToString(issue.ID),
 			"squad_id", uuidToString(squad.ID),

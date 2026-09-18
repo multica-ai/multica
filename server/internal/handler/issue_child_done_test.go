@@ -659,6 +659,7 @@ func TestStageLeaderPrepareTimeoutRetryCanAdvanceNextStage(t *testing.T) {
 	req = newRequest("PUT", "/api/issues/"+stage2.ID, map[string]any{"status": "todo"})
 	req.Header.Set("X-Agent-ID", sq.LeaderID)
 	req.Header.Set("X-Task-ID", retryID)
+	req.Header.Set("X-Actor-Source", "task_token")
 	req = withURLParam(req, "id", stage2.ID)
 	testHandler.UpdateIssue(w, req)
 	if w.Code != http.StatusOK {

@@ -767,6 +767,9 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) {
           qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+          // Preferences include the default runtime's provider, which can
+          // change when another client moves the agent to a new runtime.
+          qc.invalidateQueries({ queryKey: runtimeKeys.preferences(wsId) });
           qc.invalidateQueries({ queryKey: workspaceWorkingAgentsKeys.all(wsId) });
           // Squad members status is derived per agent, so any agent
           // change (status flip, archive, runtime swap) needs to refresh the

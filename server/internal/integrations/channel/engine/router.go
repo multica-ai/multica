@@ -631,8 +631,8 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	// 8. Debounce the run trigger. The synchronous outcome is OutcomeIngested
 	//    with no TaskID — the task row is created at flush. identity.UserID is
 	//    THIS message's sender (the task initiator), deliberately not the
-	//    session creator (group sessions are creator=installer). Latest sender
-	//    in a window wins (MUL-2645).
+	//    session creator (group sessions are creator=installer). Input
+	//    in each sender window stays isolated from other members.
 	//
 	//    SkipAgentRun lets an adapter opt this message out of the agent turn —
 	//    used by wecom for standalone /issue commands where the engine has
@@ -651,7 +651,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		for _, pending := range pendingContexts {
 			revision := pending.Revision
 			forceFresh := revision == appendRes.ContextRevision && msg.ForceFresh
-			if revision == appendRes.ContextRevision {
+			if revision == appendRes.ContextRevision && pending.InitiatorUserID == identity.UserID {
 				r.scheduleRunWithFresh(
 					set, inst, msg, sessionID, identity.UserID,
 					res.ChannelBindingID, res.ChannelRouteRevision, forceFresh, revision,
@@ -932,7 +932,7 @@ func (r *Router) scheduleRunMode(
 		)
 		return
 	}
-	key := keyForSessionContext(sessionID, contextRevision)
+	key := keyForSessionContext(sessionID, contextRevision) + ":" + uuidString(initiatorUserID)
 	flush := func() {
 		// A later message in this same durable context generation may replace
 		// the closure. /clear advances the generation and therefore uses a distinct
@@ -984,7 +984,7 @@ func (r *Router) flushChatRun(
 		// not stick on the user's message.
 		r.clearTyping(ctx, set, sessionID)
 		switch {
-		case errors.Is(err, service.ErrChatTaskAgentNoRuntime):
+		case errors.Is(err, service.ErrChatTaskAgentNoRuntime), errors.Is(err, service.ErrTaskRuntimeUnavailable):
 			r.emitFlushReply(ctx, set, inst, msg, sessionID, bindingID, routeRevision, OutcomeAgentOffline)
 		case errors.Is(err, service.ErrChatTaskAgentArchived):
 			r.emitFlushReply(ctx, set, inst, msg, sessionID, bindingID, routeRevision, OutcomeAgentArchived)

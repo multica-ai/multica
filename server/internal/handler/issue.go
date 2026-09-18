@@ -2667,11 +2667,19 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "agent not found")
 		return
 	}
+	effectiveRuntimeID, err := h.TaskService.EffectiveRuntimeForUser(r.Context(), agent, requesterUUID)
+	if err != nil {
+		writeAgentUnavailable(w, err.Error(), dispatch.ReasonInvocationNotAllowed)
+		return
+	}
+	readinessAgent := agent
+	readinessAgent.RuntimeID = effectiveRuntimeID
+
 	// Quick-create needs the agent to run NOW, so any non-ready verdict refuses
 	// — but with the verdict's own code, so "CLI cannot run" no longer arrives
 	// as "runtime is offline" and sends the user to reconnect a machine that is
 	// already connected (MUL-6164).
-	if verdict, err := service.AgentReadiness(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceIssue), agent); err != nil {
+	if verdict, err := service.AgentReadiness(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceIssue), readinessAgent); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check agent runtime")
 		return
 	} else if !verdict.Ready() {
@@ -2688,13 +2696,13 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 	// twenty seconds later. Dev-built
 	// daemons (git-describe shape) are exempted inside CheckMinCLIVersion
 	// so `make daemon` works without weakening staging or production.
-	if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID); status != 0 {
+	if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), obsmetrics.RuntimeLookupSourceIssue, effectiveRuntimeID); status != 0 {
 		writeJSON(w, status, payload)
 		return
 	}
 	if priority != "" || dueDate != "" {
 		if status, payload := h.checkQuickCreateDaemonVersionAtLeast(
-			r.Context(), obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID, agentpkg.MinQuickCreateFieldsCLIVersion,
+			r.Context(), obsmetrics.RuntimeLookupSourceIssue, effectiveRuntimeID, agentpkg.MinQuickCreateFieldsCLIVersion,
 		); status != 0 {
 			writeJSON(w, status, payload)
 			return
@@ -2747,7 +2755,11 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		parentIssueUUID = pid
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, attachmentIDs)
+	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, attachmentIDs, effectiveRuntimeID)
+	if errors.Is(err, service.ErrTaskRuntimeUnavailable) {
+		writeAgentUnavailable(w, err.Error(), dispatch.ReasonInvocationNotAllowed)
+		return
+	}
 	if err != nil {
 		if writeIssueLimitReached(w, err) {
 			return
@@ -3767,7 +3779,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		},
 		h.issueTriggerWriteProbe(r, actorType, actorID, issue),
 	); ok && !req.SuppressRun {
-		h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.HandoffNote)
+		h.dispatchIssueRun(r, issue, trigger, actorType, actorID, req.HandoffNote)
 	}
 
 	// Platform-driven parent notification: when this issue transitions into
@@ -3907,10 +3919,13 @@ func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, act
 		return db.Agent{}, false, false
 	}
 	agent, err := h.Queries.GetAgent(ctx, issue.AssigneeID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil || agent.ArchivedAt.Valid {
 		return db.Agent{}, false, false
 	}
 	if !h.canInvokeAgent(ctx, agent, actorType, actorID, opts.OriginatorUserID, uuidToString(issue.WorkspaceID)) {
+		return db.Agent{}, false, false
+	}
+	if verdict, err := h.commentRuntimeReadiness(ctx, agent, actorType, actorID, opts); err != nil || verdict.Blocked() {
 		return db.Agent{}, false, false
 	}
 	// Coalescing queue: pending is still a valid route target, but callers
@@ -4454,7 +4469,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			},
 			h.issueTriggerWriteProbe(r, actorType, actorID, issue),
 		); ok && !req.Updates.SuppressRun {
-			h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.Updates.HandoffNote)
+			h.dispatchIssueRun(r, issue, trigger, actorType, actorID, req.Updates.HandoffNote)
 		}
 
 		// No status change — not even → cancelled — cancels active tasks here,

@@ -981,5 +981,37 @@
     "selected_one": "{{count}} selected",
     "selected_other": "{{count}} selected",
     "clear_selection": "Clear selection"
+  },
+  "personal_runtime": {
+    "settings": {
+      "title": "My execution settings",
+      "hint": "Applies to new work you start. Automatic follow-up runs keep the original runtime. Existing runs, files and CLI sessions stay on their current machine.",
+      "label": "Personal runtime",
+      "use_default": "Use agent default",
+      "unavailable": "Your selected runtime is unavailable. Choose another runtime or reset to the agent default.",
+      "load_failed": "Unable to load your runtime preference.",
+      "save_failed": "Unable to save your runtime preference.",
+      "shared_default": "Agent default runtime",
+      "shared_default_hint": "Shared default for anyone without a personal preference.",
+      "model_mode": "Model selection",
+      "model_inherit": "Use agent model",
+      "model_runtime_default": "Use runtime default model",
+      "model_custom": "Choose a model",
+      "model_id": "Model ID",
+      "model_hint": "Choose an available model or enter an ID supported by your selected runtime and account.",
+      "concurrency": "My concurrency limit",
+      "concurrency_inherit": "Use agent limit ({{count}})",
+      "concurrency_hint": "Applies only to your executions of this agent, across your machines. Leave blank to use the agent limit. Machine capacity still applies. Lowering the limit waits for active runs to finish.",
+      "execution_hint": "Personal execution uses runtime defaults or your chosen model, not the agent’s execution configuration. Changes apply to new run chains. Resetting the runtime clears these personal settings.",
+      "save_execution": "Save execution settings",
+      "owner_default": "You use the agent’s default execution configuration below.",
+      "owner_customize": "Configure separately for myself",
+      "owner_override": "Currently using a personal override",
+      "owner_restore": "Restore default configuration"
+    },
+    "task": {
+      "source": "Runtime selection",
+      "execution_user": "Execution user"
+    }
   }
 }

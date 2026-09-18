@@ -67,34 +67,20 @@ func mintAgentTaskToken(t *testing.T, agentID, taskID, boundUserID string) strin
 	return raw
 }
 
-// ensureAgentTask returns a task UUID belonging to the given agent, inserting a
-// queued one if none exists. authRequestWithAgent binds its mat_ token to that
-// task, so callers keep treating "name the agent" as the single knob for
-// posing as one.
+// ensureAgentTask creates an active run with the same bound principal as a
+// server-minted legacy task token. Queued and terminal tasks cannot authenticate.
 func ensureAgentTask(t *testing.T, agentID string) string {
 	t.Helper()
 	ctx := context.Background()
 	var taskID string
-	if err := testPool.QueryRow(ctx,
-		`SELECT id::text FROM agent_task_queue WHERE agent_id = $1 LIMIT 1`,
-		agentID,
-	).Scan(&taskID); err == nil && taskID != "" {
-		return taskID
-	}
-	var runtimeID string
-	if err := testPool.QueryRow(ctx,
-		`SELECT runtime_id::text FROM agent WHERE id = $1`,
-		agentID,
-	).Scan(&runtimeID); err != nil {
-		t.Fatalf("ensureAgentTask: load runtime_id for agent %s: %v", agentID, err)
-	}
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
-		VALUES ($1, $2, 'queued', 0)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, originator_user_id, accountable_user_id)
+		SELECT id, runtime_id, 'running', 0, $2, $2 FROM agent WHERE id=$1
 		RETURNING id::text
-	`, agentID, runtimeID).Scan(&taskID); err != nil {
-		t.Fatalf("ensureAgentTask: insert task for agent %s: %v", agentID, err)
+	`, agentID, testUserID).Scan(&taskID); err != nil {
+		t.Fatalf("ensure active agent task: %v", err)
 	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id=$1`, taskID) })
 	return taskID
 }
 

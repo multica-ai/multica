@@ -981,5 +981,37 @@
     "selected_one": "{{count}} sélectionné",
     "selected_other": "{{count}} sélectionnés",
     "clear_selection": "Effacer la sélection"
+  },
+  "personal_runtime": {
+    "settings": {
+      "title": "Mes paramètres d’exécution",
+      "hint": "S’applique aux nouveaux travaux que vous lancez. Les exécutions de suivi automatiques conservent le runtime initial. Les exécutions, fichiers et sessions CLI existants restent sur leur machine actuelle.",
+      "label": "Runtime personnel",
+      "use_default": "Utiliser le runtime de l’agent",
+      "unavailable": "Le runtime sélectionné est indisponible. Choisissez-en un autre ou rétablissez celui de l’agent.",
+      "load_failed": "Impossible de charger votre préférence de runtime.",
+      "save_failed": "Impossible d’enregistrer votre préférence de runtime.",
+      "shared_default": "Runtime par défaut de l’agent",
+      "shared_default_hint": "Valeur partagée pour les utilisateurs sans préférence personnelle.",
+      "model_mode": "Sélection du modèle",
+      "model_inherit": "Utiliser le modèle de l’agent",
+      "model_runtime_default": "Utiliser le modèle par défaut du runtime",
+      "model_custom": "Choisir un modèle",
+      "model_id": "ID du modèle",
+      "model_hint": "Choisissez un modèle disponible ou saisissez un ID pris en charge par le runtime et votre compte.",
+      "concurrency": "Ma limite de simultanéité",
+      "concurrency_inherit": "Utiliser la limite de l’agent ({{count}})",
+      "concurrency_hint": "S’applique uniquement à vos exécutions de cet agent, sur toutes vos machines. Laissez vide pour utiliser la limite de l’agent. La capacité de la machine reste applicable. Une baisse de la limite attend la fin des exécutions en cours.",
+      "execution_hint": "Vos exécutions utilisent les paramètres du runtime ou le modèle choisi. Les modifications s’appliquent aux nouvelles chaînes d’exécution. Rétablir le runtime par défaut efface ces paramètres personnels.",
+      "save_execution": "Enregistrer les paramètres",
+      "owner_default": "Vous utilisez la configuration par défaut de l’agent ci-dessous.",
+      "owner_customize": "Configurer pour moi",
+      "owner_override": "Configuration personnelle active",
+      "owner_restore": "Rétablir la configuration par défaut"
+    },
+    "task": {
+      "source": "Sélection du runtime",
+      "execution_user": "Utilisateur d’exécution"
+    }
   }
 }

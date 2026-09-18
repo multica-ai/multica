@@ -959,5 +959,37 @@
   "actions": {
     "selected_other": "{{count}}개 선택됨",
     "clear_selection": "선택 해제"
+  },
+  "personal_runtime": {
+    "settings": {
+      "title": "내 실행 설정",
+      "hint": "내가 시작하는 새 작업에 적용됩니다. 자동 후속 실행은 원래 런타임을 유지합니다. 기존 실행, 파일 및 CLI 세션은 현재 컴퓨터에 남습니다.",
+      "label": "개인 런타임",
+      "use_default": "에이전트 기본값 사용",
+      "unavailable": "선택한 런타임을 사용할 수 없습니다. 다른 런타임을 선택하거나 에이전트 기본값으로 재설정하세요.",
+      "load_failed": "런타임 설정을 불러올 수 없습니다.",
+      "save_failed": "런타임 설정을 저장할 수 없습니다.",
+      "shared_default": "에이전트 기본 런타임",
+      "shared_default_hint": "개인 설정이 없는 사용자가 사용하는 공유 기본값입니다.",
+      "model_mode": "모델 선택",
+      "model_inherit": "에이전트 모델 사용",
+      "model_runtime_default": "런타임 기본 모델 사용",
+      "model_custom": "모델 지정",
+      "model_id": "모델 ID",
+      "model_hint": "사용 가능한 모델을 선택하거나 선택한 런타임과 계정이 지원하는 모델 ID를 입력하세요.",
+      "concurrency": "내 동시 실행 한도",
+      "concurrency_inherit": "에이전트 한도 사용 ({{count}})",
+      "concurrency_hint": "이 에이전트를 내가 진행하는 실행을 모든 내 기기에서 합산합니다. 비워 두면 에이전트 한도를 사용합니다. 기기 용량 제한도 적용됩니다. 한도를 낮추면 진행 중인 실행이 끝날 때까지 기다립니다.",
+      "execution_hint": "개인 런타임은 자체 기본 설정 또는 지정한 모델을 사용하며 에이전트의 실행 설정을 상속하지 않습니다. 변경 사항은 새 실행 체인에 적용됩니다. 런타임을 초기화하면 개인 설정이 삭제됩니다.",
+      "save_execution": "실행 설정 저장",
+      "owner_default": "기본적으로 아래 에이전트 실행 설정을 사용하며 다시 연결할 필요가 없습니다.",
+      "owner_customize": "나만의 설정 추가",
+      "owner_override": "현재 개인 설정으로 재정의 중",
+      "owner_restore": "기본 설정으로 복원"
+    },
+    "task": {
+      "source": "런타임 선택",
+      "execution_user": "실행 사용자"
+    }
   }
 }

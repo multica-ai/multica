@@ -87,8 +87,8 @@ func TestEnqueueChatTaskConsumesPendingFreshOnlyOnSuccess(t *testing.T) {
 		t.Fatalf("seed pending fresh: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO chat_message (chat_session_id, role, content)
-		VALUES ($1, 'user', 'start the new topic')`, chatSessionID); err != nil {
+		INSERT INTO chat_message (channel_sender_user_id, chat_session_id, role, content)
+		VALUES ((SELECT creator_id FROM chat_session WHERE id = $1), $1, 'user', 'start the new topic')`, chatSessionID); err != nil {
 		t.Fatalf("seed chat message: %v", err)
 	}
 
@@ -99,8 +99,8 @@ func TestEnqueueChatTaskConsumesPendingFreshOnlyOnSuccess(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE agent SET runtime_id = NULL WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("disable agent runtime: %v", err)
 	}
-	if _, err := svc.EnqueueChatTask(ctx, session, initiator, false); !errors.Is(err, ErrChatTaskAgentNoRuntime) {
-		t.Fatalf("offline enqueue error = %v, want ErrChatTaskAgentNoRuntime", err)
+	if _, err := svc.EnqueueChatTask(ctx, session, initiator, false); !errors.Is(err, ErrTaskRuntimeUnavailable) {
+		t.Fatalf("offline enqueue error = %v, want ErrTaskRuntimeUnavailable", err)
 	}
 	var pending bool
 	if err := pool.QueryRow(ctx, `SELECT pending_fresh FROM channel_chat_session_binding WHERE chat_session_id = $1`, chatSessionID).Scan(&pending); err != nil {
@@ -144,16 +144,16 @@ func TestEnqueueChatTaskIgnoresHandledCommandMedia(t *testing.T) {
 
 	var commandID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO chat_message (chat_session_id, role, content, message_kind, channel_media_pending_until)
-		VALUES ($1, 'user', '/issue login is broken [Image]', 'channel_command', $2)
+		INSERT INTO chat_message (channel_sender_user_id, chat_session_id, role, content, message_kind, channel_media_pending_until)
+		VALUES ((SELECT creator_id FROM chat_session WHERE id = $1), $1, 'user', '/issue login is broken [Image]', 'channel_command', $2)
 		RETURNING id`, chatSessionID, time.Now().Add(time.Minute)).Scan(&commandID); err != nil {
 		t.Fatalf("seed handled command: %v", err)
 	}
 	// The message that arms this flush: plain text of its own, no media.
 	var questionID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO chat_message (chat_session_id, role, content)
-		VALUES ($1, 'user', 'unrelated question') RETURNING id`, chatSessionID).Scan(&questionID); err != nil {
+		INSERT INTO chat_message (channel_sender_user_id, chat_session_id, role, content)
+		VALUES ((SELECT creator_id FROM chat_session WHERE id = $1), $1, 'user', 'unrelated question') RETURNING id`, chatSessionID).Scan(&questionID); err != nil {
 		t.Fatalf("seed ordinary message: %v", err)
 	}
 
@@ -198,8 +198,8 @@ func TestPromoteChannelChatTasksIgnoresHandledCommandMedia(t *testing.T) {
 
 	var mediaMessageID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO chat_message (chat_session_id, role, content, channel_media_pending_until)
-		VALUES ($1, 'user', '[Image] what is this?', $2) RETURNING id`,
+		INSERT INTO chat_message (channel_sender_user_id, chat_session_id, role, content, channel_media_pending_until)
+		VALUES ((SELECT creator_id FROM chat_session WHERE id = $1), $1, 'user', '[Image] what is this?', $2) RETURNING id`,
 		chatSessionID, time.Now().Add(time.Minute)).Scan(&mediaMessageID); err != nil {
 		t.Fatalf("seed pending media message: %v", err)
 	}
@@ -219,8 +219,8 @@ func TestPromoteChannelChatTasksIgnoresHandledCommandMedia(t *testing.T) {
 	// A `/issue` command arrives while the task waits, and starts resolving its
 	// own attachments.
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO chat_message (chat_session_id, role, content, message_kind, channel_media_pending_until)
-		VALUES ($1, 'user', '/issue ship the fix [Image]', 'channel_command', $2)`,
+		INSERT INTO chat_message (channel_sender_user_id, chat_session_id, role, content, message_kind, channel_media_pending_until)
+		VALUES ((SELECT creator_id FROM chat_session WHERE id = $1), $1, 'user', '/issue ship the fix [Image]', 'channel_command', $2)`,
 		chatSessionID, time.Now().Add(time.Minute)); err != nil {
 		t.Fatalf("seed handled command: %v", err)
 	}

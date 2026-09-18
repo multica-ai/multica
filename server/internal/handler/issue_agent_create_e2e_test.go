@@ -97,6 +97,7 @@ func TestAgentCreateOriginator_E2E_CreateAssignSquad_PrivateWorkerTriggered(t *t
 	})
 	r.Header.Set("X-Agent-ID", creatorAID)
 	r.Header.Set("X-Task-ID", creatorTaskID)
+	r.Header.Set("X-Actor-Source", "task_token")
 	testHandler.CreateIssue(w, r)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
@@ -145,6 +146,7 @@ func TestAgentCreateOriginator_E2E_CreateAssignSquad_PrivateWorkerTriggered(t *t
 	})
 	r.Header.Set("X-Agent-ID", leaderID)
 	r.Header.Set("X-Task-ID", leaderTaskID)
+	r.Header.Set("X-Actor-Source", "task_token")
 	r = withURLParam(r, "id", created.ID)
 	testHandler.CreateComment(w, r)
 	if w.Code != http.StatusCreated {
@@ -216,6 +218,7 @@ func TestAgentCreateOriginator_E2E_UpdateAssignSquad_HandlerGateAdmitsPrivateLea
 	})
 	r.Header.Set("X-Agent-ID", creatorAID)
 	r.Header.Set("X-Task-ID", creatorTaskID)
+	r.Header.Set("X-Actor-Source", "task_token")
 	testHandler.CreateIssue(w, r)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
@@ -238,6 +241,7 @@ func TestAgentCreateOriginator_E2E_UpdateAssignSquad_HandlerGateAdmitsPrivateLea
 	})
 	r.Header.Set("X-Agent-ID", creatorAID)
 	r.Header.Set("X-Task-ID", creatorTaskID)
+	r.Header.Set("X-Actor-Source", "task_token")
 	r = withURLParam(r, "id", created.ID)
 	testHandler.UpdateIssue(w, r)
 	if w.Code != http.StatusOK {

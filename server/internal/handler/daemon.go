@@ -857,6 +857,14 @@ func (h *Handler) mergeLegacyRuntime(ctx context.Context, newRuntimeID, oldRunti
 		return errRuntimeMergeFenced
 	}
 
+	routed, err := qtx.HasRoutedTasksByRuntime(ctx, oldRuntimeID)
+	if err != nil {
+		return fmt.Errorf("check frozen runtime history: %w", err)
+	}
+	if routed {
+		return fmt.Errorf("runtime has frozen task routing and cannot be merged")
+	}
+
 	reassignment, err := qtx.ReassignTasksToRuntime(ctx, db.ReassignTasksToRuntimeParams{
 		NewRuntimeID: newRuntimeID,
 		OldRuntimeID: oldRuntimeID,
@@ -1855,8 +1863,9 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			// the reclaim path.
 			continue
 		}
-		if !rt.OwnerID.Valid {
-			slog.Error("batch claim: runtime owner missing; cancelling task to avoid unscoped agent credentials",
+		executionUserID := claimRequestingUserID(task, rt)
+		if !executionUserID.Valid {
+			slog.Error("batch claim: execution user missing; cancelling task to avoid unscoped agent credentials",
 				"task_id", uuidToString(task.ID), "runtime_id", uuidToString(task.RuntimeID))
 			if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
 				slog.Error("batch claim: cancel after missing runtime owner failed",
@@ -1895,7 +1904,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			TaskID:      task.ID,
 			AgentID:     task.AgentID,
 			WorkspaceID: parseUUID(resp.WorkspaceID),
-			UserID:      rt.OwnerID,
+			UserID:      executionUserID,
 			ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
 		}, deliveredCommentIDs, commentBackedTask, issueSnapshot, daemonTokens...)
 		if ferr != nil {
@@ -2269,43 +2278,71 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			message: "failed to load task agent",
 		}
 	}
-	// The SQL claim narrows candidates and repeats the access predicate before
-	// changing task state, but Agent mutations do not stay locked through HTTP
-	// response assembly. Recheck the freshly loaded Agent here so a rebind or
-	// owner change that committed after the claim cannot reach the daemon.
-	if agent.RuntimeID != task.RuntimeID {
-		slog.Warn("daemon claim: agent runtime changed before delivery; refusing dispatch",
-			"task_id", uuidToString(task.ID),
-			"agent_id", uuidToString(task.AgentID),
-			"task_runtime_id", uuidToString(task.RuntimeID),
-			"agent_runtime_id", uuidToString(agent.RuntimeID),
-		)
-		return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(
-			r.Context(), task,
-			"The agent moved to another runtime before this task could start. Retry the task to run it on the agent's current runtime.",
-			taskfailure.ReasonInvalidTaskIdentity,
-			"error_agent_runtime_changed", http.StatusConflict, "agent runtime changed before task delivery",
-		)
-	}
-	if runtime.Visibility == "private" && runtime.OwnerID.Valid &&
-		(!agent.OwnerID.Valid || agent.OwnerID != runtime.OwnerID) {
-		userMessage := "This private runtime cannot run the assigned agent because the agent and runtime have different owners."
-		if !agent.OwnerID.Valid {
-			userMessage = "This private runtime cannot run the assigned agent because the agent has no owner."
+	if len(task.RuntimeRouting) == 0 || string(task.RuntimeRouting) == "null" {
+		// The SQL claim narrows candidates and repeats the access predicate before
+		// changing task state, but Agent mutations do not stay locked through HTTP
+		// response assembly. Recheck the freshly loaded Agent here so a rebind or
+		// owner change that committed after the claim cannot reach the daemon.
+		if agent.RuntimeID != task.RuntimeID {
+			slog.Warn("daemon claim: agent runtime changed before delivery; refusing dispatch",
+				"task_id", uuidToString(task.ID),
+				"agent_id", uuidToString(task.AgentID),
+				"task_runtime_id", uuidToString(task.RuntimeID),
+				"agent_runtime_id", uuidToString(agent.RuntimeID),
+			)
+			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(
+				r.Context(), task,
+				"The agent moved to another runtime before this task could start. Retry the task to run it on the agent's current runtime.",
+				taskfailure.ReasonInvalidTaskIdentity,
+				"error_agent_runtime_changed", http.StatusConflict, "agent runtime changed before task delivery",
+			)
 		}
-		slog.Warn("daemon claim: private runtime no longer permits task agent; refusing dispatch",
-			"task_id", uuidToString(task.ID),
-			"agent_id", uuidToString(task.AgentID),
-			"runtime_id", runtimeID,
-			"agent_owner_valid", agent.OwnerID.Valid,
-		)
-		return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(
-			r.Context(), task,
-			userMessage,
-			taskfailure.ReasonInvalidTaskIdentity,
-			"error_runtime_access_denied", http.StatusForbidden, "private runtime does not permit task agent",
-		)
+		if runtime.Visibility == "private" && runtime.OwnerID.Valid &&
+			(!agent.OwnerID.Valid || agent.OwnerID != runtime.OwnerID) {
+			userMessage := "This private runtime cannot run the assigned agent because the agent and runtime have different owners."
+			if !agent.OwnerID.Valid {
+				userMessage = "This private runtime cannot run the assigned agent because the agent has no owner."
+			}
+			slog.Warn("daemon claim: private runtime no longer permits task agent; refusing dispatch",
+				"task_id", uuidToString(task.ID),
+				"agent_id", uuidToString(task.AgentID),
+				"runtime_id", runtimeID,
+				"agent_owner_valid", agent.OwnerID.Valid,
+			)
+			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(
+				r.Context(), task,
+				userMessage,
+				taskfailure.ReasonInvalidTaskIdentity,
+				"error_runtime_access_denied", http.StatusForbidden, "private runtime does not permit task agent",
+			)
+		}
+	} else {
+		// Recheck immutable selection against current membership, invocation rights,
+		// and runtime ownership/sharing before exposing a claim payload.
+		allowed, accessErr := h.Queries.IsTaskRuntimeAllowed(r.Context(), db.IsTaskRuntimeAllowedParams{
+			AgentID: task.AgentID, RuntimeID: runtime.ID, RuntimeRouting: task.RuntimeRouting,
+		})
+		if accessErr != nil {
+			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount,
+				h.rejectClaimSourceLoad(r.Context(), task, accessErr, "task runtime authorization", runtimeID)
+		}
+		if !allowed || task.RuntimeID != runtime.ID {
+			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(
+				r.Context(), task,
+				"The selected runtime is no longer available or authorized for this execution.",
+				taskfailure.ReasonInvalidTaskIdentity,
+				"error_runtime_access_denied", http.StatusForbidden, "selected runtime does not permit this execution",
+			)
+		}
 	}
+	defaultProvider := runtime.Provider
+	if len(task.RuntimeRouting) > 0 && agent.RuntimeID != runtime.ID {
+		defaultProvider = ""
+		if original, err := h.Queries.GetAgentRuntime(r.Context(), agent.RuntimeID); err == nil && original.WorkspaceID == agent.WorkspaceID {
+			defaultProvider = original.Provider
+		}
+	}
+	agent = claimAgentConfiguration(agent, runtime, task.RuntimeRouting, defaultProvider)
 	useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
 	// A daemon older than the multica-platform merge assembles a brief that
 	// still names the built-ins this server stopped shipping. It cannot be
@@ -2337,21 +2374,26 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// lands on the agent's next task with nothing to restart. Errors —
 	// including a failed read — leave the agent config untouched: a broken
 	// shared entry must never take away servers the agent runs with today.
-	if bound, err := h.Queries.ListEnabledAgentMcpServers(r.Context(), agent.ID); err != nil {
-		slog.Warn("daemon claim: load agent mcp servers failed; using agent mcp_config",
-			"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID), "error", err)
-	} else if len(bound) > 0 {
-		bindings := make([]WorkspaceMcpBinding, 0, len(bound))
-		for _, server := range bound {
-			bindings = append(bindings, WorkspaceMcpBinding{Name: server.Name, Config: json.RawMessage(server.Config)})
-		}
-		if resolved, err := ResolveAgentMcpConfig(bindings, mcpConfig); err != nil {
-			slog.Warn("daemon claim: resolve agent mcp servers failed; falling back to agent mcp_config",
+	// Personal/provider-isolated runs must not recover owner credentials from
+	// workspace bindings after their direct agent config was removed.
+	if !isolateAgentConfiguration(agent, runtime, task.RuntimeRouting, defaultProvider) {
+		if bound, err := h.Queries.ListEnabledAgentMcpServers(r.Context(), agent.ID); err != nil {
+			slog.Warn("daemon claim: load agent mcp servers failed; using agent mcp_config",
 				"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID), "error", err)
-		} else {
-			mcpConfig = resolved
+		} else if len(bound) > 0 {
+			bindings := make([]WorkspaceMcpBinding, 0, len(bound))
+			for _, server := range bound {
+				bindings = append(bindings, WorkspaceMcpBinding{Name: server.Name, Config: json.RawMessage(server.Config)})
+			}
+			if resolved, err := ResolveAgentMcpConfig(bindings, mcpConfig); err != nil {
+				slog.Warn("daemon claim: resolve agent mcp servers failed; falling back to agent mcp_config",
+					"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID), "error", err)
+			} else {
+				mcpConfig = resolved
+			}
 		}
 	}
+
 	// Layer the per-task overlay (set at enqueue from the initiator
 	// user's active integrations — currently Composio) on top of the
 	// agent's saved mcp_config. Overlay wins on server-name collisions
@@ -2431,19 +2473,20 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		)
 	}
 
-	// Resolve the runtime owner's profile description so the daemon can
+	// Resolve the frozen execution user's profile (legacy: runtime owner) so the daemon can
 	// inject "## Requesting User" into the brief. Empty fields short-circuit
 	// the heading entirely on the daemon side; cloud / system runtimes with
 	// no owner stay anonymous. Failure here must not block claim — the agent
 	// can still run without the user-context section.
-	if runtime.OwnerID.Valid {
-		if owner, err := h.Queries.GetUser(r.Context(), runtime.OwnerID); err == nil {
+	requestingUserID := claimRequestingUserID(*task, runtime)
+	if requestingUserID.Valid {
+		if owner, err := h.Queries.GetUser(r.Context(), requestingUserID); err == nil {
 			resp.RequestingUserName = owner.Name
 			resp.RequestingUserProfileDescription = owner.ProfileDescription
 		} else {
-			slog.Debug("failed to load runtime owner for brief injection",
+			slog.Debug("failed to load execution user for brief injection",
 				"runtime_id", runtimeID,
-				"owner_id", uuidToString(runtime.OwnerID),
+				"user_id", uuidToString(requestingUserID),
 				"error", err,
 			)
 		}
@@ -2794,10 +2837,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// was never recorded (failed too early), execenv.Reuse falls back to a
 			// fresh Prepare and gateResumeToReusedWorkdir drops the now-unusable
 			// session — reuse is best-effort, never a silent swap onto a stale
-			// directory. PriorWorkDir is offered regardless of runtime (a shared
-			// mount may still resolve it); only the per-cwd session is
-			// runtime-gated.
-			if src, err := h.Queries.GetAgentTask(r.Context(), task.RerunOfTaskID); err == nil && rerunSourceMatchesTaskScope(*task, src) {
+			// directory. Both the workdir and provider session stay within
+			// the same runtime, user, provider, and frozen model boundary.
+			if src, err := h.Queries.GetAgentTask(r.Context(), task.RerunOfTaskID); err == nil && rerunSourceMatchesTaskScope(*task, src) && canReuseTaskExecution(task.AgentID, task.RuntimeID, task.RuntimeRouting, src.RuntimeID, src.RuntimeRouting) {
 				if src.WorkDir.Valid {
 					resp.PriorWorkDir = src.WorkDir.String
 				}
@@ -2836,7 +2878,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
-			}); err == nil && prior.SessionID.Valid {
+			}); err == nil && prior.SessionID.Valid && canReuseTaskExecution(task.AgentID, task.RuntimeID, task.RuntimeRouting, prior.RuntimeID, prior.RuntimeRouting) {
 				if prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
 					// Same rule as the rerun path: date the deltas from the run
@@ -2986,22 +3028,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 		projectCtx.applyTo(&resp)
-		if !task.ForceFreshSession && !task.ChannelContextRevision.Valid {
-			// Resume chat sessions only when the stored pointer was produced
-			// by the same runtime as the claiming task. When the chat_session
-			// pointer is missing (legacy NULL runtime_id), stale (last task
-			// failed before reporting completion), or runtime-mismatched, fall
-			// back to the most recent task row that recorded a session_id —
-			// otherwise a single failed turn would silently drop the entire
-			// conversation memory on the next message. The fallback also
-			// requires runtime to match.
-			if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
-				resp.PriorSessionID = cs.SessionID.String
-			}
-			if cs.WorkDir.Valid {
-				resp.PriorWorkDir = cs.WorkDir.String
-			}
-		}
+		// Provider session and workdir pointers are resolved from task history below.
+		// chat_session's shared pointer has no execution-user evidence.
+
 		// Resolve the user-message input batch for this run. A task-owned
 		// task (chat_input_task_id set) reads exactly the user messages
 		// tagged with its own input owner, so a message that arrived after
@@ -3064,7 +3093,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				})
 				h.Metrics.ObserveChatClaimLastSessionQuery(time.Since(started).Seconds())
 				switch {
-				case err == nil && prior.SessionID.Valid:
+				case err == nil && prior.SessionID.Valid && canReuseTaskExecution(task.AgentID, task.RuntimeID, task.RuntimeRouting, prior.RuntimeID, prior.RuntimeRouting):
 					h.Metrics.RecordChatClaimSessionFallbackHit()
 					if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
 						resp.PriorSessionID = prior.SessionID.String
@@ -3644,19 +3673,20 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Mint a task-scoped `mat_` token bound to (agent, task, workspace,
-	// owner). The daemon will inject this as MULTICA_TOKEN into the agent
+	// execution user). The daemon will inject this as MULTICA_TOKEN into the agent
 	// process instead of its own credential, so any API call the agent
 	// makes — even one that strips X-Agent-ID / X-Task-ID headers — is
 	// recognized server-side as actor=agent, closing the lateral-movement
 	// path on human-only endpoints (e.g. `/api/agents/{id}/env`). Runtime
-	// owner is required because task tokens are still bound to an owning user;
+	// execution user is required because task tokens are bound to a user;
 	// without one, fail the claim explicitly instead of letting the daemon
 	// fall back to a member/owner credential. MUL-3292.
 	// Token expires after the queue/runtime upper bound (24h) so it survives
 	// long-running tasks but cannot outlive a forgotten one.
-	if !runtime.OwnerID.Valid {
+	executionUserID := claimRequestingUserID(*task, runtime)
+	if !executionUserID.Valid {
 		outcome = "error_token"
-		slog.Error("task claim: runtime owner missing; cancelling task to avoid unscoped agent credentials",
+		slog.Error("task claim: execution user missing; cancelling task to avoid unscoped agent credentials",
 			"task_id", uuidToString(task.ID),
 			"runtime_id", runtimeID,
 			"workspace_id", runtimeWorkspaceID,
@@ -3692,7 +3722,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		TaskID:      task.ID,
 		AgentID:     task.AgentID,
 		WorkspaceID: parseUUID(resp.WorkspaceID),
-		UserID:      runtime.OwnerID,
+		UserID:      executionUserID,
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
 	}, deliveredCommentIDs, commentBackedTask, issueSnapshot, daemonTokens...)
 	if ferr != nil {
@@ -4237,10 +4267,34 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 //     these comments and its delivered set will contain them, so its completion
 //     finds nothing to re-schedule.
 func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.AgentTaskQueue) {
+	h.reconcileTaskComments(ctx, task, false)
+}
+
+func (h *Handler) reconcileCommentsOnFailure(ctx context.Context, task *db.AgentTaskQueue) {
+	if task == nil || len(task.ReconciliationCommentIds) == 0 {
+		return
+	}
+	// These are separate users' deferred requests, never inputs to the failed
+	// run. Do not replay the failed run's own inputs and bypass its retry budget.
+	// The failure has committed; an HTTP disconnect must not cancel this handoff.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	h.reconcileTaskComments(ctx, task, true)
+}
+
+func (h *Handler) reconcileTaskComments(ctx context.Context, task *db.AgentTaskQueue, obligationsOnly bool) {
 	if task == nil || !task.IssueID.Valid || !task.AgentID.Valid || !task.CreatedAt.Valid {
 		return
 	}
+	var obligations map[pgtype.UUID]struct{}
+	if obligationsOnly {
+		obligations = make(map[pgtype.UUID]struct{}, len(task.ReconciliationCommentIds))
+		for _, id := range task.ReconciliationCommentIds {
+			obligations[id] = struct{}{}
+		}
+	}
 	plannedCommentIDs := append([]pgtype.UUID{}, task.CoalescedCommentIds...)
+	plannedCommentIDs = append(plannedCommentIDs, task.ReconciliationCommentIds...)
 	if task.TriggerCommentID.Valid {
 		plannedCommentIDs = append(plannedCommentIDs, task.TriggerCommentID)
 	}
@@ -4251,7 +4305,7 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		PlannedCommentIds: plannedCommentIDs,
 	})
 	if err != nil {
-		slog.Warn("reconcile comments on completion: list comments failed",
+		slog.Warn("reconcile task comments: list comments failed",
 			"issue_id", uuidToString(task.IssueID), "task_id", uuidToString(task.ID), "error", err)
 		return
 	}
@@ -4269,7 +4323,7 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 	}
 	issue, err := h.Queries.GetIssue(ctx, task.IssueID)
 	if err != nil {
-		slog.Warn("reconcile comments on completion: load issue failed",
+		slog.Warn("reconcile task comments: load issue failed",
 			"issue_id", uuidToString(task.IssueID), "error", err)
 		return
 	}
@@ -4277,6 +4331,11 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 	scheduled := 0
 	for i := range comments {
 		c := comments[i]
+		if obligationsOnly {
+			if _, ok := obligations[c.ID]; !ok {
+				continue
+			}
+		}
 		if _, ok := delivered[uuidToString(c.ID)]; ok {
 			// Already delivered to this run (trigger or pre-claim coalesced).
 			continue
@@ -4331,6 +4390,7 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		}
 		triggers, _ := h.computeCommentAgentTriggers(ctx, issue, c.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 			ExcludeTriggerCommentID: c.ID,
+			SourceTaskID:            c.SourceTaskID,
 			OriginatorUserID:        originatorUserID,
 		})
 		// Agent replies discovered only by timestamp must not start a new
@@ -4361,7 +4421,7 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		if res := h.enqueueCommentAgentTriggers(ctx, issue, c.ID, scoped)[agentID]; res.status == DispatchBlocked {
 			headSha := h.TaskService.ResolveIssueReviewSHAParam(ctx, task.IssueID)
 			if h.propagateUncoveredCommentObligation(ctx, issue, scoped[0], c.ID, headSha) {
-				slog.Info("reconcile comments on completion: replay blocked, obligation handed to the active task",
+				slog.Info("reconcile task comments: replay blocked, obligation handed to the active task",
 					"issue_id", uuidToString(task.IssueID), "agent_id", agentID, "comment_id", uuidToString(c.ID))
 			} else {
 				// The slot is held by a DIFFERENT-head queued task: it can neither
@@ -4369,7 +4429,7 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 				// run consume a new-head request — TEN-356). Today's schema has no
 				// safe place to park the obligation, so surface it loudly rather
 				// than let it disappear quietly.
-				slog.Error("reconcile comments on completion: replay blocked and obligation could not be handed off; comment needs a durable obligation record",
+				slog.Error("reconcile task comments: replay blocked and obligation could not be handed off; comment needs a durable obligation record",
 					"issue_id", uuidToString(task.IssueID), "agent_id", agentID, "comment_id", uuidToString(c.ID),
 					"reason", res.reason)
 			}
@@ -4377,9 +4437,9 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		scheduled++
 	}
 	if scheduled > 0 {
-		slog.Info("reconcile comments on completion: scheduled follow-up",
+		slog.Info("reconcile task comments: scheduled follow-up",
 			"issue_id", uuidToString(task.IssueID),
-			"completed_task_id", uuidToString(task.ID),
+			"task_id", uuidToString(task.ID),
 			"agent_id", agentID,
 			"undelivered_comments", scheduled)
 	}
@@ -5884,4 +5944,19 @@ func (h *Handler) GetTaskGCCheck(w http.ResponseWriter, r *http.Request) {
 		"status":       task.Status,
 		"completed_at": task.CompletedAt.Time,
 	})
+}
+
+func claimRequestingUserID(task db.AgentTaskQueue, runtime db.AgentRuntime) pgtype.UUID {
+	routing, err := service.ParseRuntimeRouting(task.RuntimeRouting)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	if routing == nil {
+		return runtime.OwnerID
+	}
+	id, err := util.ParseUUID(routing.ExecutionUserID)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return id
 }

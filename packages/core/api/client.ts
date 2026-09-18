@@ -31,6 +31,7 @@ import type {
   StoredAgentDraft,
   UpdateAgentRequest,
   AgentEnvResponse,
+  AgentRuntimePreference,
   UpdateAgentEnvRequest,
   AgentTask,
   AgentActivityBucket,
@@ -460,6 +461,8 @@ import {
   type IssueView,
   type IssueViewPreference,
   type CreateIssueViewRequest,
+  AgentRuntimePreferenceSchema,
+  AgentPersonalRuntimeProjectionSchema,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1624,11 +1627,24 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.include_archived) search.set("include_archived", "true");
-    return this.fetch(`/api/agents?${search}`);
+    const agents = await this.fetch<Agent[]>(`/api/agents?${search}`);
+    return agents.map((agent) => this.parseAgentPersonalRuntimeProjection(agent));
   }
 
   async getAgent(id: string): Promise<Agent> {
-    return this.fetch(`/api/agents/${id}`);
+    const agent = await this.fetch<Agent>(`/api/agents/${id}`);
+    return this.parseAgentPersonalRuntimeProjection(agent);
+  }
+
+  private parseAgentPersonalRuntimeProjection(agent: Agent): Agent {
+    const projection = parseWithFallback<Pick<Agent, "personal_runtime_id" | "personal_runtime_availability">>(agent, AgentPersonalRuntimeProjectionSchema, {}, {
+      endpoint: "GET /api/agents",
+    });
+    return {
+      ...agent,
+      personal_runtime_id: projection.personal_runtime_id,
+      personal_runtime_availability: projection.personal_runtime_availability,
+    };
   }
 
   async createAgent(data: CreateAgentRequest): Promise<Agent> {
@@ -1757,6 +1773,29 @@ export class ApiClient {
 
   async archiveAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}/archive`, { method: "POST" });
+  }
+
+  async getAgentRuntimePreference(id: string, wsId: string): Promise<AgentRuntimePreference | null> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/runtime-preference?${new URLSearchParams({ workspace_id: wsId })}`, {
+      headers: { "X-Workspace-Slug": "", "X-Workspace-ID": wsId },
+    });
+    return parseWithFallback<AgentRuntimePreference | null>(raw, AgentRuntimePreferenceSchema, null, {
+      endpoint: "GET /api/agents/{id}/runtime-preference",
+    });
+  }
+
+  async updateAgentRuntimePreference(id: string, wsId: string, preference: string | null | AgentRuntimePreference): Promise<AgentRuntimePreference | null> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/runtime-preference?${new URLSearchParams({ workspace_id: wsId })}`, {
+      headers: { "X-Workspace-Slug": "", "X-Workspace-ID": wsId },
+      method: "PUT",
+      body: JSON.stringify(typeof preference === "object" && preference !== null ? {
+        runtime_id: preference.runtimeId, model_mode: preference.modelMode,
+        model: preference.model, max_concurrent_tasks: preference.maxConcurrentTasks,
+      } : { runtime_id: preference }),
+    });
+    return parseWithFallback<AgentRuntimePreference | null>(raw, AgentRuntimePreferenceSchema, null, {
+      endpoint: "PUT /api/agents/{id}/runtime-preference",
+    });
   }
 
   /**

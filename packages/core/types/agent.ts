@@ -292,6 +292,8 @@ export interface AgentTask {
   id: string;
   agent_id: string;
   runtime_id: string;
+  runtime_routing_source?: "default" | "personal";
+  runtime_execution_user_id?: string;
   // Empty string ("") when the task has no linked issue — either chat- or
   // autopilot-spawned. Check chat_session_id / autopilot_run_id to tell
   // which source produced it.
@@ -485,6 +487,10 @@ export interface Agent {
   runtime_bound?: boolean;
   /** Privacy-safe coarse liveness for a runtime hidden from the runtime list. */
   runtime_availability?: "online" | "unstable" | "offline";
+  /** Authenticated viewer only; shared default remains runtime_id. */
+  personal_runtime_id?: string;
+  /** Current viewer's selected runtime; never shared in workspace broadcasts. */
+  personal_runtime_availability?: "online" | "unstable" | "offline";
   name: string;
   description: string;
   /** What this agent's owner wrote. For a system agent this holds only the
@@ -1327,4 +1333,13 @@ export interface RuntimeLocalSkillImportResult {
   status: "created" | "updated" | "conflict";
   skill?: Skill;
   conflict?: RuntimeLocalSkillImportConflict;
+}
+
+/** The current account's per-agent runtime preference. Null uses the shared default. */
+export interface AgentRuntimePreference {
+  runtimeId: string | null;
+  provider?: string | null;
+  modelMode?: "inherit" | "runtime_default" | "custom";
+  model?: string;
+  maxConcurrentTasks?: number | null;
 }

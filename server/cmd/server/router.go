@@ -2137,6 +2137,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// denied. Every reveal / write is audited to
 					// activity_log. See MUL-2600, MUL-5438 and
 					// internal/handler/agent_env.go.
+					r.Get("/runtime-preference", h.GetAgentRuntimePreference)
+					r.Put("/runtime-preference", h.UpdateAgentRuntimePreference)
 					r.Get("/env", h.GetAgentEnv)
 					r.Put("/env", h.UpdateAgentEnv)
 				})

@@ -370,15 +370,22 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 	// author_type='system', author_id=zero UUID. The zero UUID is a valid 16
 	// byte value and the column is NOT NULL; frontend code should branch on
 	// author_type === 'system' rather than on the UUID value.
+	// Continue the execution which created this child, even if preferences changed.
+	var routingParentID pgtype.UUID
+	if completed.OriginType.Valid && completed.OriginID.Valid &&
+		(completed.OriginType.String == "agent_create" || completed.OriginType.String == "quick_create") {
+		routingParentID = completed.OriginID
+	}
 	created, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
-		ID:          dbid.NewV7(),
-		IssueID:     parent.ID,
-		WorkspaceID: parent.WorkspaceID,
-		AuthorType:  "system",
-		AuthorID:    pgtype.UUID{Valid: true},
-		Content:     content,
-		Type:        "system",
-		ParentID:    pgtype.UUID{Valid: false},
+		SourceTaskID: routingParentID,
+		ID:           dbid.NewV7(),
+		IssueID:      parent.ID,
+		WorkspaceID:  parent.WorkspaceID,
+		AuthorType:   "system",
+		AuthorID:     pgtype.UUID{Valid: true},
+		Content:      content,
+		Type:         "system",
+		ParentID:     pgtype.UUID{Valid: false},
 	})
 	if err != nil {
 		slog.Warn("child done: create system comment failed",
@@ -742,7 +749,7 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, tr
 		ID:          parent.AssigneeID,
 		WorkspaceID: parent.WorkspaceID,
 	})
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil || agent.ArchivedAt.Valid {
 		return
 	}
 
@@ -799,7 +806,7 @@ func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, tr
 	}
 
 	agent, err := h.Queries.GetAgent(ctx, squad.LeaderID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil || agent.ArchivedAt.Valid {
 		return
 	}
 

@@ -1801,6 +1801,8 @@ export const AgentTaskSchema = z.object({
   cancelled_by_comment_change: z.boolean().optional().catch(undefined),
   cancelled_by: TaskCancellationActorSchema.optional().catch(undefined),
   id: z.string(),
+  runtime_routing_source: z.string().optional().catch(undefined),
+  runtime_execution_user_id: z.string().optional().catch(undefined),
   agent_id: z.string().default(""),
   runtime_id: z.string().default(""),
   issue_id: z.string().default(""),
@@ -3475,3 +3477,23 @@ export const EMPTY_JOIN_SHARE_LINK_RESPONSE: {
   workspace_id: "",
   workspace_slug: "",
 };
+export const AgentRuntimePreferenceSchema = z.object({
+  runtime_id: z.string().min(1).nullable(),
+  provider: z.string().min(1).nullable().optional(),
+  model_mode: z.enum(["inherit", "runtime_default", "custom"]).optional(),
+  model: z.string().max(256).optional(),
+  max_concurrent_tasks: z.number().int().min(1).max(100).nullable().optional(),
+}).transform((value) => ({
+  runtimeId: value.runtime_id,
+  ...(value.provider !== undefined ? { provider: value.provider } : {}),
+  ...(value.model_mode !== undefined ? { modelMode: value.model_mode } : {}),
+  ...(value.model !== undefined ? { model: value.model } : {}),
+  ...(value.max_concurrent_tasks !== undefined ? { maxConcurrentTasks: value.max_concurrent_tasks } : {}),
+}));
+
+// Viewer-specific projection is parsed separately from the existing shared
+// agent response contract. Unknown/malformed additive fields stay unavailable.
+export const AgentPersonalRuntimeProjectionSchema = z.object({
+  personal_runtime_id: z.string().min(1).optional().catch(undefined),
+  personal_runtime_availability: z.enum(["online", "unstable", "offline"]).optional().catch(undefined),
+});

@@ -332,6 +332,7 @@ func TestBatchChildDoneUnknownStatusIsolation(t *testing.T) {
 	ws := dbfx.Workspace(t, "Missing key", "child-missing-key")
 	otherWS := dbfx.Workspace(t, "Known key", "child-known-key")
 	for _, workspace := range []string{ws, otherWS} {
+		dbfx.Member(t, workspace, testUserID, "owner")
 		dbfx.Insert(t, "issue_status", testutil.Cols{"workspace_id": workspace, "key": "working", "name": "Working", "category": "started", "color": "#123456"})
 	}
 	dbfx.Insert(t, "issue_status", testutil.Cols{"workspace_id": otherWS, "key": "missing", "name": "Known elsewhere", "category": "started", "color": "#123456"})
@@ -397,6 +398,7 @@ func TestChildDoneCatalogFailureSkipsNotification(t *testing.T) {
 			}
 			t.Run(fmt.Sprintf("batch=%t/%s", batch, tc.name), func(t *testing.T) {
 				ws := dbfx.Workspace(t, "Transient status read", "child-status-failure")
+				dbfx.Member(t, ws, testUserID, "owner")
 				fx := testutil.New(testPool, ws, testUserID)
 				for key, category := range map[string]string{"working": "started", "parked": "unstarted", "approved": "done"} {
 					fx.Insert(t, "issue_status", testutil.Cols{"workspace_id": ws, "key": key, "name": key, "category": category, "color": "#123456"})

@@ -56,7 +56,7 @@ func TestChatSessionResumeFallbackNeeded(t *testing.T) {
 	}
 }
 
-func TestClaimTaskChatCompletePointerSkipsSessionFallbackQuery(t *testing.T) {
+func TestClaimTaskChatCompletePointerRequiresTaskHistory(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -96,8 +96,8 @@ func TestClaimTaskChatCompletePointerSkipsSessionFallbackQuery(t *testing.T) {
 	if resp.Task == nil {
 		t.Fatal("expected a claimed task")
 	}
-	if resp.Task.PriorSessionID != "pointer-session" || resp.Task.PriorWorkDir != "/pointer-workdir" {
-		t.Fatalf("claim pointer = (%q, %q), want direct chat-session pointer", resp.Task.PriorSessionID, resp.Task.PriorWorkDir)
+	if resp.Task.PriorSessionID != "" || resp.Task.PriorWorkDir != "" {
+		t.Fatalf("claim pointer = (%q, %q), want no unproven chat-session pointer", resp.Task.PriorSessionID, resp.Task.PriorWorkDir)
 	}
 
 	registry := prometheus.NewRegistry()
@@ -106,15 +106,17 @@ func TestClaimTaskChatCompletePointerSkipsSessionFallbackQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gather claim metrics: %v", err)
 	}
-	seenRolloutQuery := false
+	seenRolloutQuery, seenSessionQuery := false, false
 	for _, family := range families {
 		switch family.GetName() {
 		case "multica_chat_claim_session_fallback_needed_total":
-			if len(family.Metric) != 1 || family.Metric[0].GetCounter().GetValue() != 0 {
-				t.Fatalf("complete pointer unexpectedly needed session fallback: %v", family)
+			if len(family.Metric) != 1 || family.Metric[0].GetCounter().GetValue() != 1 {
+				t.Fatalf("chat pointer must still consult task history: %v", family)
 			}
 		case "multica_chat_claim_session_fallback_result_total":
-			t.Fatalf("complete pointer unexpectedly emitted a session fallback result: %v", family)
+			if len(family.Metric) != 1 || family.Metric[0].GetCounter().GetValue() != 1 {
+				t.Fatalf("task history fallback was not recorded: %v", family)
+			}
 		case "multica_chat_claim_resume_query_duration_seconds":
 			for _, metric := range family.Metric {
 				for _, label := range metric.Label {
@@ -125,14 +127,14 @@ func TestClaimTaskChatCompletePointerSkipsSessionFallbackQuery(t *testing.T) {
 					case "rollout_missing":
 						seenRolloutQuery = true
 					case "last_session":
-						t.Fatal("complete pointer unexpectedly ran GetLastChatTaskSession")
+						seenSessionQuery = true
 					}
 				}
 			}
 		}
 	}
-	if !seenRolloutQuery {
-		t.Fatal("independent rollout-missing query was not observed")
+	if !seenRolloutQuery || !seenSessionQuery {
+		t.Fatal("resume history and rollout queries must both be observed")
 	}
 }
 

@@ -57,7 +57,9 @@ export function agentListOptions(wsId: string) {
         (agent) =>
           !agent.archived_at &&
           (agent.runtime_availability === "online" ||
-            agent.runtime_availability === "unstable"),
+            agent.runtime_availability === "unstable" ||
+            agent.personal_runtime_availability === "online" ||
+            agent.personal_runtime_availability === "unstable"),
       )
         ? 30_000
         : false,

@@ -1820,8 +1820,11 @@ func (h *Handler) validateAutopilotAssigneeForSave(
 			return false
 		}
 		if requireRuntime && !agent.RuntimeID.Valid {
-			writeError(w, http.StatusUnprocessableEntity, "assignee agent needs a runtime before this autopilot can be active")
-			return false
+			actorType, actorID := h.resolveActor(r, requestUserID(r), util.UUIDToString(workspaceID))
+			if _, err := h.runtimeForRequest(r, agent, actorType, actorID); err != nil {
+				writeError(w, http.StatusUnprocessableEntity, "assignee agent needs an available runtime selection before this autopilot can be active")
+				return false
+			}
 		}
 		return true
 	case "squad":
@@ -1856,8 +1859,11 @@ func (h *Handler) validateAutopilotAssigneeForSave(
 			return false
 		}
 		if requireRuntime && !leader.RuntimeID.Valid {
-			writeError(w, http.StatusUnprocessableEntity, "squad leader needs a runtime before this autopilot can be active")
-			return false
+			actorType, actorID := h.resolveActor(r, requestUserID(r), util.UUIDToString(workspaceID))
+			if _, err := h.runtimeForRequest(r, leader, actorType, actorID); err != nil {
+				writeError(w, http.StatusUnprocessableEntity, "squad leader needs an available runtime selection before this autopilot can be active")
+				return false
+			}
 		}
 		// Private-leader gate: the member configuring the autopilot must have
 		// access to the private leader, same as validateAssigneePair.

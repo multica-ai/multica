@@ -959,5 +959,37 @@
   "actions": {
     "selected_other": "已选 {{count}} 项",
     "clear_selection": "清除选择"
+  },
+  "personal_runtime": {
+    "settings": {
+      "title": "我的执行配置",
+      "hint": "用于你新发起的工作。自动后续运行 沿用原运行时。已有运行、文件和 CLI 会话保留在原机器上。",
+      "label": "个人运行时",
+      "use_default": "使用智能体默认运行时",
+      "unavailable": "你选择的运行时不可用。请选择其他运行时或恢复智能体默认设置。",
+      "load_failed": "无法加载你的运行时偏好。",
+      "save_failed": "无法保存你的运行时偏好。",
+      "shared_default": "智能体默认运行时",
+      "shared_default_hint": "未设置个人偏好时使用的共享默认运行时。",
+      "model_mode": "模型选择",
+      "model_inherit": "沿用智能体模型",
+      "model_runtime_default": "使用运行时默认模型",
+      "model_custom": "指定模型",
+      "model_id": "模型 ID",
+      "model_hint": "选择可用模型，或输入当前运行时及账号支持的模型 ID。",
+      "concurrency": "我的并发上限",
+      "concurrency_inherit": "沿用智能体上限（{{count}}）",
+      "concurrency_hint": "仅统计你执行此智能体的运行，跨个人机器合计。留空沿用智能体上限，实际并发仍受机器容量限制。降低上限会等待已有运行结束。",
+      "execution_hint": "个人运行时使用自身默认配置或你指定的模型，不继承智能体的执行配置。修改对新运行链生效；恢复默认运行时会清除这些个人设置。",
+      "save_execution": "保存执行配置",
+      "owner_default": "你默认使用下方的智能体执行配置，无需重复绑定。",
+      "owner_customize": "为自己单独配置",
+      "owner_override": "当前使用个人覆盖",
+      "owner_restore": "恢复使用默认配置"
+    },
+    "task": {
+      "source": "运行时选择",
+      "execution_user": "执行用户"
+    }
   }
 }

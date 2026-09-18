@@ -2961,8 +2961,8 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	if task.PriorSessionID != "" {
 		t.Fatalf("runtime mismatch: expected empty PriorSessionID, got %q", task.PriorSessionID)
 	}
-	if task.PriorWorkDir != "/tmp/old-runtime-workdir" {
-		t.Fatalf("runtime mismatch: expected PriorWorkDir='/tmp/old-runtime-workdir', got %q", task.PriorWorkDir)
+	if task.PriorWorkDir != "" {
+		t.Fatalf("runtime mismatch: expected empty PriorWorkDir, got %q", task.PriorWorkDir)
 	}
 	if task.ThreadName != "runtime-session-skip fixture" {
 		t.Fatalf("issue task thread_name = %q, want issue title", task.ThreadName)
@@ -3154,10 +3154,10 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 		}
 	})
 
-	t.Run("different_runtime_reuses_workdir_drops_session", func(t *testing.T) {
+	t.Run("different_runtime_drops_workdir_and_session", func(t *testing.T) {
 		task := insertRerun(t, otherRuntimeID, "timeout", "", "cross-session", "/tmp/retry-cross-workdir")
-		if task.PriorWorkDir != "/tmp/retry-cross-workdir" {
-			t.Fatalf("PriorWorkDir = %q, want /tmp/retry-cross-workdir (workdir offered regardless of runtime, best-effort)", task.PriorWorkDir)
+		if task.PriorWorkDir != "" {
+			t.Fatalf("PriorWorkDir = %q, want empty across the runtime boundary", task.PriorWorkDir)
 		}
 		if task.PriorSessionID != "" {
 			t.Fatalf("PriorSessionID = %q, want empty (cross-runtime session cannot resolve)", task.PriorSessionID)
@@ -3368,8 +3368,8 @@ func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 	if task.PriorSessionID != "" {
 		t.Fatalf("chat runtime mismatch: expected empty PriorSessionID, got %q", task.PriorSessionID)
 	}
-	if task.PriorWorkDir != "/tmp/old-chat-workdir" {
-		t.Fatalf("chat runtime mismatch: expected PriorWorkDir='/tmp/old-chat-workdir', got %q", task.PriorWorkDir)
+	if task.PriorWorkDir != "" {
+		t.Fatalf("chat runtime mismatch: expected empty PriorWorkDir, got %q", task.PriorWorkDir)
 	}
 	dbfx.Exec(t, `
 		UPDATE agent_task_queue
@@ -3382,6 +3382,14 @@ func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 		"session_id": "same-chat-session",
 		"work_dir":   "/tmp/same-chat-workdir",
 		"runtime_id": runtimeID,
+	})
+
+	// Matching task history proves which runtime owns this provider context.
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID, "chat_session_id": resumeSessionID,
+		"status": "completed", "started_at": testutil.Raw("now() - interval '1 minute'"),
+		"completed_at": testutil.Raw("now()"),
+		"session_id":   "same-chat-session", "work_dir": "/tmp/same-chat-workdir",
 	})
 
 	dbfx.Exec(t, `

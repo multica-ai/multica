@@ -118,6 +118,7 @@ func topLevelIssueRequest(t *testing.T, assigneeType, assigneeID, status, actorA
 	}
 	if taskID != "" {
 		r.Header.Set("X-Task-ID", taskID)
+		r.Header.Set("X-Actor-Source", "task_token")
 	}
 	return r
 }
@@ -139,6 +140,7 @@ func autopilotChildIssueRequest(t *testing.T, assigneeType, assigneeID, parentIs
 	}
 	if taskID != "" {
 		r.Header.Set("X-Task-ID", taskID)
+		r.Header.Set("X-Actor-Source", "task_token")
 	}
 	return r
 }
@@ -161,6 +163,7 @@ func createUnassignedIssueAsRun(t *testing.T, actorAgentID, taskID string) strin
 	})
 	r.Header.Set("X-Agent-ID", actorAgentID)
 	r.Header.Set("X-Task-ID", taskID)
+	r.Header.Set("X-Actor-Source", "task_token")
 
 	var created IssueResponse
 	testutil.Call(t, testHandler.CreateIssue, r).Want(http.StatusCreated).JSON(&created)
@@ -226,6 +229,7 @@ func batchAssignAsRun(t *testing.T, headerUserID, agentID, taskID, targetAgentID
 	})
 	req.Header.Set("X-Agent-ID", agentID)
 	req.Header.Set("X-Task-ID", taskID)
+	req.Header.Set("X-Actor-Source", "task_token")
 	return testutil.Call(t, testHandler.BatchUpdateIssues, req)
 }
 

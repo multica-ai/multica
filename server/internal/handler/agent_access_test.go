@@ -166,7 +166,7 @@ func privateAgentTestFixture(t *testing.T) (agentID, ownerID, memberID string) {
 		VALUES ($1, 'private-access-test-agent', '', 'cloud', '{}'::jsonb,
 		        $2, 'private', 1, $3, '', '{}'::jsonb, '[]'::jsonb)
 		RETURNING id
-	`, testWorkspaceID, handlerTestRuntimeID(t), ownerID).Scan(&agentID); err != nil {
+	`, testWorkspaceID, dbfx.Runtime(t, "Private agent owner's runtime", testutil.Cols{"owner_id": ownerID}), ownerID).Scan(&agentID); err != nil {
 		t.Fatalf("create private agent: %v", err)
 	}
 	t.Cleanup(func() {
@@ -205,8 +205,8 @@ func TestGetAgent_PrivateAgentForbidsPlainMember(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &ownerResponse); err != nil {
 		t.Fatalf("decode GetAgent owner response: %v", err)
 	}
-	if _, ok := ownerResponse["runtime_availability"]; ok {
-		t.Fatal("runtime_availability should be omitted when the viewer owns the runtime")
+	if got := string(ownerResponse["runtime_availability"]); got != `"online"` {
+		t.Fatalf("hidden runtime availability = %s, want online", got)
 	}
 
 	// Agent owner (plain member who happens to own the agent): allowed.

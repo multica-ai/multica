@@ -888,13 +888,6 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "chat agent is archived")
 		return
 	}
-	// Shared verdict: an unbound agent and a machine whose CLI cannot run are
-	// both refusals here, with their own codes. A merely offline runtime is not
-	// checked at all — chat messages queue for it, as they always have.
-	if verdict, err := service.AgentReadiness(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceChat), agent); err == nil && verdict.Blocked() {
-		h.writeDispatchBlocked(w, http.StatusConflict, verdict.Reason)
-		return
-	}
 
 	// Re-run the INVOKE gate on every send, not just the softer view gate in
 	// gatePublicChatSessionForUser (MUL-4525). canAccessPrivateAgent lets a workspace
@@ -908,6 +901,23 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	if !h.canInvokeAgent(r.Context(), agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
+		return
+	}
+
+	effectiveRuntimeID, err := h.runtimeForRequest(r, agent, actorType, actorID)
+	if err != nil {
+		if errors.Is(err, service.ErrTaskRuntimeUnavailable) && !agent.RuntimeID.Valid {
+			h.writeDispatchBlocked(w, http.StatusConflict, ReasonAgentRuntimeRequired)
+		} else {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+		}
+		return
+	}
+	readinessAgent := agent
+	readinessAgent.RuntimeID = effectiveRuntimeID
+	// Offline machines may queue chat; unusable machines need repair first.
+	if verdict, err := service.AgentReadiness(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceChat), readinessAgent); err == nil && verdict.Blocked() {
+		h.writeDispatchBlocked(w, http.StatusConflict, verdict.Reason)
 		return
 	}
 
@@ -943,6 +953,10 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// under `## Task Initiator`. actorType/actorID were resolved above for the
 	// invoke gate.
 	sent, err := h.TaskService.SendDirectChatMessage(r.Context(), session, agent, parseUUID(userID), req.Content, attachmentIDs, actorType, parseUUID(actorID))
+	if errors.Is(err, service.ErrTaskRuntimeUnavailable) {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrChatSessionArchived):
