@@ -312,8 +312,8 @@ vi.mock("sonner", () => ({
 describe("SearchCommand", () => {
   beforeEach(() => {
     mockPush.mockReset();
-    mockSearchIssues.mockReset().mockResolvedValue({ issues: [] });
-    mockSearchProjects.mockReset().mockResolvedValue({ projects: [] });
+    mockSearchIssues.mockReset().mockResolvedValue({ issues: [], has_more: false });
+    mockSearchProjects.mockReset().mockResolvedValue({ projects: [], has_more: false });
     mockRecentItems.current = [];
     mockAllIssues.current = [];
     mockAgents.current = [];
@@ -910,13 +910,22 @@ describe("SearchCommand", () => {
 
     await waitFor(
       () => {
-        expect(screen.getByText("First overflow match")).toBeInTheDocument();
+        // HighlightText splits the title around the query match.
+        expect(
+          screen.getByText(
+            (_, el) =>
+              el?.textContent === "First overflow match" && el?.tagName === "SPAN",
+          ),
+        ).toBeInTheDocument();
       },
       { timeout: 2000 },
     );
 
-    const moreRow = await screen.findByText((_, el) =>
-      el?.textContent?.startsWith("Show all results for"),
+    // Leaf span only — parent cmdk Item shares the same textContent.
+    const moreRow = await screen.findByText(
+      (_, el) =>
+        el?.tagName === "SPAN" &&
+        !!el.textContent?.startsWith("Show all results for"),
     );
     expect(moreRow).toBeInTheDocument();
 
@@ -934,8 +943,10 @@ describe("SearchCommand", () => {
     await user.type(input, "exhaustive");
     await waitFor(() => {
       expect(
-        screen.queryByText((_, el) =>
-          el?.textContent?.startsWith("Show all results for"),
+        screen.queryByText(
+          (_, el) =>
+            el?.tagName === "SPAN" &&
+            !!el.textContent?.startsWith("Show all results for"),
         ),
       ).not.toBeInTheDocument();
     });
