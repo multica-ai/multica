@@ -3844,6 +3844,87 @@ func TestRunIssueListIgnoresFieldsWithTableOutput(t *testing.T) {
 	}
 }
 
+// TestRunIssueListRejectsMalformedResponse guards that a 200 body that is
+// not the documented list shape fails loudly instead of being reported as an
+// empty page, which would silently end a scripted pagination walk: a missing
+// or mistyped issues array, a total that is present but not a number, and
+// non-object rows in table output are all errors. A missing total stays
+// tolerated (a newer backend may drop the field) and falls back to
+// page-length has_more detection.
+func TestRunIssueListRejectsMalformedResponse(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		output  string
+		wantErr string
+	}{
+		{"issues field missing", `{"total": 5}`, "json", "expected an issues array"},
+		{"issues not an array", `{"issues": "corrupt", "total": 5}`, "json", "expected an issues array"},
+		{"total not a number", `{"issues": [], "total": "five"}`, "json", "expected total to be a number"},
+		{"total not a number in table output", `{"issues": [], "total": true}`, "table", "expected total to be a number"},
+		{"non-object row in table output", `{"issues": ["corrupt"], "total": 1}`, "table", "expected each issue to be an object"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			cmd := newIssueListTestCmd()
+			_ = cmd.Flags().Set("output", tc.output)
+			err := runIssueList(cmd, nil)
+			if err == nil {
+				t.Fatalf("runIssueList: expected error for malformed body %s", tc.body)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %q, want it to contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestRunIssueListToleratesMissingTotal pins the one malformed-adjacent
+// shape that must keep working: a response with no total field still prints
+// its page, with has_more derived from page length.
+func TestRunIssueListToleratesMissingTotal(t *testing.T) {
+	issue := fullTestIssue(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issues": []any{issue}})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueListTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+
+	out, err := captureStdout(t, func() error { return runIssueList(cmd, nil) })
+	if err != nil {
+		t.Fatalf("runIssueList: %v", err)
+	}
+	var resp struct {
+		Issues []map[string]any `json:"issues"`
+		Total  int              `json:"total"`
+	}
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("unmarshal output: %v\noutput: %s", err, out)
+	}
+	if len(resp.Issues) != 1 {
+		t.Fatalf("issues = %d, want 1", len(resp.Issues))
+	}
+	if resp.Total != 0 {
+		t.Fatalf("total = %d, want 0 when the field is absent", resp.Total)
+	}
+}
+
 func TestComputeReorderPosition(t *testing.T) {
 	positions := map[string]float64{"a": 10, "b": 20, "x": 99}
 	tests := []struct {
@@ -4762,6 +4843,16 @@ func newFakeIssueListServer(t *testing.T, rows []map[string]any, total any) (*ht
 		}
 		requests++
 		query = r.URL.Query()
+		// A nil rows slice must still encode as an empty array, not null:
+		// the CLI rejects a non-array issues field as a malformed response.
+		if rows == nil {
+			body := map[string]any{"issues": []any{}}
+			if total != nil {
+				body["total"] = total
+			}
+			_ = json.NewEncoder(w).Encode(body)
+			return
+		}
 		body := map[string]any{"issues": rows}
 		if total != nil {
 			body["total"] = total
@@ -5005,7 +5096,9 @@ func TestRunIssueListTableFooterReportsPage(t *testing.T) {
 		{name: "last page with total missing", limit: "50", offset: "100", rows: 45, total: nil, wantStderr: "Showing issues 101-145."},
 		{name: "empty page while the count failed", limit: "50", offset: "50", rows: 0, total: 0, wantStderr: "No issues at --offset 50."},
 		{name: "total missing on an empty page", limit: "50", offset: "50", rows: 0, total: nil, wantStderr: "No issues at --offset 50."},
-		{name: "total not a number on an empty page", limit: "50", offset: "50", rows: 0, total: "145", wantStderr: "No issues at --offset 50."},
+		// A total that is present but not a number is a malformed response,
+		// not a failed count: it errors (HYP-1766), covered by
+		// TestRunIssueListRejectsMalformedResponse.
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
