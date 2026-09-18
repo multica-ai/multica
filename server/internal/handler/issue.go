@@ -2316,15 +2316,12 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
 	h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
-	if originalInput, err := h.issueOriginalInput(r.Context(), issue); err == nil {
-		resp.OriginalInput = originalInput
+	if originalInput, err := h.issueOriginalInput(r.Context(), issue); err != nil {
+		// Provenance is detail-only enrichment. Corrupt historical origins must
+		// remain observable without making the issue itself unreadable.
+		slog.Error("load issue original input failed", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "error", err)...)
 	} else {
-		slog.Warn("load issue original input failed", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "error", err)...)
-		// The original input is the authoritative instruction for a quick-create
-		// issue. Returning only the generated description would silently restore
-		// the lossy behavior this field exists to prevent.
-		writeError(w, http.StatusInternalServerError, "failed to load issue original input")
-		return
+		resp.OriginalInput = originalInput
 	}
 	detailLabels := h.labelsByIssue(r.Context(), issue.WorkspaceID, []pgtype.UUID{issue.ID})[uuidToString(issue.ID)]
 	if detailLabels == nil {
@@ -2369,9 +2366,9 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 // issueOriginalInput returns the authoritative user request for a quick-create
-// issue. The quick-create origin task is already the durable provenance record:
-// IssueService validates the task, creator and workspace before committing the
-// issue. Re-check those boundaries here so a corrupted origin cannot expose a
+// issue. The quick-create origin task is already the durable provenance record.
+// IssueService locks and validates it before creating new issues; this read-side
+// check also protects historical or externally corrupted rows from exposing a
 // different task's prompt, even within the same workspace.
 func (h *Handler) issueOriginalInput(ctx context.Context, issue db.Issue) (*string, error) {
 	if !issue.OriginType.Valid || issue.OriginType.String != service.QuickCreateContextType {
@@ -3224,6 +3221,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, service.ErrIssueLabelNotFound) {
 		writeError(w, http.StatusBadRequest, "one or more labels not found in this workspace")
+		return
+	}
+	if errors.Is(err, service.ErrInvalidQuickCreateOrigin) || errors.Is(err, service.ErrQuickCreateOriginAlreadyUsed) {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if errors.Is(err, service.ErrIssueStatusUnavailable) {

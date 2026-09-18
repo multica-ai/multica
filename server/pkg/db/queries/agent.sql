@@ -739,6 +739,15 @@ SELECT atq.* FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 WHERE atq.id = $1 AND a.workspace_id = $2;
 
+-- name: GetAgentTaskInWorkspaceForUpdate :one
+-- Serializes consumers that claim a task as an issue origin. Lock only the
+-- task row: the joined agent row is used for tenant scoping and does not need
+-- to block unrelated agent updates.
+SELECT atq.* FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+WHERE atq.id = $1 AND a.workspace_id = $2
+FOR UPDATE OF atq;
+
 -- name: ClaimAgentTask :one
 -- Claims the next queued task for an agent on one healthy runtime, enforcing
 -- per-(issue, agent) serialization:
