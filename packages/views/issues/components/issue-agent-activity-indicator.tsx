@@ -54,16 +54,12 @@ interface IssueAgentActivityIndicatorProps {
  * in the top-right of board cards and right after the identifier in list
  * rows. Derives state from the workspace-wide agent task snapshot:
  *
- *   - has ≥1 running task  → tiny avatar stack + shimmering "Working"
+ *   - has ≥1 running task  → tiny avatar stack + emphasized "Working"
  *   - 0 running, ≥1 queued → half-opacity stack + muted "Queued"
  *   - nothing               → return null (no chrome, no placeholder)
  *
- * The shimmer reuses chat's `animate-chat-text-shimmer` utility (defined
- * in packages/ui/styles/base.css). Earlier iterations layered a brand
- * ring + opacity pulse around the avatars; both read as nervous on a
- * dense board. Moving the "alive" signal onto the label keeps the
- * avatars themselves still and lets the cue ride a piece of text the
- * user can already read.
+ * Running labels use a static activity color so long-lived runs do not
+ * continuously repaint every visible issue row.
  *
  * Hover opens AgentActivityHoverContent which lists every active task
  * with status dot + duration. No link rows — the card itself is the
@@ -104,7 +100,7 @@ export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndic
 
   const { agentIds, opacity } = useMemo(() => {
     // Stack heads: prefer running. If 0 running, fall back to queued.
-    // Each case is visually distinct (running gets shimmer, queued gets
+    // Each case is visually distinct (running gets activity text, queued gets
     // muted text) so the indicator always offers a face to hover.
     const primary = groups.running.length > 0 ? groups.running : groups.queued;
     const uniqueAgents = [...new Set(primary.map((t) => t.agent_id))];
@@ -125,15 +121,10 @@ export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndic
         opacity={opacity}
         max={3}
       />
-      {/* No leading-none: the shimmer paints glyphs via background-clip:
-          text, and the background only covers the line box — a squeezed
-          line box leaves descenders transparent. */}
       <span
         className={cn(
           "text-micro",
-          isRunning
-            ? "animate-chat-text-shimmer"
-            : "text-muted-foreground",
+          isRunning ? "text-info" : "text-muted-foreground",
         )}
       >
         {isRunning
