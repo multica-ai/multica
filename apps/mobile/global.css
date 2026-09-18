@@ -6,11 +6,7 @@
  * Theme tokens — RNR template (verbatim) + Multica custom tokens appended.
  *
  * When changing any variable here, also update apps/mobile/lib/theme.ts —
- * they mirror each other. See apps/mobile/docs/rnr-migration.md §5.
- *
- * Dark-mode values for the Multica custom tokens currently mirror their
- * light values — they will be tuned when a screen using them actually
- * needs dark-mode treatment. Don't pre-author (per §3.1 "defaults first").
+ * they mirror each other. See apps/mobile/AGENTS.md, "Theming model".
  */
 
 @layer base {

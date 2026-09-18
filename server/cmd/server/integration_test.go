@@ -884,8 +884,8 @@ UPDATE agent SET owner_id = $2 WHERE id = $1
 		t.Fatalf("member DingTalk install request failed: %v", err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("agent-owner DingTalk install status = %d, want 400 or 503", resp.StatusCode)
+	if resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("agent-owner DingTalk install status = %d, want 400 or 403", resp.StatusCode)
 	}
 	if _, err := testPool.Exec(context.Background(), `
 UPDATE agent SET owner_id = $2 WHERE id = $1

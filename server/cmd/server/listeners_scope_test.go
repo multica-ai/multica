@@ -151,3 +151,103 @@ func TestRegisterListeners_TaskChatGoToWorkspace(t *testing.T) {
 		})
 	}
 }
+
+// An invitation conclusion must reach the invitee BOTH ways: the workspace
+// broadcast keeps admin pending lists fresh, and a targeted send reaches the
+// invitee's own clients — which are usually bound to a different workspace
+// room (or no room at all, #8432), so the broadcast alone never arrives.
+// The targeted frame passes excludeWorkspace so clients already in the room
+// don't get the event twice.
+func TestRegisterListeners_InvitationConcludedReachesActorAndWorkspace(t *testing.T) {
+	cases := []struct {
+		name      string
+		eventType string
+	}{
+		{"invitation:accepted", protocol.EventInvitationAccepted},
+		{"invitation:declined", protocol.EventInvitationDeclined},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bus := events.New()
+			fb := &fakeBroadcaster{}
+			registerListeners(bus, fb)
+
+			bus.Publish(events.Event{
+				Type: tc.eventType, WorkspaceID: "ws-1",
+				ActorType: "member", ActorID: "invitee-1",
+				Payload: map[string]any{"invitation_id": "inv-1"},
+			})
+
+			if len(fb.workspaceCalls) != 1 || fb.workspaceCalls[0].workspaceID != "ws-1" {
+				t.Fatalf("workspace fanout = %+v, want exactly ws-1 (admin lists depend on it)", fb.workspaceCalls)
+			}
+			if len(fb.userCalls) != 1 {
+				t.Fatalf("targeted sends = %+v, want exactly one", fb.userCalls)
+			}
+			send := fb.userCalls[0]
+			if send.userID != "invitee-1" {
+				t.Fatalf("targeted recipient = %q, want the acting invitee invitee-1", send.userID)
+			}
+			if len(send.exclude) != 1 || send.exclude[0] != "ws-1" {
+				t.Fatalf("excludeWorkspace = %v, want [ws-1] to dedupe the room broadcast", send.exclude)
+			}
+			var frame struct {
+				Type    string `json:"type"`
+				ActorID string `json:"actor_id"`
+				Payload struct {
+					InvitationID string `json:"invitation_id"`
+				} `json:"payload"`
+			}
+			if err := json.Unmarshal(send.msg, &frame); err != nil {
+				t.Fatalf("decode targeted frame: %v", err)
+			}
+			if frame.Type != tc.eventType || frame.ActorID != "invitee-1" || frame.Payload.InvitationID != "inv-1" {
+				t.Fatalf("targeted frame = type %q actor %q payload %+v", frame.Type, frame.ActorID, frame.Payload)
+			}
+		})
+	}
+}
+
+// Without an acting invitee there is nobody to target; the workspace
+// broadcast must still go out.
+func TestRegisterListeners_InvitationConcludedWithoutActorSkipsTargetedSend(t *testing.T) {
+	bus := events.New()
+	fb := &fakeBroadcaster{}
+	registerListeners(bus, fb)
+
+	bus.Publish(events.Event{
+		Type: protocol.EventInvitationDeclined, WorkspaceID: "ws-1",
+		ActorType: "member",
+		Payload:   map[string]any{"invitation_id": "inv-1"},
+	})
+
+	if len(fb.workspaceCalls) != 1 {
+		t.Fatalf("workspace fanout = %+v, want exactly one", fb.workspaceCalls)
+	}
+	if len(fb.userCalls) != 0 {
+		t.Fatalf("targeted sends = %+v, want none without an actor", fb.userCalls)
+	}
+}
+
+// invitation:revoked keeps its invitee_user_id routing: its actor is the
+// revoking admin, so targeting the actor would refresh the wrong user's list.
+func TestRegisterListeners_InvitationRevokedStillTargetsInviteeNotActor(t *testing.T) {
+	bus := events.New()
+	fb := &fakeBroadcaster{}
+	registerListeners(bus, fb)
+
+	bus.Publish(events.Event{
+		Type: protocol.EventInvitationRevoked, WorkspaceID: "ws-1",
+		ActorType: "member", ActorID: "admin-1",
+		Payload: map[string]any{"invitee_user_id": inviteePtr("invitee-2")},
+	})
+
+	if len(fb.workspaceCalls) != 0 {
+		t.Fatalf("revoked reached workspace fanout: %+v (still a personal event)", fb.workspaceCalls)
+	}
+	if len(fb.userCalls) != 1 || fb.userCalls[0].userID != "invitee-2" {
+		t.Fatalf("revoked fanout = %+v, want invitee-2 only", fb.userCalls)
+	}
+}
+
+func inviteePtr(s string) *string { return &s }

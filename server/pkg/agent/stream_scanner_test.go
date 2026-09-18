@@ -2,7 +2,6 @@ package agent
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"strings"
 	"testing"
@@ -42,14 +41,8 @@ func TestAgentStreamScannerReadsPastOldTenMiBCap(t *testing.T) {
 func TestAgentStreamScannerStillFailsClosedAboveCap(t *testing.T) {
 	t.Parallel()
 
-	var buf bytes.Buffer
-	buf.Grow(agentStreamMaxLineBytes + 2)
-	for i := 0; i < agentStreamMaxLineBytes+1; i++ {
-		buf.WriteByte('x')
-	}
-	buf.WriteByte('\n')
-
-	scanner := newAgentStreamScanner(&buf)
+	line := strings.Repeat("x", agentStreamMaxLineBytes+1)
+	scanner := newAgentStreamScanner(strings.NewReader(line + "\n"))
 
 	if scanner.Scan() {
 		t.Fatalf("expected an over-cap line to fail, scanned %d bytes", len(scanner.Bytes()))

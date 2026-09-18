@@ -98,6 +98,7 @@ multica issue assign MUL-123 --to "Backend Agent"
 # コメントと実行履歴
 multica issue comment list MUL-123
 multica issue comment add MUL-123 --content "まず回帰テストを確認してください"
+multica issue comment update <comment-id> --expected-revision 2 --content "回帰テストとリリースノートを確認してください"
 multica issue runs MUL-123
 ```
 
@@ -106,6 +107,7 @@ multica issue runs MUL-123
 ```bash
 multica issue create --title "アップグレードメモ" --description-stdin < notes.md
 multica issue comment add MUL-123 --content-stdin < review.md
+multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
 ```
 
 1 回の実行のメッセージを表示する、または実行を停止する:
@@ -247,7 +249,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | `project` | `list/get/create/update/delete` | プロジェクトを管理 | |
 | | `status <id> <status>` | プロジェクトのステータスを変更 | |
 | | `resource list/add/update/remove` | プロジェクトの追加リソースを管理 | `--type`、`--url`、`--local-path`、`--daemon-id`、`--execution-mode`（ローカルディレクトリの `in_place` / `worktree`） |
-| `label` | `list/get/create/update/delete` | ワークスペースのラベルを管理 | |
+| `label` | `list/get/create/update/delete` | ワークスペースのラベルを管理 | `list`: `--resource-type`（`issue` または `skill`）、`--full-id`；`create`: `--name`、`--color`、`--resource-type`（`issue` または `skill`）、`--description` |
 | `property` | `list/get/create/update/archive/unarchive` | ワークスペースのカスタムプロパティを管理 | `create`: `--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`）、`--option`（繰り返し可、select 系のみ）；`list`: `--include-archived`；タイプは作成後に変更できません |
 | `agent` | `list/get/create/update/archive/restore` | エージェントを管理 | `--name`、`--runtime-id`（`create` では必須）、`--instructions`、`--conversation-starters`、`--model`、`--thinking-level`、`--mcp-config`、`--permission-mode`、`--max-concurrent-tasks` |
 | | `copy <agent-id>` | 新しいエージェントとして複製。元のエージェントは変更されません | `--name`（デフォルトは元の名前 + ` (copy)`）、`--runtime-id`（別のランタイムへ複製する場合は `--model` の同時指定が必須）、`--no-skills`；`custom_env`、`mcp_config`、`runtime_config` などの機密設定は複製されないため、`create` と同じフラグで再指定してください |
@@ -268,6 +270,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `import` | URL またはローカルファイルからスキルをインポート | `--url` / `--file`、`--on-conflict`（`fail`、`overwrite`、`rename`、`skip`。デフォルトは `fail`） |
 | | `search <query>` | スキルを検索 | |
 | | `files list/upsert/delete <skill-id>` | スキル内のファイルを管理 | |
+| | `label list/add/remove <skill-id>` | スキルのラベルを管理 | `add` / `remove`: `<label-id>` は完全な UUID または短いプレフィックス |
 | `squad` | `list/get/create/update/delete` | スクワッドを管理（`delete` はアーカイブ） | |
 | | `member list/add/set-role/remove` | スクワッドのメンバーを管理 | |
 | | `activity <issue-id> <outcome>` | リーダーの評価を記録 | |

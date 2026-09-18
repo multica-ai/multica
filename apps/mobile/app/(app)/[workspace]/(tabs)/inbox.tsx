@@ -185,8 +185,7 @@ function InboxEmpty({ iconColor }: { iconColor: string }) {
         Inbox zero
       </Text>
       <Text className="text-sm text-muted-foreground text-center">
-        When someone @mentions you, assigns an issue, or an agent finishes a
-        task, it shows up here.
+        Mentions, assignments, and agent updates appear here.
       </Text>
     </View>
   );

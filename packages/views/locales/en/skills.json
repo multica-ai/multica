@@ -25,7 +25,7 @@
     },
     "empty": {
       "title": "No skills yet",
-      "description": "Create your first skill, import one from a URL or a local folder, or copy one from a connected runtime — and every agent in the workspace can use it."
+      "description": "Create or import a skill."
     },
     "no_matches": {
       "title": "No matches",
@@ -99,7 +99,6 @@
     "updated_toast_one": "Updated {{count}} skill from source",
     "updated_toast_other": "Updated {{count}} skills from source",
     "update_partial_toast": "Updated {{count}}, {{failed}} failed",
-    "add_dialog_description": "Select the agents that should get the selected skills.",
     "cancel": "Cancel",
     "add_confirm": "Add ({{num}})",
     "adding": "Adding...",
@@ -113,6 +112,10 @@
     "filter_active_count_other": "{{count}} filters",
     "clear_filters": "Clear filters",
     "section_usage": "Usage",
+    "section_labels": "Labels",
+    "filter_search_placeholder": "Filter...",
+    "no_labels": "No labels yet",
+    "no_results": "No results",
     "display": "Display",
     "sort_by": "Sort by",
     "direction_asc": "Ascending",
@@ -218,14 +221,16 @@
       "properties_hint": "These fields stay in sync with the SKILL.md frontmatter.",
       "name": "Name",
       "description": "Description",
-      "description_hint": "{{count}} characters. Agents read this to decide whether to load the skill.",
+      "description_hint": "Agents use this to decide when to load the skill.",
       "labels": "Labels",
       "used_by_one": "Used by {{count}} agent",
       "used_by_other": "Used by {{count}} agents",
       "used_by_empty": "Not assigned to any agent yet. Open an agent's Skills tab to assign.",
       "permissions_owner": "You can edit and delete this skill. Changes take effect on the next agent run.",
       "permissions_locked_creator": "Only the creator ({{name}}) or a workspace admin can edit this skill.",
-      "permissions_locked": "Only the creator or a workspace admin can edit this skill."
+      "permissions_locked": "Only the creator or a workspace admin can edit this skill.",
+      "properties_help": "About skill properties",
+      "character_count": "{{count}} characters"
     },
     "files": {
       "list_aria": "Skill files",
@@ -322,9 +327,7 @@
     "load_failed": "Failed to load runtime local skills",
     "not_supported": "This runtime provider does not expose local skill inventory yet.",
     "no_skills_title": "No local skills found",
-    "no_skills_hint": "This runtime does not have any discoverable local skills yet.",
     "search_placeholder": "Search local skills",
-    "no_search_results_title": "No matching local skills",
     "no_search_results_hint": "No local skills match \"{{query}}\".",
     "ignored_files_hint": "Symlinks, unreadable files, oversized files, and very large bundles are ignored during import.",
     "ready": "Ready to import",

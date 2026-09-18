@@ -94,4 +94,9 @@ const EMERGENCY_COPY = {
     description: "페이지에서 예기치 않은 오류가 발생했습니다. 다시 불러오세요.",
     reload: "다시 불러오기",
   },
+  fr: {
+    title: "Une erreur s'est produite",
+    description: "La page a rencontré une erreur inattendue. Essayez de la recharger.",
+    reload: "Recharger",
+  },
 } as const;

@@ -74,7 +74,7 @@
     "description_placeholder": "説明を追加...",
     "description_hint": "このプロジェクトのすべての実行で、コンテキストとしてエージェントに共有されます。",
     "empty_issues_title": "リンクされたタスクはありません",
-    "empty_issues_hint": "新しいタスクを作成するか、既存のタスクをこのプロジェクトに割り当ててください。",
+    "empty_issues_hint": "既存のタスクをこのプロジェクトに追加することもできます。",
     "empty_issues_new_button": "新規タスク",
     "no_issues_yet": "タスクはまだありません",
     "toast_link_copied": "リンクをコピーしました",

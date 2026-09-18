@@ -42,7 +42,6 @@ export function IssueTab() {
       </p>
       <SettingsSection
         title={t(($) => $.issue.quick_create_title)}
-        description={t(($) => $.issue.quick_create_description)}
       >
         <SettingsCard>
           {QUICK_CREATE_FIELDS.map((field) => (
@@ -62,7 +61,6 @@ export function IssueTab() {
 
       <SettingsSection
         title={t(($) => $.issue.manual_create_title)}
-        description={t(($) => $.issue.manual_create_description)}
       >
         <SettingsCard>
           {MANUAL_CREATE_FIELDS.map((field) => (

@@ -325,7 +325,14 @@ func (s *wsSender) sendMedia(ctx context.Context, chatID string, chatType int, m
 	if err != nil {
 		return err
 	}
-	if _, err := s.request(ctx, cmdSendMsg, body); err != nil {
+	// Through sendMsgFrame: a file and a piece of an answer are the same
+	// aibot_send_msg to WeCom and spend the same per-chat allowance, so a turn
+	// that answers in words and then sends three attachments has to count as
+	// four (rate_limit.go). The retry that comes with it is safe on this route
+	// for the reason spelled out below — a STATED refusal is the server saying
+	// it did not act on the frame, which is the one failure that cannot leave
+	// a copy of the file behind.
+	if err := s.sendMsgFrame(ctx, chatID, body); err != nil {
 		// A verdict that never came is not a refusal. The frame went out, and
 		// the read loop can simply have been busy. Resending on that would put
 		// the SAME media_id out a second time and the person sees the picture

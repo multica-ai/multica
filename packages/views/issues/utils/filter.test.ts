@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import type { Issue, IssueAssigneeGroup, PropertyFilterValue } from "@multica/core/types";
+import type { Issue, IssueAssigneeGroup, ProjectStatus, PropertyFilterValue } from "@multica/core/types";
 import {
   applyIssueFilters,
   filterAssigneeGroups,
@@ -8,6 +8,7 @@ import {
   issueMatchesPropertyFilters,
   NO_PROPERTY_VALUE,
   type IssueFilters,
+  type IssueFilterState,
 } from "./filter";
 
 const NO_FILTER: IssueFilters = {
@@ -20,6 +21,8 @@ const NO_FILTER: IssueFilters = {
   includeNoProject: false,
   labelFilters: [],
 };
+
+const NO_FILTER_STATE: IssueFilterState = { ...NO_FILTER, workingOnly: false };
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -162,6 +165,79 @@ describe("filterIssues", () => {
       includeNoProject: true,
     });
     expect(result.map((i) => i.id)).toEqual(["2", "3"]);
+  });
+
+  // --- Project status ---
+  // The predicate needs the project catalog, which the surface passes through
+  // the filter context: an Issue only carries `project_id`.
+  const projectStatusById = new Map<string, ProjectStatus>([
+    ["p-1", "in_progress"],
+    ["p-2", "completed"],
+  ]);
+  const byProjectStatus = (
+    state: Partial<IssueFilterState>,
+    catalog: ReadonlyMap<string, ProjectStatus> | undefined,
+  ) =>
+    applyIssueFilters(issues, { ...NO_FILTER_STATE, ...state }, {
+      projectStatusById: catalog,
+    }).map((i) => i.id);
+
+  it("filters by project status", () => {
+    expect(byProjectStatus({ projectStatusFilters: ["in_progress"] }, projectStatusById)).toEqual(["1", "4"]);
+  });
+
+  it("keeps issues whose project matches any selected status", () => {
+    expect(
+      byProjectStatus(
+        { projectStatusFilters: ["in_progress", "completed"] },
+        projectStatusById,
+      ),
+    ).toEqual(["1", "2", "4"]);
+  });
+
+  // Issue "3" has no project. `includeNoProject` widens the project-id
+  // dimension enough to keep it, and the project-status predicate still
+  // drops it — an issue with no project has no status to match.
+  it("never matches an issue without a project", () => {
+    expect(
+      byProjectStatus(
+        {
+          projectStatusFilters: ["in_progress"],
+          projectFilters: ["p-1"],
+          includeNoProject: true,
+        },
+        projectStatusById,
+      ),
+    ).toEqual(["1", "4"]);
+  });
+
+  it("drops an issue whose project is missing from the catalog", () => {
+    expect(
+      byProjectStatus(
+        { projectStatusFilters: ["in_progress"] },
+        new Map<string, ProjectStatus>([["p-2", "completed"]]),
+      ),
+    ).toEqual([]);
+  });
+
+  // A surface that never loads the project catalog must not blank its list:
+  // an absent map means "cannot evaluate", not "matches nothing".
+  it("is a no-op when the project catalog is unavailable", () => {
+    expect(byProjectStatus({ projectStatusFilters: ["in_progress"] }, undefined)).toEqual([
+      "1",
+      "2",
+      "3",
+      "4",
+    ]);
+  });
+
+  it("ANDs project status with the project-id filter", () => {
+    expect(
+      byProjectStatus(
+        { projectStatusFilters: ["in_progress"], projectFilters: ["p-2"] },
+        projectStatusById,
+      ),
+    ).toEqual([]);
   });
 
   it("applies status + project filters together", () => {

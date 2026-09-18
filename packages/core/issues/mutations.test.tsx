@@ -1,12 +1,13 @@
 /**
  * @vitest-environment jsdom
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { setApiInstance } from "../api";
+import { configStore } from "../config";
 import type { ApiClient } from "../api/client";
 import { createQueryClient } from "../query-client";
 import {
@@ -108,7 +109,7 @@ describe("useCreateCommentSubIssue", () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const listKey = issueKeys.list(WS_ID);
     qc.setQueryData<ListIssuesCache>(listKey, {
-      byStatus: { todo: { issues: [], total: 0 } },
+      byStatus: { unstarted: { issues: [], total: 0 } },
     });
     const child = makeIssue(2, { parent_issue_id: "issue-1" });
     const createCommentSubIssue = vi.fn().mockResolvedValue(child);
@@ -134,7 +135,7 @@ describe("useCreateCommentSubIssue", () => {
       issue: { title: "Child" },
     });
     expect(
-      qc.getQueryData<ListIssuesCache>(listKey)?.byStatus.todo?.issues,
+      qc.getQueryData<ListIssuesCache>(listKey)?.byStatus.unstarted?.issues,
     ).toContainEqual(child);
     expect(qc.getQueryState(listKey)?.isInvalidated).toBe(true);
     qc.clear();
@@ -161,15 +162,15 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
   function makeBucketed(): ListIssuesCache {
     return {
       byStatus: {
-        todo: { issues: [makeIssue(1)], total: 1 },
-        in_progress: { issues: [], total: 0 },
+        unstarted: { issues: [makeIssue(1)], total: 1 },
+        started: { issues: [], total: 0 },
       },
     };
   }
 
   function bucketIds(
     key: readonly unknown[],
-    status: "todo" | "in_progress",
+    status: "unstarted" | "started",
   ): string[] {
     const c = qc.getQueryData<ListIssuesCache>(key);
     return (c?.byStatus[status]?.issues ?? []).map((i) => i.id);
@@ -218,8 +219,8 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
 
     // Optimistic state — the regression: myList must move too, not just ws.
     for (const key of [wsKey, myKey, projectKey]) {
-      expect(bucketIds(key, "todo")).toEqual([]);
-      expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
+      expect(bucketIds(key, "unstarted")).toEqual([]);
+      expect(bucketIds(key, "started")).toEqual(["issue-1"]);
     }
 
     await act(async () => {
@@ -228,7 +229,7 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
 
     // Authoritative settle keeps the card in place in both caches.
     for (const key of [wsKey, myKey, projectKey]) {
-      expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
+      expect(bucketIds(key, "started")).toEqual(["issue-1"]);
     }
   });
 
@@ -380,7 +381,7 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     expect(
       qc
         .getQueryData<ListIssuesCache>(wsKey)
-        ?.byStatus.in_progress?.issues[0]?.position,
+        ?.byStatus.started?.issues[0]?.position,
     ).toBe(15);
   });
 
@@ -426,8 +427,8 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     });
 
     for (const key of [wsKey, myKey, projectKey]) {
-      expect(bucketIds(key, "todo")).toEqual(["issue-1"]);
-      expect(bucketIds(key, "in_progress")).toEqual([]);
+      expect(bucketIds(key, "unstarted")).toEqual(["issue-1"]);
+      expect(bucketIds(key, "started")).toEqual([]);
     }
     const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
     expect(invalidatedKeys).toContainEqual(issueKeys.detail(WS_ID, "issue-1"));
@@ -496,15 +497,15 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
 
     // Optimistic: gone from the old project's list immediately; the
     // workspace board and the assignee-filtered list keep the card.
-    expect(bucketIds(projectKey, "todo")).toEqual([]);
-    expect(bucketIds(wsKey, "todo")).toEqual(["issue-1"]);
-    expect(bucketIds(myKey, "todo")).toEqual(["issue-1"]);
+    expect(bucketIds(projectKey, "unstarted")).toEqual([]);
+    expect(bucketIds(wsKey, "unstarted")).toEqual(["issue-1"]);
+    expect(bucketIds(myKey, "unstarted")).toEqual(["issue-1"]);
 
     await act(async () => {
       resolve(makeIssue(1, { project_id: "project-9" }));
     });
 
-    expect(bucketIds(projectKey, "todo")).toEqual([]);
+    expect(bucketIds(projectKey, "unstarted")).toEqual([]);
     const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
     expect(invalidatedKeys).not.toContainEqual(issueKeys.myAll(WS_ID));
   });
@@ -522,7 +523,7 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
         .catch(() => {});
     });
 
-    expect(bucketIds(projectKey, "todo")).toEqual(["issue-1"]);
+    expect(bucketIds(projectKey, "unstarted")).toEqual(["issue-1"]);
   });
 });
 
@@ -632,13 +633,13 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
   function makeBucketed(): ListIssuesCache {
     return {
       byStatus: {
-        todo: { issues: [makeIssue(1)], total: 1 },
-        in_progress: { issues: [], total: 0 },
+        unstarted: { issues: [makeIssue(1)], total: 1 },
+        started: { issues: [], total: 0 },
       },
     };
   }
 
-  function bucketIds(key: readonly unknown[], status: "todo" | "in_progress"): string[] {
+  function bucketIds(key: readonly unknown[], status: "unstarted" | "started"): string[] {
     const c = qc.getQueryData<ListIssuesCache>(key);
     return (c?.byStatus[status]?.issues ?? []).map((i) => i.id);
   }
@@ -677,8 +678,8 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
     // so the optimistic patch lands a microtask later — wait for it.
     await waitFor(() => {
       for (const key of [wsKey, myKey]) {
-        expect(bucketIds(key, "todo")).toEqual([]);
-        expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
+        expect(bucketIds(key, "unstarted")).toEqual([]);
+        expect(bucketIds(key, "started")).toEqual(["issue-1"]);
       }
     });
 
@@ -687,7 +688,7 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
     });
 
     for (const key of [wsKey, myKey]) {
-      expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
+      expect(bucketIds(key, "started")).toEqual(["issue-1"]);
     }
   });
 
@@ -747,8 +748,8 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
     });
 
     for (const key of [wsKey, myKey]) {
-      expect(bucketIds(key, "todo")).toEqual(["issue-1"]);
-      expect(bucketIds(key, "in_progress")).toEqual([]);
+      expect(bucketIds(key, "unstarted")).toEqual(["issue-1"]);
+      expect(bucketIds(key, "started")).toEqual([]);
     }
   });
 
@@ -790,9 +791,9 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
       });
     });
 
-    expect(bucketIds(projectKey, "todo")).toEqual([]);
+    expect(bucketIds(projectKey, "unstarted")).toEqual([]);
     // The assignee-filtered list is untouched by a project move.
-    expect(bucketIds(myKey, "todo")).toEqual(["issue-1"]);
+    expect(bucketIds(myKey, "unstarted")).toEqual(["issue-1"]);
     const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
     expect(invalidatedKeys).not.toContainEqual(issueKeys.myAll(WS_ID));
   });
@@ -1153,7 +1154,7 @@ describe("comment mutations — owner revision and last activity", () => {
   function seed(qc: QueryClient) {
     const issue = makeIssue(1, { revision: 1 });
     const board: ListIssuesCache = {
-      byStatus: { todo: { issues: [issue], total: 1 } },
+      byStatus: { unstarted: { issues: [issue], total: 1 } },
     };
     qc.setQueryData<Issue>(detailKey, issue);
     qc.setQueryData<ListIssuesCache>(lastActivityKey, board);
@@ -1223,6 +1224,85 @@ describe("comment mutations — owner revision and last activity", () => {
     expect(qc.getQueryState(detailKey)?.isInvalidated).toBe(true);
     expect(qc.getQueryState(lastActivityKey)?.isInvalidated).toBe(true);
     expect(qc.getQueryState(positionKey)?.isInvalidated).toBe(true);
+    qc.clear();
+  });
+
+  // #8296: deleting a comment keeps its replies. The outcome (tombstone or
+  // removal) is applied only once the server confirms; the matrix itself lives
+  // in comment-deletion.test.ts.
+  it("keeps the timeline until the delete is confirmed, then keeps the replies", async () => {
+    configStore.getState().setCommentDeleteKeepRepliesSupported(true);
+    onTestFinished(() => configStore.getState().setCommentDeleteKeepRepliesSupported(false));
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seed(qc);
+    const [root] = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))!;
+    const reply: TimelineEntry = { ...root!, id: "comment-2", parent_id: "comment-1", content: "reply" };
+    qc.setQueryData<TimelineEntry[]>(issueKeys.timeline(issueId), [root!, reply]);
+    let confirm!: () => void;
+    const deleteComment = vi.fn(() => new Promise<void>((resolve) => { confirm = resolve; }));
+    setApiInstance({ deleteComment } as unknown as ApiClient);
+    const { result } = renderHook(() => useDeleteComment(issueId), {
+      wrapper: createWrapper(qc),
+    });
+
+    let pending!: Promise<unknown>;
+    await act(async () => {
+      pending = result.current.mutateAsync("comment-1");
+    });
+    await waitFor(() => expect(deleteComment).toHaveBeenCalledWith("comment-1", { keepReplies: true }));
+    expect(qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))).toEqual([root, reply]);
+
+    await act(async () => {
+      confirm();
+      await pending;
+    });
+    const timeline = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))!;
+    expect(timeline.map((e) => e.id)).toEqual(["comment-1", "comment-2"]);
+    expect(timeline[0]).toMatchObject({ content: "" });
+    expect(timeline[0]?.deleted_at).toEqual(expect.any(String));
+    expect(timeline[1]).toEqual(reply);
+    qc.clear();
+  });
+
+  // A server that has not declared the capability deletes the replies too:
+  // the client uses the legacy route and mirrors that outcome.
+  it("mirrors a reply-deleting server when the capability is not declared", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seed(qc);
+    const [root] = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))!;
+    const reply: TimelineEntry = { ...root!, id: "comment-2", parent_id: "comment-1", content: "reply" };
+    qc.setQueryData<TimelineEntry[]>(issueKeys.timeline(issueId), [root!, reply]);
+    const deleteComment = vi.fn().mockResolvedValue(undefined);
+    setApiInstance({ deleteComment } as unknown as ApiClient);
+    const { result } = renderHook(() => useDeleteComment(issueId), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync("comment-1");
+    });
+
+    expect(deleteComment).toHaveBeenCalledWith("comment-1", { keepReplies: false });
+    expect(qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))).toEqual([]);
+    qc.clear();
+  });
+
+  it("leaves the timeline untouched when the delete fails", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seed(qc);
+    const before = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId));
+    setApiInstance({
+      deleteComment: vi.fn().mockRejectedValue(new Error("nope")),
+    } as unknown as ApiClient);
+    const { result } = renderHook(() => useDeleteComment(issueId), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync("comment-1").catch(() => undefined);
+    });
+
+    expect(qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))).toBe(before);
     qc.clear();
   });
 });

@@ -89,16 +89,18 @@ func TestCanonicalIssueTableFingerprintNormalizesSetLikeArrays(t *testing.T) {
 	left := issueTableQuerySpec{
 		Scope: issueTableScope{Kind: "workspace", AssigneeTypes: []string{"agent", "member", "agent"}},
 		Filters: issueTableFiltersRequest{
-			Statuses:   []string{"todo", "backlog", "todo"},
-			ProjectIDs: []string{"b", "a"},
+			Statuses:        []string{"todo", "backlog", "todo"},
+			ProjectIDs:      []string{"b", "a"},
+			ProjectStatuses: []string{"planned", "in_progress", "planned"},
 		},
 		Sort: issueTableSortRequest{Field: "title", Direction: "asc"},
 	}
 	right := issueTableQuerySpec{
 		Scope: issueTableScope{Kind: "workspace", AssigneeTypes: []string{"member", "agent"}},
 		Filters: issueTableFiltersRequest{
-			Statuses:   []string{"backlog", "todo"},
-			ProjectIDs: []string{"a", "b"},
+			Statuses:        []string{"backlog", "todo"},
+			ProjectIDs:      []string{"a", "b"},
+			ProjectStatuses: []string{"in_progress", "planned"},
 		},
 		Sort: issueTableSortRequest{Field: "title", Direction: "asc"},
 	}

@@ -15,6 +15,8 @@ import (
 )
 
 func TestCursorBackgroundUncapturedDisabledToolWatchdog(t *testing.T) {
+	t.Parallel()
+
 	fake := filepath.Join(t.TempDir(), "cursor-agent")
 	const script = `#!/bin/sh
 cat >/dev/null

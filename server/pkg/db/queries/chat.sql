@@ -333,9 +333,10 @@ WHERE id = sqlc.arg('id')
 -- backwards onto the turn the user interrupted.
 --
 -- The newer-task lookup depends on
--- idx_agent_task_queue_chat_with_session_created_at (migration 465). Neither
--- chat_pending_v3 nor chat_terminal_resume can replace it: this guard spans
--- both in-flight and terminal tasks and compares created_at.
+-- idx_agent_task_queue_chat_session (migration 472). Neither chat_pending_v3
+-- nor chat_terminal_resume can replace it: this guard spans both in-flight and
+-- terminal tasks and compares created_at; the broader index also serves the
+-- chat_session foreign-key delete lookup.
 UPDATE chat_session cs
 SET session_id = t.session_id,
     runtime_id = t.runtime_id,

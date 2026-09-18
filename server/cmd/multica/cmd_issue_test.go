@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -365,6 +366,210 @@ func newIssueCommentAddTestCmd() *cobra.Command {
 	return cmd
 }
 
+func newIssueCommentUpdateTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("content", "", "")
+	cmd.Flags().Bool("content-stdin", false, "")
+	cmd.Flags().String("content-file", "", "")
+	cmd.Flags().Bool("allow-external-file", false, "")
+	cmd.Flags().Int64("expected-revision", 0, "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func TestIssueCommentUpdateCommandRegistration(t *testing.T) {
+	cmd, _, err := issueCommentCmd.Find([]string{"update"})
+	if err != nil {
+		t.Fatalf("find issue comment update: %v", err)
+	}
+	if cmd != issueCommentUpdateCmd {
+		t.Fatalf("found command = %q, want issue comment update", cmd.CommandPath())
+	}
+	for _, anchor := range []string{
+		"merge your change into it before retrying",
+		"re-enqueues every agent the new body mentions",
+	} {
+		if !strings.Contains(cmd.Long, anchor) {
+			t.Fatalf("long help should carry the conflict rule and the re-trigger side effect (missing %q), got %q", anchor, cmd.Long)
+		}
+	}
+	for _, name := range []string{"content", "content-stdin", "content-file", "allow-external-file", "expected-revision", "output"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("issue comment update missing --%s", name)
+		}
+	}
+}
+
+func TestRunIssueCommentUpdateSendsExpectedRequest(t *testing.T) {
+	chdirWithDaemonTaskMarker(t)
+	const commentID = "11111111-1111-4111-8111-111111111111"
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Method != http.MethodPut {
+			t.Fatalf("method = %s, want PUT", r.Method)
+		}
+		if r.URL.Path != "/api/comments/"+commentID {
+			t.Fatalf("path = %q, want /api/comments/%s", r.URL.Path, commentID)
+		}
+		if ws := r.Header.Get("X-Workspace-ID"); ws != "ws-1" {
+			t.Fatalf("X-Workspace-ID = %q, want ws-1", ws)
+		}
+		if contentType := r.Header.Get("Content-Type"); contentType != "application/json" {
+			t.Fatalf("Content-Type = %q, want application/json", contentType)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if len(body) != 2 || body["content"] != "updated\ncomment" || body["expected_revision"] != float64(7) {
+			t.Fatalf("body = %#v, want content plus expected revision", body)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":      commentID,
+			"content": body["content"],
+		})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueCommentUpdateTestCmd()
+	_ = cmd.Flags().Set("content", `updated\ncomment`)
+	_ = cmd.Flags().Set("expected-revision", "7")
+	stderr := captureStderr(t)
+	defer stderr.restore()
+	out, err := captureStdout(t, func() error {
+		return runIssueCommentUpdate(cmd, []string{commentID})
+	})
+	if err != nil {
+		t.Fatalf("runIssueCommentUpdate: %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+	if got := stderr.read(); got != "Comment "+commentID+" updated.\n" {
+		t.Fatalf("stderr = %q", got)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode stdout JSON %q: %v", out, err)
+	}
+	if got["id"] != commentID || got["content"] != "updated\ncomment" {
+		t.Fatalf("stdout = %#v", got)
+	}
+}
+
+func TestRunIssueCommentUpdateReadsContentFileAndHonorsTableOutput(t *testing.T) {
+	const commentID = "22222222-2222-4222-8222-222222222222"
+	t.Chdir(t.TempDir())
+	const content = "Updated title\n\nChinese: \u4e2d\u6587; literal \\n stays literal.\n"
+	if err := os.WriteFile("comment.md", []byte(content), 0o644); err != nil {
+		t.Fatalf("write comment file: %v", err)
+	}
+
+	var gotContent string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		gotContent, _ = body["content"].(string)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": commentID, "content": gotContent})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	cmd := newIssueCommentUpdateTestCmd()
+	_ = cmd.Flags().Set("content-file", "comment.md")
+	_ = cmd.Flags().Set("expected-revision", "4")
+	_ = cmd.Flags().Set("output", "table")
+	stderr := captureStderr(t)
+	defer stderr.restore()
+	out, err := captureStdout(t, func() error {
+		return runIssueCommentUpdate(cmd, []string{commentID})
+	})
+	if err != nil {
+		t.Fatalf("runIssueCommentUpdate: %v", err)
+	}
+	if gotContent != strings.TrimSuffix(content, "\n") {
+		t.Fatalf("request content = %q, want file body preserved", gotContent)
+	}
+	if out != "" {
+		t.Fatalf("table output wrote stdout %q, want empty", out)
+	}
+	if got := stderr.read(); got != "Comment "+commentID+" updated.\n" {
+		t.Fatalf("stderr = %q", got)
+	}
+}
+
+func TestRunIssueCommentUpdateRejectsMissingContentBeforeRequest(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	cmd := newIssueCommentUpdateTestCmd()
+	_ = cmd.Flags().Set("expected-revision", "1")
+	err := runIssueCommentUpdate(cmd, []string{"comment-1"})
+	if err == nil || err.Error() != "--content, --content-stdin, or --content-file is required" {
+		t.Fatalf("error = %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("requests = %d, want 0 for local validation failure", requests)
+	}
+}
+
+func TestRunIssueCommentUpdateRejectsMissingOrInvalidRevisionBeforeRequest(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	for _, revision := range []string{"", "0", "-1"} {
+		cmd := newIssueCommentUpdateTestCmd()
+		_ = cmd.Flags().Set("content", "updated")
+		if revision != "" {
+			_ = cmd.Flags().Set("expected-revision", revision)
+		}
+		err := runIssueCommentUpdate(cmd, []string{"comment-1"})
+		if err == nil || !strings.Contains(err.Error(), "--expected-revision is required and must be a positive integer") {
+			t.Fatalf("revision %q error = %v", revision, err)
+		}
+	}
+	if requests != 0 {
+		t.Fatalf("requests = %d, want 0 for local revision validation failures", requests)
+	}
+}
+
+func TestRunIssueCommentUpdateWrapsAPIError(t *testing.T) {
+	chdirWithDaemonTaskMarker(t)
+	const commentID = "33333333-3333-4333-8333-333333333333"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "only comment author or admin can edit", http.StatusForbidden)
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueCommentUpdateTestCmd()
+	_ = cmd.Flags().Set("content", "not allowed")
+	_ = cmd.Flags().Set("expected-revision", "2")
+	err := runIssueCommentUpdate(cmd, []string{commentID})
+	if err == nil {
+		t.Fatal("expected API error")
+	}
+	if !strings.Contains(err.Error(), "update comment: PUT /api/comments/"+commentID+" returned 403") {
+		t.Fatalf("error lacks update context: %v", err)
+	}
+}
+
 // TestRunIssueCommentAddRejectsExternalAttachmentWithZeroUploads is the MUL-4252
 // P2 guard: `comment add` must validate every --attachment BEFORE uploading any,
 // so a valid attachment followed by an invalid (external) one aborts the call
@@ -609,10 +814,12 @@ func TestRunIssuePullRequestsListsLinkedPRsAsJSON(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	drainCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); drainCh <- b }()
 	err := runIssuePullRequests(cmd, []string{"MUL-2818"})
 	_ = w.Close()
 	os.Stdout = old
-	out, _ := io.ReadAll(r)
+	out := <-drainCh
 	if err != nil {
 		t.Fatalf("runIssuePullRequests: %v", err)
 	}
@@ -677,10 +884,12 @@ func TestRunIssueUsageReturnsTokenSummaryAsJSON(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	drainCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); drainCh <- b }()
 	err := runIssueUsage(cmd, []string{"MUL-2818"})
 	_ = w.Close()
 	os.Stdout = old
-	out, _ := io.ReadAll(r)
+	out := <-drainCh
 	if err != nil {
 		t.Fatalf("runIssueUsage: %v", err)
 	}
@@ -822,10 +1031,12 @@ func TestRunIssuePullRequestsTableIncludesCoreFields(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	drainCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); drainCh <- b }()
 	printIssuePullRequestsTable(prs)
 	_ = w.Close()
 	os.Stdout = old
-	out, _ := io.ReadAll(r)
+	out := <-drainCh
 	text := string(out)
 	for _, want := range []string{"NUMBER", "STATE", "TITLE", "URL", "42", "open", "MUL-2818 add issue PR CLI", "https://github.com/multica-ai/multica/pull/42"} {
 		if !strings.Contains(text, want) {
@@ -4220,13 +4431,15 @@ func TestRunIssueCommentListCompactWiring(t *testing.T) {
 			t.Fatalf("pipe: %v", err)
 		}
 		os.Stdout = w
+		drainCh := make(chan []byte, 1)
+		go func() { b, _ := io.ReadAll(r); drainCh <- b }()
 		runErr := runIssueCommentList(cmd, []string{issueID})
 		w.Close()
 		os.Stdout = orig
 		if runErr != nil {
 			t.Fatalf("runIssueCommentList: %v", runErr)
 		}
-		out, _ := io.ReadAll(r)
+		out := <-drainCh
 		var got []map[string]any
 		if err := json.Unmarshal(out, &got); err != nil {
 			t.Fatalf("output not JSON: %v\n---\n%s", err, out)
@@ -4820,6 +5033,67 @@ func TestRunIssueListTableFooterReportsPage(t *testing.T) {
 			}
 			if got := strings.TrimSpace(stderr.read()); got != tc.wantStderr {
 				t.Errorf("stderr = %q, want %q", got, tc.wantStderr)
+			}
+		})
+	}
+}
+
+// #8296: the CLI deletes through the keep-replies route, which only servers
+// that keep a deleted comment's replies expose. An older server does not route
+// it, and the CLI refuses rather than falling back to a delete that would
+// remove the replies too.
+func TestRunIssueCommentDeleteKeepsReplies(t *testing.T) {
+	commentID := "comment-123"
+	tests := []struct {
+		name    string
+		respond func(http.ResponseWriter)
+		wantErr string
+	}{
+		{
+			name:    "server keeps replies",
+			respond: func(w http.ResponseWriter) { w.WriteHeader(http.StatusNoContent) },
+		},
+		{
+			name:    "older server without the route",
+			respond: func(w http.ResponseWriter) { http.Error(w, "404 page not found", http.StatusNotFound) },
+			wantErr: "would delete the comment's replies too",
+		},
+		{
+			name: "comment not found",
+			respond: func(w http.ResponseWriter) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(map[string]string{"error": "comment not found"})
+			},
+			wantErr: "comment not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var paths []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodDelete {
+					t.Errorf("method = %s, want DELETE", r.Method)
+				}
+				paths = append(paths, r.URL.Path)
+				tt.respond(w)
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			err := runIssueCommentDelete(newIssueCommentResolutionTestCmd("delete"), []string{commentID})
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("run command: %v", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("error = %v, want it to mention %q", err, tt.wantErr)
+			}
+			if want := []string{"/api/comments/" + commentID + "/keep-replies"}; !slices.Equal(paths, want) {
+				t.Fatalf("requests = %v, want only %v", paths, want)
 			}
 		})
 	}

@@ -80,6 +80,7 @@
     "run_blocked_invocation_not_allowed": "Not triggered — you don't have permission to use this autopilot's agent",
     "run_blocked_runtime_offline": "Not triggered — the agent's runtime is offline",
     "run_blocked_agent_runtime_required": "Not triggered — the agent has no runtime; bind one to run it",
+    "run_blocked_runtime_access_denied": "Not triggered — the agent can't run on its private runtime; make it public or rebind/copy the agent",
     "run_blocked_target_unavailable": "Not triggered — the agent is unavailable",
     "run_blocked_attribution": "Not triggered — the run couldn't be attributed to a responsible member",
     "run_blocked_already_active": "Not triggered — a recent run already covers this",
@@ -175,6 +176,7 @@
     "copy_url": "Copy URL",
     "url_copied": "Webhook URL copied",
     "url_copy_failed": "Failed to copy",
+    "edit_schedule": "Edit schedule",
     "rotate_url": "Rotate URL",
     "rotate_confirm_title": "Rotate webhook URL",
     "rotate_confirm_description": "The current URL will stop working immediately. Any external systems calling it must be updated with the new URL. Continue?",
@@ -254,6 +256,16 @@
     "toast_added_webhook": "Webhook trigger added",
     "toast_add_failed": "Failed to add trigger"
   },
+  "edit_trigger_dialog": {
+    "title": "Edit schedule",
+    "label_field": "Label (optional)",
+    "label_placeholder": "e.g. Weekday morning",
+    "enabled_label": "Enabled",
+    "submit": "Save",
+    "submitting": "Saving...",
+    "toast_updated": "Schedule updated",
+    "toast_update_failed": "Failed to update schedule"
+  },
   "dialog": {
     "sr_create": "New Autopilot",
     "sr_edit": "Edit Autopilot",
@@ -314,7 +326,7 @@
     "event_filter_add": "Add",
     "event_filter_remove_label": "Remove filter",
     "event_filter_hint": "Only process webhooks matching these events. Leave empty to accept all.",
-    "schedule_disabled_reason": "This autopilot has multiple schedules — edit them in the detail page.",
+    "schedule_multiple_notice": "This autopilot has {{count}} schedules. Close this dialog and edit each one under Triggers below.",
     "schedule_empty": "No schedule — this autopilot only runs when triggered manually.",
     "schedule_add": "Add schedule",
     "error_title_required": "Enter a name for this autopilot.",

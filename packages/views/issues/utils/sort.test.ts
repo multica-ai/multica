@@ -83,19 +83,57 @@ describe("sortIssues property sorts", () => {
     expect(sorted.map((i) => i.id)).toEqual(["newer", "older"]);
   });
 
-  it("sorts custom statuses by their effective category", () => {
+  // MUL-7379: ranking on the four lifecycle categories made every status in one
+  // category tie, so a list the user sorted by status came back ordered by the
+  // created_at tiebreak instead.
+  it("keeps the built-ins distinct inside one lifecycle category", () => {
     const sorted = sortIssues(
       [
-        staticIssue("done", { status: "done" }),
-        staticIssue("blocked", {
-          status: "waiting_on_vendor",
-          status_category: "blocked",
-        }),
+        staticIssue("blocked", { status: "blocked" }),
+        staticIssue("todo", { status: "todo" }),
+        staticIssue("in_progress", { status: "in_progress" }),
+        staticIssue("backlog", { status: "backlog" }),
+        staticIssue("in_review", { status: "in_review" }),
       ],
       "status",
       "asc",
     );
-    expect(sorted.map((i) => i.id)).toEqual(["blocked", "done"]);
+    expect(sorted.map((i) => i.id)).toEqual([
+      "backlog",
+      "todo",
+      "in_progress",
+      "in_review",
+      "blocked",
+    ]);
+  });
+
+  it("ranks custom statuses where the catalog puts them", () => {
+    const sorted = sortIssues(
+      [
+        staticIssue("done", { status: "done" }),
+        staticIssue("gate", { status: "waiting_on_vendor" }),
+        staticIssue("in_progress", { status: "in_progress" }),
+      ],
+      "status",
+      "asc",
+      // Catalog order: the gate sits between in_progress and done, which no
+      // ordering of the seven built-ins alone could produce.
+      ["backlog", "todo", "in_progress", "waiting_on_vendor", "in_review", "blocked", "done", "cancelled"],
+    );
+    expect(sorted.map((i) => i.id)).toEqual(["in_progress", "gate", "done"]);
+  });
+
+  it("falls back to built-in order when the catalog has not loaded", () => {
+    const sorted = sortIssues(
+      [
+        staticIssue("custom", { status: "waiting_on_vendor" }),
+        staticIssue("in_review", { status: "in_review" }),
+      ],
+      "status",
+      "asc",
+    );
+    // Unknown keys rank last rather than being guessed into a category.
+    expect(sorted.map((i) => i.id)).toEqual(["in_review", "custom"]);
   });
 
   it("keeps missing dates last in descending order", () => {

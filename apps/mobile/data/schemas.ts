@@ -92,6 +92,8 @@ export const CommentSchema = z.object({
   resolved_by_type: z.string().nullable().default(null),
   resolved_by_id: z.string().nullable().default(null),
   source_task_id: z.string().nullable().optional(),
+  // Tombstone marker (#8296); a malformed value reads as a live comment.
+  deleted_at: z.string().nullable().optional().catch(undefined),
 }).loose() as unknown as z.ZodType<Comment>;
 
 export const EMPTY_COMMENT: Comment = {

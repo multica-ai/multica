@@ -212,10 +212,14 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
   const pending = call && live && !row.result;
   const error = !grouped && !call && row.kind === "error";
   const Icon = grouped || call ? Terminal : row.kind === "text" ? MessageSquare : row.kind === "thinking" ? Brain : AlertCircle;
+  const previewCall = grouped ? row.steps[0] : call ? row : undefined;
+  const toolSummary = previewCall
+    ? redactSecrets(traceToolArgSummary(previewCall.call?.input, { formatText }) || (previewCall.result ? traceEventSummary(previewCall.result, { formatText }) : ""))
+    : "";
   const summary = call
-    ? redactSecrets(traceToolArgSummary(row.call?.input, { formatText }) || (row.result ? traceEventSummary(row.result, { formatText }) : "")) || row.tool
-    : grouped ? row.tool
-    : row.kind === "text" ? t(($) => $.inline_run.message)
+    ? toolSummary || row.tool
+    : grouped ? toolSummary ? `${row.tool} · ${toolSummary}` : row.tool
+    : row.kind === "text" ? traceEventSummary({ ...row.item, content: redactSecrets(formatText(row.item.content ?? "")) }) || t(($) => $.inline_run.message)
     : row.kind === "thinking" ? thinkingPreview(row.item.content, formatText) || t(($) => $.inline_run.thinking)
     : t(($) => $.inline_run.error);
   return <details className="min-w-0 text-caption" onToggle={onToggle}>

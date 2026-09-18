@@ -1777,12 +1777,14 @@ func TestAgentGetTableIncludesAvatarURL(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	drainCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); drainCh <- b }()
 
 	err := runAgentGet(cmd, []string{"agent-123"})
 
 	w.Close()
 	os.Stdout = old
-	out, _ := io.ReadAll(r)
+	out := <-drainCh
 
 	if err != nil {
 		t.Fatalf("runAgentGet: %v", err)

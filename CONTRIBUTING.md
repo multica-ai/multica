@@ -243,6 +243,35 @@ make stop-worktree    # stop
 make check-worktree   # verify
 ```
 
+### Git Identity in Managed Task Checkouts
+
+`multica repo checkout` uses the user's system/global Git identity, including
+conditional includes evaluated in the checkout. Agent names determine branch
+names, not commit authors. The optional `Co-authored-by` trailer is independent
+of author and committer identity.
+
+Linked worktrees mask the shared cache's `user`, `author`, and `committer`
+name/email settings with private defaults in `multica-identity.config`, included
+first by their `config.worktree`. Repeating checkout refreshes these defaults;
+explicit worktree settings and Git command/environment overrides take precedence.
+Conditional identities are snapshots: switching branches or changing global
+config takes effect in these defaults on the next checkout call, not at commit time.
+Use `git config --worktree user.name "Your Name"` and
+`git config --worktree user.email "you@example.com"` for an intentional checkout
+override. Plain `git config` and `--local` write to the shared cache in linked
+worktrees. Isolated clones already have private config and retain it unchanged.
+If no user identity is configured, commits fail instead of using a stale cache
+identity; configure an explicit worktree identity before committing.
+
+Existing linked checkouts receive the protection on their next checkout call,
+including calls that keep local work. Residual shared identity is masked, not
+deleted: changing it would change other running tasks. Existing tasks that never
+repeat checkout remain unprotected until they do. Enabling `worktreeConfig`
+moves `core.bare`/`core.worktree` to the bare repository's own `config.worktree`
+without changing other worktrees' effective settings. The files are standard Git
+config; older daemons leave them in place, but do not refresh identity defaults
+or protect newly created worktrees. No pushed commit history is rewritten.
+
 ### Removing a Worktree
 
 Git does not provide a `pre-worktree-remove` hook. Use the repository wrapper

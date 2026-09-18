@@ -237,9 +237,6 @@ function CallbackContent() {
           <CardTitle className="text-display-sm">
             {t(($) => $.web.callback.signing_in)}
           </CardTitle>
-          <CardDescription>
-            {t(($) => $.web.callback.signing_in_description)}
-          </CardDescription>
         </CardHeader>
         <CardContent className="flex justify-center">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />

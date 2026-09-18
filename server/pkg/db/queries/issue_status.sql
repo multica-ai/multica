@@ -1,42 +1,42 @@
 -- Issue status catalog (MUL-6243). Each workspace holds the 7 built-in
--- statuses plus any custom ones. A category's value IS its canonical built-in
--- key, so resolving a custom status to its platform behavior is a plain column
--- read — no mapping table, no second concept.
+-- statuses plus custom ones, all stored in four lifecycle categories.
 
 -- name: SeedIssueStatusEntries :exec
 -- Idempotent seed of the 7 built-ins. Safe to call concurrently from multiple
 -- pods during a rolling deploy: the unique (workspace_id, key) index makes a
--- losing racer a no-op rather than an error. Positions are intra-category, and
--- each built-in is the only member of its category at seed time, so all 0.
+-- losing racer a no-op rather than an error. Initial positions are 0; the list's
+-- built-in tiebreak preserves the seed order until an admin reorders the group.
 INSERT INTO issue_status (workspace_id, key, name, description, category, color, is_system, position)
 VALUES
-    (sqlc.arg('workspace_id')::uuid, 'backlog', 'Backlog', 'Parked. Assigning an issue here never starts an agent run.', 'backlog', '#6b7280', TRUE, 0),
-    (sqlc.arg('workspace_id')::uuid, 'todo', 'Todo', 'Queued for work. Moving an issue here starts the assigned agent.', 'todo', '#6b7280', TRUE, 0),
-    (sqlc.arg('workspace_id')::uuid, 'in_progress', 'In Progress', 'Actively being worked on.', 'in_progress', '#f59e0b', TRUE, 0),
-    (sqlc.arg('workspace_id')::uuid, 'in_review', 'In Review', 'Work delivered, waiting on human review. Finalizes the autopilot run.', 'in_review', '#22c55e', TRUE, 0),
+    (sqlc.arg('workspace_id')::uuid, 'backlog', 'Backlog', 'Parked. Assigning an issue here never starts an agent run.', 'unstarted', '#6b7280', TRUE, 0),
+    (sqlc.arg('workspace_id')::uuid, 'todo', 'Todo', 'Queued for work. Moving an issue here starts the assigned agent.', 'unstarted', '#6b7280', TRUE, 0),
+    (sqlc.arg('workspace_id')::uuid, 'in_progress', 'In Progress', 'Actively being worked on.', 'started', '#f59e0b', TRUE, 0),
+    (sqlc.arg('workspace_id')::uuid, 'in_review', 'In Review', 'Work delivered, waiting on human review. Finalizes the autopilot run.', 'started', '#22c55e', TRUE, 0),
     (sqlc.arg('workspace_id')::uuid, 'done', 'Done', 'Completed.', 'done', '#3b82f6', TRUE, 0),
-    (sqlc.arg('workspace_id')::uuid, 'blocked', 'Blocked', 'Stalled on an external dependency.', 'blocked', '#ef4444', TRUE, 0),
-    (sqlc.arg('workspace_id')::uuid, 'cancelled', 'Cancelled', 'Decided not to do.', 'cancelled', '#6b7280', TRUE, 0)
+    (sqlc.arg('workspace_id')::uuid, 'blocked', 'Blocked', 'Stalled on an external dependency.', 'started', '#ef4444', TRUE, 0),
+    (sqlc.arg('workspace_id')::uuid, 'cancelled', 'Cancelled', 'Decided not to do.', 'closed', '#6b7280', TRUE, 0)
 ON CONFLICT DO NOTHING;
 
 -- name: ListIssueStatusEntries :many
--- Ordered by the canonical board category rank, then intra-category position,
--- then key as a stable tiebreak.
+-- Position orders both built-in and custom rows inside each lifecycle group.
+-- Built-in order is only a tiebreak for the original seeded positions.
 SELECT * FROM issue_status
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND (sqlc.arg('include_archived')::bool OR archived_at IS NULL)
 ORDER BY
-    CASE category
-        WHEN 'backlog' THEN 0
-        WHEN 'todo' THEN 1
-        WHEN 'in_progress' THEN 2
-        WHEN 'in_review' THEN 3
-        WHEN 'blocked' THEN 4
-        WHEN 'done' THEN 5
-        WHEN 'cancelled' THEN 6
-        ELSE 7
-    END,
+    CASE category WHEN 'unstarted' THEN 0 WHEN 'started' THEN 1 WHEN 'done' THEN 2 WHEN 'closed' THEN 3 ELSE 4 END,
     position,
+	CASE WHEN is_system THEN 0 ELSE 1 END,
+	CASE key
+		WHEN 'backlog' THEN 0
+		WHEN 'todo' THEN 1
+		WHEN 'in_progress' THEN 2
+		WHEN 'in_review' THEN 3
+		WHEN 'blocked' THEN 4
+		WHEN 'done' THEN 5
+		WHEN 'cancelled' THEN 6
+		ELSE 7
+	END,
     key;
 
 -- name: GetIssueStatusEntryByKey :one
@@ -52,7 +52,7 @@ WHERE id = sqlc.arg('id')::uuid
 -- name: CreateIssueStatusEntry :one
 -- Custom statuses only: is_system is never set here, so the canonical-key and
 -- non-archivable CHECK constraints can only ever apply to seeded rows.
-INSERT INTO issue_status (workspace_id, key, name, description, category, color, position)
+INSERT INTO issue_status (workspace_id, key, name, description, category, color, icon, position)
 VALUES (
     sqlc.arg('workspace_id')::uuid,
     sqlc.arg('key')::text,
@@ -60,10 +60,11 @@ VALUES (
     sqlc.arg('description')::text,
     sqlc.arg('category')::text,
     sqlc.arg('color')::text,
+    sqlc.arg('icon')::text,
     COALESCE(
         (SELECT MAX(position) + 1 FROM issue_status
          WHERE workspace_id = sqlc.arg('workspace_id')::uuid
-           AND category = sqlc.arg('category')::text),
+		   AND category = sqlc.arg('category')::text),
         0
     )
 )
@@ -77,6 +78,7 @@ UPDATE issue_status SET
     name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
     color = COALESCE(sqlc.narg('color'), color),
+    icon = COALESCE(sqlc.narg('icon'), icon),
     position = COALESCE(sqlc.narg('position'), position),
     updated_at = now()
 WHERE id = sqlc.arg('id')::uuid
@@ -102,9 +104,8 @@ WHERE id = sqlc.arg('id')::uuid
 RETURNING *;
 
 -- name: CountIssuesUsingStatusKey :one
--- Reported alongside a status so the UI can say how many issues still carry an
--- archived one. NOT an archive precondition: archiving never requires migrating
--- issues off the status.
+-- Archive precondition, including terminal issues. Call under the catalog lock
+-- so a concurrent status assignment cannot invalidate the empty check.
 SELECT COUNT(*)::bigint FROM issue
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND status = sqlc.arg('key')::text;
@@ -159,15 +160,14 @@ ORDER BY position, key;
 -- order untouched instead of the partially-applied prefix a per-row PATCH loop
 -- produces.
 --
--- Positions start at 1 because the category's built-in is seeded at 0 and can
--- never move (is_system rows are excluded here, as they are in every write).
--- Archived rows are excluded too: they are frozen, and letting one into the
--- write sequence is exactly what made a drag past an archived row half-commit.
+-- Full-catalog callers may reorder built-ins, without changing their semantics.
+-- Legacy custom-only callers preserve the positions occupied by custom rows.
+-- Archived rows remain frozen.
 UPDATE issue_status s
-SET position = v.ordinality::int,
+SET position = (sqlc.arg('positions')::float8[])[v.ordinality],
     updated_at = now()
 FROM unnest(sqlc.arg('ids')::uuid[]) WITH ORDINALITY AS v(id, ordinality)
 WHERE s.id = v.id
   AND s.workspace_id = sqlc.arg('workspace_id')::uuid
-  AND s.is_system = FALSE
+  AND (sqlc.arg('include_system')::bool OR s.is_system = FALSE)
   AND s.archived_at IS NULL;

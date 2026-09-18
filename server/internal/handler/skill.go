@@ -72,6 +72,11 @@ type SkillSummaryResponse struct {
 	// Enabled is only populated for agent-scoped skill responses. Workspace
 	// skill lists describe the skill itself, so they omit assignment state.
 	Enabled *bool `json:"enabled,omitempty"`
+	// Labels are bulk-attached by ListSkills so the client can filter
+	// without an N+1 round-trip per row. Pointer + omitempty: ListSkills
+	// always sets a non-nil slice (empty when none). Other summary
+	// producers leave this nil so the field is omitted.
+	Labels *[]LabelResponse `json:"labels,omitempty"`
 }
 
 // AgentSkillSummary is the still-narrower shape used for skills embedded in
@@ -342,12 +347,19 @@ func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id st
 
 func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID := parseUUID(workspaceID)
 
-	skills, err := h.Queries.ListSkillSummariesByWorkspace(r.Context(), parseUUID(workspaceID))
+	skills, err := h.Queries.ListSkillSummariesByWorkspace(r.Context(), wsUUID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list skills")
 		return
 	}
+
+	ids := make([]pgtype.UUID, len(skills))
+	for i, s := range skills {
+		ids[i] = s.ID
+	}
+	labelsMap := h.labelsBySkill(r.Context(), wsUUID, ids)
 
 	resp := make([]SkillSummaryResponse, len(skills))
 	for i, s := range skills {
@@ -355,9 +367,46 @@ func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
 			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
 		)
+		// Own a non-nil slice so JSON is `labels: []` (not `null`/omitted).
+		// append(nil, xs...) keeps a nil header when xs is empty.
+		labels := append([]LabelResponse{}, labelsMap[resp[i].ID]...)
+		resp[i].Labels = &labels
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// labelsBySkill bulk-loads labels for the given skill IDs and returns a map
+// keyed by skill UUID string. On error or empty input, returns an empty map —
+// label rendering is non-critical and we'd rather serve skills without labels
+// than fail the whole list call.
+func (h *Handler) labelsBySkill(ctx context.Context, wsUUID pgtype.UUID, skillIDs []pgtype.UUID) map[string][]LabelResponse {
+	out := map[string][]LabelResponse{}
+	if len(skillIDs) == 0 {
+		return out
+	}
+	rows, err := h.Queries.ListLabelsForSkills(ctx, db.ListLabelsForSkillsParams{
+		SkillIds:    skillIDs,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		slog.Warn("ListLabelsForSkills failed", "error", err)
+		return out
+	}
+	for _, r := range rows {
+		skillID := uuidToString(r.SkillID)
+		out[skillID] = append(out[skillID], LabelResponse{
+			ID:           uuidToString(r.ID),
+			WorkspaceID:  uuidToString(r.WorkspaceID),
+			ResourceType: r.ResourceType,
+			Name:         r.Name,
+			Description:  r.Description,
+			Color:        r.Color,
+			CreatedAt:    timestampToString(r.CreatedAt),
+			UpdatedAt:    timestampToString(r.UpdatedAt),
+		})
+	}
+	return out
 }
 
 func (h *Handler) SearchSkills(w http.ResponseWriter, r *http.Request) {

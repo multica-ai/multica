@@ -15,10 +15,8 @@ import (
 
 // The daemon interrupts a running agent the moment a task-status poll answers
 // `404 task not found` (shouldInterruptAgent → isTaskNotFoundError). So that
-// body is a kill signal, and only a lookup that completed and found nothing may
-// produce it. #2127 established this for GetAgentTask; these tests hold the same
-// line for the workspace resolution three lines below it, which #2127 missed and
-// GH #8272 hit in production.
+// body is a kill signal, and only a lookup that completed and found no task row
+// may produce it. Transient failures and authorization misses must stay distinct.
 
 // lookupFaultPool fails one named query and passes everything else through, so
 // a single link in ResolveTaskWorkspaceIDChecked can be made to time out while
@@ -37,11 +35,10 @@ func (f *lookupFaultPool) QueryRow(ctx context.Context, query string, args ...an
 	return f.DBTX.QueryRow(ctx, query, args...)
 }
 
-// TestGetTaskStatus_WorkspaceLookupFailure_Returns500 covers every link kind the
-// resolver walks. A timeout on any of them must be a 5xx the daemon retries, not
-// a deletion it acts on.
-func TestGetTaskStatus_WorkspaceLookupFailure_Returns500(t *testing.T) {
-	ctx := context.Background()
+// TestGetTaskStatus_DoesNotResolveSourceWorkspace pins the hot-path contract:
+// status polling authorizes through the owning agent's workspace and never
+// follows optional issue / chat / autopilot links.
+func TestGetTaskStatus_DoesNotResolveSourceWorkspace(t *testing.T) {
 	runtimeID := dbfx.Runtime(t, "MUL-7259 lookup runtime")
 	agentID := dbfx.Agent(t, "MUL-7259 lookup agent", runtimeID)
 	issueID := dbfx.Issue(t, "MUL-7259 lookup issue")
@@ -63,38 +60,25 @@ func TestGetTaskStatus_WorkspaceLookupFailure_Returns500(t *testing.T) {
 				"runtime_id": runtimeID, "status": "running", "started_at": testutil.Raw("now()"), tc.column: tc.id,
 			})
 			fault := &lookupFaultPool{DBTX: testPool, query: tc.query}
-			h := &Handler{Queries: db.New(testPool), TaskService: &service.TaskService{Queries: db.New(fault)}}
+			h := &Handler{Queries: db.New(fault), TaskService: &service.TaskService{Queries: db.New(fault)}}
 			req := newDaemonTokenRequest(http.MethodGet, "/api/daemon/tasks/"+taskID+"/status", nil, testWorkspaceID, "test-daemon")
 			req = withURLParam(req, "taskId", taskID)
 
-			w := testutil.Call(t, h.GetTaskStatus, req).Want(http.StatusInternalServerError)
-			if !fault.called {
-				t.Fatal("fault was never exercised — the resolver did not reach the injected query")
+			var response map[string]string
+			testutil.Call(t, h.GetTaskStatus, req).Want(http.StatusOK).JSON(&response)
+			if fault.called {
+				t.Fatalf("status poll unexpectedly executed %s", tc.query)
 			}
-			// isTaskNotFoundError requires BOTH a 404 and this body, so the
-			// 500 above is already enough to keep the daemon from
-			// interrupting. The body is asserted too so the response never
-			// carries the cancel-triggering string at all, should either half
-			// of that check ever be relaxed.
-			if strings.Contains(w.Body.String(), "task not found") {
-				t.Fatalf("5xx body must not carry the daemon's cancel-triggering string: %s", w.Body.String())
+			if response["status"] != "running" {
+				t.Fatalf("status = %q, want running", response["status"])
 			}
-
-			task, err := testHandler.Queries.GetAgentTask(ctx, parseUUID(taskID))
-			if err != nil || task.Status != "running" {
-				t.Fatalf("task must be untouched and still running: status=%s err=%v", task.Status, err)
-			}
-			// Once the dependency recovers the identical request succeeds, so
-			// the 5xx really was "ask again", not a masked permanent failure.
-			testutil.Call(t, testHandler.GetTaskStatus, req).Want(http.StatusOK)
 		})
 	}
 }
 
-// TestGetTaskStatus_GenuinelyUnreachable_Returns404 is the other half of the
-// contract: the 404 must survive for real absence, otherwise a deleted task
-// would leave its agent running to its full timeout.
-func TestGetTaskStatus_GenuinelyUnreachable_Returns404(t *testing.T) {
+// TestGetTaskStatus_TaskRowPresenceContract distinguishes a genuinely missing
+// task from a surviving task whose optional source row has gone away.
+func TestGetTaskStatus_TaskRowPresenceContract(t *testing.T) {
 	runtimeID := dbfx.Runtime(t, "MUL-7259 absent runtime")
 	agentID := dbfx.Agent(t, "MUL-7259 absent agent", runtimeID)
 
@@ -108,13 +92,12 @@ func TestGetTaskStatus_GenuinelyUnreachable_Returns404(t *testing.T) {
 		}
 	})
 
-	t.Run("link target missing", func(t *testing.T) {
+	t.Run("optional source missing", func(t *testing.T) {
 		// agent_task_queue.issue_id is ON DELETE CASCADE, so an issue task can
-		// never outlive its issue — that absence surfaces as ErrNoRows on the
-		// task itself (covered above). chat_session_id is ON DELETE SET NULL,
-		// so this is the shape where the resolver genuinely has nothing left to
-		// resolve, and it must stay a 404 rather than becoming a 5xx the daemon
-		// retries forever.
+		// never outlive its issue. chat_session_id is ON DELETE SET NULL, so a
+		// chat task can survive its source. The status endpoint now authorizes
+		// that row through its owning agent instead of treating the optional
+		// source as task identity.
 		chatID := dbfx.ChatSession(t, agentID)
 		taskID := dbfx.Task(t, agentID, testutil.Cols{
 			"runtime_id": runtimeID, "status": "running",
@@ -124,9 +107,10 @@ func TestGetTaskStatus_GenuinelyUnreachable_Returns404(t *testing.T) {
 
 		req := newDaemonTokenRequest(http.MethodGet, "/api/daemon/tasks/"+taskID+"/status", nil, testWorkspaceID, "test-daemon")
 		req = withURLParam(req, "taskId", taskID)
-		w := testutil.Call(t, testHandler.GetTaskStatus, req).Want(http.StatusNotFound)
-		if !strings.Contains(w.Body.String(), "task not found") {
-			t.Fatalf("a task whose only link is gone is unreachable: %s", w.Body.String())
+		var response map[string]string
+		testutil.Call(t, testHandler.GetTaskStatus, req).Want(http.StatusOK).JSON(&response)
+		if response["status"] != "running" {
+			t.Fatalf("status = %q, want running", response["status"])
 		}
 	})
 }
@@ -146,7 +130,10 @@ func TestGetTaskStatus_ForeignWorkspace_Returns404(t *testing.T) {
 	otherWorkspace := uuid.NewString()
 	req := newDaemonTokenRequest(http.MethodGet, "/api/daemon/tasks/"+taskID+"/status", nil, otherWorkspace, "other-daemon")
 	req = withURLParam(req, "taskId", taskID)
-	testutil.Call(t, testHandler.GetTaskStatus, req).Want(http.StatusNotFound)
+	w := testutil.Call(t, testHandler.GetTaskStatus, req).Want(http.StatusNotFound)
+	if strings.Contains(w.Body.String(), "task not found") {
+		t.Fatalf("authorization miss must not carry the daemon's deletion signal: %s", w.Body.String())
+	}
 }
 
 // TestResolveTaskWorkspaceIDChecked_SeparatesAbsenceFromFailure asserts the

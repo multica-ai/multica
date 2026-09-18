@@ -177,16 +177,19 @@ describe("PreferencesTab — Language switcher", () => {
     expect(mockToastWarning).not.toHaveBeenCalled();
   });
 
-  it("when logged in + PATCH success: confirms the save before reloading", async () => {
+  it.each([
+    { name: "中文", locale: "zh-Hans" },
+    { name: "Français", locale: "fr" },
+  ])("when logged in: saves $locale before reloading", async ({ name, locale }) => {
     userRef.current = { id: "user-1" };
     mockUpdateMe.mockResolvedValueOnce({});
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    await pickLanguage(user, "中文");
+    await pickLanguage(user, name);
 
-    expect(mockPersist).toHaveBeenCalledWith("zh-Hans");
-    expect(mockUpdateMe).toHaveBeenCalledWith({ language: "zh-Hans" });
+    expect(mockPersist).toHaveBeenCalledWith(locale);
+    expect(mockUpdateMe).toHaveBeenCalledWith({ language: locale });
     expect(mockToastWarning).not.toHaveBeenCalled();
     expect(mockToastSuccess).toHaveBeenCalledTimes(1);
     expect(mockReload).not.toHaveBeenCalled();
@@ -336,7 +339,7 @@ describe("PreferencesTab — Sticky comment bar", () => {
     const user = userEvent.setup();
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    const toggle = screen.getByRole("switch", { name: "Sticky comment bar" });
+    const toggle = screen.getByRole("switch", { name: "Pin comment bar to bottom" });
     expect(toggle).toHaveAttribute("aria-checked", "true");
 
     await user.click(toggle);

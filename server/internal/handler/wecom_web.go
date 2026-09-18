@@ -63,7 +63,7 @@ func wecomInstallationToResponse(inst wecom.Installation) WecomInstallationRespo
 
 // wecomIntegrationConfigured reports whether the wecom integration is
 // wired on this deployment. Both surfaces (list + register) short-circuit
-// on it: list degrades to an empty response, register returns 503.
+// on it: list degrades to an empty response, register returns 403.
 func (h *Handler) wecomIntegrationConfigured() bool {
 	return h.WecomStore != nil && h.WecomCredentials != nil && h.ChannelRouter != nil
 }
@@ -86,7 +86,7 @@ func (h *Handler) ListWecomInstallations(w http.ResponseWriter, r *http.Request)
 	}
 	svc := h.wecomInstallService()
 	if svc == nil {
-		writeError(w, http.StatusServiceUnavailable, "wecom integration not enabled")
+		writeFeatureDisabled(w, "wecom_not_configured", "wecom integration not enabled")
 		return
 	}
 	rows, err := svc.ListByWorkspace(r.Context(), wsUUID)
@@ -126,12 +126,12 @@ type RegisterWecomBYORequest struct {
 // Admin-only at the router.
 func (h *Handler) RegisterWecomBYO(w http.ResponseWriter, r *http.Request) {
 	if !h.wecomIntegrationConfigured() {
-		writeError(w, http.StatusServiceUnavailable, "wecom integration not enabled")
+		writeFeatureDisabled(w, "wecom_not_configured", "wecom integration not enabled")
 		return
 	}
 	svc := h.wecomInstallService()
 	if svc == nil {
-		writeError(w, http.StatusServiceUnavailable, "wecom integration not enabled")
+		writeFeatureDisabled(w, "wecom_not_configured", "wecom integration not enabled")
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -264,12 +264,12 @@ func writeWecomInstallError(w http.ResponseWriter, err error, wsUUID, agentUUID 
 // re-install through Upsert flips it back to 'active' atomically.
 func (h *Handler) RevokeWecomInstallation(w http.ResponseWriter, r *http.Request) {
 	if !h.wecomIntegrationConfigured() {
-		writeError(w, http.StatusServiceUnavailable, "wecom integration not enabled")
+		writeFeatureDisabled(w, "wecom_not_configured", "wecom integration not enabled")
 		return
 	}
 	svc := h.wecomInstallService()
 	if svc == nil {
-		writeError(w, http.StatusServiceUnavailable, "wecom integration not enabled")
+		writeFeatureDisabled(w, "wecom_not_configured", "wecom integration not enabled")
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -358,7 +358,7 @@ type RedeemWecomBindingTokenResponse struct {
 //   - 403 Forbidden: redeemer is not a workspace member
 func (h *Handler) RedeemWecomBindingToken(w http.ResponseWriter, r *http.Request) {
 	if h.WecomBindingTokens == nil {
-		writeError(w, http.StatusServiceUnavailable, "wecom integration not configured")
+		writeFeatureDisabled(w, "wecom_not_configured", "wecom integration not configured")
 		return
 	}
 	userID, ok := requireUserID(w, r)

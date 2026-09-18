@@ -215,6 +215,16 @@ func TestCheckMinVersion(t *testing.T) {
 		{"zeroclaw", "invalid", true},
 		{"dim", "0.2.99", true},
 		{"dim", "invalid", true},
+		// opencode: 1.1.54 is the first build that honors TMPDIR/TMP/TEMP for
+		// Bun native-module extraction. 1.1.53 and 1.1.49 are the versions
+		// actually measured leaking into the shared temp dir (#8392); the CLI
+		// prints a bare semver, so there is no prefix to strip.
+		{"opencode", "1.1.54", false},
+		{"opencode", "1.1.55", false},
+		{"opencode", "1.18.30", false},
+		{"opencode", "1.1.53", true},
+		{"opencode", "1.1.49", true},
+		{"opencode", "0.15.0", true},
 		{"unknown", "1.0.0", false},
 	}
 	for _, tt := range tests {

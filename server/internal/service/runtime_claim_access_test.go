@@ -102,7 +102,7 @@ func TestRuntimeAccessGatesQueuedTaskClaims(t *testing.T) {
 		ownerlessAgent  bool
 		wantClaim       bool
 	}{
-		{name: "private runtime rejects foreign agent", visibility: "private", wantClaim: false, matchingBinding: true},
+		{name: "private runtime routes foreign agent to handler", visibility: "private", wantClaim: true, matchingBinding: true},
 		{name: "private runtime accepts owner agent", visibility: "private", sameOwner: true, matchingBinding: true, wantClaim: true},
 		{name: "private runtime routes ownerless agent to handler", visibility: "private", sameOwner: true, matchingBinding: true, ownerlessAgent: true, wantClaim: true},
 		{name: "public runtime accepts foreign agent", visibility: "public", wantClaim: true, matchingBinding: true},
@@ -263,6 +263,40 @@ func TestClaimTaskRejectsMismatchedAgentRuntime(t *testing.T) {
 	}
 	if status != "queued" {
 		t.Fatalf("task status = %q, want queued", status)
+	}
+}
+
+func TestClaimTaskForRuntimeKeepsOwnerlessPrivateAgentClaimable(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRuntimeClaimAccessFixture(t, "private", true, true, "queued")
+	if _, err := fixture.pool.Exec(ctx, `UPDATE agent SET owner_id = NULL WHERE id = $1`, fixture.agentID); err != nil {
+		t.Fatalf("clear agent owner: %v", err)
+	}
+	svc := NewTaskService(db.New(fixture.pool), fixture.pool, nil, events.New())
+
+	claimed, err := svc.ClaimTaskForRuntime(ctx, fixture.runtimeID)
+	if err != nil {
+		t.Fatalf("claim task: %v", err)
+	}
+	if claimed == nil || util.UUIDToString(claimed.ID) != fixture.taskID {
+		t.Fatalf("claimed task = %+v, want %s", claimed, fixture.taskID)
+	}
+}
+
+func TestClaimTasksForRuntimesKeepsOwnerlessPrivateAgentClaimable(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRuntimeClaimAccessFixture(t, "private", true, true, "queued")
+	if _, err := fixture.pool.Exec(ctx, `UPDATE agent SET owner_id = NULL WHERE id = $1`, fixture.agentID); err != nil {
+		t.Fatalf("clear agent owner: %v", err)
+	}
+	svc := NewTaskService(db.New(fixture.pool), fixture.pool, nil, events.New())
+
+	claimed, err := svc.ClaimTasksForRuntimes(ctx, []pgtype.UUID{fixture.runtimeID}, 1)
+	if err != nil {
+		t.Fatalf("claim tasks: %v", err)
+	}
+	if len(claimed) != 1 || util.UUIDToString(claimed[0].ID) != fixture.taskID {
+		t.Fatalf("claimed tasks = %+v, want task %s", claimed, fixture.taskID)
 	}
 }
 

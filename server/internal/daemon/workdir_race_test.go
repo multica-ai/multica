@@ -183,9 +183,7 @@ IFS= read -r _
 printf '%s\n' '{"type":"system","session_id":"sess-private-temp"}'
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-private-temp","result":"done"}'
 `
-	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake agent: %v", err)
-	}
+	writeTestExecutable(t, fakeBin, []byte(script))
 	if err := os.Chmod(fakeBin, 0o755); err != nil {
 		t.Fatalf("chmod fake agent: %v", err)
 	}
@@ -422,9 +420,7 @@ IFS= read -r _
 printf '%s\n' '{"type":"system","session_id":"sess-temp-base"}'
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-temp-base","result":"done"}'
 `
-	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake agent: %v", err)
-	}
+	writeTestExecutable(t, fakeBin, []byte(script))
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -522,9 +518,7 @@ func TestRunTask_TaskTempBaseInvalidFailsStartup(t *testing.T) {
 	script := `#!/bin/sh
 printf 'ran\n' > "$CAPTURE_FILE"
 `
-	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake agent: %v", err)
-	}
+	writeTestExecutable(t, fakeBin, []byte(script))
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -575,14 +569,7 @@ printf 'ran\n' > "$CAPTURE_FILE"
 }
 
 func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
-	oldRefresh := taskPrepareLeaseRefresh
-	oldTimeout := taskPrepareLeaseTimeout
-	taskPrepareLeaseRefresh = 10 * time.Millisecond
-	taskPrepareLeaseTimeout = 500 * time.Millisecond
-	t.Cleanup(func() {
-		taskPrepareLeaseRefresh = oldRefresh
-		taskPrepareLeaseTimeout = oldTimeout
-	})
+	t.Parallel()
 
 	workspacesRoot := t.TempDir()
 	workspaceID := "ws-runtask-start-lease"
@@ -617,11 +604,12 @@ func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
 
 	missingBin := filepath.Join(t.TempDir(), "definitely-not-claude")
 	d := &Daemon{
-		client:         NewClient(srv.URL),
-		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
-		workspaces:     make(map[string]*workspaceState),
-		runtimeIndex:   map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
-		activeEnvRoots: make(map[string]int),
+		client:              NewClient(srv.URL),
+		logger:              slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:          make(map[string]*workspaceState),
+		runtimeIndex:        map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		activeEnvRoots:      make(map[string]int),
+		prepareLeaseRefresh: 10 * time.Millisecond,
 		cfg: Config{
 			WorkspacesRoot: workspacesRoot,
 			Agents: map[string]AgentEntry{
@@ -650,80 +638,93 @@ func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
 	}
 }
 
-type prepareLeaseCountingTransport struct {
-	base  http.RoundTripper
-	calls *atomic.Int64
+// prepareRequestCountingTransport counts requests where the client starts
+// them. A cancelled RoundTrip can return before httptest schedules its handler,
+// so counting in the handler can make an already-in-flight request look like
+// post-timeout activity, or a /start the deadline cancelled look like one that
+// was never sent.
+type prepareRequestCountingTransport struct {
+	base   http.RoundTripper
+	leases *atomic.Int64
+	// starts counts only /start requests issued while their context was still
+	// live, i.e. before the prepare deadline fired.
+	starts *atomic.Int64
 }
 
-func (t *prepareLeaseCountingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if strings.HasSuffix(req.URL.Path, "/prepare-lease") {
-		t.calls.Add(1)
+func (t *prepareRequestCountingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	switch {
+	case strings.HasSuffix(req.URL.Path, "/prepare-lease"):
+		t.leases.Add(1)
+	case strings.HasSuffix(req.URL.Path, "/start") && req.Context().Err() == nil:
+		t.starts.Add(1)
 	}
 	return t.base.RoundTrip(req)
 }
 
-// prepareBudgetForBlockedStart is the prepare deadline the blocked-/start test
-// arms. It has to outlast everything runTask does before it calls /start — the
-// isolated execution environment, its sidecars, and the task temp dir are all
-// real filesystem work — because a deadline that expires during preparation
-// never reaches the /start this test is about. That preparation costs ~15ms on
-// an idle developer machine but an order of magnitude more on a loaded CI
-// runner under -race, which is why the original 150ms turned main red
-// (MUL-7244). Two seconds keeps ~20x headroom over the observed CI cost while
-// still bounding the test at roughly the budget itself.
-const prepareBudgetForBlockedStart = 2 * time.Second
+// The blocked-/start test's prepare deadline has to outlast everything runTask
+// does before it calls /start — the isolated execution environment, its
+// sidecars, and the task temp dir are all real filesystem work — because a
+// deadline that expires during preparation never reaches the /start the test is
+// about. That preparation costs ~15ms on an idle developer machine but an order
+// of magnitude more on a loaded CI runner under -race, which is why a fixed
+// 150ms budget turned main red (MUL-7244). Rather than pay a worst-case budget
+// on every run, the test starts small and doubles the budget whenever the
+// deadline fired before /start was sent.
+const (
+	minPrepareBudgetForBlockedStart = 250 * time.Millisecond
+	maxPrepareBudgetForBlockedStart = 4 * time.Second
+)
 
 func TestRunTask_PrepareTimeoutStopsLeaseDuringBlockedStartTask(t *testing.T) {
-	oldRefresh := taskPrepareLeaseRefresh
-	oldTimeout := taskPrepareLeaseTimeout
-	taskPrepareLeaseRefresh = 10 * time.Millisecond
-	taskPrepareLeaseTimeout = 500 * time.Millisecond
-	t.Cleanup(func() {
-		taskPrepareLeaseRefresh = oldRefresh
-		taskPrepareLeaseTimeout = oldTimeout
-	})
+	t.Parallel()
 
-	var leaseCalls atomic.Int64
-	startEntered := make(chan struct{})
-	var closeStartOnce sync.Once
-	releaseStart := make(chan struct{})
-	var releaseStartOnce sync.Once
-	t.Cleanup(func() { releaseStartOnce.Do(func() { close(releaseStart) }) })
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/prepare-lease"):
-			w.WriteHeader(http.StatusOK)
-		case strings.HasSuffix(r.URL.Path, "/start"):
-			closeStartOnce.Do(func() { close(startEntered) })
-			<-releaseStart
-			w.WriteHeader(http.StatusOK)
-		default:
-			w.WriteHeader(http.StatusOK)
+	for budget := minPrepareBudgetForBlockedStart; ; budget *= 2 {
+		if prepareTimeoutStopsLeaseDuringBlockedStart(t, budget) {
+			return
 		}
-	}))
-	t.Cleanup(srv.Close)
+		if budget >= maxPrepareBudgetForBlockedStart {
+			t.Fatalf("runTask never reached /start: even a %s prepare budget expired during preparation", budget)
+		}
+	}
+}
 
-	// Count requests where the extender starts them. A cancelled RoundTrip can
-	// return before httptest schedules its handler, so counting in the handler
-	// can make an already-in-flight request look like post-timeout activity.
+// prepareTimeoutStopsLeaseDuringBlockedStart runs one blocked-/start attempt
+// under the given prepare budget. It returns false, having asserted nothing,
+// when the budget expired before runTask sent /start.
+func prepareTimeoutStopsLeaseDuringBlockedStart(t *testing.T, budget time.Duration) bool {
+	t.Helper()
+
+	const leaseRefresh = 10 * time.Millisecond
+	releaseStart := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/start") {
+			<-releaseStart
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	// LIFO: unblock /start before Close waits for its handler.
+	defer close(releaseStart)
+
+	var leaseCalls, startCalls atomic.Int64
 	client := NewClient(srv.URL)
-	client.client.Transport = &prepareLeaseCountingTransport{
-		base:  client.client.Transport,
-		calls: &leaseCalls,
+	client.client.Transport = &prepareRequestCountingTransport{
+		base:   client.client.Transport,
+		leases: &leaseCalls,
+		starts: &startCalls,
 	}
 
 	workspacesRoot := t.TempDir()
 	fakeBin := filepath.Join(t.TempDir(), "claude")
-	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("write fake agent: %v", err)
-	}
+	writeTestExecutable(t, fakeBin, []byte("#!/bin/sh\nexit 0\n"))
 	d := &Daemon{
-		client:             client,
-		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
-		workspaces:         make(map[string]*workspaceState),
-		runtimeIndex:       map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
-		activeEnvRoots:     make(map[string]int),
-		taskPrepareTimeout: prepareBudgetForBlockedStart,
+		client:              client,
+		logger:              slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:          make(map[string]*workspaceState),
+		runtimeIndex:        map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		activeEnvRoots:      make(map[string]int),
+		taskPrepareTimeout:  budget,
+		prepareLeaseRefresh: leaseRefresh,
 		cfg: Config{
 			WorkspacesRoot: workspacesRoot,
 			Agents: map[string]AgentEntry{
@@ -746,30 +747,21 @@ func TestRunTask_PrepareTimeoutStopsLeaseDuringBlockedStartTask(t *testing.T) {
 	if !errors.Is(err, errTaskPrepareTimeout) {
 		t.Fatalf("runTask error = %v, want task prepare timeout", err)
 	}
-	if elapsed := time.Since(startedAt); elapsed > prepareBudgetForBlockedStart+time.Second {
+	if startCalls.Load() == 0 {
+		return false
+	}
+	if elapsed := time.Since(startedAt); elapsed > budget+time.Second {
 		t.Fatalf("runTask took %s, want prepare deadline to stop blocked /start", elapsed)
 	}
-	// Wait for the handler rather than sampling it: runTask returns as soon as
-	// the deadline cancels the in-flight RoundTrip, which can beat httptest
-	// scheduling the handler goroutine that closes startEntered. The wait only
-	// slows the failing path — when /start was reached the channel is already
-	// closed, and when it was not the budget above was too small to survive
-	// preparation on this machine.
-	select {
-	case <-startEntered:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("runTask did not reach /start: the %s prepare budget expired during preparation", prepareBudgetForBlockedStart)
-	}
-	releaseStartOnce.Do(func() { close(releaseStart) })
 	if got := leaseCalls.Load(); got == 0 {
 		t.Fatal("prepare lease request was never started while /start was blocked")
 	}
 	leaseCallsAtReturn := leaseCalls.Load()
 	lastLeaseCalls := leaseCallsAtReturn
 	stableReads := 0
-	deadline := time.Now().Add(12 * taskPrepareLeaseRefresh)
+	deadline := time.Now().Add(12 * leaseRefresh)
 	for stableReads < 3 && time.Now().Before(deadline) {
-		time.Sleep(taskPrepareLeaseRefresh)
+		time.Sleep(leaseRefresh)
 		got := leaseCalls.Load()
 		if got == lastLeaseCalls {
 			stableReads++
@@ -784,6 +776,7 @@ func TestRunTask_PrepareTimeoutStopsLeaseDuringBlockedStartTask(t *testing.T) {
 	if got := taskRunFailureReason(err); got != "timeout" {
 		t.Fatalf("taskRunFailureReason = %q, want retryable platform timeout", got)
 	}
+	return true
 }
 
 // TestHandleTask_KeepsEnvRootActiveAcrossCompletion is the regression guard

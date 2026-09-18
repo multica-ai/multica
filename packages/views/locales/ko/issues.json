@@ -22,7 +22,7 @@
   },
   "status_catalog_error": {
     "title": "상태 목록을 불러오지 못했습니다",
-    "hint": "이것 없이는 상태 필터를 적용할 수 없어 태스크를 표시하지 않습니다.",
+    "hint": "상태를 불러와야 태스크를 표시할 수 있습니다.",
     "retry": "다시 시도"
   },
   "source_context": {
@@ -99,7 +99,6 @@
     "breadcrumb_title": "태스크",
     "breadcrumb_workspace_fallback": "워크스페이스",
     "empty_title": "아직 태스크가 없습니다",
-    "empty_hint": "태스크를 만들어 시작하세요.",
     "move_failed": "태스크를 이동하지 못했습니다"
   },
   "status": {
@@ -110,6 +109,12 @@
     "done": "완료",
     "blocked": "막힘",
     "cancelled": "취소됨"
+  },
+  "status_category": {
+    "unstarted": "시작 전",
+    "started": "시작됨",
+    "done": "완료",
+    "closed": "종료"
   },
   "priority": {
     "urgent": "긴급",
@@ -146,6 +151,7 @@
     "chip_op_before": "{{value}} 이전",
     "chip_op_after": "{{value}} 이후",
     "section_project": "프로젝트",
+    "section_project_status": "프로젝트 상태",
     "section_label": "라벨",
     "section_date": "날짜",
     "date_field": "필드",
@@ -313,12 +319,10 @@
     },
     "empty": {
       "assigned": {
-        "title": "할당된 태스크가 없습니다",
-        "description": "여기에 할당된 태스크가 이 보기로 표시됩니다."
+        "title": "할당된 태스크가 없습니다"
       },
       "created": {
-        "title": "생성한 태스크가 없습니다",
-        "description": "여기에서 만든 태스크가 이 보기로 표시됩니다."
+        "title": "생성한 태스크가 없습니다"
       }
     },
     "search_placeholder": "태스크 검색...",
@@ -379,7 +383,6 @@
     "quick_action_blocked_body": "“{{name}}”은(는) 트리거 권한이 없는 에이전트로 실행됩니다. 워크스페이스 관리자에게 해당 에이전트를 팀에 공개하거나 공유 에이전트로 변경해 달라고 요청하세요.",
     "quick_action_blocked_ok": "확인",
     "pull_requests_loading": "불러오는 중...",
-    "pull_requests_empty": "아직 연결된 Pull request가 없습니다. 이 태스크 식별자를 PR 브랜치 이름이나 제목에 넣거나, 본문에서 Closes 바로 뒤에 적으면 자동으로 연결됩니다.",
     "pull_request_state_open": "열림",
     "pull_request_state_draft": "초안",
     "pull_request_state_merged": "병합됨",
@@ -450,7 +453,8 @@
     "project_directory_path_copied": "프로젝트 디렉터리 경로를 복사했습니다",
     "project_directory_path_copied_with_branch": "프로젝트 디렉터리 경로를 복사했습니다 — 작업은 {{branch}} 브랜치에 있습니다",
     "workdir_path_copy_failed": "작업 디렉터리 경로를 복사하지 못했습니다",
-    "workdir_path_unavailable": "아직 로컬 작업 디렉터리가 없습니다. 로컬 에이전트가 이 태스크를 실행하지 않았습니다"
+    "workdir_path_unavailable": "아직 로컬 작업 디렉터리가 없습니다. 로컬 에이전트가 이 태스크를 실행하지 않았습니다",
+    "pull_requests_empty_title": "연결된 PR이 없습니다."
   },
   "timeline": {
     "loading": "불러오는 중..."
@@ -489,6 +493,8 @@
     "delete_title": "댓글 삭제",
     "delete_desc": "이 댓글이 영구 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
     "delete_desc_with_replies": "이 댓글과 모든 답글이 영구 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
+    "delete_desc_replies_kept": "이 댓글이 영구 삭제됩니다. 답글은 스레드에 남습니다. 이 작업은 되돌릴 수 없습니다.",
+    "deleted_placeholder": "삭제된 댓글입니다",
     "delete_action": "삭제",
     "cancel_action": "취소",
     "edit_placeholder": "댓글 수정...",
@@ -509,6 +515,7 @@
     "trigger_blocked_runtime_unusable": "이 대상의 CLI를 해당 기기에서 실행할 수 없습니다 — 그 기기에서 다시 설치하세요",
     "trigger_blocked_runtime_profile_missing": "이 대상의 CLI에 해당 기기의 런타임 프로필이 없습니다 — 그 기기에서 설치하세요",
     "trigger_blocked_agent_runtime_required": "이 대상에 런타임이 없습니다 — 실행하려면 런타임을 연결하세요",
+    "trigger_blocked_runtime_access_denied": "이 대상의 에이전트는 비공개 런타임에서 실행할 수 없습니다 — 런타임을 공개로 변경하거나, 소유자가 사용할 수 있는 런타임으로 에이전트를 다시 연결/복사하세요",
     "trigger_blocked_generic": "이 대상은 트리거되지 않습니다",
     "trigger_blocked_short_invocation_not_allowed": "찾을 수 없음 또는 권한 없음",
     "trigger_blocked_short_target_unavailable": "사용 불가",
@@ -516,6 +523,7 @@
     "trigger_blocked_short_runtime_unusable": "CLI 실행 불가",
     "trigger_blocked_short_runtime_profile_missing": "런타임 프로필 없음",
     "trigger_blocked_short_agent_runtime_required": "런타임 필요",
+    "trigger_blocked_short_runtime_access_denied": "런타임 접근 거부",
     "trigger_blocked_short_generic": "트리거 안 됨",
     "send_reply_failed": "답글을 보내지 못했습니다",
     "delete_failed": "댓글을 삭제하지 못했습니다",
@@ -529,6 +537,7 @@
     "trigger_skipped_label": "건너뜀",
     "trigger_wont_trigger": "이번에는 시작하지 않습니다",
     "trigger_none_will_trigger": "어떤 에이전트도 시작하지 않습니다",
+    "all_members_notice": "멤버 전체 공지 · @all은 에이전트를 시작하지 않습니다",
     "trigger_reason_mention_squad_leader": "멘션된 Squad의 리더입니다.",
     "trigger_reason_unknown": "이 댓글로 시작합니다.",
     "trigger_will_start": "전송 후 작업을 시작합니다",
@@ -592,7 +601,6 @@
   },
   "filtered_empty": {
     "title": "필터 조건에 맞는 태스크가 없습니다",
-    "hint": "필터를 조정하거나 해제하면 이 보기의 태스크가 표시됩니다.",
     "clear_button": "필터 해제"
   },
   "agent_live": {

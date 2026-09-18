@@ -13,6 +13,7 @@ vi.mock("@multica/core/hooks", () => ({
 
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => ({
+    iconOf: () => null,
     colorOf: (status: string) =>
       status === "awaiting_response" ? "#f97316" : null,
   }),
@@ -66,7 +67,7 @@ describe("IssueChip", () => {
               identifier: "MUL-6956",
               title: "Custom status color in Chat",
               status: "awaiting_response",
-              status_category: "in_review",
+              status_category: "started",
             },
           ],
         } as ReturnType<typeof useQuery>;
@@ -96,7 +97,7 @@ describe("IssueChip", () => {
     );
     expect(screen.getByTestId("status-icon")).toHaveAttribute(
       "data-category",
-      "in_review",
+      "started",
     );
     expect(screen.getByTestId("status-icon")).toHaveAttribute(
       "data-color",
