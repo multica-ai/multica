@@ -1457,6 +1457,15 @@ func (w *LocalWorktree) verifyDeliveryPoint(tip string, logger *slog.Logger) err
 			shortID(tip), shortID(w.BaseCommit))
 	}
 	if advanceBranch {
+		// update-ref is atomic but deliberately lower-level than the porcelain
+		// branch commands: it will move a branch even when another worktree has
+		// it checked out. Do not change HEAD underneath a sibling/user checkout.
+		if checkedOutAt, checkedOut, err := branchWorktreePath(w.GitRoot, w.Branch); err != nil {
+			return fmt.Errorf("check whether branch %s is in use before fast-forwarding it: %w", w.Branch, err)
+		} else if checkedOut {
+			return fmt.Errorf("branch %s is checked out at %s, so it cannot be advanced to delivered commit %s without moving another worktree underneath it",
+				w.Branch, checkedOutAt, shortID(tip))
+		}
 		out, err := runGit(w.GitRoot, "update-ref", branchRef, tip, branchTip)
 		if err != nil {
 			return fmt.Errorf("fast-forward branch %s from %s to delivered commit %s: %s: %w",
@@ -1468,6 +1477,27 @@ func (w *LocalWorktree) verifyDeliveryPoint(tip string, logger *slog.Logger) err
 		}
 	}
 	return nil
+}
+
+// branchWorktreePath reports where branch is currently checked out, if
+// anywhere. A low-level update-ref does not enforce git's normal checked-out
+// branch protection, so callers that move a branch ref must check this first.
+func branchWorktreePath(gitRoot, branch string) (string, bool, error) {
+	out, err := runGitStdout(gitRoot, "worktree", "list", "--porcelain")
+	if err != nil {
+		return "", false, err
+	}
+	target := "branch refs/heads/" + branch
+	var worktreePath string
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			worktreePath = strings.TrimPrefix(line, "worktree ")
+		case line == target:
+			return worktreePath, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 // unmergedPaths lists the files git considers unresolved in a worktree.
