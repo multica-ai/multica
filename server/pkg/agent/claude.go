@@ -93,12 +93,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		return nil, err
 	}
 
-	stdout, err := cmd.StdoutPipe()
+	stream, err := newRuntimeStream(cmd, "claude", b.cfg)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("claude stdout pipe: %w", err)
 	}
-	stdin, err := cmd.StdinPipe()
+	stdin, err := stream.stdinPipe()
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("claude stdin pipe: %w", err)
@@ -111,9 +111,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// like "claude exited with error: exit status 3" — which is useless for
 	// root-causing V8 aborts, Bun panics, or any other CLI-side crash.
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[claude:stderr] "), agentStderrTailBytes)
-	cmd.Stderr = stderrBuf
+	if err := stream.captureStderr(stderrBuf); err != nil {
+		cancel()
+		return nil, fmt.Errorf("claude stderr pipe: %w", err)
+	}
 
-	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
+	if err := stream.start(); err != nil {
 		closeStdin()
 		cancel()
 		return nil, fmt.Errorf("start claude: %w", err)
@@ -207,10 +210,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					signalProcessGroup(cmd, syscall.SIGKILL)
 				}
 			}
-			_ = stdout.Close()
+			stream.close()
 		}()
 
-		scanner := newAgentStreamScanner(stdout)
+		scanner := newAgentStreamScanner(stream)
 
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -244,6 +247,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 			case "result":
+				// The protocol boundary: claude reports one result per run and
+				// nothing after it belongs to this run. Telling the stream lets
+				// it bound the wait for a CLI that emits its result and then
+				// does not exit; a CLI that exits normally reaches EOF first
+				// and the grace is never consulted.
+				stream.terminalObserved()
 				sawResult = true
 				finalResultText = msg.ResultText
 				resultIsError = msg.IsError
@@ -270,13 +279,13 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			// Scanner stopped consuming stdout. Close the pipe before Wait so a
 			// child still writing a malformed/oversized event cannot deadlock on
 			// the full OS pipe; the scanner error remains the primary failure.
-			_ = stdout.Close()
+			stream.close()
 		}
 
 		closeStdin()
 
 		// Wait for process exit, then release the cancellation handler.
-		exitErr := cmd.Wait()
+		exitErr := stream.wait()
 		close(procDone)
 		// The leader is reaped; drop ownership. On Windows that closes the Job
 		// Object, which kills anything still inside it — precisely what should

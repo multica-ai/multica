@@ -311,6 +311,14 @@ type Config struct {
 	// vendor's binary; it defaults to false so an unset caller fails
 	// closed onto standard behavior.
 	BuiltinRuntime bool
+	// streamTerminalGrace and streamExitDrain override runtimeStream's two
+	// fallback windows. Unexported because only this package's tests set them:
+	// the production values are seconds long by design, and a test that had to
+	// wait them out would trade the machine's load for its own runtime. Zero
+	// means the constant applies. Per-Config rather than package-global so
+	// parallel tests cannot shorten each other's windows.
+	streamTerminalGrace time.Duration
+	streamExitDrain     time.Duration
 	// provider is the runtime/provider identity used in safe launch logs. New
 	// fills it from the protocol family; NewRuntime preserves the concrete
 	// built-in runtime identity instead (for example omp rather than pi).

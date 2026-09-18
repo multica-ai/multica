@@ -250,7 +250,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	}
 	cmd.Env = buildEnv(b.cfg.Env)
 
-	stdout, err := cmd.StdoutPipe()
+	stream, err := newRuntimeStream(cmd, label, b.cfg)
 	if err != nil {
 		releasePiSessionFileLock(sessionLock)
 		cancel()
@@ -261,7 +261,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	// from re-tokenising embedded quotes into CLI flags on Windows (#6457).
 	// The explicit close remains part of the #2188 contract too: under systemd,
 	// Pi has been observed to wait indefinitely when stdin never reaches EOF.
-	stdin, err := cmd.StdinPipe()
+	stdin, err := stream.stdinPipe()
 	if err != nil {
 		releasePiSessionFileLock(sessionLock)
 		cancel()
@@ -273,9 +273,13 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	// emitting a single JSON event, so stderr is the only place the reason
 	// exists and Result.ResumeRejected has nothing else to be built from.
 	stderrWatch := newPiStderrWatcher(newLogWriter(b.cfg.Logger, "["+label+":stderr] "))
-	cmd.Stderr = stderrWatch
+	if err := stream.captureStderr(stderrWatch); err != nil {
+		releasePiSessionFileLock(sessionLock)
+		cancel()
+		return nil, fmt.Errorf("%s stderr pipe: %w", label, err)
+	}
 
-	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
+	if err := stream.start(); err != nil {
 		closeStdin()
 		releasePiSessionFileLock(sessionLock)
 		cancel()
@@ -303,7 +307,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	go func() {
 		<-runCtx.Done()
 		closeStdin()
-		_ = stdout.Close()
+		stream.close()
 	}()
 
 	go func() {
@@ -321,7 +325,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 
 		// Pi message_update events can be large (they embed the full message
 		// partial on each delta); the shared stream bound covers that.
-		scanner := newAgentStreamScanner(stdout)
+		scanner := newAgentStreamScanner(stream)
 		var textBuffer strings.Builder
 
 		for scanner.Scan() {
@@ -332,6 +336,26 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			var evt piStreamEvent
 			if err := json.Unmarshal([]byte(line), &evt); err != nil {
 				continue
+			}
+
+			// Arm the stream's terminal boundary, or withdraw a stale arming.
+			//
+			// agent_end is Pi's boundary for the whole execution (turn_end
+			// repeats per turn), but Pi keeps going after it in two documented
+			// ways: an automatic retry of a retryable error, and context
+			// compaction, whose overflow case compacts and then continues
+			// generating. Both begin with an event, and compaction_end says in
+			// willRetry whether more is coming — so every event other than a
+			// boundary is proof the run is still producing and withdraws the
+			// arming. Enumerating only the continuation events would leave the
+			// next one Pi adds silently able to cut a live run short.
+			switch {
+			case evt.Type == "agent_end":
+				stream.terminalObserved()
+			case evt.Type == "compaction_end" && !evt.WillRetry:
+				stream.terminalObserved()
+			default:
+				stream.runContinues()
 			}
 
 			switch evt.Type {
@@ -426,6 +450,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 						finalError = label + " exhausted automatic retries"
 					}
 				}
+
 			}
 		}
 		if d := flushPiTextBuffer(&textBuffer); d != "" {
@@ -433,7 +458,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			trySend(msgCh, Message{Type: MessageText, Content: d})
 		}
 
-		waitErr := cmd.Wait()
+		waitErr := stream.wait()
 		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 
@@ -596,6 +621,11 @@ type piStreamEvent struct {
 	// auto_retry_end
 	Success    bool   `json:"success,omitempty"`
 	FinalError string `json:"finalError,omitempty"`
+
+	// compaction_end: true when Pi will continue generating once the context
+	// has been compacted (the overflow case). False is the threshold case,
+	// where compaction ends the execution.
+	WillRetry bool `json:"willRetry,omitempty"`
 }
 
 type piAssistantMessageEvent struct {
