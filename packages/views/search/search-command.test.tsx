@@ -867,6 +867,74 @@ describe("SearchCommand", () => {
     expect(screen.queryByText("In Review")).not.toBeInTheDocument();
   });
 
+  it("surfaces a more-results row when a search is truncated, and opens the Issues page", async () => {
+    const user = userEvent.setup();
+    mockSearchIssues.mockResolvedValue({
+      issues: [
+        {
+          id: "overflow-issue-1",
+          workspace_id: "ws-test",
+          number: 1,
+          identifier: "MUL-1",
+          title: "First overflow match",
+          description: null,
+          status: "in_progress",
+          priority: "none",
+          assignee_type: null,
+          assignee_id: null,
+          creator_type: "member",
+          creator_id: "user-1",
+          parent_issue_id: null,
+          project_id: null,
+          position: 0,
+          start_date: null,
+          due_date: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+          match_source: "title",
+        },
+      ],
+      has_more: true,
+    });
+
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "overflow");
+
+    await waitFor(
+      () => {
+        expect(screen.getByText("First overflow match")).toBeInTheDocument();
+      },
+      { timeout: 2000 },
+    );
+
+    const moreRow = await screen.findByText((_, el) =>
+      el?.textContent?.startsWith("Show all results for"),
+    );
+    expect(moreRow).toBeInTheDocument();
+
+    await user.click(moreRow);
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/issues");
+    expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  it("omits the more-results row when the result set is not truncated", async () => {
+    const user = userEvent.setup();
+    // beforeEach left both search mocks resolving to exhaustive empty lists.
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "exhaustive");
+    await waitFor(() => {
+      expect(
+        screen.queryByText((_, el) =>
+          el?.textContent?.startsWith("Show all results for"),
+        ),
+      ).not.toBeInTheDocument();
+    });
+  });
+
   it("shows the assignee avatar instead of status text for recent issues", () => {
     mockRecentItems.current = [{ id: "issue-1", visitedAt: 1000 }];
     mockAgents.current = [{ id: "agent-1", name: "Niko", avatar_url: null }];

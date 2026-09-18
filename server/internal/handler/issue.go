@@ -998,9 +998,11 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, terminalStatusKeys)
-	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
+	// Fill placeholder args: $4 = workspace_id, last two = limit, offset.
+	// Fetch one extra row and detect overflow so truncation can be surfaced as
+	// has_more; the window itself must not silently drop the overflow.
 	args[3] = wsUUID
-	args[len(args)-2] = limit
+	args[len(args)-2] = limit + 1
 	args[len(args)-1] = offset
 
 	var results []searchResult
@@ -1058,6 +1060,14 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// has_more reports whether rows exist beyond the requested page. The query
+	// fetched limit+1 rows; an overflow proves truncation, which the client must
+	// be able to see instead of assuming the returned issues are exhaustive.
+	hasMore := len(results) > limit
+	if hasMore {
+		results = results[:limit]
+	}
+
 	prefix := h.getIssuePrefix(ctx, wsUUID)
 	fillSearch := h.newStatusCategoryFiller(ctx, wsUUID)
 	resp := make([]SearchIssueResponse, len(results))
@@ -1087,7 +1097,8 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"issues": resp,
+		"issues":   resp,
+		"has_more": hasMore,
 	})
 }
 

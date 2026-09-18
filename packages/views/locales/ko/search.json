@@ -29,7 +29,8 @@
   },
   "empty": {
     "no_results": "검색 결과가 없습니다.",
-    "type_to_search": "태스크와 프로젝트를 검색해 보세요"
+    "type_to_search": "태스크와 프로젝트를 검색해 보세요",
+    "more_results": "{{query}} 의 모든 결과 보기"
   },
   "trigger": {
     "label": "검색..."

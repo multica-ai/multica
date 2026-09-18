@@ -1287,10 +1287,15 @@ const SearchIssueResultSchema = IssueSchema.extend({
 
 export const SearchIssuesResponseSchema = z.object({
   issues: z.array(SearchIssueResultSchema).default([]),
+  // Truncation signal from the search endpoint: true means more matching rows
+  // exist beyond the returned page. Defaults to false for older backends so a
+  // missing field degrades to the previous "no more results" behavior.
+  has_more: z.boolean().default(false),
 }).loose();
 
 export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
   issues: [],
+  has_more: false,
 };
 
 const ProjectSchema = z.object({
@@ -1322,10 +1327,12 @@ const SearchProjectResultSchema = ProjectSchema.extend({
 
 export const SearchProjectsResponseSchema = z.object({
   projects: z.array(SearchProjectResultSchema).default([]),
+  has_more: z.boolean().default(false),
 }).loose();
 
 export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
   projects: [],
+  has_more: false,
 };
 
 const IssueAssigneeGroupSchema = z.object({

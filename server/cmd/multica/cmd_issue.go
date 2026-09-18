@@ -2689,7 +2689,15 @@ func runIssueSearch(cmd *cobra.Command, args []string) error {
 			matchInfo,
 		})
 	}
+
 	cli.PrintTable(os.Stdout, headers, rows)
+
+	if hasMore, _ := result["has_more"].(bool); hasMore {
+		// The search window truncated the result set; say so instead of
+		// letting the table look exhaustive. The API supports offset
+		// pagination, and raising --limit widens the window to the cap.
+		fmt.Fprintln(os.Stdout, "MORE matches available — raise --limit (or page with offset) to see them.")
+	}
 	return nil
 }
 

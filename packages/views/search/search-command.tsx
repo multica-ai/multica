@@ -296,9 +296,15 @@ interface SearchResults {
   query: string;
   issues: SearchIssueResult[];
   projects: SearchProjectResult[];
+  /**
+   * True when either query was truncated by its server-side window. The list is
+   * then not exhaustive, so a footer row tells the searcher instead of silently
+   * letting them believe the oldest visible hit is the true earliest match.
+   */
+  hasMore: boolean;
 }
 
-const NO_RESULTS: SearchResults = { query: "", issues: [], projects: [] };
+const NO_RESULTS: SearchResults = { query: "", issues: [], projects: [], hasMore: false };
 
 // One heading treatment for every group. Headings go through cmdk's `heading`
 // prop rather than a hand-rolled div: cmdk renders it into a
@@ -648,6 +654,7 @@ export function SearchCommand() {
             query: q.trim(),
             issues: issueRes.issues,
             projects: projectRes.projects,
+            hasMore: issueRes.has_more || projectRes.has_more,
           });
           setIsLoading(false);
         }
@@ -656,7 +663,7 @@ export function SearchCommand() {
           // Drop the previous query's rows rather than leaving them on screen
           // permanently greyed out: the request that would have replaced them
           // is never coming. The list falls through to the empty state.
-          setResults({ query: q.trim(), issues: [], projects: [] });
+          setResults({ query: q.trim(), issues: [], projects: [], hasMore: false });
           setIsLoading(false);
         }
       }
@@ -698,6 +705,14 @@ export function SearchCommand() {
     },
     [intentNavigate, consumeIntent, setOpen, p],
   );
+
+  // The result list is truncated (has_more), so it is not exhaustive. Send the
+  // searcher to the Issues page, the one surface that paginates every match
+  // instead of hiding overflow.
+  const handleMoreResultsSelect = useCallback(() => {
+    setOpen(false);
+    intentNavigate(p.issues(), consumeIntent());
+  }, [intentNavigate, consumeIntent, setOpen, p]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -924,6 +939,21 @@ export function SearchCommand() {
                     onSelect={handleSelect}
                   />
                 ))}
+              </CommandPrimitive.Group>
+            )}
+
+            {!resultsAreStale && results.hasMore && (
+              <CommandPrimitive.Group className={GROUP_CLASS}>
+                <CommandPrimitive.Item
+                  value={`more-results:${results.query}`}
+                  onSelect={handleMoreResultsSelect}
+                  className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                >
+                  <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate">
+                    {t(($) => $.empty.more_results, { query: results.query })}
+                  </span>
+                </CommandPrimitive.Item>
               </CommandPrimitive.Group>
             )}
 
