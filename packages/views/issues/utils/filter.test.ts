@@ -500,6 +500,17 @@ describe("property filters", () => {
     expect(result.map((i) => i.id)).toEqual(["P2"]);
   });
 
+  it("multi_text/multi_url match any single element exactly", () => {
+    const aliasId = "prop-aliases";
+    const withAlpha = makeIssue({ id: "L1", properties: { [aliasId]: ["beta", "alpha"] } });
+    const without = makeIssue({ id: "L2", properties: { [aliasId]: ["beta"] } });
+    const result = filterIssues([withAlpha, without], {
+      ...NO_FILTER,
+      propertyFilters: { [aliasId]: ["alpha"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["L1"]);
+  });
+
   it("checkbox values match the true/false pseudo-options", () => {
     const result = filterIssues([checked, unset], {
       ...NO_FILTER,

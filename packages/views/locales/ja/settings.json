@@ -507,7 +507,9 @@
       "checkbox": "チェックボックス",
       "url": "URL",
       "actor": "メンバー",
-      "multi_actor": "メンバー（複数選択）"
+      "multi_actor": "メンバー（複数選択）",
+      "multi_text": "テキストリスト",
+      "multi_url": "URLリスト"
     },
     "actions": {
       "open": "{{name}} の操作",

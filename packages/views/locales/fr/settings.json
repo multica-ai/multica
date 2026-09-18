@@ -509,7 +509,9 @@
       "checkbox": "Case à cocher",
       "url": "URL",
       "actor": "Membre",
-      "multi_actor": "Membres"
+      "multi_actor": "Membres",
+      "multi_text": "Liste de textes",
+      "multi_url": "Liste d'URL"
     },
     "actions": {
       "open": "Actions pour {{name}}",

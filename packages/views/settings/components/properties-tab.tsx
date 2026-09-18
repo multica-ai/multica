@@ -351,6 +351,10 @@ export function PropertyTypeLabel({ type }: { type: string }) {
       return <>{t(($) => $.properties.types.actor)}</>;
     case "multi_actor":
       return <>{t(($) => $.properties.types.multi_actor)}</>;
+    case "multi_text":
+      return <>{t(($) => $.properties.types.multi_text)}</>;
+    case "multi_url":
+      return <>{t(($) => $.properties.types.multi_url)}</>;
     default:
       // Forward compat: newer servers may ship types this build doesn't know.
       return <>{type}</>;

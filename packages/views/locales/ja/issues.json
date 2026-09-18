@@ -753,6 +753,7 @@
       "number_placeholder": "0",
       "actor_search_placeholder": "メンバーを検索…",
       "open_link": "リンクを開く",
+      "remove_item": "{{value}} を削除",
       "archived_hint": "アーカイブ済みプロパティ — 値は読み取り専用です",
       "unknown_value": "表示できません",
       "unknown_value_hint": "この値は新しいバージョンの Multica で設定されており、ここでは編集できません。アプリを更新するか、値をクリアしてください"

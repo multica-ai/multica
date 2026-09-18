@@ -163,8 +163,8 @@ concurrent edits. There is no CLI bulk-export or `--all` mode.
 Workspaces may define custom issue properties (Severity, Environment, QA
 Status, Reviewer, ...). They are the place for durable, typed issue state:
 values are validated against the definition (select options, date format,
-http(s) URL, member reference), visible in the issue sidebar, and addressed
-by name.
+http(s) URL, member reference, free-form text/URL lists), visible in the
+issue sidebar, and addressed by name.
 
 - Read what exists before writing: `multica property list` shows the catalog;
   `multica issue property list <issue-id>` shows values set on the issue.
@@ -182,6 +182,9 @@ multica issue property unset <issue-id> --name Environment
   workspace members only. `--value` takes a member name, email, UUID, short id,
   or an explicit `member:<uuid>`; `multi_actor` takes a comma-separated list
   (duplicates dropped, order kept, max 20).
+- `multi_text` / `multi_url` properties hold free-form lists: `--value` is a
+  comma-separated list of strings / http(s) URLs (empty entries skipped,
+  duplicates dropped, order kept, max 20). They take no options.
 - Definitions may include an optional catalog icon for visual identification;
   it does not change the property's type or value validation.
 - Agents cannot create or edit property definitions (owner/admin humans only).
@@ -201,7 +204,8 @@ multica issue list --sort property:Impact --direction desc --output json
   matches ANY of its values; different properties must ALL match. Values are
   option names or ids (select types), `true`/`false` (checkbox), a member
   name/email/id (actor types), or the value itself for text, url, number,
-  and date (`YYYY-MM-DD`). The reserved value `__none__` matches
+  and date (`YYYY-MM-DD`); for `multi_text` / `multi_url` the value matches
+  any single element of the list exactly. The reserved value `__none__` matches
   issues where the property is unset (works for every type; it is not
   index-backed, so use it for targeted audits rather than as a default
   listing filter). Only `=` is supported today; the `>=`, `<=` and `!=`
@@ -210,7 +214,7 @@ multica issue list --sort property:Impact --direction desc --output json
   an ordinal scale (Low < Medium < High) sorts by meaning — and number/date/
   text/url by value; issues without the property sort last either way.
   Archived properties and types without an order (multi_select, checkbox,
-  actor kinds) are rejected up front.
+  actor kinds, list types) are rejected up front.
 - `issue list` and `issue get` return `properties` as a map of definition id
   to stored value. Add `--resolve-properties` in JSON mode to get the rows
   `issue property list` prints instead (name, type, stored value, display
@@ -222,8 +226,9 @@ multica issue list --status in_progress --output json --resolve-properties
 multica issue get <issue-id> --resolve-properties
 ```
 
-  Read `display` for a single value and `display_values` for a multi_select
-  or multi_actor value; `value` keeps the stored ids.
+  Read `display` for a single value and `display_values` for a multi-value
+  property (multi_select, multi_actor, multi_text, multi_url); `value` keeps
+  the stored ids / strings.
 
 ## Status changes have server side effects
 
