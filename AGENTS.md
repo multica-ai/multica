@@ -70,6 +70,7 @@ Installed desktop clients may talk to newer backends. Preserve response compatib
 
 ## Database and Migration Rules
 
+- Allocate new migration numbers after the current `main` maximum. Before pushing a migration PR, fetch `origin/main`, validate the merged candidate, and run `cd server && go test ./internal/migrations -count=1`; a branch-only check can miss numbers taken upstream. Renumber only migrations that have not been applied to a persistent database; preserve both directions and dependency order.
 - Do not add foreign keys, cascading deletes, or cascading updates. Validate relationships and clean up dependents in application code, using a transaction when the operation must be atomic.
 - Every migration-created index, including indexes on new tables, uses `CREATE [UNIQUE] INDEX CONCURRENTLY`. Each concurrent index build gets its own single-statement migration file; the runner executes files outside an explicit transaction.
 - Conditionally skipped migrations are still recorded in `schema_migrations`. Later DDL touching conditional objects must be idempotent (`IF EXISTS` / `IF NOT EXISTS`); document recovery if the missing object would break runtime behavior.
