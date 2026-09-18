@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/entitlement"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -290,6 +293,81 @@ func autopilotRunFromTerminalRow(row db.UpdateAutopilotRunTerminalWithQuotaRow) 
 func (s *AutopilotService) recoverPartialAutopilotRun(ctx context.Context, run db.AutopilotRun) (bool, error) {
 	rows, err := s.Queries.RecoverPartialAutopilotRun(ctx, run.ID)
 	return rows > 0, err
+}
+
+// ReconcileStaleScheduledAutopilotRuns closes scheduled runs that have outlived
+// the stale wall-clock threshold without a healthy downstream task/runtime.
+// Candidate selection and the terminal transition are separate guarded steps:
+// selection is bounded, while the transition's active-status predicate makes
+// completion and stale recovery converge safely when they race. The terminal
+// write releases any still-reserved quota slot in the same statement.
+func (s *AutopilotService) ReconcileStaleScheduledAutopilotRuns(
+	ctx context.Context,
+	createdBefore time.Time,
+	runtimeStaleAfter time.Duration,
+	limit int32,
+) (int, error) {
+	if limit <= 0 {
+		return 0, nil
+	}
+	if runtimeStaleAfter <= 0 {
+		runtimeStaleAfter = time.Duration(RuntimeClaimFreshnessSeconds * float64(time.Second))
+	}
+	runs, err := s.Queries.ListStaleScheduledAutopilotRuns(ctx, db.ListStaleScheduledAutopilotRunsParams{
+		CreatedBefore:    pgtype.Timestamptz{Time: createdBefore.UTC(), Valid: true},
+		RuntimeStaleSecs: runtimeStaleAfter.Seconds(),
+		RowLimit:         limit,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("list stale scheduled autopilot runs: %w", err)
+	}
+
+	reclaimed := 0
+	for _, candidate := range runs {
+		run, err := s.Queries.ReclaimStaleScheduledAutopilotRun(ctx, db.ReclaimStaleScheduledAutopilotRunParams{
+			RunID:            candidate.ID,
+			CreatedBefore:    pgtype.Timestamptz{Time: createdBefore.UTC(), Valid: true},
+			RuntimeStaleSecs: runtimeStaleAfter.Seconds(),
+			FailureReason:    autopilotRunStaleFailureReason,
+			ReasonCode:       string(dispatch.ReasonStaleTimeout),
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			// A task/issue completion won the race after candidate selection.
+			continue
+		}
+		if err != nil {
+			return reclaimed, fmt.Errorf("reclaim stale scheduled autopilot run %s: %w", util.UUIDToString(candidate.ID), err)
+		}
+		reclaimed++
+
+		ap, loadErr := s.Queries.GetAutopilot(ctx, run.AutopilotID)
+		if loadErr != nil {
+			slog.Warn("reclaimed stale autopilot run but failed to load autopilot telemetry context",
+				"run_id", util.UUIDToString(run.ID), "autopilot_id", util.UUIDToString(run.AutopilotID), "error", loadErr)
+			continue
+		}
+		autopilotRun := autopilotRunFromReclaimedRow(run)
+		s.captureAutopilotRunFailed(ap, autopilotRun, autopilotRun.Source, autopilotRunStaleFailureReason)
+		s.publishRunDone(util.UUIDToString(ap.WorkspaceID), autopilotRun, "failed")
+		slog.Warn("reclaimed stale scheduled autopilot run",
+			"run_id", util.UUIDToString(run.ID),
+			"autopilot_id", util.UUIDToString(run.AutopilotID),
+			"reason_code", dispatch.ReasonStaleTimeout,
+		)
+	}
+	return reclaimed, nil
+}
+
+func autopilotRunFromReclaimedRow(row db.ReclaimStaleScheduledAutopilotRunRow) db.AutopilotRun {
+	return db.AutopilotRun{
+		ID: row.ID, AutopilotID: row.AutopilotID, TriggerID: row.TriggerID,
+		Source: row.Source, Status: row.Status, IssueID: row.IssueID, TaskID: row.TaskID,
+		TriggeredAt: row.TriggeredAt, CompletedAt: row.CompletedAt,
+		FailureReason: row.FailureReason, TriggerPayload: row.TriggerPayload,
+		Result: row.Result, CreatedAt: row.CreatedAt, SquadID: row.SquadID,
+		PlannedAt: row.PlannedAt, WebhookDeliveryID: row.WebhookDeliveryID,
+		QuotaReservationID: row.QuotaReservationID, ReasonCode: row.ReasonCode,
+	}
 }
 
 // FailAutopilotRunsByIssue keeps create_issue consumption immutable while

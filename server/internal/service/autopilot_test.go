@@ -5,9 +5,33 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestAutopilotRunTerminalAndSingleFlightConflict(t *testing.T) {
+	for _, status := range []string{"completed", "failed", "skipped"} {
+		if !isAutopilotRunTerminal(status) {
+			t.Fatalf("status %q should be terminal", status)
+		}
+	}
+	for _, status := range []string{"pending", "issue_created", "running"} {
+		if isAutopilotRunTerminal(status) {
+			t.Fatalf("status %q should remain active", status)
+		}
+	}
+
+	active := &pgconn.PgError{Code: "23505", ConstraintName: "uq_autopilot_run_active_schedule"}
+	planned := &pgconn.PgError{Code: "23505", ConstraintName: "uq_autopilot_run_trigger_planned"}
+	other := &pgconn.PgError{Code: "23505", ConstraintName: "some_other_unique_index"}
+	if !isAutopilotScheduleRunConflict(active) || !isAutopilotScheduleRunConflict(planned) {
+		t.Fatal("scheduled uniqueness conflicts must be classified as single-flight conflicts")
+	}
+	if isAutopilotScheduleRunConflict(other) {
+		t.Fatal("unrelated uniqueness conflicts must not be treated as single-flight")
+	}
+}
 
 func TestAutopilotErrorType(t *testing.T) {
 	cases := map[string]string{

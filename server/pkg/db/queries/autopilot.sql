@@ -350,6 +350,94 @@ SELECT * FROM autopilot_run
 WHERE quota_reservation_id = $1
 LIMIT 1;
 
+-- name: ListStaleScheduledAutopilotRuns :many
+-- A scheduled run is reclaimable only when it is old enough AND no linked
+-- downstream task is proving that work is still alive. The task join covers
+-- both run_only tasks (autopilot_run_id) and create_issue tasks (issue_id).
+-- Runtime liveness deliberately uses the same heartbeat signal as task claim:
+-- queued, running, waiting_local_directory, and deferred work on a healthy
+-- runtime must not be mistaken for a hung autopilot merely because it spans
+-- several schedule periods.
+WITH candidates AS (
+    SELECT ar.id
+    FROM autopilot_run ar
+    WHERE ar.source = 'schedule'
+      AND ar.status IN ('issue_created', 'running')
+      AND ar.created_at < @created_before::timestamptz
+      AND NOT EXISTS (
+          SELECT 1
+          FROM agent_task_queue task
+          JOIN agent_runtime runtime ON runtime.id = task.runtime_id
+          WHERE (
+              task.autopilot_run_id = ar.id
+              OR (ar.issue_id IS NOT NULL AND task.issue_id = ar.issue_id)
+          )
+            AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+            AND runtime.status = 'online'
+            AND COALESCE(runtime.last_seen_at, runtime.updated_at) >=
+                now() - make_interval(secs => @runtime_stale_secs::double precision)
+      )
+    ORDER BY ar.created_at ASC, ar.id ASC
+    LIMIT @row_limit::int
+    FOR UPDATE SKIP LOCKED
+)
+SELECT ar.*
+FROM autopilot_run ar
+JOIN candidates ON candidates.id = ar.id
+ORDER BY ar.created_at ASC, ar.id ASC;
+
+-- name: ReclaimStaleScheduledAutopilotRun :one
+-- The status predicate makes stale recovery converge safely with task/issue
+-- completion. Quota release is kept in the same statement as the terminal
+-- transition, so a reclaimed run cannot leave a reserved slot behind.
+WITH updated_run AS (
+    UPDATE autopilot_run AS ar
+    SET status = 'failed',
+        completed_at = now(),
+        failure_reason = @failure_reason::text,
+        reason_code = @reason_code::text
+    WHERE ar.id = @run_id
+      AND ar.source = 'schedule'
+      AND ar.status IN ('issue_created', 'running')
+      AND ar.created_at < @created_before::timestamptz
+      AND NOT EXISTS (
+          SELECT 1
+          FROM agent_task_queue task
+          JOIN agent_runtime runtime ON runtime.id = task.runtime_id
+          WHERE (
+              task.autopilot_run_id = ar.id
+              OR (ar.issue_id IS NOT NULL AND task.issue_id = ar.issue_id)
+          )
+            AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+            AND runtime.status = 'online'
+            AND COALESCE(runtime.last_seen_at, runtime.updated_at) >=
+                now() - make_interval(secs => @runtime_stale_secs::double precision)
+      )
+    RETURNING ar.*
+), locked_reservation AS MATERIALIZED (
+    SELECT qr.*
+    FROM autopilot_quota_reservation qr
+    JOIN updated_run ar ON ar.quota_reservation_id = qr.id
+    WHERE qr.state = 'reserved'
+    FOR UPDATE
+), released_reservation AS (
+    UPDATE autopilot_quota_reservation AS qr
+    SET state = 'released', finalized_at = now()
+    FROM locked_reservation AS locked
+    WHERE qr.id = locked.id
+    RETURNING locked.workspace_id, locked.period_start, locked.period_end
+), settled_period AS (
+    UPDATE autopilot_quota_period AS p
+    SET reserved_count = GREATEST(p.reserved_count - 1, 0),
+        updated_at = now()
+    FROM released_reservation AS released
+    WHERE p.workspace_id = released.workspace_id
+      AND p.period_start = released.period_start
+      AND p.period_end = released.period_end
+    RETURNING p.workspace_id
+)
+SELECT * FROM updated_run;
+
 -- name: RecoverPartialAutopilotRun :one
 -- Recovers a partial-state autopilot_run from a crashed first attempt
 -- (the runner wrote the run row but died before creating the downstream
@@ -490,6 +578,7 @@ WITH updated_run AS (
             ELSE ar.reason_code
         END
     WHERE ar.id = @run_id
+      AND ar.status IN ('pending', 'issue_created', 'running')
     RETURNING ar.*
 ), locked_reservation AS MATERIALIZED (
     SELECT qr.*

@@ -130,8 +130,10 @@ func TestDispatchAutopilotForPlanIsIdempotent(t *testing.T) {
 		t.Fatalf("expected exactly 1 autopilot_run for the (trigger, planned_at) pair, got %d", rowCount)
 	}
 
-	// A different planned_at for the same trigger MUST be allowed —
-	// it represents the next scheduled occurrence, not a duplicate.
+	// A different planned_at represents the next scheduled occurrence, but the
+	// Autopilot is single-flight: while the first run is still active, the next
+	// occurrence is recorded as a terminal deduplication rather than creating a
+	// second active run.
 	plannedAt2 := plannedAt.Add(5 * time.Minute)
 	third, err := autopilotSvc.DispatchAutopilotForPlan(
 		ctx, ap, trigger.ID, "schedule", nil, plannedAt2,
@@ -139,8 +141,11 @@ func TestDispatchAutopilotForPlanIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("third DispatchAutopilotForPlan with new planned_at: %v", err)
 	}
-	if third.ID == first.ID {
-		t.Fatalf("different planned_at must produce a different run, got reuse")
+	if third.ID == first.ID || third.Status != "skipped" {
+		t.Fatalf("next occurrence = %+v, want a distinct skipped run", third)
+	}
+	if third.ReasonCode.String != "already_active" {
+		t.Fatalf("next occurrence reason_code = %q, want already_active", third.ReasonCode.String)
 	}
 
 	if err := testPool.QueryRow(ctx,
@@ -149,8 +154,77 @@ func TestDispatchAutopilotForPlanIsIdempotent(t *testing.T) {
 		t.Fatalf("count rows after 3rd call: %v", err)
 	}
 	if rowCount != 2 {
-		t.Fatalf("expected 2 autopilot_run rows after distinct planned_ats, got %d", rowCount)
+		t.Fatalf("expected 2 autopilot_run rows (active + deduplicated), got %d", rowCount)
 	}
+}
+
+// TestStaleScheduledRunIsReclaimedBeforeRedispatch covers the cross-day
+// hanging-run path: an old active run with no healthy downstream task is
+// failed with an observable stale_timeout reason, then a later occurrence can
+// acquire the single-flight slot and dispatch exactly once.
+func TestStaleScheduledRunIsReclaimedBeforeRedispatch(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	trigger, _, autopilotSvc := setupAutopilotScheduleJob(t, "*/1 * * * *")
+
+	stale, err := queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
+		AutopilotID: trigger.AutopilotID,
+		TriggerID:   trigger.ID,
+		Source:      "schedule",
+		Status:      "running",
+		PlannedAt:   pgtype.Timestamptz{Time: time.Now().UTC().Add(-8 * time.Hour), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("create stale scheduled run: %v", err)
+	}
+	if _, err := testPool.Exec(ctx,
+		`UPDATE autopilot_run SET created_at = now() - INTERVAL '8 hours' WHERE id = $1`, stale.ID,
+	); err != nil {
+		t.Fatalf("age stale scheduled run: %v", err)
+	}
+
+	reclaimed, err := autopilotSvc.ReconcileStaleScheduledAutopilotRuns(
+		ctx,
+		time.Now().UTC().Add(-service.AutopilotRunStaleAfter),
+		150*time.Second,
+		100,
+	)
+	if err != nil {
+		t.Fatalf("reconcile stale scheduled runs: %v", err)
+	}
+	if reclaimed != 1 {
+		t.Fatalf("reclaimed = %d, want 1", reclaimed)
+	}
+
+	closed, err := queries.GetAutopilotRun(ctx, stale.ID)
+	if err != nil {
+		t.Fatalf("reload stale run: %v", err)
+	}
+	if closed.Status != "failed" || closed.ReasonCode.String != "stale_timeout" || !closed.CompletedAt.Valid {
+		t.Fatalf("stale run after reconcile = status=%q reason=%q completed=%v, want failed/stale_timeout/true",
+			closed.Status, closed.ReasonCode.String, closed.CompletedAt.Valid)
+	}
+
+	activeAutopilot, err := queries.GetAutopilot(ctx, trigger.AutopilotID)
+	if err != nil {
+		t.Fatalf("load autopilot for redispatch: %v", err)
+	}
+	fresh, err := autopilotSvc.DispatchAutopilotForPlan(
+		ctx, activeAutopilot, trigger.ID, "schedule", nil, time.Now().UTC().Truncate(time.Second),
+	)
+	if err != nil {
+		t.Fatalf("redispatch after stale recovery: %v", err)
+	}
+	if fresh.ID == stale.ID || fresh.Status != "running" {
+		t.Fatalf("fresh run = %+v, want a new running run", fresh)
+	}
+
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM agent_task_queue WHERE autopilot_run_id IN (SELECT id FROM autopilot_run WHERE autopilot_id = $1)`,
+			trigger.AutopilotID,
+		)
+	})
 }
 
 func TestDispatchAutopilotSuppressesRecentDuplicateIssue(t *testing.T) {

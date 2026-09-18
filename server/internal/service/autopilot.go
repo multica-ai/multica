@@ -50,6 +50,14 @@ const DefaultAutopilotTriggerTimezone = "UTC"
 
 const autopilotRecentDuplicateWindow = 60 * time.Second
 
+// AutopilotRunStaleAfter is the wall-clock age at which a scheduled run with
+// no healthy downstream task is considered abandoned. A healthy task/runtime
+// heartbeat takes precedence, so this is not a maximum duration for legitimate
+// long-running work.
+const AutopilotRunStaleAfter = 6 * time.Hour
+
+const autopilotRunStaleFailureReason = "autopilot run exceeded stale TTL without a healthy downstream task/runtime heartbeat"
+
 func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *AutopilotService {
 	return &AutopilotService{Queries: q, TxStarter: tx, Bus: bus, TaskSvc: taskSvc}
 }
@@ -585,6 +593,37 @@ func (s *AutopilotService) dispatchAutopilot(
 		WebhookDeliveryID: webhookDeliveryID,
 	})
 	if err != nil {
+		// The partial unique index is the final atomic single-flight fence for
+		// scheduled runs. A loser is still recorded as a terminal audit row so
+		// operators can distinguish deduplication from a dispatch failure.
+		if source == "schedule" && isAutopilotScheduleRunConflict(err) {
+			// Two workers can race before either sees the exact occurrence row.
+			// If the planned-at uniqueness constraint is the one that rejected
+			// this insert, reuse that canonical run instead of trying to insert a
+			// second audit row for the same occurrence.
+			if plannedAt.Valid && triggerID.Valid {
+				if existing, lookupErr := s.Queries.GetAutopilotRunByTriggerAndPlanned(ctx, db.GetAutopilotRunByTriggerAndPlannedParams{
+					TriggerID: triggerID,
+					PlannedAt: plannedAt,
+				}); lookupErr == nil {
+					return &existing, dispatch.ReasonCode(existing.ReasonCode.String), nil
+				} else if !errors.Is(lookupErr, pgx.ErrNoRows) {
+					return nil, dispatch.ReasonInternalError, fmt.Errorf("lookup concurrent scheduled run: %w", lookupErr)
+				}
+			}
+			skipped, skipErr := s.recordSkippedRun(
+				ctx,
+				autopilot,
+				triggerID,
+				source,
+				payload,
+				plannedAt,
+				webhookDeliveryID,
+				"another scheduled run is already active",
+				dispatch.ReasonAlreadyActive,
+			)
+			return skipped, dispatch.ReasonAlreadyActive, skipErr
+		}
 		var quotaErr *AutopilotQuotaExceededError
 		if errors.As(err, &quotaErr) && source == "schedule" {
 			skipped, skipErr := s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, webhookDeliveryID, quotaErr.Error(), dispatch.ReasonQuotaExceeded)
@@ -597,6 +636,15 @@ func (s *AutopilotService) dispatchAutopilot(
 	}
 	s.captureAutopilotRunStarted(autopilot, run, source)
 	return s.dispatchAutopilotRun(ctx, autopilot, triggerID, source, &run, actorUserID)
+}
+
+func isAutopilotScheduleRunConflict(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		return false
+	}
+	return pgErr.ConstraintName == "uq_autopilot_run_active_schedule" ||
+		pgErr.ConstraintName == "uq_autopilot_run_trigger_planned"
 }
 
 // dispatchAutopilotRun performs the downstream side effect for an already
@@ -1091,6 +1139,9 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 	if err != nil {
 		return // no active run linked to this issue
 	}
+	if isAutopilotRunTerminal(run.Status) {
+		return
+	}
 	autopilot, err := s.Queries.GetAutopilot(ctx, run.AutopilotID)
 	if err != nil {
 		return
@@ -1139,6 +1190,9 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 
 	run, err := s.Queries.GetAutopilotRun(ctx, task.AutopilotRunID)
 	if err != nil {
+		return
+	}
+	if isAutopilotRunTerminal(run.Status) {
 		return
 	}
 
@@ -1204,6 +1258,9 @@ func (s *AutopilotService) SyncRunFromLinkedIssueTask(ctx context.Context, task 
 	if err != nil {
 		return // no active run linked to this issue
 	}
+	if isAutopilotRunTerminal(run.Status) {
+		return
+	}
 	// A still-active task — typically the auto-retry FailTask just enqueued —
 	// means the dispatch isn't terminal yet; wait for the final attempt.
 	hasActive, err := s.Queries.HasActiveTaskForIssue(ctx, task.IssueID)
@@ -1239,6 +1296,15 @@ func (s *AutopilotService) SyncRunFromLinkedIssueTask(ctx context.Context, task 
 	}
 	s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
 	s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), updatedRun, "failed")
+}
+
+func isAutopilotRunTerminal(status string) bool {
+	switch status {
+	case "completed", "failed", "skipped":
+		return true
+	default:
+		return false
+	}
 }
 
 func taskFailureReasonForAutopilotRun(task db.AgentTaskQueue) string {

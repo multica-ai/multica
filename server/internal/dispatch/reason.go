@@ -68,6 +68,9 @@ const (
 	// ReasonAlreadyActive: a run is already active/pending for this target and
 	// this trigger did not coalesce.
 	ReasonAlreadyActive ReasonCode = "already_active"
+	// ReasonStaleTimeout: an automation run outlived its lease without a
+	// downstream task/runtime heartbeat proving that work was still alive.
+	ReasonStaleTimeout ReasonCode = "stale_timeout"
 	// ReasonSelfTriggerSuppressed: the target was intentionally not (re-)triggered
 	// because doing so would be a self-trigger the guard suppresses, and no active
 	// run remains to cover it — e.g. a squad leader's own @mention of its squad

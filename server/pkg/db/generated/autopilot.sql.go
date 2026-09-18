@@ -1590,6 +1590,88 @@ func (q *Queries) ListSchedulableAutopilotTriggers(ctx context.Context) ([]ListS
 	return items, nil
 }
 
+const listStaleScheduledAutopilotRuns = `-- name: ListStaleScheduledAutopilotRuns :many
+WITH candidates AS (
+    SELECT ar.id
+    FROM autopilot_run ar
+    WHERE ar.source = 'schedule'
+      AND ar.status IN ('issue_created', 'running')
+      AND ar.created_at < $1::timestamptz
+      AND NOT EXISTS (
+          SELECT 1
+          FROM agent_task_queue task
+          JOIN agent_runtime runtime ON runtime.id = task.runtime_id
+          WHERE (
+              task.autopilot_run_id = ar.id
+              OR (ar.issue_id IS NOT NULL AND task.issue_id = ar.issue_id)
+          )
+            AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+            AND runtime.status = 'online'
+            AND COALESCE(runtime.last_seen_at, runtime.updated_at) >=
+                now() - make_interval(secs => $2::double precision)
+      )
+    ORDER BY ar.created_at ASC, ar.id ASC
+    LIMIT $3::int
+    FOR UPDATE SKIP LOCKED
+)
+SELECT ar.id, ar.autopilot_id, ar.trigger_id, ar.source, ar.status, ar.issue_id, ar.task_id, ar.triggered_at, ar.completed_at, ar.failure_reason, ar.trigger_payload, ar.result, ar.created_at, ar.squad_id, ar.planned_at, ar.webhook_delivery_id, ar.quota_reservation_id, ar.reason_code
+FROM autopilot_run ar
+JOIN candidates ON candidates.id = ar.id
+ORDER BY ar.created_at ASC, ar.id ASC
+`
+
+type ListStaleScheduledAutopilotRunsParams struct {
+	CreatedBefore    pgtype.Timestamptz `json:"created_before"`
+	RuntimeStaleSecs float64            `json:"runtime_stale_secs"`
+	RowLimit         int32              `json:"row_limit"`
+}
+
+// A scheduled run is reclaimable only when it is old enough AND no linked
+// downstream task is proving that work is still alive. The task join covers
+// both run_only tasks (autopilot_run_id) and create_issue tasks (issue_id).
+// Runtime liveness deliberately uses the same heartbeat signal as task claim:
+// queued, running, waiting_local_directory, and deferred work on a healthy
+// runtime must not be mistaken for a hung autopilot merely because it spans
+// several schedule periods.
+func (q *Queries) ListStaleScheduledAutopilotRuns(ctx context.Context, arg ListStaleScheduledAutopilotRunsParams) ([]AutopilotRun, error) {
+	rows, err := q.db.Query(ctx, listStaleScheduledAutopilotRuns, arg.CreatedBefore, arg.RuntimeStaleSecs, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AutopilotRun{}
+	for rows.Next() {
+		var i AutopilotRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.AutopilotID,
+			&i.TriggerID,
+			&i.Source,
+			&i.Status,
+			&i.IssueID,
+			&i.TaskID,
+			&i.TriggeredAt,
+			&i.CompletedAt,
+			&i.FailureReason,
+			&i.TriggerPayload,
+			&i.Result,
+			&i.CreatedAt,
+			&i.SquadID,
+			&i.PlannedAt,
+			&i.WebhookDeliveryID,
+			&i.QuotaReservationID,
+			&i.ReasonCode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockAutopilotForUpdate = `-- name: LockAutopilotForUpdate :one
 SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, pause_reason FROM autopilot
 WHERE id = $1 AND workspace_id = $2
@@ -1739,6 +1821,120 @@ func (q *Queries) PauseAutopilotsByUnrunnableSquad(ctx context.Context, squadID 
 		return nil, err
 	}
 	return items, nil
+}
+
+const reclaimStaleScheduledAutopilotRun = `-- name: ReclaimStaleScheduledAutopilotRun :one
+WITH updated_run AS (
+    UPDATE autopilot_run AS ar
+    SET status = 'failed',
+        completed_at = now(),
+        failure_reason = $1::text,
+        reason_code = $2::text
+    WHERE ar.id = $3
+      AND ar.source = 'schedule'
+      AND ar.status IN ('issue_created', 'running')
+      AND ar.created_at < $4::timestamptz
+      AND NOT EXISTS (
+          SELECT 1
+          FROM agent_task_queue task
+          JOIN agent_runtime runtime ON runtime.id = task.runtime_id
+          WHERE (
+              task.autopilot_run_id = ar.id
+              OR (ar.issue_id IS NOT NULL AND task.issue_id = ar.issue_id)
+          )
+            AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+            AND runtime.status = 'online'
+            AND COALESCE(runtime.last_seen_at, runtime.updated_at) >=
+                now() - make_interval(secs => $5::double precision)
+      )
+    RETURNING ar.id, ar.autopilot_id, ar.trigger_id, ar.source, ar.status, ar.issue_id, ar.task_id, ar.triggered_at, ar.completed_at, ar.failure_reason, ar.trigger_payload, ar.result, ar.created_at, ar.squad_id, ar.planned_at, ar.webhook_delivery_id, ar.quota_reservation_id, ar.reason_code
+), locked_reservation AS MATERIALIZED (
+    SELECT qr.id, qr.workspace_id, qr.period_start, qr.period_end, qr.policy_revision, qr.subscription_version, qr.source, qr.idempotency_key, qr.state, qr.created_at, qr.finalized_at
+    FROM autopilot_quota_reservation qr
+    JOIN updated_run ar ON ar.quota_reservation_id = qr.id
+    WHERE qr.state = 'reserved'
+    FOR UPDATE
+), released_reservation AS (
+    UPDATE autopilot_quota_reservation AS qr
+    SET state = 'released', finalized_at = now()
+    FROM locked_reservation AS locked
+    WHERE qr.id = locked.id
+    RETURNING locked.workspace_id, locked.period_start, locked.period_end
+), settled_period AS (
+    UPDATE autopilot_quota_period AS p
+    SET reserved_count = GREATEST(p.reserved_count - 1, 0),
+        updated_at = now()
+    FROM released_reservation AS released
+    WHERE p.workspace_id = released.workspace_id
+      AND p.period_start = released.period_start
+      AND p.period_end = released.period_end
+    RETURNING p.workspace_id
+)
+SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, planned_at, webhook_delivery_id, quota_reservation_id, reason_code FROM updated_run
+`
+
+type ReclaimStaleScheduledAutopilotRunParams struct {
+	FailureReason    string             `json:"failure_reason"`
+	ReasonCode       string             `json:"reason_code"`
+	RunID            pgtype.UUID        `json:"run_id"`
+	CreatedBefore    pgtype.Timestamptz `json:"created_before"`
+	RuntimeStaleSecs float64            `json:"runtime_stale_secs"`
+}
+
+type ReclaimStaleScheduledAutopilotRunRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	AutopilotID        pgtype.UUID        `json:"autopilot_id"`
+	TriggerID          pgtype.UUID        `json:"trigger_id"`
+	Source             string             `json:"source"`
+	Status             string             `json:"status"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	TaskID             pgtype.UUID        `json:"task_id"`
+	TriggeredAt        pgtype.Timestamptz `json:"triggered_at"`
+	CompletedAt        pgtype.Timestamptz `json:"completed_at"`
+	FailureReason      pgtype.Text        `json:"failure_reason"`
+	TriggerPayload     []byte             `json:"trigger_payload"`
+	Result             []byte             `json:"result"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	SquadID            pgtype.UUID        `json:"squad_id"`
+	PlannedAt          pgtype.Timestamptz `json:"planned_at"`
+	WebhookDeliveryID  pgtype.UUID        `json:"webhook_delivery_id"`
+	QuotaReservationID pgtype.UUID        `json:"quota_reservation_id"`
+	ReasonCode         pgtype.Text        `json:"reason_code"`
+}
+
+// The status predicate makes stale recovery converge safely with task/issue
+// completion. Quota release is kept in the same statement as the terminal
+// transition, so a reclaimed run cannot leave a reserved slot behind.
+func (q *Queries) ReclaimStaleScheduledAutopilotRun(ctx context.Context, arg ReclaimStaleScheduledAutopilotRunParams) (ReclaimStaleScheduledAutopilotRunRow, error) {
+	row := q.db.QueryRow(ctx, reclaimStaleScheduledAutopilotRun,
+		arg.FailureReason,
+		arg.ReasonCode,
+		arg.RunID,
+		arg.CreatedBefore,
+		arg.RuntimeStaleSecs,
+	)
+	var i ReclaimStaleScheduledAutopilotRunRow
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.TriggerID,
+		&i.Source,
+		&i.Status,
+		&i.IssueID,
+		&i.TaskID,
+		&i.TriggeredAt,
+		&i.CompletedAt,
+		&i.FailureReason,
+		&i.TriggerPayload,
+		&i.Result,
+		&i.CreatedAt,
+		&i.SquadID,
+		&i.PlannedAt,
+		&i.WebhookDeliveryID,
+		&i.QuotaReservationID,
+		&i.ReasonCode,
+	)
+	return i, err
 }
 
 const recoverPartialAutopilotRun = `-- name: RecoverPartialAutopilotRun :one
@@ -2468,6 +2664,7 @@ WITH updated_run AS (
             ELSE ar.reason_code
         END
     WHERE ar.id = $5
+      AND ar.status IN ('pending', 'issue_created', 'running')
     RETURNING ar.id, ar.autopilot_id, ar.trigger_id, ar.source, ar.status, ar.issue_id, ar.task_id, ar.triggered_at, ar.completed_at, ar.failure_reason, ar.trigger_payload, ar.result, ar.created_at, ar.squad_id, ar.planned_at, ar.webhook_delivery_id, ar.quota_reservation_id, ar.reason_code
 ), locked_reservation AS MATERIALIZED (
     SELECT qr.id, qr.workspace_id, qr.period_start, qr.period_end, qr.policy_revision, qr.subscription_version, qr.source, qr.idempotency_key, qr.state, qr.created_at, qr.finalized_at
