@@ -15,7 +15,7 @@
   "dependencies": {
     "@multica/ui": "workspace:*",
     "fumadocs-core": "^15.5.2",
-    "fumadocs-mdx": "^12.0.3",
+    "fumadocs-mdx": "^13.0.8",
     "fumadocs-ui": "^15.5.2",
     "lucide-react": "catalog:",
     "mermaid": "^11.14.0",
