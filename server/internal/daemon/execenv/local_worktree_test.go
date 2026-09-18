@@ -1620,6 +1620,46 @@ func TestFinalizeFastForwardsConversationBranchToOffBranchDelivery(t *testing.T)
 	finalizeOK(t, next)
 }
 
+// Moving the ref is only safe when nobody else has the conversation branch
+// checked out. git update-ref itself does not protect linked worktrees, so keep
+// the successful delivery preserved rather than changing another checkout's
+// HEAD underneath it.
+func TestFinalizeRefusesFastForwardWhenConversationBranchIsCheckedOutElsewhere(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+
+	wt := prepareTurn(t, repo, "MUL-8541", turnOneTask)
+	gitRun(t, wt.Path, "checkout", "-b", "repo/task-branch")
+	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "off-branch delivery\n")
+	gitRun(t, wt.Path, "add", "-A")
+	gitRun(t, wt.Path, "commit", "-m", "off-branch delivery")
+	delivered := gitRun(t, wt.Path, "rev-parse", "HEAD")
+
+	other := filepath.Join(t.TempDir(), "conversation")
+	gitRun(t, repo, "worktree", "add", "--quiet", other, wt.Branch)
+	conversationTip := gitRun(t, repo, "rev-parse", wt.Branch)
+	if _, err := gitTry(t, repo, "merge-base", "--is-ancestor", conversationTip, delivered); err != nil {
+		t.Fatal("test setup is not a fast-forward delivery")
+	}
+
+	outcome, err := wt.Finalize(worktreeTestLogger())
+	if err == nil {
+		t.Fatal("Finalize moved a conversation branch that another worktree had checked out")
+	}
+	if !strings.Contains(err.Error(), "checked out at") {
+		t.Errorf("error does not explain that the branch is in use: %v", err)
+	}
+	if outcome.PreservedPath != wt.Path {
+		t.Errorf("PreservedPath = %q, want %q", outcome.PreservedPath, wt.Path)
+	}
+	if got := gitRun(t, repo, "rev-parse", wt.Branch); got != conversationTip {
+		t.Errorf("conversation branch moved to %s, want %s", got, conversationTip)
+	}
+	if _, statErr := os.Stat(wt.Path); statErr != nil {
+		t.Errorf("delivery worktree was removed after the ref move was refused: %v", statErr)
+	}
+}
+
 // A fast-forward recovery must never become a force-update. Once another
 // worktree has advanced the conversation branch on a different line, the
 // off-branch delivery and the conversation branch have diverged; Finalize must
