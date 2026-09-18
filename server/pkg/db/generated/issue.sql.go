@@ -403,6 +403,11 @@ const deleteIssue = `-- name: DeleteIssue :exec
 WITH target AS (
     SELECT issue.id FROM issue WHERE issue.id = $1 AND issue.workspace_id = $2
 ),
+cleared_pr_policy AS (
+    DELETE FROM pr_automation_issue WHERE issue_id IN (SELECT id FROM target)
+), cleared_pr_overrides AS (
+    DELETE FROM pr_automation_override WHERE issue_id IN (SELECT id FROM target)
+),
 cleared_vcs_pr_links AS (
     DELETE FROM issue_vcs_pull_request WHERE issue_id IN (SELECT target.id FROM target)
 )

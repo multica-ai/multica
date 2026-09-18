@@ -1,5 +1,7 @@
 "use client";
 
+import { PRAutomationSettings } from "./pr-automation-settings";
+
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -127,6 +129,7 @@ export function VCSTab() {
 
   return (
     <div className="space-y-6">
+      <PRAutomationSettings key={wsId} wsId={wsId} canManage={canManage} />
       <p className="text-body text-muted-foreground">{t(($) => $.vcs.page_description)}</p>
 
       {connections.length > 0 && (

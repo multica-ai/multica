@@ -493,7 +493,10 @@
     "activity_count_one": "{{count}} activity",
     "activity_count_other": "{{count}} activities",
     "show_more_activities_one": "Show {{count}} more activity",
-    "show_more_activities_other": "Show {{count}} more activities"
+    "show_more_activities_other": "Show {{count}} more activities",
+    "pr_automation_updated": "updated PR automation",
+    "pr_automation_reopened": "disabled PR auto-completion because this issue was reopened",
+    "pr_automation_completed": "completed this issue because all linked PRs merged, following the workspace policy"
   },
   "comment": {
     "add_reaction": "Add reaction",

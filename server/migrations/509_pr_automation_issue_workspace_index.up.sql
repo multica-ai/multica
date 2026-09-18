@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY pr_automation_issue_workspace_idx ON pr_automation_issue (workspace_id);

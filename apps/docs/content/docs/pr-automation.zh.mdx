@@ -1,0 +1,32 @@
+---
+title: PR 自动化
+description: 配置 PR 如何关联任务，以及合并后是否自动完成任务。
+---
+
+在**设置 → GitHub** 或**设置 → 集成 → Git 托管**中配置。GitHub 和自托管 Git 提供商共用两个工作区设置。
+
+| 设置 | 选项 |
+| --- | --- |
+| 自动关联来源 | 仅手动；标题与分支；标题、分支与正文 |
+| 所有关联 PR 合并后完成任务 | 开／关 |
+
+推荐选择**标题与分支**。`Closes`、`Fixes` 等关键词不再有特殊含义：不扫描正文时，正文中的 `Closes MUL-123` 也不会关联；扫描正文时，普通提及的任务编号同样会关联。
+
+开启自动完成后，任务至少关联一个 PR，且**所有关联 PR 均已合并**，才会转为 `done`。关闭但未合并的 PR 会阻止完成，废弃方案可以移除关联。合并到任意目标分支都算已合并，不代表已部署或已验收。合并后补关联、移除最后一个阻塞 PR、开启自动完成，都可能立即完成任务。
+
+任务详情中的**管理 PR 自动化**显示关联来源和等待原因。可以手动关联 PR URL、移除关联、恢复自动关联。手动移除后，后续 webhook 不会重新添加该关联；手动添加的关联也不会因 PR 文本修改而消失。编号有歧义时需要手动关联。
+
+单个任务可以遵循工作区设置，或关闭自动完成。重新打开已完成任务时，会同时关闭该任务的自动完成。Triage 中的任务等待接受，已有完成或取消状态不会被覆盖。连接中断或信息待同步会阻止自动完成，即使隐藏 PR 侧栏，也能看到原因。
+
+owner 或 admin 修改工作区策略前，需要预览新增／移除的关联及可能完成的任务，再保存并应用。如果影响发生变化，需要重新预览。大量变更会分批应用。
+
+现有工作区在管理员保存新策略前继续使用旧版关键词规则，部署不会批量完成历史任务。可以先迁移并关闭自动完成。历史 PR 正文可能需要通过已授权的提供商连接同步；预览覆盖已同步 PR，缺失的 PR 可以用 URL 手动补关联。
+
+```sh
+multica issue pr-automation MUL-123 --output json
+multica issue pr-automation MUL-123 --disabled
+multica issue pr-automation MUL-123 --disabled=false
+multica issue pr-automation MUL-123 --link https://github.com/owner/repo/pull/12
+multica issue pr-automation MUL-123 --exclude <pr-uuid>
+multica issue pr-automation MUL-123 --restore <pr-uuid>
+```

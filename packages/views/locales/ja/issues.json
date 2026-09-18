@@ -484,7 +484,10 @@
     "squad_leader_failed_reason": "評価に失敗しました: {{reason}}",
     "coalesced_badge": "×{{count}}",
     "activity_count_other": "アクティビティ {{count}} 件",
-    "show_more_activities_other": "アクティビティをさらに {{count}} 件表示"
+    "show_more_activities_other": "アクティビティをさらに {{count}} 件表示",
+    "pr_automation_updated": "PR 自動化を更新しました",
+    "pr_automation_reopened": "タスクが再開されたため PR 自動完了を無効にしました",
+    "pr_automation_completed": "関連する PR がすべてマージされたため、ワークスペースの設定に従ってタスクを完了しました"
   },
   "comment": {
     "add_reaction": "リアクションを追加",

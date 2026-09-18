@@ -401,6 +401,7 @@ type Handler struct {
 	// so the feature degrades cleanly on deployments without a private key.
 	// Wired in cmd/server/router.go after New.
 	PRRefresh *ghsnapshot.Manager
+	prEffects *prDeferredEffects
 	cfg       Config
 }
 
@@ -729,6 +730,9 @@ func (h *Handler) channelDeliversFiles(channelType string) bool {
 
 // publish sends a domain event through the event bus.
 func (h *Handler) publish(eventType, workspaceID, actorType, actorID string, payload any) {
+	if h.deferPREffect(func(root *Handler) { root.publish(eventType, workspaceID, actorType, actorID, payload) }) {
+		return
+	}
 	h.Bus.Publish(events.Event{
 		Type:        eventType,
 		WorkspaceID: workspaceID,

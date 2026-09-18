@@ -14,6 +14,20 @@ import (
 const deleteVCSConnection = `-- name: DeleteVCSConnection :exec
 WITH target AS (
     SELECT vcs_connection.id FROM vcs_connection WHERE vcs_connection.id = $1 AND vcs_connection.workspace_id = $2
+      AND NOT EXISTS (SELECT 1 FROM pr_automation_policy WHERE workspace_id=$2)
+),
+saved_policy_connection AS (
+    INSERT INTO pr_automation_connection(workspace_id,instance_url,connection_id)
+    SELECT workspace_id,instance_url,id FROM vcs_connection
+    WHERE id=$1 AND workspace_id=$2 AND EXISTS (SELECT 1 FROM pr_automation_policy WHERE workspace_id=$2)
+    ON CONFLICT(workspace_id,instance_url) DO UPDATE SET connection_id=EXCLUDED.connection_id
+),
+cleared_pr_evidence AS (
+    DELETE FROM pr_automation_evidence WHERE pr_id IN (
+        SELECT id FROM vcs_pull_request WHERE connection_id IN (SELECT id FROM target))
+), cleared_pr_overrides AS (
+    DELETE FROM pr_automation_override WHERE pr_id IN (
+        SELECT id FROM vcs_pull_request WHERE connection_id IN (SELECT id FROM target))
 ),
 cleared_links AS (
     DELETE FROM issue_vcs_pull_request
@@ -438,9 +452,10 @@ func (q *Queries) UpsertVCSCommitStatus(ctx context.Context, arg UpsertVCSCommit
 
 const upsertVCSConnection = `-- name: UpsertVCSConnection :one
 INSERT INTO vcs_connection (
-    workspace_id, provider, instance_url, account_login,
+    id, workspace_id, provider, instance_url, account_login,
     access_token_encrypted, webhook_secret_encrypted, connected_by_id
 ) VALUES (
+    COALESCE((SELECT connection_id FROM pr_automation_connection WHERE workspace_id=$1 AND instance_url=$3),gen_random_uuid()),
     $1, $2, $3, $4, $5, $6, $7
 )
 ON CONFLICT (workspace_id, instance_url) DO UPDATE SET

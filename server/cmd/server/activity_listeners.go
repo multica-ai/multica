@@ -65,6 +65,13 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 		assigneeChanged, _ := payload["assignee_changed"].(bool)
 		descriptionChanged, _ := payload["description_changed"].(bool)
 
+		// PR completion commits its evidence activity atomically with the issue.
+		// Broadcast that record instead of inserting a second status activity.
+		if recorded, ok := payload["status_activity"].(db.ActivityLog); statusChanged && ok &&
+			util.UUIDToString(recorded.IssueID) == issue.ID && util.UUIDToString(recorded.WorkspaceID) == issue.WorkspaceID && recorded.Action == "status_changed" {
+			publishActivityEvent(bus, e, recorded)
+			statusChanged = false
+		}
 		if statusChanged {
 			prevStatus, _ := payload["prev_status"].(string)
 			details, _ := json.Marshal(map[string]string{

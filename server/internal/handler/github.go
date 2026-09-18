@@ -1079,7 +1079,10 @@ func (h *Handler) HandleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	case "installation":
 		h.handleInstallationEvent(ctx, body)
 	case "pull_request":
-		h.handlePullRequestEvent(ctx, body)
+		if err := h.handlePullRequestEvent(ctx, body); err != nil {
+			writeError(w, 500, "PR ingestion failed; retry delivery")
+			return
+		}
 	case "check_suite", "check_run", "status":
 		// CI events are pure triggers under Plan C (MUL-5265): their payload is
 		// never read for display. Each just asks the API pipeline to re-fetch
@@ -1254,24 +1257,24 @@ type ghPullRequestPayload struct {
 	} `json:"installation"`
 }
 
-func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
+func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) error {
 	var p ghPullRequestPayload
 	if err := json.Unmarshal(body, &p); err != nil {
 		slog.Warn("github: bad pull_request payload", "err", err)
-		return
+		return nil
 	}
 	if p.Installation.ID == 0 {
-		return
+		return nil
 	}
 	insts, err := h.Queries.ListGitHubInstallationsByInstallationID(ctx, p.Installation.ID)
 	if err != nil {
 		slog.Warn("github: lookup installation failed", "err", err)
-		return
+		return err
 	}
 	if len(insts) == 0 {
 		// Webhook from an installation we never wired up — nothing we
 		// can attribute to a workspace, so drop it silently.
-		return
+		return nil
 	}
 	// #4855 lets one GitHub App installation bind to several workspaces. A
 	// repo's events belong to every bound workspace, so fan the delivery out:
@@ -1288,14 +1291,17 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 	// links, and treat that verdict as authoritative for the whole delivery, so
 	// the mirror pass cannot re-derive a different answer. See closeIntentPolicy.
 	closePolicy := h.resolveCloseIntentPolicy(ctx, insts, &p)
+	var failures error
 	for _, inst := range insts {
-		h.mirrorPullRequestForWorkspace(ctx, inst.WorkspaceID, inst.InstallationID, &p, closePolicy)
+		failures = errors.Join(failures, h.mirrorPullRequestForWorkspace(ctx, inst.WorkspaceID, inst.InstallationID, &p, closePolicy))
 	}
 	// The PR row(s) now carry the new head; ask the API pipeline for the
 	// authoritative CI + mergeability snapshot for that head. The webhook is
 	// only the doorbell — its own mergeable/checks payload is not used for
 	// display anymore (MUL-5265).
 	h.PRRefresh.Enqueue(p.Installation.ID, p.Repository.Owner.Login, p.Repository.Name, p.PullRequest.Number)
+
+	return failures
 }
 
 // closeIntentPolicy decides which (closing identifier, workspace) pairs this
@@ -1382,6 +1388,18 @@ func (h *Handler) resolveCloseIntentPolicy(ctx context.Context, insts []db.Githu
 				"installation_id", p.Installation.ID, "repo", repo, "pr_number", prNumber)
 			return closeIntentPolicy{}
 		}
+		if policy, migrated, policyErr := readPRPolicy(ctx, h.DB, inst.WorkspaceID); policyErr != nil {
+			return closeIntentPolicy{}
+		} else if migrated {
+			var settings struct {
+				Enabled *bool `json:"github_enabled"`
+			}
+			if len(ws.Settings) > 0 && json.Unmarshal(ws.Settings, &settings) != nil {
+				return closeIntentPolicy{}
+			}
+			autoLink = policy.Source != "manual" && (settings.Enabled == nil || *settings.Enabled)
+		}
+
 		if !autoLink {
 			continue
 		}
@@ -1531,35 +1549,67 @@ func (h *Handler) triggerPRRefreshFromCIEvent(ctx context.Context, body []byte) 
 // carry close_intent, so they can never advance an issue to done. This function
 // only ever narrows that verdict — it cannot grant close intent the policy
 // withheld.
-func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype.UUID, installationID int64, p *ghPullRequestPayload, closePolicy closeIntentPolicy) {
-	state := derivePRState(p.PullRequest.State, p.PullRequest.Draft, p.PullRequest.Merged)
-	mergeable, clearMergeable := derivePRMergeableState(p.Action, p.PullRequest.MergeableState, baseRefChanged(p.Changes))
-	pr, err := h.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
-		WorkspaceID:         wsID,
-		InstallationID:      installationID,
-		RepoOwner:           p.Repository.Owner.Login,
-		RepoName:            p.Repository.Name,
-		PrNumber:            p.PullRequest.Number,
-		Title:               p.PullRequest.Title,
-		State:               state,
-		HtmlUrl:             p.PullRequest.HTMLURL,
-		Branch:              ptrToText(strPtrOrNil(p.PullRequest.Head.Ref)),
-		AuthorLogin:         ptrToText(strPtrOrNil(p.PullRequest.User.Login)),
-		AuthorAvatarUrl:     ptrToText(strPtrOrNil(p.PullRequest.User.AvatarURL)),
-		MergedAt:            parseGHTime(p.PullRequest.MergedAt),
-		ClosedAt:            parseGHTime(p.PullRequest.ClosedAt),
-		PrCreatedAt:         parseGHTimeRequired(p.PullRequest.CreatedAt),
-		PrUpdatedAt:         parseGHTimeRequired(p.PullRequest.UpdatedAt),
-		HeadSha:             p.PullRequest.Head.SHA,
-		MergeableState:      mergeable,
-		ClearMergeableState: pgtype.Bool{Bool: clearMergeable, Valid: true},
-		Additions:           p.PullRequest.Additions,
-		Deletions:           p.PullRequest.Deletions,
-		ChangedFiles:        p.PullRequest.ChangedFiles,
-	})
+func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype.UUID, installationID int64, p *ghPullRequestPayload, closePolicy closeIntentPolicy) (resultErr error) {
+	policyTx, err := h.prPolicyTx(ctx, wsID)
 	if err != nil {
+		slog.Error("cannot lock PR ingestion", "error", err)
+		return err
+	}
+	defer policyTx.Rollback(ctx)
+	_, migrated, err := readPRPolicy(ctx, policyTx, wsID)
+	if err != nil {
+		slog.Error("cannot read PR policy", "error", err)
+		return err
+	}
+	queries := h.Queries.WithTx(policyTx)
+	if !migrated {
+		effects := &prDeferredEffects{handler: h}
+		scoped := *h
+		scoped.Queries = queries
+		scoped.DB = policyTx
+		scoped.prEffects = effects
+		if scoped.IssueStatusCatalog == nil || scoped.IssueStatusCatalog == h.Queries {
+			scoped.IssueStatusCatalog = queries
+		}
+		h = &scoped
+		defer func() {
+			if resultErr != nil {
+				return
+			}
+			if err := policyTx.Commit(ctx); err != nil {
+				resultErr = err
+				return
+			}
+			for _, effect := range effects.effects {
+				effect()
+			}
+		}()
+	}
+	state := derivePRState(p.PullRequest.State, p.PullRequest.Draft, p.PullRequest.Merged)
+	if migrated {
+		if handled, err := h.conflictingPRObservation(ctx, policyTx, wsID, "github_pull_request", "installation_id", installationID, p.Repository.Owner.Login, p.Repository.Name, p.PullRequest.Number, p.PullRequest.Title, p.PullRequest.Head.Ref, p.PullRequest.Body, state, p.Action, parseGHTimeRequired(p.PullRequest.UpdatedAt)); handled || err != nil {
+			return err
+		}
+	}
+	pr, err := upsertGitHubPolicyPR(ctx, queries, wsID, installationID, p)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
 		slog.Warn("github: upsert pr failed", "err", err)
-		return
+		return err
+	}
+
+	if migrated {
+		if err := h.finishPRPolicyMirror(ctx, policyTx, wsID, pr.ID, p.PullRequest.Body, pr.PrUpdatedAt); err != nil {
+			slog.Error("PR policy ingestion failed", "error", err)
+			return err
+		}
+		return nil
+	}
+	if h.recordPRPolicyEvidence(ctx, wsID, pr.ID, p.PullRequest.Body, pr.PrUpdatedAt) {
+		h.publish(protocol.EventPullRequestUpdated, uuidToString(wsID), "system", "", map[string]any{"pull_request": githubPullRequestToResponse(pr, h.PRRefresh.Enabled())})
+		return nil
 	}
 
 	workspaceID := uuidToString(wsID)
@@ -1719,6 +1769,8 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		"pull_request":     resp,
 		"linked_issue_ids": linkedIssueIDs,
 	})
+
+	return nil
 }
 
 // derivePRMergeableState resolves the upsert behaviour for the PR row's
@@ -1978,4 +2030,33 @@ func strPtrOrNil(s string) *string {
 	}
 	v := s
 	return &v
+}
+
+// Shared metadata ingestion; linking and completion belong to the caller.
+func upsertGitHubPolicyPR(ctx context.Context, queries *db.Queries, wsID pgtype.UUID, installationID int64, p *ghPullRequestPayload) (db.GithubPullRequest, error) {
+	state := derivePRState(p.PullRequest.State, p.PullRequest.Draft, p.PullRequest.Merged)
+	mergeable, clearMergeable := derivePRMergeableState(p.Action, p.PullRequest.MergeableState, baseRefChanged(p.Changes))
+	return queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
+		WorkspaceID:         wsID,
+		InstallationID:      installationID,
+		RepoOwner:           p.Repository.Owner.Login,
+		RepoName:            p.Repository.Name,
+		PrNumber:            p.PullRequest.Number,
+		Title:               p.PullRequest.Title,
+		State:               state,
+		HtmlUrl:             p.PullRequest.HTMLURL,
+		Branch:              ptrToText(strPtrOrNil(p.PullRequest.Head.Ref)),
+		AuthorLogin:         ptrToText(strPtrOrNil(p.PullRequest.User.Login)),
+		AuthorAvatarUrl:     ptrToText(strPtrOrNil(p.PullRequest.User.AvatarURL)),
+		MergedAt:            parseGHTime(p.PullRequest.MergedAt),
+		ClosedAt:            parseGHTime(p.PullRequest.ClosedAt),
+		PrCreatedAt:         parseGHTimeRequired(p.PullRequest.CreatedAt),
+		PrUpdatedAt:         parseGHTimeRequired(p.PullRequest.UpdatedAt),
+		HeadSha:             p.PullRequest.Head.SHA,
+		MergeableState:      mergeable,
+		ClearMergeableState: pgtype.Bool{Bool: clearMergeable, Valid: true},
+		Additions:           p.PullRequest.Additions,
+		Deletions:           p.PullRequest.Deletions,
+		ChangedFiles:        p.PullRequest.ChangedFiles,
+	})
 }

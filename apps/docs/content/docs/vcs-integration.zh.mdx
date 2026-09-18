@@ -3,6 +3,8 @@ title: 自托管 Git 代码托管
 description: 为每个工作区连接自托管的 Forgejo、Gitea 或 GitLab 实例，使分支名或标题中带有任务编号、或正文中在关闭关键字后带有任务编号的 Pull Request / Merge Request 自动关联到对应任务，在合并时将其移动到「完成」，并展示 CI 状态。
 ---
 
+**PR 自动化策略：**已迁移的工作区通过[两个显式设置](/pr-automation)控制关联和完成。下文的关键词关联／完成规则只适用于尚未迁移的工作区。
+
 import { Callout } from "fumadocs-ui/components/callout";
 
 <Callout type="warn">

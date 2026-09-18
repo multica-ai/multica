@@ -1,3 +1,4 @@
+vi.mock("./pr-automation-settings", () => ({PRAutomationSettings: () => null}));
 import type { ReactNode } from "react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";

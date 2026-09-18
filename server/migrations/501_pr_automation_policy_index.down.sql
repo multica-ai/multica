@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS pr_automation_policy_workspace_idx;

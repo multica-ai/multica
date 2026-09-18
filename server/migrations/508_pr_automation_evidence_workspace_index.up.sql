@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY pr_automation_evidence_workspace_idx ON pr_automation_evidence (workspace_id);

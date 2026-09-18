@@ -2,7 +2,7 @@
 
 Product contracts the runtime brief does not fully encode.
 
-- [PR linking and close intent are two distinct contracts](#pr-linking-and-close-intent-are-two-distinct-contracts)
+- [PR linking and automatic completion follow workspace policy](#pr-linking-and-automatic-completion-follow-workspace-policy)
 - [Reading a linked PR's real state](#reading-a-linked-prs-real-state)
 - [Editing comments without overwriting concurrent work](#editing-comments-without-overwriting-concurrent-work)
 - [Custom properties: typed workflow state](#custom-properties-typed-workflow-state)
@@ -29,61 +29,45 @@ comments; workspace owners and admins can edit any comment. Existing attachments
 remain unchanged. Content edits have the same agent-trigger behavior as edits
 in the app, so do not use an update as a silent bookkeeping operation.
 
-## PR linking and close intent are two distinct contracts
+## PR linking and automatic completion follow workspace policy
 
-The GitHub webhook runs two separate scans over an incoming PR. They are not the
-same gate and they read different fields.
+Before relying on a PR to complete an issue, inspect the effective policy:
 
-**Linking** scans three places for a routable issue key (`PREFIX-NUMBER`, e.g.
-`MUL-123`): the PR **title**, the **branch name**, and the **body right after a
-closing keyword**. Each match writes an issue to PR link row — the link that
-`multica issue pull-requests` reads back. A key that appears in the body as a
-bare mention, with nothing in the title or branch and no closing keyword, is a
-passing reference and links nothing.
-
-```text
-MUL-123: add the thing the issue asks for        # key anywhere in title → links
-agent/dana/mul-123-add-the-thing             # branch ref   → links
-Closes MUL-123                                   # body + closing keyword → links
-Related to MUL-123                               # body mention only → no link
+```bash
+multica issue pr-automation <issue-id> --output json
 ```
 
-**Close intent** is stricter and is a separate scan over **title or body only —
-never the branch**. It fires only for a key placed immediately after a closing
-keyword (`Closes` / `Fixes` / `Resolves`, optional `:` then whitespace). That
-adjacency is what sets the link row's close-intent flag, the gate that
-auto-advances the issue to `done` when the PR merges.
+In migrated workspaces, settings select identifier sources: `manual` (explicit
+links only), `title_branch`, or `all` (also ordinary description mentions).
+`Closes` / `Fixes` / `Resolves` have no special completion meaning. Use a routable
+issue key (`PREFIX-NUMBER`, such as `MUL-123`) in a selected source, or explicitly
+link the PR:
 
-```text
-Closes MUL-123                                    # links AND records close intent
-Fixes MUL-123
-Resolves MUL-123
-Fix login MUL-123                                 # in a title: links, no close intent
+```bash
+multica issue pr-automation MUL-123 --link https://github.com/owner/repo/pull/12
 ```
 
-Consequence: a bare key in the title or a branch reference links the PR but does
-not close the issue on merge. A closing keyword immediately adjacent to the issue key
-records close intent; on merge, that close intent can move the linked issue to
-`done`.
+With workspace automatic completion enabled, an issue completes only when at
+least one PR is linked and **all linked PRs are merged**, across providers.
+Open, draft and closed-unmerged PRs block completion. Triage and terminal issues
+are preserved; disconnected providers or incomplete metadata can block progress.
+The command reports the decision, associations and exclusions; inspect those
+rather than assuming that a keyword or a merged PR is sufficient.
 
-**Passing mentions link nothing.** A key that appears **only** as a bare mention
-in the body — no closing keyword, and not in the title or branch — does not link
-the PR at all. This keeps `Related MUL-123` or `Follow up in MUL-123` from
-surfacing an unrelated PR as if it were working on that issue. To make a PR show
-up for an issue, put the key in the title, the branch, or after a closing keyword
-in the body — not as a loose body reference.
+Manual links survive text edits. Removing a link persists an exclusion until
+restored. Reopening a completed issue disables automatic completion for that
+issue; restore workspace inheritance explicitly only when intended. Linking an
+already merged PR or removing the last unmerged blocker can complete the issue
+immediately. For work requiring acceptance after merge, disable automatic
+completion for that issue before relying on PR links.
 
-While the PR is still open the link follows the live title and body: adding a key
-links it, and downgrading that key to a plain mention drops the link. Once the PR
-has merged or closed, existing links and their close-intent decision are frozen —
-but a PR that was never linked can still be linked by editing it, so a forgotten
-key is repairable after the fact. That late link does not move the issue to
-`done`; close intent is decided at merge time.
-
-```text
-Closes MUL-123 in the body                        # links
-Related to MUL-123 in the body (no title/branch)  # no link
-```
+**Unmigrated workspaces retain the legacy contract.** Title/branch keys and body
+closing keywords link; ordinary body mentions do not. Merge-time close intent
+from `Closes` / `Fixes` / `Resolves` is required for automatic completion, subject
+to the existing integration and issue gates. Late links do not grant retroactive
+close intent. If the command is unsupported by the client/server, use
+`multica issue pull-requests <issue-id>` and verify settings; do not assume the
+new policy is active.
 
 ### Default for code-changing issue work
 
@@ -94,16 +78,10 @@ an unconditional command: if no code changed, say no PR is needed; if PR creatio
 is blocked by auth, failing tests, or missing remote state, report that blocker
 instead of pretending the run is complete.
 
-To make the PR show on the issue, put a routable issue key in the PR **title**
-(preferred) or the **branch**. A key that appears only as a bare mention in the
-body links nothing. Do not use a closing keyword (`Closes` / `Fixes` /
-`Resolves`) unless the issue should auto-advance to `done` on merge.
-
-```text
-MUL-123: fix login redirect        # key anywhere in title → links
-Closes MUL-123                     # only when merge should mark the issue done
-Part of MUL-123                    # body mention only → no link at all
-```
+Put a routable issue key in the PR **title** (preferred) or **branch**, then
+verify the saved policy and actual association. With source `manual`, explicitly
+link the URL. A description-only key links only when the selected source permits
+it; adding a closing keyword does not override migrated workspace settings.
 
 In the final issue comment, include the PR URL when a PR exists. If the task did
 not produce a PR because no code changed or the user asked not to create one, say
@@ -145,11 +123,11 @@ Returns `{"pull_requests": [...]}`. Each element exposes:
 So "is it merged?" is `state == "merged"` (or `merged_at != null`); "is it still
 a draft?" is `state == "draft"`; coarse CI status is `checks_conclusion`.
 
-If the command returns no linked PRs after a PR was opened, check the syntax
-first: the scanner needs a routable issue key in the PR title or branch, or one
-right after a closing keyword in the body — a bare body mention does not count
-(see the passing-mention rule above). When the syntax is the problem, editing the
-title or adding a closing keyword re-runs the scan.
+If the command returns no linked PRs, inspect `issue pr-automation` first:
+check the selected identifier sources, manual exclusions and ambiguous matches.
+Correct a title/branch key if that source is enabled, or explicitly link the URL.
+For legacy workspaces, title/branch keys or body closing keywords link; ordinary
+body mentions do not. Do not add keywords blindly to force completion.
 
 If the key is already written correctly and the list is still empty, stop editing
 the PR blind: another no-op edit cannot fix an integration that never received the
@@ -288,9 +266,10 @@ archived statuses remain readable via an explicit status filter.
   later re-trigger confirms the overall goal is met.
 - **`in_review`** is an accepted issue status. Some workflows use it while a PR
   is open and awaiting review; moving to it is an explicit mutation.
-- **`done`** on a child issue posts a system comment on its parent. If a PR
-  carries close intent (`Closes MUL-XXXX`), it advances the issue to `done`
-  itself on merge — you do not also need to flip it manually.
+- **`done`** on a child issue posts a system comment on its parent. PR automation
+  can advance it to `done` when the effective workspace/issue policy allows it;
+  inspect `issue pr-automation` rather than assuming a closing keyword suffices.
+  Do not also flip the status manually when automation already completed it.
 - **`cancelled`** is a terminal, user-driven decision to close the issue. Like
   `done` it enqueues no new agent work, but it does **not** stop tasks already in
   flight — a run in progress keeps going. To stop a running task, cancel the
@@ -416,12 +395,12 @@ breakdown, leave it `backlog` and comment to confirm first.
 
 ## Incorrect to correct
 
-PR title (link the issue):
+PR text with the `title_branch` source selected:
 
 ```text
 Fix login redirect                  # incorrect — no issue key, won't link
-Body-only "Part of MUL-123"         # incorrect — passing mention, won't link
-MUL-123: fix login redirect        # correct — links the PR
+Body-only "Part of MUL-123"         # won't link with this source; links with all
+MUL-123: fix login redirect        # links when title matching is enabled
 ```
 
 Serial / phased sub-issues (don't start the whole chain at once):

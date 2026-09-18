@@ -1,0 +1,52 @@
+---
+title: PR automation
+description: Choose how PRs link to issues and whether merging them completes the issue.
+---
+
+PR automation has two workspace settings, shared by GitHub and self-hosted Git
+providers. Find them in **Settings → GitHub** or **Settings → Integrations → Git hosting**.
+
+| Setting | Options |
+| --- | --- |
+| Automatically link from | Manual only; title and branch; title, branch and description |
+| Complete when all linked PRs are merged | On or off |
+
+**Title and branch** is the recommended source. Keywords such as `Closes` and
+`Fixes` have no special meaning. With descriptions excluded, `Closes MUL-123` in a
+PR description does not link the issue. With descriptions included, every matching
+issue identifier counts, including ordinary references.
+
+When completion is on, an issue needs at least one linked PR and **all** linked
+PRs must be merged. A closed but unmerged PR blocks completion; remove its link if
+it is abandoned. Any target branch counts as merged. This does not imply deployment
+or acceptance. Linking after merge, removing a blocker or enabling completion can
+complete an issue immediately.
+
+In issue detail, **Manage PR automation** shows association sources and why an issue
+is waiting. You can link a PR URL, remove a link or restore automatic linking.
+Removed links stay excluded across webhook updates. Manually added links survive
+changes to PR text. Ambiguous identifiers require manual linking.
+
+An individual issue can follow the workspace or disable completion. Reopening a
+completed issue disables its completion so it stays open. Triage awaits acceptance;
+completed and cancelled issues are preserved. Connection or synchronization problems
+block completion and appear in the issue's decision, even when the PR sidebar is hidden.
+
+Only owners and admins can change workspace policy. Review the preview of added and
+removed links and issues that may complete, then **Save and apply**. If the evaluated
+impact changes, preview again. Large changes continue in batches in the background.
+
+Existing workspaces keep the legacy keyword rules until an administrator saves this
+policy. Deployment does not complete historical issues. You can migrate with completion
+off first. Historical PR descriptions may need **Sync PR metadata** before completion;
+this requires access through the connected provider. Preview covers already synchronized
+PRs, while manually linking a URL can fetch a missing PR.
+
+```sh
+multica issue pr-automation MUL-123 --output json
+multica issue pr-automation MUL-123 --disabled
+multica issue pr-automation MUL-123 --disabled=false
+multica issue pr-automation MUL-123 --link https://github.com/owner/repo/pull/12
+multica issue pr-automation MUL-123 --exclude <pr-uuid>
+multica issue pr-automation MUL-123 --restore <pr-uuid>
+```

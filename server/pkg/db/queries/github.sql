@@ -123,6 +123,7 @@ ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number) DO UPDATE SET
     deletions     = EXCLUDED.deletions,
     changed_files = EXCLUDED.changed_files,
     updated_at = now()
+WHERE EXCLUDED.pr_updated_at >= github_pull_request.pr_updated_at
 RETURNING *;
 
 -- name: GetGitHubPullRequest :one

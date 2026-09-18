@@ -125,3 +125,8 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 - Do not add internal compatibility shims, dual writes, fallback paths, or legacy adapters unless requested. This does not relax API response compatibility above.
 - New global pre-workspace routes use a single word or `/{noun}/{verb}`, not hyphenated root names. Update `server/internal/handler/reserved_slugs.json`, run `pnpm generate:reserved-slugs`, and commit `packages/core/paths/reserved-slugs.ts` when changing reserved slugs.
 - Use atomic conventional commits and the repository PR template. For releases, follow [.github/RELEASING.md](.github/RELEASING.md); default to a patch bump unless specified otherwise.
+
+## PR Automation
+
+- Before relying on a PR to complete a Multica issue, inspect `multica issue pr-automation <id>` when the client/server supports it. On older versions use `multica issue pull-requests <id>` and do not assume the new policy is active. Migrated workspaces use source selection and an all-linked-PRs-merged switch; closing keywords have no special eligibility. Unmigrated workspaces retain the legacy rules.
+- Manual removal persists an exclusion. Reopening a completed issue disables its automatic completion until explicitly restored. See [PR automation](docs/pr-automation.md) for migration, API, and recovery contracts.

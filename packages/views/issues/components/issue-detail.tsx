@@ -1,5 +1,7 @@
 "use client";
 
+import { PRAutomationControl } from "./pr-automation-control";
+
 import {
   issueBehavesAs,
   issueBehavesAsAny,
@@ -298,7 +300,10 @@ function formatActivity(
   switch (entry.action) {
     case "created":
       return t(($) => $.activity.created);
+    case "pr_automation_updated":
+      return details.reason === "reopened" ? t(($) => $.activity.pr_automation_reopened) : t(($) => $.activity.pr_automation_updated);
     case "status_changed":
+      if (details.source === "pr_automation") return t(($) => $.activity.pr_automation_completed);
       return t(($) => $.activity.status_changed, {
         from: statusLabel(details.from ?? "?", t, resolveStatusLabel),
         to: statusLabel(details.to ?? "?", t, resolveStatusLabel),
@@ -2545,6 +2550,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>}
         </div>
       )}
+
+      <PRAutomationControl key={id} issueId={id} />
 
       {/* Pull requests — hidden when the workspace disables the PR sidebar
           (or the GitHub master switch is off). Backend data is kept either

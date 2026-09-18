@@ -141,7 +141,10 @@ func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
 		if pr, err := provider.ParsePullRequest(body); err != nil {
 			slog.Warn("vcs: bad pull_request payload", "provider", conn.Provider, "err", err)
 		} else {
-			h.mirrorVCSPullRequest(r.Context(), conn, pr)
+			if err := h.mirrorVCSPullRequest(r.Context(), conn, pr); err != nil {
+				writeError(w, 500, "PR ingestion failed; retry delivery")
+				return
+			}
 		}
 	case vcs.EventCIStatus:
 		if st, err := provider.ParseCIStatus(body); err != nil {
@@ -155,37 +158,56 @@ func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
-func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnection, ev vcs.PullRequestEvent) {
+func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnection, ev vcs.PullRequestEvent) (resultErr error) {
 	if ev.RepoOwner == "" || ev.RepoName == "" || ev.Number == 0 {
 		slog.Warn("vcs: pull_request missing repo identity", "provider", conn.Provider)
-		return
+		return nil
 	}
 
-	pr, err := h.Queries.UpsertVCSPullRequest(ctx, db.UpsertVCSPullRequestParams{
-		WorkspaceID:     conn.WorkspaceID,
-		ConnectionID:    conn.ID,
-		Provider:        conn.Provider,
-		RepoOwner:       ev.RepoOwner,
-		RepoName:        ev.RepoName,
-		PrNumber:        ev.Number,
-		Title:           ev.Title,
-		State:           ev.State,
-		HtmlUrl:         ev.HTMLURL,
-		Branch:          ptrToText(strPtrOrNil(ev.Branch)),
-		AuthorLogin:     ptrToText(strPtrOrNil(ev.AuthorLogin)),
-		AuthorAvatarUrl: ptrToText(strPtrOrNil(ev.AuthorAvatarURL)),
-		MergedAt:        parseGHTime(ev.MergedAt),
-		ClosedAt:        parseGHTime(ev.ClosedAt),
-		PrCreatedAt:     parseGHTimeRequired(ev.CreatedAt),
-		PrUpdatedAt:     parseGHTimeRequired(ev.UpdatedAt),
-		Additions:       ev.Additions,
-		Deletions:       ev.Deletions,
-		ChangedFiles:    ev.ChangedFiles,
-		HeadSha:         ev.HeadSHA,
-	})
+	policyTx, err := h.prPolicyTx(ctx, conn.WorkspaceID)
+	if err != nil {
+		slog.Error("cannot lock PR ingestion", "error", err)
+		return err
+	}
+	defer policyTx.Rollback(ctx)
+	_, migrated, err := readPRPolicy(ctx, policyTx, conn.WorkspaceID)
+	if err != nil {
+		slog.Error("cannot read PR policy", "error", err)
+		return err
+	}
+	queries := h.Queries.WithTx(policyTx)
+	if !migrated {
+		effects := &prDeferredEffects{handler: h}
+		scoped := *h
+		scoped.Queries = queries
+		scoped.DB = policyTx
+		scoped.prEffects = effects
+		if scoped.IssueStatusCatalog == nil || scoped.IssueStatusCatalog == h.Queries {
+			scoped.IssueStatusCatalog = queries
+		}
+		h = &scoped
+		defer func() {
+			if resultErr != nil {
+				return
+			}
+			if err := policyTx.Commit(ctx); err != nil {
+				resultErr = err
+				return
+			}
+			for _, effect := range effects.effects {
+				effect()
+			}
+		}()
+	}
+	if migrated {
+		if handled, err := h.conflictingPRObservation(ctx, policyTx, conn.WorkspaceID, "vcs_pull_request", "connection_id", conn.ID, ev.RepoOwner, ev.RepoName, ev.Number, ev.Title, ev.Branch, ev.Body, ev.State, ev.Action, parseGHTimeRequired(ev.UpdatedAt)); handled || err != nil {
+			return err
+		}
+	}
+	pr, err := upsertVCSPolicyPR(ctx, queries, conn, ev)
 	if err != nil {
 		slog.Warn("vcs: upsert pr failed", "err", err)
-		return
+		return err
 	}
 
 	// Out-of-order guard for the link write. UpsertVCSPullRequest keeps the
@@ -201,7 +223,19 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	// never strictly after the stored value, so it proceeds.)
 	evUpdatedAt := parseGHTimeRequired(ev.UpdatedAt)
 	if pr.PrUpdatedAt.Valid && evUpdatedAt.Valid && pr.PrUpdatedAt.Time.After(evUpdatedAt.Time) {
-		return
+		return nil
+	}
+
+	if migrated {
+		if err := h.finishPRPolicyMirror(ctx, policyTx, conn.WorkspaceID, pr.ID, ev.Body, pr.PrUpdatedAt); err != nil {
+			slog.Error("PR policy ingestion failed", "error", err)
+			return err
+		}
+		return nil
+	}
+	if h.recordPRPolicyEvidence(ctx, conn.WorkspaceID, pr.ID, ev.Body, pr.PrUpdatedAt) {
+		h.publish(protocol.EventPullRequestUpdated, uuidToString(conn.WorkspaceID), "system", "", map[string]any{"pull_request": vcsPullRequestToResponse(pr)})
+		return nil
 	}
 
 	workspaceID := uuidToString(conn.WorkspaceID)
@@ -295,6 +329,8 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 		"pull_request":     resp,
 		"linked_issue_ids": linkedIssueIDs,
 	})
+
+	return nil
 }
 
 func (h *Handler) mirrorVCSCIStatus(ctx context.Context, conn db.VcsConnection, ev vcs.CIStatusEvent) {
@@ -332,4 +368,30 @@ func (h *Handler) mirrorVCSCIStatus(ctx context.Context, conn db.VcsConnection, 
 			"issue_id": uuidToString(issueID),
 		})
 	}
+}
+
+// Shared metadata ingestion; linking and completion belong to the caller.
+func upsertVCSPolicyPR(ctx context.Context, queries *db.Queries, conn db.VcsConnection, ev vcs.PullRequestEvent) (db.VcsPullRequest, error) {
+	return queries.UpsertVCSPullRequest(ctx, db.UpsertVCSPullRequestParams{
+		WorkspaceID:     conn.WorkspaceID,
+		ConnectionID:    conn.ID,
+		Provider:        conn.Provider,
+		RepoOwner:       ev.RepoOwner,
+		RepoName:        ev.RepoName,
+		PrNumber:        ev.Number,
+		Title:           ev.Title,
+		State:           ev.State,
+		HtmlUrl:         ev.HTMLURL,
+		Branch:          ptrToText(strPtrOrNil(ev.Branch)),
+		AuthorLogin:     ptrToText(strPtrOrNil(ev.AuthorLogin)),
+		AuthorAvatarUrl: ptrToText(strPtrOrNil(ev.AuthorAvatarURL)),
+		MergedAt:        parseGHTime(ev.MergedAt),
+		ClosedAt:        parseGHTime(ev.ClosedAt),
+		PrCreatedAt:     parseGHTimeRequired(ev.CreatedAt),
+		PrUpdatedAt:     parseGHTimeRequired(ev.UpdatedAt),
+		Additions:       ev.Additions,
+		Deletions:       ev.Deletions,
+		ChangedFiles:    ev.ChangedFiles,
+		HeadSha:         ev.HeadSHA,
+	})
 }

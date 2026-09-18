@@ -1,5 +1,7 @@
 "use client";
 
+import { PRAutomationSettings } from "./pr-automation-settings";
+
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -23,6 +25,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import {
+  prPolicyOptions,
   deriveGitHubSettings,
   githubInstallationsOptions,
 } from "@multica/core/github";
@@ -44,6 +47,7 @@ export function GitHubTab() {
   const workspace = useCurrentWorkspace();
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
+  const { data: prPolicy } = useQuery(prPolicyOptions(wsId));
   const navigation = useNavigation();
   const user = useAuthStore((s) => s.user);
 
@@ -132,6 +136,7 @@ export function GitHubTab() {
     <SettingsTab
       title={t(($) => $.page.tabs.github)}
     >
+      <PRAutomationSettings key={wsId} wsId={wsId} canManage={canManage} />
       <section className="space-y-3">
         <Card>
           <CardContent>
@@ -280,7 +285,7 @@ export function GitHubTab() {
               onCheckedChange={(v) => persistSetting("co_authored_by_enabled", v)}
             />
 
-            <FeatureRow
+            {!prPolicy?.migrated && <FeatureRow
               id="github-auto-link"
               icon={<Link2 className="h-4 w-4" />}
               label={t(($) => $.github.feature_auto_link_label)}
@@ -297,7 +302,7 @@ export function GitHubTab() {
               checked={flags.autoLinkPRs}
               disabled={!canManage || !flags.enabled || savingKey === "github_auto_link_prs_enabled"}
               onCheckedChange={(v) => persistSetting("github_auto_link_prs_enabled", v)}
-            />
+            />}
           </CardContent>
         </Card>
       </section>

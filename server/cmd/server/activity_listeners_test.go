@@ -344,3 +344,24 @@ func TestActivityTaskFailed(t *testing.T) {
 		t.Fatalf("expected action 'task_failed', got %q", activities[0].Action)
 	}
 }
+
+func TestActivityIssueUpdatedReusesCommittedPRCompletion(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerActivityListeners(bus, queries)
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupActivities(t, issueID); cleanupTestIssue(t, issueID) })
+	activity, err := queries.CreateActivity(context.Background(), db.CreateActivityParams{
+		WorkspaceID: parseUUID(testWorkspaceID), IssueID: parseUUID(issueID), ActorType: util.StrToText("system"), Action: "status_changed", Details: []byte(`{"from":"in_review","to":"done","source":"pr_automation"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bus.Publish(events.Event{Type: protocol.EventIssueUpdated, WorkspaceID: testWorkspaceID, ActorType: "system", Payload: map[string]any{
+		"issue": handler.IssueResponse{ID: issueID, WorkspaceID: testWorkspaceID, Status: "done"}, "status_changed": true, "prev_status": "in_review", "status_activity": activity,
+	}})
+	activities := listActivitiesForIssue(t, queries, issueID)
+	if len(activities) != 1 || activities[0].ID != activity.ID {
+		t.Fatalf("completion activity duplicated: %+v", activities)
+	}
+}

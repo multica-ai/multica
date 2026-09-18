@@ -69,6 +69,9 @@ import (
 // notification on the side of a successful status update; failing it must
 // not roll back the user's status change.
 func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Issue) {
+	if h.deferPREffect(func(root *Handler) { root.notifyParentOfChildDone(ctx, prev, issue) }) {
+		return
+	}
 	if !issue.ParentIssueID.Valid {
 		return
 	}

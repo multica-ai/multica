@@ -493,7 +493,10 @@
     "activity_count_one": "{{count}} activité",
     "activity_count_other": "{{count}} activités",
     "show_more_activities_one": "Afficher {{count}} activité de plus",
-    "show_more_activities_other": "Afficher {{count}} activités de plus"
+    "show_more_activities_other": "Afficher {{count}} activités de plus",
+    "pr_automation_updated": "a modifié l’automatisation des PR",
+    "pr_automation_reopened": "a désactivé la clôture automatique car la tâche a été rouverte",
+    "pr_automation_completed": "a terminé cette tâche selon la politique de l’espace de travail, car toutes les PR associées ont été fusionnées"
   },
   "comment": {
     "add_reaction": "Ajouter une réaction",

@@ -1,3 +1,4 @@
+import { PRPolicyEnvelopeSchema, PRPolicyPlanSchema, IssuePRPolicySchema, type PRPolicy, type PRPolicyUpdate, type PRPolicyEnvelope, type PRPolicyPlan, type IssuePRPolicy } from "./pr-automation";
 import type { InboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import { configStore } from "../config";
@@ -4579,6 +4580,34 @@ export class ApiClient {
       EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
       { endpoint: "GET /api/issues/:id/pull-requests" },
     );
+  }
+
+  async getPRPolicy(wsId: string) {
+    const endpoint = `/api/workspaces/${wsId}/pr-automation`;
+    return parseWithFallback<PRPolicyEnvelope | null>(await this.fetch<unknown>(endpoint), PRPolicyEnvelopeSchema.nullable(), null, { endpoint });
+  }
+  async syncPRPolicy(wsId: string) {
+    await this.fetch(`/api/workspaces/${wsId}/pr-automation/sync`, {method: "POST"});
+  }
+  async previewPRPolicy(wsId: string, policy: PRPolicy) {
+    const endpoint = `/api/workspaces/${wsId}/pr-automation/preview`;
+    const result = parseWithFallback<PRPolicyPlan | null>(await this.fetch<unknown>(endpoint, { method: "POST", body: JSON.stringify({source: policy.source, auto_complete: policy.autoComplete}) }), PRPolicyPlanSchema.nullable(), null, { endpoint });
+    if (!result) throw new Error("Invalid PR policy preview response");
+    return result;
+  }
+  async updatePRPolicy(wsId: string, policy: PRPolicy, token: string) {
+    const endpoint = `/api/workspaces/${wsId}/pr-automation`;
+    const result = parseWithFallback<PRPolicyPlan | null>(await this.fetch<unknown>(endpoint, { method: "PUT", body: JSON.stringify({source: policy.source, auto_complete: policy.autoComplete, token}) }), PRPolicyPlanSchema.nullable(), null, { endpoint });
+    if (!result) throw new Error("Invalid PR policy response");
+    return result;
+  }
+  async getIssuePRPolicy(issueId: string) {
+    const endpoint = `/api/issues/${issueId}/pr-automation`;
+    return parseWithFallback<IssuePRPolicy | null>(await this.fetch<unknown>(endpoint), IssuePRPolicySchema.nullable(), null, { endpoint });
+  }
+  async updateIssuePRPolicy(issueId: string, body: PRPolicyUpdate) {
+    const payload = "disabled" in body ? body : {pr_id: body.prId, url: body.url, mode: body.mode};
+    return this.fetch(`/api/issues/${issueId}/pr-automation`, { method: "PUT", body: JSON.stringify(payload) });
   }
 
   // VCS integration (Forgejo / Gitea / GitLab)

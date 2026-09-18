@@ -805,6 +805,17 @@ func main() {
 	if err := schedulerMgr.Register(scheduler.PluginHookScheduleDispatchJob(queries, h.PluginService)); err != nil {
 		slog.Warn("scheduler: failed to register plugin_hook_schedule_dispatch job", "error", err)
 	}
+	if err := schedulerMgr.Register(scheduler.JobSpec{
+		Name: "pr_automation_reconcile", Cadence: time.Minute, CatchUpMode: scheduler.CatchUpLatestOnly,
+		CatchUpWindow: time.Hour, RunTimeout: 50 * time.Second, StaleTimeout: 2 * time.Minute,
+		HeartbeatInterval: 15 * time.Second, AllowStaleReentry: true, MaxAttempts: 3,
+		RetryBackoff: []time.Duration{time.Minute}, Scopes: scheduler.StaticScopes(scheduler.ScopeGlobal),
+		Handler: func(ctx context.Context, _ scheduler.HandlerInput) (scheduler.HandlerResult, error) {
+			return scheduler.HandlerResult{}, h.ReconcilePRPolicies(ctx)
+		},
+	}); err != nil {
+		slog.Error("register PR automation reconciliation", "error", err)
+	}
 	go func() {
 		_ = schedulerMgr.Run(sweepCtx)
 	}()

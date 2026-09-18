@@ -1194,6 +1194,44 @@ type PluginStorage struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
+type PrAutomationConnection struct {
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	InstanceUrl  string      `json:"instance_url"`
+	ConnectionID pgtype.UUID `json:"connection_id"`
+}
+
+type PrAutomationEvidence struct {
+	PrID            pgtype.UUID        `json:"pr_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Body            string             `json:"body"`
+	ObservedAt      pgtype.Timestamptz `json:"observed_at"`
+	SyncAttemptedAt pgtype.Timestamptz `json:"sync_attempted_at"`
+	SyncError       pgtype.Text        `json:"sync_error"`
+}
+
+type PrAutomationIssue struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Disabled    bool        `json:"disabled"`
+}
+
+type PrAutomationOverride struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	PrID        pgtype.UUID `json:"pr_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Mode        string      `json:"mode"`
+}
+
+type PrAutomationPolicy struct {
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Source       string             `json:"source"`
+	AutoComplete bool               `json:"auto_complete"`
+	Revision     int64              `json:"revision"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	CheckedAt    pgtype.Timestamptz `json:"checked_at"`
+	LastError    pgtype.Text        `json:"last_error"`
+}
+
 type Project struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

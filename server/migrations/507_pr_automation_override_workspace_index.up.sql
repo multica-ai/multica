@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY pr_automation_override_workspace_idx ON pr_automation_override (workspace_id);

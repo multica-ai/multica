@@ -96,7 +96,12 @@ SELECT id FROM workspace WHERE id = $1 FOR KEY SHARE;
 -- tables the DELETE below sweeps — they are not cleaned up implicitly. Remove
 -- their workspace-owned rows here so they commit or roll back atomically with
 -- the workspace row.
-WITH ws_installations AS (
+WITH cleared_pr_connection AS (DELETE FROM pr_automation_connection WHERE workspace_id=$1),
+cleared_pr_policy AS (DELETE FROM pr_automation_policy WHERE workspace_id=$1),
+cleared_pr_evidence AS (DELETE FROM pr_automation_evidence WHERE workspace_id=$1),
+cleared_pr_overrides AS (DELETE FROM pr_automation_override WHERE workspace_id=$1),
+cleared_pr_issue_policy AS (DELETE FROM pr_automation_issue WHERE workspace_id=$1),
+ws_installations AS (
     SELECT id FROM channel_installation WHERE workspace_id = $1
 ),
 ws_sessions AS (

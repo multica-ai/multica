@@ -484,7 +484,10 @@
     "squad_leader_failed_reason": "평가 실패: {{reason}}",
     "coalesced_badge": "×{{count}}",
     "activity_count_other": "활동 {{count}}개",
-    "show_more_activities_other": "활동 {{count}}개 더 보기"
+    "show_more_activities_other": "활동 {{count}}개 더 보기",
+    "pr_automation_updated": "PR 자동화를 업데이트했습니다",
+    "pr_automation_reopened": "태스크가 다시 열려 PR 자동 완료를 비활성화했습니다",
+    "pr_automation_completed": "연결된 PR이 모두 병합되어 워크스페이스 설정에 따라 태스크를 완료했습니다"
   },
   "comment": {
     "add_reaction": "반응 추가",

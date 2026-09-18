@@ -484,7 +484,10 @@
     "squad_leader_failed_reason": "评估失败：{{reason}}",
     "coalesced_badge": "×{{count}}",
     "activity_count_other": "{{count}} 条动态",
-    "show_more_activities_other": "展开更早 {{count}} 条动态"
+    "show_more_activities_other": "展开更早 {{count}} 条动态",
+    "pr_automation_updated": "更新了 PR 自动化设置",
+    "pr_automation_reopened": "任务重新打开，已关闭 PR 自动完成",
+    "pr_automation_completed": "所有关联 PR 均已合并，按工作区设置完成任务"
   },
   "comment": {
     "add_reaction": "添加表情回应",
