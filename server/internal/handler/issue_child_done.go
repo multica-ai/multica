@@ -341,7 +341,8 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 
 	var content string
 	if staged {
-		stageCancelled := stageHasCancelled(children, closedStage, statuses.status)
+		stageCancelledCount := countStageCancelled(children, closedStage, statuses.status)
+		stageCancelled := stageCancelledCount > 0
 		advanceHasCancelled := stageCancelled
 		if batch {
 			// A single batch can close several stages. Always preserve cancellation
@@ -351,7 +352,7 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 			advanceHasCancelled = stageCancelled || batchClosedScopeHasCancelled(children, batchCompleted, closedStage, statuses.status)
 		}
 		summary, nextStage := stageProgressSummary(children, closedStage, statuses.status)
-		advance := stageAdvanceInstruction(nextStage, parentID, advanceHasCancelled)
+		advance := stageAdvanceInstruction(nextStage, parentID, stageCancelledCount, advanceHasCancelled)
 		if !stageCancelled {
 			// Keep the historical no-cancellation wording byte-identical for the
 			// named stage. A lower stage cancelled in the same batch can still add
@@ -640,13 +641,27 @@ func stageProgressSummary(children []db.Issue, closedStage int32, statusOf func(
 	return strings.Join(parts, "; "), nextStage
 }
 
-func stageHasCancelled(children []db.Issue, stage int32, statusOf func(db.Issue) string) bool {
+// countStageCancelled counts the cancelled children of one stage. The advance
+// instruction reports the number rather than the fact, because the agent it is
+// written for has to decide whether the next stage can start without that work:
+// "2 sub-issues cancelled" is checkable against the layout, "includes cancelled
+// items" is not.
+func countStageCancelled(children []db.Issue, stage int32, statusOf func(db.Issue) string) int {
+	n := 0
 	for _, child := range children {
 		if child.Stage.Valid && child.Stage.Int32 == stage && statusOf(child) == "cancelled" {
-			return true
+			n++
 		}
 	}
-	return false
+	return n
+}
+
+// subIssueCount renders a sub-issue count with the right plural.
+func subIssueCount(n int) string {
+	if n == 1 {
+		return "1 sub-issue"
+	}
+	return fmt.Sprintf("%d sub-issues", n)
 }
 
 // batchClosedScopeHasCancelled reports whether this batch newly cancelled work
@@ -695,10 +710,16 @@ func anyCancelledChildren(children []db.Issue, statusOf func(db.Issue) string) b
 //     asserted a finality the server cannot know and pushed leaders to wrap up
 //     mid-workflow (MUL-4062 / #4927). The message now names both possibilities
 //     and hands the create-next-vs-wrap-up decision back to the leader.
-//   - hasCancelled: one of the stages just closed contains cancelled work, so
-//     the instruction asks the assignee to confirm it is not a dependency
-//     before advancing. The server still does not decide that question itself.
-func stageAdvanceInstruction(nextStage int32, parentID string, hasCancelled bool) string {
+//   - stageCancelled: how many sub-issues of the stage this comment names were
+//     cancelled. Non-zero also means the headline above calls the stage
+//     `closed` rather than complete, so the instruction says "Closing" to
+//     match rather than contradicting its own comment with "Completing".
+//   - scopeCancelled: whether anything the update closed was cancelled, which
+//     for a batch includes lower stages that carry no count of their own. It
+//     decides whether the warning renders at all; stageCancelled decides
+//     whether the warning can be specific. The server still does not decide
+//     the dependency question itself either way.
+func stageAdvanceInstruction(nextStage int32, parentID string, stageCancelled int, scopeCancelled bool) string {
 	var instruction string
 	if nextStage > 0 {
 		instruction = fmt.Sprintf(
@@ -706,12 +727,25 @@ func stageAdvanceInstruction(nextStage int32, parentID string, hasCancelled bool
 			nextStage, parentID, nextStage,
 		)
 	} else {
-		instruction = fmt.Sprintf(" Completing this stage does not mean the whole issue is done. Decide whether the issue is actually complete — if so, synthesize the results and run `multica issue status %s in_review` to mark the parent ready for review — or whether the next stage still needs to be created, in which case create that stage and its sub-issues now.", parentID)
+		verb := "Completing"
+		if stageCancelled > 0 {
+			verb = "Closing"
+		}
+		instruction = fmt.Sprintf(" %s this stage does not mean the whole issue is done. Decide whether the issue is actually complete — if so, synthesize the results and run `multica issue status %s in_review` to mark the parent ready for review — or whether the next stage still needs to be created, in which case create that stage and its sub-issues now.", verb, parentID)
 	}
-	if !hasCancelled {
+	if !scopeCancelled {
 		return instruction
 	}
-	return instruction + " The just-closed work includes cancelled items: confirm that the cancelled work is not a dependency of whatever comes next before advancing. If unsure, do not promote or create the next stage yet; post a comment to confirm first."
+	// Only the named stage has a count attached to it. A batch that also closed
+	// lower stages has no single stage to name, so it keeps the general warning
+	// rather than reporting a number that would not match any one stage.
+	if stageCancelled == 0 {
+		return instruction + " The just-closed work includes cancelled items: confirm that the cancelled work is not a dependency of whatever comes next before advancing. If unsure, do not promote or create the next stage yet; post a comment to confirm first."
+	}
+	if nextStage > 0 {
+		return instruction + fmt.Sprintf(" The stage that just closed has %s cancelled: confirm that the cancelled work is not something Stage %d depends on before advancing. If unsure, do not promote yet; post a comment to confirm first.", subIssueCount(stageCancelled), nextStage)
+	}
+	return instruction + fmt.Sprintf(" The stage that just closed has %s cancelled: confirm that the cancelled work is not a dependency of whatever comes next before advancing. If unsure, do not create the next stage yet; post a comment to confirm first.", subIssueCount(stageCancelled))
 }
 
 func unstagedCancellationInstruction() string {

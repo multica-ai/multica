@@ -254,7 +254,8 @@ func TestBatchChildDonePreservesRepresentativeAndParentOrder(t *testing.T) {
 							if !strings.Contains(content, "Stage 7 of this issue is closed") ||
 								!strings.Contains(content, "Stage 2: 0/1 done, 1 cancelled; Stage 7: 0/2 done, 2 cancelled; Stage 20: 0/1 done (next)") ||
 								!strings.Contains(content, "Stage 20 is next") ||
-								!strings.Contains(content, "confirm that the cancelled work is not a dependency") {
+								!strings.Contains(content, "has 2 sub-issues cancelled") ||
+								!strings.Contains(content, "not something Stage 20 depends on") {
 								t.Fatalf("inaccurate cancelled-stage summary: %s", content)
 							}
 						} else if !strings.Contains(content, "Stage 7 of this issue is complete") || !strings.Contains(content, "Stage 2: 1/1 done; Stage 7: 2/2 done; Stage 20: 0/1 done (next)") || !strings.Contains(content, "Stage 20 is next") {

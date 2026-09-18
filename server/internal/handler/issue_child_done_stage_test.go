@@ -155,14 +155,14 @@ func TestStageAdvanceInstruction(t *testing.T) {
 	const parentID = "parent-uuid"
 
 	t.Run("a known next stage points the leader at it", func(t *testing.T) {
-		got := stageAdvanceInstruction(3, parentID, false)
+		got := stageAdvanceInstruction(3, parentID, 0, false)
 		if !strings.Contains(got, "Stage 3 is next") {
 			t.Fatalf("expected next-stage instruction, got %q", got)
 		}
 	})
 
 	t.Run("no created next stage does not assert finality", func(t *testing.T) {
-		got := stageAdvanceInstruction(0, parentID, false)
+		got := stageAdvanceInstruction(0, parentID, 0, false)
 		// Regression guard for MUL-4062: an intermediate stage in a lazily
 		// created workflow also reaches nextStage==0, so the message must not
 		// claim this was definitively the final stage.
