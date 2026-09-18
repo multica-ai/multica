@@ -412,6 +412,34 @@ describe("useCreateIssue — parent children cache refresh", () => {
     vi.restoreAllMocks();
   });
 
+  it("inserts a child exactly once into an empty cache before invalidation", async () => {
+    const child = makeIssue(1, { parent_issue_id: PARENT_ID });
+    qc.setQueryData<Issue[]>(childKey, []);
+    createIssue.mockResolvedValue(child);
+    const invalidateQueries = qc.invalidateQueries.bind(qc);
+    const snapshots: Issue[][] = [];
+    vi.spyOn(qc, "invalidateQueries").mockImplementation((filters, options) => {
+      if (JSON.stringify(filters?.queryKey) === JSON.stringify(childKey)) {
+        snapshots.push([...(qc.getQueryData<Issue[]>(childKey) ?? [])]);
+      }
+      return invalidateQueries(filters, options);
+    });
+
+    const { result } = renderHook(() => useCreateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        title: "Child",
+        parent_issue_id: PARENT_ID,
+      });
+    });
+
+    expect(snapshots).toEqual([[child]]);
+    expect(qc.getQueryData<Issue[]>(childKey)).toEqual([child]);
+  });
+
   it("inserts a created child into an already loaded parent children cache", async () => {
     const child = makeIssue(2, { parent_issue_id: PARENT_ID });
     qc.setQueryData<Issue[]>(childKey, [
