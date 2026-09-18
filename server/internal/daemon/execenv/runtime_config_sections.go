@@ -997,6 +997,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	writeAgentIdentity(&b, ctx)
 	writeRequestingUser(&b, ctx)
 	writeWorkspaceContext(&b, ctx)
+	writeCodexWindowsWarning(&b, provider)
 
 	switch kind {
 	case kindQuickCreate:
@@ -1050,4 +1051,16 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	writeOutput(&b, kind, ctx)
 
 	return b.String()
+}
+
+// writeCodexWindowsWarning keeps the upstream Windows output-capture limitation
+// visible in the active runtime brief, without treating missing output as proof
+// that a command succeeded (openai/codex#20874).
+func writeCodexWindowsWarning(b *strings.Builder, provider string) {
+	if provider != "codex" || runtimeGOOS != "windows" {
+		return
+	}
+	b.WriteString("## Important: Known Codex Limitation on Windows\n\n")
+	b.WriteString("Codex CLI on Windows may lose shell command stdout/stderr or report an unreliable exit code (openai/codex#20874). Commands can still execute and produce side effects even when their output is blank. Missing output does not prove success or failure: verify results through an observable file or another working tool, and explicitly report any result you cannot verify. Do not repeat a state-changing command just because its output was blank.\n\n")
+	b.WriteString("If shell output remains unavailable, report the limitation. Running Codex under WSL2/Linux on the same host is a possible workaround.\n\n")
 }
