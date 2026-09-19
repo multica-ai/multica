@@ -19,6 +19,9 @@ type RuntimeSkillRefForEnv struct {
 	Key    string
 	Name   string
 	Plugin string
+	// PluginPath is resolved from the runtime's native launch-context inventory, never
+	// from API input. It is needed only for Claude plugin discovery filtering.
+	PluginPath string
 }
 
 func cleanRuntimeSkillKey(key string) (string, bool) {
@@ -57,12 +60,12 @@ func prepareClaudeSkillSettings(envRoot string, disabled []RuntimeSkillRefForEnv
 		if invocationName == "" {
 			invocationName = filepath.Base(filepath.FromSlash(key))
 		}
-		if workspaceClaimsRuntimeSkill(invocationName, workspaceSkills) {
+		if skill.Root != "plugin" && workspaceClaimsRuntimeSkill(invocationName, workspaceSkills) {
 			continue
 		}
 		// Claude Code's skillOverrides fully hides personal/project skills.
-		// Plugin skills ignore that setting, so the permission deny below is
-		// also emitted for every key and is the enforcement path for plugins.
+		// Plugin copies handle discovery; deny rules additionally block explicit
+		// invocation of a disabled namespaced skill retained in session history.
 		if skill.Root != "plugin" {
 			overrides[invocationName] = "off"
 		} else {
