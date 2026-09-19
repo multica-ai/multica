@@ -30,6 +30,8 @@ func DisplayNameForToolkitSlug(slug string) string {
 		return ""
 	}
 	switch slug {
+	case "feishu-documents":
+		return "Feishu Documents"
 	case "github":
 		return "GitHub"
 	case "gmail":
