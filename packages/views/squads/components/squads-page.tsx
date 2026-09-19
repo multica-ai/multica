@@ -91,6 +91,7 @@ import {
 } from "../../layout/collection-page";
 import { useLocale, useT } from "../../i18n";
 import { PAGE_TOOLBAR } from "../../layout/page-header";
+import { ImportFromWorkspaceAction } from "../../workspace/import-from-workspace-dialog";
 
 // Column template — the simplest member of the ListGrid family (squads are
 // the fewest entity, 1-5 rows): subgrid template + var tracks + two-zone
@@ -916,11 +917,14 @@ export function SquadsPage() {
         title={t(($) => $.page.title)}
         count={squads.length}
         actions={
-          <CollectionPageHeaderAction
-            icon={Plus}
-            label={t(($) => $.page.new_button)}
-            onClick={() => useModalStore.getState().open("create-squad")}
-          />
+          <>
+            <ImportFromWorkspaceAction />
+            <CollectionPageHeaderAction
+              icon={Plus}
+              label={t(($) => $.page.new_button)}
+              onClick={() => useModalStore.getState().open("create-squad")}
+            />
+          </>
         }
       />
 

@@ -56,6 +56,10 @@ import {
   SendChatMessageResponseSchema,
   SquadListSchema,
   SquadSchema,
+  WorkspaceImportPreviewSchema,
+  WorkspaceImportResultSchema,
+  EMPTY_WORKSPACE_IMPORT_PREVIEW,
+  EMPTY_WORKSPACE_IMPORT_RESULT,
   SourceContextPreviewSchema,
   TimelineEntriesSchema,
   UserSchema,
@@ -2266,5 +2270,29 @@ describe("TaskMessageListSchema", () => {
   it("downgrades an unknown message type instead of dropping the transcript", () => {
     const parsed = TaskMessageListSchema.parse([{ ...row, type: "video" }]);
     expect(parsed[0]?.type).toBe("text");
+  });
+});
+
+describe("workspace import schemas", () => {
+  it("fills missing preview collections", () => {
+    const parsed = parseWithFallback(
+      { source_workspace_id: "src" },
+      WorkspaceImportPreviewSchema,
+      EMPTY_WORKSPACE_IMPORT_PREVIEW,
+      { endpoint: "GET /api/workspaces/:id/import-preview" },
+    );
+    expect(parsed.source_workspace_id).toBe("src");
+    expect(parsed.agents).toEqual([]);
+    expect(parsed.squads).toEqual([]);
+  });
+
+  it("falls back when the import result is malformed", () => {
+    const parsed = parseWithFallback(
+      "nope",
+      WorkspaceImportResultSchema,
+      EMPTY_WORKSPACE_IMPORT_RESULT,
+      { endpoint: "POST /api/workspaces/:id/import-from-workspace" },
+    );
+    expect(parsed).toEqual(EMPTY_WORKSPACE_IMPORT_RESULT);
   });
 });

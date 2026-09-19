@@ -88,6 +88,8 @@ import type {
   User,
   WebhookDelivery,
   WorkspaceMcpServer,
+  WorkspaceImportPreview,
+  WorkspaceImportResult,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
@@ -2158,6 +2160,55 @@ export const SquadSchema = z.object({
 
 export const SquadListSchema = z.array(SquadSchema);
 export const EMPTY_SQUAD_LIST: Squad[] = [];
+
+const WorkspaceImportPreviewAgentSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().default(""),
+  model: z.string().default(""),
+  skill_names: z.array(z.string()).default([]),
+}).loose();
+
+const WorkspaceImportPreviewSquadSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().default(""),
+  leader_id: z.string().default(""),
+  leader_name: z.string().default(""),
+  member_count: z.number().default(0),
+  agent_member_ids: z.array(z.string()).default([]),
+}).loose();
+
+export const WorkspaceImportPreviewSchema = z.object({
+  source_workspace_id: z.string(),
+  source_workspace_name: z.string().default(""),
+  agents: z.array(WorkspaceImportPreviewAgentSchema).default([]),
+  squads: z.array(WorkspaceImportPreviewSquadSchema).default([]),
+}).loose();
+
+export const EMPTY_WORKSPACE_IMPORT_PREVIEW: WorkspaceImportPreview = {
+  source_workspace_id: "",
+  source_workspace_name: "",
+  agents: [],
+  squads: [],
+};
+
+const WorkspaceImportItemResultSchema = z.object({
+  source_id: z.string(),
+  id: z.string().optional(),
+  name: z.string().default(""),
+  status: z.string().default("skipped"),
+}).loose();
+
+export const WorkspaceImportResultSchema = z.object({
+  agents: z.array(WorkspaceImportItemResultSchema).default([]),
+  squads: z.array(WorkspaceImportItemResultSchema).default([]),
+}).loose();
+
+export const EMPTY_WORKSPACE_IMPORT_RESULT: WorkspaceImportResult = {
+  agents: [],
+  squads: [],
+};
 export const EMPTY_SQUAD: Squad = {
   id: "",
   workspace_id: "",

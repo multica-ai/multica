@@ -1623,6 +1623,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// because opening an issue is what asks for it; executable
 					// bytes stay off the authenticated app/API origin.
 					r.Get("/plugins/{installationId}/surfaces/{surfaceKey}/launch", h.GetPluginSurfaceLaunch)
+					// Copy portable agent/squad configuration from another
+					// workspace the caller belongs to. Secrets never travel.
+					r.Get("/import-preview", h.PreviewWorkspaceImport)
+					r.Post("/import-from-workspace", h.ImportFromWorkspace)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {

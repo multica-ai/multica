@@ -38,6 +38,17 @@ import { Callout } from "fumadocs-ui/components/callout";
 修改任务前缀后，所有任务立即换用新编号（`MUL-5` 变为 `NEW-5`），但 PR、分支名和聊天记录里的旧编号不会更新。
 </Callout>
 
+## 导入智能体和小队
+
+新工作区是空的。如果你已经在自己加入的另一个工作区里配好了智能体和小队，可以直接导入，而不用重新创建。
+
+在智能体或小队页面选择**导入**，选来源工作区、选当前工作区里的运行时，然后确认。会复制名称、指令、访问权限、对话开场白和小队成员。环境变量、MCP 配置和其他密钥不会复制。只有当前工作区里已有同名 Skill 时才会挂上。重名项会跳过。
+
+```bash
+multica workspace import --from other-team --runtime-id <runtime-id>
+multica workspace import --from other-team --preview
+```
+
 ## 切换和离开
 
 一个账号可以加入多个工作区。切换只改变当前查看的范围，不移动任何数据。

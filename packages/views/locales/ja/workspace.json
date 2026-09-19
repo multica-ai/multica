@@ -30,5 +30,25 @@
     "description": "このワークスペースは存在しないか、アクセス権がありません。",
     "go_to_workspaces": "マイワークスペースへ移動",
     "sign_in_different": "別のユーザーでログイン"
+  },
+  "import": {
+    "action": "インポート",
+    "title": "ワークスペースからインポート",
+    "source_label": "元のワークスペース",
+    "source_placeholder": "ワークスペースを選択",
+    "runtime_label": "インポート先のランタイム",
+    "runtime_placeholder": "ランタイムを選択",
+    "runtime_empty": "先にこのワークスペースへランタイムを追加してください。",
+    "loading": "読み込み中…",
+    "agents_section": "エージェント",
+    "squads_section": "スクワッド",
+    "empty_source": "そのワークスペースからインポートできるものはありません。",
+    "hint": "同名の項目はスキップされます。環境変数と MCP 設定はコピーされません。",
+    "cancel": "キャンセル",
+    "submit": "インポート",
+    "submitting": "インポート中…",
+    "success": "エージェント {{agents}}、スクワッド {{squads}} をインポートしました。",
+    "success_partial": "エージェント {{agents}}、スクワッド {{squads}} をインポートし、{{skipped}} 件をスキップしました。",
+    "failed": "インポートに失敗しました"
   }
 }

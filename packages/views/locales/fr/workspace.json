@@ -30,5 +30,25 @@
     "description": "Cet espace de travail n'existe pas ou vous n'y avez pas accès.",
     "go_to_workspaces": "Accéder à mes espaces de travail",
     "sign_in_different": "Se connecter avec un autre compte"
+  },
+  "import": {
+    "action": "Importer",
+    "title": "Importer depuis un espace de travail",
+    "source_label": "Espace source",
+    "source_placeholder": "Choisir un espace de travail",
+    "runtime_label": "Runtime des agents importés",
+    "runtime_placeholder": "Choisir un runtime",
+    "runtime_empty": "Ajoutez d'abord un runtime dans cet espace.",
+    "loading": "Chargement…",
+    "agents_section": "Agents",
+    "squads_section": "Équipes",
+    "empty_source": "Rien à importer depuis cet espace.",
+    "hint": "Les noms déjà pris sont ignorés. Les variables d'environnement et la config MCP ne sont pas copiées.",
+    "cancel": "Annuler",
+    "submit": "Importer",
+    "submitting": "Importation…",
+    "success": "{{agents}} agents et {{squads}} équipes importés.",
+    "success_partial": "{{agents}} agents et {{squads}} équipes importés. {{skipped}} ignorés.",
+    "failed": "Échec de l'importation"
   }
 }

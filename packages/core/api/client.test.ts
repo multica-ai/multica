@@ -3054,3 +3054,46 @@ describe("ApiClient shared credential across windows", () => {
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("ApiClient workspace import", () => {
+  it("previews and imports through the target workspace routes", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (String(url).includes("import-preview")) {
+        return new Response(
+          JSON.stringify({
+            source_workspace_id: "src",
+            source_workspace_name: "Studio",
+            agents: [{ id: "a1", name: "Lead" }],
+            squads: [],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          agents: [{ source_id: "a1", id: "new", name: "Lead", status: "created" }],
+          squads: [],
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    const preview = await client.previewWorkspaceImport("target", "src");
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      "/api/workspaces/target/import-preview?source_workspace_id=src",
+    );
+    expect(preview.agents[0]?.name).toBe("Lead");
+
+    const result = await client.importFromWorkspace("target", {
+      source_workspace_id: "src",
+      runtime_id: "rt-1",
+      import_all: true,
+    });
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain(
+      "/api/workspaces/target/import-from-workspace",
+    );
+    expect(result.agents[0]?.status).toBe("created");
+  });
+});

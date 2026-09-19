@@ -54,6 +54,9 @@ import type {
   Workspace,
   WorkspaceRepo,
   WorkspaceMcpServer,
+  WorkspaceImportPreview,
+  WorkspaceImportRequest,
+  WorkspaceImportResult,
   MemberWithUser,
   User,
   Skill,
@@ -291,6 +294,8 @@ import {
   EMPTY_SQUAD,
   EMPTY_SQUAD_LIST,
   EMPTY_SQUAD_MEMBER_STATUS_LIST,
+  EMPTY_WORKSPACE_IMPORT_PREVIEW,
+  EMPTY_WORKSPACE_IMPORT_RESULT,
   EMPTY_TIMELINE_ENTRIES,
   EMPTY_USER,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
@@ -326,6 +331,8 @@ import {
   SearchProjectsResponseSchema,
   SquadSchema,
   SquadListSchema,
+  WorkspaceImportPreviewSchema,
+  WorkspaceImportResultSchema,
   SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
   TaskMessageListSchema,
@@ -2767,6 +2774,38 @@ export class ApiClient {
 
   async getWorkspace(id: string): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`);
+  }
+
+  async previewWorkspaceImport(
+    targetWorkspaceId: string,
+    sourceWorkspaceId: string,
+  ): Promise<WorkspaceImportPreview> {
+    const search = new URLSearchParams({ source_workspace_id: sourceWorkspaceId });
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${targetWorkspaceId}/import-preview?${search}`,
+    );
+    return parseWithFallback(
+      raw,
+      WorkspaceImportPreviewSchema,
+      EMPTY_WORKSPACE_IMPORT_PREVIEW,
+      { endpoint: "GET /api/workspaces/:id/import-preview" },
+    );
+  }
+
+  async importFromWorkspace(
+    targetWorkspaceId: string,
+    data: WorkspaceImportRequest,
+  ): Promise<WorkspaceImportResult> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${targetWorkspaceId}/import-from-workspace`,
+      { method: "POST", body: JSON.stringify(data) },
+    );
+    return parseWithFallback(
+      raw,
+      WorkspaceImportResultSchema,
+      EMPTY_WORKSPACE_IMPORT_RESULT,
+      { endpoint: "POST /api/workspaces/:id/import-from-workspace" },
+    );
   }
 
   async createWorkspace(data: { name: string; slug: string; description?: string; context?: string; issue_prefix?: string }): Promise<Workspace> {
