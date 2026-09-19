@@ -2450,7 +2450,14 @@ func discoverGrokModels(ctx context.Context, runtimeCmd Command) (Catalog, error
 		acpArgs:      []string{"--no-auto-update", "agent", "--always-approve", "stdio"},
 		annotate:     annotateGrokThinkingFromACP,
 		selectAuthMethod: func(initResult json.RawMessage, childEnv []string) (string, error) {
-			return selectGrokAuthMethod(extractACPAuthMethods(initResult), envHasNonEmpty(childEnv, "XAI_API_KEY"))
+			// Discovery authenticates once and already degrades to the static
+			// catalog on failure, so it takes the most-preferred method rather
+			// than walking the list the way a real run does.
+			methods, err := selectGrokAuthMethods(extractACPAuthMethods(initResult), envHasNonEmpty(childEnv, "XAI_API_KEY"))
+			if err != nil {
+				return "", err
+			}
+			return methods[0], nil
 		},
 		strictErrors: true,
 	})
