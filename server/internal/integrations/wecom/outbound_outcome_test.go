@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -513,7 +514,7 @@ func TestAReapedTaskRowIsStillADrop(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			q := deliverableTurn(t)
-			q.taskErr = pgx.ErrNoRows
+			q.originErr = pgx.ErrNoRows
 			tc.setup(q)
 			r := newOutcomeRig(t, q, true)
 
@@ -562,9 +563,9 @@ func TestAnotherPlatformsTurnDoesNotPayForTheOriginGate(t *testing.T) {
 
 	r.o.handleEvent(outcomeEvent())
 
-	if q.taskGets != 0 {
-		t.Fatalf("the origin gate ran %d task lookup(s) for another platform's turn; every channel's "+
-			"chat:done passes through here, so that cost is paid on all of them", q.taskGets)
+	if len(q.originAskedFor) != 0 {
+		t.Fatalf("the origin gate ran %d lookup(s) for another platform's turn; every channel's "+
+			"chat:done passes through here, so that cost is paid on all of them", len(q.originAskedFor))
 	}
 	if got := r.mx.get("outbound_skipped:" + string(skipNotWecomTurn)); got != 1 {
 		t.Fatalf("outbound_skipped:%s = %d, want 1", skipNotWecomTurn, got)
@@ -575,19 +576,26 @@ func TestAnotherPlatformsTurnDoesNotPayForTheOriginGate(t *testing.T) {
 // completion of a question typed in the Multica web UI arrives in the
 // no-delivery-row branch — EnqueueChatTask writes no delivery row, only
 // EnqueueChannelChatTask does — so on a deployment running WeCom this branch,
-// not the one with a row, carries most of the traffic. Two keyed reads each
-// time: the task row, then the channel_ingested stamp on the batch it owns.
+// not the one with a row, carries most of the traffic.
+//
+// ONE read each time, and the assertion is an equality on both sides for that
+// reason: GetTaskChannelOrigin answers task existence and channel provenance
+// together, so the branch costs one round trip on top of the delivery lookup
+// main already did. It was two — GetAgentTask, then the channel_ingested stamp
+// — and every one of them was on the completion response's path, see the
+// contract above taskOriginOf.
 //
 // Pinned because a cost paid once per web message is the kind that is measured
 // once, written into a comment, and then grows. The exit table is
 // TestNonWecomSessionIsNotADrop's; what this one owns is the price and what the
 // price buys.
 //
-// REVERSE VERIFICATION: drop the gate from that branch and record
-// skipNoDeliveryRow unconditionally — the cheap version the cost argument
-// pushes toward — and this fails with 0 lookups and no_delivery_row in place of
-// origin_not_channel, which is the loudest line in the file firing once per web
-// message.
+// REVERSE VERIFICATION: split the gate back into GetAgentTask plus
+// TaskHasChannelIngestedMessages and this fails with 2 lookups; drop the gate
+// from that branch and record skipNoDeliveryRow unconditionally — the cheap
+// version the cost argument pushes toward — and it fails with 0 lookups and
+// no_delivery_row in place of origin_not_channel, which is the loudest line in
+// the file firing once per web message.
 func TestTheWebUITurnWithNoRowPaysForTheOriginGate(t *testing.T) {
 	t.Parallel()
 	q := deliverableTurn(t)
@@ -597,17 +605,117 @@ func TestTheWebUITurnWithNoRowPaysForTheOriginGate(t *testing.T) {
 
 	r.o.handleEvent(outcomeEvent())
 
-	if q.taskGets != 1 {
-		t.Errorf("task lookups = %d, want 1 — this runs on every web-UI completion in the deployment",
-			q.taskGets)
+	if got := q.originAskedFor; len(got) != 1 || got[0] != outcomeTask {
+		t.Errorf("origin-classification queries = %v, want exactly one, keyed on the completed task "+
+			"%s — this runs on every web-UI completion in the deployment, and the completion "+
+			"response waits for it", got, outcomeTask)
 	}
-	if got := len(q.originAskedFor); got != 1 {
-		t.Errorf("channel_ingested reads = %d, want 1 — same traffic, same multiplier", got)
-	}
-	// What the two reads buy: this turn leaves by the web UI's exit at DEBUG
+	// What the read buys: this turn leaves by the web UI's exit at DEBUG
 	// instead of the missing-route WARN.
 	if got := r.mx.get("outbound_skipped:" + string(skipOriginNotChannel)); got != 1 {
-		t.Fatalf("outbound_skipped:%s = %d, want 1 — then the lookups bought nothing. log:\n%s",
+		t.Fatalf("outbound_skipped:%s = %d, want 1 — then the lookup bought nothing. log:\n%s",
 			skipOriginNotChannel, got, r.logs.String())
+	}
+}
+
+// TestAGateFailureIsNotAnUnconfirmedReply — a read that fails before anything
+// reaches a socket is not an unconfirmed delivery.
+//
+// unconfirmedReason maps context.Canceled and context.DeadlineExceeded to
+// "interrupted", and it is right to: on the SEND path a context error leaves a
+// frame that may already be at the peer, which outbound_media.go:478-485 argues
+// for at length. handleEvent then applies that reading to everything
+// processEvent returns, including reads taken long before any byte moves — and
+// an unconfirmed reply tells an operator the user may ALREADY HAVE this
+// message, so a resend would duplicate it and the right move is to go and look.
+// For a lookup that failed, all of that is false.
+//
+// Both of the origin gate's call sites are here because they fail for the same
+// reason and must record the same thing. What they do NOT share is the budget:
+// see the test below.
+//
+// REVERSE VERIFICATION: return the gate's error from either branch instead of
+// recording it, and that row fails with outbound_dropped:transport_error = 0
+// and an outbound_unconfirmed:interrupted WARN in the log the failure prints.
+func TestAGateFailureIsNotAnUnconfirmedReply(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		setup func(q *fakeOutboundQueries)
+	}{
+		{
+			// The observability call site: no delivery row, so nothing was
+			// ever going to be sent and the read only decides a log level.
+			name:  "no delivery row",
+			setup: func(q *fakeOutboundQueries) { q.sessionErr = pgx.ErrNoRows },
+		},
+		{
+			// The delivery call site: the row says the turn is WeCom's, so a
+			// reply WAS owed. Still nothing on the wire — the gate is upstream
+			// of the socket — so still a definite drop, not an unknown.
+			name:  "a wecom delivery row",
+			setup: func(*fakeOutboundQueries) {},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			q := deliverableTurn(t)
+			q.originErr = context.DeadlineExceeded
+			tc.setup(q)
+			r := newOutcomeRig(t, q, true)
+
+			r.o.handleEvent(outcomeEvent())
+
+			if got := r.mx.get("outbound_unconfirmed"); got != 0 {
+				t.Errorf("outbound_unconfirmed = %d; nothing was written to a socket, so telling an "+
+					"operator the user may already have this reply is false. log:\n%s",
+					got, r.logs.String())
+			}
+			if got := r.mx.get("outbound_dropped:" + string(dropTransport)); got != 1 {
+				t.Fatalf("outbound_dropped:%s = %d, want 1 — a turn this adapter could not classify "+
+					"at all still has to be counted once, and definitely. log:\n%s",
+					dropTransport, got, r.logs.String())
+			}
+			if n := r.frames(); n != 0 {
+				t.Errorf("frames = %d, want 0", n)
+			}
+		})
+	}
+}
+
+// TestTheObservabilityLookupHasItsOwnBudget — and the budget is not the
+// handler's.
+//
+// handleEvent's ten seconds cover a whole delivery: the lookups, a WebSocket
+// write, and the ack the platform owes it. The no-delivery-row branch delivers
+// nothing — it reads to decide whether a missing route is worth a WARN — and it
+// is reached by every web-UI completion in the deployment, on a publish the
+// daemon's POST /tasks/{id}/complete is waiting for (see the call-path contract
+// above taskOriginOf). Ten seconds of that per completion is the cost this
+// branch must not be able to impose.
+//
+// The database here never answers at all, which is the worst case and the one
+// the ceiling exists for.
+//
+// REVERSE VERIFICATION: hand the gate ctx instead of its own budget and this
+// fails twice — a budget of ~10s, and a handler that took the full 10s.
+func TestTheObservabilityLookupHasItsOwnBudget(t *testing.T) {
+	t.Parallel()
+	q := deliverableTurn(t)
+	q.sessionErr = pgx.ErrNoRows // no delivery row: the observability branch
+	q.originHangs = true         // ... and a database that never answers
+	r := newOutcomeRig(t, q, true)
+
+	started := time.Now()
+	r.o.handleEvent(outcomeEvent())
+	elapsed := time.Since(started)
+
+	if q.originBudget <= 0 || q.originBudget > originLookupBudget {
+		t.Errorf("the gate was given %s; want a budget of its own, at most %s",
+			q.originBudget, originLookupBudget)
+	}
+	if elapsed >= outboundHandlerBudget {
+		t.Errorf("the handler took %s — the gate spent the whole delivery budget (%s) on a read "+
+			"that delivers nothing", elapsed, outboundHandlerBudget)
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -47,13 +48,9 @@ type fakeOutboundQueries struct {
 	// query rather than how many the counter was told about.
 	lookupGate     chan struct{}
 	lookupsEntered atomic.Int64
-	// tasks answers the retry-clone lookup: the round is bound under the turn
-	// that owns the input batch, and a clone reaches it through
-	// chat_input_task_id. A task with no row here reads as pgx.ErrNoRows —
-	// cancelled and reaped while its ending was in flight.
-	tasks    map[string]db.AgentTaskQueue
-	taskErr  error
-	taskGets int
+	// tasks says which task rows exist. A task with no row here reads as
+	// pgx.ErrNoRows — cancelled and reaped while its ending was in flight.
+	tasks map[string]struct{}
 	// channelIngested is the channel_ingested stamp on the input batch the
 	// task owns: askedOverWecom for a question typed in the room,
 	// askedInTheWebUI for one typed in Multica.
@@ -66,11 +63,23 @@ type fakeOutboundQueries struct {
 	// omission, which is what keeps this rig usable by whichever of the two
 	// lands second.
 	//
-	// originAskedFor records which id the stamp was read for, which is the
-	// whole of the retry-clone question.
+	// originAskedFor records which id the origin gate was keyed on, once per
+	// call. The gate is one query now, so its length IS what a completion costs
+	// in reads — there is no second counter to disagree with it.
+	//
+	// WHICH BATCH the stamp is read off — the clone's own id or the parent's
+	// chat_input_task_id — is no longer observable here: it moved into
+	// GetTaskChannelOrigin's COALESCE. TestGetTaskChannelOrigin_RealSQL pins it
+	// against Postgres instead, because a fake cannot answer for a join it does
+	// not perform.
 	channelIngested *bool
 	originErr       error
 	originAskedFor  []string
+	// originHangs makes the gate wait for its context instead of answering,
+	// which is what an unavailable database looks like from in here.
+	// originBudget records how long the caller gave it.
+	originHangs  bool
+	originBudget time.Duration
 	// t is who an unset stamp is reported to. fileTask sets it, and a filed
 	// row is the only route to the origin gate, so it is always there by the
 	// time the gate reads.
@@ -118,24 +127,23 @@ func (f *fakeOutboundQueries) ListAttachmentsByChatMessage(context.Context, db.L
 	}
 	return f.attachments, f.attachmentsErr
 }
-func (f *fakeOutboundQueries) GetAgentTask(_ context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
-	f.taskGets++
-	if f.taskErr != nil {
-		return db.AgentTaskQueue{}, f.taskErr
+func (f *fakeOutboundQueries) GetTaskChannelOrigin(ctx context.Context, id pgtype.UUID) (bool, error) {
+	f.originAskedFor = append(f.originAskedFor, util.UUIDToString(id))
+	if deadline, ok := ctx.Deadline(); ok {
+		f.originBudget = time.Until(deadline)
 	}
-	task, ok := f.tasks[util.UUIDToString(id)]
-	if !ok {
-		return db.AgentTaskQueue{}, pgx.ErrNoRows
+	if f.originHangs {
+		<-ctx.Done()
+		return false, ctx.Err()
 	}
-	return task, nil
-}
-func (f *fakeOutboundQueries) TaskHasChannelIngestedMessages(_ context.Context, taskID pgtype.UUID) (bool, error) {
-	f.originAskedFor = append(f.originAskedFor, util.UUIDToString(taskID))
 	if f.originErr != nil {
 		return false, f.originErr
 	}
+	if _, ok := f.tasks[util.UUIDToString(id)]; !ok {
+		return false, pgx.ErrNoRows
+	}
 	if f.channelIngested == nil {
-		f.failStampNotSet(util.UUIDToString(taskID))
+		f.failStampNotSet(util.UUIDToString(id))
 		return false, nil // unreachable: failStampNotSet ends the test
 	}
 	return *f.channelIngested, nil
@@ -162,26 +170,16 @@ func (f *fakeOutboundQueries) failStampNotSet(taskID string) {
 	f.t.Fatalf("%s", msg)
 }
 
-// fileTask records the agent_task_queue row GetAgentTask answers with, for a
-// task that owns its own input batch — which every chat round's task has done
-// since MUL-4351. id is the task id the ending event carries.
+// fileTask records that the agent_task_queue row the ending event names is
+// still there, so the origin gate gets a verdict rather than pgx.ErrNoRows.
 func (f *fakeOutboundQueries) fileTask(t testing.TB, id string) {
-	t.Helper()
-	f.fileRetryClone(t, id, id)
-}
-
-// fileRetryClone files FailTask's retry child: a fresh task id inheriting the
-// parent's input batch, its own id owning nothing. This is the row that makes
-// the batch owner the only id worth asking the stamp about.
-func (f *fakeOutboundQueries) fileRetryClone(t testing.TB, id, owner string) {
 	t.Helper()
 	f.t = t
 	taskID := mustParseTaskUUID(t, id)
-	ownerID := mustParseTaskUUID(t, owner)
 	if f.tasks == nil {
-		f.tasks = map[string]db.AgentTaskQueue{}
+		f.tasks = map[string]struct{}{}
 	}
-	f.tasks[util.UUIDToString(taskID)] = db.AgentTaskQueue{ID: taskID, ChatInputTaskID: ownerID}
+	f.tasks[util.UUIDToString(taskID)] = struct{}{}
 }
 
 func mustParseTaskUUID(t testing.TB, id string) pgtype.UUID {
@@ -192,9 +190,6 @@ func mustParseTaskUUID(t testing.TB, id string) pgtype.UUID {
 	}
 	return parsed
 }
-
-// originAsked is the ids the provenance stamp was read for, in order.
-func (f *fakeOutboundQueries) originAsked() []string { return f.originAskedFor }
 
 func newOutboundWithConn(t *testing.T, q outboundQueries) (*Outbound, pgtype.UUID, *recordingConn) {
 	t.Helper()
