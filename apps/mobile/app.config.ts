@@ -26,11 +26,24 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     orientation: "portrait",
     userInterfaceStyle: "automatic",
     scheme: "multica",
-    // 1024x1024 source shared with the desktop client
-    // (apps/desktop/build/icon.png). Expo prebuild generates every required
-    // iOS icon size from this single PNG.
+    // Base icon: the 1024x1024 desktop artwork (apps/desktop/build/icon.png),
+    // a rounded-square logo with padding and a drop shadow on a white ground.
+    // That shape is right for macOS but wrong for iOS, which applies its own
+    // squircle mask: the white padding survives as a ring and the artwork's
+    // corner radius nests inside iOS's. iOS therefore overrides it below with a
+    // full-bleed source. Prebuild only resizes; it cannot strip padding, a
+    // shadow, or pre-rounded corners.
     icon: "./assets/icon.png",
     ios: {
+      // Full-bleed iOS source: opaque #111827 ground extending to all four
+      // edges, white mark held inside the safe zone, no shadow, no padding, no
+      // pre-rounded corners — so only iOS's own mask shapes the icon. Rasterized
+      // from apps/web/public/icons/icon.svg, the same full-bleed mark the web
+      // maskable icon already ships. Regenerate after a brand change with:
+      //   sips -s format png --resampleHeightWidth 1024 1024 \
+      //     ../web/public/icons/icon.svg --out assets/icon-ios.png
+      // then flatten to strip the alpha channel iOS sources must not carry.
+      icon: "./assets/icon-ios.png",
       // Expo keeps the top-level portrait policy for iPhone while adding all
       // iPad orientations required for multitasking when tablet support is on.
       supportsTablet: true,
