@@ -36,8 +36,11 @@ type fakeOutboundQueries struct {
 	// user reads. A fake with no profile set answers "nothing", which is the
 	// deployment default — the answer every test written before the copy pack
 	// expects.
-	userBindingID  pgtype.UUID
-	userBindErr    error
+	userBindingID pgtype.UUID
+	userBindErr   error
+	// perUserBinding overrides userBindingID for one channel userid; an invalid
+	// UUID means that sender is not bound, which is pgx.ErrNoRows in production.
+	perUserBinding map[string]pgtype.UUID
 	userLanguage   string
 	userErr        error
 	sessionBinding db.ChannelChatSessionBinding
@@ -230,9 +233,20 @@ func (f *fakeOutboundQueries) ListAttachmentsByChatMessage(context.Context, db.L
 	}
 	return f.attachments, f.attachmentsErr
 }
-func (f *fakeOutboundQueries) GetChannelUserBindingByUserID(context.Context, db.GetChannelUserBindingByUserIDParams) (db.ChannelUserBinding, error) {
+
+// GetChannelUserBindingByUserID answers by the channel userid it is given.
+// Production returns pgx.ErrNoRows for a sender nobody has bound, so a double
+// that hands back a binding for every id cannot express a room where one
+// speaker is bound and another is not — which is every real room.
+func (f *fakeOutboundQueries) GetChannelUserBindingByUserID(_ context.Context, arg db.GetChannelUserBindingByUserIDParams) (db.ChannelUserBinding, error) {
 	if f.userBindErr != nil {
 		return db.ChannelUserBinding{}, f.userBindErr
+	}
+	if id, ok := f.perUserBinding[arg.ChannelUserID]; ok {
+		if !id.Valid {
+			return db.ChannelUserBinding{}, pgx.ErrNoRows
+		}
+		return db.ChannelUserBinding{MulticaUserID: id}, nil
 	}
 	return db.ChannelUserBinding{MulticaUserID: f.userBindingID}, nil
 }
