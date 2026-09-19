@@ -29,7 +29,8 @@
   },
   "empty": {
     "no_results": "Aucun résultat.",
-    "type_to_search": "Saisissez du texte pour rechercher des tâches et des projets"
+    "type_to_search": "Saisissez du texte pour rechercher des tâches et des projets",
+    "more_results": "Afficher tous les résultats pour « {{query}} »"
   },
   "trigger": {
     "label": "Rechercher..."
