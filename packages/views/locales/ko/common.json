@@ -8,7 +8,13 @@
     "upload_image": "이미지 업로드",
     "emoji_label": "이모지",
     "more_emojis": "이모지 더 보기…",
-    "emoji_loading": "불러오는 중…"
+    "emoji_loading": "불러오는 중…",
+    "brand_label": "브랜드",
+    "ring_label": "역량 링",
+    "ring_none": "없음",
+    "ring_flagship": "플래그십",
+    "ring_standard": "스탠다드",
+    "ring_fast": "라이트"
   },
   "avatar_crop": {
     "title": "아바타 편집",
