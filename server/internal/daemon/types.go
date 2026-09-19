@@ -172,12 +172,31 @@ type Task struct {
 	InitiatorID    string `json:"initiator_id,omitempty"`
 	InitiatorName  string `json:"initiator_name,omitempty"`
 	InitiatorEmail string `json:"initiator_email,omitempty"`
+	// Attribution carries the accountable human resolved when the task was
+	// enqueued. The daemon uses that stable snapshot for Git author identity;
+	// it must not substitute the immediate trigger actor, which can be another
+	// agent in a delegated run.
+	Attribution *TaskAttributionData `json:"attribution,omitempty"`
 	// AuthToken is the task-scoped credential the server mints at claim time.
 	// The daemon injects it into the spawned agent as MULTICA_TOKEN so the
 	// agent never sees the daemon's own (often workspace-owner) credential.
 	// Empty or non-task-scoped values are fatal for writable agent tasks; the
 	// daemon must not fall back to its own token. See MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
+}
+
+// TaskAttributionData is the claim-wire subset the daemon needs from the
+// server's richer TaskAttribution response. Unknown provenance fields remain
+// forward-compatible and are intentionally ignored here.
+type TaskAttributionData struct {
+	Initiator *AttributionUserData `json:"initiator,omitempty"`
+}
+
+// AttributionUserData identifies the accountable human behind a task.
+type AttributionUserData struct {
+	ID    string `json:"id"`
+	Name  string `json:"name,omitempty"`
+	Email string `json:"email,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon

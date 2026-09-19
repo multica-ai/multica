@@ -584,6 +584,92 @@ func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
 	}
 }
 
+func TestTaskMulticaEnvironmentIncludesAccountableGitIdentity(t *testing.T) {
+	t.Parallel()
+
+	task := Task{
+		ID:          "task-test",
+		AgentID:     "agent-test",
+		WorkspaceID: "workspace-test",
+		Attribution: &TaskAttributionData{Initiator: &AttributionUserData{
+			ID:    "user-test",
+			Name:  "Accountable Human",
+			Email: "human@example.com",
+		}},
+	}
+	env := taskMulticaEnvironment(task, "Implementation Agent", "mat_task", "/config", "/workspaces", "https://task.example", 19514, 0, "/tmp")
+
+	want := map[string]string{
+		"GIT_AUTHOR_NAME":            "Accountable Human",
+		"GIT_AUTHOR_EMAIL":           "human@example.com",
+		"GIT_COMMITTER_NAME":         "Implementation Agent",
+		"GIT_COMMITTER_EMAIL":        multicaAgentGitEmail,
+		"MULTICA_ON_BEHALF_OF_NAME":  "Accountable Human",
+		"MULTICA_ON_BEHALF_OF_EMAIL": "human@example.com",
+	}
+	for key, value := range want {
+		if env[key] != value {
+			t.Errorf("%s = %q, want %q", key, env[key], value)
+		}
+	}
+
+	// Explicit agent configuration remains authoritative for teams that use a
+	// dedicated bot/signing identity instead of accountable-human authorship.
+	layerCustomEnvAndHermesHome(env, map[string]string{
+		"GIT_AUTHOR_NAME":  "Release Bot",
+		"GIT_AUTHOR_EMAIL": "release-bot@example.com",
+	}, "", nil)
+	if env["GIT_AUTHOR_NAME"] != "Release Bot" || env["GIT_AUTHOR_EMAIL"] != "release-bot@example.com" {
+		t.Fatalf("custom_env did not override Git author defaults: %#v", env)
+	}
+}
+
+func TestTaskGitAttributionOverridesCommandScopedSyntheticIdentity(t *testing.T) {
+	t.Parallel()
+
+	env := map[string]string{}
+	layerTaskGitAttribution(env, Task{
+		Attribution: &TaskAttributionData{Initiator: &AttributionUserData{
+			Name:  "Accountable Human",
+			Email: "human@example.com",
+		}},
+	}, "Implementation Agent")
+
+	cmd := exec.Command("git",
+		"-c", "user.name=Synthetic Agent",
+		"-c", "user.email=agent-id@agents.multica.invalid",
+		"var", "GIT_AUTHOR_IDENT",
+	)
+	cmd.Env = os.Environ()
+	for key, value := range env {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git var GIT_AUTHOR_IDENT: %s: %v", out, err)
+	}
+	identity := string(out)
+	if !strings.Contains(identity, "Accountable Human <human@example.com>") {
+		t.Fatalf("Git author identity = %q, want accountable human despite command-scoped synthetic config", identity)
+	}
+}
+
+func TestTaskMulticaEnvironmentOmitsPartialGitIdentity(t *testing.T) {
+	t.Parallel()
+
+	task := Task{
+		Attribution: &TaskAttributionData{Initiator: &AttributionUserData{
+			Name: "Accountable Human",
+		}},
+	}
+	env := taskMulticaEnvironment(task, "Implementation Agent", "mat_task", "/config", "/workspaces", "https://task.example", 19514, 0, "/tmp")
+	for _, key := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
+		if _, ok := env[key]; ok {
+			t.Errorf("partial attribution unexpectedly set %s", key)
+		}
+	}
+}
+
 // When `brew --prefix` is unavailable but the executable path is under a
 // known Cellar root, triggerRestart must recover the prefix from the
 // known-prefix list and target <prefix>/bin/multica.
