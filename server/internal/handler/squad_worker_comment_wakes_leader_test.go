@@ -4,10 +4,284 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
+
+func TestGuestSquadWorkerReplayRequiresPlannedInput_GH8301(t *testing.T) {
+	trigger := commentAgentTrigger{Source: commentTriggerSourceThreadParent, NonLeaderAgentReply: true}
+	if got := keepReplayableAgentTriggers([]commentAgentTrigger{trigger}, false); len(got) != 0 {
+		t.Fatal("timestamp-only guest worker reply must not replay")
+	}
+	if got := keepReplayableAgentTriggers([]commentAgentTrigger{trigger}, true); len(got) != 1 {
+		t.Fatal("planned guest worker reply must replay")
+	}
+}
+
+// TestCreateComment_GuestSquadWorkerCommentWakesLeader_GH8301 covers the full
+// member-assignee → @squad leader → @worker → plain worker reply loop.
+func TestCreateComment_GuestSquadWorkerCommentWakesLeader_GH8301(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	for _, leaderState := range []string{"completed", "dispatched", "deleted_delegation"} {
+		t.Run(leaderState, func(t *testing.T) {
+			leaderRuntimeID := dbfx.Runtime(t, "GH-8301 guest leader runtime "+leaderState)
+			leaderID := dbfx.Agent(t, "GH-8301 guest leader "+leaderState, leaderRuntimeID)
+			workerRuntimeID := dbfx.Runtime(t, "GH-8301 worker runtime "+leaderState)
+			workerID := dbfx.Agent(t, "GH-8301 worker "+leaderState, workerRuntimeID)
+			squadID := dbfx.Squad(t, "GH-8301 guest squad "+leaderState, leaderID)
+			issueID := dbfx.Issue(t, "guest squad worker result "+leaderState, testutil.Cols{
+				"assignee_type": "member",
+				"assignee_id":   testUserID,
+			})
+			rootID := dbfx.Comment(t, issueID, "[@Guest squad](mention://squad/"+squadID+") please coordinate")
+			leaderTaskID := dbfx.Task(t, leaderID, testutil.Cols{
+				"runtime_id":          leaderRuntimeID,
+				"issue_id":            issueID,
+				"status":              "running",
+				"trigger_comment_id":  rootID,
+				"is_leader_task":      true,
+				"squad_id":            squadID,
+				"originator_user_id":  testUserID,
+				"accountable_user_id": testUserID,
+			})
+			dbfx.Exec(t, `UPDATE agent_task_queue SET delivered_comment_ids = ARRAY[$2::uuid] WHERE id = $1`, leaderTaskID, rootID)
+			// Handler-created comments and the worker/continuation tasks are not fixture
+			// rows, so remove them before the fixture deletes the issue.
+			dbfx.Cleanup(t, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+			dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+
+			post := func(agentID, taskID string, body map[string]any) CommentResponse {
+				t.Helper()
+				r := newRequest("POST", "/api/issues/"+issueID+"/comments", body)
+				r.Header.Set("X-Agent-ID", agentID)
+				r.Header.Set("X-Task-ID", taskID)
+				r = withURLParam(r, "id", issueID)
+				var response CommentResponse
+				testutil.Call(t, testHandler.CreateComment, r).Want(http.StatusCreated).JSON(&response)
+				return response
+			}
+
+			delegation := post(leaderID, leaderTaskID, map[string]any{
+				"content":   "[@Worker](mention://agent/" + workerID + ") please handle",
+				"parent_id": rootID,
+			})
+
+			var workerTaskID string
+			dbfx.QueryRow(t, `
+				SELECT id FROM agent_task_queue
+				WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+			`, issueID, workerID).Scan(&workerTaskID)
+			dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'completed' WHERE id = $1`, leaderTaskID)
+			dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'running' WHERE id = $1`, workerTaskID)
+
+			var dispatchedLeaderTaskID string
+			if leaderState != "completed" {
+				progress := post(workerID, workerTaskID, map[string]any{
+					"content":   "verification started",
+					"parent_id": delegation.ID,
+				})
+				dbfx.QueryRow(t, `
+					SELECT id FROM agent_task_queue
+					WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+				`, issueID, leaderID).Scan(&dispatchedLeaderTaskID)
+				claimed := claimWorkerReplyRun(t, leaderRuntimeID)
+				if claimed == nil || claimed.ID != dispatchedLeaderTaskID || !slices.Contains(claimed.DeliveredCommentIDs, progress.ID) {
+					t.Fatal("first guest leader continuation did not receive the worker progress")
+				}
+			}
+
+			reply := post(workerID, workerTaskID, map[string]any{
+				"content":   "done — pushed the change",
+				"parent_id": delegation.ID,
+			})
+
+			if leaderState != "completed" {
+				leaderTask, err := testHandler.Queries.GetAgentTask(context.Background(), parseUUID(dispatchedLeaderTaskID))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !slices.Contains(leaderTask.CoalescedCommentIds, parseUUID(reply.ID)) || slices.Contains(leaderTask.DeliveredCommentIds, parseUUID(reply.ID)) {
+					t.Fatal("dispatched guest leader did not record the worker reply as planned but undelivered")
+				}
+				if leaderState == "deleted_delegation" {
+					deleted, err := testHandler.deleteComment(context.Background(), parseUUID(delegation.ID), parseUUID(testWorkspaceID))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if deleted.Tombstone == nil {
+						t.Fatal("delegation with replies was removed instead of tombstoned")
+					}
+				}
+				if _, err := testHandler.TaskService.StartTask(context.Background(), parseUUID(dispatchedLeaderTaskID)); err != nil {
+					t.Fatal(err)
+				}
+				completeWorkerReplyRun(t, dispatchedLeaderTaskID)
+			}
+
+			leaderTasks := dbfx.Count(t, `
+				SELECT count(*) FROM agent_task_queue
+				WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+				  AND is_leader_task = TRUE AND squad_id = $3
+			`, issueID, leaderID, squadID)
+			wantLeaderTasks := 1
+			if leaderState == "deleted_delegation" {
+				wantLeaderTasks = 0
+			}
+			if leaderTasks != wantLeaderTasks {
+				t.Fatalf("after guest worker comment: expected %d queued leader task(s), got %d", wantLeaderTasks, leaderTasks)
+			}
+		})
+	}
+}
+
+// A live delegation from guest squad B takes precedence over assigned squad A,
+// even when B's historical leader role is no longer valid. A tombstone removes
+// the guest delegation's authority while preserving the independent assignment.
+func TestCreateComment_GuestSquadRouteWinsAssignedSquadFallback_GH8301(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	for _, mode := range []string{"valid", "archived_squad", "leader_changed", "permission_denied", "deleted_delegation"} {
+		t.Run(mode, func(t *testing.T) {
+			outsiderID := dbfx.User(t, "GH-8301 outsider "+mode, "gh-8301-"+mode+"@multica.test")
+			assignedLeaderID := dbfx.Agent(t, "GH-8301 assigned leader "+mode, testRuntimeID)
+			guestLeaderID := dbfx.Agent(t, "GH-8301 exact guest leader "+mode, testRuntimeID)
+			replacementID := dbfx.Agent(t, "GH-8301 replacement leader "+mode, testRuntimeID)
+			workerID := dbfx.Agent(t, "GH-8301 exact guest worker "+mode, testRuntimeID)
+			assignedSquadID := dbfx.Squad(t, "GH-8301 assigned squad "+mode, assignedLeaderID)
+			guestSquadID := dbfx.Squad(t, "GH-8301 exact guest squad "+mode, guestLeaderID)
+			issueID := dbfx.Issue(t, "guest route beats assigned fallback "+mode, testutil.Cols{
+				"assignee_type": "squad",
+				"assignee_id":   assignedSquadID,
+			})
+			guestLeaderTaskID := dbfx.Task(t, guestLeaderID, testutil.Cols{
+				"runtime_id":          testRuntimeID,
+				"issue_id":            issueID,
+				"status":              "completed",
+				"is_leader_task":      true,
+				"squad_id":            guestSquadID,
+				"originator_user_id":  testUserID,
+				"accountable_user_id": testUserID,
+			})
+			delegationID := dbfx.Comment(t, issueID, "delegate to guest worker", testutil.Cols{
+				"author_type":    "agent",
+				"author_id":      guestLeaderID,
+				"source_task_id": guestLeaderTaskID,
+			})
+			workerTaskID := dbfx.Task(t, workerID, testutil.Cols{
+				"runtime_id":             testRuntimeID,
+				"issue_id":               issueID,
+				"status":                 "running",
+				"trigger_comment_id":     delegationID,
+				"squad_id":               guestSquadID,
+				"delegated_from_task_id": guestLeaderTaskID,
+				"originator_user_id":     testUserID,
+				"accountable_user_id":    testUserID,
+			})
+			dbfx.Cleanup(t, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+			dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+
+			switch mode {
+			case "archived_squad":
+				dbfx.Exec(t, `UPDATE squad SET archived_at = now() WHERE id = $1`, guestSquadID)
+			case "leader_changed":
+				dbfx.Exec(t, `UPDATE squad SET leader_id = $2 WHERE id = $1`, guestSquadID, replacementID)
+			case "permission_denied":
+				dbfx.Exec(t, `UPDATE agent SET owner_id = $2 WHERE id = $1`, guestLeaderID, outsiderID)
+			case "deleted_delegation":
+				dbfx.Comment(t, issueID, "keep delegation reply tree", testutil.Cols{"parent_id": delegationID})
+				deleted, err := testHandler.deleteComment(context.Background(), parseUUID(delegationID), parseUUID(testWorkspaceID))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if deleted.Tombstone == nil {
+					t.Fatal("delegation with replies was removed instead of tombstoned")
+				}
+			}
+
+			r := newRequest(http.MethodPost, "/api/issues/"+issueID+"/comments", map[string]any{
+				"content":   "guest work complete",
+				"parent_id": delegationID,
+			})
+			r.Header.Set("X-Agent-ID", workerID)
+			r.Header.Set("X-Task-ID", workerTaskID)
+			r = withURLParam(r, "id", issueID)
+			testutil.Call(t, testHandler.CreateComment, r).Want(http.StatusCreated)
+
+			wantAssigned := 0
+			if mode == "deleted_delegation" {
+				wantAssigned = 1
+			}
+			if got := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task = TRUE AND squad_id = $3`, issueID, assignedLeaderID, assignedSquadID); got != wantAssigned {
+				t.Fatalf("assigned squad leader received %d task(s), want %d", got, wantAssigned)
+			}
+			wantGuest := 0
+			if mode == "valid" {
+				wantGuest = 1
+			}
+			if got := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task = TRUE AND squad_id = $3`, issueID, guestLeaderID, guestSquadID); got != wantGuest {
+				t.Fatalf("exact guest squad leader received %d task(s), want %d", got, wantGuest)
+			}
+		})
+	}
+}
+
+// Deleting a parent removes its author-routing authority, but does not revoke
+// the issue's squad assignment or suppress an ordinary worker result.
+func TestCreateComment_WorkerReplyToTombstoneWakesAssignedSquad_GH8301(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	for _, authorType := range []string{"agent", "member"} {
+		t.Run(authorType, func(t *testing.T) {
+			leaderID := dbfx.Agent(t, "GH-8301 tombstone assigned leader "+authorType, testRuntimeID)
+			workerID := dbfx.Agent(t, "GH-8301 tombstone worker "+authorType, testRuntimeID)
+			squadID := dbfx.Squad(t, "GH-8301 tombstone squad "+authorType, leaderID)
+			issueID := dbfx.Issue(t, "assigned worker reply to tombstone "+authorType, testutil.Cols{
+				"assignee_type": "squad", "assignee_id": squadID,
+			})
+			parentCols := testutil.Cols{}
+			if authorType == "agent" {
+				leaderTaskID := dbfx.Task(t, leaderID, testutil.Cols{
+					"runtime_id": testRuntimeID, "issue_id": issueID, "status": "completed",
+					"is_leader_task": true, "squad_id": squadID,
+					"originator_user_id": testUserID, "accountable_user_id": testUserID,
+				})
+				parentCols = testutil.Cols{"author_type": "agent", "author_id": leaderID, "source_task_id": leaderTaskID}
+			}
+			parentID := dbfx.Comment(t, issueID, "please handle", parentCols)
+			dbfx.Comment(t, issueID, "keep reply tree", testutil.Cols{"parent_id": parentID})
+			workerTaskID := dbfx.Task(t, workerID, testutil.Cols{
+				"runtime_id": testRuntimeID, "issue_id": issueID, "status": "running",
+				"trigger_comment_id": parentID, "originator_user_id": testUserID, "accountable_user_id": testUserID,
+			})
+			dbfx.Cleanup(t, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+			dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+			deleted, err := testHandler.deleteComment(context.Background(), parseUUID(parentID), parseUUID(testWorkspaceID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if deleted.Tombstone == nil {
+				t.Fatal("parent with replies was removed instead of tombstoned")
+			}
+
+			r := newRequest(http.MethodPost, "/api/issues/"+issueID+"/comments", map[string]any{
+				"content": "work complete", "parent_id": parentID,
+			})
+			r.Header.Set("X-Agent-ID", workerID)
+			r.Header.Set("X-Task-ID", workerTaskID)
+			testutil.Call(t, testHandler.CreateComment, withURLParam(r, "id", issueID)).Want(http.StatusCreated)
+			if got := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task = TRUE AND squad_id = $3`, issueID, leaderID, squadID); got != 1 {
+				t.Fatalf("assigned squad leader received %d task(s) after worker reply to %s tombstone, want 1", got, authorType)
+			}
+		})
+	}
+}
 
 // TestCreateComment_WorkerAgentCommentWakesSquadLeader_MUL4015 pins the
 // full CreateComment behavior for the scenario reported in MUL-4015:
