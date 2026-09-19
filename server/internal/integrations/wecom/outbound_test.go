@@ -48,9 +48,11 @@ type fakeOutboundQueries struct {
 	// query rather than how many the counter was told about.
 	lookupGate     chan struct{}
 	lookupsEntered atomic.Int64
-	// tasks says which task rows exist. A task with no row here reads as
-	// pgx.ErrNoRows — cancelled and reaped while its ending was in flight.
-	tasks map[string]struct{}
+	// tasks answers the retry-clone lookup: the round is bound under the turn
+	// that owns the input batch, and a clone reaches it through
+	// chat_input_task_id. A task with no row here reads as pgx.ErrNoRows —
+	// cancelled and reaped while its ending was in flight.
+	tasks map[string]db.AgentTaskQueue
 	// channelIngested is the channel_ingested stamp on the input batch the
 	// task owns: askedOverWecom for a question typed in the room,
 	// askedInTheWebUI for one typed in Multica.
@@ -67,11 +69,15 @@ type fakeOutboundQueries struct {
 	// call. The gate is one query now, so its length IS what a completion costs
 	// in reads — there is no second counter to disagree with it.
 	//
-	// WHICH BATCH the stamp is read off — the clone's own id or the parent's
-	// chat_input_task_id — is no longer observable here: it moved into
-	// GetTaskChannelOrigin's COALESCE. TestGetTaskChannelOrigin_RealSQL pins it
-	// against Postgres instead, because a fake cannot answer for a join it does
-	// not perform.
+	// The id recorded is the COMPLETED TASK's, not its batch owner's, and that
+	// is the whole shape of the change: the gate used to pick the owner in Go
+	// and ask the stamp about it, and GetTaskChannelOrigin now takes the
+	// completed id and resolves the owner in SQL, through
+	// COALESCE(chat_input_task_id, id). WHICH BATCH it lands on is therefore no
+	// longer observable from in here — TestGetTaskChannelOrigin_RealSQL pins
+	// that against Postgres, because a fake cannot answer for a join it does
+	// not perform. What fileRetryClone files is still the lineage a rig means
+	// to describe; this double simply no longer reads it.
 	channelIngested *bool
 	originErr       error
 	originAskedFor  []string
@@ -139,7 +145,7 @@ func (f *fakeOutboundQueries) GetTaskChannelOrigin(ctx context.Context, id pgtyp
 	if f.originErr != nil {
 		return false, f.originErr
 	}
-	if _, ok := f.tasks[util.UUIDToString(id)]; !ok {
+	if _, filed := f.tasks[util.UUIDToString(id)]; !filed {
 		return false, pgx.ErrNoRows
 	}
 	if f.channelIngested == nil {
@@ -170,16 +176,33 @@ func (f *fakeOutboundQueries) failStampNotSet(taskID string) {
 	f.t.Fatalf("%s", msg)
 }
 
-// fileTask records that the agent_task_queue row the ending event names is
-// still there, so the origin gate gets a verdict rather than pgx.ErrNoRows.
+// fileTask records the agent_task_queue row the origin gate answers from, for a
+// task that owns its own input batch — which every chat round's task has done
+// since MUL-4351. id is the task id the ending event carries.
 func (f *fakeOutboundQueries) fileTask(t testing.TB, id string) {
+	t.Helper()
+	f.fileRetryClone(t, id, id)
+}
+
+// fileRetryClone files FailTask's retry child: a fresh task id inheriting the
+// parent's input batch, its own id owning nothing. This is the row that makes
+// the batch owner the only id worth asking the stamp about.
+//
+// The owner it records is the fixture's statement of lineage, and since the
+// gate became one query keyed on the completed id, resolving that lineage is
+// GetTaskChannelOrigin's COALESCE rather than anything this double does. It
+// still files the row, because a rig that describes a retry chain should be
+// able to say so, and because the sibling rigs in this package assert on what
+// the gate was keyed on.
+func (f *fakeOutboundQueries) fileRetryClone(t testing.TB, id, owner string) {
 	t.Helper()
 	f.t = t
 	taskID := mustParseTaskUUID(t, id)
+	ownerID := mustParseTaskUUID(t, owner)
 	if f.tasks == nil {
-		f.tasks = map[string]struct{}{}
+		f.tasks = map[string]db.AgentTaskQueue{}
 	}
-	f.tasks[util.UUIDToString(taskID)] = struct{}{}
+	f.tasks[util.UUIDToString(taskID)] = db.AgentTaskQueue{ID: taskID, ChatInputTaskID: ownerID}
 }
 
 func mustParseTaskUUID(t testing.TB, id string) pgtype.UUID {
@@ -190,6 +213,9 @@ func mustParseTaskUUID(t testing.TB, id string) pgtype.UUID {
 	}
 	return parsed
 }
+
+// originAsked is the ids the origin gate was keyed on, in order.
+func (f *fakeOutboundQueries) originAsked() []string { return f.originAskedFor }
 
 func newOutboundWithConn(t *testing.T, q outboundQueries) (*Outbound, pgtype.UUID, *recordingConn) {
 	t.Helper()
