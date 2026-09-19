@@ -551,7 +551,7 @@ func (d *Daemon) demoteUnusableRuntimes(ctx context.Context, causes map[string]r
 	var installWaits []dshInstallWait
 	// Grouped per workspace because the cleanup below has to run under each
 	// workspace's register lock — see deregisterDroppedRuntimes.
-	demotedByWorkspace := make(map[string][]string)
+	demotedByWorkspace := make(map[string][]droppedRuntime)
 	demotedProviders := make(map[string]string)
 	offlineReasons := make(map[string]RuntimeOfflineReason)
 	for workspaceID, ws := range d.workspaces {
@@ -573,7 +573,15 @@ func (d *Daemon) demoteUnusableRuntimes(ctx context.Context, causes map[string]r
 			}
 			delete(d.runtimeIndex, rid)
 			demoted = append(demoted, rid)
-			demotedByWorkspace[workspaceID] = append(demotedByWorkspace[workspaceID], rid)
+			// A demoted provider is one this process stops serving until the CLI
+			// is usable again, so its logical runtime claim goes with the row —
+			// with the target captured before the row is dropped from the index
+			// (GH #8280). When the provider recovers, converge re-registers it
+			// and takes the claim back under a new generation.
+			demotedByWorkspace[workspaceID] = append(demotedByWorkspace[workspaceID], droppedRuntime{
+				ID:     rid,
+				Target: runtimeOwnerTargetForRuntime(rt, workspaceID),
+			})
 			demotedProviders[rt.Provider] = cause.reason
 			// Carried to the server per runtime row: a client asking "why is my
 			// agent offline" reads it from there, and only this side knows both
@@ -737,6 +745,14 @@ func (d *Daemon) deregisterRevivedRuntimes(ctx context.Context, workspaceID stri
 		d.logger.Warn("deregister of revived demoted runtimes failed",
 			"workspace_id", workspaceID, "runtime_ids", runtimeIDs, "error", err)
 	}
+	// Only now, and only for the rows actually taken offline: a row that is
+	// tracked again was re-created by a newer register and its claim belongs to
+	// that decision instead. The claim is released by logical target because
+	// runtime IDs rotate when the server deletes and recreates a row, and these
+	// rows were never indexed locally (GH #8280).
+	for _, rid := range runtimeIDs {
+		d.releaseRuntimeOwnership(revived.targets[rid])
+	}
 }
 
 // deregisterDroppedRuntimes takes offline the server-side rows a convergence
@@ -752,7 +768,16 @@ func (d *Daemon) deregisterRevivedRuntimes(ctx context.Context, workspaceID stri
 //
 // Best-effort: the daemon has already stopped heartbeating these rows, so the
 // server's stale-heartbeat sweep is the backstop if the call fails.
-func (d *Daemon) deregisterDroppedRuntimes(ctx context.Context, workspaceID string, runtimeIDs []string, reason string, offlineReasons map[string]RuntimeOfflineReason) {
+func (d *Daemon) deregisterDroppedRuntimes(ctx context.Context, workspaceID string, dropped []droppedRuntime, reason string, offlineReasons map[string]RuntimeOfflineReason) {
+	if len(dropped) == 0 {
+		return
+	}
+	targets := make(map[string]string, len(dropped))
+	runtimeIDs := make([]string, 0, len(dropped))
+	for _, entry := range dropped {
+		targets[entry.ID] = entry.Target
+		runtimeIDs = append(runtimeIDs, entry.ID)
+	}
 	runtimeIDs = d.untrackedRuntimeIDs(runtimeIDs)
 	if len(runtimeIDs) == 0 {
 		return
@@ -760,6 +785,17 @@ func (d *Daemon) deregisterDroppedRuntimes(ctx context.Context, workspaceID stri
 	if err := d.client.Deregister(ctx, runtimeIDs, offlineReasons); err != nil {
 		d.logger.Warn("deregister of dropped runtimes failed",
 			"workspace_id", workspaceID, "runtime_ids", runtimeIDs, "reason", reason, "error", err)
+	}
+	// The claim is released only AFTER the bounded deregistration attempt, in
+	// this order and never the other way around: the moment the claim drops a
+	// sibling may take the logical runtime over and bring it back online, and a
+	// Deregister that arrived after that would knock out a live runtime that is
+	// no longer ours (GH #8280). Holding a claim for a runtime this process has
+	// intentionally stopped serving is the worse failure — no sibling could ever
+	// recover it — so a failed call still releases, with the server's
+	// stale-heartbeat sweep as the backstop.
+	for _, rid := range runtimeIDs {
+		d.releaseRuntimeOwnership(targets[rid])
 	}
 }
 

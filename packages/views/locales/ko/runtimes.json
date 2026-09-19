@@ -120,6 +120,8 @@
     "serving_count_other": "에이전트 {{count}}개",
     "no_agents": "아직 이 런타임에 연결된 에이전트가 없습니다.",
     "diagnostics_title": "진단",
+    "diagnostics_resume_warning_title": "세션 연속성",
+    "diagnostics_resume_warning_body": "이전 세션을 복원할 수 없어 이 런타임이 새 세션으로 작업을 이어갔습니다.",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "공개 범위",
     "visibility_label": {

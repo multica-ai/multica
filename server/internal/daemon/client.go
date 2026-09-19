@@ -670,6 +670,24 @@ func (c *Client) ReportModelListResult(ctx context.Context, runtimeID, requestID
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/models/%s/result", runtimeID, requestID), result, nil)
 }
 
+// ReportRuntimeResumeWarning records, on the runtime, that this run expected to
+// resume a prior provider session and proved locally that it could not.
+//
+// The daemon already tells the agent through the task context and the resume
+// decision already reaches the server with the task payload; this is the
+// user-facing half, so an operator looking at the runtime can see why a task
+// restarted cold. Best effort by contract: callers log and continue, including
+// when an older server answers 404 because it does not have the endpoint.
+func (c *Client) ReportRuntimeResumeWarning(ctx context.Context, runtimeID, taskID string) error {
+	if strings.TrimSpace(runtimeID) == "" || strings.TrimSpace(taskID) == "" {
+		return nil
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/resume-warning", runtimeID), map[string]any{
+		"code":    "prior_session_resume_unavailable",
+		"task_id": taskID,
+	}, nil)
+}
+
 // ReportLocalSkillListResult sends the runtime-local-skill inventory back to the server.
 func (c *Client) ReportLocalSkillListResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/local-skills/%s/result", runtimeID, requestID), result, nil)

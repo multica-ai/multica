@@ -125,6 +125,8 @@
     "serving_count_other": "{{count}} agents",
     "no_agents": "No agents are bound to this runtime yet.",
     "diagnostics_title": "Diagnostics",
+    "diagnostics_resume_warning_title": "Session continuity",
+    "diagnostics_resume_warning_body": "A previous session could not be restored, so this runtime continued the task with a fresh session.",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "Visibility",
     "visibility_label": {

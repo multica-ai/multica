@@ -120,6 +120,8 @@
     "serving_count_other": "エージェント {{count}} 個",
     "no_agents": "まだこのランタイムに紐づいたエージェントがありません。",
     "diagnostics_title": "診断",
+    "diagnostics_resume_warning_title": "セッションの継続性",
+    "diagnostics_resume_warning_body": "前回のセッションを復元できなかったため、このランタイムは新しいセッションでタスクを続行しました。",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "公開範囲",
     "visibility_label": {

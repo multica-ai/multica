@@ -52,13 +52,21 @@ type PrepareParams struct {
 	// JSON boundary back to the daemon. The claim therefore has to be held by
 	// the parent, whose lifetime is the task run.
 	EnvRootPreclaimed bool
-	// Profile is the daemon's profile name (empty = default). It namespaces the
-	// per-issue Codex session store so a second profile-daemon sharing the same
+	// Profile is the daemon's profile name (empty = default). It scopes the
+	// profile-local config caches (e.g. the OpenClaw config cache) and nothing
+	// else: which tree persistent session state lands in is
+	// CodexSessionNamespace's job.
+	Profile string
+	// CodexSessionNamespace is the daemon's resolved work-state namespace for the
+	// per-conversation Codex session store (daemon.WorkStateScope.CodexNamespace).
+	// Keyed on machine + backend rather than the Multica profile, so two profiles
+	// serving one backend mount one store and either can resume a conversation
+	// the other started (GH #8280), while a second backend sharing the same
 	// ~/.codex cannot see or GC this daemon's stores (MUL-4424).
-	Profile      string
-	Provider     string // agent provider (determines runtime config and skill injection paths)
-	CodexVersion string // detected Codex CLI version (only used when Provider == "codex")
-	OpenclawBin  string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
+	CodexSessionNamespace string
+	Provider              string // agent provider (determines runtime config and skill injection paths)
+	CodexVersion          string // detected Codex CLI version (only used when Provider == "codex")
+	OpenclawBin           string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
 	// McpConfig is the agent's saved `mcp_config` JSON, forwarded to the
 	// provider-specific config preparer when that provider materialises MCP
 	// via a per-task config file. Cursor, OpenClaw, and OMP consume it here;
@@ -632,7 +640,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, codexHomeDirName)
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "" || params.LocalWorktree != nil, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "" || params.LocalWorktree != nil, SessionStoreKey: codexSessionStoreKey(params.CodexSessionNamespace, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
 		if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
@@ -774,10 +782,12 @@ type ReuseParams struct {
 	// OpenclawGateway is the per-task Gateway pin re-applied on reuse so the
 	// agent picks up any runtime_config changes saved since the prior run.
 	OpenclawGateway OpenclawGatewayPin
-	// Profile is the daemon's profile name (empty = default), mirroring
-	// PrepareParams.Profile so a reused task keys its per-issue Codex session
-	// store into the same profile namespace (MUL-4424).
+	// Profile mirrors PrepareParams.Profile: profile-local config caches only.
 	Profile string
+	// CodexSessionNamespace mirrors PrepareParams.CodexSessionNamespace so a
+	// reused task keys its per-conversation Codex session store into the same
+	// work-state namespace (GH #8280, MUL-4424).
+	CodexSessionNamespace string
 	// LocalDirectory is true when the reused WorkDir is a user-supplied
 	// directory (the local_directory flow). The flag is propagated into
 	// the returned Environment so downstream callers (notably the GC
@@ -914,7 +924,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// config (especially sandbox/network access) is up to date.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, codexHomeDirName)
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.CodexSessionNamespace, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
 			// Leaving env.CodexHome empty does not launch Codex against an
 			// ambient home: configureCodexTaskShellEnvironment rejects the empty
 			// value ("task CODEX_HOME is missing") and the run fails before

@@ -120,6 +120,8 @@
     "serving_count_other": "{{count}} 个智能体",
     "no_agents": "还没有智能体绑定到这个运行时。",
     "diagnostics_title": "诊断",
+    "diagnostics_resume_warning_title": "会话连续性",
+    "diagnostics_resume_warning_body": "无法恢复之前的会话，此运行时已使用新会话继续执行任务。",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "可见性",
     "visibility_label": {

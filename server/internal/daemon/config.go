@@ -111,7 +111,8 @@ type Config struct {
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
 	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, codearts, deveco, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, dim, zeroclaw (plus built-in runtime identities from agent.BuiltinRuntimes, e.g. omp)
-	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
+	WorkspacesRoot                 string                // base path for execution envs; resolved from the work-state scope below
+	WorkState                      WorkStateScope        // machine + backend persistent work-state identity (GH #8280); every persistent store path hangs off it
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
 	MaxConcurrentTasks             int                   // max tasks running in parallel (default: 20)
@@ -527,11 +528,23 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		runtimeName = overrides.RuntimeName
 	}
 
-	// Workspaces root: override > env > default (~/multica_workspaces or ~/multica_workspaces_<profile>)
-	workspacesRoot, err := ResolveWorkspacesRoot(profile, overrides.WorkspacesRoot)
+	// Work state: the persistent-state identity of this machine + backend, which
+	// is what the runtime row is already keyed on. The workspaces root is one of
+	// the trees it owns, so it resolves here rather than from the profile name.
+	// The resolution is persisted once per backend (workstate.go), and it adopts
+	// an existing profile-scoped tree as-is (an upgrade must not orphan a
+	// resumable conversation). Two competing non-empty trees, an ambiguous legacy
+	// tree, and an override that disagrees with the persisted mapping all fail
+	// startup instead of one being picked silently (GH #8280).
+	workState, err := ResolveOrCreateWorkStateScope(WorkStateScopeParams{
+		ServerBaseURL:          serverBaseURL,
+		Profile:                profile,
+		ExplicitWorkspacesRoot: overrides.WorkspacesRoot,
+	})
 	if err != nil {
 		return Config{}, err
 	}
+	workspacesRoot := workState.WorkspacesRoot
 
 	// Health port: override > default
 	healthPort := DefaultHealthPort
@@ -631,6 +644,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		Profile:                         profile,
 		Agents:                          agents,
 		WorkspacesRoot:                  workspacesRoot,
+		WorkState:                       workState,
 		KeepEnvAfterTask:                keepEnv,
 		GCEnabled:                       gcEnabled,
 		GCInterval:                      gcInterval,
@@ -716,7 +730,15 @@ func defaultGCCompletedTaskTTL(serverBaseURL string) time.Duration {
 	return DefaultGCCompletedTaskTTLSelfHost
 }
 
-// NormalizeServerBaseURL converts a WebSocket or HTTP URL to a base HTTP URL.
+// NormalizeServerBaseURL converts a WebSocket or HTTP URL to a base HTTP URL,
+// folding the two components that are case-insensitive by contract: the scheme
+// and the host. The path is left exactly as given - it is not case-insensitive,
+// so two spellings that differ only there are two different backends and must
+// stay two different work states (GH #8280).
+//
+// This is also the single URL-normalization contract the work-state key hashes:
+// WorkStateKey applies no normalization of its own, so whatever this function
+// considers one backend is one scope.
 func NormalizeServerBaseURL(raw string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
@@ -734,6 +756,10 @@ func NormalizeServerBaseURL(raw string) (string, error) {
 	if u.Path == "/ws" {
 		u.Path = ""
 	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	if u.Host != "" {
+		u.Host = strings.ToLower(u.Host)
+	}
 	u.RawPath = ""
 	u.RawQuery = ""
 	u.Fragment = ""
@@ -742,33 +768,36 @@ func NormalizeServerBaseURL(raw string) (string, error) {
 
 // TaskWorkspacesRootEnv carries the workspaces root of the daemon that owns a
 // managed task into that task's environment. Task-mode `daemon disk-usage`
-// reads this and nothing else: ResolveWorkspacesRoot derives its default from
-// $HOME and the --profile name, so a task hosted by a named-profile daemon
-// would otherwise scan the default root and silently report the wrong tree.
+// reads this and nothing else: ResolveWorkspacesRoot resolves the root through
+// the daemon's work-state scope, so a task would otherwise have to re-derive a
+// machine + backend identity it does not know and could silently report the
+// wrong tree.
 const TaskWorkspacesRootEnv = "MULTICA_TASK_WORKSPACES_ROOT"
 
-// ResolveWorkspacesRoot returns the absolute path that the daemon and CLI
-// should treat as the workspaces root. Resolution order: explicit override >
-// MULTICA_WORKSPACES_ROOT env > default ($HOME/multica_workspaces, or
-// $HOME/multica_workspaces_<profile> for a named profile). Read-only callers
-// (e.g. `multica daemon disk-usage`) use this directly so they pick the same
-// directory the running daemon would have picked. Inside a managed task use
-// TaskWorkspacesRootEnv instead — see resolveDiskUsageRoot.
+// ResolveWorkspacesRoot returns the absolute path that the daemon and CLI should
+// treat as the workspaces root for a profile.
+//
+// The root is a work-state path, not a profile path: it follows the profile's
+// recorded backend, so every profile on this machine aimed at one backend
+// resolves one root. An explicit override (flag > MULTICA_WORKSPACES_ROOT > the
+// profile's persisted workspaces_root) selects that root and becomes the
+// machine-wide choice for the backend. Otherwise an existing legacy tree is
+// adopted, and a machine with no state gets the backend-scoped default
+// ($HOME/multica_workspaces_<workStateKey>). Two non-empty trees for one backend
+// are a startup error rather than a silent choice — see WorkStateConflictError
+// (GH #8280).
+//
+// Read-only callers (e.g. `multica daemon disk-usage`) use this directly so they
+// pick the same directory the running daemon would have picked. Inside a managed
+// task use TaskWorkspacesRootEnv instead — see resolveDiskUsageRoot.
 func ResolveWorkspacesRoot(profile, override string) (string, error) {
-	root := strings.TrimSpace(os.Getenv("MULTICA_WORKSPACES_ROOT"))
-	if override != "" {
-		root = override
+	scope, err := WorkStateScopeForProfile(profile, override)
+	if err != nil {
+		return "", err
 	}
+	root := strings.TrimSpace(scope.WorkspacesRoot)
 	if root == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolve home directory: %w (set MULTICA_WORKSPACES_ROOT to override)", err)
-		}
-		if profile != "" {
-			root = filepath.Join(home, "multica_workspaces_"+profile)
-		} else {
-			root = filepath.Join(home, "multica_workspaces")
-		}
+		return "", fmt.Errorf("resolve workspaces root for profile %q: empty work-state root", profile)
 	}
 	abs, err := filepath.Abs(root)
 	if err != nil {

@@ -146,6 +146,15 @@ func pinHumanCLIContext(t *testing.T) {
 	clearDaemonTaskEnv(t)
 }
 
+// stageTestHome points HOME at dir and USERPROFILE with it. os.UserHomeDir
+// reads %USERPROFILE% on Windows, so a test that only sets HOME resolves the
+// developer's real home there and silently asserts against the wrong tree.
+func stageTestHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+}
+
 // TestDiskUsageNeedsParentStatus pins the gate itself: the per-task table and
 // any JSON output need statuses; the --by-workspace table has no STATUS column
 // and must not trigger a request.
@@ -175,7 +184,7 @@ func TestDiskUsageNeedsParentStatus(t *testing.T) {
 func TestRunDaemonDiskUsageByWorkspaceTableMakesNoRequest(t *testing.T) {
 	pinHumanCLIContext(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	stageTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 	t.Setenv("MULTICA_SERVER_URL", "")
 
@@ -206,7 +215,7 @@ func TestRunDaemonDiskUsageByWorkspaceTableMakesNoRequest(t *testing.T) {
 func TestRunDaemonDiskUsageTaskTableResolvesStatus(t *testing.T) {
 	pinHumanCLIContext(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	stageTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 	t.Setenv("MULTICA_SERVER_URL", "")
 
@@ -233,7 +242,7 @@ func TestRunDaemonDiskUsageTaskTableResolvesStatus(t *testing.T) {
 func TestRunDaemonDiskUsageJSONSurvivesServerFailure(t *testing.T) {
 	pinHumanCLIContext(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	stageTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 	t.Setenv("MULTICA_SERVER_URL", "")
 
@@ -274,19 +283,23 @@ func TestRunDaemonDiskUsageJSONSurvivesServerFailure(t *testing.T) {
 
 // TestRunDaemonDiskUsageAllProfilesUsesPerProfileToken guards the credential
 // wiring in aggregate mode: each root must be resolved with its own profile's
-// token, not whichever one happened to be loaded first.
+// token, not whichever one happened to be loaded first. The two profiles point
+// at different backends, because profiles on one backend now share one root and
+// are deduplicated before this point (GH #8280).
 func TestRunDaemonDiskUsageAllProfilesUsesPerProfileToken(t *testing.T) {
 	pinHumanCLIContext(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	stageTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 	t.Setenv("MULTICA_SERVER_URL", "")
 
-	rec := &gcCheckRecorder{}
-	srv := newGCCheckServer(t, rec)
-	setupDiskUsageProfile(t, home, "", "token-default", srv.URL,
+	recDefault := &gcCheckRecorder{}
+	srvDefault := newGCCheckServer(t, recDefault)
+	recSecond := &gcCheckRecorder{}
+	srvSecond := newGCCheckServer(t, recSecond)
+	setupDiskUsageProfile(t, home, "", "token-default", srvDefault.URL,
 		"11111111-1111-1111-1111-111111111111", "aaaaaaaa", "issue-default")
-	setupDiskUsageProfile(t, home, "second", "token-second", srv.URL,
+	setupDiskUsageProfile(t, home, "second", "token-second", srvSecond.URL,
 		"22222222-2222-2222-2222-222222222222", "bbbbbbbb", "issue-second")
 
 	cmd := newDiskUsageTestCmd(t)
@@ -298,12 +311,14 @@ func TestRunDaemonDiskUsageAllProfilesUsesPerProfileToken(t *testing.T) {
 		t.Fatalf("runDaemonDiskUsage --all-profiles: %v", err)
 	}
 
-	rec.mu.Lock()
-	defer rec.mu.Unlock()
-	if got := rec.tokenByIssue["issue-default"]; got != "token-default" {
+	recDefault.mu.Lock()
+	defer recDefault.mu.Unlock()
+	recSecond.mu.Lock()
+	defer recSecond.mu.Unlock()
+	if got := recDefault.tokenByIssue["issue-default"]; got != "token-default" {
 		t.Errorf("default root resolved with token %q, want token-default", got)
 	}
-	if got := rec.tokenByIssue["issue-second"]; got != "token-second" {
+	if got := recSecond.tokenByIssue["issue-second"]; got != "token-second" {
 		t.Errorf("second profile root resolved with token %q, want token-second", got)
 	}
 }
@@ -376,7 +391,7 @@ func TestPrintRepoCacheLineSilentWhenEmpty(t *testing.T) {
 func setupTaskDiskUsageContext(t *testing.T, home, ownerServerURL string) string {
 	t.Helper()
 	t.Chdir(t.TempDir())
-	t.Setenv("HOME", home)
+	stageTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 	t.Setenv("MULTICA_SERVER_URL", "")
 
@@ -482,15 +497,23 @@ func TestResolveDiskUsageRootTaskContext(t *testing.T) {
 
 	t.Run("outside a task keeps profile resolution", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
+		stageTestHome(t, home)
 		t.Setenv("MULTICA_WORKSPACES_ROOT", "")
+		t.Setenv("MULTICA_SERVER_URL", "")
 		t.Setenv(daemon.TaskWorkspacesRootEnv, filepath.Join(t.TempDir(), "ignored"))
 
 		got, err := resolveDiskUsageRoot(false, "staging", "")
 		if err != nil {
 			t.Fatalf("resolveDiskUsageRoot: %v", err)
 		}
-		if want := filepath.Join(home, "multica_workspaces_staging"); got != want {
+		// With no explicit root and no existing tree the profile resolves the
+		// backend-scoped default, so two profiles aimed at one backend land on one
+		// tree rather than two (GH #8280).
+		baseURL, err := daemon.NormalizeServerBaseURL(daemon.DefaultServerURL)
+		if err != nil {
+			t.Fatalf("normalize default server url: %v", err)
+		}
+		if want := filepath.Join(home, "multica_workspaces_"+daemon.WorkStateKey(baseURL)); got != want {
 			t.Fatalf("root = %q, want %q", got, want)
 		}
 	})
@@ -500,7 +523,7 @@ func TestRunDaemonDiskUsageHonorsProfileWorkspacesRoot(t *testing.T) {
 	pinHumanCLIContext(t)
 	home := t.TempDir()
 	customRoot := filepath.Join(t.TempDir(), "configured-workspaces")
-	t.Setenv("HOME", home)
+	stageTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 	if err := cli.SaveCLIConfig(cli.CLIConfig{WorkspacesRoot: customRoot}); err != nil {
 		t.Fatalf("SaveCLIConfig: %v", err)
@@ -528,7 +551,7 @@ func TestResolveDiskUsageRootEnvOverridesProfileConfig(t *testing.T) {
 	home := t.TempDir()
 	configRoot := filepath.Join(t.TempDir(), "configured-workspaces")
 	envRoot := filepath.Join(t.TempDir(), "env-workspaces")
-	t.Setenv("HOME", home)
+	stageTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", envRoot)
 	if err := cli.SaveCLIConfig(cli.CLIConfig{WorkspacesRoot: configRoot}); err != nil {
 		t.Fatalf("SaveCLIConfig: %v", err)
@@ -550,7 +573,7 @@ func TestEnumerateDiskUsageRootsUsesAndDeduplicatesProfileConfig(t *testing.T) {
 	sharedRoot := filepath.Join(t.TempDir(), "shared-root")
 	uniqueRoot := filepath.Join(t.TempDir(), "unique-root")
 	neverRanRoot := filepath.Join(t.TempDir(), "never-ran-root")
-	t.Setenv("HOME", home)
+	stageTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 
 	configs := []struct {

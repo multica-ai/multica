@@ -186,15 +186,13 @@ func TestIsBlockedEnvKey(t *testing.T) {
 }
 
 func TestPrepareReasonixTaskStateHome(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	stateRoot := t.TempDir()
 
-	got, err := prepareReasonixTaskStateHome("work", "runtime-1", "agent_2")
+	got, err := prepareReasonixTaskStateHome(stateRoot, "runtime-1", "agent_2")
 	if err != nil {
 		t.Fatalf("prepareReasonixTaskStateHome: %v", err)
 	}
-	want := filepath.Join(home, ".multica", "profiles", "work", "reasonix-state", "runtime-1", "agent_2")
+	want := filepath.Join(stateRoot, "reasonix-state", "runtime-1", "agent_2")
 	if got != want {
 		t.Fatalf("state home = %q, want %q", got, want)
 	}
@@ -208,15 +206,13 @@ func TestPrepareReasonixTaskStateHome(t *testing.T) {
 }
 
 func TestPrepareDshTaskSessionRoot(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	stateRoot := t.TempDir()
 
-	got, err := prepareDshTaskSessionRoot("work", "runtime-1", "agent_2")
+	got, err := prepareDshTaskSessionRoot(stateRoot, "runtime-1", "agent_2")
 	if err != nil {
 		t.Fatalf("prepareDshTaskSessionRoot: %v", err)
 	}
-	want := filepath.Join(home, ".multica", "profiles", "work", "dsh-sessions", "runtime-1", "agent_2")
+	want := filepath.Join(stateRoot, "dsh-sessions", "runtime-1", "agent_2")
 	if got != want {
 		t.Fatalf("session root = %q, want %q", got, want)
 	}

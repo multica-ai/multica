@@ -639,6 +639,35 @@ type Daemon struct {
 	activeStoresCond *sync.Cond      // signalled when an in-flight store deletion finishes, so a blocked markActive can proceed
 	activeStores     map[string]int  // persistent store path (per-conversation Codex sessions, per-agent Hermes memories) -> live-task refcount; guards the store from GC mid-task (MUL-4424)
 	deletingStores   map[string]bool // store paths a GC delete has reserved; markActive waits these out so a task never mounts a store mid-removal
+	// scopeLocks carries the cross-process half of both guards above. A
+	// work-state scope is shared by every daemon process that serves the backend,
+	// and the maps right above are per process — so they stay as the local
+	// reference count and the fast path, while the OS locks in this scope are the
+	// authoritative boundary between daemons (GH #8280).
+	scopeLocks execenv.ScopeLocks
+	// scopeClaimTimeout bounds how long a task waits for a scope claim another
+	// daemon in this work state is holding (a store being deleted, or an env root
+	// being reclaimed). Zero means the default; tests shorten it.
+	scopeClaimTimeout time.Duration
+	// runtimeOwners holds the logical-runtime ownership claims this process has
+	// taken (see runtime_owner.go). A runtime may only be registered, claimed,
+	// heartbeated, recovered or deregistered by its owner, because one runtime
+	// row is one machine + backend rather than one process.
+	runtimeOwners *runtimeOwners
+	// runtimeOwnersInit guards the lazy creation of runtimeOwners, so a Daemon
+	// built as a struct literal (tests, embedded callers) cannot panic on the
+	// ownership path. Same pattern as ensureActiveEnvRootStateLocked.
+	runtimeOwnersInit sync.Mutex
+	// legacyPeerStandby is set while a live same-machine, same-backend peer from
+	// a release that predates the runtime-owner claim is serving this machine.
+	// This process has given its runtimes up to that peer, so it must not start
+	// new work: the flag is the second condition tryEnterClaim refuses on (GH
+	// #8280 - see runtime_coordination.go).
+	legacyPeerStandby atomic.Bool
+	// machineLocks is the machine-global lock set for resources that are not
+	// scoped to one backend - currently the local_directory real paths. See
+	// local_directory_scope.go.
+	machineLocks execenv.ScopeLocks
 
 	// repoCheckoutTasks binds the localhost /repo/checkout endpoint to the
 	// task-scoped bearer token of a currently running agent. The request body is
@@ -705,7 +734,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	d := &Daemon{
 		cfg:                       cfg,
 		client:                    client,
-		repoCache:                 repocache.New(cacheRoot, logger),
+		repoCache:                 repocache.NewScoped(cacheRoot, logger, execenv.NewScopeLocks(cfg.WorkState.LockDir)),
 		skillCache:                NewSkillBundleCache(skillCacheRoot),
 		logger:                    logger,
 		terminalReports:           newTerminalReportStore(cfg),
@@ -725,6 +754,9 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		deletingEnvRoots:          make(map[string]bool),
 		activeStores:              make(map[string]int),
 		deletingStores:            make(map[string]bool),
+		scopeLocks:                execenv.NewScopeLocks(cfg.WorkState.LockDir),
+		runtimeOwners:             newRuntimeOwners(),
+		machineLocks:              machineScopeLocks(),
 		localPathLocks:            NewLocalPathLocker(),
 		runtimeGoneInflight:       make(map[string]struct{}),
 		pendingWorkInflight:       make(map[string]struct{}),
@@ -1417,14 +1449,79 @@ func (d *Daemon) removeStaleRuntime(runtimeID string) (string, bool) {
 		d.mu.Unlock()
 		return "", false
 	}
+	// Capture the ownership target before the row goes: the claim is held by
+	// logical target, and once the runtime ID is gone nothing local can name it.
+	// The row itself was deleted server-side, so there is nothing to deregister —
+	// but this process is no longer serving a live runtime under that claim, and
+	// releasing it here is what gives the re-registration below a fresh ownership
+	// generation (and therefore exactly one orphan recovery for the new row).
+	// Holding it would keep the claim but skip that recovery forever (GH #8280).
+	var target string
+	if rt, tracked := d.runtimeIndex[runtimeID]; tracked {
+		target = runtimeOwnerTargetForRuntime(rt, workspaceID)
+	}
 	delete(d.runtimeIndex, runtimeID)
 	d.mu.Unlock()
+	d.releaseRuntimeOwnership(target)
 
 	d.wsHBMu.Lock()
 	delete(d.wsHBLastAck, runtimeID)
 	d.wsHBMu.Unlock()
 
 	return workspaceID, true
+}
+
+// dropTrackedRuntimeRows stops tracking every runtime row of one workspace and
+// returns them paired with their ownership targets, so the caller can take them
+// offline and then release the claims. The workspace itself stays tracked; use
+// forgetWorkspace to stop tracking it as well.
+//
+// The target has to be captured here, under the same lock that removes the row:
+// after this call there is no runtime metadata left to derive it from, and
+// releasing "by runtime ID" is not the same thing — IDs rotate when the server
+// deletes and recreates a runtime.
+func (d *Daemon) dropTrackedRuntimeRows(workspaceID string) []droppedRuntime {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ws, exists := d.workspaces[workspaceID]
+	if !exists {
+		return nil
+	}
+	if len(ws.runtimeIDs) == 0 {
+		return nil
+	}
+	dropped := make([]droppedRuntime, 0, len(ws.runtimeIDs))
+	for _, rid := range ws.runtimeIDs {
+		entry := droppedRuntime{ID: rid}
+		if rt, tracked := d.runtimeIndex[rid]; tracked {
+			entry.Target = runtimeOwnerTargetForRuntime(rt, workspaceID)
+			delete(d.runtimeIndex, rid)
+		}
+		dropped = append(dropped, entry)
+	}
+	// A fresh array rather than reuse, matching removeStaleRuntime: the health
+	// handler copies the slice header under d.mu and serializes it after
+	// releasing the lock.
+	ws.runtimeIDs = ws.runtimeIDs[:0:0]
+	return dropped
+}
+
+// forgetWorkspace drops one workspace's local tracking — its runtime rows and
+// the workspaceState itself — and reports the rows it was serving, so the caller
+// can take them offline and then release the claims. It reports false when the
+// workspace was not tracked.
+func (d *Daemon) forgetWorkspace(workspaceID string) ([]droppedRuntime, bool) {
+	d.mu.Lock()
+	_, exists := d.workspaces[workspaceID]
+	d.mu.Unlock()
+	if !exists {
+		return nil, false
+	}
+	dropped := d.dropTrackedRuntimeRows(workspaceID)
+	d.mu.Lock()
+	delete(d.workspaces, workspaceID)
+	d.mu.Unlock()
+	return dropped, true
 }
 
 // workspaceNeedsRuntimeRecovery reports whether a tracked workspace currently
@@ -1440,6 +1537,20 @@ func (d *Daemon) workspaceNeedsRuntimeRecovery(workspaceID string) bool {
 		return false
 	}
 	return len(ws.runtimeIDs) == 0
+}
+
+// workspaceNeedsRuntimeReconcile reports whether the periodic reconcile should
+// retry registration for a tracked workspace: it has no runtimes at all, or one
+// of its runtime targets is currently recorded as sibling-owned.
+//
+// The second half is what keeps partial ownership from going stale. A sibling
+// that dies releases nothing but its OS claim, and when the workspace's profile
+// signature has not changed there is no drift reason to re-register either — so
+// without a standby-aware predicate this process would happily keep serving the
+// runtimes it owns and never retry the freed sibling runtime it is standing by
+// for (GH #8280).
+func (d *Daemon) workspaceNeedsRuntimeReconcile(workspaceID string) bool {
+	return d.workspaceNeedsRuntimeRecovery(workspaceID) || d.workspaceHasStandbyRuntime(workspaceID)
 }
 
 // reregisterWorkspaceAfterRuntimeGone calls registerRuntimesForWorkspace and
@@ -1465,14 +1576,18 @@ func (d *Daemon) workspaceNeedsRuntimeRecovery(workspaceID string) bool {
 //   - newIDs:     the runtime IDs the server returned in this response, in
 //     the order they were returned. These are the daemon's authoritative
 //     current runtime set after the call.
-//   - droppedIDs: runtime IDs that were tracked before this call but did
-//     NOT survive the response. Callers Deregister these so the server marks
-//     them offline immediately instead of waiting on the 150 s
-//     stale-heartbeat sweep. On the runtime_gone path the triggering row was
+//   - dropped: runtime rows that were tracked before this call but did NOT
+//     survive the response, each paired with the ownership target it belongs
+//     to. Callers Deregister these so the server marks them offline immediately
+//     instead of waiting on the 150 s stale-heartbeat sweep, and release the
+//     target's claim afterwards — this process has stopped serving that logical
+//     runtime, so keeping the claim would lock a sibling out until the process
+//     exits (GH #8280). On the runtime_gone path the triggering row was
 //     already deleted server-side (and pruned locally before the register),
 //     but a SIBLING dropped here — e.g. a provider removed from the daemon's
 //     config, or a disabled profile — still has a live server row that must be
-//     deregistered.
+//     deregistered. The target is read here, under the same lock that drops the
+//     row: afterwards nothing local can name it, and runtime IDs rotate.
 //   - ok:         false when the workspace was forgotten between the
 //     register call and this apply (e.g. the user left the workspace and
 //     syncWorkspacesFromAPI removed it). The caller must abort silently in
@@ -1494,7 +1609,7 @@ func (d *Daemon) workspaceNeedsRuntimeRecovery(workspaceID string) bool {
 // rejected below: that verdict was reached by demoteBelowMinimumRuntimes, which
 // removed the rows under the claim barrier, and this response merely predates
 // it.
-func (d *Daemon) applyRegisterResponseInPlace(workspaceID string, resp *RegisterResponse, profileSig string, preserveProviders map[string]string) (newIDs, droppedIDs []string, ok bool) {
+func (d *Daemon) applyRegisterResponseInPlace(workspaceID string, resp *RegisterResponse, profileSig string, preserveProviders map[string]string) (newIDs []string, dropped []droppedRuntime, ok bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	ws, exists := d.workspaces[workspaceID]
@@ -1515,7 +1630,7 @@ func (d *Daemon) applyRegisterResponseInPlace(workspaceID string, resp *Register
 	for _, rt := range resp.Runtimes {
 		if rt.ProfileID == "" && d.providerDemotedLocked(rt.Provider) {
 			rejected[rt.ID] = struct{}{}
-			droppedIDs = append(droppedIDs, rt.ID)
+			dropped = append(dropped, droppedRuntime{ID: rt.ID, Target: runtimeOwnerTargetForRuntime(rt, workspaceID)})
 			continue
 		}
 		newIDs = append(newIDs, rt.ID)
@@ -1543,8 +1658,12 @@ func (d *Daemon) applyRegisterResponseInPlace(workspaceID string, resp *Register
 				continue
 			}
 		}
+		target := ""
+		if rt, tracked := d.runtimeIndex[oldID]; tracked {
+			target = runtimeOwnerTargetForRuntime(rt, workspaceID)
+		}
 		delete(d.runtimeIndex, oldID)
-		droppedIDs = append(droppedIDs, oldID)
+		dropped = append(dropped, droppedRuntime{ID: oldID, Target: target})
 	}
 	for _, rt := range resp.Runtimes {
 		if _, skip := rejected[rt.ID]; skip {
@@ -1571,7 +1690,7 @@ func (d *Daemon) applyRegisterResponseInPlace(workspaceID string, resp *Register
 	if profileSig != "" {
 		ws.profileSetSig = profileSig
 	}
-	return newIDs, droppedIDs, true
+	return newIDs, dropped, true
 }
 
 // mergeBuiltinRegisterResponse applies a builtins-only register response
@@ -1632,7 +1751,7 @@ func (d *Daemon) mergeBuiltinRegisterResponse(workspaceID string, resp *Register
 		// guard in applyRegisterResponseInPlace. The caller deregisters the row
 		// the server upserted back.
 		if d.providerDemotedLocked(rt.Provider) {
-			revived.add(d, rt.ID, rt.Provider)
+			revived.add(d, workspaceID, rt)
 			continue
 		}
 		d.runtimeIndex[rt.ID] = rt
@@ -1694,6 +1813,22 @@ func (d *Daemon) demotedOfflineReasonLocked(provider string) *RuntimeOfflineReas
 type revivedRuntimes struct {
 	ids     []string
 	reasons map[string]RuntimeOfflineReason
+	// targets is the ownership claim each of those rows belongs to. The row is
+	// refused locally, so this process must not keep claiming the logical
+	// runtime it just declined to serve (GH #8280).
+	targets map[string]string
+}
+
+// droppedRuntime is one runtime row this daemon is giving up: the server row to
+// take offline, and the ownership claim to release once that attempt is done.
+//
+// The two travel together because they cannot be derived from each other after
+// the fact: the claim is keyed on the logical target (workspace + provider, or
+// workspace + profile), and the local metadata that names it is deleted in the
+// same step that decides the row is going away.
+type droppedRuntime struct {
+	ID     string
+	Target string
 }
 
 // reasonsFor narrows the causes to the rows actually being deregistered. The
@@ -1719,16 +1854,22 @@ func (r revivedRuntimes) reasonsFor(runtimeIDs []string) map[string]RuntimeOffli
 // add records one revived row. Callers must hold d.mu (it reads the demotion
 // record), and it is a no-op for a provider with no structured cause — those
 // rows still need deregistering, they just have nothing to re-attach.
-func (r *revivedRuntimes) add(d *Daemon, runtimeID, provider string) {
-	r.ids = append(r.ids, runtimeID)
-	reason := d.demotedOfflineReasonLocked(provider)
+func (r *revivedRuntimes) add(d *Daemon, workspaceID string, rt Runtime) {
+	r.ids = append(r.ids, rt.ID)
+	if target := runtimeOwnerTargetForRuntime(rt, workspaceID); target != "" {
+		if r.targets == nil {
+			r.targets = make(map[string]string, 1)
+		}
+		r.targets[rt.ID] = target
+	}
+	reason := d.demotedOfflineReasonLocked(rt.Provider)
 	if reason == nil {
 		return
 	}
 	if r.reasons == nil {
 		r.reasons = make(map[string]RuntimeOfflineReason, 1)
 	}
-	r.reasons[runtimeID] = *reason
+	r.reasons[rt.ID] = *reason
 }
 
 // demotionRecord is a confirmed verdict about the binary on disk: the evidence
@@ -1923,18 +2064,32 @@ func (d *Daemon) untrackedRuntimeIDs(ids []string) []string {
 
 func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, workspaceID string) error {
 	var newIDs []string
+	// The response rows are captured for the ownership-gated recovery below,
+	// which runs after the register lock is released.
+	var registered []Runtime
 	// Send, apply and clean up as one ordered step — see workspaceRegisterLock.
 	err := d.withWorkspaceRegisterLock(workspaceID, func() error {
 		resp, profileSig, preserve, err := d.registerRuntimesForWorkspaceLocked(ctx, workspaceID)
 		if err != nil {
+			if errors.Is(err, errAllRuntimesPeerOwned) {
+				// Every candidate is served by a sibling right now. That is a
+				// standby outcome rather than a failed reconcile: registering
+				// nothing is correct, the standby entries keep the workspace
+				// reconciled, and the caller must not be told it failed (GH
+				// #8280).
+				d.logger.Info("all runtime candidates are owned by a sibling daemon process; standing by",
+					"workspace_id", workspaceID)
+				return nil
+			}
 			return fmt.Errorf("register runtimes: %w", err)
 		}
 
-		ids, droppedIDs, ok := d.applyRegisterResponseInPlace(workspaceID, resp, profileSig, preserve)
+		ids, dropped, ok := d.applyRegisterResponseInPlace(workspaceID, resp, profileSig, preserve)
 		if !ok {
 			return fmt.Errorf("workspace %s no longer tracked", workspaceID)
 		}
 		newIDs = ids
+		registered = resp.Runtimes
 
 		for _, rid := range newIDs {
 			d.logger.Info("re-registered runtime after server-side deletion",
@@ -1946,7 +2101,7 @@ func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, worksp
 		// runtime_gone trigger only deleted its own. Eagerly mark those offline,
 		// matching the drift path, instead of leaving them claimable until the
 		// stale-heartbeat sweep.
-		d.deregisterDroppedRuntimes(ctx, workspaceID, droppedIDs, "runtime_gone recovery", nil)
+		d.deregisterDroppedRuntimes(ctx, workspaceID, dropped, "runtime_gone recovery", nil)
 		return nil
 	})
 	if err != nil {
@@ -1954,20 +2109,28 @@ func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, worksp
 	}
 	d.notifyRuntimeSetChanged()
 
-	// Tell the server about any tasks the previous (now-deleted) runtime
-	// was working on, mirroring the registration path's recover-orphans call.
-	// This is intentionally scoped to the runtime_gone recovery: the
-	// runtimes were truly gone server-side, so anything still in
-	// dispatched/running/waiting_local_directory on those rows is an orphan
-	// that needs to be failed-and-retried. The drift-refresh path (which
-	// also feeds applyRegisterResponseInPlace) deliberately skips this step
-	// because its surviving runtime IDs may still be actively executing
-	// tasks for the user (MUL-3332).
-	for _, rid := range newIDs {
-		if err := d.client.RecoverOrphans(ctx, rid); err != nil {
-			d.logger.Warn("recover-orphans after re-register failed",
-				"runtime_id", rid, "error", err)
+	// Tell the server about any tasks the previous (now-deleted) runtime was
+	// working on, mirroring the registration path. The recovery is gated on
+	// ownership generation rather than on the returned rows: this register
+	// returns every configured provider, so the runtime that lost its row comes
+	// back TOGETHER with the workspace's surviving runtimes, and recovery
+	// hard-fails every dispatched/running/waiting_local_directory task on
+	// whichever runtime it is aimed at. Recovering per returned row would fail
+	// the tasks this process is still executing on a sibling runtime of the one
+	// that was actually deleted (GH #8280).
+	//
+	// The row that lost its server-side identity got a fresh ownership
+	// generation in removeStaleRuntime, so it is recovered exactly once here; a
+	// surviving runtime keeps its generation and markOwnershipRecovered skips
+	// it. The drift-refresh path (which also feeds applyRegisterResponseInPlace)
+	// still deliberately skips recovery entirely (MUL-3332).
+	for _, rt := range registered {
+		if rt.ProfileID == "" && d.providerDemotedLocked(rt.Provider) {
+			// Refused locally and already on its way offline; recovering it
+			// would fail tasks for a runtime this process will never serve.
+			continue
 		}
+		d.recoverOrphansOncePerOwnership(ctx, workspaceID, rt)
 	}
 	return nil
 }
@@ -2182,11 +2345,21 @@ func (d *Daemon) RestartBinary() string {
 	return d.restartBinary
 }
 
-// deregisterRuntimes notifies the server that all runtimes are going offline.
+// deregisterRuntimes notifies the server that the runtimes THIS process owns are
+// going offline, then releases those ownership claims.
+//
+// Ordering is the whole point and must not be reversed: deregistering first and
+// releasing second means a sibling can never take the runtime over and bring it
+// back online before this process's late Deregister lands. Releasing first would
+// reopen exactly the race this ownership model exists to close.
+//
+// Only owned runtimes are reported. A process that is merely standing by for a
+// sibling's runtime must not take it offline when it exits (GH #8280).
 func (d *Daemon) deregisterRuntimes() {
-	runtimeIDs := d.allRuntimeIDs()
+	runtimeIDs := d.ownedRuntimeIDs()
 	if len(runtimeIDs) == 0 {
-		d.logger.Debug("deregister: no runtimes to deregister")
+		d.logger.Debug("deregister: no owned runtimes to deregister")
+		d.releaseAllRuntimeOwnership()
 		return
 	}
 
@@ -2199,6 +2372,38 @@ func (d *Daemon) deregisterRuntimes() {
 	} else {
 		d.logger.Info("deregistered runtimes", "count", len(runtimeIDs))
 	}
+	// Only now: the server has been told, so a takeover that happens after this
+	// point is a genuine new owner rather than a sibling racing a stale report.
+	d.releaseAllRuntimeOwnership()
+}
+
+// ownedRuntimeIDs returns the server runtime IDs this process is the active
+// owner of. A runtime tracked locally but owned by a sibling process is
+// deliberately excluded - see deregisterRuntimes.
+func (d *Daemon) ownedRuntimeIDs() []string {
+	d.mu.Lock()
+	type row struct {
+		id          string
+		workspaceID string
+		rt          Runtime
+	}
+	rows := make([]row, 0, len(d.runtimeIndex))
+	for workspaceID, ws := range d.workspaces {
+		for _, rid := range ws.runtimeIDs {
+			if rt, ok := d.runtimeIndex[rid]; ok {
+				rows = append(rows, row{id: rid, workspaceID: workspaceID, rt: rt})
+			}
+		}
+	}
+	d.mu.Unlock()
+
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if d.ownsTarget(runtimeOwnerTargetForRuntime(r.rt, r.workspaceID)) {
+			ids = append(ids, r.id)
+		}
+	}
+	return ids
 }
 
 // resolveAuth loads the auth token from the CLI config for the active profile.
@@ -2952,12 +3157,32 @@ func (d *Daemon) registerRuntimesForWorkspaceBatchLocked(ctx context.Context, wo
 	// previously cached on the workspaceState.
 	profileSig := d.appendProfileRuntimes(ctx, workspaceID, &runtimes, &failedProfiles)
 
+	// Ownership gate: only candidates this process owns may be announced to the
+	// server. A sibling process in the same work-state scope that already serves a
+	// runtime keeps it, and this process stands by for that one (GH #8280).
+	owned, peerOwned, ownErr := d.filterOwnedRuntimeCandidates(ctx, workspaceID, runtimes)
+	if ownErr != nil {
+		return nil, "", ownErr
+	}
+	runtimes = owned
+	if len(peerOwned) > 0 {
+		d.logger.Info("runtime candidates already owned by a sibling daemon process; standing by",
+			"workspace_id", workspaceID, "providers", peerOwned, "owned", len(runtimes))
+	}
+
 	if len(runtimes) == 0 && len(failedProfiles) == 0 {
 		// profileSig is still meaningful even when nothing resolves: the
 		// refresh path uses it to remember "we already converged on the
 		// disabled-everywhere state" so duplicate change notifications are a
 		// no-op instead of a re-empty-register loop. Initial-registration
 		// callers that don't care about the sig discard it via _.
+		//
+		// A standby process reports a DIFFERENT error: it does have runtimes to
+		// host, they are just served elsewhere, and the converge-to-zero path
+		// must not act on that as if this process had nothing (GH #8280).
+		if len(peerOwned) > 0 {
+			return nil, profileSig, errAllRuntimesPeerOwned
+		}
 		return nil, profileSig, ErrNoRuntimesToRegister
 	}
 
@@ -3809,6 +4034,15 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 func (d *Daemon) applyProfileDriftRegistration(ctx context.Context, workspaceID string) error {
 	regResp, profileSig, preserve, err := d.registerRuntimesForWorkspaceLocked(ctx, workspaceID)
 	if err != nil {
+		if errors.Is(err, errAllRuntimesPeerOwned) {
+			// Every candidate is served by a sibling process. This is not
+			// convergence to zero - the runtimes exist and are in use - so the
+			// workspace keeps being reconciled and this process keeps standing by
+			// until it can take one over (GH #8280).
+			d.logger.Info("all runtimes for workspace are owned by a sibling daemon process; standing by",
+				"workspace_id", workspaceID)
+			return nil
+		}
 		if errors.Is(err, ErrNoRuntimesToRegister) {
 			// Convergence-to-zero: a custom-only daemon's only enabled
 			// profile was just disabled / deleted, and there are no built-in
@@ -3886,7 +4120,7 @@ func (d *Daemon) convergeWorkspaceRuntimesToZero(ctx context.Context, workspaceI
 	// slice header under d.mu and serializes it after releasing the lock
 	// (removeStaleRuntime keeps the same rule).
 	kept := ws.runtimeIDs[:0:0]
-	var dropped []string
+	var dropped []droppedRuntime
 	for _, rid := range ws.runtimeIDs {
 		if rt, tracked := d.runtimeIndex[rid]; tracked && rt.ProfileID == "" {
 			if _, preserve := preserveProviders[rt.Provider]; preserve {
@@ -3897,8 +4131,15 @@ func (d *Daemon) convergeWorkspaceRuntimesToZero(ctx context.Context, workspaceI
 			// round; drop its version record too, mirroring the demote path.
 			delete(ws.builtinVersions, rt.Provider)
 		}
+		// The ownership target is read before the row goes: converging to zero
+		// means this process stops serving that logical runtime, so the claim
+		// must be released with it (GH #8280).
+		entry := droppedRuntime{ID: rid}
+		if rt, tracked := d.runtimeIndex[rid]; tracked {
+			entry.Target = runtimeOwnerTargetForRuntime(rt, workspaceID)
+		}
 		delete(d.runtimeIndex, rid)
-		dropped = append(dropped, rid)
+		dropped = append(dropped, entry)
 	}
 	ws.runtimeIDs = kept
 	if profileSig != "" {
@@ -3909,7 +4150,7 @@ func (d *Daemon) convergeWorkspaceRuntimesToZero(ctx context.Context, workspaceI
 	d.mu.Unlock()
 
 	d.logger.Info("custom runtime profile drift converged to zero; clearing local tracking",
-		"workspace_id", workspaceID, "deregistered_runtime_ids", dropped,
+		"workspace_id", workspaceID, "deregistered_runtimes", len(dropped),
 		"preserved_providers", preserveProviders)
 
 	d.deregisterDroppedRuntimes(ctx, workspaceID, dropped, "zero-runtime convergence", nil)
@@ -4248,6 +4489,24 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 	}
 	d.mu.Unlock()
 
+	// A live same-machine, same-backend peer from a release that predates the
+	// runtime-owner claim cannot be coordinated with: it would register and serve
+	// the same runtimes this process is about to take. Fail closed and stand by
+	// until it is gone, then retry on the next reconcile (GH #8280).
+	//
+	// checkRuntimeCoordinationPeers is the whole mixed-version rule: a peer that
+	// answered without the capability blocks, a peer that did not answer blocks
+	// while its health port is still held, and a peer whose port is free is a
+	// stale profile directory. If this process already owns runtimes when the
+	// conflict appears, "standing by" has to be an active transition rather than
+	// an early return - see yieldRuntimesToLegacyPeer.
+	if decision := d.checkRuntimeCoordinationPeers(ctx); decision.Blocked {
+		d.logLegacyPeerStandby(decision)
+		d.yieldRuntimesToLegacyPeer(ctx, decision)
+		return nil
+	}
+	d.resumeAfterLegacyPeer()
+
 	// Built-in agent CLIs are installed per machine, so one probe round serves
 	// every workspace this sync has to register (MUL-5225). Probing is lazy —
 	// a sync that finds nothing new to register never shells out at all, which
@@ -4267,6 +4526,10 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 
 	var registered int
 	var removed int
+	// standbyCount counts the workspaces this round deliberately left entirely
+	// to a sibling process. A daemon whose every workspace is in that state is
+	// healthy, not empty: the runtimes exist and are being served (GH #8280).
+	var standbyCount int
 	for id, name := range apiIDs {
 		if currentIDs[id] {
 			if reconcileProfiles {
@@ -4276,13 +4539,16 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 			}
 			// Only intervene further if the workspace lost all of its
 			// runtimes (most commonly because handleRuntimeGone pruned them
-			// and its inline re-register failed). The pointer is not replaced
-			// here either — ensureRepoReady holds repoRefreshMu from the
-			// original pointer.
-			if !d.workspaceNeedsRuntimeRecovery(id) {
+			// and its inline re-register failed), or because a sibling owns one
+			// of its runtime targets and this process is still standing by for
+			// that one — a healthy locally-owned runtime must not suppress the
+			// retry, since the sibling can die at any time (GH #8280). The
+			// pointer is not replaced here either — ensureRepoReady holds
+			// repoRefreshMu from the original pointer.
+			if !d.workspaceNeedsRuntimeReconcile(id) {
 				continue
 			}
-			d.logger.Info("workspace has no runtimes; retrying registration", "workspace_id", id, "name", name)
+			d.logger.Info("workspace runtimes need reconcile; retrying registration", "workspace_id", id, "name", name)
 			if err := d.reregisterWorkspaceAfterRuntimeGone(ctx, id); err != nil {
 				d.logger.Warn("retry register failed", "workspace_id", id, "error", err)
 				continue
@@ -4294,6 +4560,12 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 		var (
 			resp       *RegisterResponse
 			runtimeIDs []string
+			// standby marks an attempt that deliberately registered nothing
+			// because a sibling process serves every runtime this workspace
+			// would have hosted. It is neither an error nor a success: there is
+			// no response to fold in, and the steps after the callback must be
+			// skipped rather than run against a nil resp (GH #8280).
+			standby bool
 		)
 		// Send, publish and clean up as one ordered step — see
 		// workspaceRegisterLock.
@@ -4302,6 +4574,15 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 			var err error
 			resp, profileSig, err = d.registerRuntimesForWorkspaceBatchLocked(ctx, id, payload)
 			if err != nil {
+				if errors.Is(err, errAllRuntimesPeerOwned) {
+					// Standby: a sibling process serves every runtime this
+					// workspace would have hosted. Register nothing, converge
+					// nothing, and let the periodic reconcile retry (GH #8280).
+					d.logger.Info("workspace runtimes are owned by a sibling daemon process; standing by",
+						"workspace_id", id)
+					standby = true
+					return nil
+				}
 				return err
 			}
 			// First registration is the third path a response reaches local state
@@ -4315,7 +4596,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 			var revived revivedRuntimes
 			for _, rt := range resp.Runtimes {
 				if rt.ProfileID == "" && d.providerDemotedLocked(rt.Provider) {
-					revived.add(d, rt.ID, rt.Provider)
+					revived.add(d, id, rt)
 					continue
 				}
 				runtimeIDs = append(runtimeIDs, rt.ID)
@@ -4361,6 +4642,13 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 			d.logger.Error("failed to register runtimes", "workspace_id", id, "name", name, "error", err)
 			continue
 		}
+		if standby {
+			// A standby attempt owns no runtime it could publish: no repo sync,
+			// no orphan recovery (that would hard-fail the sibling's tasks), no
+			// registration count. Only the remaining workspaces matter.
+			standbyCount++
+			continue
+		}
 
 		if d.repoCache != nil && len(resp.Repos) > 0 {
 			go d.syncWorkspaceRepos(id, resp.Repos)
@@ -4370,10 +4658,16 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 		// running on these runtimes. Without this, an issue can stay stuck
 		// at in_progress until the slow heartbeat sweeper or the in-flight
 		// task timeout (2.5h) kicks in.
-		for _, rid := range runtimeIDs {
-			if err := d.client.RecoverOrphans(ctx, rid); err != nil {
-				d.logger.Warn("recover-orphans failed", "runtime_id", rid, "error", err)
+		//
+		// Gated on ownership: recovery hard-fails every running task on the
+		// runtime, so it may only run for a runtime THIS process just took over
+		// from a dead owner - never for one a sibling process is still serving,
+		// and never twice for one ownership (GH #8280).
+		for _, rt := range resp.Runtimes {
+			if rt.ProfileID == "" && d.providerDemotedLocked(rt.Provider) {
+				continue
 			}
+			d.recoverOrphansOncePerOwnership(ctx, id, rt)
 		}
 
 		d.logger.Info("watching workspace", "workspace_id", id, "name", name, "runtimes", len(runtimeIDs), "repos", len(resp.Repos))
@@ -4383,14 +4677,17 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 	// Remove workspaces the user no longer belongs to.
 	for id := range currentIDs {
 		if _, ok := apiIDs[id]; !ok {
-			d.mu.Lock()
-			if ws, exists := d.workspaces[id]; exists {
-				for _, rid := range ws.runtimeIDs {
-					delete(d.runtimeIndex, rid)
-				}
+			// Drop the local metadata first, then tell the server, then release
+			// the ownership claims — the same order shutdown uses, and for the
+			// same reason: releasing first would let a sibling take the target
+			// over and bring the runtime back online before this process's late
+			// Deregister lands (GH #8280). The target can only be named while
+			// the runtime row is still here, so it is captured inside.
+			dropped, existed := d.forgetWorkspace(id)
+			if !existed {
+				continue
 			}
-			delete(d.workspaces, id)
-			d.mu.Unlock()
+			d.deregisterDroppedRuntimes(ctx, id, dropped, "workspace removed", nil)
 			d.logger.Info("stopped watching workspace", "workspace_id", id)
 			removed++
 		}
@@ -4407,7 +4704,13 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 	// just upgraded, and a state file removed by repo cache GC.
 	d.publishTrackedCoAuthoredByState()
 
-	if len(d.allRuntimeIDs()) == 0 && registered == 0 && len(workspaces) > 0 {
+	// Startup may continue with nothing to serve only when every workspace was
+	// explicitly left to a sibling: the runtimes exist, this process just does
+	// not own them, and the periodic sync takes them over once they are free.
+	// Every other way of registering nothing (unreachable server, rejected
+	// token, a machine with no runtimes) still fails startup.
+	allWorkspacesStandby := standbyCount > 0 && standbyCount == len(apiIDs)
+	if len(d.allRuntimeIDs()) == 0 && registered == 0 && !allWorkspacesStandby && len(workspaces) > 0 {
 		return fmt.Errorf("%w for any of the %d workspace(s)", errNoWorkspaceRuntimesRegistered, len(workspaces))
 	}
 	if registered > 0 || removed > 0 {
@@ -5199,7 +5502,11 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 func (d *Daemon) tryEnterClaim() bool {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	if d.pauseClaims {
+	// legacyPeerStandby is checked here rather than by pausing claims through
+	// the auto-update barrier: the barrier is owned by the update path and is
+	// released on its failure paths, so a standby set through it could be
+	// cleared by an unrelated update that never happened (GH #8280).
+	if d.pauseClaims || d.legacyPeerStandby.Load() {
 		return false
 	}
 	d.claimsInFlight++
@@ -5798,11 +6105,23 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		taskLog.Error("resolve stable task env root", "error", resolveRootErr)
 	}
 	if resolvedEnvRoot != "" {
+		releaseEnvRootScope, scopeErr := d.holdEnvRootForTask(resolvedEnvRoot)
+		if scopeErr != nil {
+			taskLog.Error("claim stable task env root", "root", resolvedEnvRoot, "error", scopeErr)
+		} else {
+			defer releaseEnvRootScope()
+		}
 		d.markActiveEnvRoot(resolvedEnvRoot)
 		defer d.unmarkActiveEnvRoot(resolvedEnvRoot)
 	}
 	if task.PriorWorkDir != "" {
 		if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != resolvedEnvRoot {
+			releasePriorScope, scopeErr := d.holdEnvRootForTask(priorRoot)
+			if scopeErr != nil {
+				taskLog.Error("claim prior task env root", "root", priorRoot, "error", scopeErr)
+			} else {
+				defer releasePriorScope()
+			}
 			d.markActiveEnvRoot(priorRoot)
 			defer d.unmarkActiveEnvRoot(priorRoot)
 		}
@@ -6221,6 +6540,40 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			taskLog.Error("fail task after local_directory lock cancel", "error", failErr)
 		}
 		return nil, true
+	}
+	// The machine-wide half of the same claim. Ordering is local-then-machine
+	// everywhere (see local_directory_scope.go): the local locker owns fairness
+	// and the holder hint, and the OS claim is what actually spans processes.
+	machineRelease, machineErr := d.holdLocalDirectoryPath(waitCtx, assignment.RealPath, task.ID, onWait)
+	if machineErr != nil {
+		release()
+		if cancelledByPoll != nil {
+			select {
+			case <-cancelledByPoll:
+				taskLog.Info("local_directory: wait aborted by server-side terminal state")
+				return nil, true
+			default:
+			}
+		}
+		if waitCtx.Err() != nil {
+			taskLog.Info("local_directory: machine-wide wait cancelled")
+			return nil, true
+		}
+		taskLog.Error("local_directory: machine-wide lock acquire failed", "error", machineErr)
+		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:          terminalTaskReportFail,
+			taskID:        task.ID,
+			errorMessage:  fmt.Sprintf("local_directory wait failed: %s", machineErr.Error()),
+			failureReason: "local_directory_error",
+		}); failErr != nil {
+			taskLog.Error("fail task after local_directory machine-wide lock error", "error", failErr)
+		}
+		return nil, true
+	}
+	localRelease := release
+	release = func() {
+		machineRelease()
+		localRelease()
 	}
 	taskLog.Info("local_directory: lock acquired")
 	return release, false
@@ -7799,11 +8152,40 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("resolve stable task env root: %w", err)
 	}
+	// Stable scope claim for the whole run, and it is taken BEFORE the in-tree
+	// .task_lock below and before any env work: a sibling daemon whose GC owns the
+	// delete claim for this path must not be able to race this task recreating the
+	// directory. Released last (defers run LIFO), so the .task_lock outlives the
+	// scope claim rather than the other way round.
+	releaseRootScope, err := d.holdEnvRootForTask(resolvedRoot)
+	if err != nil {
+		return TaskResult{}, err
+	}
+	defer releaseRootScope()
+
+	// A run that may check out workspace repositories holds the scope-level
+	// activity claim for each bare repo for the whole run, and it must hold all of
+	// them before the agent starts: heavy maintenance and eviction take the
+	// exclusive side of that claim, so a run that cannot claim a repository would
+	// otherwise put this run's git activity and another daemon's prune on the same
+	// object store. Claimed here, before any repository-sensitive preparation, and
+	// released with the run (GH #8280).
+	releaseRepoActivity, err := d.holdTaskRepoActivity(task)
+	if err != nil {
+		return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("claim repository activity: %w", err))
+	}
+	defer releaseRepoActivity()
+
 	d.markActiveEnvRoot(resolvedRoot)
 	defer d.unmarkActiveEnvRoot(resolvedRoot)
 	if task.PriorWorkDir != "" {
 		priorRoot := filepath.Dir(task.PriorWorkDir)
 		if priorRoot != resolvedRoot {
+			releasePriorRootScope, err := d.holdEnvRootForTask(priorRoot)
+			if err != nil {
+				return TaskResult{}, err
+			}
+			defer releasePriorRootScope()
 			d.markActiveEnvRoot(priorRoot)
 			defer d.unmarkActiveEnvRoot(priorRoot)
 		}
@@ -8006,10 +8388,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// the resolved source home so switching an agent's profile switches its
 		// memory line, matching Hermes' own "a profile is an isolated instance"
 		// model. Guarded from the GC for the whole task, as the Codex store below.
-		if store := execenv.HermesMemoryStorePath(d.cfg.Profile, task.AgentID, res.SourceHome); store != "" {
+		if store := execenv.HermesMemoryStorePath(d.cfg.WorkState.StateRoot, task.AgentID, res.SourceHome); store != "" {
+			release, err := d.holdStoreForTask(store)
+			if err != nil {
+				return TaskResult{}, fmt.Errorf("claim hermes memory store: %w", err)
+			}
 			hermesMemoryStore = store
-			d.markActiveStore(store)
-			defer d.unmarkActiveStore(store)
+			defer release()
 		}
 		// The overlay links state.db here so the conversation transcript
 		// survives the task and a follow-up turn can actually resume it
@@ -8017,10 +8402,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// tasks of one conversation are serial, so the shard has a single
 		// writer, while two issues never share a database. Guarded from the GC
 		// for the whole task, as the stores above and below.
-		if store := execenv.HermesSessionStorePath(d.cfg.Profile, task.AgentID, res.SourceHome, taskCtx); store != "" {
+		if store := execenv.HermesSessionStorePath(d.cfg.WorkState.StateRoot, task.AgentID, res.SourceHome, taskCtx); store != "" {
+			release, err := d.holdStoreForTask(store)
+			if err != nil {
+				return TaskResult{}, fmt.Errorf("claim hermes session store: %w", err)
+			}
 			hermesSessionStore = store
-			d.markActiveStore(store)
-			defer d.unmarkActiveStore(store)
+			defer release()
 		}
 	}
 	// Reasonix locates its user config from the environment (REASONIX_HOME, and
@@ -8038,9 +8426,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// store's stale (pre-remount) mtime cannot reclaim it out from under a resume
 	// of a long-idle issue (MUL-4424). No-op for non-Codex tasks / no stable key.
 	if provider == "codex" {
-		if store := execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx); store != "" {
-			d.markActiveStore(store)
-			defer d.unmarkActiveStore(store)
+		if store := execenv.CodexSessionStorePath(d.cfg.WorkState.CodexNamespace, taskCtx); store != "" {
+			release, err := d.holdStoreForTask(store)
+			if err != nil {
+				return TaskResult{}, fmt.Errorf("claim codex session store: %w", err)
+			}
+			defer release()
 		}
 	}
 	envReused := false
@@ -8054,6 +8445,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	if reusable {
 		defer priorClaim.Release()
+		// The reused directory is the env root this run actually works in, so it
+		// needs the same stable scope claim the fresh path takes. Registered after
+		// the .task_lock release above, so it is released before it - the in-tree
+		// lock still outlives the scope claim, and the GC legacy probe covers the
+		// remaining window.
+		if priorRoot := filepath.Dir(priorWorkDir); priorRoot != "" {
+			releasePriorEnvRootScope, scopeErr := d.holdEnvRootForTask(priorRoot)
+			if scopeErr != nil {
+				return TaskResult{}, scopeErr
+			}
+			defer releasePriorEnvRootScope()
+		}
 		// Deterministic seam for the last-window regression: tests swap the
 		// directory here, after the claim is settled and before Reuse resolves
 		// the path by name.
@@ -8064,6 +8467,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		env, err = d.reuseExecutionEnvironment(prepareCtx, execenv.ReuseParams{
 			WorkspacesRoot: d.cfg.WorkspacesRoot,
 			Profile:        d.cfg.Profile,
+			// Persistent session state follows the machine + backend scope, not
+			// the profile, so a conversation started under another profile aimed
+			// at this backend resumes here (#8280).
+			CodexSessionNamespace: d.cfg.WorkState.CodexNamespace,
 			// The canonical path the lock was taken on. Handing Reuse the raw
 			// PriorWorkDir instead would re-resolve it, so the directory we
 			// locked and the directory we use could differ.
@@ -8109,13 +8516,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env == nil {
 		var err error
 		prepParams := execenv.PrepareParams{
-			WorkspacesRoot:  d.cfg.WorkspacesRoot,
-			Profile:         d.cfg.Profile,
-			WorkspaceID:     task.WorkspaceID,
-			WorkspaceSlug:   task.WorkspaceSlug,
-			TaskID:          task.ID,
-			IssueIdentifier: task.IssueIdentifier,
-			AgentName:       agentName,
+			WorkspacesRoot: d.cfg.WorkspacesRoot,
+			Profile:        d.cfg.Profile,
+			// See ReuseParams above: session state is keyed on the work-state
+			// scope, never on the profile name (#8280).
+			CodexSessionNamespace: d.cfg.WorkState.CodexNamespace,
+			WorkspaceID:           task.WorkspaceID,
+			WorkspaceSlug:         task.WorkspaceSlug,
+			TaskID:                task.ID,
+			IssueIdentifier:       task.IssueIdentifier,
+			AgentName:             agentName,
 			// This run already holds the claim (envClaim above) and the reset
 			// it implies; preparation must not try to take it again.
 			EnvRootPreclaimed:     true,
@@ -8196,7 +8606,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				return TaskResult{}, fmt.Errorf("local_directory worktree: wait for a consistent snapshot of %s: %w",
 					localAssignment.AbsPath, lockErr)
 			}
+			// The machine-wide half, held for the snapshot alone exactly like the
+			// local half: another PROCESS may be running an in_place task in this
+			// same checkout, and snapshotting underneath it would capture a
+			// half-written tree (GH #8280).
+			machineRelease, machineErr := d.holdLocalDirectoryPath(waitCtx, localAssignment.RealPath, task.ID, nil)
+			if machineErr != nil {
+				release()
+				return TaskResult{}, fmt.Errorf("local_directory worktree: machine-wide wait for a consistent snapshot of %s: %w",
+					localAssignment.AbsPath, machineErr)
+			}
 			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
+			machineRelease()
 			release()
 			if err != nil {
 				return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: %w", err))
@@ -8215,6 +8636,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Belt-and-suspenders: also mark whatever root we ended up with, in case
 	// future changes diverge from ResolveRootDir.
 	if env.RootDir != resolvedRoot && env.RootDir != "" {
+		if releaseRootScope, scopeErr := d.holdEnvRootForTask(env.RootDir); scopeErr != nil {
+			taskLog.Error("claim prepared env root", "root", env.RootDir, "error", scopeErr)
+		} else {
+			defer releaseRootScope()
+		}
 		d.markActiveEnvRoot(env.RootDir)
 		defer d.unmarkActiveEnvRoot(env.RootDir)
 	}
@@ -8396,6 +8822,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if resumeReachable {
 		gateCodexResumeToRolloutPresence(&task, &taskCtx, provider, env.CodexHome, taskLog)
 	}
+	d.reportResumeWarning(ctx, task, taskLog)
 
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
 	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
@@ -8511,14 +8938,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
 	if provider == "reasonix" {
-		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
+		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.WorkState.StateRoot, task.RuntimeID, task.AgentID)
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("prepare reasonix state home: %w", err)
 		}
 		agentEnv["REASONIX_STATE_HOME"] = reasonixStateHome
 	}
 	if provider == "dsh" {
-		dshSessionRoot, err := prepareDshTaskSessionRoot(d.cfg.Profile, task.RuntimeID, task.AgentID)
+		dshSessionRoot, err := prepareDshTaskSessionRoot(d.cfg.WorkState.StateRoot, task.RuntimeID, task.AgentID)
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("prepare dsh session root: %w", err)
 		}
@@ -10051,14 +10478,51 @@ func (d *Daemon) ensureActiveEnvRootStateLocked() {
 // check-then-remove race between the GC loop and task startup: either GC sees
 // the active task and skips, or task startup waits for the mutation to finish
 // and recreates/uses the post-GC environment.
+//
+// Two layers, and only the outer one is authoritative across processes. Any
+// daemon in this work-state scope may be running a task on this env root, and
+// the task's own .task_lock is the one signal that answers "is that execution
+// still alive?" regardless of which process started it, so the claim below
+// acquires that lock and holds it for the whole mutation. The in-process maps
+// then do what they always did — reference count this daemon's own tasks, and
+// keep a same-process task from entering mid-mutation.
 func (d *Daemon) reserveEnvRootForGC(envRoot string) (release func(), ok bool) {
 	if envRoot == "" {
+		return nil, false
+	}
+	// 1. The stable scope-level claim. It is keyed on the env root PATH and lives
+	// outside the tree, so it survives the deletion it authorises: an in-tree
+	// lock can be unlinked by the very RemoveAll this claim guards, and the next
+	// process would then lock a fresh inode at the same path while the removal is
+	// still running. This claim cannot be unlinked, so recreate-during-deletion
+	// loses here (GH #8280).
+	scopeClaim, owned, err := d.scopeLocks.TryAcquireTargetDelete(envRoot)
+	if err != nil {
+		d.logger.Warn("gc: could not take the env root scope claim; skipping", "dir", envRoot, "error", err)
+		return nil, false
+	}
+	if !owned {
+		return nil, false
+	}
+	// 2. The legacy/in-tree half. A task started by an older daemon holds only
+	// .task_lock and knows nothing about the scope claim, so a rolling upgrade
+	// depends on this probe to leave that task's env root alone.
+	claim, owned, err := execenv.AcquireEnvRootGCClaim(envRoot)
+	if err != nil {
+		d.logger.Warn("gc: could not take the env root execution lock; skipping", "dir", envRoot, "error", err)
+		scopeClaim.Release()
+		return nil, false
+	}
+	if !owned {
+		scopeClaim.Release()
 		return nil, false
 	}
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
 	d.ensureActiveEnvRootStateLocked()
 	if d.activeEnvRoots[envRoot] > 0 || d.deletingEnvRoots[envRoot] {
+		claim.Release()
+		scopeClaim.Release()
 		return nil, false
 	}
 	d.deletingEnvRoots[envRoot] = true
@@ -10067,7 +10531,137 @@ func (d *Daemon) reserveEnvRootForGC(envRoot string) (release func(), ok bool) {
 		delete(d.deletingEnvRoots, envRoot)
 		d.activeEnvRootsCond.Broadcast()
 		d.activeEnvRootsMu.Unlock()
+		claim.Release()
+		scopeClaim.Release()
 	}, true
+}
+
+// holdEnvRootForTask takes the stable scope-level USE claim for one env root for
+// the lifetime of a task, and returns its release.
+//
+// Ordering, and it is not optional: this must be taken BEFORE the env root own
+// .task_lock (execenv.ClaimEnvRoot / LockEnvRootForReuse), because a GC in a
+// sibling daemon that already owns the delete claim would otherwise let this
+// task recreate the directory and its lock file inside the removal. Taking the
+// scope claim first means the task waits (bounded) until the removal finishes,
+// and only then creates anything.
+//
+// A scope with no lock directory (hand-built configurations) degrades to no
+// cross-process coordination, exactly what such a configuration had before.
+func (d *Daemon) holdEnvRootForTask(envRoot string) (release func(), err error) {
+	if strings.TrimSpace(envRoot) == "" {
+		return func() {}, nil
+	}
+	claim, err := d.scopeLocks.AcquireTargetUse(envRoot, d.scopeLockTimeout())
+	if err != nil {
+		return nil, fmt.Errorf("claim env root %s: %w", envRoot, err)
+	}
+	return func() { claim.Release() }, nil
+}
+
+// reportResumeWarning records the finalized resume decision on the runtime when
+// a prior session was expected and could not be restored.
+//
+// Placement matters, and so does the condition. It runs once per task, after both
+// resume gates have decided and before the agent process exists, and it keys off
+// the single finalized flag the gates (and the server, for a withheld rollout)
+// set — not off each gate, which would report the same task twice, and not off
+// PriorSessionID, which the gates themselves clear when they reject a session.
+// A cold start and a healthy resume both leave the flag false and report nothing.
+//
+// Best effort, always: this is observability. A failure is logged here and the
+// task continues with the fresh session it was already going to use.
+func (d *Daemon) reportResumeWarning(ctx context.Context, task Task, taskLog *slog.Logger) {
+	if !task.PriorSessionResumeUnavailable {
+		return
+	}
+	// Bounded and off the launch critical path: this is a diagnostic, and the
+	// normal client timeout is far longer than a provider launch should ever
+	// wait on one. A failure - including a 404 from a server that predates the
+	// endpoint - is logged and the run continues.
+	reportCtx, cancel := context.WithTimeout(ctx, resumeWarningReportTimeout)
+	defer cancel()
+	if err := d.client.ReportRuntimeResumeWarning(reportCtx, task.RuntimeID, task.ID); err != nil {
+		taskLog.Warn("failed to report runtime resume warning", "error", err)
+	}
+}
+
+// scopeLockTimeout is the bound a task waits for a scope claim.
+func (d *Daemon) scopeLockTimeout() time.Duration {
+	if d.scopeClaimTimeout > 0 {
+		return d.scopeClaimTimeout
+	}
+	return execenv.DefaultScopeLockTimeout
+}
+
+// holdTaskRepoActivity takes the shared scope-level activity claim for every
+// bare repo this task may check out, for the lifetime of the run, and returns
+// the release.
+//
+// The claims are REQUIRED, not best effort. They are the only thing that stops a
+// sibling daemon from running heavy maintenance or an eviction against the same
+// repository - reflog expire, git gc --prune, a cache removal - while this run's
+// agent works in a linked worktree, and agent-side git activity is precisely
+// what the repo mutation lock does NOT cover. So a run that cannot claim every
+// repository it may touch does not start: failing the task is the safe answer,
+// and continuing would put an agent and a prune on the same object store.
+//
+// Multi-repo acquisition is all-or-nothing from the caller's point of view: if
+// any claim fails, the ones already taken are released in reverse order and the
+// error names the repository plus the underlying scope-lock cause.
+func (d *Daemon) holdTaskRepoActivity(task Task) (func(), error) {
+	if d.repoCache == nil || len(task.Repos) == 0 {
+		return func() {}, nil
+	}
+	releases := make([]func(), 0, len(task.Repos))
+	claimed := make(map[string]bool, len(task.Repos))
+	for _, repo := range task.Repos {
+		url := strings.TrimSpace(repo.URL)
+		if url == "" {
+			continue
+		}
+		barePath := d.repoCache.BarePath(task.WorkspaceID, url)
+		if barePath == "" || claimed[barePath] {
+			continue
+		}
+		claimed[barePath] = true
+		claim, err := d.scopeLocks.AcquireTargetUse(execenv.RepoActivityTarget(barePath), d.scopeLockTimeout())
+		if err != nil {
+			for i := len(releases) - 1; i >= 0; i-- {
+				releases[i]()
+			}
+			return nil, fmt.Errorf(
+				"repository %s is owned exclusively by another daemon in this work state, so this task did not start: %w",
+				filepath.Base(barePath), err)
+		}
+		releases = append(releases, claim.Release)
+	}
+	return func() {
+		for i := len(releases) - 1; i >= 0; i-- {
+			releases[i]()
+		}
+	}, nil
+}
+
+// holdStoreForTask takes the store for the lifetime of one task: a SHARED claim
+// in the work-state scope (other tasks of the same store coexist — two tasks of
+// one Hermes agent share one memory store by design), plus the in-process mark.
+//
+// Order matters, and it is the reverse of the GC's. The scope claim is taken
+// first so a store some other daemon is reclaiming right now is waited out
+// (bounded) rather than mounted mid-removal; the in-process mark follows, which
+// is what makes THIS daemon's GC wait for this task. A scope with no lock
+// directory (hand-built configurations) degrades to the in-process guard alone.
+func (d *Daemon) holdStoreForTask(store string) (release func(), err error) {
+	claim, err := d.scopeLocks.AcquireTargetUse(store, d.scopeLockTimeout())
+	if err != nil {
+		return nil, err
+	}
+	d.markActiveStore(store)
+	return func() {
+		d.unmarkActiveStore(store)
+		claim.Release()
+	}, nil
 }
 
 // markActiveStore records that a task is about to use the given persistent
@@ -10110,10 +10704,25 @@ func (d *Daemon) unmarkActiveStore(store string) {
 // the "confirm inactive" and the mark happen under one lock acquisition, so a
 // markActiveStore either loses the check (store stays) or blocks on the
 // reservation, closing the stat->remove race (MUL-4424).
+//
+// The scope claim is the half that spans processes: any daemon serving this
+// backend may hold the store, and only its own process knows that. Acquiring the
+// exclusive claim first means a store another daemon is using is skipped rather
+// than deleted out from under it, while the in-process reservation below still
+// closes the same-process race on its own.
 func (d *Daemon) reserveStoreForDeletion(store string) (commit func(), ok bool) {
+	claim, owned, err := d.scopeLocks.TryAcquireTargetDelete(store)
+	if err != nil {
+		d.logger.Warn("gc: could not take the store deletion claim; skipping", "store", store, "error", err)
+		return nil, false
+	}
+	if !owned {
+		return nil, false
+	}
 	d.activeStoresMu.Lock()
 	defer d.activeStoresMu.Unlock()
 	if d.activeStores[store] > 0 || d.deletingStores[store] {
+		claim.Release()
 		return nil, false
 	}
 	d.deletingStores[store] = true
@@ -10122,6 +10731,7 @@ func (d *Daemon) reserveStoreForDeletion(store string) (commit func(), ok bool) 
 		delete(d.deletingStores, store)
 		d.activeStoresCond.Broadcast()
 		d.activeStoresMu.Unlock()
+		claim.Release()
 	}, true
 }
 
@@ -10455,15 +11065,27 @@ func layerCustomEnvAndHermesHome(agentEnv, customEnv map[string]string, overlayH
 	}
 }
 
+// reasonixStateDirName and dshSessionDirName are the work-state subtrees holding
+// those providers' persisted transcripts and leases. They are listed in
+// workStateTreeNames (workstate.go) because adoption has to recognize them.
+const (
+	reasonixStateDirName = "reasonix-state"
+	dshSessionDirName    = "dsh-sessions"
+)
+
 // prepareReasonixTaskStateHome isolates persisted transcripts and leases per
 // (runtime, agent) while leaving REASONIX_HOME untouched. Current Reasonix
 // reads credentials/config from REASONIX_HOME and state from
 // REASONIX_STATE_HOME, so `reasonix setup` remains the sole credential owner
 // and Multica never copies API keys into task-managed files.
-func prepareReasonixTaskStateHome(profile, runtimeID, agentID string) (string, error) {
-	profileDir, err := cli.ProfileDir(profile)
-	if err != nil {
-		return "", err
+//
+// stateRoot is the daemon's work-state root (machine + backend), not the Multica
+// profile directory: a transcript has to outlive whichever profile launched the
+// daemon that serves it, so a task started under one profile can be continued
+// under another aimed at the same backend (GH #8280).
+func prepareReasonixTaskStateHome(stateRoot, runtimeID, agentID string) (string, error) {
+	if strings.TrimSpace(stateRoot) == "" {
+		return "", fmt.Errorf("work-state root is required")
 	}
 	runtimeSegment, err := validateReasonixStateSegment("runtime", runtimeID)
 	if err != nil {
@@ -10473,7 +11095,7 @@ func prepareReasonixTaskStateHome(profile, runtimeID, agentID string) (string, e
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(profileDir, "reasonix-state", runtimeSegment, agentSegment)
+	path := filepath.Join(stateRoot, reasonixStateDirName, runtimeSegment, agentSegment)
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return "", err
 	}
@@ -10486,10 +11108,12 @@ func prepareReasonixTaskStateHome(profile, runtimeID, agentID string) (string, e
 // prepareDshTaskSessionRoot keeps DSH transcripts private to one Multica
 // runtime/agent pair. Credentials and the user's DSH profile remain in the
 // ordinary DSH_HOME; only session persistence is redirected.
-func prepareDshTaskSessionRoot(profile, runtimeID, agentID string) (string, error) {
-	profileDir, err := cli.ProfileDir(profile)
-	if err != nil {
-		return "", err
+//
+// stateRoot is the daemon's work-state root (machine + backend), for the same
+// reason as prepareReasonixTaskStateHome (GH #8280).
+func prepareDshTaskSessionRoot(stateRoot, runtimeID, agentID string) (string, error) {
+	if strings.TrimSpace(stateRoot) == "" {
+		return "", fmt.Errorf("work-state root is required")
 	}
 	runtimeSegment, err := validateReasonixStateSegment("runtime", runtimeID)
 	if err != nil {
@@ -10499,7 +11123,7 @@ func prepareDshTaskSessionRoot(profile, runtimeID, agentID string) (string, erro
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(profileDir, "dsh-sessions", runtimeSegment, agentSegment)
+	path := filepath.Join(stateRoot, dshSessionDirName, runtimeSegment, agentSegment)
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return "", err
 	}
@@ -10580,3 +11204,9 @@ func defaultArgsForProvider(cfg Config, provider string) []string {
 	}
 	return append([]string(nil), args...)
 }
+
+// resumeWarningReportTimeout bounds the best-effort runtime resume-warning
+// report. It is deliberately short: the report is observability, and it sits
+// before the provider launch, so a slow or unreachable server must not delay a
+// task. The client timeout is tuned for task traffic, not for this.
+const resumeWarningReportTimeout = 3 * time.Second

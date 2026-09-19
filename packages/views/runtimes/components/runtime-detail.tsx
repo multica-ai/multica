@@ -7,7 +7,12 @@ import {
   Cpu,
   Globe,
   Lock,
+  AlertTriangle,
 } from "lucide-react";
+import {
+  readRuntimeResumeWarning,
+  type RuntimeResumeWarning,
+} from "../runtime-resume-warning";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import type {
@@ -474,6 +479,43 @@ function ServingAgentsCard({
   );
 }
 
+
+/**
+ * One session-continuity notice: this runtime expected to resume a prior
+ * provider session, could not restore it locally, and continued the task with a
+ * fresh one.
+ *
+ * Amber, not destructive red, and it is not a health state: the runtime is
+ * online and usable, and one previous task lost its conversation. The raw task
+ * id stays in the tooltip — useful for support, not for reading — and no local
+ * path or session id is ever rendered.
+ *
+ * Exported so the runtime-detail tests can assert the notice directly instead of
+ * snapshotting the whole page.
+ */
+export function ResumeWarningNotice({
+  warning,
+}: {
+  warning: RuntimeResumeWarning;
+}) {
+	const { t } = useT("runtimes");
+	return (
+		<div
+			className="rounded-md border border-amber-300/70 bg-amber-50 p-3 dark:border-amber-900/60 dark:bg-amber-950/30"
+			data-testid="runtime-resume-warning"
+			title={warning.task_id}
+		>
+			<div className="mb-1 flex items-center gap-1.5 text-caption font-semibold text-amber-800 dark:text-amber-300">
+				<AlertTriangle className="h-3.5 w-3.5" />
+				{t(($) => $.detail.diagnostics_resume_warning_title)}
+			</div>
+			<p className="text-caption text-amber-800/90 dark:text-amber-200/90">
+				{t(($) => $.detail.diagnostics_resume_warning_body)}
+			</p>
+		</div>
+	);
+}
+
 function DiagnosticsCard({
   runtime,
   canEditVisibility,
@@ -492,12 +534,14 @@ function DiagnosticsCard({
   onDelete: () => void;
 }) {
   const { t } = useT("runtimes");
+  const resumeWarning = readRuntimeResumeWarning(runtime.metadata);
   return (
     <div className="rounded-lg border">
       <div className="border-b px-4 py-2.5">
         <span className="text-caption font-semibold">{t(($) => $.detail.diagnostics_title)}</span>
       </div>
       <div className="space-y-3 p-4">
+        {resumeWarning && <ResumeWarningNotice warning={resumeWarning} />}
         <div>
           <div className="mb-1.5 text-micro uppercase tracking-wide text-muted-foreground">
             {t(($) => $.detail.diagnostics_visibility)}

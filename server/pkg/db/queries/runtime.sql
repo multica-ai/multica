@@ -126,6 +126,20 @@ DO UPDATE SET
     updated_at = now()
 RETURNING *, (xmax = 0) AS inserted;
 
+-- name: SetAgentRuntimeResumeWarning :one
+-- Merges ONE diagnostic key into a runtime's metadata, leaving every other
+-- key untouched (version, cli_version, capabilities, offline_reason, runtime
+-- profile metadata, ...). Used by the daemon-authenticated endpoint that
+-- records a prior-session resume loss, so the runtime detail can show why a
+-- task restarted cold instead of losing that fact in the daemon log. The
+-- handler builds the JSON object; this query only merges it. Metadata is
+-- treated as {} when NULL so a row that predates any metadata still works.
+UPDATE agent_runtime
+SET metadata = COALESCE(metadata, '{}'::jsonb)
+        || jsonb_build_object('resume_warning', @resume_warning::jsonb),
+    updated_at = now()
+WHERE id = @id
+RETURNING *;
 -- name: UpdateAgentRuntimeVisibility :one
 -- Toggles a runtime between 'private' (only owner can bind agents) and
 -- 'public' (any workspace member can). Default for new rows is 'private'

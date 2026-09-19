@@ -60,6 +60,10 @@ type batchFixture struct {
 	// deregistered accumulates every runtime ID sent to /api/daemon/deregister,
 	// so a test can assert the server was actually told to stop routing work.
 	deregistered []string
+	// recovered accumulates every runtime ID sent to recover-orphans, in call
+	// order. Recovery hard-fails every running task on that runtime, so the set
+	// of IDs it was aimed at is the evidence for "whose work was reclaimed".
+	recovered []string
 	// offlineReasons is the server's view of WHY each row is offline. The
 	// register upsert overwrites it (see the register handler), which is what
 	// makes "the reason survived a late healthy register" testable.
@@ -263,6 +267,13 @@ func (fx *batchFixture) deregisteredCount() int {
 	return len(fx.deregistered)
 }
 
+// recoveredIDs copies the runtime IDs recovery was run against, in order.
+func (fx *batchFixture) recoveredIDs() []string {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	return append([]string(nil), fx.recovered...)
+}
+
 // deregisteredIDs copies the runtime IDs deregistered server-side, in order.
 func (fx *batchFixture) deregisteredIDs() []string {
 	fx.mu.Lock()
@@ -443,6 +454,14 @@ func newBatchFixture(t *testing.T) *batchFixture {
 					fx.offlineReasons[id] = reason
 				}
 			}
+			fx.mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(r.URL.Path, "/recover-orphans"):
+			// Mirror the route: the runtime is the last path segment.
+			trimmed := strings.TrimSuffix(r.URL.Path, "/recover-orphans")
+			id := trimmed[strings.LastIndex(trimmed, "/")+1:]
+			fx.mu.Lock()
+			fx.recovered = append(fx.recovered, id)
 			fx.mu.Unlock()
 			w.WriteHeader(http.StatusOK)
 		case strings.HasSuffix(r.URL.Path, "/runtime-profiles"):

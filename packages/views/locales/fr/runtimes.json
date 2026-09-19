@@ -125,6 +125,8 @@
     "serving_count_other": "{{count}} agents",
     "no_agents": "Aucun agent n'est encore associé à ce runtime.",
     "diagnostics_title": "Diagnostics",
+    "diagnostics_resume_warning_title": "Continuité de session",
+    "diagnostics_resume_warning_body": "Une session précédente n'a pas pu être restaurée : ce runtime a poursuivi la tâche avec une nouvelle session.",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "Visibilité",
     "visibility_label": {

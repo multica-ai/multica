@@ -1268,6 +1268,52 @@ func (q *Queries) SetAgentRuntimeOfflineWithReason(ctx context.Context, arg SetA
 	return err
 }
 
+const setAgentRuntimeResumeWarning = `-- name: SetAgentRuntimeResumeWarning :one
+UPDATE agent_runtime
+SET metadata = COALESCE(metadata, '{}'::jsonb)
+        || jsonb_build_object('resume_warning', $1::jsonb),
+    updated_at = now()
+WHERE id = $2
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name
+`
+
+type SetAgentRuntimeResumeWarningParams struct {
+	ResumeWarning []byte      `json:"resume_warning"`
+	ID            pgtype.UUID `json:"id"`
+}
+
+// Merges ONE diagnostic key into a runtime's metadata, leaving every other
+// key untouched (version, cli_version, capabilities, offline_reason, runtime
+// profile metadata, ...). Used by the daemon-authenticated endpoint that
+// records a prior-session resume loss, so the runtime detail can show why a
+// task restarted cold instead of losing that fact in the daemon log. The
+// handler builds the JSON object; this query only merges it. Metadata is
+// treated as {} when NULL so a row that predates any metadata still works.
+func (q *Queries) SetAgentRuntimeResumeWarning(ctx context.Context, arg SetAgentRuntimeResumeWarningParams) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, setAgentRuntimeResumeWarning, arg.ResumeWarning, arg.ID)
+	var i AgentRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.LegacyDaemonID,
+		&i.Visibility,
+		&i.ProfileID,
+		&i.CustomName,
+	)
+	return i, err
+}
+
 const touchAgentRuntimeLastSeen = `-- name: TouchAgentRuntimeLastSeen :execrows
 UPDATE agent_runtime
 SET last_seen_at = now()
