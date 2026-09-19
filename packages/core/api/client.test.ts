@@ -2038,6 +2038,32 @@ describe("ApiClient", () => {
       expect(JSON.parse(fetchMock.mock.calls[1]![1]?.body as string)).toEqual({ content: "again" });
     });
 
+    it("sendChatMessage serialises page_context only when one is given", async () => {
+      const fetchMock = vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ message_id: "m1", task_id: "t1", created_at: "2026-08-01T00:00:00Z" }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const pageContext = { type: "issue" as const, issue_id: "issue-1" };
+      await client.sendChatMessage("session-1", "this issue?", ["att-1"], { pageContext });
+      await client.sendChatMessage("session-1", "no page", undefined, { pageContext: null });
+      await client.sendChatMessage("session-1", "no options");
+
+      expect(JSON.parse(fetchMock.mock.calls[0]![1]?.body as string)).toEqual({
+        content: "this issue?",
+        attachment_ids: ["att-1"],
+        page_context: { type: "issue", issue_id: "issue-1" },
+      });
+      expect(JSON.parse(fetchMock.mock.calls[1]![1]?.body as string)).toEqual({ content: "no page" });
+      expect(JSON.parse(fetchMock.mock.calls[2]![1]?.body as string)).toEqual({ content: "no options" });
+    });
+
     it("sendChatMessage accepts the server's null attachment_ids for text-only sends", async () => {
       vi.stubGlobal(
         "fetch",
