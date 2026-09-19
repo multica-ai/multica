@@ -1215,35 +1215,42 @@ func (h *Handler) handleInstallationEvent(ctx context.Context, body []byte) {
 	}
 }
 
+// ghPRObject is the shape of a GitHub "pull_request" object. GitHub uses this
+// same shape both inside a pull_request webhook payload and as the top-level
+// body of GET /repos/{owner}/{repo}/pulls/{number}, so it is shared between
+// the webhook path (ghPullRequestPayload below) and the manual-link REST
+// fetch (fetchGitHubPullRequestByNumber in github_pr_link.go).
+type ghPRObject struct {
+	Number         int32  `json:"number"`
+	HTMLURL        string `json:"html_url"`
+	Title          string `json:"title"`
+	Body           string `json:"body"`
+	State          string `json:"state"`
+	Draft          bool   `json:"draft"`
+	Merged         bool   `json:"merged"`
+	MergedAt       string `json:"merged_at"`
+	ClosedAt       string `json:"closed_at"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+	MergeableState string `json:"mergeable_state"`
+	Additions      int32  `json:"additions"`
+	Deletions      int32  `json:"deletions"`
+	ChangedFiles   int32  `json:"changed_files"`
+	Head           struct {
+		Ref string `json:"ref"`
+		SHA string `json:"sha"`
+	} `json:"head"`
+	User struct {
+		Login     string `json:"login"`
+		AvatarURL string `json:"avatar_url"`
+	} `json:"user"`
+}
+
 type ghPullRequestPayload struct {
-	Action      string `json:"action"`
-	PullRequest struct {
-		Number         int32  `json:"number"`
-		HTMLURL        string `json:"html_url"`
-		Title          string `json:"title"`
-		Body           string `json:"body"`
-		State          string `json:"state"`
-		Draft          bool   `json:"draft"`
-		Merged         bool   `json:"merged"`
-		MergedAt       string `json:"merged_at"`
-		ClosedAt       string `json:"closed_at"`
-		CreatedAt      string `json:"created_at"`
-		UpdatedAt      string `json:"updated_at"`
-		MergeableState string `json:"mergeable_state"`
-		Additions      int32  `json:"additions"`
-		Deletions      int32  `json:"deletions"`
-		ChangedFiles   int32  `json:"changed_files"`
-		Head           struct {
-			Ref string `json:"ref"`
-			SHA string `json:"sha"`
-		} `json:"head"`
-		User struct {
-			Login     string `json:"login"`
-			AvatarURL string `json:"avatar_url"`
-		} `json:"user"`
-	} `json:"pull_request"`
-	Changes    *ghPRChanges `json:"changes"`
-	Repository struct {
+	Action      string       `json:"action"`
+	PullRequest ghPRObject   `json:"pull_request"`
+	Changes     *ghPRChanges `json:"changes"`
+	Repository  struct {
 		Name  string `json:"name"`
 		Owner struct {
 			Login string `json:"login"`
