@@ -1,17 +1,19 @@
 ---
 title: Chat with agents
-description: One-to-one, fully private conversation with an agent, outside any issue. The agent starts with no issue context and never auto-creates issues — but it acts with your workspace access when you explicitly ask it to.
+description: One-to-one, fully private conversation with an agent, outside any issue. The agent has no issue context by default and never auto-creates issues — but it acts with your workspace access when you explicitly ask it to.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
 Chat fits work that hasn't formed a clear issue yet: sorting out ideas, checking on the workspace, discussing an approach, or having an agent finish a small task first.
 
-**Chat is a one-to-one conversation between you and an [agent](/agents)** — stepping outside the [issue](/issues) board. The agent starts with **no issue context** — it isn't looking at your board and won't turn the conversation into issues on its own — and the entire conversation is **fully private** (nobody else in the [workspace](/workspaces), including admins, can see it). It fits discussing an approach with an agent, brainstorming, or asking a question that does not belong to any issue.
+**Chat is a one-to-one conversation between you and an [agent](/agents)** — stepping outside the [issue](/issues) board. By default the agent has **no issue context** — it isn't looking at your board and won't turn the conversation into issues on its own — and the entire conversation is **fully private** (nobody else in the [workspace](/workspaces), including admins, can see it). It fits discussing an approach with an agent, brainstorming, or asking a question that does not belong to any issue.
 
 A chat is **not bound to any issue**: the agent doesn't automatically receive an issue's description and comments, but it can still use the Multica CLI to query workspaces, projects, issues, and skills within its permissions.
 
 A chat can also carry background. Click **+** at the bottom left of the input and choose **Project context** to attach a [project](/projects) to the conversation; when the agent runs, it receives that project's description, repositories, and other resources.
+
+When you write from the floating chat window while an issue is open — on its page, or selected in [Inbox](/inbox) — each message you send carries a reference to that issue, so the agent knows what "this issue" means. The issue appears above the input; click **×** on it to send without it. The agent receives only the reference: it reads the issue when it needs to and doesn't act on it unless you ask.
 
 ![A chat with an agent: a question answered with the result organized into a table](/images/docs/chat-conversation.webp)
 
