@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createStore, type StoreApi } from "zustand/vanilla";
+import { effectiveIssueWorkflowOptions } from "@multica/core/issue-workflows";
+import { issueTableFacetsOptions } from "@multica/core/issues/queries";
+import { SurfaceWorkflowContext } from "../surface/workflow-context";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Plus } from "lucide-react";
 import { sortDirectionLabelKey } from "../utils/sort-direction";
@@ -146,6 +149,34 @@ const CARD_PROPERTY_LABEL_KEY = {
 const snapshotState = viewStorePersistOptions("save-view-draft").partialize;
 
 const ROW_LABEL = "w-16 shrink-0 text-caption text-muted-foreground";
+
+/** The draft can target different projects than the page behind the dialog. */
+export function DraftWorkflowFields({ scope }: { scope: SaveViewScope }) {
+  const wsId = useWorkspaceId();
+  const projects = useViewStore((s) => s.projectFilters);
+  const noProject = useViewStore((s) => s.includeNoProject);
+  const statuses = useViewStore((s) => s.statusFilters);
+  const projectId = scope.kind === "project" ? scope.projectId : projects.length === 1 && !noProject ? projects[0] : null;
+  const definition = useQuery(effectiveIssueWorkflowOptions(wsId, projectId ?? null, true));
+  const facets = useQuery({
+    ...issueTableFacetsOptions(wsId, {
+      query: {
+        scope: scope.kind === "project" ? { kind: "project", project_id: scope.projectId } : { kind: "workspace" },
+        filters: {
+          ...(projects.length ? { project_ids: projects } : {}),
+          ...(noProject ? { include_no_project: true } : {}),
+          workflow_status_ids: statuses.filter((key) => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(key)),
+        },
+        sort: { field: "position", direction: "asc" },
+      },
+      facets: [{ kind: "workflow_status" }],
+    }),
+    enabled: definition.isSuccess && !!definition.data.workflow.id,
+  });
+  return <SurfaceWorkflowContext value={{ statuses: definition.isSuccess && definition.data.workflow.id ? definition.data.statuses : undefined, facets: facets.data }}>
+    <DraftDefinitionFields />
+  </SurfaceWorkflowContext>;
+}
 
 /** Filter row + layout row + collapsible display defaults, all bound to the
  *  DRAFT store via the surrounding provider. */
@@ -582,6 +613,7 @@ export function SaveViewDialog({
       definition_version: 1,
       query: {
         statusFilters: state.statusFilters,
+        statusFilterMappings: state.statusFilterMappings,
         priorityFilters: state.priorityFilters,
         assigneeFilters: state.assigneeFilters,
         includeNoAssignee: state.includeNoAssignee,
@@ -797,7 +829,7 @@ export function SaveViewDialog({
 
           {draftStore && (
             <ViewStoreProvider store={draftStore}>
-              <DraftDefinitionFields />
+              <DraftWorkflowFields scope={scope} />
             </ViewStoreProvider>
           )}
         </div>

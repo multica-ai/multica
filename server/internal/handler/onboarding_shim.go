@@ -31,6 +31,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -247,6 +248,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	issueCreated := false
+	var workflowEntry service.IssueTransitionResult
 	if !foundIssue {
 		issueNumber, err := service.AllocateIssueNumber(r.Context(), qtx, wsUUID, issueCountPolicy)
 		if err != nil {
@@ -281,6 +283,15 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
 			return
 		}
+		workflowEntry, err = service.EnterIssueWorkflowStatus(r.Context(), qtx, nil, issue, issueworkflow.TransitionActor{
+			Type: "member",
+			ID:   parseUUID(userID),
+		}, "onboarding_issue_created")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
+			return
+		}
+		issue = workflowEntry.Issue
 		issueCreated = true
 	}
 
@@ -319,6 +330,9 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		))
 	}
 	if issueCreated {
+		if h.TaskService != nil {
+			h.TaskService.NotifyWorkflowEntry(r.Context(), workflowEntry)
+		}
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
 		h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
@@ -329,7 +343,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			uuidToString(assistant.ID), "", "", analytics.SourceOnboarding,
 			platform,
 		))
-		if h.shouldEnqueueAgentTask(r.Context(), issue) {
+		if !workflowEntry.Task.ID.Valid && h.shouldEnqueueAgentTask(r.Context(), issue) {
 			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
 		}
 	}
@@ -413,6 +427,7 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 
 	var issue db.Issue
 	issueCreated := false
+	var workflowEntry service.IssueTransitionResult
 	if foundIssue {
 		issue = existing
 	} else {
@@ -445,6 +460,15 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
 			return
 		}
+		workflowEntry, err = service.EnterIssueWorkflowStatus(r.Context(), qtx, nil, issue, issueworkflow.TransitionActor{
+			Type: "member",
+			ID:   parseUUID(userID),
+		}, "onboarding_issue_created")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
+			return
+		}
+		issue = workflowEntry.Issue
 		issueCreated = true
 	}
 
@@ -465,6 +489,9 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 	}
 
 	if issueCreated {
+		if h.TaskService != nil {
+			h.TaskService.NotifyWorkflowEntry(r.Context(), workflowEntry)
+		}
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
 		h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)

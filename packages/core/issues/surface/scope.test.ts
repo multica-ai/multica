@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
   actorKindForViewVariant,
@@ -115,5 +116,18 @@ describe("myRelationForViewVariant", () => {
     expect(myRelationForViewVariant("any")).toBe("all");
     expect(myRelationForViewVariant(null)).toBe("all");
     expect(myRelationForViewVariant("members")).toBe("all");
+  });
+});
+
+
+describe("global project selection", () => {
+  it("preserves personal relation and creation defaults inside the project", () => {
+    const scope = { type: "my", relation: "assigned", userId: "u1", projectId: "p1" } as const;
+    expect(buildIssueSurfaceQueryPlan(scope)).toMatchObject({
+      scopeKey: "my:u1:assigned:project:p1",
+      createDefaults: { project_id: "p1", assignee_type: "member", assignee_id: "u1" },
+    });
+    expect(issueScopeKey({ ...scope, projectId: null })).toBe("my:u1:assigned:project:workspace");
+    expect(issueScopeKey({ type: "workspace", actorKind: "agents", projectId: "p2" })).toBe("workspace:agents:project:p2");
   });
 });

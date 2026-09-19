@@ -138,6 +138,8 @@ func init() {
 	projectCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
 	projectCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
 	projectCreateCmd.Flags().StringArray("repo", nil, "Attach a github_repo resource by URL (may be repeated)")
+	projectCreateCmd.Flags().String("workflow-file", "", "Create a custom issue workflow from a YAML or JSON file")
+	projectCreateCmd.Flags().Bool("allow-external-file", false, "Allow --workflow-file to read outside the current working directory")
 	projectCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// project resource list
@@ -318,6 +320,17 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	body := map[string]any{"title": title}
+	if path, _ := cmd.Flags().GetString("workflow-file"); path != "" {
+		file, readErr := readWorkflowFile(cmd, path, "workflow-file")
+		if readErr != nil {
+			return readErr
+		}
+		spec, resolveErr := resolveWorkflowFileSpec(ctx, client, file)
+		if resolveErr != nil {
+			return fmt.Errorf("resolve workflow references: %w", resolveErr)
+		}
+		body["issue_workflow"] = spec
+	}
 	if v, _ := cmd.Flags().GetString("description"); v != "" {
 		body["description"] = v
 	}

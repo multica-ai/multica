@@ -23,6 +23,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setApiInstance } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import type { ApiClient } from "@multica/core/api/client";
+import { issueWorkflowOptions } from "@multica/core/issue-workflows";
 import { issueKeys } from "@multica/core/issues/queries";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { getIssueSurfaceViewStore } from "@multica/core/issues/stores/surface-view-store";
@@ -315,6 +316,33 @@ describe("TableView cell editors under data refresh", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+  });
+
+  it("exports the pinned workflow node label instead of its lifecycle projection", async () => {
+    serverIssues = [{ ...makeIssue("native-export", "Payment review", "in_progress"), workflow_id: "engineering", workflow_status_id: "review-node" }];
+    queryClient.setQueryData(issueWorkflowOptions("ws-1", "engineering").queryKey, {
+      workflow: { id: "engineering", name: "Engineering", scope_type: "project", workspace_id: "ws-1", scope_id: "p1", revision: 1, initial_status_id: "review-node", created_at: "", updated_at: "" },
+      statuses: [{ id: "review-node", workflow_id: "engineering", legacy_status_key: null, spec_key: "security_review", name: "Security review", description: "", color: "#123456", position: 0, phase: "started", outcome: null, entry_policy: { executor: { type: "none" }, instructions: "" }, entry_policy_revision: 1, archived_at: null, created_at: "", updated_at: "" }],
+      mode: "custom",
+    });
+    const createURL = vi.fn((_blob: Blob) => "blob:export-test");
+    vi.stubGlobal("URL", Object.assign(class extends URL {}, { createObjectURL: createURL, revokeObjectURL: vi.fn() }));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    try {
+      renderWithI18n(<QueryClientProvider client={queryClient}><Harness childProgressMap={new Map()} surfaceKey="native-export" /></QueryClientProvider>);
+      await screen.findByText("MUL-native-export");
+      fireEvent.click(screen.getByRole("button", { name: "Export" }));
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Export all" }));
+      await waitFor(() => expect(createURL).toHaveBeenCalledOnce());
+      const blob = createURL.mock.calls[0]![0] as Blob;
+      const contents = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.readAsText(blob);
+      });
+      expect(contents).toContain("Security review");
+      expect(contents).not.toContain("In Progress");
+    } finally { click.mockRestore(); }
   });
 
   // Explicit timeout: this mounts the full TableView with every picker + a

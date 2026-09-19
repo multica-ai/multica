@@ -1,5 +1,7 @@
 "use client";
 
+import { issueWorkflowOptions } from "@multica/core/issue-workflows";
+import { useSurfaceWorkflow } from "../surface/workflow-context";
 import { useStatusLabel } from "../utils/status-label";
 import {
   useCallback,
@@ -137,6 +139,7 @@ import {
   PriorityPicker,
   StartDatePicker,
   StatusPicker,
+  WorkflowStatusPicker,
 } from "./pickers";
 import { CustomPropertyValueEditor } from "./pickers/custom-property-picker";
 import {
@@ -1155,6 +1158,7 @@ function IssueTableBodyCell({
     case "status":
       return (
         <div onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
+          {issue.workflow_id ? <WorkflowStatusPicker issue={issue} open={editorOpen} onOpenChange={setEditorOpen} /> : (
           <StatusPicker
             status={issue.status}
             onUpdate={onUpdate}
@@ -1162,6 +1166,7 @@ function IssueTableBodyCell({
             open={editorOpen}
             onOpenChange={setEditorOpen}
           />
+          )}
         </div>
       );
     case "priority":
@@ -1367,9 +1372,10 @@ export function TableView({
     t,
   ]);
 
+  const { statuses: workflowStatuses } = useSurfaceWorkflow();
   const serverGroupSpec = useMemo(
-    () => tableGroupSpec(effectiveTableGrouping),
-    [effectiveTableGrouping],
+    () => effectiveTableGrouping === "status" && workflowStatuses ? { kind: "workflow_status" } as const : tableGroupSpec(effectiveTableGrouping),
+    [effectiveTableGrouping, workflowStatuses],
   );
   const usesServerGrouping = serverGroupSpec.kind !== "none";
   // Project group rows carry only a project id; the title comes from the
@@ -1785,6 +1791,8 @@ export function TableView({
         // of collapsing to the schema fallback or an empty label. (MUL-6243)
         return resolveStatusLabel(value.status);
       }
+      if (value.kind === "workflow_status") return value.workflow_name && !value.is_default ? `${value.workflow_name} / ${value.name}` : value.name;
+      if (value.kind === "workflow") return value.name;
       if (value.kind === "assignee") {
         return value.actor
           ? getActorName(value.actor.type, value.actor.id)
@@ -1820,7 +1828,7 @@ export function TableView({
           ?.name ?? String(value.value ?? "")
       );
     },
-    [getActorName, groupProjectMap, propertyById, t],
+    [getActorName, groupProjectMap, propertyById, resolveStatusLabel, t],
   );
 
   const serverDisplayRows = useMemo<IssueTableDisplayRow[]>(() => {
@@ -2128,6 +2136,10 @@ export function TableView({
   // starts a run, and must confirm rather than fire from one click (MUL-6463).
   const updateIssue = useCallback(
     (issue: Issue, updates: Partial<UpdateIssueRequest>) => {
+      if (issue.workflow_id && (updates.project_id !== undefined || updates.status !== undefined || updates.workflow_status_id !== undefined)) {
+        actions?.updateIssue(issue.id, updates);
+        return;
+      }
       const intent = runConfirmIntent(issue, updates, { entryOf });
       if (intent) {
         openModal("issue-run-confirm", intent);
@@ -2157,7 +2169,7 @@ export function TableView({
       onCreateIssue({
         parent_issue_id: issue.id,
         parent_issue_identifier: issue.identifier,
-        ...(issue.project_id ? { project_id: issue.project_id } : {}),
+        project_id: issue.project_id,
       }),
     [onCreateIssue],
   );
@@ -2324,6 +2336,11 @@ export function TableView({
             )
           : Promise.resolve(getActorName),
       ]);
+      const workflowIds = [...new Set(rows.flatMap((issue) => issue.workflow_id ? [issue.workflow_id] : []))];
+      const workflows = csvColumns.some((column) => column.key === "status")
+        ? await Promise.all(workflowIds.map((id) => queryClient.fetchQuery(issueWorkflowOptions(wsId, id)))) : [];
+      const nodeLabels = new Map(workflows.flatMap((definition) => definition.statuses.map((node) => [node.id,
+        workflows.length > 1 && definition.workflow.scope_type !== "workspace" ? `${definition.workflow.name} / ${node.name}` : node.name] as const)));
       const headers = csvColumns.map((column) => {
         const propertyId = propertyIdFromViewKey(column.key);
         if (propertyId) return exportPropertyById.get(propertyId)?.name ?? "";
@@ -2348,7 +2365,9 @@ export function TableView({
             case "identifier":
               return issue.identifier;
             case "status":
-              return resolveStatusLabel(issue.status);
+              if (!issue.workflow_status_id) return resolveStatusLabel(issue.status);
+              if (!nodeLabels.has(issue.workflow_status_id)) throw new IssueTableExportIntegrityError();
+              return nodeLabels.get(issue.workflow_status_id)!;
             case "priority":
               return t(($) => $.priority[issue.priority]);
             case "assignee":

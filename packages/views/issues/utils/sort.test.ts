@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { Issue } from "@multica/core/types";
 import { sortIssues } from "./sort";
@@ -147,5 +148,18 @@ describe("sortIssues property sorts", () => {
       "desc",
     );
     expect(sorted.map((i) => i.id)).toEqual(["later", "earlier", "missing"]);
+  });
+});
+
+
+describe("workflow status sorting", () => {
+  it("orders same-phase nodes by definition position in both directions", () => {
+    const rows = [
+      staticIssue("review", { status: "in_progress", workflow_status_id: "node-review", position: 1 }),
+      staticIssue("build", { status: "in_progress", workflow_status_id: "node-build", position: 2 }),
+    ];
+    const order = ["node-build", "node-review", "in_progress"];
+    expect(sortIssues(rows, "status", "asc", order).map((row) => row.id)).toEqual(["build", "review"]);
+    expect(sortIssues(rows, "status", "desc", order).map((row) => row.id)).toEqual(["review", "build"]);
   });
 });

@@ -23,6 +23,11 @@ const (
 	// gate pinned Task/Run execution: disabling discovery and management must not
 	// mutate an immutable execution manifest that is already in flight.
 	PluginsV1 = "plugins_v1"
+	// IssueWorkflowV1 gates reading the new workflow projection as the
+	// canonical product model. Schema migration, dual-write, and immutable
+	// transition recording are intentionally not gated so a rollback never
+	// leaves an unrepairable history gap.
+	IssueWorkflowV1 = "issue_workflow_v1"
 	// TriageV1 gates the Triage inbox (MUL-7189): creating issues into Triage,
 	// triage runs, and the Triage page. It is a GLOBAL switch — per-workspace
 	// targeting has no production wiring — which is enough because a
@@ -63,6 +68,10 @@ func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) boo
 
 func PluginsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, PluginsV1, false)
+}
+
+func IssueWorkflowV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, IssueWorkflowV1, false)
 }
 
 func TriageV1Enabled(ctx context.Context, flags *featureflag.Service) bool {

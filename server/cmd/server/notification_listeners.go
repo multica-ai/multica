@@ -702,7 +702,8 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		}
 	})
 
-	// issue:updated — handle assignee changes, status changes, priority, due date
+	// issue:updated — handle field changes. Status changes have their own
+	// issue:transitioned subscription below.
 	bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) {
 		payload, ok := e.Payload.(map[string]any)
 		if !ok {
@@ -713,7 +714,6 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			return
 		}
 		assigneeChanged, _ := payload["assignee_changed"].(bool)
-		statusChanged, _ := payload["status_changed"].(bool)
 		descriptionChanged, _ := payload["description_changed"].(bool)
 		prevAssigneeType, _ := payload["prev_assignee_type"].(*string)
 		prevAssigneeID, _ := payload["prev_assignee_id"].(*string)
@@ -783,40 +783,6 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				exclude, "assignee_changed", "info",
 				issue.Title, "",
 				assigneeDetails)
-		}
-
-		if statusChanged {
-			prevStatus, _ := payload["prev_status"].(string)
-			statusDetails, _ := json.Marshal(map[string]string{
-				"from": prevStatus,
-				"to":   issue.Status,
-			})
-			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
-				nil, "status_changed", "info",
-				issue.Title, "",
-				statusDetails)
-
-			// When the issue progresses past the failure, retire any stale
-			// task_failed inbox rows so the inbox reflects the current state of
-			// the work, not its history. The activity log keeps the full
-			// failure history for audit.
-			//
-			// Same handoff predicate as the delegated tier, minus Blocked:
-			// blocked hands the issue to a human, but it hands over work that
-			// is still stuck, so the past failures remain worth triaging.
-			// Blocked is excluded by its exact key — a custom started status is
-			// a review gate, not a stall. (MUL-7379)
-			//
-			// FAIL CLOSED here, unlike delivery: hiding a failure notice on a
-			// guess is worse than leaving a stale one the user can dismiss.
-			handoff, handoffErr := issueStatusIsHandoff(ctx, queries, parseUUID(e.WorkspaceID), issue.Status)
-			switch {
-			case handoffErr != nil:
-				slog.Warn("resolve issue status handoff for task_failed dismissal; keeping rows",
-					"issue_id", issue.ID, "status", issue.Status, "error", handoffErr)
-			case handoff && issue.Status != issuestatus.Blocked:
-				archiveStaleTaskFailedInbox(ctx, queries, bus, e.WorkspaceID, issue.ID)
-			}
 		}
 
 		if priorityChanged, _ := payload["priority_changed"].(bool); priorityChanged {
@@ -889,6 +855,32 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				notifyMentionedMembers(bus, queries, e, added, issue.ID, issue.Title, issue.Status,
 					issue.Title, skip, emptyDetails)
 			}
+		}
+	})
+
+	bus.Subscribe(protocol.EventIssueTransitioned, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		issue, ok := payload["issue"].(handler.IssueResponse)
+		if !ok {
+			return
+		}
+		prevStatus, _ := payload["prev_status"].(string)
+		statusDetails, _ := json.Marshal(map[string]string{"from": prevStatus, "to": issue.Status})
+		notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
+			nil, "status_changed", "info", issue.Title, "", statusDetails)
+
+		// Keep failure notices on lookup errors; a custom started status is a
+		// handoff, while the fixed blocked key still represents stuck work.
+		handoff, handoffErr := issueStatusIsHandoff(ctx, queries, parseUUID(e.WorkspaceID), issue.Status)
+		switch {
+		case handoffErr != nil:
+			slog.Warn("resolve issue status handoff for task_failed dismissal; keeping rows",
+				"issue_id", issue.ID, "status", issue.Status, "error", handoffErr)
+		case handoff && issue.Status != issuestatus.Blocked:
+			archiveStaleTaskFailedInbox(ctx, queries, bus, e.WorkspaceID, issue.ID)
 		}
 	})
 

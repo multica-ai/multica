@@ -121,7 +121,7 @@ function ListRowContent({
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className="truncate">{issue.title}</span>
             {/* Keep custom names visible when this row appears outside a status section. */}
-            <CustomStatusChip status={issue.status} className="shrink-0" />
+            <CustomStatusChip status={issue.status} workflowId={issue.workflow_id} workflowStatusId={issue.workflow_status_id} className="shrink-0" />
             {showChildProgress && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
                 <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />

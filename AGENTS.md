@@ -53,6 +53,7 @@ Root frontend commands and `make check` do not verify mobile. Docs-only changes 
 - Web/desktop shared stores live in `packages/core/`. Desktop platform stores remain in desktop; mobile stores remain in mobile. Do not define stores in `packages/views/`.
 - On web/desktop, workspace identity is route-driven; platform mirrors exist only for request headers, storage namespaces, and reconnects. React Context is for platform plumbing, not a second server-state store.
 - Among stores, only auth/workspace stores may call `api.*` directly; other server interactions belong in queries/mutations.
+- Global Issues/My Issues include all projects by default; projects are ordinary filters. Each project has one effective workflow for all current issues; workflow changes migrate existing bindings atomically after a status-mapping preview. Administrative workflow migrations and project moves record history without status-entry automation, and active agent work blocks them. Status boards use independent lanes by the issue’s current workflow_id, with concrete status nodes and no cross-workflow dragging. Server group descriptors own lane membership, counts, and pagination; never derive lanes from loaded cards. Saved views own their query and preference key independently of external project selection. Default workflow lanes sort first and start expanded; secondary lanes start collapsed, while a single workflow uses the full board without lane chrome. All issue views, filters, status sorting, and exports use concrete workflow status IDs/names; legacy saved status filters retain their projection semantics.
 - Workspace-scoped query keys include `wsId`; account-level keys remain account-scoped. Hooks needing workspace context accept `wsId` unless guaranteed to run under its provider.
 - Zustand selectors return stable references; use shallow comparison for allocated objects/arrays.
 - WebSocket events patch or invalidate Query caches, not server payloads in Zustand. Clearing client-owned pointers is allowed with one responder and a self-initiated guard when this client can cause the event.
@@ -84,6 +85,8 @@ In `server/internal/handler/`, distinguish UUID sources before using them in wri
 - Outside handlers: `util.ParseUUID(s)` and check the error.
 
 Workspace-scoped queries filter by `workspace_id`; membership gates access and `X-Workspace-ID` selects the workspace. Assignees are polymorphic: interpret `assignee_id` together with `assignee_type`.
+
+Administrative workflow migrations and project moves use `issueworkflow.RecordTransition` without entry effects, under the workflow migration guards. All ordinary issue creation and status/project writes take the shared workspace catalog lock before any row locks; workflow definition changes take its exclusive counterpart. Runtime issue status writes use `service.EnterIssueWorkflowStatus` inside the same transaction as the issue mutation, or the `IssueService.TransitionStatus` / `TransitionStatusNode` wrappers. Record the transition, snapshot the entry policy, and enqueue its task atomically; publish task notifications after commit. Workflow execution retries do not re-enter the business status. Triage proposal changes record transitions without starting workflow entry executors.
 
 ## Desktop Rules
 

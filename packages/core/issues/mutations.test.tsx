@@ -12,6 +12,7 @@ import type { ApiClient } from "../api/client";
 import { createQueryClient } from "../query-client";
 import {
   useBatchUpdateIssues,
+  useCreateIssue,
   useCreateComment,
   useCreateCommentSubIssue,
   useDeleteComment,
@@ -103,6 +104,21 @@ function createWrapper(qc: QueryClient) {
     return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
   };
 }
+
+describe("create issue workflow cache", () => {
+  it("refreshes project workflows after a rejected create so stale draft nodes can be repaired", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const key = ["issue-workflows", WS_ID, "effective", "project", { includeArchived: false }];
+    qc.setQueryData(key, { workflow: { id: "old" } });
+    setApiInstance({ createIssue: vi.fn().mockRejectedValue(new Error("status retired")) } as unknown as ApiClient);
+    const { result } = renderHook(() => useCreateIssue(), { wrapper: createWrapper(qc) });
+    await act(async () => {
+      await expect(result.current.mutateAsync({ title: "Draft", project_id: "project", workflow_status_id: "retired" })).rejects.toThrow("status retired");
+    });
+    expect(qc.getQueryState(key)?.isInvalidated).toBe(true);
+    qc.clear();
+  });
+});
 
 describe("useCreateCommentSubIssue", () => {
   it("applies the normal issue-create cache coordination", async () => {
@@ -473,12 +489,7 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     expect(invalidatedKeys).not.toContainEqual(issueKeys.myAll(WS_ID));
   });
 
-  it("surgically removes the issue from the old project's list on a project move (no blanket myAll refetch)", async () => {
-    // A project move makes the issue leave the old project's filtered list.
-    // The membership-aware coordinator removes the card from that loaded list
-    // in onMutate — deterministic, no WS echo or refetch needed — replacing
-    // the old blanket "invalidate myAll on settle" safety net (MUL-3669 /
-    // #4548). Lists whose filter the move cannot affect stay untouched.
+  it("waits for a project move to commit before reconciling membership", async () => {
     let resolve!: (issue: Issue) => void;
     updateIssue.mockReturnValue(
       new Promise<Issue>((r) => {
@@ -495,9 +506,8 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
       result.current.mutate({ id: "issue-1", project_id: "project-9" });
     });
 
-    // Optimistic: gone from the old project's list immediately; the
-    // workspace board and the assignee-filtered list keep the card.
-    expect(bucketIds(projectKey, "unstarted")).toEqual([]);
+    // The server selects the destination status; keep the current card pending.
+    expect(bucketIds(projectKey, "unstarted")).toEqual(["issue-1"]);
     expect(bucketIds(wsKey, "unstarted")).toEqual(["issue-1"]);
     expect(bucketIds(myKey, "unstarted")).toEqual(["issue-1"]);
 
@@ -510,7 +520,7 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     expect(invalidatedKeys).not.toContainEqual(issueKeys.myAll(WS_ID));
   });
 
-  it("rolls the membership removal back when a project move fails", async () => {
+  it("preserves membership when a project move fails", async () => {
     updateIssue.mockRejectedValue(new Error("boom"));
 
     const { result } = renderHook(() => useUpdateIssue(), {
@@ -769,10 +779,7 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
     expect(invalidatedKeys).not.toContainEqual(issueKeys.list(WS_ID));
   });
 
-  it("surgically removes moved issues from the old project's list (no blanket myAll refetch)", async () => {
-    // Mirrors useUpdateIssue: a batch project move drops the cards from the
-    // old project's loaded list via the membership-aware coordinator instead
-    // of refetching every filtered list (MUL-3669 / #4548).
+  it("refetches batch project moves after the server commits", async () => {
     const projectScope = "project:p1";
     const projectFilter = { project_id: "p1" };
     const projectKey = issueKeys.myListSorted(WS_ID, projectScope, projectFilter, sort);
@@ -791,11 +798,11 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
       });
     });
 
-    expect(bucketIds(projectKey, "unstarted")).toEqual([]);
+    expect(bucketIds(projectKey, "unstarted")).toEqual(["issue-1"]);
     // The assignee-filtered list is untouched by a project move.
     expect(bucketIds(myKey, "unstarted")).toEqual(["issue-1"]);
     const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
-    expect(invalidatedKeys).not.toContainEqual(issueKeys.myAll(WS_ID));
+    expect(invalidatedKeys).toContainEqual(issueKeys.all(WS_ID));
   });
 });
 

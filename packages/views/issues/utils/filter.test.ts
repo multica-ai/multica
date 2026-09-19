@@ -703,3 +703,30 @@ describe("scalar operator filters", () => {
     expect(result.map((i) => i.id)).toEqual(["B"]);
   });
 });
+
+
+describe("workflow status filters", () => {
+  const rows = [
+    makeIssue({ id: "build", status: "in_progress", workflow_status_id: "node-build" }),
+    makeIssue({ id: "review", status: "in_progress", workflow_status_id: "node-review" }),
+    makeIssue({ id: "legacy", status: "todo" }),
+  ];
+  it("selects an exact node without selecting its same-phase sibling", () => {
+    expect(filterIssues(rows, { ...NO_FILTER, statusFilters: ["node-review"] }).map((row) => row.id)).toEqual(["review"]);
+  });
+  it("preserves legacy saved filters and ORs them with native selections", () => {
+    expect(filterIssues(rows, { ...NO_FILTER, statusFilters: ["in_progress"] }).map((row) => row.id)).toEqual(["build", "review"]);
+    expect(filterIssues(rows, { ...NO_FILTER, statusFilters: ["todo", "node-review"] }).map((row) => row.id)).toEqual(["review", "legacy"]);
+  });
+});
+
+it("applies saved status mappings only within the migrated project", () => {
+  const rows = [
+    makeIssue({ id: "migrated", project_id: "p1", workflow_status_id: "new-node" }),
+    makeIssue({ id: "unrelated", project_id: "p2", workflow_status_id: "new-node" }),
+    makeIssue({ id: "original", project_id: "p2", workflow_status_id: "old-node" }),
+  ];
+  expect(filterIssues(rows, {
+    ...NO_FILTER, statusFilters: ["old-node"], statusFilterMappings: { p1: { "old-node": "new-node" } },
+  }).map((issue) => issue.id)).toEqual(["migrated", "original"]);
+});

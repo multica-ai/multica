@@ -67,7 +67,7 @@ export function buildIssueSurfaceQueryPlan(
       return {
         scopeKey,
         queryFilter: assigneeTypes ? { assignee_types: assigneeTypes } : {},
-        createDefaults: {},
+        createDefaults: scope.projectId ? { project_id: scope.projectId } : {},
       };
     }
     case "project": {
@@ -80,8 +80,10 @@ export function buildIssueSurfaceQueryPlan(
         createDefaults: { project_id: scope.projectId },
       };
     }
-    case "my":
-      return buildMyRelationPlan(scope, scopeKey);
+    case "my": {
+      const plan = buildMyRelationPlan(scope, scopeKey);
+      return { ...plan, createDefaults: { ...plan.createDefaults, ...(scope.projectId ? { project_id: scope.projectId } : {}) } };
+    }
     case "actor":
       return {
         scopeKey,

@@ -24,8 +24,9 @@ import (
 const issueTableMaxFacets = 32
 
 type issueTableFacetValueResponse struct {
-	Key   string `json:"key"`
-	Count int64  `json:"count"`
+	Key        string                        `json:"key"`
+	Count      int64                         `json:"count"`
+	StatusNode *issueTableGroupValueResponse `json:"status_node,omitempty"`
 }
 
 type issueTableFacetResponse struct {
@@ -51,8 +52,10 @@ func issueTableQueryWithoutFacet(input issueTableQuerySpec, facet issueTableFace
 	}
 
 	switch facet.Kind {
-	case "status":
+	case "status", "workflow_status":
 		output.Filters.Statuses = nil
+		output.Filters.WorkflowStatusIDs = nil
+		output.Filters.StatusMappings = nil
 	case "priority":
 		output.Filters.Priorities = nil
 	case "assignee":
@@ -87,6 +90,8 @@ func issueTableFacetIdentity(facet issueTableFacetSpec) string {
 
 func issueTableBaseFacetExpression(query issueTableQuerySpec, facet issueTableFacetSpec) (string, bool) {
 	switch facet.Kind {
+	case "workflow_status":
+		return "COALESCE(i.workflow_status_id::text, 'legacy:' || i.status)", len(query.Filters.WorkflowStatusIDs) == 0 && len(query.Filters.Statuses) == 0
 	case "status":
 		return "i.status", len(query.Filters.Statuses) == 0
 	case "priority":
@@ -191,6 +196,8 @@ func (h *Handler) issueTableFacetQuery(w http.ResponseWriter, r *http.Request, r
 
 	query := ""
 	switch facet.Kind {
+	case "workflow_status":
+		query = fmt.Sprintf(`SELECT COALESCE(i.workflow_status_id::text, 'legacy:' || i.status), COUNT(*)::bigint FROM issue i WHERE %s GROUP BY COALESCE(i.workflow_status_id::text, 'legacy:' || i.status)`, compiled.where)
 	case "status":
 		query = fmt.Sprintf(`SELECT i.status, COUNT(*)::bigint FROM issue i WHERE %s GROUP BY i.status`, compiled.where)
 	case "priority":
@@ -428,6 +435,65 @@ func (h *Handler) ListIssueTableFacets(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		responses[index] = resolved
+	}
+
+	// Status filters are disjunctive and must not depend on the lanes already
+	// paged into the board. Resolve their labels in one workspace-scoped query.
+	for index := range responses {
+		if responses[index].Kind != "workflow_status" {
+			continue
+		}
+		ids := make([]string, 0, len(responses[index].Values))
+		for _, value := range responses[index].Values {
+			ids = append(ids, value.Key)
+		}
+		ids = append(ids, request.Query.Filters.WorkflowStatusIDs...)
+		rows, err := h.DB.Query(r.Context(), `SELECT s.id::text, s.workflow_id::text,
+          COALESCE(s.legacy_status_key,''), s.name, s.color,
+          COALESCE(s.icon,''), s.position, s.phase, s.archived_at::text, w.name, COALESCE(w.id=(SELECT default_issue_workflow_id FROM workspace WHERE id=$1),false)
+          FROM issue_workflow_status s JOIN issue_workflow w ON w.id=s.workflow_id AND w.workspace_id=s.workspace_id
+          WHERE s.workspace_id=$1 AND s.id::text=ANY($2::text[])`, base.args[0], ids)
+		if err != nil {
+			writeIssueTableQueryFailure(w, r, "failed to resolve status filter labels")
+			return
+		}
+		nodes := map[string]issueTableGroupValueResponse{}
+		for rows.Next() {
+			var node issueTableWorkflowStatusRef
+			if err := rows.Scan(&node.ID, &node.WorkflowID, &node.LegacyStatusKey, &node.Name, &node.Color, &node.Icon, &node.Position, &node.Phase, &node.ArchivedAt, &node.WorkflowName, &node.IsDefault); err != nil {
+				rows.Close()
+				writeIssueTableQueryFailure(w, r, "failed to resolve status filter labels")
+				return
+			}
+			descriptor, err := (resolvedIssueTableGroup{kind: "workflow_status"}).descriptor(node.ID, 0, issueTableGroupContext{WorkflowStatus: &node}, nil)
+			if err != nil {
+				rows.Close()
+				writeIssueTableQueryFailure(w, r, "failed to resolve status filter labels")
+				return
+			}
+			nodes[node.ID] = descriptor.Value
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			writeIssueTableQueryFailure(w, r, "failed to resolve status filter labels")
+			return
+		}
+		present := map[string]bool{}
+		for _, value := range responses[index].Values {
+			present[value.Key] = true
+		}
+		for _, id := range request.Query.Filters.WorkflowStatusIDs {
+			if _, exists := nodes[id]; exists && !present[id] {
+				responses[index].Values = append(responses[index].Values, issueTableFacetValueResponse{Key: id, Count: 0})
+				present[id] = true
+			}
+		}
+		for i := range responses[index].Values {
+			if node, ok := nodes[responses[index].Values[i].Key]; ok {
+				responses[index].Values[i].StatusNode = &node
+			}
+		}
 	}
 
 	response := issueTableFacetsResponse{

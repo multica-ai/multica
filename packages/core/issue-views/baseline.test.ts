@@ -60,6 +60,17 @@ describe("baselineFromQuery property filters", () => {
   });
 });
 
+
+it("retains legacy and native status filters in saved-view baselines", () => {
+  const statuses = ["in_progress", "22222222-2222-4222-8222-222222222222"];
+  expect(baselineFromQuery({ statusFilters: statuses }).raw.statusFilters).toEqual(statuses);
+});
+
+it("retains project-scoped native status mappings when reopening a saved view", () => {
+  const query = { statusFilters: ["old"], statusFilterMappings: { project: { old: "new" } } };
+  expect(baselineFromQuery(query).raw.statusFilterMappings).toEqual(query.statusFilterMappings);
+});
+
 // Saved views predate the project-status dimension, so every read path has to
 // treat a missing key as "no filter" rather than as a value.
 describe("baselineFromQuery project status filters", () => {

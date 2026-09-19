@@ -11,7 +11,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { setApiInstance } from "@multica/core/api";
+import { ApiError, setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import {
   getIssueSurfaceViewStore,
@@ -167,6 +167,7 @@ describe("IssueSurface — scope switch loading semantics", () => {
       return Promise.resolve({ issues, total: issues.length });
     });
     setApiInstance({
+      getEffectiveIssueWorkflow: async () => { throw new ApiError("Not found", 404, "Not Found"); },
       // The board pages by category, so every surface stub answers the catalog
       // read. Empty is the real shape for a workspace with no custom statuses:
       // a built-in key IS its own category. (MUL-6243)
@@ -276,6 +277,7 @@ describe("IssueSurface — scope switch loading semantics", () => {
       return Promise.resolve({ issues, total: issues.length });
     });
     setApiInstance({
+      getEffectiveIssueWorkflow: async () => { throw new ApiError("Not found", 404, "Not Found"); },
       // The board pages by category, so every surface stub answers the catalog
       // read. Empty is the real shape for a workspace with no custom statuses:
       // a built-in key IS its own category. (MUL-6243)
@@ -355,6 +357,7 @@ describe("IssueSurface — table pagination ownership", () => {
     }));
     const listIssueTableRows = vi.fn(() => never());
     setApiInstance({
+      getEffectiveIssueWorkflow: async () => { throw new ApiError("Not found", 404, "Not Found"); },
       // The board pages by category, so every surface stub answers the catalog
       // read. Empty is the real shape for a workspace with no custom statuses:
       // a built-in key IS its own category. (MUL-6243)
@@ -404,11 +407,9 @@ describe("IssueSurface — table pagination ownership", () => {
       </QueryClientProvider>,
     );
 
-    // The first render has not received the independent working-agents query
-    // yet and therefore requests the explicit match-none form. Once that
-    // query resolves, the Table owns a new query key containing the agent id
-    // list and starts the real branch.
-    await waitFor(() => expect(listIssueTableRows).toHaveBeenCalledTimes(2));
+    // Workflow capability settles before mounting the Table. The independent
+    // working-agents query is already warm, so only the real branch is read.
+    await waitFor(() => expect(listIssueTableRows).toHaveBeenCalledTimes(1));
     expect(listIssueTableRows).toHaveBeenLastCalledWith(
       expect.objectContaining({
         group: { kind: "none" },
@@ -456,6 +457,7 @@ describe("IssueSurface — table pagination ownership", () => {
       ),
     );
     setApiInstance({
+      getEffectiveIssueWorkflow: async () => { throw new ApiError("Not found", 404, "Not Found"); },
       // The board pages by category, so every surface stub answers the catalog
       // read. Empty is the real shape for a workspace with no custom statuses:
       // a built-in key IS its own category. (MUL-6243)
@@ -528,6 +530,7 @@ describe("IssueSurface — table pagination ownership", () => {
     const issue = makeIssue("table-selected", "Loaded Table issue", "pt-batch");
 
     setApiInstance({
+      getEffectiveIssueWorkflow: async () => { throw new ApiError("Not found", 404, "Not Found"); },
       // The board pages by category, so every surface stub answers the catalog
       // read. Empty is the real shape for a workspace with no custom statuses:
       // a built-in key IS its own category. (MUL-6243)
@@ -600,6 +603,7 @@ describe("IssueSurface — table pagination ownership", () => {
         : never(),
     );
     setApiInstance({
+      getEffectiveIssueWorkflow: async () => { throw new ApiError("Not found", 404, "Not Found"); },
       // The board pages by category, so every surface stub answers the catalog
       // read. Empty is the real shape for a workspace with no custom statuses:
       // a built-in key IS its own category. (MUL-6243)
@@ -672,6 +676,7 @@ describe("IssueSurface — table pagination ownership", () => {
     );
 
     setApiInstance({
+      getEffectiveIssueWorkflow: async () => { throw new ApiError("Not found", 404, "Not Found"); },
       // The board pages by category, so every surface stub answers the catalog
       // read. Empty is the real shape for a workspace with no custom statuses:
       // a built-in key IS its own category. (MUL-6243)
@@ -765,6 +770,7 @@ describe("IssueSurface — filtered empty state", () => {
       Promise.resolve({ issues: [], total: 0 } satisfies ListIssuesResponse),
     );
     setApiInstance({
+      getEffectiveIssueWorkflow: async () => { throw new ApiError("Not found", 404, "Not Found"); },
       // The board pages by category, so every surface stub answers the catalog
       // read. Empty is the real shape for a workspace with no custom statuses:
       // a built-in key IS its own category. (MUL-6243)
@@ -851,6 +857,7 @@ describe("IssueSurface — status catalog failure", () => {
     const listIssues = vi.fn(() => Promise.resolve({ issues: [], total: 0 }));
     const tableMethods = statusTableMethodsFromLegacy(listIssues);
     setApiInstance({
+      getEffectiveIssueWorkflow: async () => { throw new ApiError("Not found", 404, "Not Found"); },
       listIssueStatuses,
       listIssues,
       ...tableMethods,

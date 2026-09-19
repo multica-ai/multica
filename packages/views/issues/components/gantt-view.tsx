@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { issueWorkflowOptions } from "@multica/core/issue-workflows";
+import { statusCategoryOfKey } from "@multica/core/issues";
+import { useQuery, useQueries } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -323,6 +325,8 @@ function ScheduledRow({
   const p = useWorkspacePaths();
   const wsId = useWorkspaceId();
   const { colorOf, iconOf } = useIssueStatuses(wsId);
+  const workflow = useQuery(issueWorkflowOptions(wsId, issue.workflow_id ?? ""));
+  const node = workflow.data?.statuses.find((node) => node.id === issue.workflow_status_id);
   const { data: projects = [] } = useQuery({
     ...projectListOptions(wsId),
     enabled: !!issue.project_id,
@@ -377,9 +381,9 @@ function ScheduledRow({
         >
           <StatusIcon
             status={issue.status}
-            color={colorOf(issue.status)}
-            icon={iconOf(issue.status)}
-            category={issueStatusCategory(issue) ?? undefined}
+            color={node?.color ?? colorOf(issue.status)}
+            icon={node?.icon ?? iconOf(issue.status)}
+            category={node ? statusCategoryOfKey(node.phase) : issueStatusCategory(issue) ?? undefined}
             className="h-3.5 w-3.5"
           />
           <PriorityIcon priority={issue.priority} />
@@ -417,7 +421,7 @@ function ScheduledRow({
                       STATUS_BAR_BG[issueStatusCategory(issue) ?? "unstarted"],
                       inverted && "ring-2 ring-destructive ring-offset-1 ring-offset-background",
                     )}
-                    style={{ left: bar.left, width: bar.width }}
+                    style={{ left: bar.left, width: bar.width, backgroundColor: node?.color }}
                   >
                     {!bar.isMarker && bar.width > 60 && (
                       <span className="block truncate px-2 py-[2px] text-micro leading-4 text-white">
@@ -461,8 +465,16 @@ export function GanttView({ issues }: { issues: Issue[] }) {
   const act = useViewStoreApi().getState();
   // Board order for `sort=status`, archived included: an issue can still sit on
   // an archived status and has to rank with the rest (MUL-7379).
-  const statusCatalog = useIssueStatuses(useWorkspaceId());
-  const statusOrder = useMemo(() => statusColumnKeys(statusCatalog, true), [statusCatalog]);
+  const wsId = useWorkspaceId();
+  const statusCatalog = useIssueStatuses(wsId);
+  const workflowIds = [...new Set(issues.flatMap((issue) => issue.workflow_id ? [issue.workflow_id] : []))];
+  const definitions = useQueries({ queries: workflowIds.map((id) => issueWorkflowOptions(wsId, id)) });
+  const statusOrder = useMemo(() => [
+    ...definitions.flatMap((result) => result.data ? [result.data] : []).toSorted((a, b) =>
+      Number(b.workflow.scope_type === "workspace") - Number(a.workflow.scope_type === "workspace") || a.workflow.name.localeCompare(b.workflow.name) || a.workflow.id.localeCompare(b.workflow.id))
+      .flatMap((definition) => definition.statuses.toSorted((a, b) => a.position - b.position).map((node) => node.id)),
+    ...statusColumnKeys(statusCatalog, true),
+  ], [definitions, statusCatalog]);
 
   const today = useMemo(() => startOfDayUTC(new Date()), []);
   const dayPx = DAY_PX_BY_ZOOM[zoom];

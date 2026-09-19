@@ -13,13 +13,17 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issuepolicy"
 	"github.com/multica-ai/multica/server/internal/issueposition"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -38,8 +42,9 @@ type IssueService struct {
 	// cmd/server/router.go after construction; nil in tests / self-hosted
 	// without the metrics listener — obsmetrics.RecordEvent treats a nil
 	// Metrics as "PostHog only", so leaving it unset is safe.
-	Metrics     *obsmetrics.BusinessMetrics
-	TaskService *TaskService
+	Metrics      *obsmetrics.BusinessMetrics
+	TaskService  *TaskService
+	FeatureFlags *featureflag.Service
 	// Entitlements supplies Cloud's effective issue-count instruction. Nil is
 	// the self-hosted unlimited path.
 	Entitlements entitlement.Provider
@@ -59,22 +64,25 @@ func NewIssueService(q *db.Queries, tx TxStarter, bus *events.Bus, ac analytics.
 // to IssueService.Create. The handler owns the parsing step that turns its
 // request payload into this struct; the service stays transport-agnostic.
 type IssueCreateParams struct {
-	WorkspaceID   pgtype.UUID
-	Title         string
-	Description   pgtype.Text
-	Status        string
-	Priority      string
-	AssigneeType  pgtype.Text
-	AssigneeID    pgtype.UUID
-	CreatorType   string // "agent" or "member"
-	CreatorID     pgtype.UUID
-	ParentIssueID pgtype.UUID
-	ProjectID     pgtype.UUID
-	StartDate     pgtype.Date
-	DueDate       pgtype.Date
-	OriginType    pgtype.Text
-	OriginID      pgtype.UUID
-	AttachmentIDs []pgtype.UUID
+	// ProjectIDExplicit allows an explicitly empty project without parent inheritance.
+	ProjectIDExplicit bool
+	WorkspaceID       pgtype.UUID
+	Title             string
+	Description       pgtype.Text
+	Status            string
+	WorkflowStatusID  pgtype.UUID
+	Priority          string
+	AssigneeType      pgtype.Text
+	AssigneeID        pgtype.UUID
+	CreatorType       string // "agent" or "member"
+	CreatorID         pgtype.UUID
+	ParentIssueID     pgtype.UUID
+	ProjectID         pgtype.UUID
+	StartDate         pgtype.Date
+	DueDate           pgtype.Date
+	OriginType        pgtype.Text
+	OriginID          pgtype.UUID
+	AttachmentIDs     []pgtype.UUID
 	// LabelIDs are the issue-scoped labels to attach to the new issue. They
 	// are validated and written inside the create transaction (see Create),
 	// so the issue is never committed with a partial or wrong label set. An
@@ -218,6 +226,9 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
+	if err := qtx.LockIssueStatusCatalogShared(ctx, p.WorkspaceID); err != nil {
+		return IssueCreateResult{}, err
+	}
 
 	if p.SourceContext != nil {
 		if _, err := qtx.LockIssueForDescriptionUpdate(ctx, db.LockIssueForDescriptionUpdateParams{
@@ -254,7 +265,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	// Re-checking under the lock is what makes the status provably active at
 	// the moment the row is written. Built-in statuses skip both — they can
 	// never be archived, so the common path is unchanged. (MUL-6243)
-	if !issuestatus.IsBuiltIn(p.Status) {
+	if !p.WorkflowStatusID.Valid && p.Status != "" && !issuestatus.IsBuiltIn(p.Status) {
 		if err := qtx.LockIssueStatusCatalogShared(ctx, p.WorkspaceID); err != nil {
 			return IssueCreateResult{}, err
 		}
@@ -283,7 +294,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		// Back-fill project from parent when the caller did not pin
 		// one explicitly. Matches the long-standing HTTP behavior: a
 		// sub-issue inherits its parent's project unless overridden.
-		if !projectID.Valid {
+		if !projectID.Valid && !p.ProjectIDExplicit {
 			projectID = parent.ProjectID
 		}
 	}
@@ -295,6 +306,78 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			return IssueCreateResult{}, ErrProjectNotFound
 		}
 	}
+
+	// The legacy request still names a status key, but the durable write is a
+	// stable workflow node. Resolve that node before allocating a number so an
+	// archived project-specific node is rejected instead of creating an issue
+	// with a NULL or retired workflow binding. The active node is share-locked
+	// below so an apply cannot archive it between validation and INSERT.
+	workflow, err := issueworkflow.Effective(ctx, qtx, p.WorkspaceID, projectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Rolling deployments and old test fixtures can encounter a workspace
+		// before the backfill has installed its default workflow. Repair it in
+		// this same transaction, then resolve the project inheritance again.
+		if seedErr := qtx.SeedIssueStatusEntries(ctx, p.WorkspaceID); seedErr != nil {
+			return IssueCreateResult{}, fmt.Errorf("seed issue status catalog: %w", seedErr)
+		}
+		if _, ensureErr := issueworkflow.EnsureDefault(ctx, qtx, p.WorkspaceID); ensureErr != nil {
+			return IssueCreateResult{}, ensureErr
+		}
+		workflow, err = issueworkflow.Effective(ctx, qtx, p.WorkspaceID, projectID)
+	}
+	if err != nil {
+		return IssueCreateResult{}, err
+	}
+	var workflowStatus db.IssueWorkflowStatus
+	if p.WorkflowStatusID.Valid {
+		workflowStatus, err = qtx.GetIssueWorkflowStatusByID(ctx, db.GetIssueWorkflowStatusByIDParams{
+			WorkspaceID: p.WorkspaceID, WorkflowID: workflow.ID, ID: p.WorkflowStatusID,
+		})
+	} else if p.Status == "" && workflow.InitialStatusID.Valid {
+		workflowStatus, err = qtx.GetIssueWorkflowStatusByID(ctx, db.GetIssueWorkflowStatusByIDParams{
+			WorkspaceID: p.WorkspaceID, WorkflowID: workflow.ID, ID: workflow.InitialStatusID,
+		})
+	} else {
+		if p.Status == "" {
+			p.Status = "todo"
+		}
+		workflowStatus, err = qtx.GetIssueWorkflowStatusByLegacyKey(ctx, db.GetIssueWorkflowStatusByLegacyKeyParams{
+			WorkspaceID: p.WorkspaceID, WorkflowID: workflow.ID,
+			LegacyStatusKey: pgtype.Text{String: p.Status, Valid: true},
+		})
+	}
+	if !p.WorkflowStatusID.Valid && p.Status != "" && workflow.ScopeType == "workspace" && (errors.Is(err, pgx.ErrNoRows) || (err == nil && workflowStatus.ArchivedAt.Valid)) {
+		// Until the final adapter cutover the workspace-default definition is
+		// projected from issue_status. A direct legacy write (including older
+		// binaries during a rolling deploy) may have committed between syncs;
+		// repair that projection before deciding the node is unavailable.
+		if syncErr := issueworkflow.SyncDefault(ctx, qtx, p.WorkspaceID); syncErr != nil {
+			return IssueCreateResult{}, syncErr
+		}
+		workflowStatus, err = qtx.GetIssueWorkflowStatusByLegacyKey(ctx, db.GetIssueWorkflowStatusByLegacyKeyParams{
+			WorkspaceID: p.WorkspaceID, WorkflowID: workflow.ID,
+			LegacyStatusKey: pgtype.Text{String: p.Status, Valid: true},
+		})
+	}
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return IssueCreateResult{}, ErrIssueStatusUnavailable
+		}
+		return IssueCreateResult{}, fmt.Errorf("resolve issue workflow status: %w", err)
+	}
+	if workflowStatus.ArchivedAt.Valid {
+		return IssueCreateResult{}, ErrIssueStatusUnavailable
+	}
+	workflowStatus, err = qtx.LockActiveIssueWorkflowStatus(ctx, db.LockActiveIssueWorkflowStatusParams{
+		WorkspaceID: p.WorkspaceID, WorkflowID: workflow.ID, ID: workflowStatus.ID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return IssueCreateResult{}, ErrIssueStatusUnavailable
+		}
+		return IssueCreateResult{}, fmt.Errorf("lock issue workflow status: %w", err)
+	}
+	p.Status = issueworkflow.LegacyProjection(workflowStatus)
 
 	// Validate labels before we increment the issue counter so a stale or
 	// wrong-scope selection fails the create cheaply. The de-duplicated rows
@@ -335,52 +418,73 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 
 	var issue db.Issue
 	var assignedTask db.AgentTaskQueue
+	var workflowEntryTask bool
+	var customWorkflowEntryPolicy bool
 	if p.OriginType.Valid {
 		issue, err = qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
-			ID:            dbid.NewV7(),
-			WorkspaceID:   p.WorkspaceID,
-			Title:         p.Title,
-			Description:   p.Description,
-			Status:        p.Status,
-			Priority:      p.Priority,
-			AssigneeType:  p.AssigneeType,
-			AssigneeID:    p.AssigneeID,
-			CreatorType:   p.CreatorType,
-			CreatorID:     p.CreatorID,
-			ParentIssueID: p.ParentIssueID,
-			Position:      newPosition,
-			StartDate:     p.StartDate,
-			DueDate:       p.DueDate,
-			Number:        issueNumber,
-			ProjectID:     projectID,
-			OriginType:    p.OriginType,
-			OriginID:      p.OriginID,
-			Stage:         p.Stage,
+			ID:               dbid.NewV7(),
+			WorkspaceID:      p.WorkspaceID,
+			Title:            p.Title,
+			Description:      p.Description,
+			Status:           p.Status,
+			Priority:         p.Priority,
+			AssigneeType:     p.AssigneeType,
+			AssigneeID:       p.AssigneeID,
+			CreatorType:      p.CreatorType,
+			CreatorID:        p.CreatorID,
+			ParentIssueID:    p.ParentIssueID,
+			Position:         newPosition,
+			StartDate:        p.StartDate,
+			DueDate:          p.DueDate,
+			Number:           issueNumber,
+			ProjectID:        projectID,
+			OriginType:       p.OriginType,
+			OriginID:         p.OriginID,
+			Stage:            p.Stage,
+			WorkflowID:       workflow.ID,
+			WorkflowStatusID: workflowStatus.ID,
 		})
 	} else {
 		issue, err = qtx.CreateIssue(ctx, db.CreateIssueParams{
-			ID:            dbid.NewV7(),
-			WorkspaceID:   p.WorkspaceID,
-			Title:         p.Title,
-			Description:   p.Description,
-			Status:        p.Status,
-			Priority:      p.Priority,
-			AssigneeType:  p.AssigneeType,
-			AssigneeID:    p.AssigneeID,
-			CreatorType:   p.CreatorType,
-			CreatorID:     p.CreatorID,
-			ParentIssueID: p.ParentIssueID,
-			Position:      newPosition,
-			StartDate:     p.StartDate,
-			DueDate:       p.DueDate,
-			Number:        issueNumber,
-			ProjectID:     projectID,
-			Stage:         p.Stage,
+			ID:               dbid.NewV7(),
+			WorkspaceID:      p.WorkspaceID,
+			Title:            p.Title,
+			Description:      p.Description,
+			Status:           p.Status,
+			Priority:         p.Priority,
+			AssigneeType:     p.AssigneeType,
+			AssigneeID:       p.AssigneeID,
+			CreatorType:      p.CreatorType,
+			CreatorID:        p.CreatorID,
+			ParentIssueID:    p.ParentIssueID,
+			Position:         newPosition,
+			StartDate:        p.StartDate,
+			DueDate:          p.DueDate,
+			Number:           issueNumber,
+			ProjectID:        projectID,
+			Stage:            p.Stage,
+			WorkflowID:       workflow.ID,
+			WorkflowStatusID: workflowStatus.ID,
 		})
 	}
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("create issue: %w", err)
 	}
+	entry, err := EnterIssueWorkflowStatus(ctx, qtx, nil, issue, issueworkflow.TransitionActor{
+		Type: p.CreatorType, ID: p.CreatorID,
+	}, "issue_created")
+	if err != nil {
+		return IssueCreateResult{}, fmt.Errorf("apply initial workflow entry policy: %w", err)
+	}
+	issue, assignedTask = entry.Issue, entry.Task
+	workflowEntryTask = assignedTask.ID.Valid
+	initialWorkflow, err := qtx.GetIssueWorkflowByID(ctx, db.GetIssueWorkflowByIDParams{
+		ID: issue.WorkflowID, WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		return IssueCreateResult{}, fmt.Errorf("load initial workflow policy scope: %w", err)
+	}
+	customWorkflowEntryPolicy = initialWorkflow.ScopeType == "project"
 
 	if p.SourceContext != nil {
 		if _, err := PersistSourceContext(ctx, qtx, *p.SourceContext, issue.ID, pgtype.UUID{}); err != nil {
@@ -455,7 +559,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		}
 	}
 
-	if !opts.AssignedAgentRunFireAt.IsZero() && s.shouldEnqueueAgentTaskWithQueries(ctx, qtx, issue) {
+	if !customWorkflowEntryPolicy && !assignedTask.ID.Valid && !opts.AssignedAgentRunFireAt.IsZero() && s.shouldEnqueueAgentTaskWithQueries(ctx, qtx, issue) {
 		// The issue must never become visible without its media-gated assigned
 		// task. Inserting both rows through qtx makes the unique-index winner
 		// deterministic: any observer that can discover the committed issue also
@@ -477,21 +581,22 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		actorID = util.UUIDToString(issue.CreatorID)
 	}
 
-	var assignedTaskID pgtype.UUID
+	assignedTaskID := assignedTask.ID
 	if !opts.AssignedAgentRunFireAt.IsZero() {
-		assignedTaskID = assignedTask.ID
 		if assignedTaskID.Valid {
-			// The deferred task became durable with the issue at commit. Refresh the
-			// daemon's schedule only now so a wakeup can never race uncommitted data.
-			s.TaskService.notifyRuntimeMayHaveWork(assignedTask.RuntimeID, "")
-			if err := s.TaskService.hydrateDeferredChannelIssueTaskOverlay(ctx, assignedTask); err != nil {
-				// Runtime overlays are best-effort on every enqueue path. The task is
-				// already durable and safely deferred, so an optional integration
-				// failure must not turn a committed issue into a retry duplicate.
-				slog.Warn("hydrate deferred channel issue task overlay failed",
-					"issue_id", util.UUIDToString(issue.ID),
-					"task_id", util.UUIDToString(assignedTask.ID),
-					"error", err)
+			if !workflowEntryTask {
+				// The deferred task became durable with the issue at commit. Refresh the
+				// daemon's schedule only now so a wakeup can never race uncommitted data.
+				s.TaskService.notifyRuntimeMayHaveWork(assignedTask.RuntimeID, "")
+				if err := s.TaskService.hydrateDeferredChannelIssueTaskOverlay(ctx, assignedTask); err != nil {
+					// Runtime overlays are best-effort on every enqueue path. The task is
+					// already durable and safely deferred, so an optional integration
+					// failure must not turn a committed issue into a retry duplicate.
+					slog.Warn("hydrate deferred channel issue task overlay failed",
+						"issue_id", util.UUIDToString(issue.ID),
+						"task_id", util.UUIDToString(assignedTask.ID),
+						"error", err)
+				}
 			}
 		} else if s.shouldEnqueueSquadLeaderOnAssign(ctx, issue) {
 			// AssignedAgentRunFireAt currently belongs to channel /issue, which
@@ -503,7 +608,12 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 
 	s.publishIssueCreated(issue, attachments, labels, p.CreatorType, actorID, opts)
 	s.captureCreatedAnalytics(issue, p.CreatorType, actorID, opts)
-	if opts.AssignedAgentRunFireAt.IsZero() {
+	if workflowEntryTask {
+		if s.TaskService != nil {
+			s.TaskService.BroadcastTaskQueued(ctx, assignedTask)
+			s.TaskService.NotifyTaskEnqueued(ctx, assignedTask)
+		}
+	} else if !customWorkflowEntryPolicy && opts.AssignedAgentRunFireAt.IsZero() {
 		assignedTaskID = s.maybeEnqueueOnAssign(ctx, issue, p.CreatorType, actorID, opts.AssignedAgentRunFireAt)
 	}
 
@@ -729,10 +839,7 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 	}
 	// Backlog is the parking lot: nothing runs from it, so nothing here needs
 	// explaining either. Custom unstarted statuses do not inherit parking.
-	//
-	// Triage refuses for a different reason and so returns just as quietly: the
-	// entry is not yet work anyone agreed to do (MUL-7189 §2.3).
-	if issue.TriageState.Valid || issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
+	if issue.TriageState.Valid || issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueWorkflowV1Enabled(ctx, s.FeatureFlags)).IsParked() {
 		return pgtype.UUID{}
 	}
 	verdict, admitted := agentAssigneeVerdict(ctx, s.runtimeLookup(s.Queries), issue)
@@ -778,9 +885,7 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 func (s *IssueService) shouldEnqueueAgentTaskWithQueries(ctx context.Context, q *db.Queries, issue db.Issue) bool {
 	// Resolved through q, not s.Queries: this runs inside the create
 	// transaction and must see the same snapshot as the rest of it. (MUL-6243)
-	// That snapshot is also the only place a just-created Triage issue is
-	// visible, which is why the Triage check belongs on the same read.
-	if issue.TriageState.Valid || issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status) == "backlog" {
+	if issue.TriageState.Valid || issuepolicy.ResolveIssue(ctx, q, issue, featureflags.IssueWorkflowV1Enabled(ctx, s.FeatureFlags)).IsParked() {
 		return false
 	}
 	return isAgentAssigneeReadyWithQueries(ctx, s.runtimeLookup(q), issue)
@@ -813,7 +918,7 @@ func agentAssigneeVerdict(ctx context.Context, lookup RuntimeLookup, issue db.Is
 }
 
 func (s *IssueService) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db.Issue) bool {
-	if issue.TriageState.Valid || issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
+	if issue.TriageState.Valid || issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueWorkflowV1Enabled(ctx, s.FeatureFlags)).IsParked() {
 		return false
 	}
 	return s.isSquadLeaderReady(ctx, issue)

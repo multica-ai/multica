@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createStore } from "zustand/vanilla";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
 
@@ -17,7 +18,7 @@ import { IssueContextMenuProvider } from "../actions";
 
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
-  useQuery: () => ({ data: [] }),
+  useQuery: (options: { queryKey: string[] }) => ({ data: options.queryKey[0] === "issue-workflows" ? undefined : [] }),
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -85,11 +86,11 @@ const ISSUE = {
 function renderGantt(locale: "en" | "zh-Hans") {
   const store = createStore<IssueViewState>()(viewStoreSlice);
   return renderWithI18n(
-    <ViewStoreProvider store={store}>
+    <QueryClientProvider client={new QueryClient()}><ViewStoreProvider store={store}>
       <IssueContextMenuProvider>
         <GanttView issues={[ISSUE]} />
       </IssueContextMenuProvider>
-    </ViewStoreProvider>,
+    </ViewStoreProvider></QueryClientProvider>,
     { locale },
   );
 }

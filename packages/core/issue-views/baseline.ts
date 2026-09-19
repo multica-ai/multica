@@ -74,6 +74,14 @@ export function baselineFromQuery(query: Record<string, unknown>): IssueViewBase
   const statusFilters = stringArray(query.statusFilters).filter(
     (s): s is IssueStatus => s.length > 0,
   );
+  const statusFilterMappings: Record<string, Record<string, string>> = {};
+  if (query.statusFilterMappings && typeof query.statusFilterMappings === "object") {
+    for (const [project, raw] of Object.entries(query.statusFilterMappings)) {
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+        statusFilterMappings[project] = Object.fromEntries(Object.entries(raw).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+      }
+    }
+  }
   const priorityFilters = stringArray(query.priorityFilters).filter(
     (p): p is IssuePriority => (PRIORITY_DISPLAY_ORDER as readonly string[]).includes(p),
   );
@@ -116,6 +124,7 @@ export function baselineFromQuery(query: Record<string, unknown>): IssueViewBase
     property,
     raw: {
       statusFilters,
+      statusFilterMappings,
       priorityFilters,
       assigneeFilters,
       includeNoAssignee,

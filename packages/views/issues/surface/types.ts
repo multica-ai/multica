@@ -14,6 +14,9 @@ export type IssueCreateDefaults = Partial<
   /** Display-only context for the create dialog while the parent query loads. */
   parent_issue_identifier?: string;
   project_id?: string | null;
+  /** Constrain column creation until an eligible project is explicitly chosen. */
+  required_workflow_id?: string;
+  require_project_choice?: boolean;
 };
 
 export type IssueSurfaceMode = Extract<

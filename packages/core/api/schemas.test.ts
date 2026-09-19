@@ -1,5 +1,8 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
+  IssueWorkflowEntryPolicySchema,
+  IssueTableFacetsResponseSchema,
   AppConfigSchema,
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
@@ -72,6 +75,10 @@ import {
   IssueStatusEntrySchema,
   EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
   EMPTY_ISSUE_STATUS_ENTRY,
+  IssueWorkflowResponseSchema,
+  EMPTY_ISSUE_LIFECYCLE_RESPONSE,
+  TransitionIssueStatusNodeResponseSchema,
+  IssueTableGroupsResponseSchema,
 } from "./schemas";
 import { parseWithFallback } from "./schema";
 
@@ -204,6 +211,21 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     });
     expect(parsed.issues[0]?.id).toBe(baseIssue.id);
     expect(parsed.issues[0]?.source_context).toBeUndefined();
+  });
+  it("keeps an issue while independently dropping malformed workflow cursors", () => {
+    const parsed = ListIssuesResponseSchema.parse({
+      issues: [{
+        ...baseIssue,
+        workflow_id: 7,
+        workflow_status_id: { id: "status-1" },
+        transition_id: false,
+      }],
+      total: 1,
+    });
+    expect(parsed.issues[0]?.id).toBe(baseIssue.id);
+    expect(parsed.issues[0]?.workflow_id).toBeUndefined();
+    expect(parsed.issues[0]?.workflow_status_id).toBeUndefined();
+    expect(parsed.issues[0]?.transition_id).toBeUndefined();
   });
   it("parses source-context change reasons without requiring them from older servers", () => {
     const sourceContext = {
@@ -2207,6 +2229,136 @@ describe("issue status catalog schemas", () => {
   });
 });
 
+describe("issue workflow schemas", () => {
+  const workflow = {
+    id: "workflow-1",
+    workspace_id: "ws-1",
+    scope_type: "project",
+    scope_id: "project-1",
+    name: "Project workflow",
+    revision: 2,
+    initial_status_id: "status-1",
+    created_at: "2026-09-03T00:00:00Z",
+    updated_at: "2026-09-03T00:00:00Z",
+  };
+  const status = {
+    id: "status-1",
+    workflow_id: "workflow-1",
+    legacy_status_key: "in_progress",
+    spec_key: "building",
+    name: "Building",
+    description: "Agent is working",
+    color: "#2563eb",
+    position: 2,
+    phase: "started",
+    outcome: null,
+    entry_policy: {
+      executor: { type: "agent", id: "agent-1" },
+      instructions: "Implement the issue.",
+    },
+    entry_policy_revision: 3,
+    archived_at: null,
+    created_at: "2026-09-03T00:00:00Z",
+    updated_at: "2026-09-03T00:00:00Z",
+  };
+
+  it("parses an effective project workflow and keeps forward-compatible phases", () => {
+    const parsed = IssueWorkflowResponseSchema.parse({
+      workflow,
+      statuses: [{ ...status, icon: "three_quarters" }, { ...status, id: "status-2", phase: "waiting", icon: 42 }],
+      mode: "custom",
+    });
+    expect(parsed.workflow.revision).toBe(2);
+    expect(parsed.workflow.initial_status_id).toBe("status-1");
+    expect(parsed.statuses[0]?.spec_key).toBe("building");
+    expect(parsed.statuses[0]?.entry_policy_revision).toBe(3);
+    expect(parsed.statuses[0]?.entry_policy.executor).toEqual({ type: "agent", id: "agent-1" });
+    expect(parsed.statuses[1]?.phase).toBe("waiting");
+    expect(parsed.statuses[0]?.icon).toBe("three_quarters");
+    expect(parsed.statuses[1]?.icon).toBeUndefined();
+  });
+
+  it("normalizes an additive server's empty entry policy to safe defaults", () => {
+    const parsed = IssueWorkflowResponseSchema.parse({
+      workflow,
+      statuses: [{ ...status, entry_policy: {} }],
+      mode: "custom",
+    });
+    expect(parsed.statuses[0]?.entry_policy).toEqual({
+      executor: { type: "none" },
+      instructions: "",
+    });
+  });
+
+  it("falls back safely when a workflow response is malformed", () => {
+    const parsed = parseWithFallback(
+      { workflow: { id: 7 }, statuses: "bad" },
+      IssueWorkflowResponseSchema,
+      EMPTY_ISSUE_LIFECYCLE_RESPONSE,
+      { endpoint: "GET /api/issue-workflows/effective" },
+    );
+    expect(parsed).toEqual(EMPTY_ISSUE_LIFECYCLE_RESPONSE);
+  });
+
+  it("accepts a no-op transition without fabricating an audit record", () => {
+    const parsed = TransitionIssueStatusNodeResponseSchema.parse({
+      issue: { ...baseIssue, workflow_id: "workflow-1", workflow_status_id: "status-1" },
+      transition: null,
+    });
+    expect(parsed.issue.workflow_status_id).toBe("status-1");
+    expect(parsed.transition).toBeNull();
+  });
+
+  it("validates workflow lane identity and tolerates absent or malformed optional facet metadata", () => {
+    const payload = { query_fingerprint: "query", total: 1, next_cursor: null, groups: [{
+      key: "workflow:one", count: 1, value: { kind: "workflow", workflow_id: "one", name: "Design" },
+      secondary_groups: [{ key: "opaque", count: 1, value: { kind: "workflow_status", workflow_id: "one", workflow_status_id: "review", name: "Review", workflow_name: 123, is_default: "yes" } }],
+    }] };
+    const cell = IssueTableGroupsResponseSchema.parse(payload).groups[0]?.secondary_groups?.[0];
+    expect(cell?.key).toBe("opaque");
+    expect(cell?.value).toMatchObject({ name: "Review", workflow_name: undefined, is_default: undefined });
+    expect(IssueTableGroupsResponseSchema.safeParse({ ...payload, groups: [{ ...payload.groups[0], value: { kind: "workflow", workflow_id: 12 } }] }).success).toBe(false);
+    const facet = IssueTableFacetsResponseSchema.parse({ query_fingerprint: "query", total: 1, facets: [{
+      kind: "workflow_status", values: [
+        { key: "review", count: 1, status_node: { kind: "workflow_status", workflow_id: "one", workflow_status_id: "review", name: "Design / Review" } },
+        { key: "old", count: 2 }, { key: "bad", count: 3, status_node: { kind: "workflow_status", name: 12 } },
+      ],
+    }] });
+    expect(facet.facets[0]?.values[0]?.status_node?.name).toBe("Design / Review");
+    expect(facet.facets[0]?.values[1]?.status_node).toBeUndefined();
+    expect(facet.facets[0]?.values[2]?.status_node).toBeUndefined();
+  });
+
+  it("preserves workflow status-node identity in table group descriptors", () => {
+    const parsed = IssueTableGroupsResponseSchema.parse({
+      query_fingerprint: "query-1",
+      total: 2,
+      groups: [
+        {
+          key: "workflow_status:status-1",
+          value: {
+            kind: "workflow_status",
+            workflow_id: "workflow-1",
+            workflow_status_id: "status-1",
+            status: "todo",
+            name: "Implementation",
+            color: "#2563eb",
+            position: 2,
+            phase: "started",
+          },
+          count: 2,
+        },
+      ],
+      next_cursor: null,
+    });
+    expect(parsed.groups[0]?.value).toMatchObject({
+      kind: "workflow_status",
+      workflow_status_id: "status-1",
+      name: "Implementation",
+    });
+  });
+});
+
 describe("TaskMessageListSchema", () => {
   const row = { task_id: "task-1", issue_id: "issue-1", seq: 1, type: "tool_result", output: "log line" };
 
@@ -2267,4 +2419,10 @@ describe("TaskMessageListSchema", () => {
     const parsed = TaskMessageListSchema.parse([{ ...row, type: "video" }]);
     expect(parsed[0]?.type).toBe("text");
   });
+});
+
+it("parses executor instructions and rejects malformed executors", () => {
+  const manual = { executor: { type: "none" }, instructions: "" };
+  expect(IssueWorkflowEntryPolicySchema.parse(manual)).toEqual(manual);
+  expect(IssueWorkflowEntryPolicySchema.safeParse({ executor: { type: "agent", id: 42 } }).success).toBe(false);
 });

@@ -151,10 +151,50 @@ describe("status grouping with custom statuses", () => {
     expect(getMoveUpdates(inReviewColumn, 5)).toEqual({ status: "in_review", position: 5 });
   });
 
-  // A built-in card in its own column keeps carrying the (unchanged) key, so a
-  // workspace without custom statuses sends exactly the payload it always did.
-  it("keeps the status in the payload for a built-in card", () => {
+  it("only reorders a built-in card within its current status column", () => {
     expect(getMoveUpdates(inReviewColumn, 5, builtIn)).toEqual({ position: 5 });
+  });
+});
+
+describe("project workflow status-node grouping", () => {
+  const first = {
+    ...mk("first", 1),
+    workflow_id: "workflow-a",
+    workflow_status_id: "node-a",
+  } as Issue;
+  const second = {
+    ...mk("second", 2),
+    workflow_id: "workflow-b",
+    workflow_status_id: "node-b",
+  } as Issue;
+  const firstColumn: BoardColumnGroup = {
+    id: "workflow_status:node-a",
+    title: "Implementation",
+    workflowStatusId: "node-a",
+    workflowStatusLegacyKey: "todo",
+  };
+  const secondColumn: BoardColumnGroup = {
+    id: "workflow_status:node-b",
+    title: "Implementation",
+    workflowStatusId: "node-b",
+    workflowStatusLegacyKey: "todo",
+  };
+
+  it("keeps same-name nodes isolated by stable id", () => {
+    expect(buildColumns([first, second], [firstColumn, secondColumn], "status")).toEqual({
+      "workflow_status:node-a": ["first"],
+      "workflow_status:node-b": ["second"],
+    });
+  });
+
+  it("moves with workflow_status_id and recognizes a same-node reorder", () => {
+    expect(issueMatchesGroup(first, firstColumn)).toBe(true);
+    expect(issueMatchesGroup(first, secondColumn)).toBe(false);
+    expect(getMoveUpdates(firstColumn, 3, first)).toEqual({ position: 3 });
+    expect(getMoveUpdates(secondColumn, 3, first)).toEqual({
+      workflow_status_id: "node-b",
+      position: 3,
+    });
   });
 });
 

@@ -15,7 +15,11 @@ export type IssuesScope = "all" | "members" | "agents";
  */
 export type IssuesScopePageKey = "issues" | `project:${string}`;
 
+export type GlobalIssuesPage = "issues" | "my-issues";
+
 interface IssuesScopeState {
+  projects: Partial<Record<GlobalIssuesPage, string | null>>;
+  setProject: (page: GlobalIssuesPage, projectId: string | null) => void;
   scopes: Partial<Record<IssuesScopePageKey, IssuesScope>>;
   setScope: (page: IssuesScopePageKey, scope: IssuesScope) => void;
 }
@@ -24,6 +28,9 @@ export const useIssuesScopeStore = create<IssuesScopeState>()(
   persist(
     (set) => ({
       scopes: {},
+      projects: {},
+      setProject: (page, projectId) =>
+        set((state) => ({ projects: { ...state.projects, [page]: projectId } })),
       setScope: (page, scope) =>
         set((state) => ({ scopes: { ...state.scopes, [page]: scope } })),
     }),
@@ -31,6 +38,10 @@ export const useIssuesScopeStore = create<IssuesScopeState>()(
       name: "multica_issues_scope",
       version: 1,
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
+      merge: (persisted, current) => {
+        const saved = persisted as Partial<IssuesScopeState> | undefined;
+        return { ...current, scopes: saved?.scopes ?? {}, projects: saved?.projects ?? {} };
+      },
       migrate: (persisted, version) => {
         // v0 stored one tab shared by every page; carry it over as the
         // Issues page's tab and let project pages start fresh on "all".

@@ -6,6 +6,7 @@ import { useState, useCallback, useMemo, useEffect, useRef, memo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   DndContext,
+  pointerWithin,
   DragOverlay,
   PointerSensor,
   useSensor,
@@ -19,11 +20,12 @@ import { toast } from "sonner";
 import type {
   Issue,
   IssueAssigneeType,
+  IssueWorkflowStatusNode,
   IssueStatus,
   Project,
   IssueProperty,
 } from "@multica/core/types";
-import { useViewStore } from "@multica/core/issues/stores/view-store-context";
+import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 import { propertyListOptions, useSetIssueProperty, useUnsetIssueProperty } from "@multica/core/properties";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -62,6 +64,7 @@ import {
   propertyGroupId,
   projectGroupId,
 } from "../utils/drag-utils";
+import { buildWorkflowStatusGroups } from "../utils/workflow-status-groups";
 
 function isStatusGroup(
   group: BoardColumnGroup,
@@ -255,6 +258,8 @@ function BoardViewImpl({
   onCreateIssue,
   statusPagination,
   groupBranches,
+  workflowStatuses,
+  ownWorkflow = false,
 }: {
   issues: Issue[];
   visibleStatuses: IssueStatus[];
@@ -267,9 +272,14 @@ function BoardViewImpl({
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
   statusPagination?: IssueStatusPagination;
   groupBranches?: IssueGroupBranches;
+  workflowStatuses?: IssueWorkflowStatusNode[];
+  ownWorkflow?: boolean;
 }) {
   const { t } = useT("issues");
   const storeGrouping = useViewStore((s) => s.grouping);
+  const hiddenKeys = useViewStore((s) => s.hiddenStatuses);
+  const statusFilters = useViewStore((s) => s.statusFilters);
+  const viewStore = useViewStoreApi();
   const sortBy = useViewStore((s) => s.sortBy);
   const boardWsId = useWorkspaceId();
   const catalog = useIssueStatuses(boardWsId);
@@ -365,6 +375,14 @@ function BoardViewImpl({
     }
     return undefined;
   }, [getActorName, groupBranches, grouping, t]);
+  const hydratedWorkflowGroups = useMemo<BoardColumnGroup[] | undefined>(() => {
+    if (workflowStatuses === undefined || grouping !== "status") return undefined;
+    return buildWorkflowStatusGroups(
+      workflowStatuses,
+      groupBranches?.descriptors ?? [],
+      ownWorkflow,
+    );
+  }, [groupBranches?.descriptors, grouping, workflowStatuses, ownWorkflow]);
   const projectColumnLabels = useMemo<ProjectColumnLabels>(
     () => ({
       noProject: t(($) => $.swimlane.no_project),
@@ -435,9 +453,10 @@ function BoardViewImpl({
       ]),
     ) as Record<string, IssueGroupPageState>;
   }, [groupBranches]);
-  const groups = useMemo(
+  const allGroups = useMemo(
     () => {
       const built =
+        hydratedWorkflowGroups ??
         hydratedAssigneeGroups ??
         hydratedProjectGroups ??
         buildGroups(issues, visibleStatuses, grouping, {
@@ -453,8 +472,13 @@ function BoardViewImpl({
         totalCount: groupPagination?.[group.id]?.total ?? group.totalCount,
       }));
     },
-    [hydratedAssigneeGroups, hydratedProjectGroups, issues, visibleStatuses, grouping, getActorName, groupingProperty, projectMap, projectColumnLabels, groupPagination, t],
+    [hydratedWorkflowGroups, hydratedAssigneeGroups, hydratedProjectGroups, issues, visibleStatuses, grouping, getActorName, groupingProperty, projectMap, projectColumnLabels, groupPagination, t],
   );
+  const hiddenWorkflowGroups = useMemo(() => ownWorkflow ? allGroups.filter((group) => {
+    const keys = [group.workflowStatusId, group.workflowStatusLegacyKey].filter((key): key is string => !!key);
+    return keys.some((key) => hiddenKeys.includes(key)) && !keys.some((key) => statusFilters.includes(key));
+  }) : [], [allGroups, hiddenKeys, ownWorkflow, statusFilters]);
+  const groups = useMemo(() => allGroups.filter((group) => !hiddenWorkflowGroups.includes(group)), [allGroups, hiddenWorkflowGroups]);
   const groupIds = useMemo(
     () => new Set(groups.map((group) => group.id)),
     [groups],
@@ -464,8 +488,8 @@ function BoardViewImpl({
     [groups],
   );
   const collisionDetection = useMemo(
-    () => makeKanbanCollision(groupIds),
-    [groupIds],
+    () => ownWorkflow ? pointerWithin : makeKanbanCollision(groupIds),
+    [groupIds, ownWorkflow],
   );
 
   // --- Drag state ---
@@ -537,7 +561,9 @@ function BoardViewImpl({
         const activeCol = findColumn(prev, activeId, groupIds);
         const overCol = findColumn(prev, overId, groupIds);
         if (!activeCol || !overCol || activeCol === overCol) return prev;
-        const targetStatus = groups.find((group) => group.id === overCol)?.status;
+        const targetGroup = groups.find((group) => group.id === overCol);
+        if (targetGroup?.workflowStatusArchived) return prev;
+        const targetStatus = targetGroup?.status;
         if (targetStatus && catalog.entryOf(targetStatus)?.archived_at) return prev;
 
         if (sortBy !== "position") return prev;
@@ -600,7 +626,7 @@ function BoardViewImpl({
         return;
       }
       const finalGroup = groupMap.get(finalCol);
-      if (!finalGroup) {
+      if (!finalGroup || finalGroup.workflowStatusArchived || (finalGroup.workflowId && issueMapRef.current.get(activeId)?.workflow_id !== finalGroup.workflowId)) {
         resetColumns();
         return;
       }
@@ -780,7 +806,18 @@ function BoardViewImpl({
         )}
 
 
-        {grouping === "status" && hiddenStatuses.length > 0 && (
+        {hiddenWorkflowGroups.length > 0 && <HiddenColumnsPanel
+          hiddenStatuses={hiddenWorkflowGroups.map((group) => group.id)}
+          renderRow={(id) => {
+            const group = hiddenWorkflowGroups.find((group) => group.id === id)!;
+            return <HiddenColumnRow key={id} status={group.workflowStatusId ?? group.workflowStatusLegacyKey ?? ""}
+              label={group.title} total={group.totalCount} onShow={() => {
+                if (group.workflowStatusId) viewStore.getState().showStatus(group.workflowStatusId);
+                if (group.workflowStatusLegacyKey) viewStore.getState().showStatus(group.workflowStatusLegacyKey);
+              }} />;
+          }}
+        />}
+        {grouping === "status" && workflowStatuses === undefined && hiddenStatuses.length > 0 && (
           <BoardHiddenColumnsPanel
             hiddenStatuses={hiddenStatuses}
             statusPagination={statusPagination}

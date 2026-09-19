@@ -345,6 +345,12 @@
     "toggle_collapse": "Replier ou déplier le couloir"
   },
   "board": {
+    "legacy_workflow": "Ancien workflow",
+    "resize_lane": "Ajuster la hauteur du couloir {{name}}",
+    "resize_lane_hint": "Faites glisser ou utilisez les flèches. Double-cliquez pour rétablir la hauteur automatique.",
+    "reset_lane_height": "Rétablir la hauteur automatique de {{name}}",
+    "more_workflows": "Afficher plus de workflows",
+    "choose_workflow_project": "Choisissez un projet (ou Aucun projet) utilisant ce workflow pour créer une tâche dans cette colonne.",
     "hidden_columns_label": "Colonnes masquées",
     "hide_column": "Masquer la colonne",
     "show_column": "Afficher la colonne",

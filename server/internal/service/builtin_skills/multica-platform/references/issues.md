@@ -227,6 +227,12 @@ multica issue get <issue-id> --resolve-properties
 
 ## Status changes have server side effects
 
+Project workflow executors can change status according to their instructions;
+there is no separate per-status approval setting. A successful run does not itself
+advance the issue. After human takeover, automated writes from the superseded
+entry are rejected. Describe conditional status changes in the executor instructions. See `projects.md`
+for entry actions and execution snapshots.
+
 A status change is not cosmetic — the server enqueues or skips agent work based
 on it. These are the contracts, not advice.
 
@@ -419,3 +425,43 @@ multica issue create --title "Step 1" --parent <issue-id> --assignee <agent> --s
 multica issue create --title "Step 2" --parent <issue-id> --assignee <agent> --stage 2 --status backlog
 multica issue create --title "Step 3" --parent <issue-id> --assignee <agent> --stage 3 --status backlog
 ```
+
+## Project workflow status selection
+
+New issues resolve the selected project's effective workflow (the workspace
+workflow when no project is selected). Web/Desktop selects its configured
+initial node and sends `workflow_status_id`; it never sends a workspace status
+key alongside a node ID. Choosing another project resets the status selection.
+Ordinary creation and manual creation from a comment use the same contract.
+
+For a sub-issue, an omitted `project_id` inherits the parent's project. An explicit
+`project_id: null` creates it without a project. Web/Desktop always sends the
+project shown in the form, including an explicit null for “No project”.
+
+Existing issues select statuses from their pinned `workflow_id`, even after a
+project changes its default workflow. Table cells, sub-issue rows, context menus,
+and batch status actions use that binding. A batch spanning different workflows
+must be split by workflow; equal status names do not imply equal node identities.
+Workflow batch status actions call the dedicated status-node transition endpoint
+for each issue with its own revision and transition cursor. The legacy batch
+update endpoint rejects `workflow_status_id` rather than silently ignoring it.
+
+Every actual status entry records its transition and applies the node's entry
+policy in one transaction, including creation, ordinary updates, legacy batch
+updates, and system transitions. Repeating the current node does not run the
+action again; leaving and re-entering it creates a new execution. Entry actions
+do not replace the issue's assignee. `suppress_run` only suppresses legacy
+assignee-triggered runs, not configured entry actions. An unavailable executor
+or failed task insert rolls back the issue update and transition together.
+An execution that fails after commit stays on the current business status;
+retrying it does not create another status entry.
+
+Moving to another project automatically enters the destination effective workflow’s
+initial status and applies its entry action. Submit `project_id`; no status mapping
+is needed. This also applies to batch moves and removing an issue from a project
+(which uses the workspace workflow). Selecting the current project preserves its
+status. Project changes, workflow entry, and superseding the previous entry run
+are atomic per issue. An unavailable executor causes that issue’s move to fail.
+
+CLI creation with `--parent` and `--workflow-status` resolves the status against
+the inherited parent project unless `--project` explicitly selects another one.

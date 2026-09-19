@@ -88,7 +88,7 @@ export function sortIssues(
           if (statusRank) return statusRank.get(status) ?? statusRank.size;
           return BUILT_IN_STATUS_RANK[status] ?? BUILT_IN_STATUS_ORDER.length;
         };
-        return dir * (rank(a.status) - rank(b.status));
+        return dir * (rank(a.workflow_status_id && statusRank?.has(a.workflow_status_id) ? a.workflow_status_id : a.status) - rank(b.workflow_status_id && statusRank?.has(b.workflow_status_id) ? b.workflow_status_id : b.status));
       }
       case "start_date":
         return compareOptionalDate(a.start_date, b.start_date, direction);

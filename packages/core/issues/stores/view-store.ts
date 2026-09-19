@@ -8,6 +8,7 @@ import type { IssueStatus, IssuePriority, ProjectStatus, PropertyFilterValue } f
 import { PROJECT_STATUS_ORDER } from "../../projects/config";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
+import { clampWorkflowLaneHeight } from "../workflow-lane-layout";
 
 export type ViewMode = "board" | "list" | "table" | "gantt" | "swimlane";
 export type GanttZoom = "day" | "week" | "month";
@@ -121,6 +122,7 @@ export interface ActorFilterValue {
  *  fixes, and what resets restore. */
 export interface FilterSnapshot {
   statusFilters: IssueStatus[];
+  statusFilterMappings?: Record<string, Record<string, string>>;
   priorityFilters: IssuePriority[];
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
@@ -240,6 +242,7 @@ export interface IssueViewState {
   viewMode: ViewMode;
   grouping: IssueGrouping;
   statusFilters: IssueStatus[];
+  statusFilterMappings?: Record<string, Record<string, string>>;
   priorityFilters: IssuePriority[];
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
@@ -303,6 +306,11 @@ export interface IssueViewState {
   /** Persisted collapsed lanes, keyed by grouping. Same id space as
    *  `swimlaneOrders`, plus the sentinel `"none"` for the pinned
    *  no-X lane and `"__orphans__"` for the parent-grouping fallback. */
+  collapsedWorkflowLanes: string[];
+  expandedWorkflowLanes: string[];
+  toggleWorkflowLaneCollapsed: (key: string, defaultCollapsed?: boolean) => void;
+  workflowLaneHeights: Record<string, number>;
+  setWorkflowLaneHeight: (key: string, height: number | null) => void;
   collapsedSwimlanes: Record<SwimlaneGrouping, string[]>;
   /** Ordered table columns. Title is mandatory and normalized to the front. */
   tableColumns: TableColumnConfig[];
@@ -365,6 +373,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   viewMode: "board",
   grouping: "status",
   statusFilters: [],
+  statusFilterMappings: {},
   priorityFilters: [],
   assigneeFilters: [],
   includeNoAssignee: false,
@@ -388,6 +397,9 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   ganttShowCompleted: false,
   swimlaneGrouping: "assignee",
   swimlaneOrders: { parent: [], project: [], assignee: [] },
+  collapsedWorkflowLanes: [],
+  expandedWorkflowLanes: [],
+  workflowLaneHeights: {},
   collapsedSwimlanes: { parent: [], project: [], assignee: [] },
   tableColumns: DEFAULT_TABLE_COLUMNS.map((column) => ({ ...column })),
   tableGrouping: "none",
@@ -511,6 +523,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   clearFilters: () =>
     set({
       statusFilters: [],
+  statusFilterMappings: {},
       priorityFilters: [],
       assigneeFilters: [],
       includeNoAssignee: false,
@@ -523,7 +536,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       dateFilter: null,
       agentRunningFilter: false,
     }),
-  resetFiltersTo: (snapshot) => set({ ...snapshot }),
+  resetFiltersTo: (snapshot) => set({ statusFilterMappings: {}, ...snapshot }),
   clearFilterDimension: (dimension) =>
     set((state) => {
       switch (dimension) {
@@ -596,6 +609,20 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     set((state) => ({
       swimlaneOrders: { ...state.swimlaneOrders, [state.swimlaneGrouping]: order },
     })),
+  toggleWorkflowLaneCollapsed: (key, defaultCollapsed = false) => set((state) => {
+    const collapsed = state.collapsedWorkflowLanes.includes(key) || (defaultCollapsed && !state.expandedWorkflowLanes.includes(key));
+    return {
+      collapsedWorkflowLanes: collapsed ? state.collapsedWorkflowLanes.filter((id) => id !== key) : [...state.collapsedWorkflowLanes, key],
+      expandedWorkflowLanes: collapsed ? [...new Set([...state.expandedWorkflowLanes, key])] : state.expandedWorkflowLanes.filter((id) => id !== key),
+    };
+  }),
+  setWorkflowLaneHeight: (key, height) => set((state) => {
+    if (height !== null && !Number.isFinite(height)) return state;
+    const heights = { ...state.workflowLaneHeights };
+    if (height === null) delete heights[key];
+    else heights[key] = clampWorkflowLaneHeight(height);
+    return { workflowLaneHeights: heights };
+  }),
   toggleSwimlaneCollapsed: (key) =>
     set((state) => {
       const grouping = state.swimlaneGrouping;
@@ -668,6 +695,7 @@ export const viewStorePersistOptions = (name: string) => ({
     viewMode: state.viewMode,
     grouping: state.grouping,
     statusFilters: state.statusFilters,
+    statusFilterMappings: state.statusFilterMappings,
     priorityFilters: state.priorityFilters,
     assigneeFilters: state.assigneeFilters,
     includeNoAssignee: state.includeNoAssignee,
@@ -689,6 +717,9 @@ export const viewStorePersistOptions = (name: string) => ({
     ganttShowCompleted: state.ganttShowCompleted,
     swimlaneGrouping: state.swimlaneGrouping,
     swimlaneOrders: state.swimlaneOrders,
+    collapsedWorkflowLanes: state.collapsedWorkflowLanes,
+    expandedWorkflowLanes: state.expandedWorkflowLanes,
+    workflowLaneHeights: state.workflowLaneHeights,
     collapsedSwimlanes: state.collapsedSwimlanes,
     tableColumns: state.tableColumns,
     tableGrouping: state.tableGrouping,
@@ -762,6 +793,15 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
   const merged = {
     ...current,
     ...p,
+    collapsedWorkflowLanes: Array.isArray(p.collapsedWorkflowLanes)
+      ? p.collapsedWorkflowLanes.filter((id): id is string => typeof id === "string")
+      : current.collapsedWorkflowLanes,
+    expandedWorkflowLanes: Array.isArray(p.expandedWorkflowLanes) ? p.expandedWorkflowLanes.filter((id): id is string => typeof id === "string") : current.expandedWorkflowLanes,
+    workflowLaneHeights: isRecord(p.workflowLaneHeights)
+      ? Object.fromEntries(Object.entries(p.workflowLaneHeights).filter(
+          (entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1]),
+        ).map(([key, height]) => [key, clampWorkflowLaneHeight(height)]))
+      : current.workflowLaneHeights,
     hiddenStatuses: statusesFromStorage(p.hiddenStatuses ?? legacy?.hiddenStatusCategories, current.hiddenStatuses, p.hiddenStatuses === undefined),
     listCollapsedStatuses: statusesFromStorage(p.listCollapsedStatuses, current.listCollapsedStatuses, p.hiddenStatuses === undefined),
     cardProperties: {

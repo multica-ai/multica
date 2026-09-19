@@ -21,15 +21,25 @@ import (
 )
 
 type issueTableGroupValueResponse struct {
-	Kind       string               `json:"kind"`
-	Status     string               `json:"status,omitempty"`
-	Actor      *issueTableActorRef  `json:"actor"`
-	ProjectID  *string              `json:"project_id,omitempty"`
-	ParentID   *string              `json:"parent_id,omitempty"`
-	Parent     *issueTableParentRef `json:"parent,omitempty"`
-	PropertyID string               `json:"property_id,omitempty"`
-	Value      any                  `json:"value,omitempty"`
-	ValueState string               `json:"value_state,omitempty"`
+	Kind             string               `json:"kind"`
+	Status           string               `json:"status,omitempty"`
+	WorkflowID       *string              `json:"workflow_id,omitempty"`
+	WorkflowName     string               `json:"workflow_name,omitempty"`
+	IsDefault        bool                 `json:"is_default,omitempty"`
+	WorkflowStatusID *string              `json:"workflow_status_id,omitempty"`
+	Name             string               `json:"name,omitempty"`
+	Color            string               `json:"color,omitempty"`
+	Icon             string               `json:"icon,omitempty"`
+	Position         *float64             `json:"position,omitempty"`
+	Phase            string               `json:"phase,omitempty"`
+	Archived         bool                 `json:"archived,omitempty"`
+	Actor            *issueTableActorRef  `json:"actor"`
+	ProjectID        *string              `json:"project_id,omitempty"`
+	ParentID         *string              `json:"parent_id,omitempty"`
+	Parent           *issueTableParentRef `json:"parent,omitempty"`
+	PropertyID       string               `json:"property_id,omitempty"`
+	Value            any                  `json:"value,omitempty"`
+	ValueState       string               `json:"value_state,omitempty"`
 }
 
 type issueTableParentRef struct {
@@ -41,7 +51,24 @@ type issueTableParentRef struct {
 }
 
 type issueTableGroupContext struct {
-	Parent *issueTableParentRef `json:"parent,omitempty"`
+	Parent         *issueTableParentRef         `json:"parent,omitempty"`
+	WorkflowStatus *issueTableWorkflowStatusRef `json:"workflow_status,omitempty"`
+	WorkflowName   string                       `json:"workflow_name,omitempty"`
+	IsDefault      bool                         `json:"is_default,omitempty"`
+}
+
+type issueTableWorkflowStatusRef struct {
+	ID              string  `json:"id"`
+	WorkflowID      string  `json:"workflow_id"`
+	WorkflowName    string  `json:"workflow_name"`
+	IsDefault       bool    `json:"is_default"`
+	LegacyStatusKey string  `json:"legacy_status_key"`
+	Name            string  `json:"name"`
+	Color           string  `json:"color"`
+	Icon            string  `json:"icon,omitempty"`
+	Position        float64 `json:"position"`
+	Phase           string  `json:"phase"`
+	ArchivedAt      *string `json:"archived_at"`
 }
 
 type issueTableGroupDescriptorResponse struct {
@@ -73,6 +100,8 @@ type resolvedIssueTableGroup struct {
 	// secondaryCategory marks a compound whose secondary axis is the CATEGORY
 	// of the status rather than its key, retained for installed clients.
 	secondaryCategory bool
+	secondaryWorkflow bool
+	workflowStatuses  map[string]issueTableWorkflowStatusRef
 	// categoryKeys maps each of the 4 categories to the concrete status keys
 	// that belong to it, resolved ONCE per request. Category predicates expand
 	// through this into `i.status = ANY(...)` so the (workspace_id, status)
@@ -235,6 +264,18 @@ func (h *Handler) resolveIssueTableGroup(w http.ResponseWriter, r *http.Request,
 			statusCustomKeys: customKeys,
 			statusOrder:      issueTableStatusOrder(entries),
 		}, true
+	case "workflow_status":
+		// Status node ids are globally unique, so they are the grouping identity.
+		// The legacy fallback keeps a mixed-version row visible instead of making
+		// pgx scan a NULL group value into string and fail the complete surface.
+		return resolvedIssueTableGroup{
+			kind:      "workflow_status",
+			groupExpr: "COALESCE(i.workflow_status_id::text, 'legacy:' || i.status)",
+			groupSortExpr: `CASE WHEN group_value LIKE 'legacy:%' THEN group_value ELSE COALESCE(
+  (SELECT LOWER(s.name) FROM issue_workflow_status s WHERE s.workspace_id = $1 AND s.id = group_value::uuid),
+  group_value
+) END`,
+		}, true
 	case "status_category":
 		// Retained category-grouping API for installed clients. New task views
 		// use exact status groups, including custom keys.
@@ -263,6 +304,14 @@ func (h *Handler) resolveIssueTableGroup(w http.ResponseWriter, r *http.Request,
   WHEN 'squad' THEN (SELECT s.name FROM squad s WHERE s.workspace_id = $1 AND s.id = split_part(group_value, ':', 2)::uuid)
 END, ''))`,
 		}, true
+	case "workflow":
+		return resolvedIssueTableGroup{
+			kind:      "workflow",
+			groupExpr: "COALESCE(i.workflow_id::text, '__legacy__')",
+			groupSortExpr: `CASE WHEN group_value = '__legacy__' THEN '' ELSE LOWER(COALESCE(
+              (SELECT w.name FROM issue_workflow w WHERE w.workspace_id = $1 AND w.id = group_value::uuid), ''
+            )) END`,
+		}, true
 	case "project":
 		return resolvedIssueTableGroup{
 			kind:      "project",
@@ -282,17 +331,44 @@ END, ''))`,
 )) END`,
 		}, true
 	case "compound":
-		if group.Secondary != "status" && group.Secondary != "status_category" {
+		if group.Secondary != "status" && group.Secondary != "status_category" && group.Secondary != "workflow_status" {
 			writeIssueTableUnsupportedGroup(w, "secondary_group_unsupported", "Only status is supported as a secondary group.")
 			return resolvedIssueTableGroup{}, false
 		}
 		secondaryCategory := group.Secondary == "status_category"
-		if group.Primary != "assignee" && group.Primary != "project" && group.Primary != "parent" {
+		secondaryWorkflow := group.Secondary == "workflow_status"
+		workflowStatuses := map[string]issueTableWorkflowStatusRef{}
+		if group.Primary != "assignee" && group.Primary != "project" && group.Primary != "parent" && group.Primary != "workflow" {
 			writeIssueTableUnsupportedGroup(w, "primary_group_unsupported", "This primary group is not supported.")
 			return resolvedIssueTableGroup{}, false
 		}
+		if group.Primary == "workflow" && !secondaryWorkflow {
+			writeIssueTableUnsupportedGroup(w, "secondary_group_unsupported", "Workflow lanes require workflow status columns.")
+			return resolvedIssueTableGroup{}, false
+		}
 		var customKeys map[string]string
-		if !secondaryCategory {
+		if secondaryWorkflow {
+			customKeys = map[string]string{}
+			rows, err := h.DB.Query(r.Context(), `SELECT s.id::text, s.workflow_id::text, COALESCE(s.legacy_status_key,''), s.name, s.color, COALESCE(s.icon,''), s.position, s.phase, s.archived_at::text, w.name, COALESCE(w.id=ws.default_issue_workflow_id,false) FROM issue_workflow_status s JOIN issue_workflow w ON w.id=s.workflow_id AND w.workspace_id=s.workspace_id JOIN workspace ws ON ws.id=w.workspace_id WHERE s.workspace_id=$1`, workspaceID)
+			if err != nil {
+				writeIssueTableQueryFailure(w, r, "failed to resolve workflow columns")
+				return resolvedIssueTableGroup{}, false
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var node issueTableWorkflowStatusRef
+				if err := rows.Scan(&node.ID, &node.WorkflowID, &node.LegacyStatusKey, &node.Name, &node.Color, &node.Icon, &node.Position, &node.Phase, &node.ArchivedAt, &node.WorkflowName, &node.IsDefault); err != nil {
+					writeIssueTableQueryFailure(w, r, "failed to resolve workflow columns")
+					return resolvedIssueTableGroup{}, false
+				}
+				workflowStatuses[node.ID] = node
+				customKeys[node.ID] = node.Phase
+			}
+			if rows.Err() != nil {
+				writeIssueTableQueryFailure(w, r, "failed to resolve workflow columns")
+				return resolvedIssueTableGroup{}, false
+			}
+		} else if !secondaryCategory {
 			var err error
 			customKeys, err = issuestatus.CustomKeyCategories(r.Context(), h.issueStatusCatalog(), workspaceID)
 			if err != nil {
@@ -304,6 +380,9 @@ END, ''))`,
 		seenInputs := make(map[string]bool, len(group.SecondaryValues))
 		normalizedSecondaryValues := make([]string, 0, len(group.SecondaryValues))
 		validSecondary := validIssueStatuses
+		if secondaryWorkflow {
+			validSecondary = nil
+		}
 		if secondaryCategory && !legacy {
 			validSecondary = validIssueStatusCategories
 		}
@@ -339,6 +418,8 @@ END, ''))`,
 			secondaryValues:   normalizedSecondaryValues,
 			secondaryFiltered: group.SecondaryValues != nil,
 			secondaryCategory: secondaryCategory,
+			secondaryWorkflow: secondaryWorkflow,
+			workflowStatuses:  workflowStatuses,
 			legacyCategories:  legacy,
 			statusCustomKeys:  customKeys,
 		}
@@ -505,6 +586,17 @@ func (group resolvedIssueTableGroup) orderExpression(addArg func(any) string) st
 			return fmt.Sprintf("COALESCE(array_position(%s::text[], group_value), 100000)", addArg(validIssueStatuses))
 		}
 		return statusOrderExpression("group_value")
+	case "workflow":
+		return `CASE WHEN group_value = (SELECT default_issue_workflow_id::text FROM workspace WHERE id=$1) THEN 0 ELSE 1 END`
+	case "workflow_status":
+		return `CASE WHEN group_value LIKE 'legacy:%' THEN 2147483646 ELSE COALESCE(
+  (SELECT ranked.rank FROM (
+    SELECT s.id, ROW_NUMBER() OVER (ORDER BY COALESCE(w.id=ws.default_issue_workflow_id,false) DESC, LOWER(w.name), w.id, s.position, s.id)::int AS rank
+    FROM issue_workflow_status s JOIN issue_workflow w ON w.id=s.workflow_id AND w.workspace_id=s.workspace_id
+    JOIN workspace ws ON ws.id=w.workspace_id WHERE s.workspace_id=$1
+  ) ranked WHERE ranked.id=group_value::uuid),
+  2147483647
+) END`
 	case "assignee":
 		return "CASE split_part(group_value, ':', 1) WHEN 'member' THEN 0 WHEN 'agent' THEN 1 WHEN 'squad' THEN 2 ELSE 3 END"
 	case "project":
@@ -525,6 +617,31 @@ func (group resolvedIssueTableGroup) orderExpression(addArg func(any) string) st
 func (group resolvedIssueTableGroup) contextExpression(addArg func(any) string, issuePrefix string) string {
 	if group.kind == "compound" && group.primary != nil {
 		return group.primary.contextExpression(addArg, issuePrefix)
+	}
+	if group.kind == "workflow" {
+		return `CASE WHEN group_value = '__legacy__' THEN '{}'::jsonb ELSE COALESCE((
+          SELECT jsonb_build_object('workflow_name', w.name, 'is_default', w.id=(SELECT default_issue_workflow_id FROM workspace WHERE id=$1)) FROM issue_workflow w
+          WHERE w.workspace_id = $1 AND w.id = group_value::uuid
+        ), '{}'::jsonb) END`
+	}
+	if group.kind == "workflow_status" {
+		return `CASE WHEN group_value LIKE 'legacy:%' THEN '{}'::jsonb ELSE COALESCE((
+  SELECT jsonb_build_object('workflow_status', jsonb_build_object(
+    'id', s.id::text,
+    'workflow_id', s.workflow_id::text,
+    'workflow_name', (SELECT name FROM issue_workflow WHERE id=s.workflow_id AND workspace_id=$1),
+    'is_default', s.workflow_id=(SELECT default_issue_workflow_id FROM workspace WHERE id=$1),
+    'legacy_status_key', COALESCE(s.legacy_status_key, ''),
+    'name', s.name,
+    'color', s.color,
+    'icon', s.icon,
+    'position', s.position,
+    'phase', s.phase,
+    'archived_at', s.archived_at
+  ))
+  FROM issue_workflow_status s
+  WHERE s.workspace_id = $1 AND s.id = group_value::uuid
+), '{}'::jsonb) END`
 	}
 	if group.kind != "parent" {
 		return "'{}'::jsonb"
@@ -595,7 +712,69 @@ func (group resolvedIssueTableGroup) descriptor(raw string, count int64, context
 		if group.secondaryCategory {
 			secondaryValues = group.categoryValues()
 		}
+		if group.secondaryWorkflow {
+			secondaryValues = append([]string(nil), group.secondaryValues...)
+			if group.primary.kind == "workflow" {
+				// A lane owns only its pinned workflow's columns. Keep active
+				// empty targets; archived nodes appear only while occupied.
+				secondaryValues = nil
+				for id, node := range group.workflowStatuses {
+					if node.WorkflowID == raw && node.ArchivedAt == nil &&
+						(!group.secondaryFiltered || issueTableContainsString(group.secondaryValues, id)) {
+						secondaryValues = append(secondaryValues, id)
+					}
+				}
+			}
+			if group.primary.kind != "workflow" && !group.secondaryFiltered {
+				// Assignee/project/parent grids need empty targets from each
+				// represented workflow, not only the nodes with loaded cards.
+				workflows := map[string]bool{}
+				for id := range secondaryCounts {
+					workflows[group.workflowStatuses[id].WorkflowID] = true
+				}
+				for id, node := range group.workflowStatuses {
+					if workflows[node.WorkflowID] && node.ArchivedAt == nil && !issueTableContainsString(secondaryValues, id) {
+						secondaryValues = append(secondaryValues, id)
+					}
+				}
+			}
+			for id := range secondaryCounts {
+				if !issueTableContainsString(secondaryValues, id) {
+					secondaryValues = append(secondaryValues, id)
+				}
+			}
+			sort.Slice(secondaryValues, func(i, j int) bool {
+				a, b := group.workflowStatuses[secondaryValues[i]], group.workflowStatuses[secondaryValues[j]]
+				if a.IsDefault != b.IsDefault {
+					return a.IsDefault
+				}
+				if a.WorkflowID != b.WorkflowID {
+					if a.WorkflowName != b.WorkflowName {
+						return a.WorkflowName < b.WorkflowName
+					}
+					return a.WorkflowID < b.WorkflowID
+				}
+				if a.Position != b.Position {
+					return a.Position < b.Position
+				}
+				return secondaryValues[i] < secondaryValues[j]
+			})
+		}
 		for _, status := range secondaryValues {
+			if group.secondaryWorkflow {
+				node, exists := group.workflowStatuses[status]
+				context := issueTableGroupContext{}
+				if exists {
+					context.WorkflowStatus = &node
+				}
+				cell, err := (resolvedIssueTableGroup{kind: "workflow_status"}).descriptor(status, secondaryCounts[status], context, nil)
+				if err != nil {
+					return descriptor, err
+				}
+				cell.Key = "compound:" + base64.RawURLEncoding.EncodeToString([]byte(descriptor.Key)) + ":workflow_status:" + status
+				descriptor.SecondaryGroups = append(descriptor.SecondaryGroups, cell)
+				continue
+			}
 			statusCount := secondaryCounts[status]
 			descriptor.SecondaryGroups = append(descriptor.SecondaryGroups, issueTableGroupDescriptorResponse{
 				Key: compoundCellGroupKey(descriptor.Key, status, group.secondaryCategory),
@@ -628,6 +807,36 @@ func (group resolvedIssueTableGroup) descriptor(raw string, count int64, context
 		// value.kind stays "status" for compatibility with existing grouped
 		// response consumers; the group key identifies this as a category.
 		descriptor.Value = issueTableGroupValueResponse{Kind: "status", Status: raw}
+	case "workflow_status":
+		if legacy, found := strings.CutPrefix(raw, "legacy:"); found {
+			if legacy == "" || len(legacy) > 64 {
+				return descriptor, fmt.Errorf("unexpected workflow status group value %q", raw)
+			}
+			descriptor.Key = "workflow_status:legacy:" + legacy
+			descriptor.Value = issueTableGroupValueResponse{
+				Kind: "workflow_status", Status: legacy, Name: legacy,
+			}
+			break
+		}
+		if _, err := util.ParseUUID(raw); err != nil || context.WorkflowStatus == nil {
+			return descriptor, fmt.Errorf("unexpected workflow status group value %q", raw)
+		}
+		status := context.WorkflowStatus
+		descriptor.Key = "workflow_status:" + raw
+		descriptor.Value = issueTableGroupValueResponse{
+			Kind:             "workflow_status",
+			Status:           status.LegacyStatusKey,
+			WorkflowID:       &status.WorkflowID,
+			WorkflowName:     status.WorkflowName,
+			IsDefault:        status.IsDefault,
+			WorkflowStatusID: &status.ID,
+			Name:             status.Name,
+			Color:            status.Color,
+			Icon:             status.Icon,
+			Position:         &status.Position,
+			Phase:            status.Phase,
+			Archived:         status.ArchivedAt != nil,
+		}
 	case "assignee":
 		descriptor.Value.Kind = "assignee"
 		if raw == "__unassigned__" {
@@ -643,6 +852,19 @@ func (group resolvedIssueTableGroup) descriptor(raw string, count int64, context
 		}
 		descriptor.Key = "assignee:" + raw
 		descriptor.Value.Actor = &issueTableActorRef{Type: parts[0], ID: parts[1]}
+	case "workflow":
+		descriptor.Value.Kind = "workflow"
+		descriptor.Value.Name = context.WorkflowName
+		descriptor.Value.IsDefault = context.IsDefault
+		if raw == "__legacy__" {
+			descriptor.Key = "workflow:legacy"
+			return descriptor, nil
+		}
+		if _, err := util.ParseUUID(raw); err != nil {
+			return descriptor, fmt.Errorf("unexpected workflow group value %q", raw)
+		}
+		descriptor.Key = "workflow:" + raw
+		descriptor.Value.WorkflowID = &raw
 	case "project":
 		descriptor.Value.Kind = "project"
 		if raw == "__no_project__" {
@@ -720,11 +942,17 @@ func (group resolvedIssueTableGroup) predicate(w http.ResponseWriter, key string
 		}
 		encodedAndStatus := strings.TrimPrefix(key, prefix)
 		axis := ":status:"
+		if group.secondaryWorkflow {
+			axis = ":workflow_status:"
+		}
 		if group.secondaryCategory {
 			axis = ":status_category:"
 		}
 		encoded, status, ok := strings.Cut(encodedAndStatus, axis)
 		validSecondary := validIssueStatuses
+		if group.secondaryWorkflow {
+			validSecondary = nil
+		}
 		if group.secondaryCategory {
 			validSecondary = group.categoryValues()
 			if normalized, valid := issuestatus.ParseCategory(status); valid && !group.legacyCategories {
@@ -732,6 +960,10 @@ func (group resolvedIssueTableGroup) predicate(w http.ResponseWriter, key string
 			}
 		}
 		_, custom := group.statusCustomKeys[status]
+		if group.secondaryWorkflow && strings.HasPrefix(status, "legacy:") {
+			legacyStatus := strings.TrimPrefix(status, "legacy:")
+			custom = legacyStatus != "" && len(legacyStatus) <= 64
+		}
 		if !ok || (!issueTableContainsString(validSecondary, status) && (group.secondaryCategory || !custom)) {
 			writeError(w, http.StatusBadRequest, "invalid group_key")
 			return "", false
@@ -744,6 +976,9 @@ func (group resolvedIssueTableGroup) predicate(w http.ResponseWriter, key string
 		primaryPredicate, ok := group.primary.predicate(w, string(decoded), addArg)
 		if !ok {
 			return "", false
+		}
+		if group.secondaryWorkflow {
+			return fmt.Sprintf("(%s) AND COALESCE(i.workflow_status_id::text, 'legacy:' || i.status) = %s::text", primaryPredicate, addArg(status)), true
 		}
 		if group.secondaryCategory {
 			return fmt.Sprintf("(%s) AND i.status = ANY(%s::text[])", primaryPredicate, addArg(group.categoryKeysFor(status))), true
@@ -782,6 +1017,26 @@ func (group resolvedIssueTableGroup) predicate(w http.ResponseWriter, key string
 		// category function: `status = ANY(...)` keeps the (workspace_id,
 		// status) index, a function wrapper would force a workspace scan.
 		return fmt.Sprintf("i.status = ANY(%s::text[])", addArg(group.categoryKeysFor(category))), true
+	case "workflow_status":
+		const prefix = "workflow_status:"
+		raw, found := strings.CutPrefix(key, prefix)
+		if !found || raw == "" {
+			writeError(w, http.StatusBadRequest, "invalid group_key")
+			return "", false
+		}
+		if legacy, legacyFallback := strings.CutPrefix(raw, "legacy:"); legacyFallback {
+			if legacy == "" || len(legacy) > 64 {
+				writeError(w, http.StatusBadRequest, "invalid group_key")
+				return "", false
+			}
+			return fmt.Sprintf("i.workflow_status_id IS NULL AND i.status = %s::text", addArg(legacy)), true
+		}
+		id, err := util.ParseUUID(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid group_key")
+			return "", false
+		}
+		return fmt.Sprintf("i.workflow_status_id = %s::uuid", addArg(id)), true
 	case "assignee":
 		const prefix = "assignee:"
 		if !strings.HasPrefix(key, prefix) {
@@ -803,6 +1058,21 @@ func (group resolvedIssueTableGroup) predicate(w http.ResponseWriter, key string
 			return "", false
 		}
 		return fmt.Sprintf("i.assignee_type = %s::text AND i.assignee_id = %s::uuid", addArg(parts[0]), addArg(id)), true
+	case "workflow":
+		raw, ok := strings.CutPrefix(key, "workflow:")
+		if !ok {
+			writeError(w, http.StatusBadRequest, "invalid group_key")
+			return "", false
+		}
+		if raw == "legacy" {
+			return "i.workflow_id IS NULL", true
+		}
+		id, err := util.ParseUUID(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid group_key")
+			return "", false
+		}
+		return fmt.Sprintf("i.workflow_id = %s::uuid", addArg(id)), true
 	case "project":
 		const prefix = "project:"
 		if !strings.HasPrefix(key, prefix) {
@@ -995,6 +1265,9 @@ func (h *Handler) ListIssueTableGroups(w http.ResponseWriter, r *http.Request) {
 		// behaves as. In the category case a custom status counts into the cell
 		// of the column it renders in, never a cell of its own. (MUL-6243)
 		secondaryExpr := "i.status"
+		if group.secondaryWorkflow {
+			secondaryExpr = "COALESCE(i.workflow_status_id::text, 'legacy:' || i.status)"
+		}
 		if group.secondaryCategory {
 			secondaryExpr = group.categoryExpression(addArg)
 		}
@@ -1031,12 +1304,16 @@ func (h *Handler) ListIssueTableGroups(w http.ResponseWriter, r *http.Request) {
     i.parent_issue_id IS NULL AND
     EXISTS (SELECT 1 FROM promoted_parents p WHERE p.id = i.id)
   )`
+				childStatusExpr := "child.status"
+				if group.secondaryWorkflow {
+					childStatusExpr = "COALESCE(child.workflow_status_id::text, 'legacy:' || child.status)"
+				}
 				promotedParentsCTE = fmt.Sprintf(`, promoted_parents AS (
   SELECT DISTINCT child.parent_issue_id AS id
   FROM membership child
   WHERE child.parent_issue_id IS NOT NULL
-    AND child.status = ANY(%s::text[])
-)`, visibleKeysRef)
+    AND %s = ANY(%s::text[])
+)`, childStatusExpr, visibleKeysRef)
 			}
 			groupedCTE = fmt.Sprintf(`membership AS NOT MATERIALIZED (
   SELECT i.*

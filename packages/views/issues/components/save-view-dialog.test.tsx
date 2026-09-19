@@ -1,6 +1,6 @@
 import { createStore } from "zustand/vanilla";
 import { describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   type IssueViewState,
@@ -8,11 +8,15 @@ import {
 } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { renderWithI18n } from "../../test/i18n";
-import { DraftDefinitionFields } from "./save-view-dialog";
+import { DraftDefinitionFields, DraftWorkflowFields } from "./save-view-dialog";
 
+const queryOptionsSeen = vi.hoisted(() => vi.fn());
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
-  useQuery: () => ({ data: [] }),
+  useQuery: (options: { queryKey: readonly unknown[] }) => {
+    queryOptionsSeen(options);
+    return options.queryKey[0] === "issue-workflows" ? { isSuccess: true, data: { workflow: { id: "default" }, statuses: [] } } : { data: undefined };
+  },
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -61,4 +65,18 @@ describe("DraftDefinitionFields ordering", () => {
       screen.queryByRole("button", { name: "Reverse workflow order" }),
     ).not.toBeInTheDocument();
   });
+});
+
+
+it("resolves saved-view status choices from the draft project filters rather than the page behind it", () => {
+  const store = createStore<IssueViewState>()(viewStoreSlice);
+  const node = "22222222-2222-4222-8222-222222222222";
+  store.setState({ projectFilters: ["project-a"], statusFilters: [node] });
+  renderWithI18n(<ViewStoreProvider store={store}><DraftWorkflowFields scope={{ kind: "workspace" }} /></ViewStoreProvider>);
+  expect(queryOptionsSeen).toHaveBeenCalledWith(expect.objectContaining({ queryKey: ["issue-workflows", "workspace-1", "effective", "project-a", { includeArchived: true }] }));
+  const requestKeys = queryOptionsSeen.mock.calls.map(([options]) => JSON.stringify(options.queryKey));
+  expect(requestKeys.some((key) => key.includes('"workflow_status_ids":["' + node + '"]'))).toBe(true);
+  act(() => store.setState({ projectFilters: ["project-b"] }));
+  expect(queryOptionsSeen).toHaveBeenCalledWith(expect.objectContaining({ queryKey: ["issue-workflows", "workspace-1", "effective", "project-b", { includeArchived: true }] }));
+  expect(store.getState().statusFilters).toEqual([node]);
 });

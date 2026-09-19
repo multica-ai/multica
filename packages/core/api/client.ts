@@ -124,6 +124,12 @@ import type {
   IssueStatusEntry,
   CreateIssueStatusRequest,
   UpdateIssueStatusRequest,
+  IssueWorkflowResponse,
+  AutomationExecution,
+  UpdateIssueWorkflowStatusRequest,
+  TransitionIssueStatusNodeRequest,
+  TransitionIssueStatusNodeResponse,
+  TakeOverAutomationExecutionResponse,
   IssueLabelsResponse,
   LabelResourceType,
   ResourceLabelsResponse,
@@ -392,6 +398,12 @@ import {
   ListLabelsResponseSchema,
   ListIssueStatusesResponseSchema,
   IssueStatusEntrySchema,
+  IssueWorkflowResponseSchema,
+  AutomationExecutionListSchema,
+  EMPTY_ISSUE_LIFECYCLE_RESPONSE,
+  TransitionIssueStatusNodeResponseSchema,
+  TakeOverAutomationExecutionResponseSchema,
+  EMPTY_TRANSITION_ISSUE_STATUS_NODE_RESPONSE,
   IssuePropertySchema,
   ListPropertiesResponseSchema,
   IssuePropertiesResponseSchema,
@@ -3937,6 +3949,128 @@ export class ApiClient {
     return parseWithFallback(raw, IssueStatusEntrySchema, EMPTY_ISSUE_STATUS_ENTRY, {
       endpoint: "DELETE /api/issue-statuses/{id}",
     });
+  }
+
+  async getEffectiveIssueWorkflow(
+    projectId?: string | null,
+    includeArchived = false,
+  ): Promise<IssueWorkflowResponse> {
+    const query = new URLSearchParams();
+    if (projectId) query.set("project_id", projectId);
+    if (includeArchived) query.set("include_archived", "true");
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    const raw = await this.fetch<unknown>(`/api/issue-workflows/effective${suffix}`);
+    return parseWithFallback(raw, IssueWorkflowResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "GET /api/issue-workflows/effective",
+    });
+  }
+
+  async getIssueWorkflow(workflowId: string): Promise<IssueWorkflowResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows/${workflowId}`);
+    return parseWithFallback(raw, IssueWorkflowResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "GET /api/issue-workflows/{workflowId}",
+    });
+  }
+
+  async listIssueAutomationExecutions(issueId: string): Promise<AutomationExecution[]> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/automation-executions`);
+    return parseWithFallback(raw, AutomationExecutionListSchema, [], {
+      endpoint: "GET /api/issues/{id}/automation-executions",
+    });
+  }
+
+  async applyProjectWorkflow(projectId: string, data: import("../types").ApplyProjectWorkflowRequest): Promise<IssueWorkflowResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/issue-workflow`, {
+      method: "PUT", body: JSON.stringify(data),
+    });
+    const result = parseWithFallback(raw, IssueWorkflowResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "PUT /api/projects/{id}/issue-workflow (spec)",
+    });
+    if (!result.workflow.id || result.statuses.length === 0) throw new Error("Invalid workflow response. Reload the project to verify the saved configuration.");
+    if (data.dry_run && (!result.dry_run || !result.plan?.migration)) throw new Error("This server does not support workflow migration previews. Update the server before editing this workflow.");
+    return result;
+  }
+
+  async updateProjectIssueWorkflow(
+    projectId: string,
+    mode: "default" | "custom",
+  ): Promise<IssueWorkflowResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/issue-workflow`, {
+      method: "PUT",
+      body: JSON.stringify({ mode }),
+    });
+    return parseWithFallback(raw, IssueWorkflowResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "PUT /api/projects/{id}/issue-workflow",
+    });
+  }
+
+  async updateIssueWorkflowStatus(
+    workflowId: string,
+    statusId: string,
+    data: UpdateIssueWorkflowStatusRequest,
+  ): Promise<IssueWorkflowResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows/${workflowId}/statuses/${statusId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueWorkflowResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "PATCH /api/issue-workflows/{workflowId}/statuses/{statusId}",
+    });
+  }
+
+  async archiveIssueWorkflowStatus(
+    workflowId: string,
+    statusId: string,
+    expectedRevision: number,
+  ): Promise<IssueWorkflowResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows/${workflowId}/statuses/${statusId}?expected_revision=${expectedRevision}`, {
+      method: "DELETE",
+    });
+    return parseWithFallback(raw, IssueWorkflowResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "DELETE /api/issue-workflows/{workflowId}/statuses/{statusId}",
+    });
+  }
+
+  async reorderIssueWorkflowStatuses(
+    workflowId: string,
+    statusIds: string[],
+    expectedRevision: number,
+  ): Promise<IssueWorkflowResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows/${workflowId}/statuses/reorder`, {
+      method: "PATCH",
+      body: JSON.stringify({ status_ids: statusIds, expected_revision: expectedRevision }),
+    });
+    return parseWithFallback(raw, IssueWorkflowResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "PATCH /api/issue-workflows/{workflowId}/statuses/reorder",
+    });
+  }
+
+  async transitionIssueStatusNode(
+    issueId: string,
+    data: TransitionIssueStatusNodeRequest,
+  ): Promise<TransitionIssueStatusNodeResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/transitions`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(
+      raw,
+      TransitionIssueStatusNodeResponseSchema,
+      EMPTY_TRANSITION_ISSUE_STATUS_NODE_RESPONSE,
+      { endpoint: "POST /api/issues/{id}/transitions" },
+    );
+  }
+
+  async takeOverAutomationExecution(
+    issueId: string,
+    executionId: string,
+    expectedRevision?: number,
+  ): Promise<TakeOverAutomationExecutionResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/automation-executions/${executionId}/take-over`, {
+      method: "POST",
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    });
+    return TakeOverAutomationExecutionResponseSchema.parse(raw) as TakeOverAutomationExecutionResponse;
   }
 
   // Custom issue properties

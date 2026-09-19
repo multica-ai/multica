@@ -1,4 +1,10 @@
 {
+  "project_scope": {
+    "workspace": "工作区",
+    "label": "选择工作区或项目",
+    "search": "搜索项目...",
+    "retry": "重新加载项目"
+  },
   "inline_run": {
     "label": "{{name}} 的运行",
     "stop": "停止",
@@ -341,6 +347,12 @@
     "toggle_collapse": "切换泳道"
   },
   "board": {
+    "legacy_workflow": "旧版工作流",
+    "resize_lane": "调整 {{name}} 泳道高度",
+    "resize_lane_hint": "拖动调整高度，也可使用方向键；双击恢复自动高度。",
+    "reset_lane_height": "恢复 {{name}} 的自动高度",
+    "more_workflows": "显示更多工作流",
+    "choose_workflow_project": "请选择使用这套工作流的项目（或无项目），以在此状态列创建任务。",
     "hidden_columns_label": "隐藏的列",
     "hide_column": "隐藏列",
     "show_column": "显示列",
@@ -900,5 +912,37 @@
     "surface_loading": "正在加载 {{name}}…",
     "surface_unavailable": "{{name}} 的界面无法加载，已安装的版本可能不包含它。",
     "surface_navigated": "{{name}} 试图把面板替换成从别处加载的页面。已经拦下并断开连接，建议告知工作区管理员。"
+  },
+  "automation": {
+    "title": "自动化",
+    "manual": "手动",
+    "entry_count_other": "{{count}} 次进入",
+    "take_over": "人工接管"
+  },
+  "handoff": {
+    "enter": "进入 {{name}}",
+    "starts": "将启动 {{name}}",
+    "manual": "不会自动启动执行",
+    "stops": "将停止当前执行，已完成的工作会保留。",
+    "transition_title": "进入 {{name}}？",
+    "cancel": "取消",
+    "pending": "更新中...",
+    "error": "无法更新任务，请刷新后重试。",
+    "loading": "加载状态操作...",
+    "effects_intro": "进入此状态将应用以下规则。"
+  },
+  "workflow_selection": {
+    "choose": "选择状态",
+    "loading": "正在加载工作流…",
+    "load_error": "无法加载此工作流。",
+    "retry": "重试",
+    "mixed": "请选择同一工作流中的任务，再批量修改状态。",
+    "move_title": "移动任务到项目",
+    "move_description": "选择目标状态。移动会保留历史，不会启动智能体。",
+    "move_initial_status": "初始状态：{{name}}",
+    "move": "移动任务",
+    "batch_failed": "有 {{count}} 个任务更新失败。成功的修改已保留，请刷新后重试。",
+    "move_active_blocked": "请等待智能体执行结束或主动取消后再移动任务。",
+    "move_phase_warning": "此移动会改变任务的生命周期，请确认重开或结束任务是预期操作。"
   }
 }

@@ -109,7 +109,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   const showLabels = storeProperties.labels && labels.length > 0;
   // Keeps the chip row from rendering an empty flex container when the status
   // chip is the only thing in it and it decides to render nothing.
-  const showCustomStatus = useIsCustomStatus(issue.status);
+  const showCustomStatus = useIsCustomStatus(issue.status, { workflowId: issue.workflow_id, workflowStatusId: issue.workflow_status_id });
 
   const showAssigneeName = showAssigneeSection && hasAssignee && !showStartDate && !showDueDate;
   const showUpdatedHint = showAssigneeName && !showChildProgress;
@@ -220,7 +220,7 @@ export const BoardCardContent = memo(function BoardCardContent({
           already names the category. (MUL-6243) */}
       {(showCustomStatus || showProject || showLabels || cardCustomProperties.length > 0) && (
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-          <CustomStatusChip status={issue.status} />
+          <CustomStatusChip status={issue.status} workflowId={issue.workflow_id} workflowStatusId={issue.workflow_status_id} />
           {showProject && (
             <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-micro text-muted-foreground max-w-[160px]">
               <ProjectIcon project={project} size="sm" />

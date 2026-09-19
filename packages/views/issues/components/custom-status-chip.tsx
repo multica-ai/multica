@@ -1,10 +1,13 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
+import { issueWorkflowOptions } from "@multica/core/issue-workflows";
+import { statusCategoryOfKey } from "@multica/core/issues";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import type { IssueStatusCatalog } from "@multica/core/issue-statuses";
 import { isBuiltInIssueStatus } from "@multica/core/issue-statuses";
 import { useWorkspaceId } from "@multica/core/hooks";
-import type { IssueStatus } from "@multica/core/types";
+import type { IssueStatus, IssueStatusEntry } from "@multica/core/types";
 import { StatusIcon } from "./status-icon";
 
 /**
@@ -14,9 +17,22 @@ import { StatusIcon } from "./status-icon";
  * only chip is the status chip would render an empty flex row with its own
  * margin whenever the chip decides to stay silent.
  */
-export function useIsCustomStatus(status: IssueStatus): boolean {
+type WorkflowIdentity = { workflowId?: string | null; workflowStatusId?: string | null };
+
+function useCustomStatusEntry(status: IssueStatus, { workflowId, workflowStatusId }: WorkflowIdentity = {}): IssueStatusEntry | undefined {
   const wsId = useWorkspaceId();
-  return isCustomStatus(useIssueStatuses(wsId), status);
+  const catalog = useIssueStatuses(wsId);
+  const definition = useQuery(issueWorkflowOptions(wsId, workflowId ?? ""));
+  if (workflowId && workflowStatusId) {
+    const node = definition.data?.statuses.find((node) => node.id === workflowStatusId);
+    if (!node || (definition.data?.workflow.scope_type === "workspace" && node.legacy_status_key && isBuiltInIssueStatus(node.legacy_status_key))) return undefined;
+    return { ...node, key: node.id, workspace_id: wsId, category: statusCategoryOfKey(node.phase), is_system: false };
+  }
+  return isCustomStatus(catalog, status) ? catalog.entryOf(status) : undefined;
+}
+
+export function useIsCustomStatus(status: IssueStatus, workflow?: WorkflowIdentity): boolean {
+  return !!useCustomStatusEntry(status, workflow);
 }
 
 /**
@@ -34,18 +50,14 @@ function isCustomStatus(catalog: IssueStatusCatalog, status: IssueStatus): boole
 export function CustomStatusChip({
   status,
   className = "",
-}: {
+  workflowId,
+  workflowStatusId,
+}: WorkflowIdentity & {
   status: IssueStatus;
   className?: string;
 }) {
-  const wsId = useWorkspaceId();
-  // ONE catalog observer for both the predicate and the entry — subscribing
-  // twice per card is free on the network (React Query dedupes the request) but
-  // not on re-renders.
-  const catalog = useIssueStatuses(wsId);
-  const entry = catalog.entryOf(status);
-
-  if (!isCustomStatus(catalog, status) || !entry) return null;
+  const entry = useCustomStatusEntry(status, { workflowId, workflowStatusId });
+  if (!entry) return null;
 
   return (
     <span
@@ -53,7 +65,7 @@ export function CustomStatusChip({
     >
       <StatusIcon
         status={status}
-        category={catalog.categoryOf(status)}
+        category={entry.category}
         color={entry.color}
         icon={entry.icon}
         className="size-3"

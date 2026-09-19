@@ -34,8 +34,9 @@ import {
   viewStoreSlice,
 } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
-import type { IssueStatusEntry } from "@multica/core/types";
+import type { IssueStatusEntry, IssueWorkflowStatusNode, IssueTableFacetsResponse } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
+import { SurfaceWorkflowContext } from "../surface/workflow-context";
 import { IssueFilterMenu } from "./issues-header";
 
 vi.mock("@multica/core/hooks", () => ({
@@ -74,7 +75,7 @@ const HUMAN_REVIEW = entry({
   position: 1,
 });
 
-function renderFilterMenu(statuses: IssueStatusEntry[]) {
+function renderFilterMenu(statuses: IssueStatusEntry[], native?: { statuses: IssueWorkflowStatusNode[]; facets?: IssueTableFacetsResponse }, selected: string[] = []) {
   setApiInstance({
     listIssueStatuses: async () => ({
       statuses,
@@ -88,11 +89,12 @@ function renderFilterMenu(statuses: IssueStatusEntry[]) {
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
   const store = createStore<IssueViewState>()(viewStoreSlice);
+  store.setState({ statusFilters: selected });
 
   return renderWithI18n(
     <QueryClientProvider client={qc}>
       <ViewStoreProvider store={store}>
-        <IssueFilterMenu trigger={<button type="button">Filter</button>} />
+        <SurfaceWorkflowContext value={native ?? {}}><IssueFilterMenu trigger={<button type="button">Filter</button>} /></SurfaceWorkflowContext>
       </ViewStoreProvider>
     </QueryClientProvider>,
   );
@@ -153,4 +155,17 @@ describe("IssueFilterMenu status section", () => {
     ).toBeNull();
     expect(screen.getAllByRole("menuitemcheckbox")).toHaveLength(BUILT_IN_STATUS_ORDER.length);
   });
+});
+
+
+it("shows workflow-qualified native choices and preserves selected legacy filters without duplicate default choices", async () => {
+  const defaultNode = { id: "default-todo", workflow_id: "default", legacy_status_key: "todo", name: "Todo", phase: "unstarted", position: 0, color: "#888888" } as IssueWorkflowStatusNode;
+  renderFilterMenu(BUILT_INS, { statuses: [defaultNode], facets: { query_fingerprint: "test", total: 0, facets: [{ kind: "workflow_status", values: [
+    { key: "design-review", count: 0, status_node: { kind: "workflow_status", workflow_id: "design", workflow_status_id: "design-review", workflow_name: "Design", name: "Review", status: "", phase: "started" } },
+  ] }] } }, ["todo", "design-review"]);
+  fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: /^Status/ }));
+  expect(await screen.findByRole("menuitemcheckbox", { name: "Design / Review" })).toHaveAttribute("aria-checked", "true");
+  expect(screen.getAllByRole("menuitemcheckbox", { name: "Todo" })).toHaveLength(1);
+  expect(screen.getByRole("menuitemcheckbox", { name: "Todo" })).toHaveAttribute("aria-checked", "true");
 });

@@ -1,9 +1,9 @@
 "use client";
 
-import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useSurfaceStatusCatalog } from "../surface/workflow-context";
 import { useStatusLabel } from "../utils/status-label";
 import { NO_PROPERTY_VALUE } from "../utils/filter";
-import { useMemo, type ReactNode } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
 import {
   CalendarDays,
   CircleDashed,
@@ -185,8 +185,9 @@ function useFilterChips(
   const { t } = useT("issues");
   const projectStatusLabels = useProjectStatusLabels();
   const wsId = useWorkspaceId();
-  const resolveStatusLabel = useStatusLabel(wsId);
-  const { categoryOf, colorOf, iconOf } = useIssueStatuses(wsId);
+  const workspaceStatusLabel = useStatusLabel(wsId);
+  const { categoryOf, colorOf, iconOf, entryOf } = useSurfaceStatusCatalog(wsId);
+  const resolveStatusLabel = useCallback((key: string) => entryOf(key)?.id === key ? entryOf(key)!.name : workspaceStatusLabel(key), [entryOf, workspaceStatusLabel]);
 
   const statusFilters = useViewStore((s) => s.statusFilters);
   const priorityFilters = useViewStore((s) => s.priorityFilters);
@@ -264,6 +265,7 @@ function useFilterChips(
     const raw = baseline.raw;
     const current: FilterSnapshot = {
       statusFilters: s.statusFilters,
+      statusFilterMappings: s.statusFilterMappings,
       priorityFilters: s.priorityFilters,
       assigneeFilters: s.assigneeFilters,
       includeNoAssignee: s.includeNoAssignee,
@@ -276,7 +278,7 @@ function useFilterChips(
     };
     switch (dimension) {
       case "status":
-        s.resetFiltersTo({ ...current, statusFilters: raw.statusFilters });
+        s.resetFiltersTo({ ...current, statusFilters: raw.statusFilters, statusFilterMappings: raw.statusFilterMappings });
         break;
       case "priority":
         s.resetFiltersTo({ ...current, priorityFilters: raw.priorityFilters });

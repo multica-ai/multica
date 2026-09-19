@@ -185,3 +185,18 @@ describe("saved view baseline", () => {
     expect([...baseline.status]).toEqual(["qa"]);
   });
 });
+
+
+describe("workflow lane presentation", () => {
+  it("persists explicit expansion of a secondary lane independently of primary collapse", () => {
+    const store = createStore<IssueViewState>()((set) => viewStoreSlice(set));
+    store.getState().toggleWorkflowLaneCollapsed("secondary", true);
+    store.getState().toggleWorkflowLaneCollapsed("default");
+    const restored = mergeViewStatePersisted(store.getState(), store.getState());
+    expect(restored.expandedWorkflowLanes).toContain("secondary");
+    expect(restored.collapsedWorkflowLanes).toContain("default");
+    store.getState().toggleWorkflowLaneCollapsed("secondary", true);
+    expect(store.getState().expandedWorkflowLanes).not.toContain("secondary");
+    expect(store.getState().collapsedWorkflowLanes).toContain("secondary");
+  });
+});

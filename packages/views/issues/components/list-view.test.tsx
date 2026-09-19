@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { issueStatusKeys } from "@multica/core/issue-statuses/queries";
-import type { Issue, IssueStatus, IssueStatusEntry } from "@multica/core/types";
+import type { Issue, IssueWorkflowStatusNode, IssueStatus, IssueStatusEntry } from "@multica/core/types";
 import { ListView } from "./list-view";
 import { IssueContextMenuProvider } from "../actions";
 import { ScrollRestorationProvider, type ScrollRestorationAdapter } from "../../platform";
@@ -72,6 +72,8 @@ const mockViewState: {
   cardProperties: Record<string, boolean>;
   cardPropertyIds: string[];
   listCollapsedStatuses: IssueStatus[];
+  hiddenStatuses: IssueStatus[];
+  statusFilters: IssueStatus[];
   toggleListCollapsed: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
 } = {
@@ -80,6 +82,8 @@ const mockViewState: {
   cardProperties: {},
   cardPropertyIds: [],
   listCollapsedStatuses: [],
+  hiddenStatuses: [],
+  statusFilters: [],
   toggleListCollapsed: vi.fn((status: IssueStatus) => {
     mockViewState.listCollapsedStatuses =
       mockViewState.listCollapsedStatuses.includes(status)
@@ -211,6 +215,7 @@ function renderListView(
   hiddenStatuses: IssueStatus[] = [],
   onMoveIssue = vi.fn(),
   statuses: IssueStatusEntry[] = [],
+  extraProps: Partial<React.ComponentProps<typeof ListView>> = {},
   scrollAdapter: ScrollRestorationAdapter = { get: () => undefined },
 ) {
   const queryClient = new QueryClient({
@@ -228,6 +233,7 @@ function renderListView(
               hiddenStatuses={hiddenStatuses}
               statusPagination={PAGINATION}
               onMoveIssue={onMoveIssue}
+              {...extraProps}
             />
           </ScrollRestorationProvider>
         </IssueContextMenuProvider>
@@ -274,7 +280,7 @@ describe("ListView status header collapse", () => {
       return { top: 2400, height: 600 };
     });
     try {
-      renderListView(issues, ["todo"], [], vi.fn(), [], { get });
+      renderListView(issues, ["todo"], [], vi.fn(), [], {}, { get });
       expect(get).toHaveBeenCalledWith("list");
       expect(seedRows).toBe(30);
       expect(spacerHeight).toBe("calc(70 * var(--issue-row-height))");
@@ -343,6 +349,76 @@ describe("ListView status header collapse", () => {
     await user.click(trigger);
 
     expect(mockViewState.listCollapsedStatuses).toEqual(["todo"]);
+  });
+});
+
+describe("ListView project workflow status nodes", () => {
+  beforeEach(() => { mockViewState.listCollapsedStatuses = []; mockViewState.hiddenStatuses = []; mockViewState.statusFilters = []; });
+  it("renders the concrete node name and rows from its stable-id branch", () => {
+    const workflowIssue = {
+      ...ISSUES[0],
+      workflow_id: "workflow-1",
+      workflow_status_id: "node-implementation",
+    } as Issue;
+    const workflowStatus = {
+      id: "node-implementation",
+      workflow_id: "workflow-1",
+      legacy_status_key: "todo",
+      spec_key: "implementation",
+      name: "Implementation",
+      description: "",
+      color: "#2563eb",
+      position: 1,
+      phase: "unstarted",
+      outcome: null,
+      entry_policy: {
+        executor: { type: "none" },
+        instructions: "",
+      },
+      entry_policy_revision: 1,
+      archived_at: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    } satisfies IssueWorkflowStatusNode;
+    const page = { ...emptyPage, loaded: 1, total: 1 };
+
+    renderListView([workflowIssue], ["todo"], [], vi.fn(), [], {
+      workflowStatuses: [workflowStatus],
+      groupBranches: {
+        enabled: true,
+        descriptors: [
+          {
+            key: "workflow_status:node-implementation",
+            value: {
+              kind: "workflow_status",
+              workflow_id: "workflow-1",
+              workflow_status_id: "node-implementation",
+              status: "todo",
+              name: "Implementation",
+              color: "#2563eb",
+              position: 1,
+            },
+            count: 1,
+          },
+        ],
+        issues: [workflowIssue],
+        pagination: {
+          "workflow_status:node-implementation": page,
+        },
+        total: 1,
+        isLoading: false,
+        isRefreshing: false,
+        isError: false,
+        hasMoreGroups: false,
+        isLoadingMoreGroups: false,
+        loadMoreGroups: vi.fn(),
+        retryGroups: vi.fn(),
+      },
+    });
+
+    expect(screen.getByText("Implementation")).toBeInTheDocument();
+    expect(screen.getByText("First todo issue")).toBeInTheDocument();
+    expect(screen.queryByText("Todo")).not.toBeInTheDocument();
   });
 });
 

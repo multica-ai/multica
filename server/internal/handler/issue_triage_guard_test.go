@@ -94,6 +94,14 @@ func TestIssueInTriageAcceptsOrdinaryFieldWrites(t *testing.T) {
 		newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{
 			"status": "in_progress", "project_id": projectID, "priority": "high",
 		}), "id", issueID)).Want(http.StatusOK).JSON(&resp)
+	// Project moves enter the destination's initial status, including when
+	// the issue is still a Triage proposal. A subsequent status edit is allowed.
+	if resp.Status != "todo" || resp.Priority != "high" || resp.ProjectID == nil || *resp.ProjectID != projectID {
+		t.Fatalf("project proposal = {status:%q priority:%q project:%v}, want initial status", resp.Status, resp.Priority, resp.ProjectID)
+	}
+	testutil.Call(t, testHandler.UpdateIssue, withURLParam(
+		newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{"status": "in_progress"}),
+		"id", issueID)).Want(http.StatusOK).JSON(&resp)
 	if resp.Status != "in_progress" || resp.Priority != "high" {
 		t.Fatalf("proposal write = {status:%q priority:%q}, want it applied", resp.Status, resp.Priority)
 	}

@@ -3,11 +3,12 @@ import type { IssueAssigneeType } from "../../types";
 export type WorkspaceIssueActorKind = "all" | "members" | "agents";
 
 export type IssueScope =
-  | { type: "workspace"; actorKind?: WorkspaceIssueActorKind }
+  | { type: "workspace"; actorKind?: WorkspaceIssueActorKind; projectId?: string | null }
   | {
       type: "my";
       relation: "all" | "assigned" | "created" | "involved";
       userId: string;
+      projectId?: string | null;
     }
   | { type: "project"; projectId: string; actorKind?: WorkspaceIssueActorKind }
   | {
@@ -63,9 +64,9 @@ export class UnsupportedIssueScopeError extends Error {
 export function issueScopeKey(scope: IssueScope): string {
   switch (scope.type) {
     case "workspace":
-      return `workspace:${scope.actorKind ?? "all"}`;
+      return `workspace:${scope.actorKind ?? "all"}${scope.projectId !== undefined ? `:project:${scope.projectId ?? "workspace"}` : ""}`;
     case "my":
-      return `my:${scope.userId}:${scope.relation}`;
+      return `my:${scope.userId}:${scope.relation}${scope.projectId !== undefined ? `:project:${scope.projectId ?? "workspace"}` : ""}`;
     case "project":
       // The unrestricted tab keeps the historical key so existing persisted
       // display state survives; Members/Agents get their own key (and thus

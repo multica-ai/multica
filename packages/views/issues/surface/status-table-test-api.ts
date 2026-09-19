@@ -139,9 +139,10 @@ function workingAgentFacetValues(
 
 function primaryDescriptor(
   issue: Issue,
-  primary: "assignee" | "project" | "parent",
+  primary: "assignee" | "project" | "parent" | "workflow",
   issueById: ReadonlyMap<string, Issue>,
 ): Omit<IssueTableGroupDescriptor, "count" | "secondary_groups"> {
+  if (primary === "workflow") return { key: `workflow:${issue.workflow_id ?? "legacy"}`, value: { kind: "workflow", workflow_id: issue.workflow_id ?? null, name: "Workflow" } };
   if (primary === "assignee") {
     const actor =
       issue.assignee_type && issue.assignee_id

@@ -40,7 +40,7 @@ import type { SwimlaneGrouping } from "@multica/core/issues/stores/view-store";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { IssueStatusCatalog } from "@multica/core/issue-statuses";
-import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useSurfaceWorkflow, useSurfaceStatusCatalog, useSurfaceNodeWorkflows, workflowColumnKey } from "../surface/workflow-context";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { childrenByParentsOptions, issueKeys } from "@multica/core/issues/queries";
 import {
@@ -492,8 +492,7 @@ function buildServerLanes(
     if (
       (descriptor.secondary_groups ?? []).every(
         (secondary) =>
-          secondary.value.kind !== "status" ||
-          !visibleStatusSet.has(secondary.value.status as IssueStatus) ||
+          !visibleStatusSet.has(workflowColumnKey(secondary) ?? "") ||
           secondary.count === 0,
       )
     ) {
@@ -501,8 +500,8 @@ function buildServerLanes(
     }
     const serverCellKeys = Object.fromEntries(
       (descriptor.secondary_groups ?? []).flatMap((secondary) =>
-        secondary.value.kind === "status"
-          ? [[secondary.value.status, secondary.key]]
+        workflowColumnKey(secondary) !== undefined
+          ? [[workflowColumnKey(secondary), secondary.key]]
           : [],
       ),
     ) as Partial<Record<IssueStatus, string>>;
@@ -655,11 +654,13 @@ function SwimLaneViewImpl({
   const swimlaneOrder = swimlaneOrders[swimlaneGrouping];
 
   const wsId = useWorkspaceId();
-  const statusCatalog = useIssueStatuses(wsId);
+  const statusCatalog = useSurfaceStatusCatalog(wsId);
+  const { statuses: workflowStatuses } = useSurfaceWorkflow();
+  const nodeWorkflows = useSurfaceNodeWorkflows();
   const { categoryOf, entryOf } = statusCatalog;
   // Board order for `sort=status`, archived included: an issue can still sit
   // on an archived status and has to rank with the rest (MUL-7379).
-  const statusSortOrder = useMemo(() => statusColumnKeys(statusCatalog, true), [statusCatalog]);
+  const statusSortOrder = useMemo(() => workflowStatuses ? statusCatalog.statuses.map((node) => node.key) : statusColumnKeys(statusCatalog, true), [statusCatalog, workflowStatuses]);
 
   const activeFilters = useMemo(() => ({
     // Status is enforced by visible-column rendering, not by filterIssues
@@ -697,7 +698,7 @@ function SwimLaneViewImpl({
   const laneSourceIssues = unfilteredIssues ?? issues;
 
   // The controller supplies exact status keys in catalog order.
-  const sortedStatuses = visibleStatuses;
+  const sortedStatuses = useMemo(() => workflowStatuses ? visibleStatuses.toSorted((a, b) => statusSortOrder.indexOf(a) - statusSortOrder.indexOf(b)) : visibleStatuses, [workflowStatuses, visibleStatuses, statusSortOrder]);
 
   const laneLabels = useMemo(
     () => ({
@@ -893,7 +894,7 @@ function SwimLaneViewImpl({
             break;
           }
           // Cell identity is the exact status key.
-          const status = issue.status;
+          const status = workflowStatuses ? issue.workflow_status_id ?? issue.status : issue.status;
           if (result[lane.key]?.[status]) {
             result[lane.key]![status]!.push(issue.id);
             placed = true;
@@ -904,14 +905,14 @@ function SwimLaneViewImpl({
       // Parent grouping: a child whose parent isn't a header here falls
       // into the orphan fallback so it doesn't silently disappear.
       if (!placed && orphanLane && issue.parent_issue_id !== null) {
-        const status = issue.status;
+        const status = workflowStatuses ? issue.workflow_status_id ?? issue.status : issue.status;
         if (result[orphanLane.key]?.[status]) {
           result[orphanLane.key]![status]!.push(issue.id);
         }
       }
     }
     return result;
-  }, [issues, mergedIssues, laneGroups, sortedStatuses, sortBy, sortDirection, statusSortOrder, headerIssueIds, swimlaneGrouping]);
+  }, [issues, mergedIssues, laneGroups, sortedStatuses, sortBy, sortDirection, statusSortOrder, headerIssueIds, swimlaneGrouping, workflowStatuses]);
 
   const laneByKey = useMemo(() => {
     const map = new Map<string, LaneGroup>();
@@ -942,8 +943,8 @@ function SwimLaneViewImpl({
       const totals = new Map<IssueStatus, number>();
       for (const lane of groupBranches.descriptors) {
         for (const cell of lane.secondary_groups ?? []) {
-          if (cell.value.kind !== "status") continue;
-          const status = cell.value.status as IssueStatus;
+          const status = workflowColumnKey(cell);
+          if (!status) continue;
           totals.set(status, (totals.get(status) ?? 0) + cell.count);
         }
       }
@@ -952,11 +953,11 @@ function SwimLaneViewImpl({
     const totals = new Map<IssueStatus, number>();
     for (const issue of laneSourceIssues) {
       if (headerIssueIds.has(issue.id)) continue;
-      const status = issue.status;
+      const status = workflowStatuses ? issue.workflow_status_id ?? issue.status : issue.status;
       totals.set(status, (totals.get(status) ?? 0) + 1);
     }
     return totals;
-  }, [groupBranches, laneSourceIssues, headerIssueIds]);
+  }, [groupBranches, laneSourceIssues, headerIssueIds, workflowStatuses]);
 
   // Collapsed swimlanes — persisted per-grouping via the view store. The
   // store keys are raw lane ids (or sentinel `NONE_LANE_ID` / `ORPHAN_LANE_ID`
@@ -1068,7 +1069,11 @@ function SwimLaneViewImpl({
         const activeCell = findCellIn(prev, cellSet, activeId);
         const overCell = findCellIn(prev, cellSet, overId);
         if (!activeCell || !overCell) return prev;
-        if (issueMapRef.current.get(activeId)?.status !== overCell.status && entryOf(overCell.status)?.archived_at) return prev;
+        const issue = issueMapRef.current.get(activeId);
+        if (nodeWorkflows.has(overCell.status) && nodeWorkflows.get(overCell.status) !== issue?.workflow_id) return prev;
+        const currentStatus = entryOf(overCell.status)?.id === overCell.status
+          ? issue?.workflow_status_id : issue?.status;
+        if (currentStatus !== overCell.status && entryOf(overCell.status)?.archived_at) return prev;
         if (
           activeCell.laneKey === overCell.laneKey &&
           activeCell.status === overCell.status
@@ -1143,7 +1148,7 @@ function SwimLaneViewImpl({
         };
       });
     },
-    [cellSet, laneByKey, entryOf],
+    [cellSet, laneByKey, entryOf, nodeWorkflows],
   );
 
   const handleDragEnd = useCallback(
@@ -1205,6 +1210,12 @@ function SwimLaneViewImpl({
       const activeCell = findCellIn(cols, cellSet, activeId);
       const overCell = findCellIn(cols, cellSet, overId);
       if (!activeCell || !overCell) {
+        reset();
+        return;
+      }
+
+      const targetWorkflow = nodeWorkflows.get(overCell.status);
+      if (entryOf(overCell.status)?.archived_at || (targetWorkflow && targetWorkflow !== issueMapRef.current.get(activeId)?.workflow_id)) {
         reset();
         return;
       }
@@ -1274,7 +1285,10 @@ function SwimLaneViewImpl({
         return;
       }
 
-      if (currentIssue?.status !== finalOverCell.status && entryOf(finalOverCell.status)?.archived_at) {
+      if (nodeWorkflows.has(finalOverCell.status) && nodeWorkflows.get(finalOverCell.status) !== currentIssue?.workflow_id) { reset(); return; }
+      const currentStatus = entryOf(finalOverCell.status)?.id === finalOverCell.status
+        ? currentIssue?.workflow_status_id : currentIssue?.status;
+      if (currentStatus !== finalOverCell.status && entryOf(finalOverCell.status)?.archived_at) {
         reset();
         return;
       }
@@ -1282,7 +1296,7 @@ function SwimLaneViewImpl({
       // Cell membership is the exact status key.
       const staysInCell =
         currentIssue !== undefined &&
-        currentIssue.status === finalOverCell.status;
+        currentStatus === finalOverCell.status;
       // Moving within a status must not emit a redundant status mutation.
       const keepsStatus = staysInCell;
       if (
@@ -1302,7 +1316,7 @@ function SwimLaneViewImpl({
           ...(keepsStatus
             ? {}
             : {
-                status: finalOverCell.status as IssueStatus,
+                ...(entryOf(finalOverCell.status)?.id === finalOverCell.status ? { workflow_status_id: finalOverCell.status } : { status: finalOverCell.status as IssueStatus }),
               }),
           position: newPosition,
           ...getMoveAnchors(finalIds, activeId),
@@ -1313,7 +1327,7 @@ function SwimLaneViewImpl({
         },
       );
     },
-    [cells, cellSet, laneByKey, laneGroups, onMoveIssue, swimlaneGrouping, viewStoreApi, entryOf],
+    [cells, cellSet, laneByKey, laneGroups, onMoveIssue, swimlaneGrouping, viewStoreApi, entryOf, nodeWorkflows],
   );
 
   // Grid template: one column per status, fixed width COLUMN_WIDTH, gap COLUMN_GAP.
@@ -1761,6 +1775,7 @@ function SwimLaneCell({
   // reject the drop, so visual confirmation would be misleading.
   const { t } = useT("issues");
   const { categoryOf, entryOf } = statusCatalog;
+  const nodeWorkflows = useSurfaceNodeWorkflows();
   const archived = !!entryOf(status)?.archived_at;
   const isOver = !readOnly && !archived && droppableIsOver;
   const cfg = STATUS_CONFIG[categoryOf(status)];
@@ -1776,14 +1791,16 @@ function SwimLaneCell({
 
   const handleAdd = useCallback(() => {
     const data: IssueCreateDefaults = {
-      status: status,
+      ...(statusCatalog.entryOf(status)?.id === status ? { workflow_status_id: status } : { status }),
       ...lane.moveUpdates,
+      ...(nodeWorkflows.has(status) ? { required_workflow_id: nodeWorkflows.get(status), require_project_choice: !projectId && !lane.moveUpdates.project_id } : {}),
     };
     // Per-page project override takes precedence (e.g. Project Detail
     // pre-fills its own project id regardless of grouping).
     if (projectId) data.project_id = projectId;
+    else if (data.require_project_choice) data.project_id = null;
     onCreateIssue?.(data);
-  }, [status, lane, projectId, onCreateIssue]);
+  }, [status, lane, projectId, onCreateIssue, statusCatalog, nodeWorkflows]);
 
   return (
     <div className={`flex min-h-[120px] flex-col rounded-xl ${cfg?.columnBg ?? "bg-muted/40"} p-2`}>
@@ -1852,6 +1869,16 @@ function SwimLaneHiddenColumnsPanel({
   hiddenStatuses: IssueStatus[];
   statusTotals: Map<IssueStatus, number>;
 }) {
+  const store = useViewStoreApi();
+  const { statuses, groups } = useSurfaceWorkflow();
+  const show = (key: string) => {
+    store.getState().showStatus(key);
+    const legacy = statuses?.find((node) => node.id === key)?.legacy_status_key;
+    if (legacy) store.getState().showStatus(legacy);
+    for (const group of groups ?? []) for (const cell of group.secondary_groups ?? [group]) {
+      if (cell.value.kind === "workflow_status" && cell.value.workflow_status_id === key && cell.value.status) store.getState().showStatus(cell.value.status);
+    }
+  };
   return (
     <HiddenColumnsPanel
       hiddenStatuses={hiddenStatuses}
@@ -1859,6 +1886,7 @@ function SwimLaneHiddenColumnsPanel({
         <HiddenColumnRow
           key={status}
           status={status}
+          onShow={() => show(status)}
           total={statusTotals.get(status) ?? 0}
         />
       )}

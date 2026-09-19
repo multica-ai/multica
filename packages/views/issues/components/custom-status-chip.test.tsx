@@ -1,10 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses";
-import type { IssueStatusEntry } from "@multica/core/types";
+import type { IssueStatusEntry, IssueWorkflowResponse } from "@multica/core/types";
 import { CustomStatusChip } from "./custom-status-chip";
 
 let catalogEntries: IssueStatusEntry[] | undefined;
+let workflowDefinition: IssueWorkflowResponse | undefined;
+vi.mock("@tanstack/react-query", () => ({ useQuery: () => ({ data: workflowDefinition }), queryOptions: (options: unknown) => options }));
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "workspace-1",
@@ -77,4 +79,20 @@ describe("CustomStatusChip", () => {
     render(<CustomStatusChip status="qa" />);
     expect(screen.getByText("QA Review")).toBeInTheDocument();
   });
+});
+
+
+it("labels a concrete custom workflow node even when its compatibility status is built in", () => {
+  workflowDefinition = { workflow: { scope_type: "project" }, statuses: [{ id: "review-node", name: "Security review", color: "#ff0000", phase: "started" }] } as IssueWorkflowResponse;
+  render(<CustomStatusChip status="in_progress" workflowId="engineering" workflowStatusId="review-node" />);
+  expect(screen.getByText("Security review")).toBeInTheDocument();
+  workflowDefinition = undefined;
+});
+
+
+it("keeps a native default built-in status silent on cards", () => {
+  workflowDefinition = { workflow: { scope_type: "workspace" }, statuses: [{ id: "todo-node", name: "Todo", legacy_status_key: "todo", phase: "unstarted" }] } as IssueWorkflowResponse;
+  const { container } = render(<CustomStatusChip status="todo" workflowId="default" workflowStatusId="todo-node" />);
+  expect(container).toBeEmptyDOMElement();
+  workflowDefinition = undefined;
 });

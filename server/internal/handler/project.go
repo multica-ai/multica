@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -70,6 +71,7 @@ func (h *Handler) loadProjectIssueStats(ctx context.Context, workspaceID, projec
 		WorkspaceID:        workspaceID,
 		ProjectIds:         []pgtype.UUID{projectID},
 		TerminalStatusKeys: terminalStatusKeys,
+		WorkflowEnabled:    featureflags.IssueWorkflowV1Enabled(ctx, h.FeatureFlags),
 	})
 	if err != nil || len(stats) == 0 {
 		return 0, 0
@@ -109,6 +111,7 @@ type CreateProjectRequest struct {
 	StartDate   *string                               `json:"start_date"`
 	DueDate     *string                               `json:"due_date"`
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
+	Workflow    *issueWorkflowSpecRequest             `json:"issue_workflow,omitempty"`
 }
 
 // CreateProjectResourceRequestPayload mirrors CreateProjectResourceRequest but
@@ -170,6 +173,7 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID:        wsUUID,
 			ProjectIds:         projectIDs,
 			TerminalStatusKeys: terminalStatusKeys,
+			WorkflowEnabled:    featureflags.IssueWorkflowV1Enabled(r.Context(), h.FeatureFlags),
 		})
 		if statsErr == nil {
 			for _, s := range stats {
@@ -300,6 +304,17 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var workflowSpec normalizedWorkflowSpec
+	if req.Workflow != nil {
+		if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
+			return
+		}
+		var valid bool
+		workflowSpec, valid = h.normalizeWorkflowSpec(w, r, workspaceID, *req.Workflow)
+		if !valid {
+			return
+		}
+	}
 
 	// start_date / due_date are optional calendar days; an absent or empty
 	// value leaves the column NULL. Mirrors CreateIssue's date handling.
@@ -381,7 +396,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Without resources, keep the simple non-tx path.
-	if len(req.Resources) == 0 {
+	if len(req.Resources) == 0 && req.Workflow == nil {
 		project, err := h.Queries.CreateProject(r.Context(), createParams)
 		if err != nil {
 			h.writeProjectWriteError(w, r, err, "create")
@@ -406,6 +421,17 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.writeProjectWriteError(w, r, err, "create")
 		return
+	}
+	var workflowResponse *issueWorkflowResponse
+	if req.Workflow != nil {
+		workflow, statuses, _, applyErr := applyWorkflowSpec(r.Context(), qtx, wsUUID, project.ID, workflowSpec, nil, false)
+		if applyErr != nil {
+			slog.Warn("create project workflow failed", append(logger.RequestAttrs(r), "error", applyErr)...)
+			writeError(w, http.StatusInternalServerError, "failed to create project workflow")
+			return
+		}
+		response := buildIssueWorkflowResponse(workflow, statuses, project.ID)
+		workflowResponse = &response
 	}
 
 	creator, _ := h.parseUserUUIDOrZero(userID)
@@ -461,10 +487,12 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	// reads — GET /projects/{id} stays metadata-only with resource_count.
 	writeJSON(w, http.StatusCreated, struct {
 		ProjectResponse
-		Resources []ProjectResourceResponse `json:"resources"`
+		Resources     []ProjectResourceResponse `json:"resources"`
+		IssueWorkflow *issueWorkflowResponse    `json:"issue_workflow,omitempty"`
 	}{
 		ProjectResponse: resp,
 		Resources:       resourceResp,
+		IssueWorkflow:   workflowResponse,
 	})
 }
 
@@ -917,6 +945,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID:        wsUUID,
 			ProjectIds:         projectIDs,
 			TerminalStatusKeys: terminalStatusKeys,
+			WorkflowEnabled:    featureflags.IssueWorkflowV1Enabled(ctx, h.FeatureFlags),
 		})
 		if statsErr == nil {
 			for _, s := range stats {

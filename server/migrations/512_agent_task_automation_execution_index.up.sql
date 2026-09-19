@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY idx_agent_task_automation_execution ON agent_task_queue(automation_execution_id) WHERE automation_execution_id IS NOT NULL;
