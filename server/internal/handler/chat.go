@@ -804,6 +804,9 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 type SendChatMessageRequest struct {
 	Content       string   `json:"content"`
 	AttachmentIDs []string `json:"attachment_ids"`
+	// PageContext is the page the sender had open (web/desktop only). It is
+	// stored with the message and turned into a context note at claim time.
+	PageContext *ChatPageContextRequest `json:"page_context"`
 }
 
 type SendChatMessageResponse struct {
@@ -851,6 +854,10 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// any state mutation. The actual link runs after CreateChatMessage so we
 	// have a message_id to back-fill into the attachment rows.
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
+	if !ok {
+		return
+	}
+	pageIssueID, ok := parseChatPageContextOrBadRequest(w, req.PageContext)
 	if !ok {
 		return
 	}
@@ -911,6 +918,14 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Keep the page issue only if it lives in this session's workspace. Resolved
+	// after the invoke gate so a refused send never does the lookup.
+	pageIssueID, err = h.resolveChatPageIssue(r.Context(), pageIssueID, session.WorkspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve page context")
+		return
+	}
+
 	// Detect whether this is the very first human message in the session,
 	// BEFORE we insert the new row. This scopes LLM auto-titling (MUL-4295) to
 	// the opening turn: we upgrade the default/original title exactly once, off
@@ -942,7 +957,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// creator-only), so they are the task initiator — surfaced to the agent
 	// under `## Task Initiator`. actorType/actorID were resolved above for the
 	// invoke gate.
-	sent, err := h.TaskService.SendDirectChatMessage(r.Context(), session, agent, parseUUID(userID), req.Content, attachmentIDs, actorType, parseUUID(actorID))
+	sent, err := h.TaskService.SendDirectChatMessage(r.Context(), session, agent, parseUUID(userID), req.Content, attachmentIDs, pageIssueID, actorType, parseUUID(actorID))
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrChatSessionArchived):

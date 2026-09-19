@@ -482,10 +482,12 @@ WHERE id = $1;
 -- message_kind and quick_actions default via COALESCE so every existing caller
 -- (which omits it) keeps writing ordinary messages; the empty-reply path passes
 -- 'no_response' to mark a visible turn with no text output (MUL-4351).
+-- page_issue_id is NULL except for a web/desktop user send made while an issue
+-- was open; the claim re-resolves it into a context note for that turn.
 INSERT INTO chat_message (
     chat_session_id, role, content, task_id, failure_reason, elapsed_ms,
     message_kind, quick_actions, channel_media_pending_until, channel_ingested,
-    channel_context_revision, id
+    channel_context_revision, page_issue_id, id
 )
 VALUES (
     $1, $2, $3, sqlc.narg(task_id), sqlc.narg(failure_reason), sqlc.narg(elapsed_ms),
@@ -501,6 +503,7 @@ VALUES (
          ELSE now() + make_interval(secs => sqlc.narg(channel_media_pending_secs)::float8) END,
     COALESCE(sqlc.narg(channel_ingested)::boolean, FALSE),
     sqlc.narg(channel_context_revision),
+    sqlc.narg(page_issue_id),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 )
 RETURNING *;

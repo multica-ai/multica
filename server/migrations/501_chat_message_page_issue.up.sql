@@ -1,0 +1,15 @@
+-- page_issue_id records the issue the sender had open when they sent a direct
+-- chat message from web/desktop (the issue detail page, or the issue selected
+-- in Inbox). The daemon claim for that turn turns it into a short note so the
+-- agent can resolve "this issue" without the user retyping its key.
+--
+-- NULL is the normal state: channel messages, assistant rows, mobile sends,
+-- sends made off an issue page, and every row written before this migration.
+--
+-- Soft reference, no FK (see AGENTS.md) and no index: the column is never a
+-- lookup key. It is only projected off rows the claim already loaded by task,
+-- and the claim re-resolves it inside the chat session's workspace every time,
+-- so a deleted issue simply yields no note. Issue deletion therefore does not
+-- clear it — the value is a record of what was open at send time, read only by
+-- that turn's claim (and its retries), like channel_outbound_installation_id.
+ALTER TABLE chat_message ADD COLUMN IF NOT EXISTS page_issue_id UUID;

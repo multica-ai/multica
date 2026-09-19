@@ -2294,6 +2294,9 @@ var ErrChatSessionAlreadyStarted = errors.New("chat session already has a user m
 // The caller must have already gated the session and preflighted the agent
 // (archived / no-runtime), passing the loaded agent in. Those checks are repeated
 // under the transaction locks below because either row may change before enqueue.
+//
+// pageIssueID is the issue the sender had open, already resolved inside the
+// session's workspace by the caller; an invalid value stores no page context.
 func (s *TaskService) SendDirectChatMessage(
 	ctx context.Context,
 	session db.ChatSession,
@@ -2301,6 +2304,7 @@ func (s *TaskService) SendDirectChatMessage(
 	initiatorUserID pgtype.UUID,
 	content string,
 	attachmentIDs []pgtype.UUID,
+	pageIssueID pgtype.UUID,
 	uploaderType string,
 	uploaderID pgtype.UUID,
 ) (*DirectChatSendResult, error) {
@@ -2425,6 +2429,7 @@ func (s *TaskService) SendDirectChatMessage(
 			Content:       content,
 			TaskID:        task.ID,
 			MessageKind:   pgtype.Text{String: protocol.ChatMessageKindMessage, Valid: true},
+			PageIssueID:   pageIssueID,
 		})
 		if err != nil {
 			return fmt.Errorf("create user chat message: %w", err)

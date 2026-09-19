@@ -493,6 +493,7 @@ type ChatMessage struct {
 	ChannelOutboundInstallationID pgtype.UUID        `json:"channel_outbound_installation_id"`
 	ChannelOutboundChatID         pgtype.Text        `json:"channel_outbound_chat_id"`
 	ChannelOutboundMessageIds     []string           `json:"channel_outbound_message_ids"`
+	PageIssueID                   pgtype.UUID        `json:"page_issue_id"`
 }
 
 type ChatPinnedAgent struct {
