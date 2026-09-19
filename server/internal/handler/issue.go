@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -2858,6 +2859,10 @@ func readRuntimeCLIVersion(metadata []byte) string {
 }
 
 type CreateIssueRequest struct {
+	// RequestID is a caller-stable idempotency key. Repeating the same key and
+	// normalized payload returns the original issue; reusing it for different
+	// content is rejected with 409.
+	RequestID     *string  `json:"request_id,omitempty"`
 	Title         string   `json:"title"`
 	Description   *string  `json:"description"`
 	Status        string   `json:"status"`
@@ -2883,6 +2888,42 @@ type CreateIssueRequest struct {
 	OriginID   *string `json:"origin_id,omitempty"`
 
 	AllowDuplicate bool `json:"allow_duplicate,omitempty"`
+}
+
+var issueCreateRequestIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$`)
+
+func canonicalUUIDStrings(ids []pgtype.UUID) []string {
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if !id.Valid {
+			continue
+		}
+		value := uuidToString(id)
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func canonicalOptionalUUID(id pgtype.UUID) *string {
+	if !id.Valid {
+		return nil
+	}
+	value := uuidToString(id)
+	return &value
+}
+
+func canonicalOptionalDate(date pgtype.Date) *string {
+	if !date.Valid {
+		return nil
+	}
+	value := date.Time.Format("2006-01-02")
+	return &value
 }
 
 func duplicateIssueMessage(issue IssueResponse) string {
@@ -3104,26 +3145,74 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return out
 	}
 
+	var requestKey pgtype.Text
+	var requestPayloadHash pgtype.Text
+	if req.RequestID != nil {
+		key := strings.TrimSpace(*req.RequestID)
+		if !issueCreateRequestIDPattern.MatchString(key) {
+			writeError(w, http.StatusBadRequest, "request_id must be 1-200 characters using letters, numbers, '.', '_', ':' or '-'")
+			return
+		}
+		canonical := struct {
+			Title          string   `json:"title"`
+			Description    *string  `json:"description"`
+			Status         string   `json:"status"`
+			Priority       string   `json:"priority"`
+			AssigneeType   *string  `json:"assignee_type"`
+			AssigneeID     *string  `json:"assignee_id"`
+			ParentIssueID  *string  `json:"parent_issue_id"`
+			ProjectID      *string  `json:"project_id"`
+			Stage          *int32   `json:"stage"`
+			StartDate      *string  `json:"start_date"`
+			DueDate        *string  `json:"due_date"`
+			AttachmentIDs  []string `json:"attachment_ids"`
+			LabelIDs       []string `json:"label_ids"`
+			OriginType     *string  `json:"origin_type"`
+			OriginID       *string  `json:"origin_id"`
+			AllowDuplicate bool     `json:"allow_duplicate"`
+			CreatorType    string   `json:"creator_type"`
+			CreatorID      string   `json:"creator_id"`
+		}{
+			Title: req.Title, Description: req.Description, Status: status, Priority: priority,
+			AssigneeType: textToPtr(assigneeType), AssigneeID: canonicalOptionalUUID(assigneeID),
+			ParentIssueID: canonicalOptionalUUID(parentIssueID), ProjectID: canonicalOptionalUUID(projectID),
+			Stage: req.Stage, StartDate: canonicalOptionalDate(startDate), DueDate: canonicalOptionalDate(dueDate),
+			AttachmentIDs: canonicalUUIDStrings(attachmentIDs), LabelIDs: canonicalUUIDStrings(labelIDs),
+			OriginType: textToPtr(originType), OriginID: canonicalOptionalUUID(originID),
+			AllowDuplicate: req.AllowDuplicate, CreatorType: creatorType, CreatorID: actualCreatorID,
+		}
+		encoded, err := json.Marshal(canonical)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to normalize issue request")
+			return
+		}
+		digest := sha256.Sum256(encoded)
+		requestKey = pgtype.Text{String: key, Valid: true}
+		requestPayloadHash = pgtype.Text{String: fmt.Sprintf("%x", digest), Valid: true}
+	}
+
 	res, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
-		WorkspaceID:    wsUUID,
-		Title:          req.Title,
-		Description:    ptrToText(req.Description),
-		Status:         status,
-		Priority:       priority,
-		AssigneeType:   assigneeType,
-		AssigneeID:     assigneeID,
-		CreatorType:    creatorType,
-		CreatorID:      parseUUID(actualCreatorID),
-		ParentIssueID:  parentIssueID,
-		ProjectID:      projectID,
-		StartDate:      startDate,
-		DueDate:        dueDate,
-		OriginType:     originType,
-		OriginID:       originID,
-		Stage:          ptrToInt4(req.Stage),
-		AttachmentIDs:  attachmentIDs,
-		LabelIDs:       labelIDs,
-		AllowDuplicate: req.AllowDuplicate,
+		WorkspaceID:        wsUUID,
+		Title:              req.Title,
+		Description:        ptrToText(req.Description),
+		Status:             status,
+		Priority:           priority,
+		AssigneeType:       assigneeType,
+		AssigneeID:         assigneeID,
+		CreatorType:        creatorType,
+		CreatorID:          parseUUID(actualCreatorID),
+		ParentIssueID:      parentIssueID,
+		ProjectID:          projectID,
+		StartDate:          startDate,
+		DueDate:            dueDate,
+		OriginType:         originType,
+		OriginID:           originID,
+		Stage:              ptrToInt4(req.Stage),
+		AttachmentIDs:      attachmentIDs,
+		LabelIDs:           labelIDs,
+		AllowDuplicate:     req.AllowDuplicate,
+		RequestKey:         requestKey,
+		RequestPayloadHash: requestPayloadHash,
 	}, service.IssueCreateOpts{
 		ActorID:          actualCreatorID,
 		AnalyticsAgentID: analyticsAgentID,
@@ -3175,6 +3264,13 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			"the target status was archived while this request was in flight; reload the status list and retry")
 		return
 	}
+	if errors.Is(err, service.ErrIssueCreateRequestConflict) {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"code":  "idempotency_conflict",
+			"error": "request_id was already used for different issue content",
+		})
+		return
+	}
 	if writeIssueLimitReached(w, err) {
 		return
 	}
@@ -3195,7 +3291,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// understood label_ids and skip its legacy post-create attach fallback.
 	labelResponses := labelsToResponse(res.Labels)
 	resp.Labels = &labelResponses
-	writeJSON(w, http.StatusCreated, resp)
+	statusCode := http.StatusCreated
+	if res.Replayed {
+		statusCode = http.StatusOK
+	}
+	writeJSON(w, statusCode, resp)
 }
 
 type UpdateIssueRequest struct {

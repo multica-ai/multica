@@ -454,6 +454,22 @@ SELECT inserted_comment.*, touched_issue.revision AS issue_revision
 FROM inserted_comment
 JOIN touched_issue ON touched_issue.id = inserted_comment.issue_id;
 
+-- name: GetTaskFinalCommentCandidate :one
+-- A same-task ordinary comment is the only pre-completion comment that may be
+-- adopted as the task's final answer. Progress updates never match, so they
+-- cannot suppress a final response merely because they were posted later.
+SELECT * FROM comment
+WHERE issue_id = @issue_id
+  AND workspace_id = @workspace_id
+  AND author_type = 'agent'
+  AND author_id = @agent_id
+  AND source_task_id = @source_task_id
+  AND type = 'comment'
+  AND deleted_at IS NULL
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+FOR UPDATE;
+
 -- name: GetDelegatedFailureRecoveryComment :one
 -- The failed task row is locked by the caller before this lookup/insert pair,
 -- making (source issue, failed task) a durable idempotency key without a new
@@ -558,16 +574,6 @@ SET revision = revision + 1,
 WHERE id = @id
   AND workspace_id = @workspace_id
 RETURNING *;
-
--- name: HasAgentCommentedSince :one
-SELECT EXISTS (
-    SELECT 1 FROM comment
-    WHERE issue_id = @issue_id
-      AND author_type = 'agent'
-      AND author_id = @author_id
-      AND created_at >= @since
-      AND deleted_at IS NULL
-) AS commented;
 
 -- name: HasAgentRepliedInThread :one
 -- Returns true if the given agent has posted a reply in the thread rooted at

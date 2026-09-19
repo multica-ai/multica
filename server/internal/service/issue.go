@@ -82,6 +82,11 @@ type IssueCreateParams struct {
 	// ErrIssueLabelNotFound rather than being silently dropped.
 	LabelIDs       []pgtype.UUID
 	AllowDuplicate bool
+	// RequestKey enables server-side, actor-scoped idempotency. The handler
+	// supplies RequestPayloadHash from the normalized request. Both are absent
+	// for legacy callers, which retain the ordinary create behavior.
+	RequestKey         pgtype.Text
+	RequestPayloadHash pgtype.Text
 	// Stage groups this issue into an ordered barrier group under its parent
 	// (NULL = unstaged). See issue_child_done.go for the staged-barrier wake.
 	Stage pgtype.Int4
@@ -164,6 +169,11 @@ var ErrIssueLabelNotFound = errors.New("issue label not found in this workspace"
 // it arrived, so retrying against the refreshed catalog is the remedy.
 var ErrIssueStatusUnavailable = errors.New("issue status is no longer available")
 
+// ErrIssueCreateRequestConflict means one actor reused a request key with a
+// different normalized payload. Returning the prior issue would hide a caller
+// bug; creating a second issue would break exactly-once semantics.
+var ErrIssueCreateRequestConflict = errors.New("issue create request key was reused with different content")
+
 var ErrSourceContextAlreadyAttached = errors.New("source context is already attached")
 
 // IssueCreateResult is the typed return from IssueService.Create.
@@ -185,6 +195,7 @@ type IssueCreateResult struct {
 	// understood label_ids (see the create handler's compatibility contract).
 	Labels         []db.IssueLabel
 	DuplicateIssue *db.Issue
+	Replayed       bool
 }
 
 // Create runs the full issue-creation pipeline atomically end-to-end:
@@ -194,15 +205,17 @@ type IssueCreateResult struct {
 //  3. Lock & check the duplicate guard.
 //  4. Increment the workspace issue counter.
 //  5. Insert the issue row (with optional origin stamping).
-//  6. Commit.
-//  7. Link any pre-uploaded attachments (post-commit, idempotent).
-//  8. For a media-gated channel issue, persist its deferred assigned-agent
+//  6. Link pre-uploaded attachments and bind the request key inside the same
+//     transaction as the issue row.
+//  7. For a media-gated channel issue, persist its deferred assigned-agent
 //     task in the issue transaction so both rows become visible atomically.
-//     Ordinary creates keep their existing event-before-enqueue ordering.
+//     Idempotent ordinary creates persist the first assigned-agent task there
+//     as well, so a replay can never create a second run.
+//  8. Commit.
 //  9. Publish EventIssueCreated to the bus (payload via opts.BroadcastPayload).
 //  10. Capture the IssueCreated analytics event.
-//  11. Enqueue the ordinary agent task or trigger the squad leader when the
-//     issue is assigned and not in `backlog`.
+//  11. Enqueue legacy non-idempotent work, or trigger the squad leader, when
+//     the issue is assigned and not in `backlog`.
 //
 // Validation that lives in the service (parent existence, project
 // workspace membership, parent → project back-fill) is enforced here so
@@ -218,6 +231,59 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
+
+	if p.RequestKey.Valid || p.RequestPayloadHash.Valid {
+		if !p.RequestKey.Valid || !p.RequestPayloadHash.Valid {
+			return IssueCreateResult{}, errors.New("issue create request identity is incomplete")
+		}
+		if _, err := qtx.ReserveIssueCreateRequest(ctx, db.ReserveIssueCreateRequestParams{
+			WorkspaceID:   p.WorkspaceID,
+			ActorType:     p.CreatorType,
+			ActorID:       p.CreatorID,
+			RequestKey:    p.RequestKey.String,
+			PayloadSha256: p.RequestPayloadHash.String,
+		}); err != nil {
+			return IssueCreateResult{}, fmt.Errorf("reserve issue create request: %w", err)
+		}
+		request, err := qtx.GetIssueCreateRequestForUpdate(ctx, db.GetIssueCreateRequestForUpdateParams{
+			WorkspaceID: p.WorkspaceID,
+			ActorType:   p.CreatorType,
+			ActorID:     p.CreatorID,
+			RequestKey:  p.RequestKey.String,
+		})
+		if err != nil {
+			return IssueCreateResult{}, fmt.Errorf("load issue create request: %w", err)
+		}
+		if request.PayloadSha256 != p.RequestPayloadHash.String {
+			return IssueCreateResult{}, ErrIssueCreateRequestConflict
+		}
+		if request.IssueID.Valid {
+			issue, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+				ID: request.IssueID, WorkspaceID: p.WorkspaceID,
+			})
+			if err != nil {
+				return IssueCreateResult{}, fmt.Errorf("load idempotent issue: %w", err)
+			}
+			labels, err := qtx.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{
+				IssueID: issue.ID, WorkspaceID: p.WorkspaceID,
+			})
+			if err != nil {
+				return IssueCreateResult{}, fmt.Errorf("load idempotent issue labels: %w", err)
+			}
+			attachments, err := qtx.ListAttachmentsByIssue(ctx, db.ListAttachmentsByIssueParams{
+				IssueID: issue.ID, WorkspaceID: p.WorkspaceID,
+			})
+			if err != nil {
+				return IssueCreateResult{}, fmt.Errorf("load idempotent issue attachments: %w", err)
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return IssueCreateResult{}, fmt.Errorf("commit idempotent issue lookup: %w", err)
+			}
+			return IssueCreateResult{
+				Issue: issue, Attachments: attachments, Labels: labels, Replayed: true,
+			}, nil
+		}
+	}
 
 	if p.SourceContext != nil {
 		if _, err := qtx.LockIssueForDescriptionUpdate(ctx, db.LockIssueForDescriptionUpdateParams{
@@ -455,14 +521,62 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		}
 	}
 
+	var attachments []db.Attachment
+	if p.RequestKey.Valid && len(p.AttachmentIDs) > 0 {
+		linked, err := qtx.LinkAttachmentsToIssue(ctx, db.LinkAttachmentsToIssueParams{
+			IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
+			AttachmentIds: p.AttachmentIDs, BumpRevision: false,
+		})
+		if err != nil {
+			return IssueCreateResult{}, fmt.Errorf("link idempotent issue attachments: %w", err)
+		}
+		expected := uniqueValidUUIDCount(p.AttachmentIDs)
+		if linked.LinkedCount != int64(expected) {
+			return IssueCreateResult{}, fmt.Errorf("link idempotent issue attachments: linked %d of %d", linked.LinkedCount, expected)
+		}
+		attachments, err = qtx.ListAttachmentsByIssue(ctx, db.ListAttachmentsByIssueParams{
+			IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			return IssueCreateResult{}, fmt.Errorf("load idempotent issue attachments: %w", err)
+		}
+	}
+
 	if !opts.AssignedAgentRunFireAt.IsZero() && s.shouldEnqueueAgentTaskWithQueries(ctx, qtx, issue) {
 		// The issue must never become visible without its media-gated assigned
 		// task. Inserting both rows through qtx makes the unique-index winner
 		// deterministic: any observer that can discover the committed issue also
 		// sees the inert deferred task and must merge into it.
+		if s.TaskService == nil {
+			return IssueCreateResult{}, errors.New("task service is unavailable")
+		}
 		assignedTask, err = s.TaskService.createDeferredChannelIssueTaskWithQueries(ctx, qtx, issue, opts.AssignedAgentRunFireAt)
 		if err != nil {
 			return IssueCreateResult{}, fmt.Errorf("create deferred channel issue task: %w", err)
+		}
+	} else if p.RequestKey.Valid && s.shouldEnqueueAgentTaskWithQueries(ctx, qtx, issue) {
+		// Stable API requests atomically persist their first assigned-agent task.
+		// A crash after commit can no longer leave a visible issue whose execution
+		// trigger existed only as a post-commit side effect.
+		if s.TaskService == nil {
+			return IssueCreateResult{}, errors.New("task service is unavailable")
+		}
+		assignedTask, err = s.TaskService.createIssueTaskWithQueries(ctx, qtx, issue)
+		if err != nil {
+			return IssueCreateResult{}, fmt.Errorf("create idempotent issue task: %w", err)
+		}
+	}
+
+	if p.RequestKey.Valid {
+		bound, err := qtx.BindIssueCreateRequest(ctx, db.BindIssueCreateRequestParams{
+			IssueID: issue.ID, WorkspaceID: p.WorkspaceID, ActorType: p.CreatorType,
+			ActorID: p.CreatorID, RequestKey: p.RequestKey.String,
+		})
+		if err != nil {
+			return IssueCreateResult{}, fmt.Errorf("bind issue create request: %w", err)
+		}
+		if bound != 1 {
+			return IssueCreateResult{}, errors.New("issue create request reservation was not bound")
 		}
 	}
 
@@ -470,7 +584,9 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		return IssueCreateResult{}, fmt.Errorf("commit: %w", err)
 	}
 
-	attachments := s.linkAttachments(ctx, issue, p.AttachmentIDs)
+	if !p.RequestKey.Valid {
+		attachments = s.linkAttachments(ctx, issue, p.AttachmentIDs)
+	}
 
 	actorID := opts.ActorID
 	if actorID == "" {
@@ -499,11 +615,15 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			// for any future caller that supplies the option with a squad.
 			s.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, p.CreatorType, actorID)
 		}
+	} else if assignedTask.ID.Valid {
+		assignedTaskID = assignedTask.ID
+		s.TaskService.broadcastTaskEvent(ctx, protocol.EventTaskQueued, assignedTask)
+		s.TaskService.NotifyTaskEnqueued(ctx, assignedTask)
 	}
 
 	s.publishIssueCreated(issue, attachments, labels, p.CreatorType, actorID, opts)
 	s.captureCreatedAnalytics(issue, p.CreatorType, actorID, opts)
-	if opts.AssignedAgentRunFireAt.IsZero() {
+	if opts.AssignedAgentRunFireAt.IsZero() && !assignedTask.ID.Valid {
 		assignedTaskID = s.maybeEnqueueOnAssign(ctx, issue, p.CreatorType, actorID, opts.AssignedAgentRunFireAt)
 	}
 
@@ -551,6 +671,16 @@ func validateIssueLabels(ctx context.Context, qtx *db.Queries, workspaceID pgtyp
 		deduped = append(deduped, label)
 	}
 	return deduped, nil
+}
+
+func uniqueValidUUIDCount(ids []pgtype.UUID) int {
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if id.Valid {
+			seen[util.UUIDToString(id)] = struct{}{}
+		}
+	}
+	return len(seen)
 }
 
 // linkAttachments links the given attachment IDs to the newly created

@@ -466,6 +466,12 @@ deleted_lark_user_bindings AS (
 ),
 deleted_lark_binding_tokens AS (
     DELETE FROM lark_binding_token WHERE workspace_id = $1
+),
+deleted_lifeos_secretary_instructions AS (
+    DELETE FROM lifeos_secretary_instruction WHERE workspace_id = $1
+),
+deleted_lifeos_secretary_projection AS (
+    DELETE FROM lifeos_secretary_projection WHERE workspace_id = $1
 )
 UPDATE channel_media_pending_object
 SET state = CASE

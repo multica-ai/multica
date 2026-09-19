@@ -604,6 +604,62 @@ func (q *Queries) GetLatestMemberCommentForIssueSince(ctx context.Context, arg G
 	return i, err
 }
 
+const getTaskFinalCommentCandidate = `-- name: GetTaskFinalCommentCandidate :one
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at, deleted_at FROM comment
+WHERE issue_id = $1
+  AND workspace_id = $2
+  AND author_type = 'agent'
+  AND author_id = $3
+  AND source_task_id = $4
+  AND type = 'comment'
+  AND deleted_at IS NULL
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+FOR UPDATE
+`
+
+type GetTaskFinalCommentCandidateParams struct {
+	IssueID      pgtype.UUID `json:"issue_id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	AgentID      pgtype.UUID `json:"agent_id"`
+	SourceTaskID pgtype.UUID `json:"source_task_id"`
+}
+
+// A same-task ordinary comment is the only pre-completion comment that may be
+// adopted as the task's final answer. Progress updates never match, so they
+// cannot suppress a final response merely because they were posted later.
+func (q *Queries) GetTaskFinalCommentCandidate(ctx context.Context, arg GetTaskFinalCommentCandidateParams) (Comment, error) {
+	row := q.db.QueryRow(ctx, getTaskFinalCommentCandidate,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.AgentID,
+		arg.SourceTaskID,
+	)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+		&i.SourceTaskID,
+		&i.QuickActionID,
+		&i.ViaPluginID,
+		&i.Revision,
+		&i.RecoverySettledAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const getThreadRoot = `-- name: GetThreadRoot :one
 WITH RECURSIVE root_of AS (
     SELECT c.id, c.parent_id
@@ -653,30 +709,6 @@ func (q *Queries) GetThreadRoot(ctx context.Context, arg GetThreadRootParams) (C
 		&i.DeletedAt,
 	)
 	return i, err
-}
-
-const hasAgentCommentedSince = `-- name: HasAgentCommentedSince :one
-SELECT EXISTS (
-    SELECT 1 FROM comment
-    WHERE issue_id = $1
-      AND author_type = 'agent'
-      AND author_id = $2
-      AND created_at >= $3
-      AND deleted_at IS NULL
-) AS commented
-`
-
-type HasAgentCommentedSinceParams struct {
-	IssueID  pgtype.UUID        `json:"issue_id"`
-	AuthorID pgtype.UUID        `json:"author_id"`
-	Since    pgtype.Timestamptz `json:"since"`
-}
-
-func (q *Queries) HasAgentCommentedSince(ctx context.Context, arg HasAgentCommentedSinceParams) (bool, error) {
-	row := q.db.QueryRow(ctx, hasAgentCommentedSince, arg.IssueID, arg.AuthorID, arg.Since)
-	var commented bool
-	err := row.Scan(&commented)
-	return commented, err
 }
 
 const hasAgentRepliedInThread = `-- name: HasAgentRepliedInThread :one

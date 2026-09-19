@@ -106,6 +106,19 @@ type AgentSkill struct {
 	Enabled   bool               `json:"enabled"`
 }
 
+type AgentTaskCompletionOutcome struct {
+	TaskID             pgtype.UUID        `json:"task_id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	AgentID            pgtype.UUID        `json:"agent_id"`
+	OutcomeKind        string             `json:"outcome_kind"`
+	Content            string             `json:"content"`
+	ResultSha256       string             `json:"result_sha256"`
+	FinalCommentID     pgtype.UUID        `json:"final_comment_id"`
+	AnsweredCommentIds []pgtype.UUID      `json:"answered_comment_ids"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
 type AgentTaskQueue struct {
 	ID                    pgtype.UUID        `json:"id"`
 	AgentID               pgtype.UUID        `json:"agent_id"`
@@ -806,6 +819,16 @@ type Issue struct {
 	TriageState        pgtype.Text        `json:"triage_state"`
 }
 
+type IssueCreateRequest struct {
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ActorType     string             `json:"actor_type"`
+	ActorID       pgtype.UUID        `json:"actor_id"`
+	RequestKey    string             `json:"request_key"`
+	PayloadSha256 string             `json:"payload_sha256"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type IssueDependency struct {
 	ID               pgtype.UUID `json:"id"`
 	IssueID          pgtype.UUID `json:"issue_id"`
@@ -1031,6 +1054,38 @@ type LarkUserBinding struct {
 	LarkOpenID     string             `json:"lark_open_id"`
 	UnionID        pgtype.Text        `json:"union_id"`
 	BoundAt        pgtype.Timestamptz `json:"bound_at"`
+}
+
+type LifeosLocalCredential struct {
+	Singleton          int16              `json:"singleton"`
+	Username           string             `json:"username"`
+	PasswordSalt       []byte             `json:"password_salt"`
+	PasswordHash       []byte             `json:"password_hash"`
+	PasswordIterations int32              `json:"password_iterations"`
+	FailedAttempts     int32              `json:"failed_attempts"`
+	LockedUntil        pgtype.Timestamptz `json:"locked_until"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type LifeosSecretaryInstruction struct {
+	Sequence         int64              `json:"sequence"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	RequestID        pgtype.UUID        `json:"request_id"`
+	UserID           pgtype.UUID        `json:"user_id"`
+	ItemKey          string             `json:"item_key"`
+	Kind             string             `json:"kind"`
+	Payload          []byte             `json:"payload"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	CanonicalReceipt pgtype.Text        `json:"canonical_receipt"`
+}
+
+type LifeosSecretaryProjection struct {
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Revision     int64              `json:"revision"`
+	SourceSha256 string             `json:"source_sha256"`
+	Payload      []byte             `json:"payload"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type MaintenanceJob struct {
@@ -1350,6 +1405,24 @@ type SysCronExecution struct {
 	ErrorMsg     pgtype.Text        `json:"error_msg"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type TaskCompletionOutbox struct {
+	TaskID         pgtype.UUID        `json:"task_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	AgentID        pgtype.UUID        `json:"agent_id"`
+	CommentID      pgtype.UUID        `json:"comment_id"`
+	IssueRevision  int64              `json:"issue_revision"`
+	State          string             `json:"state"`
+	Attempts       int32              `json:"attempts"`
+	LeaseOwner     pgtype.Text        `json:"lease_owner"`
+	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	LastError      pgtype.Text        `json:"last_error"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	PublishedAt    pgtype.Timestamptz `json:"published_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 type TaskMessage struct {

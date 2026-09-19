@@ -2,11 +2,14 @@ package handler
 
 import (
 	"net/http"
+
+	"github.com/multica-ai/multica/server/internal/auth"
 )
 
 // RequireHumanActor is a chi-style middleware that rejects requests
-// authenticated via a machine credential — currently mat_ task tokens
-// and mcn_ cloud-node PATs. It exists for endpoints whose
+// authenticated via a machine credential — currently mat_ task tokens,
+// mcn_ cloud-node PATs, and the LifeOS local automation credential. It exists
+// for endpoints whose
 // authorization model is "the human owner authorized this", not
 // "anyone holding the owner's credentials authorized this".
 //
@@ -30,6 +33,8 @@ import (
 //     behalf — same conceptual category as
 //     mat_ (machine running owner-scoped
 //     code) for authorization purposes.
+//   - LifeOS local automation → X-User-ID = the configured local owner,
+//     plus `X-Actor-Source: local_agent_automation`.
 //
 // The mat_ and mcn_ designs (MUL-2600 and the cloud-node PAT story
 // respectively) were both deliberately built this way: every request
@@ -112,7 +117,7 @@ func isMachineCredentialActor(r *http.Request) bool {
 	// client-supplied value before stamping its own, so a recognized value here
 	// is authoritative.
 	switch r.Header.Get("X-Actor-Source") {
-	case "task_token", "cloud_pat":
+	case "task_token", "cloud_pat", auth.LocalAgentActorSource:
 		return true
 	default:
 		return false

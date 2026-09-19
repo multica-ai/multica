@@ -1250,6 +1250,31 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 }
 
 func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin) (db.AgentTaskQueue, error) {
+	return s.insertIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, coalescedCommentIDs, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, fireAt, origin, true)
+}
+
+// createIssueTaskWithQueries inserts the first task for an idempotent issue
+// through the caller's transaction-bound query handle. It deliberately omits
+// broadcasts and runtime wakeups: IssueService emits those only after the
+// issue, request reservation, and task have committed together.
+func (s *TaskService) createIssueTaskWithQueries(ctx context.Context, q *db.Queries, issue db.Issue) (db.AgentTaskQueue, error) {
+	txService := &TaskService{Queries: q}
+	return txService.insertIssueTaskWithCommentPlan(
+		ctx,
+		issue,
+		pgtype.UUID{},
+		nil,
+		false,
+		"",
+		pgtype.UUID{},
+		pgtype.UUID{},
+		pgtype.Timestamptz{},
+		OriginDerived,
+		false,
+	)
+}
+
+func (s *TaskService) insertIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin, publish bool) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -1365,7 +1390,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		"agent_id", util.UUIDToString(issue.AssigneeID),
 		"force_fresh_session", forceFreshSession,
 	)
-	if fireAt.Valid {
+	if fireAt.Valid || !publish {
 		return task, nil
 	}
 	// Order matters: broadcast first, notify daemon second. notifyTaskAvailable
@@ -4405,6 +4430,11 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 			}
 			chatAssistantMsg = msg
 		}
+		if t.IssueID.Valid {
+			if err := s.writeIssueCompletionOutcome(ctx, qtx, t, result); err != nil {
+				return fmt.Errorf("write issue completion outcome: %w", err)
+			}
+		}
 		return nil
 	}); err != nil {
 		// When parallel agents race, a task may already be completed,
@@ -4439,53 +4469,13 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
-
-	// Invariant: every completed issue task must have at least one agent
-	// comment on the issue, so the user always sees something when a run
-	// ends. If the agent posted a comment during execution (result, progress
-	// ping, or CLI reply), HasAgentCommentedSince returns true and we skip.
-	// Otherwise, synthesize one from the final output. For comment-triggered
-	// tasks, TriggerCommentID threads the fallback under the original comment;
-	// for assignment-triggered tasks it is NULL and the fallback is top-level.
-	// Chat tasks have no IssueID and are handled separately below.
 	if task.IssueID.Valid {
-		suppressNoActionComment, err := HasSquadLeaderNoActionEvaluationForTask(ctx, s.Queries, task)
-		if err != nil {
-			slog.Warn("checking squad leader no_action evaluation failed",
-				"task_id", util.UUIDToString(task.ID),
-				"issue_id", util.UUIDToString(task.IssueID),
-				"agent_id", util.UUIDToString(task.AgentID),
-				"error", err,
-			)
-		}
-		agentCommented, _ := s.Queries.HasAgentCommentedSince(ctx, db.HasAgentCommentedSinceParams{
-			IssueID:  task.IssueID,
-			AuthorID: task.AgentID,
-			Since:    task.StartedAt,
-		})
-		if !suppressNoActionComment && !agentCommented {
-			var payload protocol.TaskCompletedPayload
-			if err := json.Unmarshal(result, &payload); err == nil {
-				if payload.Output != "" {
-					// Match the CLI's --content / --description behavior: agents that
-					// emit literal `\n` 4-char sequences (Python/JSON-style) get them
-					// decoded into real newlines before the comment hits the DB. See
-					// util.UnescapeBackslashEscapes for the exact contract.
-					body := util.UnescapeBackslashEscapes(payload.Output)
-					if task.TriggerCommentID.Valid && isTrivialDoneOutput(body) {
-						slog.Warn("suppressing trivial comment-trigger fallback output",
-							"task_id", util.UUIDToString(task.ID),
-							"issue_id", util.UUIDToString(task.IssueID),
-							"agent_id", util.UUIDToString(task.AgentID),
-						)
-					} else {
-						// Redact first, then bound: a runaway raw-stream Output (GH #5455)
-						// must never reach the issue thread, even as a clipped excerpt.
-						content := truncateFallbackCommentBody(redact.Text(body), maxSynthesizedFallbackCommentRunes)
-						s.createAgentComment(ctx, task.IssueID, task.AgentID, content, "comment", task.TriggerCommentID, task.ID)
-					}
-				}
-			}
+		if delivery, err := s.DeliverTaskCompletionOutbox(ctx, 10); err != nil {
+			slog.Warn("task completion outbox delivery failed",
+				"task_id", util.UUIDToString(task.ID), "error", err)
+		} else if delivery.Failed > 0 {
+			slog.Warn("task completion outbox delivery deferred",
+				"task_id", util.UUIDToString(task.ID), "failed", delivery.Failed)
 		}
 	}
 

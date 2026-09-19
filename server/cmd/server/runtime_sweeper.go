@@ -31,6 +31,11 @@ const (
 	// delegatedFailureRecoverySweepInterval keeps the low-probability durable
 	// recovery scan off the latency-sensitive runtime liveness path.
 	delegatedFailureRecoverySweepInterval = 5 * time.Minute
+	// taskCompletionOutboxSweepInterval repairs a crash between the atomic
+	// completion commit and its realtime publication without coupling that
+	// retry to runtime-liveness work.
+	taskCompletionOutboxSweepInterval = 30 * time.Second
+	taskCompletionOutboxBatchSize     = 100
 	// staleThresholdSeconds marks runtimes offline if no heartbeat for this
 	// long. The heartbeat timing derivation lives with the shared service
 	// constant so every task release path uses the same eligibility window.
@@ -176,6 +181,20 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 func runDelegatedFailureRecoverySweeper(ctx context.Context, taskSvc *service.TaskService) {
 	runPeriodicSweep(ctx, delegatedFailureRecoverySweepInterval, func() {
 		sweepPendingDelegatedFailureRecoveries(ctx, taskSvc)
+	})
+}
+
+func runTaskCompletionOutboxSweeper(ctx context.Context, taskSvc *service.TaskService) {
+	runPeriodicSweep(ctx, taskCompletionOutboxSweepInterval, func() {
+		result, err := taskSvc.DeliverTaskCompletionOutbox(ctx, taskCompletionOutboxBatchSize)
+		if err != nil {
+			slog.Warn("task completion outbox sweeper failed", "error", err)
+			return
+		}
+		if result.Published > 0 || result.Failed > 0 {
+			slog.Info("task completion outbox sweep",
+				"claimed", result.Claimed, "published", result.Published, "failed", result.Failed)
+		}
 	})
 }
 

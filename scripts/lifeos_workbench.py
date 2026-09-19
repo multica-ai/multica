@@ -474,13 +474,13 @@ def start(
 
 
 def ensure_running(lifeos_root: Path, controller_root: Path) -> None:
-    """由本机后台管家调用；幂等恢复看板、执行器和全局索引。"""
+    """由后台管家调用；只恢复看板并刷新索引，不改 Agent 配置。"""
     start(
         lifeos_root,
         controller_root,
         build=False,
         open_browser=False,
-        start_executor=True,
+        start_executor=False,
     )
 
 
@@ -1179,8 +1179,8 @@ def install_autostart(lifeos_root: Path, controller_root: Path) -> None:
         _write_plist(path, payload)
         _run([launchctl, "bootstrap", domain, str(path)], environment=environment)
     print(
-        "已启用：登录后自动启动看板并唤醒 Codex，本机后台管家恢复 AI 执行器，"
-        "每 2 小时静默同步 LifeOS、每日本地备份。"
+        "已启用：登录后自动启动看板并唤醒 Codex；每 2 小时只读刷新索引并处理"
+        "既有队列，每日本地备份。Agent 安装与配置只在显式 start 时执行。"
     )
 
 

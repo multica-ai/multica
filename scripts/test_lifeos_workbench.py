@@ -474,7 +474,7 @@ class ContextDatabaseTests(unittest.TestCase):
         self.assertEqual(tunnel_args.command, "install-tunnel")
         self.assertEqual(tunnel_args.public_origin, "https://lifeos.example.com")
 
-    def test_ensure_restores_executor_without_rebuild_or_browser(self) -> None:
+    def test_ensure_never_rewrites_executor_configuration(self) -> None:
         lifeos_root = Path("/tmp/lifeos-root")
         controller_root = Path("/tmp/lifeos-controller")
         with mock.patch.object(lifeos_workbench, "start") as start:
@@ -485,7 +485,7 @@ class ContextDatabaseTests(unittest.TestCase):
             controller_root,
             build=False,
             open_browser=False,
-            start_executor=True,
+            start_executor=False,
         )
 
 

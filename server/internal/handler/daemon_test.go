@@ -2573,11 +2573,12 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 		"started_at":         testutil.Raw("now()"),
 	})
 
-	// Agent posts its own reply during the run — exactly the compliant path.
+	// Agent posts its own reply during the run and binds it to this exact task.
+	// An unbound or older comment must not suppress the task's final outcome.
 	dbfx.Exec(t, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
-		VALUES ($1, $2, 'agent', $3, 'done, see PR', 'comment', $4)
-	`, issueID, testWorkspaceID, agentID, triggerCommentID)
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id)
+		VALUES ($1, $2, 'agent', $3, 'done, see PR', 'comment', $4, $5)
+	`, issueID, testWorkspaceID, agentID, triggerCommentID, taskID)
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
@@ -2602,7 +2603,7 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 	}
 }
 
-func TestCompleteTask_CommentTriggered_SuppressesTrivialDoneOutput(t *testing.T) {
+func TestCompleteTask_CommentTriggered_PersistsTrivialDoneAsFinalOutput(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -2641,12 +2642,13 @@ func TestCompleteTask_CommentTriggered_SuppressesTrivialDoneOutput(t *testing.T)
 	}
 
 	var count int
+	var content string
 	dbfx.QueryRow(t, `
-		SELECT count(*) FROM comment
+		SELECT count(*), COALESCE(max(content), '') FROM comment
 		WHERE issue_id = $1 AND author_type = 'agent' AND author_id = $2
-	`, issueID, agentID).Scan(&count)
-	if count != 0 {
-		t.Fatalf("expected no synthesized agent comment for trivial Done output, got %d", count)
+	`, issueID, agentID).Scan(&count, &content)
+	if count != 1 || content != "Done." {
+		t.Fatalf("expected one final Done comment, got count=%d content=%q", count, content)
 	}
 }
 

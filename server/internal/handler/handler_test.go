@@ -428,6 +428,52 @@ func TestIssueCRUD(t *testing.T) {
 	}
 }
 
+func TestCreateIssueRequestIDReplaysAndRejectsChangedContent(t *testing.T) {
+	requestID := fmt.Sprintf("lifeos-test:%d", time.Now().UnixNano())
+	body := map[string]any{
+		"request_id":      requestID,
+		"title":           "Idempotent handler issue",
+		"status":          "todo",
+		"priority":        "medium",
+		"allow_duplicate": true,
+	}
+
+	first := testutil.Call(t, testHandler.CreateIssue,
+		newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, body),
+	).Want(http.StatusCreated)
+	var created IssueResponse
+	if err := json.NewDecoder(first.Body).Decode(&created); err != nil {
+		t.Fatalf("decode first response: %v", err)
+	}
+	t.Cleanup(func() {
+		req := withURLParam(newRequest("DELETE", "/api/issues/"+created.ID, nil), "id", created.ID)
+		testHandler.DeleteIssue(httptest.NewRecorder(), req)
+	})
+
+	second := testutil.Call(t, testHandler.CreateIssue,
+		newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, body),
+	).Want(http.StatusOK)
+	var replayed IssueResponse
+	if err := json.NewDecoder(second.Body).Decode(&replayed); err != nil {
+		t.Fatalf("decode replay response: %v", err)
+	}
+	if replayed.ID != created.ID {
+		t.Fatalf("replayed issue = %s, want %s", replayed.ID, created.ID)
+	}
+
+	changed := map[string]any{
+		"request_id": requestID,
+		"title":      "Changed content",
+		"status":     "todo",
+	}
+	conflict := testutil.Call(t, testHandler.CreateIssue,
+		newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, changed),
+	).Want(http.StatusConflict)
+	if !strings.Contains(conflict.Body.String(), `"code":"idempotency_conflict"`) {
+		t.Fatalf("conflict response = %s", conflict.Body.String())
+	}
+}
+
 // TestDeleteIssueByIdentifier guards against #1661 — DELETE /api/issues/{id}
 // must actually delete the row when the path segment is a human-readable
 // identifier ("HAN-42") rather than a UUID. Before the PR #1680 + MUL-1410

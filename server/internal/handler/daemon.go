@@ -1959,6 +1959,12 @@ func claimPollHintDelay(now, fireAt time.Time) time.Duration {
 	if delay < claimPollHintMinDelay {
 		return claimPollHintMinDelay
 	}
+	// Database and application clocks can differ by a few milliseconds. Keep
+	// the advertised hint inside the client's five-second safety window even
+	// when PostgreSQL's now() is marginally ahead of this process.
+	if delay > 5*time.Second {
+		return 5 * time.Second
+	}
 	return delay
 }
 
