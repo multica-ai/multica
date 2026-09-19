@@ -8,7 +8,13 @@
     "upload_image": "上传图片",
     "emoji_label": "表情",
     "more_emojis": "更多表情…",
-    "emoji_loading": "加载中…"
+    "emoji_loading": "加载中…",
+    "brand_label": "品牌",
+    "ring_label": "能力圈",
+    "ring_none": "无",
+    "ring_flagship": "旗舰",
+    "ring_standard": "标准",
+    "ring_fast": "轻量"
   },
   "avatar_crop": {
     "title": "编辑头像",

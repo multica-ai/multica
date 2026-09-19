@@ -159,6 +159,7 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
                 name={name}
                 size={64}
                 onUploaded={setAvatarUrl}
+                onEmojiSelected={setAvatarUrl}
                 onClear={() => setAvatarUrl(null)}
               />
               <div className="flex-1 min-w-0 space-y-3">

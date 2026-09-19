@@ -12,6 +12,15 @@ import {
   parseAvatarEmoji,
 } from "@multica/ui/lib/avatar-emoji";
 import {
+  AVATAR_BRANDS,
+  AVATAR_BRAND_RING_COLOR,
+  formatAvatarBrand,
+  parseAvatarBrand,
+  type AvatarBrandId,
+  type AvatarBrandRing,
+} from "@multica/ui/lib/avatar-brand";
+import { BrandAvatarMark } from "@multica/ui/components/common/brand-avatar-mark";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -49,11 +58,13 @@ interface AvatarUploadControlProps {
    */
   onUploaded: (url: string) => void | Promise<unknown>;
   /**
-   * When provided, the avatar offers emoji as an alternative to an image:
-   * clicking it opens a picker with the suggested set, full emoji search, and
-   * the upload entry. Fires with the value to persist (`emoji:🚀`) — the same
-   * `avatar_url` shape as `onUploaded`, so the caller stores both the same
-   * way. Omit it and the control keeps its click-straight-to-upload behavior.
+   * When provided, the avatar offers built-in faces as an alternative to an
+   * image: clicking it opens a picker with LLM brand tiles (plus an optional
+   * capability ring), the suggested emoji set, full emoji search, and the
+   * upload entry. Fires with the value to persist (`brand:claude/flagship`
+   * or `emoji:🚀`) — the same `avatar_url` shape as `onUploaded`, so the
+   * caller stores both the same way. Omit it and the control keeps its
+   * click-straight-to-upload behavior.
    */
   onEmojiSelected?: (value: string) => void | Promise<unknown>;
   /**
@@ -154,10 +165,12 @@ export function AvatarUploadControl({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [emojiSearchOpen, setEmojiSearchOpen] = useState(false);
 
-  const emoji = parseAvatarEmoji(value);
-  const resolved = value && !emoji ? resolvePublicFileUrl(value) : null;
+  const brand = parseAvatarBrand(value);
+  const emoji = brand ? null : parseAvatarEmoji(value);
+  const resolved =
+    value && !emoji && !brand ? resolvePublicFileUrl(value) : null;
   const hasImage = !!resolved && !previewError;
-  const hasAvatar = !!emoji || hasImage;
+  const hasAvatar = !!brand || !!emoji || hasImage;
   const emojiEnabled = !!onEmojiSelected;
 
   const openFileDialog = () => fileInputRef.current?.click();
@@ -212,17 +225,26 @@ export function AvatarUploadControl({
   //
   // No success toast on purpose: the avatar swaps to the chosen emoji in place,
   // so the change is already visible.
-  const handleEmojiSelected = async (picked: string) => {
+  const persistMarker = async (marker: string) => {
     closePicker();
     setPreviewError(false);
     setBusy(true);
     try {
-      await persistedByCaller(() =>
-        onEmojiSelected?.(formatAvatarEmoji(picked)),
-      );
+      await persistedByCaller(() => onEmojiSelected?.(marker));
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleEmojiSelected = (picked: string) =>
+    persistMarker(formatAvatarEmoji(picked));
+
+  const handleBrandSelected = (id: AvatarBrandId) =>
+    persistMarker(formatAvatarBrand(id, brand?.ring ?? null));
+
+  const handleRingSelected = (ring: AvatarBrandRing | null) => {
+    if (!brand) return;
+    return persistMarker(formatAvatarBrand(brand.id, ring));
   };
 
   const avatarButton = (
@@ -235,7 +257,8 @@ export function AvatarUploadControl({
       disabled={disabled || busy}
       aria-label={ariaLabel ?? t(($) => $.avatar_upload.change)}
       className={cn(
-        "group relative h-full w-full overflow-hidden bg-muted text-muted-foreground outline-none",
+        "group relative h-full w-full bg-muted text-muted-foreground outline-none",
+        !brand && "overflow-hidden",
         "flex items-center justify-center",
         "focus-visible:ring-2 focus-visible:ring-ring",
         "disabled:cursor-not-allowed disabled:opacity-60",
@@ -244,7 +267,14 @@ export function AvatarUploadControl({
       )}
       style={{ width: size, height: size }}
     >
-      {emoji ? (
+      {brand ? (
+        <BrandAvatarMark
+          id={brand.id}
+          ring={brand.ring}
+          label={name}
+          className="h-full w-full"
+        />
+      ) : emoji ? (
         <span
           role="img"
           aria-label={name}
@@ -311,6 +341,63 @@ export function AvatarUploadControl({
                     <ImagePlus className="size-4 shrink-0 text-muted-foreground" />
                     {t(($) => $.avatar_upload.upload_image)}
                   </button>
+                </div>
+
+                <Separator />
+
+                <div className="p-1">
+                  <p className="px-1.5 py-1 text-caption font-medium text-muted-foreground">
+                    {t(($) => $.avatar_upload.brand_label)}
+                  </p>
+                  <div className="grid grid-cols-7 gap-0.5">
+                    {AVATAR_BRANDS.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        aria-label={item.label}
+                        aria-pressed={brand?.id === item.id}
+                        onClick={() => handleBrandSelected(item.id)}
+                        className={cn(
+                          "flex h-8 w-8 items-center justify-center rounded-md outline-hidden transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
+                          brand?.id === item.id && "bg-accent ring-1 ring-ring",
+                        )}
+                      >
+                        <BrandAvatarMark id={item.id} className="h-6 w-6" />
+                      </button>
+                    ))}
+                  </div>
+                  <p className="px-1.5 pb-1 pt-2 text-caption font-medium text-muted-foreground">
+                    {t(($) => $.avatar_upload.ring_label)}
+                  </p>
+                  <div className="flex items-center gap-1 px-1">
+                    <RingChoice
+                      label={t(($) => $.avatar_upload.ring_none)}
+                      selected={!!brand && brand.ring === null}
+                      disabled={!brand}
+                      onClick={() => handleRingSelected(null)}
+                    />
+                    <RingChoice
+                      label={t(($) => $.avatar_upload.ring_flagship)}
+                      color={AVATAR_BRAND_RING_COLOR.flagship}
+                      selected={brand?.ring === "flagship"}
+                      disabled={!brand}
+                      onClick={() => handleRingSelected("flagship")}
+                    />
+                    <RingChoice
+                      label={t(($) => $.avatar_upload.ring_standard)}
+                      color={AVATAR_BRAND_RING_COLOR.standard}
+                      selected={brand?.ring === "standard"}
+                      disabled={!brand}
+                      onClick={() => handleRingSelected("standard")}
+                    />
+                    <RingChoice
+                      label={t(($) => $.avatar_upload.ring_fast)}
+                      color={AVATAR_BRAND_RING_COLOR.fast}
+                      selected={brand?.ring === "fast"}
+                      disabled={!brand}
+                      onClick={() => handleRingSelected("fast")}
+                    />
+                  </div>
                 </div>
 
                 <Separator />
@@ -386,5 +473,43 @@ export function AvatarUploadControl({
         onCropped={handleCropped}
       />
     </div>
+  );
+}
+
+function RingChoice({
+  label,
+  color,
+  selected,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  color?: string;
+  selected: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      aria-pressed={selected}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "flex h-8 min-w-8 items-center justify-center rounded-md px-1 outline-hidden transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40",
+        selected && "bg-accent ring-1 ring-ring",
+      )}
+    >
+      <span
+        aria-hidden
+        className="block h-4 w-4 rounded-full"
+        style={
+          color
+            ? { boxShadow: `inset 0 0 0 2px ${color}` }
+            : { boxShadow: "inset 0 0 0 1.5px var(--border)" }
+        }
+      />
+    </button>
   );
 }

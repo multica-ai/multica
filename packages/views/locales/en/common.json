@@ -8,7 +8,13 @@
     "upload_image": "Upload image",
     "emoji_label": "Emoji",
     "more_emojis": "More emojis…",
-    "emoji_loading": "Loading…"
+    "emoji_loading": "Loading…",
+    "brand_label": "Brand",
+    "ring_label": "Capability ring",
+    "ring_none": "None",
+    "ring_flagship": "Flagship",
+    "ring_standard": "Standard",
+    "ring_fast": "Fast"
   },
   "avatar_crop": {
     "title": "Edit avatar",

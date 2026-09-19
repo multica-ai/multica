@@ -101,6 +101,61 @@ describe("AvatarUploadControl", () => {
       await screen.findByRole("button", { name: "Upload image" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "🦊" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Grok" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Claude" })).toBeInTheDocument();
+  });
+
+  it("emits a brand marker, keeping a previously chosen ring", async () => {
+    const onEmojiSelected = vi.fn();
+    renderWithI18n(
+      <AvatarUploadControl
+        variant="agent"
+        value="brand:gpt/flagship"
+        onUploaded={vi.fn()}
+        onEmojiSelected={onEmojiSelected}
+      />,
+    );
+
+    openPicker();
+    fireEvent.click(await screen.findByRole("button", { name: "Claude" }));
+
+    await waitFor(() =>
+      expect(onEmojiSelected).toHaveBeenCalledWith("brand:claude/flagship"),
+    );
+  });
+
+  it("applies a capability ring only after a brand is chosen", async () => {
+    const onEmojiSelected = vi.fn();
+    renderWithI18n(
+      <AvatarUploadControl
+        variant="agent"
+        value={null}
+        onUploaded={vi.fn()}
+        onEmojiSelected={onEmojiSelected}
+      />,
+    );
+
+    openPicker();
+    expect(screen.getByRole("button", { name: "Flagship" })).toBeDisabled();
+  });
+
+  it("writes the ring onto the current brand marker", async () => {
+    const onEmojiSelected = vi.fn();
+    renderWithI18n(
+      <AvatarUploadControl
+        variant="agent"
+        value="brand:kimi"
+        onUploaded={vi.fn()}
+        onEmojiSelected={onEmojiSelected}
+      />,
+    );
+
+    openPicker();
+    fireEvent.click(await screen.findByRole("button", { name: "Flagship" }));
+
+    await waitFor(() =>
+      expect(onEmojiSelected).toHaveBeenCalledWith("brand:kimi/flagship"),
+    );
   });
 
   // The caller persists whatever it gets straight into `avatar_url`, so the

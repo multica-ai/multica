@@ -9,6 +9,8 @@ import {
   type AvatarSize,
 } from "@multica/ui/lib/avatar-size";
 import { parseAvatarEmoji } from "@multica/ui/lib/avatar-emoji";
+import { parseAvatarBrand } from "@multica/ui/lib/avatar-brand";
+import { BrandAvatarMark } from "./brand-avatar-mark";
 import { MulticaIcon } from "./multica-icon";
 
 interface ActorAvatarProps {
@@ -34,7 +36,8 @@ function ActorAvatar({
 }: ActorAvatarProps) {
   const [imgError, setImgError] = useState(false);
   const px = AVATAR_SIZE_PX[size];
-  const emoji = parseAvatarEmoji(avatarUrl);
+  const brand = parseAvatarBrand(avatarUrl);
+  const emoji = brand ? null : parseAvatarEmoji(avatarUrl);
 
   useEffect(() => {
     setImgError(false);
@@ -47,8 +50,13 @@ function ActorAvatar({
     <div
       data-slot="avatar"
       className={cn(
-        "inline-flex shrink-0 items-center justify-center font-medium overflow-hidden",
-        (!avatarUrl || emoji || imgError) && "bg-muted text-muted-foreground",
+        "inline-flex shrink-0 items-center justify-center font-medium",
+        // Brand tiles draw their own disc (and optional ring) inside the SVG.
+        // Clipping the box would shave the ring at the viewBox edge.
+        !brand && "overflow-hidden",
+        (!avatarUrl || emoji || imgError) &&
+          !brand &&
+          "bg-muted text-muted-foreground",
         className,
         // rounded-full stays last so a call-site `className` can never override
         // the circle — avatar shape is a hard invariant, not a per-site choice.
@@ -56,7 +64,14 @@ function ActorAvatar({
       )}
       style={{ width: px, height: px, fontSize: px * 0.45 }}
     >
-      {emoji ? (
+      {brand ? (
+        <BrandAvatarMark
+          id={brand.id}
+          ring={brand.ring}
+          label={name}
+          className="h-full w-full"
+        />
+      ) : emoji ? (
         <span
           role="img"
           aria-label={name}
