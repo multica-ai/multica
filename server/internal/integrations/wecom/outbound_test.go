@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -39,6 +40,7 @@ type fakeOutboundQueries struct {
 	memberErr      error
 	workspace      db.Workspace
 	workspaceErr   error
+	statuses       map[string]db.IssueStatus
 	attachments    []db.Attachment
 	attachmentsErr error
 	// lookupGate holds every attachment lookup open until it is closed, which
@@ -103,6 +105,13 @@ func (f *fakeOutboundQueries) FindChannelBindingForMember(context.Context, db.Fi
 }
 func (f *fakeOutboundQueries) GetWorkspace(context.Context, pgtype.UUID) (db.Workspace, error) {
 	return f.workspace, f.workspaceErr
+}
+func (f *fakeOutboundQueries) GetIssueStatusEntryByKey(_ context.Context, arg db.GetIssueStatusEntryByKeyParams) (db.IssueStatus, error) {
+	status, ok := f.statuses[arg.Key]
+	if !ok {
+		return db.IssueStatus{}, pgx.ErrNoRows
+	}
+	return status, nil
 }
 func (f *fakeOutboundQueries) ListAttachmentsByChatMessage(context.Context, db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error) {
 	if f.lookupGate != nil {
@@ -312,6 +321,37 @@ func TestTryDeliverInbox_PushesToBoundMemberPrivately(t *testing.T) {
 	}
 	if body["chat_type"] != float64(chatTypeSingleInt) {
 		t.Errorf("inbox push chat_type = %v, want single (1)", body["chat_type"])
+	}
+}
+
+func TestTryDeliverInbox_StatusChangeUsesStructuredDetails(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{
+		memberBinding: db.ChannelUserBinding{ChannelUserID: "T_USER_1"},
+		workspace:     db.Workspace{Slug: "acme"},
+		statuses: map[string]db.IssueStatus{
+			"human_review": {Key: "human_review", Name: "Human Review"},
+		},
+	}
+	o, instID, conn := newOutboundWithConn(t, q)
+	q.memberBinding.InstallationID = instID
+
+	item := map[string]any{
+		"recipient_type": "member",
+		"recipient_id":   "33333333-3333-3333-3333-333333333333",
+		"workspace_id":   "44444444-4444-4444-4444-444444444444",
+		"type":           "status_changed",
+		"title":          "Login page returns 500",
+		"details":        json.RawMessage(`{"from":"todo","to":"human_review"}`),
+	}
+	if !o.tryDeliverInbox(context.Background(), item, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+		t.Fatal("tryDeliverInbox returned false; expected status notification delivery")
+	}
+	body := conn.sendBody(t, 0)
+	markdown, _ := body["markdown"].(map[string]any)
+	content, _ := markdown["content"].(string)
+	if !strings.Contains(content, "Todo → Human Review") {
+		t.Fatalf("status transition missing from WeCom card: %q", content)
 	}
 }
 
