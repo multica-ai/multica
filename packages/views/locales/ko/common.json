@@ -10,11 +10,13 @@
     "more_emojis": "이모지 더 보기…",
     "emoji_loading": "불러오는 중…",
     "brand_label": "브랜드",
-    "ring_label": "역량 링",
-    "ring_none": "없음",
-    "ring_flagship": "플래그십",
-    "ring_standard": "스탠다드",
-    "ring_fast": "라이트"
+    "tier_label": "역량 등급",
+    "tier_gold": "골드",
+    "tier_silver": "실버",
+    "tier_copper": "코퍼",
+    "tier_cyan": "시안",
+    "tier_diamond": "다이아몬드",
+    "tier_crown": "크라운"
   },
   "avatar_crop": {
     "title": "아바타 편집",

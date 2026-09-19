@@ -9,20 +9,20 @@ describe("parseAvatarBrand", () => {
   it("reads a bare brand marker", () => {
     expect(parseAvatarBrand("brand:claude")).toEqual({
       id: "claude",
-      ring: null,
+      tier: null,
     });
   });
 
-  it("reads a brand plus capability ring", () => {
-    expect(parseAvatarBrand("brand:grok/flagship")).toEqual({
+  it("reads a brand plus capability tier", () => {
+    expect(parseAvatarBrand("brand:grok/gold")).toEqual({
       id: "grok",
-      ring: "flagship",
+      tier: "gold",
     });
   });
 
-  it("rejects unknown brands, unknown rings, and other avatar shapes", () => {
+  it("rejects unknown brands, unknown tiers, and other avatar shapes", () => {
     expect(parseAvatarBrand("brand:not-a-model")).toBeNull();
-    expect(parseAvatarBrand("brand:claude/gold")).toBeNull();
+    expect(parseAvatarBrand("brand:claude/flagship")).toBeNull();
     expect(parseAvatarBrand("emoji:🚀")).toBeNull();
     expect(parseAvatarBrand("https://cdn.example/a.png")).toBeNull();
     expect(parseAvatarBrand("")).toBeNull();
@@ -31,19 +31,19 @@ describe("parseAvatarBrand", () => {
 });
 
 describe("formatAvatarBrand", () => {
-  it("round-trips with and without a ring", () => {
+  it("round-trips with and without a tier", () => {
     expect(formatAvatarBrand("gpt")).toBe("brand:gpt");
     expect(formatAvatarBrand("gpt", null)).toBe("brand:gpt");
-    expect(formatAvatarBrand("gpt", "fast")).toBe("brand:gpt/fast");
-    expect(parseAvatarBrand(formatAvatarBrand("devin", "standard"))).toEqual({
+    expect(formatAvatarBrand("gpt", "crown")).toBe("brand:gpt/crown");
+    expect(parseAvatarBrand(formatAvatarBrand("devin", "diamond"))).toEqual({
       id: "devin",
-      ring: "standard",
+      tier: "diamond",
     });
   });
 
   it("covers every catalog id the picker offers", () => {
     for (const brand of AVATAR_BRANDS) {
-      expect(parseAvatarBrand(formatAvatarBrand(brand.id, "flagship"))?.id).toBe(
+      expect(parseAvatarBrand(formatAvatarBrand(brand.id, "gold"))?.id).toBe(
         brand.id,
       );
     }

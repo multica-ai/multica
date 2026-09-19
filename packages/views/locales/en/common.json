@@ -10,11 +10,13 @@
     "more_emojis": "More emojis…",
     "emoji_loading": "Loading…",
     "brand_label": "Brand",
-    "ring_label": "Capability ring",
-    "ring_none": "None",
-    "ring_flagship": "Flagship",
-    "ring_standard": "Standard",
-    "ring_fast": "Fast"
+    "tier_label": "Capability tier",
+    "tier_gold": "Gold",
+    "tier_silver": "Silver",
+    "tier_copper": "Copper",
+    "tier_cyan": "Cyan",
+    "tier_diamond": "Diamond",
+    "tier_crown": "Crown"
   },
   "avatar_crop": {
     "title": "Edit avatar",

@@ -50,9 +50,8 @@ function ActorAvatar({
     <div
       data-slot="avatar"
       className={cn(
-        "inline-flex shrink-0 items-center justify-center font-medium",
-        // Brand tiles draw their own disc (and optional ring) inside the SVG.
-        // Clipping the box would shave the ring at the viewBox edge.
+        // Brand artwork is a circular badge on transparency — clipping the box
+        // would shave its tier frame at the edges.
         !brand && "overflow-hidden",
         (!avatarUrl || emoji || imgError) &&
           !brand &&
@@ -67,7 +66,7 @@ function ActorAvatar({
       {brand ? (
         <BrandAvatarMark
           id={brand.id}
-          ring={brand.ring}
+          tier={brand.tier}
           label={name}
           className="h-full w-full"
         />

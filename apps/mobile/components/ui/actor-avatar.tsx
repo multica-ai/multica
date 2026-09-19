@@ -128,7 +128,10 @@ function BareAvatar({
       : null;
 
   if (brand) {
-    const ringWidth = Math.max(2, Math.round(size * 0.06));
+    // Mobile cannot load the bundled web artwork; the letter tile stands in,
+    // wearing the tier's frame color as its ring so the capability grade
+    // stays visible here too.
+    const tierWidth = Math.max(2, Math.round(size * 0.06));
     return (
       <View
         accessibilityLabel={displayName}
@@ -137,8 +140,8 @@ function BareAvatar({
           height: size,
           borderRadius: radius,
           backgroundColor: brand.bg,
-          borderWidth: brand.ring ? ringWidth : 0,
-          borderColor: brand.ring ?? undefined,
+          borderWidth: brand.tier ? tierWidth : 0,
+          borderColor: brand.tier ?? undefined,
           alignItems: "center",
           justifyContent: "center",
         }}
@@ -263,43 +266,41 @@ function AgentAvatarWithPresence({
 
 // Keep in lockstep with `packages/ui/lib/avatar-brand.ts`. Mobile cannot
 // import `@multica/ui`, so the marker parser and tile colors live here as
-// the same `brand:<id>[/<ring>]` contract the web picker persists.
+// the same `brand:<id>[/<tier>]` contract the web picker persists.
 const BRAND_FACE: Record<string, { bg: string; fg: string; letter: string }> = {
-  grok: { bg: "#0A0A0A", fg: "#F4F4F5", letter: "G" },
-  gpt: { bg: "#10A37F", fg: "#FFFFFF", letter: "G" },
-  claude: { bg: "#D97757", fg: "#FFFFFF", letter: "C" },
+  gpt: { bg: "#111111", fg: "#FFFFFF", letter: "G" },
   gemini: { bg: "#1A73E8", fg: "#FFFFFF", letter: "G" },
+  claude: { bg: "#D97757", fg: "#FFFFFF", letter: "C" },
+  glm: { bg: "#3B6FF6", fg: "#FFFFFF", letter: "Z" },
+  kimi: { bg: "#111111", fg: "#FFFFFF", letter: "K" },
   deepseek: { bg: "#4D6BFE", fg: "#FFFFFF", letter: "D" },
-  kimi: { bg: "#1F1147", fg: "#FFFFFF", letter: "K" },
-  glm: { bg: "#1A56DB", fg: "#FFFFFF", letter: "Z" },
-  qwen: { bg: "#6A3DE8", fg: "#FFFFFF", letter: "Q" },
-  llama: { bg: "#12101A", fg: "#ED9D3C", letter: "L" },
-  mistral: { bg: "#FA520F", fg: "#FFFFFF", letter: "M" },
-  devin: { bg: "#0B1220", fg: "#5EEAD4", letter: "D" },
-  cursor: { bg: "#0A0A0A", fg: "#F4F4F5", letter: "C" },
-  copilot: { bg: "#0D1117", fg: "#F0F6FC", letter: "C" },
-  opencode: { bg: "#3F3F46", fg: "#E4E4E7", letter: "O" },
+  composer: { bg: "#111111", fg: "#FFFFFF", letter: "C" },
+  grok: { bg: "#0A0A0A", fg: "#F4F4F5", letter: "G" },
+  devin: { bg: "#0E7490", fg: "#FFFFFF", letter: "D" },
 };
 
-const BRAND_RING: Record<string, string> = {
-  flagship: "#22D3EE",
-  standard: "#A78BFA",
-  fast: "#34D399",
+const BRAND_TIER_COLOR: Record<string, string> = {
+  gold: "#D7A414",
+  silver: "#B9C0CA",
+  copper: "#C7793B",
+  cyan: "#10BDC1",
+  diamond: "#4D9DFF",
+  crown: "#E0AD23",
 };
 
 function parseBrandAvatar(raw: string | null | undefined): {
   bg: string;
   fg: string;
   letter: string;
-  ring: string | null;
+  tier: string | null;
 } | null {
   if (!raw?.startsWith("brand:")) return null;
   const rest = raw.slice("brand:".length).trim();
   if (!rest) return null;
   const slash = rest.indexOf("/");
   const id = slash === -1 ? rest : rest.slice(0, slash);
-  const ringRaw = slash === -1 ? "" : rest.slice(slash + 1);
+  const tierRaw = slash === -1 ? "" : rest.slice(slash + 1);
   const face = BRAND_FACE[id];
   if (!face) return null;
-  return { ...face, ring: ringRaw ? (BRAND_RING[ringRaw] ?? null) : null };
+  return { ...face, tier: tierRaw ? (BRAND_TIER_COLOR[tierRaw] ?? null) : null };
 }

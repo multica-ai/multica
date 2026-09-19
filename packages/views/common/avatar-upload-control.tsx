@@ -13,11 +13,12 @@ import {
 } from "@multica/ui/lib/avatar-emoji";
 import {
   AVATAR_BRANDS,
-  AVATAR_BRAND_RING_COLOR,
+  AVATAR_BRAND_TIERS,
+  AVATAR_BRAND_TIER_COLOR,
   formatAvatarBrand,
   parseAvatarBrand,
   type AvatarBrandId,
-  type AvatarBrandRing,
+  type AvatarBrandTier,
 } from "@multica/ui/lib/avatar-brand";
 import { BrandAvatarMark } from "@multica/ui/components/common/brand-avatar-mark";
 import {
@@ -238,13 +239,12 @@ export function AvatarUploadControl({
 
   const handleEmojiSelected = (picked: string) =>
     persistMarker(formatAvatarEmoji(picked));
-
   const handleBrandSelected = (id: AvatarBrandId) =>
-    persistMarker(formatAvatarBrand(id, brand?.ring ?? null));
+    persistMarker(formatAvatarBrand(id, brand?.tier ?? null));
 
-  const handleRingSelected = (ring: AvatarBrandRing | null) => {
+  const handleTierSelected = (tier: AvatarBrandTier | null) => {
     if (!brand) return;
-    return persistMarker(formatAvatarBrand(brand.id, ring));
+    return persistMarker(formatAvatarBrand(brand.id, tier));
   };
 
   const avatarButton = (
@@ -270,7 +270,7 @@ export function AvatarUploadControl({
       {brand ? (
         <BrandAvatarMark
           id={brand.id}
-          ring={brand.ring}
+          tier={brand.tier}
           label={name}
           className="h-full w-full"
         />
@@ -346,10 +346,7 @@ export function AvatarUploadControl({
                 <Separator />
 
                 <div className="p-1">
-                  <p className="px-1.5 py-1 text-caption font-medium text-muted-foreground">
-                    {t(($) => $.avatar_upload.brand_label)}
-                  </p>
-                  <div className="grid grid-cols-7 gap-0.5">
+                  <div className="grid grid-cols-9 gap-0.5">
                     {AVATAR_BRANDS.map((item) => (
                       <button
                         key={item.id}
@@ -362,41 +359,28 @@ export function AvatarUploadControl({
                           brand?.id === item.id && "bg-accent ring-1 ring-ring",
                         )}
                       >
-                        <BrandAvatarMark id={item.id} className="h-6 w-6" />
+                        <BrandAvatarMark
+                          id={item.id}
+                          tier={brand?.id === item.id ? (brand.tier ?? null) : null}
+                          className="h-6 w-6"
+                        />
                       </button>
                     ))}
                   </div>
                   <p className="px-1.5 pb-1 pt-2 text-caption font-medium text-muted-foreground">
-                    {t(($) => $.avatar_upload.ring_label)}
+                    {t(($) => $.avatar_upload.tier_label)}
                   </p>
                   <div className="flex items-center gap-1 px-1">
-                    <RingChoice
-                      label={t(($) => $.avatar_upload.ring_none)}
-                      selected={!!brand && brand.ring === null}
-                      disabled={!brand}
-                      onClick={() => handleRingSelected(null)}
-                    />
-                    <RingChoice
-                      label={t(($) => $.avatar_upload.ring_flagship)}
-                      color={AVATAR_BRAND_RING_COLOR.flagship}
-                      selected={brand?.ring === "flagship"}
-                      disabled={!brand}
-                      onClick={() => handleRingSelected("flagship")}
-                    />
-                    <RingChoice
-                      label={t(($) => $.avatar_upload.ring_standard)}
-                      color={AVATAR_BRAND_RING_COLOR.standard}
-                      selected={brand?.ring === "standard"}
-                      disabled={!brand}
-                      onClick={() => handleRingSelected("standard")}
-                    />
-                    <RingChoice
-                      label={t(($) => $.avatar_upload.ring_fast)}
-                      color={AVATAR_BRAND_RING_COLOR.fast}
-                      selected={brand?.ring === "fast"}
-                      disabled={!brand}
-                      onClick={() => handleRingSelected("fast")}
-                    />
+                    {AVATAR_BRAND_TIERS.map((tier) => (
+                      <RingChoice
+                        key={tier}
+                        label={t(($) => $.avatar_upload[`tier_${tier}`])}
+                        color={AVATAR_BRAND_TIER_COLOR[tier]}
+                        selected={brand?.tier === tier}
+                        disabled={!brand}
+                        onClick={() => handleTierSelected(tier)}
+                      />
+                    ))}
                   </div>
                 </div>
 

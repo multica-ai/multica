@@ -4,65 +4,69 @@
  * Stored in `avatar_url` as a marker, same idea as `emoji:🚀`:
  *
  *   brand:claude
- *   brand:claude/flagship
+ *   brand:claude/gold
  *
- * The optional `/<ring>` suffix is a capability-grade halo drawn around the
- * face. Unknown ids and unknown rings parse as `null` so a stale marker
- * falls through to the ordinary fallback glyph instead of a broken image.
+ * The optional `/<tier>` suffix picks one of the six capability-grade frames
+ * (gold / silver / copper / cyan / diamond / crown) — the same tiers the
+ * bundled badge artwork ships, so the ring is part of the picture rather than
+ * something the renderers draw. Unknown ids and unknown tiers parse as `null`
+ * so a stale marker falls through to the ordinary fallback glyph instead of a
+ * broken image.
  */
 
 export const AVATAR_BRAND_PREFIX = "brand:";
 
+/**
+ * Exactly the brands the bundled artwork covers — no letter-only placeholders.
+ * `composer` is Cursor's Composer model.
+ */
 export const AVATAR_BRAND_IDS = [
-  "grok",
   "gpt",
-  "claude",
   "gemini",
-  "deepseek",
-  "kimi",
+  "claude",
   "glm",
-  "qwen",
-  "llama",
-  "mistral",
+  "kimi",
+  "deepseek",
+  "composer",
+  "grok",
   "devin",
-  "cursor",
-  "copilot",
-  "opencode",
 ] as const;
 
 export type AvatarBrandId = (typeof AVATAR_BRAND_IDS)[number];
 
-export const AVATAR_BRAND_RINGS = ["flagship", "standard", "fast"] as const;
+export const AVATAR_BRAND_TIERS = [
+  "gold",
+  "silver",
+  "copper",
+  "cyan",
+  "diamond",
+  "crown",
+] as const;
 
-export type AvatarBrandRing = (typeof AVATAR_BRAND_RINGS)[number];
+export type AvatarBrandTier = (typeof AVATAR_BRAND_TIERS)[number];
 
 export interface AvatarBrand {
   id: AvatarBrandId;
   /** Short label shown in the picker. Brand names stay in English. */
   label: string;
-  /** Tile fill. */
-  bg: string;
-  /** Glyph / letter color. */
-  fg: string;
-  /** One-letter fallback for surfaces that cannot draw the SVG mark. */
+  /** Letter fallback for surfaces that cannot load the artwork (mobile). */
   letter: string;
+  /** Tile fill for the letter fallback. Sampled from each brand's badge face. */
+  bg: string;
+  /** Letter color for the fallback. */
+  fg: string;
 }
 
 export const AVATAR_BRANDS: readonly AvatarBrand[] = [
-  { id: "grok", label: "Grok", bg: "#0A0A0A", fg: "#F4F4F5", letter: "G" },
-  { id: "gpt", label: "GPT", bg: "#10A37F", fg: "#FFFFFF", letter: "G" },
-  { id: "claude", label: "Claude", bg: "#D97757", fg: "#FFFFFF", letter: "C" },
-  { id: "gemini", label: "Gemini", bg: "#1A73E8", fg: "#FFFFFF", letter: "G" },
-  { id: "deepseek", label: "DeepSeek", bg: "#4D6BFE", fg: "#FFFFFF", letter: "D" },
-  { id: "kimi", label: "Kimi", bg: "#1F1147", fg: "#FFFFFF", letter: "K" },
-  { id: "glm", label: "GLM", bg: "#1A56DB", fg: "#FFFFFF", letter: "Z" },
-  { id: "qwen", label: "Qwen", bg: "#6A3DE8", fg: "#FFFFFF", letter: "Q" },
-  { id: "llama", label: "Llama", bg: "#12101A", fg: "#ED9D3C", letter: "L" },
-  { id: "mistral", label: "Mistral", bg: "#FA520F", fg: "#FFFFFF", letter: "M" },
-  { id: "devin", label: "Devin", bg: "#0B1220", fg: "#5EEAD4", letter: "D" },
-  { id: "cursor", label: "Cursor", bg: "#0A0A0A", fg: "#F4F4F5", letter: "C" },
-  { id: "copilot", label: "Copilot", bg: "#0D1117", fg: "#F0F6FC", letter: "C" },
-  { id: "opencode", label: "OpenCode", bg: "#3F3F46", fg: "#E4E4E7", letter: "O" },
+  { id: "gpt", label: "GPT", letter: "G", bg: "#111111", fg: "#FFFFFF" },
+  { id: "gemini", label: "Gemini", letter: "G", bg: "#1A73E8", fg: "#FFFFFF" },
+  { id: "claude", label: "Claude", letter: "C", bg: "#D97757", fg: "#FFFFFF" },
+  { id: "glm", label: "GLM", letter: "Z", bg: "#3B6FF6", fg: "#FFFFFF" },
+  { id: "kimi", label: "Kimi", letter: "K", bg: "#111111", fg: "#FFFFFF" },
+  { id: "deepseek", label: "DeepSeek", letter: "D", bg: "#4D6BFE", fg: "#FFFFFF" },
+  { id: "composer", label: "Composer", letter: "C", bg: "#111111", fg: "#FFFFFF" },
+  { id: "grok", label: "Grok", letter: "G", bg: "#0A0A0A", fg: "#F4F4F5" },
+  { id: "devin", label: "Devin", letter: "D", bg: "#0E7490", fg: "#FFFFFF" },
 ];
 
 export const AVATAR_BRAND_BY_ID: Record<AvatarBrandId, AvatarBrand> =
@@ -72,30 +76,38 @@ export const AVATAR_BRAND_BY_ID: Record<AvatarBrandId, AvatarBrand> =
   >;
 
 /**
- * Halo colors. Flagship is the cyan ring from the motivating design;
- * the other two grades sit next to it as cooler / warmer companions
- * rather than a traffic-light.
+ * Capability-tier colors, sampled from the badge frames themselves. Used only
+ * where the artwork cannot load: the mobile letter fallback draws this color
+ * as the ring border, and the picker swatch previews the tier.
  */
-export const AVATAR_BRAND_RING_COLOR: Record<AvatarBrandRing, string> = {
-  flagship: "#22D3EE",
-  standard: "#A78BFA",
-  fast: "#34D399",
+export const AVATAR_BRAND_TIER_COLOR: Record<AvatarBrandTier, string> = {
+  gold: "#D7A414",
+  silver: "#B9C0CA",
+  copper: "#C7793B",
+  cyan: "#10BDC1",
+  diamond: "#4D9DFF",
+  crown: "#E0AD23",
 };
 
 export interface ParsedAvatarBrand {
   id: AvatarBrandId;
-  ring: AvatarBrandRing | null;
+  tier: AvatarBrandTier | null;
 }
 
-const BRAND_ID_SET = new Set<string>(AVATAR_BRAND_IDS);
-const RING_SET = new Set<string>(AVATAR_BRAND_RINGS);
+const BRAND_ID_BY_VALUE: Record<string, true> = Object.fromEntries(
+  AVATAR_BRAND_IDS.map((id) => [id, true as const]),
+);
+
+const TIER_BY_VALUE: Record<string, true> = Object.fromEntries(
+  AVATAR_BRAND_TIERS.map((tier) => [tier, true as const]),
+);
 
 export function isAvatarBrandId(value: string): value is AvatarBrandId {
-  return BRAND_ID_SET.has(value);
+  return value in BRAND_ID_BY_VALUE;
 }
 
-export function isAvatarBrandRing(value: string): value is AvatarBrandRing {
-  return RING_SET.has(value);
+export function isAvatarBrandTier(value: string): value is AvatarBrandTier {
+  return value in TIER_BY_VALUE;
 }
 
 export function parseAvatarBrand(
@@ -108,16 +120,26 @@ export function parseAvatarBrand(
 
   const slash = rest.indexOf("/");
   const id = slash === -1 ? rest : rest.slice(0, slash);
-  const ringRaw = slash === -1 ? "" : rest.slice(slash + 1);
+  const tierRaw = slash === -1 ? "" : rest.slice(slash + 1);
   if (!isAvatarBrandId(id)) return null;
-  if (ringRaw && !isAvatarBrandRing(ringRaw)) return null;
+  if (tierRaw && !isAvatarBrandTier(tierRaw)) return null;
 
-  return { id, ring: ringRaw ? (ringRaw as AvatarBrandRing) : null };
+  return { id, tier: tierRaw ? (tierRaw as AvatarBrandTier) : null };
 }
 
 export function formatAvatarBrand(
   id: AvatarBrandId,
-  ring: AvatarBrandRing | null = null,
+  tier: AvatarBrandTier | null = null,
 ): string {
-  return ring ? `${AVATAR_BRAND_PREFIX}${id}/${ring}` : `${AVATAR_BRAND_PREFIX}${id}`;
+  return tier
+    ? `${AVATAR_BRAND_PREFIX}${id}/${tier}`
+    : `${AVATAR_BRAND_PREFIX}${id}`;
+}
+
+/** Bundled artwork filename for a brand face, tiered or frameless. */
+export function avatarBrandAssetName(
+  id: AvatarBrandId,
+  tier: AvatarBrandTier | null,
+): string {
+  return tier ? `${id}-${tier}.webp` : `${id}.webp`;
 }

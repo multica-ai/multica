@@ -10,11 +10,13 @@
     "more_emojis": "Plus d'emojis…",
     "emoji_loading": "Chargement…",
     "brand_label": "Marque",
-    "ring_label": "Anneau de capacité",
-    "ring_none": "Aucun",
-    "ring_flagship": "Phare",
-    "ring_standard": "Standard",
-    "ring_fast": "Rapide"
+    "tier_label": "Niveau de capacité",
+    "tier_gold": "Or",
+    "tier_silver": "Argent",
+    "tier_copper": "Cuivre",
+    "tier_cyan": "Cyan",
+    "tier_diamond": "Diamant",
+    "tier_crown": "Couronne"
   },
   "avatar_crop": {
     "title": "Modifier l'avatar",

@@ -105,12 +105,12 @@ describe("AvatarUploadControl", () => {
     expect(screen.getByRole("button", { name: "Claude" })).toBeInTheDocument();
   });
 
-  it("emits a brand marker, keeping a previously chosen ring", async () => {
+  it("emits a brand marker, keeping a previously chosen tier", async () => {
     const onEmojiSelected = vi.fn();
     renderWithI18n(
       <AvatarUploadControl
         variant="agent"
-        value="brand:gpt/flagship"
+        value="brand:gpt/gold"
         onUploaded={vi.fn()}
         onEmojiSelected={onEmojiSelected}
       />,
@@ -120,11 +120,11 @@ describe("AvatarUploadControl", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Claude" }));
 
     await waitFor(() =>
-      expect(onEmojiSelected).toHaveBeenCalledWith("brand:claude/flagship"),
+      expect(onEmojiSelected).toHaveBeenCalledWith("brand:claude/gold"),
     );
   });
 
-  it("applies a capability ring only after a brand is chosen", async () => {
+  it("applies a capability tier only after a brand is chosen", async () => {
     const onEmojiSelected = vi.fn();
     renderWithI18n(
       <AvatarUploadControl
@@ -136,10 +136,10 @@ describe("AvatarUploadControl", () => {
     );
 
     openPicker();
-    expect(screen.getByRole("button", { name: "Flagship" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Gold" })).toBeDisabled();
   });
 
-  it("writes the ring onto the current brand marker", async () => {
+  it("writes the tier onto the current brand marker", async () => {
     const onEmojiSelected = vi.fn();
     renderWithI18n(
       <AvatarUploadControl
@@ -151,10 +151,10 @@ describe("AvatarUploadControl", () => {
     );
 
     openPicker();
-    fireEvent.click(await screen.findByRole("button", { name: "Flagship" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Gold" }));
 
     await waitFor(() =>
-      expect(onEmojiSelected).toHaveBeenCalledWith("brand:kimi/flagship"),
+      expect(onEmojiSelected).toHaveBeenCalledWith("brand:kimi/gold"),
     );
   });
 
