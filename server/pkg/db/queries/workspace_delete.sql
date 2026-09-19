@@ -438,6 +438,10 @@ deleted_channel_outbound_messages AS (
     DELETE FROM channel_outbound_message
     WHERE installation_id IN (SELECT id FROM ws_channel_installations)
 ),
+deleted_channel_reply_deliveries AS (
+    DELETE FROM channel_reply_delivery
+    WHERE installation_id IN (SELECT id FROM ws_channel_installations)
+),
 deleted_channel_chat_contexts AS (
     DELETE FROM channel_chat_context_generation
     WHERE chat_session_id IN (SELECT id FROM ws_sessions)
