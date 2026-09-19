@@ -2653,6 +2653,10 @@ func (h *Handler) SetAgentSkills(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := qtx.TouchAgentForSkillChange(r.Context(), agent.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update agent timestamp")
+		return
+	}
 
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit")
@@ -2702,6 +2706,10 @@ func (h *Handler) AddAgentSkills(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := qtx.TouchAgentForSkillChange(r.Context(), agent.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update agent timestamp")
+		return
+	}
 
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit")
@@ -2732,7 +2740,15 @@ func (h *Handler) SetAgentSkillEnabled(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "enabled is required")
 		return
 	}
-	rows, err := h.Queries.SetAgentSkillEnabled(r.Context(), db.SetAgentSkillEnabledParams{
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	qtx := h.Queries.WithTx(tx)
+	rows, err := qtx.SetAgentSkillEnabled(r.Context(), db.SetAgentSkillEnabledParams{
 		AgentID: agent.ID,
 		SkillID: skillID,
 		Enabled: *req.Enabled,
@@ -2743,6 +2759,14 @@ func (h *Handler) SetAgentSkillEnabled(w http.ResponseWriter, r *http.Request) {
 	}
 	if rows == 0 {
 		writeError(w, http.StatusNotFound, "agent skill not found")
+		return
+	}
+	if err := qtx.TouchAgentForSkillChange(r.Context(), agent.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update agent timestamp")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit")
 		return
 	}
 
@@ -2762,11 +2786,27 @@ func (h *Handler) RemoveAgentSkill(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.Queries.RemoveAgentSkill(r.Context(), db.RemoveAgentSkillParams{
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	qtx := h.Queries.WithTx(tx)
+	if err := qtx.RemoveAgentSkill(r.Context(), db.RemoveAgentSkillParams{
 		AgentID: agent.ID,
 		SkillID: skillID,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to remove agent skill")
+		return
+	}
+	if err := qtx.TouchAgentForSkillChange(r.Context(), agent.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update agent timestamp")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit")
 		return
 	}
 	h.writeUpdatedAgentSkills(w, r, agent)
