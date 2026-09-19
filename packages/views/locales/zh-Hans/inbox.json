@@ -42,6 +42,7 @@
     "archived_empty": "暂无已归档通知",
     "unarchive_tooltip": "取消归档",
     "actions_aria": "通知操作",
+    "action_required": "需要处理",
     "load_more": "加载更多",
     "loading_more": "加载中...",
     "retry": "重试"

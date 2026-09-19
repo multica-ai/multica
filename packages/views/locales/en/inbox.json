@@ -44,6 +44,7 @@
     "archived_empty": "No archived notifications",
     "unarchive_tooltip": "Unarchive",
     "actions_aria": "Notification actions",
+    "action_required": "Action required",
     "load_more": "Load more",
     "loading_more": "Loading…",
     "retry": "Retry"
