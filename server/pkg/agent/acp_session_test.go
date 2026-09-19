@@ -53,6 +53,35 @@ func TestIsACPResumeRejected(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "grok session/load on a session file that is gone",
+			// Grok stores each session under its working directory and answers
+			// session/load with -32603 and this frame once that file was
+			// removed. The frame names no session-shaped noun, so both wording
+			// predicates miss it and the daemon replays the dead id forever
+			// (the GH #8116 failure family).
+			err: &acpRPCError{
+				Method:  "session/load",
+				Code:    -32603,
+				Message: "Path not found.",
+				Data:    `{"code":"FS_NOT_FOUND","detail":"No such file or directory (os error 2)"}`,
+			},
+			want: true,
+		},
+		{
+			name: "unrelated filesystem error during resume is not a rejection",
+			// The negative that keeps acpSessionPathMissingRe narrow: the
+			// generic OS detail alone can come from a missing config file or
+			// cwd, which a fresh session does not cure, so it must not retire
+			// the pointer.
+			err: &acpRPCError{
+				Method:  "session/load",
+				Code:    -32603,
+				Message: "Failed to read config",
+				Data:    `{"detail":"no such file or directory"}`,
+			},
+			want: false,
+		},
+		{
 			name: "unreachable mcp server whose data echoes the session id",
 			// The false positive the adjacency window exists to stop. Both
 			// halves are present in the string — "Invalid params" and a
