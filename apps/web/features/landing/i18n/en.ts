@@ -386,6 +386,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           "Select text in a comment, add a note, and your reply carries that quote.",
           "Select text in an Issue description to start a new thread from it.",
           "Back and Forward on the desktop app list the pages you visited, so you can jump straight to one.",
+          "Choose whether closing Multica Desktop hides it to the system tray, minimizes it to the taskbar, or quits the app.",
           "A new Issue view opens on your latest work, and keeps the sorting you saved.",
           "The transcript now says when a tool's output was not kept in full.",
           "Run history shows who cancelled a task.",

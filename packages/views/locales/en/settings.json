@@ -1179,7 +1179,18 @@
   },
   "desktop": {
     "tabs": {
+      "desktop": "Desktop",
       "updates": "Updates"
+    },
+    "app": {
+      "title": "Desktop",
+      "description": "Choose how the desktop app behaves on this device.",
+      "close_behavior_title": "When closing the main window",
+      "close_behavior_description": "Keep active runs and connections alive by sending Multica to the tray or taskbar, or quit the app completely.",
+      "close_behavior_tray": "Minimize to system tray",
+      "close_behavior_taskbar": "Minimize to taskbar",
+      "close_behavior_quit": "Quit application",
+      "close_behavior_save_failed": "Failed to save desktop settings"
     },
     "updates": {
       "title": "Updates",

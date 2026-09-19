@@ -917,7 +917,18 @@
   },
   "desktop": {
     "tabs": {
+      "desktop": "데스크톱",
       "updates": "업데이트"
+    },
+    "app": {
+      "title": "데스크톱",
+      "description": "이 기기에서 데스크톱 앱이 동작하는 방식을 설정합니다.",
+      "close_behavior_title": "기본 창을 닫을 때",
+      "close_behavior_description": "Multica를 시스템 트레이나 작업 표시줄로 보내 실행 중인 작업과 연결을 유지하거나 앱을 완전히 종료합니다.",
+      "close_behavior_tray": "시스템 트레이로 최소화",
+      "close_behavior_taskbar": "작업 표시줄로 최소화",
+      "close_behavior_quit": "앱 종료",
+      "close_behavior_save_failed": "데스크톱 설정을 저장하지 못했습니다"
     },
     "updates": {
       "title": "업데이트",

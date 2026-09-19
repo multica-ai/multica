@@ -1176,7 +1176,18 @@
   },
   "desktop": {
     "tabs": {
+      "desktop": "桌面端",
       "updates": "更新"
+    },
+    "app": {
+      "title": "桌面端",
+      "description": "设置桌面端在此设备上的行为。",
+      "close_behavior_title": "关闭主窗口时",
+      "close_behavior_description": "将 Multica 收起到系统托盘或任务栏可让进行中的运行和连接继续；也可以直接退出应用。",
+      "close_behavior_tray": "最小化到系统托盘",
+      "close_behavior_taskbar": "最小化到任务栏",
+      "close_behavior_quit": "退出应用",
+      "close_behavior_save_failed": "保存桌面端设置失败"
     },
     "updates": {
       "title": "更新",

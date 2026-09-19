@@ -1176,7 +1176,18 @@
   },
   "desktop": {
     "tabs": {
+      "desktop": "デスクトップ",
       "updates": "アップデート"
+    },
+    "app": {
+      "title": "デスクトップ",
+      "description": "このデバイスでのデスクトップアプリの動作を設定します。",
+      "close_behavior_title": "メインウィンドウを閉じるとき",
+      "close_behavior_description": "Multica をシステムトレイまたはタスクバーに格納して実行中の処理と接続を維持するか、アプリを完全に終了します。",
+      "close_behavior_tray": "システムトレイに最小化",
+      "close_behavior_taskbar": "タスクバーに最小化",
+      "close_behavior_quit": "アプリを終了",
+      "close_behavior_save_failed": "デスクトップ設定を保存できませんでした"
     },
     "updates": {
       "title": "アップデート",
