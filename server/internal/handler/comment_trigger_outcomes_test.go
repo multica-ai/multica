@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -130,9 +132,15 @@ func TestCommentTriggerOutboxDoesNotRepeatACompletedDeliveredTarget(t *testing.T
 		t.Fatalf("first trigger: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
-		UPDATE agent_task_queue
-		SET status='completed', completed_at=now(), delivered_comment_ids=ARRAY[$3::uuid]
-		WHERE issue_id=$1 AND agent_id=$2
+		WITH delivered_task AS (
+			UPDATE agent_task_queue
+			SET status='completed', completed_at=now(), delivered_comment_ids=ARRAY[$3::uuid]
+			WHERE issue_id=$1 AND agent_id=$2
+			RETURNING id, agent_id
+		)
+		INSERT INTO comment_trigger_delivery_receipt (comment_id, comment_trigger_revision, agent_id, task_id)
+		SELECT source.id, source.trigger_revision, delivered_task.agent_id, delivered_task.id
+		FROM delivered_task JOIN comment source ON source.id=$3::uuid
 	`, issueID, agentID, uuidToString(commentID)); err != nil {
 		t.Fatalf("complete delivered task: %v", err)
 	}
@@ -157,6 +165,82 @@ func TestCommentTriggerOutboxDoesNotRepeatACompletedDeliveredTarget(t *testing.T
 	}
 	if taskCount != 1 {
 		t.Fatalf("tasks after post-trigger crash replay = %d, want 1", taskCount)
+	}
+}
+
+func TestPresentationOnlyCommentRevisionDoesNotInvalidateTriggerReceipt(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "Stable Trigger Revision Target", nil)
+	issueID := createCommentTriggerPreviewIssue(t, "stable trigger revision", "", "")
+	commentID := dbid.NewV7()
+	created, err := testHandler.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ID: commentID, IssueID: parseUUID(issueID), WorkspaceID: parseUUID(testWorkspaceID),
+		AuthorType: "member", AuthorID: parseUUID(testUserID),
+		Content: fmt.Sprintf("[@Target](mention://agent/%s) keep this instruction stable", agentID), Type: "comment",
+	})
+	if err != nil {
+		t.Fatalf("create stable trigger comment: %v", err)
+	}
+	if err := testHandler.Queries.CreateCommentTriggerOutbox(ctx, db.CreateCommentTriggerOutboxParams{
+		CommentID: commentID, WorkspaceID: parseUUID(testWorkspaceID), IssueID: parseUUID(issueID),
+		ActorType: "member", ActorID: parseUUID(testUserID), OriginatorUserID: parseOptionalUUID(testUserID),
+		SuppressAgentIds: []pgtype.UUID{}, CommentTriggerRevision: created.TriggerRevision,
+	}); err != nil {
+		t.Fatalf("create stable trigger outbox: %v", err)
+	}
+	if _, err := testHandler.processCommentTriggerOutbox(ctx, commentID); err != nil {
+		t.Fatalf("deliver stable trigger: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		WITH delivered_task AS (
+			UPDATE agent_task_queue
+			SET status='completed', completed_at=now(), delivered_comment_ids=ARRAY[$3::uuid]
+			WHERE issue_id=$1 AND agent_id=$2
+			RETURNING id, agent_id
+		)
+		INSERT INTO comment_trigger_delivery_receipt (comment_id, comment_trigger_revision, agent_id, task_id)
+		SELECT source.id, source.trigger_revision, delivered_task.agent_id, delivered_task.id
+		FROM delivered_task JOIN comment source ON source.id=$3::uuid
+	`, issueID, agentID, uuidToString(commentID)); err != nil {
+		t.Fatalf("record stable trigger delivery: %v", err)
+	}
+	if _, err := testHandler.Queries.AddReaction(ctx, db.AddReactionParams{
+		CommentID: commentID, WorkspaceID: parseUUID(testWorkspaceID),
+		ActorType: "member", ActorID: parseUUID(testUserID), Emoji: "👍",
+	}); err != nil {
+		t.Fatalf("add presentation-only reaction: %v", err)
+	}
+	var revision, triggerRevision int64
+	if err := testPool.QueryRow(ctx, `
+		SELECT revision, trigger_revision FROM comment WHERE id=$1
+	`, uuidToString(commentID)).Scan(&revision, &triggerRevision); err != nil {
+		t.Fatalf("load split revisions: %v", err)
+	}
+	if revision != 2 || triggerRevision != 1 {
+		t.Fatalf("split revisions = ui:%d trigger:%d, want 2/1", revision, triggerRevision)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE comment_trigger_outbox
+		SET state='processing', attempts=1, lease_owner='presentation-replay',
+		    lease_expires_at=now()-interval '1 second'
+		WHERE comment_id=$1
+	`, uuidToString(commentID)); err != nil {
+		t.Fatalf("stage presentation replay: %v", err)
+	}
+	if result, err := testHandler.DeliverCommentTriggerOutbox(ctx, 10); err != nil || result.Done != 1 || result.Failed != 0 {
+		t.Fatalf("presentation replay = %+v, %v", result, err)
+	}
+	var taskCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2
+	`, issueID, agentID).Scan(&taskCount); err != nil {
+		t.Fatalf("count stable trigger tasks: %v", err)
+	}
+	if taskCount != 1 {
+		t.Fatalf("presentation-only change created %d tasks, want 1 total", taskCount)
 	}
 }
 
@@ -215,9 +299,15 @@ func TestCommentTriggerOutboxRetriesOnlyTheMissingTarget(t *testing.T) {
 		t.Fatalf("read missing target task: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
-		UPDATE agent_task_queue
-		SET status='completed', completed_at=now(), delivered_comment_ids=ARRAY[$2::uuid]
-		WHERE id=$1
+		WITH delivered_task AS (
+			UPDATE agent_task_queue
+			SET status='completed', completed_at=now(), delivered_comment_ids=ARRAY[$2::uuid]
+			WHERE id=$1
+			RETURNING id, agent_id
+		)
+		INSERT INTO comment_trigger_delivery_receipt (comment_id, comment_trigger_revision, agent_id, task_id)
+		SELECT source.id, source.trigger_revision, delivered_task.agent_id, delivered_task.id
+		FROM delivered_task JOIN comment source ON source.id=$2::uuid
 	`, deliveredTaskID, uuidToString(commentID)); err != nil {
 		t.Fatalf("complete delivered target: %v", err)
 	}
@@ -291,6 +381,278 @@ func TestCommentTriggerOutboxExpiresTheLastCrashedLeaseToDead(t *testing.T) {
 	}
 	if state != "dead" || lastError == "" {
 		t.Fatalf("exhausted outbox = (%q, %q), want visible dead letter", state, lastError)
+	}
+}
+
+func TestEditedCommentRevisionTriggersExactlyOnce(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	for _, priorState := range []string{"completed", "running"} {
+		t.Run(priorState, func(t *testing.T) {
+			ctx := context.Background()
+			agentID := createHandlerTestAgent(t, "Edited Revision "+priorState, nil)
+			issueID := createCommentTriggerPreviewIssue(t, "edited revision "+priorState, "", "")
+			commentID := dbid.NewV7()
+			contentV1 := fmt.Sprintf("[@Target](mention://agent/%s) version one", agentID)
+			created, err := testHandler.Queries.CreateComment(ctx, db.CreateCommentParams{
+				ID: commentID, IssueID: parseUUID(issueID), WorkspaceID: parseUUID(testWorkspaceID),
+				AuthorType: "member", AuthorID: parseUUID(testUserID), Content: contentV1, Type: "comment",
+			})
+			if err != nil {
+				t.Fatalf("create version one comment: %v", err)
+			}
+			if err := testHandler.Queries.CreateCommentTriggerOutbox(ctx, db.CreateCommentTriggerOutboxParams{
+				CommentID: commentID, WorkspaceID: parseUUID(testWorkspaceID), IssueID: parseUUID(issueID),
+				ActorType: "member", ActorID: parseUUID(testUserID), OriginatorUserID: parseOptionalUUID(testUserID),
+				SuppressAgentIds: []pgtype.UUID{}, CommentTriggerRevision: created.TriggerRevision,
+			}); err != nil {
+				t.Fatalf("create version one outbox: %v", err)
+			}
+			if _, err := testHandler.processCommentTriggerOutbox(ctx, commentID); err != nil {
+				t.Fatalf("deliver version one: %v", err)
+			}
+
+			var firstTaskID string
+			if err := testPool.QueryRow(ctx, `
+				SELECT id::text FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2
+			`, issueID, agentID).Scan(&firstTaskID); err != nil {
+				t.Fatalf("load version one task: %v", err)
+			}
+			switch priorState {
+			case "completed":
+				if _, err := testPool.Exec(ctx, `
+					WITH delivered_task AS (
+						UPDATE agent_task_queue
+						SET status='completed', dispatched_at=now()-interval '2 seconds',
+						    started_at=now()-interval '1 second', completed_at=now(),
+						    delivered_comment_ids=ARRAY[$2::uuid]
+						WHERE id=$1
+						RETURNING id, agent_id
+					)
+					INSERT INTO comment_trigger_delivery_receipt (comment_id, comment_trigger_revision, agent_id, task_id)
+					SELECT source.id, source.trigger_revision, delivered_task.agent_id, delivered_task.id
+					FROM delivered_task JOIN comment source ON source.id=$2::uuid
+				`, firstTaskID, uuidToString(commentID)); err != nil {
+					t.Fatalf("complete version one task: %v", err)
+				}
+			case "running":
+				if _, err := testPool.Exec(ctx, `
+					UPDATE agent_task_queue
+					SET status='running', dispatched_at=now(), started_at=now()
+					WHERE id=$1
+				`, firstTaskID); err != nil {
+					t.Fatalf("run version one task: %v", err)
+				}
+			}
+
+			contentV2 := fmt.Sprintf("[@Target](mention://agent/%s) version two", agentID)
+			update := func() *httptest.ResponseRecorder {
+				w := httptest.NewRecorder()
+				req := withURLParam(newRequest(http.MethodPut, "/api/comments/"+uuidToString(commentID), map[string]any{
+					"content": contentV2, "expected_revision": int64(1),
+				}), "commentId", uuidToString(commentID))
+				testHandler.UpdateComment(w, req)
+				return w
+			}
+			if w := update(); w.Code != http.StatusOK {
+				t.Fatalf("edit to version two = %d: %s", w.Code, w.Body.String())
+			}
+			if w := update(); w.Code != http.StatusConflict {
+				t.Fatalf("network replay = %d, want 409: %s", w.Code, w.Body.String())
+			}
+
+			var total, active, cancelled int
+			if err := testPool.QueryRow(ctx, `
+				SELECT count(*),
+				       count(*) FILTER (WHERE status IN ('queued','dispatched','running','waiting_local_directory','deferred')),
+				       count(*) FILTER (WHERE status='cancelled')
+				FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2
+			`, issueID, agentID).Scan(&total, &active, &cancelled); err != nil {
+				t.Fatalf("count revision tasks: %v", err)
+			}
+			if total != 2 || active != 1 {
+				t.Fatalf("revision tasks = total:%d active:%d, want 2/1", total, active)
+			}
+			if priorState == "running" && cancelled != 1 {
+				t.Fatalf("running version one cancellations = %d, want 1", cancelled)
+			}
+			var outboxRevision int64
+			var outboxState string
+			if err := testPool.QueryRow(ctx, `
+				SELECT comment_trigger_revision, state FROM comment_trigger_outbox WHERE comment_id=$1
+			`, uuidToString(commentID)).Scan(&outboxRevision, &outboxState); err != nil {
+				t.Fatalf("load version two outbox: %v", err)
+			}
+			if outboxRevision != 2 || outboxState != "done" {
+				t.Fatalf("version two outbox = revision:%d state:%s, want 2/done", outboxRevision, outboxState)
+			}
+		})
+	}
+}
+
+func TestCommentTriggerOutboxFencePreventsExpiredConsumerTakeover(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "Lease Fence Target", nil)
+	issueID := createCommentTriggerPreviewIssue(t, "lease fence", "", "")
+	commentID := dbid.NewV7()
+	created, err := testHandler.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ID: commentID, IssueID: parseUUID(issueID), WorkspaceID: parseUUID(testWorkspaceID),
+		AuthorType: "member", AuthorID: parseUUID(testUserID),
+		Content: fmt.Sprintf("[@Target](mention://agent/%s) fenced", agentID), Type: "comment",
+	})
+	if err != nil {
+		t.Fatalf("create fenced comment: %v", err)
+	}
+	if err := testHandler.Queries.CreateCommentTriggerOutbox(ctx, db.CreateCommentTriggerOutboxParams{
+		CommentID: commentID, WorkspaceID: parseUUID(testWorkspaceID), IssueID: parseUUID(issueID),
+		ActorType: "member", ActorID: parseUUID(testUserID), OriginatorUserID: parseOptionalUUID(testUserID),
+		SuppressAgentIds: []pgtype.UUID{}, CommentTriggerRevision: created.TriggerRevision,
+	}); err != nil {
+		t.Fatalf("create fenced outbox: %v", err)
+	}
+
+	functionName := "test_pause_comment_trigger_insert"
+	triggerName := "test_pause_comment_trigger_insert"
+	if _, err := testPool.Exec(ctx, fmt.Sprintf(`
+		CREATE OR REPLACE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN
+			PERFORM pg_sleep(4);
+			RETURN NEW;
+		END $$;
+		DROP TRIGGER IF EXISTS %s ON agent_task_queue;
+		CREATE TRIGGER %s BEFORE INSERT ON agent_task_queue
+		FOR EACH ROW WHEN (NEW.trigger_comment_id = '%s'::uuid)
+		EXECUTE FUNCTION %s();
+	`, functionName, triggerName, triggerName, uuidToString(commentID), functionName)); err != nil {
+		t.Fatalf("install pause trigger: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON agent_task_queue", triggerName))
+		_, _ = testPool.Exec(context.Background(), fmt.Sprintf("DROP FUNCTION IF EXISTS %s()", functionName))
+	})
+
+	ownerA := "lease-owner-a"
+	row, err := testHandler.Queries.ClaimCommentTriggerOutboxByComment(ctx, db.ClaimCommentTriggerOutboxByCommentParams{
+		LeaseOwner: pgtype.Text{String: ownerA, Valid: true}, LeaseSeconds: 2,
+		MaxAttempts: commentTriggerOutboxMaxAttempts, CommentID: commentID,
+	})
+	if err != nil {
+		t.Fatalf("claim consumer A: %v", err)
+	}
+	aDone := make(chan error, 1)
+	go func() {
+		_, deliverErr := testHandler.deliverClaimedCommentTriggerOutbox(ctx, row, ownerA)
+		aDone <- deliverErr
+	}()
+
+	// A is sleeping inside the task INSERT after its coverage check while its
+	// transaction still owns the outbox row lock. Wait beyond the nominal lease,
+	// then prove B cannot take over using the expired timestamp.
+	time.Sleep(2500 * time.Millisecond)
+	bCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_, bErr := testHandler.Queries.ClaimCommentTriggerOutboxByComment(bCtx, db.ClaimCommentTriggerOutboxByCommentParams{
+		LeaseOwner: pgtype.Text{String: "lease-owner-b", Valid: true}, LeaseSeconds: 60,
+		MaxAttempts: commentTriggerOutboxMaxAttempts, CommentID: commentID,
+	})
+	if !errors.Is(bErr, pgx.ErrNoRows) {
+		t.Fatalf("consumer B claim after A commit = %v, want pgx.ErrNoRows", bErr)
+	}
+	if err := <-aDone; err != nil {
+		t.Fatalf("consumer A delivery: %v", err)
+	}
+	var taskCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2
+	`, issueID, agentID).Scan(&taskCount); err != nil {
+		t.Fatalf("count fenced tasks: %v", err)
+	}
+	if taskCount != 1 {
+		t.Fatalf("fenced task count = %d, want 1", taskCount)
+	}
+}
+
+type lockTimeoutTxStarter struct {
+	base txStarter
+}
+
+func (s lockTimeoutTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.base.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '100ms'`); err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, err
+	}
+	return tx, nil
+}
+
+func TestLifeOSRouteQueryFailureKeepsCommentTriggerRetryable(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	enableLifeOSLocalModeForTest(t)
+	ceoID := createHandlerTestAgent(t, localLifeOSCEOAgentName, nil)
+	issueID := createCommentTriggerPreviewIssue(t, "LifeOS retryable route query", "member", testUserID)
+	commentID := dbid.NewV7()
+	created, err := testHandler.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ID: commentID, IssueID: parseUUID(issueID), WorkspaceID: parseUUID(testWorkspaceID),
+		AuthorType: "member", AuthorID: parseUUID(testUserID), Content: "请继续处理", Type: "comment",
+	})
+	if err != nil {
+		t.Fatalf("create LifeOS route comment: %v", err)
+	}
+	if err := testHandler.Queries.CreateCommentTriggerOutbox(ctx, db.CreateCommentTriggerOutboxParams{
+		CommentID: commentID, WorkspaceID: parseUUID(testWorkspaceID), IssueID: parseUUID(issueID),
+		ActorType: "member", ActorID: parseUUID(testUserID), OriginatorUserID: parseOptionalUUID(testUserID),
+		SuppressAgentIds: []pgtype.UUID{}, CommentTriggerRevision: created.TriggerRevision,
+	}); err != nil {
+		t.Fatalf("create LifeOS route outbox: %v", err)
+	}
+
+	blocker, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin route blocker: %v", err)
+	}
+	if _, err := blocker.Exec(ctx, `LOCK TABLE agent_task_queue IN ACCESS EXCLUSIVE MODE`); err != nil {
+		_ = blocker.Rollback(ctx)
+		t.Fatalf("lock task queue: %v", err)
+	}
+	faulting := *testHandler
+	faulting.TxStarter = lockTimeoutTxStarter{base: testHandler.TxStarter}
+	if _, err := faulting.processCommentTriggerOutbox(ctx, commentID); err == nil {
+		_ = blocker.Rollback(ctx)
+		t.Fatal("route query failure was swallowed")
+	}
+	if err := blocker.Rollback(ctx); err != nil {
+		t.Fatalf("release route blocker: %v", err)
+	}
+
+	var state string
+	if err := testPool.QueryRow(ctx, `
+		SELECT state FROM comment_trigger_outbox WHERE comment_id=$1
+	`, uuidToString(commentID)).Scan(&state); err != nil {
+		t.Fatalf("read retryable route outbox: %v", err)
+	}
+	if state != "pending" {
+		t.Fatalf("route failure outbox state = %s, want pending", state)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE comment_trigger_outbox SET next_attempt_at=now() WHERE comment_id=$1
+	`, uuidToString(commentID)); err != nil {
+		t.Fatalf("make route retry due: %v", err)
+	}
+	if _, err := testHandler.processCommentTriggerOutbox(ctx, commentID); err != nil {
+		t.Fatalf("recover route delivery: %v", err)
+	}
+	if got := countQueuedCommentTriggerTasks(t, issueID, ceoID); got != 1 {
+		t.Fatalf("recovered AI 星耀 tasks = %d, want 1", got)
 	}
 }
 

@@ -88,6 +88,53 @@ type TaskService struct {
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
 	analyticsContextOrder []string
+
+	// transactionBound suppresses enqueue broadcasts/wakeups until the caller's
+	// transaction commits. comment-trigger delivery uses this to keep the outbox
+	// lease/version fence, coverage check, and task write in one transaction
+	// without exposing an uncommitted task to clients or daemons.
+	transactionBound    bool
+	transactionEnqueued []db.AgentTaskQueue
+}
+
+// WithTransactionQueries returns a request-scoped TaskService backed by qtx.
+// It deliberately shares immutable collaborators but not mutex/atomic state;
+// copying a live TaskService would copy synchronization primitives after use.
+// Fresh task effects are retained for the caller to publish after commit via
+// TransactionEnqueuedTasks.
+func (s *TaskService) WithTransactionQueries(qtx *db.Queries) *TaskService {
+	return &TaskService{
+		Queries:              qtx,
+		TxStarter:            s.TxStarter,
+		Hub:                  s.Hub,
+		Bus:                  s.Bus,
+		Analytics:            s.Analytics,
+		Metrics:              s.Metrics,
+		Wakeup:               s.Wakeup,
+		Entitlements:         s.Entitlements,
+		SourceContextStorage: s.SourceContextStorage,
+		FeatureFlags:         s.FeatureFlags,
+		EmptyClaim:           s.EmptyClaim,
+		ReclaimCheck:         s.ReclaimCheck,
+		Composio:             s.Composio,
+		QuickActions:         s.QuickActions,
+		transactionBound:     true,
+	}
+}
+
+// TransactionEnqueuedTasks returns fresh task rows created through a
+// transaction-bound service. The owning caller publishes them only after the
+// database commit succeeds.
+func (s *TaskService) TransactionEnqueuedTasks() []db.AgentTaskQueue {
+	return append([]db.AgentTaskQueue(nil), s.transactionEnqueued...)
+}
+
+func (s *TaskService) retainTransactionEnqueue(task db.AgentTaskQueue) bool {
+	if !s.transactionBound {
+		return false
+	}
+	s.transactionEnqueued = append(s.transactionEnqueued, task)
+	return true
 }
 
 type SourceContextObjectStore interface {
@@ -1390,7 +1437,13 @@ func (s *TaskService) insertIssueTaskWithCommentPlan(ctx context.Context, issue 
 		"agent_id", util.UUIDToString(issue.AssigneeID),
 		"force_fresh_session", forceFreshSession,
 	)
+	// Scheduled tasks and explicitly silent inserts keep their original event
+	// semantics even when the service is transaction-bound. Only an immediate
+	// task that would normally publish is retained for post-commit delivery.
 	if fireAt.Valid || !publish {
+		return task, nil
+	}
+	if s.retainTransactionEnqueue(task) {
 		return task, nil
 	}
 	// Order matters: broadcast first, notify daemon second. notifyTaskAvailable
@@ -1526,6 +1579,9 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	}
 
 	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "is_leader_task", isLeader)
+	if s.retainTransactionEnqueue(task) {
+		return task, nil
+	}
 	// See EnqueueTaskForIssue for ordering rationale.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
@@ -3858,6 +3914,12 @@ func (s *TaskService) FinalizeTaskClaim(
 		})
 		if err != nil {
 			return fmt.Errorf("set delivered comment ids: %w", err)
+		}
+		if err := qtx.RecordCommentTriggerDeliveryReceipts(ctx, db.RecordCommentTriggerDeliveryReceiptsParams{
+			DeliveredCommentIds: deliveredCommentIDs,
+			TaskID:              task.ID,
+		}); err != nil {
+			return fmt.Errorf("record comment trigger delivery receipts: %w", err)
 		}
 		receipt = persisted
 		return nil

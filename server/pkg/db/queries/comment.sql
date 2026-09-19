@@ -403,6 +403,14 @@ WHERE id = $1;
 SELECT * FROM comment
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: GetCommentInWorkspaceForTriggerDelivery :one
+-- Serializes a body edit with delivery of the exact outbox revision. The
+-- outbox row is locked first everywhere, so edit and delivery share one lock
+-- order and cannot deadlock by inversion.
+SELECT * FROM comment
+WHERE id = @id AND workspace_id = @workspace_id
+FOR UPDATE;
+
 -- name: GetThreadRoot :one
 -- Returns the thread-root comment for @comment_id by walking parent_id up to
 -- the row whose parent_id IS NULL. For a root comment it returns that comment
@@ -529,6 +537,7 @@ WITH locked_issue AS MATERIALIZED (
         content = $2,
         source_task_id = sqlc.narg(source_task_id)::uuid,
         revision = comment.revision + CASE WHEN target.did_change THEN 1 ELSE 0 END,
+        trigger_revision = comment.trigger_revision + CASE WHEN target.did_change THEN 1 ELSE 0 END,
         updated_at = CASE WHEN target.did_change THEN now() ELSE comment.updated_at END
     FROM target
     WHERE comment.id = target.id
@@ -537,7 +546,7 @@ WITH locked_issue AS MATERIALIZED (
               comment.parent_id, comment.workspace_id, comment.resolved_at,
               comment.resolved_by_type, comment.resolved_by_id, comment.source_task_id,
               comment.quick_action_id, comment.via_plugin_id, comment.revision,
-              comment.deleted_at, target.did_change
+              comment.trigger_revision, comment.deleted_at, target.did_change
 ), touched_issue AS (
     UPDATE issue
     SET revision = issue.revision + 1,
@@ -555,7 +564,7 @@ SELECT updated_comment.id, updated_comment.issue_id, updated_comment.author_type
        updated_comment.resolved_by_type, updated_comment.resolved_by_id,
        updated_comment.source_task_id, updated_comment.quick_action_id,
        updated_comment.via_plugin_id, updated_comment.revision,
-       updated_comment.deleted_at,
+       updated_comment.trigger_revision, updated_comment.deleted_at,
        COALESCE((SELECT revision FROM touched_issue), 0)::bigint AS issue_revision
 FROM updated_comment;
 

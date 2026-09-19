@@ -193,7 +193,7 @@ func TestAutopilotCommentAuthority_KeysOnRunOriginator(t *testing.T) {
 	// do — with the originator resolved from the speaking run — and reports whether
 	// the private target fires.
 	mentionTriggersTarget := func(fx autopilotDelegationFixture, originatorUserID string) bool {
-		triggers, _ := testHandler.computeCommentAgentTriggers(
+		triggers, _, _ := testHandler.computeCommentAgentTriggers(
 			ctx, fx.Issue, fx.Comment.Content, nil, "agent", fx.LeaderAgentID,
 			commentTriggerComputeOptions{
 				ExcludeTriggerCommentID: fx.Comment.ID,

@@ -826,6 +826,19 @@ WHERE id = @task_id
   )
 RETURNING delivered_comment_ids;
 
+-- name: RecordCommentTriggerDeliveryReceipts :exec
+-- SetTaskDeliveredCommentIDs proves these exact comments were embedded in the
+-- claim response. Persist their current revisions in the same transaction so
+-- an edited comment is a new input even when its UUID is unchanged.
+INSERT INTO comment_trigger_delivery_receipt (
+    comment_id, comment_trigger_revision, agent_id, task_id
+)
+SELECT delivered.id, delivered.trigger_revision, task.agent_id, task.id
+FROM agent_task_queue AS task
+JOIN comment AS delivered ON delivered.id = ANY(@delivered_comment_ids::uuid[])
+WHERE task.id = @task_id
+ON CONFLICT (comment_id, comment_trigger_revision, agent_id) DO NOTHING;
+
 -- name: SetTaskIssueSnapshot :exec
 -- Record the comparable issue state this claim's payload was built from, so the
 -- NEXT run this agent takes on the issue can be told whether the issue itself
@@ -2037,9 +2050,9 @@ RETURNING *;
 -- receipt. This prevents cancelled/failed pre-delivery tasks from swallowing
 -- the recovery obligation while still avoiding a loop after real delivery.
 SELECT count(*) > 0 AS covered
-FROM agent_task_queue
-WHERE issue_id = @issue_id
-  AND agent_id = @agent_id
+FROM agent_task_queue AS task
+WHERE task.issue_id = @issue_id
+  AND task.agent_id = @agent_id
   AND (
       @comment_id::uuid = ANY(delivered_comment_ids)
       OR (
@@ -2054,29 +2067,36 @@ WHERE issue_id = @issue_id
 
 -- name: HasTaskCoveringCommentTrigger :one
 -- Durable idempotency for comment-trigger outbox replay. A terminal task only
--- covers a comment when the daemon receipt proves the comment reached the
--- prompt. A live task covers its persisted trigger/coalesced plan so a crash
--- after enqueue but before the outbox receipt cannot create a second run.
-SELECT count(*) > 0 AS covered
-FROM agent_task_queue
-WHERE issue_id = @issue_id
-  AND agent_id = @agent_id
-  AND (
-      (
-          @comment_id::uuid = ANY(delivered_comment_ids)
-          AND completed_at >= (
-              SELECT updated_at FROM comment WHERE id = @comment_id::uuid
+-- covers the exact comment revision when the daemon receipt proves that version
+-- reached the prompt. A live task covers its persisted trigger/coalesced plan
+-- because body edits cancel those tasks before publishing a newer outbox
+-- revision. UUID-only receipts are deliberately insufficient after an edit.
+SELECT EXISTS (
+    SELECT 1
+    FROM (
+        SELECT 1
+        FROM comment_trigger_delivery_receipt AS receipt
+        JOIN comment AS source
+          ON source.id = receipt.comment_id
+         AND source.trigger_revision = receipt.comment_trigger_revision
+        WHERE receipt.comment_id = @comment_id::uuid
+          AND receipt.agent_id = @agent_id::uuid
+          AND source.issue_id = @issue_id::uuid
+        UNION ALL
+        SELECT 1
+        FROM agent_task_queue AS task
+        WHERE task.issue_id = @issue_id
+          AND task.agent_id = @agent_id
+          AND (
+              task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+              OR (task.status = 'deferred' AND task.context->>'channel_issue_media_pending' = 'true')
           )
-      )
-      OR (
-          status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
-          OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
-      )
-      AND (
-          trigger_comment_id = @comment_id::uuid
-          OR @comment_id::uuid = ANY(coalesced_comment_ids)
-      )
-  );
+          AND (
+              task.trigger_comment_id = @comment_id::uuid
+              OR @comment_id::uuid = ANY(task.coalesced_comment_ids)
+          )
+    ) AS exact_receipt_or_live_task
+) AS covered;
 
 -- name: CountDelegatedFailureRecoveryTasks :one
 -- Counts dedicated coordinator wakeups for one failed delegated task. Merged

@@ -88,11 +88,12 @@ type CommentTriggerOutboxDeliveryResult struct {
 func (h *Handler) retryCommentTriggerOutbox(ctx context.Context, row db.CommentTriggerOutbox, owner string, deliveryErr error) {
 	message := fmt.Sprintf("%T", deliveryErr)
 	_, err := h.Queries.RetryCommentTriggerOutbox(ctx, db.RetryCommentTriggerOutboxParams{
-		MaxAttempts:   commentTriggerOutboxMaxAttempts,
-		NextAttemptAt: pgtype.Timestamptz{Time: time.Now().UTC().Add(15 * time.Second), Valid: true},
-		LastError:     pgtype.Text{String: message, Valid: true},
-		CommentID:     row.CommentID,
-		LeaseOwner:    pgtype.Text{String: owner, Valid: true},
+		MaxAttempts:            commentTriggerOutboxMaxAttempts,
+		NextAttemptAt:          pgtype.Timestamptz{Time: time.Now().UTC().Add(15 * time.Second), Valid: true},
+		LastError:              pgtype.Text{String: message, Valid: true},
+		CommentID:              row.CommentID,
+		CommentTriggerRevision: row.CommentTriggerRevision,
+		LeaseOwner:             pgtype.Text{String: owner, Valid: true},
 	})
 	if err != nil {
 		slog.Warn("comment trigger outbox retry update failed", "comment_id", uuidToString(row.CommentID), "error", err)
@@ -100,25 +101,59 @@ func (h *Handler) retryCommentTriggerOutbox(ctx context.Context, row db.CommentT
 }
 
 func (h *Handler) deliverClaimedCommentTriggerOutbox(ctx context.Context, row db.CommentTriggerOutbox, owner string) ([]CommentTriggerOutcome, error) {
-	comment, err := h.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
-		ID: row.CommentID, WorkspaceID: row.WorkspaceID,
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+
+	// Revalidate ownership and the exact input generation under a row lock.
+	// The lock stays held through routing, coverage checks, and task writes, so
+	// a lease takeover cannot interleave after a stale consumer's pre-check.
+	locked, err := qtx.LockCommentTriggerOutboxForDelivery(ctx, db.LockCommentTriggerOutboxForDeliveryParams{
+		CommentID:              row.CommentID,
+		CommentTriggerRevision: row.CommentTriggerRevision,
+		LeaseOwner:             pgtype.Text{String: owner, Valid: true},
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		_, markErr := h.Queries.MarkCommentTriggerOutboxDone(ctx, db.MarkCommentTriggerOutboxDoneParams{
-			CommentID: row.CommentID, LeaseOwner: pgtype.Text{String: owner, Valid: true},
-		})
-		return nil, markErr
+		return nil, errors.New("comment trigger outbox lease or revision was lost")
 	}
 	if err != nil {
 		return nil, err
 	}
-	if comment.DeletedAt.Valid {
-		_, err = h.Queries.MarkCommentTriggerOutboxDone(ctx, db.MarkCommentTriggerOutboxDoneParams{
-			CommentID: row.CommentID, LeaseOwner: pgtype.Text{String: owner, Valid: true},
+	row = locked
+
+	comment, err := qtx.GetCommentInWorkspaceForTriggerDelivery(ctx, db.GetCommentInWorkspaceForTriggerDeliveryParams{
+		ID: row.CommentID, WorkspaceID: row.WorkspaceID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		_, markErr := qtx.MarkCommentTriggerOutboxDone(ctx, db.MarkCommentTriggerOutboxDoneParams{
+			CommentID: row.CommentID, CommentTriggerRevision: row.CommentTriggerRevision,
+			LeaseOwner: pgtype.Text{String: owner, Valid: true},
 		})
+		if markErr != nil {
+			return nil, markErr
+		}
+		return nil, tx.Commit(ctx)
+	}
+	if err != nil {
 		return nil, err
 	}
-	issue, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+	if comment.TriggerRevision != row.CommentTriggerRevision {
+		return nil, errors.New("comment trigger outbox input revision changed")
+	}
+	if comment.DeletedAt.Valid {
+		_, err = qtx.MarkCommentTriggerOutboxDone(ctx, db.MarkCommentTriggerOutboxDoneParams{
+			CommentID: row.CommentID, CommentTriggerRevision: row.CommentTriggerRevision,
+			LeaseOwner: pgtype.Text{String: owner, Valid: true},
+		})
+		if err != nil {
+			return nil, err
+		}
+		return nil, tx.Commit(ctx)
+	}
+	issue, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
 		ID: row.IssueID, WorkspaceID: row.WorkspaceID,
 	})
 	if err != nil {
@@ -126,7 +161,7 @@ func (h *Handler) deliverClaimedCommentTriggerOutbox(ctx context.Context, row db
 	}
 	var parent *db.Comment
 	if comment.ParentID.Valid {
-		loaded, getErr := h.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
+		loaded, getErr := qtx.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
 			ID: comment.ParentID, WorkspaceID: row.WorkspaceID,
 		})
 		if getErr == nil {
@@ -139,15 +174,20 @@ func (h *Handler) deliverClaimedCommentTriggerOutbox(ctx context.Context, row db
 	if row.OriginatorUserID.Valid {
 		originator = uuidToString(row.OriginatorUserID)
 	}
-	outcomes, deliveryErr := h.triggerTasksForCommentDelivery(
+	txTaskService := h.TaskService.WithTransactionQueries(qtx)
+	txHandler := *h
+	txHandler.Queries = qtx
+	txHandler.TaskService = txTaskService
+	outcomes, blockedTargets, deliveryErr := txHandler.resolveCommentTriggerDelivery(
 		ctx, issue, comment, parent, row.ActorType, uuidToString(row.ActorID),
 		originator, row.SuppressAgentIds,
 	)
 	if deliveryErr != nil {
 		return outcomes, deliveryErr
 	}
-	updated, err := h.Queries.MarkCommentTriggerOutboxDone(ctx, db.MarkCommentTriggerOutboxDoneParams{
-		CommentID: row.CommentID, LeaseOwner: pgtype.Text{String: owner, Valid: true},
+	updated, err := qtx.MarkCommentTriggerOutboxDone(ctx, db.MarkCommentTriggerOutboxDoneParams{
+		CommentID: row.CommentID, CommentTriggerRevision: row.CommentTriggerRevision,
+		LeaseOwner: pgtype.Text{String: owner, Valid: true},
 	})
 	if err != nil {
 		return outcomes, err
@@ -155,6 +195,14 @@ func (h *Handler) deliverClaimedCommentTriggerOutbox(ctx context.Context, row db
 	if updated != 1 {
 		return outcomes, errors.New("comment trigger outbox lease was lost")
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return outcomes, err
+	}
+	for _, task := range txTaskService.TransactionEnqueuedTasks() {
+		h.TaskService.BroadcastTaskQueued(ctx, task)
+		h.TaskService.NotifyTaskEnqueued(ctx, task)
+	}
+	h.noteBlockedRuntimeTargets(ctx, issue, blockedTargets)
 	return outcomes, nil
 }
 

@@ -1649,7 +1649,11 @@ func (h *Handler) PreviewCommentTriggers(w http.ResponseWriter, r *http.Request)
 
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
 	opts.OriginatorUserID = h.invokeOriginatorFromRequest(r, actorType, actorID)
-	triggers, targets := h.computeCommentAgentTriggers(r.Context(), issue, content, parentComment, actorType, actorID, opts)
+	triggers, targets, routeErr := h.computeCommentAgentTriggers(r.Context(), issue, content, parentComment, actorType, actorID, opts)
+	if routeErr != nil {
+		writeError(w, http.StatusInternalServerError, "failed to preview comment routing")
+		return
+	}
 	resp := CommentTriggerPreviewResponse{
 		Agents:  make([]CommentTriggerAgentResponse, 0, len(triggers)),
 		Blocked: commentBlockedTargetOutcomes(targets),
@@ -1976,7 +1980,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 				CommentID: created.ID, WorkspaceID: issue.WorkspaceID, IssueID: issue.ID,
 				ActorType: authorType, ActorID: parseUUID(authorID),
 				OriginatorUserID: parseOptionalUUID(originatorUserID),
-				SuppressAgentIds: suppressAgentIDs,
+				SuppressAgentIds: suppressAgentIDs, CommentTriggerRevision: created.TriggerRevision,
 			})
 		}
 		if err == nil && replayedComment == nil && requestKey.Valid {
@@ -2153,21 +2157,36 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 }
 
 func (h *Handler) triggerTasksForCommentDelivery(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs []pgtype.UUID) ([]CommentTriggerOutcome, error) {
+	outcomes, targets, err := h.resolveCommentTriggerDelivery(
+		ctx, issue, comment, parentComment, actorType, actorID,
+		originatorUserID, suppressAgentIDs,
+	)
+	h.noteBlockedRuntimeTargets(ctx, issue, targets)
+	return outcomes, err
+}
+
+// resolveCommentTriggerDelivery contains only database work. The durable
+// outbox path runs it inside the same transaction as the lease/version fence
+// and publishes runtime-unusable notices only after commit; otherwise a rolled
+// back delivery could emit a comment event for a row that never became visible.
+func (h *Handler) resolveCommentTriggerDelivery(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs []pgtype.UUID) ([]CommentTriggerOutcome, []commentMentionTarget, error) {
 	if isNoteComment(comment.Content) {
-		return nil, nil
+		return nil, nil, nil
 	}
-	triggers, targets := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
+	triggers, targets, routeErr := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 		ExcludeTriggerCommentID: comment.ID,
 		OriginatorUserID:        originatorUserID,
 	})
+	if routeErr != nil {
+		return nil, nil, routeErr
+	}
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
-	h.noteBlockedRuntimeTargets(ctx, issue, targets)
 	enqueued := h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
 	outcomes := commentTriggerOutcomes(targets, enqueued)
 	if err := commentTriggerDeliveryError(outcomes, enqueued); err != nil {
-		return outcomes, err
+		return outcomes, targets, err
 	}
-	return outcomes, nil
+	return outcomes, targets, nil
 }
 
 func commentTriggerDeliveryError(outcomes []CommentTriggerOutcome, enqueued map[string]commentEnqueueResult) error {
@@ -2845,7 +2864,7 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 // @squad mention (MUL-4525 §2). Targets come only from the explicit-mention path
 // — the implicit routing fallbacks (assignee, thread parent, conversation) were
 // never named by the user, so a no-route there is not a silent no-op.
-func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, actorType, actorID string, opts commentTriggerComputeOptions) ([]commentAgentTrigger, []commentMentionTarget) {
+func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, actorType, actorID string, opts commentTriggerComputeOptions) ([]commentAgentTrigger, []commentMentionTarget, error) {
 	// A persisted comment determines its thread; previews use the parent.
 	// A new top-level preview has no thread yet and cannot merge with a queue.
 	opts.ThreadCommentID = opts.ExcludeTriggerCommentID
@@ -2854,15 +2873,17 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	}
 
 	if isNoteComment(content) {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// LifeOS local mode is deliberately a two-person interaction contract:
 	// every chairman comment goes through AI 星耀, independent of assignment,
 	// status, reply ancestry, or mention markup. Judge and other agents remain
 	// workflow implementation details rather than competing inboxes.
-	if trigger, ok := h.routeLifeOSChairmanToCEO(ctx, issue, actorType, actorID, opts); ok {
-		return []commentAgentTrigger{trigger}, nil
+	if trigger, ok, err := h.routeLifeOSChairmanToCEO(ctx, issue, actorType, actorID, opts); err != nil {
+		return nil, nil, err
+	} else if ok {
+		return []commentAgentTrigger{trigger}, nil, nil
 	}
 
 	// Autopilot delegation authority (MUL-4857) is applied by the gate via
@@ -2883,13 +2904,14 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	// `all` is neither "agent" nor "squad", so it is skipped inside
 	// resolveMentionedAgentCommentTriggers and never enqueues a run of its own.
 	if hasAgentOrSquadMention(mentions) {
-		return h.resolveMentionedAgentCommentTriggers(ctx, issue, mentions, actorType, actorID, opts)
+		triggers, targets := h.resolveMentionedAgentCommentTriggers(ctx, issue, mentions, actorType, actorID, opts)
+		return triggers, targets, nil
 	}
 	if util.HasMentionAll(mentions) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if hasMemberMention(mentions) {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	if actorType != "member" {
@@ -2906,42 +2928,42 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 		if issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" {
 			if trigger, ok := h.routeAssignedSquadLeaderFallback(ctx, issue, actorType, actorID, opts); ok {
 				trigger.NonLeaderAgentReply = actorType == "agent" && actorID != uuidToString(trigger.Agent.ID)
-				return []commentAgentTrigger{trigger}, nil
+				return []commentAgentTrigger{trigger}, nil, nil
 			}
 		}
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// A deleted parent no longer speaks for its agent author (#8296).
 	if parentComment != nil && parentComment.AuthorType == "agent" && !parentComment.DeletedAt.Valid {
 		trigger, ok := h.routeReplyToParentAuthor(ctx, issue, parentComment, actorType, actorID, opts)
 		if !ok {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return []commentAgentTrigger{trigger}, nil
+		return []commentAgentTrigger{trigger}, nil, nil
 	}
 
 	if parentComment != nil {
 		triggers, handled := h.routeThreadRootOwners(ctx, issue, parentComment, actorID, opts)
 		if handled {
 			if len(triggers) == 0 {
-				return nil, nil
+				return nil, nil, nil
 			}
-			return triggers, nil
+			return triggers, nil, nil
 		}
 		// A plain member-to-member reply must not start the issue assignee just
 		// because the thread has no agent owner. Explicit mentions and existing
 		// conversation owners were already resolved above. The same holds for a
 		// reply under a deleted comment: it is still a reply, not a new request.
 		if parentComment.AuthorType == "member" || parentComment.DeletedAt.Valid {
-			return nil, nil
+			return nil, nil, nil
 		}
 	}
 
 	if trigger, ok := h.routeAssigneeFallback(ctx, issue, actorType, actorID, opts); ok {
-		return []commentAgentTrigger{trigger}, nil
+		return []commentAgentTrigger{trigger}, nil, nil
 	}
-	return nil, nil
+	return nil, nil, nil
 }
 
 func (h *Handler) routeLifeOSChairmanToCEO(
@@ -2950,13 +2972,16 @@ func (h *Handler) routeLifeOSChairmanToCEO(
 	actorType string,
 	actorID string,
 	opts commentTriggerComputeOptions,
-) (commentAgentTrigger, bool) {
+) (commentAgentTrigger, bool, error) {
 	if !h.cfg.LocalMode || actorType != "member" || actorID == "" {
-		return commentAgentTrigger{}, false
+		return commentAgentTrigger{}, false, nil
 	}
-	agent, ok := h.localLifeOSCEOForChairman(ctx, issue.WorkspaceID, actorID)
+	agent, ok, err := h.localLifeOSCEOForChairman(ctx, issue.WorkspaceID, actorID)
+	if err != nil {
+		return commentAgentTrigger{}, false, err
+	}
 	if !ok {
-		return commentAgentTrigger{}, false
+		return commentAgentTrigger{}, false, nil
 	}
 	if !h.canInvokeAgent(
 		ctx,
@@ -2966,17 +2991,17 @@ func (h *Handler) routeLifeOSChairmanToCEO(
 		opts.OriginatorUserID,
 		uuidToString(issue.WorkspaceID),
 	) {
-		return commentAgentTrigger{}, false
+		return commentAgentTrigger{}, false, nil
 	}
 	hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, agent.ID, opts)
 	if err != nil {
-		return commentAgentTrigger{}, false
+		return commentAgentTrigger{}, false, err
 	}
 	return commentAgentTrigger{
 		Agent:          agent,
 		Source:         commentTriggerSourceLifeOSChairman,
 		AlreadyPending: hasPending,
-	}, true
+	}, true, nil
 }
 
 func hasAgentOrSquadMention(mentions []util.Mention) bool {
@@ -3610,6 +3635,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	// NOTE: See CreateComment — Markdown is sanitized at render/edit time, not here.
 
 	oldContent := existing.Content
+	bodyChanged := oldContent != req.Content
 	// Preserve the existing authority lineage by default — this path is taken only
 	// for an UNCHANGED edit (no re-trigger). When the content changes below, the
 	// lineage is re-derived from the EDIT action itself (MUL-4857), never carried
@@ -3617,7 +3643,8 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	sourceTaskID := existing.SourceTaskID
 	var triggerIssue *db.Issue
 	var cancelled []db.AgentTaskQueue
-	if oldContent != req.Content {
+	editOriginatorUserID := ""
+	if bodyChanged {
 		issue, err := h.Queries.GetIssue(r.Context(), existing.IssueID)
 		if err != nil {
 			slog.Warn("load issue for edit post-processing failed", "issue_id", uuidToString(existing.IssueID), "error", err)
@@ -3640,17 +3667,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		} else {
 			sourceTaskID = pgtype.UUID{}
 		}
-		// Legacy clients keep the existing cancel-before-update behavior. Strict
-		// revision writes defer cancellation until the conditional UPDATE wins,
-		// so a race that returns 409 cannot mutate the task queue.
-		if !strictContentEdit {
-			cancelled, err = h.TaskService.CancelTasksByTriggerComment(r.Context(), existing.ID)
-			if err != nil {
-				slog.Warn("cancel tasks for edited comment failed", "comment_id", uuidToString(existing.ID), "error", err)
-				writeError(w, http.StatusInternalServerError, "failed to prepare comment edit")
-				return
-			}
-		}
+		editOriginatorUserID = h.invokeOriginatorFromRequest(r, actorType, actorID)
 	}
 
 	updateParams := db.UpdateCommentParams{
@@ -3666,13 +3683,13 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	var comment db.Comment
 	var issueRevision int64
-	transactionalEdit := replaceAttachments || (oldContent != req.Content && strictContentEdit)
+	transactionalEdit := replaceAttachments || bodyChanged
 	if transactionalEdit {
-		// Strict body edits, attachment-set edits, and cancellation of tasks built
-		// from the old body are one database outcome. UpdateComment takes the row
-		// lock before the attachment replacement, so two modern editors cannot
-		// interleave their CAS check and attachment selection. A body + attachment
-		// edit is one visible mutation and therefore bumps revision exactly once.
+		// Every body edit (legacy and revision-aware), attachment-set edit, task
+		// cancellation, and replacement outbox generation is one database outcome.
+		// The outbox row is locked first, matching delivery's lock order; then
+		// UpdateComment takes the comment lock. No consumer can route an old body
+		// between cancellation and publishing the new revision.
 		tx, beginErr := h.TxStarter.Begin(r.Context())
 		if beginErr != nil {
 			writeError(w, http.StatusInternalServerError, "failed to prepare comment edit")
@@ -3680,17 +3697,33 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		}
 		defer tx.Rollback(r.Context())
 		qtx := h.Queries.WithTx(tx)
+		if bodyChanged {
+			_, lockErr := qtx.LockCommentTriggerOutboxForEdit(r.Context(), existing.ID)
+			if lockErr != nil && !errors.Is(lockErr, pgx.ErrNoRows) {
+				err = lockErr
+			}
+		}
 		var updated db.UpdateCommentRow
-		updated, err = qtx.UpdateComment(r.Context(), updateParams)
+		if err == nil {
+			updated, err = qtx.UpdateComment(r.Context(), updateParams)
+		}
 		if err == nil {
 			comment = updated.Comment()
 			issueRevision = updated.IssueRevision
 		}
-		if err == nil && oldContent != req.Content && strictContentEdit {
+		if err == nil && bodyChanged {
 			cancelled, err = qtx.CancelAgentTasksByTriggerComment(r.Context(), existing.ID)
 			if err == nil {
 				err = service.SettleDeliveredDelegatedFailureRecoveries(r.Context(), qtx, cancelled...)
 			}
+		}
+		if err == nil && bodyChanged {
+			err = qtx.CreateCommentTriggerOutbox(r.Context(), db.CreateCommentTriggerOutboxParams{
+				CommentID: comment.ID, WorkspaceID: existing.WorkspaceID, IssueID: existing.IssueID,
+				ActorType: actorType, ActorID: parseUUID(actorID),
+				OriginatorUserID: parseOptionalUUID(editOriginatorUserID),
+				SuppressAgentIds: suppressAgentIDs, CommentTriggerRevision: comment.TriggerRevision,
+			})
 		}
 		if err == nil && replaceAttachments {
 			var changed int64
@@ -3699,7 +3732,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 				IssueID:       existing.IssueID,
 				AttachmentIds: attachmentIDs,
 			})
-			if err == nil && changed > 0 && oldContent == req.Content {
+			if err == nil && changed > 0 && !bodyChanged {
 				comment, err = qtx.BumpCommentRevision(r.Context(), db.BumpCommentRevisionParams{
 					ID:          comment.ID,
 					WorkspaceID: existing.WorkspaceID,
@@ -3722,11 +3755,6 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		slog.Warn("update comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
-		if triggerIssue != nil && !strictContentEdit {
-			// Cancellation committed but the edit did not. Restore the complete
-			// original batch, including the still-valid unchanged comment.
-			h.retriggerCancelledTaskSurvivors(r.Context(), *triggerIssue, cancelled, pgtype.UUID{})
-		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			current, reloadErr := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{ID: commentUUID, WorkspaceID: wsUUID})
 			if errors.Is(reloadErr, pgx.ErrNoRows) || (reloadErr == nil && current.DeletedAt.Valid) {
@@ -3747,20 +3775,18 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	retriggerEditedComment := func() []CommentTriggerOutcome {
-		if oldContent == comment.Content {
+		if !bodyChanged {
 			return nil
 		}
 		issue := *triggerIssue
-		var parentComment *db.Comment
-		if existing.ParentID.Valid {
-			parent, err := h.Queries.GetComment(r.Context(), existing.ParentID)
-			if err == nil {
-				parentComment = &parent
-			}
-		}
-
 		h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, existing.ID)
-		return h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), suppressAgentIDs)
+		outcomes, processErr := h.processCommentTriggerOutbox(r.Context(), comment.ID)
+		if processErr != nil {
+			slog.Warn("edited comment trigger outbox delivery failed",
+				append(logger.RequestAttrs(r), "error", processErr, "comment_id", uuidToString(comment.ID))...)
+			return nil
+		}
+		return outcomes
 	}
 
 	// Fetch reactions and attachments for the updated comment.
@@ -4161,10 +4187,15 @@ func (h *Handler) retriggerCancelledTaskSurvivors(ctx context.Context, issue db.
 		if actorType != "member" {
 			originatorUserID = uuidToString(h.TaskService.ResolveOriginatorFromTriggerComment(ctx, issue.WorkspaceID, comment.ID))
 		}
-		triggers, _ := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
+		triggers, _, routeErr := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 			ExcludeTriggerCommentID: comment.ID,
 			OriginatorUserID:        originatorUserID,
 		})
+		if routeErr != nil {
+			slog.Warn("retrigger cancelled comment batch: route failed",
+				"issue_id", uuidToString(issue.ID), "comment_id", uuidToString(comment.ID), "error", routeErr)
+			continue
+		}
 		targets := targetsByComment[uuidToString(comment.ID)]
 		scoped := make([]commentAgentTrigger, 0, len(targets))
 		for _, trigger := range triggers {

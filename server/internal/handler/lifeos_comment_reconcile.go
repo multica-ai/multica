@@ -81,7 +81,11 @@ func (h *Handler) ReconcileLifeOSComments(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	ceo, ok := h.localLifeOSCEOForChairman(r.Context(), workspaceID, actorID)
+	ceo, ok, lookupErr := h.localLifeOSCEOForChairman(r.Context(), workspaceID, actorID)
+	if lookupErr != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve AI 星耀")
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusConflict, "AI 星耀 is not available")
 		return
@@ -155,7 +159,7 @@ func (h *Handler) ReconcileLifeOSComments(w http.ResponseWriter, r *http.Request
 			response.Blocked++
 			continue
 		}
-		trigger, ok := h.routeLifeOSChairmanToCEO(
+		trigger, ok, routeErr := h.routeLifeOSChairmanToCEO(
 			r.Context(),
 			issue,
 			"member",
@@ -165,6 +169,10 @@ func (h *Handler) ReconcileLifeOSComments(w http.ResponseWriter, r *http.Request
 				OriginatorUserID:        actorID,
 			},
 		)
+		if routeErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to route comment to AI 星耀")
+			return
+		}
 		if !ok {
 			response.Blocked++
 			continue
@@ -227,18 +235,18 @@ func (h *Handler) localLifeOSCEOForChairman(
 	ctx context.Context,
 	workspaceID pgtype.UUID,
 	chairmanID string,
-) (db.Agent, bool) {
+) (db.Agent, bool, error) {
 	agents, err := h.Queries.ListAgents(ctx, workspaceID)
 	if err != nil {
-		return db.Agent{}, false
+		return db.Agent{}, false, err
 	}
 	for _, agent := range agents {
 		if agent.Name == localLifeOSCEOAgentName &&
 			agent.RuntimeID.Valid &&
 			agent.OwnerID.Valid &&
 			uuidToString(agent.OwnerID) == chairmanID {
-			return agent, true
+			return agent, true, nil
 		}
 	}
-	return db.Agent{}, false
+	return db.Agent{}, false, nil
 }

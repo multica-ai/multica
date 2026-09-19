@@ -5025,35 +5025,47 @@ func (q *Queries) HasRetryTaskForParent(ctx context.Context, parentTaskID pgtype
 }
 
 const hasTaskCoveringCommentTrigger = `-- name: HasTaskCoveringCommentTrigger :one
-SELECT count(*) > 0 AS covered
-FROM agent_task_queue
-WHERE issue_id = $1
-  AND agent_id = $2
-  AND (
-      $3::uuid = ANY(delivered_comment_ids)
-      OR (
-          status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
-          OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
-      )
-      AND (
-          trigger_comment_id = $3::uuid
-          OR $3::uuid = ANY(coalesced_comment_ids)
-      )
-  )
+SELECT EXISTS (
+    SELECT 1
+    FROM (
+        SELECT 1
+        FROM comment_trigger_delivery_receipt AS receipt
+        JOIN comment AS source
+          ON source.id = receipt.comment_id
+         AND source.trigger_revision = receipt.comment_trigger_revision
+        WHERE receipt.comment_id = $1::uuid
+          AND receipt.agent_id = $2::uuid
+          AND source.issue_id = $3::uuid
+        UNION ALL
+        SELECT 1
+        FROM agent_task_queue AS task
+        WHERE task.issue_id = $3
+          AND task.agent_id = $2
+          AND (
+              task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+              OR (task.status = 'deferred' AND task.context->>'channel_issue_media_pending' = 'true')
+          )
+          AND (
+              task.trigger_comment_id = $1::uuid
+              OR $1::uuid = ANY(task.coalesced_comment_ids)
+          )
+    ) AS exact_receipt_or_live_task
+) AS covered
 `
 
 type HasTaskCoveringCommentTriggerParams struct {
-	IssueID   pgtype.UUID `json:"issue_id"`
-	AgentID   pgtype.UUID `json:"agent_id"`
 	CommentID pgtype.UUID `json:"comment_id"`
+	AgentID   pgtype.UUID `json:"agent_id"`
+	IssueID   pgtype.UUID `json:"issue_id"`
 }
 
 // Durable idempotency for comment-trigger outbox replay. A terminal task only
-// covers a comment when the daemon receipt proves the comment reached the
-// prompt. A live task covers its persisted trigger/coalesced plan so a crash
-// after enqueue but before the outbox receipt cannot create a second run.
+// covers the exact comment revision when the daemon receipt proves that version
+// reached the prompt. A live task covers its persisted trigger/coalesced plan
+// because body edits cancel those tasks before publishing a newer outbox
+// revision. UUID-only receipts are deliberately insufficient after an edit.
 func (q *Queries) HasTaskCoveringCommentTrigger(ctx context.Context, arg HasTaskCoveringCommentTriggerParams) (bool, error) {
-	row := q.db.QueryRow(ctx, hasTaskCoveringCommentTrigger, arg.IssueID, arg.AgentID, arg.CommentID)
+	row := q.db.QueryRow(ctx, hasTaskCoveringCommentTrigger, arg.CommentID, arg.AgentID, arg.IssueID)
 	var covered bool
 	err := row.Scan(&covered)
 	return covered, err
@@ -5061,9 +5073,9 @@ func (q *Queries) HasTaskCoveringCommentTrigger(ctx context.Context, arg HasTask
 
 const hasTaskCoveringDelegatedFailureComment = `-- name: HasTaskCoveringDelegatedFailureComment :one
 SELECT count(*) > 0 AS covered
-FROM agent_task_queue
-WHERE issue_id = $1
-  AND agent_id = $2
+FROM agent_task_queue AS task
+WHERE task.issue_id = $1
+  AND task.agent_id = $2
   AND (
       $3::uuid = ANY(delivered_comment_ids)
       OR (
@@ -5808,7 +5820,7 @@ func (q *Queries) ListChatFinalizeDeferredExpired(ctx context.Context, arg ListC
 }
 
 const listPendingDelegatedFailureRecoveries = `-- name: ListPendingDelegatedFailureRecoveries :many
-SELECT recovery.id, recovery.issue_id, recovery.author_type, recovery.author_id, recovery.content, recovery.type, recovery.created_at, recovery.updated_at, recovery.parent_id, recovery.workspace_id, recovery.resolved_at, recovery.resolved_by_type, recovery.resolved_by_id, recovery.source_task_id, recovery.quick_action_id, recovery.via_plugin_id, recovery.revision, recovery.recovery_settled_at, recovery.deleted_at, recovery.request_key, recovery.request_payload_sha256
+SELECT recovery.id, recovery.issue_id, recovery.author_type, recovery.author_id, recovery.content, recovery.type, recovery.created_at, recovery.updated_at, recovery.parent_id, recovery.workspace_id, recovery.resolved_at, recovery.resolved_by_type, recovery.resolved_by_id, recovery.source_task_id, recovery.quick_action_id, recovery.via_plugin_id, recovery.revision, recovery.recovery_settled_at, recovery.deleted_at, recovery.request_key, recovery.request_payload_sha256, recovery.trigger_revision
 FROM comment recovery
 JOIN agent_task_queue failed ON failed.id = recovery.source_task_id
 JOIN agent_task_queue source ON source.id = failed.delegated_from_task_id
@@ -5928,6 +5940,7 @@ func (q *Queries) ListPendingDelegatedFailureRecoveries(ctx context.Context, max
 			&i.DeletedAt,
 			&i.RequestKey,
 			&i.RequestPayloadSha256,
+			&i.TriggerRevision,
 		); err != nil {
 			return nil, err
 		}
@@ -7919,6 +7932,30 @@ func (q *Queries) ReclaimStaleDispatchedTasksForRuntimes(ctx context.Context, ar
 		return nil, err
 	}
 	return items, nil
+}
+
+const recordCommentTriggerDeliveryReceipts = `-- name: RecordCommentTriggerDeliveryReceipts :exec
+INSERT INTO comment_trigger_delivery_receipt (
+    comment_id, comment_trigger_revision, agent_id, task_id
+)
+SELECT delivered.id, delivered.trigger_revision, task.agent_id, task.id
+FROM agent_task_queue AS task
+JOIN comment AS delivered ON delivered.id = ANY($1::uuid[])
+WHERE task.id = $2
+ON CONFLICT (comment_id, comment_trigger_revision, agent_id) DO NOTHING
+`
+
+type RecordCommentTriggerDeliveryReceiptsParams struct {
+	DeliveredCommentIds []pgtype.UUID `json:"delivered_comment_ids"`
+	TaskID              pgtype.UUID   `json:"task_id"`
+}
+
+// SetTaskDeliveredCommentIDs proves these exact comments were embedded in the
+// claim response. Persist their current revisions in the same transaction so
+// an edited comment is a new input even when its UUID is unchanged.
+func (q *Queries) RecordCommentTriggerDeliveryReceipts(ctx context.Context, arg RecordCommentTriggerDeliveryReceiptsParams) error {
+	_, err := q.db.Exec(ctx, recordCommentTriggerDeliveryReceipts, arg.DeliveredCommentIds, arg.TaskID)
+	return err
 }
 
 const recoverOrphanedTasksForRuntime = `-- name: RecoverOrphanedTasksForRuntime :many

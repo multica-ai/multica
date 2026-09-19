@@ -234,6 +234,10 @@ func TestWorkerReplyReconcileBoundaries(t *testing.T) {
 				}
 				if mode == "registration_failure" || mode == "completed_before_registration" {
 					h.Queries = db.New(registration)
+					h.TxStarter = &workerReplyRegistrationTxStarter{
+						delegate:     h.TxStarter,
+						registration: registration,
+					}
 				}
 				testutil.Call(t, h.CreateComment, req).Want(http.StatusCreated).JSON(&response)
 				if (mode == "registration_failure" || mode == "completed_before_registration") && registration.calls != 1 {
@@ -382,6 +386,10 @@ type workerReplyRegistrationDB struct {
 }
 
 func (d *workerReplyRegistrationDB) QueryRow(ctx context.Context, query string, args ...any) pgx.Row {
+	return d.queryRowThrough(ctx, d.DBTX, query, args...)
+}
+
+func (d *workerReplyRegistrationDB) queryRowThrough(ctx context.Context, delegate db.DBTX, query string, args ...any) pgx.Row {
 	if strings.Contains(query, "-- name: RegisterPlannedCommentForActiveTask :one") {
 		d.calls++
 		if d.before != nil {
@@ -391,5 +399,29 @@ func (d *workerReplyRegistrationDB) QueryRow(ctx context.Context, query string, 
 			return errRow{err: d.err}
 		}
 	}
-	return d.DBTX.QueryRow(ctx, query, args...)
+	return delegate.QueryRow(ctx, query, args...)
+}
+
+type workerReplyRegistrationTxStarter struct {
+	delegate interface {
+		Begin(context.Context) (pgx.Tx, error)
+	}
+	registration *workerReplyRegistrationDB
+}
+
+func (s *workerReplyRegistrationTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.delegate.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &workerReplyRegistrationTx{Tx: tx, registration: s.registration}, nil
+}
+
+type workerReplyRegistrationTx struct {
+	pgx.Tx
+	registration *workerReplyRegistrationDB
+}
+
+func (tx *workerReplyRegistrationTx) QueryRow(ctx context.Context, query string, args ...any) pgx.Row {
+	return tx.registration.queryRowThrough(ctx, tx.Tx, query, args...)
 }

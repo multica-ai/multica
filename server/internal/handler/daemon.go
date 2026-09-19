@@ -4490,10 +4490,15 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		if actorType != "member" {
 			originatorUserID = uuidToString(h.TaskService.ResolveOriginatorFromTriggerComment(ctx, issue.WorkspaceID, c.ID))
 		}
-		triggers, _ := h.computeCommentAgentTriggers(ctx, issue, c.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
+		triggers, _, routeErr := h.computeCommentAgentTriggers(ctx, issue, c.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 			ExcludeTriggerCommentID: c.ID,
 			OriginatorUserID:        originatorUserID,
 		})
+		if routeErr != nil {
+			slog.Warn("reconcile comments on completion: route failed",
+				"issue_id", uuidToString(issue.ID), "comment_id", uuidToString(c.ID), "error", routeErr)
+			continue
+		}
 		// Agent replies discovered only by timestamp must not start a new
 		// conversation. Replay explicit mentions, or a worker reply that the
 		// creation path already accepted and recorded in this run's input plan.

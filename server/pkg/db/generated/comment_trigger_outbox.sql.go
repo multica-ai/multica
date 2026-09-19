@@ -32,7 +32,7 @@ SET state = 'processing', attempts = outbox.attempts + 1,
     next_attempt_at = NULL, last_error = NULL, updated_at = now()
 FROM candidates
 WHERE outbox.comment_id = candidates.comment_id
-RETURNING outbox.comment_id, outbox.workspace_id, outbox.issue_id, outbox.actor_type, outbox.actor_id, outbox.originator_user_id, outbox.suppress_agent_ids, outbox.state, outbox.attempts, outbox.lease_owner, outbox.lease_expires_at, outbox.next_attempt_at, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.processed_at
+RETURNING outbox.comment_id, outbox.workspace_id, outbox.issue_id, outbox.actor_type, outbox.actor_id, outbox.originator_user_id, outbox.suppress_agent_ids, outbox.state, outbox.attempts, outbox.lease_owner, outbox.lease_expires_at, outbox.next_attempt_at, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.processed_at, outbox.comment_trigger_revision
 `
 
 type ClaimCommentTriggerOutboxParams struct {
@@ -73,6 +73,7 @@ func (q *Queries) ClaimCommentTriggerOutbox(ctx context.Context, arg ClaimCommen
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ProcessedAt,
+			&i.CommentTriggerRevision,
 		); err != nil {
 			return nil, err
 		}
@@ -97,7 +98,7 @@ WHERE comment_id = $3
   )
   AND (next_attempt_at IS NULL OR next_attempt_at <= now())
   AND attempts < $4
-RETURNING comment_id, workspace_id, issue_id, actor_type, actor_id, originator_user_id, suppress_agent_ids, state, attempts, lease_owner, lease_expires_at, next_attempt_at, last_error, created_at, updated_at, processed_at
+RETURNING comment_id, workspace_id, issue_id, actor_type, actor_id, originator_user_id, suppress_agent_ids, state, attempts, lease_owner, lease_expires_at, next_attempt_at, last_error, created_at, updated_at, processed_at, comment_trigger_revision
 `
 
 type ClaimCommentTriggerOutboxByCommentParams struct {
@@ -132,6 +133,7 @@ func (q *Queries) ClaimCommentTriggerOutboxByComment(ctx context.Context, arg Cl
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ProcessedAt,
+		&i.CommentTriggerRevision,
 	)
 	return i, err
 }
@@ -139,22 +141,40 @@ func (q *Queries) ClaimCommentTriggerOutboxByComment(ctx context.Context, arg Cl
 const createCommentTriggerOutbox = `-- name: CreateCommentTriggerOutbox :exec
 INSERT INTO comment_trigger_outbox (
     comment_id, workspace_id, issue_id, actor_type, actor_id,
-    originator_user_id, suppress_agent_ids
+    originator_user_id, suppress_agent_ids, comment_trigger_revision
 ) VALUES (
     $1, $2, $3, $4, $5,
-    $6, $7
+    $6, $7,
+    COALESCE(NULLIF($8::bigint, 0), (SELECT trigger_revision FROM comment WHERE id = $1))
 )
-ON CONFLICT (comment_id) DO NOTHING
+ON CONFLICT (comment_id) DO UPDATE
+SET workspace_id = EXCLUDED.workspace_id,
+    issue_id = EXCLUDED.issue_id,
+    actor_type = EXCLUDED.actor_type,
+    actor_id = EXCLUDED.actor_id,
+    originator_user_id = EXCLUDED.originator_user_id,
+    suppress_agent_ids = EXCLUDED.suppress_agent_ids,
+    comment_trigger_revision = EXCLUDED.comment_trigger_revision,
+    state = 'pending',
+    attempts = 0,
+    lease_owner = NULL,
+    lease_expires_at = NULL,
+    next_attempt_at = NULL,
+    last_error = NULL,
+    processed_at = NULL,
+    updated_at = now()
+WHERE comment_trigger_outbox.comment_trigger_revision < EXCLUDED.comment_trigger_revision
 `
 
 type CreateCommentTriggerOutboxParams struct {
-	CommentID        pgtype.UUID   `json:"comment_id"`
-	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
-	IssueID          pgtype.UUID   `json:"issue_id"`
-	ActorType        string        `json:"actor_type"`
-	ActorID          pgtype.UUID   `json:"actor_id"`
-	OriginatorUserID pgtype.UUID   `json:"originator_user_id"`
-	SuppressAgentIds []pgtype.UUID `json:"suppress_agent_ids"`
+	CommentID              pgtype.UUID   `json:"comment_id"`
+	WorkspaceID            pgtype.UUID   `json:"workspace_id"`
+	IssueID                pgtype.UUID   `json:"issue_id"`
+	ActorType              string        `json:"actor_type"`
+	ActorID                pgtype.UUID   `json:"actor_id"`
+	OriginatorUserID       pgtype.UUID   `json:"originator_user_id"`
+	SuppressAgentIds       []pgtype.UUID `json:"suppress_agent_ids"`
+	CommentTriggerRevision int64         `json:"comment_trigger_revision"`
 }
 
 func (q *Queries) CreateCommentTriggerOutbox(ctx context.Context, arg CreateCommentTriggerOutboxParams) error {
@@ -166,6 +186,7 @@ func (q *Queries) CreateCommentTriggerOutbox(ctx context.Context, arg CreateComm
 		arg.ActorID,
 		arg.OriginatorUserID,
 		arg.SuppressAgentIds,
+		arg.CommentTriggerRevision,
 	)
 	return err
 }
@@ -189,23 +210,87 @@ func (q *Queries) ExpireExhaustedCommentTriggerOutbox(ctx context.Context, maxAt
 	return result.RowsAffected(), nil
 }
 
+const lockCommentTriggerOutboxForDelivery = `-- name: LockCommentTriggerOutboxForDelivery :one
+SELECT comment_id, workspace_id, issue_id, actor_type, actor_id, originator_user_id, suppress_agent_ids, state, attempts, lease_owner, lease_expires_at, next_attempt_at, last_error, created_at, updated_at, processed_at, comment_trigger_revision
+FROM comment_trigger_outbox
+WHERE comment_id = $1
+  AND comment_trigger_revision = $2
+  AND state = 'processing'
+  AND lease_owner = $3
+  AND lease_expires_at > clock_timestamp()
+FOR UPDATE
+`
+
+type LockCommentTriggerOutboxForDeliveryParams struct {
+	CommentID              pgtype.UUID `json:"comment_id"`
+	CommentTriggerRevision int64       `json:"comment_trigger_revision"`
+	LeaseOwner             pgtype.Text `json:"lease_owner"`
+}
+
+// This is the execution fence. Holding the row lock until the routing/task
+// transaction commits prevents a second consumer from taking over between the
+// coverage check and the task write. The version and owner predicates reject a
+// stale claimant before it can create any side effect.
+func (q *Queries) LockCommentTriggerOutboxForDelivery(ctx context.Context, arg LockCommentTriggerOutboxForDeliveryParams) (CommentTriggerOutbox, error) {
+	row := q.db.QueryRow(ctx, lockCommentTriggerOutboxForDelivery, arg.CommentID, arg.CommentTriggerRevision, arg.LeaseOwner)
+	var i CommentTriggerOutbox
+	err := row.Scan(
+		&i.CommentID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.ActorType,
+		&i.ActorID,
+		&i.OriginatorUserID,
+		&i.SuppressAgentIds,
+		&i.State,
+		&i.Attempts,
+		&i.LeaseOwner,
+		&i.LeaseExpiresAt,
+		&i.NextAttemptAt,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ProcessedAt,
+		&i.CommentTriggerRevision,
+	)
+	return i, err
+}
+
+const lockCommentTriggerOutboxForEdit = `-- name: LockCommentTriggerOutboxForEdit :one
+SELECT comment_id
+FROM comment_trigger_outbox
+WHERE comment_id = $1
+FOR UPDATE
+`
+
+// Instruction edits take the outbox lock before UpdateComment takes the comment lock;
+// delivery uses the same order. A pre-outbox legacy comment returns no rows.
+func (q *Queries) LockCommentTriggerOutboxForEdit(ctx context.Context, commentID pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockCommentTriggerOutboxForEdit, commentID)
+	var comment_id pgtype.UUID
+	err := row.Scan(&comment_id)
+	return comment_id, err
+}
+
 const markCommentTriggerOutboxDone = `-- name: MarkCommentTriggerOutboxDone :execrows
 UPDATE comment_trigger_outbox
 SET state = 'done', lease_owner = NULL, lease_expires_at = NULL,
     next_attempt_at = NULL, last_error = NULL,
     processed_at = now(), updated_at = now()
 WHERE comment_id = $1
+  AND comment_trigger_revision = $2
   AND state = 'processing'
-  AND lease_owner = $2
+  AND lease_owner = $3
 `
 
 type MarkCommentTriggerOutboxDoneParams struct {
-	CommentID  pgtype.UUID `json:"comment_id"`
-	LeaseOwner pgtype.Text `json:"lease_owner"`
+	CommentID              pgtype.UUID `json:"comment_id"`
+	CommentTriggerRevision int64       `json:"comment_trigger_revision"`
+	LeaseOwner             pgtype.Text `json:"lease_owner"`
 }
 
 func (q *Queries) MarkCommentTriggerOutboxDone(ctx context.Context, arg MarkCommentTriggerOutboxDoneParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markCommentTriggerOutboxDone, arg.CommentID, arg.LeaseOwner)
+	result, err := q.db.Exec(ctx, markCommentTriggerOutboxDone, arg.CommentID, arg.CommentTriggerRevision, arg.LeaseOwner)
 	if err != nil {
 		return 0, err
 	}
@@ -216,19 +301,24 @@ const retryCommentTriggerOutbox = `-- name: RetryCommentTriggerOutbox :execrows
 UPDATE comment_trigger_outbox
 SET state = CASE WHEN attempts >= $1 THEN 'dead' ELSE 'pending' END,
     lease_owner = NULL, lease_expires_at = NULL,
-    next_attempt_at = CASE WHEN attempts >= $1 THEN NULL ELSE $2 END,
+    next_attempt_at = CASE
+        WHEN attempts >= $1 THEN NULL::timestamptz
+        ELSE $2::timestamptz
+    END,
     last_error = $3, updated_at = now()
 WHERE comment_id = $4
+  AND comment_trigger_revision = $5
   AND state = 'processing'
-  AND lease_owner = $5
+  AND lease_owner = $6
 `
 
 type RetryCommentTriggerOutboxParams struct {
-	MaxAttempts   int32              `json:"max_attempts"`
-	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
-	LastError     pgtype.Text        `json:"last_error"`
-	CommentID     pgtype.UUID        `json:"comment_id"`
-	LeaseOwner    pgtype.Text        `json:"lease_owner"`
+	MaxAttempts            int32              `json:"max_attempts"`
+	NextAttemptAt          pgtype.Timestamptz `json:"next_attempt_at"`
+	LastError              pgtype.Text        `json:"last_error"`
+	CommentID              pgtype.UUID        `json:"comment_id"`
+	CommentTriggerRevision int64              `json:"comment_trigger_revision"`
+	LeaseOwner             pgtype.Text        `json:"lease_owner"`
 }
 
 func (q *Queries) RetryCommentTriggerOutbox(ctx context.Context, arg RetryCommentTriggerOutboxParams) (int64, error) {
@@ -237,6 +327,7 @@ func (q *Queries) RetryCommentTriggerOutbox(ctx context.Context, arg RetryCommen
 		arg.NextAttemptAt,
 		arg.LastError,
 		arg.CommentID,
+		arg.CommentTriggerRevision,
 		arg.LeaseOwner,
 	)
 	if err != nil {

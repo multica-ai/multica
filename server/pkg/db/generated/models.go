@@ -579,6 +579,7 @@ type Comment struct {
 	DeletedAt            pgtype.Timestamptz `json:"deleted_at"`
 	RequestKey           pgtype.Text        `json:"request_key"`
 	RequestPayloadSha256 pgtype.Text        `json:"request_payload_sha256"`
+	TriggerRevision      int64              `json:"trigger_revision"`
 }
 
 type CommentCreateRequest struct {
@@ -602,23 +603,32 @@ type CommentReaction struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type CommentTriggerDeliveryReceipt struct {
+	CommentID              pgtype.UUID        `json:"comment_id"`
+	CommentTriggerRevision int64              `json:"comment_trigger_revision"`
+	AgentID                pgtype.UUID        `json:"agent_id"`
+	TaskID                 pgtype.UUID        `json:"task_id"`
+	DeliveredAt            pgtype.Timestamptz `json:"delivered_at"`
+}
+
 type CommentTriggerOutbox struct {
-	CommentID        pgtype.UUID        `json:"comment_id"`
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
-	IssueID          pgtype.UUID        `json:"issue_id"`
-	ActorType        string             `json:"actor_type"`
-	ActorID          pgtype.UUID        `json:"actor_id"`
-	OriginatorUserID pgtype.UUID        `json:"originator_user_id"`
-	SuppressAgentIds []pgtype.UUID      `json:"suppress_agent_ids"`
-	State            string             `json:"state"`
-	Attempts         int32              `json:"attempts"`
-	LeaseOwner       pgtype.Text        `json:"lease_owner"`
-	LeaseExpiresAt   pgtype.Timestamptz `json:"lease_expires_at"`
-	NextAttemptAt    pgtype.Timestamptz `json:"next_attempt_at"`
-	LastError        pgtype.Text        `json:"last_error"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	ProcessedAt      pgtype.Timestamptz `json:"processed_at"`
+	CommentID              pgtype.UUID        `json:"comment_id"`
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	IssueID                pgtype.UUID        `json:"issue_id"`
+	ActorType              string             `json:"actor_type"`
+	ActorID                pgtype.UUID        `json:"actor_id"`
+	OriginatorUserID       pgtype.UUID        `json:"originator_user_id"`
+	SuppressAgentIds       []pgtype.UUID      `json:"suppress_agent_ids"`
+	State                  string             `json:"state"`
+	Attempts               int32              `json:"attempts"`
+	LeaseOwner             pgtype.Text        `json:"lease_owner"`
+	LeaseExpiresAt         pgtype.Timestamptz `json:"lease_expires_at"`
+	NextAttemptAt          pgtype.Timestamptz `json:"next_attempt_at"`
+	LastError              pgtype.Text        `json:"last_error"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	ProcessedAt            pgtype.Timestamptz `json:"processed_at"`
+	CommentTriggerRevision int64              `json:"comment_trigger_revision"`
 }
 
 type ContactSalesInquiry struct {
