@@ -80,6 +80,36 @@ export function parseCurrentContextRoute(pathname: string, searchParams: URLSear
   return null;
 }
 
+/** The issue fields the chat composer shows and sends as page context. */
+export type PageIssue = Pick<Issue, "id" | "identifier" | "title">;
+
+/**
+ * The issue open on the current page (issue detail, or the issue selected in
+ * Inbox), or undefined while it loads or when no issue is open. The route id
+ * may be an identifier or a UUID; the resolved `Issue.id` is always the UUID.
+ */
+export function useCurrentPageIssue(wsId: string): Issue | undefined {
+  const { pathname, searchParams } = useNavigation();
+  const currentRoute = parseCurrentContextRoute(pathname, searchParams);
+  const { data } = useQuery({
+    ...issueDetailOptions(wsId, currentRoute?.type === "issue" ? currentRoute.id : ""),
+    enabled: currentRoute?.type === "issue",
+  });
+  return currentRoute?.type === "issue" ? data : undefined;
+}
+
+/**
+ * The issue a send will carry as page context: the open issue, unless the
+ * user removed it from the composer.
+ */
+export function resolvePageIssueContext(
+  current: PageIssue | undefined,
+  dismissedIssueId: string | null,
+): PageIssue | null {
+  if (!current || current.id === dismissedIssueId) return null;
+  return current;
+}
+
 export function useChatContextItems(wsId: string): MentionItem[] {
   const { pathname, searchParams } = useNavigation();
   const currentRoute = parseCurrentContextRoute(pathname, searchParams);
@@ -89,10 +119,7 @@ export function useChatContextItems(wsId: string): MentionItem[] {
     [recentEntries],
   );
 
-  const { data: currentIssue } = useQuery({
-    ...issueDetailOptions(wsId, currentRoute?.type === "issue" ? currentRoute.id : ""),
-    enabled: currentRoute?.type === "issue",
-  });
+  const currentIssue = useCurrentPageIssue(wsId);
 
   const { data: currentProject } = useQuery({
     ...projectDetailOptions(wsId, currentRoute?.type === "project" ? currentRoute.id : ""),

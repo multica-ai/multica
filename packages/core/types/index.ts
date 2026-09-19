@@ -163,6 +163,7 @@ export type {
   PendingChatTasksResponse,
   HasPendingChatTasksResponse,
   SendChatMessageResponse,
+  ChatPageContext,
   StartMikaOnboardingResponse,
   CancelledChatMessage,
   CancelTaskResponse,

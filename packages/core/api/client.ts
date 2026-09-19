@@ -95,6 +95,7 @@ import type {
   PendingChatTasksResponse,
   HasPendingChatTasksResponse,
   SendChatMessageResponse,
+  ChatPageContext,
   StartMikaOnboardingResponse,
   CancelTaskResponse,
   Project,
@@ -3563,13 +3564,18 @@ export class ApiClient {
     sessionId: string,
     content: string,
     attachmentIds?: string[],
+    options?: { pageContext?: ChatPageContext | null },
   ): Promise<SendChatMessageResponse> {
     const body: {
       content: string;
       attachment_ids?: string[];
+      page_context?: ChatPageContext;
     } = { content };
     if (attachmentIds && attachmentIds.length > 0) {
       body.attachment_ids = attachmentIds;
+    }
+    if (options?.pageContext) {
+      body.page_context = options.pageContext;
     }
     const raw = await this.fetch<unknown>(`/api/chat/sessions/${sessionId}/messages`, {
       method: "POST",

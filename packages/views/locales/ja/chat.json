@@ -31,7 +31,9 @@
     "change_project_context": "プロジェクトコンテキストを変更",
     "remove_project_context": "プロジェクトコンテキストを削除",
     "no_projects": "プロジェクトがまだありません",
-    "project_context_unsupported": "プロジェクトの説明は適用されません——このエージェントのデーモンのアップグレードが必要です"
+    "project_context_unsupported": "プロジェクトの説明は適用されません——このエージェントのデーモンのアップグレードが必要です",
+    "issue_context": "タスクコンテキスト",
+    "remove_issue_context": "タスクコンテキストを削除"
   },
   "queue": {
     "title_other": "キュー内のメッセージ {{count}} 件",

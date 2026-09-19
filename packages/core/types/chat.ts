@@ -186,6 +186,17 @@ export interface ChatMessagesPage {
   next_cursor?: ChatMessagesCursor | null;
 }
 
+/**
+ * The page the sender had open, sent with a chat message (request-only; the
+ * server never echoes it back). Only issue pages exist today. The server keeps
+ * it only when the issue is in the session's workspace and tells the agent
+ * which issue "this issue" refers to.
+ */
+export interface ChatPageContext {
+  type: "issue";
+  issue_id: string;
+}
+
 export interface SendChatMessageResponse {
   message_id: string;
   task_id: string;

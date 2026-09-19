@@ -3278,9 +3278,33 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				attsByMessage[mid] = append(attsByMessage[mid], a)
 			}
 		}
+		// Page context (the issue the sender had open) is re-resolved inside the
+		// session's workspace now, not trusted from send time: the issue may have
+		// been deleted or renamed since. A read failure preserves the task for
+		// redelivery, exactly like the input and attachment loads above.
+		pageNotes, pageErr := h.chatPageIssueNotes(r.Context(), unanswered, cs.WorkspaceID)
+		if pageErr != nil {
+			slog.Error("chat claim: load chat page context failed; preserving task for redelivery",
+				"task_id", uuidToString(task.ID),
+				"chat_session_id", uuidToString(cs.ID),
+				"error", pageErr)
+			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+				outcome: "error_chat_page_context",
+				status:  http.StatusInternalServerError,
+				message: "failed to load chat page context",
+			}
+		}
+		// userParts is the user's own text. The empty-input guard and the
+		// thread-name fallback below judge it, never the page notes.
+		userParts := make([]string, 0, len(unanswered))
 		for _, m := range unanswered {
 			if strings.TrimSpace(m.Content) != "" {
-				parts = append(parts, m.Content)
+				userParts = append(userParts, m.Content)
+				if note, ok := pageNotes[m.ID]; ok {
+					parts = append(parts, note+"\n\n"+m.Content)
+				} else {
+					parts = append(parts, m.Content)
+				}
 			}
 			for _, a := range attsByMessage[uuidToString(m.ID)] {
 				resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, ChatAttachmentMeta{
@@ -3298,7 +3322,8 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// same transaction as the task, so this only fires on genuinely
 		// corrupt state — cancel the just-dispatched task and reject the claim
 		// rather than run the agent with nothing to answer (MUL-4351).
-		if task.ChatInputTaskID.Valid && !resp.ChatIntro && strings.TrimSpace(resp.ChatMessage) == "" {
+		userText := strings.Join(userParts, "\n\n")
+		if task.ChatInputTaskID.Valid && !resp.ChatIntro && strings.TrimSpace(userText) == "" {
 			slog.Error("chat claim: task-owned direct task has no user input; cancelling",
 				"task_id", uuidToString(task.ID),
 				"chat_session_id", uuidToString(cs.ID),
@@ -3315,8 +3340,8 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 
-		if strings.TrimSpace(resp.ThreadName) == "" && resp.ChatMessage != "" {
-			resp.ThreadName = resp.ChatMessage
+		if strings.TrimSpace(resp.ThreadName) == "" && userText != "" {
+			resp.ThreadName = userText
 		}
 	}
 
