@@ -631,11 +631,11 @@ func TestADeliveryIsBoundedByTheBudgetItsGraceIsComputedFrom(t *testing.T) {
 // answer again.
 //
 // Splitting moved the arithmetic under outcomeGrace. Before it, a text
-// delivery waited on exactly one ack, so reserving a single DeliveryBudget for
-// "the last offer's own delivery" was the truth. After it, one logical send
-// waits for the chat's turn and then for N consecutive acks, while the grace
-// still reserves one budget — so a slow multi-piece answer outlives the grace
-// and Resolve fences a reply whose holder is still writing it.
+// delivery waited on exactly one ack, so an offer's delivery cost one ack
+// wait. After it, one logical send waits for the chat's turn and then for N
+// consecutive acks, while the grace reserves one budget per offer — so a slow
+// multi-piece answer outlives its offer's budget and Resolve fences a reply
+// whose holder is still writing it.
 //
 // The cap is applied once, around deliverRelayed, so everything inside — the
 // lock wait and all the pieces — shares the one budget the grace sets aside.

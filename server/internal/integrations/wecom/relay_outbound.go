@@ -873,18 +873,24 @@ func (r *RelayOutbound) perform(ctx context.Context, item queued) bool {
 			return false
 		}
 	}
-	// DeliveryBudget is what the publisher's outcomeGrace is computed from —
-	// "the last offer's own delivery" below — so it has to be what this
-	// delivery actually gets. It was documented as the bound and never
-	// applied: the send's only limit was ackTimeout, the constant, whatever
-	// the config said. An operator who lowered the budget shrank the grace
-	// without shortening the delivery, and a Resolve landing inside an ack
-	// wait fences a reply that is on its way.
+	// DeliveryBudget is what the publisher's outcomeGrace charges per offer
+	// (outcomeGrace, below), so it has to be what this delivery actually
+	// gets. It was documented as the bound and never applied: the send's only
+	// limit was ackTimeout, the constant, whatever the config said. An
+	// operator who lowered the budget shrank the grace without shortening the
+	// delivery, and a Resolve landing inside an ack wait fences a reply that
+	// is on its way.
+	//
+	// A budget PER OFFER and not one for the chain, because this is where the
+	// claim is taken and given back: an offer that ends provably-unsent
+	// releases the claim a few lines down, and the next offer arrives here
+	// and opens a fresh one.
 	//
 	// The default is ackTimeout, so a deployment that sets nothing sees no
 	// change. A delivery cut here ends in a context error, which
-	// unconfirmedReason reads as unknown rather than failed — correct: the
-	// frame was written and no verdict came back.
+	// unconfirmedReason reads as unknown rather than failed — correct when
+	// the cut lands after the write, and marked as certain when it lands
+	// before one (errNotAttempted, ws_sender.go).
 	dctx, cancelDelivery := context.WithTimeout(ctx, r.cfg.deliveryBudget())
 	res := r.handler.deliverRelayed(dctx, item.frame)
 	cancelDelivery()
