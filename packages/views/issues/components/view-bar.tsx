@@ -284,6 +284,9 @@ export function ViewBar({
   const { containerRef, measureRef, fitCount } = useSingleRowFit({
     count: visible.length,
     gap: 4,
+    contentKey: visible
+      .map((item) => `${item.barItemId}:${item.label}`)
+      .join("|"),
     reserve:
       reserveTier === "promoted"
         ? RESERVE_PROMOTED
