@@ -129,15 +129,56 @@ type quotedMessage struct {
 // adapter does not know contributes nothing, the same way a mixed run does.
 func (q quotedMessage) render() string {
 	if !strings.EqualFold(q.MsgType, "mixed") {
-		return q.mixedItem.render()
+		return q.mixedItem.renderQuoted()
 	}
 	var runs []string
 	for _, item := range q.Mixed.MsgItem {
-		if s := item.render(); s != "" {
+		if s := item.renderQuoted(); s != "" {
 			runs = append(runs, s)
 		}
 	}
 	return strings.Join(runs, "\n")
+}
+
+// media lists the quoted message's downloadable attachments, in the order
+// render lays their markers out, each stamped with the marker it stands for.
+//
+// FETCHING THEM IS THE WHOLE OF THE FIX. "[Image]" is all a quote of a picture
+// could be rendered as — the payload carries no sender, no message id and no
+// timestamp to say WHICH picture — so an agent reading that line cannot tell a
+// screenshot it read a minute ago from one it has never seen, and answers
+// "左下角那块看不清" about a picture it does not have. The url and aeskey on
+// the quote are the only thing that resolves it, and the callback hands them
+// over exactly the way it hands over an attachment the sender just made.
+//
+// The stamp closes the other half. Fetching the bytes puts the picture in the
+// attachment list; the marker's occurrence number is what says WHICH entry of
+// that list the quote's marker is, and without it a message carrying two
+// attachments — one quoted, one just sent — hands the agent two markers and
+// two ids with nothing joining them.
+func (q quotedMessage) media() []InboundMedia {
+	var out []InboundMedia
+	if strings.EqualFold(q.MsgType, "mixed") {
+		for _, item := range q.Mixed.MsgItem {
+			out = append(out, item.media()...)
+		}
+	} else {
+		out = q.mixedItem.media()
+	}
+	// Counted PER MARKER, not over the whole list: "[Image: unavailable]" and
+	// "[File: unavailable]" are different strings, so the second picture in a
+	// quote that also carried a document is still that marker's first
+	// occurrence. Counting them together would send the binder looking for a
+	// second "[Image: unavailable]" that is not there, and leave the picture
+	// unnamed.
+	seen := make(map[string]int, len(out))
+	for i := range out {
+		marker := quotedMediaPlaceholder(out[i].Kind)
+		out[i].InlinePlaceholder = marker
+		out[i].InlineIndex = seen[marker]
+		seen[marker]++
+	}
+	return out
 }
 
 // mediaBody is the {url, aeskey} pair every downloadable kind carries. In
@@ -184,7 +225,13 @@ func (item mixedItem) words() string {
 // render turns one 图文混排 run into the line it contributes to the message
 // body. An item of a kind this adapter does not know contributes nothing
 // rather than a stray placeholder.
-func (item mixedItem) render() string {
+func (item mixedItem) render() string { return item.renderWith(mediaPlaceholder) }
+
+// renderQuoted is the same run inside a QUOTED message, where an attachment
+// renders as a marker with room in it to be named. See quotedMediaPlaceholder.
+func (item mixedItem) renderQuoted() string { return item.renderWith(quotedMediaPlaceholder) }
+
+func (item mixedItem) renderWith(placeholder func(channel.MsgType) string) string {
 	if s := item.words(); s != "" {
 		return s
 	}
@@ -192,7 +239,19 @@ func (item mixedItem) render() string {
 	if !ok || strings.TrimSpace(body.URL) == "" {
 		return ""
 	}
-	return mediaPlaceholder(kind)
+	return placeholder(kind)
+}
+
+// media is the downloadable attachment behind this run's marker, if it has
+// one. Paired with renderWith on purpose: a run that renders a marker has an
+// attachment here, and one that renders words has none, so the two lists line
+// up by construction rather than by a caller keeping them in step.
+func (item mixedItem) media() []InboundMedia {
+	body, kind, ok := mediaFor(item.MsgType, item.Image, item.File, item.Video)
+	if !ok || strings.TrimSpace(body.URL) == "" {
+		return nil
+	}
+	return []InboundMedia{{Kind: kind, URL: body.URL, AESKey: body.AESKey}}
 }
 
 // mediaPlaceholder is the marker that stands in for an attachment in the
@@ -216,6 +275,38 @@ func mediaPlaceholder(kind channel.MsgType) string {
 	}
 }
 
+// mediaUnavailable is what a quoted attachment's marker says before anything
+// has been fetched for it, and what it keeps saying if the fetch never
+// succeeds. A marker that is never rewritten still reads as a sentence.
+const mediaUnavailable = "unavailable"
+
+// quotedMediaPlaceholder is the marker a QUOTED attachment renders as. It
+// carries a word inside the brackets where the sender's own "[Image]" carries
+// nothing, because the quote's marker is the one that has to be joined to an
+// attachment.
+//
+// Fetching the quoted picture puts it in the attachment list and stops there.
+// The list is a separate block of text from the body, so with one attachment
+// the reader infers the join and with two it cannot — and a quote is exactly
+// the case where a message carries somebody else's picture beside its own.
+// The marker is what the engine rewrites into the attachment's id.
+//
+// The sender's OWN attachments keep the bare "[Image]" they have always had.
+// It is already unambiguous, being the attachment on the message the reader is
+// looking at, and changing it would change what every existing wecom message
+// body says.
+func quotedMediaPlaceholder(kind channel.MsgType) string {
+	return namedMediaPlaceholder(kind, mediaUnavailable)
+}
+
+// namedMediaPlaceholder writes a name inside the bracketed marker: "[Image]"
+// becomes "[Image: <name>]". engine.inlineAttachmentIDMarker rewrites the same
+// shape and keeps the label ahead of the colon, so the two spellings cannot
+// drift apart.
+func namedMediaPlaceholder(kind channel.MsgType, name string) string {
+	return strings.TrimSuffix(mediaPlaceholder(kind), "]") + ": " + name + "]"
+}
+
 // mediaFor returns the body and normalized kind for a raw wecom msgtype, and
 // whether that type is one we download at all.
 func mediaFor(msgType string, image, file, video mediaBody) (mediaBody, channel.MsgType, bool) {
@@ -235,7 +326,14 @@ func mediaFor(msgType string, image, file, video mediaBody) (mediaBody, channel.
 // user sent it. A body with no url is skipped: there is nothing to fetch, and
 // carrying it forward would only produce an intent-ledger row for an object
 // that can never exist.
+// The quoted message's attachments come FIRST, because the quote block renders
+// above the sender's own words and the two lists have to agree on order — the
+// engine binds a marker by its occurrence number in the body.
 func (mc aibotMsgCallback) attachments() []InboundMedia {
+	return append(mc.Quote.media(), mc.ownAttachments()...)
+}
+
+func (mc aibotMsgCallback) ownAttachments() []InboundMedia {
 	var out []InboundMedia
 	add := func(body mediaBody, kind channel.MsgType) {
 		if strings.TrimSpace(body.URL) == "" {
@@ -473,6 +571,31 @@ type InboundMedia struct {
 	// AESKey unlocks what comes back from URL. Long-connection mode mints one
 	// per url; see media_crypt.go.
 	AESKey string `json:"aeskey"`
+	// InlinePlaceholder is the exact marker in the stored body this attachment
+	// stands for, and InlineIndex is which occurrence of that marker it is.
+	// They travel onto channel.MediaRef, and the binder rewrites that one
+	// occurrence to name the attachment once a row exists (engine/session.go).
+	//
+	// Set for a QUOTED attachment only — see quotedMediaPlaceholder for why the
+	// sender's own marker stays bare.
+	InlinePlaceholder string `json:"inline_placeholder,omitempty"`
+	InlineIndex       int    `json:"inline_index,omitempty"`
+}
+
+// inline copies the marker this attachment stands for onto the ref the binder
+// will rewrite. A ref with no marker is left exactly as it was, which is what
+// keeps the sender's own attachments on the path they were already on.
+func (m InboundMedia) inline(ref channel.MediaRef) channel.MediaRef {
+	if m.InlinePlaceholder == "" {
+		return ref
+	}
+	ref.InlinePlaceholder = m.InlinePlaceholder
+	ref.InlineIndex = m.InlineIndex
+	// The marker REFERS to the attachment, it does not carry it: the picture
+	// belongs to a message somebody else sent, and replacing the marker with an
+	// inline image would state this sender attached it again.
+	ref.InlineIDOnly = true
+	return ref
 }
 
 // channelMessageFromCallback converts a wecom-side aibot_msg_callback into
