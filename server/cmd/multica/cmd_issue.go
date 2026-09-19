@@ -843,8 +843,23 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("list issues: %w", err)
 	}
 
-	issuesRaw, _ := result["issues"].([]any)
+	// A 200 body that is not the documented shape (issues array missing or
+	// mistyped, total present but not a number) is a server regression or an
+	// intermediary error object, not an empty page; fail loudly instead of
+	// reporting a page that was never returned, which would silently end a
+	// scripted pagination walk. A missing total stays tolerated: a newer
+	// backend may drop the field, and has_more below already falls back to
+	// page-length detection in that case.
+	issuesRaw, issuesOK := result["issues"].([]any)
+	if !issuesOK {
+		return fmt.Errorf("invalid issue list response: expected an issues array")
+	}
 	total, totalOK := result["total"].(float64)
+	if !totalOK {
+		if _, present := result["total"]; present {
+			return fmt.Errorf("invalid issue list response: expected total to be a number")
+		}
+	}
 	returned := len(issuesRaw)
 	// total cannot end a walk on its own. The server answers with the row
 	// count it just returned when its count query fails, and a newer backend
@@ -899,7 +914,7 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	for _, raw := range issuesRaw {
 		issue, ok := raw.(map[string]any)
 		if !ok {
-			continue
+			return fmt.Errorf("invalid issue list response: expected each issue to be an object")
 		}
 		assignee := formatAssignee(issue, actors)
 		startDate := strVal(issue, "start_date")
