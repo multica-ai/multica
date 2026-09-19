@@ -267,6 +267,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | | `skills list/set/add <agent-id>` | Manage attached skills | `--skill-ids` (`set` replaces the full list, `add` appends) |
 | | `mcp list/add/enable/disable/remove <agent-id>` | Assign workspace MCP servers to this agent | Take the server id from `workspace mcp list`. A library entry does nothing until it is added here; `disable` stops sending it without dropping the assignment |
 | `autopilot` | `list/get/create/update/delete` | Manage automations | `create`: `--title`, `--agent`, `--mode` (all required), `--project`, `--subscriber` (repeatable) |
+| `autopilot` | `trigger-add/trigger-update/trigger-list` | Configure and inspect triggers | `--provider github`, `--signing-secret-file` or `--signing-secret-stdin`, `--enabled=false`; update also supports `--clear-signing-secret`. See the [signed admission contract](/autopilots#github-signed-admission-api-and-cli-contract). |
 | | `trigger <id>` | Trigger a run manually | |
 | | `runs <id>` | View run history | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Manage schedule and webhook triggers | |

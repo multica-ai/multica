@@ -422,14 +422,14 @@ INSERT INTO autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
     next_run_at, webhook_token, label, provider, event_filters,
     published_by_type, published_by_id,
-    created_by_type, created_by_id
+    created_by_type, created_by_id, signing_secret
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8,
     COALESCE($9::text, 'generic'),
     $10,
     $11, $12,
-    $13, $14
+    $13, $14, $15
 ) RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters, published_by_type, published_by_id, created_by_type, created_by_id
 `
 
@@ -448,6 +448,7 @@ type CreateAutopilotTriggerParams struct {
 	PublishedByID   pgtype.UUID        `json:"published_by_id"`
 	CreatedByType   pgtype.Text        `json:"created_by_type"`
 	CreatedByID     pgtype.UUID        `json:"created_by_id"`
+	SigningSecret   pgtype.Text        `json:"signing_secret"`
 }
 
 func (q *Queries) CreateAutopilotTrigger(ctx context.Context, arg CreateAutopilotTriggerParams) (AutopilotTrigger, error) {
@@ -466,6 +467,7 @@ func (q *Queries) CreateAutopilotTrigger(ctx context.Context, arg CreateAutopilo
 		arg.PublishedByID,
 		arg.CreatedByType,
 		arg.CreatedByID,
+		arg.SigningSecret,
 	)
 	var i AutopilotTrigger
 	err := row.Scan(
@@ -1628,6 +1630,42 @@ func (q *Queries) LockAutopilotForUpdate(ctx context.Context, arg LockAutopilotF
 	return i, err
 }
 
+const lockAutopilotTriggerForUpdate = `-- name: LockAutopilotTriggerForUpdate :one
+SELECT id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters, published_by_type, published_by_id, created_by_type, created_by_id FROM autopilot_trigger WHERE id = $1 AND autopilot_id = $2 FOR UPDATE
+`
+
+type LockAutopilotTriggerForUpdateParams struct {
+	ID          pgtype.UUID `json:"id"`
+	AutopilotID pgtype.UUID `json:"autopilot_id"`
+}
+
+func (q *Queries) LockAutopilotTriggerForUpdate(ctx context.Context, arg LockAutopilotTriggerForUpdateParams) (AutopilotTrigger, error) {
+	row := q.db.QueryRow(ctx, lockAutopilotTriggerForUpdate, arg.ID, arg.AutopilotID)
+	var i AutopilotTrigger
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.Kind,
+		&i.Enabled,
+		&i.CronExpression,
+		&i.Timezone,
+		&i.NextRunAt,
+		&i.WebhookToken,
+		&i.Label,
+		&i.LastFiredAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Provider,
+		&i.SigningSecret,
+		&i.EventFilters,
+		&i.PublishedByType,
+		&i.PublishedByID,
+		&i.CreatedByType,
+		&i.CreatedByID,
+	)
+	return i, err
+}
+
 const pauseAutopilotsByUnboundAgents = `-- name: PauseAutopilotsByUnboundAgents :many
 UPDATE autopilot a
 SET status = 'paused',
@@ -2581,19 +2619,25 @@ UPDATE autopilot_trigger SET
     next_run_at = $5,
     label = COALESCE($6, label),
     event_filters = COALESCE($7, event_filters),
+    provider = COALESCE($8::text, provider),
+    signing_secret = CASE WHEN $9::boolean THEN NULL
+        ELSE COALESCE($10::text, signing_secret) END,
     updated_at = now()
 WHERE id = $1
 RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters, published_by_type, published_by_id, created_by_type, created_by_id
 `
 
 type UpdateAutopilotTriggerParams struct {
-	ID             pgtype.UUID        `json:"id"`
-	Enabled        pgtype.Bool        `json:"enabled"`
-	CronExpression pgtype.Text        `json:"cron_expression"`
-	Timezone       pgtype.Text        `json:"timezone"`
-	NextRunAt      pgtype.Timestamptz `json:"next_run_at"`
-	Label          pgtype.Text        `json:"label"`
-	EventFilters   []byte             `json:"event_filters"`
+	ID                 pgtype.UUID        `json:"id"`
+	Enabled            pgtype.Bool        `json:"enabled"`
+	CronExpression     pgtype.Text        `json:"cron_expression"`
+	Timezone           pgtype.Text        `json:"timezone"`
+	NextRunAt          pgtype.Timestamptz `json:"next_run_at"`
+	Label              pgtype.Text        `json:"label"`
+	EventFilters       []byte             `json:"event_filters"`
+	Provider           pgtype.Text        `json:"provider"`
+	ClearSigningSecret bool               `json:"clear_signing_secret"`
+	SigningSecret      pgtype.Text        `json:"signing_secret"`
 }
 
 func (q *Queries) UpdateAutopilotTrigger(ctx context.Context, arg UpdateAutopilotTriggerParams) (AutopilotTrigger, error) {
@@ -2605,6 +2649,9 @@ func (q *Queries) UpdateAutopilotTrigger(ctx context.Context, arg UpdateAutopilo
 		arg.NextRunAt,
 		arg.Label,
 		arg.EventFilters,
+		arg.Provider,
+		arg.ClearSigningSecret,
+		arg.SigningSecret,
 	)
 	var i AutopilotTrigger
 	err := row.Scan(

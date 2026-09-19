@@ -238,15 +238,17 @@ func extractDedupeKey(provider string, headers http.Header) (string, string) {
 // verifyWebhookSignatureForProvider returns one of sigStatus* describing the
 // outcome of HMAC verification for the configured trigger.
 //
-// When no signing secret is configured the result is `not_required` — the
-// trigger has opted into bearer-token-only authentication. When a secret IS
-// configured the request must carry the expected header; otherwise the
-// outcome is `missing` (caller still records a rejected delivery).
+// GitHub always requires a key and valid signature. Only generic triggers may
+// opt into bearer-token-only authentication (`not_required`). A configured key
+// requires the signature header regardless of provider.
 //
 //	github  -> X-Hub-Signature-256: sha256=<hex>
 //	generic -> X-Hub-Signature-256 (same shape; lets curl/Postman opt in)
 func verifyWebhookSignatureForProvider(provider, secret string, headers http.Header, rawBody []byte) string {
 	if secret == "" {
+		if provider == "github" {
+			return sigStatusInvalid
+		}
 		return sigStatusNotRequired
 	}
 	sig := headers.Get("X-Hub-Signature-256")
@@ -310,7 +312,9 @@ func selectedHeadersJSON(headers http.Header) []byte {
 // autopilots. It runs OUTSIDE the authenticated route group: the bearer
 // token in the URL path IS the credential.
 //
-// Flow (persist-first, synchronous admission + durable async dispatch):
+// GitHub authentication precedes normalization and every durable write.
+// Generic endpoints retain their rejected-delivery history for compatibility.
+// Flow after GitHub authentication (synchronous admission + durable dispatch):
 //
 //  1. High absolute per-IP ceiling plus a non-consuming check for prior
 //     bad-credential debt (both before DB I/O).
@@ -425,6 +429,27 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	provider := trigRow.Provider
+	if provider == "" {
+		provider = "generic"
+	}
+	dedupeKey, dedupeSource := extractDedupeKey(provider, r.Header)
+	sigStatus := verifyWebhookSignatureForProvider(provider, trigRow.SigningSecret.String, r.Header, body)
+
+	// GitHub admission precedes normalization, deduplication and ALL durable writes.
+	// A bad signature cannot poison a delivery ID or wake an existing queued run.
+	if provider == "github" && sigStatus != sigStatusValid {
+		if ip != "" && h.WebhookIPRateLimiter != nil {
+			h.WebhookIPRateLimiter.Allow(r.Context(), ip)
+		}
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"status": "rejected", "reason": "invalid_signature"})
+		return
+	}
+	if provider == "github" && !trigRow.Enabled {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ignored", "reason": "trigger_disabled"})
+		return
+	}
+
 	// 5. Normalize body. Invalid JSON → 400 without persistence: we have no
 	//    dedupe identifier from the body, and replaying an unparsable payload
 	//    is not useful.
@@ -439,12 +464,6 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// 6. Provider + dedupe + signature.
-	provider := trigRow.Provider
-	if provider == "" {
-		provider = "generic"
-	}
-	dedupeKey, dedupeSource := extractDedupeKey(provider, r.Header)
-	sigStatus := verifyWebhookSignatureForProvider(provider, trigRow.SigningSecret.String, r.Header, body)
 
 	// 7. Persist (INSERT delivery). Dedupe collision → bump existing row.
 	delivery, dup, err := h.persistInboundDelivery(r, persistDeliveryInput{

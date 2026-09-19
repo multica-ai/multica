@@ -93,6 +93,9 @@ export interface AutopilotTrigger {
   autopilot_id: string;
   kind: AutopilotTriggerKind;
   enabled: boolean;
+  provider?: string | null;
+  has_signing_secret?: boolean;
+  signing_secret_hint?: string | null;
   cron_expression: string | null;
   timezone: string | null;
   next_run_at: string | null;
@@ -183,6 +186,9 @@ export interface UpdateAutopilotRequest {
 }
 
 export interface CreateAutopilotTriggerRequest {
+  enabled?: boolean;
+  provider?: "generic" | "github";
+  signing_secret?: string;
   kind: AutopilotTriggerKind;
   cron_expression?: string;
   timezone?: string;
@@ -192,6 +198,9 @@ export interface CreateAutopilotTriggerRequest {
 }
 
 export interface UpdateAutopilotTriggerRequest {
+  provider?: "generic" | "github";
+  signing_secret?: string;
+  clear_signing_secret?: boolean;
   enabled?: boolean;
   cron_expression?: string;
   timezone?: string;

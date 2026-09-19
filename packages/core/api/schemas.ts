@@ -2342,6 +2342,37 @@ export const EMPTY_LIST_AUTOPILOTS_RESPONSE = {
   total: 0,
 };
 
+// Trigger admission metadata defaults to unverified/disabled on old responses.
+// Strip unknown fields so write-only signing material cannot enter UI state.
+export const AutopilotTriggerSchema = z.object({
+  id: z.string(),
+  autopilot_id: z.string(),
+  kind: z.string(),
+  enabled: z.boolean().default(false),
+  provider: z.string().nullable().default(null),
+  has_signing_secret: z.boolean().default(false),
+  signing_secret_hint: z.unknown().transform(() => null),
+  cron_expression: z.string().nullable().default(null),
+  timezone: z.string().nullable().default(null),
+  next_run_at: z.string().nullable().default(null),
+  webhook_token: z.string().nullable().default(null),
+  webhook_path: z.string().nullable().optional(),
+  webhook_url: z.string().nullable().optional(),
+  label: z.string().nullable().default(null),
+  event_filters: z.array(z.object({event:z.string(),actions:z.array(z.string()).optional()})).nullable().optional(),
+  last_fired_at: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+});
+
+export const FALLBACK_AUTOPILOT_TRIGGER = {
+  id: "", autopilot_id: "", kind: "webhook" as const, enabled: false,
+  provider: null, has_signing_secret: false, signing_secret_hint: null,
+  cron_expression: null, timezone: null, next_run_at: null,
+  webhook_token: null, webhook_path: null, webhook_url: null,
+  label: null, last_fired_at: null, created_at: "", updated_at: "",
+};
+
 // Autopilot run (POST /trigger, GET /runs). Consumed by the "run now" flow,
 // which branches on `status` to avoid a false-success toast (MUL-4525), so the
 // response must be schema-parsed. `reason_code` is an additive, stable
