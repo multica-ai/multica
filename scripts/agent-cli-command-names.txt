@@ -17,6 +17,7 @@ omp
 openclaw
 opencode
 pi
+prime-agent
 qodercli
 qoderclicn
 qwen

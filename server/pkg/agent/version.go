@@ -33,6 +33,17 @@ var MinVersions = map[string]string{
 	// filename in a shared /tmp is not safe, so refusing the CLI is the only
 	// place we can stop it. See #8392: ~2,960 files, 11.16 GiB, root at 99%.
 	"opencode": "1.1.54",
+	// The whole fail-closed rlmMaxDepth gate is argued from v0.7.1 internals:
+	// getAgentDir's PRIME_AGENT_CODING_AGENT_DIR handling, _resolveRlmMaxDepth's
+	// precedence chain, and the settings.json path the gate opens. A build that
+	// resolved that path differently would make the gate read the wrong file and
+	// pass silently, so the assumption is enforced rather than only documented.
+	// 0.7.1 is also the only version smoke-tested against a live account.
+	// getAgentDir, ENV_AGENT_DIR, CONFIG_DIR_NAME and _resolveRlmMaxDepth were
+	// diffed through v0.9.4, and the only divergence is v0.9.4 expanding a
+	// Windows `~\` value that earlier versions leave relative; primeAgentDirsFor
+	// checks both readings, so the floor admits nothing the gate cannot see.
+	"prime": "0.7.1",
 }
 
 // MinQuickCreateCLIVersion gates the agent-create (quick-create) flow against
