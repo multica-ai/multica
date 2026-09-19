@@ -858,6 +858,51 @@ func TestPrepareLocalWorktreeContinuesTheConversationBranch(t *testing.T) {
 	}
 }
 
+// A clean local HEAD advancing during a turn is committed work, not a new
+// user edit to replay onto the conversation branch (#8544).
+func TestPrepareLocalWorktreeDoesNotReplayCleanHEADAdvance(t *testing.T) {
+	for _, dirty := range []bool{false, true} {
+		t.Run(fmt.Sprintf("new_local_edit_%t", dirty), func(t *testing.T) {
+			repo := newTestRepo(t)
+			first := prepareTurn(t, repo, "MUL-6881", turnOneTask)
+			writeFile(t, filepath.Join(first.WorkDir, "turn-one.txt"), "agent work\n")
+			writeFile(t, filepath.Join(repo, "upstream.txt"), "committed upstream work\n")
+			gitRun(t, repo, "add", "upstream.txt")
+			gitRun(t, repo, "commit", "-m", "advance local HEAD")
+			finalizeOK(t, first)
+			firstTip := gitRun(t, repo, "rev-parse", first.Branch)
+			if dirty {
+				writeFile(t, filepath.Join(repo, "local-edit.txt"), "new uncommitted work\n")
+			}
+
+			second := prepareTurn(t, repo, "MUL-6881", turnTwoTask)
+			if !second.Continued || second.Branch != first.Branch {
+				t.Fatalf("expected to continue %s, got %s (continued=%v)", first.Branch, second.Branch, second.Continued)
+			}
+			if _, err := os.Stat(filepath.Join(second.WorkDir, "upstream.txt")); !os.IsNotExist(err) {
+				t.Fatalf("committed local HEAD advance was replayed: %v", err)
+			}
+			if got := readFile(t, filepath.Join(second.WorkDir, "turn-one.txt")); got != "agent work\n" {
+				t.Fatalf("agent work changed: %q", got)
+			}
+			if dirty {
+				if got := readFile(t, filepath.Join(second.WorkDir, "local-edit.txt")); got != "new uncommitted work\n" {
+					t.Fatalf("new local edit missing: %q", got)
+				}
+			} else if second.BaseCommit != firstTip {
+				t.Fatalf("clean resume authored a commit: %s != %s", second.BaseCommit, firstTip)
+			}
+			finalizeOK(t, second)
+			secondTip := gitRun(t, repo, "rev-parse", second.Branch)
+			third := prepareTurn(t, repo, "MUL-6881", turnThreeTask)
+			if third.BaseCommit != secondTip {
+				t.Fatalf("unchanged third turn replayed local state again: %s != %s", third.BaseCommit, secondTip)
+			}
+			finalizeOK(t, third)
+		})
+	}
+}
+
 // The user's uncommitted work reaches the branch once, as turn one's baseline,
 // and every later turn replays only what they changed since. Replaying their
 // whole tree again would ask git to merge their copy of a file against the
