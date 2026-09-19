@@ -94,6 +94,10 @@ func TestBatchUpdateValidUpdatesPersistAndCount(t *testing.T) {
 	b := createTestIssue(t, "BU-ok B", "todo", "low")
 	t.Cleanup(func() { deleteTestIssue(t, a) })
 	t.Cleanup(func() { deleteTestIssue(t, b) })
+	// in_progress requires an assignee (I4127.DP/I4192.DP), so give the
+	// issues a member assignee before the batch move.
+	setIssueAssigneeDirect(t, a, "member", testUserID)
+	setIssueAssigneeDirect(t, b, "member", testUserID)
 
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues/batch-update", map[string]any{
@@ -214,8 +218,10 @@ func newStagedBatchFixture(t *testing.T) stagedBatchFixture {
 
 	pw := httptest.NewRecorder()
 	preq := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "batch-stage parent " + time.Now().Format(time.RFC3339Nano),
-		"status": "in_progress",
+		"title":         "batch-stage parent " + time.Now().Format(time.RFC3339Nano),
+		"status":        "in_progress",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
 	})
 	testHandler.CreateIssue(pw, preq)
 	if pw.Code != http.StatusCreated {
@@ -241,6 +247,8 @@ func newStagedBatchFixture(t *testing.T) stagedBatchFixture {
 		creq := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 			"title":           "batch-stage child " + time.Now().Format(time.RFC3339Nano),
 			"status":          "in_progress",
+			"assignee_type":   "member",
+			"assignee_id":     testUserID,
 			"parent_issue_id": parent.ID,
 		})
 		testHandler.CreateIssue(cw, creq)
