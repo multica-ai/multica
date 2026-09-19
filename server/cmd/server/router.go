@@ -604,6 +604,25 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				patcher := lark.NewPatcher(cs, installSvc, larkClient, lark.PatcherConfig{})
 				patcher.Register(bus)
 
+				// Second hop for the agent's files: the files an agent
+				// bound to its reply are read back out of object storage,
+				// uploaded to Lark, and posted behind the answer. Mirrors
+				// the WeCom branch below.
+				//
+				// SetAttachments and DeclareChannelFileDelivery sit on one
+				// `if` on purpose. The first builds the hop; the second is
+				// the same fact told to the agent, and a run must not be
+				// promised a delivery this branch never built. A deployment
+				// with no object storage has nothing to read an attachment
+				// out of, and answering false is the safe direction: an
+				// agent that says "见附件" into a room where nothing is
+				// attached leaves the reader hunting for a file that was
+				// never sent.
+				if store != nil {
+					patcher.SetAttachments(store)
+					h.DeclareChannelFileDelivery(string(channel.TypeFeishu))
+				}
+
 				// Typing indicator: shows a "processing" reaction on the user's
 				// message while the agent is working, then removes it before the
 				// reply is sent. Best-effort; failures are logged only.
