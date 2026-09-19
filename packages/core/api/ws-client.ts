@@ -16,6 +16,24 @@ const UNPARSEABLE_LOG_MAX_CHARS = 200;
 const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
 
+// Half-open detection. A socket can die without the browser ever noticing:
+// a NAT/proxy silently drops the idle connection, the OS sleeps and wakes,
+// or the network path changes (Wi-Fi ↔ VPN ↔ LAN). In every one of those
+// cases readyState stays OPEN, no close frame ever arrives, `onclose` never
+// fires, and the reconnect backoff above never starts — the UI shows live
+// data that has secretly stopped updating. Browsers handle the
+// protocol-level ping/pong invisible to JS, so the only health signal
+// available to application code is inbound traffic. The client therefore
+// sends its own {"type":"ping"} app-level frame (the server replies
+// {"type":"pong"}, server/internal/realtime/hub.go) every
+// HEARTBEAT_INTERVAL_MS — short enough to also keep an idle socket fed
+// under the server's 60s pongWait read deadline — and force-closes a socket
+// from which nothing (pong or business event) has arrived for
+// HEARTBEAT_SILENCE_TIMEOUT_MS. The 3x multiplier tolerates two missed
+// heartbeat replies, avoiding reconnect churn on brief network stalls.
+const HEARTBEAT_INTERVAL_MS = 45_000;
+const HEARTBEAT_SILENCE_TIMEOUT_MS = 3 * HEARTBEAT_INTERVAL_MS;
+
 function summarizeUnparseable(data: unknown): string {
   const text = typeof data === "string" ? data : String(data);
   if (text.length <= UNPARSEABLE_LOG_MAX_CHARS) return text;
@@ -47,6 +65,10 @@ export class WSClient {
   // times per session, so we log the first drop and suppress the rest. Reset
   // on each connect() so a fresh connection logs once again.
   private badFrameLogged = false;
+  /** Interval sending app-level pings and checking the silence window. */
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  /** Epoch ms of the last inbound frame — any frame, parseable or not. */
+  private lastFrameAt: number | null = null;
   private onReconnectCallbacks = new Set<() => void>();
   private anyHandlers = new Set<(msg: WSMessage) => void>();
   private logger: Logger;
@@ -82,6 +104,10 @@ export class WSClient {
 
   connect() {
     this.badFrameLogged = false;
+    // A heartbeat interval from a previous connection must not survive into
+    // this one: its ticks would close over the *new* socket before auth
+    // completes, and a stale lastFrameAt could misjudge the fresh connection.
+    this.stopHeartbeat();
     const url = new URL(this.baseUrl);
     // Token is never sent as a URL query parameter — it would be logged by
     // proxies, CDNs, and browser history.  In cookie mode the HttpOnly cookie
@@ -111,6 +137,10 @@ export class WSClient {
     };
 
     this.ws.onmessage = (event) => {
+      // Update before any parsing: even an unparseable or non-conforming
+      // frame is proof the TCP path is alive, which is all the half-open
+      // detection below cares about.
+      this.lastFrameAt = Date.now();
       let msg: WSMessage;
       try {
         msg = JSON.parse(event.data as string) as WSMessage;
@@ -157,6 +187,7 @@ export class WSClient {
     };
 
     this.ws.onclose = () => {
+      this.stopHeartbeat();
       this.scheduleReconnect();
     };
 
@@ -192,6 +223,10 @@ export class WSClient {
 
   private onAuthenticated() {
     this.logger.info("connected");
+    // Start the heartbeat only once the server has accepted this socket:
+    // unauthenticated connections are short-lived by design, and a socket
+    // stuck in auth limbo gets torn down by the server, not by us.
+    this.startHeartbeat();
     const recoveredConnection = this.hasConnectedBefore || this.reconnectAttempt > 0;
     this.reconnectAttempt = 0;
     if (recoveredConnection) {
@@ -206,7 +241,66 @@ export class WSClient {
     this.hasConnectedBefore = true;
   }
 
+  /**
+   * Runs the half-open detection cycle: send an application-level ping, then
+   * check the silence window. One interval drives both jobs because the ping
+   * itself is the traffic that should reset the window on a healthy socket —
+   * the server's {"type":"pong"} reply updates lastFrameAt via onmessage
+   * before the next tick's silence check.
+   */
+  private startHeartbeat() {
+    this.stopHeartbeat();
+    this.lastFrameAt = Date.now();
+    this.heartbeatTimer = setInterval(() => {
+      this.sendPing();
+      this.checkHealth();
+    }, HEARTBEAT_INTERVAL_MS);
+  }
+
+  private stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  /** `ping`/`pong` are transport control frames, not WSEventType business
+   *  events — serialized directly, same bypass as the auth frame in onopen. */
+  private sendPing() {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "ping" }));
+    }
+  }
+
+  /**
+   * Force-closes a socket that has received nothing for the silence window —
+   * by then the connection is a one-way black hole: readyState is OPEN, the
+   * server's answers go nowhere, and `onclose` will never fire on its own.
+   * Closing deliberately enters the normal onclose → scheduleReconnect →
+   * connect path, so recovery reuses the entire existing machinery
+   * (backoff, auth re-negotiation, reconnect callbacks, cache refetches).
+   *
+   * Public so the platform layer can probe on transition points where a
+   * half-open socket is most likely to be discovered — a tab returning to
+   * visibility after sleep, the network coming back online — instead of
+   * waiting for the next interval tick.
+   */
+  checkHealth() {
+    if (this.lastFrameAt === null) return;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const silentFor = Date.now() - this.lastFrameAt;
+    if (silentFor < HEARTBEAT_SILENCE_TIMEOUT_MS) return;
+    this.logger.warn(
+      `ws: no inbound frames for ${Math.round(silentFor / 1000)}s` +
+        ` (>${Math.round(HEARTBEAT_SILENCE_TIMEOUT_MS / 1000)}s heartbeat window),` +
+        " closing suspected half-open connection",
+    );
+    this.ws.close();
+  }
+
   disconnect() {
+    this.stopHeartbeat();
+    this.lastFrameAt = null;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
