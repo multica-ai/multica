@@ -18,6 +18,10 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
+// agentEmojiAvatarPrefix mirrors handler.agentEmojiAvatarPrefix: the marker the
+// server persists for an emoji avatar. The CLI only ever sends this form.
+const agentEmojiAvatarPrefix = "emoji:"
+
 var agentCmd = &cobra.Command{
 	Use:   "agent",
 	Short: "Work with agents",
@@ -158,6 +162,7 @@ func init() {
 
 	// agent create
 	agentCreateCmd.Flags().String("name", "", "Agent name (required)")
+	agentCreateCmd.Flags().String("avatar-emoji", "", "Avatar emoji glyph (e.g. 🦊), not empty/whitespace-only; omitted = random avatar")
 	agentCreateCmd.Flags().String("description", "", "Agent description")
 	agentCreateCmd.Flags().String("instructions", "", "Agent instructions")
 	agentCreateCmd.Flags().String("conversation-starters", "", "Conversation starters as a JSON array of {\"label\",\"prompt\"} objects (at most 3; label ≤80, prompt ≤4000). Shown above the Chat composer; selecting one fills the composer and does not start a run. Omit to default to none.")
@@ -182,6 +187,7 @@ func init() {
 
 	// agent update
 	agentUpdateCmd.Flags().String("name", "", "New name")
+	agentUpdateCmd.Flags().String("avatar-emoji", "", "Avatar emoji glyph (e.g. 🦊), not empty/whitespace-only; omitted = keep current avatar")
 	agentUpdateCmd.Flags().String("description", "", "New description")
 	agentUpdateCmd.Flags().String("instructions", "", "New instructions")
 	agentUpdateCmd.Flags().String("conversation-starters", "", "New conversation starters as a JSON array of {\"label\",\"prompt\"} objects (at most 3; label ≤80, prompt ≤4000). Pass '[]' to clear. Omit to leave the stored value unchanged.")
@@ -658,6 +664,13 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 	if err := applyConversationStartersFlag(cmd, body); err != nil {
 		return err
 	}
+	if cmd.Flags().Changed("avatar-emoji") {
+		v, _ := cmd.Flags().GetString("avatar-emoji")
+		if strings.TrimSpace(v) == "" {
+			return fmt.Errorf("--avatar-emoji must not be empty or whitespace-only; omit the flag to use the random default avatar")
+		}
+		body["avatar_url"] = agentEmojiAvatarPrefix + v
+	}
 	if cmd.Flags().Changed("runtime-config") {
 		v, _ := cmd.Flags().GetString("runtime-config")
 		var rc any
@@ -756,6 +769,13 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("runtime-id")
 		body["runtime_id"] = v
 	}
+	if cmd.Flags().Changed("avatar-emoji") {
+		v, _ := cmd.Flags().GetString("avatar-emoji")
+		if strings.TrimSpace(v) == "" {
+			return fmt.Errorf("--avatar-emoji must not be empty or whitespace-only; omit the flag to keep the current avatar")
+		}
+		body["avatar_url"] = agentEmojiAvatarPrefix + v
+	}
 	if cmd.Flags().Changed("runtime-config") {
 		v, _ := cmd.Flags().GetString("runtime-config")
 		var rc any
@@ -810,7 +830,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --conversation-starters, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --custom-args, --mcp-config, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
+		return fmt.Errorf("no fields to update; use --name, --avatar-emoji, --description, --instructions, --conversation-starters, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --custom-args, --mcp-config, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())
