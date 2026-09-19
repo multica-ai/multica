@@ -5,7 +5,7 @@ import {
   buildRuntimeCatalog,
   formatCommandLine,
   parseCommandLine,
-  PROTOCOL_FAMILIES,
+  RUNTIME_TYPES,
 } from "./runtime-profile-catalog";
 
 function profile(
@@ -42,11 +42,11 @@ describe("buildRuntimeCatalog", () => {
       id: "prof-1",
       protocolFamily: "codex",
     });
-    expect(catalog.builtins).toHaveLength(PROTOCOL_FAMILIES.length);
+    expect(catalog.builtins).toHaveLength(RUNTIME_TYPES.length);
     expect(catalog.builtins[0]).toMatchObject({
       kind: "builtin",
-      id: `builtin:${PROTOCOL_FAMILIES[0]}`,
-      protocolFamily: PROTOCOL_FAMILIES[0],
+      id: `builtin:${RUNTIME_TYPES[0]}`,
+      protocolFamily: RUNTIME_TYPES[0],
     });
   });
 
@@ -77,7 +77,9 @@ describe("parseCommandLine", () => {
   });
 
   it("preserves quoted whitespace and escaped characters", () => {
-    expect(parseCommandLine(`agent --flag "a b c" path\\ with\\ spaces`)).toEqual({
+    expect(
+      parseCommandLine(`agent --flag "a b c" path\\ with\\ spaces`),
+    ).toEqual({
       ok: true,
       commandName: "agent",
       fixedArgs: ["--flag", "a b c", "path with spaces"],

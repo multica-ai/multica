@@ -335,7 +335,7 @@
       "read_only": "読み取り専用"
     },
     "detail": {
-      "base_family": "ベースプロトコルファミリー",
+      "base_family": "ベースランタイム",
       "command": "コマンド",
       "description": "説明",
       "no_description": "説明なし",
@@ -347,12 +347,12 @@
     "form": {
       "create_title": "新しいカスタムランタイム",
       "edit_title": "カスタムランタイムを編集",
-      "step_family_label": "ベースプロトコルファミリーを選択",
-      "step_family_hint": "このランタイムが使用する基盤の CLI プロトコル。",
+      "step_family_label": "ベースランタイムを選択",
+      "step_family_hint": "このコマンドと互換性のある CLI を選択します。",
       "step_details_label": "ランタイムを設定",
       "step_progress": "ステップ {{current}} / {{total}}",
-      "family_label": "ベースプロトコルファミリー",
-      "family_locked_hint": "作成後はベースプロトコルファミリーを変更できません。",
+      "family_label": "ベースランタイム",
+      "family_locked_hint": "作成後はベースランタイムを変更できません。",
       "display_name_label": "表示名",
       "display_name_placeholder": "例：マイカスタム Claude…",
       "command_name_label": "コマンド",

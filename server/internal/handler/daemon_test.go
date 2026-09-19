@@ -4716,3 +4716,25 @@ func TestBatchIssueGCCheckReadsNoCatalogForBuiltInStatuses(t *testing.T) {
 			counter.entryReads, counter.keyReads)
 	}
 }
+
+func TestDaemonRegister_ProfileUsesStoredRuntimeIdentity(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	profileID := insertRuntimeProfileFixture(t, ctx, "Custom OMP", "pi", "wrapper")
+	if _, err := testPool.Exec(ctx, `UPDATE runtime_profile SET runtime_type = 'omp' WHERE id = $1`, profileID); err != nil {
+		t.Fatal(err)
+	}
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID, "daemon_id": "test-omp-profile", "device_name": "test-device",
+		"runtimes": []map[string]any{{"name": "Custom OMP", "type": "pi", "profile_id": profileID, "status": "online"}},
+	}, testWorkspaceID, "test-omp-profile")
+	testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE profile_id = $1`, profileID) })
+	var provider string
+	dbfx.QueryRow(t, `SELECT provider FROM agent_runtime WHERE profile_id = $1`, profileID).Scan(&provider)
+	if provider != "omp" {
+		t.Fatalf("provider = %q, want stored omp identity", provider)
+	}
+}

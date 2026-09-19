@@ -138,6 +138,12 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
 export type RuntimeProtocolFamily =
   (typeof RUNTIME_PROFILE_PROTOCOL_FAMILIES)[number];
 
+export const RUNTIME_PROFILE_RUNTIME_TYPES = [
+  ...RUNTIME_PROFILE_PROTOCOL_FAMILIES,
+  "omp",
+] as const;
+export type RuntimeProfileType = (typeof RUNTIME_PROFILE_RUNTIME_TYPES)[number];
+
 // Profile visibility mirrors RuntimeVisibility's vocabulary but uses the
 // workspace/private axis the server documents for profiles.
 export type RuntimeProfileVisibility = "workspace" | "private";
@@ -147,6 +153,7 @@ export interface RuntimeProfile {
   workspace_id: string;
   display_name: string;
   protocol_family: RuntimeProtocolFamily;
+  runtime_type?: RuntimeProfileType;
   command_name: string;
   description: string | null;
   fixed_args: string[];
@@ -157,12 +164,14 @@ export interface RuntimeProfile {
   updated_at: string;
 }
 
-// POST body. `protocol_family` is required and immutable after creation.
+// POST body. runtime_type is the immutable compatibility target; the server
+// derives protocol_family. Older clients may still send protocol_family alone.
 // Optional fields are omitted entirely when unset (never sent as null/empty)
 // so the server applies its own defaults.
 export interface CreateRuntimeProfileRequest {
   display_name: string;
-  protocol_family: RuntimeProtocolFamily;
+  protocol_family?: RuntimeProtocolFamily;
+  runtime_type?: RuntimeProfileType;
   command_name: string;
   description?: string;
   fixed_args?: string[];

@@ -90,7 +90,8 @@ func init() {
 	runtimeProfileListCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// create
-	runtimeProfileCreateCmd.Flags().String("protocol-family", "", "Supported backend the profile routes to (required)")
+	runtimeProfileCreateCmd.Flags().String("runtime-type", "", "Base runtime compatibility target (e.g. pi or omp)")
+	runtimeProfileCreateCmd.Flags().String("protocol-family", "", "Legacy base protocol family (use --runtime-type for Oh-My-Pi)")
 	runtimeProfileCreateCmd.Flags().String("command-name", "", "Executable the daemon resolves on PATH (required)")
 	runtimeProfileCreateCmd.Flags().String("display-name", "", "Human-readable profile name (required)")
 	runtimeProfileCreateCmd.Flags().String("description", "", "Optional description")
@@ -166,8 +167,20 @@ func runRuntimeProfileCreate(cmd *cobra.Command, _ []string) error {
 	displayName, _ := cmd.Flags().GetString("display-name")
 	description, _ := cmd.Flags().GetString("description")
 
-	if strings.TrimSpace(family) == "" {
-		return fmt.Errorf("--protocol-family is required")
+	runtimeType, _ := cmd.Flags().GetString("runtime-type")
+	runtimeType = strings.TrimSpace(runtimeType)
+	if runtimeType == "" && strings.TrimSpace(family) == "" {
+		return fmt.Errorf("--runtime-type or --protocol-family is required")
+	}
+	if runtimeType != "" {
+		resolved, ok := agent.RuntimeProtocolFamily(runtimeType)
+		if !ok {
+			return fmt.Errorf("unsupported --runtime-type %q", runtimeType)
+		}
+		if family != "" && family != resolved {
+			return fmt.Errorf("--protocol-family does not match --runtime-type")
+		}
+		family = resolved
 	}
 	if strings.TrimSpace(commandName) == "" {
 		return fmt.Errorf("--command-name is required")
@@ -192,6 +205,10 @@ func runRuntimeProfileCreate(cmd *cobra.Command, _ []string) error {
 		"display_name":    displayName,
 		"protocol_family": family,
 		"command_name":    commandName,
+	}
+	if runtimeType != "" {
+		body["runtime_type"] = runtimeType
+		delete(body, "protocol_family")
 	}
 	if description != "" {
 		body["description"] = description

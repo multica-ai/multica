@@ -1877,3 +1877,38 @@ func TestModelSelectorMustBeProviderQualifiedIsAnExecutionContract(t *testing.T)
 		})
 	}
 }
+
+// This fixture accepts OMP's discovery surface and rejects Pi-only flags (#8379).
+func TestCustomOmpCompatibilityTargetDiscovery(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX fixture")
+	}
+	path := filepath.Join(t.TempDir(), "custom-wrapper")
+	writeTestExecutable(t, path, []byte(`#!/bin/sh
+[ "$1" = "launch" ] || exit 3
+shift
+if [ "$1 $2" = "models --json" ]; then
+ echo '{"models":[{"provider":"commandcode","id":"deepseek/deepseek-v4.1-flash","selector":"commandcode/deepseek/deepseek-v4.1-flash"}]}'
+ exit 0
+fi
+echo "Error: unknown flags: $*" >&2
+exit 2
+`))
+	cmd := NewCommand(path, []string{"launch"})
+	if _, err := ListModels(context.Background(), "pi", cmd); err == nil || !strings.Contains(err.Error(), "unknown flags") {
+		t.Fatalf("Pi compatibility target must report failed probes, got %v", err)
+	}
+	catalog, err := ListModels(context.Background(), "omp", cmd)
+	if err != nil || len(catalog.Models) != 1 || catalog.Models[0].ID != "commandcode/deepseek/deepseek-v4.1-flash" {
+		t.Fatalf("OMP discovery lost selector or command prefix: %+v, %v", catalog, err)
+	}
+}
+
+func TestOmpProfileLaunchPrefixUsesProtocolBlocklist(t *testing.T) {
+	prefix := []string{"launch", "--mode", "text", "--model", "commandcode/deepseek/model"}
+	got := FilterLaunchPrefix("omp", prefix, nil)
+	want := FilterLaunchPrefix("pi", prefix, nil)
+	if strings.Join(got, " ") != strings.Join(want, " ") || len(got) == len(prefix) || got[0] != "launch" {
+		t.Fatalf("OMP prefix = %v; Pi prefix = %v", got, want)
+	}
+}

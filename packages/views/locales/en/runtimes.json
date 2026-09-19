@@ -348,7 +348,7 @@
       "read_only": "Read-only"
     },
     "detail": {
-      "base_family": "Base protocol family",
+      "base_family": "Base runtime",
       "command": "Command",
       "description": "Description",
       "no_description": "No description",
@@ -360,12 +360,12 @@
     "form": {
       "create_title": "New custom runtime",
       "edit_title": "Edit custom runtime",
-      "step_family_label": "Choose a base protocol family",
-      "step_family_hint": "The underlying CLI protocol this runtime speaks.",
+      "step_family_label": "Choose a base runtime",
+      "step_family_hint": "Select the CLI this command is compatible with.",
       "step_details_label": "Configure the runtime",
       "step_progress": "Step {{current}} of {{total}}",
-      "family_label": "Base protocol family",
-      "family_locked_hint": "The base protocol family can't be changed after creation.",
+      "family_label": "Base runtime",
+      "family_locked_hint": "The base runtime cannot be changed after creation.",
       "display_name_label": "Display name",
       "display_name_placeholder": "e.g. My custom Claude…",
       "command_name_label": "Command",

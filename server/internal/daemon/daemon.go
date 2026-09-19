@@ -3044,7 +3044,7 @@ func (d *Daemon) registerBuiltinRuntimesForWorkspaceLocked(ctx context.Context, 
 //
 // The registration entry mirrors the built-in shape: name = display_name
 // (suffixed with the device name like the built-in path), type =
-// protocol_family (the routing provider), version = best-effort detected
+// runtime_type (the compatibility target), version = best-effort detected
 // version, status = "online", plus the profile_id the server validates.
 //
 // Returns a content signature of the fetched profile list (MUL-3332). The
@@ -3070,14 +3070,15 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 		return profileSetSignature(nil)
 	}
 	for _, profile := range resp.RuntimeProfiles {
+		runtimeType := agent.ProfileRuntimeType(profile.RuntimeType, profile.ProtocolFamily)
 		if profile.CommandName == "" || profile.ProtocolFamily == "" {
 			d.logger.Warn("skip custom runtime profile: missing command_name or protocol_family",
 				"workspace_id", workspaceID, "profile_id", profile.ID, "display_name", profile.DisplayName)
 			continue
 		}
-		if !agent.IsSupportedType(profile.ProtocolFamily) {
-			reason := "unsupported protocol_family: " + profile.ProtocolFamily
-			d.logger.Warn("skip custom runtime profile: unsupported protocol_family",
+		if _, supported := agent.RuntimeProtocolFamily(runtimeType); !supported {
+			reason := "unsupported runtime_type: " + runtimeType
+			d.logger.Warn("skip custom runtime profile: unsupported runtime_type",
 				"workspace_id", workspaceID, "profile_id", profile.ID,
 				"display_name", profile.DisplayName, "protocol_family", profile.ProtocolFamily)
 			*failedProfiles = append(*failedProfiles, map[string]string{
@@ -3116,7 +3117,7 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 		if resolved == "" {
 			r, err := lookPath(profile.CommandName)
 			if err != nil {
-				if discovered, ok := d.agents()[profile.ProtocolFamily]; ok && discovered.Command == profile.CommandName && discovered.Path != "" {
+				if discovered, ok := d.agents()[runtimeType]; ok && discovered.Command == profile.CommandName && discovered.Path != "" {
 					resolved = discovered.Path
 					d.logger.Info("custom runtime profile: using discovered provider command path",
 						"workspace_id", workspaceID, "profile_id", profile.ID,
@@ -3149,7 +3150,7 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 		// wrapper's, and only the former means anything to the min-version
 		// gate (GH #7046).
 		version, verErr := detectAgentVersion(ctx, agent.NewCommand(resolved,
-			agent.FilterLaunchPrefix(profile.ProtocolFamily, profile.FixedArgs, d.logger)))
+			agent.FilterLaunchPrefix(runtimeType, profile.FixedArgs, d.logger)))
 		if verErr != nil {
 			d.logger.Debug("custom runtime profile: version probe failed (registering with empty version)",
 				"workspace_id", workspaceID, "profile_id", profile.ID, "path", resolved, "error", verErr)
@@ -3165,7 +3166,7 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 			"protocol_family", profile.ProtocolFamily, "command_path", resolved)
 		*runtimes = append(*runtimes, map[string]string{
 			"name":       displayName,
-			"type":       profile.ProtocolFamily,
+			"type":       runtimeType,
 			"version":    version,
 			"status":     "online",
 			"profile_id": profile.ID,
@@ -3181,7 +3182,7 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 // without a restart.
 //
 // The hashed projection covers exactly the fields that affect what the
-// daemon sends in a Register call: ID, Enabled, ProtocolFamily, CommandName,
+// daemon sends in a Register call: ID, Enabled, runtime identity, CommandName,
 // FixedArgs (the launch args every agent on this runtime inherits) and
 // Visibility (so a hypothetical future per-creator filter still triggers
 // drift). Profiles are sorted by ID first so the digest is order-independent
@@ -3199,7 +3200,7 @@ func profileSetSignature(profiles []RuntimeProfile) string {
 		fmt.Fprintf(h, "%s%s%t%s%s%s%s%s%s%s",
 			p.ID, sep,
 			p.Enabled, sep,
-			p.ProtocolFamily, sep,
+			agent.ProfileRuntimeType(p.RuntimeType, p.ProtocolFamily), sep,
 			p.CommandName, sep,
 			p.Visibility, sep,
 		)
@@ -7682,8 +7683,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	entry, ok := d.agents()[provider]
 	// A custom runtime profile (MUL-3284) overrides the executable path: the
-	// runtime's protocol_family is the provider (so agent.New still selects
-	// the right backend), but the actual binary on PATH is the profile's
+	// runtime identity is the provider (so ResolveBackend applies its descriptor),
+	// but the actual binary on PATH is the profile's
 	// command_name, resolved at registration time and keyed by RuntimeID here.
 	// Critically, a custom runtime can live on a host that has NO built-in
 	// agent of the same provider installed, so when the runtime is custom we
