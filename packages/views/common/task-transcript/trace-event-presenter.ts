@@ -231,7 +231,8 @@ export interface TraceDiffLine {
  * Expanded-row body. A replacement reads as a diff; a whole-file write reads as
  * plain content, because nothing was compared — marking all of it `+` adds
  * noise, not information. A patch carries one entry per file, since a single
- * Codex `patch_apply` routinely touches several. Everything else is text.
+ * Codex `patch_apply` routinely touches several. A shell call reads as the
+ * command it ran. Everything else is text.
  */
 export type TraceEventDetail =
   | { kind: "diff"; path: string; lines: TraceDiffLine[] }
@@ -513,9 +514,20 @@ function readFileMutation(input: Record<string, unknown>): FileMutation | null {
 }
 
 /**
+ * The command a shell call ran, when its input carries one. Keyed on the
+ * `command` / `cmd` string rather than a tool-name allowlist, like the summary
+ * and step folding, so it holds for every backend.
+ */
+function readCommand(input: Record<string, unknown>): string | null {
+  const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+  return str(input.command) || str(input.cmd);
+}
+
+/**
  * Structured body for the expanded row. Edits become a diff so a reviewer sees
- * what changed rather than two escaped string literals; results are unwrapped;
- * every other tool call falls back to pretty JSON.
+ * what changed rather than two escaped string literals; shell calls show the
+ * command itself; results are unwrapped; every other tool call falls back to
+ * pretty JSON.
  */
 export function traceEventDetail(event: TraceEvent): TraceEventDetail {
   switch (traceEventKind(event)) {
@@ -541,6 +553,12 @@ export function traceEventDetail(event: TraceEvent): TraceEventDetail {
           lineCount: toLines(mutation.content).length,
         };
       }
+      // The command is what the reader opened the row for. Pretty JSON shows
+      // the transport instead: a multi-line script arrives as one string with
+      // every newline escaped, which is unreadable for exactly the calls that
+      // most need reading. The full input remains available through copy.
+      const command = readCommand(event.input);
+      if (command !== null) return { kind: "text", text: command };
       return { kind: "text", text: JSON.stringify(event.input, null, 2) };
     }
     case "tool_result":

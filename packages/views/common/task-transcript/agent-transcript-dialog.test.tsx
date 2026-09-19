@@ -333,11 +333,12 @@ describe("AgentTranscriptDialog", () => {
     // The report is the narrative and renders whole; a tool call is a line
     // whose body waits in the inspector. This inversion is the redesign.
     expect(screen.getByTestId("rich-content")).toHaveTextContent("Agent hidden detail");
-    expect(screen.queryByText(/"command": "pnpm test"/)).not.toBeInTheDocument();
+    expect(screen.queryByText("pnpm test", { selector: "pre" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /pnpm test/ }));
 
-    expect(screen.getByText(/"command": "pnpm test"/)).toBeInTheDocument();
+    // The body is the command as text, not the `{ "command": ... }` object.
+    expect(screen.getByText("pnpm test", { selector: "pre" })).toBeInTheDocument();
   });
 
   // Regression, #7125: a run of short prose steps under a long agent name put
@@ -1080,7 +1081,7 @@ describe("tool output completeness", () => {
         seq: 1,
         type: "tool_use",
         tool: "exec_command",
-        input: { command: "echo", payload: "y".repeat(9000) },
+        input: { command: `echo ${"y".repeat(9000)}` },
       },
     ]);
     fireEvent.click(screen.getByRole("button", { name: /exec_command/ }));

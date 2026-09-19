@@ -240,15 +240,22 @@ describe("traceEventDetail", () => {
     expect(detail.lines).toEqual([{ kind: "remove", text: "gone" }]);
   });
 
-  it("falls back to pretty JSON for a tool call that is not an edit", () => {
-    const detail = traceEventDetail({
-      type: "tool_use",
-      tool: "Bash",
-      input: { command: "ls -la" },
-    });
-    expect(detail.kind).toBe("text");
-    if (detail.kind !== "text") return;
-    expect(detail.text).toBe('{\n  "command": "ls -la"\n}');
+  it("shows a shell call as its command and falls back to pretty JSON otherwise", () => {
+    // A multi-line script must read as the script, not as one JSON string
+    // with every newline escaped. Other params stay reachable through copy.
+    expect(
+      traceEventDetail({
+        type: "tool_use",
+        tool: "Bash",
+        input: { command: 'echo "a"\necho "b"', timeout: 120000 },
+      }),
+    ).toEqual({ kind: "text", text: 'echo "a"\necho "b"' });
+    expect(
+      traceEventDetail({ type: "tool_use", tool: "exec_command", input: { cmd: "ls -la" } }),
+    ).toEqual({ kind: "text", text: "ls -la" });
+    expect(
+      traceEventDetail({ type: "tool_use", tool: "Grep", input: { query: "flaky", limit: 5 } }),
+    ).toEqual({ kind: "text", text: '{\n  "query": "flaky",\n  "limit": 5\n}' });
   });
 
   it("unwraps a tool result so it reads as the terminal output it was", () => {

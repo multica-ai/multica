@@ -36,7 +36,7 @@ describe("trace issue labels", () => {
     expect(traceToolArgSummary({ cmd: command }, { formatText: (text) => replaceTraceIssueIds(text, labels) }))
       .toBe("multica issue update DEV-17 --description 'DEV-14 DEV-17 visible-tail'");
     expect(input.command).toBe(command);
-    expect(traceEventDetail(event)).toEqual({ kind: "text", text: JSON.stringify(input, null, 2) });
+    expect(traceEventDetail(event)).toEqual({ kind: "text", text: command });
     expect(traceEventCopyText(event)).toContain(issue);
     expect(traceEventCopyText(event)).not.toContain("DEV-17");
   });
