@@ -223,8 +223,8 @@ func (h *Handler) completeLocalAgentAutomationLogin(w http.ResponseWriter, r *ht
 	}
 	writeJSON(w, http.StatusOK, LocalLoginResponse{
 		Token:     tokenString,
-		User:      userToResponse(user),
-		Workspace: workspaceToResponse(workspace),
+		User:      h.userToResponse(user),
+		Workspace: h.workspaceToResponse(workspace),
 		Actor: &LocalActorResponse{
 			Type: "agent",
 			ID:   uuidToString(actor.ID),
@@ -273,8 +273,8 @@ func (h *Handler) completeLocalLogin(w http.ResponseWriter, r *http.Request, set
 
 	writeJSON(w, http.StatusOK, LocalLoginResponse{
 		Token:     tokenString,
-		User:      userToResponse(user),
-		Workspace: workspaceToResponse(workspace),
+		User:      h.userToResponse(user),
+		Workspace: h.workspaceToResponse(workspace),
 	})
 }
 

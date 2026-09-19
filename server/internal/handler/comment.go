@@ -2786,7 +2786,7 @@ func (h *Handler) routeLifeOSChairmanToCEO(
 		agent,
 		actorType,
 		actorID,
-		opts.effectiveInvoker(),
+		opts.OriginatorUserID,
 		uuidToString(issue.WorkspaceID),
 	) {
 		return commentAgentTrigger{}, false

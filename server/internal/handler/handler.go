@@ -853,10 +853,11 @@ func requestUserID(r *http.Request) string {
 //
 // Returns ("agent", agentID) on success, ("member", userID) otherwise.
 func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (actorType, actorID string) {
-	if r.Header.Get("X-Actor-Source") == "task_token" {
+	actorSource := r.Header.Get("X-Actor-Source")
+	if actorSource == "task_token" || actorSource == auth.LocalAgentActorSource {
 		// Server-set header — the auth middleware stripped whatever the
-		// client sent and re-stamped X-Agent-ID from the token row. Trust
-		// it directly without re-querying.
+		// client sent and re-stamped X-Agent-ID from the task token or the
+		// signed local automation JWT. Trust it directly without re-querying.
 		return "agent", r.Header.Get("X-Agent-ID")
 	}
 	agentID := r.Header.Get("X-Agent-ID")

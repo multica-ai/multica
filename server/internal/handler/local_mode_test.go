@@ -171,7 +171,7 @@ func TestLocalSetupAndLoginBootstrapOneIdentity(t *testing.T) {
 	}
 
 	var gotActorType, gotActorID, gotActorSource, gotWorkspaceID string
-	authenticated := middleware.Auth(db.New(testPool), nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	authenticated := middleware.Auth(db.New(testPool), nil, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotActorType, gotActorID = h.resolveActor(r, r.Header.Get("X-User-ID"), r.Header.Get("X-Workspace-ID"))
 		gotActorSource = r.Header.Get("X-Actor-Source")
 		gotWorkspaceID = r.Header.Get("X-Workspace-ID")
