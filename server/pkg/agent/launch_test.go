@@ -7,9 +7,87 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestCommandExecAppliesEnvironmentOverlay(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell fixture is unavailable on Windows")
+	}
+	cmd := NewCommand("/bin/sh", nil).
+		WithEnv(map[string]string{"TEST_COMMAND_ENV": "paired"}).
+		exec(context.Background(), "-c", `printf '%s' "$TEST_COMMAND_ENV"`)
+	out, err := outputOwned(cmd, nil)
+	if err != nil {
+		t.Fatalf("run command with environment overlay: %v", err)
+	}
+	if got := string(out); got != "paired" {
+		t.Fatalf("command environment = %q, want paired", got)
+	}
+}
+
+func TestCommandExecViaAppliesEnvironmentOverlay(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell fixture is unavailable on Windows")
+	}
+	choose := func(execName, _ string, args []string, _ *slog.Logger) (string, []string) {
+		return execName, args
+	}
+	cmd, _, _ := NewCommand("/bin/sh", nil).
+		WithEnv(map[string]string{"TEST_COMMAND_ENV": "paired"}).
+		execVia(context.Background(), choose, "/bin/sh", []string{"-c", `printf '%s' "$TEST_COMMAND_ENV"`}, nil)
+	out, err := outputOwned(cmd, nil)
+	if err != nil {
+		t.Fatalf("run chosen command with environment overlay: %v", err)
+	}
+	if got := string(out); got != "paired" {
+		t.Fatalf("chosen command environment = %q, want paired", got)
+	}
+}
+
+func TestCommandCacheKeyIncludesEnvironmentDeterministically(t *testing.T) {
+	a := NewCommand("/tool", []string{"start"}).WithEnv(map[string]string{
+		"PATH":      "/runtime/a",
+		"JAVA_HOME": "/java",
+	})
+	b := NewCommand("/tool", []string{"start"}).WithEnv(map[string]string{
+		"JAVA_HOME": "/java",
+		"PATH":      "/runtime/a",
+	})
+	c := NewCommand("/tool", []string{"start"}).WithEnv(map[string]string{
+		"PATH":      "/runtime/b",
+		"JAVA_HOME": "/java",
+	})
+	if a.cacheKey() != b.cacheKey() {
+		t.Fatal("equivalent environment maps produced different cache keys")
+	}
+	if a.cacheKey() == c.cacheKey() {
+		t.Fatal("different runtime environments produced the same cache key")
+	}
+	prefixOnly := NewCommand("/tool", []string{"PATH", "/runtime/a"})
+	envOnly := NewCommand("/tool", nil).WithEnv(map[string]string{"PATH": "/runtime/a"})
+	if prefixOnly.cacheKey() == envOnly.cacheKey() {
+		t.Fatal("launch prefix and environment produced the same cache key")
+	}
+}
+
+func TestConfigCommandAtCarriesImmutableRuntimeEnvironment(t *testing.T) {
+	runtimeEnv := map[string]string{"PATH": "/mise/node/bin:/usr/bin:/bin"}
+	cmd := (Config{
+		Env:        map[string]string{"MULTICA_AGENT_TOKEN": "task-secret"},
+		RuntimeEnv: runtimeEnv,
+	}).commandAt("/mise/agent")
+	runtimeEnv["PATH"] = "/mutated"
+
+	if got := cmd.Env["PATH"]; got != "/mise/node/bin:/usr/bin:/bin" {
+		t.Fatalf("command runtime PATH = %q, want immutable paired environment", got)
+	}
+	if _, leaked := cmd.Env["MULTICA_AGENT_TOKEN"]; leaked {
+		t.Fatal("command probe environment included the complete task environment")
+	}
+}
 
 // prefixIndex reports where the first token of want starts inside argv, or -1.
 func prefixIndex(argv, want []string) int {
