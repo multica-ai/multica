@@ -189,11 +189,14 @@ export function KpiCard({
         ? "text-success"
         : "";
   return (
-    <div className="flex flex-col gap-2 p-5">
+    <div className="flex min-w-0 flex-col gap-2 p-5">
       <div className="text-micro font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
-      <div className={`text-display font-semibold leading-none tabular-nums ${valueClass}`}>
+      {/* `truncate` keeps an unusually large value clipped inside its own
+          card instead of bleeding into the neighbour once the row is
+          three-across again at `sm` and up. */}
+      <div className={`truncate text-display font-semibold leading-none tabular-nums ${valueClass}`}>
         {value}
       </div>
       {hint != null && (
