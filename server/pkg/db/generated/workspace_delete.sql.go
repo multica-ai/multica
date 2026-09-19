@@ -69,6 +69,10 @@ WITH
 deleted_members AS (
     DELETE FROM member WHERE member.workspace_id = $1
 ),
+deleted_personal_access_tokens AS (
+    DELETE FROM personal_access_token
+    WHERE personal_access_token.workspace_id = $1
+),
 deleted_notification_preferences AS (
     DELETE FROM notification_preference
     WHERE notification_preference.workspace_id = $1
