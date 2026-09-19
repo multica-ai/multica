@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/url"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,10 +21,89 @@ const (
 	// DshProtocolVersion is the DSH stdio protocol this backend speaks. Exported
 	// because the daemon's profile probe accepts or rejects a runtime profile on
 	// this exact number, and a second copy of it there is a copy that can drift.
-	DshProtocolVersion = 1
-	dshCancelGrace     = 3 * time.Second
-	dshTerminateGrace  = 2 * time.Second
+	DshProtocolVersion     = 1
+	dshCancelGrace         = 3 * time.Second
+	dshTerminateGrace      = 2 * time.Second
+	dshRuntimeBudgetPrefix = "MULTICA_RUNTIME_BUDGET "
 )
+
+// dshRuntimeBudget is an opt-in, prompt-carried execution contract for bounded
+// workflows such as independent review. It is enforced by the transport, not
+// merely suggested to the model. The directive must be the first prompt line.
+type dshRuntimeBudget struct {
+	WallClockSeconds     int `json:"wall_clock_seconds"`
+	MaxToolCalls         int `json:"max_tool_calls"`
+	MaxRepeatedDecisions int `json:"max_repeated_decisions"`
+}
+
+func parseDshRuntimeBudget(text string) (*dshRuntimeBudget, error) {
+	line := ""
+	for _, candidate := range strings.Split(text, "\n") {
+		if strings.HasPrefix(candidate, dshRuntimeBudgetPrefix) {
+			line = candidate
+			break
+		}
+	}
+	if line == "" {
+		return nil, nil
+	}
+	var budget dshRuntimeBudget
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, dshRuntimeBudgetPrefix)), &budget); err != nil {
+		return nil, fmt.Errorf("dsh: invalid runtime budget directive: %w", err)
+	}
+	if budget.WallClockSeconds < 1 || budget.MaxToolCalls < 1 || budget.MaxRepeatedDecisions < 1 {
+		return nil, fmt.Errorf("dsh: runtime budget values must all be positive")
+	}
+	return &budget, nil
+}
+
+func parseDshRuntimeBudgetResult(output string) (*dshRuntimeBudget, error) {
+	var value any
+	if json.Unmarshal([]byte(output), &value) != nil {
+		return parseDshRuntimeBudget(output)
+	}
+	var visit func(any) (*dshRuntimeBudget, error)
+	visit = func(current any) (*dshRuntimeBudget, error) {
+		switch typed := current.(type) {
+		case string:
+			return parseDshRuntimeBudget(typed)
+		case []any:
+			for _, item := range typed {
+				if budget, err := visit(item); budget != nil || err != nil {
+					return budget, err
+				}
+			}
+		case map[string]any:
+			for _, item := range typed {
+				if budget, err := visit(item); budget != nil || err != nil {
+					return budget, err
+				}
+			}
+		}
+		return nil, nil
+	}
+	return visit(value)
+}
+
+func dshDecisionSignature(content string) string {
+	text := strings.ToLower(content)
+	if !strings.Contains(text, "verdict") && !strings.Contains(text, "decision") &&
+		!strings.Contains(text, "disposition") && !strings.Contains(text, "结论") &&
+		!strings.Contains(text, "判定") {
+		return ""
+	}
+	var verdicts []string
+	for _, verdict := range []string{"pass", "continue", "rework", "blocked", "incomplete", "fail"} {
+		if strings.Contains(text, verdict) {
+			verdicts = append(verdicts, verdict)
+		}
+	}
+	if len(verdicts) == 0 {
+		return ""
+	}
+	sort.Strings(verdicts)
+	return strings.Join(verdicts, ",")
+}
 
 // dshBackend drives the Multica DSH bundle over its versioned JSONL
 // stdio protocol. The adapter is intentionally independent of ACP: DSH owns
@@ -220,8 +300,19 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	if err != nil {
 		return nil, fmt.Errorf("dsh: invalid mcp_config: %w", err)
 	}
+	budget, err := parseDshRuntimeBudget(prompt)
+	if err != nil {
+		return nil, err
+	}
+	effectiveTimeout := opts.Timeout
+	if budget != nil {
+		budgetTimeout := time.Duration(budget.WallClockSeconds) * time.Second
+		if effectiveTimeout <= 0 || budgetTimeout < effectiveTimeout {
+			effectiveTimeout = budgetTimeout
+		}
+	}
 
-	runCtx, cancel := runContext(ctx, opts.Timeout)
+	runCtx, cancel := runContext(ctx, effectiveTimeout)
 	args := dshLaunchArgs()
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
@@ -306,6 +397,29 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		defer func() { _ = stdin.Close() }()
 		started := time.Now()
 		state := dshRunState{usage: make(map[string]TokenUsage)}
+		var budgetStopReason string
+		toolCalls := 0
+		lastDecision := ""
+		repeatedDecisions := 0
+		var budgetTimer *time.Timer
+		startBudgetTimer := func() {
+			if budgetTimer != nil || budget == nil {
+				return
+			}
+			remaining := time.Duration(budget.WallClockSeconds)*time.Second - time.Since(started)
+			if remaining <= 0 {
+				budgetStopReason = fmt.Sprintf("wall clock %ds", budget.WallClockSeconds)
+				cancel()
+				return
+			}
+			budgetTimer = time.AfterFunc(remaining, cancel)
+		}
+		startBudgetTimer()
+		defer func() {
+			if budgetTimer != nil {
+				budgetTimer.Stop()
+			}
+		}()
 		scanner := newAgentStreamScanner(stdout)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -318,6 +432,51 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 				continue
 			}
 			state.frameCount++
+			if frame.Type == "tool_call" {
+				toolCalls++
+			}
+			if budget == nil && frame.Type == "tool_result" {
+				budget, err = parseDshRuntimeBudgetResult(frame.Output)
+				if err != nil {
+					budgetStopReason = err.Error()
+					cancel()
+					continue
+				}
+				startBudgetTimer()
+				if budget != nil && toolCalls > budget.MaxToolCalls {
+					budgetStopReason = fmt.Sprintf("tool-call limit reached after call %d", toolCalls)
+					cancel()
+					continue
+				}
+			}
+			if budget != nil && budgetStopReason == "" {
+				switch frame.Type {
+				case "tool_call":
+					if toolCalls > budget.MaxToolCalls {
+						budgetStopReason = fmt.Sprintf("tool-call limit reached before call %d", toolCalls)
+						cancel()
+						continue
+					}
+				case "thinking":
+					signature := dshDecisionSignature(frame.Content)
+					if signature != "" {
+						if signature == lastDecision {
+							repeatedDecisions++
+						} else {
+							lastDecision = signature
+							repeatedDecisions = 1
+						}
+						if repeatedDecisions >= budget.MaxRepeatedDecisions {
+							budgetStopReason = fmt.Sprintf("same decision repeated %d times", repeatedDecisions)
+							cancel()
+							continue
+						}
+					}
+				}
+			}
+			if budgetStopReason != "" {
+				continue
+			}
 			handleDshFrame(frame, requestID, msgCh, &state)
 		}
 		scanErr := scanner.Err()
@@ -329,12 +488,24 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		releaseProcessGroup(cmd)
 
 		result := state.result
+		if budgetStopReason == "" && budget != nil && errors.Is(runCtx.Err(), context.Canceled) &&
+			time.Since(started) >= time.Duration(budget.WallClockSeconds)*time.Second {
+			budgetStopReason = fmt.Sprintf("wall clock %ds", budget.WallClockSeconds)
+		}
+		if budgetStopReason != "" {
+			result = &Result{Status: "failed", SessionID: state.sessionID, Usage: state.usage,
+				Error: "dsh runtime budget exceeded: " + budgetStopReason}
+		}
 		if result == nil {
 			result = &Result{Status: "failed", SessionID: state.sessionID, Usage: state.usage}
 			switch {
 			case errors.Is(runCtx.Err(), context.DeadlineExceeded):
 				result.Status = "timeout"
-				result.Error = fmt.Sprintf("dsh timed out after %s", opts.Timeout)
+				if budget != nil && effectiveTimeout == time.Duration(budget.WallClockSeconds)*time.Second {
+					result.Error = fmt.Sprintf("dsh runtime budget exceeded: wall clock %s", effectiveTimeout)
+				} else {
+					result.Error = fmt.Sprintf("dsh timed out after %s", effectiveTimeout)
+				}
 			case errors.Is(runCtx.Err(), context.Canceled):
 				result.Status = "cancelled"
 				result.Error = "dsh execution cancelled"

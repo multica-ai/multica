@@ -125,6 +125,64 @@ printf '%s\n' '{"v":1,"type":"result","request_id":"task-cancel","status":"cance
 	}
 }
 
+func TestDshBackendRuntimeBudgetStopsBeforeSeventhToolCall(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	bin := writeDshFixture(t, `
+printf '%s\n' '{"v":1,"type":"ready","runtime":"dsh","plugin_version":"test","capabilities":{}}'
+IFS= read -r execute
+printf '%s\n' '{"v":1,"type":"session","request_id":"task-budget","session_id":"session-budget","resumed":false}'
+i=1
+while [ "$i" -le 7 ]; do
+  printf '{"v":1,"type":"tool_call","request_id":"task-budget","call_id":"call-%s","name":"bash","arguments":"{}"}\n' "$i"
+  i=$((i + 1))
+done
+IFS= read -r cancel
+case "$cancel" in *'"type":"cancel"'*) ;; *) exit 8 ;; esac
+`)
+	b, err := New("dsh", Config{ExecutablePath: bin, TaskID: "task-budget", Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := `MULTICA_RUNTIME_BUDGET {"wall_clock_seconds":5,"max_tool_calls":6,"max_repeated_decisions":3}
+review`
+	session, err := b.Execute(context.Background(), prompt, ExecOptions{Cwd: t.TempDir(), Timeout: 30 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := 0
+	for message := range session.Messages {
+		if message.Type == MessageToolUse {
+			tools++
+		}
+	}
+	result := <-session.Result
+	if tools != 6 {
+		t.Fatalf("forwarded %d tool calls, want exactly 6", tools)
+	}
+	if result.Status != "failed" || !strings.Contains(result.Error, "before call 7") {
+		t.Fatalf("unexpected budget result: %#v", result)
+	}
+}
+
+func TestDshBackendDiscoversRuntimeBudgetFromIssueGetResult(t *testing.T) {
+	output := `{"description":"MULTICA_RUNTIME_BUDGET {\"wall_clock_seconds\":300,\"max_tool_calls\":6,\"max_repeated_decisions\":3}\ncontract"}`
+	budget, err := parseDshRuntimeBudgetResult(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if budget == nil || budget.MaxToolCalls != 6 || budget.WallClockSeconds != 300 {
+		t.Fatalf("unexpected discovered budget: %#v", budget)
+	}
+}
+
+func TestParseDshRuntimeBudgetRejectsMalformedDirective(t *testing.T) {
+	if _, err := parseDshRuntimeBudget("MULTICA_RUNTIME_BUDGET {}\nreview"); err == nil {
+		t.Fatal("expected invalid zero budget to fail")
+	}
+}
+
 func TestDiscoverDshModels(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture")
