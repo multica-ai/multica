@@ -522,6 +522,52 @@ SELECT EXISTS (
       AND channel_ingested
 ) AS channel_ingested;
 
+-- name: GetTaskChannelOrigin :one
+-- The whole origin question for one completed task, in one round trip: is the
+-- task row still there, and did its input arrive over a channel?
+--
+-- GetAgentTask followed by TaskHasChannelIngestedMessages answers the same
+-- question in two, which is what the other channel adapters do. They ask it
+-- only after a channel_task_delivery row has already said the turn was theirs.
+-- WeCom's reply path also asks it for a completion with NO delivery row, to
+-- tell an unroutable channel turn apart from an ordinary web-UI one, and that
+-- branch is reached by every web-UI completion in the deployment. It runs
+-- synchronously inside events.Bus.Publish (internal/events/bus.go:61-76),
+-- below TaskService.broadcastChatDone (internal/service/task.go:7330) and
+-- CompleteTaskWithTransition (internal/service/task.go:4518), which the
+-- daemon's POST /tasks/{id}/complete waits for before it answers
+-- (internal/handler/daemon.go:4269). A round trip here is a round trip the
+-- completion response and the realtime fanout both wait for, so there is one.
+--
+-- NO ROW means the task is gone — cancelled and reaped while its ending was in
+-- flight. Callers receive pgx.ErrNoRows and must not fold that into "asked in
+-- the web UI": it is the absence of a verdict, not a negative one, and the two
+-- are recorded differently.
+--
+-- The batch key is COALESCE(chat_input_task_id, id) — the same key migration
+-- 427 used to decide which in-flight tasks were owed a delivery row, so a row
+-- this query calls channel-ingested is a row that backfill would have given a
+-- route to:
+--   * an auto-retry clone inherits its parent's chat_input_task_id while its
+--     own messages stay tagged with the parent, so keying on the owner makes
+--     the clone reach its parent's verdict (MUL-4351);
+--   * a legacy row with NO owner falls back to its own id rather than being
+--     assumed channel-ingested. Migration 158 left both legacy and channel
+--     tasks NULL here, so "NULL means channel" would report every pre-158 web
+--     turn as a channel turn whose route went missing.
+--
+-- Plan: agent_task_queue_pkey for the row, idx_chat_message_input_owner for
+-- the EXISTS. Neither side scans.
+SELECT EXISTS (
+    SELECT 1
+    FROM chat_message
+    WHERE task_id = COALESCE(task.chat_input_task_id, task.id)
+      AND role = 'user'
+      AND channel_ingested
+) AS channel_ingested
+FROM agent_task_queue AS task
+WHERE task.id = $1;
+
 -- name: SetChatMessageChannelOutboundProvenanceByTask :execrows
 -- The assistant row is committed before EventChatDone is published. Attach the
 -- external identifiers produced by the adapter to that durable turn so a live
