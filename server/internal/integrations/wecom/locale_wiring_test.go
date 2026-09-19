@@ -167,7 +167,6 @@ func TestZhHansPackIsTheCopyThatAlreadyShipped(t *testing.T) {
 	want := map[string]string{
 		"StreamNoReply":          "（这轮没有需要回复的内容）",
 		"StreamNoReplyWithFiles": "（这轮没有文字回复，附件在下面）",
-		"StreamMerged":           "✅ 这条已并入上一条回复一起处理了。",
 		"StreamNotStarted":       "已收到，但这条暂时没能开始处理。",
 		"StreamFailed":           "⚠️ 这次没跑通，请稍后再试一次。",
 		"StreamCancelled":        "⏹️ 这次处理已取消。",

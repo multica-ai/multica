@@ -385,20 +385,24 @@ func (o *Outbound) deliverAnswer(ctx context.Context, e events.Event, taskID pgt
 	if t.HasBubble {
 		// A bubble on screen has to end in words. An empty completion is a
 		// legitimate outcome — the agent had nothing to add — but an endless
-		// spinner is not, so the copy stands in for the silence. For a round
-		// that waited in line behind another, the silence has a better
-		// explanation: the reply ahead of it already covered this message.
-		// The round's own language, captured when its bubble was opened. And
-		// when the agent said nothing but produced files, the silence is not the
-		// end of the turn at all: those files arrive as their own messages right
-		// underneath, so a bubble reading "nothing to reply this round" would
-		// contradict the next thing on screen.
+		// spinner is not, so the copy stands in for the silence. The round's own
+		// language, captured when its bubble was opened. And when the agent said
+		// nothing but produced files, the silence is not the end of the turn at
+		// all: those files arrive as their own messages right underneath, so a
+		// bubble reading "nothing to reply this round" would contradict the next
+		// thing on screen.
+		//
+		// A ROUND THAT WAITED IN LINE SAYS THE SAME THING AS ONE THAT DID NOT.
+		// "已并入上一条回复" reads as a merge, and nothing here merged anything:
+		// QueuedBehind records only that another round was open when this one
+		// was painted, which is not evidence that the reply ahead covered this
+		// message. A real merged notice needs a real merge signal. Falling
+		// through to StreamNoReply drops the claim without adding state, and
+		// it puts the attachment case back in charge when files are carried.
 		text := content
 		if !hasVisibleChar(text) {
 			c := copyFor(t.Handle.Locale)
 			switch {
-			case t.Handle.QueuedBehind:
-				text = c.StreamMerged
 			case carriesFiles:
 				text = c.StreamNoReplyWithFiles
 			default:

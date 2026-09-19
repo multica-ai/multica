@@ -251,6 +251,14 @@ type RouterOptions struct {
 	// unfalsifiable from outside the process, so the boot-wiring guard needs
 	// what boot actually built rather than something a test assembled itself.
 	// Nil everywhere but that guard.
+	//
+	// WHAT IT ASSERTS IS *BUILT*, NOT *REGISTERED*. The set is handed over at
+	// the point boot assembled it, so a guard reading this proves the pieces
+	// were constructed and passed on — not that the engine accepted them or
+	// that anything downstream kept them. An accessor on engine.Router would
+	// assert the stronger thing; it is a shared-engine change and belongs in
+	// its own PR, not in one whose whole claim is that it does not touch the
+	// engine.
 	WecomResolverSetBuilt func(engine.ResolverSet)
 	DaemonHub             *daemonws.Hub
 	DaemonWakeup          service.TaskWakeupNotifier

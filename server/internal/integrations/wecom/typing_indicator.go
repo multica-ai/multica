@@ -70,7 +70,6 @@ import (
 // produces exactly these words, so they are what those tests pin.
 var (
 	streamCopyNoReply    = copyFor(DefaultLocale).StreamNoReply
-	streamCopyMerged     = copyFor(DefaultLocale).StreamMerged
 	streamCopyNotStarted = copyFor(DefaultLocale).StreamNotStarted
 	streamCopyFailed     = copyFor(DefaultLocale).StreamFailed
 	streamCopyCancelled  = copyFor(DefaultLocale).StreamCancelled

@@ -124,7 +124,6 @@ type copyPack struct {
 	//   Distinct from StreamNoReply because that copy says nothing is coming,
 	//   and then something arrives: a bubble that contradicts the next message
 	//   reads as a bug even though both halves are working.
-	// StreamMerged — a QUEUED round's run finished with nothing of its own to
 	//   say; the reply ahead of it already covered this message. A first
 	//   round's empty finish keeps StreamNoReply, which has no earlier answer
 	//   to point at.
@@ -140,7 +139,6 @@ type copyPack struct {
 	//   noticed.
 	StreamNoReply          string
 	StreamNoReplyWithFiles string
-	StreamMerged           string
 	StreamNotStarted       string
 	StreamFailed           string
 	StreamCancelled        string
@@ -158,7 +156,6 @@ var copyPacks = map[Locale]copyPack{
 	LocaleZhHans: {
 		StreamNoReply:          "（这轮没有需要回复的内容）",
 		StreamNoReplyWithFiles: "（这轮没有文字回复，附件在下面）",
-		StreamMerged:           "✅ 这条已并入上一条回复一起处理了。",
 		StreamNotStarted:       "已收到，但这条暂时没能开始处理。",
 		StreamFailed:           "⚠️ 这次没跑通，请稍后再试一次。",
 		StreamCancelled:        "⏹️ 这次处理已取消。",
@@ -166,7 +163,6 @@ var copyPacks = map[Locale]copyPack{
 	LocaleEn: {
 		StreamNoReply:          "(nothing to reply with this round)",
 		StreamNoReplyWithFiles: "(no text this round — the files follow)",
-		StreamMerged:           "✅ Handled together with my previous reply.",
 		StreamNotStarted:       "Got it, but this one couldn't start processing.",
 		StreamFailed:           "⚠️ That run didn't go through. Please try again.",
 		StreamCancelled:        "⏹️ That run was cancelled.",

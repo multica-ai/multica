@@ -648,7 +648,7 @@ func TestMessagesInsideTheDebounceWindowShareOneBubble(t *testing.T) {
 // A queued round whose run finished with nothing of its own to say has a
 // better explanation than plain silence: the reply ahead of it already covered
 // the message.
-func TestAQueuedRoundWithNothingToSaySaysItWasMerged(t *testing.T) {
+func TestAQueuedRoundWithNothingToSayMakesNoClaimAboutWhy(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
 	rig.ran(t, "REQ-F1", "task-1")
@@ -661,9 +661,14 @@ func TestAQueuedRoundWithNothingToSaySaysItWasMerged(t *testing.T) {
 	if len(frames) != 4 {
 		t.Fatalf("got %d stream frames, want 4 (two opens, two seals)", len(frames))
 	}
-	if frames[3]["content"] != streamCopyMerged {
+	// It used to say 「已并入上一条回复」. QueuedBehind records only that another
+	// round was open when this one was painted — never that the reply ahead
+	// covered this message — so the notice claimed a merge that never happened.
+	// The claim is gone; the bubble still closes with words, which is the
+	// property this test was written for.
+	if frames[3]["content"] != streamCopyNoReply {
 		t.Errorf("a queued round's empty answer closed with %q, want %q",
-			frames[3]["content"], streamCopyMerged)
+			frames[3]["content"], streamCopyNoReply)
 	}
 }
 
