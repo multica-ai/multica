@@ -1078,17 +1078,26 @@ func (r *RelayOutbound) outcomeGrace() time.Duration {
 	// The settle retry on the finished offer: its extra attempts and the
 	// pauses between them (settleClaim).
 	total += time.Duration(claimSettleAttempts-1) * (budget + r.settleRetryBackoff())
-	// Plus the last offer's own delivery: a claim taken on the final attempt
-	// is still being written and acked when the chain's timing says the chain
-	// is over, and a Resolve that lands inside that ack wait fences a reply
-	// that is about to be delivered.
+	// Plus a DELIVERY PER OFFER, not one for the chain. perform gives every
+	// claimed delivery a budget of its own, and the failure that spends the
+	// whole of one is also the failure that hands the claim back: an offer
+	// whose chat is busy waits for the chat's turn until its budget runs out
+	// and comes back errChatBusy, which is provablyNotSent, so the claim is
+	// released and the frame is offered again with a fresh budget. Charging
+	// one delivery to the chain therefore sized the grace for a chain that
+	// cannot happen — every offer's backoff plus one offer's delivery — and
+	// on the defaults that is 5s of grace against 60s the chain can spend.
 	//
-	// ONE budget is enough only because perform applies the same one budget to
-	// the whole delivery. A split answer waits for the chat's turn and then
-	// for several acks in a row, so the alternative — reserving one ack here
-	// and letting the delivery take as many as it needs — is the mismatch
-	// this term exists to prevent, in the other direction.
-	total += r.cfg.deliveryBudget()
+	// The Resolve that lands inside a live offer is the whole cost: it fences
+	// the key as lost in the same operation, so the holder that comes back
+	// records nothing while the counter already says the reply was dropped.
+	// One reply, counted lost and delivered at once.
+	//
+	// The other direction — a delivery that outlives the budget perform gave
+	// it — cannot happen: it IS the budget, applied to the context the
+	// delivery runs on, so an answer split into several frames spends it
+	// across all of them rather than taking an ack wait per piece.
+	total += r.cfg.deliveryBudget() * time.Duration(offers)
 	return total
 }
 
