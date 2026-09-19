@@ -34,6 +34,10 @@ export interface BuilderDraftPayload {
   member_ids?: unknown;
 }
 
+function isBuilderDraftPayload(value: unknown): value is BuilderDraftPayload {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 export function parseBuilderDraft(
   content: string,
   { completed = false }: { completed?: boolean } = {},
@@ -48,18 +52,14 @@ export function parseBuilderDraft(
     if (parts.length !== 2 || !parts[1]) return null;
     try {
       const value = JSON.parse(escapeJsonStringControlCharacters(parts[1]));
-      return value && typeof value === "object" && !Array.isArray(value)
-        ? (value as BuilderDraftPayload)
-        : null;
+      return isBuilderDraftPayload(value) ? value : null;
     } catch {
       return null;
     }
   }
   try {
     const value = JSON.parse(match[1]);
-    return value && typeof value === "object"
-      ? (value as BuilderDraftPayload)
-      : null;
+    return isBuilderDraftPayload(value) ? value : null;
   } catch {
     // Some CLI-backed models emit literal newlines in the Markdown
     // instructions string even when asked for compact JSON. Repair only JSON
@@ -67,9 +67,7 @@ export function parseBuilderDraft(
     // other syntax still have to pass JSON.parse.
     try {
       const value = JSON.parse(escapeJsonStringControlCharacters(match[1]));
-      return value && typeof value === "object"
-        ? (value as BuilderDraftPayload)
-        : null;
+      return isBuilderDraftPayload(value) ? value : null;
     } catch {
       return null;
     }

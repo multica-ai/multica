@@ -28,6 +28,19 @@ const draft = (): AgentDraft => ({
 });
 
 describe("agent builder protocol", () => {
+  it.each([
+    "[]",
+    '[{"name":"Reviewer"}]',
+    '[{"instructions":"First line\nSecond line"}]',
+  ])("rejects array payloads: %j", (payload) => {
+    expect(
+      parseBuilderDraft(`<agent_draft>${payload}</agent_draft>`),
+    ).toBeNull();
+    expect(
+      parseBuilderDraft(`<agent_draft>${payload}`, { completed: true }),
+    ).toBeNull();
+  });
+
   it("parses and hides the structured draft block", () => {
     const content =
       'Here is a first draft.\n<agent_draft>{"name":"Researcher","permission_scope":"workspace"}</agent_draft>';
