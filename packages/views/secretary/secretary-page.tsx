@@ -217,7 +217,7 @@ export function SecretaryPage({
                           required
                           value={capacityInput}
                           onChange={(event) => setCapacityInput(event.target.value)}
-                          className="w-20 rounded border bg-background p-2 text-sm"
+                          className="w-20 rounded-md border bg-background p-2 text-sm"
                         />
                         <Button
                           size="sm"

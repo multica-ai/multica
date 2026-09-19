@@ -102,7 +102,7 @@ export function InstructionForm({
       <label className="block text-sm">
         {t(($) => $.secretary.handling_method)}
         <select
-          className="ml-3 rounded border bg-background p-2"
+          className="ml-3 rounded-md border bg-background p-2"
           value={kind}
           disabled={mutation.isPending}
           onChange={(event) => setKind(event.target.value as Kind)}
@@ -123,7 +123,7 @@ export function InstructionForm({
             <input
               required
               type="date"
-              className="ml-2 rounded border bg-background p-2"
+              className="ml-2 rounded-md border bg-background p-2"
               value={day}
               onChange={(event) => setDay(event.target.value)}
             />
@@ -135,7 +135,7 @@ export function InstructionForm({
                 type="number"
                 min={1}
                 max={1440}
-                className="ml-2 w-20 rounded border bg-background p-2"
+                className="ml-2 w-20 rounded-md border bg-background p-2"
                 value={minutes}
                 onChange={(event) => setMinutes(event.target.value)}
                 placeholder={t(($) => $.secretary.unestimated)}
@@ -156,7 +156,7 @@ export function InstructionForm({
           maxLength={1000}
           value={note}
           onChange={(event) => setNote(event.target.value)}
-          className="mt-1 block min-h-20 w-full rounded border bg-background p-2"
+          className="mt-1 block min-h-20 w-full rounded-md border bg-background p-2"
         />
       </label>
       {kind === "complete" && (
