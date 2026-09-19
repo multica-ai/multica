@@ -13,8 +13,10 @@ package wecom
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
@@ -880,4 +882,113 @@ func hasVisibleChar(s string) bool {
 		}
 	}
 	return false
+}
+
+// sendMsgContentLimit is the cap on one aibot_send_msg markdown body: the same
+// 20480 utf8 bytes the stream frame gets
+// (https://developer.work.weixin.qq.com/document/path/101138). A body past it
+// is refused WHOLE — the server does not clip it — and the refusal arrives as
+// errcode 45002 on the ack, so before splitForWire a long answer simply never
+// appeared in the chat.
+const sendMsgContentLimit = 20480
+
+// splitForWire cuts a reply into pieces the platform will accept, and returns
+// the input untouched when it already fits — which is nearly always, so the
+// common path allocates nothing.
+//
+// Splitting rather than truncating is the point. A long answer is a code
+// review, a pasted log, a document draft: the tail is not filler, and neither
+// a reply the server refuses whole nor one that stops at an ellipsis with no
+// way to read the rest is an answer. The cut prefers a line boundary, then a
+// rune boundary, so a piece never ends mid-character and rarely ends mid-line.
+//
+// Each piece carries a marker so the reader knows the answer continues. This
+// is the one place the adapter adds words to an agent's own text, which is why
+// the marker is a bare counter rather than a sentence: it belongs to no
+// language, so it needs no translation and cannot contradict an answer written
+// in one.
+func splitForWire(content string) []string {
+	if len(content) <= sendMsgContentLimit {
+		return []string{content}
+	}
+
+	var pieces []string
+	remaining := content
+	for len(remaining) > 0 {
+		// Reserve room for the widest marker this piece could end up with.
+		// The total is not known until the split is done, so the placeholder
+		// stands in for it: "…" is three bytes, which covers a total up to
+		// three digits — far past any answer that reaches this function.
+		marker := fmt.Sprintf("\n\n(%d/…)", len(pieces)+1)
+		budget := sendMsgContentLimit - len(marker)
+		if len(remaining) <= sendMsgContentLimit {
+			pieces = append(pieces, remaining)
+			break
+		}
+		cut := wireCutPoint(remaining, budget)
+		// Nothing is dropped at the seam. The cut is an index into remaining
+		// and both sides of it are kept: a line break the cut point chose ends
+		// the piece it belongs to, so concatenating the pieces with their
+		// markers stripped gives the answer back byte for byte. An earlier
+		// version trimmed leading newlines here, which silently ate a
+		// paragraph break out of every log and code block long enough to
+		// split.
+		pieces = append(pieces, remaining[:cut])
+		remaining = remaining[cut:]
+	}
+
+	// A piece with nothing visible in it is not sent. A long answer that ends
+	// in a run of blank lines puts that run in a piece of its own — the last
+	// piece carries no marker, so nothing else makes it visible — and that
+	// piece reaches the chat as an empty bubble, which is the thing
+	// hasVisibleChar exists at the call sites to prevent. Dropping it costs
+	// the reader nothing: what is dropped is whitespace that would have
+	// occupied a whole message on its own.
+	//
+	// Filtered before the markers go on, so the numbering counts the pieces
+	// the person actually receives.
+	kept := pieces[:0]
+	for _, p := range pieces {
+		if hasVisibleChar(p) {
+			kept = append(kept, p)
+		}
+	}
+	pieces = kept
+
+	// The count is only knowable once the split is done, so the markers go on
+	// afterwards. The last piece gets none: there is nothing after it to
+	// promise, and the reader can see that for themselves.
+	total := len(pieces)
+	for i := range pieces {
+		if i == total-1 {
+			continue
+		}
+		pieces[i] += fmt.Sprintf("\n\n(%d/%d)", i+1, total)
+	}
+	return pieces
+}
+
+// wireCutPoint picks where to end a piece: the last line break inside the
+// budget when there is one worth using, otherwise the last rune boundary.
+func wireCutPoint(s string, budget int) int {
+	if budget >= len(s) {
+		return len(s)
+	}
+	// A line break in the last quarter of the budget is worth taking; one
+	// near the start would waste most of a frame. The cut goes AFTER it, so
+	// the break stays at the end of the piece it terminated rather than
+	// falling into the gap between two frames.
+	if nl := strings.LastIndexByte(s[:budget], '\n'); nl > budget*3/4 {
+		return nl + 1
+	}
+	cut := budget
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	if cut == 0 {
+		// A single rune wider than the budget cannot happen at this size, but
+		// returning 0 would loop forever, so fall back to the raw cut.
+		return budget
+	}
+	return cut
 }

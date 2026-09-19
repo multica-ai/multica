@@ -807,26 +807,91 @@ func TestRelay_AttemptedWriteKeepsTheClaim(t *testing.T) {
 	}
 }
 
-// TestDeliverRelayed_ContextErrorsDoNotRelease — a bare context error is
-// ambiguous: request() returns one both before the write and while waiting for
-// the verdict after it. Treated as possibly-sent, so the outcome must not be
-// the claim-releasing one.
-func TestDeliverRelayed_ContextErrorsDoNotRelease(t *testing.T) {
+// A cancellation is TWO facts on this path, and the relay owes them opposite
+// answers. request raises one before it mints a req_id and one while waiting
+// for the verdict after the frame is on the wire (ws_sender.go); the first is
+// proof of non-delivery, the second is proof of nothing. One test covered both
+// with the possibly-sent answer, which is right for the second and loses the
+// answer on the first — so it is two tests, one per fact.
+//
+// The pre-write half: the socket saw no bytes, so the claim goes back and the
+// dispatcher offers the frame again. Releasing here cannot duplicate anything,
+// and NOT releasing here is a reply nobody ever retries.
+//
+// REVERSE VERIFICATION: return the bare ctx.Err() from request's pre-write
+// check again and this fails with outcomeDone and a record of a reply the chat
+// never saw.
+func TestDeliverRelayed_APreWriteContextErrorReleasesTheClaim(t *testing.T) {
 	t.Parallel()
 	instID := mustTestUUID(t)
 	reg := newSendersRegistry()
 	conn := &recordingConn{}
-	reg.set(instID, conn.autoAck(newWSSender(conn, nil)))
+	reg.set(instID, conn.autoAck(newWSSender(conn, slog.Default())))
 	o := NewOutbound(nil, reg, slog.Default())
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // already expired: sendTextCtx fails on its pre-write check
+	cancel() // already over: the chat is free, so request's pre-write check is what fails
 	got := o.deliverRelayed(ctx, relayFrame{
 		Kind: relayKindReply, InstallationID: util.UUIDToString(instID),
 		ChatID: "CHAT_1", ChatType: chatTypeSingleInt, Content: "hello",
 	})
+
+	if n := conn.frameCount(); n != 0 {
+		t.Fatalf("%d frame(s) reached the socket; this test is no longer about a send that never started", n)
+	}
+	if got.outcome != outcomeProvablyNotSent {
+		t.Fatalf("outcome = %v, want outcomeProvablyNotSent — the claim stays held on an answer "+
+			"the socket never saw, and the dispatcher stops offering it", got.outcome)
+	}
+	if got.record != nil {
+		t.Error("a frame still owed another offer carries a record; counting it here counts it once per attempt")
+	}
+}
+
+// The post-write half: the frame is on the wire and only its verdict is
+// missing, so the claim STAYS and the reply files as unconfirmed. Releasing it
+// would let a re-offer put the same answer in the chat a second time, with
+// nothing to undo it with.
+func TestDeliverRelayed_AContextErrorAwaitingTheAckKeepsTheClaim(t *testing.T) {
+	t.Parallel()
+	instID := mustTestUUID(t)
+	reg := newSendersRegistry()
+	conn := &recordingConn{} // no autoAck: the frame goes out and no verdict comes back
+	reg.set(instID, newWSSender(conn, slog.Default()))
+	mx := newCountingMetrics()
+	o := NewOutbound(nil, reg, slog.Default(), WithOutboundMetrics(mx))
+
+	// Cancelled once the frame is ON THE WIRE, so which of request's two
+	// context errors this raises is a fact about the run rather than a race
+	// against a timer.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		for conn.frameCount() == 0 {
+			time.Sleep(time.Millisecond)
+		}
+		cancel()
+	}()
+	got := o.deliverRelayed(ctx, relayFrame{
+		Kind: relayKindReply, InstallationID: util.UUIDToString(instID),
+		ChatID: "CHAT_1", ChatType: chatTypeSingleInt, Content: "hello",
+	})
+
+	if n := conn.frameCount(); n != 1 {
+		t.Fatalf("%d frame(s) reached the socket, want 1; this test is about a cancellation AFTER the write", n)
+	}
 	if got.outcome == outcomeProvablyNotSent {
-		t.Fatal("a context error released the claim; it is ambiguous and must not")
+		t.Fatal("the claim was released for a frame the peer may already hold; a re-offer prints the answer twice")
+	}
+	if got.record == nil {
+		t.Fatal("a finished frame carries no record, so this reply moves no counter at all")
+	}
+	got.record()
+	if n := mx.get("outbound_unconfirmed"); n != 1 {
+		t.Errorf("outbound_unconfirmed = %d, want 1 — the verdict is missing, which is not the same as a failure", n)
+	}
+	if n := mx.get("outbound_dropped"); n != 0 {
+		t.Errorf("outbound_dropped = %d, want 0 — dropped promises the answer is not coming, and it may already be there", n)
 	}
 }
 

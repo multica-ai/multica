@@ -90,7 +90,137 @@ type wsSender struct {
 	// job, because a pong echoes the server's req_id and that may be empty
 	// or repeated. It never goes on the wire.
 	seq uint64
+
+	// chats serializes whole logical messages per target chat. mu orders one
+	// frame write; it is released before the ack wait, which is where an
+	// unrelated send used to land between two pieces of one answer.
+	//
+	// EVERY push the reader sees takes it: text through sendTextCtx and files
+	// through sendMedia. Half of that is no rule at all — a picture between
+	// "(1/3)" and "(2/3)" is the same unreadable chat as a stray sentence
+	// there, and attachment delivery is spawned alongside the answer it came
+	// with, so the two are concurrent by construction rather than by
+	// coincidence. What it does NOT cover is the upload: that puts nothing in
+	// the chat, and holding the chat's turn for a multi-megabyte transfer
+	// would queue every other message behind bytes that have not yet become a
+	// message.
+	chats chatLocks
 }
+
+// chatLocks is one lock per target chat, created on demand and dropped when
+// the last holder leaves, so a process that has talked to many chats does not
+// keep an entry for each of them forever.
+//
+// Per CHAT rather than per connection on purpose: a second answer to a
+// different room has no reason to queue behind this one, and the ping loop
+// writes through request/write and never takes a chat lock at all, so it
+// cannot be held up by a send.
+type chatLocks struct {
+	mu    sync.Mutex
+	locks map[string]*chatLock
+}
+
+type chatLock struct {
+	// ch is a mutex that can be waited on with a context: capacity one, a
+	// token in it means held.
+	ch   chan struct{}
+	refs int
+}
+
+// acquire blocks until this chat is free or ctx ends. The returned release is
+// nil when it returns an error.
+//
+// The wait is bounded by whoever holds it: a holder is inside at most one
+// ackTimeout per piece, and the pieces of one answer are few. A caller on
+// context.Background therefore waits rather than interleaving, which is the
+// whole point — the alternative is the reader seeing an unrelated message
+// wedged into the middle of an answer.
+func (c *chatLocks) acquire(ctx context.Context, chatID string) (func(), error) {
+	c.mu.Lock()
+	if c.locks == nil {
+		c.locks = make(map[string]*chatLock)
+	}
+	l := c.locks[chatID]
+	if l == nil {
+		l = &chatLock{ch: make(chan struct{}, 1)}
+		c.locks[chatID] = l
+	}
+	l.refs++
+	c.mu.Unlock()
+
+	release := func() {
+		<-l.ch
+		c.mu.Lock()
+		l.refs--
+		if l.refs == 0 {
+			delete(c.locks, chatID)
+		}
+		c.mu.Unlock()
+	}
+	drop := func() {
+		c.mu.Lock()
+		l.refs--
+		if l.refs == 0 {
+			delete(c.locks, chatID)
+		}
+		c.mu.Unlock()
+	}
+
+	// A free chat is taken without consulting the context at all. select picks
+	// at RANDOM among ready cases, so a caller whose context is already dead
+	// arriving at a chat nobody holds would otherwise be turned away half the
+	// time for a chat nobody was using.
+	//
+	// It also keeps errChatBusy honest: it is returned only when the chat
+	// really was somebody else's and the wait ran out. What the caller gets
+	// instead is request's pre-write check, which is the same fact under a
+	// different name — both wrap errNotAttempted, so the classifiers cannot
+	// tell them apart and do not need to.
+	select {
+	case l.ch <- struct{}{}:
+		return release, nil
+	default:
+	}
+	select {
+	case l.ch <- struct{}{}:
+		return release, nil
+	case <-ctx.Done():
+		drop()
+		return nil, fmt.Errorf("%w: %w", errChatBusy, ctx.Err())
+	}
+}
+
+// errNotAttempted marks a send that ended BEFORE any byte could leave this
+// process. It is the one mark on this path that means "certainly not
+// delivered", and it is the only thing the three classifiers have to test for
+// — provablyNotSent (relay_outbound.go), unconfirmedReason (outbound_outcome.go)
+// and sendOutcome (outbound_media.go).
+//
+// It exists because the bare ctx.Err() these paths used to return said the
+// opposite. Every classifier reads a context error as "the frame may be in
+// front of the person already" — the right reading for a context that ended
+// while waiting for a VERDICT (errAckAbandoned), and the exact inversion of
+// one that ended before the write. So the direct path filed a message it had
+// never sent as "outcome unknown", which is the one outcome nobody may resend;
+// the relay settled its claim and stopped offering it; and the media path told
+// the user their file might have arrived. The user got nothing and the party
+// whose job is to try again was told not to.
+//
+// Every not-attempted failure WRAPS this rather than carrying its own
+// unrelated sentinel, so the classifiers ask one question instead of keeping a
+// list in step with this file. Two failures wrap it today: the chat lock's
+// wait running out (errChatBusy) and request's pre-write check.
+//
+// Each of those also wraps ctx.Err(), because the cause is worth having in a
+// log line. That is why every classifier has to test for this AHEAD of its
+// generic context branch — errors.Is finds context.Canceled in here too.
+var errNotAttempted = errors.New("wecom: nothing was written")
+
+// errChatBusy — the wait for this chat's turn ended before the turn came, and
+// NOT ONE BYTE went anywhere. The lock is taken before a frame is built, so
+// this and request's pre-write check are the two failures on the send path
+// that are provably non-deliveries.
+var errChatBusy = fmt.Errorf("%w; the wait for this chat's turn ended first", errNotAttempted)
 
 func newWSSender(conn wsConn, log *slog.Logger) *wsSender {
 	if log == nil {
@@ -202,7 +332,13 @@ func (s *wsSender) deliverReply(env frameEnvelope) bool {
 // errcode, errAckTimeout, or a transport failure.
 func (s *wsSender) request(ctx context.Context, cmd string, body map[string]any) (json.RawMessage, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		// Marked, for the same reason the wait below is marked and the
+		// opposite fact. Nothing has been minted, registered or built at this
+		// point, so this is proof the peer saw nothing — and a bare ctx.Err()
+		// here is indistinguishable from the one twenty lines down, which
+		// proves the opposite. A caller that cannot tell them apart has to
+		// read both the same way, and either reading is wrong for one of them.
+		return nil, fmt.Errorf("%w: %w", errNotAttempted, err)
 	}
 	reqID := newReqID()
 	w, ok := s.awaitReply(reqID)
@@ -302,15 +438,16 @@ var errWriteAttempted = errors.New("wecom: frame write attempted")
 // than replacing it, so every errors.Is(err, context.Canceled) reader keeps
 // working and the outcome still files as "interrupted".
 //
-// It exists because request returns ctx.Err() from two places that mean
+// It exists because request raises a context error in two places that mean
 // opposite things — the check ahead of the write, where nothing left this
-// process, and the wait after it, where the peer may already hold the frame.
-// Until this mark, the two differed only in the line that raised them, which
-// is not something a caller can see. A caller weighing a cancellation against
-// another outcome it already holds then has to read every cancellation the
-// same way, and either one of those readings is wrong. sendMsgFrame is that
-// caller: it holds a refusal WeCom stated for a first frame, and must not let
-// it speak for a second one that is already on the wire.
+// process (errNotAttempted), and the wait after it, where the peer may already
+// hold the frame. Until the two marks, they differed only in the line that
+// raised them, which is not something a caller can see. A caller weighing a
+// cancellation against another outcome it already holds then has to read every
+// cancellation the same way, and either one of those readings is wrong.
+// sendMsgFrame is that caller: it holds a refusal WeCom stated for a first
+// frame, and must not let it speak for a second one that is already on the
+// wire.
 var errAckAbandoned = errors.New("wecom: the wait for the verdict was cut short after the frame went out")
 
 // sendText pushes an aibot_send_msg (proactive push) with plain text to a
@@ -330,7 +467,67 @@ func (s *wsSender) sendText(chatID string, chatTypeInt int, content string) erro
 // Safe to block here only because inbound callbacks no longer run on the read
 // loop (wecom_channel.go): the read loop is the sole deliverer of acks, so a
 // send that waited for one from inside a callback would have waited on itself.
+// It is also where a long answer is cut into pieces the server will accept.
+// That belongs here rather than at any one call site because a body past the
+// cap is refused WHOLE: every caller that pushes plain text — the agent's
+// reply, an inbox card, a relayed frame — would otherwise have to remember the
+// rule, and the one that forgot would lose its message silently.
+//
+// A piece that fails stops the rest: the pieces after it are the tail of an
+// answer whose head did not arrive, and sending them alone would read as the
+// bot replying to nothing.
+//
+// A failure past the FIRST piece is wrapped in errPartiallySent, because the
+// caller's question — may this send be tried again? — has a different answer
+// once part of the answer is in the chat.
 func (s *wsSender) sendTextCtx(ctx context.Context, chatID string, chatTypeInt int, content string) error {
+	pieces := splitForWire(content)
+	// Held for every send, not only a split one: a single-frame push from
+	// another caller — an inbox card, the file this same answer produced
+	// (sendMedia takes the same lock), the unsupported-type notice — is
+	// exactly what used to arrive between piece one and piece two, and with
+	// two long answers in flight at once the (n/total) counters could not be
+	// matched back to their own text.
+	//
+	// A caller whose context ends while queued here gets errChatBusy, which
+	// wraps errNotAttempted: nothing has been built yet, let alone written,
+	// and the classifiers have to be able to tell that from a context that
+	// ended while waiting for a verdict.
+	release, err := s.chats.acquire(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	for i, piece := range pieces {
+		if err := s.sendOneTextCtx(ctx, chatID, chatTypeInt, piece); err != nil {
+			if i > 0 {
+				return fmt.Errorf("%w: %w", errPartiallySent, err)
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+// errPartiallySent marks a long answer whose LATER piece failed after an
+// earlier one was accepted by the server.
+//
+// It exists for one caller decision. Everything else on this path asks "did
+// this frame reach the peer", and for the failing piece the honest answer may
+// still be no — but the SEND is not the frame. splitForWire cuts one answer
+// into several aibot_send_msg frames, and by the time piece two fails, piece
+// one is already in the user's chat. A caller that reads the failure as "this
+// send put nothing on the wire" and retries the whole content prints the first
+// piece a second time, which is the one outcome a retry exists to avoid.
+//
+// So this is deliberately NOT a claim about the failing frame — provablyNotSent
+// asks about the send as a whole, and this answers that question.
+var errPartiallySent = errors.New("wecom: an earlier piece of this answer was already accepted")
+
+// sendOneTextCtx writes exactly one aibot_send_msg frame and reads its ack.
+// Nothing here may exceed the cap: splitForWire is the only thing standing
+// between an agent's answer and a 45002 refusal.
+func (s *wsSender) sendOneTextCtx(ctx context.Context, chatID string, chatTypeInt int, content string) error {
 	body, err := sendMsgTextBody(chatID, chatTypeInt, content)
 	if err != nil {
 		return err

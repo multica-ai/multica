@@ -486,6 +486,13 @@ func sendOutcome(err error) deliveryState {
 	switch {
 	case err == nil:
 		return deliveryDelivered
+	case errors.Is(err, errNotAttempted):
+		// AHEAD of the context arm below, which this also matches: every
+		// not-attempted failure wraps the ctx.Err() that ended it. A push that
+		// never got the chat's turn, or whose context was already over when
+		// request was entered, was never built let alone written — so the file
+		// is definitely not there, and the person can be told so plainly.
+		return deliveryDefinitelyFailed
 	case errors.Is(err, errAckTimeout),
 		errors.Is(err, errWriteAttempted),
 		errors.Is(err, context.Canceled),

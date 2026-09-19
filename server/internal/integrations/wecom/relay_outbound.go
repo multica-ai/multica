@@ -138,10 +138,20 @@ func dedupeTTLFor(replayGrace time.Duration) time.Duration {
 // A zero field takes its documented default.
 type RelayConfig struct {
 	// DeliveryBudget is the longest one delivery attempt may take once it
-	// holds the claim — the send and its ack wait. Zero means ackTimeout. It
-	// sizes the publisher's outcome grace (outcomeGrace): the last offer of
-	// the chain may still be inside its ack wait when the chain's timing is
-	// over. Tests shrink it with everything else.
+	// holds the claim, and it bounds the WHOLE logical delivery: the wait for
+	// the target chat's turn, and every piece a long answer is split into with
+	// its own ack wait. Zero means ackTimeout.
+	//
+	// One budget for all of it, because that is what the publisher's outcome
+	// grace reserves for one offer (outcomeGrace) — a grace sized for one ack
+	// while the delivery waits for several is a Resolve that fences a reply
+	// its holder is still writing.
+	//
+	// The grace charges it PER OFFER, not once for the chain: an offer that
+	// fails provably-unsent hands the claim back, so the next offer starts
+	// with a budget of its own. Lowering it therefore shortens the grace
+	// twelve-fold on the defaults, which is why tests that wait a grace out
+	// shrink it along with the claim budget and the lease settle.
 	DeliveryBudget time.Duration
 
 	// Shards is how many independent queues carry frames, and it is a
@@ -863,7 +873,27 @@ func (r *RelayOutbound) perform(ctx context.Context, item queued) bool {
 			return false
 		}
 	}
-	res := r.handler.deliverRelayed(ctx, item.frame)
+	// DeliveryBudget is what the publisher's outcomeGrace charges per offer
+	// (outcomeGrace, below), so it has to be what this delivery actually
+	// gets. It was documented as the bound and never applied: the send's only
+	// limit was ackTimeout, the constant, whatever the config said. An
+	// operator who lowered the budget shrank the grace without shortening the
+	// delivery, and a Resolve landing inside an ack wait fences a reply that
+	// is on its way.
+	//
+	// A budget PER OFFER and not one for the chain, because this is where the
+	// claim is taken and given back: an offer that ends provably-unsent
+	// releases the claim a few lines down, and the next offer arrives here
+	// and opens a fresh one.
+	//
+	// The default is ackTimeout, so a deployment that sets nothing sees no
+	// change. A delivery cut here ends in a context error, which
+	// unconfirmedReason reads as unknown rather than failed — correct when
+	// the cut lands after the write, and marked as certain when it lands
+	// before one (errNotAttempted, ws_sender.go).
+	dctx, cancelDelivery := context.WithTimeout(ctx, r.cfg.deliveryBudget())
+	res := r.handler.deliverRelayed(dctx, item.frame)
+	cancelDelivery()
 	if res.outcome == outcomeDone {
 		// FINISHED. The holder's record is made only once the claim says
 		// so: Settle is a compare-and-set on this replica's token, and a
@@ -1059,11 +1089,26 @@ func (r *RelayOutbound) outcomeGrace() time.Duration {
 	// The settle retry on the finished offer: its extra attempts and the
 	// pauses between them (settleClaim).
 	total += time.Duration(claimSettleAttempts-1) * (budget + r.settleRetryBackoff())
-	// Plus the last offer's own delivery: a claim taken on the final attempt
-	// is still being written and acked when the chain's timing says the chain
-	// is over, and a Resolve that lands inside that ack wait fences a reply
-	// that is about to be delivered. The send waits at most ackTimeout.
-	total += r.cfg.deliveryBudget()
+	// Plus a DELIVERY PER OFFER, not one for the chain. perform gives every
+	// claimed delivery a budget of its own, and the failure that spends the
+	// whole of one is also the failure that hands the claim back: an offer
+	// whose chat is busy waits for the chat's turn until its budget runs out
+	// and comes back errChatBusy, which is provablyNotSent, so the claim is
+	// released and the frame is offered again with a fresh budget. Charging
+	// one delivery to the chain therefore sized the grace for a chain that
+	// cannot happen — every offer's backoff plus one offer's delivery — and
+	// on the defaults that is 5s of grace against 60s the chain can spend.
+	//
+	// The Resolve that lands inside a live offer is the whole cost: it fences
+	// the key as lost in the same operation, so the holder that comes back
+	// records nothing while the counter already says the reply was dropped.
+	// One reply, counted lost and delivered at once.
+	//
+	// The other direction — a delivery that outlives the budget perform gave
+	// it — cannot happen: it IS the budget, applied to the context the
+	// delivery runs on, so an answer split into several frames spends it
+	// across all of them rather than taking an ack wait per piece.
+	total += r.cfg.deliveryBudget() * time.Duration(offers)
 	return total
 }
 
@@ -1288,13 +1333,11 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult
 			}
 			sendErr := err
 			if f.Kind == relayKindReply {
-				record = func() {
-					if reason := unconfirmedReason(sendErr); reason != "" {
-						o.unconfirmedFor(ctx, f.SessionID, f.Kind, reason, sendErr)
-					} else {
-						o.droppedFor(ctx, f.SessionID, f.Kind, classifyDrop(sendErr), sendErr)
-					}
-				}
+				// The same mapping the direct path uses. A partial send in
+				// particular has to agree across the two, or one reply counts
+				// as delivered or dropped depending on which replica held the
+				// socket — see recordSend.
+				record = func() { o.recordSend(ctx, f.SessionID, f.Kind, sendErr) }
 			} else {
 				record = func() {
 					o.logger.WarnContext(ctx, "wecom relay: inbox push failed on the lease holder",
@@ -1353,12 +1396,26 @@ func provablyNotSent(err error) bool {
 	switch {
 	case err == nil:
 		return false
+	case errors.Is(err, errPartiallySent):
+		// An answer past the cap goes out as several frames, and a failure on
+		// the second says nothing about the first, which the user is already
+		// reading. Retrying such a send would repeat what landed.
+		return false
 	case errors.As(err, &apiErr):
 		return false
 	case errors.Is(err, errAckTimeout):
 		return false
 	case errors.Is(err, errWriteAttempted):
 		return false
+	case errors.Is(err, errNotAttempted):
+		// AHEAD of the context branch below, which this error also matches:
+		// every not-attempted failure wraps the ctx.Err() that ended it. The
+		// chat lock is taken and the context is checked before a frame is
+		// built, so a delivery that ended at either point wrote nothing — and
+		// these are the most retryable failures the path has. Reading them as
+		// the ambiguous context error underneath settles the claim on a
+		// message that was never offered to the socket.
+		return true
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return false
 	default:

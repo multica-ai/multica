@@ -119,6 +119,15 @@ func unconfirmedReason(err error) string {
 		return "ack_timeout"
 	case errors.Is(err, errWriteAttempted):
 		return "write_attempted"
+	case errors.Is(err, errNotAttempted):
+		// AHEAD of the context branch below, which this error also matches:
+		// every not-attempted failure wraps the ctx.Err() that ended it. What
+		// it marks is that the wait ended before a frame existed — the chat's
+		// turn never came, or the context was already over when request was
+		// entered — so these are the context failures on this path that are
+		// certain rather than unknown. "interrupted" would tell an operator
+		// not to resend a message nobody ever sent.
+		return ""
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return "interrupted"
 	}
@@ -280,6 +289,41 @@ func worseDropReason(a, b dropReason) dropReason {
 // delivered records one reply that reached the user. Without it the drop
 // counters have no denominator, and "no drops today" cannot be told apart from
 // "no traffic today" — which is the same silence #7215 was reported as.
+// recordSend files the counter for one completed text send. It is the single
+// definition of that mapping, and it has to stay single: the two paths that
+// put an agent's words in front of a WeCom user — processEvent on the replica
+// that produced the completion, and deliverRelayed on the one holding the
+// socket — used to classify a PARTIAL send differently. The same user-visible
+// event, piece one in the chat and piece two refused, counted as
+// outbound_delivered on a single-replica deployment and outbound_dropped once
+// the reply went through the relay, so whether a partial delivery paged
+// anybody depended on which replica happened to hold the lease.
+//
+// A partial send counts as delivered, and WARNs with what did not land. The
+// alternative reading — record a drop — tells an operator to resend an answer
+// the user is already reading, and a resend would print the first piece a
+// second time. Neither counter is a good fit for "most of it arrived"; this is
+// the one that does not invite a harmful action.
+//
+// Callers must not also return the error to a layer that classifies it again:
+// one send moves one counter.
+func (o *Outbound) recordSend(ctx context.Context, sessionID, eventType string, err error) {
+	switch {
+	case err == nil:
+		o.delivered()
+	case errors.Is(err, errPartiallySent):
+		o.logger.WarnContext(ctx, "wecom outbound: only part of a long answer reached the chat",
+			"error", err, "chat_session_id", sessionID, "event", eventType)
+		o.delivered()
+	default:
+		if reason := unconfirmedReason(err); reason != "" {
+			o.unconfirmedFor(ctx, sessionID, eventType, reason, err)
+			return
+		}
+		o.droppedFor(ctx, sessionID, eventType, classifyDrop(err), err)
+	}
+}
+
 func (o *Outbound) delivered() { o.mx().RecordOutboundDelivered() }
 
 // mx returns the metrics sink, or a no-op one. Mirrors wecomChannel.mx.
