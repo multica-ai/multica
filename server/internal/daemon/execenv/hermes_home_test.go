@@ -3,6 +3,7 @@ package execenv
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -145,6 +146,34 @@ func TestHermesDisablesExternalMemoryProvider(t *testing.T) {
 	}
 }
 
+func TestHermesDisablesHostGrillGatePlugin(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"),
+		"plugins:\n  enabled:\n    - openai-codex\n    - grill-gate-guard\n")
+
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	if _, err := prepareHermesHomeWithSoul(hermesHome, sharedHome, false, "# Multica agent\n", nil, nil, "", "", testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(hermesHome, "config.yaml"))
+	if err != nil {
+		t.Fatalf("read derived config: %v", err)
+	}
+	var parsed struct {
+		Plugins struct {
+			Disabled []string `yaml:"disabled"`
+		} `yaml:"plugins"`
+	}
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("parse derived config: %v", err)
+	}
+	if !slices.Contains(parsed.Plugins.Disabled, "grill-gate-guard") {
+		t.Fatalf("plugins.disabled = %v, want grill-gate-guard", parsed.Plugins.Disabled)
+	}
+}
+
 // TestHermesDerivedConfigRebasesRelativeExternalDirs is the regression for the
 // silent-repoint bug: relative external_dirs must be rewritten to absolute paths
 // anchored at the shared home, absolute entries left intact, and the real skills
@@ -224,6 +253,33 @@ func TestHermesBoundSkillKeepsNaturalSlug(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(userSkill); string(data) != "USER VERSION" {
 		t.Errorf("user's shared skill was modified: %q", data)
+	}
+}
+
+func TestHermesOverlayUsesAgentSoul(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	mustWrite(t, filepath.Join(sharedHome, "SOUL.md"), "# HARD GATE\nCall grill_gate_check before tools.\n")
+
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "x"}}
+	agentSoul := "# SOUL.md — Multica agent\nUse issue comments and blocked status when blocked.\n"
+	if _, err := prepareHermesHomeWithSoul(hermesHome, sharedHome, false, agentSoul, skills, nil, "", "", testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+
+	soulPath := filepath.Join(hermesHome, "SOUL.md")
+	if fi, err := os.Lstat(soulPath); err != nil {
+		t.Fatalf("overlay SOUL.md missing: %v", err)
+	} else if fi.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("overlay SOUL.md must be task-local, not a symlink into the host home")
+	}
+	body, err := os.ReadFile(soulPath)
+	if err != nil {
+		t.Fatalf("read overlay SOUL.md: %v", err)
+	}
+	if strings.Contains(string(body), "grill_gate_check") || !strings.Contains(string(body), "Multica agent") {
+		t.Fatalf("overlay SOUL.md = %q, want agent identity without host hard gate", body)
 	}
 }
 
@@ -768,6 +824,39 @@ func TestPrepareHermesNoSkillsLeavesHomeUnset(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(env.RootDir, "hermes-home")); !os.IsNotExist(err) {
 		t.Error("no hermes-home overlay should be created for a skill-less task")
+	}
+}
+
+func TestPrepareHermesInstructionsCreateSoulOverlayWithoutSkills(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	mustWrite(t, filepath.Join(sharedHome, "SOUL.md"), "# HARD GATE\nCall grill_gate_check.\n")
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot:   t.TempDir(),
+		WorkspaceID:      "ws-hermes-soul",
+		TaskID:           "cccc1111-2222-3333-4444-555566667777",
+		Provider:         "hermes",
+		HermesSourceHome: sharedHome,
+		Task: TaskContextForEnv{
+			IssueID:           "soul-only",
+			AgentInstructions: "# Multica SOUL\nUse issue comments and blocked status.\n",
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if env.HermesHome == "" {
+		t.Fatal("expected HERMES_HOME overlay for Hermes task with agent instructions")
+	}
+	body, err := os.ReadFile(filepath.Join(env.HermesHome, "SOUL.md"))
+	if err != nil {
+		t.Fatalf("read overlay SOUL.md: %v", err)
+	}
+	if strings.Contains(string(body), "grill_gate_check") || !strings.Contains(string(body), "Multica SOUL") {
+		t.Fatalf("overlay SOUL.md = %q", body)
 	}
 }
 
