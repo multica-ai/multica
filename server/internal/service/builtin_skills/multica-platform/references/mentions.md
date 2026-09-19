@@ -141,6 +141,9 @@ not injected into an already running prompt. Different threads queue independent
   run when the same target has a mergeable queued task in the **same thread**
   (the root comment and all descendants), with the same reviewed head. The
   outcome is `coalesced`; all covered instructions are delivered together.
+  If a database error prevents loading those instructions or their reply
+  threads at claim time, the run waits for redelivery instead of starting with
+  partial input. This does not require posting the handoff again.
   Different root threads and assignment-triggered runs have separate queue
   slots. Inputs received after execution starts belong to a successor run;
   `deferred` means a claim race durably recorded the follow-up obligation.
