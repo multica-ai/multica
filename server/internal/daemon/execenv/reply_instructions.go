@@ -41,7 +41,7 @@ import "fmt"
 //
 // Known bounds of the `--since` read, unchanged by this hint: the handler caps
 // a page at 2000 comments and reports the cut in `X-Comments-Truncated`, which
-// the CLI does not surface; and `--thread` combined with `--since` drops the
+// the CLI surfaces on stderr; and `--thread` combined with `--since` drops the
 // thread root unless `--tail` is passed. The thread command below therefore
 // stays on `--tail 30`, never `--thread ... --since ...`.
 //

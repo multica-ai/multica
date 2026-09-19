@@ -341,6 +341,10 @@ var issueSubscriberRemoveCmd = &cobra.Command{
 // `issue timeline`).
 const headerActiveRunsTruncated = "X-Active-Runs-Truncated"
 
+// headerCommentsTruncated mirrors handler.HeaderCommentsTruncated without
+// importing the handler package into the CLI.
+const headerCommentsTruncated = "X-Comments-Truncated"
+
 var issueRunsCmd = &cobra.Command{
 	Use:   "runs <issue-id>",
 	Short: "List execution history for an issue",
@@ -2153,6 +2157,14 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	respHeaders, err := client.GetJSONWithHeaders(ctx, path, &comments)
 	if err != nil {
 		return fmt.Errorf("list comments: %w", err)
+	}
+	if respHeaders.Get(headerCommentsTruncated) == "true" {
+		// --since drops newer rows at the cap; other reads may drop older
+		// ones. Do not imply that either end of this response is complete.
+		// --recent limits threads, not replies, so it is not a bounded recovery path.
+		fmt.Fprintln(os.Stderr, "warning: comments truncated by the server cap; this response is incomplete. "+
+			"Browse with --roots-only --summary --compact, then read a thread with --thread <id> --tail 30 (without --since); "+
+			"follow returned --before / --before-id reply cursors for older replies.")
 	}
 	// The server emits the next-page cursor in headers when there is likely
 	// an older page. Surface it on stderr so an operator (and the agent
