@@ -216,7 +216,7 @@ export function TaskStatusPill({
         <UnicodeSpinner name="breathe" className="opacity-70" />
       )}
       <span className="truncate">
-        <span className={cn(!stage.static && "animate-chat-text-shimmer")}>
+        <span className={cn(!stage.static && "text-info")}>
           {stage.label}
         </span>
         <span className="opacity-70 tabular-nums"> · {formatElapsedSecs(elapsedSecs)}</span>
