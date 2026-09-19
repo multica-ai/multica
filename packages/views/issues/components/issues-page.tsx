@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "@multica/core/api";
+import { useState } from "react";
+import { useConfigStore } from "@multica/core/config";
 import { Button } from "@multica/ui/components/ui/button";
 import { SecretaryPage } from "../../secretary/secretary-page";
 import { ListTodo } from "lucide-react";
@@ -19,11 +18,6 @@ import { RefreshablePageIcon } from "../../layout/refreshable-page-icon";
 import { useT } from "../../i18n";
 import { IssueSurface } from "../surface/issue-surface";
 import { IssuesHeader } from "./issues-header";
-import {
-  LifeOSFocusStrip,
-  lifeOSFocusForIssue,
-  useLifeOSFocus,
-} from "./lifeos-focus-strip";
 
 function IssuesSurfaceHeader({
   issues,
@@ -32,8 +26,6 @@ function IssuesSurfaceHeader({
   facetCountsExact,
   tableFacetCounts,
   onTableFacetChange,
-  focus,
-  onFocusChange,
 }: {
   issues: Issue[];
   workingAgents: WorkingAgentSummary[] | undefined;
@@ -41,8 +33,6 @@ function IssuesSurfaceHeader({
   facetCountsExact: boolean;
   tableFacetCounts?: IssueTableFacetsResponse;
   onTableFacetChange: (facet: IssueTableFacetSpec | null) => void;
-  focus: ReturnType<typeof useLifeOSFocus>[0];
-  onFocusChange: ReturnType<typeof useLifeOSFocus>[1];
 }) {
   const { t } = useT("issues");
   const dateFilter = useViewStore((s) => s.dateFilter);
@@ -65,31 +55,36 @@ function IssuesSurfaceHeader({
         tableFacetCounts={tableFacetCounts}
         onTableFacetChange={onTableFacetChange}
       />
-      <LifeOSFocusStrip
-        issues={issues}
-        value={focus}
-        onChange={onFocusChange}
-      />
     </>
   );
 }
 
 export function IssuesPage() {
+  const { t } = useT("issues");
   const [original, setOriginal] = useState(false);
-  const config = useQuery({ queryKey: ["app-config"], queryFn: () => api.getConfig(), staleTime: 60_000 });
-  if (config.data?.local_mode && !original) return <SecretaryPage onOriginalRecords={() => setOriginal(true)} />;
-  return <div className="flex flex-1 min-h-0 flex-col">{original && <Button variant="ghost" className="self-start m-2" onClick={() => setOriginal(false)}>返回秘书安排</Button>}<OriginalIssuesPage /></div>;
+  const localMode = useConfigStore((state) => state.localMode);
+  if (localMode && !original) {
+    return <SecretaryPage onOriginalRecords={() => setOriginal(true)} />;
+  }
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {original && (
+        <Button
+          variant="ghost"
+          className="m-2 self-start"
+          onClick={() => setOriginal(false)}
+        >
+          {t(($) => $.secretary.back_to_schedule)}
+        </Button>
+      )}
+      <OriginalIssuesPage />
+    </div>
+  );
 }
 
 function OriginalIssuesPage() {
   const { t } = useT("issues");
   const scope = useIssuesScope("issues");
-  const [focus, setFocus] = useLifeOSFocus();
-  const focusFilter = useCallback(
-    (issue: Issue) =>
-      focus === "all" || lifeOSFocusForIssue(issue) === focus,
-    [focus],
-  );
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
@@ -97,7 +92,6 @@ function OriginalIssuesPage() {
         scope={{ type: "workspace", actorKind: scope }}
         modes={["board", "list", "table", "swimlane"]}
         batchToolbar="list"
-        clientFilter={focusFilter}
         renderHeader={({ controller }) => (
           <IssuesSurfaceHeader
             issues={controller.surfaceIssues}
@@ -106,8 +100,6 @@ function OriginalIssuesPage() {
             facetCountsExact={controller.facetCountsExact}
             tableFacetCounts={controller.tableFacetCounts}
             onTableFacetChange={controller.setActiveTableFacet}
-            focus={focus}
-            onFocusChange={setFocus}
           />
         )}
         renderEmpty={() => (

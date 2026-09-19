@@ -5024,6 +5024,41 @@ func (q *Queries) HasRetryTaskForParent(ctx context.Context, parentTaskID pgtype
 	return column_1, err
 }
 
+const hasTaskCoveringCommentTrigger = `-- name: HasTaskCoveringCommentTrigger :one
+SELECT count(*) > 0 AS covered
+FROM agent_task_queue
+WHERE issue_id = $1
+  AND agent_id = $2
+  AND (
+      $3::uuid = ANY(delivered_comment_ids)
+      OR (
+          status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+          OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
+      )
+      AND (
+          trigger_comment_id = $3::uuid
+          OR $3::uuid = ANY(coalesced_comment_ids)
+      )
+  )
+`
+
+type HasTaskCoveringCommentTriggerParams struct {
+	IssueID   pgtype.UUID `json:"issue_id"`
+	AgentID   pgtype.UUID `json:"agent_id"`
+	CommentID pgtype.UUID `json:"comment_id"`
+}
+
+// Durable idempotency for comment-trigger outbox replay. A terminal task only
+// covers a comment when the daemon receipt proves the comment reached the
+// prompt. A live task covers its persisted trigger/coalesced plan so a crash
+// after enqueue but before the outbox receipt cannot create a second run.
+func (q *Queries) HasTaskCoveringCommentTrigger(ctx context.Context, arg HasTaskCoveringCommentTriggerParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasTaskCoveringCommentTrigger, arg.IssueID, arg.AgentID, arg.CommentID)
+	var covered bool
+	err := row.Scan(&covered)
+	return covered, err
+}
+
 const hasTaskCoveringDelegatedFailureComment = `-- name: HasTaskCoveringDelegatedFailureComment :one
 SELECT count(*) > 0 AS covered
 FROM agent_task_queue
@@ -5773,7 +5808,7 @@ func (q *Queries) ListChatFinalizeDeferredExpired(ctx context.Context, arg ListC
 }
 
 const listPendingDelegatedFailureRecoveries = `-- name: ListPendingDelegatedFailureRecoveries :many
-SELECT recovery.id, recovery.issue_id, recovery.author_type, recovery.author_id, recovery.content, recovery.type, recovery.created_at, recovery.updated_at, recovery.parent_id, recovery.workspace_id, recovery.resolved_at, recovery.resolved_by_type, recovery.resolved_by_id, recovery.source_task_id, recovery.quick_action_id, recovery.via_plugin_id, recovery.revision, recovery.recovery_settled_at, recovery.deleted_at
+SELECT recovery.id, recovery.issue_id, recovery.author_type, recovery.author_id, recovery.content, recovery.type, recovery.created_at, recovery.updated_at, recovery.parent_id, recovery.workspace_id, recovery.resolved_at, recovery.resolved_by_type, recovery.resolved_by_id, recovery.source_task_id, recovery.quick_action_id, recovery.via_plugin_id, recovery.revision, recovery.recovery_settled_at, recovery.deleted_at, recovery.request_key, recovery.request_payload_sha256
 FROM comment recovery
 JOIN agent_task_queue failed ON failed.id = recovery.source_task_id
 JOIN agent_task_queue source ON source.id = failed.delegated_from_task_id
@@ -5891,6 +5926,8 @@ func (q *Queries) ListPendingDelegatedFailureRecoveries(ctx context.Context, max
 			&i.Revision,
 			&i.RecoverySettledAt,
 			&i.DeletedAt,
+			&i.RequestKey,
+			&i.RequestPayloadSha256,
 		); err != nil {
 			return nil, err
 		}

@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import io
 import plistlib
 import sqlite3
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,9 +17,343 @@ from unittest import mock
 import lifeos_workbench
 
 
+def write_backup_fixture(
+    root: Path,
+    *,
+    missing_asset: str = "",
+    release_schema_version: int = 1,
+    include_attachments: bool = True,
+    backup_schema_version: int = lifeos_workbench.BACKUP_SCHEMA_VERSION,
+    directory_asset: str = "",
+) -> None:
+    with sqlite3.connect(root / "lifeos-context.sqlite3") as connection:
+        for table in lifeos_workbench.CONTEXT_DATABASE_TABLES:
+            connection.execute("CREATE TABLE %s(value TEXT)" % table)
+    with sqlite3.connect(root / "lifeos-interaction.sqlite3") as connection:
+        for table in lifeos_workbench.INTERACTION_DATABASE_TABLES:
+            connection.execute("CREATE TABLE %s(value TEXT)" % table)
+    (root / "workbench-postgres.dump").write_bytes(b"postgres-dump")
+    (root / "release-manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": release_schema_version,
+                "release_id": "a" * 64,
+                "contains_secrets": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    state = b"# State\n<!-- LIFEOS_WORKPLACE_STATE_JSON\n{}\nLIFEOS_WORKPLACE_STATE_JSON -->\n"
+    commit = {
+        "schema_version": 2,
+        "state_version": 7,
+        "commit_status": "committed",
+        "snapshot_hash": "fixture-snapshot",
+        "artifact_hashes": {
+            lifeos_workbench.OPERATING_STATE_PATH: hashlib.sha256(state).hexdigest(),
+        },
+    }
+    assets = {
+        lifeos_workbench.OPERATING_STATE_PATH: state,
+        lifeos_workbench.OPERATING_COMMIT_PATH: json.dumps(commit).encode(),
+        "departments/workplace/department.md": b"# Workplace\n",
+        "meta/00-charter.md": b"# Charter\n",
+        "workflows/interaction-loop.md": b"# Interaction\n",
+        "logs/transactions/workplace/fixture.json": b"{}\n",
+        "logs/runs/fixture/run.json": b"{}\n",
+        "logs/recovery/workplace/fixture/manifest.json": b"{}\n",
+        "projects/project-index.md": b"# Projects\n",
+        "projects/project-map.json": b"{}\n",
+        "projects/automation-registry.md": b"# Automations\n",
+        "memory/preferences.md": b"# Preferences\n",
+        "memory/writing-rules.json": b"{}\n",
+    }
+    with tarfile.open(root / "lifeos-operating-assets.tar.gz", "w:gz") as archive:
+        for relative in lifeos_workbench.LIFEOS_BACKUP_ASSETS["required"]:
+            if relative == missing_asset:
+                continue
+            if "." not in Path(relative).name:
+                info = tarfile.TarInfo(relative)
+                info.type = tarfile.DIRTYPE
+                archive.addfile(info)
+        for relative, content in assets.items():
+            if relative == missing_asset or relative.startswith(missing_asset.rstrip("/") + "/"):
+                continue
+            info = tarfile.TarInfo(relative)
+            if relative == directory_asset:
+                info.type = tarfile.DIRTYPE
+                archive.addfile(info)
+                continue
+            info.size = len(content)
+            archive.addfile(info, io.BytesIO(content))
+    if include_attachments:
+        with tarfile.open(root / "workbench-attachments.tar", "w") as archive:
+            info = tarfile.TarInfo("uploads")
+            info.type = tarfile.DIRTYPE
+            archive.addfile(info)
+    archive_tree = hashlib.sha256()
+    with tarfile.open(root / "lifeos-operating-assets.tar.gz", "r:gz") as archive:
+        for member in sorted(archive.getmembers(), key=lambda item: item.name):
+            if not member.isfile():
+                continue
+            handle = archive.extractfile(member)
+            assert handle is not None
+            archive_tree.update(member.name.encode())
+            archive_tree.update(b"\0")
+            archive_tree.update(hashlib.sha256(handle.read()).hexdigest().encode())
+            archive_tree.update(b"\n")
+    files = [path for path in root.iterdir() if path.name != "manifest.json"]
+    (root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "backup_schema_version": backup_schema_version,
+                "operating_commit": {
+                    "commit_sha256": hashlib.sha256(
+                        json.dumps(commit).encode()
+                    ).hexdigest(),
+                    "state_version": 7,
+                    "snapshot_hash": "fixture-snapshot",
+                    "asset_tree_sha256": archive_tree.hexdigest(),
+                },
+                "files": [
+                    {
+                        "name": path.name,
+                        "sha256": lifeos_workbench._sha256_file(path),
+                    }
+                    for path in files
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 class ContextDatabaseTests(unittest.TestCase):
+    def test_default_controller_root_is_the_canonical_lifeos_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            home = Path(tempdir)
+            canonical = home / "Documents/Life OS AI"
+            (canonical / "scripts").mkdir(parents=True)
+            (canonical / "scripts/lifeos_mcp_server.py").write_text(
+                "# canonical controller\n", encoding="utf-8"
+            )
+            with mock.patch.object(lifeos_workbench.Path, "home", return_value=home), mock.patch.dict(
+                lifeos_workbench.os.environ,
+                {"LIFEOS_CONTROLLER_ROOT": ""},
+            ):
+                resolved = lifeos_workbench.resolve_controller_root(None)
+
+        self.assertEqual(resolved, canonical.resolve())
+
     def test_codex_index_sync_runs_every_two_hours(self) -> None:
         self.assertEqual(lifeos_workbench.INDEX_SYNC_INTERVAL_SECONDS, 7200)
+
+    def test_lifeos_asset_archive_excludes_restricted_meeting_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir) / "lifeos"
+            meeting = root / "sources/meetings/2026/example"
+            (meeting / "source").mkdir(parents=True)
+            (meeting / "minutes.md").write_text("结论\n", encoding="utf-8")
+            (meeting / "source/transcript.txt").write_text(
+                "受限原文\n", encoding="utf-8"
+            )
+            target = Path(tempdir) / "assets.tar.gz"
+
+            lifeos_workbench.create_lifeos_asset_archive(root, target)
+
+            with tarfile.open(target, "r:gz") as archive:
+                names = archive.getnames()
+            self.assertIn("sources/meetings/2026/example/minutes.md", names)
+            self.assertNotIn(
+                "sources/meetings/2026/example/source/transcript.txt", names
+            )
+
+    def test_verify_backup_checks_hashes_and_sqlite_integrity(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            write_backup_fixture(root)
+            database = root / "lifeos-context.sqlite3"
+
+            result = lifeos_workbench.verify_backup(root)
+            database.write_bytes(b"corrupt")
+
+            self.assertTrue(result["verified"])
+            self.assertEqual(result["verification_level"], "recovery_package")
+            self.assertTrue(result["recovery_package_verified"])
+            self.assertFalse(result["business_recovery_verified"])
+            with self.assertRaisesRegex(
+                lifeos_workbench.WorkbenchError, "哈希不一致"
+            ):
+                lifeos_workbench.verify_backup(root)
+
+    def test_verify_backup_rejects_missing_required_operating_asset(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            write_backup_fixture(root, missing_asset="projects/project-map.json")
+
+            with self.assertRaisesRegex(
+                lifeos_workbench.WorkbenchError, "经营资产必须是文件"
+            ):
+                lifeos_workbench.verify_backup(root)
+
+    def test_verify_backup_rejects_missing_attachment_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            write_backup_fixture(root, include_attachments=False)
+
+            with self.assertRaisesRegex(
+                lifeos_workbench.WorkbenchError, "备份缺少必需资产"
+            ):
+                lifeos_workbench.verify_backup(root)
+
+    def test_verify_backup_rejects_directory_masquerading_as_required_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            write_backup_fixture(root, directory_asset="projects/project-map.json")
+
+            with self.assertRaisesRegex(
+                lifeos_workbench.WorkbenchError, "必须是文件"
+            ):
+                lifeos_workbench.verify_backup(root)
+
+    def test_verify_backup_rejects_mixed_operating_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            write_backup_fixture(root)
+            manifest = json.loads((root / "manifest.json").read_text())
+            manifest["operating_commit"]["commit_sha256"] = "f" * 64
+            (root / "manifest.json").write_text(json.dumps(manifest))
+
+            with self.assertRaisesRegex(
+                lifeos_workbench.WorkbenchError, "不同提交版本"
+            ):
+                lifeos_workbench.verify_backup(root)
+
+    def test_verify_backup_marks_legacy_schema_as_limited(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            write_backup_fixture(root, backup_schema_version=2)
+
+            result = lifeos_workbench.verify_backup(root)
+
+            self.assertTrue(result["verified"])
+            self.assertFalse(result["recovery_package_verified"])
+            self.assertFalse(result["business_recovery_verified"])
+            self.assertEqual(result["verification_level"], "limited_integrity")
+
+    def test_verify_backup_rejects_unknown_backup_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            write_backup_fixture(root, backup_schema_version=99)
+
+            with self.assertRaisesRegex(
+                lifeos_workbench.WorkbenchError, "不支持的备份格式版本"
+            ):
+                lifeos_workbench.verify_backup(root)
+
+    def test_verify_backup_rejects_sqlite_without_business_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            write_backup_fixture(root)
+            database = root / "lifeos-context.sqlite3"
+            with sqlite3.connect(database) as connection:
+                connection.execute("DROP TABLE ceo_review_queue")
+            manifest = json.loads((root / "manifest.json").read_text())
+            for item in manifest["files"]:
+                if item["name"] == database.name:
+                    item["sha256"] = lifeos_workbench._sha256_file(database)
+            (root / "manifest.json").write_text(json.dumps(manifest))
+
+            with self.assertRaisesRegex(
+                lifeos_workbench.WorkbenchError, "缺少业务表"
+            ):
+                lifeos_workbench.verify_backup(root)
+
+    def test_attachment_reference_validation_rejects_missing_object(self) -> None:
+        with self.assertRaisesRegex(
+            lifeos_workbench.WorkbenchError, "缺少数据库引用对象"
+        ):
+            lifeos_workbench._validate_attachment_references(
+                ["/uploads/workspaces/a/missing.png"],
+                [".", "workspaces/a/kept.png"],
+            )
+
+    def test_verify_backup_rejects_unknown_release_manifest_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            write_backup_fixture(root, release_schema_version=2)
+
+            with self.assertRaisesRegex(
+                lifeos_workbench.WorkbenchError, "发布清单无效"
+            ):
+                lifeos_workbench.verify_backup(root)
+
+    def test_restore_drill_drops_the_database_it_created(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            write_backup_fixture(root)
+            lifeos_root = root / "lifeos"
+            validator = lifeos_root / "scripts/commit_workplace_state.py"
+            validator.parent.mkdir(parents=True)
+            validator.write_text("# test-only validator\n", encoding="utf-8")
+            commands = []
+
+            def run(command, **_kwargs):
+                commands.append(command)
+                statement = next(
+                    (argument for argument in command if isinstance(argument, str) and argument.startswith("SELECT")),
+                    "",
+                )
+                if "SELECT count(*)" in statement:
+                    stdout = "8\n"
+                elif "SELECT tablename" in statement:
+                    stdout = "\n".join(sorted(lifeos_workbench.POSTGRES_RECOVERY_TABLES)) + "\n"
+                elif "SELECT url FROM attachment" in statement:
+                    stdout = ""
+                else:
+                    stdout = ""
+                return mock.Mock(returncode=0, stdout=stdout, stderr="")
+
+            with mock.patch.object(
+                lifeos_workbench, "runtime_environment", return_value={}
+            ), mock.patch.object(
+                lifeos_workbench, "docker_ready", return_value=True
+            ), mock.patch.object(
+                lifeos_workbench, "compose_command", return_value=["docker", "compose"]
+            ), mock.patch.object(
+                lifeos_workbench, "_run", side_effect=run
+            ), mock.patch.object(
+                lifeos_workbench.subprocess,
+                "run",
+                return_value=mock.Mock(returncode=0, stdout=b"", stderr=b""),
+            ):
+                result = lifeos_workbench.restore_drill(
+                    root,
+                    lifeos_root=lifeos_root,
+                    controller_root=Path(tempdir) / "controller",
+                )
+
+            created = next(command for command in commands if "createdb" in command)
+            dropped = next(command for command in commands if "dropdb" in command)
+            validation = next(
+                command
+                for command in commands
+                if str(validator) in command and "--verify-only" in command
+            )
+            self.assertEqual(created[-1], dropped[-1])
+            self.assertRegex(created[-1], r"^lifeos_restore_[0-9]{14}_[0-9a-f]{6}$")
+            restored_operating_root = Path(
+                validation[validation.index("--root") + 1]
+            )
+            self.assertEqual(restored_operating_root.name, "lifeos-operating-assets")
+            self.assertTrue(
+                restored_operating_root.parent.name.startswith(
+                    "lifeos-restore-drill-"
+                )
+            )
+            self.assertTrue(result["restored_in_isolation"])
+            self.assertTrue(result["business_recovery_verified"])
+            self.assertTrue(result["operating_state_validated"])
 
     def test_ensure_env_creates_private_automation_credential(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

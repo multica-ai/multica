@@ -166,6 +166,37 @@ func TestPostJSON(t *testing.T) {
 	})
 }
 
+func TestPostJSONWithHeadersScopesHeadersToOneRequest(t *testing.T) {
+	var observed []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		observed = append(observed, r.Header.Get("X-LifeOS-Automation-Token"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	client := NewAPIClient(srv.URL, "", "")
+	headers := http.Header{
+		"X-LifeOS-Automation-Token": []string{"bootstrap-secret"},
+	}
+	if err := client.PostJSONWithHeaders(context.Background(), "/bootstrap", map[string]any{}, headers, &map[string]any{}); err != nil {
+		t.Fatalf("PostJSONWithHeaders: %v", err)
+	}
+	if err := client.PostJSON(context.Background(), "/ordinary", map[string]any{}, &map[string]any{}); err != nil {
+		t.Fatalf("PostJSON: %v", err)
+	}
+
+	want := []string{"bootstrap-secret", ""}
+	if len(observed) != len(want) {
+		t.Fatalf("observed %d requests, want %d", len(observed), len(want))
+	}
+	for i := range want {
+		if observed[i] != want[i] {
+			t.Errorf("request %d automation token = %q, want %q", i, observed[i], want[i])
+		}
+	}
+}
+
 func TestDeleteJSONResponse(t *testing.T) {
 	type respBody struct {
 		ID string `json:"id"`

@@ -78,6 +78,7 @@ type IssueResponse struct {
 	CreatedAt string  `json:"created_at"`
 	UpdatedAt string  `json:"updated_at"`
 	Revision  int64   `json:"revision"`
+	Replayed  bool    `json:"replayed,omitempty"`
 	// LastActivityAt is the latest semantic issue activity. It stays nullable
 	// while the operator-run historical backfill is incomplete.
 	LastActivityAt *string `json:"last_activity_at"`
@@ -3271,6 +3272,13 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if errors.Is(err, service.ErrIssueCreateRequestGone) {
+		writeJSON(w, http.StatusGone, map[string]any{
+			"code":  "idempotent_resource_deleted",
+			"error": "the issue created by this request_id was deleted",
+		})
+		return
+	}
 	if writeIssueLimitReached(w, err) {
 		return
 	}
@@ -3284,6 +3292,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 
 	resp := issueToResponse(issue, prefix)
+	resp.Replayed = res.Replayed
 	fillCreated(&resp)
 	resp.Attachments = buildAttachmentResponses(res.Attachments)
 	// Echo the authoritative labels attached in the create transaction. Always
@@ -4197,6 +4206,16 @@ func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issu
 			}
 		} else if !errors.Is(contextErr, pgx.ErrNoRows) {
 			return issueDeleteResult{}, fmt.Errorf("load issue source context for delete: %w", contextErr)
+		}
+		if err := qtx.MarkIssueCreateRequestsDeleted(ctx, db.MarkIssueCreateRequestsDeletedParams{
+			WorkspaceID: issue.WorkspaceID, IssueID: issue.ID,
+		}); err != nil {
+			return issueDeleteResult{}, fmt.Errorf("tombstone issue create request: %w", err)
+		}
+		if err := qtx.MarkCommentCreateRequestsDeletedForIssue(ctx, db.MarkCommentCreateRequestsDeletedForIssueParams{
+			WorkspaceID: issue.WorkspaceID, IssueID: issue.ID,
+		}); err != nil {
+			return issueDeleteResult{}, fmt.Errorf("tombstone comment create requests: %w", err)
 		}
 		if err := qtx.DeleteIssue(ctx, db.DeleteIssueParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID}); err != nil {
 			return issueDeleteResult{}, fmt.Errorf("delete issue: %w", err)

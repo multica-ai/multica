@@ -12,30 +12,11 @@ import (
 
 func secretaryFixture(t *testing.T) (secretaryProjectionRequest, string) {
 	t.Helper()
-	id := createMetadataTestIssue(t, "secretary original")
-	var updated time.Time
-	if err := testPool.QueryRow(t.Context(), `SELECT updated_at FROM issue WHERE id=$1`, id).Scan(&updated); err != nil {
-		t.Fatal(err)
-	}
+	id := createMetadataTestIssue(t, "secretary original "+t.Name())
 	raw, _ := json.Marshal(map[string]any{"version": 1, "state_version": 85, "source_as_of": "2026-09-06T08:00:00+08:00",
 		"cases": []any{map[string]any{"id": "recruitment", "title": "招聘", "area": "团队", "summary": "三个岗位"}},
 		"items": []any{map[string]any{"key": "a", "issue_id": id, "case_id": "recruitment", "title": "确认岗位", "situation": "画像已准备", "next_step": "确定范围", "recommendation": "按已定画像启动", "why_now": "进入本周流程", "completion": "范围已确认", "kind": "action", "stage": "ready", "owner": "chairman"}}})
-	var p map[string]any
-	_ = json.Unmarshal(raw, &p)
-	rows, err := testPool.Query(t.Context(), `SELECT id::text,title FROM issue WHERE workspace_id=$1 AND id<>$2`, testWorkspaceID, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for rows.Next() {
-		var other, title string
-		if err = rows.Scan(&other, &title); err != nil {
-			t.Fatal(err)
-		}
-		p["items"] = append(p["items"].([]any), map[string]any{"key": other, "issue_id": other, "case_id": "recruitment", "title": title, "situation": "保留历史", "next_step": "参考", "kind": "reference", "stage": "history", "owner": "secretary"})
-	}
-	rows.Close()
-	raw, _ = json.Marshal(p)
-	return secretaryProjectionRequest{ExpectedRevision: 0, Projection: raw, Updates: []secretaryIssueUpdate{{ID: id, ExpectedUpdatedAt: updated, Title: "确认岗位", Description: "准备后的说明", Metadata: map[string]any{"lifeos_case_id": "recruitment"}}}}, id
+	return secretaryProjectionRequest{ExpectedRevision: 0, Projection: raw}, id
 }
 func TestSecretaryProjectionAtomicAndMemberInstructions(t *testing.T) {
 	old := testHandler.cfg
@@ -47,6 +28,7 @@ func TestSecretaryProjectionAtomicAndMemberInstructions(t *testing.T) {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM lifeos_secretary_projection WHERE workspace_id=$1`, testWorkspaceID)
 	})
 	req, id := secretaryFixture(t)
+	_ = createMetadataTestIssue(t, "unrelated issue "+t.Name())
 	publish := func(p secretaryProjectionRequest) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
 		r := newRequest("PUT", "/api/lifeos/secretary", p)
@@ -54,15 +36,20 @@ func TestSecretaryProjectionAtomicAndMemberInstructions(t *testing.T) {
 		testHandler.PutLifeOSSecretary(w, r)
 		return w
 	}
-	bad := req
-	bad.Updates = append([]secretaryIssueUpdate{}, req.Updates...)
-	bad.Updates[0].ExpectedUpdatedAt = time.Now().Add(-time.Hour)
-	if w := publish(bad); w.Code != 409 {
-		t.Fatalf("conflict: %d %s", w.Code, w.Body.String())
+	legacy := req
+	legacy.Updates = []secretaryIssueUpdate{{
+		ID:                id,
+		ExpectedUpdatedAt: time.Now(),
+		Title:             "确认岗位",
+		Description:       "准备后的说明",
+		Metadata:          map[string]any{"lifeos_case_id": "recruitment"},
+	}}
+	if w := publish(legacy); w.Code != 400 {
+		t.Fatalf("legacy source rewrite was accepted: %d %s", w.Code, w.Body.String())
 	}
 	var title string
 	_ = testPool.QueryRow(t.Context(), `SELECT title FROM issue WHERE id=$1`, id).Scan(&title)
-	if title != "secretary original" {
+	if title != "secretary original "+t.Name() {
 		t.Fatal("partial update escaped transaction")
 	}
 	if w := publish(req); w.Code != 200 {
@@ -77,22 +64,21 @@ func TestSecretaryProjectionAtomicAndMemberInstructions(t *testing.T) {
 	if w := publish(stale); w.Code != 409 {
 		t.Fatal("a stale canonical version replaced newer history")
 	}
-	var precise time.Time
-	if err := testPool.QueryRow(t.Context(), `SELECT updated_at FROM issue WHERE id=$1`, id).Scan(&precise); err != nil {
-		t.Fatal(err)
-	}
 	req.ExpectedRevision = 1
-	req.Updates[0].ExpectedUpdatedAt = precise
-	req.Updates[0].Description = "更新后的第二次说明"
 	if w := publish(req); w.Code != 200 {
-		t.Fatalf("second material publication: %d %s", w.Code, w.Body.String())
+		t.Fatalf("idempotent projection publication: %d %s", w.Code, w.Body.String())
 	}
-	var originalTitle string
-	if err := testPool.QueryRow(t.Context(), `SELECT metadata->>'lifeos_original_title' FROM issue WHERE id=$1`, id).Scan(&originalTitle); err != nil {
+	var sourceTitle string
+	var sourceDescription *string
+	var hasSecretaryMetadata bool
+	if err := testPool.QueryRow(t.Context(), `
+		SELECT title, description,
+		       metadata ?| array['lifeos_original_title','lifeos_case_id','lifeos_secretary_kind','lifeos_secretary_stage']
+		FROM issue WHERE id=$1`, id).Scan(&sourceTitle, &sourceDescription, &hasSecretaryMetadata); err != nil {
 		t.Fatal(err)
 	}
-	if originalTitle != "secretary original" {
-		t.Fatal("rewriting the summary lost or replaced the original source")
+	if sourceTitle != "secretary original "+t.Name() || sourceDescription != nil || hasSecretaryMetadata {
+		t.Fatal("projection publication mutated the source issue")
 	}
 	command := secretaryInstructionRequest{RequestID: uuid.NewString(), ItemKey: "a", Kind: "complete", ExpectedRevision: 1, Note: "已提交，等接收"}
 	send := func(c secretaryInstructionRequest) *httptest.ResponseRecorder {
@@ -114,7 +100,6 @@ func TestSecretaryProjectionAtomicAndMemberInstructions(t *testing.T) {
 		t.Fatal("report fabricated business completion")
 	}
 	req.ExpectedRevision = 1
-	req.Updates = nil
 	if w := publish(req); w.Code != 200 {
 		t.Fatalf("idempotent publish: %d %s", w.Code, w.Body.String())
 	}
@@ -182,7 +167,7 @@ func TestSecretaryResolvedViewHonorsWaitingDateAndLatestInstruction(t *testing.T
 	}
 }
 
-func TestSecretaryRoutineCompletionNeedsCanonicalReceiptBeforeUpdatingSource(t *testing.T) {
+func TestSecretaryRoutineCompletionChangesResolvedViewWithoutUpdatingSource(t *testing.T) {
 	old := testHandler.cfg
 	testHandler.cfg.LocalMode, testHandler.cfg.LocalAutomationToken = true, "test-secretary-only"
 	t.Cleanup(func() {
@@ -223,21 +208,25 @@ func TestSecretaryRoutineCompletionNeedsCanonicalReceiptBeforeUpdatingSource(t *
 	if response.Projection.Items[0].Stage != "history" {
 		t.Fatal("personal feedback stayed in the active queue")
 	}
-	var updated time.Time
-	_ = testPool.QueryRow(t.Context(), `SELECT updated_at FROM issue WHERE id=$1`, id).Scan(&updated)
+	legacy := req
 	done := "done"
-	req.ExpectedRevision, req.Updates[0].ExpectedUpdatedAt, req.Updates[0].Status = 1, updated, &done
+	legacy.ExpectedRevision = 1
+	legacy.Updates = []secretaryIssueUpdate{{
+		ID: id, ExpectedUpdatedAt: time.Now(), Title: "已完成", Status: &done,
+	}}
+	req = legacy
 	if w := publish(); w.Code != 400 {
 		t.Fatalf("source accepted completion without canonical evidence: %d", w.Code)
 	}
 	item["stage"], item["business_status"], item["reported_status"] = "history", "completed", "completed"
+	req.Updates = nil
 	req.Projection, _ = json.Marshal(p)
 	if w := publish(); w.Code != 200 {
 		t.Fatalf("canonical completion: %d %s", w.Code, w.Body.String())
 	}
 	var status string
 	_ = testPool.QueryRow(t.Context(), `SELECT status FROM issue WHERE id=$1`, id).Scan(&status)
-	if status != "done" {
-		t.Fatal("routine completion not projected")
+	if status == "done" {
+		t.Fatal("secretary projection rewrote the source issue status")
 	}
 }

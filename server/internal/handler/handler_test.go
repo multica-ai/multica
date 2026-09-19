@@ -472,6 +472,72 @@ func TestCreateIssueRequestIDReplaysAndRejectsChangedContent(t *testing.T) {
 	if !strings.Contains(conflict.Body.String(), `"code":"idempotency_conflict"`) {
 		t.Fatalf("conflict response = %s", conflict.Body.String())
 	}
+
+	testutil.Call(t, testHandler.DeleteIssue,
+		withURLParam(newRequest(http.MethodDelete, "/api/issues/"+created.ID, nil), "id", created.ID),
+	).Want(http.StatusNoContent)
+	gone := testutil.Call(t, testHandler.CreateIssue,
+		newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, body),
+	).Want(http.StatusGone)
+	if !strings.Contains(gone.Body.String(), `"code":"idempotent_resource_deleted"`) {
+		t.Fatalf("deleted replay response = %s", gone.Body.String())
+	}
+}
+
+func TestCreateCommentRequestIDReplaysAndRejectsChangedContent(t *testing.T) {
+	issueID := dbfx.Issue(t, "Idempotent comment request")
+	requestID := fmt.Sprintf("lifeos-comment-test:%d", time.Now().UnixNano())
+	body := map[string]any{
+		"request_id": requestID,
+		"content":    "董事长补充了一条执行说明。",
+		"type":       "comment",
+	}
+
+	var created CommentResponse
+	testutil.Call(t, testHandler.CreateComment,
+		withURLParam(newRequest("POST", "/api/issues/"+issueID+"/comments", body), "id", issueID),
+	).Want(http.StatusCreated).JSON(&created)
+
+	var replayed CommentResponse
+	testutil.Call(t, testHandler.CreateComment,
+		withURLParam(newRequest("POST", "/api/issues/"+issueID+"/comments", body), "id", issueID),
+	).Want(http.StatusOK).JSON(&replayed)
+	if replayed.ID != created.ID || !replayed.Replayed {
+		t.Fatalf("replayed comment = (%s, %v), want (%s, true)", replayed.ID, replayed.Replayed, created.ID)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM comment WHERE issue_id = $1`, issueID); n != 1 {
+		t.Fatalf("comments after replay = %d, want 1", n)
+	}
+
+	changed := map[string]any{
+		"request_id": requestID,
+		"content":    "同一个请求标识下的不同说明。",
+		"type":       "comment",
+	}
+	conflict := testutil.Call(t, testHandler.CreateComment,
+		withURLParam(newRequest("POST", "/api/issues/"+issueID+"/comments", changed), "id", issueID),
+	).Want(http.StatusConflict)
+	if !strings.Contains(conflict.Body.String(), `"code":"idempotency_conflict"`) {
+		t.Fatalf("conflict response = %s", conflict.Body.String())
+	}
+
+	otherIssueID := dbfx.Issue(t, "Same comment request on another issue")
+	otherIssue := testutil.Call(t, testHandler.CreateComment,
+		withURLParam(newRequest("POST", "/api/issues/"+otherIssueID+"/comments", body), "id", otherIssueID),
+	).Want(http.StatusConflict)
+	if !strings.Contains(otherIssue.Body.String(), `"code":"idempotency_conflict"`) {
+		t.Fatalf("cross-issue conflict response = %s", otherIssue.Body.String())
+	}
+
+	testutil.Call(t, testHandler.DeleteComment,
+		withURLParam(newRequest(http.MethodDelete, "/api/comments/"+created.ID, nil), "commentId", created.ID),
+	).Want(http.StatusNoContent)
+	gone := testutil.Call(t, testHandler.CreateComment,
+		withURLParam(newRequest("POST", "/api/issues/"+issueID+"/comments", body), "id", issueID),
+	).Want(http.StatusGone)
+	if !strings.Contains(gone.Body.String(), `"code":"idempotent_resource_deleted"`) {
+		t.Fatalf("deleted replay response = %s", gone.Body.String())
+	}
 }
 
 // TestDeleteIssueByIdentifier guards against #1661 — DELETE /api/issues/{id}

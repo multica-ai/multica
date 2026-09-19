@@ -74,6 +74,10 @@ export function AuthInitializer({
           workspaceCreationDisabled: cfg.workspace_creation_disabled === true,
           // Absent/false on the managed cloud and older servers → section hidden.
           vcsIntegrationAvailable: cfg.vcs_integration_available === true,
+          // Optional LifeOS fields fail closed to the regular login flow.
+          localMode: cfg.local_mode === true,
+          localWorkspaceSlug: cfg.local_workspace_slug,
+          localAuthConfigured: cfg.local_auth_configured === true,
         });
         configStore.getState().setDaemonConfig({
           daemonServerUrl: cfg.daemon_server_url,

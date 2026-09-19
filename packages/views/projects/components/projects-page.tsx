@@ -19,7 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@multica/core/api";
+import { useConfigStore } from "@multica/core/config";
 import { SecretaryPage } from "../../secretary/secretary-page";
 import { toast } from "sonner";
 import {
@@ -797,10 +797,32 @@ function ProjectBatchToolbar({
 // ---------------------------------------------------------------------------
 
 export function ProjectsPage() {
+  const { t } = useT("issues");
   const [original, setOriginal] = useState(false);
-  const config = useQuery({ queryKey: ["app-config"], queryFn: () => api.getConfig(), staleTime: 60_000 });
-  if (config.data?.local_mode && !original) return <SecretaryPage initialView="matters" originalLabel="原项目目录" onOriginalRecords={() => setOriginal(true)} />;
-  return <div className="flex flex-1 min-h-0 flex-col">{original && <Button variant="ghost" className="self-start m-2" onClick={() => setOriginal(false)}>返回具体事项</Button>}<OriginalProjectsPage /></div>;
+  const localMode = useConfigStore((state) => state.localMode);
+  if (localMode && !original) {
+    return (
+      <SecretaryPage
+        initialView="matters"
+        originalLabel={t(($) => $.secretary.original_project_directory)}
+        onOriginalRecords={() => setOriginal(true)}
+      />
+    );
+  }
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {original && (
+        <Button
+          variant="ghost"
+          className="m-2 self-start"
+          onClick={() => setOriginal(false)}
+        >
+          {t(($) => $.secretary.back_to_matters)}
+        </Button>
+      )}
+      <OriginalProjectsPage />
+    </div>
+  );
 }
 
 function OriginalProjectsPage() {

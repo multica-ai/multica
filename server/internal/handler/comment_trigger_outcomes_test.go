@@ -3,11 +3,35 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
+
+func TestCommentTriggerDeliveryRetriesOnlyInternalFailures(t *testing.T) {
+	outcomes := []CommentTriggerOutcome{
+		{TargetType: "agent", TargetID: "ok", Status: DispatchQueued, ReasonCode: ReasonQueued},
+		{TargetType: "agent", TargetID: "retry", Status: DispatchBlocked, ReasonCode: ReasonInternalError},
+	}
+	results := map[string]commentEnqueueResult{
+		"ok":    {status: DispatchQueued, reason: ReasonQueued},
+		"retry": {status: DispatchBlocked, reason: ReasonInternalError},
+	}
+	if !errors.Is(commentTriggerDeliveryError(outcomes, results), errCommentTriggerDeliveryRetryable) {
+		t.Fatal("internal enqueue failure must keep the outbox retryable")
+	}
+	results["retry"] = commentEnqueueResult{status: DispatchBlocked, reason: ReasonAttributionBlocked}
+	outcomes[1].ReasonCode = ReasonAttributionBlocked
+	if err := commentTriggerDeliveryError(outcomes, results); err != nil {
+		t.Fatalf("permanent refusal must not retry forever: %v", err)
+	}
+}
 
 func findCommentOutcome(t *testing.T, outcomes []CommentTriggerOutcome, targetID string) CommentTriggerOutcome {
 	t.Helper()
@@ -18,6 +42,256 @@ func findCommentOutcome(t *testing.T, outcomes []CommentTriggerOutcome, targetID
 	}
 	t.Fatalf("no trigger outcome for target %s in %+v", targetID, outcomes)
 	return CommentTriggerOutcome{}
+}
+
+// TestCommentTriggerOutboxRepairsCommitBeforeDispatchCrash models the exact
+// crash window the durable outbox closes: the comment and trigger intent have
+// committed, but the HTTP process dies before routing the comment to an agent.
+// The sweeper must enqueue the work once and a second pass must be a no-op.
+func TestCommentTriggerOutboxRepairsCommitBeforeDispatchCrash(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "Durable Comment Trigger Target", nil)
+	issueID := createCommentTriggerPreviewIssue(t, "durable comment trigger", "", "")
+	commentID := dbid.NewV7()
+	content := fmt.Sprintf("[@Target](mention://agent/%s) please continue", agentID)
+
+	if _, err := testHandler.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ID: commentID, IssueID: parseUUID(issueID), WorkspaceID: parseUUID(testWorkspaceID),
+		AuthorType: "member", AuthorID: parseUUID(testUserID), Content: content, Type: "comment",
+	}); err != nil {
+		t.Fatalf("persist crash-window comment: %v", err)
+	}
+	if err := testHandler.Queries.CreateCommentTriggerOutbox(ctx, db.CreateCommentTriggerOutboxParams{
+		CommentID: commentID, WorkspaceID: parseUUID(testWorkspaceID), IssueID: parseUUID(issueID),
+		ActorType: "member", ActorID: parseUUID(testUserID),
+		OriginatorUserID: pgtype.UUID{Bytes: parseUUID(testUserID).Bytes, Valid: true},
+		SuppressAgentIds: []pgtype.UUID{},
+	}); err != nil {
+		t.Fatalf("persist crash-window trigger intent: %v", err)
+	}
+
+	result, err := testHandler.DeliverCommentTriggerOutbox(ctx, 10)
+	if err != nil || result.Claimed != 1 || result.Done != 1 || result.Failed != 0 {
+		t.Fatalf("first outbox delivery = %+v, %v", result, err)
+	}
+	if got := countQueuedCommentTriggerTasks(t, issueID, agentID); got != 1 {
+		t.Fatalf("queued tasks after recovery = %d, want 1", got)
+	}
+
+	result, err = testHandler.DeliverCommentTriggerOutbox(ctx, 10)
+	if err != nil || result.Claimed != 0 {
+		t.Fatalf("second outbox delivery = %+v, %v, want no claim", result, err)
+	}
+	if got := countQueuedCommentTriggerTasks(t, issueID, agentID); got != 1 {
+		t.Fatalf("queued tasks after replay = %d, want 1", got)
+	}
+}
+
+func TestCommentTriggerOutboxDoesNotRepeatACompletedDeliveredTarget(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "Crash After Trigger Target", nil)
+	issueID := createCommentTriggerPreviewIssue(t, "crash after trigger", "", "")
+	commentID := dbid.NewV7()
+	content := fmt.Sprintf("[@Target](mention://agent/%s) please continue", agentID)
+	if _, err := testHandler.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ID: commentID, IssueID: parseUUID(issueID), WorkspaceID: parseUUID(testWorkspaceID),
+		AuthorType: "member", AuthorID: parseUUID(testUserID), Content: content, Type: "comment",
+	}); err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	comment, err := testHandler.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
+		ID: commentID, WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("load comment: %v", err)
+	}
+	if err := testHandler.Queries.CreateCommentTriggerOutbox(ctx, db.CreateCommentTriggerOutboxParams{
+		CommentID: commentID, WorkspaceID: parseUUID(testWorkspaceID), IssueID: parseUUID(issueID),
+		ActorType: "member", ActorID: parseUUID(testUserID),
+		OriginatorUserID: parseOptionalUUID(testUserID), SuppressAgentIds: []pgtype.UUID{},
+	}); err != nil {
+		t.Fatalf("create trigger outbox: %v", err)
+	}
+	issue, err := testHandler.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID: parseUUID(issueID), WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+	if _, err := testHandler.triggerTasksForCommentDelivery(
+		ctx, issue, comment, nil, "member", testUserID, testUserID, nil,
+	); err != nil {
+		t.Fatalf("first trigger: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status='completed', completed_at=now(), delivered_comment_ids=ARRAY[$3::uuid]
+		WHERE issue_id=$1 AND agent_id=$2
+	`, issueID, agentID, uuidToString(commentID)); err != nil {
+		t.Fatalf("complete delivered task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE comment_trigger_outbox
+		SET state='processing', attempts=1, lease_owner='crashed-worker',
+		    lease_expires_at=now()-interval '1 second'
+		WHERE comment_id=$1
+	`, uuidToString(commentID)); err != nil {
+		t.Fatalf("stage expired outbox lease: %v", err)
+	}
+
+	result, err := testHandler.DeliverCommentTriggerOutbox(ctx, 10)
+	if err != nil || result.Done != 1 || result.Failed != 0 {
+		t.Fatalf("replay delivery = %+v, %v", result, err)
+	}
+	var taskCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2
+	`, issueID, agentID).Scan(&taskCount); err != nil {
+		t.Fatalf("count target tasks: %v", err)
+	}
+	if taskCount != 1 {
+		t.Fatalf("tasks after post-trigger crash replay = %d, want 1", taskCount)
+	}
+}
+
+func TestCommentTriggerOutboxRetriesOnlyTheMissingTarget(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	firstAgentID := createHandlerTestAgent(t, "Partial Trigger Delivered", nil)
+	secondAgentID := createHandlerTestAgent(t, "Partial Trigger Retry", nil)
+	issueID := createCommentTriggerPreviewIssue(t, "partial trigger retry", "", "")
+	commentID := dbid.NewV7()
+	content := fmt.Sprintf(
+		"[@First](mention://agent/%s) [@Second](mention://agent/%s) continue",
+		firstAgentID, secondAgentID,
+	)
+	if _, err := testHandler.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ID: commentID, IssueID: parseUUID(issueID), WorkspaceID: parseUUID(testWorkspaceID),
+		AuthorType: "member", AuthorID: parseUUID(testUserID), Content: content, Type: "comment",
+	}); err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	comment, err := testHandler.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
+		ID: commentID, WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("load comment: %v", err)
+	}
+	if err := testHandler.Queries.CreateCommentTriggerOutbox(ctx, db.CreateCommentTriggerOutboxParams{
+		CommentID: commentID, WorkspaceID: parseUUID(testWorkspaceID), IssueID: parseUUID(issueID),
+		ActorType: "member", ActorID: parseUUID(testUserID),
+		OriginatorUserID: parseOptionalUUID(testUserID), SuppressAgentIds: []pgtype.UUID{},
+	}); err != nil {
+		t.Fatalf("create trigger outbox: %v", err)
+	}
+	issue, err := testHandler.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID: parseUUID(issueID), WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+	if _, err := testHandler.triggerTasksForCommentDelivery(
+		ctx, issue, comment, nil, "member", testUserID, testUserID, nil,
+	); err != nil {
+		t.Fatalf("initial trigger: %v", err)
+	}
+	var deliveredTaskID, missingTaskID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id::text FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2
+	`, issueID, firstAgentID).Scan(&deliveredTaskID); err != nil {
+		t.Fatalf("read delivered target task: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT id::text FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2
+	`, issueID, secondAgentID).Scan(&missingTaskID); err != nil {
+		t.Fatalf("read missing target task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status='completed', completed_at=now(), delivered_comment_ids=ARRAY[$2::uuid]
+		WHERE id=$1
+	`, deliveredTaskID, uuidToString(commentID)); err != nil {
+		t.Fatalf("complete delivered target: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id=$1`, missingTaskID); err != nil {
+		t.Fatalf("remove failed target attempt: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE comment_trigger_outbox
+		SET state='processing', attempts=1, lease_owner='partial-worker',
+		    lease_expires_at=now()-interval '1 second'
+		WHERE comment_id=$1
+	`, uuidToString(commentID)); err != nil {
+		t.Fatalf("stage partial retry: %v", err)
+	}
+
+	result, err := testHandler.DeliverCommentTriggerOutbox(ctx, 10)
+	if err != nil || result.Done != 1 || result.Failed != 0 {
+		t.Fatalf("partial retry delivery = %+v, %v", result, err)
+	}
+	for _, agentID := range []string{firstAgentID, secondAgentID} {
+		var count int
+		if err := testPool.QueryRow(ctx, `
+			SELECT count(*) FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2
+		`, issueID, agentID).Scan(&count); err != nil {
+			t.Fatalf("count target %s tasks: %v", agentID, err)
+		}
+		if count != 1 {
+			t.Fatalf("target %s tasks = %d, want exactly 1", agentID, count)
+		}
+	}
+}
+
+func TestCommentTriggerOutboxExpiresTheLastCrashedLeaseToDead(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	issueID := createCommentTriggerPreviewIssue(t, "exhausted trigger lease", "", "")
+	commentID := dbid.NewV7()
+	if _, err := testHandler.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ID: commentID, IssueID: parseUUID(issueID), WorkspaceID: parseUUID(testWorkspaceID),
+		AuthorType: "member", AuthorID: parseUUID(testUserID), Content: "/note exhausted", Type: "comment",
+	}); err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	if err := testHandler.Queries.CreateCommentTriggerOutbox(ctx, db.CreateCommentTriggerOutboxParams{
+		CommentID: commentID, WorkspaceID: parseUUID(testWorkspaceID), IssueID: parseUUID(issueID),
+		ActorType: "member", ActorID: parseUUID(testUserID),
+		OriginatorUserID: parseOptionalUUID(testUserID), SuppressAgentIds: []pgtype.UUID{},
+	}); err != nil {
+		t.Fatalf("create trigger outbox: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE comment_trigger_outbox
+		SET state='processing', attempts=$2, lease_owner='last-worker',
+		    lease_expires_at=now()-interval '1 second'
+		WHERE comment_id=$1
+	`, uuidToString(commentID), commentTriggerOutboxMaxAttempts); err != nil {
+		t.Fatalf("stage exhausted outbox: %v", err)
+	}
+
+	result, err := testHandler.DeliverCommentTriggerOutbox(ctx, 10)
+	if err != nil || result.Claimed != 0 {
+		t.Fatalf("expired delivery = %+v, %v", result, err)
+	}
+	var state, lastError string
+	if err := testPool.QueryRow(ctx, `
+		SELECT state, last_error FROM comment_trigger_outbox WHERE comment_id=$1
+	`, uuidToString(commentID)).Scan(&state, &lastError); err != nil {
+		t.Fatalf("read exhausted outbox: %v", err)
+	}
+	if state != "dead" || lastError == "" {
+		t.Fatalf("exhausted outbox = (%q, %q), want visible dead letter", state, lastError)
+	}
 }
 
 // TestCreateComment_MixedMentionSurfacesPartialTriggerOutcomes is the MUL-4525 §2

@@ -19,6 +19,7 @@ WHERE workspace_id = $2
   AND actor_id = $4
   AND request_key = $5
   AND issue_id IS NULL
+  AND deleted_at IS NULL
 `
 
 type BindIssueCreateRequestParams struct {
@@ -44,7 +45,7 @@ func (q *Queries) BindIssueCreateRequest(ctx context.Context, arg BindIssueCreat
 }
 
 const getIssueCreateRequestForUpdate = `-- name: GetIssueCreateRequestForUpdate :one
-SELECT workspace_id, actor_type, actor_id, request_key, payload_sha256, issue_id, created_at
+SELECT workspace_id, actor_type, actor_id, request_key, payload_sha256, issue_id, created_at, deleted_at
 FROM issue_create_request
 WHERE workspace_id = $1
   AND actor_type = $2
@@ -76,8 +77,25 @@ func (q *Queries) GetIssueCreateRequestForUpdate(ctx context.Context, arg GetIss
 		&i.PayloadSha256,
 		&i.IssueID,
 		&i.CreatedAt,
+		&i.DeletedAt,
 	)
 	return i, err
+}
+
+const markIssueCreateRequestsDeleted = `-- name: MarkIssueCreateRequestsDeleted :exec
+UPDATE issue_create_request
+SET deleted_at = COALESCE(deleted_at, now())
+WHERE workspace_id = $1 AND issue_id = $2
+`
+
+type MarkIssueCreateRequestsDeletedParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+func (q *Queries) MarkIssueCreateRequestsDeleted(ctx context.Context, arg MarkIssueCreateRequestsDeletedParams) error {
+	_, err := q.db.Exec(ctx, markIssueCreateRequestsDeleted, arg.WorkspaceID, arg.IssueID)
+	return err
 }
 
 const reserveIssueCreateRequest = `-- name: ReserveIssueCreateRequest :execrows

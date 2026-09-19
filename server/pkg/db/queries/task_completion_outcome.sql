@@ -8,8 +8,29 @@ INSERT INTO agent_task_completion_outcome (
 )
 RETURNING *;
 
+-- name: ExpireExhaustedTaskCompletionOutbox :execrows
+UPDATE task_completion_outbox
+SET state = 'dead', lease_owner = NULL, lease_expires_at = NULL,
+    next_attempt_at = NULL,
+    last_error = COALESCE(last_error, 'lease expired after retry budget was exhausted'),
+    updated_at = now()
+WHERE state = 'publishing'
+  AND lease_expires_at <= now()
+  AND attempts >= @max_attempts;
+
 -- name: GetAgentTaskCompletionOutcome :one
 SELECT * FROM agent_task_completion_outcome WHERE task_id = @task_id;
+
+-- name: TombstoneTaskCompletionOutcomeForComment :exec
+-- Comment deletion explicitly retires the completion delivery before the
+-- comment row is cleared or removed. The FK is RESTRICT, so no direct delete
+-- can silently invalidate a non-suppressed outcome.
+WITH retired_outbox AS (
+    DELETE FROM task_completion_outbox WHERE comment_id = @comment_id
+)
+UPDATE agent_task_completion_outcome
+SET outcome_kind = 'suppressed', content = '', final_comment_id = NULL
+WHERE final_comment_id = @comment_id;
 
 -- name: CreateTaskCompletionOutbox :one
 INSERT INTO task_completion_outbox (

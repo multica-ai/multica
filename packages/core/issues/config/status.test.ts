@@ -1,33 +1,33 @@
 import { describe, expect, it } from "vitest";
 import {
   ALL_STATUSES,
-  LIFEOS_BOARD_STATUSES,
+  BUILT_IN_STATUS_CATEGORY,
+  BUILT_IN_STATUS_ORDER,
   STATUS_ORDER,
 } from "./status";
 
 describe("LifeOS issue workflow", () => {
-  it("puts chairman attention before review and completion", () => {
+  it("uses the current four lifecycle categories", () => {
     expect(STATUS_ORDER).toEqual([
-      "backlog",
-      "todo",
-      "in_progress",
-      "blocked",
-      "in_review",
+      "unstarted",
+      "started",
       "done",
-      "cancelled",
+      "closed",
     ]);
     expect(ALL_STATUSES).toEqual(STATUS_ORDER);
   });
 
-  it("keeps cancelled recoverable but off the default board", () => {
-    expect(LIFEOS_BOARD_STATUSES).toEqual([
+  it("keeps the installed LifeOS statuses mapped to those categories", () => {
+    expect(BUILT_IN_STATUS_ORDER).toEqual([
       "backlog",
       "todo",
       "in_progress",
-      "blocked",
       "in_review",
+      "blocked",
       "done",
+      "cancelled",
     ]);
-    expect(ALL_STATUSES).toContain("cancelled");
+    expect(BUILT_IN_STATUS_CATEGORY.blocked).toBe("started");
+    expect(BUILT_IN_STATUS_CATEGORY.cancelled).toBe("closed");
   });
 });

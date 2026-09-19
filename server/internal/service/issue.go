@@ -174,6 +174,11 @@ var ErrIssueStatusUnavailable = errors.New("issue status is no longer available"
 // bug; creating a second issue would break exactly-once semantics.
 var ErrIssueCreateRequestConflict = errors.New("issue create request key was reused with different content")
 
+// ErrIssueCreateRequestGone means the request key already completed, but the
+// created issue was intentionally deleted. The identity remains reserved so a
+// transport retry cannot recreate work the user removed.
+var ErrIssueCreateRequestGone = errors.New("issue created by this request was deleted")
+
 var ErrSourceContextAlreadyAttached = errors.New("source context is already attached")
 
 // IssueCreateResult is the typed return from IssueService.Create.
@@ -256,6 +261,9 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		}
 		if request.PayloadSha256 != p.RequestPayloadHash.String {
 			return IssueCreateResult{}, ErrIssueCreateRequestConflict
+		}
+		if request.DeletedAt.Valid {
+			return IssueCreateResult{}, ErrIssueCreateRequestGone
 		}
 		if request.IssueID.Valid {
 			issue, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{

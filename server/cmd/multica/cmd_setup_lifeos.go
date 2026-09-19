@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -232,11 +233,11 @@ func bootstrapLifeOSProfile(
 	if err != nil {
 		return cli.CLIConfig{}, lifeOSIdentity{}, err
 	}
-	publicClient.ExtraHeaders = map[string]string{
-		"X-LifeOS-Automation-Token": automationToken,
-	}
 	var session lifeOSLocalSession
-	if err := publicClient.PostJSON(ctx, "/auth/local/automation", map[string]any{}, &session); err != nil {
+	headers := http.Header{
+		"X-LifeOS-Automation-Token": []string{automationToken},
+	}
+	if err := publicClient.PostJSONWithHeaders(ctx, "/auth/local/automation", map[string]any{}, headers, &session); err != nil {
 		return cli.CLIConfig{}, lifeOSIdentity{}, fmt.Errorf("create LifeOS local session: %w", err)
 	}
 	if session.Token == "" || session.Workspace.ID == "" {

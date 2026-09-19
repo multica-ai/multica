@@ -15,6 +15,11 @@ interface ConfigState {
   // must be hidden. Defaults to false so unknown / older servers behave like
   // the managed-cloud case.
   workspaceCreationDisabled: boolean;
+  // LifeOS single-user mode is declared by the server. Older servers omit
+  // these fields, so clients must stay on the normal auth flow by default.
+  localMode: boolean;
+  localWorkspaceSlug: string;
+  localAuthConfigured: boolean;
   // Self-host-only gate for the Git provider integration (Forgejo / Gitea /
   // GitLab). When false the whole Settings → Integrations "Git providers"
   // section is hidden. Defaults to false so unknown / older servers and the
@@ -46,6 +51,9 @@ interface ConfigState {
     googleClientId?: string;
     workspaceCreationDisabled?: boolean;
     vcsIntegrationAvailable?: boolean;
+    localMode?: boolean;
+    localWorkspaceSlug?: string;
+    localAuthConfigured?: boolean;
   }) => void;
   setDaemonConfig: (config: {
     daemonServerUrl?: string;
@@ -67,6 +75,9 @@ export const configStore = createStore<ConfigState>((set) => ({
   daemonAppUrl: "",
   workspaceCreationDisabled: false,
   vcsIntegrationAvailable: false,
+  localMode: false,
+  localWorkspaceSlug: "",
+  localAuthConfigured: false,
   featureFlags: {},
   serverVersion: "",
   localWorktreeSupported: false,
@@ -78,7 +89,19 @@ export const configStore = createStore<ConfigState>((set) => ({
     googleClientId = "",
     workspaceCreationDisabled = false,
     vcsIntegrationAvailable = false,
-  }) => set({ allowSignup, googleClientId, workspaceCreationDisabled, vcsIntegrationAvailable }),
+    localMode = false,
+    localWorkspaceSlug = "",
+    localAuthConfigured = false,
+  }) =>
+    set({
+      allowSignup,
+      googleClientId,
+      workspaceCreationDisabled,
+      vcsIntegrationAvailable,
+      localMode,
+      localWorkspaceSlug,
+      localAuthConfigured,
+    }),
   setDaemonConfig: ({ daemonServerUrl = "", daemonAppUrl = "" }) =>
     set({ daemonServerUrl, daemonAppUrl }),
   setFeatureFlags: (flags = {}) => set({ featureFlags: { ...flags } }),

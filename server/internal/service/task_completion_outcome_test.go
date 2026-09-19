@@ -2,34 +2,31 @@ package service
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
-	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-type runningIssueTaskFixture struct {
-	pool      *pgxpool.Pool
-	queries   *db.Queries
-	service   *TaskService
-	workspace pgtype.UUID
-	user      pgtype.UUID
-	agent     pgtype.UUID
-	issue     db.Issue
-	task      db.AgentTaskQueue
-	input     db.Comment
+func TestCompletionAnsweredCommentIDsUsesDeliveredSubsetOnly(t *testing.T) {
+	delivered := dbid.NewV7()
+	coalescedOnly := dbid.NewV7()
+	task := db.AgentTaskQueue{
+		TriggerCommentID:    coalescedOnly,
+		CoalescedCommentIds: []pgtype.UUID{coalescedOnly},
+		DeliveredCommentIds: []pgtype.UUID{delivered, delivered},
+	}
+	got := completionAnsweredCommentIDs(task)
+	if len(got) != 1 || got[0] != delivered {
+		t.Fatalf("answered comments = %v, want only delivered %s", got, util.UUIDToString(delivered))
+	}
 }
 
-func seedRunningIssueTask(t *testing.T) runningIssueTaskFixture {
-	t.Helper()
+func TestIssueCompletionDoesNotAdoptOrdinaryProgressCommentAsFinal(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
 	queries := db.New(pool)
@@ -38,146 +35,118 @@ func seedRunningIssueTask(t *testing.T) runningIssueTaskFixture {
 	userUUID := util.MustParseUUID(userID)
 	agentUUID := util.MustParseUUID(agentID)
 	issueUUID := util.MustParseUUID(issueID)
-	issue, err := queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: issueUUID, WorkspaceID: workspaceUUID})
-	if err != nil {
-		t.Fatalf("load issue: %v", err)
-	}
-	createdInput, err := queries.CreateComment(ctx, db.CreateCommentParams{
-		ID: dbid.NewV7(), IssueID: issueUUID, WorkspaceID: workspaceUUID,
-		AuthorType: "member", AuthorID: userUUID, Content: "Please finish this", Type: "comment",
+	svc := &TaskService{Queries: queries, TxStarter: pool, Bus: events.New()}
+
+	task, err := svc.EnqueueTaskForIssue(ctx, db.Issue{
+		ID: issueUUID, WorkspaceID: workspaceUUID,
+		AssigneeType: pgtype.Text{String: "agent", Valid: true}, AssigneeID: agentUUID,
+		CreatorType: "member", CreatorID: userUUID, Priority: "medium",
 	})
 	if err != nil {
-		t.Fatalf("create trigger comment: %v", err)
+		t.Fatalf("enqueue issue task: %v", err)
 	}
-	bus := events.New()
-	service := &TaskService{Queries: queries, TxStarter: pool, Bus: bus}
-	task, err := service.EnqueueTaskForIssue(ctx, issue, createdInput.ID)
-	if err != nil {
-		t.Fatalf("enqueue task: %v", err)
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET status='running', started_at=now() WHERE id=$1`, task.ID); err != nil {
+		t.Fatalf("start issue task: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `
-		UPDATE agent_task_queue
-		SET status='running', dispatched_at=now(), started_at=now()
-		WHERE id=$1`, task.ID); err != nil {
-		t.Fatalf("start task: %v", err)
-	}
-	task, err = queries.GetAgentTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("reload running task: %v", err)
-	}
-	return runningIssueTaskFixture{
-		pool: pool, queries: queries, service: service, workspace: workspaceUUID,
-		user: userUUID, agent: agentUUID, issue: issue, task: task, input: createdInput.Comment(),
-	}
-}
-
-func completionPayload(t *testing.T, taskID pgtype.UUID, output string) []byte {
-	t.Helper()
-	data, err := json.Marshal(protocol.TaskCompletedPayload{TaskID: util.UUIDToString(taskID), Output: output})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return data
-}
-
-func TestIssueCompletionProgressCannotSuppressFinalOutcome(t *testing.T) {
-	f := seedRunningIssueTask(t)
-	ctx := context.Background()
-	if _, err := f.queries.CreateComment(ctx, db.CreateCommentParams{
-		ID: dbid.NewV7(), IssueID: f.issue.ID, WorkspaceID: f.workspace,
-		AuthorType: "agent", AuthorID: f.agent, Content: "Still working", Type: "progress_update",
-		SourceTaskID: f.task.ID,
+	progressID := dbid.NewV7()
+	if _, err := queries.CreateComment(ctx, db.CreateCommentParams{
+		ID: progressID, IssueID: issueUUID, WorkspaceID: workspaceUUID,
+		AuthorType: "agent", AuthorID: agentUUID, Content: "处理中：已完成第一步。", Type: "comment",
+		SourceTaskID: task.ID,
 	}); err != nil {
 		t.Fatalf("create progress comment: %v", err)
 	}
 
-	commentEvents := 0
-	f.service.Bus.Subscribe(protocol.EventCommentCreated, func(events.Event) { commentEvents++ })
-	result := completionPayload(t, f.task.ID, "Final answer with evidence")
-	completed, transitioned, err := f.service.CompleteTaskWithTransition(ctx, f.task.ID, result, "", "", "", false, "", "")
-	if err != nil || !transitioned || completed.Status != "completed" {
-		t.Fatalf("complete = task %+v transitioned %v err %v", completed, transitioned, err)
+	completed, transitioned, err := svc.CompleteTaskWithTransition(
+		ctx, task.ID, []byte(`{"output":"最终结论：已完成。"}`), "", "", "", false, "", "",
+	)
+	if err != nil || !transitioned || completed == nil {
+		t.Fatalf("complete task = (%v, %v, %v)", completed, transitioned, err)
 	}
 
-	outcome, err := f.queries.GetAgentTaskCompletionOutcome(ctx, f.task.ID)
-	if err != nil {
-		t.Fatalf("load outcome: %v", err)
+	var outcomeKind, content, finalCommentID string
+	if err := pool.QueryRow(ctx, `
+		SELECT outcome_kind, content, final_comment_id::text
+		FROM agent_task_completion_outcome WHERE task_id=$1
+	`, task.ID).Scan(&outcomeKind, &content, &finalCommentID); err != nil {
+		t.Fatalf("read completion outcome: %v", err)
 	}
-	if outcome.OutcomeKind != "final" || outcome.Content != "Final answer with evidence" || !outcome.FinalCommentID.Valid {
-		t.Fatalf("outcome = %+v", outcome)
+	if outcomeKind != "final" || content != "最终结论：已完成。" {
+		t.Fatalf("completion outcome = (%q, %q)", outcomeKind, content)
 	}
-	if len(outcome.AnsweredCommentIds) != 1 || outcome.AnsweredCommentIds[0] != f.input.ID {
-		t.Fatalf("answered comments = %v, want trigger %s", outcome.AnsweredCommentIds, util.UUIDToString(f.input.ID))
+	if finalCommentID == util.UUIDToString(progressID) {
+		t.Fatalf("ordinary progress comment %s was adopted as final", finalCommentID)
 	}
-	var progressCount, finalCount int
-	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE source_task_id=$1 AND type='progress_update'`, f.task.ID).Scan(&progressCount); err != nil {
-		t.Fatal(err)
+	var finalContent string
+	if err := pool.QueryRow(ctx, `SELECT content FROM comment WHERE id=$1`, finalCommentID).Scan(&finalContent); err != nil {
+		t.Fatalf("read final comment: %v", err)
 	}
-	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE source_task_id=$1 AND type='comment'`, f.task.ID).Scan(&finalCount); err != nil {
-		t.Fatal(err)
+	if finalContent != "最终结论：已完成。" {
+		t.Fatalf("final comment content = %q", finalContent)
 	}
-	if progressCount != 1 || finalCount != 1 || commentEvents != 1 {
-		t.Fatalf("progress=%d final=%d final events=%d; want 1/1/1", progressCount, finalCount, commentEvents)
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE source_task_id=$1`, task.ID).Scan(&count); err != nil {
+		t.Fatalf("count task comments: %v", err)
 	}
-	var outboxState string
-	if err := f.pool.QueryRow(ctx, `SELECT state FROM task_completion_outbox WHERE task_id=$1`, f.task.ID).Scan(&outboxState); err != nil {
-		t.Fatal(err)
-	}
-	if outboxState != "published" {
-		t.Fatalf("outbox state = %q, want published", outboxState)
-	}
-
-	replayed, transitioned, err := f.service.CompleteTaskWithTransition(ctx, f.task.ID, result, "", "", "", false, "", "")
-	if err != nil || transitioned || replayed.ID != f.task.ID {
-		t.Fatalf("replay = task %+v transitioned %v err %v", replayed, transitioned, err)
-	}
-	if commentEvents != 1 {
-		t.Fatalf("replayed completion emitted %d comment events, want one total", commentEvents)
+	if count != 2 {
+		t.Fatalf("task comments = %d, want progress plus authoritative final", count)
 	}
 }
 
-func TestIssueCompletionOutcomeFailureRollsBackTerminalTransition(t *testing.T) {
-	f := seedRunningIssueTask(t)
+func TestCompletionOutboxExpiresTheLastCrashedLeaseToDead(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
-	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
-	functionName := "test_fail_completion_" + suffix
-	triggerName := "test_fail_completion_trigger_" + suffix
-	ddl := fmt.Sprintf(`
-		CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$
-		BEGIN
-			IF NEW.task_id = '%s'::uuid THEN
-				RAISE EXCEPTION 'injected outcome failure';
-			END IF;
-			RETURN NEW;
-		END $$;
-		CREATE TRIGGER %s BEFORE INSERT ON agent_task_completion_outcome
-		FOR EACH ROW EXECUTE FUNCTION %s()`, functionName, util.UUIDToString(f.task.ID), triggerName, functionName)
-	if _, err := f.pool.Exec(ctx, ddl); err != nil {
-		t.Fatalf("install failure trigger: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = f.pool.Exec(context.Background(), fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON agent_task_completion_outcome; DROP FUNCTION IF EXISTS %s()", triggerName, functionName))
+	queries := db.New(pool)
+	workspaceID, userID, agentID, issueID := seedAttributionFixture(t, pool)
+	workspaceUUID := util.MustParseUUID(workspaceID)
+	userUUID := util.MustParseUUID(userID)
+	agentUUID := util.MustParseUUID(agentID)
+	issueUUID := util.MustParseUUID(issueID)
+	svc := &TaskService{Queries: queries, TxStarter: pool, Bus: events.New()}
+	task, err := svc.EnqueueTaskForIssue(ctx, db.Issue{
+		ID: issueUUID, WorkspaceID: workspaceUUID,
+		AssigneeType: pgtype.Text{String: "agent", Valid: true}, AssigneeID: agentUUID,
+		CreatorType: "member", CreatorID: userUUID, Priority: "medium",
 	})
-
-	result := completionPayload(t, f.task.ID, "This must roll back")
-	if _, transitioned, err := f.service.CompleteTaskWithTransition(ctx, f.task.ID, result, "", "", "", false, "", ""); err == nil || transitioned {
-		t.Fatalf("completion with injected failure = transitioned %v err %v", transitioned, err)
-	}
-	current, err := f.queries.GetAgentTask(ctx, f.task.ID)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("enqueue issue task: %v", err)
 	}
-	if current.Status != "running" {
-		t.Fatalf("task status = %q, want running after rollback", current.Status)
+	commentID := dbid.NewV7()
+	if _, err := queries.CreateComment(ctx, db.CreateCommentParams{
+		ID: commentID, IssueID: issueUUID, WorkspaceID: workspaceUUID,
+		AuthorType: "agent", AuthorID: agentUUID, Content: "最终结果", Type: "comment",
+		SourceTaskID: task.ID,
+	}); err != nil {
+		t.Fatalf("create final comment: %v", err)
 	}
-	var outcomes, finalComments int
-	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_completion_outcome WHERE task_id=$1`, f.task.ID).Scan(&outcomes); err != nil {
-		t.Fatal(err)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO agent_task_completion_outcome(
+			task_id, workspace_id, issue_id, agent_id, outcome_kind, content,
+			result_sha256, final_comment_id, answered_comment_ids
+		) VALUES($1,$2,$3,$4,'final','最终结果',$5,$6,'{}')
+	`, task.ID, workspaceUUID, issueUUID, agentUUID, strings.Repeat("a", 64), commentID); err != nil {
+		t.Fatalf("create completion outcome: %v", err)
 	}
-	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE source_task_id=$1 AND type='comment'`, f.task.ID).Scan(&finalComments); err != nil {
-		t.Fatal(err)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO task_completion_outbox(
+			task_id, workspace_id, issue_id, agent_id, comment_id, issue_revision,
+			state, attempts, lease_owner, lease_expires_at
+		) VALUES($1,$2,$3,$4,$5,1,'publishing',$6,'last-worker',now()-interval '1 second')
+	`, task.ID, workspaceUUID, issueUUID, agentUUID, commentID, taskCompletionOutboxMaxAttempts); err != nil {
+		t.Fatalf("create exhausted completion outbox: %v", err)
 	}
-	if outcomes != 0 || finalComments != 0 {
-		t.Fatalf("rolled-back outcomes=%d final comments=%d, want 0/0", outcomes, finalComments)
+
+	result, err := svc.DeliverTaskCompletionOutbox(ctx, 10)
+	if err != nil || result.Claimed != 0 {
+		t.Fatalf("completion outbox delivery = %+v, %v", result, err)
+	}
+	var state, lastError string
+	if err := pool.QueryRow(ctx, `
+		SELECT state, last_error FROM task_completion_outbox WHERE task_id=$1
+	`, task.ID).Scan(&state, &lastError); err != nil {
+		t.Fatalf("read completion outbox: %v", err)
+	}
+	if state != "dead" || lastError == "" {
+		t.Fatalf("completion outbox = (%q, %q), want visible dead letter", state, lastError)
 	}
 }

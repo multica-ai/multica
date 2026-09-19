@@ -170,39 +170,9 @@ func (h *Handler) PutLifeOSSecretary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	ids := map[string]bool{}
-	sourceItems := map[string]secretaryItem{}
-	for _, item := range p.Items {
-		if item.IssueID != nil {
-			ids[*item.IssueID] = true
-			sourceItems[*item.IssueID] = item
-		}
-	}
-	seen := map[string]bool{}
-	for _, update := range req.Updates {
-		if !ids[update.ID] || seen[update.ID] || update.Title == "" || len(update.Title) > 1200 || len(update.Description) > 50000 || update.ExpectedUpdatedAt.IsZero() {
-			writeError(w, 400, "invalid source update")
-			return
-		}
-		seen[update.ID] = true
-		sourceItem := sourceItems[update.ID]
-		validStatus := update.Status == nil || (sourceItem.ActionID != "" && sourceItem.Stage == "history" &&
-			((*update.Status == "cancelled" && sourceItem.BusinessStatus == "cancelled") ||
-				(*update.Status == "done" && sourceItem.BusinessStatus == "completed" && sourceItem.ClosureMode == "self_report" && sourceItem.ReportedStatus == "completed")))
-		if !validStatus {
-			writeError(w, 400, "canonical completion or cancellation evidence required")
-			return
-		}
-		for key, value := range update.Metadata {
-			if key != "lifeos_case_id" && key != "lifeos_secretary_kind" && key != "lifeos_secretary_stage" {
-				writeError(w, 400, "unsupported projection metadata")
-				return
-			}
-			if _, ok := value.(string); !ok {
-				writeError(w, 400, "invalid projection metadata")
-				return
-			}
-		}
+	if len(req.Updates) != 0 {
+		writeError(w, 400, "source presentation writes are retired; publish the projection only")
+		return
 	}
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -229,42 +199,6 @@ func (h *Handler) PutLifeOSSecretary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 409, "canonical state advanced; reload before rebuilding")
 		return
 	}
-	// Serialize presentation and verified terminal updates; never spawn execution.
-	for _, update := range req.Updates {
-		id, parseErr := util.ParseUUID(update.ID)
-		if parseErr != nil {
-			writeError(w, 400, "invalid source id")
-			return
-		}
-		metadata, _ := json.Marshal(update.Metadata)
-		// Preserve the source body atomically on the first secretary publication.
-		// These reserved fields cannot be supplied through projection metadata.
-		tag, updateErr := tx.Exec(r.Context(), `
-            UPDATE issue SET title=$3, description=$4,
-              metadata=(CASE WHEN metadata ? 'lifeos_original_description' THEN metadata
-                ELSE metadata || jsonb_build_object(
-                  'lifeos_original_title', title,
-                  'lifeos_original_description', COALESCE(description,''),
-                  'lifeos_original_captured_at', updated_at)
-                END) || $5::jsonb,
-              status=COALESCE($7,status), updated_at=now()
-            WHERE workspace_id=$1 AND id=$2 AND updated_at=$6`,
-			ws, id, update.Title, update.Description, metadata, update.ExpectedUpdatedAt, update.Status)
-		if updateErr != nil {
-			writeError(w, 500, "failed to update source presentation")
-			return
-		}
-		if tag.RowsAffected() != 1 {
-			writeError(w, 409, "source changed; rebuild projection")
-			return
-		}
-	}
-	// All issue records must remain represented, including completed/cancelled history.
-	var missing int
-	if err = tx.QueryRow(r.Context(), `SELECT count(*) FROM issue i WHERE i.workspace_id=$1 AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements($2::jsonb->'items') e WHERE e->>'issue_id'=i.id::text)`, ws, req.Projection).Scan(&missing); err != nil {
-		writeError(w, 500, "failed to verify coverage")
-		return
-	}
 	var unknown int
 	if err = tx.QueryRow(r.Context(), `SELECT count(*) FROM jsonb_array_elements($2::jsonb->'items') e WHERE e->>'issue_id' IS NOT NULL AND NOT EXISTS (SELECT 1 FROM issue i WHERE i.workspace_id=$1 AND i.id::text=e->>'issue_id')`, ws, req.Projection).Scan(&unknown); err != nil {
 		writeError(w, 500, "failed to verify source membership")
@@ -272,10 +206,6 @@ func (h *Handler) PutLifeOSSecretary(w http.ResponseWriter, r *http.Request) {
 	}
 	if unknown != 0 {
 		writeError(w, 400, "projection contains unknown source records")
-		return
-	}
-	if missing != 0 {
-		writeError(w, 409, "source inventory changed; incomplete projection rejected")
 		return
 	}
 	for requestID, receipt := range req.Acknowledgements {
@@ -302,7 +232,7 @@ func (h *Handler) PutLifeOSSecretary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "failed to commit projection")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"revision": current, "updated": len(req.Updates), "source_sha256": hash})
+	writeJSON(w, 200, map[string]any{"revision": current, "updated": 0, "source_sha256": hash})
 }
 
 func (h *Handler) CreateLifeOSSecretaryInstruction(w http.ResponseWriter, r *http.Request) {

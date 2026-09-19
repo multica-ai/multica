@@ -15,6 +15,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 import unicodedata
@@ -373,9 +374,10 @@ def resolve_controller_root(value: Optional[Path]) -> Path:
     elif os.environ.get("LIFEOS_CONTROLLER_ROOT"):
         root = Path(os.environ["LIFEOS_CONTROLLER_ROOT"]).expanduser().resolve()
     else:
-        sibling = REPO.parent / "lifeos-ai-workbench-control"
-        root = sibling if (sibling / "scripts/lifeos_mcp_server.py").is_file() else Path.home() / "Documents/Life OS AI"
-        root = root.resolve()
+        # Governance and the executable controller now share one canonical
+        # checkout. The retired sibling worktree must never win merely because
+        # it still exists on disk.
+        root = (Path.home() / "Documents/Life OS AI").resolve()
     if not (root / "scripts/lifeos_mcp_server.py").is_file():
         raise WorkbenchError("找不到 LifeOS 控制器：%s" % root)
     return root
@@ -857,6 +859,648 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _lifeos_backup_filter(info: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
+    parts = Path(info.name).parts
+    if any(part in {".git", "__pycache__", ".DS_Store"} for part in parts):
+        return None
+    # Operating backups contain data, not filesystem indirection. Omitting
+    # links keeps the archive snapshot and the later isolated extraction on the
+    # same explicit set of regular files and directories.
+    if info.issym() or info.islnk() or info.isdev():
+        return None
+    # Meeting originals have a separate retention and encryption decision.
+    # Minutes, metadata and the registry remain in the ordinary operating set.
+    if len(parts) >= 4 and parts[0:2] == ("sources", "meetings") and "source" in parts[2:]:
+        return None
+    info.uid = info.gid = 0
+    info.uname = info.gname = ""
+    return info
+
+
+LIFEOS_BACKUP_ASSETS = {
+    "required": [
+        "departments",
+        "meta",
+        "workflows",
+        "logs/transactions",
+        "logs/runs",
+        "logs/recovery/workplace",
+        "projects/project-index.md",
+        "projects/project-map.json",
+        "projects/automation-registry.md",
+        "memory/preferences.md",
+        "memory/writing-rules.json",
+    ],
+    "optional": [
+        "reviews",
+        "compound",
+        "sources/meetings",
+        "archive/manifest.json",
+    ],
+    "restricted": ["sources/meetings/*/source"],
+    "external": ["cloud_d1_unconsumed_commands"],
+}
+
+BACKUP_SCHEMA_VERSION = 3
+OPERATING_COMMIT_PATH = "departments/workplace/commit-state.json"
+OPERATING_STATE_PATH = "departments/workplace/state.md"
+CONTEXT_DATABASE_TABLES = {
+    "workbench_schema",
+    "thread_index",
+    "ceo_review_queue",
+    "secretary_intake",
+    "secretary_delivery",
+}
+INTERACTION_DATABASE_TABLES = {"schema_meta", "turns", "events", "memory_promotions"}
+POSTGRES_RECOVERY_TABLES = {
+    "issue",
+    "comment",
+    "agent_task_queue",
+    "comment_trigger_outbox",
+    "task_completion_outbox",
+    "lifeos_secretary_projection",
+}
+
+
+def _json_object(raw: bytes, label: str) -> Mapping[str, object]:
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise WorkbenchError("%s 不是有效 JSON" % label) from error
+    if not isinstance(value, Mapping):
+        raise WorkbenchError("%s 必须是 JSON 对象" % label)
+    return value
+
+
+def _operating_commit_snapshot(lifeos_root: Path) -> Dict[str, object]:
+    commit_path = lifeos_root / OPERATING_COMMIT_PATH
+    if not commit_path.is_file():
+        raise WorkbenchError("经营正本缺少提交标记")
+    raw = commit_path.read_bytes()
+    commit = _json_object(raw, "经营正本提交标记")
+    if commit.get("commit_status") != "committed" or not isinstance(
+        commit.get("state_version"), int
+    ):
+        raise WorkbenchError("经营正本提交标记尚未完成")
+    artifact_hashes = commit.get("artifact_hashes")
+    if not isinstance(artifact_hashes, Mapping) or not artifact_hashes:
+        raise WorkbenchError("经营正本提交标记缺少资产哈希")
+    for relative, expected in artifact_hashes.items():
+        path = lifeos_root / str(relative)
+        if not path.is_file() or _sha256_file(path) != expected:
+            raise WorkbenchError("经营正本提交标记与当前资产不一致：%s" % relative)
+    return {
+        "commit_sha256": hashlib.sha256(raw).hexdigest(),
+        "state_version": commit["state_version"],
+        "snapshot_hash": commit.get("snapshot_hash"),
+    }
+
+
+def _operating_asset_tree_sha256(lifeos_root: Path) -> str:
+    entries: List[tuple[str, str]] = []
+    requested = LIFEOS_BACKUP_ASSETS["required"] + LIFEOS_BACKUP_ASSETS["optional"]
+    for relative in requested:
+        source = lifeos_root / relative
+        if source.is_file():
+            candidates = [source]
+        elif source.is_dir():
+            candidates = sorted(source.rglob("*"))
+        else:
+            candidates = []
+        for path in candidates:
+            if path.is_symlink() or not path.is_file():
+                continue
+            name = path.relative_to(lifeos_root).as_posix()
+            parts = Path(name).parts
+            if any(part in {".git", "__pycache__", ".DS_Store"} for part in parts):
+                continue
+            if (
+                len(parts) >= 4
+                and parts[0:2] == ("sources", "meetings")
+                and "source" in parts[2:]
+            ):
+                continue
+            entries.append((name, _sha256_file(path)))
+    digest = hashlib.sha256()
+    for name, file_hash in sorted(entries):
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(file_hash.encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def _archive_file_bytes(archive: tarfile.TarFile, member: tarfile.TarInfo) -> bytes:
+    handle = archive.extractfile(member)
+    if handle is None:
+        raise WorkbenchError("经营资产归档文件无法读取：%s" % member.name)
+    return handle.read()
+
+
+def _validate_operating_archive(
+    path: Path, expected_commit: Optional[Mapping[str, object]] = None
+) -> Dict[str, object]:
+    with tarfile.open(path, "r:*") as archive:
+        members = {
+            member.name.removeprefix("./").rstrip("/"): member
+            for member in archive.getmembers()
+        }
+        for relative in LIFEOS_BACKUP_ASSETS["required"]:
+            member = members.get(relative)
+            if relative in {
+                "projects/project-index.md",
+                "projects/project-map.json",
+                "projects/automation-registry.md",
+                "memory/preferences.md",
+                "memory/writing-rules.json",
+            }:
+                if member is None or not member.isfile():
+                    raise WorkbenchError("经营资产必须是文件：%s" % relative)
+            elif member is None or not member.isdir():
+                raise WorkbenchError("经营资产必须是目录：%s" % relative)
+
+        required_files = {
+            OPERATING_STATE_PATH,
+            OPERATING_COMMIT_PATH,
+            "meta/00-charter.md",
+            "workflows/interaction-loop.md",
+            "projects/project-index.md",
+            "projects/project-map.json",
+            "projects/automation-registry.md",
+            "memory/preferences.md",
+            "memory/writing-rules.json",
+        }
+        for relative in required_files:
+            member = members.get(relative)
+            if member is None or not member.isfile() or member.size <= 0:
+                raise WorkbenchError("经营资产归档缺少有效文件：%s" % relative)
+
+        for prefix in (
+            "logs/transactions/",
+            "logs/runs/",
+            "logs/recovery/workplace/",
+        ):
+            if not any(
+                name.startswith(prefix) and member.isfile()
+                for name, member in members.items()
+            ):
+                raise WorkbenchError(
+                    "经营资产归档缺少业务记录：%s" % prefix.rstrip("/")
+                )
+
+        commit_raw = _archive_file_bytes(archive, members[OPERATING_COMMIT_PATH])
+        commit = _json_object(commit_raw, "归档内经营提交标记")
+        if commit.get("commit_status") != "committed" or not isinstance(
+            commit.get("state_version"), int
+        ):
+            raise WorkbenchError("归档内经营提交标记无效")
+        if expected_commit:
+            if hashlib.sha256(commit_raw).hexdigest() != expected_commit.get(
+                "commit_sha256"
+            ):
+                raise WorkbenchError("经营资产归档混入了不同提交版本")
+            if commit.get("state_version") != expected_commit.get("state_version"):
+                raise WorkbenchError("经营资产归档版本与备份清单不一致")
+
+        artifact_hashes = commit.get("artifact_hashes")
+        if not isinstance(artifact_hashes, Mapping) or not artifact_hashes:
+            raise WorkbenchError("归档内经营提交标记缺少资产哈希")
+        for relative, expected in artifact_hashes.items():
+            member = members.get(str(relative))
+            if member is None or not member.isfile():
+                raise WorkbenchError("归档缺少提交资产：%s" % relative)
+            actual = hashlib.sha256(_archive_file_bytes(archive, member)).hexdigest()
+            if actual != expected:
+                raise WorkbenchError("归档提交资产哈希不一致：%s" % relative)
+
+        archive_tree = hashlib.sha256()
+        for name, member in sorted(members.items()):
+            if not member.isfile():
+                continue
+            archive_tree.update(name.encode("utf-8"))
+            archive_tree.update(b"\0")
+            file_hash = hashlib.sha256(
+                _archive_file_bytes(archive, member)
+            ).hexdigest()
+            archive_tree.update(file_hash.encode("ascii"))
+            archive_tree.update(b"\n")
+        if expected_commit and archive_tree.hexdigest() != expected_commit.get(
+            "asset_tree_sha256"
+        ):
+            raise WorkbenchError("经营资产归档不是同一个固定文件快照")
+
+        _json_object(
+            _archive_file_bytes(archive, members["projects/project-map.json"]),
+            "项目地图",
+        )
+        _json_object(
+            _archive_file_bytes(archive, members["memory/writing-rules.json"]),
+            "写作规则",
+        )
+        state = _archive_file_bytes(archive, members[OPERATING_STATE_PATH])
+        if b"LIFEOS_WORKPLACE_STATE_JSON" not in state:
+            raise WorkbenchError("经营正本缺少机器可读状态")
+    return {
+        "state_version": commit["state_version"],
+        "commit_sha256": hashlib.sha256(commit_raw).hexdigest(),
+    }
+
+
+def _validate_sqlite_schema(path: Path, required_tables: set[str], label: str) -> None:
+    with sqlite3.connect("file:%s?mode=ro" % path, uri=True) as connection:
+        if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            raise WorkbenchError("%s 完整性检查失败" % label)
+        actual = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+    missing = sorted(required_tables - actual)
+    if missing:
+        raise WorkbenchError("%s 缺少业务表：%s" % (label, "、".join(missing)))
+
+
+def _attachment_key(value: str) -> str:
+    marker = "/uploads/"
+    if marker not in value:
+        return ""
+    return value.split(marker, 1)[1].split("?", 1)[0].lstrip("/")
+
+
+def _validate_attachment_references(
+    urls: Iterable[str], archive_names: Iterable[str]
+) -> None:
+    available = {
+        str(name).removeprefix("./").lstrip("/")
+        for name in archive_names
+        if str(name).removeprefix("./").strip("/")
+    }
+    missing = sorted(
+        key
+        for key in {_attachment_key(str(url)) for url in urls}
+        if key and key not in available
+    )
+    if missing:
+        raise WorkbenchError("附件归档缺少数据库引用对象：%s" % "、".join(missing[:20]))
+
+
+def create_lifeos_asset_archive(lifeos_root: Path, target: Path) -> List[str]:
+    requested = LIFEOS_BACKUP_ASSETS["required"] + LIFEOS_BACKUP_ASSETS["optional"]
+    included: List[str] = []
+    with tarfile.open(target, "w:gz") as archive:
+        for relative in requested:
+            source = lifeos_root / relative
+            if not source.exists():
+                continue
+            archive.add(
+                source,
+                arcname=relative,
+                recursive=True,
+                filter=_lifeos_backup_filter,
+            )
+            included.append(relative)
+    os.chmod(target, 0o600)
+    return included
+
+
+def _validate_archive(path: Path) -> int:
+    count = 0
+    with tarfile.open(path, "r:*") as archive:
+        for member in archive.getmembers():
+            pure = Path(member.name)
+            if pure.is_absolute() or ".." in pure.parts:
+                raise WorkbenchError("备份归档包含不安全路径：%s" % member.name)
+            if member.issym() or member.islnk():
+                raise WorkbenchError("备份归档不能包含链接：%s" % member.name)
+            if member.isdev():
+                raise WorkbenchError("备份归档包含设备文件：%s" % member.name)
+            count += 1
+    return count
+
+
+def verify_backup(backup_root: Path) -> Dict[str, object]:
+    root = backup_root.expanduser().resolve()
+    manifest_path = root / "manifest.json"
+    if not manifest_path.is_file():
+        raise WorkbenchError("备份缺少 manifest.json")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as error:
+        raise WorkbenchError("备份 manifest 无法读取") from error
+    files = manifest.get("files")
+    if not isinstance(files, list) or not files:
+        raise WorkbenchError("备份 manifest 没有资产清单")
+    backup_schema_version = manifest.get("backup_schema_version")
+    if backup_schema_version not in {2, BACKUP_SCHEMA_VERSION}:
+        raise WorkbenchError("不支持的备份格式版本")
+    archive_members = 0
+    archive_names: set[str] = set()
+    for item in files:
+        if not isinstance(item, Mapping) or not item.get("name") or not item.get("sha256"):
+            raise WorkbenchError("备份资产记录无效")
+        path = root / str(item["name"])
+        if not path.is_file() or _sha256_file(path) != item["sha256"]:
+            raise WorkbenchError("备份资产缺失或哈希不一致：%s" % item["name"])
+        if path.suffix in {".tar", ".gz", ".tgz"}:
+            archive_members += _validate_archive(path)
+            if path.name == "lifeos-operating-assets.tar.gz":
+                with tarfile.open(path, "r:*") as archive:
+                    archive_names = set(archive.getnames())
+        if path.name == "release-manifest.json":
+            release = json.loads(path.read_text(encoding="utf-8"))
+            if (
+                release.get("schema_version") != 1
+                or not release.get("release_id")
+                or release.get("contains_secrets") is not False
+            ):
+                raise WorkbenchError("发布清单无效")
+    expected_files = {
+        "workbench-postgres.dump",
+        "lifeos-context.sqlite3",
+        "lifeos-interaction.sqlite3",
+        "lifeos-operating-assets.tar.gz",
+        "workbench-attachments.tar",
+        "release-manifest.json",
+    }
+    actual_files = {
+        str(item.get("name")) for item in files if isinstance(item, Mapping)
+    }
+    missing_files = sorted(expected_files - actual_files)
+    if missing_files:
+        raise WorkbenchError("备份缺少必需资产：%s" % "、".join(missing_files))
+
+    if backup_schema_version == BACKUP_SCHEMA_VERSION:
+        expected_commit = manifest.get("operating_commit")
+        if not isinstance(expected_commit, Mapping):
+            raise WorkbenchError("备份缺少固定经营提交点")
+        _validate_operating_archive(
+            root / "lifeos-operating-assets.tar.gz", expected_commit
+        )
+        _validate_sqlite_schema(
+            root / "lifeos-context.sqlite3",
+            CONTEXT_DATABASE_TABLES,
+            "LifeOS 控制器数据库",
+        )
+        _validate_sqlite_schema(
+            root / "lifeos-interaction.sqlite3",
+            INTERACTION_DATABASE_TABLES,
+            "LifeOS 交互数据库",
+        )
+        verification_level = "recovery_package"
+        recovery_package_verified = True
+        business_recovery_verified = False
+    else:
+        # Schema v2 remains readable for integrity checks, but it predates the
+        # fixed operating commit and business-schema contracts.
+        for name in ("lifeos-context.sqlite3", "lifeos-interaction.sqlite3"):
+            with sqlite3.connect("file:%s?mode=ro" % (root / name), uri=True) as connection:
+                if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                    raise WorkbenchError("SQLite 备份完整性检查失败")
+        missing_assets = []
+        for relative in LIFEOS_BACKUP_ASSETS["required"]:
+            if relative not in archive_names and not any(
+                name.startswith(relative.rstrip("/") + "/") for name in archive_names
+            ):
+                missing_assets.append(relative)
+        if missing_assets:
+            raise WorkbenchError("经营资产归档不完整：%s" % "、".join(missing_assets))
+        verification_level = "limited_integrity"
+        recovery_package_verified = False
+        business_recovery_verified = False
+    return {
+        "verified": True,
+        "verification_level": verification_level,
+        "recovery_package_verified": recovery_package_verified,
+        "business_recovery_verified": business_recovery_verified,
+        "files": len(files),
+        "archive_members": archive_members,
+        "backup_root": str(root),
+    }
+
+
+def restore_drill(
+    backup_root: Path,
+    *,
+    lifeos_root: Path,
+    controller_root: Path,
+) -> Dict[str, object]:
+    root = backup_root.expanduser().resolve()
+    verification = verify_backup(root)
+    if not verification.get("recovery_package_verified"):
+        raise WorkbenchError("旧版备份只完成有限完整性校验，不能宣称业务恢复成功")
+    environment = runtime_environment(lifeos_root, controller_root)
+    if not docker_ready(environment):
+        raise WorkbenchError("恢复演练需要本机容器运行底座")
+    restore_database_name = "lifeos_restore_%s_%s" % (
+        dt.datetime.now().strftime("%Y%m%d%H%M%S"),
+        secrets.token_hex(3),
+    )
+    if not re.fullmatch(
+        r"lifeos_restore_[0-9]{14}_[0-9a-f]{6}", restore_database_name
+    ):
+        raise WorkbenchError("恢复演练数据库名称无效")
+    postgres_dump = root / "workbench-postgres.dump"
+    if not postgres_dump.is_file():
+        raise WorkbenchError("备份缺少 PostgreSQL dump")
+
+    created = False
+    table_count = 0
+    try:
+        result = _run(
+            compose_command(environment)
+            + [
+                "exec",
+                "-T",
+                "postgres",
+                "createdb",
+                "-U",
+                "lifeos",
+                restore_database_name,
+            ],
+            environment=environment,
+            cwd=REPO,
+            check=False,
+            capture=True,
+        )
+        if result.returncode != 0:
+            raise WorkbenchError("无法创建隔离恢复数据库")
+        created = True
+        with postgres_dump.open("rb") as source:
+            restored = subprocess.run(
+                compose_command(environment)
+                + [
+                    "exec",
+                    "-T",
+                    "postgres",
+                    "pg_restore",
+                    "-U",
+                    "lifeos",
+                    "-d",
+                    restore_database_name,
+                ],
+                cwd=str(REPO),
+                env=dict(environment),
+                stdin=source,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        if restored.returncode != 0:
+            raise WorkbenchError("PostgreSQL 隔离恢复失败")
+        counted = _run(
+            compose_command(environment)
+            + [
+                "exec",
+                "-T",
+                "postgres",
+                "psql",
+                "-U",
+                "lifeos",
+                "-d",
+                restore_database_name,
+                "-Atc",
+                "SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname='public'",
+            ],
+            environment=environment,
+            cwd=REPO,
+            capture=True,
+        )
+        table_count = int(counted.stdout.strip())
+        if table_count < 1:
+            raise WorkbenchError("隔离恢复数据库没有业务表")
+        table_list = _run(
+            compose_command(environment)
+            + [
+                "exec",
+                "-T",
+                "postgres",
+                "psql",
+                "-U",
+                "lifeos",
+                "-d",
+                restore_database_name,
+                "-Atc",
+                "SELECT tablename FROM pg_catalog.pg_tables "
+                "WHERE schemaname='public' ORDER BY tablename",
+            ],
+            environment=environment,
+            cwd=REPO,
+            capture=True,
+        )
+        restored_tables = {
+            line.strip() for line in table_list.stdout.splitlines() if line.strip()
+        }
+        missing_tables = sorted(POSTGRES_RECOVERY_TABLES - restored_tables)
+        if missing_tables:
+            raise WorkbenchError(
+                "隔离恢复数据库缺少业务表：%s" % "、".join(missing_tables)
+            )
+        attachment_rows = _run(
+            compose_command(environment)
+            + [
+                "exec",
+                "-T",
+                "postgres",
+                "psql",
+                "-U",
+                "lifeos",
+                "-d",
+                restore_database_name,
+                "-Atc",
+                "SELECT url FROM attachment WHERE url LIKE '%/uploads/%' ORDER BY url",
+            ],
+            environment=environment,
+            cwd=REPO,
+            capture=True,
+        )
+        attachment_urls = [
+            line.strip() for line in attachment_rows.stdout.splitlines() if line.strip()
+        ]
+
+        with tempfile.TemporaryDirectory(prefix="lifeos-restore-drill-") as directory:
+            restored_root = Path(directory)
+            restored_operating_root: Optional[Path] = None
+            for name in ("lifeos-operating-assets.tar.gz", "workbench-attachments.tar"):
+                archive_path = root / name
+                if not archive_path.is_file():
+                    raise WorkbenchError("备份缺少恢复资产：%s" % name)
+                _validate_archive(archive_path)
+                destination = restored_root / name.replace(".tar.gz", "").replace(".tar", "")
+                destination.mkdir()
+                with tarfile.open(archive_path, "r:*") as archive:
+                    archive.extractall(destination)
+                    if name == "lifeos-operating-assets.tar.gz":
+                        restored_operating_root = destination
+                    if name == "workbench-attachments.tar":
+                        _validate_attachment_references(
+                            attachment_urls, archive.getnames()
+                        )
+            validator = lifeos_root / "scripts/commit_workplace_state.py"
+            if not validator.is_file() or restored_operating_root is None:
+                raise WorkbenchError("恢复演练缺少经营正本只读校验器")
+            validated = _run(
+                [
+                    sys.executable,
+                    str(validator),
+                    "--root",
+                    str(restored_operating_root),
+                    "--verify-only",
+                ],
+                environment=environment,
+                cwd=lifeos_root,
+                check=False,
+                capture=True,
+            )
+            if validated.returncode != 0:
+                raise WorkbenchError("隔离恢复的经营正本未通过事务一致性校验")
+            for sqlite_name in (
+                "lifeos-context.sqlite3",
+                "lifeos-interaction.sqlite3",
+            ):
+                source_database = root / sqlite_name
+                if not source_database.is_file():
+                    raise WorkbenchError("备份缺少 SQLite 资产：%s" % sqlite_name)
+                restored_context = restored_root / sqlite_name
+                shutil.copy2(source_database, restored_context)
+                required_tables = (
+                    CONTEXT_DATABASE_TABLES
+                    if sqlite_name == "lifeos-context.sqlite3"
+                    else INTERACTION_DATABASE_TABLES
+                )
+                _validate_sqlite_schema(
+                    restored_context, required_tables, "SQLite 隔离恢复数据库"
+                )
+    finally:
+        if created:
+            _run(
+                compose_command(environment)
+                + [
+                    "exec",
+                    "-T",
+                    "postgres",
+                    "dropdb",
+                    "-U",
+                    "lifeos",
+                    "--if-exists",
+                    restore_database_name,
+                ],
+                environment=environment,
+                cwd=REPO,
+                check=False,
+                capture=True,
+            )
+    return {
+        **verification,
+        "restored_in_isolation": True,
+        "business_recovery_verified": True,
+        "operating_state_validated": True,
+        "postgres_public_tables": table_count,
+        "execution_started": False,
+        "external_snapshots_pending": ["cloud_d1_unconsumed_commands"],
+    }
+
+
 def backup(lifeos_root: Path, controller_root: Path) -> Path:
     environment = runtime_environment(lifeos_root, controller_root)
     ensure_env()
@@ -894,10 +1538,97 @@ def backup(lifeos_root: Path, controller_root: Path) -> Path:
             source.close()
         os.chmod(sqlite_dump, 0o600)
         files.append(sqlite_dump)
+    else:
+        raise WorkbenchError("备份缺少 LifeOS 控制器数据库")
+
+    interaction_db = lifeos_root / "inbox/lifeos-interaction.sqlite3"
+    if not interaction_db.is_file():
+        raise WorkbenchError("备份缺少 LifeOS 交互事件数据库")
+    interaction_dump = root / "lifeos-interaction.sqlite3"
+    source = sqlite3.connect("file:%s?mode=ro" % interaction_db, uri=True)
+    destination = sqlite3.connect(str(interaction_dump))
+    try:
+        source.backup(destination)
+    finally:
+        destination.close()
+        source.close()
+    os.chmod(interaction_dump, 0o600)
+    files.append(interaction_dump)
+
+    governance_archive = root / "lifeos-operating-assets.tar.gz"
+    included_assets: List[str] = []
+    operating_commit: Dict[str, object] = {}
+    for _attempt in range(3):
+        before_commit = _operating_commit_snapshot(lifeos_root)
+        before_tree = _operating_asset_tree_sha256(lifeos_root)
+        included_assets = create_lifeos_asset_archive(lifeos_root, governance_archive)
+        after_commit = _operating_commit_snapshot(lifeos_root)
+        after_tree = _operating_asset_tree_sha256(lifeos_root)
+        if before_commit == after_commit and before_tree == after_tree:
+            operating_commit = {**before_commit, "asset_tree_sha256": before_tree}
+            break
+    if not operating_commit:
+        raise WorkbenchError("经营正本在备份期间持续变化，请稍后重试")
+    missing_required_assets = sorted(
+        set(LIFEOS_BACKUP_ASSETS["required"]) - set(included_assets)
+    )
+    if missing_required_assets:
+        raise WorkbenchError(
+            "备份缺少必需经营资产：%s" % "、".join(missing_required_assets)
+        )
+    _validate_operating_archive(governance_archive, operating_commit)
+    files.append(governance_archive)
+
+    attachment_archive = root / "workbench-attachments.tar"
+    with attachment_archive.open("wb") as output:
+        completed = subprocess.run(
+            compose_command(environment)
+            + ["exec", "-T", "backend", "tar", "-C", "/app/data/uploads", "-cf", "-", "."],
+            cwd=str(REPO),
+            env=dict(environment),
+            stdout=output,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    if completed.returncode != 0:
+        raise WorkbenchError("Workbench 附件备份失败")
+    os.chmod(attachment_archive, 0o600)
+    files.append(attachment_archive)
+
+    release_manifest = root / "release-manifest.json"
+    release_script = controller_root / "scripts/lifeos_release_manifest.py"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(release_script),
+            "--root",
+            str(lifeos_root),
+            "--workbench",
+            str(REPO),
+            "--output",
+            str(release_manifest),
+            "--require-clean",
+        ],
+        cwd=str(controller_root),
+        env=dict(environment),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise WorkbenchError("发布清单生成失败：%s" % completed.stderr.strip()[:500])
+    os.chmod(release_manifest, 0o600)
+    files.append(release_manifest)
     manifest = {
+        "backup_schema_version": BACKUP_SCHEMA_VERSION,
         "created_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
         "lifeos_root": str(lifeos_root),
         "contains_codex_chat_raw": False,
+        "included_lifeos_assets": included_assets,
+        "asset_classes": LIFEOS_BACKUP_ASSETS,
+        "excluded_restricted_assets": LIFEOS_BACKUP_ASSETS["restricted"],
+        "external_snapshots_required": LIFEOS_BACKUP_ASSETS["external"],
+        "operating_commit": operating_commit,
         "files": [
             {"name": path.name, "bytes": path.stat().st_size, "sha256": _sha256_file(path)}
             for path in files
@@ -906,6 +1637,7 @@ def backup(lifeos_root: Path, controller_root: Path) -> Path:
     manifest_path = root / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.chmod(manifest_path, 0o600)
+    verify_backup(root)
     print("LifeOS 工作台备份已完成：%s" % root)
     return root
 
@@ -1213,6 +1945,14 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("stop", help="停止工作台但保留数据")
     commands.add_parser("status", help="查看本地服务状态")
     commands.add_parser("backup", help="创建受限本地备份")
+    verify_backup_parser = commands.add_parser(
+        "verify-backup", help="校验备份哈希、归档路径和 SQLite 完整性"
+    )
+    verify_backup_parser.add_argument("--path", type=Path, required=True)
+    restore_parser = commands.add_parser(
+        "restore-drill", help="在隔离数据库和临时目录中演练恢复，不启动执行"
+    )
+    restore_parser.add_argument("--path", type=Path, required=True)
     commands.add_parser("doctor", help="检查完整执行闭环")
     commands.add_parser("ensure", help="幂等恢复看板、AI 执行器和索引")
     background = commands.add_parser(
@@ -1260,6 +2000,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return status(lifeos_root, controller_root)
         if args.command == "backup":
             backup(lifeos_root, controller_root)
+            return 0
+        if args.command == "verify-backup":
+            print(
+                json.dumps(
+                    verify_backup(args.path), ensure_ascii=False, indent=2
+                )
+            )
+            return 0
+        if args.command == "restore-drill":
+            print(
+                json.dumps(
+                    restore_drill(
+                        args.path,
+                        lifeos_root=lifeos_root,
+                        controller_root=controller_root,
+                    ),
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
             return 0
         if args.command == "doctor":
             return doctor(lifeos_root, controller_root)

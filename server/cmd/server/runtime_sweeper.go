@@ -36,6 +36,8 @@ const (
 	// retry to runtime-liveness work.
 	taskCompletionOutboxSweepInterval = 30 * time.Second
 	taskCompletionOutboxBatchSize     = 100
+	commentTriggerOutboxSweepInterval = 30 * time.Second
+	commentTriggerOutboxBatchSize     = 100
 	// staleThresholdSeconds marks runtimes offline if no heartbeat for this
 	// long. The heartbeat timing derivation lives with the shared service
 	// constant so every task release path uses the same eligibility window.
@@ -194,6 +196,20 @@ func runTaskCompletionOutboxSweeper(ctx context.Context, taskSvc *service.TaskSe
 		if result.Published > 0 || result.Failed > 0 {
 			slog.Info("task completion outbox sweep",
 				"claimed", result.Claimed, "published", result.Published, "failed", result.Failed)
+		}
+	})
+}
+
+func runCommentTriggerOutboxSweeper(ctx context.Context, h *handler.Handler) {
+	runPeriodicSweep(ctx, commentTriggerOutboxSweepInterval, func() {
+		result, err := h.DeliverCommentTriggerOutbox(ctx, commentTriggerOutboxBatchSize)
+		if err != nil {
+			slog.Warn("comment trigger outbox sweeper failed", "error", err)
+			return
+		}
+		if result.Done > 0 || result.Failed > 0 {
+			slog.Info("comment trigger outbox sweep",
+				"claimed", result.Claimed, "done", result.Done, "failed", result.Failed)
 		}
 	})
 }

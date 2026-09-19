@@ -619,7 +619,13 @@ func writeEditConflict(w http.ResponseWriter, resourceType string, resourceID pg
 // For unvalidated user input at request boundaries, use parseUUIDOrBadRequest
 // (writes 400) — never feed raw chi.URLParam / request-body strings into
 // parseUUID directly when the call writes to the database.
-func parseUUID(s string) pgtype.UUID                { return util.MustParseUUID(s) }
+func parseUUID(s string) pgtype.UUID { return util.MustParseUUID(s) }
+func parseOptionalUUID(s string) pgtype.UUID {
+	if strings.TrimSpace(s) == "" {
+		return pgtype.UUID{}
+	}
+	return parseUUID(s)
+}
 func uuidToString(u pgtype.UUID) string             { return util.UUIDToString(u) }
 func textToPtr(t pgtype.Text) *string               { return util.TextToPtr(t) }
 func ptrToText(s *string) pgtype.Text               { return util.PtrToText(s) }

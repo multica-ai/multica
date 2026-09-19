@@ -83,6 +83,9 @@ type CommentResponse struct {
 	// reports that here instead of silently dropping the trigger, so the client
 	// can show "comment posted, but N targets were not triggered".
 	TriggerOutcomes []CommentTriggerOutcome `json:"trigger_outcomes,omitempty"`
+	// Replayed is true when request_id returned the comment created by an
+	// earlier attempt. Existing clients ignore the additive field.
+	Replayed bool `json:"replayed,omitempty"`
 }
 
 // CommentTriggerOutcome is the per-target result of an explicit @agent / @squad
@@ -1474,6 +1477,10 @@ func keepRootConnected(byID map[string]db.Comment) []db.Comment {
 }
 
 type CreateCommentRequest struct {
+	// RequestID is stable for one logical comment submission. Retrying the same
+	// normalized payload returns the original comment; changing the payload is
+	// rejected instead of creating a second instruction.
+	RequestID        *string  `json:"request_id,omitempty"`
 	Content          string   `json:"content"`
 	Type             string   `json:"type"`
 	ParentID         *string  `json:"parent_id"`
@@ -1726,7 +1733,6 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var parentID pgtype.UUID
-	var parentComment *db.Comment
 	if req.ParentID != nil {
 		var parsed pgtype.UUID
 		parsed, ok = parseUUIDOrBadRequest(w, *req.ParentID, "parent_id")
@@ -1739,7 +1745,6 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid parent comment")
 			return
 		}
-		parentComment = &parent
 	}
 
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
@@ -1835,6 +1840,23 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	requestKey, requestPayloadHash, identityErr := prepareCommentCreateRequestIdentity(
+		req,
+		uuidToString(issue.ID),
+		parentID,
+		attachmentIDs,
+		suppressAgentIDs,
+		sourceTaskID,
+	)
+	if errors.Is(identityErr, errInvalidCommentCreateRequestID) {
+		writeError(w, http.StatusBadRequest, "request_id must be 1-200 characters using letters, numbers, '.', '_', ':' or '-'")
+		return
+	}
+	if identityErr != nil {
+		writeError(w, http.StatusInternalServerError, "failed to normalize comment request")
+		return
+	}
+
 	// NOTE: Comment content is stored as Markdown source. XSS is handled at the
 	// rendering layer (rehype-sanitize) and at the editor layer
 	// (@tiptap/markdown with html:false). Running an HTML sanitizer here would
@@ -1856,19 +1878,24 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	createParams := db.CreateCommentParams{
-		ID:           dbid.NewV7(),
-		IssueID:      issue.ID,
-		WorkspaceID:  issue.WorkspaceID,
-		AuthorType:   authorType,
-		AuthorID:     parseUUID(authorID),
-		Content:      req.Content,
-		Type:         req.Type,
-		ParentID:     parentID,
-		SourceTaskID: sourceTaskID,
+		ID:                   dbid.NewV7(),
+		IssueID:              issue.ID,
+		WorkspaceID:          issue.WorkspaceID,
+		AuthorType:           authorType,
+		AuthorID:             parseUUID(authorID),
+		Content:              req.Content,
+		Type:                 req.Type,
+		ParentID:             parentID,
+		SourceTaskID:         sourceTaskID,
+		RequestKey:           requestKey,
+		RequestPayloadSha256: requestPayloadHash,
 	}
+	originatorUserID := h.invokeOriginatorFromRequest(r, authorType, authorID)
 	var created db.CreateCommentRow
 	var err error
-	if len(attachmentIDs) > 0 {
+	var createTx pgx.Tx
+	var replayedComment *db.Comment
+	{
 		// A comment and the attachments it was posted with are one visible
 		// change, and one database outcome. Committing the comment first leaves
 		// a window in which it can gain a reply and be deleted into a
@@ -1894,9 +1921,42 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer tx.Rollback(r.Context())
+		createTx = tx
 		qtx := h.Queries.WithTx(tx)
-		created, err = qtx.CreateComment(r.Context(), createParams)
-		if err == nil {
+		if requestKey.Valid {
+			var reserved int64
+			reserved, err = qtx.ReserveCommentCreateRequest(r.Context(), db.ReserveCommentCreateRequestParams{
+				WorkspaceID: issue.WorkspaceID, ActorType: authorType,
+				ActorID: parseUUID(authorID), RequestKey: requestKey.String,
+				PayloadSha256: requestPayloadHash.String,
+			})
+			if err == nil {
+				var requestRow db.CommentCreateRequest
+				requestRow, err = qtx.GetCommentCreateRequestForUpdate(r.Context(), db.GetCommentCreateRequestForUpdateParams{
+					WorkspaceID: issue.WorkspaceID, ActorType: authorType,
+					ActorID: parseUUID(authorID), RequestKey: requestKey.String,
+				})
+				if err == nil && requestRow.PayloadSha256 != requestPayloadHash.String {
+					err = errCommentCreateRequestConflict
+				} else if err == nil && requestRow.DeletedAt.Valid {
+					err = errCommentCreateRequestGone
+				} else if err == nil && requestRow.CommentID.Valid {
+					var existing db.Comment
+					existing, err = qtx.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
+						ID: requestRow.CommentID, WorkspaceID: issue.WorkspaceID,
+					})
+					if err == nil {
+						replayedComment = &existing
+					}
+				} else if err == nil && reserved == 0 {
+					err = errors.New("comment create request reservation is unbound")
+				}
+			}
+		}
+		if err == nil && replayedComment == nil {
+			created, err = qtx.CreateComment(r.Context(), createParams)
+		}
+		if err == nil && replayedComment == nil && len(attachmentIDs) > 0 {
 			var missing pgtype.UUID
 			missing, err = lockCommentAttachments(r.Context(), qtx, issue.WorkspaceID, issue.ID, attachmentIDs)
 			if err == nil && missing.Valid {
@@ -1904,18 +1964,93 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if err == nil {
+		if err == nil && replayedComment == nil && len(attachmentIDs) > 0 {
 			err = qtx.LinkAttachmentsToComment(r.Context(), db.LinkAttachmentsToCommentParams{
 				CommentID: created.ID,
 				IssueID:   issue.ID,
 				Column3:   attachmentIDs,
 			})
 		}
+		if err == nil && replayedComment == nil {
+			err = qtx.CreateCommentTriggerOutbox(r.Context(), db.CreateCommentTriggerOutboxParams{
+				CommentID: created.ID, WorkspaceID: issue.WorkspaceID, IssueID: issue.ID,
+				ActorType: authorType, ActorID: parseUUID(authorID),
+				OriginatorUserID: parseOptionalUUID(originatorUserID),
+				SuppressAgentIds: suppressAgentIDs,
+			})
+		}
+		if err == nil && replayedComment == nil && requestKey.Valid {
+			var bound int64
+			bound, err = qtx.BindCommentCreateRequest(r.Context(), db.BindCommentCreateRequestParams{
+				CommentID: created.ID, WorkspaceID: issue.WorkspaceID,
+				ActorType: authorType, ActorID: parseUUID(authorID), RequestKey: requestKey.String,
+			})
+			if err == nil && bound != 1 {
+				err = errors.New("comment create request reservation was not bound")
+			}
+		}
 		if err == nil {
 			err = tx.Commit(r.Context())
 		}
-	} else {
-		created, err = h.Queries.CreateComment(r.Context(), createParams)
+	}
+	if errors.Is(err, errCommentCreateRequestConflict) {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"code": "idempotency_conflict", "error": "request_id was already used for different comment content",
+		})
+		return
+	}
+	if errors.Is(err, errCommentCreateRequestGone) {
+		writeJSON(w, http.StatusGone, map[string]any{
+			"code": "idempotent_resource_deleted", "error": "the comment created by this request_id was deleted",
+		})
+		return
+	}
+	if err == nil && replayedComment != nil {
+		grouped := h.groupAttachments(r, []pgtype.UUID{replayedComment.ID})
+		replayed := commentToResponse(*replayedComment, nil, grouped[uuidToString(replayedComment.ID)])
+		replayed.Replayed = true
+		if outcomes, processErr := h.processCommentTriggerOutbox(r.Context(), replayedComment.ID); processErr != nil {
+			slog.Warn("replay comment trigger repair failed", append(logger.RequestAttrs(r), "error", processErr, "comment_id", uuidToString(replayedComment.ID))...)
+		} else if outcomes != nil {
+			replayed.TriggerOutcomes = outcomes
+		}
+		writeJSON(w, http.StatusOK, replayed)
+		return
+	}
+	if requestKey.Valid && isCommentCreateRequestCollision(err) {
+		if createTx != nil {
+			_ = createTx.Rollback(r.Context())
+		}
+		existing, getErr := h.Queries.GetCommentByCreateRequest(
+			r.Context(),
+			db.GetCommentByCreateRequestParams{
+				WorkspaceID: issue.WorkspaceID,
+				AuthorType:  authorType,
+				AuthorID:    parseUUID(authorID),
+				RequestKey:  requestKey,
+			},
+		)
+		if getErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to replay comment request")
+			return
+		}
+		if !existing.RequestPayloadSha256.Valid || existing.RequestPayloadSha256.String != requestPayloadHash.String {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"code":  "idempotency_conflict",
+				"error": "request_id was already used for different comment content",
+			})
+			return
+		}
+		grouped := h.groupAttachments(r, []pgtype.UUID{existing.ID})
+		replayed := commentToResponse(existing, nil, grouped[uuidToString(existing.ID)])
+		replayed.Replayed = true
+		if outcomes, processErr := h.processCommentTriggerOutbox(r.Context(), existing.ID); processErr != nil {
+			slog.Warn("replay comment trigger repair failed", append(logger.RequestAttrs(r), "error", processErr, "comment_id", uuidToString(existing.ID))...)
+		} else if outcomes != nil {
+			replayed.TriggerOutcomes = outcomes
+		}
+		writeJSON(w, http.StatusOK, replayed)
+		return
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		// The issue was deleted, possibly while this waited for its row lock.
@@ -1949,11 +2084,14 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// must keep the resolved root in sync.
 	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), rootComment, uuidToString(issue.WorkspaceID), authorType, authorID)
 
-	originatorUserID := h.invokeOriginatorFromRequest(r, authorType, authorID)
 	// The comment is already saved; a blocked mention must not fail the whole
 	// request. Surface the per-target outcomes so the client can show partial
 	// success instead of a silent no-op (MUL-4525 §2).
-	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs)
+	if outcomes, processErr := h.processCommentTriggerOutbox(r.Context(), comment.ID); processErr != nil {
+		slog.Warn("comment trigger outbox delivery failed", append(logger.RequestAttrs(r), "error", processErr, "comment_id", uuidToString(comment.ID))...)
+	} else {
+		resp.TriggerOutcomes = outcomes
+	}
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -2007,8 +2145,16 @@ func isLifeOSChineseNoteBoundary(char rune) bool {
 // deferred / blocked from enqueue. UI-suppressed triggers (the user unchecked
 // them) are removed before enqueue and produce no outcome.
 func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs []pgtype.UUID) []CommentTriggerOutcome {
+	outcomes, _ := h.triggerTasksForCommentDelivery(
+		ctx, issue, comment, parentComment, actorType, actorID,
+		originatorUserID, suppressAgentIDs,
+	)
+	return outcomes
+}
+
+func (h *Handler) triggerTasksForCommentDelivery(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs []pgtype.UUID) ([]CommentTriggerOutcome, error) {
 	if isNoteComment(comment.Content) {
-		return nil
+		return nil, nil
 	}
 	triggers, targets := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 		ExcludeTriggerCommentID: comment.ID,
@@ -2017,7 +2163,25 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
 	h.noteBlockedRuntimeTargets(ctx, issue, targets)
 	enqueued := h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
-	return commentTriggerOutcomes(targets, enqueued)
+	outcomes := commentTriggerOutcomes(targets, enqueued)
+	if err := commentTriggerDeliveryError(outcomes, enqueued); err != nil {
+		return outcomes, err
+	}
+	return outcomes, nil
+}
+
+func commentTriggerDeliveryError(outcomes []CommentTriggerOutcome, enqueued map[string]commentEnqueueResult) error {
+	for _, result := range enqueued {
+		if result.status == DispatchBlocked && result.reason == ReasonInternalError {
+			return errCommentTriggerDeliveryRetryable
+		}
+	}
+	for _, outcome := range outcomes {
+		if outcome.Status == DispatchBlocked && outcome.ReasonCode == ReasonInternalError {
+			return errCommentTriggerDeliveryRetryable
+		}
+	}
+	return nil
 }
 
 // noteBlockedRuntimeTargets leaves one system comment per agent refused for an
@@ -2143,6 +2307,19 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 // genuine non-convergence it returns a truthful internal_error, never a fabricated
 // deferred that would silently drop the comment.
 func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, triggerCommentID pgtype.UUID) (DispatchStatus, DispatchReasonCode) {
+	covered, err := h.Queries.HasTaskCoveringCommentTrigger(ctx, db.HasTaskCoveringCommentTriggerParams{
+		IssueID:   issue.ID,
+		AgentID:   trigger.Agent.ID,
+		CommentID: triggerCommentID,
+	})
+	if err != nil {
+		slog.Warn("comment trigger coverage check failed",
+			"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID), "error", err)
+		return DispatchBlocked, ReasonInternalError
+	}
+	if covered {
+		return DispatchCoalesced, ReasonCoalesced
+	}
 	pending := trigger.AlreadyPending
 	lostRace := false
 	// Resolve the reviewed HEAD lazily and at most once — the common
@@ -3835,6 +4012,14 @@ func (h *Handler) deleteComment(ctx context.Context, commentID, workspaceID pgty
 		CommentID:   target.ID,
 		WorkspaceID: target.WorkspaceID,
 	}); err != nil {
+		return out, err
+	}
+	if err := qtx.MarkCommentCreateRequestsDeleted(ctx, db.MarkCommentCreateRequestsDeletedParams{
+		WorkspaceID: target.WorkspaceID, CommentID: target.ID,
+	}); err != nil {
+		return out, err
+	}
+	if err := qtx.TombstoneTaskCompletionOutcomeForComment(ctx, target.ID); err != nil {
 		return out, err
 	}
 

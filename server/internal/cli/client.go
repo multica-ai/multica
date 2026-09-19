@@ -367,6 +367,18 @@ func (c *APIClient) DeleteJSONWithBody(ctx context.Context, path string, body an
 
 // PostJSON performs a POST request with a JSON body.
 func (c *APIClient) PostJSON(ctx context.Context, path string, body any, out any) error {
+	return c.postJSON(ctx, path, body, nil, out)
+}
+
+// PostJSONWithHeaders performs a POST request with request-scoped headers.
+// Headers are applied only to this request; callers should prefer PostJSON for
+// ordinary authenticated API calls so sensitive bootstrap credentials cannot
+// leak into later requests made by the same client.
+func (c *APIClient) PostJSONWithHeaders(ctx context.Context, path string, body any, headers http.Header, out any) error {
+	return c.postJSON(ctx, path, body, headers, out)
+}
+
+func (c *APIClient) postJSON(ctx context.Context, path string, body any, headers http.Header, out any) error {
 	data, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -378,6 +390,11 @@ func (c *APIClient) PostJSON(ctx context.Context, path string, body any, out any
 	}
 	req.Header.Set("Content-Type", "application/json")
 	c.setHeaders(req)
+	for name, values := range headers {
+		for _, value := range values {
+			req.Header.Add(name, value)
+		}
+	}
 
 	resp, err := c.HTTPClient.Do(req)
 	err = wrapTransport(req, err)

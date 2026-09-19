@@ -75,13 +75,10 @@
 /* -----------------------------------------------------------------------------
  * Landing editorial serif
  *
- * The landing tree swaps the app's `--font-serif` (Source Serif 4, set on <html>
- * by app/layout.tsx) for Instrument Serif, loaded by app/(landing)/layout.tsx as
- * `--font-instrument-serif`. The stack is composed here in static CSS rather
- * than in next/font's `fallback` for the same reasons `--font-sans` is composed
- * in app/globals.css: it has to be overridable per `<html lang>`, and it stays
- * CSP-safe (no inline <style>). Keep the CJK ordering here in sync with the
- * `--font-sans` chain in app/globals.css.
+ * The LifeOS build must remain usable without downloading fonts. The landing
+ * tree therefore uses platform serif faces and keeps locale-specific CJK
+ * ordering in static CSS. Keep the CJK ordering in sync with the `--font-sans`
+ * chain in app/globals.css.
  *
  * Instrument Serif ships Latin only, so CJK headlines used to fall out of the
  * stack entirely and land on the browser's default face — a sans, next to Latin
@@ -90,12 +87,13 @@
  * webfont (an earlier `Noto_Serif_SC` next/font entry was never referenced by
  * any rule and requested `subsets: ["latin"]`, so it downloaded no CJK glyphs).
  *
- * Default (en / zh / ko): Latin renders with Instrument Serif; Han falls through
- * to the Chinese serifs, then Hangul to the Korean ones. Chinese MUST stay
+ * Default (en / zh / ko): Latin uses the platform editorial serif; Han falls
+ * through to the Chinese serifs, then Hangul to the Korean ones. Chinese MUST stay
  * before Korean so zh users never get Korean Hanja glyph shapes (Hangul is a
  * separate Unicode block, so ko users still get Korean fonts for Hangul). */
 .landing-light {
-    --font-serif: var(--font-instrument-serif), "Songti SC", "SimSun",
+    --font-serif: "Iowan Old Style", "Apple Garamond", Baskerville,
+        "Times New Roman", "Songti SC", "SimSun",
         "Noto Serif CJK SC", "Nanum Myeongjo", "AppleMyungjo", "Batang",
         "Noto Serif CJK KR", ui-serif, serif;
 }
@@ -103,10 +101,10 @@
 /* Japanese: Kanji are Han ideographs sharing the same Unicode block as Chinese,
    and CSS font-fallback order is NOT affected by `<html lang>` — so the
    Chinese-first default above would hand Japanese users Chinese glyph shapes for
-   shared ideographs. Promote a Mincho-first chain only for Japanese. Instrument
-   Serif still leads for Latin; zh/ko remain as a deep fallback. */
+   shared ideographs. Promote a Mincho-first chain only for Japanese; zh/ko
+   remain as a deep fallback. */
 html[lang|="ja"] .landing-light {
-    --font-serif: var(--font-instrument-serif), "Hiragino Mincho ProN",
+    --font-serif: "Hiragino Mincho ProN",
         "Yu Mincho", "MS Mincho", "Noto Serif CJK JP", "Songti SC", "SimSun",
         "Noto Serif CJK SC", "Nanum Myeongjo", "AppleMyungjo", "Batang",
         "Noto Serif CJK KR", ui-serif, serif;

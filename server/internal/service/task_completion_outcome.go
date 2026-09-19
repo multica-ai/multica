@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -33,8 +32,8 @@ type TaskCompletionOutboxDeliveryResult struct {
 }
 
 func completionAnsweredCommentIDs(task db.AgentTaskQueue) []pgtype.UUID {
-	seen := make(map[string]struct{}, len(task.CoalescedCommentIds)+1)
-	result := make([]pgtype.UUID, 0, len(task.CoalescedCommentIds)+1)
+	seen := make(map[string]struct{}, len(task.DeliveredCommentIds))
+	result := make([]pgtype.UUID, 0, len(task.DeliveredCommentIds))
 	appendID := func(id pgtype.UUID) {
 		if !id.Valid {
 			return
@@ -46,8 +45,7 @@ func completionAnsweredCommentIDs(task db.AgentTaskQueue) []pgtype.UUID {
 		seen[key] = struct{}{}
 		result = append(result, id)
 	}
-	appendID(task.TriggerCommentID)
-	for _, id := range task.CoalescedCommentIds {
+	for _, id := range task.DeliveredCommentIds {
 		appendID(id)
 	}
 	return result
@@ -96,33 +94,20 @@ func (s *TaskService) writeIssueCompletionOutcome(ctx context.Context, qtx *db.Q
 		return nil
 	}
 
-	finalComment, candidateErr := qtx.GetTaskFinalCommentCandidate(ctx, db.GetTaskFinalCommentCandidateParams{
-		IssueID: task.IssueID, WorkspaceID: issue.WorkspaceID,
-		AgentID: task.AgentID, SourceTaskID: task.ID,
+	// Ordinary comments posted while a task is running are progress unless the
+	// completion protocol explicitly names one as final. The current protocol
+	// has no final_comment_id, so the terminal callback is the only authoritative
+	// final answer and is materialized exactly once inside this transaction.
+	outcomeKind, content := issueCompletionContent(result)
+	created, createErr := qtx.CreateComment(ctx, db.CreateCommentParams{
+		ID: dbid.NewV7(), IssueID: task.IssueID, WorkspaceID: issue.WorkspaceID,
+		AuthorType: "agent", AuthorID: task.AgentID, Content: content, Type: "comment",
+		ParentID: task.TriggerCommentID, SourceTaskID: task.ID,
 	})
-	outcomeKind := "final"
-	content := finalComment.Content
-	issueRevision := issue.Revision
-	outboxState := "published"
-	if candidateErr != nil {
-		if !errors.Is(candidateErr, pgx.ErrNoRows) {
-			return fmt.Errorf("load task final comment candidate: %w", candidateErr)
-		}
-		outcomeKind, content = issueCompletionContent(result)
-		created, createErr := qtx.CreateComment(ctx, db.CreateCommentParams{
-			ID: dbid.NewV7(), IssueID: task.IssueID, WorkspaceID: issue.WorkspaceID,
-			AuthorType: "agent", AuthorID: task.AgentID, Content: content, Type: "comment",
-			ParentID: task.TriggerCommentID, SourceTaskID: task.ID,
-		})
-		if createErr != nil {
-			return fmt.Errorf("create final issue comment: %w", createErr)
-		}
-		finalComment = created.Comment()
-		issueRevision = created.IssueRevision
-		outboxState = "pending"
-	} else if content == "" {
-		outcomeKind = "no_response"
+	if createErr != nil {
+		return fmt.Errorf("create final issue comment: %w", createErr)
 	}
+	finalComment := created.Comment()
 
 	if _, err := qtx.CreateAgentTaskCompletionOutcome(ctx, db.CreateAgentTaskCompletionOutcomeParams{
 		TaskID: task.ID, WorkspaceID: issue.WorkspaceID, IssueID: task.IssueID,
@@ -135,7 +120,7 @@ func (s *TaskService) writeIssueCompletionOutcome(ctx context.Context, qtx *db.Q
 	if _, err := qtx.CreateTaskCompletionOutbox(ctx, db.CreateTaskCompletionOutboxParams{
 		TaskID: task.ID, WorkspaceID: issue.WorkspaceID, IssueID: task.IssueID,
 		AgentID: task.AgentID, CommentID: finalComment.ID,
-		IssueRevision: issueRevision, State: outboxState,
+		IssueRevision: created.IssueRevision, State: "pending",
 	}); err != nil {
 		return fmt.Errorf("persist issue completion outbox: %w", err)
 	}
@@ -172,6 +157,9 @@ func (s *TaskService) DeliverTaskCompletionOutbox(ctx context.Context, limit int
 	var result TaskCompletionOutboxDeliveryResult
 	if s == nil || s.Queries == nil || limit <= 0 {
 		return result, nil
+	}
+	if _, err := s.Queries.ExpireExhaustedTaskCompletionOutbox(ctx, taskCompletionOutboxMaxAttempts); err != nil {
+		return result, fmt.Errorf("expire exhausted task completion outbox: %w", err)
 	}
 	owner := util.UUIDToString(dbid.NewV7())
 	rows, err := s.Queries.ClaimTaskCompletionOutbox(ctx, db.ClaimTaskCompletionOutboxParams{

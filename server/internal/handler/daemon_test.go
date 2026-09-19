@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
@@ -2545,10 +2547,11 @@ func TestCompleteTask_CommentTriggered_SynthesizesCommentWhenAgentSilent(t *test
 	}
 }
 
-// Companion to the above: when the agent DID post its own comment during the
-// run, CompleteTask must not synthesize a duplicate. Guards against the
-// common case where the fix is over-eager and creates two comments per task.
-func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t *testing.T) {
+// Companion to the above: an ordinary comment posted during the run is
+// progress, not an authoritative final answer. CompleteTask must preserve that
+// comment and materialize the terminal callback exactly once, so a stale or
+// partial progress update cannot mask the run's actual outcome.
+func TestCompleteTask_CommentTriggered_PreservesProgressAndMaterializesFinalOutcome(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -2582,7 +2585,7 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
-		map[string]any{"output": "final terminal text that must NOT become a comment"},
+		map[string]any{"output": "authoritative final terminal text"},
 		testWorkspaceID, "legit-daemon")
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("taskId", taskID)
@@ -2593,13 +2596,33 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var count int
-	dbfx.QueryRow(t, `
-		SELECT count(*) FROM comment
+	rows, err := testPool.Query(context.Background(), `
+		SELECT content, source_task_id FROM comment
 		WHERE issue_id = $1 AND author_type = 'agent' AND author_id = $2
-	`, issueID, agentID).Scan(&count)
-	if count != 1 {
-		t.Fatalf("expected 1 agent comment (the agent's own reply), got %d — synthesis duplicated", count)
+		ORDER BY created_at ASC, id ASC
+	`, issueID, agentID)
+	if err != nil {
+		t.Fatalf("query progress and final comments: %v", err)
+	}
+	defer rows.Close()
+	var comments []string
+	for rows.Next() {
+		var content string
+		var sourceTaskID pgtype.UUID
+		if err := rows.Scan(&content, &sourceTaskID); err != nil {
+			t.Fatalf("scan progress and final comments: %v", err)
+		}
+		if !sourceTaskID.Valid || uuidToString(sourceTaskID) != taskID {
+			t.Fatalf("comment %q lost task provenance", content)
+		}
+		comments = append(comments, content)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate progress and final comments: %v", err)
+	}
+	want := []string{"done, see PR", "authoritative final terminal text"}
+	if !slices.Equal(comments, want) {
+		t.Fatalf("progress/final comments = %v, want %v", comments, want)
 	}
 }
 

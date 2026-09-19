@@ -187,6 +187,25 @@ func (q *Queries) CreateTaskCompletionOutbox(ctx context.Context, arg CreateTask
 	return i, err
 }
 
+const expireExhaustedTaskCompletionOutbox = `-- name: ExpireExhaustedTaskCompletionOutbox :execrows
+UPDATE task_completion_outbox
+SET state = 'dead', lease_owner = NULL, lease_expires_at = NULL,
+    next_attempt_at = NULL,
+    last_error = COALESCE(last_error, 'lease expired after retry budget was exhausted'),
+    updated_at = now()
+WHERE state = 'publishing'
+  AND lease_expires_at <= now()
+  AND attempts >= $1
+`
+
+func (q *Queries) ExpireExhaustedTaskCompletionOutbox(ctx context.Context, maxAttempts int32) (int64, error) {
+	result, err := q.db.Exec(ctx, expireExhaustedTaskCompletionOutbox, maxAttempts)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getAgentTaskCompletionOutcome = `-- name: GetAgentTaskCompletionOutcome :one
 SELECT task_id, workspace_id, issue_id, agent_id, outcome_kind, content, result_sha256, final_comment_id, answered_comment_ids, created_at FROM agent_task_completion_outcome WHERE task_id = $1
 `
@@ -261,4 +280,21 @@ func (q *Queries) RetryTaskCompletionOutbox(ctx context.Context, arg RetryTaskCo
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const tombstoneTaskCompletionOutcomeForComment = `-- name: TombstoneTaskCompletionOutcomeForComment :exec
+WITH retired_outbox AS (
+    DELETE FROM task_completion_outbox WHERE comment_id = $1
+)
+UPDATE agent_task_completion_outcome
+SET outcome_kind = 'suppressed', content = '', final_comment_id = NULL
+WHERE final_comment_id = $1
+`
+
+// Comment deletion explicitly retires the completion delivery before the
+// comment row is cleared or removed. The FK is RESTRICT, so no direct delete
+// can silently invalidate a non-suppressed outcome.
+func (q *Queries) TombstoneTaskCompletionOutcomeForComment(ctx context.Context, commentID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, tombstoneTaskCompletionOutcomeForComment, commentID)
+	return err
 }

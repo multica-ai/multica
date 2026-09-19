@@ -558,25 +558,38 @@ type ClientUsageDaily struct {
 }
 
 type Comment struct {
-	ID                pgtype.UUID        `json:"id"`
-	IssueID           pgtype.UUID        `json:"issue_id"`
-	AuthorType        string             `json:"author_type"`
-	AuthorID          pgtype.UUID        `json:"author_id"`
-	Content           string             `json:"content"`
-	Type              string             `json:"type"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
-	ParentID          pgtype.UUID        `json:"parent_id"`
-	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
-	ResolvedAt        pgtype.Timestamptz `json:"resolved_at"`
-	ResolvedByType    pgtype.Text        `json:"resolved_by_type"`
-	ResolvedByID      pgtype.UUID        `json:"resolved_by_id"`
-	SourceTaskID      pgtype.UUID        `json:"source_task_id"`
-	QuickActionID     pgtype.UUID        `json:"quick_action_id"`
-	ViaPluginID       pgtype.UUID        `json:"via_plugin_id"`
-	Revision          int64              `json:"revision"`
-	RecoverySettledAt pgtype.Timestamptz `json:"recovery_settled_at"`
-	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
+	ID                   pgtype.UUID        `json:"id"`
+	IssueID              pgtype.UUID        `json:"issue_id"`
+	AuthorType           string             `json:"author_type"`
+	AuthorID             pgtype.UUID        `json:"author_id"`
+	Content              string             `json:"content"`
+	Type                 string             `json:"type"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	ParentID             pgtype.UUID        `json:"parent_id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	ResolvedAt           pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedByType       pgtype.Text        `json:"resolved_by_type"`
+	ResolvedByID         pgtype.UUID        `json:"resolved_by_id"`
+	SourceTaskID         pgtype.UUID        `json:"source_task_id"`
+	QuickActionID        pgtype.UUID        `json:"quick_action_id"`
+	ViaPluginID          pgtype.UUID        `json:"via_plugin_id"`
+	Revision             int64              `json:"revision"`
+	RecoverySettledAt    pgtype.Timestamptz `json:"recovery_settled_at"`
+	DeletedAt            pgtype.Timestamptz `json:"deleted_at"`
+	RequestKey           pgtype.Text        `json:"request_key"`
+	RequestPayloadSha256 pgtype.Text        `json:"request_payload_sha256"`
+}
+
+type CommentCreateRequest struct {
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ActorType     string             `json:"actor_type"`
+	ActorID       pgtype.UUID        `json:"actor_id"`
+	RequestKey    string             `json:"request_key"`
+	PayloadSha256 string             `json:"payload_sha256"`
+	CommentID     pgtype.UUID        `json:"comment_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	DeletedAt     pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type CommentReaction struct {
@@ -587,6 +600,25 @@ type CommentReaction struct {
 	ActorID     pgtype.UUID        `json:"actor_id"`
 	Emoji       string             `json:"emoji"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type CommentTriggerOutbox struct {
+	CommentID        pgtype.UUID        `json:"comment_id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	ActorType        string             `json:"actor_type"`
+	ActorID          pgtype.UUID        `json:"actor_id"`
+	OriginatorUserID pgtype.UUID        `json:"originator_user_id"`
+	SuppressAgentIds []pgtype.UUID      `json:"suppress_agent_ids"`
+	State            string             `json:"state"`
+	Attempts         int32              `json:"attempts"`
+	LeaseOwner       pgtype.Text        `json:"lease_owner"`
+	LeaseExpiresAt   pgtype.Timestamptz `json:"lease_expires_at"`
+	NextAttemptAt    pgtype.Timestamptz `json:"next_attempt_at"`
+	LastError        pgtype.Text        `json:"last_error"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	ProcessedAt      pgtype.Timestamptz `json:"processed_at"`
 }
 
 type ContactSalesInquiry struct {
@@ -827,6 +859,7 @@ type IssueCreateRequest struct {
 	PayloadSha256 string             `json:"payload_sha256"`
 	IssueID       pgtype.UUID        `json:"issue_id"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	DeletedAt     pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type IssueDependency struct {

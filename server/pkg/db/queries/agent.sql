@@ -2052,6 +2052,32 @@ WHERE issue_id = @issue_id
       )
   );
 
+-- name: HasTaskCoveringCommentTrigger :one
+-- Durable idempotency for comment-trigger outbox replay. A terminal task only
+-- covers a comment when the daemon receipt proves the comment reached the
+-- prompt. A live task covers its persisted trigger/coalesced plan so a crash
+-- after enqueue but before the outbox receipt cannot create a second run.
+SELECT count(*) > 0 AS covered
+FROM agent_task_queue
+WHERE issue_id = @issue_id
+  AND agent_id = @agent_id
+  AND (
+      (
+          @comment_id::uuid = ANY(delivered_comment_ids)
+          AND completed_at >= (
+              SELECT updated_at FROM comment WHERE id = @comment_id::uuid
+          )
+      )
+      OR (
+          status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+          OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
+      )
+      AND (
+          trigger_comment_id = @comment_id::uuid
+          OR @comment_id::uuid = ANY(coalesced_comment_ids)
+      )
+  );
+
 -- name: CountDelegatedFailureRecoveryTasks :one
 -- Counts dedicated coordinator wakeups for one failed delegated task. Merged
 -- recovery signals do not create a new row and therefore do not consume an

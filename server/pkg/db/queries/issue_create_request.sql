@@ -22,5 +22,10 @@ WHERE workspace_id = @workspace_id
   AND actor_type = @actor_type
   AND actor_id = @actor_id
   AND request_key = @request_key
-  AND issue_id IS NULL;
+  AND issue_id IS NULL
+  AND deleted_at IS NULL;
 
+-- name: MarkIssueCreateRequestsDeleted :exec
+UPDATE issue_create_request
+SET deleted_at = COALESCE(deleted_at, now())
+WHERE workspace_id = @workspace_id AND issue_id = @issue_id;
