@@ -189,7 +189,10 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		})
 	case "codex":
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discovered(discoverCodexModels(ctx, runtimeCmd), nil)
+			// discoverCodexModels flags a static answer Catalog.Fallback, so
+			// (unlike discovered(...)) a discovery failure is neither cached
+			// nor treated as authoritative by the validators.
+			return discoverCodexModels(ctx, runtimeCmd), nil
 		})
 	case "antigravity":
 		// agy 1.0.6 added a `--model` flag plus an `agy models` catalog
