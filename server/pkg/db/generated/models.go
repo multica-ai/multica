@@ -564,6 +564,7 @@ type Comment struct {
 	Revision          int64              `json:"revision"`
 	RecoverySettledAt pgtype.Timestamptz `json:"recovery_settled_at"`
 	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
+	QuestionPayload   []byte             `json:"question_payload"`
 }
 
 type CommentReaction struct {

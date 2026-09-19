@@ -143,7 +143,7 @@ func TestClaudeHandleControlRequestAutoApproves(t *testing.T) {
 		}),
 	}
 
-	b.handleControlRequest(msg, &written)
+	b.handleControlRequest(msg, &written, nil)
 
 	var resp map[string]any
 	if err := json.Unmarshal(bytes.TrimSpace(written.Bytes()), &resp); err != nil {
@@ -191,7 +191,7 @@ func TestClaudeHandleControlRequestForcesBackgroundToolsForeground(t *testing.T)
 				}),
 			}
 
-			b.handleControlRequest(msg, &written)
+			b.handleControlRequest(msg, &written, nil)
 
 			var resp map[string]any
 			if err := json.Unmarshal(bytes.TrimSpace(written.Bytes()), &resp); err != nil {
@@ -552,6 +552,175 @@ func TestBuildClaudeArgsFiltersBlockedCustomArgs(t *testing.T) {
 	}
 	if !foundModel {
 		t.Fatalf("expected --model o3 in args but it was missing: %v", args)
+	}
+}
+
+func TestBuildClaudeArgsEnablesAskUserQuestionOnlyForIssueRuns(t *testing.T) {
+	t.Parallel()
+
+	withQuestions := buildClaudeArgs(ExecOptions{AllowUserQuestions: true}, slog.Default())
+	if !hasArgPair(withQuestions, "--permission-prompt-tool", "stdio") {
+		t.Fatalf("issue runs must declare the stdio permission host: %v", withQuestions)
+	}
+	if hasArgPair(withQuestions, "--disallowedTools", "AskUserQuestion") {
+		t.Fatalf("issue runs must not disallow AskUserQuestion: %v", withQuestions)
+	}
+
+	without := buildClaudeArgs(ExecOptions{}, slog.Default())
+	if hasArgPair(without, "--permission-prompt-tool", "stdio") {
+		t.Fatalf("non-issue runs must not declare a permission host: %v", without)
+	}
+	if !hasArgPair(without, "--disallowedTools", "AskUserQuestion") {
+		t.Fatalf("non-issue runs must keep AskUserQuestion disabled: %v", without)
+	}
+}
+
+func hasArgPair(args []string, flag, value string) bool {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) && args[i+1] == value {
+			return true
+		}
+	}
+	return false
+}
+
+func TestBuildClaudeArgsBlocksPermissionPromptToolOverride(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs(ExecOptions{
+		AllowUserQuestions: true,
+		CustomArgs:         []string{"--permission-prompt-tool", "mcp__other__prompt", "--model", "o3"},
+	}, slog.Default())
+
+	stdio := 0
+	for i, a := range args {
+		if a == "--permission-prompt-tool" {
+			if i+1 >= len(args) || args[i+1] != "stdio" {
+				t.Fatalf("--permission-prompt-tool must stay pinned to stdio: %v", args)
+			}
+			stdio++
+		}
+	}
+	if stdio != 1 {
+		t.Fatalf("expected exactly one --permission-prompt-tool stdio, got %d in %v", stdio, args)
+	}
+	for _, a := range args {
+		if a == "AskUserQuestion" {
+			t.Fatalf("AskUserQuestion must no longer be disallowed: %v", args)
+		}
+	}
+}
+
+func TestClaudeHandleControlRequestDeniesAskUserQuestionAndForwardsIt(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	var written bytes.Buffer
+	msgCh := make(chan Message, 1)
+
+	questions := []any{map[string]any{
+		"question":    "Which flag name?",
+		"header":      "Flag",
+		"multiSelect": false,
+		"options": []any{
+			map[string]any{"label": "--dry-run", "description": "Conventional"},
+			map[string]any{"label": "--preview", "description": "Friendlier"},
+		},
+	}}
+	msg := claudeSDKMessage{
+		Type:      "control_request",
+		RequestID: "req-q1",
+		Request: mustMarshal(t, claudeControlRequestPayload{
+			Subtype:   "can_use_tool",
+			ToolName:  "AskUserQuestion",
+			Input:     mustMarshal(t, map[string]any{"questions": questions}),
+			ToolUseID: "toolu_q1",
+		}),
+	}
+
+	b.handleControlRequest(msg, &written, msgCh)
+
+	select {
+	case got := <-msgCh:
+		if got.Type != MessageUserQuestion {
+			t.Fatalf("expected MessageUserQuestion, got %q", got.Type)
+		}
+		if got.Tool != "AskUserQuestion" || got.CallID != "toolu_q1" {
+			t.Fatalf("unexpected tool/call id: %+v", got)
+		}
+		qs, ok := got.Input["questions"].([]any)
+		if !ok || len(qs) != 1 {
+			t.Fatalf("expected the questions payload to be forwarded verbatim, got %+v", got.Input)
+		}
+	default:
+		t.Fatal("expected the question to be forwarded on the message channel")
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(written.Bytes()), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	inner := resp["response"].(map[string]any)
+	if inner["request_id"] != "req-q1" {
+		t.Fatalf("expected request_id req-q1, got %v", inner["request_id"])
+	}
+	decision := inner["response"].(map[string]any)
+	if decision["behavior"] != "deny" {
+		t.Fatalf("expected behavior deny, got %v", decision["behavior"])
+	}
+	if decision["message"] != claudeAskUserQuestionDenyMessage {
+		t.Fatalf("expected the delivered deny message, got %v", decision["message"])
+	}
+	if _, ok := decision["updatedInput"]; ok {
+		t.Fatal("a denied question must not carry updatedInput")
+	}
+}
+
+func TestClaudeHandleControlRequestAskUserQuestionUndeliveredFallsBackToComment(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	var written bytes.Buffer
+
+	msg := claudeSDKMessage{
+		Type:      "control_request",
+		RequestID: "req-q2",
+		Request: mustMarshal(t, claudeControlRequestPayload{
+			Subtype:  "can_use_tool",
+			ToolName: "AskUserQuestion",
+			Input:    mustMarshal(t, map[string]any{"questions": []any{}}),
+		}),
+	}
+
+	// A nil channel is the degenerate "nobody is listening" case; the
+	// timeout path is covered by deliverUserQuestion below.
+	b.handleControlRequest(msg, &written, nil)
+
+	var resp map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(written.Bytes()), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	decision := resp["response"].(map[string]any)["response"].(map[string]any)
+	if decision["behavior"] != "deny" {
+		t.Fatalf("expected behavior deny, got %v", decision["behavior"])
+	}
+	if decision["message"] != claudeAskUserQuestionUndeliveredMessage {
+		t.Fatalf("expected the undelivered fallback message, got %v", decision["message"])
+	}
+}
+
+func TestDeliverUserQuestionTimesOutOnFullChannel(t *testing.T) {
+	t.Parallel()
+
+	full := make(chan Message, 1)
+	full <- Message{Type: MessageText}
+	if deliverUserQuestion(full, Message{Type: MessageUserQuestion}, 10*time.Millisecond) {
+		t.Fatal("expected delivery to give up on a full channel")
+	}
+
+	ready := make(chan Message, 1)
+	if !deliverUserQuestion(ready, Message{Type: MessageUserQuestion}, 10*time.Millisecond) {
+		t.Fatal("expected delivery to succeed when the channel has room")
 	}
 }
 
