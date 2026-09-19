@@ -316,6 +316,8 @@ var concurrentIndexCleanups = map[string]string{
 	"480_instance_telemetry_state_singleton_index":              "instance_telemetry_state_singleton_uidx",
 	"482_agent_task_queue_telemetry_started_index":              "idx_agent_task_queue_telemetry_started",
 	"484_issue_triage_state_index":                              "idx_issue_triage_state",
+	"486_issue_scheduled_trigger_pending_index":                 "uq_issue_scheduled_trigger_pending_issue",
+	"487_issue_scheduled_trigger_scan_index":                    "idx_issue_scheduled_trigger_status_run_at",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
