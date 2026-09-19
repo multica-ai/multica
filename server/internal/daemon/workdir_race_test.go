@@ -580,6 +580,7 @@ func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
 		closeLeaseOnce   sync.Once
 	)
 	leaseSeenDuringStart := make(chan struct{})
+	var startAttempts atomic.Int32
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -590,10 +591,15 @@ func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusOK)
 		case strings.HasSuffix(r.URL.Path, "/start"):
+			attempt := startAttempts.Add(1)
 			startEntered.Store(true)
 			select {
 			case <-leaseSeenDuringStart:
 			case <-time.After(2 * time.Second):
+			}
+			if attempt == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
 			}
 			w.WriteHeader(http.StatusOK)
 		default:
@@ -619,12 +625,14 @@ func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
 	}
 
 	task := Task{
-		ID:          taskID,
-		WorkspaceID: workspaceID,
-		RuntimeID:   "rt-1",
-		IssueID:     "issue-runtask-start-lease",
-		AgentID:     "agent-runtask-start-lease",
-		Agent:       &AgentData{ID: "agent-runtask-start-lease", Name: "test-agent"},
+		ID:                  taskID,
+		WorkspaceID:         workspaceID,
+		RuntimeID:           "rt-1",
+		IssueID:             "issue-runtask-start-lease",
+		StartClaimSupported: true,
+		DispatchedAt:        "2026-09-17T09:00:00.123456Z",
+		AgentID:             "agent-runtask-start-lease",
+		Agent:               &AgentData{ID: "agent-runtask-start-lease", Name: "test-agent"},
 	}
 
 	taskLog := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -635,6 +643,9 @@ func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
 	}
 	if !leaseDuringStart.Load() {
 		t.Fatal("prepare lease was not extended while /start was still in flight")
+	}
+	if startAttempts.Load() != 2 {
+		t.Fatalf("start attempts = %d, want transient failure then success", startAttempts.Load())
 	}
 }
 
@@ -734,12 +745,14 @@ func prepareTimeoutStopsLeaseDuringBlockedStart(t *testing.T, budget time.Durati
 	}
 
 	task := Task{
-		ID:          "task-runtask-start-timeout",
-		WorkspaceID: "ws-runtask-start-timeout",
-		RuntimeID:   "rt-1",
-		IssueID:     "issue-runtask-start-timeout",
-		AgentID:     "agent-runtask-start-timeout",
-		Agent:       &AgentData{ID: "agent-runtask-start-timeout", Name: "test-agent"},
+		ID:                  "task-runtask-start-timeout",
+		StartClaimSupported: true,
+		DispatchedAt:        "2026-09-17T09:00:00.123456Z",
+		WorkspaceID:         "ws-runtask-start-timeout",
+		RuntimeID:           "rt-1",
+		IssueID:             "issue-runtask-start-timeout",
+		AgentID:             "agent-runtask-start-timeout",
+		Agent:               &AgentData{ID: "agent-runtask-start-timeout", Name: "test-agent"},
 	}
 	taskLog := slog.New(slog.NewTextHandler(io.Discard, nil))
 	startedAt := time.Now()
