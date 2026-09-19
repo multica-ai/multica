@@ -130,6 +130,17 @@ func TestASendThatNeverStartedIsProvablyNotSent(t *testing.T) {
 			if got := sendOutcome(err); got != deliveryDefinitelyFailed {
 				t.Errorf("sendOutcome(%v) = %v, want %v", err, got, deliveryDefinitelyFailed)
 			}
+			// And the cause is still in there, which two readers need. The log
+			// line wants to say what ended the send; and sendMsgFrame's
+			// closing switch answers a throttled retry that was cut short
+			// before its second write with the FIRST attempt's stated refusal,
+			// through the context arm this error has to keep matching
+			// (rate_limit.go). Dropping the cause would send that arm to its
+			// default and report a cancellation over a definite refusal.
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("errors.Is(%v, context.Canceled) = false — the cause is what the log line "+
+					"and sendMsgFrame's closing switch read", err)
+			}
 		})
 	}
 }
