@@ -101,20 +101,58 @@ export function ClearablePillButton({
       >
         {children}
       </button>
-      {clearable && (
-        <button
-          type="button"
-          aria-label={clearLabel}
-          title={clearLabel}
-          onClick={(e) => {
-            e.stopPropagation();
-            onClear?.();
-          }}
-          className="flex shrink-0 items-center py-1 pl-0.5 pr-2 text-muted-foreground hover:text-foreground cursor-pointer"
-        >
-          <XIcon className="size-3" />
-        </button>
-      )}
+      {clearable && <PillClearButton label={clearLabel} onClear={onClear} />}
     </span>
+  );
+}
+
+/**
+ * Static pill with the same trailing quick-clear ×, for a value that is shown
+ * but not picked here (the issue a chat send will carry). Same chrome as
+ * `ClearablePillButton`, but the body is plain text rather than a trigger: a
+ * focusable button that opens nothing would be a dead tab stop. The root is a
+ * named group so assistive tech announces what the text and the × belong to.
+ */
+export function ClearablePill({
+  children,
+  className,
+  onClear,
+  clearLabel,
+  ...props
+}: React.HTMLAttributes<HTMLSpanElement> & {
+  onClear: () => void;
+  /** Accessible name for the × — the button has no text. */
+  clearLabel: string;
+}) {
+  return (
+    <span role="group" className={cn(PILL_CHROME, className)} {...props}>
+      <span className="flex min-w-0 items-center gap-1.5 overflow-hidden py-1 pl-2.5 pr-1">
+        {children}
+      </span>
+      <PillClearButton label={clearLabel} onClear={onClear} />
+    </span>
+  );
+}
+
+function PillClearButton({
+  label,
+  onClear,
+}: {
+  label: string | undefined;
+  onClear: (() => void) | undefined;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClear?.();
+      }}
+      className="flex shrink-0 items-center py-1 pl-0.5 pr-2 text-muted-foreground hover:text-foreground cursor-pointer"
+    >
+      <XIcon className="size-3" />
+    </button>
   );
 }

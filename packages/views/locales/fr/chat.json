@@ -32,7 +32,9 @@
     "change_project_context": "Changer le contexte de projet",
     "remove_project_context": "Retirer le contexte de projet",
     "no_projects": "Aucun projet pour l'instant",
-    "project_context_unsupported": "La description du projet ne s'appliquera pas — le daemon de cet agent doit être mis à jour"
+    "project_context_unsupported": "La description du projet ne s'appliquera pas — le daemon de cet agent doit être mis à jour",
+    "issue_context": "Contexte de tâche",
+    "remove_issue_context": "Retirer le contexte de tâche"
   },
   "queue": {
     "title_one": "{{count}} message en file d'attente",

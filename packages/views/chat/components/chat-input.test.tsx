@@ -553,6 +553,38 @@ describe("ChatInput @ context wiring", () => {
   });
 });
 
+describe("ChatInput page issue context", () => {
+  const pageIssue = { id: "issue-uuid-1", identifier: "MUL-12", title: "Fix login redirect" };
+
+  it("shows the open issue as a removable pill", () => {
+    const onRemovePageIssue = vi.fn();
+    const { onSend } = renderInput({ pageIssue, onRemovePageIssue });
+
+    const pill = screen.getByRole("group", { name: "Issue context" });
+    expect(pill).toHaveTextContent("MUL-12");
+    expect(pill).toHaveTextContent("Fix login redirect");
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove issue context" }));
+    expect(onRemovePageIssue).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("hides the pill whenever a send would not carry it", () => {
+    const onRemovePageIssue = vi.fn();
+    const { rerender } = renderInput({ pageIssue: null, onRemovePageIssue });
+    expect(screen.queryByRole("group", { name: "Issue context" })).not.toBeInTheDocument();
+
+    rerender(element({ pageIssue }));
+    expect(screen.queryByRole("group", { name: "Issue context" })).not.toBeInTheDocument();
+
+    rerender(element({ pageIssue, onRemovePageIssue, disabled: true }));
+    expect(screen.queryByRole("group", { name: "Issue context" })).not.toBeInTheDocument();
+
+    rerender(element({ pageIssue, onRemovePageIssue, noAgent: true }));
+    expect(screen.queryByRole("group", { name: "Issue context" })).not.toBeInTheDocument();
+  });
+});
+
 describe("ChatInput project context", () => {
   type ChatProject = NonNullable<
     React.ComponentProps<typeof ChatInput>["projects"]
@@ -620,6 +652,19 @@ describe("ChatInput project context", () => {
     fireEvent.click(screen.getByRole("button", { name: "Change project context" }));
 
     expect(onProjectChange).toHaveBeenCalledWith(null);
+  });
+
+  it("shows the page issue pill alongside the project chip", () => {
+    renderInput({
+      projects: [sampleProject],
+      projectId: "project-alpha",
+      onProjectChange: vi.fn(),
+      pageIssue: { id: "issue-uuid-1", identifier: "MUL-12", title: "Fix login redirect" },
+      onRemovePageIssue: vi.fn(),
+    });
+
+    expect(screen.getByRole("button", { name: "Change project context" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Issue context" })).toBeInTheDocument();
   });
 
   it("allows removing project context while the agent is running", () => {

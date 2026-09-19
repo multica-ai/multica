@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { TriangleAlert } from "lucide-react";
+import { LocateFixed, TriangleAlert } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import {
   ContentEditor,
@@ -27,7 +27,8 @@ import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
 import type { MentionItem } from "../../editor/extensions/mention-suggestion";
 import type { Attachment, Project } from "@multica/core/types";
 import { ProjectPicker } from "../../projects/components/project-picker";
-import { ClearablePillButton } from "../../common/pill-button";
+import { ClearablePill, ClearablePillButton } from "../../common/pill-button";
+import type { PageIssue } from "./use-chat-context-items";
 import { useT } from "../../i18n";
 
 const logger = createLogger("chat.ui");
@@ -132,6 +133,11 @@ interface ChatInputProps {
    *  the composer only surfaces a warning next to the chip and in the
    *  project submenu. */
   projectContextUnsupported?: boolean;
+  /** The issue open on the current page, which the next send carries as page
+   *  context. Shown as a removable pill; the owner decides what "removed"
+   *  means via `onRemovePageIssue`. */
+  pageIssue?: PageIssue | null;
+  onRemovePageIssue?: () => void;
   /** Monotonic nonce bumped by the owner whenever the compose box should grab
    *  keyboard focus — currently on "new chat" so the user can type right away.
    *  0 (the initial value) is inert, so a plain deep-link open never steals
@@ -169,6 +175,8 @@ export function ChatInput({
   onProjectChange,
   isProjectUpdating,
   projectContextUnsupported,
+  pageIssue,
+  onRemovePageIssue,
   focusRequest,
   draftKeyOverride,
   editorKeyOverride,
@@ -603,6 +611,9 @@ export function ChatInput({
     !submitting &&
     !isProjectUpdating;
   const selectedProject = projects.find((project) => project.id === projectId);
+  // Shown exactly when a send would carry it: a composer that cannot send
+  // must not suggest the agent will see this issue.
+  const shownPageIssue = pageIssue && onRemovePageIssue && !disabled && !noAgent ? pageIssue : null;
 
   return (
     <div
@@ -650,35 +661,50 @@ export function ChatInput({
         )}
         aria-disabled={noAgent || undefined}
       >
-        {selectedProject && (
+        {(selectedProject || shownPageIssue) && (
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pt-2">
-            <div
-              className={cn(
-                "inline-flex max-w-full",
-                !projectSelectionEnabled && "pointer-events-none opacity-60",
-              )}
-            >
-              <ProjectPicker
-                projectId={selectedProject.id}
-                onUpdate={(updates) => onProjectChange?.(updates.project_id ?? null)}
-                disabled={!projectSelectionEnabled}
-                triggerRender={
-                  <ClearablePillButton
-                    disabled={!projectSelectionEnabled}
-                    aria-label={t(($) => $.input.change_project_context)}
-                    title={t(($) => $.input.change_project_context)}
-                    onClear={() => onProjectChange?.(null)}
-                    clearLabel={t(($) => $.input.remove_project_context)}
-                    className="h-6 border-surface-border bg-surface-raised font-medium text-foreground"
-                  />
-                }
-              />
-            </div>
-            {projectContextUnsupported && (
+            {selectedProject && (
+              <div
+                className={cn(
+                  "inline-flex max-w-full",
+                  !projectSelectionEnabled && "pointer-events-none opacity-60",
+                )}
+              >
+                <ProjectPicker
+                  projectId={selectedProject.id}
+                  onUpdate={(updates) => onProjectChange?.(updates.project_id ?? null)}
+                  disabled={!projectSelectionEnabled}
+                  triggerRender={
+                    <ClearablePillButton
+                      disabled={!projectSelectionEnabled}
+                      aria-label={t(($) => $.input.change_project_context)}
+                      title={t(($) => $.input.change_project_context)}
+                      onClear={() => onProjectChange?.(null)}
+                      clearLabel={t(($) => $.input.remove_project_context)}
+                      className="h-6 border-surface-border bg-surface-raised font-medium text-foreground"
+                    />
+                  }
+                />
+              </div>
+            )}
+            {selectedProject && projectContextUnsupported && (
               <span className="inline-flex min-w-0 items-center gap-1 text-caption text-warning">
                 <TriangleAlert className="size-3 shrink-0" />
                 {t(($) => $.input.project_context_unsupported)}
               </span>
+            )}
+            {shownPageIssue && (
+              <ClearablePill
+                aria-label={t(($) => $.input.issue_context)}
+                title={`${shownPageIssue.identifier} ${shownPageIssue.title}`}
+                onClear={() => onRemovePageIssue?.()}
+                clearLabel={t(($) => $.input.remove_issue_context)}
+                className="h-6 border-surface-border bg-surface-raised text-foreground"
+              >
+                <LocateFixed className="size-3 shrink-0 text-muted-foreground" />
+                <span className="shrink-0 font-medium">{shownPageIssue.identifier}</span>
+                <span className="min-w-0 truncate text-muted-foreground">{shownPageIssue.title}</span>
+              </ClearablePill>
             )}
           </div>
         )}

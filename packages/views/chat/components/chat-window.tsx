@@ -76,7 +76,11 @@ import { ChatQueue } from "./chat-queue";
 import { EmptyState } from "./chat-empty-state";
 import { SessionRenameInput } from "./session-rename-input";
 import { ChatResizeHandles } from "./chat-resize-handles";
-import { useChatContextItems } from "./use-chat-context-items";
+import {
+  resolvePageIssueContext,
+  useChatContextItems,
+  useCurrentPageIssue,
+} from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
 import { useVisualViewportKeyboard } from "./use-visual-viewport-keyboard";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
@@ -281,6 +285,22 @@ export function ChatWindow() {
 
   const projectContextSupport = useChatProjectContextSupport(wsId, activeAgent);
 
+  // The issue open on the current page rides along with each send as page
+  // context, so the agent can resolve "this issue". The composer's × drops it
+  // only while the user stays on that issue: once the page's issue changes,
+  // the dismissal is forgotten and the pill comes back. Ephemeral UI state.
+  const currentPageIssue = useCurrentPageIssue(wsId);
+  const currentPageIssueId = currentPageIssue?.id ?? null;
+  const [dismissedPageIssueId, setDismissedPageIssueId] = useState<string | null>(null);
+  if (dismissedPageIssueId !== null && dismissedPageIssueId !== currentPageIssueId) {
+    setDismissedPageIssueId(null);
+  }
+  const pageIssue = resolvePageIssueContext(currentPageIssue, dismissedPageIssueId);
+  const handleRemovePageIssue = useCallback(
+    () => setDismissedPageIssueId(currentPageIssueId),
+    [currentPageIssueId],
+  );
+
   // Three-state availability — "loading" stays neutral (no banner, no
   // disable) so the input doesn't flash a fake "no agent" state in the
   // few hundred ms before the agent list query resolves. Only `"none"`
@@ -472,6 +492,11 @@ export function ChatWindow() {
       }
 
       const finalContent = content;
+      // Captured before any await: the message carries the issue that was open
+      // when the user hit send, even if they navigate while it is in flight.
+      const pageContext = pageIssue
+        ? { type: "issue" as const, issue_id: pageIssue.id }
+        : null;
 
       const isNewSession = !activeSessionId;
 
@@ -481,6 +506,7 @@ export function ChatWindow() {
         agentId: activeAgent.id,
         contentLength: finalContent.length,
         attachmentCount: attachmentIds?.length ?? 0,
+        hasPageContext: !!pageContext,
       });
 
       let sessionId: string | null = null;
@@ -513,7 +539,9 @@ export function ChatWindow() {
       // the draft for retry (ChatInput never cleared it).
       let result;
       try {
-        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
+        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds, {
+          pageContext,
+        });
       } catch (err) {
         apiLogger.error("sendChatMessage.error", { sessionId, err });
         const reason = dispatchReasonCode(err);
@@ -615,6 +643,7 @@ export function ChatWindow() {
       isAgentAccessRevoked,
       pendingTask,
       pendingTaskId,
+      pageIssue,
       ensureSession,
       cancelChatTask,
       qc,
@@ -1031,6 +1060,8 @@ export function ChatWindow() {
           />
         }
         contextItems={contextItems}
+        pageIssue={pageIssue}
+        onRemovePageIssue={handleRemovePageIssue}
         focusRequest={focusRequest}
       />
     </motion.div>
