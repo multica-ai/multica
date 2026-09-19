@@ -50,7 +50,7 @@ func newOutcomeRig(t *testing.T, q *fakeOutboundQueries, withSocket bool) *outco
 	}
 	q.sessionBinding.InstallationID = instID
 	q.installation.ID = instID
-	r.o = NewOutbound(q, reg,
+	r.o = NewOutbound(q, reg, nil,
 		slog.New(slog.NewTextHandler(r.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		WithOutboundMetrics(r.mx))
 	return r
@@ -208,7 +208,7 @@ func TestNilMetricsSinkIsSafe(t *testing.T) {
 	instID := mustTestUUID(t)
 	q.sessionBinding.InstallationID = instID
 	q.installation.ID = instID
-	o := NewOutbound(q, reg, slog.Default()) // no WithOutboundMetrics
+	o := NewOutbound(q, reg, nil, slog.Default()) // no WithOutboundMetrics
 
 	o.handleEvent(outcomeEvent()) // no socket registered: takes the drop path
 }

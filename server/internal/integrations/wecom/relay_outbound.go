@@ -1255,7 +1255,39 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult
 	// conclusions or which replica held the socket decides whether the user
 	// sees a blank message and whether the text or the file is what the reply
 	// counter is counting.
-	if hasVisibleChar(f.Content) {
+	// THE BUBBLE THIS REPLY BELONGS TO IS ON THIS REPLICA, so seal it rather
+	// than pushing a second message underneath it. The replica that takes a
+	// relayed reply is by definition the one holding the socket, and a bubble
+	// is writable only where it was painted — which is that same replica. The
+	// frame carries the task id for exactly this lookup.
+	//
+	// Replies only: an inbox push is not an answer to a round and must never
+	// close one.
+	spoke := false
+	if hasVisibleChar(f.Content) && f.Kind == relayKindReply && f.TaskID != "" {
+		if sessionID, err := util.ParseUUID(f.SessionID); err == nil && sessionID.Valid {
+			if t, _ := o.rounds().take(ctx, sessionID, byTask(f.TaskID)); t.HasBubble {
+				sealErr := o.finishStream(ctx, t.Handle, f.Content)
+				switch classifySeal(sealErr) {
+				case sealOnScreen:
+					record, spoke = o.delivered, true
+				case sealUnknown:
+					se := sealErr
+					record = func() {
+						o.unconfirmedFor(ctx, f.SessionID, f.Kind, unconfirmedSealReason(se), se)
+					}
+					spoke = true
+				default:
+					// Proof the words are not in the bubble. They still have to
+					// reach the room, on a budget the seal cannot have spent.
+					var cancel context.CancelFunc
+					ctx, cancel = fallbackBudget(ctx)
+					defer cancel()
+				}
+			}
+		}
+	}
+	if hasVisibleChar(f.Content) && !spoke {
 		if err := sender.sendTextCtx(ctx, f.ChatID, f.ChatType, f.Content); err != nil {
 			// WHETHER THIS FRAME IS FINISHED IS SETTLED BEFORE ANY COUNTER
 			// MOVES. A frame that is owed another offer is still in flight,
@@ -1356,6 +1388,18 @@ func provablyNotSent(err error) bool {
 	case errors.As(err, &apiErr):
 		return false
 	case errors.Is(err, errAckTimeout):
+		return false
+	case errors.Is(err, errStreamBusy):
+		// Nothing was written: the gate refused to put a frame out while the
+		// server still owed a verdict on this req_id. Provably not sent is
+		// what lets the answer go out once, by the plain route.
+		return true
+	case errors.Is(err, errStreamAckTimeout):
+		// A stream frame whose verdict never came back is the same evidence as
+		// errAckTimeout and has to be read the same way: the frame went to the
+		// socket and the server said nothing. Missing here it fell to the
+		// default and was reported as provably unsent, which is what let a
+		// sealed bubble's answer go out a second time as a plain message.
 		return false
 	case errors.Is(err, errWriteAttempted):
 		return false

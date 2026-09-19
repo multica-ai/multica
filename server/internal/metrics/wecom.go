@@ -53,6 +53,9 @@ type WecomMetrics struct {
 	AuthFailures          prometheus.Counter
 	CallbacksQueued       prometheus.Counter
 	CallbackQueueBlocked  prometheus.Counter
+	StreamOpened          prometheus.Counter
+	StreamFinished        prometheus.Counter
+	StreamFellBack        prometheus.Counter
 	OutboundDelivered     prometheus.Counter
 	OutboundDropped       *prometheus.CounterVec
 	OutboundSkipped       *prometheus.CounterVec
@@ -82,6 +85,12 @@ func NewWecomMetrics() *WecomMetrics {
 			"Inbound callbacks handed to the ingest worker. The baseline every other inbound number is read against."),
 		CallbackQueueBlocked: counter("inbound_queue_blocked_total",
 			"Times the read loop had to wait on a full ingest queue. Backpressure by design; a rising rate means the engine is behind and the socket is about to stop being drained."),
+		StreamOpened: counter("stream_opened_total",
+			"Bubbles painted on ingest. The denominator for the two below: opened minus finished minus fell_back is the number nobody ever ended, which is the only failure the finished/fell_back ratio cannot show."),
+		StreamFinished: counter("stream_finished_total",
+			"Answers that landed in the bubble the question opened."),
+		StreamFellBack: counter("stream_fell_back_total",
+			"Answers sent as a new message because the bubble refused the closing frame. The answer is not lost; the experience is the one the bubble was built to replace."),
 		OutboundDelivered: counter("outbound_delivered_total",
 			"Agent replies this adapter put in front of a WeCom user. The denominator the drop breakdown is read against."),
 		OutboundDropped: prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -119,6 +128,7 @@ func (m *WecomMetrics) Collectors() []prometheus.Collector {
 	return []prometheus.Collector{
 		m.ConnectFailures, m.AuthFailures,
 		m.CallbacksQueued, m.CallbackQueueBlocked,
+		m.StreamOpened, m.StreamFinished, m.StreamFellBack,
 		m.OutboundDelivered, m.OutboundDropped, m.OutboundSkipped,
 		m.AttachmentDelivered, m.AttachmentDropped, m.AttachmentSheds,
 		m.OutboundUnconfirmed, m.AttachmentUnconfirmed,
@@ -154,3 +164,7 @@ func (m *WecomMetrics) RecordAttachmentUnconfirmed(reason string) {
 func (m *WecomMetrics) RecordRelayShed(kind string) {
 	m.RelayShed.WithLabelValues(kind).Inc()
 }
+
+func (m *WecomMetrics) RecordStreamOpened()   { m.StreamOpened.Inc() }
+func (m *WecomMetrics) RecordStreamFinished() { m.StreamFinished.Inc() }
+func (m *WecomMetrics) RecordStreamFellBack() { m.StreamFellBack.Inc() }
