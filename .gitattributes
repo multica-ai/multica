@@ -4,3 +4,7 @@ docker/entrypoint.sh text eol=lf
 
 # Default behavior
 * text=auto
+
+# Unified-diff patch files keep context lines whose only content is the
+# leading marker space; skip whitespace checks for these generated files.
+patches/*.patch -whitespace
