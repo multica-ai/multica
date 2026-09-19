@@ -67,7 +67,8 @@ func inboundFromUpdate(u Update, botID int64, botUsername string) (channel.Inbou
 	}
 	agentText := cleaned
 	quotedHuman := m.ReplyToMessage != nil && m.ReplyToMessage.From != nil && !m.ReplyToMessage.From.IsBot
-	if chatType == channel.ChatTypeGroup && mentioned && quotedHuman {
+	hasSelectedContext := chatType == channel.ChatTypeGroup && mentioned && quotedHuman
+	if hasSelectedContext {
 		agentText = enrichWithQuotedHumanMessage(cleaned, m.Chat.ID, m.ReplyToMessage)
 	}
 
@@ -96,13 +97,14 @@ func inboundFromUpdate(u Update, botID int64, botUsername string) (channel.Inbou
 		EventID: strconv.FormatInt(u.UpdateID, 10),
 		// Telegram message ids are only unique per chat, so the dedup key
 		// (installation, message_id) uses the composite chat:message form.
-		MessageID:      messageKey(m.Chat.ID, m.MessageID),
-		Type:           msgType,
-		Text:           agentText,
-		CommandText:    commandText,
-		ReplyTo:        reply,
-		AddressedToBot: addressed,
-		ForceFresh:     forceFresh,
+		MessageID:          messageKey(m.Chat.ID, m.MessageID),
+		Type:               msgType,
+		Text:               agentText,
+		CommandText:        commandText,
+		HasSelectedContext: hasSelectedContext,
+		ReplyTo:            reply,
+		AddressedToBot:     addressed,
+		ForceFresh:         forceFresh,
 		Source: channel.Source{
 			ChannelType: TypeTelegram,
 			ChatID:      chatID,

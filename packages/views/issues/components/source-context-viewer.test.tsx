@@ -1,4 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
+
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  useIssueStatuses: () => buildIssueStatusCatalog([]),
+}));
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -7,6 +12,7 @@ import enIssues from "../../locales/en/issues.json";
 import zhHansIssues from "../../locales/zh-Hans/issues.json";
 
 const navigationPush = vi.hoisted(() => vi.fn());
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 
 vi.mock("../../navigation", () => ({
   useNavigation: () => ({ push: navigationPush }),
@@ -139,7 +145,7 @@ describe("SourceContextBadge", () => {
     expect(dialog).toHaveClass("h-[min(82dvh,56rem)]", "sm:max-w-4xl");
     expect(dialog).not.toHaveClass("h-[calc(100dvh-2rem)]", "sm:max-w-[calc(100%-2rem)]");
     expect(screen.getByText("Source comment")).toHaveClass(
-      "rounded",
+      "rounded-xs",
       "bg-info/10",
       "text-info",
     );

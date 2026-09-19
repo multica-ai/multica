@@ -378,6 +378,8 @@ func TestReconcileCommentsOnCompletion_AutopilotDelegationRestoresAuthority(t *t
 		fx := newAutopilotDelegationFixture(t, workerID, creatorUserID, "autopilot")
 		issueID := uuidToString(fx.Issue.ID)
 		workerTaskID := seedCompletedTaskOnIssueBefore(t, workerID, issueID, fx.RuntimeID)
+		// Simulate a claim race that registered an undelivered thread input.
+		dbfx.Exec(t, `UPDATE agent_task_queue SET coalesced_comment_ids=ARRAY[$2::uuid] WHERE id=$1`, workerTaskID, fx.Comment.ID)
 		workerTask, err := testHandler.Queries.GetAgentTask(ctx, util.MustParseUUID(workerTaskID))
 		if err != nil {
 			t.Fatalf("load worker task: %v", err)
@@ -651,6 +653,8 @@ func TestUpdateComment_AdminEditOfAgentCommentClearsStaleLineage(t *testing.T) {
 	// lineage cleared it must NOT resurrect the creator authority or enqueue a
 	// follow-up. (Without the fix this reconcile would enqueue exactly one.)
 	workerTaskID := seedCompletedTaskOnIssueBefore(t, workerID, issueID, fx.RuntimeID)
+	// Simulate a claim race that registered an undelivered thread input.
+	dbfx.Exec(t, `UPDATE agent_task_queue SET coalesced_comment_ids=ARRAY[$2::uuid] WHERE id=$1`, workerTaskID, fx.Comment.ID)
 	workerTask, err := testHandler.Queries.GetAgentTask(ctx, util.MustParseUUID(workerTaskID))
 	if err != nil {
 		t.Fatalf("load worker task: %v", err)

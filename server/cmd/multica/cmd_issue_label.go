@@ -95,7 +95,7 @@ func runIssueLabelAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
-	labelRef, err := resolveLabelID(ctx, client, args[1])
+	labelRef, err := resolveLabelID(ctx, client, args[1], "issue")
 	if err != nil {
 		return fmt.Errorf("resolve label: %w", err)
 	}
@@ -128,7 +128,7 @@ func runIssueLabelRemove(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
-	labelRef, err := resolveLabelID(ctx, client, args[1])
+	labelRef, err := resolveLabelID(ctx, client, args[1], "issue")
 	if err != nil {
 		return fmt.Errorf("resolve label: %w", err)
 	}

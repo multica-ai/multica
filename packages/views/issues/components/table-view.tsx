@@ -443,7 +443,7 @@ function SortableColumnHeader({
           type="button"
           aria-label={reorderLabel}
           className={cn(
-            "-ml-2 mr-0.5 rounded p-0.5 text-muted-foreground opacity-0 hover:bg-accent hover:text-muted-foreground group-hover/header:opacity-100 focus-visible:opacity-100",
+            "-ml-2 mr-0.5 rounded-xs p-0.5 text-muted-foreground opacity-0 hover:bg-accent hover:text-muted-foreground group-hover/header:opacity-100 focus-visible:opacity-100",
             isDragging ? "cursor-grabbing opacity-100" : "cursor-grab",
           )}
           {...attributes}
@@ -453,7 +453,7 @@ function SortableColumnHeader({
         </button>
       )}
       <DropdownMenu>
-        <DropdownMenuTrigger className="flex min-w-0 items-center gap-1 rounded px-1.5 py-1 hover:bg-accent">
+        <DropdownMenuTrigger className="flex min-w-0 items-center gap-1 rounded-xs px-1.5 py-1 hover:bg-accent">
           <span className="truncate">{label}</span>
           {active &&
             (sortDirection === "asc" ? (
@@ -699,7 +699,7 @@ export function InlineTitle({
         <button
           type="button"
           aria-label={toggleLabel}
-          className="rounded p-0.5 text-muted-foreground hover:bg-accent"
+          className="rounded-xs p-0.5 text-muted-foreground hover:bg-accent"
           onClick={(event) => {
             event.stopPropagation();
             onToggleParent();
@@ -767,7 +767,7 @@ export function InlineTitle({
             <button
               type="button"
               aria-label={createSubIssueLabel}
-              className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="rounded-xs p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
               onClick={(event) => {
                 event.stopPropagation();
                 onCreateSubIssue();
@@ -779,7 +779,7 @@ export function InlineTitle({
             <button
               type="button"
               aria-label={renameLabel}
-              className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="rounded-xs p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
               onClick={(event) => {
                 event.stopPropagation();
                 setDraft(row.issue.title);
@@ -824,7 +824,7 @@ function LazyLabelCell({
   return (
     <button
       type="button"
-      className="flex max-w-full items-center gap-1 overflow-hidden rounded px-1 py-0.5 hover:bg-accent"
+      className="flex max-w-full items-center gap-1 overflow-hidden rounded-xs px-1 py-0.5 hover:bg-accent"
       onClick={(event) => {
         event.stopPropagation();
         onOpenChange(true);
@@ -1039,7 +1039,7 @@ function IssueTableAddColumnHeader({
         <button
           type="button"
           aria-label={t(($) => $.table.columns.add)}
-          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="rounded-xs p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <Plus className="size-3.5" />
         </button>
@@ -1208,7 +1208,7 @@ function IssueTableBodyCell({
             triggerRender={
               <button
                 type="button"
-                className="flex max-w-full items-center gap-1.5 rounded px-1 py-0.5 hover:bg-accent"
+                className="flex max-w-full items-center gap-1.5 rounded-xs px-1 py-0.5 hover:bg-accent"
               />
             }
           />

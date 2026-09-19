@@ -318,6 +318,16 @@ describe("execution log header geometry", () => {
     );
   }
 
+  it("shows the running task before pending tasks in queue order", () => {
+    renderSection([
+      makeTask({ id: "new", status: "queued", trigger_summary: "Order: second", created_at: "2026-09-08T03:02:00Z" }),
+      makeTask({ id: "old", status: "queued", trigger_summary: "Order: first", created_at: "2026-09-08T03:01:00Z" }),
+      makeTask({ id: "running", status: "running", trigger_summary: "Order: running", created_at: "2026-09-08T03:00:00Z" }),
+    ]);
+    expect(screen.getAllByText(/^Order:/).map((el) => el.textContent))
+      .toEqual(["Order: running", "Order: first", "Order: second"]);
+  });
+
   function headerOf(): HTMLElement {
     const label = screen.getByText("Execution log");
     const header = label.closest("div");

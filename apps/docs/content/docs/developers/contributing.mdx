@@ -103,7 +103,7 @@ pnpm lint
 pnpm test
 ```
 
-Root commands exclude Mobile by default. Mobile has separate scripts and CI; read `apps/mobile/CLAUDE.md` before changing it.
+Root commands exclude Mobile by default. Mobile has separate scripts and CI; read `apps/mobile/AGENTS.md` before changing it.
 
 ### Backend
 
@@ -132,7 +132,7 @@ Place features needed by both Web and Desktop according to responsibility:
 4. Keep Next.js, Electron, and routing adapters in the corresponding app.
 5. Wire shared pages into both Web and Desktop.
 
-TanStack Query owns server data. Zustand owns client state such as filters, drafts, and layout. See [Project architecture](/developers/architecture) and the root `CLAUDE.md` for the exact boundary.
+TanStack Query owns server data. Zustand owns client state such as filters, drafts, and layout. See [Project architecture](/developers/architecture) and the root `AGENTS.md` for the exact boundary.
 
 When adding or changing an API, update the zod schema in `packages/core/api/` and add parsing tests for missing fields, unknown enum values, and malformed data.
 
@@ -200,7 +200,7 @@ make start
 
 ## Before submitting
 
-- Read the root `CLAUDE.md` and relevant nested instructions.
+- Read the root `AGENTS.md` and relevant nested instructions.
 - Change only the scope required by the task.
 - Write code comments in English.
 - Do not commit `.env`, tokens, build artifacts, or local paths.

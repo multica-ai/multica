@@ -26,9 +26,7 @@ func newOpenclawCacheFixture(t *testing.T) *openclawCacheFixture {
 	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "openclaw")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("write fake openclaw binary: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte("#!/bin/sh\nexit 0\n"))
 	configPath := filepath.Join(dir, "openclaw.json")
 	if err := os.WriteFile(configPath, []byte(`{ "agents": { "list": [] } }`), 0o600); err != nil {
 		t.Fatalf("write user config: %v", err)
@@ -144,9 +142,7 @@ func TestOpenclawDiscoveryCacheInvalidatesOnBinaryChange(t *testing.T) {
 	f := newOpenclawCacheFixture(t)
 	f.run(t)
 
-	if err := os.WriteFile(f.bin, []byte("#!/bin/sh\n# upgraded\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("rewrite fake binary: %v", err)
-	}
+	writeTestExecutable(t, f.bin, []byte("#!/bin/sh\n# upgraded\nexit 0\n"))
 
 	if got := f.run(t); got != 2 {
 		t.Errorf("preparation after a binary upgrade made %d CLI calls, want 2 (cache must be invalid)", got)

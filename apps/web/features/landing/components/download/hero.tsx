@@ -224,7 +224,7 @@ function PrimaryCta({
     return (
       <span
         aria-disabled="true"
-        className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-[12px] border border-white/15 bg-white/8 px-5 py-3 text-body font-semibold text-white/60"
+        className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-(--landing-radius-action) border border-white/15 bg-white/8 px-5 py-3 text-body font-semibold text-white/60"
       >
         {children}
       </span>

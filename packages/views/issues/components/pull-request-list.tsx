@@ -54,8 +54,8 @@ export function PullRequestList({ issueId }: { issueId: string }) {
   }
   if (prs.length === 0) {
     return (
-      <p className="text-caption text-muted-foreground px-2">
-        {t(($) => $.detail.pull_requests_empty)}
+      <p className="px-2 text-caption text-muted-foreground">
+        {t(($) => $.detail.pull_requests_empty_title)}
       </p>
     );
   }

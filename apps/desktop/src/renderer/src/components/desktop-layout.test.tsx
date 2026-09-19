@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { useSidebar } from "@multica/ui/components/ui/sidebar";
@@ -20,8 +20,12 @@ vi.mock("@/hooks/use-tab-history", () => ({
   useTabHistory: () => ({
     canGoBack: false,
     canGoForward: false,
+    historyEntries: [],
+    historyIndex: 0,
+    browsingHistory: [],
     goBack: vi.fn(),
     goForward: vi.fn(),
+    goToHistoryIndex: vi.fn(),
   }),
   useNavigationInputBindings: () => {},
 }));
@@ -126,5 +130,17 @@ describe("DesktopShell sidebar trigger", () => {
       "data-external-trigger",
       "true",
     );
+    const mainTopBar = container.querySelector('[data-slot="main-top-bar"]');
+    expect(mainTopBar).toHaveAttribute("data-sidebar-resize-consumer");
+    expect(mainTopBar).toHaveClass("transition-[padding-left]");
+    expect(mainTopBar).toHaveStyle({
+      paddingLeft:
+        "max(0px, calc(256px - var(--sidebar-live-width, var(--sidebar-width))))",
+    });
+
+    fireEvent.click(
+      container.querySelector('[data-slot="sidebar-trigger"]')!,
+    );
+    expect(mainTopBar).toHaveStyle({ paddingLeft: "256px" });
   });
 });

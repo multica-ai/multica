@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
       origins: [] as string[],
       agents: [] as string[],
       creators: [] as string[],
+      labels: [] as string[],
     },
     toggleSort: vi.fn(),
     setSortField: vi.fn(),

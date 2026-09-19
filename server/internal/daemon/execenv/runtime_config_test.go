@@ -201,10 +201,9 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 		// on MUL-6460 proved a detached status-block bullet does not fire —
 		// the model is walking the numbered list when the condition triggers.
 		"3. If any part of what this turn will produce is what the issue itself asks for",
-		// Category-scoped skip so a custom in_progress-category status (e.g.
-		// Planning, MUL-6460) already counts as "recorded" once agents can
-		// see the catalog.
-		"already in an `in_progress`-category status",
+		// Only the exact built-in key satisfies this workflow step. The
+		// started category also contains review and blocked statuses.
+		"already `in_progress`",
 		"the board should show the issue being worked while you work, not only after",
 		// No assignee gate: the judgment applies to whoever is running.
 		"whoever the assignee is",
@@ -233,6 +232,8 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 	// timing that hides a long first work turn in todo.
 	for _, banned := range []string{
 		"Turn mode",
+		"already in an `in_progress`-category status",
+		"already in a `started`-category status",
 		"Ownership mode",
 		"Reply mode",
 		"when this issue is assigned to you and this turn does substantive work on it",
@@ -313,23 +314,36 @@ func TestPerRunCommentContextStaysOutOfBrief(t *testing.T) {
 		"reply-abc", "thread-abc", "reply-def", "thread-def", since,
 		"4 new comment(s) on this issue since your last run",
 		"DISTINCT threads",
+		// MUL-7344's issue-state report is per-run for the same reason the
+		// comment delta is, and TaskContextForEnv deliberately has no field to
+		// carry it. These pin the rendered text so a future "just pass it
+		// through to the brief" cannot land quietly.
+		"The issue is unchanged since your last run",
+		"Since your last run the issue changed",
 	} {
 		if strings.Contains(out, banned) {
 			t.Errorf("brief must not carry per-run comment value %q (MUL-5377)\n---\n%s", banned, out)
 		}
 	}
 
-	// The helper that now feeds the per-turn prompt is unchanged.
+	// The helper that now feeds the per-turn prompt still carries the per-run
+	// values, as ONE issue-wide `--since` delta read (MUL-7344).
 	hint := BuildNewCommentsHint(issueID, "reply-abc", "thread-abc", since, 4)
 	for _, want := range []string{
 		"4 new comment(s) on this issue since your last run",
 		"across all threads",
-		"--thread thread-abc --since " + since + " --compact --output json",
-		"--tail 30",
+		"multica issue comment list " + issueID + " --since " + since + " --compact --output json",
+		"--thread thread-abc --tail 30",
 	} {
 		if !strings.Contains(hint, want) {
 			t.Errorf("BuildNewCommentsHint missing %q\n---\n%s", want, hint)
 		}
+	}
+	// The scan the `--since` delta replaces must not also be handed over: two
+	// wide reads for one server-computed answer is exactly the cost MUL-7344
+	// removed.
+	if strings.Contains(hint, "--roots-only --summary") {
+		t.Errorf("BuildNewCommentsHint must not hand over the roots scan alongside the delta read\n---\n%s", hint)
 	}
 }
 
@@ -362,10 +376,17 @@ func TestCommentHintsCarryNoModality(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"cold", "warm"} {
-		if !strings.Contains(hints[name], "--roots-only --summary") {
-			t.Errorf("%s hint must hand over the scan step 2 requires:\n%s", name, hints[name])
-		}
+	// Cold has no server-computed delta, so it hands over the scan itself. Warm
+	// has one, so it hands over the read that IS the scan's answer — a single
+	// issue-wide `--since` (MUL-7344). Both are unconditional commands.
+	if !strings.Contains(hints["cold"], "--roots-only --summary") {
+		t.Errorf("cold hint must hand over the scan step 2 requires:\n%s", hints["cold"])
+	}
+	if !strings.Contains(hints["warm"], "--since 2026-05-28T11:00:00Z --compact --output json") {
+		t.Errorf("warm hint must hand over the issue-wide delta read:\n%s", hints["warm"])
+	}
+	if strings.Contains(hints["warm"], "--roots-only --summary") {
+		t.Errorf("warm hint must not also hand over the scan the delta read answers:\n%s", hints["warm"])
 	}
 	if !strings.Contains(hints["resumed"], "issue-wide delta is empty") {
 		t.Errorf("resumed hint must report the empty delta as the scan's answer:\n%s", hints["resumed"])
@@ -2171,7 +2192,9 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 }
 
 // TestBriefIssuePointerFollowsTheInstalledSkill covers the compatibility
-// direction the server cannot reach (MUL-6986).
+// direction the server cannot reach (MUL-6986). The brief carried two
+// pointers at this skill; MUL-6966 retired the metadata one, so the
+// sub-issue pointer is now the single subject here.
 //
 // The brief is assembled here, in the daemon, from a binary the user installs
 // on their own schedule. A backend deploy does not rewrite it, and an app
@@ -2237,7 +2260,6 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 			for _, always := range []string{
 				"`--status todo` starts an agent-assigned child immediately",
 				"`--stage <N>` groups children into ordered stages",
-				"never secrets or long content",
 			} {
 				if !strings.Contains(out, always) {
 					t.Errorf("brief lost unconditional content %q", always)
@@ -2245,15 +2267,10 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 			}
 
 			if tc.want == "" {
-				for _, banned := range []string{"Full write discipline:", "Before creating sub-issues, read"} {
-					if strings.Contains(out, banned) {
-						t.Errorf("brief points at a skill with none installed (%q):\n%s", banned, out)
-					}
+				if strings.Contains(out, "Before creating sub-issues, read") {
+					t.Errorf("brief points at a skill with none installed:\n%s", out)
 				}
 				return
-			}
-			if !strings.Contains(out, "Full write discipline: "+tc.want+".") {
-				t.Errorf("metadata pointer does not name %q:\n%s", tc.want, out)
 			}
 			if !strings.Contains(out, "Before creating sub-issues, read "+tc.want+" —") {
 				t.Errorf("sub-issue pointer does not name %q:\n%s", tc.want, out)

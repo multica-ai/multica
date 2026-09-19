@@ -155,8 +155,8 @@ func (c ShardedStreamRelayConfig) Validate() error {
 // bounded by pod_count * shard_count instead of active_scope_count.
 type ShardedStreamRelay struct {
 	hub      *Hub
-	writeRDB *redis.Client
-	readRDB  *redis.Client
+	writeRDB redis.UniversalClient
+	readRDB  redis.UniversalClient
 	nodeID   string
 	config   ShardedStreamRelayConfig
 	now      func() time.Time
@@ -173,7 +173,7 @@ type ShardedStreamRelay struct {
 	wecomOutbound WecomOutboundDeliverer
 }
 
-func NewShardedStreamRelay(hub *Hub, writeRDB, readRDB *redis.Client, config ShardedStreamRelayConfig) *ShardedStreamRelay {
+func NewShardedStreamRelay(hub *Hub, writeRDB, readRDB redis.UniversalClient, config ShardedStreamRelayConfig) *ShardedStreamRelay {
 	if readRDB == nil {
 		readRDB = writeRDB
 	}
@@ -368,7 +368,7 @@ func (r *ShardedStreamRelay) maintainStreams(ctx context.Context) {
 		}
 		if exists == 0 {
 			r.updateStreamPresence(shard, false)
-			M.ObserveRedisStream(stream, 0, 0, -2)
+			M.ObserveRedisStream(stream, 0, -2)
 			continue
 		}
 		r.updateStreamPresence(shard, true)
@@ -393,12 +393,7 @@ func (r *ShardedStreamRelay) maintainStreams(ctx context.Context) {
 			r.recordRetentionError("XLEN failed", err, "stream", stream)
 			continue
 		}
-		memoryBytes, err := r.writeRDB.MemoryUsage(maintCtx, stream).Result()
-		if err != nil && !errors.Is(err, redis.Nil) {
-			r.recordRetentionError("MEMORY USAGE failed", err, "stream", stream)
-			memoryBytes = 0
-		}
-		M.ObserveRedisStream(stream, length, memoryBytes, redisTTLMillis(ttl))
+		M.ObserveRedisStream(stream, length, redisTTLMillis(ttl))
 	}
 	M.SetRedisStreamsWithoutTTL("sharded", withoutTTL)
 	r.observeRedisServer(maintCtx)

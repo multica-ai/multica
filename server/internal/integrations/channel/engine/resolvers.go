@@ -58,11 +58,12 @@ type Result struct {
 	ChannelRouteRevision int64
 	// Sender is the platform-native sender id (e.g. Lark open_id), so the
 	// replier can target a binding prompt back to the sender.
-	Sender          string
-	IssueID         pgtype.UUID
-	IssueNumber     int32
-	IssueIdentifier string
-	IssueTitle      string
+	Sender             string
+	IssueID            pgtype.UUID
+	IssueNumber        int32
+	IssueIdentifier    string
+	IssueWorkspaceSlug string
+	IssueTitle         string
 	// IssueDuplicate marks an /issue command that did not create a new issue
 	// because the shared duplicate guard found the active IssueID above.
 	// Repliers render this as a business conflict, never as an internal error.

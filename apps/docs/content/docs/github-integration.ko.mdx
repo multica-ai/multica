@@ -36,7 +36,7 @@ GitHub 연동은 설치할 때 승인한 저장소만 읽으며 코드, 댓글, 
 | GitHub 연동 | 전체 스위치입니다. 끄면 아래 세 기능이 작동하지 않지만 GitHub App 연결은 해제되지 않습니다. |
 | PR 사이드바 | 태스크 상세 화면에 연결된 pull request를 표시합니다. |
 | Co-authored-by | 에이전트가 만든 commit에 `Co-authored-by: multica-agent <github@multica.ai>`를 추가합니다. |
-| PR 자동 연결 | PR의 브랜치 이름, 제목, 본문에서 태스크 번호를 찾습니다. |
+| PR 자동 연결 | PR의 브랜치 이름과 제목에서 태스크 번호를 찾고, 본문에서는 종료 문구 바로 뒤에 있는 번호만 찾습니다. |
 | **PR 카드 → CI와 머지 가능 여부** | 연결된 각 PR에 대해 Multica는 인증된 GitHub API 스냅샷을 가져와, 그 **CI 상태**와 **머지 가능 여부**를 카드에 미러링합니다(아래 **PR 카드에 표시되는 것** 참조). |
 
 
@@ -62,7 +62,7 @@ Fixes MUL-123
 Resolves MUL-123
 ```
 
-본문의 `Related to MUL-123` 같은 일반 언급은 해당 태스크의 작업 PR로 표시되지 않습니다. Commit message와 PR 댓글도 연결을 트리거하지 않습니다.
+본문의 `Related to MUL-123` 같은 일반 언급은 해당 태스크에 전혀 연결되지 않습니다. Commit message와 PR 댓글도 연결을 트리거하지 않습니다.
 
 ## 태스크에서 PR 확인
 
@@ -83,7 +83,7 @@ CI 상태와 merge 가능 여부는 Multica가 GitHub API에서 가져온 snapsh
 PR이 merge되었다고 태스크가 반드시 완료된 것은 아닙니다. Multica는 다음 조건이 모두 충족될 때만 태스크를 `Done`으로 바꿉니다.
 
 1. merge된 연결 PR이 하나 이상 있고, `Closes MUL-123`처럼 종료 문구 바로 뒤에 번호가 있습니다(`Closes login MUL-123`처럼 중간에 다른 단어가 있으면 적용되지 않음).
-2. 해당 태스크에 `Open` 또는 `Draft` 상태인 다른 작업 PR이 없습니다. 본문의 일반 언급은 작업 PR에 포함되지 않습니다.
+2. 해당 태스크에 `Open` 또는 `Draft` 상태인 다른 연결 PR이 없습니다.
 3. 태스크의 현재 상태가 `done` 또는 `cancelled`가 아닙니다.
 
 따라서 브랜치 이름이나 제목에 `MUL-123`만 넣으면 연결은 되지만 그것만으로 완료를 트리거하지 않습니다. PR을 merge하지 않고 닫아도 태스크가 완료되지 않습니다.
@@ -175,7 +175,7 @@ API 서비스를 다시 시작한 뒤 **설정 → GitHub**에서 연결을 완�
 - **연결 버튼을 사용할 수 없음**: `GITHUB_APP_SLUG`와 `GITHUB_WEBHOOK_SECRET`이 API 프로세스에 전달되었는지 확인합니다.
 - **Webhook이 401을 반환함**: GitHub App과 API가 같은 Webhook secret을 사용하는지 확인하고 GitHub의 **Recent Deliveries**에서 다시 전달합니다.
 - **PR이 연결되지 않음**: 저장소가 App 승인 범위에 있는지, 자동 연결이 켜져 있는지, 번호가 현재 워크스페이스에 속하는지 확인합니다.
-- **본문에 번호를 썼지만 표시되지 않음**: `Closes MUL-123`을 사용하거나 번호를 브랜치 이름 또는 PR 제목에 넣습니다.
+- **본문에 번호를 썼지만 연결되지 않음**: `Closes MUL-123`을 사용하거나 번호를 브랜치 이름 또는 PR 제목에 넣습니다.
 - **CI 상태가 없음**: `GITHUB_APP_ID`와 `GITHUB_APP_PRIVATE_KEY`가 설정되었는지, App에 Contents, Checks 및 Commit statuses 읽기 권한이 있고 관련 이벤트를 구독했는지 확인합니다. Contents가 없으면 snapshot 전체가 실패해 PR 카드에 CI도 머지 상태도 표시되지 않습니다. 설치된 App에 권한을 추가한 뒤에는 각 installation owner가 GitHub에서 승인해야 적용됩니다.
 - **PR merge 후 태스크가 완료되지 않음**: PR에 종료 문구가 있는지 확인하고 다른 연결 PR이 Open 또는 Draft 상태로 남아 있는지 확인합니다.
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strconv"
 	"strings"
 	"testing"
@@ -416,7 +417,7 @@ func TestRegisterRuntimes_PrefersCommandPathOverride(t *testing.T) {
 	t.Cleanup(stubAgentVersion(t))
 	// PATH would resolve to a *different* binary; the override must win.
 	stubLookPath(t, map[string]string{"company-codex": "/usr/bin/company-codex"})
-	stubProfilePathExecutable(t, map[string]bool{"/opt/custom/company-codex": true})
+	stubResolveProfileOverridePath(t, map[string]string{"/opt/custom/company-codex": "/opt/custom/company-codex"})
 
 	profiles := []RuntimeProfile{{
 		ID:             "prof-1",
@@ -449,8 +450,8 @@ func TestRegisterRuntimes_PrefersCommandPathOverride(t *testing.T) {
 func TestRegisterRuntimes_OverrideNotExecutableFallsBackToPath(t *testing.T) {
 	t.Cleanup(stubAgentVersion(t))
 	stubLookPath(t, map[string]string{"company-codex": "/usr/bin/company-codex"})
-	// Override path reports NOT executable -> must fall back to PATH.
-	stubProfilePathExecutable(t, map[string]bool{})
+	// Override path does not resolve -> must fall back to PATH.
+	stubResolveProfileOverridePath(t, map[string]string{})
 
 	profiles := []RuntimeProfile{{
 		ID:             "prof-1",
@@ -474,14 +475,20 @@ func TestRegisterRuntimes_OverrideNotExecutableFallsBackToPath(t *testing.T) {
 	}
 }
 
-// stubProfilePathExecutable swaps the package-level profilePathExecutable
-// indirection so override-preference tests can decide which paths are
-// "executable" without staging real files. An absent path reports false.
-func stubProfilePathExecutable(t *testing.T, executable map[string]bool) {
+// stubResolveProfileOverridePath swaps the package-level
+// resolveProfileOverridePath indirection so override-preference tests can
+// decide which paths resolve without staging real files. An absent path
+// reports exec.ErrNotFound.
+func stubResolveProfileOverridePath(t *testing.T, resolved map[string]string) {
 	t.Helper()
-	orig := profilePathExecutable
-	profilePathExecutable = func(path string) bool { return executable[path] }
-	t.Cleanup(func() { profilePathExecutable = orig })
+	orig := resolveProfileOverridePath
+	resolveProfileOverridePath = func(path string) (string, error) {
+		if p, ok := resolved[path]; ok {
+			return p, nil
+		}
+		return "", exec.ErrNotFound
+	}
+	t.Cleanup(func() { resolveProfileOverridePath = orig })
 }
 
 // bookkeeping that runTask relies on to override the launch path.

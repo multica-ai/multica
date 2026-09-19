@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"testing"
@@ -226,8 +227,8 @@ func TestCreateMediaGatedIssueCommitsDeferredTaskAtomicallyBeforeCreatedEvent(t 
 			NewOriginatorSource:     pgtype.Text{String: "direct_human", Valid: true},
 			NewTriggerEvidenceKind:  pgtype.Text{String: "comment", Valid: true},
 			NewTriggerEvidenceRefID: mergedCommentID,
-		}); err != nil {
-			callbackErr = fmt.Errorf("merge immediate comment into deferred task: %w", err)
+		}); !errors.Is(err, pgx.ErrNoRows) {
+			callbackErr = fmt.Errorf("new comment thread must not merge into the assignment: %v", err)
 		}
 	})
 
@@ -272,8 +273,8 @@ func TestCreateMediaGatedIssueCommitsDeferredTaskAtomicallyBeforeCreatedEvent(t 
 		Scan(&taskID, &triggerCommentID, &runtimeID, &taskCount); err != nil {
 		t.Fatalf("load final pending task: %v", err)
 	}
-	if taskCount != 1 || taskID != result.AssignedTaskID || triggerCommentID != mergedCommentID {
-		t.Fatalf("pending task = count %d id %v trigger %v, want one task %v with trigger %v", taskCount, taskID, triggerCommentID, result.AssignedTaskID, mergedCommentID)
+	if taskCount != 1 || taskID != result.AssignedTaskID || triggerCommentID.Valid {
+		t.Fatalf("pending task = count %d id %v trigger %v, want one assignment task %v without a comment trigger", taskCount, taskID, triggerCommentID, result.AssignedTaskID)
 	}
 	if wakeup.calls[0].runtimeID != util.UUIDToString(runtimeID) {
 		t.Fatalf("schedule wakeup runtime = %q, want %q", wakeup.calls[0].runtimeID, util.UUIDToString(runtimeID))
@@ -307,6 +308,9 @@ func TestHydrateDeferredChannelIssueTaskOverlayDoesNotOverwriteMergedCommentPlan
 		VALUES ($1, $2, 'member', $3, 'New effective trigger')
 		RETURNING id`, task.IssueID, workspaceID, userID).Scan(&commentID); err != nil {
 		t.Fatalf("seed merged comment: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET trigger_comment_id=$2 WHERE id=$1`, task.ID, commentID); err != nil {
+		t.Fatal(err)
 	}
 	mergedOverlay := json.RawMessage(`{"mcpServers":{"merged":{"url":"https://merged.example"}}}`)
 	if _, err := q.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{

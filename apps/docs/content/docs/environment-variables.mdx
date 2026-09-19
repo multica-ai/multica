@@ -33,6 +33,7 @@ You also need to pick an email service, otherwise verification codes and invitat
 | `DATABASE_URL` | local `multica` database | PostgreSQL connection string |
 | `DATABASE_MAX_CONNS` | `25` | Maximum database connections per API process |
 | `DATABASE_MIN_CONNS` | `5` | Minimum connections each API process keeps |
+| `DATABASE_SEARCH_WORK_MEM_MB` | `64` | PostgreSQL `work_mem` ceiling in MB for each search plan node; set `1`-`64` to lower it or `0` to keep the database/session default |
 | `DATABASE_REPLICA_URL` | empty | Optional PostgreSQL read-only replica connection string; new connections are validated as read-only, while businesses must explicitly opt into eventual-consistency reads in code |
 | `DATABASE_REPLICA_MAX_CONNS` | `10` | Maximum replica connections per API process |
 | `DATABASE_REPLICA_MIN_CONNS` | `0` | Minimum replica connections each API process keeps |
@@ -41,7 +42,7 @@ You also need to pick an email service, otherwise verification codes and invitat
 | `PORT` | `8080` | API listen port |
 | `JWT_SECRET` | required in production | Secret for sign-in JWTs and some signing flows; production refuses to boot on empty or known placeholders |
 | `APP_ENV` | empty | Set to `production` in production |
-| `AUTH_TOKEN_TTL` | `720h` (30 days) | Lifetime of browser JWTs and cookies; accepts a Go duration or a positive integer of seconds |
+| `AUTH_TOKEN_TTL` | `720h` (30 days) | Lifetime of browser JWTs and cookies; accepts a Go duration or a positive integer of seconds. Sessions slide: one in continuous use is re-issued rather than expiring, from the halfway point of its lifetime onward. Values below `60s` are clamped to `60s` |
 | `LOG_LEVEL` | application default | Log level |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | How long to wait after a termination signal before graceful shutdown begins |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | How long an offline runtime may reconnect before its in-flight runs fail; values below `150s` are clamped |
@@ -155,7 +156,8 @@ Use `ATTACHMENT_DOWNLOAD_MODE=proxy` when the endpoint — an internal MinIO, fo
 
 | Variable | Default | Description |
 |---|---|---|
-| `REDIS_URL` | empty | Used for shared rate limiting, realtime events, and the token cache; when unset, realtime events and invitation limits fall back to in-process memory, while auth rate limiting is off |
+| `REDIS_URL` | empty | The one connection URL used by all Redis-backed features, including shared rate limiting, realtime events, channel WebSocket leases, and token caches |
+| `REDIS_CLUSTER_MODE` | `false` | Forces the Redis Cluster client, including for a single configuration endpoint; cluster mode requires database 0 and `REALTIME_RELAY_MODE=sharded` |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | Set `true` when a managed Redis blocks `CLIENT SETNAME` |
 | `RATE_LIMIT_AUTH` | `5` | Per-IP requests per minute to send a verification code or start Google sign-in |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | Per-IP code verifications per minute |
@@ -233,11 +235,12 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Concurrent run ceiling per daemon |
 | `MULTICA_AGENT_TIMEOUT` | `0` | Absolute time limit per run; `0` means no limit |
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | Silence ceiling with no output and no tool execution; `0` disables the watchdog entirely |
-| `MULTICA_AGENT_TOOL_WATCHDOG` | same as `MULTICA_AGENT_IDLE_WATCHDOG` | Silence ceiling for a single tool call; set it only to give tools more room than the model gets, `0` never force-stops a tool call |
+| `MULTICA_AGENT_TOOL_WATCHDOG` | same as `MULTICA_AGENT_IDLE_WATCHDOG` | Silence ceiling for a single tool call; set it only to give tools more room than the model gets, `0` never force-stops a tool call. Cursor background shells stay in flight until their owned processes exit; at this boundary the daemon stops those processes and gives Cursor a fresh watchdog budget to produce its terminal result. If process ownership or cleanup cannot be verified, the ordinary run-cancellation policy applies |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode-specific silence threshold |
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | same as `MULTICA_AGENT_IDLE_WATCHDOG` | Codex semantic-silence threshold. Codex's own timer cannot see that a tool is running, so it tracks the larger of the idle / tool budgets instead of holding a separate, shorter ceiling |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Explicit override for the Codex first-turn no-progress ceiling; `0` keeps the default. The effective first-turn wait stays bounded by `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` and the overall execution timeout — set `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` strictly above this value (with some margin), or the wait is truncated to it and the model-catalog startup retry is skipped. Equal values are not enough: the semantic timer is armed first, so at equal durations the retry can still be lost |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`; `thread/start`, `thread/resume`: `60s` | Codex app-server startup handshake ceilings. An explicit value overrides both budgets globally |
+| `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` | Grace period after cancellation for Codex app-server to acknowledge `turn/interrupt` and emit `turn/completed`, preserving final token usage before forced process cleanup. On unusually slow hosts, tune this from the interrupt latency recorded in daemon logs |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`; self-hosted `false` | Whether to check for and apply CLI updates automatically |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Update check interval |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | Whether to restart into a `multica` binary replaced on disk out of band (`brew upgrade`, a re-download, a local build). Independent of `MULTICA_DAEMON_AUTO_UPDATE` |
@@ -247,12 +250,16 @@ The variables below are read on the computer that runs your agents, not in the A
 
 For the internal context that the daemon injects into agent tasks, see [Task runtime environment](/daemon-runtimes#task-runtime-environment).
 
-Each AI coding tool accepts `MULTICA_<PROVIDER>_PATH` and `MULTICA_<PROVIDER>_MODEL` to override the command path and default model. QwenPaw and MiniMax Code have no model variable because Multica never sends them a model; MiniMax Code's path variable is `MULTICA_MCODE_PATH` — see [AI coding tools comparison](/providers#model-sources). DeepSeek Harness supports `MULTICA_DSH_PATH` and `MULTICA_DSH_MODEL` (a model id from the dsh catalog, e.g. `deepseek-official/deepseek-chat`). Dim supports `MULTICA_DIM_PATH` and `MULTICA_DIM_MODEL` (a model id from the dim catalog). ZeroClaw supports `MULTICA_ZEROCLAW_PATH` but has no model variable; its agent profile owns the model selection. Machine-wide default arguments via `MULTICA_<PROVIDER>_ARGS` are currently supported for five tools: Claude Code, Codex, CodeBuddy, Qwen Code, and QwenPaw. The variables are `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, and `MULTICA_QWENPAW_ARGS`. For example:
+Each AI coding tool accepts `MULTICA_<PROVIDER>_PATH` and `MULTICA_<PROVIDER>_MODEL` to override the command path and default model. QwenPaw and MiniMax Code have no model variable because Multica never sends them a model; MiniMax Code's path variable is `MULTICA_MCODE_PATH` — see [AI coding tools comparison](/providers#model-sources). DeepSeek Harness supports `MULTICA_DSH_PATH` and `MULTICA_DSH_MODEL` (a model id from the dsh catalog, e.g. `deepseek-official/deepseek-chat`). DeepSeek Harness additionally accepts `MULTICA_DSH_PROFILE_BUNDLE`: a comma-separated list of bundles to install into its `multica` profile when that profile is missing, tried in order, where each entry is an npm spec, a directory, or a packed tarball. It is unset by default, and the `--stdio` protocol Multica drives is what that profile supplies, so an unset variable leaves the DSH installation untouched and the daemon reports the missing profile instead of registering an unusable runtime. Multica's own bridge is not on a public npm registry yet, so choosing a value is covered in [Install an agent runtime](/install-agent-runtime); whatever you set is installed into every daemon host's DSH home without further confirmation, so treat it as a supply-chain decision. The install `MULTICA_DSH_PROFILE_BUNDLE` enables is bounded on purpose: it runs at most once per daemon lifetime, only when the probe reports the profile genuinely absent, and a failure is logged with the package manager's own output and retried only after a daemon restart. A probe that times out, or answers with a protocol version this daemon does not drive, is reported and never installed over — the daemon does not overwrite a profile that is deliberately there. To diagnose, search the daemon log for `DSH runtime profile`; to undo an install, delete `$DSH_HOME/profiles/multica` (default `~/.dsh/profiles/multica`). `MULTICA_DSH_PLUGIN_PATH` overrides the directory the install resolves pnpm from. DSH Desktop keeps the pnpm that `dsh plugin` forwards to inside its own runtime-commands directory on both macOS and Windows, and the daemon finds and prepends it automatically — including the versioned layout a newer Desktop uses — so this variable is only needed for an installation the daemon cannot find, or to make the install use a pnpm of your own. Setting it replaces the search entirely: if the directory does not exist, the install falls back to whatever pnpm is on the daemon's `PATH` rather than to the bundled one. Linux has no DSH Desktop, so there the install always uses `PATH`. Dim supports `MULTICA_DIM_PATH` and `MULTICA_DIM_MODEL` (a model id from the dim catalog). ZeroClaw supports `MULTICA_ZEROCLAW_PATH` but has no model variable; its agent profile owns the model selection. Machine-wide default arguments via `MULTICA_<PROVIDER>_ARGS` are currently supported for five tools: Claude Code, Codex, CodeBuddy, Qwen Code, and QwenPaw. The variables are `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, and `MULTICA_QWENPAW_ARGS`. For example:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
 MULTICA_CLAUDE_ARGS=--max-turns 40
 ```
+
+Cursor's verified background cleanup requires Linux 6.9 or newer (process-group pidfds), macOS kernel support for process identity queries and audit-token signalling, or a successfully assigned nested Job Object on Windows. On macOS, each process is signalled using a kernel-checked PID version; no same-session group join is required. These macOS APIs are private and checked at capture time. A launch that cannot be claimed returns its original tool result and uses the ordinary idle watchdog, including when the tool watchdog is `0`. Already-claimed work remains in flight if cleanup cannot be confirmed. With the tool watchdog set to `0` there is no such boundary at all: claimed background work keeps the run in flight for as long as it lives, so the run is bounded only by `MULTICA_AGENT_TIMEOUT`, which is `0` by default.
+
+Owned Cursor background processes are also stopped when the run completes normally, so a background server started by that run does not intentionally survive finalization. macOS can recognize late children through retained original-parent identities, but cannot prove a chain whose intermediate processes disappeared before observation. Such processes, work that leaves the tracked group, or persistent ownership/signalling errors can leave background work behind. Unconfirmed cleanup is logged and never grants a successful-cleanup recovery window; unknown processes are not killed based only on their numeric PID or process group.
 
 Precedence is command-line flag → environment variable → `~/.multica/config.json` → built-in default. For watchdog behavior, see [Daemon and runtimes](/daemon-runtimes).
 
@@ -297,11 +304,16 @@ A few value rules:
 
 | Variable | Default | Description |
 |---|---|---|
+| `DO_NOT_TRACK` | empty (telemetry enabled) | Set `1` or `true` (case-insensitive) to stop first-party anonymous self-host telemetry collection and delivery |
 | `ANALYTICS_DISABLED` | `false` | Set `true` to turn off PostHog reporting |
 | `POSTHOG_API_KEY` | empty | Reporting is off when unset; set it to use your own PostHog project |
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog host |
 | `METRICS_ADDR` | empty | Prometheus metrics listen address; empty means not started |
 | `REALTIME_METRICS_TOKEN` | empty | Bearer token protecting `/health/realtime` |
+
+First-party self-host telemetry sends one deployment-level snapshot per UTC day to the fixed, non-configurable `https://telemetry.multica.ai/v1/telemetry/events` endpoint. It contains the formal release version; bucketed workspace, distinct-human-member, active-agent, and 24-hour active-daemon counts; and aggregate run counts for the previous 24 hours. It never includes names, email addresses or domains, IP addresses, business identifiers, host/device details, repositories, models/plugins, prompts/output, comments/chats, paths, token/cost data, credentials, errors, stacks, or logs. It is used only to understand self-hosted version adoption, deployment-size ranges, and aggregate usage—not for billing, licensing, authentication, or security decisions.
+
+`DO_NOT_TRACK` and `ANALYTICS_DISABLED` are independent. The former controls this first-party anonymous snapshot; the latter controls the optional PostHog integration.
 
 ## Next steps
 

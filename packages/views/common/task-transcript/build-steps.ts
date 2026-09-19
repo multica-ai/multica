@@ -87,8 +87,8 @@ function durationBetween(start?: string, end?: string): number | undefined {
   const a = timeMs(start);
   const b = timeMs(end);
   if (a === undefined || b === undefined) return undefined;
-  // Clamp rather than drop: the daemon flushes in 500ms batches, so a fast
-  // call can land with its result on the same tick or one tick earlier.
+  // Clamp rather than drop: a daemon wall-clock adjustment can make a result
+  // appear just before its call. Zero is preserved as "unknown" in the UI.
   return Math.max(0, b - a);
 }
 
@@ -425,14 +425,4 @@ export function toolKindTotals(steps: TraceStep[]): ToolKindTotals {
     totals[kind] += step.durationMs;
   }
   return totals;
-}
-
-/** Below these, a timeline is chrome: it would render a handful of bars that
- *  say less than the durations already on each row. */
-export const TIMELINE_MIN_STEPS = 8;
-export const TIMELINE_MIN_MS = 60_000;
-
-export function shouldShowTimeline(steps: TraceStep[], lanes: TraceLanes | null): boolean {
-  if (!lanes) return false;
-  return steps.length >= TIMELINE_MIN_STEPS && lanes.totalMs >= TIMELINE_MIN_MS;
 }

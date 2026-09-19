@@ -64,9 +64,9 @@ export function SlackTab() {
   const installations = data?.installations ?? [];
   const configured = data?.configured === true;
   // install_supported tracks whether the OAuth client credentials are wired on
-  // the server. When false, "Connect Slack" would 503, so we hide the connect
-  // entry points and surface a "coming soon" notice. Already-installed bots
-  // still appear below and remain manageable.
+  // the server. When false, "Connect Slack" would be rejected, so we hide the
+  // connect entry points and surface a "coming soon" notice. Already-installed
+  // bots still appear below and remain manageable.
   const installSupported = data?.install_supported === true;
 
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
@@ -97,7 +97,7 @@ export function SlackTab() {
             <p className="text-body font-medium">{t(($) => $.slack.not_enabled_title)}</p>
             <p className="text-caption text-muted-foreground">
               {t(($) => $.slack.not_enabled_description_prefix)}{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-micro">
+              <code className="rounded-xs bg-muted px-1 py-0.5 text-micro">
                 MULTICA_SLACK_SECRET_KEY
               </code>{" "}
               {t(($) => $.slack.not_enabled_description_suffix)}{" "}
@@ -210,7 +210,7 @@ function InstallationRow({
           <p className="text-body font-medium">
             {agentName}
             {!isActive && (
-              <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+              <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                 {t(($) => $.slack.revoked_badge)}
               </span>
             )}

@@ -691,3 +691,24 @@ func testLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard,
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestInboundBareControlKeepsSelectedXMLContext(t *testing.T) {
+	for _, command := range []string{"/new", "/clear"} {
+		for _, mentioned := range []bool{false, true} {
+			text := command
+			if mentioned {
+				text = "@my_bot " + text
+			}
+			msg, ok := inboundFromUpdate(Update{UpdateID: 1, Message: &Message{
+				MessageID: 10, From: &User{ID: 111}, Chat: Chat{ID: -100200, Type: "supergroup"}, Text: text,
+				ReplyToMessage: &Message{MessageID: 9, From: &User{ID: 222, FirstName: "Ada"}, Text: "selected text"},
+			}}, 999, "my_bot")
+			if !ok || msg.HasSelectedContext != mentioned || msg.CommandText != command || msg.ForceFresh != (command == "/clear") {
+				t.Fatalf("selected Telegram control = %+v", msg)
+			}
+			if mentioned && (!strings.Contains(msg.Text, "<quoted_message ") || !strings.Contains(msg.Text, "selected text") || strings.Contains(msg.Text, command)) {
+				t.Fatalf("XML quote not preserved: %q", msg.Text)
+			}
+		}
+	}
+}

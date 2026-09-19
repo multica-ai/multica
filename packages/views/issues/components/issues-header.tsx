@@ -2,11 +2,10 @@
 
 import { cloneElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowDown,
-  ArrowUp,
   CalendarDays,
   ChartGantt,
   ChevronDown,
+  CircleDashed,
   CircleDot,
   Columns3,
   Filter,
@@ -65,6 +64,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { PROJECT_STATUS_CONFIG, PROJECT_STATUS_ORDER } from "@multica/core/projects/config";
 import { labelListOptions } from "@multica/core/labels/queries";
 import { propertyListOptions } from "@multica/core/properties";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
@@ -73,18 +73,23 @@ import type {
   IssueProperty,
   IssueTableFacetSpec,
   IssueTableFacetsResponse,
+  ProjectStatus,
   WorkingAgentSummary,
 } from "@multica/core/types";
 import { formatActorRef, isActorPropertyType, isFilterablePropertyType, isScalarPropertyType, propertyFilterValueKey, PROPERTY_FILTER_OP_SYMBOLS, PROPERTY_FILTER_OPS_BY_TYPE, type PropertyFilterOp, type PropertyFilterValue } from "@multica/core/types";
 import { ProjectIcon } from "../../projects/components/project-icon";
+import { useProjectStatusLabels } from "../../projects/components/labels";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropertyIcon } from "../../common/property-icon";
+import { sortDirectionLabelKey } from "../utils/sort-direction";
 import { LabelChip } from "../../labels/label-chip";
 import {
   SORT_OPTIONS,
   GROUPING_OPTIONS,
   SWIMLANE_GROUPINGS,
   CARD_PROPERTY_OPTIONS,
+  cardPropertyOptionsForView,
+  sortOptionsForView,
   type ActorFilterValue,
   type IssueDateField,
   type IssueDateFilter,
@@ -141,6 +146,7 @@ function getActiveFilterCount(
     creatorFilters: ActorFilterValue[];
     projectFilters: string[];
     includeNoProject: boolean;
+    projectStatusFilters: ProjectStatus[];
     labelFilters: string[];
     propertyFilters?: Record<string, PropertyFilterValue[]>;
     dateFilter?: IssueDateFilter | null;
@@ -163,6 +169,7 @@ function getActiveFilterCount(
     delta(state.projectFilters, baseline?.project) > 0 ||
     (state.includeNoProject && !(baseline?.includeNoProject ?? false));
   if (projectDelta) count++;
+  if (delta(state.projectStatusFilters, baseline?.projectStatus) > 0) count++;
   if (delta(state.labelFilters, baseline?.label) > 0) count++;
   for (const [id, selected] of Object.entries(state.propertyFilters ?? {})) {
     // Property members can be operator objects — compare through their
@@ -589,6 +596,48 @@ function ProjectSubContent({
         )}
       </div>
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Project status sub-menu content
+// ---------------------------------------------------------------------------
+
+function ProjectStatusSubContent({
+  selected,
+  onToggle,
+  fixedStatuses,
+  fixedTitle,
+}: {
+  selected: ProjectStatus[];
+  onToggle: (status: ProjectStatus) => void;
+  fixedStatuses?: Set<string>;
+  fixedTitle?: string;
+}) {
+  const statusLabels = useProjectStatusLabels();
+  return (
+    <div className="p-1">
+      {PROJECT_STATUS_ORDER.map((status) => {
+        const checked = selected.includes(status);
+        const fixed = fixedStatuses?.has(status) === true;
+        return (
+          <DropdownMenuCheckboxItem
+            key={status}
+            checked={checked}
+            disabled={fixed}
+            title={fixed ? fixedTitle : undefined}
+            onCheckedChange={() => onToggle(status)}
+            className={FILTER_ITEM_CLASS}
+          >
+            <HoverCheck checked={checked} />
+            <span
+              className={`size-2 rounded-full ${PROJECT_STATUS_CONFIG[status].dotColor}`}
+            />
+            {statusLabels[status]}
+          </DropdownMenuCheckboxItem>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1145,7 +1194,7 @@ export function IssuesHeader({
   allowGantt = false,
   dateFilter = null,
   onDateFilterChange,
-  isRefreshing = false,
+  isRefreshing,
   facetCountsExact = true,
   tableFacetCounts,
   onTableFacetChange,
@@ -1158,6 +1207,7 @@ export function IssuesHeader({
   allowGantt?: boolean;
   dateFilter?: IssueDateFilter | null;
   onDateFilterChange?: (filter: IssueDateFilter | null) => void;
+  /** Omit when the page title already displays refresh feedback. */
   isRefreshing?: boolean;
   /** See IssueDisplayControls.facetCountsExact. */
   facetCountsExact?: boolean;
@@ -1341,7 +1391,7 @@ export function IssuesHeader({
             onTableFacetChange={onTableFacetChange}
             viewBaseline={viewBaseline}
           />
-          <ViewRefreshIndicator active={isRefreshing} />
+          {isRefreshing !== undefined && <ViewRefreshIndicator active={isRefreshing} />}
         </div>
       </div>
     </div>
@@ -1429,6 +1479,7 @@ export function IssueFilterMenu({
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
+  const projectStatusFilters = useViewStore((s) => s.projectStatusFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
   const propertyFilters = useViewStore((s) => s.propertyFilters);
   const viewStoreApi = useViewStoreApi();
@@ -1463,6 +1514,7 @@ export function IssueFilterMenu({
         creatorFilters,
         projectFilters,
         includeNoProject,
+        projectStatusFilters,
         labelFilters,
         dateFilter: showDateFilter ? dateFilter : null,
       },
@@ -1547,6 +1599,7 @@ export function IssueFilterMenu({
                         status={option.key}
                         category={option.category}
                         color={option.color}
+                        icon={option.icon}
                         className="h-3.5 w-3.5"
                       />
                       {option.label}
@@ -1712,6 +1765,29 @@ export function IssueFilterMenu({
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
+            {/* Project status — a dimension of its own next to Project:
+                "everything in the projects that are in progress", without
+                naming them one by one. */}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <CircleDashed className="size-3.5" />
+                <span className="flex-1">{t(($) => $.filters.section_project_status)}</span>
+                {projectStatusFilters.length > 0 && (
+                  <span className="text-caption text-primary font-medium">
+                    {projectStatusFilters.length}
+                  </span>
+                )}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-auto min-w-52 p-0">
+                <ProjectStatusSubContent
+                  selected={projectStatusFilters}
+                  onToggle={act.toggleProjectStatusFilter}
+                  fixedStatuses={viewBaseline?.projectStatus}
+                  fixedTitle={fixedTitle}
+                />
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+
             {/* Label */}
             <DropdownMenuSub
               onOpenChange={(open) =>
@@ -1849,6 +1925,7 @@ export function IssueDisplayControls({
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
+  const projectStatusFilters = useViewStore((s) => s.projectStatusFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
   const propertyFilters = useViewStore((s) => s.propertyFilters);
   const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
@@ -1912,6 +1989,7 @@ export function IssueDisplayControls({
       creatorFilters,
       projectFilters,
       includeNoProject,
+      projectStatusFilters,
       labelFilters,
       dateFilter: showDateFilter ? dateFilter : null,
     },
@@ -1949,6 +2027,8 @@ export function IssueDisplayControls({
     labels: "card_labels",
     childProgress: "card_child_progress",
   };
+  const availableCardPropertyOptions = cardPropertyOptionsForView(viewMode);
+  const availableSortOptions = sortOptionsForView(viewMode, grouping);
   const sortPropertyId = propertyIdFromViewKey(sortBy);
   const groupingPropertyId = propertyIdFromViewKey(grouping);
   const tableGroupingPropertyId = propertyIdFromViewKey(tableGrouping);
@@ -1958,6 +2038,9 @@ export function IssueDisplayControls({
   const sortLabel = sortPropertyId
     ? propertyById.get(sortPropertyId)?.name ?? t(($) => $.display.sort_manual)
     : t(($) => $.display[SORT_LABEL_KEY[sortBy as keyof typeof SORT_LABEL_KEY]]);
+  const sortDirectionLabel = t(
+    ($) => $.display[sortDirectionLabelKey(sortBy, sortDirection)],
+  );
   const groupingLabel = groupingPropertyId
     ? propertyById.get(groupingPropertyId)?.name ?? t(($) => $.display.group_status)
     : t(($) => $.display[GROUPING_LABEL_KEY[grouping as keyof typeof GROUPING_LABEL_KEY]]);
@@ -2109,9 +2192,10 @@ export function IssueDisplayControls({
             />
             <TooltipContent side="bottom">{t(($) => $.display.tooltip)}</TooltipContent>
           </Tooltip>
-          <PopoverContent align="end" className="w-64 p-3">
+          <PopoverContent align="end" className="w-72 p-3">
             <div className="space-y-3">
-              {/* Uniform rows: caption label left, control right. Spacing
+              {/* Caption label left, control right; multi-control sections
+                  (Ordering, Card properties) stack the label on top. Spacing
                   separates sections — no dividers (see UI rules). */}
               {viewMode === "board" && (
                 <div className="flex items-center justify-between gap-3">
@@ -2201,14 +2285,18 @@ export function IssueDisplayControls({
                   />
                 </label>
               )}
-              <div className="flex items-center justify-between gap-3">
+              <div>
                 <span className="text-caption font-medium text-muted-foreground">
                   {t(($) => $.display.ordering_section)}
                 </span>
-                <div className="flex items-center gap-1.5">
+                {/* Direction labels run up to "Reverse workflow order", so the
+                    pair gets the full popover width (w-72 keeps "Status" beside
+                    it untruncated): the field select absorbs the slack and
+                    truncates, the direction label never does. */}
+                <div className="mt-2 flex items-center gap-1.5">
                   <Select
                     items={[
-                      ...SORT_OPTIONS.map((opt) => ({
+                      ...availableSortOptions.map((opt) => ({
                         value: opt.value as string,
                         label: t(($) => $.display[SORT_LABEL_KEY[opt.value as keyof typeof SORT_LABEL_KEY]]),
                       })),
@@ -2222,12 +2310,12 @@ export function IssueDisplayControls({
                       if (v) act.setSortBy(v as SortField);
                     }}
                   >
-                    <SelectTrigger size="sm" className="w-26" aria-label={t(($) => $.display.ordering_section)}>
+                    <SelectTrigger size="sm" className="min-w-0 flex-1" aria-label={t(($) => $.display.ordering_section)}>
                       <SelectValue>{sortLabel}</SelectValue>
                     </SelectTrigger>
                     <SelectContent align="end">
                       <SelectGroup>
-                      {SORT_OPTIONS.map((opt) => (
+                      {availableSortOptions.map((opt) => (
                         <SelectItem key={opt.value} value={opt.value}>
                           {t(($) => $.display[SORT_LABEL_KEY[opt.value as keyof typeof SORT_LABEL_KEY]])}
                         </SelectItem>
@@ -2243,17 +2331,14 @@ export function IssueDisplayControls({
                   {sortBy !== "position" && (
                     <Button
                       variant="outline"
-                      size="icon-sm"
+                      size="sm"
                       onClick={() =>
                         act.setSortDirection(sortDirection === "asc" ? "desc" : "asc")
                       }
-                      title={sortDirection === "asc" ? t(($) => $.display.ascending_title) : t(($) => $.display.descending_title)}
+                      aria-label={sortDirectionLabel}
+                      title={sortDirectionLabel}
                     >
-                      {sortDirection === "asc" ? (
-                        <ArrowUp className="size-3.5" />
-                      ) : (
-                        <ArrowDown className="size-3.5" />
-                      )}
+                      {sortDirectionLabel}
                     </Button>
                   )}
                 </div>
@@ -2268,7 +2353,7 @@ export function IssueDisplayControls({
                   onCheckedChange={() => act.toggleShowSubIssues()}
                 />
               </label>
-              {viewMode !== "table" && (
+              {availableCardPropertyOptions.length > 0 && (
                 <div>
                   <span className="text-caption font-medium text-muted-foreground">
                     {t(($) => $.display.card_properties_section)}
@@ -2276,7 +2361,7 @@ export function IssueDisplayControls({
                   {/* Chip toggles (pressed = shown on cards). Unpressed chips
                       dim so the active set reads at a glance. */}
                   <div className="mt-2 flex flex-wrap gap-1">
-                    {CARD_PROPERTY_OPTIONS.map((opt) => (
+                    {availableCardPropertyOptions.map((opt) => (
                       <Toggle
                         key={opt.key}
                         size="sm"

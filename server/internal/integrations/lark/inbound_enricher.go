@@ -231,10 +231,12 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 			b.WriteString("\n\n")
 		}
 		b.WriteString(e.renderQuotedBlock(msg.ParentID, quotedItems, quotedErr, names))
+		msg.HasSelectedContext = true
 	}
 
 	var core string
 	if isForward {
+		msg.HasSelectedContext = true
 		if forwardErr != nil {
 			e.logger.Warn("lark enricher: forward fetch failed", "message_id", msg.MessageID, "err", forwardErr)
 			core = forwardedErrorBlock()

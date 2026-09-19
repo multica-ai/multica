@@ -178,7 +178,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// assistant message for exactly that case, and returning now would throw
 	// the work away.
 	content := deliverableContent(e)
-	if content == "" && !o.mayCarryAttachments(e) {
+	if !hasVisibleChar(content) && !o.mayCarryAttachments(e) {
 		o.skipped(ctx, e, skipNothingToSay)
 		return nil
 	}
@@ -284,7 +284,12 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// Words first. An empty completion reaches here only because a file is
 	// bound to it, and an empty markdown bubble ahead of that file would be
 	// noise the user has to scroll past.
-	if content != "" {
+	//
+	// Empty is hasVisibleChar's sense of it, not `!= ""`. A completion of "\n"
+	// is a bubble with nothing in it on the reader's screen, and counting it
+	// as the words that answered the turn also tells the file below it that
+	// the reply has already been accounted for.
+	if hasVisibleChar(content) {
 		if err := sender.sendTextCtx(ctx, binding.ChannelChatID, chatType, content); err != nil {
 			return err
 		}
@@ -300,7 +305,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		ChatID:         binding.ChannelChatID,
 		ChatType:       chatType,
 		SessionID:      e.ChatSessionID,
-	}, content == "")
+	}, !hasVisibleChar(content))
 	return nil
 }
 

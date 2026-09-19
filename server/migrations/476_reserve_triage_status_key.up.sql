@@ -1,0 +1,12 @@
+-- Intentionally empty (MUL-7400).
+--
+-- This file was step 2 of reserving the `triage` status key: it renamed any
+-- pre-existing custom `triage` status to `triage_2`, moved that workspace's
+-- issues onto the new key, rewrote saved views, and validated 475's CHECK. All
+-- of it existed to protect an equivalence — `status = 'triage'` means "in
+-- Triage" — that migration 483 retired by giving Triage a column of its own.
+--
+-- What is left without that equivalence is a rewrite of live customer data
+-- (status keys, issue rows, saved views) in the deploy path, buying nothing.
+-- The key reservation is gone from the server as well, so a workspace that
+-- already owns a custom `triage` status simply keeps it.

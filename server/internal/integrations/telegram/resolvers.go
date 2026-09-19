@@ -227,7 +227,7 @@ func (r *sessionBinder) StartSession(ctx context.Context, p engine.StartSessionP
 			BindingKey: bindingKey, BindingConfig: config, ChatType: p.Message.Source.ChatType,
 		},
 		Initiator: p.Sender,
-		Body:      p.Message.Text, MessageID: p.Message.MessageID, ThreadID: replyThread,
+		Body:      p.Message.Text, CommandText: p.Message.CommandText, MessageID: p.Message.MessageID, ThreadID: replyThread,
 		ClaimToken: p.ClaimToken, MediaPendingSeconds: p.MediaPendingSeconds,
 		PersistMessage: p.PersistMessage, HistoryBoundaryPending: p.HistoryBoundaryPending,
 		BeforeCommit: p.BeforeCommit,

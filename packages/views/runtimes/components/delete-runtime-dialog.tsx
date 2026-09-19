@@ -200,8 +200,8 @@ export function DeleteRuntimeDialog({
       <AlertDialogContent
         className={
           cascade
-            ? "w-[calc(100vw-2rem)] !max-w-[640px] gap-0 overflow-hidden rounded-lg p-0"
-            : "w-[calc(100vw-2rem)] !max-w-[440px] gap-0 overflow-hidden rounded-lg p-0"
+            ? "w-[calc(100vw-2rem)] !max-w-[640px] gap-0 overflow-hidden p-0"
+            : "w-[calc(100vw-2rem)] !max-w-[440px] gap-0 overflow-hidden p-0"
         }
         onClick={(e) => e.stopPropagation()}
       >

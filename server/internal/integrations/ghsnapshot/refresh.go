@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/dbreader"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -49,10 +50,11 @@ var (
 // PR linking, merge→Done, or any other existing behavior (acceptance
 // criterion 4).
 type Manager struct {
-	client    *Client
-	queries   *db.Queries
-	pool      TxBeginner
-	onApplied func(ctx context.Context, prID pgtype.UUID)
+	client       *Client
+	queries      *db.Queries
+	readSelector *dbreader.Selector
+	pool         TxBeginner
+	onApplied    func(ctx context.Context, prID pgtype.UUID)
 
 	concurrency   int
 	viewTTL       time.Duration
@@ -92,6 +94,7 @@ func NewManager(client *Client, queries *db.Queries, pool TxBeginner, onApplied 
 	return &Manager{
 		client:        client,
 		queries:       queries,
+		readSelector:  dbreader.NewPrimaryOnly(queries),
 		pool:          pool,
 		onApplied:     onApplied,
 		concurrency:   defaultConcurrency,
@@ -109,6 +112,15 @@ func NewManager(client *Client, queries *db.Queries, pool TxBeginner, onApplied 
 		trailing:      map[address]bool{},
 		attempts:      map[address]int{},
 		rateUntil:     map[int64]time.Time{},
+	}
+}
+
+// SetReadSelector opts the refresh worker into the API server's configured
+// replica routing. It must be called before Start; managers used by tests and
+// primary-only deployments retain the safe primary default from NewManager.
+func (m *Manager) SetReadSelector(selector *dbreader.Selector) {
+	if selector != nil {
+		m.readSelector = selector
 	}
 }
 
@@ -234,7 +246,7 @@ func (m *Manager) process(ctx context.Context, addr address) {
 		return
 	}
 
-	rows, err := m.queries.ListGitHubPRRowsByAddress(ctx, db.ListGitHubPRRowsByAddressParams{
+	rows, err := m.listGitHubPRRowsByAddress(ctx, db.ListGitHubPRRowsByAddressParams{
 		InstallationID: addr.InstallationID,
 		RepoOwner:      addr.Owner,
 		RepoName:       addr.Repo,
@@ -265,10 +277,13 @@ func (m *Manager) process(ctx context.Context, addr address) {
 		}
 	}
 
-	// Chase decision. Chase only while the snapshot is undecided AND we still
-	// have an open PR row on this head. If nothing applied (head advanced past
-	// this response, or the PR is gone), the webhook that moved the head has
-	// already enqueued the fresh head, so we stop here.
+	// Chase only while the snapshot is undecided AND a write proved that an
+	// open PR row still exists on this head. If the head advanced, its webhook
+	// owns the next refresh; if the row was removed, nothing remains to refresh.
+	// Replica lag can instead make rows empty; that omission is recovered by the
+	// bounded TTL sweep for an open/draft PR or by a later page-view refresh, so
+	// it must not start a chase without having observed current row state. A
+	// logged write failure is likewise left to those later triggers.
 	if anyApplied && anyOpenApplied && !snap.Decided() {
 		m.scheduleChase(addr)
 	} else {
@@ -276,6 +291,23 @@ func (m *Manager) process(ctx context.Context, addr address) {
 		delete(m.attempts, addr)
 		m.mu.Unlock()
 	}
+}
+
+// listGitHubPRRowsByAddress is eventual-consistency safe because the returned
+// IDs are only candidates for primary writes. Each write checks the current
+// head SHA on the primary, so replica lag can omit an update but cannot apply a
+// snapshot for an old head. The TTL sweep and page-view trigger recover omitted
+// rows.
+func (m *Manager) listGitHubPRRowsByAddress(ctx context.Context, params db.ListGitHubPRRowsByAddressParams) ([]db.ListGitHubPRRowsByAddressRow, error) {
+	return dbreader.Read(
+		ctx,
+		m.readSelector,
+		dbreader.BusinessGitHubPRRefresh,
+		dbreader.EventualConsistency,
+		func(ctx context.Context, queries *db.Queries) ([]db.ListGitHubPRRowsByAddressRow, error) {
+			return queries.ListGitHubPRRowsByAddress(ctx, params)
+		},
+	)
 }
 
 func (m *Manager) rateLimitPause(installationID int64) time.Duration {

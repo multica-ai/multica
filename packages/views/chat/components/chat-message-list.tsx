@@ -51,7 +51,11 @@ import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { FOLLOW_EDGE_THRESHOLD } from "../../common/task-transcript/transcript-follow";
 import { LIVE_END_ROW_ATTR, useStickToBottom } from "./stick-to-bottom";
 import { formatElapsedMs } from "../lib/format";
-import { splitTimeline, extractCopyText } from "../lib/copy-text";
+import {
+  canonicalAnswerText,
+  extractCopyText,
+  splitTimeline,
+} from "../lib/copy-text";
 import { stripChatQuickActionsProtocol } from "../lib/quick-actions";
 import { useT } from "../../i18n";
 
@@ -599,6 +603,14 @@ function AssistantMessage({
   // without any text. Keep whatever tool/thinking timeline the run produced and
   // show a localized "no text reply" notice instead of an empty markdown block.
   const isNoResponse = message?.message_kind === "no_response";
+  const settledContent = message
+    ? canonicalAnswerText(message, transformContent)
+    : undefined;
+  // Empty persisted content is valid for attachment-only/no-response turns and
+  // for legacy rows whose transcript is the only remaining text source. Only
+  // a non-empty canonical answer replaces timeline text after settlement.
+  const canonicalAnswer =
+    !isNoResponse && settledContent?.trim() ? settledContent : undefined;
 
   return (
     <div className="w-full space-y-1.5">
@@ -608,13 +620,14 @@ function AssistantMessage({
           attachments={message?.attachments}
           phase={phase}
           isStreaming={!message}
+          settledContent={canonicalAnswer}
         />
       )}
       {isNoResponse ? (
         <NoResponseNotice />
       ) : message && timeline.length === 0 ? (
         <RichContent
-          content={message.content}
+          content={settledContent ?? message.content}
           attachments={message.attachments}
           density="compact"
           phase="settled"
@@ -625,12 +638,13 @@ function AssistantMessage({
         <>
           <AttachmentList
             attachments={message.attachments}
-            content={message.content}
+            content={settledContent ?? message.content}
           />
           <MessageFooter
             message={message}
             timeline={timeline}
             isPending={isPending}
+            transformContent={transformContent}
           />
           {onQuickAction && showStarterCards ? (
             // The opening's starter cards own this turn's suggestion strip
@@ -853,15 +867,18 @@ function MessageFooter({
   message,
   timeline,
   isPending,
+  transformContent,
 }: {
   message: ChatMessage;
   timeline: ChatTimelineItem[];
   isPending: boolean;
+  transformContent?: (content: string) => string;
 }) {
   // A no_response turn has nothing to copy, and its caption uses a neutral
   // "Finished in Xs" instead of "Replied in Xs" (MUL-4351).
   const isNoResponse = message.message_kind === "no_response";
-  const showCopy = !isPending && !isNoResponse;
+  const copyContent = extractCopyText(message, timeline, transformContent);
+  const showCopy = !isPending && !isNoResponse && copyContent.trim().length > 0;
   if (message.elapsed_ms == null && !showCopy) return null;
   return (
     <div className="flex items-center gap-1.5">
@@ -871,21 +888,21 @@ function MessageFooter({
           elapsedMs={message.elapsed_ms}
         />
       )}
-      {showCopy && <MessageCopyButton message={message} timeline={timeline} />}
+      {showCopy && (
+        <MessageCopyButton content={copyContent} />
+      )}
     </div>
   );
 }
 
 function MessageCopyButton({
-  message,
-  timeline,
+  content,
 }: {
-  message: ChatMessage;
-  timeline: ChatTimelineItem[];
+  content: string;
 }) {
   const { t } = useT("chat");
   const handleCopy = async () => {
-    if (await copyText(extractCopyText(message, timeline))) {
+    if (await copyText(content)) {
       toast.success(t(($) => $.message_list.copied_toast));
     } else {
       toast.error(t(($) => $.message_list.copy_failed_toast));
@@ -978,6 +995,7 @@ function FailureBubble({
     timeout: t(($) => $.message_list.failure.timeout),
     codex_semantic_inactivity: t(($) => $.message_list.failure.codex_semantic_inactivity),
     runtime_offline: t(($) => $.message_list.failure.runtime_offline),
+    runtime_access_denied: t(($) => $.message_list.failure.runtime_access_denied),
     runtime_recovery: t(($) => $.message_list.failure.runtime_recovery),
     manual: t(($) => $.message_list.failure.manual),
     cancelled: t(($) => $.message_list.failure.manual),
@@ -1025,7 +1043,7 @@ function FailureBubble({
                 <span>{t(($) => $.message_list.show_details)}</span>
               </CollapsibleTrigger>
               <CollapsibleContent>
-                <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted/40 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-all">
+                <pre className="mt-1 max-h-40 overflow-auto rounded-xs bg-muted/40 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-all">
                   {rawError}
                 </pre>
               </CollapsibleContent>
@@ -1041,37 +1059,66 @@ function FailureBubble({
   );
 }
 
-// ─── Timeline: outer process fold + final text (Conductor-style) ─────────
+// ─── Timeline: outer process fold + answer (Conductor-style) ─────────────
 //
-// splitTimeline (lib/copy-text.ts) carves the items into:
+// While streaming, splitTimeline (lib/copy-text.ts) carves the items into:
 //   preface — text before the first thinking/tool item
 //   middle  — first → last non-text item (inclusive, may sandwich text)
 //   final   — text after the last non-text item
 //
-// We render preface + final outside an outer Collapsible ("X steps") that
-// wraps middle. The inner row Collapsibles (ThinkingRow / ToolCallRow /
-// ToolResultRow) are unchanged — clicking them toggles independently of
-// the outer fold. Copy mirrors what's visible when the outer fold is
-// closed: preface + final, never middle. See extractCopyText for the
-// authoritative copy logic.
+// Once settled, the persisted chat_message content is authoritative for the
+// answer. Preface + middle remain in the process fold so intermediate narration
+// is still inspectable; only trailing transcript text is replaced. Explicit
+// process/answer keys preserve the trailing RichContent subtree when a live row
+// becomes its persisted row (MUL-4922).
 
 function TimelineView({
   items,
   isStreaming,
   attachments,
   phase = "settled",
+  settledContent,
 }: {
   items: ChatTimelineItem[];
   isStreaming?: boolean;
   attachments?: import("@multica/core/types").Attachment[];
   phase?: "streaming" | "settled";
+  settledContent?: string;
 }) {
+  if (phase === "settled" && settledContent !== undefined) {
+    const { preface, middle } = splitTimeline(items);
+    const processItems = [...preface, ...middle];
+    return (
+      <>
+        {processItems.length > 0 && (
+          <OuterProcessFold
+            key="process"
+            items={processItems}
+            isStreaming={false}
+            attachments={attachments}
+            phase="settled"
+            stepCount={middle.length}
+          />
+        )}
+        <RichContent
+          key="answer"
+          content={settledContent}
+          attachments={attachments}
+          density="compact"
+          phase="settled"
+          className="leading-relaxed"
+        />
+      </>
+    );
+  }
+
   const { preface, middle, final } = splitTimeline(items);
 
   return (
     <>
       {preface.length > 0 && (
         <RichContent
+          key="preface"
           content={preface.map((t) => t.content ?? "").join("")}
           attachments={attachments}
           density="compact"
@@ -1081,6 +1128,7 @@ function TimelineView({
       )}
       {middle.length > 0 && (
         <OuterProcessFold
+          key="process"
           items={middle}
           isStreaming={!!isStreaming}
           attachments={attachments}
@@ -1089,6 +1137,7 @@ function TimelineView({
       )}
       {final.length > 0 && (
         <RichContent
+          key="answer"
           content={final.map((t) => t.content ?? "").join("")}
           attachments={attachments}
           density="compact"
@@ -1105,11 +1154,13 @@ function OuterProcessFold({
   isStreaming,
   attachments,
   phase = "settled",
+  stepCount,
 }: {
   items: ChatTimelineItem[];
   isStreaming?: boolean;
   attachments?: import("@multica/core/types").Attachment[];
   phase?: "streaming" | "settled";
+  stepCount?: number;
 }) {
   const { t } = useT("chat");
   // Open while the task streams (so the user watches progress), collapsed once
@@ -1123,13 +1174,13 @@ function OuterProcessFold({
     if (wasStreaming.current && !isStreaming) setOpen(false);
     wasStreaming.current = !!isStreaming;
   }, [isStreaming]);
-  const stepCount = items.length;
+  const displayedStepCount = stepCount ?? items.length;
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="flex items-center gap-1 text-caption text-muted-foreground hover:text-foreground transition-colors">
         {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-        <span>{t(($) => $.message_list.process_steps, { count: stepCount })}</span>
+        <span>{t(($) => $.message_list.process_steps, { count: displayedStepCount })}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-1 rounded-lg border bg-muted/20 p-2 space-y-0.5">
@@ -1229,7 +1280,7 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
+      <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-xs px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
         <ChevronRight
           className={cn(
             "h-3 w-3 shrink-0 text-muted-foreground transition-transform",
@@ -1242,7 +1293,7 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
       </CollapsibleTrigger>
       {hasInput && (
         <CollapsibleContent>
-          <pre className="ml-[18px] mt-0.5 max-h-32 overflow-auto rounded bg-muted/50 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-all">
+          <pre className="ml-[18px] mt-0.5 max-h-32 overflow-auto rounded-xs bg-muted/50 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-all">
             {JSON.stringify(item.input, null, 2)}
           </pre>
         </CollapsibleContent>
@@ -1264,7 +1315,7 @@ function ToolResultRow({ item }: { item: ChatTimelineItem }) {
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex w-full items-start gap-1.5 rounded px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
+      <CollapsibleTrigger className="flex w-full items-start gap-1.5 rounded-xs px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
         <ChevronRight
           className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform mt-0.5", open && "rotate-90")}
         />
@@ -1273,7 +1324,7 @@ function ToolResultRow({ item }: { item: ChatTimelineItem }) {
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <pre className="ml-[18px] mt-0.5 max-h-40 overflow-auto rounded bg-muted/50 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-all">
+        <pre className="ml-[18px] mt-0.5 max-h-40 overflow-auto rounded-xs bg-muted/50 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-all">
           {output.length > 4000 ? output.slice(0, 4000) + "\n... (truncated)" : output}
         </pre>
       </CollapsibleContent>
@@ -1290,12 +1341,12 @@ function ThinkingRow({ item }: { item: ChatTimelineItem }) {
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex w-full items-start gap-1.5 rounded px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
+      <CollapsibleTrigger className="flex w-full items-start gap-1.5 rounded-xs px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
         <Brain className="h-3 w-3 shrink-0 text-faint-foreground mt-0.5" />
         <span className="text-muted-foreground italic truncate">{preview}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <pre className="ml-[18px] mt-0.5 max-h-40 overflow-auto rounded bg-muted/30 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-words">
+        <pre className="ml-[18px] mt-0.5 max-h-40 overflow-auto rounded-xs bg-muted/30 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-words">
           {text}
         </pre>
       </CollapsibleContent>

@@ -262,3 +262,66 @@ describe("AutopilotDialog schedule section on an autopilot that has one", () => 
     expect(mockCreateTrigger).not.toHaveBeenCalled();
   });
 });
+
+// Regression cover for MUL-7478: the schedule panel counted triggers of every
+// kind, so a 1 schedule + 1 webhook autopilot — where exactly one row can take
+// a cron and the write below names it — was locked out of schedule editing
+// entirely, with a notice pointing at a detail page that had no editor either.
+describe("AutopilotDialog schedule section on an autopilot with several triggers", () => {
+  beforeEach(() => {
+    mockUpdateAutopilot.mockReset().mockResolvedValue({ id: AUTOPILOT_ID });
+    mockCreateTrigger.mockReset().mockResolvedValue({ id: "trg-new" });
+    mockUpdateTrigger.mockReset().mockResolvedValue({ id: "trg-sched" });
+  });
+
+  it("edits the one schedule of an autopilot that also has a webhook", async () => {
+    const user = userEvent.setup();
+    renderEditDialog([
+      trigger({ id: "trg-sched" }),
+      trigger({ id: "trg-hook", kind: "webhook", cron_expression: null, timezone: null }),
+    ]);
+
+    // The stored schedule, live — not the locked notice a second trigger of any
+    // kind used to produce.
+    expect(screen.getByTestId("timezone-picker")).toHaveTextContent("Asia/Shanghai");
+    expect(screen.queryByText(/Close this dialog/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "At an interval" }));
+    await user.click(saveButton());
+
+    await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
+    // The schedule row, never the webhook one: the API rejects a cron on any
+    // other kind, and rotating the webhook's URL out from under its callers
+    // would be the wrong write to guess at.
+    expect(mockUpdateTrigger.mock.calls[0]?.[0]).toMatchObject({
+      autopilotId: AUTOPILOT_ID,
+      triggerId: "trg-sched",
+    });
+    expect(mockCreateTrigger).not.toHaveBeenCalled();
+  });
+
+  it("states which schedules to go and edit instead of showing the first of them", async () => {
+    const user = userEvent.setup();
+    renderEditDialog([
+      trigger({ id: "trg-morning" }),
+      trigger({ id: "trg-evening", cron_expression: "TZ=Asia/Shanghai 0 18 * * *" }),
+    ]);
+
+    expect(
+      screen.getByText(
+        "This autopilot has 2 schedules. Close this dialog and edit each one under Triggers below.",
+      ),
+    ).toBeInTheDocument();
+    // A single-value editor cannot show two schedules, and a disabled one
+    // showing the first is still the half-truth a reader would set a clock by.
+    expect(screen.queryByTestId("timezone-picker")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "At an interval" })).not.toBeInTheDocument();
+
+    await user.click(saveButton());
+
+    // Other fields still save; the schedules are left to the trigger rows.
+    await waitFor(() => expect(mockUpdateAutopilot).toHaveBeenCalledTimes(1));
+    expect(mockUpdateTrigger).not.toHaveBeenCalled();
+    expect(mockCreateTrigger).not.toHaveBeenCalled();
+  });
+});

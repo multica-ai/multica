@@ -132,14 +132,15 @@ func channelMessageFromLark(lm InboundMessage) channel.InboundMessage {
 		reply = &channel.ReplyCtx{MessageID: lm.ParentID, RootID: lm.RootID}
 	}
 	return channel.InboundMessage{
-		EventID:        lm.EventID,
-		MessageID:      lm.MessageID,
-		Type:           channelMsgType(lm.MessageType),
-		Text:           lm.Body,
-		CommandText:    lm.CommandBody,
-		ReplyTo:        reply,
-		AddressedToBot: lm.AddressedToBot,
-		ForceFresh:     lm.ForceFreshSession,
+		EventID:            lm.EventID,
+		MessageID:          lm.MessageID,
+		Type:               channelMsgType(lm.MessageType),
+		Text:               lm.Body,
+		CommandText:        lm.CommandBody,
+		HasSelectedContext: lm.HasSelectedContext,
+		ReplyTo:            reply,
+		AddressedToBot:     lm.AddressedToBot,
+		ForceFresh:         lm.ForceFreshSession,
 		Source: channel.Source{
 			ChannelType: channel.TypeFeishu,
 			ChatID:      string(lm.ChatID),

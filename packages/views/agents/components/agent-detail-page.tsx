@@ -56,8 +56,9 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { cn } from "@multica/ui/lib/utils";
 import { AppLink, useNavigation } from "../../navigation";
-import { PageHeader } from "../../layout/page-header";
+import { PAGE_GUTTER, PAGE_RAIL, PageHeader } from "../../layout/page-header";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AgentPresenceIndicator } from "./agent-presence-indicator";
 import { VisibilityBadge } from "./visibility-badge";
@@ -357,7 +358,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       />
 
       {!canEdit.allowed && (
-        <div className="px-6 pt-3">
+        <div className={cn(PAGE_RAIL, PAGE_GUTTER, "pt-3")}>
           <CapabilityBanner
             reason={canEdit.reason}
             resource="agent"
@@ -367,40 +368,44 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       )}
 
       {isArchived && (
-        <div className="flex shrink-0 items-center gap-2 border-b bg-muted/50 px-6 py-2 text-caption text-muted-foreground">
-          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-          <span className="flex-1">
-            {t(($) => $.detail.archived_banner)}
-          </span>
-          {canEdit.allowed && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-6 text-caption"
-              onClick={() => handleRestore(agent.id)}
-            >
-              {t(($) => $.detail.restore)}
-            </Button>
-          )}
+        <div className="shrink-0 border-b bg-muted/50 py-2 text-caption text-muted-foreground">
+          <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex items-center gap-2")}>
+            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+            <span className="flex-1">
+              {t(($) => $.detail.archived_banner)}
+            </span>
+            {canEdit.allowed && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 text-caption"
+                onClick={() => handleRestore(agent.id)}
+              >
+                {t(($) => $.detail.restore)}
+              </Button>
+            )}
+          </div>
         </div>
       )}
 
       {!isArchived && !runtimeBound && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-6 py-2 text-caption text-amber-900 dark:text-amber-100">
-          <Server className="h-3.5 w-3.5 shrink-0" />
-          <span className="flex-1">
-            {t(($) => $.detail.runtime_required_banner)}
-          </span>
-          {canEdit.allowed && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-6 border-amber-500/40 bg-background/70 text-caption"
-              onClick={() => setTabNavIntent("general")}
-            >
-              {t(($) => $.detail.bind_runtime)}
-            </Button>
-          )}
+        <div className="shrink-0 border-b border-amber-500/30 bg-amber-500/10 py-2 text-caption text-amber-900 dark:text-amber-100">
+          <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex items-center gap-2")}>
+            <Server className="h-3.5 w-3.5 shrink-0" />
+            <span className="flex-1">
+              {t(($) => $.detail.runtime_required_banner)}
+            </span>
+            {canEdit.allowed && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 border-amber-500/40 bg-background/70 text-caption"
+                onClick={() => setTabNavIntent("general")}
+              >
+                {t(($) => $.detail.bind_runtime)}
+              </Button>
+            )}
+          </div>
         </div>
       )}
 
@@ -500,8 +505,10 @@ function DetailHeader({
   const hasMoreActions = !!onArchive;
 
   return (
-    <header className="shrink-0 border-b bg-background px-4 pb-5 pt-3 sm:px-6">
-      <div className="mx-auto max-w-[1440px]">
+    <header
+      className="shrink-0 border-b bg-background pb-5 pt-3"
+    >
+      <div className={cn(PAGE_RAIL, PAGE_GUTTER)}>
         <div className="flex min-w-0 items-center gap-1.5 text-caption text-muted-foreground">
           <AppLink
             href={backHref}
@@ -623,18 +630,20 @@ function BackHeader({ paths, title }: { paths: string; title: string }) {
 function DetailLoadingSkeleton() {
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <div className="shrink-0 border-b px-6 pb-5 pt-3">
-        <Skeleton className="h-4 w-48" />
-        <div className="mt-4 flex items-start gap-4">
-          <Skeleton className="h-14 w-14 rounded-full" />
-          <div className="flex-1 space-y-3">
-            <Skeleton className="h-7 w-64" />
-            <Skeleton className="h-4 w-full max-w-xl" />
-            <Skeleton className="h-4 w-full max-w-lg" />
+      <div className="shrink-0 border-b pb-5 pt-3">
+        <div className={cn(PAGE_RAIL, PAGE_GUTTER)}>
+          <Skeleton className="h-4 w-48" />
+          <div className="mt-4 flex items-start gap-4">
+            <Skeleton className="h-14 w-14 rounded-full" />
+            <div className="flex-1 space-y-3">
+              <Skeleton className="h-7 w-64" />
+              <Skeleton className="h-4 w-full max-w-xl" />
+              <Skeleton className="h-4 w-full max-w-lg" />
+            </div>
           </div>
         </div>
       </div>
-      <div className="flex flex-1 flex-col p-6">
+      <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex flex-1 flex-col py-6")}>
         <Skeleton className="h-9 w-96" />
         <div className="mt-6 grid flex-1 gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-5">

@@ -74,9 +74,8 @@ type Metrics struct {
 // relay stream. PTTLMillis uses Redis sentinel values: -1 means no expiry and
 // -2 means the key does not exist.
 type RedisStreamObservation struct {
-	Entries     int64 `json:"entries"`
-	MemoryBytes int64 `json:"memory_bytes"`
-	PTTLMillis  int64 `json:"pttl_millis"`
+	Entries    int64 `json:"entries"`
+	PTTLMillis int64 `json:"pttl_millis"`
 }
 
 // M is the package-level metrics singleton.
@@ -135,16 +134,15 @@ func (m *Metrics) lastRedisErr() string {
 }
 
 // ObserveRedisStream replaces the latest sampled statistics for stream.
-func (m *Metrics) ObserveRedisStream(stream string, entries, memoryBytes, pttlMillis int64) {
+func (m *Metrics) ObserveRedisStream(stream string, entries, pttlMillis int64) {
 	m.redisStreamsMu.Lock()
 	defer m.redisStreamsMu.Unlock()
 	if m.redisStreams == nil {
 		m.redisStreams = make(map[string]RedisStreamObservation)
 	}
 	m.redisStreams[stream] = RedisStreamObservation{
-		Entries:     entries,
-		MemoryBytes: memoryBytes,
-		PTTLMillis:  pttlMillis,
+		Entries:    entries,
+		PTTLMillis: pttlMillis,
 	}
 }
 

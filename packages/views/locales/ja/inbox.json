@@ -28,6 +28,7 @@
     "open_in_new_tab": "新しいタブで開く"
   },
   "list": {
+    "loading_selection": "通知を読み込み中…",
     "empty": "通知はありません",
     "mark_done_tooltip": "完了にする",
     "archive_tooltip": "アーカイブ",
@@ -40,7 +41,10 @@
     "archived_title": "アーカイブ済み",
     "archived_empty": "アーカイブされた通知はありません",
     "unarchive_tooltip": "アーカイブ解除",
-    "actions_aria": "通知の操作"
+    "actions_aria": "通知の操作",
+    "load_more": "さらに読み込む",
+    "loading_more": "読み込み中…",
+    "retry": "再試行"
   },
   "detail": {
     "select_prompt": "詳細を表示する通知を選択してください",
@@ -96,6 +100,7 @@
     "unarchived": "通知を元に戻しました"
   },
   "errors": {
+    "archived_lookup_failed": "リンク先の通知を読み込めませんでした",
     "source_context_retry_failed": "元のコンテキストで再試行できませんでした",
     "source_context_retry_unavailable": "このコンテキストは再試行できません。分岐点からやり直してください。",
     "mark_read_failed": "既読にできませんでした",
@@ -107,6 +112,7 @@
     "archive_all_read_failed": "既読の項目をアーカイブできませんでした",
     "archive_completed_failed": "完了した項目をアーカイブできませんでした",
     "unarchive_failed": "アーカイブ解除に失敗しました",
-    "archived_load_failed": "アーカイブ済み通知を読み込めませんでした"
+    "archived_load_failed": "アーカイブ済み通知を読み込めませんでした",
+    "filters_load_failed": "フィルターを読み込めませんでした"
   }
 }

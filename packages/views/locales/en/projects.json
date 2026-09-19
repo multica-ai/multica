@@ -75,7 +75,7 @@
     "description_placeholder": "Add description...",
     "description_hint": "Shared with agents as context for every run in this project.",
     "empty_issues_title": "No issues linked",
-    "empty_issues_hint": "Create a new issue or assign existing ones to this project.",
+    "empty_issues_hint": "You can also add existing issues to this project.",
     "empty_issues_new_button": "New Issue",
     "no_issues_yet": "No issues yet",
     "toast_link_copied": "Link copied",

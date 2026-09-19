@@ -21,7 +21,7 @@ func (h *Handler) requirePluginsV1(w http.ResponseWriter, r *http.Request) bool 
 	if h.pluginsV1Enabled(r.Context()) {
 		return true
 	}
-	writeError(w, http.StatusServiceUnavailable, "Plugin management is not enabled")
+	writeFeatureDisabled(w, "plugin_api_disabled", "Plugin management is not enabled")
 	return false
 }
 

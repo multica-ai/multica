@@ -69,6 +69,9 @@ func (d *Daemon) agentDiscoveryLoop(ctx context.Context) {
 	var (
 		backoff   time.Duration
 		nextRetry time.Time
+		// lastMismatch is the DSH profile/runtime disagreement the previous tick
+		// saw, for the one direction that is throttled to a single forced round.
+		lastMismatch dshProfileMismatch
 	)
 	for {
 		select {
@@ -77,26 +80,177 @@ func (d *Daemon) agentDiscoveryLoop(ctx context.Context) {
 		case <-versionTicker.C:
 			d.refreshAgentVersions(ctx)
 		case now := <-ticker.C:
-			gained := d.refreshAgentAvailability()
-			missing := d.providersMissingRuntimes()
-			if len(missing) == 0 {
-				backoff = 0
-				continue
-			}
-			// A newly discovered provider always gets an immediate attempt;
-			// otherwise honor the backoff earned by previous failures.
-			if len(gained) == 0 && now.Before(nextRetry) {
-				continue
-			}
-			before := len(missing)
-			d.convergeRuntimeRegistrations(ctx)
-			if len(d.providersMissingRuntimes()) < before {
-				backoff = 0
-			} else {
-				backoff = nextConvergeBackoff(backoff)
-			}
-			nextRetry = now.Add(backoff)
+			// Forced by disagreement between two live states, not by a change
+			// since the last look: a profile removed between two observations,
+			// or before the first one — which is what a restart produces —
+			// would otherwise never be noticed. Observed in practice: a profile
+			// removed a minute after startup stayed live for three minutes and
+			// the server routed a chat task straight into it.
+			mismatch := d.dshRuntimeProfileMismatch()
+			force := mismatch.forcesEveryTick() || (mismatch != dshMismatchNone && mismatch != lastMismatch)
+			lastMismatch = mismatch
+			d.convergeAgentRuntimes(ctx, &backoff, &nextRetry, now, force)
+		case <-d.agentDiscoveryKick:
+			// A local state change (the DSH runtime profile appearing) makes a
+			// provider registrable right now. Wait for nothing: the scheduled
+			// attempt this replaces can be agentConvergeMaxBackoff away.
+			d.convergeAgentRuntimes(ctx, &backoff, &nextRetry, time.Now(), true)
 		}
+	}
+}
+
+// convergeAgentRuntimes runs the expensive half of a discovery round: publish
+// anything the cheap probe gained, then version-probe and register whatever is
+// still missing a runtime.
+//
+// force ignores the backoff earned by previous failures, for a caller that
+// knows the reason a provider could not register has just gone away — and, in
+// the other direction, for one that knows a registered provider may just have
+// gone bad. backoff and nextRetry are the loop's scheduling state, threaded
+// through rather than owned here so the ticker and the kick share one backoff.
+func (d *Daemon) convergeAgentRuntimes(
+	ctx context.Context,
+	backoff *time.Duration,
+	nextRetry *time.Time,
+	now time.Time,
+	force bool,
+) {
+	gained := d.refreshAgentAvailability()
+	missing := d.providersMissingRuntimes()
+	// A forced round runs even with nothing missing: that is the shape of "a
+	// registered provider just became unusable", which is exactly what the
+	// verdict layer needs a round to notice.
+	if len(missing) == 0 && !force {
+		*backoff = 0
+		return
+	}
+	// A newly discovered provider always gets an immediate attempt; otherwise
+	// honor the backoff earned by previous failures unless the caller knows
+	// the blocker is gone.
+	if len(gained) == 0 && !force && now.Before(*nextRetry) {
+		return
+	}
+	before := len(missing)
+	d.convergeRuntimeRegistrations(ctx)
+	after := len(d.providersMissingRuntimes())
+	// backoff is earned by registration that keeps failing. A round that leaves
+	// nothing missing has nothing to back off from — including a forced round
+	// that only came here to condemn a registered provider, where before and
+	// after are both zero.
+	if after == 0 || after < before {
+		*backoff = 0
+	} else {
+		*backoff = nextConvergeBackoff(*backoff)
+	}
+	*nextRetry = now.Add(*backoff)
+}
+
+// dshOnlyVerdicts narrows a round's demotable verdicts to dsh.
+//
+// Returns nil rather than an empty map when there is nothing, so the caller's
+// length check reads the same either way.
+func dshOnlyVerdicts(demotable map[string]runtimeVerdict) map[string]runtimeVerdict {
+	verdict, ok := demotable["dsh"]
+	if !ok {
+		return nil
+	}
+	return map[string]runtimeVerdict{"dsh": verdict}
+}
+
+// dshProfileMismatch names a disagreement between the two states the daemon has
+// to keep aligned: whether the Multica runtime profile is installed, and whether
+// a dsh runtime is registered.
+//
+// The kind, rather than a bare bool, is what the caller needs, because the two
+// directions have opposite termination behaviour — see forcesEveryTick.
+type dshProfileMismatch string
+
+const (
+	// dshMismatchNone: the two states agree.
+	dshMismatchNone dshProfileMismatch = ""
+	// dshMismatchRuntimeWithoutProfile is a live runtime whose CLI can no
+	// longer start. It is still "available" — discovered, and holding a
+	// runtime — so nothing else in the loop looks at it, and the server keeps
+	// routing work into a CLI that cannot start.
+	dshMismatchRuntimeWithoutProfile dshProfileMismatch = "runtime-without-profile"
+	// dshMismatchProfileWithoutRuntime is the mirror image, and is what a
+	// manual `dsh plugin --profile multica add` produces.
+	dshMismatchProfileWithoutRuntime dshProfileMismatch = "profile-without-runtime"
+)
+
+// forcesEveryTick reports whether this mismatch must force a converge round on
+// every tick rather than only on the tick that first observed it.
+//
+// The asymmetry is about which direction a round is guaranteed to make progress
+// on. Condemning a live runtime takes TWO probe rounds — the first only starts
+// condemnedConfirmWindow — and nothing else schedules the second: with dsh still
+// registered nothing is missing a runtime, so an unforced tick returns from
+// convergeAgentRuntimes without probing at all. Forcing only the first sighting
+// therefore leaves the runtime live and taking work forever, which is the exact
+// failure the mismatch check exists to prevent.
+//
+// The other direction has no such guarantee and must NOT force every tick: a
+// profile that is installed but answers nothing keeps that mismatch for as long
+// as it is installed, and forcing on it would spend a full probe of every
+// provider every agentDiscoveryInterval, permanently bypassing
+// agentConvergeMaxBackoff.
+func (m dshProfileMismatch) forcesEveryTick() bool {
+	return m == dshMismatchRuntimeWithoutProfile
+}
+
+// dshRuntimeProfileMismatch names the current disagreement, or dshMismatchNone
+// when the two states agree.
+//
+// Deliberately not a change detector: this is compared on every tick against
+// live state, so a profile removed before the daemon's first look — or while it
+// was not looking — is caught on the very next tick rather than never.
+func (d *Daemon) dshRuntimeProfileMismatch() dshProfileMismatch {
+	registered := d.dshRuntimeRegistered()
+	if registered == dshMulticaProfilePresent() {
+		return dshMismatchNone
+	}
+	if registered {
+		return dshMismatchRuntimeWithoutProfile
+	}
+	// Only worth a round if there is a dsh CLI to register at all: without one
+	// nothing this round does can resolve the mismatch.
+	if _, discovered := d.agents()["dsh"]; discovered {
+		return dshMismatchProfileWithoutRuntime
+	}
+	return dshMismatchNone
+}
+
+// dshRuntimeRegistered reports whether any tracked workspace still holds a
+// built-in dsh runtime. Custom runtime profiles are excluded: they carry a
+// ProfileID and are owned by the drift path, not by the built-in set.
+func (d *Daemon) dshRuntimeRegistered() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, ws := range d.workspaces {
+		for _, id := range ws.runtimeIDs {
+			rt, ok := d.runtimeIndex[id]
+			if !ok || rt.ProfileID != "" {
+				continue
+			}
+			if rt.Provider == "dsh" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// kickAgentDiscovery asks the discovery loop for an immediate convergence
+// round. Safe on a zero-value Daemon and from any goroutine: the send is
+// non-blocking, so a burst of producers collapses into one round and none of
+// them waits on the loop.
+func (d *Daemon) kickAgentDiscovery() {
+	if d.agentDiscoveryKick == nil {
+		return
+	}
+	select {
+	case d.agentDiscoveryKick <- struct{}{}:
+	default:
 	}
 }
 
@@ -394,6 +548,7 @@ func (d *Daemon) demoteUnusableRuntimes(ctx context.Context, causes map[string]r
 
 	d.mu.Lock()
 	var demoted []string
+	var installWaits []dshInstallWait
 	// Grouped per workspace because the cleanup below has to run under each
 	// workspace's register lock — see deregisterDroppedRuntimes.
 	demotedByWorkspace := make(map[string][]string)
@@ -425,6 +580,14 @@ func (d *Daemon) demoteUnusableRuntimes(ctx context.Context, causes map[string]r
 			// the verdict and the repair command (MUL-6164).
 			if cause.offline != nil {
 				offlineReasons[rid] = *cause.offline
+				// A reason that says an install is running is a promise this
+				// row comes back on its own. Remember it so the install can
+				// take the promise back if it ends without a profile.
+				if cause.offline.Installing {
+					installWaits = append(installWaits, dshInstallWait{
+						workspaceID: workspaceID, runtimeID: rid, reason: *cause.offline,
+					})
+				}
 			}
 			// The runtime is gone, so the record of what was registered for it
 			// goes too. When the provider recovers, converge re-registers it and
@@ -439,6 +602,7 @@ func (d *Daemon) demoteUnusableRuntimes(ctx context.Context, causes map[string]r
 	// response would re-index the provider the moment it lands. The apply paths
 	// consult this under the same lock, so the two are totally ordered.
 	d.markProvidersDemotedLocked(causes)
+	d.dshInstallWaits = append(d.dshInstallWaits, installWaits...)
 	d.mu.Unlock()
 
 	if len(demoted) == 0 {
@@ -465,6 +629,79 @@ func (d *Daemon) demoteUnusableRuntimes(ctx context.Context, causes map[string]r
 		})
 	}
 	d.notifyRuntimeSetChanged()
+}
+
+// dshInstallWait is one runtime row whose offline reason claims an automatic
+// profile install will bring it back.
+type dshInstallWait struct {
+	workspaceID string
+	runtimeID   string
+	reason      RuntimeOfflineReason
+}
+
+// withdrawDshInstallWait rewrites the offline reason of every runtime that was
+// taken offline while an automatic profile install was still running, once that
+// install has ended without producing a profile.
+//
+// Without it the claim is permanent. `installing` is what tells the server this
+// particular offline runtime is worth queueing behind (MUL-6164), and the row
+// carrying it is written exactly once, by the demotion — which also removes the
+// runtime from the index, so no later round finds a runtime to condemn and no
+// later deregistration is sent. An install that fails after that point leaves
+// every assignment and @mention for the agent queueing behind a wait that has
+// already given up, which is the failure the structured reason exists to
+// prevent, not a new one to introduce.
+//
+// Best-effort, like every other deregistration path: the reason is a hint on a
+// row that is already offline, and the row is corrected again the moment the
+// provider registers.
+func (d *Daemon) withdrawDshInstallWait(ctx context.Context) {
+	d.mu.Lock()
+	waits := d.dshInstallWaits
+	d.dshInstallWaits = nil
+	d.mu.Unlock()
+	if len(waits) == 0 {
+		return
+	}
+
+	byWorkspace := make(map[string][]dshInstallWait, len(waits))
+	for _, wait := range waits {
+		byWorkspace[wait.workspaceID] = append(byWorkspace[wait.workspaceID], wait)
+	}
+	workspaceIDs := make([]string, 0, len(byWorkspace))
+	for workspaceID := range byWorkspace {
+		workspaceIDs = append(workspaceIDs, workspaceID)
+	}
+	sort.Strings(workspaceIDs)
+
+	for _, workspaceID := range workspaceIDs {
+		_ = d.withWorkspaceRegisterLock(workspaceID, func() error {
+			runtimeIDs := make([]string, 0, len(byWorkspace[workspaceID]))
+			reasons := make(map[string]RuntimeOfflineReason, len(byWorkspace[workspaceID]))
+			for _, wait := range byWorkspace[workspaceID] {
+				reason := wait.reason
+				reason.Installing = false
+				reason.Detail = dshInstallGaveUpReason
+				runtimeIDs = append(runtimeIDs, wait.runtimeID)
+				reasons[wait.runtimeID] = reason
+			}
+			// Same tracking re-check every deregistration path makes: a
+			// register that brought the runtime back between the demotion and
+			// now is newer than this correction, and its row already says
+			// online.
+			runtimeIDs = d.untrackedRuntimeIDs(runtimeIDs)
+			if len(runtimeIDs) == 0 {
+				return nil
+			}
+			d.logger.Warn("automatic DSH profile install gave up; withdrawing the wait from its runtimes",
+				"workspace_id", workspaceID, "runtime_ids", runtimeIDs)
+			if err := d.client.Deregister(ctx, runtimeIDs, reasons); err != nil {
+				d.logger.Warn("withdrawing the DSH install wait failed",
+					"workspace_id", workspaceID, "runtime_ids", runtimeIDs, "error", err)
+			}
+			return nil
+		})
+	}
 }
 
 // deregisterRevivedRuntimes takes offline the rows a register response brought
@@ -596,7 +833,24 @@ func (d *Daemon) convergeRuntimeRegistrations(ctx context.Context) {
 	// detectBuiltinRuntimes version-gates the availability set and publishes
 	// this round's drops for /health, so a provider that cannot register still
 	// gets a visible reason even though registration is skipped.
-	builtins, _, _ := d.detectBuiltinRuntimes(ctx)
+	builtins, demotable, _ := d.detectBuiltinRuntimes(ctx)
+	// Condemned providers drop out of builtins entirely, so acting on them
+	// before the early return is what keeps a dsh that goes bad mid-flight from
+	// staying online: the profile removed while dsh is registered leaves nothing
+	// missing a runtime, and a round reached only for that has no registration
+	// left to do. demoteUnusableRuntimes owns the claim barrier and the
+	// seq-stamped hold, so running it here is safe.
+	//
+	// Restricted to dsh on purpose. Every other provider is demoted from
+	// refreshAgentVersions alone, on its own ten-minute cadence, and that is the
+	// schedule their verdicts were tuned against; letting a converge round
+	// condemn them too would move Claude Code, Codex and the rest onto a
+	// different one as a side effect of a DSH fix. dsh is the only provider with
+	// a precondition that can change without any version changing, which is why
+	// it is the only one that needs a round it can be forced into.
+	if dshDemotable := dshOnlyVerdicts(demotable); len(dshDemotable) > 0 {
+		d.demoteUnusableRuntimes(ctx, dshDemotable)
+	}
 	if len(builtins) == 0 {
 		return
 	}

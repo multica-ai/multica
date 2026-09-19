@@ -192,7 +192,7 @@ func TestCursorHandleAssistantText(t *testing.T) {
 		}),
 	}
 
-	b.handleCursorAssistant(evt, ch, &output)
+	b.handleCursorAssistant(evt, func(msg Message) { ch <- msg }, &output)
 
 	if output.String() != "Hello from Cursor" {
 		t.Fatalf("expected output 'Hello from Cursor', got %q", output.String())
@@ -229,7 +229,7 @@ func TestCursorHandleAssistantToolUse(t *testing.T) {
 		}),
 	}
 
-	b.handleCursorAssistant(evt, ch, &output)
+	b.handleCursorAssistant(evt, func(msg Message) { ch <- msg }, &output)
 
 	select {
 	case m := <-ch:
@@ -421,7 +421,7 @@ func TestCursorUsageOnlyFromResult(t *testing.T) {
 		}),
 	}
 
-	b.handleCursorAssistant(evt, ch, &output)
+	b.handleCursorAssistant(evt, func(msg Message) { ch <- msg }, &output)
 
 	if output.String() != "hello" {
 		t.Fatalf("expected 'hello', got %q", output.String())

@@ -94,6 +94,8 @@ func TestCompleteTask_ReconcilesMemberCommentPostedDuringRun(t *testing.T) {
 		VALUES ($1, $2, 'member', $3, 'wait, also handle this', 'comment', now() - interval '1 minute')
 	`, issueID, testWorkspaceID, testUserID)
 
+	dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE issue_id=$1 AND id<>$2`, issueID, triggerCommentID)
+
 	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
 		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -101,6 +103,65 @@ func TestCompleteTask_ReconcilesMemberCommentPostedDuringRun(t *testing.T) {
 	// A follow-up run must now be queued for the agent.
 	if n := pendingTaskCountForAgentIssue(t, issueID, agentID); n != 1 {
 		t.Fatalf("expected exactly 1 follow-up task after reconciliation, got %d", n)
+	}
+}
+
+// A daemon may replay /complete after the server committed but its response was
+// lost. The task CAS makes that replay a 200, but the handler must also skip the
+// transaction-external reconciliation; otherwise a follow-up that finished
+// between deliveries leaves no pending dedupe row and the same member comment
+// creates a second real agent run.
+func TestCompleteTask_ReplayDoesNotCreateSecondFollowUp(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	dbfx.QueryRow(t,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
+		testWorkspaceID).Scan(&agentID, &runtimeID)
+	issueID := dbfx.Issue(t, "replayed-complete fixture", testutil.Cols{
+		"status":        "in_progress",
+		"number":        999009,
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
+	triggerCommentID := dbfx.Comment(t, issueID, "initial request", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '10 minutes'"),
+	})
+	var taskID string
+	dbfx.QueryRow(t, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, started_at)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
+		RETURNING id
+	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID)
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
+	dbfx.Exec(t, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at)
+		VALUES ($1, $2, 'member', $3, 'also handle this once', 'comment', $4, now() - interval '1 minute')
+	`, issueID, testWorkspaceID, testUserID, triggerCommentID)
+
+	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
+		t.Fatalf("first CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var followUpID string
+	dbfx.QueryRow(t, `
+		SELECT id FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND id <> $3 AND status = 'queued'
+	`, issueID, agentID, taskID).Scan(&followUpID)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1`, followUpID)
+
+	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
+		t.Fatalf("replayed CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var total int
+	dbfx.QueryRow(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2`, issueID, agentID).Scan(&total)
+	if total != 2 {
+		t.Fatalf("task rows after replay = %d, want original + exactly one follow-up", total)
+	}
+	if pending := pendingTaskCountForAgentIssue(t, issueID, agentID); pending != 0 {
+		t.Fatalf("replayed completion created %d additional pending follow-up(s)", pending)
 	}
 }
 
@@ -287,6 +348,7 @@ func TestCompleteTask_ReconcilesAgentAuthoredMentionToCompletedAgent(t *testing.
 		VALUES ($1, $2, 'agent', $3, $4, 'comment')
 		RETURNING id
 	`, issueID, testWorkspaceID, agentA, mention).Scan(&mentionCommentID)
+	dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE id=$1`, mentionCommentID, triggerCommentID)
 	mentionComment, err := testHandler.Queries.GetComment(ctx, util.MustParseUUID(mentionCommentID))
 	if err != nil {
 		t.Fatalf("setup: load mention comment: %v", err)
@@ -375,11 +437,9 @@ func TestCompleteTask_DoesNotReconcilePlainAgentReply(t *testing.T) {
 // computeCommentAgentTriggers routes a plain worker-agent reply (no mention) to
 // the squad leader via routeAssignedSquadLeaderFallback (Source = issue
 // assignee) — that is the create-time leader→worker→leader coordination path.
-// Reconcile must NOT replay that fallback: it compensates ONLY explicit
-// @agent/@squad mentions (keepExplicitMentionTriggers). So when the squad leader
-// completes a task and a worker's plain reply arrived during the run, no
-// completion-driven follow-up may be enqueued for the leader. Without the
-// explicit-mention filter this test enqueues 1 leader task and fails.
+// This reply was never accepted into a run's input plan. Reconcile must NOT
+// turn a timestamp-only plain reply into a new conversation. Accepted worker
+// handoffs are covered separately by TestWorkerReplyDelivery.
 func TestCompleteTask_DoesNotReconcilePlainWorkerReplyOnSquadIssue(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -500,6 +560,8 @@ func TestConsecutiveCommentsDifferentOriginatorsFullEnqueuePath(t *testing.T) {
 
 	// B's comment (different originator) before start → must fold in, NOT drop.
 	cB := insertMemberComment(userB, "second, from B — different user")
+	dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE id=$1`, cB.ID, cA.ID)
+	cB.ParentID = cA.ID
 	testHandler.triggerTasksForComment(ctx, issue, cB, nil, "member", userB, userB, nil)
 
 	// Still exactly one task (bounded concurrency, no unique-index collision).
@@ -563,6 +625,8 @@ func TestCompleteTask_ReconcilesDispatchedWindowComment(t *testing.T) {
 		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
 		VALUES ($1, $2, 'member', $3, 'squeezed in before start', 'comment', now() - interval '3 minutes')
 	`, issueID, testWorkspaceID, testUserID)
+
+	dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE issue_id=$1 AND id<>$2`, issueID, triggerCommentID)
 
 	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
 		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
@@ -655,6 +719,8 @@ func TestCompleteTask_ReconcilesPreDispatchMergeRaceComment(t *testing.T) {
 	`, agentID, runtimeID, issueID, triggerCommentID, deliveredCoalescedID).Scan(&taskID)
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
 
+	dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE issue_id=$1 AND id<>$2`, issueID, triggerCommentID)
+
 	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
 		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -713,8 +779,9 @@ func TestCompleteTask_ReconcilesPlannedButUndeliveredComments(t *testing.T) {
 				return id
 			}
 			old1 := insertComment("planned old one", "10 minutes")
-			old2 := insertComment("planned old two", "9 minutes")
+			old2 := insertComment("[@Agent](mention://agent/"+agentID+") planned old two", "9 minutes")
 			trigger := insertComment("planned trigger", "8 minutes")
+			dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE issue_id=$1 AND id<>$2`, issueID, old1)
 			delivered := []string{trigger}
 			if tc.deliveredOldCount > 0 {
 				delivered = append([]string{old1}, delivered...)

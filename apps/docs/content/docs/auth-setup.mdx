@@ -141,13 +141,19 @@ To invite a new member on an instance with open signup disabled, add their email
 
 ## Session lifetime
 
-Browser sign-ins last 30 days by default. Adjust with `AUTH_TOKEN_TTL`, which accepts a Go duration or a positive integer of seconds:
+Sessions slide. The lifetime below is an **idle** bound, not a countdown from sign-in: once a session drops below half of it, the next request re-issues it with a full lifetime again, so an account in continuous use is never signed out on a schedule. There is no absolute cap.
+
+The bound is one-sided. A session is only re-issued once it is past the halfway point, so a session last used while it still had more than half its lifetime left is not extended — the idle gap that is always survivable is half the value below, not all of it.
+
+Adjust with `AUTH_TOKEN_TTL`, which accepts a Go duration or a positive integer of seconds:
 
 ```dotenv
 AUTH_TOKEN_TTL=720h
 ```
 
-Restart the API service after changing it. The value only affects sign-in cookies and JWTs issued afterwards; it does not extend tokens that were already issued.
+The minimum is `60s`; anything shorter is clamped up to it and logs a warning at startup. Below that, the renewal cadence the server derives would fall under the floor clients apply to it, and clients would check for renewal less often than the session can survive.
+
+Restart the API service after changing it. The value applies to sessions issued or re-issued afterwards — because sessions slide, an existing session picks up the new lifetime the next time it is re-issued.
 
 ## Next steps
 

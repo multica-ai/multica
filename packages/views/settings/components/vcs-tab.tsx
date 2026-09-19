@@ -205,7 +205,7 @@ export function VCSTab() {
             {!configured ? (
               <p className="text-caption text-muted-foreground">
                 {t(($) => $.vcs.not_configured)}{" "}
-                <code className="rounded bg-muted px-1 py-0.5 text-micro">
+                <code className="rounded-xs bg-muted px-1 py-0.5 text-micro">
                   MULTICA_VCS_SECRET_KEY
                 </code>
                 .

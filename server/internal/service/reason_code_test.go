@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/dispatch"
@@ -51,13 +52,54 @@ func TestAgentReadinessVerdict(t *testing.T) {
 		t.Errorf("archived agent: got %+v, want blocked/target_unavailable", got)
 	}
 
-	// The runtime half.
-	if got := runtimeVerdict(db.AgentRuntime{Status: "online"}); !got.Ready() {
+	// The runtime half. A private runtime with an owner admits only an agent
+	// owned by that same member; ownerless agents are blocked for new work.
+	ownerA := pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
+	ownerB := pgtype.UUID{Bytes: [16]byte{3}, Valid: true}
+	if got := runtimeVerdict(db.AgentRuntime{Status: "online"}, db.Agent{OwnerID: ownerA}); !got.Ready() {
 		t.Errorf("online runtime: got %+v, want ready", got)
+	}
+	for name, tc := range map[string]struct {
+		runtime db.AgentRuntime
+		agent   db.Agent
+		blocked bool
+		reason  dispatch.ReasonCode
+	}{
+		"private mismatch": {
+			runtime: db.AgentRuntime{Status: "online", Visibility: "private", OwnerID: ownerA},
+			agent:   db.Agent{OwnerID: ownerB},
+			blocked: true,
+			reason:  dispatch.ReasonRuntimeAccessDenied,
+		},
+		"private ownerless agent": {
+			runtime: db.AgentRuntime{Status: "online", Visibility: "private", OwnerID: ownerA},
+			agent:   db.Agent{},
+			blocked: true,
+			reason:  dispatch.ReasonRuntimeAccessDenied,
+		},
+		"private same owner": {
+			runtime: db.AgentRuntime{Status: "online", Visibility: "private", OwnerID: ownerA},
+			agent:   db.Agent{OwnerID: ownerA},
+		},
+		"public mismatch": {
+			runtime: db.AgentRuntime{Status: "online", Visibility: "public", OwnerID: ownerA},
+			agent:   db.Agent{OwnerID: ownerB},
+		},
+		"ownerless runtime": {
+			runtime: db.AgentRuntime{Status: "online", Visibility: "private"},
+			agent:   db.Agent{OwnerID: ownerB},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := runtimeVerdict(tc.runtime, tc.agent)
+			if got.Blocked() != tc.blocked || (tc.blocked && got.Reason != tc.reason) {
+				t.Fatalf("got %+v, want blocked=%v reason=%q", got, tc.blocked, tc.reason)
+			}
+		})
 	}
 	// Offline with no explanation is the sleeping-laptop case: work waits for it,
 	// so this must NOT be blocked.
-	offline := runtimeVerdict(db.AgentRuntime{Status: "offline"})
+	offline := runtimeVerdict(db.AgentRuntime{Status: "offline"}, db.Agent{OwnerID: ownerA})
 	if offline.Blocked() || offline.Reason != dispatch.ReasonRuntimeOffline {
 		t.Errorf("plain offline runtime: got %+v, want waitable/runtime_offline", offline)
 	}
@@ -67,13 +109,79 @@ func TestAgentReadinessVerdict(t *testing.T) {
 	unusable := runtimeVerdict(db.AgentRuntime{
 		Status:   "offline",
 		Metadata: []byte(`{"offline_reason":{"code":"not_executable","detail":"agent CLI is not executable","repair":{"package":"@anthropic-ai/claude-code","command":"cd '/pkg' && node install.cjs"}}}`),
-	})
+	}, db.Agent{OwnerID: ownerA})
 	if !unusable.Blocked() || unusable.Reason != dispatch.ReasonRuntimeUnusable {
 		t.Fatalf("unusable runtime: got %+v, want blocked/runtime_unusable", unusable)
 	}
 	if unusable.Repair == nil || unusable.Repair.Command != "cd '/pkg' && node install.cjs" {
 		t.Errorf("unusable runtime lost the repair command: got %+v", unusable.Repair)
 	}
+	// Offline because the DSH runtime profile is missing is blocked for the same
+	// reason — the machine is reachable, its CLI cannot serve work, and no
+	// amount of waiting installs a bundle nobody configured — but under its OWN
+	// code. Collapsing it into runtime_unusable is what made every client tell
+	// the user to reinstall a CLI that runs perfectly.
+	profile := runtimeVerdict(db.AgentRuntime{
+		Status:   "offline",
+		Metadata: []byte(`{"offline_reason":{"code":"dsh_profile","detail":"the Multica runtime profile is not installed","repair":{"package":"DeepSeek Harness runtime profile"}}}`),
+	}, db.Agent{OwnerID: ownerA})
+	if !profile.Blocked() || profile.Reason != dispatch.ReasonRuntimeProfileMissing {
+		t.Fatalf("missing DSH profile: got %+v, want blocked/runtime_profile_missing", profile)
+	}
+	if !RuntimeBlockedNeedsNotice(profile.Reason) {
+		t.Error("missing DSH profile would leave no durable trace on the issue")
+	}
+	// The notice must describe the profile, not a broken CLI, and must not hand
+	// the user a command with a placeholder in it to paste.
+	notice := RuntimeUnusableNotice("Kit", profile)
+	if !strings.Contains(notice, "runtime profile") {
+		t.Errorf("notice does not name the missing profile: %q", notice)
+	}
+	for _, wrong := range []string{"cannot be executed", "postinstall", "<bundle>", "```"} {
+		if strings.Contains(notice, wrong) {
+			t.Errorf("notice contains %q, which belongs to the unrunnable-CLI repair: %q", wrong, notice)
+		}
+	}
+	// The unrunnable-CLI notice keeps its own text and its fenced command.
+	if unusableNotice := RuntimeUnusableNotice("Kit", unusable); !strings.Contains(unusableNotice, "node install.cjs") {
+		t.Errorf("unusable-CLI notice lost its repair command: %q", unusableNotice)
+	}
+	// The installing claim is bounded, not trusted. A withdraw cannot be
+	// guaranteed — the verdict is built before the runtime ids it needs are
+	// known, the corrective Deregister is best-effort and runs on a cancelled
+	// context during shutdown, and a daemon restarted mid-install does not track
+	// the row at all — so a claim older than the install it describes must stop
+	// buying a queue, or it recreates the failure it was added to prevent.
+	installingRow := func(updatedAt time.Time) db.AgentRuntime {
+		return db.AgentRuntime{
+			Status:    "offline",
+			Metadata:  []byte(`{"offline_reason":{"code":"dsh_profile","installing":true,"detail":"installing the configured bundle now"}}`),
+			UpdatedAt: pgtype.Timestamptz{Time: updatedAt, Valid: true},
+		}
+	}
+	// The one exception is an install the daemon is running right now: that wait
+	// DOES end by itself, so the work queues instead of being refused.
+	fresh := runtimeVerdict(installingRow(time.Now()), db.Agent{OwnerID: ownerA})
+	if fresh.Blocked() {
+		t.Errorf("install in flight: got %+v, want the waitable verdict", fresh)
+	}
+	if fresh.Reason != dispatch.ReasonRuntimeOffline {
+		t.Errorf("install in flight: reason = %q, want %q", fresh.Reason, dispatch.ReasonRuntimeOffline)
+	}
+	stale := runtimeVerdict(installingRow(time.Now().Add(-runtimeInstallClaimWindow - time.Minute)), db.Agent{OwnerID: ownerA})
+	if !stale.Blocked() || stale.Reason != dispatch.ReasonRuntimeProfileMissing {
+		t.Fatalf("stale install claim: got %+v, want blocked/runtime_profile_missing", stale)
+	}
+	// No timestamp to bound it with: refuse rather than queue behind something
+	// that cannot be shown to be running.
+	unbounded := runtimeVerdict(db.AgentRuntime{
+		Status:   "offline",
+		Metadata: []byte(`{"offline_reason":{"code":"dsh_profile","installing":true}}`),
+	}, db.Agent{OwnerID: ownerA})
+	if !unbounded.Blocked() {
+		t.Errorf("install claim with no updated_at: got %+v, want blocked", unbounded)
+	}
+
 	// An unrecognised or malformed reason must not invent a verdict: unknown
 	// causes stay in the waitable bucket they are in today.
 	for name, metadata := range map[string]string{
@@ -81,7 +189,7 @@ func TestAgentReadinessVerdict(t *testing.T) {
 		"malformed":    `{"offline_reason":`,
 		"empty":        ``,
 	} {
-		got := runtimeVerdict(db.AgentRuntime{Status: "offline", Metadata: []byte(metadata)})
+		got := runtimeVerdict(db.AgentRuntime{Status: "offline", Metadata: []byte(metadata)}, db.Agent{OwnerID: ownerA})
 		if got.Blocked() {
 			t.Errorf("%s: got %+v, want the plain offline verdict", name, got)
 		}
@@ -117,5 +225,10 @@ func TestRuntimeUnusableNotice(t *testing.T) {
 	}
 	if !strings.Contains(withoutRepair, "Reinstall") {
 		t.Errorf("notice must still say what to do:\n%s", withoutRepair)
+	}
+
+	accessDenied := RuntimeUnusableNotice("Mika", AgentVerdict{Reason: dispatch.ReasonRuntimeAccessDenied})
+	if !strings.Contains(accessDenied, "public") || !strings.Contains(accessDenied, "rebind/copy") {
+		t.Errorf("access-denied notice must include both recovery paths:\n%s", accessDenied)
 	}
 }

@@ -80,6 +80,7 @@
     "run_blocked_invocation_not_allowed": "実行されませんでした — このオートパイロットのエージェントを使用する権限がありません",
     "run_blocked_runtime_offline": "実行されませんでした — エージェントのランタイムがオフラインです",
     "run_blocked_agent_runtime_required": "実行されませんでした — エージェントにランタイムがありません。実行するにはバインドしてください",
+    "run_blocked_runtime_access_denied": "実行されませんでした — エージェントはプライベートランタイムで実行できません。ランタイムを公開にするか、エージェントを再設定/コピーしてください",
     "run_blocked_target_unavailable": "実行されませんでした — エージェントを利用できません",
     "run_blocked_attribution": "実行されませんでした — 実行の責任者を特定できませんでした",
     "run_blocked_already_active": "実行されませんでした — 直近の実行が本件をカバーしています",
@@ -175,6 +176,7 @@
     "copy_url": "URL をコピー",
     "url_copied": "Webhook URL をコピーしました",
     "url_copy_failed": "URL をコピーできませんでした",
+    "edit_schedule": "スケジュールを編集",
     "rotate_url": "URL を再生成",
     "rotate_confirm_title": "Webhook URL を再生成",
     "rotate_confirm_description": "現在の URL は直ちに動作を停止します。この URL を呼び出している外部システムは新しい URL に更新する必要があります。続けますか?",
@@ -254,6 +256,16 @@
     "toast_added_webhook": "Webhook トリガーを追加しました",
     "toast_add_failed": "トリガーを追加できませんでした"
   },
+  "edit_trigger_dialog": {
+    "title": "スケジュールを編集",
+    "label_field": "ラベル(任意)",
+    "label_placeholder": "例: 平日の朝",
+    "enabled_label": "有効",
+    "submit": "保存",
+    "submitting": "保存中...",
+    "toast_updated": "スケジュールを更新しました",
+    "toast_update_failed": "スケジュールの更新に失敗しました"
+  },
   "dialog": {
     "sr_create": "新規オートパイロット",
     "sr_edit": "オートパイロットを編集",
@@ -314,7 +326,7 @@
     "event_filter_add": "追加",
     "event_filter_remove_label": "フィルターを削除",
     "event_filter_hint": "これらのイベントに一致する Webhook のみを処理します。空にするとすべて許可します。",
-    "schedule_disabled_reason": "このオートパイロットには複数のスケジュールがあります。詳細ページで編集してください。",
+    "schedule_multiple_notice": "このオートパイロットにはスケジュールが {{count}} 件あります。このダイアログを閉じて、下の「トリガー」から個別に編集してください。",
     "schedule_empty": "スケジュールはありません。このオートパイロットは手動で実行したときだけ動きます。",
     "schedule_add": "スケジュールを追加",
     "error_title_required": "オートパイロット名を入力してください。",

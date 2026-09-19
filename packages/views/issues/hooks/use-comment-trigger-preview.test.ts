@@ -120,6 +120,29 @@ describe("useCommentTriggerPreview", () => {
     );
   });
 
+  it("reports @all as static semantics while editing", async () => {
+    const content = "[@All members](mention://all/all) heads up";
+    const { result } = renderHook(
+      () =>
+        useCommentTriggerPreview({
+          issueId: "issue-1",
+          editingCommentId: "comment-1",
+          content,
+        }),
+      { wrapper: createWrapper() },
+    );
+
+    expect(result.current.hasAllMembersMention).toBe(true);
+
+    await advancePreviewDebounce();
+    expect(previewCommentTriggers).toHaveBeenCalledWith(
+      "issue-1",
+      content,
+      undefined,
+      "comment-1",
+    );
+  });
+
   it("does not show previous agents while parent context changes", async () => {
     previewCommentTriggers
       .mockResolvedValueOnce({ agents: [waltAgent] })
@@ -251,8 +274,63 @@ describe("useCommentTriggerPreview", () => {
 
     await advancePreviewDebounce();
 
-    expect(result.current).toEqual({ agents: [], blocked: [] });
+    expect(result.current).toEqual({
+      agents: [],
+      blocked: [],
+      hasAllMembersMention: false,
+    });
     expect(previewCommentTriggers).not.toHaveBeenCalled();
+  });
+
+  it("still recognizes the static @all semantics in a note", async () => {
+    const { result } = renderHook(
+      () => useCommentTriggerPreview({
+        issueId: "issue-1",
+        content: "/note [@All members](mention://all/all) heads up",
+      }),
+      { wrapper: createWrapper() },
+    );
+
+    await advancePreviewDebounce();
+
+    expect(result.current).toEqual({
+      agents: [],
+      blocked: [],
+      hasAllMembersMention: true,
+    });
+    expect(previewCommentTriggers).not.toHaveBeenCalled();
+  });
+
+  it("recognizes structured @all mentions", async () => {
+    const { result } = renderHook(
+      () => useCommentTriggerPreview({
+        issueId: "issue-1",
+        content: "[@All members](mention://all/all) heads up",
+      }),
+      { wrapper: createWrapper() },
+    );
+
+    expect(result.current.hasAllMembersMention).toBe(true);
+
+    await advancePreviewDebounce();
+    expect(previewCommentTriggers).toHaveBeenCalledWith(
+      "issue-1",
+      "[@All members](mention://all/all) heads up",
+      undefined,
+      undefined,
+    );
+  });
+
+  it("does not treat plain @all text as a structured mention", () => {
+    const { result } = renderHook(
+      () => useCommentTriggerPreview({
+        issueId: "issue-1",
+        content: "plain @all text",
+      }),
+      { wrapper: createWrapper() },
+    );
+
+    expect(result.current.hasAllMembersMention).toBe(false);
   });
 });
 

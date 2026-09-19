@@ -22,9 +22,9 @@ export function AboutPageClient() {
             <p>
               {n.prefix}
               <strong className="font-semibold text-[#0a0d12]">
-                {n.mul}
+                {n.mult}
               </strong>
-              {n.tiplexed}
+              {n.iplexed}
               <strong className="font-semibold text-[#0a0d12]">
                 {n.i}
               </strong>
@@ -48,7 +48,7 @@ export function AboutPageClient() {
               href={githubUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-2.5 rounded-[12px] bg-[#0a0d12] px-5 py-3 text-body font-semibold text-white transition-colors hover:bg-[#0a0d12]/88"
+              className="inline-flex items-center gap-2.5 rounded-(--landing-radius-action) bg-[#0a0d12] px-5 py-3 text-body font-semibold text-white transition-colors hover:bg-[#0a0d12]/88"
             >
               <GitHubMark className="size-4" />
               {t.about.cta}

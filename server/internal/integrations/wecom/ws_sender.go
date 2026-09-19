@@ -77,6 +77,13 @@ type wsSender struct {
 	ackMu   sync.Mutex
 	replies map[string]*replyWaiter
 
+	// quota holds this connection's aibot_send_msg allowance, per target chat,
+	// and retryBackoff is what a throttled push waits before its one retry.
+	// One quota per socket is the whole accounting — see rate_limit.go for why
+	// that is the right scope and where the numbers come from.
+	quota        *sendQuota
+	retryBackoff time.Duration
+
 	// seq numbers outbound frames in the order they reach the socket.
 	// Guarded by mu, so it is the wire order by construction, and it is what
 	// pairs a traced send attempt with its outcome — req_id cannot do that
@@ -89,7 +96,13 @@ func newWSSender(conn wsConn, log *slog.Logger) *wsSender {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &wsSender{conn: conn, log: log, replies: make(map[string]*replyWaiter)}
+	return &wsSender{
+		conn:         conn,
+		log:          log,
+		replies:      make(map[string]*replyWaiter),
+		quota:        newSendQuota(),
+		retryBackoff: sendRetryBackoff,
+	}
 }
 
 // ackTimeout caps the wait for a verdict. WeCom answers in a few hundred
@@ -217,7 +230,13 @@ func (s *wsSender) request(ctx context.Context, cmd string, body map[string]any)
 	case <-timer.C:
 		return nil, errAckTimeout
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		// Marked, because this is not the same fact as the context error at
+		// the top of this function. That one is raised before anything is
+		// written; this one is raised after s.write returned without error,
+		// which means WriteMessage completed and the bytes are gone. A caller
+		// that cannot tell the two apart has to guess about a frame that may
+		// be in front of the person right now.
+		return nil, fmt.Errorf("%w: %w", errAckAbandoned, ctx.Err())
 	}
 }
 
@@ -277,6 +296,23 @@ func (s *wsSender) write(frame map[string]any) error {
 // and a caller may report them as definite.
 var errWriteAttempted = errors.New("wecom: frame write attempted")
 
+// errAckAbandoned — the frame went out and the caller's context ended before a
+// verdict came back. errAckTimeout's sibling: the same fact about the wire, a
+// different reason the verdict is missing. It wraps the context error rather
+// than replacing it, so every errors.Is(err, context.Canceled) reader keeps
+// working and the outcome still files as "interrupted".
+//
+// It exists because request returns ctx.Err() from two places that mean
+// opposite things — the check ahead of the write, where nothing left this
+// process, and the wait after it, where the peer may already hold the frame.
+// Until this mark, the two differed only in the line that raised them, which
+// is not something a caller can see. A caller weighing a cancellation against
+// another outcome it already holds then has to read every cancellation the
+// same way, and either one of those readings is wrong. sendMsgFrame is that
+// caller: it holds a refusal WeCom stated for a first frame, and must not let
+// it speak for a second one that is already on the wire.
+var errAckAbandoned = errors.New("wecom: the wait for the verdict was cut short after the frame went out")
+
 // sendText pushes an aibot_send_msg (proactive push) with plain text to a
 // specific chat. Callers pass channel.ChatType so the aibot chat_type int
 // (1=single, 2=group) is decided at the wecom-side boundary, not the
@@ -299,6 +335,5 @@ func (s *wsSender) sendTextCtx(ctx context.Context, chatID string, chatTypeInt i
 	if err != nil {
 		return err
 	}
-	_, err = s.request(ctx, cmdSendMsg, body)
-	return err
+	return s.sendMsgFrame(ctx, chatID, body)
 }

@@ -355,3 +355,9 @@ func TestAgentCopyAcceptsExplicitCustomEnv(t *testing.T) {
 		t.Errorf("custom_env[API_KEY] = %v, want fresh", ce["API_KEY"])
 	}
 }
+
+func TestAgentCopyDoesNotExposeConversationStartersOverride(t *testing.T) {
+	if agentCopyCmd.Flag("conversation-starters") != nil {
+		t.Error("agent copy must carry conversation_starters without a dedicated override flag")
+	}
+}

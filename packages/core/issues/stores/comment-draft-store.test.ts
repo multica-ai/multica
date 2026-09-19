@@ -328,3 +328,121 @@ describe("comment draft store — upload lifecycle", () => {
     expect(first).toBe(second);
   });
 });
+
+describe("reply annotations", () => {
+  const key = "reply:issue-1:root" as const;
+  const annotation = { id: "a", sourceCommentId: "nested-agent", sourceActorName: "Emacs", quote: "Selected text", note: "A note", start: 0, prefix: "", suffix: "" };
+  beforeEach(async () => {
+    setCurrentWorkspace("annotation-tests", "ws_annotations");
+    await flush();
+    useCommentDraftStore.setState({ drafts: {} });
+  });
+  afterEach(() => setCurrentWorkspace(null, null));
+
+  it("keeps annotation-only drafts through text/upload changes and preserves the first exact reply target", () => {
+    const store = useCommentDraftStore.getState();
+    store.addAnnotation(key, annotation);
+    store.setDraft(key, "");
+    store.setAttachments(key, [makeAttachment("att")]);
+    store.appendToDraftContent(key, "uploaded link");
+    store.setAttachments(key, []);
+    store.setDraft(key, "");
+    store.addAnnotation(key, { ...annotation, id: "b", sourceCommentId: "another-agent" });
+    store.removeAnnotation(key, "a");
+    expect(store.getAnnotations(key)).toHaveLength(1);
+    expect(useCommentDraftStore.getState().drafts[key]?.replyTarget?.commentId).toBe("nested-agent");
+    store.removeAnnotation(key, "b");
+    expect(store.getDraft(key)).toBeUndefined();
+  });
+
+  it("rejects blank notes and removes cleared notes without losing the reply body", () => {
+    const store = useCommentDraftStore.getState();
+    expect(store.addAnnotation(key, { ...annotation, note: "  " })).toBeUndefined();
+    expect(useCommentDraftStore.getState().drafts[key]).toBeUndefined();
+    store.setDraft(key, "Keep reply");
+    store.addAnnotation(key, annotation);
+    store.updateAnnotation(key, annotation.id, " ");
+    expect(store.getAnnotations(key)).toHaveLength(0);
+    expect(store.getDraft(key)).toBe("Keep reply");
+    expect(useCommentDraftStore.getState().drafts[key]?.replyTarget).toBeUndefined();
+  });
+
+  it("drops legacy empty annotations and their target when restoring a draft", async () => {
+    const store = useCommentDraftStore.getState();
+    store.setDraft(key, "Keep reply");
+    store.addAnnotation(key, annotation);
+    await flush();
+    const saved = JSON.parse(localStorage.getItem("multica_comment_drafts:annotation-tests")!);
+    saved.state.drafts[key].annotations[0].note = " ";
+    localStorage.setItem("multica_comment_drafts:annotation-tests", JSON.stringify(saved));
+    useCommentDraftStore.getState().drafts = {};
+    await useCommentDraftStore.persist.rehydrate();
+    expect(store.getAnnotations(key)).toHaveLength(0);
+    expect(store.getDraft(key)).toBe("Keep reply");
+    expect(useCommentDraftStore.getState().drafts[key]?.replyTarget).toBeUndefined();
+  });
+
+  it("persists description annotations with the new comment draft without a reply target", async () => {
+    const store = useCommentDraftStore.getState();
+    store.setDraft("new:issue", "Existing draft");
+    store.addAnnotation("new:issue", { ...annotation, sourceCommentId: "description:issue" });
+    store.updateAnnotation("new:issue", annotation.id, "Description note");
+    await flush();
+    useCommentDraftStore.getState().drafts = {};
+    await useCommentDraftStore.persist.rehydrate();
+    expect(useCommentDraftStore.getState().getDraft("new:issue")).toBe("Existing draft");
+    expect(useCommentDraftStore.getState().getAnnotations("new:issue")[0]?.note).toBe("Description note");
+    expect(useCommentDraftStore.getState().drafts["new:issue"]?.replyTarget).toBeUndefined();
+    expect(useCommentDraftStore.getState().addAnnotation("edit:issue:comment", annotation)).toBeUndefined();
+  });
+
+  it("reopens duplicate ranges, bounds collection, and changes identity only on actual edits", () => {
+    const store = useCommentDraftStore.getState();
+    expect(store.addAnnotation(key, annotation)).toBe("a");
+    const snapshot = useCommentDraftStore.getState().drafts[key];
+    expect(store.addAnnotation(key, { ...annotation, id: "duplicate" })).toBe("a");
+    store.updateAnnotation(key, "a", "A note");
+    store.setDraft(key, "");
+    expect(useCommentDraftStore.getState().drafts[key]).toBe(snapshot);
+    store.updateAnnotation(key, "a", "New intent");
+    expect(useCommentDraftStore.getState().drafts[key]).not.toBe(snapshot);
+    for (let i = 1; i < 20; i++) store.addAnnotation(key, { ...annotation, id: `a${i}`, start: i });
+    expect(store.addAnnotation(key, { ...annotation, id: "overflow", start: 21 })).toBeUndefined();
+    expect(store.addAnnotation("reply:other:root", { ...annotation, quote: "x".repeat(4001) })).toBeUndefined();
+    expect(store.getAnnotations(key)).toHaveLength(20);
+    expect(store.getAnnotations("reply:other:root")).toHaveLength(0);
+  });
+
+  it("restores annotation-only drafts and targets across rehydration", async () => {
+    const store = useCommentDraftStore.getState();
+    store.addAnnotation(key, annotation);
+    store.updateAnnotation(key, "a", "Saved note");
+    await flush();
+    useCommentDraftStore.getState().drafts = {};
+    await useCommentDraftStore.persist.rehydrate();
+    expect(useCommentDraftStore.getState().getAnnotations(key)[0]?.note).toBe("Saved note");
+    expect(useCommentDraftStore.getState().drafts[key]?.replyTarget?.commentId).toBe("nested-agent");
+  });
+  it("isolates annotations by workspace, expires old entries, and clears them on logout", async () => {
+    const { resetAllRegisteredDrafts } = await import("../../drafts/cleanup-registry");
+    setCurrentWorkspace("annotations-a", "ws_a");
+    await flush();
+    useCommentDraftStore.getState().addAnnotation(key, annotation);
+    setCurrentWorkspace("annotations-b", "ws_b");
+    await flush();
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(0);
+    setCurrentWorkspace("annotations-a", "ws_a");
+    await flush();
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(1);
+    const saved = JSON.parse(localStorage.getItem("multica_comment_drafts:annotations-a")!);
+    saved.state.drafts[key].updatedAt = Date.now() - 31 * DAY_MS;
+    localStorage.setItem("multica_comment_drafts:annotations-a", JSON.stringify(saved));
+    await useCommentDraftStore.persist.rehydrate();
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(0);
+    useCommentDraftStore.getState().addAnnotation(key, annotation);
+    resetAllRegisteredDrafts();
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(0);
+    setCurrentWorkspace(null, null);
+  });
+
+});

@@ -389,11 +389,11 @@ export function McpServerDialog({
                       ? t(($) => $.tab_body.mcp_config.dialog_edit_title)
                       : t(($) => $.tab_body.mcp_config.dialog_add_title)}
               </DialogTitle>
-              <DialogDescription>
-                {replacementMode
-                  ? t(($) => $.tab_body.mcp_config.dialog_replace_description)
-                  : t(($) => $.tab_body.mcp_config.dialog_description)}
-              </DialogDescription>
+              {replacementMode && (
+                <DialogDescription>
+                  {t(($) => $.tab_body.mcp_config.dialog_replace_description)}
+                </DialogDescription>
+              )}
             </DialogHeader>
 
             <form
@@ -616,6 +616,9 @@ export function McpServerDialog({
                     </TabsContent>
 
                     <TabsContent value="json">
+                      <p className="text-caption text-muted-foreground">
+                        {t(($) => $.tab_body.mcp_config.dialog_json_help)}
+                      </p>
                       <Field>
                         <FieldLabel htmlFor="mcp-server-json">
                           {t(($) => $.tab_body.mcp_config.dialog_json_label)}
