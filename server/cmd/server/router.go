@@ -1487,6 +1487,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/tasks/{taskId}/progress", h.ReportTaskProgress)
 		r.Post("/tasks/{taskId}/complete", h.CompleteTask)
 		r.Post("/tasks/{taskId}/fail", h.FailTask)
+		// Versioned terminal surface: these routes require the claim generation,
+		// so a report produced under a fence can never be accepted as an unfenced
+		// legacy callback by a replica that predates the fence — such a replica
+		// has no route here and answers 404, which the daemon retries.
+		r.Post("/v2/tasks/{taskId}/complete", h.CompleteTaskV2)
+		r.Post("/v2/tasks/{taskId}/fail", h.FailTaskV2)
 		r.Post("/tasks/{taskId}/usage", h.ReportTaskUsage)
 		r.Post("/tasks/{taskId}/messages", h.ReportTaskMessages)
 		r.Get("/tasks/{taskId}/messages", h.ListTaskMessages)

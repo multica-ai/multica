@@ -178,6 +178,22 @@ type Task struct {
 	// Empty or non-task-scoped values are fatal for writable agent tasks; the
 	// daemon must not fall back to its own token. See MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
+	// DispatchedAt is the claim generation: the server-issued timestamp of the
+	// claim delivery that produced this Task. The server refreshes it on every
+	// reclaim of the same task id and compares it inside the terminal UPDATE, so
+	// the daemon echoes it verbatim on /complete and /fail instead of re-deriving
+	// it later. It only means anything together with
+	// TerminalReportGenerationFenceV1: older servers send this timestamp and
+	// still ignore the terminal callback's fence, so presence alone never makes a
+	// claim generation-aware.
+	DispatchedAt *string `json:"dispatched_at,omitempty"`
+	// TerminalReportGenerationFenceV1 is the claim-only capability that says this
+	// server enforces the terminal-report generation fence. It — not the presence
+	// of DispatchedAt — is what makes a claim generation-aware: older servers send
+	// dispatched_at and still ignore expected_dispatched_at on /complete and
+	// /fail. Absent (false) means the claim keeps the legacy live callback and is
+	// never persisted as a replayable report.
+	TerminalReportGenerationFenceV1 bool `json:"terminal_report_generation_fence_v1,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon

@@ -1939,18 +1939,30 @@ SET status = 'completed', completed_at = now(), result = $2,
     retired_session_id = COALESCE($8, retired_session_id),
     prepare_lease_expires_at = NULL
 WHERE id = $1 AND status = 'running'
+  -- Claim-generation fence (#8157 follow-up). The daemon round-trips the
+  -- server-issued dispatched_at of the claim that produced this result, so a
+  -- terminal report from an older claim generation can never settle a later
+  -- reclaim of the same task id. The comparison belongs to THIS UPDATE: a
+  -- dispatched_at read followed by a terminal write would race a reclaim
+  -- landing between the two. A NULL argument keeps the legacy callback
+  -- contract for daemons that do not send the field.
+  AND (
+    $9::timestamptz IS NULL
+    OR dispatched_at = $9::timestamptz
+  )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot
 `
 
 type CompleteAgentTaskParams struct {
-	ID                    pgtype.UUID `json:"id"`
-	Result                []byte      `json:"result"`
-	SessionID             pgtype.Text `json:"session_id"`
-	WorkDir               pgtype.Text `json:"work_dir"`
-	SessionRolloutMissing bool        `json:"session_rollout_missing"`
-	DurableWorkDir        pgtype.Text `json:"durable_work_dir"`
-	BranchName            pgtype.Text `json:"branch_name"`
-	RetiredSessionID      pgtype.Text `json:"retired_session_id"`
+	ID                    pgtype.UUID        `json:"id"`
+	Result                []byte             `json:"result"`
+	SessionID             pgtype.Text        `json:"session_id"`
+	WorkDir               pgtype.Text        `json:"work_dir"`
+	SessionRolloutMissing bool               `json:"session_rollout_missing"`
+	DurableWorkDir        pgtype.Text        `json:"durable_work_dir"`
+	BranchName            pgtype.Text        `json:"branch_name"`
+	RetiredSessionID      pgtype.Text        `json:"retired_session_id"`
+	ExpectedDispatchedAt  pgtype.Timestamptz `json:"expected_dispatched_at"`
 }
 
 // session_rollout_missing (MUL-5305): when true the daemon withheld this task's
@@ -1974,6 +1986,7 @@ func (q *Queries) CompleteAgentTask(ctx context.Context, arg CompleteAgentTaskPa
 		arg.DurableWorkDir,
 		arg.BranchName,
 		arg.RetiredSessionID,
+		arg.ExpectedDispatchedAt,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -3448,19 +3461,27 @@ SET status = 'failed',
     retired_session_id = COALESCE($9, retired_session_id),
     prepare_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
+  -- See CompleteAgentTask for the claim-generation fence. The status set is
+  -- wider because a failure can legitimately settle a task the daemon never got
+  -- as far as running.
+  AND (
+    $10::timestamptz IS NULL
+    OR dispatched_at = $10::timestamptz
+  )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot
 `
 
 type FailAgentTaskParams struct {
-	ID                    pgtype.UUID `json:"id"`
-	Error                 pgtype.Text `json:"error"`
-	FailureReason         pgtype.Text `json:"failure_reason"`
-	SessionRolloutMissing bool        `json:"session_rollout_missing"`
-	SessionID             pgtype.Text `json:"session_id"`
-	WorkDir               pgtype.Text `json:"work_dir"`
-	DurableWorkDir        pgtype.Text `json:"durable_work_dir"`
-	BranchName            pgtype.Text `json:"branch_name"`
-	RetiredSessionID      pgtype.Text `json:"retired_session_id"`
+	ID                    pgtype.UUID        `json:"id"`
+	Error                 pgtype.Text        `json:"error"`
+	FailureReason         pgtype.Text        `json:"failure_reason"`
+	SessionRolloutMissing bool               `json:"session_rollout_missing"`
+	SessionID             pgtype.Text        `json:"session_id"`
+	WorkDir               pgtype.Text        `json:"work_dir"`
+	DurableWorkDir        pgtype.Text        `json:"durable_work_dir"`
+	BranchName            pgtype.Text        `json:"branch_name"`
+	RetiredSessionID      pgtype.Text        `json:"retired_session_id"`
+	ExpectedDispatchedAt  pgtype.Timestamptz `json:"expected_dispatched_at"`
 }
 
 // Marks a task as failed. session_id and work_dir are merged via COALESCE so
@@ -3489,6 +3510,7 @@ func (q *Queries) FailAgentTask(ctx context.Context, arg FailAgentTaskParams) (A
 		arg.DurableWorkDir,
 		arg.BranchName,
 		arg.RetiredSessionID,
+		arg.ExpectedDispatchedAt,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(

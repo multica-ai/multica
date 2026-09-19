@@ -225,15 +225,19 @@ const (
 // reportTerminalTask gives the durable outbox one insertion point without
 // revisiting every task exit when it is added.
 type terminalTaskReport struct {
-	kind           terminalTaskReportKind
-	taskID         string
-	output         string
-	branchName     string
-	errorMessage   string
-	sessionID      string
-	workDir        string
-	durableWorkDir string
-	failureReason  string
+	kind   terminalTaskReportKind
+	taskID string
+	// claimGeneration is the claim that produced this result. With taskID it is
+	// the report's identity: two generations of one task never share a queue file
+	// or an in-flight delivery slot.
+	claimGeneration claimGeneration
+	output          string
+	branchName      string
+	errorMessage    string
+	sessionID       string
+	workDir         string
+	durableWorkDir  string
+	failureReason   string
 	// sessionRolloutMissing is true when the daemon withheld this task's Codex
 	// session because its rollout was not in the store (MUL-5305). The server
 	// clears the resume pointer and flags the continuity gap for the next claim.
@@ -246,6 +250,55 @@ type terminalTaskReport struct {
 }
 
 type terminalReportSendFunc func(context.Context, terminalTaskReport, []time.Duration) error
+
+// claimGeneration is the fencing value of one claim: the server-issued
+// dispatched_at plus whether the claim payload carried a value we could not
+// read. Absence and malformation are separate states on purpose. Absence means
+// an older server never fenced its claims, so the callback keeps working
+// unfenced. A present-but-unreadable value is a protocol error, and treating it
+// like absence would silently turn a claim that HAS a generation into an
+// unfenced write — the one degradation this fence must never allow.
+//
+// The value is only ever read from the claim payload — never synthesized from
+// the local clock, never refreshed from a later status lookup.
+type claimGeneration struct {
+	dispatchedAt time.Time
+	unreadable   bool
+}
+
+func (g claimGeneration) String() string {
+	switch {
+	case g.unreadable:
+		return "unreadable"
+	case g.dispatchedAt.IsZero():
+		return "absent"
+	default:
+		return g.dispatchedAt.UTC().Format(time.RFC3339Nano)
+	}
+}
+
+// claimGenerationForTask reads this claim's fencing value. The claim-only
+// capability decides first: without it the claim is legacy whatever its
+// dispatched_at says. A claim that advertises the capability must carry a
+// readable generation; anything else is a protocol error that refuses terminal
+// reporting rather than degrading into an unfenced callback.
+func claimGenerationForTask(task Task) claimGeneration {
+	if !task.TerminalReportGenerationFenceV1 {
+		return claimGeneration{}
+	}
+	if task.DispatchedAt == nil {
+		return claimGeneration{unreadable: true}
+	}
+	raw := strings.TrimSpace(*task.DispatchedAt)
+	if raw == "" {
+		return claimGeneration{unreadable: true}
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil || parsed.IsZero() {
+		return claimGeneration{unreadable: true}
+	}
+	return claimGeneration{dispatchedAt: parsed.UTC()}
+}
 
 type executionEnvironmentCommand func() ([]string, error)
 
@@ -396,6 +449,9 @@ type Daemon struct {
 	terminalReportWakeup chan struct{}
 	terminalReportNow    func() time.Time
 	terminalReportMu     sync.Mutex
+	// terminalReportFlight holds one in-flight delivery slot per report identity
+	// (task id + claim generation), so two claim generations of one task never
+	// block each other while a duplicate of the same one still does.
 	terminalReportFlight map[string]struct{}
 
 	mu           sync.Mutex
@@ -4557,6 +4613,7 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
+
 	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
@@ -5722,10 +5779,11 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		d.logger.Warn("claimed task targets a runtime this daemon no longer hosts; failing it back for retry",
 			"task", task.ID, "runtime_id", task.RuntimeID)
 		if err := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:          terminalTaskReportFail,
-			taskID:        task.ID,
-			errorMessage:  "runtime went offline before the run started",
-			failureReason: taskfailure.ReasonRuntimeOffline.String(),
+			kind:            terminalTaskReportFail,
+			taskID:          task.ID,
+			claimGeneration: claimGenerationForTask(task),
+			errorMessage:    "runtime went offline before the run started",
+			failureReason:   taskfailure.ReasonRuntimeOffline.String(),
 		}); err != nil {
 			d.logger.Error("fail task callback failed", "task", task.ID, "error", err)
 		}
@@ -5882,13 +5940,14 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		// shape of the failure (provider 5xx, network, process crash,
 		// …) rather than the coarse legacy "agent_error" bucket.
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:           terminalTaskReportFail,
-			taskID:         task.ID,
-			errorMessage:   err.Error(),
-			branchName:     result.BranchName,
-			workDir:        result.WorkDir,
-			durableWorkDir: result.DurableWorkDir,
-			failureReason:  taskRunFailureReason(err),
+			kind:            terminalTaskReportFail,
+			taskID:          task.ID,
+			claimGeneration: claimGenerationForTask(task),
+			errorMessage:    err.Error(),
+			branchName:      result.BranchName,
+			workDir:         result.WorkDir,
+			durableWorkDir:  result.DurableWorkDir,
+			failureReason:   taskRunFailureReason(err),
 		}); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		}
@@ -5920,7 +5979,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		return
 	}
 
-	d.reportTaskResult(ctx, task.ID, result, taskLog)
+	d.reportTaskResult(ctx, task.ID, claimGenerationForTask(task), result, taskLog)
 
 	// Write GC metadata after the task finishes so the periodic GC loop
 	// can look up the parent record (issue / chat session / autopilot run /
@@ -6052,10 +6111,11 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	if err != nil {
 		taskLog.Error("local_directory: resolve resource failed", "error", err)
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:          terminalTaskReportFail,
-			taskID:        task.ID,
-			errorMessage:  err.Error(),
-			failureReason: "local_directory_error",
+			kind:            terminalTaskReportFail,
+			taskID:          task.ID,
+			claimGeneration: claimGenerationForTask(task),
+			errorMessage:    err.Error(),
+			failureReason:   "local_directory_error",
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory resolve error", "error", failErr)
 		}
@@ -6071,10 +6131,11 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	if err := assignment.ValidateExecutionMode(); err != nil {
 		taskLog.Error("local_directory: unsupported execution mode", "error", err)
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:          terminalTaskReportFail,
-			taskID:        task.ID,
-			errorMessage:  err.Error(),
-			failureReason: "local_directory_error",
+			kind:            terminalTaskReportFail,
+			taskID:          task.ID,
+			claimGeneration: claimGenerationForTask(task),
+			errorMessage:    err.Error(),
+			failureReason:   "local_directory_error",
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory mode check", "error", failErr)
 		}
@@ -6083,10 +6144,11 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	if err := validateLocalPath(assignment.AbsPath); err != nil {
 		taskLog.Error("local_directory: path validation failed", "error", err)
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:          terminalTaskReportFail,
-			taskID:        task.ID,
-			errorMessage:  err.Error(),
-			failureReason: "local_directory_error",
+			kind:            terminalTaskReportFail,
+			taskID:          task.ID,
+			claimGeneration: claimGenerationForTask(task),
+			errorMessage:    err.Error(),
+			failureReason:   "local_directory_error",
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory validation error", "error", failErr)
 		}
@@ -6213,10 +6275,11 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			failureReason = "cancelled"
 		}
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:          terminalTaskReportFail,
-			taskID:        task.ID,
-			errorMessage:  fmt.Sprintf("local_directory wait cancelled: %s", err.Error()),
-			failureReason: failureReason,
+			kind:            terminalTaskReportFail,
+			taskID:          task.ID,
+			claimGeneration: claimGenerationForTask(task),
+			errorMessage:    fmt.Sprintf("local_directory wait cancelled: %s", err.Error()),
+			failureReason:   failureReason,
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory lock cancel", "error", failErr)
 		}
@@ -6236,13 +6299,14 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 // the agent may have built a real session before getting stuck, and we want
 // the next chat turn to resume there rather than start over and "forget"
 // the conversation.
-func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result TaskResult, taskLog *slog.Logger) {
+func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, generation claimGeneration, result TaskResult, taskLog *slog.Logger) {
 	switch result.Status {
 	case "completed":
 		taskLog.Info("task completed", "status", result.Status)
 		err := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:                  terminalTaskReportComplete,
 			taskID:                taskID,
+			claimGeneration:       generation,
 			output:                result.Comment,
 			branchName:            result.BranchName,
 			sessionID:             result.SessionID,
@@ -6280,12 +6344,13 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		}
 		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", failureReason)
 		if err := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:           terminalTaskReportFail,
-			taskID:         taskID,
-			errorMessage:   result.Comment,
-			sessionID:      result.SessionID,
-			workDir:        result.WorkDir,
-			durableWorkDir: result.DurableWorkDir,
+			kind:            terminalTaskReportFail,
+			taskID:          taskID,
+			claimGeneration: generation,
+			errorMessage:    result.Comment,
+			sessionID:       result.SessionID,
+			workDir:         result.WorkDir,
+			durableWorkDir:  result.DurableWorkDir,
 			// Worktree mode commits the agent's leftovers before tearing the
 			// worktree down, so a failed run routinely still has a branch. This
 			// is the case where the user most needs it: the task went wrong and
@@ -6312,26 +6377,44 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 // 30-second drain, but terminal callbacks must still use that remaining window.
 // The explicit timeout keeps this detached work bounded during normal runs.
 func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTaskReport) error {
-	if _, err := persistedTerminalReport(report, time.Now()); err != nil {
+	if report.claimGeneration.unreadable {
+		// The claim named a generation we cannot read. Sending this callback
+		// without one would be an unfenced write against a task that does have a
+		// generation, so nothing is sent at all: the server's stale-dispatch
+		// reclaim owns recovery from here.
+		return fmt.Errorf("terminal task report for %s: %w", report.taskID, errTerminalReportGenerationUnreadable)
+	}
+	if _, err := persistedTerminalReport(report, time.Now()); err != nil && !errors.Is(err, errTerminalReportNotPersistable) {
 		return err
 	}
-	release, ok := d.beginTerminalReportDelivery(report.taskID)
+	release, ok := d.beginTerminalReportDelivery(report.identity())
 	if !ok {
-		return fmt.Errorf("terminal task report for %s is already being delivered", report.taskID)
+		return fmt.Errorf("terminal task report for %s (%s) is already being delivered", report.taskID, report.claimGeneration)
 	}
 	defer release()
 
 	persisted := false
 	if d.terminalReports != nil {
 		if err := d.terminalReports.enqueue(report); err != nil {
-			// Durability is an availability improvement, not a prerequisite for
-			// the online callback. A read-only/full disk must not turn a request
-			// that the server could accept right now into a stuck task.
-			d.logger.Error("persist terminal task report; continuing with direct delivery",
-				"task", report.taskID,
-				"kind", report.kind,
-				"error", err,
-			)
+			if errors.Is(err, errTerminalReportNotPersistable) {
+				// The claim did not advertise the generation fence — an older
+				// server, so its dispatched_at carries no fence semantics. There is
+				// nothing that could be replayed safely later, so the report is
+				// delivered now and deliberately not stored.
+				d.logger.Info("claim did not advertise the terminal-report generation fence; delivering without a durable copy",
+					"task", report.taskID,
+					"kind", report.kind,
+				)
+			} else {
+				// Durability is an availability improvement, not a prerequisite for
+				// the online callback. A read-only/full disk must not turn a request
+				// that the server could accept right now into a stuck task.
+				d.logger.Error("persist terminal task report; continuing with direct delivery",
+					"task", report.taskID,
+					"kind", report.kind,
+					"error", err,
+				)
+			}
 		} else {
 			persisted = true
 		}
@@ -6343,7 +6426,7 @@ func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTa
 	if err != nil {
 		quarantined := false
 		if persisted {
-			item := pendingTerminalTaskReport{fileName: terminalReportFileName(report.taskID), report: report}
+			item := pendingTerminalTaskReport{fileName: reportFileName(report), report: report}
 			quarantined = d.handleTerminalReportDeliveryError(ctx, item, err)
 		}
 		if persisted && !quarantined {
@@ -6354,7 +6437,7 @@ func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTa
 	if !persisted {
 		return nil
 	}
-	item := pendingTerminalTaskReport{fileName: terminalReportFileName(report.taskID), report: report}
+	item := pendingTerminalTaskReport{fileName: reportFileName(report), report: report}
 	if err := d.terminalReports.acknowledge(item); err != nil {
 		d.signalTerminalReportReplay()
 		return fmt.Errorf("acknowledge terminal task report: %w", err)
@@ -6362,20 +6445,27 @@ func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTa
 	return nil
 }
 
-func (d *Daemon) beginTerminalReportDelivery(taskID string) (func(), bool) {
+// beginTerminalReportDelivery claims the in-flight delivery slot for one report
+// identity. The slot is keyed on (task id, claim generation) rather than the
+// task id alone: an unsettled report from an older claim must not block the
+// reclaim that owns the task now from delivering its own result. Two attempts to
+// deliver the SAME identity are still serialized, which is what keeps the
+// foreground callback and its replay from racing each other.
+func (d *Daemon) beginTerminalReportDelivery(identity terminalReportIdentity) (func(), bool) {
+	key := identity.key()
 	d.terminalReportMu.Lock()
 	if d.terminalReportFlight == nil {
 		d.terminalReportFlight = make(map[string]struct{})
 	}
-	if _, exists := d.terminalReportFlight[taskID]; exists {
+	if _, exists := d.terminalReportFlight[key]; exists {
 		d.terminalReportMu.Unlock()
 		return nil, false
 	}
-	d.terminalReportFlight[taskID] = struct{}{}
+	d.terminalReportFlight[key] = struct{}{}
 	d.terminalReportMu.Unlock()
 	return func() {
 		d.terminalReportMu.Lock()
-		delete(d.terminalReportFlight, taskID)
+		delete(d.terminalReportFlight, key)
 		d.terminalReportMu.Unlock()
 	}, true
 }
@@ -6388,14 +6478,19 @@ func (d *Daemon) terminalReportClock() time.Time {
 }
 
 func (d *Daemon) sendTerminalTaskReport(ctx context.Context, report terminalTaskReport, schedule []time.Duration) error {
+	if report.claimGeneration.unreadable {
+		// Last line of defence on the single network path: a claim that named an
+		// unreadable generation never degrades into an unfenced callback.
+		return fmt.Errorf("terminal task report for %s: %w", report.taskID, errTerminalReportGenerationUnreadable)
+	}
 	if d.terminalReportSend != nil {
 		return d.terminalReportSend(ctx, report, schedule)
 	}
 	switch report.kind {
 	case terminalTaskReportComplete:
-		return d.client.completeTaskWithRetrySchedule(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, schedule)
+		return d.client.completeTaskWithRetrySchedule(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, report.claimGeneration.dispatchedAt, schedule)
 	case terminalTaskReportFail:
-		return d.client.failTaskWithRetrySchedule(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, schedule)
+		return d.client.failTaskWithRetrySchedule(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, report.claimGeneration.dispatchedAt, schedule)
 	default:
 		return fmt.Errorf("unsupported terminal task report kind %d", report.kind)
 	}

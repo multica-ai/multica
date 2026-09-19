@@ -1019,6 +1019,17 @@ SET status = 'completed', completed_at = now(), result = $2,
     retired_session_id = COALESCE(sqlc.narg('retired_session_id'), retired_session_id),
     prepare_lease_expires_at = NULL
 WHERE id = $1 AND status = 'running'
+  -- Claim-generation fence (#8157 follow-up). The daemon round-trips the
+  -- server-issued dispatched_at of the claim that produced this result, so a
+  -- terminal report from an older claim generation can never settle a later
+  -- reclaim of the same task id. The comparison belongs to THIS UPDATE: a
+  -- dispatched_at read followed by a terminal write would race a reclaim
+  -- landing between the two. A NULL argument keeps the legacy callback
+  -- contract for daemons that do not send the field.
+  AND (
+    sqlc.narg('expected_dispatched_at')::timestamptz IS NULL
+    OR dispatched_at = sqlc.narg('expected_dispatched_at')::timestamptz
+  )
 RETURNING *;
 
 -- name: GetLastTaskSession :one
@@ -1275,6 +1286,13 @@ SET status = 'failed',
     retired_session_id = COALESCE(sqlc.narg('retired_session_id'), retired_session_id),
     prepare_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
+  -- See CompleteAgentTask for the claim-generation fence. The status set is
+  -- wider because a failure can legitimately settle a task the daemon never got
+  -- as far as running.
+  AND (
+    sqlc.narg('expected_dispatched_at')::timestamptz IS NULL
+    OR dispatched_at = sqlc.narg('expected_dispatched_at')::timestamptz
+  )
 RETURNING *;
 
 -- name: UpdateAgentTaskSession :exec

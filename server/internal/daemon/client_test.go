@@ -368,7 +368,7 @@ func TestFailTask_RetriesOnTransient5xxThenSucceeds(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL)
-	if err := c.FailTask(context.Background(), "task-1", "boom", "", "", "", "timeout", true, "", ""); err != nil {
+	if err := c.FailTask(context.Background(), "task-1", "boom", "", "", "", "timeout", true, "", "", time.Time{}); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 	if got := calls.Load(); got != 3 {
@@ -485,14 +485,14 @@ func TestTerminalReportsCarryRetiredSessionID(t *testing.T) {
 			name:     "complete",
 			endpoint: "/api/daemon/tasks/task-1/complete",
 			call: func(c *Client) error {
-				return c.CompleteTask(context.Background(), "task-1", "done", "", "", "/tmp/wd", false, "POISONED-S", "")
+				return c.CompleteTask(context.Background(), "task-1", "done", "", "", "/tmp/wd", false, "POISONED-S", "", time.Time{})
 			},
 		},
 		{
 			name:     "fail",
 			endpoint: "/api/daemon/tasks/task-1/fail",
 			call: func(c *Client) error {
-				return c.FailTask(context.Background(), "task-1", "boom", "", "/tmp/wd", "", "api_invalid_request", false, "POISONED-S", "")
+				return c.FailTask(context.Background(), "task-1", "boom", "", "/tmp/wd", "", "api_invalid_request", false, "POISONED-S", "", time.Time{})
 			},
 		},
 	} {
@@ -528,7 +528,7 @@ func TestTerminalReportsOmitEmptyRetiredSessionID(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if err := NewClient(srv.URL).CompleteTask(context.Background(), "task-1", "done", "", "sess-1", "/tmp/wd", false, "", ""); err != nil {
+	if err := NewClient(srv.URL).CompleteTask(context.Background(), "task-1", "done", "", "sess-1", "/tmp/wd", false, "", "", time.Time{}); err != nil {
 		t.Fatalf("CompleteTask: %v", err)
 	}
 	if _, present := body["retired_session_id"]; present {
@@ -545,13 +545,13 @@ func TestTerminalReportsCarryDurableWorkDir(t *testing.T) {
 		{
 			name: "complete",
 			call: func(c *Client) error {
-				return c.CompleteTask(context.Background(), "task-1", "done", "", "", "/tmp/wd", false, "", durableWorkDir)
+				return c.CompleteTask(context.Background(), "task-1", "done", "", "", "/tmp/wd", false, "", durableWorkDir, time.Time{})
 			},
 		},
 		{
 			name: "fail",
 			call: func(c *Client) error {
-				return c.FailTask(context.Background(), "task-1", "boom", "", "/tmp/wd", "", "agent_error", false, "", durableWorkDir)
+				return c.FailTask(context.Background(), "task-1", "boom", "", "/tmp/wd", "", "agent_error", false, "", durableWorkDir, time.Time{})
 			},
 		},
 		{

@@ -133,7 +133,11 @@ func (h *Handler) requireDaemonTaskAccessWithWorkspace(w http.ResponseWriter, r 
 		// uses this 404 to interrupt the running agent, so a transient DB
 		// error must not be reported as a deletion.
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "task not found")
+			// The stable code is what lets a generation-aware report tell a real
+			// absence apart from a server whose versioned terminal route does not
+			// exist (an ordinary, unstructured 404). The sentence stays for every
+			// installed daemon that matches on it.
+			writeErrorCode(w, http.StatusNotFound, protocol.DaemonTaskNotFoundCode, "task not found")
 			return db.AgentTaskQueue{}, "", false
 		}
 		slog.Warn("get agent task failed", "task_id", taskID, "error", err)
@@ -154,7 +158,7 @@ func (h *Handler) requireDaemonTaskAccessWithWorkspace(w http.ResponseWriter, r 
 		return db.AgentTaskQueue{}, "", false
 	}
 	if wsID == "" {
-		writeError(w, http.StatusNotFound, "task not found")
+		writeErrorCode(w, http.StatusNotFound, protocol.DaemonTaskNotFoundCode, "task not found")
 		return db.AgentTaskQueue{}, "", false
 	}
 
@@ -2257,7 +2261,21 @@ func (h *Handler) failClaimedTaskBeforeLaunch(
 		false,
 		"",
 		"",
+		// Settle the generation this claim was delivered under. A stale
+		// reclaim of the same row must not be failed by the claim that lost it.
+		task.DispatchedAt.Time,
 	); err != nil {
+		if errors.Is(err, service.ErrTaskClaimGenerationMismatch) {
+			// Another claim owns the row now; this request's rejection is no
+			// longer authoritative, so answer with the caller's claim status
+			// instead of requeueing a task that is no longer ours.
+			slog.Warn("task claim: rejecting stale claim generation",
+				"task_id", uuidToString(task.ID),
+				"outcome", outcome,
+				"status", status,
+			)
+			return &claimBuildFailure{outcome: outcome, status: status, message: claimMessage}
+		}
 		slog.Error("task claim: fail rejected task failed; requeueing claim",
 			"task_id", uuidToString(task.ID),
 			"outcome", outcome,
@@ -2342,6 +2360,19 @@ func claimResponseAgentIdentityMatches(resp AgentTaskResponse) bool {
 func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQueue, runtime db.AgentRuntime, runtimeID, runtimeWorkspaceID string) (resp AgentTaskResponse, deliveredCommentIDs []pgtype.UUID, issueSnapshot []byte, agentSkillCount, builtinSkillCount int, failure *claimBuildFailure) {
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp = taskToResponse(*task, runtimeWorkspaceID)
+	// Claim-generation fence: the daemon must be able to round-trip the claim's
+	// dispatched_at exactly, because CompleteTask/FailTask compare it inside the
+	// terminal UPDATE. The shared task JSON keeps its second precision for the
+	// UI; only the claim payload carries the sub-second form, which every
+	// RFC3339 reader accepts. A value dropped to seconds here would make a
+	// fenced callback miss its own claim whenever the reclaim happened inside
+	// the same second.
+	resp.DispatchedAt = timestampToNanoPtr(task.DispatchedAt)
+	// Claim-only capability, set here so it is present on EVERY claim path (the
+	// batch claim and the per-runtime claim both build through this function).
+	// The pair is the contract: the flag says this server enforces the fence, and
+	// the nano dispatched_at above is what the daemon must echo back exactly.
+	resp.TerminalReportGenerationFenceV1 = true
 	var issueNumber int32
 	// Claim-only capability: this server resolves the squad-leader role on the
 	// wire (is_leader_task / squad_id), so the daemon must not re-derive it
@@ -4176,6 +4207,12 @@ type TaskCompleteRequest struct {
 	// to report" — this says "never hand this id to a later run". Older
 	// daemons omit it, which is exactly the pre-fix behaviour.
 	RetiredSessionID string `json:"retired_session_id,omitempty"`
+	// ExpectedDispatchedAt is the claim generation this report belongs to: the
+	// dispatched_at the server returned on the claim that produced the result.
+	// It is checked inside the terminal UPDATE, so a report from an older claim
+	// generation cannot complete a task a later claim now owns. Empty keeps the
+	// legacy callback contract for daemons that predate the fence.
+	ExpectedDispatchedAt string `json:"expected_dispatched_at,omitempty"`
 }
 
 // sanitizeTaskCompleteRequest / sanitizeTaskFailRequest scrub every
@@ -4193,6 +4230,7 @@ func sanitizeTaskCompleteRequest(req *TaskCompleteRequest) {
 	req.DurableWorkDir = util.SanitizeTextForPostgres(req.DurableWorkDir)
 	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
 	req.RetiredSessionID = util.SanitizeTextForPostgres(req.RetiredSessionID)
+	req.ExpectedDispatchedAt = strings.TrimSpace(util.SanitizeTextForPostgres(req.ExpectedDispatchedAt))
 }
 
 func sanitizeTaskFailRequest(req *TaskFailRequest) {
@@ -4203,9 +4241,62 @@ func sanitizeTaskFailRequest(req *TaskFailRequest) {
 	req.FailureReason = util.SanitizeTextForPostgres(req.FailureReason)
 	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
 	req.RetiredSessionID = util.SanitizeTextForPostgres(req.RetiredSessionID)
+	req.ExpectedDispatchedAt = strings.TrimSpace(util.SanitizeTextForPostgres(req.ExpectedDispatchedAt))
 }
 
+// parseExpectedDispatchedAt reads the optional claim generation a terminal
+// callback fences itself to. An absent value keeps the legacy callback contract
+// — the SQL comparison is skipped for that request, exactly as before the
+// fence existed. A present but malformed value is a client bug we refuse rather
+// than silently downgrade to an unfenced write.
+func parseExpectedDispatchedAt(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil || parsed.IsZero() {
+		return time.Time{}, errors.New("invalid expected_dispatched_at")
+	}
+	return parsed, nil
+}
+
+// expectedClaimGeneration adapts the parsed optional generation to the
+// service's variadic parameter. No generation (or a zero one) passes nothing,
+// which leaves that update unfenced exactly as it was before the fence existed.
+func expectedClaimGeneration(parsed time.Time) []time.Time {
+	if parsed.IsZero() {
+		return nil
+	}
+	return []time.Time{parsed}
+}
+
+// writeClaimGenerationConflict answers a terminal callback that lost ownership
+// of its task row to a later claim. The stable code is what lets the daemon
+// distinguish this non-retryable stale report from a transient failure, so it
+// stops replaying instead of retrying forever.
+func writeClaimGenerationConflict(w http.ResponseWriter) {
+	writeErrorCode(w, http.StatusConflict, protocol.DaemonTaskClaimGenerationMismatchCode,
+		"task claim generation is no longer current")
+}
+
+// CompleteTask is the legacy terminal surface: the claim generation is optional,
+// so an installed daemon that predates the fence keeps working. A
+// generation-aware daemon uses CompleteTaskV2 instead.
 func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
+	h.completeTask(w, r, false)
+}
+
+// CompleteTaskV2 is the versioned terminal surface. Unlike the legacy route its
+// semantics REQUIRE the claim generation, so a report that was produced under a
+// fence cannot be accepted here as an unfenced legacy callback: during a rolling
+// deployment an old replica has no such route and answers 404, which the daemon
+// treats as "retry later", never as "settle it anyway".
+func (h *Handler) CompleteTaskV2(w http.ResponseWriter, r *http.Request) {
+	h.completeTask(w, r, true)
+}
+
+func (h *Handler) completeTask(w http.ResponseWriter, r *http.Request, requireGeneration bool) {
 	taskID := chi.URLParam(r, "taskId")
 
 	// Verify the caller owns this task's workspace.
@@ -4228,6 +4319,17 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// re-route below feeds req.Output into the failure classifier, and that
 	// classifier must see exactly the text we are going to persist.
 	sanitizeTaskCompleteRequest(&req)
+	expectedDispatchedAt, err := parseExpectedDispatchedAt(req.ExpectedDispatchedAt)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid expected_dispatched_at")
+		return
+	}
+	if requireGeneration && expectedDispatchedAt.IsZero() {
+		// The versioned route has no unfenced mode: an empty or missing value is
+		// a caller bug, not a legacy callback.
+		writeError(w, http.StatusBadRequest, "expected_dispatched_at is required")
+		return
+	}
 
 	// GH #6402: a daemon whose backend does not (yet) read the provider's
 	// structured terminal reason reports a context-exhausted run as a clean
@@ -4257,7 +4359,8 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 			BranchName:            req.BranchName,
 			SessionRolloutMissing: req.SessionRolloutMissing,
 			RetiredSessionID:      req.RetiredSessionID,
-		})
+			ExpectedDispatchedAt:  req.ExpectedDispatchedAt,
+		}, requireGeneration)
 		return
 	}
 
@@ -4266,8 +4369,16 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// transaction (force session_id NULL + flag the row), so an auto-retry the
 	// same commit creates and wakes can never observe the withheld pointer or a
 	// missing continuity-gap flag.
-	task, transitioned, err := h.TaskService.CompleteTaskWithTransition(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.BranchName, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
+	task, transitioned, err := h.TaskService.CompleteTaskWithTransition(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.BranchName, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir, expectedClaimGeneration(expectedDispatchedAt)...)
 	if err != nil {
+		if errors.Is(err, service.ErrTaskClaimGenerationMismatch) {
+			// The row is live but another claim owns it now. This report can
+			// never settle it, so answer with a stable non-retryable code
+			// instead of a 5xx that would make the daemon replay forever.
+			slog.Info("complete task: stale claim generation rejected", "task_id", taskID)
+			writeClaimGenerationConflict(w)
+			return
+		}
 		// A CompleteTask error is an infrastructure failure (transaction /
 		// assistant-outcome write), not a bad request: an already-finalized
 		// callback is treated as idempotent success and returns no error. Return
@@ -4933,8 +5044,16 @@ type TaskFailRequest struct {
 	// to report" — this says "never hand this id to a later run". Older
 	// daemons omit it, which is exactly the pre-fix behaviour.
 	RetiredSessionID string `json:"retired_session_id,omitempty"`
+	// ExpectedDispatchedAt is the claim generation this failure belongs to: the
+	// dispatched_at the server returned on the claim whose run failed. It is
+	// checked inside the terminal UPDATE, so a failure reported by an older
+	// claim generation cannot fail a task a later claim now owns. Empty keeps
+	// the legacy callback contract for daemons that predate the fence.
+	ExpectedDispatchedAt string `json:"expected_dispatched_at,omitempty"`
 }
 
+// FailTask is the legacy terminal surface; see CompleteTask for why its fence
+// field stays optional.
 func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 
@@ -4949,12 +5068,27 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	// TaskService.FailTask normalizes req.Error itself, but every other field
-	// here lands in a TEXT column too and a NUL in any one of them fails the
-	// same transaction (GH #7098).
-	sanitizeTaskFailRequest(&req)
+	h.failTask(w, r, taskID, workspaceID, req, false)
+}
 
-	h.failTask(w, r, taskID, workspaceID, req)
+// FailTaskV2 is the versioned failure surface: the claim generation is
+// mandatory, and a server too old to have the route answers 404 rather than
+// accepting the report unfenced.
+func (h *Handler) FailTaskV2(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+
+	// Verify the caller owns this task's workspace.
+	_, workspaceID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
+	if !ok {
+		return
+	}
+
+	var req TaskFailRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	h.failTask(w, r, taskID, workspaceID, req, true)
 }
 
 // failTask records a terminal failure and writes the response. Shared by the
@@ -4962,14 +5096,40 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 // run re-classified at the /complete boundary lands through exactly the same
 // transaction, token revocation and runtime wake-up as one the daemon reported
 // as failed itself.
-func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, workspaceID string, req TaskFailRequest) {
+//
+// The request is sanitized here rather than in each caller (GH #7098), and
+// requireGeneration is set by the versioned route, which has no unfenced mode;
+// the context-exhaustion re-route carries the same generation across, so a
+// fenced completion that is normalized into a failure stays fenced.
+func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, workspaceID string, req TaskFailRequest, requireGeneration bool) {
+	// TaskService.FailTask normalizes req.Error itself, but every other field
+	// here lands in a TEXT column too and a NUL in any one of them fails the
+	// same transaction (GH #7098).
+	sanitizeTaskFailRequest(&req)
+	expectedDispatchedAt, err := parseExpectedDispatchedAt(req.ExpectedDispatchedAt)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid expected_dispatched_at")
+		return
+	}
+	if requireGeneration && expectedDispatchedAt.IsZero() {
+		writeError(w, http.StatusBadRequest, "expected_dispatched_at is required")
+		return
+	}
 	// MUL-5305: SessionRolloutMissing is applied inside FailTask's terminal
 	// transaction — forcing session_id NULL (overriding the COALESCE that would
 	// keep a stale mid-flight pin) and flagging the row in the same commit that
 	// creates and wakes the auto-retry, so the retry can never claim the withheld
 	// pointer or miss the continuity gap.
-	task, transitioned, err := h.TaskService.FailTaskWithTransition(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
+	task, transitioned, err := h.TaskService.FailTaskWithTransition(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir, expectedClaimGeneration(expectedDispatchedAt)...)
 	if err != nil {
+		if errors.Is(err, service.ErrTaskClaimGenerationMismatch) {
+			// The reclaim that owns the row now must keep it: a stale failure
+			// is not allowed to fail a task a later claim is working on, and a
+			// stable code stops the daemon from replaying it forever.
+			slog.Info("fail task: stale claim generation rejected", "task_id", taskID)
+			writeClaimGenerationConflict(w)
+			return
+		}
 		// A FailTask error is an infrastructure failure (the terminal
 		// transaction that also clears the withheld session, writes the
 		// continuity-gap flag, and creates the auto-retry rolled back), not a bad
