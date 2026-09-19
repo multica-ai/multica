@@ -7,6 +7,7 @@ package wecom
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -50,6 +51,13 @@ type bubbleConn struct {
 	loseClosingAcks int
 	closingWrites   int
 
+	// failOpeningWrite makes the socket refuse the frame that paints the
+	// bubble, with an error raised once WriteMessage had been entered — so the
+	// placeholder may be on the asker's screen and nothing says whether it is.
+	// Distinct from refuseOpeningCode, which is the server STATING that this
+	// stream is dead and no bubble exists.
+	failOpeningWrite error
+
 	// onClosing runs after a closing frame has been recorded and before its
 	// verdict is routed. It is how a test says "the socket dropped right after
 	// this frame went out" — by swapping the installation's sender from
@@ -79,8 +87,14 @@ func (c *bubbleConn) WriteMessage(_ int, data []byte) error {
 		}
 		lost = c.closingWrites <= c.loseClosingAcks
 		onClosing = c.onClosing
-	} else if c.refuseOpeningCode != 0 && env.Cmd == cmdRespondMsg {
-		code = c.refuseOpeningCode
+	} else if env.Cmd == cmdRespondMsg {
+		if c.failOpeningWrite != nil {
+			c.mu.Unlock()
+			return c.failOpeningWrite
+		}
+		if c.refuseOpeningCode != 0 {
+			code = c.refuseOpeningCode
+		}
 	}
 	c.mu.Unlock()
 	if onClosing != nil {
@@ -445,6 +459,9 @@ var testTaskUUIDs = map[string]string{
 	// A question typed in Multica on this same WeCom-bound session. Its
 	// task:queued is indistinguishable from the room's on the bus.
 	"web-1": "aaaaaaaa-0000-0000-0000-0000000000b1",
+	"web-2": "aaaaaaaa-0000-0000-0000-0000000000b2",
+	// The room's own run, queued behind a first-party one.
+	"task-r": "aaaaaaaa-0000-0000-0000-0000000000c1",
 }
 
 // taskUUID is the string form the event payloads carry.
@@ -887,5 +904,30 @@ func TestARefusedOpeningFrameCountsNoBubble(t *testing.T) {
 	pushes := rig.conn.pushes(t)
 	if len(pushes) != 1 || pushText(pushes[0]) != "the agent reply" {
 		t.Fatalf("the asker read %d plain message(s) %v, want exactly the answer", len(pushes), pushes)
+	}
+}
+
+// A write the socket may have taken is not a refusal, and the opening frame was
+// the one site in this package still reading it as one.
+//
+// errWriteAttempted means WriteMessage was entered: the peer may have taken the
+// bytes and painted the placeholder. Dropping the handle on that evidence
+// leaves a bubble on the asker's screen with nothing left that could ever close
+// it — the answer arrives as a plain message underneath a spinner that turns
+// until the platform's window runs out.
+//
+// provablyNotSent returns false for this error and unconfirmedReason files it
+// as write_attempted; this site now agrees with both.
+func TestAnOpeningFrameTheSocketMayHaveTakenKeepsItsHandle(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.conn.failOpeningWrite = errors.New("broken pipe")
+
+	rig.ask(t, "REQ-OPEN")
+
+	if got := rig.streams.depth(); got != 1 {
+		t.Fatalf("the store holds %d rounds after an opening frame the socket may have taken, "+
+			"want 1 — if the placeholder is on screen, the handle is the only thing that could "+
+			"ever close it", got)
 	}
 }

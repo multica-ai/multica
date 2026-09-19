@@ -402,3 +402,72 @@ func TestRelayedReply_ASettleThatNeverExecutedIsRetried(t *testing.T) {
 		t.Fatalf("claim value = %q, want %q", v, claimSettledValue)
 	}
 }
+
+// ---- a relayed answer belongs in the bubble, not under it ----
+
+// The replica that takes a relayed reply is by definition the one holding the
+// socket, and a bubble is writable only on the replica that painted it — which
+// is that same replica. So the round is HERE, and the frame carries the task id
+// that names it.
+//
+// It used to push the words as an ordinary message without ever looking, so on
+// any multi-replica deployment the answer arrived underneath a bubble that then
+// span until the platform's window ran out. The frame carrying the id is only
+// half of it; something has to read it.
+func TestARelayedAnswerSealsTheBubbleItBelongsTo(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.ran(t, "REQ-RELAY", "task-1")
+
+	res := rig.out.deliverRelayed(context.Background(), relayFrame{
+		Kind:           relayKindReply,
+		InstallationID: util.UUIDToString(rig.instID),
+		ChatID:         "CHAT_1",
+		ChatType:       chatTypeGroupInt,
+		Content:        "the routed answer",
+		TaskID:         taskUUID(t, "task-1"),
+		SessionID:      bubbleSession,
+	})
+	if res.outcome != outcomeDone {
+		t.Fatalf("outcome = %v, want outcomeDone", res.outcome)
+	}
+	if pushes := rig.conn.pushes(t); len(pushes) != 0 {
+		t.Fatalf("the routed answer arrived as %d plain message(s) under a bubble that is still "+
+			"turning: %v", len(pushes), pushes)
+	}
+	sealed := false
+	for _, f := range rig.conn.streamFrames(t) {
+		if f["finish"] == true && f["content"] == "the routed answer" {
+			sealed = true
+		}
+	}
+	if !sealed {
+		t.Fatal("the routed answer never sealed the bubble its question opened")
+	}
+}
+
+// An inbox push is not an answer to a round and must never close one — the
+// same distinction the reply counters make, at the one new call site.
+func TestARelayedInboxPushNeverSealsABubble(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.ran(t, "REQ-RELAY-2", "task-1")
+
+	rig.out.deliverRelayed(context.Background(), relayFrame{
+		Kind:           relayKindInbox,
+		InstallationID: util.UUIDToString(rig.instID),
+		ChatID:         "CHAT_1",
+		ChatType:       chatTypeGroupInt,
+		Content:        "an inbox notice",
+		TaskID:         taskUUID(t, "task-1"),
+		SessionID:      bubbleSession,
+	})
+	for _, f := range rig.conn.streamFrames(t) {
+		if f["finish"] == true {
+			t.Fatalf("an inbox push closed a round's bubble: %v", f)
+		}
+	}
+	if got := pushedTexts(t, rig.conn); len(got) != 1 || got[0] != "an inbox notice" {
+		t.Fatalf("the inbox push read %q, want it delivered as an ordinary message", got)
+	}
+}

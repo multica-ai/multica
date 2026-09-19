@@ -23,6 +23,11 @@ type silentConn struct {
 	mu     sync.Mutex
 	frames []frameEnvelope
 	err    error
+	// deadlineErr fails SetWriteDeadline, which is the one failure raised
+	// before any byte can leave. writeLocked wraps only the other kind in
+	// errWriteAttempted, and the two must not be modelled by the same field:
+	// one is provably unsent, the other may have reached the peer.
+	deadlineErr error
 }
 
 func (c *silentConn) WriteMessage(_ int, data []byte) error {
@@ -40,7 +45,7 @@ func (c *silentConn) WriteMessage(_ int, data []byte) error {
 }
 func (c *silentConn) ReadMessage() (int, []byte, error) { return 0, nil, nil }
 func (c *silentConn) SetReadDeadline(time.Time) error   { return nil }
-func (c *silentConn) SetWriteDeadline(time.Time) error  { return nil }
+func (c *silentConn) SetWriteDeadline(time.Time) error  { return c.deadlineErr }
 func (c *silentConn) Close() error                      { return nil }
 
 func (c *silentConn) count() int {
@@ -182,9 +187,14 @@ func TestANonFinalFrameYieldsToOneStillAwaitingItsVerdict(t *testing.T) {
 // A write that never reached the socket must give its place back, or every
 // later verdict on the turn is off by one — which is the misattribution above,
 // arriving through a different door.
+//
+// The fixture is a SetWriteDeadline failure, because that is the whole of the
+// population: writeLocked raises it before entering WriteMessage. It used to
+// be a WriteMessage failure, which is the opposite case and is covered by the
+// test below — the assertion was right and the fixture named the wrong door.
 func TestAFailedWriteGivesBackItsPlaceInTheOrder(t *testing.T) {
 	t.Parallel()
-	conn := &silentConn{err: websocket.ErrCloseSent}
+	conn := &silentConn{deadlineErr: errors.New("connection reset")}
 	sender := newWSSender(conn, nil)
 	sender.ackTimeout = 50 * time.Millisecond
 	const reqID = "REQ-5"
@@ -203,6 +213,33 @@ func TestAFailedWriteGivesBackItsPlaceInTheOrder(t *testing.T) {
 	}
 }
 
+// The other door, and the one that matters more: WriteMessage was entered, so
+// the peer may have taken the bytes and may yet answer them. Giving the place
+// back there would let that verdict settle the NEXT frame — the misattribution
+// the counters exist to prevent, arriving through the fix for the case above.
+func TestAWriteTheSocketMayHaveTakenKeepsItsPlaceInTheOrder(t *testing.T) {
+	t.Parallel()
+	conn := &silentConn{err: websocket.ErrCloseSent}
+	sender := newWSSender(conn, nil)
+	sender.ackTimeout = 50 * time.Millisecond
+	const reqID = "REQ-5W"
+
+	err := sender.respondStream(context.Background(), reqID, "S-5W", streamThinkingPlaceholder, false)
+	if !errors.Is(err, errWriteAttempted) {
+		t.Fatalf("respondStream returned %v, want it wrapped in errWriteAttempted", err)
+	}
+	sender.ackMu.Lock()
+	st := sender.streams[reqID]
+	sender.ackMu.Unlock()
+	if st == nil {
+		t.Fatal("no bookkeeping recorded for the turn")
+	}
+	if st.sent != 1 {
+		t.Fatalf("sent = %d after a write the socket may have taken, want 1; a late verdict for it "+
+			"would now be handed to the next frame", st.sent)
+	}
+}
+
 // pruneStreamsLocked must never throw away a LIVE turn to stay under its cap.
 // A live turn whose counters are gone has its next frame stamped from zero, and
 // the whole misattribution above comes back — reinstated by the sweep meant to
@@ -213,9 +250,17 @@ func TestPruneKeepsLiveTurnsEvenOverTheCap(t *testing.T) {
 	conn := &silentConn{}
 	sender := newWSSender(conn, nil)
 
-	// One live turn, opened long ago — the shape a real one has.
+	// One live turn: a frame out, no verdict back, and young enough that the
+	// round store still holds its handle.
+	//
+	// The fixture used to be 2*streamMaxAge old. That is not a live turn — past
+	// streamMaxAge the store has evicted the handle and nothing can hand seal
+	// one for this req_id — and keeping such an entry retains counters that
+	// guard nothing. The property under test is unchanged: an entry that may
+	// still take a frame survives the sweep however full the map is. The test
+	// below covers the other side.
 	const live = "REQ-LIVE"
-	sender.streams[live] = &streamAcks{sent: 1, at: time.Now().Add(-2 * streamMaxAge)}
+	sender.streams[live] = &streamAcks{sent: 1, at: time.Now().Add(-streamMaxAge / 2)}
 
 	// Fill past the cap with young sealed turns, which are the ones a burst
 	// produces and the only ones that may be dropped.
@@ -228,6 +273,35 @@ func TestPruneKeepsLiveTurnsEvenOverTheCap(t *testing.T) {
 
 	if _, ok := sender.streams[live]; !ok {
 		t.Fatal("the sweep dropped a live turn; its next frame is stamped from zero and a stale verdict will settle its closing frame")
+	}
+}
+
+// The other side: cancelAck leaves a debt on purpose, so a turn whose verdict
+// never comes is never settled. Keeping it forever was the leak; retiring it on
+// age alone was wrong for the reason recorded in pruneStreamsLocked. What
+// retires it is OUR OWN reach ending — past streamMaxAge the round store has
+// evicted the handle, and a closer already holding one is bounded by
+// streamCloseTimeout, so no frame can be written for this req_id again.
+func TestPruneRetiresATurnNothingCanWriteForAgain(t *testing.T) {
+	t.Parallel()
+	conn := &silentConn{}
+	sender := newWSSender(conn, nil)
+
+	const lost = "REQ-LOST"
+	sender.streams[lost] = &streamAcks{
+		sent: 1, acked: 0,
+		at: time.Now().Add(-(streamMaxAge + streamCloseTimeout + time.Second)),
+	}
+	for i := 0; i < streamAcksMax; i++ {
+		sender.streams[newReqID()] = &streamAcks{sealed: map[string]struct{}{"S": {}}, at: time.Now()}
+	}
+	sender.ackMu.Lock()
+	sender.pruneStreamsLocked()
+	sender.ackMu.Unlock()
+
+	if _, ok := sender.streams[lost]; ok {
+		t.Fatal("a turn past every window that could still write for it was kept; its counters " +
+			"guard nothing and the map grows for the life of the connection")
 	}
 }
 
@@ -380,5 +454,87 @@ func TestBookkeepingForALiveTurnSurvivesTheCap(t *testing.T) {
 
 	if !live {
 		t.Fatal("the live turn's counters were retired: its next verdict now matches by a position that was reset under it")
+	}
+}
+
+// ---- the gate lets a rewrite out; it must also let the rewrite's verdict in ----
+
+// A closing frame whose ack was lost leaves a permanent debt, on purpose:
+// cancelAck never writes off a verdict, because a late one must not settle the
+// NEXT frame. The owed gate reads that debt and blocks new frames. seal's
+// retry is the one exemption — an identical frame is not a second frame.
+//
+// The exemption has to cover BOTH directions. Letting the frame onto the wire
+// while stamping its waiter unaddressable is strictly worse than refusing it:
+// the server's answer cannot be matched, seal reads a timeout in place of the
+// refusal that actually came back, and a stated refusal is the only signal
+// that routes the answer to a plain message. The user then gets nothing.
+func TestARewriteReadsItsOwnVerdictDespiteTheDebtThatLetItOut(t *testing.T) {
+	t.Parallel()
+	conn := &silentConn{}
+	sender := newWSSender(conn, nil)
+	sender.ackTimeout = 200 * time.Millisecond
+	const reqID, streamID = "REQ-RW", "S-RW"
+
+	// A frame goes out and its verdict never comes: sent=1, acked=0 forever.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := sender.respondStream(ctx, reqID, streamID, "first", true); !errors.Is(err, errStreamAckTimeout) &&
+		!errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("the abandoned frame returned %v, want it to give up waiting", err)
+	}
+	sender.ackMu.Lock()
+	st := sender.streams[reqID]
+	debt := st.sent - st.acked
+	sender.ackMu.Unlock()
+	if debt == 0 {
+		t.Fatal("no debt left behind; this test's whole premise is the debt the owed gate reads")
+	}
+
+	// The retry, on the SAME socket — which is what production does, because
+	// sendersRegistry.streamRewrite resolves by installation id and nothing
+	// reconnects. The server refuses it, with words.
+	done := make(chan error, 1)
+	go func() {
+		done <- sender.respondStreamRewrite(context.Background(), reqID, streamID, "first", true)
+	}()
+	// Wait for the frame to be STAMPED — seq is set inside the writer, after
+	// the waiter is registered — and only then read the verdict it may match.
+	deadline := time.After(2 * time.Second)
+	for {
+		sender.ackMu.Lock()
+		w, waiting := sender.waiters[reqID]
+		stamped := waiting && w.seq != 0
+		addressable := stamped && w.addressable
+		sender.ackMu.Unlock()
+		if stamped {
+			if !addressable {
+				t.Fatal("the rewrite was written unaddressable: the gate let the frame out and " +
+					"then blinded it to the answer, so a stated refusal is read as a timeout and " +
+					"the answer is recorded unconfirmed while nothing reached the bubble")
+			}
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("the rewrite never reached the wire")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	// Settle the debt, then answer the rewrite — the order a server sending
+	// both verdicts produces.
+	sender.deliverAck(reqID, 0, "")
+	sender.deliverAck(reqID, 45002, "content too long")
+
+	select {
+	case err := <-done:
+		var refusal *streamError
+		if !errors.As(err, &refusal) || refusal.Code != 45002 {
+			t.Fatalf("the rewrite returned %v, want the server's stated refusal (45002) — a refusal "+
+				"read as a timeout is classified unconfirmed and the answer is never said", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the rewrite never read its verdict")
 	}
 }

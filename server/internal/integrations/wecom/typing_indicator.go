@@ -302,7 +302,14 @@ func (m *TypingIndicatorManager) OnIngested(ctx context.Context, inst engine.Res
 		switch {
 		case errors.Is(err, errStreamAckTimeout),
 			errors.Is(err, errStreamBusy),
-			errors.Is(err, errStreamSuperseded):
+			errors.Is(err, errStreamSuperseded),
+			// errWriteAttempted means WriteMessage was entered, so the peer may
+			// have taken the bytes and painted the placeholder. Every other
+			// site in this package reads it that way — provablyNotSent returns
+			// false for it, unconfirmedReason files it as write_attempted — and
+			// dropping the handle here on that evidence leaves a bubble on
+			// screen with nothing left that could ever close it.
+			errors.Is(err, errWriteAttempted):
 			m.log.DebugContext(ctx, "wecom typing: opening frame did not land, keeping the handle",
 				"chat_session_id", util.UUIDToString(sessionID), "error", err)
 		default:
@@ -492,21 +499,49 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 	// Lark's, DingTalk's, the web UI's — and the delivery row is read first,
 	// so a run with no WeCom route never reaches the second read
 	// (TestAnotherChannelsFailureNeverReachesTheTaskRow).
+	// ONE READ DECIDES WHICH RUNS PAY FOR THE GATE, and the order is the whole
+	// of it. task:failed fires for every run in the deployment — Slack's,
+	// Lark's, DingTalk's, the web UI's — so the delivery row is read first and
+	// its answer is read three ways, not two:
+	//
+	//   routingSilent — another platform's run, or ours on a revoked
+	//     installation. Nothing to say and nothing more to read: one lookup,
+	//     which is what a foreign failure cost before the gate existed
+	//     (TestAnotherChannelsFailureNeverReachesTheTaskRow).
+	//   routingOurs — a live WeCom address. The row is itself the proof of
+	//     origin, because a run typed in Multica never has one, so this skips
+	//     the gate's two reads entirely.
+	//   routingNoRow — nothing filed. THIS is the first-party population the
+	//     gate exists for, and the only one that pays for it.
+	//
+	// Reading "no row" as "not ours" is what made the gate unreachable before:
+	// EnqueueChatTask writes no external delivery snapshot for a first-party
+	// run (main's channel_new_e2e_test.go says the direct task deliberately
+	// gets none), so every run the gate was written for returned above it.
 	var bound roundAddress
-	if taskID != "" {
-		addr, ours := m.addressForTask(dbCtx, taskID)
-		if !ours {
-			return
-		}
-		bound = addr
+	if taskID == "" {
+		// No id names no row and no batch. originOf refuses it and says so,
+		// which is the visible half of a notice this process swallows.
+		m.originOf(dbCtx, sessionID, taskID)
+		return
 	}
-	switch m.originOf(dbCtx, sessionID, taskID) {
-	case originNotOurs:
-		m.releaseRefusedRound(sessionID, taskID)
-		return
-	case originUnknown:
-		// originOf has already logged which read failed.
-		return
+	{
+		addr, routing := m.addressForTask(dbCtx, taskID)
+		switch routing {
+		case routingSilent:
+			return
+		case routingNoRow:
+			switch m.originOf(dbCtx, sessionID, taskID) {
+			case originNotOurs:
+				m.releaseRefusedRound(sessionID, taskID)
+				return
+			case originUnknown:
+				// originOf has already logged which read failed.
+				return
+			}
+		default:
+			bound = addr
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
@@ -522,8 +557,8 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 	// No bubble to write into: the round was never painted, or its stream has
 	// run out. The words still go to the chat that asked.
 	if !bound.known() {
-		found, ours := m.addressForTask(ctx, taskID)
-		if !ours {
+		found, routing := m.addressForTask(ctx, taskID)
+		if routing != routingOurs {
 			return
 		}
 		bound = found
@@ -741,7 +776,7 @@ func (m *TypingIndicatorManager) releaseRefusedRound(sessionID pgtype.UUID, task
 	if m.streams == nil || taskID == "" {
 		return
 	}
-	m.streams.retryUnbind(sessionID, taskID)
+	m.streams.releaseRound(sessionID, taskID)
 }
 
 func (m *TypingIndicatorManager) rounds() roundTaker {
@@ -817,28 +852,47 @@ func (m *TypingIndicatorManager) sayAsPlainMessage(ctx context.Context, sessionI
 // every failed run on a shared bus, including Slack's and the web UI's. That
 // makes it the ownership test as much as the address, which is why
 // handleTaskFailed asks it before spending anything on the task row.
-func (m *TypingIndicatorManager) addressForTask(ctx context.Context, taskID string) (roundAddress, bool) {
+// taskRouting is what one delivery-row read establishes about a run, and it
+// has three answers rather than two. Collapsing the first two is what made the
+// origin gate unreachable: "no row" was read as "not ours" and returned, and a
+// run typed in Multica has no row by design.
+type taskRouting int
+
+const (
+	// routingNoRow: nothing is filed for this run. It may be a first-party run
+	// holding this room's round, which is exactly what the origin gate is for,
+	// so this is the one answer worth spending more reads on.
+	routingNoRow taskRouting = iota
+	// routingSilent: a row that is not a live WeCom address — another
+	// platform's run, or ours on an installation that has been revoked. Either
+	// way this subscriber says nothing, and it costs the task row no read.
+	routingSilent
+	// routingOurs: a live WeCom address. The row IS the proof of origin — a
+	// run typed in Multica never has one — so this answer skips the gate.
+	routingOurs
+)
+
+func (m *TypingIndicatorManager) addressForTask(ctx context.Context, taskID string) (roundAddress, taskRouting) {
 	if m.deliveries == nil {
-		return roundAddress{}, false
+		return roundAddress{}, routingNoRow
 	}
 	id, err := util.ParseUUID(taskID)
 	if err != nil || !id.Valid {
-		return roundAddress{}, false
+		return roundAddress{}, routingNoRow
 	}
-	addr, skip, err := taskAddress(ctx, m.deliveries, id)
+	addr, skip, filed, err := taskAddress(ctx, m.deliveries, id)
 	if err != nil {
 		m.log.WarnContext(ctx, "wecom typing: cannot find the chat a failed run belongs to",
 			"task_id", taskID, "error", err)
-		return roundAddress{}, false
+		return roundAddress{}, routingSilent
 	}
-	if skip != "" || !addr.known() {
-		// A reason means the turn was ours and is no longer deliverable; a zero
-		// address with no reason means it was never ours — no delivery row, or
-		// another platform's. Either way this subscriber says nothing, and
-		// neither costs the task row a read.
-		return roundAddress{}, false
+	switch {
+	case !filed:
+		return roundAddress{}, routingNoRow
+	case skip != "" || !addr.known():
+		return roundAddress{}, routingSilent
 	}
-	return addr, true
+	return addr, routingOurs
 }
 
 // sessionFor finds the chat session behind a task lifecycle event.
@@ -920,12 +974,28 @@ func taskIDFromEvent(e events.Event) string {
 // different chat.
 func (m *TypingIndicatorManager) writeClosing(ctx context.Context, sessionID pgtype.UUID, h streamHandle, text, why string) {
 	err := m.streams.seal(ctx, m.senders, h, text)
-	if err == nil {
+	switch classifySeal(err) {
+	case sealOnScreen:
+		return
+	case sealUnknown:
+		// The same reading the answer path takes, for the same reason: these
+		// words may already be in the bubble, and WeCom has no unsend. A
+		// notice the user might see twice is worse than one they can ask for
+		// again, so this path stops here rather than pushing a copy.
+		m.log.WarnContext(ctx, "wecom typing: closing frame's outcome is unknown, not saying it again",
+			"chat_session_id", util.UUIDToString(sessionID),
+			"reason", why, "unconfirmed_reason", unconfirmedSealReason(err), "error", err)
 		return
 	}
-	m.log.WarnContext(ctx, "wecom typing: closing frame failed, saying it as a new message",
+	m.log.WarnContext(ctx, "wecom typing: closing frame refused, saying it as a new message",
 		"chat_session_id", util.UUIDToString(sessionID),
 		"reason", why, "unusable", streamUnusable(err), "error", err)
+	// The fallback gets its own budget when seal spent this one. StreamFailed
+	// is the only "that run did not go through" WeCom ever produces, so a
+	// notice dropped for want of a few seconds leaves the user with a spinner
+	// and no explanation that would ever arrive.
+	ctx, cancel := fallbackBudget(ctx)
+	defer cancel()
 	if err := m.senders.sendTextCtx(ctx, h.InstallationID, h.ChatID, h.ChatType, text); err != nil {
 		m.log.WarnContext(ctx, "wecom typing: the fallback message was unsendable too",
 			"chat_session_id", util.UUIDToString(sessionID), "reason", why, "error", err)

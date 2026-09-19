@@ -404,3 +404,56 @@ func TestARunLeftPendingDoesNotTakeAMuchLaterQuestionsBubble(t *testing.T) {
 		t.Fatalf("the later answer arrived as %d plain message(s): %v", len(pushes), pushes)
 	}
 }
+
+// ---- a released round and a new question must not be cross-wired ----
+
+// The ordering Bohan drove: the round is released for a retry, the asker types
+// a NEW question which opens its own bubble AND queues its own run, and only
+// then does the clone's task:queued arrive.
+//
+// Both runs are a fresh task row with a fresh id on the same session, and
+// task:queued carries nothing that separates them — so a store that hands the
+// released round to whichever run arrives first gets this one backwards: the
+// new question's run takes the round it did not open, and the clone takes the
+// new question's. Two turns, each sealing the other's bubble, silently.
+//
+// What resolves it is the only authoritative name either run has: the clone
+// inherits its parent's chat_input_task_id, so the ENDING can say which round
+// it belongs to even though the queued event could not.
+func TestANewQuestionsRunDoesNotTakeTheRoundHeldForARetry(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+
+	rig.ran(t, "REQ-C1", "task-1")
+	rig.failed(t, "task-1", true) // retryable: the round is held for the clone
+
+	// The asker types again while the backoff runs, and this question's own run
+	// is queued before the clone's is.
+	rig.ask(t, "REQ-C2")
+	rig.q.fileTask(t, taskUUID(t, "task-2"))
+	rig.queueTask(t, taskUUID(t, "task-2"), "")
+
+	rig.q.fileRetryClone(t, taskUUID(t, "retry"), taskUUID(t, "task-1"))
+	rig.queueTask(t, taskUUID(t, "retry"), "")
+
+	rig.answer(t, "the retry's answer", "retry")
+	rig.answer(t, "the second answer", "task-2")
+
+	frames := rig.conn.streamFrames(t)
+	if len(frames) != 4 {
+		t.Fatalf("got %d stream frames, want 4 (two opens, two seals)", len(frames))
+	}
+	first, second := frames[0]["id"], frames[1]["id"]
+	sealed := map[any]any{}
+	for _, f := range frames[2:] {
+		sealed[f["id"]] = f["content"]
+	}
+	if sealed[first] != "the retry's answer" {
+		t.Fatalf("the first question's bubble was sealed with %q, want %q — the retry's answer "+
+			"landed in the wrong bubble", sealed[first], "the retry's answer")
+	}
+	if sealed[second] != "the second answer" {
+		t.Fatalf("the second question's bubble was sealed with %q, want %q — two turns are "+
+			"cross-wired, each answering the other's question", sealed[second], "the second answer")
+	}
+}

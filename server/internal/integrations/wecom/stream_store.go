@@ -296,6 +296,19 @@ type roundEntry struct {
 	//     it (its replacement is already on the way).
 	everBound bool
 
+	// retryOf is the id of the attempt a released round is waiting to be
+	// replaced by — the parent whose clone will answer this round's question.
+	// Set by retryUnbind, cleared the moment a run is bound.
+	//
+	// It exists because NOTHING ELSE CAN TELL THE CLONE APART from a new
+	// question's run at task:queued: both are a new task row with a new id on
+	// the same session, and the adapter may not read the database on the bus.
+	// The two orderings are symmetric — the clone may arrive before or after a
+	// new question's run — so no arrival-order rule resolves them, and the
+	// round has to carry the name of what it is waiting for until an ending
+	// can resolve the lineage.
+	retryOf string
+
 	// createdAt bounds the entry for the sweep when there is no handle to read
 	// a time off.
 	createdAt time.Time
@@ -405,15 +418,42 @@ func (s *streamStore) collectingLocked(key string) *roundEntry {
 	return nil
 }
 
-// unboundLocked finds the oldest round with no run bound to it — the one a
-// newly queued run belongs to. Caller holds s.mu.
+// unboundLocked finds the oldest round with no run bound to it, INCLUDING one
+// released by retryUnbind. It is bindNext's second choice, taken only when no
+// never-bound round is waiting — see the note there for why the order is what
+// keeps two turns from being cross-wired.
+// Caller holds s.mu.
 func (s *streamStore) unboundLocked(key string) *roundEntry {
 	for _, r := range s.sessions[key] {
-		if r.taskID == "" {
+		if r.taskID == "" && r.retryOf == "" {
 			return r
 		}
 	}
 	return nil
+}
+
+// awaitingRetryLocked answers two separate questions, and the returns are
+// deliberately not interchangeable:
+//
+//	at   — the index of the round waiting for THIS root, or -1. Only >= 0 is a
+//	       match; callers index on this and nothing else.
+//	held — whether the session holds any round waiting for a retry at all.
+//	       This is the cheap in-memory check that decides whether an ending
+//	       pays for the lineage read.
+//
+// Caller holds s.mu.
+func (s *streamStore) awaitingRetryLocked(key, root string) (at int, held bool) {
+	at = -1
+	for i, r := range s.sessions[key] {
+		if r.retryOf == "" {
+			continue
+		}
+		held = true
+		if root != "" && r.retryOf == root {
+			at = i
+		}
+	}
+	return at, held
 }
 
 // boundLocked finds the round a task id is bound to, or nil. Caller holds s.mu.
@@ -577,7 +617,29 @@ func (s *streamStore) bindNext(sessionID pgtype.UUID, taskID string) {
 	if s.boundLocked(key, taskID) != nil {
 		return // already on file; a republished queued event changes nothing
 	}
-	if e := s.unboundLocked(key); e != nil {
+	// A NEVER-BOUND ROUND FIRST, A RELEASED ONE ONLY IF NONE IS WAITING. The
+	// two lookups have to agree about a released round or two turns end up
+	// cross-wired: collectingLocked already refuses one (a new message must
+	// not join a round whose replacement run is on the way), so a new
+	// question opens a round of its own — and if this bind then handed that
+	// question's run the RELEASED round, each turn would seal the other's
+	// bubble. Driven in the real backoff order, that is two people's answers
+	// swapped, silently.
+	//
+	// Preferring the never-bound round makes the two agree. What it costs is
+	// the narrow case where the clone's task:queued arrives while a newer
+	// question's round is painted but its own run has not been queued yet:
+	// the clone takes the newer round and the released one is left without a
+	// run. That round then spins until streamMaxAge, its answer arrives as a
+	// plain message, and recordOpened makes it countable — a degraded turn,
+	// not a wrong one. Between a stranded bubble and an answer delivered to
+	// the wrong question, only one of the two is recoverable by asking again.
+	e := s.collectingLocked(key)
+	if e == nil {
+		e = s.unboundLocked(key)
+	}
+	if e != nil {
+		e.retryOf = ""
 		e.bindLocked(taskID)
 		return
 	}
@@ -620,9 +682,56 @@ func (s *streamStore) retryUnbind(sessionID pgtype.UUID, taskID string) bool {
 	if e == nil {
 		return false
 	}
-	e.taskID = ""
+	// The clone is usually already queued — service publishes its task:queued
+	// before the parent's task:failed — so the ordinary case hands the round
+	// straight over and nothing is ever left waiting.
 	if clone := s.takePendingLocked(key); clone != "" {
+		e.taskID = ""
 		e.bindLocked(clone)
+		return true
+	}
+	// NO CLONE YET. The round goes back to waiting, but NOT into the pool the
+	// next task:queued draws from: a clone's queued event is byte-identical to
+	// a new question's, so the pool would hand this round to whichever arrived
+	// first, and driven in the real order that is two turns cross-wired, each
+	// sealing the other's bubble.
+	//
+	// It records the name of what it is waiting for instead. A clone inherits
+	// its parent's chat_input_task_id, and EnqueueChatTask stamps
+	// chat_input_task_id = id on the turn it creates, so this id IS the root
+	// the clone resolves to — which makes the clone's ENDING able to name this
+	// round with an authoritative id where its queued event could not.
+	e.taskID = ""
+	e.retryOf = taskID
+	return true
+}
+
+// releaseRound hands a bubble back when the run bound to it turns out not to be
+// one this adapter will ever close — a question typed in Multica that took the
+// room's round off task:queued.
+//
+// Unlike retryUnbind there is no replacement coming, so the round genuinely
+// goes back to waiting: the room's own run, which found the round taken and
+// went to the pending queue, is bound here if it is waiting, and otherwise the
+// next task:queued for this session takes it.
+//
+// everBound stays set. The round is between runs rather than collecting, so a
+// new message must not join it — see roundEntry.everBound.
+func (s *streamStore) releaseRound(sessionID pgtype.UUID, taskID string) bool {
+	if taskID == "" {
+		return false
+	}
+	key := util.UUIDToString(sessionID)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.boundLocked(key, taskID)
+	if e == nil {
+		return false
+	}
+	e.taskID = ""
+	if next := s.takePendingLocked(key); next != "" {
+		e.bindLocked(next)
 	}
 	return true
 }
@@ -738,6 +847,32 @@ func (s *streamStore) take(ctx context.Context, sessionID pgtype.UUID, k roundKe
 	// Whatever else happens, this run is over: it must not be left waiting for
 	// a bubble it would only strand.
 	s.dropPendingLocked(key, k.taskID)
+	_, awaitingRetry := s.awaitingRetryLocked(key, "")
+	s.mu.Unlock()
+
+	// A ROUND WAITING FOR A NAMED ATTEMPT IS RESOLVED BY LINEAGE, NOT BY
+	// WHATEVER task:queued GUESSED. The clone's queued event cannot name the
+	// round it belongs to, so bindNext may have bound this run to a newer
+	// question's round; its chat_input_task_id can name it, and that is
+	// authoritative. Read first rather than on a miss, because on this path the
+	// first lookup can succeed with the WRONG round.
+	//
+	// The read is paid only while a retry is outstanding — awaitingRetry is an
+	// in-memory check over one session's rounds — so an ordinary ending still
+	// costs what it always did.
+	if awaitingRetry && k.taskID != "" && resolve != nil {
+		if root := resolve(ctx, k.taskID); root != "" {
+			s.mu.Lock()
+			if i, _ := s.awaitingRetryLocked(key, root); i >= 0 {
+				turn := s.takeAtLocked(key, i)
+				s.mu.Unlock()
+				return turn, true
+			}
+			s.mu.Unlock()
+		}
+	}
+
+	s.mu.Lock()
 	if i := s.indexLocked(key, k); i >= 0 {
 		turn := s.takeAtLocked(key, i)
 		s.mu.Unlock()

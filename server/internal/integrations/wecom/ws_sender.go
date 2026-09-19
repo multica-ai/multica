@@ -229,8 +229,19 @@ type ackWaiter struct {
 	// the point it is relied on: if it is ever false, something wrote past the
 	// gate and no verdict on this req_id may be trusted by position.
 	addressable bool
-	done        chan struct{} // closed once the waiter has left the table, by verdict or by cancel
-	once        sync.Once
+	// rewrite marks the one frame the gate lets past an outstanding debt: the
+	// SAME closing frame written again. It is what makes such a frame
+	// addressable despite the debt — and the two are one decision, not two.
+	// Letting the frame out while refusing to match its verdict is strictly
+	// worse than refusing it outright: seal then reads errStreamAckTimeout in
+	// place of the refusal the server actually sent, and a refusal is the only
+	// signal that routes the answer to the plain message. Measured on
+	// 2026-09-03 (STRATEGY §6.5): six identical rewrites of a sealed stream all
+	// returned errcode 0, so whichever identical write a verdict belongs to it
+	// reports the same outcome — the same fact that justifies letting it out.
+	rewrite bool
+	done    chan struct{} // closed once the waiter has left the table, by verdict or by cancel
+	once    sync.Once
 }
 
 func newAckWaiter() *ackWaiter {
@@ -420,6 +431,7 @@ func (s *wsSender) awaitAck(ctx context.Context, reqID string, finish, rewrite b
 		owed := tracked && st.acked < st.sent && !rewrite
 		if !taken && !owed {
 			w := newAckWaiter()
+			w.rewrite = rewrite
 			s.waiters[reqID] = w
 			s.ackMu.Unlock()
 			return w, nil
@@ -512,14 +524,15 @@ func (s *wsSender) beginStreamFrameLocked(reqID, streamID string, w *ackWaiter, 
 	}
 	if w != nil {
 		w.seq = st.sent
-		w.addressable = clean
+		w.addressable = clean || w.rewrite
 	}
 	return true
 }
 
 // abortStreamFrameLocked gives back the place reserved for a frame that never
 // reached the socket, so one failed write does not put every later verdict on
-// this req_id out of step. The seal is not given back: a turn whose closing
+// this req_id out of step. Establishing that it never reached the socket is
+// the caller's job — see the errWriteAttempted check at the one call site. The seal is not given back: a turn whose closing
 // frame failed is over either way, and the caller has already fallen back to a
 // plain message. Caller holds the writer.
 func (s *wsSender) abortStreamFrameLocked(reqID string) {
@@ -558,6 +571,21 @@ func (s *wsSender) pruneStreamsLocked() {
 		// same req_id is accepted — measured 2026-08-09, STRATEGY §6.1 — so
 		// "there will be no next frame" is not something age can establish.
 		if st.acked >= st.sent && now.Sub(st.at) > streamMaxAge {
+			delete(s.streams, k)
+			continue
+		}
+		// The other way an entry stops protecting anything: cancelAck leaves a
+		// debt on purpose, so a turn whose verdict never comes is never
+		// settled and would be kept for the life of the connection.
+		//
+		// What retires it is not age by itself — a req_id outlives its stream,
+		// and a new stream id on the same req_id is accepted (measured
+		// 2026-08-09, STRATEGY §6.1). It is OUR OWN reach that ends: the round
+		// store evicts a handle at streamMaxAge, so past that nothing can
+		// hand seal a handle for this req_id, and a closer already holding one
+		// is bounded by streamCloseTimeout. Past both, no frame can be written
+		// here again and the counters guard nothing.
+		if now.Sub(st.at) > streamMaxAge+streamCloseTimeout {
 			delete(s.streams, k)
 		}
 	}
@@ -793,7 +821,16 @@ func (s *wsSender) writeStreamFrame(ctx context.Context, reqID, streamID string,
 		return errStreamSuperseded
 	}
 	if err := s.writeLocked(ctx, payload, t); err != nil {
-		s.abortStreamFrameLocked(reqID)
+		// Only a frame that provably never reached the socket gives its place
+		// back. errWriteAttempted means WriteMessage was entered, so the peer
+		// may have taken the bytes and may yet answer them; handing the place
+		// back would let that verdict settle the NEXT frame — the exact
+		// misattribution the counters exist to prevent. The cost of keeping
+		// the place is a debt the owed gate makes visible, which is the
+		// recoverable side of the trade.
+		if !errors.Is(err, errWriteAttempted) {
+			s.abortStreamFrameLocked(reqID)
+		}
 		return err
 	}
 	return nil

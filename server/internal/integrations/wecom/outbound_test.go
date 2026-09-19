@@ -80,6 +80,29 @@ type fakeOutboundQueries struct {
 	channelIngested *bool
 	originErr       error
 	originAskedFor  []string
+	// perTaskIngested overrides channelIngested for one id. A rig needs it
+	// whenever two runs of DIFFERENT origin share a session — a question typed
+	// in the room and one typed in Multica against the same agent — which is
+	// the population every binding rule here is about.
+	perTaskIngested map[string]bool
+	// deliveryFiled says whether channel_task_delivery holds a row for the run,
+	// and sessionChannelType names the platform that row points at.
+	//
+	// These are SEPARATE from the channel_ingested stamp because production
+	// writes them in different places, and collapsing them is what hid a live
+	// bug: TaskService.enqueueChatTask takes requireDelivery, and only
+	// EnqueueChannelChatTask passes true (internal/service/task.go:1912).
+	// EnqueueChatTask passes false with the reason in its own doc — "no
+	// external delivery snapshot is created: first-party sends reply only to
+	// first-party clients" (:1882) — so a run typed in Multica has NO row even
+	// in a chat with a WeCom binding, while another platform's run has a row
+	// naming that platform.
+	//
+	// nil means filed, which is what every test written before this field
+	// expects and what a channel-owned run really is.
+	deliveryFiled      *bool
+	perTaskDelivery    map[string]bool
+	sessionChannelType string
 	// t is who an unset stamp is reported to. fileTask sets it, and a filed
 	// row is the only route to the origin gate, so it is always there by the
 	// time the gate reads.
@@ -92,13 +115,100 @@ type fakeOutboundQueries struct {
 func askedOverWecom() *bool  { asked := true; return &asked }
 func askedInTheWebUI() *bool { asked := false; return &asked }
 
-func (f *fakeOutboundQueries) GetChannelTaskDelivery(context.Context, pgtype.UUID) (db.ChannelTaskDelivery, error) {
+// originFor answers "where was this question asked" for one task: the per-task
+// stamp if the rig set one, else the rig-wide one, else unknown.
+func (f *fakeOutboundQueries) originFor(id string) (asked bool, known bool) {
+	if v, ok := f.perTaskIngested[id]; ok {
+		return v, true
+	}
+	if f.channelIngested != nil {
+		return *f.channelIngested, true
+	}
+	return false, false
+}
+
+// filedFor answers whether channel_task_delivery holds a row for the run.
+func (f *fakeOutboundQueries) filedFor(id string) (filed bool, explicit bool) {
+	if v, ok := f.perTaskDelivery[id]; ok {
+		return v, true
+	}
+	if f.deliveryFiled != nil {
+		return *f.deliveryFiled, true
+	}
+	// Unset: derive it from the enqueue that writes both. requireDelivery is
+	// true exactly for EnqueueChannelChatTask, so a run the rig has called
+	// first-party has no row, and one it has called channel-ingested does. A
+	// rig that says neither keeps the row, which is what every test written
+	// before this field expects.
+	if asked, known := f.originFor(id); known {
+		return asked, false
+	}
+	return true, false
+}
+
+// notFiled and filed are the two answers to "was a delivery route frozen for
+// this run": filed for a channel-owned task, notFiled for one typed in Multica.
+func notFiled() *bool { v := false; return &v }
+
+// refuseImpossibleRouting ends the test when a rig asks for a state production
+// cannot produce: a run with a WeCom delivery row whose question was typed in
+// Multica. Both facts come from the same enqueue — requireDelivery is true
+// exactly for EnqueueChannelChatTask — so a rig asserting both is asserting
+// against a world that does not exist, and a gate tested in that world can
+// pass while being unreachable in this one. That is precisely what happened:
+// this double used to hand back a WeCom row for every id.
+func (f *fakeOutboundQueries) refuseImpossibleRouting(id string) {
+	asked, known := f.originFor(id)
+	if !known || asked {
+		return
+	}
+	if _, explicit := f.filedFor(id); !explicit {
+		return // derived, not asserted
+	}
+	if f.t == nil {
+		return
+	}
+	f.t.Helper()
+	f.t.Fatalf("rig says task %s was asked in the web UI AND has a WeCom delivery row; production "+
+		"writes the row only for EnqueueChannelChatTask (internal/service/task.go:1912), so use "+
+		"deliveryFiled: notFiled() for a first-party run", id)
+}
+
+// GetChannelTaskDelivery answers BY TASK ID, because production does.
+//
+// A DELIVERY ROW EXISTS EXACTLY WHEN THE QUESTION CAME IN OVER A CHANNEL.
+// EnqueueChatTask's own doc says a first-party run gets none ("no external
+// delivery snapshot is created"), SendDirectChatMessage inserts none, and
+// main's channel_new_e2e_test.go:353 says the direct task deliberately gets
+// none — so for a run typed in Multica this query returns pgx.ErrNoRows.
+//
+// This double used to ignore the id and hand back a WeCom row for every one,
+// which put a run in a state production cannot be in: asked in the web UI AND
+// delivered over WeCom at once. Every test of the origin gate ran against that
+// state, which is why ten of them passed over a gate that was unreachable for
+// the whole population it was written for.
+//
+// A rig that never says where its question came from keeps the row — that is
+// what every test written before the gate existed expects, and none of them
+// reaches the gate.
+func (f *fakeOutboundQueries) GetChannelTaskDelivery(_ context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error) {
 	if f.sessionErr != nil {
 		return db.ChannelTaskDelivery{}, f.sessionErr
 	}
+	id := util.UUIDToString(taskID)
+	if filed, _ := f.filedFor(id); !filed {
+		return db.ChannelTaskDelivery{}, pgx.ErrNoRows
+	}
+	channelType := f.sessionChannelType
+	if channelType == "" {
+		channelType = channelTypeWecom
+	}
+	if channelType == channelTypeWecom {
+		f.refuseImpossibleRouting(id)
+	}
 	return db.ChannelTaskDelivery{
 		BindingID: f.sessionBinding.ID, InstallationID: f.sessionBinding.InstallationID,
-		ChannelType: channelTypeWecom, ChannelChatID: f.sessionBinding.ChannelChatID,
+		ChannelType: channelType, ChannelChatID: f.sessionBinding.ChannelChatID,
 		ChatType:         f.sessionBinding.ChatType,
 		ChannelMessageID: f.sessionBinding.LastMessageID, ChannelThreadID: f.sessionBinding.LastThreadID,
 		RouteRevision: f.sessionBinding.RouteRevision, Config: f.sessionBinding.Config,
@@ -150,11 +260,12 @@ func (f *fakeOutboundQueries) TaskHasChannelIngestedMessages(_ context.Context, 
 	if f.originErr != nil {
 		return false, f.originErr
 	}
-	if f.channelIngested == nil {
+	asked, known := f.originFor(util.UUIDToString(taskID))
+	if !known {
 		f.failStampNotSet(util.UUIDToString(taskID))
 		return false, nil // unreachable: failStampNotSet ends the test
 	}
-	return *f.channelIngested, nil
+	return asked, nil
 }
 
 // failStampNotSet ends the test naming what the rig left out, instead of

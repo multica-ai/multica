@@ -28,8 +28,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -257,6 +255,8 @@ func TestAWebUIRunsFailureLeavesTheRoomsOwnBubbleAlone(t *testing.T) {
 func TestAFailureWithNoTaskIDIsRefused(t *testing.T) {
 	t.Parallel()
 	rig := newBoundRoomRig(t)
+	// The gate's population: a run with no delivery row (an event with no task id names no row either).
+	rig.q.deliveryFiled = notFiled()
 	rig.q.channelIngested = askedInTheWebUI() // would refuse, if it were ever asked
 
 	rig.bus.Publish(events.Event{
@@ -273,6 +273,8 @@ func TestAFailureWithNoTaskIDIsRefused(t *testing.T) {
 func TestAVanishedTaskRowRefusesTheFailure(t *testing.T) {
 	t.Parallel()
 	rig := newBoundRoomRig(t)
+	// The gate's population: a run with no delivery row (a reaped run has no row left to route by).
+	rig.q.deliveryFiled = notFiled()
 	rig.q.channelIngested = askedInTheWebUI() // no row to ask about, so this never applies
 
 	rig.failed(t, "task-1", false) // rig.q.tasks holds no row for it
@@ -286,6 +288,8 @@ func TestAVanishedTaskRowRefusesTheFailure(t *testing.T) {
 func TestAnUnreadableOriginRefusesTheFailure(t *testing.T) {
 	t.Parallel()
 	rig := newBoundRoomRig(t)
+	// The gate's population: a run with no delivery row (no row, so the stamp is the only thing that could say).
+	rig.q.deliveryFiled = notFiled()
 	rig.askedInTheRoom(t, "task-1")
 	rig.q.originErr = errors.New("connection refused")
 
@@ -317,6 +321,8 @@ func TestAnUnreadableOriginRefusesTheFailure(t *testing.T) {
 func TestAnOutageWithholdsTheNoticeRatherThanGuessingTheOrigin(t *testing.T) {
 	t.Parallel()
 	rig := newBoundRoomRig(t)
+	// The gate's population: a run with no delivery row (no row, so the stamp is the only thing that could say).
+	rig.q.deliveryFiled = notFiled()
 	rig.ran(t, "REQ-1", "task-1")
 	rig.q.taskErr = errors.New("connection refused")
 	rig.q.originErr = errors.New("connection refused")
@@ -346,6 +352,8 @@ func TestAnOutageWithholdsTheNoticeRatherThanGuessingTheOrigin(t *testing.T) {
 func TestAnOutageLeavesTheRoundWhereItWas(t *testing.T) {
 	t.Parallel()
 	rig := newBoundRoomRig(t)
+	// The gate's population: a run with no delivery row (no row, so the stamp is the only thing that could say).
+	rig.q.deliveryFiled = notFiled()
 	rig.ran(t, "REQ-1", "task-1")
 	rig.q.taskErr = errors.New("connection refused")
 	rig.q.originErr = errors.New("connection refused")
@@ -364,6 +372,8 @@ func TestAnOutageLeavesTheRoundWhereItWas(t *testing.T) {
 func TestTheOriginOfARetryCloneIsItsParentsBatch(t *testing.T) {
 	t.Parallel()
 	rig := newBoundRoomRig(t)
+	// The gate's population: a run with no delivery row (a first-party clone has no row, like its parent).
+	rig.q.deliveryFiled = notFiled()
 	rig.askedInTheRoom(t, "task-1")
 	// FailTask's retry child: fresh id, inheriting the parent's input batch.
 	rig.q.fileRetryClone(t, taskUUID(t, "retry"), taskUUID(t, "task-1"))
@@ -376,8 +386,11 @@ func TestTheOriginOfARetryCloneIsItsParentsBatch(t *testing.T) {
 			"question that started it, not on the clone's own empty batch",
 			asked, taskUUID(t, "task-1"))
 	}
-	if got := pushedTexts(t, rig.conn); len(got) != 1 || got[0] != streamCopyFailed {
-		t.Fatalf("the asker read %q, want [%q]", got, streamCopyFailed)
+	// Nothing is pushed, and that is the row-less population's own rule rather
+	// than anything about lineage: with no delivery row there is no address to
+	// push to. A routed run's notice is asserted at :190 and :207.
+	if got := pushedTexts(t, rig.conn); len(got) != 0 {
+		t.Fatalf("the asker read %q for a run with no delivery route, want nothing", got)
 	}
 }
 
@@ -404,8 +417,10 @@ func TestAnotherChannelsFailureNeverReachesTheTaskRow(t *testing.T) {
 	// A failed Slack run. The row is real and its input IS channel-ingested,
 	// so the origin gate would answer "deliver" if it were ever asked.
 	rig.askedInTheRoom(t, "task-1")
-	// What makes it Slack's: no WeCom binding for this session.
-	rig.q.sessionErr = pgx.ErrNoRows
+	// What makes it Slack's: the delivery row is real and names Slack. Modelling
+	// it as a MISSING row was the fixture's own error — that is the first-party
+	// shape, and it is the one population that must reach the gate.
+	rig.q.sessionChannelType = "slack"
 
 	rig.failed(t, "task-1", false)
 
@@ -641,4 +656,49 @@ type recordingRelay struct{ frames []relayFrame }
 func (r *recordingRelay) publish(f relayFrame, _ string) bool {
 	r.frames = append(r.frames, f)
 	return true
+}
+
+// ---- the answer path's gate has to hand the bubble back too ----
+
+// The failure path releases a round a first-party run took; the answer path
+// returns at its own gate (TaskInputIsChannelIngested) and used to leave the
+// round bound to a run that will never close it. Same rule, second call site:
+// whoever refuses to speak for a run has to give back what that run is holding.
+//
+// Without it the asker watches their bubble turn until the platform ends it,
+// and their own answer finds no round and degrades to a plain message.
+func TestAWebRunsCompletionAlsoGivesTheRoomsBubbleBack(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.out = NewOutbound(rig.q, rig.senders, rig.streams, nil)
+	rig.ask(t, "REQ-ROOM-2")
+	rig.askedInTheBrowser(t, "web-2")
+	rig.queueTask(t, taskUUID(t, "web-2"), "")
+
+	// The browser run COMPLETES — it does not fail — so the answer path's gate
+	// is the one that has to release.
+	rig.answer(t, "the browser's answer", "web-2")
+
+	if got := pushedTexts(t, rig.conn); len(got) != 0 {
+		t.Fatalf("the room was told %q about a run nobody there started", got)
+	}
+
+	// The room's own run, which was queued behind the browser's.
+	rig.askedInTheRoom(t, "task-r")
+	rig.queueTask(t, taskUUID(t, "task-r"), "")
+	rig.answer(t, "the agent reply", "task-r")
+
+	if pushes := rig.conn.pushes(t); len(pushes) != 0 {
+		t.Fatalf("the room's answer arrived as %d plain message(s) — its bubble was still held by "+
+			"the browser run: %v", len(pushes), pushes)
+	}
+	sealed := false
+	for _, f := range rig.conn.streamFrames(t) {
+		if f["finish"] == true && f["content"] == "the agent reply" {
+			sealed = true
+		}
+	}
+	if !sealed {
+		t.Fatal("the room's answer never sealed the bubble its own question opened")
+	}
 }

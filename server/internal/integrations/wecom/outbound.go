@@ -34,15 +34,13 @@ package wecom
 // the socket; a round whose bubble lives elsewhere finds none here and takes
 // the addressed path, which is where the relay is.
 //
-// They never MEET either, and that is a known gap rather than a property of the
-// topology. The replica that takes a relayed reply is by definition the one
-// holding the socket, which is the one with the bubble — and deliverRelayed
-// pushes the words as an ordinary message without ever looking for it
-// (relay_outbound.go). So on a multi-replica deployment the answer arrives and
-// the bubble it belonged in stays open until the protocol's window runs out on
-// it. Replies are delivered either way; the
-// in-place bubble is a single-replica experience until a relayed reply is
-// routed through the round store on the replica that takes it.
+// They MEET on the replica that takes a relayed reply. That replica is by
+// definition the one holding the socket, which is the one that painted the
+// bubble — a bubble is writable only where it was painted — so the frame
+// carries the task id and deliverRelayed seals the round with it instead of
+// pushing a second message underneath (relay_outbound.go). A relayed reply
+// whose round is gone, or whose seal is refused, takes the ordinary addressed
+// path, which is what a single-replica answer does too.
 //
 // Sessions with no wecom binding are ignored so this coexists with the Slack /
 // Lark subscribers on the shared bus.
@@ -310,6 +308,16 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		return fmt.Errorf("wecom: classify task input origin: %w", err)
 	}
 	if !deliver {
+		// Give the bubble back. A run typed in Multica can hold the room's
+		// round — it is bound off task:queued, and a chat task's event carries
+		// nothing that tells the two apart — so returning here without
+		// releasing leaves the round bound to a run that will never close it:
+		// the asker watches the bubble turn until the platform ends it, and
+		// their own answer finds no round and degrades to a plain message.
+		// The same release the failure and cancellation gates perform.
+		if o.streams != nil {
+			o.streams.releaseRound(sessionID, taskIDFromEvent(e))
+		}
 		o.skipped(ctx, e, skipOriginNotChannel)
 		return nil
 	}
@@ -398,59 +406,21 @@ func (o *Outbound) deliverAnswer(ctx context.Context, e events.Event, taskID pgt
 			}
 		}
 		sealErr := o.finishStream(ctx, t.Handle, text)
-		if sealErr == nil {
+		switch classifySeal(sealErr) {
+		case sealOnScreen:
 			o.delivered()
 			return answerOutcome{addr: t.Handle.address(), spoke: true}, nil
-		}
-		// ONLY A STATED REFUSAL IS PROOF THE ANSWER IS NOT ON SCREEN, and only
-		// proof may put the same words out a second time. WeCom has no unsend,
-		// so a duplicate is permanent while a delivery nobody confirmed can be
-		// re-asked; between the two, the duplicate is the error with no way
-		// back.
-		//
-		// 846605 and 846608 say the stream will never take another frame, so
-		// nothing was written into the bubble. provablyNotSent covers the
-		// failures raised before the write reached the socket at all. Anything
-		// else — an ack that never came, a write whose own error may still
-		// have left bytes with the peer (errWriteAttempted's doc says exactly
-		// that) — is a delivery this process cannot see the end of, and
-		// cancelAck's note makes that the CASCADE rather than the exception:
-		// one lost ack times out every later frame on the same req_id, so a
-		// fallback on this evidence repeats the answer once per retry.
-		//
-		// Not a staleness question either. A callback's req_id belongs to the
-		// turn rather than to the socket it arrived on, and a stream opened
-		// before a reconnect is still writable after it — measured against a
-		// live tenant, see senders_registry.go.
-		if !streamUnusable(sealErr) && !provablyNotSent(sealErr) {
+		case sealUnknown:
 			o.unconfirmed(ctx, e, unconfirmedSealReason(sealErr), sealErr)
 			return answerOutcome{addr: t.Handle.address(), spoke: true}, nil
 		}
+		// Proof the words are not on screen: say them as a message, on a budget
+		// the seal cannot have already spent. On main the answer always had the
+		// full budget for its own message; falling back must not cost it that.
 		content = text
-		// THE BUBBLE MUST NOT BE ABLE TO SPEND THE ANSWER'S BUDGET. seal
-		// retries a lost ack up to streamCloseRetries times, each attempt
-		// costing an ackTimeout and a streamCloseRetryDelay, and the caller's
-		// streamCloseTimeout does not cover that (see
-		// TestTheCloseRetryPolicyFitsTheBudgetItRunsUnder). When it ran out
-		// inside seal, the plain message that is this path's whole point then
-		// ran on the expired context and wrote nothing, while the WARN said it
-		// had been sent. On main the answer always had the full budget for its
-		// own message; falling back must not cost it that.
-		//
-		// The test is what is LEFT, not whether it is already gone. A context
-		// that has expired never reaches here — an expired seal returns a
-		// context error, which is not proof of non-delivery and is recorded as
-		// unknown above. What does reach here is a seal that spent most of the
-		// budget and then read a real refusal, leaving the plain message less
-		// time than one push needs.
-		//
-		// WithoutCancel rather than a longer deadline: the reason this budget
-		// is short is the bubble, which is over.
-		if d, ok := ctx.Deadline(); ok && time.Until(d) < ackTimeout {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), fallbackSendTimeout)
-			defer cancel()
-		}
+		var cancel context.CancelFunc
+		ctx, cancel = fallbackBudget(ctx)
+		defer cancel()
 	}
 	if !hasVisibleChar(content) {
 		// No bubble to close and nothing to say. That is the end of it: a
@@ -483,16 +453,22 @@ func (o *Outbound) deliverAnswer(ctx context.Context, e events.Event, taskID pgt
 // across one of those belongs to the room that asked. The bubble path is
 // already routed that way — its handle carries the address the question came in
 // on — so both paths of this adapter answer where they were asked.
-func taskAddress(ctx context.Context, q deliveryLookup, taskID pgtype.UUID) (roundAddress, skipReason, error) {
+func taskAddress(ctx context.Context, q deliveryLookup, taskID pgtype.UUID) (roundAddress, skipReason, bool, error) {
 	delivery, err := q.GetChannelTaskDelivery(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return roundAddress{}, "", nil
+			// NO ROW AT ALL IS NOT THE SAME ANSWER as a row naming another
+			// platform, and the third return is what keeps them apart. A run
+			// typed in Multica has no row by design — EnqueueChatTask writes no
+			// external delivery snapshot — so "no row" is the one answer that
+			// leaves the origin still open, and the only one a caller should
+			// spend further reads on.
+			return roundAddress{}, "", false, nil
 		}
-		return roundAddress{}, "", fmt.Errorf("wecom: lookup task delivery: %w", err)
+		return roundAddress{}, "", false, fmt.Errorf("wecom: lookup task delivery: %w", err)
 	}
 	if delivery.ChannelType != channelTypeWecom {
-		return roundAddress{}, "", nil
+		return roundAddress{}, "", true, nil
 	}
 	binding := wecomBindingFromTaskDelivery(delivery)
 	inst, err := q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
@@ -500,17 +476,17 @@ func taskAddress(ctx context.Context, q deliveryLookup, taskID pgtype.UUID) (rou
 		ChannelType: channelTypeWecom,
 	})
 	if err != nil {
-		return roundAddress{}, "", fmt.Errorf("wecom: load installation: %w", err)
+		return roundAddress{}, "", true, fmt.Errorf("wecom: load installation: %w", err)
 	}
 	if inst.Status != string(InstallationActive) {
 		// Revoked between trigger and reply.
-		return roundAddress{}, skipInstallationInactive, nil
+		return roundAddress{}, skipInstallationInactive, true, nil
 	}
 	return roundAddress{
 		InstallationID: inst.ID,
 		ChatID:         binding.ChannelChatID,
 		ChatType:       aibotChatTypeFromChannel(channel.ChatType(binding.ChatType)),
-	}, "", nil
+	}, "", true, nil
 }
 
 // sendAsMessage pushes an answer to the chat this turn was admitted on, for a
@@ -518,7 +494,7 @@ func taskAddress(ctx context.Context, q deliveryLookup, taskID pgtype.UUID) (rou
 // window, a frame the server refused. It returns where it spoke, which is where
 // the files that follow go.
 func (o *Outbound) sendAsMessage(ctx context.Context, e events.Event, taskID pgtype.UUID, content string, carriesFiles bool) (answerOutcome, error) {
-	addr, skip, err := taskAddress(ctx, o.q, taskID)
+	addr, skip, _, err := taskAddress(ctx, o.q, taskID)
 	if err != nil {
 		return answerOutcome{}, err
 	}

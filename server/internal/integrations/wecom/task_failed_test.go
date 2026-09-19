@@ -13,6 +13,7 @@ package wecom
 // it — which is what TestAFailedRunProducesExactlyOneMessage guards.
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -150,5 +151,51 @@ func TestAFailedRunProducesExactlyOneMessage(t *testing.T) {
 	if total := sealed + len(pushedTexts(t, rig.conn)); total != 1 {
 		t.Fatalf("one failure produced %d message(s) in the chat (%d sealed bubbles, %d plain), want 1",
 			total, sealed, len(pushedTexts(t, rig.conn)))
+	}
+}
+
+// ---- every closer reads the same evidence ----
+
+// The answer path learned that an unconfirmed seal must not be said again. The
+// failure and cancellation closers share the rule and did not: writeClosing
+// computed streamUnusable for its log line and then pushed a plain copy
+// regardless.
+//
+// A closing frame whose write was entered may already be in the bubble. WeCom
+// has no unsend, so a notice the asker might read twice is worse than one they
+// can ask for again — the same trade the answer path makes, and there is only
+// one reading of it now.
+func TestAClosingNoticeWhoseOutcomeIsUnknownIsNotSaidAgain(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.conn.failClosingWrite = errors.New("broken pipe") // entered the write, no verdict
+	rig.ran(t, "REQ-UNK", "task-1")
+	rig.askedInTheRoom(t, "task-1")
+
+	rig.failed(t, "task-1", false)
+
+	if got := pushedTexts(t, rig.conn); len(got) != 0 {
+		t.Fatalf("the room was told %q as a plain message after a closing frame that may already "+
+			"be in the bubble — WeCom has no unsend, so this copy is permanent", got)
+	}
+}
+
+// The other half of the same rule: a STATED refusal is proof the words are not
+// on screen, and that is what licenses saying them again. StreamFailed is the
+// only "that run did not go through" WeCom ever produces, so a frame refused
+// for good must not leave the asker with a spinner and no explanation.
+func TestAClosingNoticeThatWasRefusedIsSaidAsAMessage(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.conn.refuseClosingCode = 846608 // this stream will never take a frame
+	rig.ran(t, "REQ-REF", "task-1")
+	rig.askedInTheRoom(t, "task-1")
+
+	rig.failed(t, "task-1", false)
+
+	got := pushedTexts(t, rig.conn)
+	if len(got) != 1 || got[0] != streamCopyFailed {
+		t.Fatalf("the room read %q after a closing frame the server refused outright, want [%q]",
+			got, streamCopyFailed)
 	}
 }
