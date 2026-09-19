@@ -647,6 +647,15 @@ func main() {
 		slog.Error("invalid MULTICA_LLM_MAX_RETRIES", "error", err)
 		os.Exit(1)
 	}
+
+	// Validate the destructive task-retention knobs before the router exists: an
+	// invalid value fails the boot rather than defaulting, so an operator never
+	// gets a deletion policy they did not set.
+	taskRetentionCfg, err := parseTaskRetentionConfig(os.Getenv)
+	if err != nil {
+		slog.Error("invalid task retention configuration", "error", err)
+		os.Exit(1)
+	}
 	var readRecorder dbreader.Recorder
 	if dbRoutingMetrics != nil {
 		readRecorder = dbRoutingMetrics
@@ -729,6 +738,10 @@ func main() {
 	// its bounded transactions run independently once per hour, so a slow GC
 	// round cannot delay offline detection or task recovery.
 	go runRuntimeGCSweeper(sweepCtx, pool, queries, taskSvc.Metrics, h)
+	// Bounded agent task retention runs on its own low-frequency loop (default
+	// daily), independent of the runtime liveness tick. It ships dry-run by
+	// default; deletion is an explicit operator opt-in.
+	go runTaskRetentionSweeper(sweepCtx, pool, queries, taskSvc.Metrics, taskRetentionCfg)
 	// Source-context cleanup is object-store work, so it gets its own goroutine
 	// instead of a slot in the runtime sweep tick.
 	go runSourceContextSweeper(sweepCtx, taskSvc)
