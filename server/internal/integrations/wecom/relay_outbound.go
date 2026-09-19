@@ -1387,13 +1387,14 @@ func provablyNotSent(err error) bool {
 		return false
 	case errors.Is(err, errWriteAttempted):
 		return false
-	case errors.Is(err, errChatBusy):
+	case errors.Is(err, errNotAttempted):
 		// AHEAD of the context branch below, which this error also matches:
-		// it wraps the ctx.Err() that ended the wait. The chat lock is taken
-		// before a frame is built, so a delivery that gave up waiting for it
-		// wrote nothing — and this is the most retryable failure the path
-		// has. Reading it as the ambiguous context error underneath settles
-		// the claim on a message that was never offered to the socket.
+		// every not-attempted failure wraps the ctx.Err() that ended it. The
+		// chat lock is taken and the context is checked before a frame is
+		// built, so a delivery that ended at either point wrote nothing — and
+		// these are the most retryable failures the path has. Reading them as
+		// the ambiguous context error underneath settles the claim on a
+		// message that was never offered to the socket.
 		return true
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return false

@@ -168,13 +168,14 @@ func (c *chatLocks) acquire(ctx context.Context, chatID string) (func(), error) 
 
 	// A free chat is taken without consulting the context at all. select picks
 	// at RANDOM among ready cases, so a caller whose context is already dead
-	// arriving at a chat nobody holds would have been classified two different
-	// ways from one run to the next — errChatBusy here, or the bare ctx.Err()
-	// from request's pre-write check a line later. Same situation, same "no
-	// frame was written", two different answers to "may this be retried".
+	// arriving at a chat nobody holds would otherwise be turned away half the
+	// time for a chat nobody was using.
 	//
-	// Taking it first also keeps errChatBusy honest: it is returned only when
-	// the chat really was somebody else's and the wait ran out.
+	// It also keeps errChatBusy honest: it is returned only when the chat
+	// really was somebody else's and the wait ran out. What the caller gets
+	// instead is request's pre-write check, which is the same fact under a
+	// different name — both wrap errNotAttempted, so the classifiers cannot
+	// tell them apart and do not need to.
 	select {
 	case l.ch <- struct{}{}:
 		return release, nil
@@ -189,23 +190,37 @@ func (c *chatLocks) acquire(ctx context.Context, chatID string) (func(), error) 
 	}
 }
 
+// errNotAttempted marks a send that ended BEFORE any byte could leave this
+// process. It is the one mark on this path that means "certainly not
+// delivered", and it is the only thing the three classifiers have to test for
+// — provablyNotSent (relay_outbound.go), unconfirmedReason (outbound_outcome.go)
+// and sendOutcome (outbound_media.go).
+//
+// It exists because the bare ctx.Err() these paths used to return said the
+// opposite. Every classifier reads a context error as "the frame may be in
+// front of the person already" — the right reading for a context that ended
+// while waiting for a VERDICT (errAckAbandoned), and the exact inversion of
+// one that ended before the write. So the direct path filed a message it had
+// never sent as "outcome unknown", which is the one outcome nobody may resend;
+// the relay settled its claim and stopped offering it; and the media path told
+// the user their file might have arrived. The user got nothing and the party
+// whose job is to try again was told not to.
+//
+// Every not-attempted failure WRAPS this rather than carrying its own
+// unrelated sentinel, so the classifiers ask one question instead of keeping a
+// list in step with this file. Two failures wrap it today: the chat lock's
+// wait running out (errChatBusy) and request's pre-write check.
+//
+// Each of those also wraps ctx.Err(), because the cause is worth having in a
+// log line. That is why every classifier has to test for this AHEAD of its
+// generic context branch — errors.Is finds context.Canceled in here too.
+var errNotAttempted = errors.New("wecom: nothing was written")
+
 // errChatBusy — the wait for this chat's turn ended before the turn came, and
 // NOT ONE BYTE went anywhere. The lock is taken before a frame is built, so
-// this is the one failure on the send path that is provably a non-delivery.
-//
-// It exists because the bare ctx.Err() this used to return said the opposite.
-// Every classifier in this package reads a context error as "the frame may be
-// in front of the person already" — the right reading for a context that ended
-// while waiting for a VERDICT, and the exact inversion of one that ended
-// before the write. So the direct path filed a message it had never sent as
-// "outcome unknown", which is the one outcome nobody may resend, and the relay
-// settled its claim and stopped offering it. The user got nothing and the
-// party whose job is to try again was told not to.
-//
-// It WRAPS ctx.Err() rather than replacing it: the cause is worth having in a
-// log line. That is also why every classifier has to test for this ahead of
-// its generic context branch — errors.Is finds context.Canceled in here too.
-var errChatBusy = errors.New("wecom: nothing was written; the wait for this chat's turn ended first")
+// this and request's pre-write check are the two failures on the send path
+// that are provably non-deliveries.
+var errChatBusy = fmt.Errorf("%w; the wait for this chat's turn ended first", errNotAttempted)
 
 func newWSSender(conn wsConn, log *slog.Logger) *wsSender {
 	if log == nil {
@@ -317,7 +332,13 @@ func (s *wsSender) deliverReply(env frameEnvelope) bool {
 // errcode, errAckTimeout, or a transport failure.
 func (s *wsSender) request(ctx context.Context, cmd string, body map[string]any) (json.RawMessage, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		// Marked, for the same reason the wait below is marked and the
+		// opposite fact. Nothing has been minted, registered or built at this
+		// point, so this is proof the peer saw nothing — and a bare ctx.Err()
+		// here is indistinguishable from the one twenty lines down, which
+		// proves the opposite. A caller that cannot tell them apart has to
+		// read both the same way, and either reading is wrong for one of them.
+		return nil, fmt.Errorf("%w: %w", errNotAttempted, err)
 	}
 	reqID := newReqID()
 	w, ok := s.awaitReply(reqID)
@@ -417,15 +438,16 @@ var errWriteAttempted = errors.New("wecom: frame write attempted")
 // than replacing it, so every errors.Is(err, context.Canceled) reader keeps
 // working and the outcome still files as "interrupted".
 //
-// It exists because request returns ctx.Err() from two places that mean
+// It exists because request raises a context error in two places that mean
 // opposite things — the check ahead of the write, where nothing left this
-// process, and the wait after it, where the peer may already hold the frame.
-// Until this mark, the two differed only in the line that raised them, which
-// is not something a caller can see. A caller weighing a cancellation against
-// another outcome it already holds then has to read every cancellation the
-// same way, and either one of those readings is wrong. sendMsgFrame is that
-// caller: it holds a refusal WeCom stated for a first frame, and must not let
-// it speak for a second one that is already on the wire.
+// process (errNotAttempted), and the wait after it, where the peer may already
+// hold the frame. Until the two marks, they differed only in the line that
+// raised them, which is not something a caller can see. A caller weighing a
+// cancellation against another outcome it already holds then has to read every
+// cancellation the same way, and either one of those readings is wrong.
+// sendMsgFrame is that caller: it holds a refusal WeCom stated for a first
+// frame, and must not let it speak for a second one that is already on the
+// wire.
 var errAckAbandoned = errors.New("wecom: the wait for the verdict was cut short after the frame went out")
 
 // sendText pushes an aibot_send_msg (proactive push) with plain text to a
@@ -467,10 +489,10 @@ func (s *wsSender) sendTextCtx(ctx context.Context, chatID string, chatTypeInt i
 	// two long answers in flight at once the (n/total) counters could not be
 	// matched back to their own text.
 	//
-	// A caller whose context ends while queued here gets errChatBusy, not the
-	// bare ctx.Err(): nothing has been built yet, let alone written, and the
-	// classifiers have to be able to tell that from a context that ended while
-	// waiting for a verdict.
+	// A caller whose context ends while queued here gets errChatBusy, which
+	// wraps errNotAttempted: nothing has been built yet, let alone written,
+	// and the classifiers have to be able to tell that from a context that
+	// ended while waiting for a verdict.
 	release, err := s.chats.acquire(ctx, chatID)
 	if err != nil {
 		return err
