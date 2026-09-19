@@ -181,6 +181,8 @@ func TestDaemonLifecycleRefusesForeignDaemon(t *testing.T) {
 		{"stop", func(c *cobra.Command) error { return runDaemonStop(c, nil) }},
 		{"restart", func(c *cobra.Command) error { return runDaemonRestart(c, nil) }},
 		{"start", func(c *cobra.Command) error { return runDaemonBackground(c) }},
+		{"pause", func(c *cobra.Command) error { return runDaemonAdmission(c, true) }},
+		{"resume", func(c *cobra.Command) error { return runDaemonAdmission(c, false) }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -192,6 +194,7 @@ func TestDaemonLifecycleRefusesForeignDaemon(t *testing.T) {
 
 			cmd := daemonStatusCmdFor(t, "collide-ba", "")
 			cmd.Flags().Bool("foreground", false, "")
+			cmd.Flags().String("owner", "manual", "")
 			err := tc.run(cmd)
 
 			var mismatch *daemonProfileMismatchError
