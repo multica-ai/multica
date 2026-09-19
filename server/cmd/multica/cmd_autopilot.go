@@ -315,7 +315,6 @@ func redactAutopilotWebhookCredentials(resp map[string]any) {
 			continue
 		}
 		delete(trigger, "signing_secret")
-		trigger["signing_secret_hint"] = nil
 		_, hasTokenField := trigger["webhook_token"]
 		_, hasPathField := trigger["webhook_path"]
 		_, hasURLField := trigger["webhook_url"]

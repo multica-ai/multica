@@ -78,7 +78,6 @@ func webhookSecurityBody(cmd *cobra.Command, body map[string]any, creating bool)
 func redactAutopilotTriggerResult(result map[string]any) {
 	redactAutopilotWebhookCredentials(map[string]any{"triggers": []any{result}})
 	delete(result, "signing_secret")
-	result["signing_secret_hint"] = nil
 }
 
 // A proxy/older server may echo a rejected body. Keep status-based exit codes,

@@ -463,8 +463,6 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to encode envelope")
 		return
 	}
-	// 6. Provider + dedupe + signature.
-
 	// 7. Persist (INSERT delivery). Dedupe collision → bump existing row.
 	delivery, dup, err := h.persistInboundDelivery(r, persistDeliveryInput{
 		WorkspaceID:     autopilot.WorkspaceID,
@@ -522,8 +520,9 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 8. Signature failure → rejected delivery + 401. No dispatch, no replay.
-	//    Providers will look for 4xx feedback when their secret is wrong.
+	// 8. A generic-provider signature failure becomes a rejected delivery +
+	//    401. GitHub signature failures returned before persistence above, so
+	//    they can never reach this compatibility path. No dispatch or replay.
 	if sigStatus == sigStatusInvalid || sigStatus == sigStatusMissing {
 		reason := "invalid_signature"
 		if sigStatus == sigStatusMissing {

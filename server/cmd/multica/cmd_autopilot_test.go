@@ -182,8 +182,8 @@ func TestRunAutopilotGetRedactsWebhookCredentialsByDefault(t *testing.T) {
 	if trigger["webhook_token_hint"] != "7890" {
 		t.Errorf("webhook_token_hint = %#v, want %q", trigger["webhook_token_hint"], "7890")
 	}
-	if trigger["signing_secret_hint"] != nil {
-		t.Error("signing secret suffix must be redacted")
+	if trigger["signing_secret_hint"] != "abcd" {
+		t.Errorf("signing_secret_hint = %#v, want existing non-sensitive hint", trigger["signing_secret_hint"])
 	}
 }
 

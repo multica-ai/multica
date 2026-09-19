@@ -131,16 +131,19 @@ authority.
   during the change. Selecting GitHub requires a key in the resulting row.
   Switching to generic is an explicit authentication-policy change.
 - **Legacy secret endpoint:** `PUT .../signing-secret` remains supported and
-  shares the same locking, validation and rollback path. An explicitly empty
-  string clears; omitted/null values are rejected. Clearing an enabled GitHub
-  key fails with `400`.
+  shares the same locking, validation and rollback path. For compatibility it
+  trims replacement values, and an omitted, null or empty value clears. PATCH
+  leaves an omitted/null secret unchanged and requires
+  `clear_signing_secret:true` to clear. Clearing an enabled GitHub key fails
+  with `400` on either path.
 - **Authorization:** creation and changes use the existing acting-human write
   gate (creator, workspace owner/admin, or collaborator). Unauthorized callers
   receive `403` without any mutation.
 
 Readback exposes `id`, `autopilot_id`, `provider`, `enabled`, and
-`has_signing_secret`. The key is never returned, and `signing_secret_hint` is
-now always null. Normal GitHub detail reads redact the bearer token/path/URL
+`has_signing_secret`. The key is never returned; the existing non-sensitive
+`signing_secret_hint` suffix remains available for rotation checks. Normal
+GitHub detail reads redact the bearer token/path/URL
 even for writers; explicit `?show_secrets=true` retains the existing authorized
 credential retrieval flow. CLI create/update/get/list redact credentials by
 default, including responses from older servers. Explicit `get --show-secrets`
@@ -188,7 +191,7 @@ When debugging a sender, use this table to interpret Multica's responses:
 | 200 | `ignored` | No run created: the trigger is disabled, the autopilot is paused or archived, or the event was filtered; the `reason` field explains why. |
 | 200 | `duplicate` | The idempotency key hit an existing delivery; returns the original delivery ID and doesn't run again. |
 | 400 | Error message | The body is empty, not valid JSON, or not a JSON object/array. |
-| 401 | `rejected` | The trigger has a signing secret configured, but the request is missing a signature or the signature doesn't match. |
+| 401 | `rejected` | GitHub admission is missing a configured key or a valid signature, or a signed generic request has an invalid signature. A GitHub rejection contains no delivery ID and creates no delivery/run/issue/task record. |
 | 404 | Error message | The token in the URL is invalid or has been rotated. |
 | 413 | Error message | The body exceeds 256 KiB. |
 | 429 | Error message | Too many requests; retry later per the `Retry-After` response header. |
@@ -207,9 +210,9 @@ Event and action inference order:
 
 ## View runs and deliveries
 
-Run history shows the trigger source, time, status, the linked issue or run, and the reason for a failure or skip. Webhook triggers additionally keep separate delivery records, including the parsed event, the response, deduplication info, and the failure reason.
+Run history shows the trigger source, time, status, the linked issue or run, and the reason for a failure or skip. Admitted webhook requests additionally keep separate delivery records, including the parsed event, the response, deduplication info, and the failure reason. GitHub requests rejected during signature admission create no delivery record.
 
-A fully processed webhook delivery can be replayed from its detail view. A replay creates a new delivery and run without rewriting the original record; deliveries that failed signature verification or are still queued can't be replayed, and replays don't participate in deduplication.
+A fully processed webhook delivery can be replayed from its detail view. A replay creates a new delivery and run without rewriting the original record. Persisted generic deliveries that failed signature verification and deliveries that are still queued can't be replayed; GitHub signature failures never reach persistence. Replays don't participate in deduplication.
 
 ## Failures, pausing, and deletion
 

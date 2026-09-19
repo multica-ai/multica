@@ -32,6 +32,15 @@ func githubPatch(t *testing.T, h *Handler, ap, trigger string, body map[string]a
 func TestGitHubSecretLifecycle(t *testing.T) {
 	fx := newActingFixture(t, "github lifecycle")
 	trig := createWebhookTriggerViaHandler(t, fx.autopilotID)
+	// The legacy PUT trims replacements; PATCH below deliberately preserves
+	// exact bytes for new atomic configuration clients.
+	put := testutil.WithURLParams(newRequest("PUT", "/", map[string]any{"signing_secret": "  " + testSigningSecret + "  "}), "id", fx.autopilotID, "triggerId", trig.ID)
+	testutil.Call(t, testHandler.SetAutopilotTriggerSigningSecret, put).Want(200)
+	var putSecret string
+	dbfx.QueryRow(t, "SELECT signing_secret FROM autopilot_trigger WHERE id=$1", trig.ID).Scan(&putSecret)
+	if putSecret != testSigningSecret {
+		t.Fatalf("legacy PUT secret = %q, want trimmed value", putSecret)
+	}
 	// Provider changes cannot silently downgrade a live endpoint.
 	if w := githubPatch(t, testHandler, fx.autopilotID, trig.ID, map[string]any{"provider": "github", "signing_secret": testSigningSecret}); w.Code != 400 {
 		t.Fatalf("live provider change: %d", w.Code)
@@ -63,10 +72,14 @@ func TestGitHubSecretLifecycle(t *testing.T) {
 	if w := githubPatch(t, testHandler, fx.autopilotID, trig.ID, map[string]any{"enabled": true}); w.Code != 400 {
 		t.Fatal("GitHub enabled without secret")
 	}
-	// Missing and null values on the old PUT must not silently erase a key.
+	// The dedicated PUT keeps its legacy contract: missing and null values are
+	// decoded as the empty string and therefore clear the key.
 	for _, body := range []map[string]any{{}, {"signing_secret": nil}} {
+		if w := githubPatch(t, testHandler, fx.autopilotID, trig.ID, map[string]any{"signing_secret": testSigningSecret}); w.Code != 200 {
+			t.Fatal(w.Body)
+		}
 		req := testutil.WithURLParams(newRequest("PUT", "/", body), "id", fx.autopilotID, "triggerId", trig.ID)
-		testutil.Call(t, testHandler.SetAutopilotTriggerSigningSecret, req).Want(400)
+		testutil.Call(t, testHandler.SetAutopilotTriggerSigningSecret, req).Want(200)
 	}
 }
 
@@ -187,7 +200,7 @@ func TestGitHubReadbackAndNoPermission(t *testing.T) {
 	found := false
 	for _, r := range response.Triggers {
 		if r.ID == trig.ID {
-			found = r.Provider != nil && *r.Provider == "github" && r.HasSigningSecret && r.SigningSecretHint == nil
+			found = r.Provider != nil && *r.Provider == "github" && r.HasSigningSecret && r.SigningSecretHint != nil && *r.SigningSecretHint == signingSecretHint(testSigningSecret)
 		}
 	}
 	if !found {

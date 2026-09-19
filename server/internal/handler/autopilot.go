@@ -144,8 +144,9 @@ type AutopilotTriggerResponse struct {
 	// the trigger. The secret itself is never returned — it is set via a
 	// dedicated write-only endpoint. Always false for non-webhook triggers.
 	HasSigningSecret bool `json:"has_signing_secret"`
-	// SigningSecretHint is retained as null for response compatibility.
-	// HasSigningSecret is the only signing-key readback metadata.
+	// SigningSecretHint is the last 4 characters of the configured secret,
+	// surfaced to help operators tell two secrets apart in the UI. Nil when
+	// no secret is configured. It is non-sensitive metadata, never the key.
 	SigningSecretHint *string `json:"signing_secret_hint"`
 	Label             *string `json:"label"`
 	LastFiredAt       *string `json:"last_fired_at"`
@@ -247,6 +248,8 @@ func (h *Handler) triggerToResponse(t db.AutopilotTrigger) AutopilotTriggerRespo
 		resp.Provider = &provider
 		if t.SigningSecret.Valid && t.SigningSecret.String != "" {
 			resp.HasSigningSecret = true
+			hint := signingSecretHint(t.SigningSecret.String)
+			resp.SigningSecretHint = &hint
 		}
 		if len(t.EventFilters) > 0 {
 			var filters []WebhookEventFilter
@@ -260,6 +263,16 @@ func (h *Handler) triggerToResponse(t db.AutopilotTrigger) AutopilotTriggerRespo
 		}
 	}
 	return resp
+}
+
+// signingSecretHint returns only the last 4 characters of a validated signing
+// secret. The suffix is an existing, non-sensitive operator aid and is kept for
+// API/UI compatibility; the signing secret itself is never serialized.
+func signingSecretHint(secret string) string {
+	if len(secret) < 4 {
+		return ""
+	}
+	return secret[len(secret)-4:]
 }
 
 // redactWebhookSecrets removes the webhook credential from a trigger response:
@@ -2223,19 +2236,22 @@ func (h *Handler) RotateAutopilotTriggerWebhookToken(w http.ResponseWriter, r *h
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// SetAutopilotTriggerSigningSecret preserves the dedicated write-only endpoint.
-// Omitted/null values are rejected; an explicit empty string clears the key.
-// The common PATCH path enforces permissions, row locking and safe clearing.
+// SetAutopilotTriggerSigningSecret preserves the dedicated write-only endpoint
+// and its historical input semantics: surrounding whitespace is trimmed and an
+// omitted, null or empty signing_secret clears the key. The common PATCH path
+// enforces permissions, row locking and safe clearing; PATCH itself uses
+// explicit clear_signing_secret and preserves exact replacement bytes.
 func (h *Handler) SetAutopilotTriggerSigningSecret(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		SigningSecret *string `json:"signing_secret"`
+		SigningSecret string `json:"signing_secret"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.SigningSecret == nil {
-		writeError(w, http.StatusBadRequest, "signing_secret is required")
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	patch := UpdateAutopilotTriggerRequest{SigningSecret: req.SigningSecret}
-	if *req.SigningSecret == "" {
+	secret := strings.TrimSpace(req.SigningSecret)
+	patch := UpdateAutopilotTriggerRequest{SigningSecret: &secret}
+	if secret == "" {
 		patch.SigningSecret = nil
 		patch.ClearSigningSecret = true
 	}

@@ -339,8 +339,9 @@ func TestSigningSecretNotEchoedInTriggerResponse(t *testing.T) {
 	if !bytes.Contains(w.Body.Bytes(), []byte(`"has_signing_secret":true`)) {
 		t.Fatalf("has_signing_secret should be true: %s", w.Body.String())
 	}
-	if !bytes.Contains(w.Body.Bytes(), []byte(`"signing_secret_hint":null`)) {
-		t.Fatal("signing secret suffix must not be exposed")
+	wantHint := `"signing_secret_hint":"` + signingSecretHint(testSigningSecret) + `"`
+	if !bytes.Contains(w.Body.Bytes(), []byte(wantHint)) {
+		t.Fatalf("existing non-sensitive signing secret hint missing: %s", w.Body.String())
 	}
 }
 
