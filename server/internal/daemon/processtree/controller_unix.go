@@ -3,17 +3,27 @@
 package processtree
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
 
 const processTreeFinishTimeout = 5 * time.Second
 
-type controller struct{}
+// startTime is the /proc/<pid>/stat "starttime" observed right after
+// Start() returned, tagging which process actually owns this controller's
+// pid number. Zero means it could not be read (non-Linux, restricted /proc)
+// — stillOurs then falls back to the pre-patch behavior of trusting the pid
+// unconditionally, rather than reporting a false negative.
+type controller struct {
+	startTime uint64
+}
 
 func newController(cmd *exec.Cmd) (*controller, error) {
 	if cmd.SysProcAttr == nil {
@@ -23,11 +33,44 @@ func newController(cmd *exec.Cmd) (*controller, error) {
 	return &controller{}, nil
 }
 
-func (*controller) attach(_ *exec.Cmd) error { return nil }
+// attach tags the just-started process the instant it is available, so the
+// later interrupt/stop/finish calls — which may run long after this pid has
+// exited and potentially been reused — can tell whether they are still
+// signalling the process this controller started.
+func (c *controller) attach(cmd *exec.Cmd) error {
+	if cmd.Process != nil {
+		c.startTime, _ = procStartTime(cmd.Process.Pid)
+	}
+	return nil
+}
 
-func (*controller) interrupt(cmd *exec.Cmd) error {
+// stillOurs reports whether it is safe to signal pid, using the tag laid
+// down in attach. See the equivalent (and the reasoning behind it) in
+// server/pkg/agent/pidtag_unix.go — this package cannot import that one
+// without an import cycle, so the same small check is duplicated here rather
+// than shared.
+//
+// A pid that no longer exists at all answers true (harmless no-op signal;
+// also how a surviving grandchild left in the group after the leader exited
+// still gets reached). Only a pid that exists but is now a *different*
+// process — proven by a starttime mismatch — answers false.
+func (c *controller) stillOurs(pid int) bool {
+	if c.startTime == 0 {
+		return true
+	}
+	current, err := procStartTime(pid)
+	if err != nil {
+		return true
+	}
+	return current == c.startTime
+}
+
+func (c *controller) interrupt(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return os.ErrProcessDone
+	}
+	if !c.stillOurs(cmd.Process.Pid) {
+		return nil
 	}
 	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM); err != nil {
 		if errors.Is(err, syscall.ESRCH) {
@@ -38,9 +81,12 @@ func (*controller) interrupt(cmd *exec.Cmd) error {
 	return nil
 }
 
-func (*controller) stop(cmd *exec.Cmd) error {
+func (c *controller) stop(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return os.ErrProcessDone
+	}
+	if !c.stillOurs(cmd.Process.Pid) {
+		return nil
 	}
 	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
 		if errors.Is(err, syscall.ESRCH) {
@@ -57,6 +103,12 @@ func (c *controller) finish(cmd *exec.Cmd) error {
 	}
 	pid := cmd.Process.Pid
 	if err := syscall.Kill(-pid, 0); errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	if !c.stillOurs(pid) {
+		// The pid we started has already exited and either no longer exists
+		// or now belongs to something this controller never launched.
+		// Nothing left here is ours to reap.
 		return nil
 	}
 	// A normally-exited leader can still leave a descendant holding inherited
@@ -76,3 +128,29 @@ func (c *controller) finish(cmd *exec.Cmd) error {
 }
 
 func (*controller) close() {}
+
+// procStartTime parses field 22 (starttime, in clock ticks since boot) from
+// /proc/<pid>/stat. The process name in field 2 is parenthesized and may
+// itself contain spaces or parentheses, so field boundaries are found from
+// the *last* ')' rather than by a fixed-width split.
+func procStartTime(pid int) (uint64, error) {
+	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return 0, err
+	}
+	idx := bytes.LastIndexByte(data, ')')
+	if idx < 0 || idx+2 > len(data) {
+		return 0, os.ErrInvalid
+	}
+	// Fields from here on: state(3) ppid(4) pgrp(5) session(6) tty_nr(7)
+	// tpgid(8) flags(9) minflt(10) cminflt(11) majflt(12) cmajflt(13)
+	// utime(14) stime(15) cutime(16) cstime(17) priority(18) nice(19)
+	// num_threads(20) itrealvalue(21) starttime(22) ...
+	// so starttime is at 0-based index 22-3 = 19 in this slice.
+	const starttimeIndex = 19
+	fields := strings.Fields(string(data[idx+1:]))
+	if starttimeIndex >= len(fields) {
+		return 0, os.ErrInvalid
+	}
+	return strconv.ParseUint(fields[starttimeIndex], 10, 64)
+}
