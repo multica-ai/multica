@@ -609,6 +609,45 @@ jobs:
         # silently as "ok".
         run: go test ./internal/daemon/execenv -v -run '^TestWindowsOpenclawShim' -count=1 -timeout=5m
 
+      - name: Test Windows workdir containment guard in the CLI
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        working-directory: server
+        # The CLI's --content-file / --attachment guard decides whether a path is
+        # inside the task workdir by canonicalizing both sides. Two of the things
+        # that decision rests on are Windows-only and covered nowhere else: a
+        # candidate on another volume, where filepath.Rel returns an error rather
+        # than a "..", so the guard has to read that as "outside" instead of
+        # surfacing `Rel: can't make Z:\... relative to C:\...` as a resolve
+        # failure; and a directory junction — the containment-relevant link shape
+        # that needs no elevation, so the one real hosts have — which resolves to
+        # itself rather than to its target under this module's go directive. The
+        # junction test pins that gap deliberately, records the observations it
+        # rests on, and fails with instructions if the platform ever starts
+        # resolving them.
+        # cmd/multica has no Windows job otherwise, so these windows-tagged
+        # tests run nowhere else. It matters twice over on a non-admin host,
+        # where the package's cross-platform cases skip for want of the symlink
+        # privilege; the ubuntu backend job covers those shapes instead.
+        # -v so a silent skip (or a -run pattern that stops matching) is visible
+        # in the log instead of passing as "ok".
+        run: go test ./cmd/multica -v -run '^TestFileWithinWorkingDirWindows' -count=1 -timeout=5m
+
+      - name: Test Windows link-target classification in internal/util
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        working-directory: server
+        # The guard's Windows correctness rests on internal/util's link-target
+        # grammar (classifyTarget), whose branch ordering is load-bearing:
+        # VolumeName is non-empty for drive-absolute paths too, so asking it
+        # before IsAbs misreads a junction's absolute target as drive-relative
+        # and resolves it against the working directory — exactly how a
+        # junction escape read as inside the workdir for one CI run. The
+        # fixture-free table pins every branch without needing a filesystem,
+        # but windows-tagged util tests run nowhere else. Scoped to the table
+        # by name; the package's symlinked-workdir cases belong to the ubuntu
+        # backend job, which runs the whole package.
+        # -v so a silent skip or a pattern that stops matching is visible.
+        run: go test ./internal/util -v -run '^TestClassifyTarget' -count=1 -timeout=5m
+
       - name: Test Windows isolated repo checkout is committable
         working-directory: server
         # #6449: on Windows the daemon now hands Codex tasks a checkout whose
