@@ -1569,6 +1569,145 @@ func TestFinalizeRefusesToRecordADeliveryThatResetPastItsBaseline(t *testing.T) 
 	}
 }
 
+// A repository may require the agent to work on its own task-named branch
+// inside Multica's worktree. If that branch simply extends the conversation
+// branch, Finalize can safely book the delivery by fast-forwarding the
+// conversation ref instead of turning a successful run into a failure.
+func TestFinalizeFastForwardsConversationBranchToOffBranchDelivery(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+
+	wt := prepareTurn(t, repo, "MUL-8541", turnOneTask)
+	conversationTip := gitRun(t, repo, "rev-parse", wt.Branch)
+	if conversationTip != wt.BaseCommit {
+		t.Fatalf("conversation tip = %s, want this turn's base %s", conversationTip, wt.BaseCommit)
+	}
+
+	gitRun(t, wt.Path, "checkout", "-b", "repo/task-branch")
+	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "delivered on the repo branch\n")
+	gitRun(t, wt.Path, "add", "-A")
+	gitRun(t, wt.Path, "commit", "-m", "agent delivery")
+	delivered := gitRun(t, wt.Path, "rev-parse", "HEAD")
+
+	outcome := finalizeOK(t, wt)
+	if outcome.Branch != wt.Branch {
+		t.Fatalf("Branch = %q, want conversation branch %q", outcome.Branch, wt.Branch)
+	}
+	if got := gitRun(t, repo, "rev-parse", wt.Branch); got != delivered {
+		t.Fatalf("conversation branch = %s, want delivered tip %s", got, delivered)
+	}
+	ref, err := readUserStateRef(repo, wt.Branch)
+	if err != nil {
+		t.Fatalf("readUserStateRef: %v", err)
+	}
+	record, err := readBranchRecord(repo, ref)
+	if err != nil {
+		t.Fatalf("readBranchRecord: %v", err)
+	}
+	if record.checkpoint != delivered {
+		t.Errorf("checkpoint = %s, want delivered tip %s", record.checkpoint, delivered)
+	}
+
+	// The next turn must continue from the recovered delivery rather than redo
+	// work from the old conversation tip.
+	next := prepareTurn(t, repo, "MUL-8541", turnTwoTask)
+	if !next.Continued {
+		t.Fatal("next turn did not continue the fast-forwarded conversation branch")
+	}
+	if got := readFile(t, filepath.Join(next.WorkDir, "agent.txt")); got != "delivered on the repo branch\n" {
+		t.Errorf("next turn lost the delivered file: %q", got)
+	}
+	finalizeOK(t, next)
+}
+
+// Moving the ref is only safe when nobody else has the conversation branch
+// checked out. git update-ref itself does not protect linked worktrees, so keep
+// the successful delivery preserved rather than changing another checkout's
+// HEAD underneath it.
+func TestFinalizeRefusesFastForwardWhenConversationBranchIsCheckedOutElsewhere(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+
+	wt := prepareTurn(t, repo, "MUL-8541", turnOneTask)
+	gitRun(t, wt.Path, "checkout", "-b", "repo/task-branch")
+	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "off-branch delivery\n")
+	gitRun(t, wt.Path, "add", "-A")
+	gitRun(t, wt.Path, "commit", "-m", "off-branch delivery")
+	delivered := gitRun(t, wt.Path, "rev-parse", "HEAD")
+
+	other := filepath.Join(t.TempDir(), "conversation")
+	gitRun(t, repo, "worktree", "add", "--quiet", other, wt.Branch)
+	conversationTip := gitRun(t, repo, "rev-parse", wt.Branch)
+	if _, err := gitTry(t, repo, "merge-base", "--is-ancestor", conversationTip, delivered); err != nil {
+		t.Fatal("test setup is not a fast-forward delivery")
+	}
+
+	outcome, err := wt.Finalize(worktreeTestLogger())
+	if err == nil {
+		t.Fatal("Finalize moved a conversation branch that another worktree had checked out")
+	}
+	if !strings.Contains(err.Error(), "checked out at") {
+		t.Errorf("error does not explain that the branch is in use: %v", err)
+	}
+	if outcome.PreservedPath != wt.Path {
+		t.Errorf("PreservedPath = %q, want %q", outcome.PreservedPath, wt.Path)
+	}
+	if got := gitRun(t, repo, "rev-parse", wt.Branch); got != conversationTip {
+		t.Errorf("conversation branch moved to %s, want %s", got, conversationTip)
+	}
+	if _, statErr := os.Stat(wt.Path); statErr != nil {
+		t.Errorf("delivery worktree was removed after the ref move was refused: %v", statErr)
+	}
+}
+
+// A fast-forward recovery must never become a force-update. Once another
+// worktree has advanced the conversation branch on a different line, the
+// off-branch delivery and the conversation branch have diverged; Finalize must
+// preserve the task worktree and leave the conversation branch untouched.
+func TestFinalizeRefusesDivergedOffBranchDelivery(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+
+	wt := prepareTurn(t, repo, "MUL-8541", turnOneTask)
+	gitRun(t, wt.Path, "checkout", "-b", "repo/task-branch")
+	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "off-branch delivery\n")
+	gitRun(t, wt.Path, "add", "-A")
+	gitRun(t, wt.Path, "commit", "-m", "off-branch delivery")
+	delivered := gitRun(t, wt.Path, "rev-parse", "HEAD")
+
+	other := filepath.Join(t.TempDir(), "conversation")
+	gitRun(t, repo, "worktree", "add", "--quiet", other, wt.Branch)
+	writeFile(t, filepath.Join(other, "other.txt"), "concurrent conversation work\n")
+	gitRun(t, other, "add", "-A")
+	gitRun(t, other, "commit", "-m", "concurrent conversation work")
+	conversationTip := gitRun(t, other, "rev-parse", "HEAD")
+	gitRun(t, repo, "worktree", "remove", "--force", other)
+
+	if _, err := gitTry(t, repo, "merge-base", "--is-ancestor", conversationTip, delivered); err == nil {
+		t.Fatal("test setup did not create divergent histories")
+	}
+
+	outcome, err := wt.Finalize(worktreeTestLogger())
+	if err == nil {
+		t.Fatal("Finalize accepted a delivery that diverged from the conversation branch")
+	}
+	if !strings.Contains(err.Error(), "did not deliver a fast-forward") {
+		t.Errorf("error does not explain the divergence: %v", err)
+	}
+	if outcome.Branch != "" {
+		t.Errorf("outcome named branch %q for a refused delivery", outcome.Branch)
+	}
+	if outcome.PreservedPath != wt.Path {
+		t.Errorf("PreservedPath = %q, want %q", outcome.PreservedPath, wt.Path)
+	}
+	if got := gitRun(t, repo, "rev-parse", wt.Branch); got != conversationTip {
+		t.Errorf("conversation branch moved to %s, want concurrent tip %s", got, conversationTip)
+	}
+	if _, statErr := os.Stat(wt.Path); statErr != nil {
+		t.Errorf("worktree removed despite refusing the divergent delivery: %v", statErr)
+	}
+}
+
 // The same guard from the other side: whatever the worktree delivered has to BE
 // the task's branch. A run that ended somewhere else — a detached checkout, a
 // different branch — delivered a commit this record has no business describing,
