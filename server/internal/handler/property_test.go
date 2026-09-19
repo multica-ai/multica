@@ -313,6 +313,30 @@ func TestIssuePropertyValues(t *testing.T) {
 		t.Fatalf("good number: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
+	// multi_text: duplicates dropped, caller order kept.
+	listText := createTestProperty(t, map[string]any{"name": "Aliases" + uuid.NewString()[:8], "type": "multi_text"})
+	wl := setIssuePropertyRaw(t, issueID, listText.ID, []string{"beta", "alpha", "beta"})
+	if wl.Code != http.StatusOK {
+		t.Fatalf("multi_text set: expected 200, got %d: %s", wl.Code, wl.Body.String())
+	}
+	var listResp struct {
+		Properties map[string]any `json:"properties"`
+	}
+	json.NewDecoder(wl.Body).Decode(&listResp)
+	storedList, _ := listResp.Properties[listText.ID].([]any)
+	if len(storedList) != 2 || storedList[0] != "beta" || storedList[1] != "alpha" {
+		t.Fatalf("multi_text not stored in caller order: %v", storedList)
+	}
+
+	// multi_url: entry-level http(s) validation.
+	listURL := createTestProperty(t, map[string]any{"name": "Links" + uuid.NewString()[:8], "type": "multi_url"})
+	if w := setIssuePropertyRaw(t, issueID, listURL.ID, []string{"https://example.com/a", "https://example.com/b"}); w.Code != http.StatusOK {
+		t.Fatalf("good multi_url: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if w := setIssuePropertyRaw(t, issueID, listURL.ID, []string{"https://example.com/a", "ftp://example.com"}); w.Code != http.StatusBadRequest {
+		t.Fatalf("non-http(s) multi_url entry: expected 400, got %d", w.Code)
+	}
+
 	// Archived definitions reject new values but allow unset.
 	warch := httptest.NewRecorder()
 	req := newRequest("PATCH", "/api/properties/"+sel.ID, map[string]any{"archived": true})
@@ -359,6 +383,49 @@ func TestValidatePropertyValueUnit(t *testing.T) {
 	}
 	if _, err := validatePropertyValue(boolDef, json.RawMessage(`false`)); err != nil {
 		t.Fatalf("false rejected: %v", err)
+	}
+}
+
+func TestValidatePropertyListValuesUnit(t *testing.T) {
+	textList := makePropertyDef("multi_text", nil)
+	if _, err := validatePropertyValue(textList, json.RawMessage(`[]`)); err == nil {
+		t.Fatalf("empty multi_text array accepted")
+	}
+	if _, err := validatePropertyValue(textList, json.RawMessage(`"alpha"`)); err == nil {
+		t.Fatalf("bare string into multi_text accepted")
+	}
+	if _, err := validatePropertyValue(textList, json.RawMessage(`["alpha", 3]`)); err == nil {
+		t.Fatalf("non-string multi_text entry accepted")
+	}
+	if _, err := validatePropertyValue(textList, json.RawMessage(`["alpha", "  "]`)); err == nil {
+		t.Fatalf("blank multi_text entry accepted")
+	}
+	stored, err := validatePropertyValue(textList, json.RawMessage(`["alpha", "beta", "alpha"]`))
+	if err != nil {
+		t.Fatalf("valid multi_text rejected: %v", err)
+	}
+	if string(stored) != `["alpha","beta"]` {
+		t.Fatalf("multi_text not deduped in caller order: %s", stored)
+	}
+	over := make([]string, maxPropertyListValues+1)
+	for i := range over {
+		over[i] = fmt.Sprintf("v%d", i)
+	}
+	overRaw, _ := json.Marshal(over)
+	if _, err := validatePropertyValue(textList, overRaw); err == nil {
+		t.Fatalf("over-cap multi_text accepted")
+	}
+
+	urlList := makePropertyDef("multi_url", nil)
+	if _, err := validatePropertyValue(urlList, json.RawMessage(`["https://a.example", "javascript:alert(1)"]`)); err == nil {
+		t.Fatalf("non-http(s) multi_url entry accepted")
+	}
+	stored, err = validatePropertyValue(urlList, json.RawMessage(`["  https://a.example/x ", "https://b.example", "https://a.example/x"]`))
+	if err != nil {
+		t.Fatalf("valid multi_url rejected: %v", err)
+	}
+	if string(stored) != `["https://a.example/x","https://b.example"]` {
+		t.Fatalf("multi_url not trimmed and deduped: %s", stored)
 	}
 }
 

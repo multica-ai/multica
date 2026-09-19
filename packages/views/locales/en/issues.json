@@ -784,6 +784,7 @@
       "number_placeholder": "0",
       "actor_search_placeholder": "Search members…",
       "open_link": "Open link",
+      "remove_item": "Remove {{value}}",
       "archived_hint": "Archived property — value is read-only",
       "unknown_value": "Unavailable",
       "unknown_value_hint": "This value was set by a newer version of Multica and can't be edited here — update the app, or clear it"

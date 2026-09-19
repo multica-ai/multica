@@ -908,6 +908,9 @@ function propertyDisplayValue(
       .map((option) => option.name)
       .join(", ");
   }
+  if (property.type === "multi_text" || property.type === "multi_url") {
+    return Array.isArray(value) ? value.join(", ") : String(value);
+  }
   if (isActorPropertyType(property.type)) {
     return actorRefsFromValue(value)
       .map((ref) => (getActorName ? getActorName(ref.kind, ref.id) : formatActorRef(ref.kind, ref.id)))
@@ -1063,7 +1066,7 @@ function IssueTableHeaderCell({
   const property = propertyId ? meta.propertyById.get(propertyId) : undefined;
   const staticSort = propertyId
     ? property &&
-      !["multi_select", "checkbox", "actor", "multi_actor"].includes(property.type)
+      !["multi_select", "checkbox", "actor", "multi_actor", "multi_text", "multi_url"].includes(property.type)
       ? (`property:${propertyId}` as SortField)
       : undefined
     : SORTABLE_COLUMNS[key as TableSystemColumnKey];
