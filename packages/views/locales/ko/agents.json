@@ -918,6 +918,7 @@
       "setup_description": "이 런타임은 생성 대화에 사용되며 새 에이전트의 기본값이 됩니다.",
       "start": "대화 시작",
       "connect_runtime": "런타임 연결",
+      "draft_parse_failed": "이 응답으로 양식을 채울 수 없습니다. 에이전트에게 초안을 다시 생성하도록 요청하거나 직접 입력하세요.",
       "start_failed": "Agent Builder를 시작하지 못했습니다.",
       "send_failed": "메시지를 보내지 못했습니다.",
       "stop_failed": "현재 생성을 중지하지 못했습니다.",

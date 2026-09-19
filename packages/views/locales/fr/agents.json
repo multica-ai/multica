@@ -339,6 +339,7 @@
       "setup_description": "Ce runtime sert à la configuration et sera celui du nouvel agent par défaut.",
       "start": "Démarrer la conversation",
       "connect_runtime": "Connecter un runtime",
+      "draft_parse_failed": "Cette réponse n’a pas permis de remplir le formulaire. Demandez à l’agent de générer à nouveau le brouillon ou remplissez le formulaire manuellement.",
       "start_failed": "Impossible de démarrer l'Agent Builder.",
       "send_failed": "Impossible d'envoyer votre message.",
       "stop_failed": "Impossible d'arrêter la génération en cours.",
