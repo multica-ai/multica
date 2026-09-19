@@ -244,6 +244,11 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		return errors.New("wecom: sender registry not configured")
 	}
 	chatType := aibotChatTypeFromChannel(channel.ChatType(binding.ChatType))
+	// Not binding.ChannelChatID: a group binding is keyed per sender, so the
+	// key is "chatid:senderid" and only the config carries an id the aibot
+	// send API accepts (wecomOutboundChatID falls back to the column for 1:1
+	// and pre-split rows).
+	chatID := wecomOutboundChatID(binding)
 	sender := o.senders.get(inst.ID)
 	if sender == nil {
 		// Before giving up: this reply may simply have been produced on the
@@ -257,7 +262,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		if o.relay.publish(relayFrame{
 			Kind:           relayKindReply,
 			InstallationID: util.UUIDToString(inst.ID),
-			ChatID:         binding.ChannelChatID,
+			ChatID:         chatID,
 			ChatType:       chatType,
 			Content:        content,
 			TaskID:         util.UUIDToString(taskID),
@@ -290,7 +295,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// as the words that answered the turn also tells the file below it that
 	// the reply has already been accounted for.
 	if hasVisibleChar(content) {
-		if err := sender.sendTextCtx(ctx, binding.ChannelChatID, chatType, content); err != nil {
+		if err := sender.sendTextCtx(ctx, chatID, chatType, content); err != nil {
 			return err
 		}
 		o.delivered()
@@ -302,7 +307,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// been counted for this reply yet and the attachment path owes its outcome.
 	o.deliverAttachments(e, attachmentTarget{
 		InstallationID: binding.InstallationID,
-		ChatID:         binding.ChannelChatID,
+		ChatID:         chatID,
 		ChatType:       chatType,
 		SessionID:      e.ChatSessionID,
 	}, !hasVisibleChar(content))
