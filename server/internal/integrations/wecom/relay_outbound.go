@@ -143,10 +143,15 @@ type RelayConfig struct {
 	// its own ack wait. Zero means ackTimeout.
 	//
 	// One budget for all of it, because that is what the publisher's outcome
-	// grace reserves (outcomeGrace) — the last offer of the chain may still be
-	// mid-delivery when the chain's timing is over, and a grace sized for one
-	// ack while the delivery waits for several is a Resolve that fences a
-	// reply its holder is still writing. Tests shrink it with everything else.
+	// grace reserves for one offer (outcomeGrace) — a grace sized for one ack
+	// while the delivery waits for several is a Resolve that fences a reply
+	// its holder is still writing.
+	//
+	// The grace charges it PER OFFER, not once for the chain: an offer that
+	// fails provably-unsent hands the claim back, so the next offer starts
+	// with a budget of its own. Lowering it therefore shortens the grace
+	// twelve-fold on the defaults, which is why tests that wait a grace out
+	// shrink it along with the claim budget and the lease settle.
 	DeliveryBudget time.Duration
 
 	// Shards is how many independent queues carry frames, and it is a
