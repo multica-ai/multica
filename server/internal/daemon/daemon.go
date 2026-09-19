@@ -8807,6 +8807,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// than being relabeled resumable by a benign-looking second error.
 		result, tools = reconcileFreshRetryResult(firstResult, firstUsage, firstTools, retryResult, retryTools, retryErr)
 	}
+	if promotedResult, promoted := promoteEmptyAgentResultFailure(result, tools); promoted {
+		taskLog.Warn("agent reported completed without output, usage, or tool activity; marking task failed",
+			"error", promotedResult.Error,
+		)
+		result = promotedResult
+	}
 	phaseRecorder.Mark(taskPhaseTurnCompleted)
 
 	elapsed := time.Since(taskStart).Round(time.Second)
