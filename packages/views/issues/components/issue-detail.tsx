@@ -1992,6 +1992,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [highlightCommentId, highlightRequestToken, id, writeViewState, items, targetIdx, scrollContainerEl, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
+  const [descriptionReadyIssueId, setDescriptionReadyIssueId] = useState<
+    string | null
+  >(null);
   const descriptionEditingRef = useRef(false);
   const descriptionSaveInFlightRef = useRef(false);
   const descriptionSaveIssueIdRef = useRef(id);
@@ -2000,11 +2003,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     baseMarkdown: string;
     attachmentIds: string[];
   } | null>(null);
-  // Keep the description editor mounted from the start. Unlike the empty
-  // composer shells, a long rendered description cannot swap between
-  // react-markdown and ProseMirror without small per-block height differences
-  // accumulating into a visible scroll/layout jump. The chunked Markdown path
-  // keeps this single eager editor affordable; title and composers stay lazy.
+  // Keep the editor mounted with ContentEditor's deferred default so the
+  // route can paint cheaply while preserving startup intent for first input.
   const titleEditorRef = useRef<TitleEditorRef>(null);
   const titleBaseRef = useRef<string | undefined>(issue?.title);
   const [titleConflictDraft, setTitleConflictDraft] = useState<string | null>(null);
@@ -2221,7 +2221,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   useIssueDetailScrollRestore({
     restoreKey: `${wsId}:${id}`,
     scrollContainerEl,
-    ready: !!issue && !loading && !timelineLoading,
+    ready:
+      !!issue &&
+      !loading &&
+      !timelineLoading &&
+      descriptionReadyIssueId === id,
     // Disabled only while the comment deep link still has a landing to run —
     // the jump owns the scroll then. Once the landing is consumed (a tab
     // switch back), this hook's retry loop IS the restore: the one-shot
@@ -3055,9 +3059,34 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 descriptionEditingRef.current = false;
               }
             }}
+            onMouseDown={(event) => {
+              // MUL-7095: pre-instance click preservation. The editor's own
+              // container handler returns early while the deferred instance
+              // is null, so this wrapper owns that window: forward the click
+              // point into the editor's focus latch (`focusAtCoords` latches
+              // pre-instance and focuses post-instance; `onCreate` lands the
+              // caret via the existing `posAtCoords` path). A text anchor
+              // needs a laid-out readonly root, which does not exist before
+              // the instance mounts, so coordinates are the right granularity
+              // here. Interactive children use the same exclusion list as the
+              // editor's container handler; an already-handled (prevented)
+              // inner click is never re-latched.
+              if (event.defaultPrevented) return;
+              const target = event.target as HTMLElement;
+              if (target.closest(".ProseMirror")) return;
+              if (target.closest("a, button, input, textarea, [role='button'], [data-node-view-wrapper]")) return;
+              // Null-window guard: a live editor owns its own clicks via
+              // the container handler — the wrapper only latches while the
+              // deferred instance does not exist yet.
+              if (descEditorRef.current?.hasEditorInstance()) return;
+              descEditorRef.current?.focusAtCoords({ x: event.clientX, y: event.clientY });
+            }}
           >
             {descriptionAnnotations.popup}
-            <div data-comment-content={descriptionSourceId}>
+            <div
+              data-testid="issue-description"
+              data-comment-content={descriptionSourceId}
+            >
               <ContentEditor
                 ref={descEditorRef}
                 key={id}
@@ -3099,6 +3128,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 currentIssueId={id}
                 selectionAction={descriptionSelectionAction}
                 attachments={descEditorAttachments}
+                onReady={() => setDescriptionReadyIssueId(id)}
               />
             </div>
 

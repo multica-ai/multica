@@ -21,6 +21,18 @@ type UseIssueDetailScrollRestoreArgs = {
 const scrollPositions = new Map<string, number>();
 const SCROLL_POSITION_CACHE_MAX_SIZE = 100;
 
+/**
+ * Events that prove the scroll point belongs to the user. The restore loop
+ * cannot tell a layout drift from a user scroll by comparing scrollTop, so
+ * any of these hands the scroll point back to the user immediately.
+ */
+const USER_INTENT_EVENTS = [
+  "wheel",
+  "touchstart",
+  "pointerdown",
+  "keydown",
+] as const;
+
 export function useIssueDetailScrollRestore({
   restoreKey,
   scrollContainerEl,
@@ -28,17 +40,25 @@ export function useIssueDetailScrollRestore({
   disabled = false,
   overrideTop,
 }: UseIssueDetailScrollRestoreArgs) {
-  const restoredKeyRef = useRef<string | null>(null);
+  const appliedTargetRef = useRef<number | null>(null);
 
   useLayoutEffect(() => {
-    restoredKeyRef.current = null;
+    appliedTargetRef.current = null;
   }, [restoreKey]);
 
   useLayoutEffect(() => {
     if (!scrollContainerEl || disabled || !ready) return;
 
     const save = () => {
-      saveScrollPosition(restoreKey, scrollContainerEl.scrollTop);
+      const top = scrollContainerEl.scrollTop;
+      // A retained, off-screen sibling surface (the route keeps the last
+      // detail mounted while another one is on screen) reports scrollTop 0
+      // with no layout box — display:none zeroes both. That is not a position
+      // the user left the issue at, and recording it would erase the offset
+      // the next visit restores. A container that really is scrolled back to
+      // the top still has its height, so it still clears its entry.
+      if (top <= 0 && scrollContainerEl.scrollHeight === 0) return;
+      saveScrollPosition(restoreKey, top);
     };
 
     scrollContainerEl.addEventListener("scroll", save, { passive: true });
@@ -51,15 +71,23 @@ export function useIssueDetailScrollRestore({
 
   useLayoutEffect(() => {
     if (!scrollContainerEl || !ready) return;
-    if (disabled) {
-      restoredKeyRef.current = restoreKey;
-      return;
-    }
-    if (restoredKeyRef.current === restoreKey) return;
-
-    restoredKeyRef.current = restoreKey;
 
     const target = overrideTop ?? scrollPositions.get(restoreKey) ?? 0;
+
+    if (disabled) {
+      // The comment deep-link jump owns the scroll. Record what a later run
+      // would apply so that run does not yank the jumped position away.
+      appliedTargetRef.current = target;
+      return;
+    }
+    // The memento is read from the pathname, and the route's canonical-URL
+    // rewrite (/issues/<uuid> -> /issues/KEY-1) lands a commit after mount, so
+    // the first run can only apply this hook's own map. Re-applying whenever
+    // the target changes lets that authoritative offset win instead of being
+    // swallowed by a once-per-visit latch.
+    if (appliedTargetRef.current === target) return;
+    appliedTargetRef.current = target;
+
     if (target <= 1) {
       scrollContainerEl.scrollTop = target;
       return;
@@ -85,11 +113,22 @@ function restoreScrollTopWithRetry(el: HTMLElement, target: number) {
   let attempts = 0;
   let stableFrames = 0;
   const maxAttempts = 30;
-  const requiredStableFrames = 2;
+  let frameId = 0;
 
   el.scrollTop = target;
 
-  let frameId: number;
+  const stop = () => {
+    if (cancelled) return;
+    cancelled = true;
+    for (const type of USER_INTENT_EVENTS) {
+      el.removeEventListener(type, stop);
+    }
+    cancelAnimationFrame(frameId);
+  };
+
+  for (const type of USER_INTENT_EVENTS) {
+    el.addEventListener(type, stop, { passive: true, once: true });
+  }
 
   const tick = () => {
     if (cancelled || !el.isConnected) return;
@@ -103,10 +142,13 @@ function restoreScrollTopWithRetry(el: HTMLElement, target: number) {
       el.scrollTop = target;
     }
 
-    // A virtualized timeline initializes after the parent's layout effect and
-    // may reset a synchronous scroll write. Requiring stability across frames
-    // keeps the restore alive long enough to outlast that initialization.
-    if (stableFrames >= requiredStableFrames || attempts >= maxAttempts) {
+    // Attachment metadata can replace an image URL a few frames after the
+    // first decode, and both passes move scrollTop. Wait for the images
+    // themselves instead of for a fixed frame count: the restore then stays
+    // alive exactly as long as the layout can still move, and releases on
+    // the first frame after the last image settles.
+    if ((stableFrames >= 1 && !hasPendingImage(el)) || attempts >= maxAttempts) {
+      stop();
       return;
     }
 
@@ -115,8 +157,12 @@ function restoreScrollTopWithRetry(el: HTMLElement, target: number) {
 
   frameId = requestAnimationFrame(tick);
 
-  return () => {
-    cancelled = true;
-    cancelAnimationFrame(frameId);
-  };
+  return stop;
+}
+
+function hasPendingImage(el: HTMLElement) {
+  for (const img of el.querySelectorAll("img")) {
+    if (!img.complete) return true;
+  }
+  return false;
 }
