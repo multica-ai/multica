@@ -365,6 +365,13 @@ jobs:
           key: ${{ steps.gocache.outputs.prefix }}${{ github.sha }}
           restore-keys: ${{ steps.gocache.outputs.prefix }}
 
+      # Checkout's pull_request default is the merge candidate, so this catches
+      # migration numbers taken on main as well as duplicates on the PR branch.
+      # Fail before any DDL or the expensive backend build.
+      - name: Validate migration filenames
+        working-directory: server
+        run: go test ./internal/migrations -run '^TestMigration(NumericPrefixesAreUnique|FilesHaveMatchingDirections)$' -count=1
+
       - name: Build
         run: cd server && go build -race ./...
 
