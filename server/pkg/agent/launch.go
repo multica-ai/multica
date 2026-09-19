@@ -473,6 +473,9 @@ var launchPrefixBlockedArgs = map[string]map[string]blockedArgMode{
 // Without it a `--version` probe and a task launch would disagree about what
 // the runtime's prefix is.
 func FilterLaunchPrefix(agentType string, prefix []string, logger *slog.Logger) []string {
+	if family, ok := RuntimeProtocolFamily(agentType); ok {
+		agentType = family
+	}
 	return filterLaunchPrefix(prefix, agentType, logger)
 }
 

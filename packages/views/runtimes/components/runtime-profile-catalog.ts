@@ -1,23 +1,23 @@
 import {
-  RUNTIME_PROFILE_PROTOCOL_FAMILIES,
+  RUNTIME_PROFILE_RUNTIME_TYPES,
   type RuntimeProfile,
-  type RuntimeProtocolFamily,
+  type RuntimeProfileType,
 } from "@multica/core/types";
 
 // A single row in the runtimes catalog the management dialog renders: the
-// built-in protocol families ship as read-only reference rows, while custom
+// built-in runtime targets ship as read-only reference rows, while custom
 // profiles are the user's editable assets.
 export type RuntimeCatalogEntry =
   | {
       kind: "builtin";
       // Stable row id — the protocol family doubles as the key for built-ins.
       id: string;
-      protocolFamily: RuntimeProtocolFamily;
+      protocolFamily: RuntimeProfileType;
     }
   | {
       kind: "custom";
       id: string;
-      protocolFamily: RuntimeProtocolFamily;
+      protocolFamily: RuntimeProfileType;
       profile: RuntimeProfile;
     };
 
@@ -28,16 +28,15 @@ export interface RuntimeCatalogSections {
 
 // Re-export the whitelist as a typed array so callers (the family picker,
 // the catalog builder) share the single source of truth.
-export const PROTOCOL_FAMILIES: readonly RuntimeProtocolFamily[] =
-  RUNTIME_PROFILE_PROTOCOL_FAMILIES;
+export const RUNTIME_TYPES = RUNTIME_PROFILE_RUNTIME_TYPES;
 
 // buildRuntimeCatalog keeps user-owned custom profiles separate from built-in
-// protocol families. The dialog renders customs as the primary management
+// runtime targets. The dialog renders customs as the primary management
 // surface and built-ins as a collapsed reference section.
 export function buildRuntimeCatalog(
   profiles: RuntimeProfile[],
 ): RuntimeCatalogSections {
-  const builtins: RuntimeCatalogEntry[] = PROTOCOL_FAMILIES.map((family) => ({
+  const builtins: RuntimeCatalogEntry[] = RUNTIME_TYPES.map((family) => ({
     kind: "builtin" as const,
     id: `builtin:${family}`,
     protocolFamily: family,
@@ -56,7 +55,7 @@ export function buildRuntimeCatalog(
     .map((profile) => ({
       kind: "custom" as const,
       id: profile.id,
-      protocolFamily: profile.protocol_family,
+      protocolFamily: profile.runtime_type ?? profile.protocol_family,
       profile,
     }));
 
@@ -168,7 +167,10 @@ export function parseCommandLine(input: string): ParsedCommandLine {
   return { ok: true, commandName: tokens[0], fixedArgs: tokens.slice(1) };
 }
 
-export function formatCommandLine(commandName: string, fixedArgs: string[]): string {
+export function formatCommandLine(
+  commandName: string,
+  fixedArgs: string[],
+): string {
   return [commandName, ...fixedArgs].filter(Boolean).map(quoteArg).join(" ");
 }
 

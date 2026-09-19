@@ -1019,8 +1019,8 @@ func (c *Client) GetWorkspaceRepos(ctx context.Context, workspaceID string) (*Wo
 }
 
 // RuntimeProfile mirrors the server's workspace custom runtime profile
-// (MUL-3284). protocol_family is the provider used for task routing (it
-// selects the agent backend), while command_name is the actual executable
+// (MUL-3284). runtime_type selects the compatibility target, while
+// protocol_family identifies its execution backend. command_name is the executable
 // the daemon resolves on PATH and launches. fixed_args are launch arguments
 // every agent on this runtime inherits.
 type RuntimeProfile struct {
@@ -1028,6 +1028,7 @@ type RuntimeProfile struct {
 	WorkspaceID    string   `json:"workspace_id"`
 	DisplayName    string   `json:"display_name"`
 	ProtocolFamily string   `json:"protocol_family"`
+	RuntimeType    string   `json:"runtime_type"`
 	CommandName    string   `json:"command_name"`
 	Description    *string  `json:"description"`
 	FixedArgs      []string `json:"fixed_args"`
