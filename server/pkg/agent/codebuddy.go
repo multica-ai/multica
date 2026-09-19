@@ -19,6 +19,15 @@ import (
 // and runContext for zero-timeout = no-deadline semantics.
 type codebuddyBackend struct {
 	cfg Config
+
+	// defaultExecutable and providerLabel are non-empty when the backend
+	// hosts a built-in runtime identity (e.g. "workbuddy") instead of the
+	// bare codebuddy family: applyBuiltinRuntimeOverrides fills them from
+	// the identity's descriptor so launches and errors name the identity.
+	// Zero values keep the family behaviour — fallback executable
+	// "codebuddy" and the family label in errors.
+	defaultExecutable string
+	providerLabel     string
 }
 
 // codebuddyBlockedArgs are flags hardcoded by the daemon that must not be
@@ -33,6 +42,37 @@ var codebuddyBlockedArgs = map[string]blockedArgMode{
 	// `--effort` is owned by the per-agent thinking_level picker so a
 	// user-supplied custom_arg cannot silently outvote it.
 	"--effort": blockedWithValue,
+}
+
+// applyBuiltinRuntimeOverrides lets a built-in runtime identity hosted by the
+// codebuddy protocol family (e.g. "workbuddy") override the fallback
+// executable and the label used in log/error lines. See
+// backendOverrideApplicator in builtin_runtimes.go — NewRuntime fails closed
+// for a family whose backend lacks this method.
+func (b *codebuddyBackend) applyBuiltinRuntimeOverrides(desc BuiltinRuntime) {
+	b.defaultExecutable = desc.DefaultExecutable
+	b.providerLabel = desc.ProviderLabel
+}
+
+// fallbackExecutable is the command a launch falls back to when the daemon
+// did not pin an executable path. A hosted identity overrides it so a
+// workbuddy runtime that reaches launch without a pinned path still invokes
+// the WorkBuddy discovery default rather than the codebuddy family one.
+func (b *codebuddyBackend) fallbackExecutable() string {
+	if b.defaultExecutable != "" {
+		return b.defaultExecutable
+	}
+	return "codebuddy"
+}
+
+// errorLabel names the runtime in launch failures. Hosted identities carry
+// their own label; the bare family keeps "codebuddy" so existing error
+// strings and their tests stay stable.
+func (b *codebuddyBackend) errorLabel() string {
+	if b.providerLabel != "" {
+		return b.providerLabel
+	}
+	return "codebuddy"
 }
 
 func buildCodebuddyArgs(opts ExecOptions, logger *slog.Logger) []string {
@@ -96,10 +136,10 @@ func buildCodebuddyArgs(opts ExecOptions, logger *slog.Logger) []string {
 func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
-		execPath = "codebuddy"
+		execPath = b.fallbackExecutable()
 	}
 	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("codebuddy executable not found at %q: %w", execPath, err)
+		return nil, fmt.Errorf("%s executable not found at %q: %w", b.errorLabel(), execPath, err)
 	}
 
 	timeout := opts.Timeout
