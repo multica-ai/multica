@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-09-16
+// Snapshot: 2026-09-19
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
@@ -45,7 +45,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "deepseek-v4-flash": { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0.15 },
   "deepseek-v4-flash-vision-exp": { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0.15 },
   "deepseek-v4-pro": { input: 0.435, output: 0.87, cacheRead: 0.003625, cacheWrite: 0.435 },
-  "deepseek-v4.1-flash": { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0.15 },
+  "deepseek-v4.1-flash": { input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite: 0.3 },
   "gemini-2.5-computer-use-preview-10-2025": { input: 1.25, output: 10, cacheRead: 1.25, cacheWrite: 1.25 },
   "gemini-2.5-flash": { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0.3 },
   "gemini-2.5-flash-image": { input: 0.3, output: 30, cacheRead: 0.075, cacheWrite: 0.3 },
@@ -97,7 +97,8 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "glm-5.1": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
   "glm-5.2": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
   "glm-5.3": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
-  "glm-5.3-flash": { input: 0.075, output: 0.25, cacheRead: 0.015, cacheWrite: 0 },
+  "glm-5.3-flash": { input: 0.15, output: 0.5, cacheRead: 0.03, cacheWrite: 0 },
+  "glm-5.3-flashx": { input: 0.37, output: 1.25, cacheRead: 0.075, cacheWrite: 0 },
   "glm-5v-turbo": { input: 1.2, output: 4, cacheRead: 0.24, cacheWrite: 0 },
   "google/gemini-flash-latest": { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
   "google/gemini-flash-lite-latest": { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0.3 },
@@ -148,6 +149,8 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "grok-build-0.1": { input: 1, output: 2, cacheRead: 0.2, cacheWrite: 1 },
   "hy3": { input: 0.14, output: 0.58, cacheRead: 0.035, cacheWrite: 0.14 },
   "hy4-preview": { input: 0.834, output: 2.501, cacheRead: 0.042, cacheWrite: 0.834 },
+  "jev-1.13": { input: 0.042, output: 0, cacheRead: 0.042, cacheWrite: 0.042 },
+  "jev-latest": { input: 0.042, output: 0, cacheRead: 0.042, cacheWrite: 0.042 },
   "kimi-k2": { input: 0.4, output: 2.5, cacheRead: 0.4, cacheWrite: 0.4 },
   "kimi-k2-thinking": { input: 0.4, output: 2.5, cacheRead: 0.4, cacheWrite: 0.4 },
   "kimi-k2.5": { input: 0.6, output: 3, cacheRead: 0.08, cacheWrite: 0.6 },
@@ -181,6 +184,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "openai/gpt-5.2-chat-latest": { input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 1.75 },
   "openai/gpt-5.3-chat-latest": { input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 1.75 },
   "opencode-go/deepseek-v4-pro": { input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0.66 },
+  "opencode-go/deepseek-v4.1-flash": { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0.15 },
   "opencode-go/glm-5": { input: 1, output: 3.2, cacheRead: 0.2, cacheWrite: 1 },
   "opencode-go/glm-5.1": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
   "opencode-go/glm-5.2": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
@@ -206,7 +210,8 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "opencode/gpt-5-codex": { input: 1.07, output: 8.5, cacheRead: 0.107, cacheWrite: 1.07 },
   "opencode/gpt-5.1": { input: 1.07, output: 8.5, cacheRead: 0.107, cacheWrite: 1.07 },
   "opencode/gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.25 },
-  "opencode/gpt-5.6-sol": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+  "opencode/gpt-5.6-sol": { input: 4, output: 20, cacheRead: 0.4, cacheWrite: 5 },
+  "opencode/jev-latest": { input: 0.042, output: 0, cacheRead: 0.042, cacheWrite: 0.042 },
   "qwen3-coder": { input: 0.45, output: 1.8, cacheRead: 0.45, cacheWrite: 0.45 },
   "qwen3.5-plus": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.25 },
   "qwen3.6-plus": { input: 0.5, output: 3, cacheRead: 0.05, cacheWrite: 0.625 },
