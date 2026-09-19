@@ -108,6 +108,7 @@ func init() {
 	f.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	f.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	f.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
+	f.Int("health-port", 0, "Local health/control port to bind; 0 = per-profile default (env: MULTICA_DAEMON_HEALTH_PORT)")
 
 	daemonLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 	daemonLogsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
@@ -131,6 +132,7 @@ func init() {
 	rf.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	rf.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	rf.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
+	rf.Int("health-port", 0, "Local health/control port to bind; 0 = per-profile default (env: MULTICA_DAEMON_HEALTH_PORT)")
 
 	df := daemonDiskUsageCmd.Flags()
 	df.Bool("by-workspace", false, "Aggregate output by workspace instead of by run")
@@ -272,10 +274,43 @@ func openBoundedErrLog(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 }
 
+// healthPortEnv is the operator escape hatch for the daemon's health/control
+// port. Two daemons run by different OS users on one host otherwise both bind
+// the default 19514 (or the same profile-derived port) and the loser dies with
+// "address already in use", which under systemd becomes a restart loop (issue
+// #8476). Setting this per user — e.g. in each systemd unit or launchd plist —
+// gives each daemon its own port. It is read inside healthPortForProfile, the
+// single resolver every daemon command routes through, so the running daemon
+// and the status/stop/restart commands that must find it all agree on the port
+// with no extra wiring.
+const healthPortEnv = "MULTICA_DAEMON_HEALTH_PORT"
+
+// daemonHealthPortEnvOverride returns the port set in MULTICA_DAEMON_HEALTH_PORT
+// and whether it was usable. An unset/blank var yields ok=false. A malformed or
+// out-of-range value is reported on stderr and also treated as unset, so a typo
+// falls back to the deterministic default rather than silently binding an
+// unexpected port.
+func daemonHealthPortEnvOverride() (int, bool) {
+	raw := strings.TrimSpace(os.Getenv(healthPortEnv))
+	if raw == "" {
+		return 0, false
+	}
+	p, err := strconv.Atoi(raw)
+	if err != nil || p < 1 || p > 65535 {
+		fmt.Fprintf(os.Stderr, "Warning: ignoring invalid %s=%q (want an integer 1-65535)\n", healthPortEnv, raw)
+		return 0, false
+	}
+	return p, true
+}
+
 // healthPortForProfile returns the health check port for the given profile.
-// Default profile uses the standard port (19514). Named profiles get a
+// An explicit MULTICA_DAEMON_HEALTH_PORT wins over everything. Otherwise the
+// default profile uses the standard port (19514) and named profiles get a
 // deterministic offset derived from the profile name.
 func healthPortForProfile(profile string) int {
+	if p, ok := daemonHealthPortEnvOverride(); ok {
+		return p
+	}
 	if profile == "" {
 		return daemon.DefaultHealthPort
 	}
@@ -285,6 +320,23 @@ func healthPortForProfile(profile string) int {
 		h += int(b)
 	}
 	return daemon.DefaultHealthPort + 1 + (h % 1000)
+}
+
+// resolveHealthPort resolves the health/control port for a daemon command with
+// precedence --health-port flag > MULTICA_DAEMON_HEALTH_PORT env > per-profile
+// default (see healthPortForProfile). The flag is only registered on start and
+// restart; on other commands cmd has no such flag and this falls through to the
+// env/profile value. A daemon started with only --health-port is reachable by
+// status/stop that share the same environment only if the env var is also set,
+// so persistent overridden daemons should prefer the env var — which every
+// command honors.
+func resolveHealthPort(cmd *cobra.Command, profile string) int {
+	if cmd != nil && cmd.Flags().Lookup("health-port") != nil && cmd.Flags().Changed("health-port") {
+		if p, err := cmd.Flags().GetInt("health-port"); err == nil && p > 0 {
+			return p
+		}
+	}
+	return healthPortForProfile(profile)
 }
 
 // daemonProfileMismatchError reports that the daemon answering on a profile's
@@ -554,7 +606,7 @@ func runDaemonStart(cmd *cobra.Command, _ []string) error {
 
 func runDaemonBackground(cmd *cobra.Command) error {
 	profile := resolveProfile(cmd)
-	healthPort := healthPortForProfile(profile)
+	healthPort := resolveHealthPort(cmd, profile)
 
 	// Check if daemon is already running.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -901,6 +953,14 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if b, _ := cmd.Flags().GetBool("no-auto-reload"); b {
 		args = append(args, "--no-auto-reload")
 	}
+	// Forward an explicit --health-port so the foreground child binds the same
+	// port the parent polls below. An env override needs no forwarding: the
+	// child inherits it.
+	if cmd.Flags().Changed("health-port") {
+		if p, _ := cmd.Flags().GetInt("health-port"); p > 0 {
+			args = append(args, "--health-port", strconv.Itoa(p))
+		}
+	}
 
 	// Forward global persistent flags.
 	if v, _ := cmd.Flags().GetString("server-url"); v != "" {
@@ -984,7 +1044,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		RuntimeName:    runtimeNameFlag,
 		WorkspacesRoot: workspacesRoot,
 		Profile:        profile,
-		HealthPort:     healthPortForProfile(profile),
+		HealthPort:     resolveHealthPort(cmd, profile),
 	}
 	pollFlag, _ := cmd.Flags().GetDuration("poll-interval")
 	pollOverride, err := resolveDaemonDurationOverride(pollFlag, "MULTICA_DAEMON_POLL_INTERVAL", fileCfg.PollInterval)
@@ -1216,7 +1276,7 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 	if err := requireKnownProfile(profile); err != nil {
 		return err
 	}
-	healthPort := healthPortForProfile(profile)
+	healthPort := resolveHealthPort(cmd, profile)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
