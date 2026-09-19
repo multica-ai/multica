@@ -3634,41 +3634,21 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 
 	// NOTE: See CreateComment — Markdown is sanitized at render/edit time, not here.
 
-	oldContent := existing.Content
-	bodyChanged := oldContent != req.Content
-	// Preserve the existing authority lineage by default — this path is taken only
-	// for an UNCHANGED edit (no re-trigger). When the content changes below, the
-	// lineage is re-derived from the EDIT action itself (MUL-4857), never carried
-	// over from the comment's original authoring run.
-	sourceTaskID := existing.SourceTaskID
+	// Derive the authority lineage this edit would use if it changes execution
+	// semantics. UpdateComment decides that under the comment row lock and keeps
+	// the existing lineage for a convergent no-op, so a stale pre-read cannot
+	// either preserve old authority on a real edit or erase it on a replay.
+	var sourceTaskID pgtype.UUID
 	var triggerIssue *db.Issue
 	var cancelled []db.AgentTaskQueue
-	editOriginatorUserID := ""
-	if bodyChanged {
-		issue, err := h.Queries.GetIssue(r.Context(), existing.IssueID)
-		if err != nil {
-			slog.Warn("load issue for edit post-processing failed", "issue_id", uuidToString(existing.IssueID), "error", err)
-			writeError(w, http.StatusInternalServerError, "failed to load issue")
-			return
-		}
-		triggerIssue = &issue
-		// A content edit is a NEW action, so its delegation lineage must key on THIS
-		// edit. Only the AGENT author re-editing its OWN comment carries the lineage
-		// forward (commentSourceTaskID re-stamps the current editing task) — so
-		// preview, save, and the deferred completion-reconcile all resolve the
-		// authority from this one action. Any OTHER editor — a workspace owner/admin
-		// editing an AGENT's comment, or a member editing their own — CLEARS the
-		// lineage so the deferred reconcile fails closed instead of resurrecting the
-		// original autopilot run's creator authority. An admin holds manage rights
-		// over the comment, not invoke rights over the author's private agents (Elon
-		// must-fix, round 3).
-		if actorType == "agent" && isAuthor {
-			sourceTaskID = h.commentSourceTaskID(r)
-		} else {
-			sourceTaskID = pgtype.UUID{}
-		}
-		editOriginatorUserID = h.invokeOriginatorFromRequest(r, actorType, actorID)
+	// A real content edit is a NEW action, so its delegation lineage must key on
+	// THIS edit. Only the AGENT author re-editing its OWN comment carries the
+	// lineage forward; every other editor clears it. The SQL applies this value
+	// only when the locked row's content actually changes.
+	if actorType == "agent" && isAuthor {
+		sourceTaskID = h.commentSourceTaskID(r)
 	}
+	editOriginatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
 
 	updateParams := db.UpdateCommentParams{
 		ID:           commentUUID,
@@ -3683,75 +3663,73 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	var comment db.Comment
 	var issueRevision int64
-	transactionalEdit := replaceAttachments || bodyChanged
-	if transactionalEdit {
-		// Every body edit (legacy and revision-aware), attachment-set edit, task
-		// cancellation, and replacement outbox generation is one database outcome.
-		// The outbox row is locked first, matching delivery's lock order; then
-		// UpdateComment takes the comment lock. No consumer can route an old body
-		// between cancellation and publishing the new revision.
-		tx, beginErr := h.TxStarter.Begin(r.Context())
-		if beginErr != nil {
-			writeError(w, http.StatusInternalServerError, "failed to prepare comment edit")
-			return
-		}
-		defer tx.Rollback(r.Context())
-		qtx := h.Queries.WithTx(tx)
-		if bodyChanged {
-			_, lockErr := qtx.LockCommentTriggerOutboxForEdit(r.Context(), existing.ID)
-			if lockErr != nil && !errors.Is(lockErr, pgx.ErrNoRows) {
-				err = lockErr
-			}
-		}
-		var updated db.UpdateCommentRow
+	semanticChanged := false
+	// Every edit enters one transaction. The outbox row is locked first,
+	// matching delivery's lock order; UpdateComment then decides from the locked
+	// row whether execution semantics really changed. This closes both stale
+	// pre-read directions: concurrent convergence is a no-op, while a request
+	// that became a real change while waiting still cancels/retriggers atomically.
+	tx, beginErr := h.TxStarter.Begin(r.Context())
+	if beginErr != nil {
+		writeError(w, http.StatusInternalServerError, "failed to prepare comment edit")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	if _, lockErr := qtx.LockCommentTriggerOutboxForEdit(r.Context(), existing.ID); lockErr != nil && !errors.Is(lockErr, pgx.ErrNoRows) {
+		err = lockErr
+	}
+	var updated db.UpdateCommentRow
+	if err == nil {
+		updated, err = qtx.UpdateComment(r.Context(), updateParams)
+	}
+	if err == nil {
+		comment = updated.Comment()
+		issueRevision = updated.IssueRevision
+		semanticChanged = updated.SemanticChanged
+	}
+	if err == nil && semanticChanged {
+		var issue db.Issue
+		issue, err = qtx.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			ID: existing.IssueID, WorkspaceID: existing.WorkspaceID,
+		})
 		if err == nil {
-			updated, err = qtx.UpdateComment(r.Context(), updateParams)
+			triggerIssue = &issue
 		}
+	}
+	if err == nil && semanticChanged {
+		cancelled, err = qtx.CancelAgentTasksByTriggerComment(r.Context(), existing.ID)
 		if err == nil {
-			comment = updated.Comment()
-			issueRevision = updated.IssueRevision
+			err = service.SettleDeliveredDelegatedFailureRecoveries(r.Context(), qtx, cancelled...)
 		}
-		if err == nil && bodyChanged {
-			cancelled, err = qtx.CancelAgentTasksByTriggerComment(r.Context(), existing.ID)
-			if err == nil {
-				err = service.SettleDeliveredDelegatedFailureRecoveries(r.Context(), qtx, cancelled...)
-			}
-		}
-		if err == nil && bodyChanged {
-			err = qtx.CreateCommentTriggerOutbox(r.Context(), db.CreateCommentTriggerOutboxParams{
-				CommentID: comment.ID, WorkspaceID: existing.WorkspaceID, IssueID: existing.IssueID,
-				ActorType: actorType, ActorID: parseUUID(actorID),
-				OriginatorUserID: parseOptionalUUID(editOriginatorUserID),
-				SuppressAgentIds: suppressAgentIDs, CommentTriggerRevision: comment.TriggerRevision,
+	}
+	if err == nil && semanticChanged {
+		err = qtx.CreateCommentTriggerOutbox(r.Context(), db.CreateCommentTriggerOutboxParams{
+			CommentID: comment.ID, WorkspaceID: existing.WorkspaceID, IssueID: existing.IssueID,
+			ActorType: actorType, ActorID: parseUUID(actorID),
+			OriginatorUserID: parseOptionalUUID(editOriginatorUserID),
+			SuppressAgentIds: suppressAgentIDs, CommentTriggerRevision: comment.TriggerRevision,
+		})
+	}
+	if err == nil && replaceAttachments {
+		var changed int64
+		changed, err = qtx.ReplaceCommentAttachments(r.Context(), db.ReplaceCommentAttachmentsParams{
+			CommentID:     comment.ID,
+			IssueID:       existing.IssueID,
+			AttachmentIds: attachmentIDs,
+		})
+		if err == nil && changed > 0 && !semanticChanged {
+			comment, err = qtx.BumpCommentRevision(r.Context(), db.BumpCommentRevisionParams{
+				ID:          comment.ID,
+				WorkspaceID: existing.WorkspaceID,
 			})
 		}
-		if err == nil && replaceAttachments {
-			var changed int64
-			changed, err = qtx.ReplaceCommentAttachments(r.Context(), db.ReplaceCommentAttachmentsParams{
-				CommentID:     comment.ID,
-				IssueID:       existing.IssueID,
-				AttachmentIds: attachmentIDs,
-			})
-			if err == nil && changed > 0 && !bodyChanged {
-				comment, err = qtx.BumpCommentRevision(r.Context(), db.BumpCommentRevisionParams{
-					ID:          comment.ID,
-					WorkspaceID: existing.WorkspaceID,
-				})
-			}
-		}
-		if err == nil {
-			err = tx.Commit(r.Context())
-		}
-		if err == nil {
-			h.TaskService.BroadcastCancelledTasks(r.Context(), uuidToString(existing.WorkspaceID), cancelled)
-		}
-	} else {
-		var updated db.UpdateCommentRow
-		updated, err = h.Queries.UpdateComment(r.Context(), updateParams)
-		if err == nil {
-			comment = updated.Comment()
-			issueRevision = updated.IssueRevision
-		}
+	}
+	if err == nil {
+		err = tx.Commit(r.Context())
+	}
+	if err == nil && semanticChanged {
+		h.TaskService.BroadcastCancelledTasks(r.Context(), uuidToString(existing.WorkspaceID), cancelled)
 	}
 	if err != nil {
 		slog.Warn("update comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
@@ -3775,7 +3753,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	retriggerEditedComment := func() []CommentTriggerOutcome {
-		if !bodyChanged {
+		if !semanticChanged {
 			return nil
 		}
 		issue := *triggerIssue

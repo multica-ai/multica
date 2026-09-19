@@ -826,17 +826,41 @@ WHERE id = @task_id
   )
 RETURNING delivered_comment_ids;
 
--- name: RecordCommentTriggerDeliveryReceipts :exec
--- SetTaskDeliveredCommentIDs proves these exact comments were embedded in the
--- claim response. Persist their current revisions in the same transaction so
--- an edited comment is a new input even when its UUID is unchanged.
-INSERT INTO comment_trigger_delivery_receipt (
-    comment_id, comment_trigger_revision, agent_id, task_id
+-- name: DeleteTaskCommentDeliverySnapshots :exec
+-- A dispatched claim can be prepared again before execution starts. Replace
+-- its input-version snapshot in the same transaction as delivered_comment_ids;
+-- only task completion promotes the final snapshot to immutable receipts.
+DELETE FROM agent_task_comment_delivery_snapshot
+WHERE task_id = @task_id;
+
+-- name: RecordTaskCommentDeliverySnapshots :exec
+INSERT INTO agent_task_comment_delivery_snapshot (
+    task_id, comment_id, comment_trigger_revision, claim_dispatched_at
 )
-SELECT delivered.id, delivered.trigger_revision, task.agent_id, task.id
+SELECT task.id, delivered.id, delivered.trigger_revision, task.dispatched_at
 FROM agent_task_queue AS task
 JOIN comment AS delivered ON delivered.id = ANY(@delivered_comment_ids::uuid[])
 WHERE task.id = @task_id
+  AND task.runtime_id = @runtime_id
+  AND task.status = 'dispatched'
+  AND task.started_at IS NULL
+  AND task.dispatched_at = @dispatched_at
+ON CONFLICT (task_id, comment_id) DO UPDATE
+SET comment_trigger_revision = EXCLUDED.comment_trigger_revision,
+    claim_dispatched_at = EXCLUDED.claim_dispatched_at;
+
+-- name: RecordFinalCommentTriggerDeliveryReceipts :exec
+-- Completion is the first point at which the delivered set is no longer
+-- replaceable. Promote the exact version snapshot atomically with the
+-- running -> completed transition; never re-read a comment's current version.
+INSERT INTO comment_trigger_delivery_receipt (
+    comment_id, comment_trigger_revision, agent_id, task_id
+)
+SELECT snapshot.comment_id, snapshot.comment_trigger_revision, task.agent_id, task.id
+FROM agent_task_queue AS task
+JOIN agent_task_comment_delivery_snapshot AS snapshot ON snapshot.task_id = task.id
+WHERE task.id = @task_id
+  AND task.status = 'completed'
 ON CONFLICT (comment_id, comment_trigger_revision, agent_id) DO NOTHING;
 
 -- name: SetTaskIssueSnapshot :exec

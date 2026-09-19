@@ -3915,11 +3915,20 @@ func (s *TaskService) FinalizeTaskClaim(
 		if err != nil {
 			return fmt.Errorf("set delivered comment ids: %w", err)
 		}
-		if err := qtx.RecordCommentTriggerDeliveryReceipts(ctx, db.RecordCommentTriggerDeliveryReceiptsParams{
+		// This set is still replaceable until the daemon starts the task. Keep an
+		// exact version snapshot for this claim generation, but do not create an
+		// immutable coverage receipt yet: a lost response may be reclaimed with a
+		// smaller/different delivered set.
+		if err := qtx.DeleteTaskCommentDeliverySnapshots(ctx, task.ID); err != nil {
+			return fmt.Errorf("clear prior comment delivery snapshots: %w", err)
+		}
+		if err := qtx.RecordTaskCommentDeliverySnapshots(ctx, db.RecordTaskCommentDeliverySnapshotsParams{
 			DeliveredCommentIds: deliveredCommentIDs,
 			TaskID:              task.ID,
+			RuntimeID:           task.RuntimeID,
+			DispatchedAt:        task.DispatchedAt,
 		}); err != nil {
-			return fmt.Errorf("record comment trigger delivery receipts: %w", err)
+			return fmt.Errorf("record comment delivery snapshots: %w", err)
 		}
 		receipt = persisted
 		return nil
@@ -4437,6 +4446,14 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 			return err
 		}
 		task = t
+
+		// The completed row now owns the final, non-replaceable claim snapshot.
+		// Promote those exact input versions to durable replay receipts in this
+		// same transaction. Reading current comment revisions here would
+		// misattribute edits that happened after delivery.
+		if err := qtx.RecordFinalCommentTriggerDeliveryReceipts(ctx, taskID); err != nil {
+			return fmt.Errorf("record final comment trigger delivery receipts: %w", err)
+		}
 
 		// Atomic with the status flip: a crash between the two would leave a
 		// finished obligation looking pending forever.

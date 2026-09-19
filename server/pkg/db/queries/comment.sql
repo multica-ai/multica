@@ -517,8 +517,7 @@ WITH locked_issue AS MATERIALIZED (
     SELECT count(*) AS locked_count FROM locked_issue
 ), target AS MATERIALIZED (
     SELECT comment.*,
-           ROW(comment.content, comment.source_task_id) IS DISTINCT FROM
-               ROW($2, sqlc.narg(source_task_id)::uuid) AS did_change
+           comment.content IS DISTINCT FROM $2 AS did_change
     FROM comment
     CROSS JOIN issue_fence
     WHERE comment.id = $1
@@ -535,7 +534,10 @@ WITH locked_issue AS MATERIALIZED (
 ), updated_comment AS (
     UPDATE comment SET
         content = $2,
-        source_task_id = sqlc.narg(source_task_id)::uuid,
+        source_task_id = CASE
+            WHEN target.did_change THEN sqlc.narg(source_task_id)::uuid
+            ELSE comment.source_task_id
+        END,
         revision = comment.revision + CASE WHEN target.did_change THEN 1 ELSE 0 END,
         trigger_revision = comment.trigger_revision + CASE WHEN target.did_change THEN 1 ELSE 0 END,
         updated_at = CASE WHEN target.did_change THEN now() ELSE comment.updated_at END
@@ -565,6 +567,7 @@ SELECT updated_comment.id, updated_comment.issue_id, updated_comment.author_type
        updated_comment.source_task_id, updated_comment.quick_action_id,
        updated_comment.via_plugin_id, updated_comment.revision,
        updated_comment.trigger_revision, updated_comment.deleted_at,
+       updated_comment.did_change AS semantic_changed,
        COALESCE((SELECT revision FROM touched_issue), 0)::bigint AS issue_revision
 FROM updated_comment;
 

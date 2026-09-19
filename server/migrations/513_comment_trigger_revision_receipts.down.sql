@@ -1,3 +1,5 @@
+DROP TABLE IF EXISTS agent_task_comment_delivery_snapshot;
+
 DROP TABLE IF EXISTS comment_trigger_delivery_receipt;
 
 ALTER TABLE comment_trigger_outbox

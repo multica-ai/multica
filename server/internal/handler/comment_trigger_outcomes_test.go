@@ -491,6 +491,147 @@ func TestEditedCommentRevisionTriggersExactlyOnce(t *testing.T) {
 	}
 }
 
+type beginGateTxStarter struct {
+	base    txStarter
+	entered chan<- struct{}
+	release <-chan struct{}
+}
+
+func (s beginGateTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.base.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	select {
+	case s.entered <- struct{}{}:
+	default:
+	}
+	select {
+	case <-s.release:
+		return tx, nil
+	case <-ctx.Done():
+		_ = tx.Rollback(context.Background())
+		return nil, ctx.Err()
+	}
+}
+
+// Two content-base edits may both pre-read v1 and legally converge on v2. The
+// second request must use the row-locked semantic_changed result: cancelling
+// from its stale pre-read would kill the valid v2 task while the same-revision
+// outbox remains done.
+func TestConcurrentConvergentCommentEditDoesNotCancelCurrentTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "Convergent Edit Target", nil)
+	issueID := createCommentTriggerPreviewIssue(t, "convergent comment edit", "", "")
+	commentID := dbid.NewV7()
+	contentV1 := fmt.Sprintf("[@Target](mention://agent/%s) version one", agentID)
+	created, err := testHandler.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ID: commentID, IssueID: parseUUID(issueID), WorkspaceID: parseUUID(testWorkspaceID),
+		AuthorType: "member", AuthorID: parseUUID(testUserID), Content: contentV1, Type: "comment",
+	})
+	if err != nil {
+		t.Fatalf("create convergent edit comment: %v", err)
+	}
+	if err := testHandler.Queries.CreateCommentTriggerOutbox(ctx, db.CreateCommentTriggerOutboxParams{
+		CommentID: commentID, WorkspaceID: parseUUID(testWorkspaceID), IssueID: parseUUID(issueID),
+		ActorType: "member", ActorID: parseUUID(testUserID), OriginatorUserID: parseOptionalUUID(testUserID),
+		SuppressAgentIds: []pgtype.UUID{}, CommentTriggerRevision: created.TriggerRevision,
+	}); err != nil {
+		t.Fatalf("create version one outbox: %v", err)
+	}
+	if _, err := testHandler.processCommentTriggerOutbox(ctx, commentID); err != nil {
+		t.Fatalf("deliver version one: %v", err)
+	}
+
+	contentV2 := fmt.Sprintf("[@Target](mention://agent/%s) version two", agentID)
+	update := func(h *Handler) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		base := contentV1
+		req := withURLParam(newRequest(http.MethodPut, "/api/comments/"+uuidToString(commentID), map[string]any{
+			"content": contentV2, "content_base": base,
+		}), "commentId", uuidToString(commentID))
+		h.UpdateComment(w, req)
+		return w
+	}
+
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	released := false
+	releaseGate := func() {
+		if !released {
+			close(release)
+			released = true
+		}
+	}
+	defer releaseGate()
+	gated := *testHandler
+	gated.TxStarter = beginGateTxStarter{base: testHandler.TxStarter, entered: entered, release: release}
+	bDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() { bDone <- update(&gated) }()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		releaseGate()
+		t.Fatal("second edit did not reach the transaction gate")
+	}
+
+	if w := update(testHandler); w.Code != http.StatusOK {
+		releaseGate()
+		t.Fatalf("first convergent edit = %d: %s", w.Code, w.Body.String())
+	}
+	var activeBeforeReplay int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id=$1 AND agent_id=$2
+		  AND status IN ('queued','dispatched','running','waiting_local_directory','deferred')
+	`, issueID, agentID).Scan(&activeBeforeReplay); err != nil {
+		releaseGate()
+		t.Fatalf("count active v2 task: %v", err)
+	}
+	if activeBeforeReplay != 1 {
+		releaseGate()
+		t.Fatalf("active tasks before convergent replay = %d, want 1", activeBeforeReplay)
+	}
+	releaseGate()
+	select {
+	case w := <-bDone:
+		if w.Code != http.StatusOK {
+			t.Fatalf("second convergent edit = %d: %s", w.Code, w.Body.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("second convergent edit did not finish")
+	}
+
+	var total, active, cancelled int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*),
+		       count(*) FILTER (WHERE status IN ('queued','dispatched','running','waiting_local_directory','deferred')),
+		       count(*) FILTER (WHERE status='cancelled')
+		FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2
+	`, issueID, agentID).Scan(&total, &active, &cancelled); err != nil {
+		t.Fatalf("count convergent edit tasks: %v", err)
+	}
+	if total != 2 || active != 1 || cancelled != 1 {
+		t.Fatalf("convergent edit tasks = total:%d active:%d cancelled:%d, want 2/1/1", total, active, cancelled)
+	}
+	var content string
+	var triggerRevision int64
+	var outboxState string
+	if err := testPool.QueryRow(ctx, `
+		SELECT source.content, source.trigger_revision, outbox.state
+		FROM comment source JOIN comment_trigger_outbox outbox ON outbox.comment_id=source.id
+		WHERE source.id=$1
+	`, uuidToString(commentID)).Scan(&content, &triggerRevision, &outboxState); err != nil {
+		t.Fatalf("read converged comment state: %v", err)
+	}
+	if content != contentV2 || triggerRevision != 2 || outboxState != "done" {
+		t.Fatalf("converged state = content:%q revision:%d outbox:%s, want v2/2/done", content, triggerRevision, outboxState)
+	}
+}
+
 func TestCommentTriggerOutboxFencePreventsExpiredConsumerTakeover(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

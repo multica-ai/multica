@@ -106,6 +106,13 @@ type AgentSkill struct {
 	Enabled   bool               `json:"enabled"`
 }
 
+type AgentTaskCommentDeliverySnapshot struct {
+	TaskID                 pgtype.UUID        `json:"task_id"`
+	CommentID              pgtype.UUID        `json:"comment_id"`
+	CommentTriggerRevision int64              `json:"comment_trigger_revision"`
+	ClaimDispatchedAt      pgtype.Timestamptz `json:"claim_dispatched_at"`
+}
+
 type AgentTaskCompletionOutcome struct {
 	TaskID             pgtype.UUID        `json:"task_id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`

@@ -3124,6 +3124,19 @@ func (q *Queries) DeleteSystemAgentByID(ctx context.Context, id pgtype.UUID) err
 	return err
 }
 
+const deleteTaskCommentDeliverySnapshots = `-- name: DeleteTaskCommentDeliverySnapshots :exec
+DELETE FROM agent_task_comment_delivery_snapshot
+WHERE task_id = $1
+`
+
+// A dispatched claim can be prepared again before execution starts. Replace
+// its input-version snapshot in the same transaction as delivered_comment_ids;
+// only task completion promotes the final snapshot to immutable receipts.
+func (q *Queries) DeleteTaskCommentDeliverySnapshots(ctx context.Context, taskID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteTaskCommentDeliverySnapshots, taskID)
+	return err
+}
+
 const deleteUnstartedQuickCreateRetryTask = `-- name: DeleteUnstartedQuickCreateRetryTask :execrows
 DELETE FROM agent_task_queue
 WHERE id = $1
@@ -7934,27 +7947,57 @@ func (q *Queries) ReclaimStaleDispatchedTasksForRuntimes(ctx context.Context, ar
 	return items, nil
 }
 
-const recordCommentTriggerDeliveryReceipts = `-- name: RecordCommentTriggerDeliveryReceipts :exec
+const recordFinalCommentTriggerDeliveryReceipts = `-- name: RecordFinalCommentTriggerDeliveryReceipts :exec
 INSERT INTO comment_trigger_delivery_receipt (
     comment_id, comment_trigger_revision, agent_id, task_id
 )
-SELECT delivered.id, delivered.trigger_revision, task.agent_id, task.id
+SELECT snapshot.comment_id, snapshot.comment_trigger_revision, task.agent_id, task.id
 FROM agent_task_queue AS task
-JOIN comment AS delivered ON delivered.id = ANY($1::uuid[])
-WHERE task.id = $2
+JOIN agent_task_comment_delivery_snapshot AS snapshot ON snapshot.task_id = task.id
+WHERE task.id = $1
+  AND task.status = 'completed'
 ON CONFLICT (comment_id, comment_trigger_revision, agent_id) DO NOTHING
 `
 
-type RecordCommentTriggerDeliveryReceiptsParams struct {
-	DeliveredCommentIds []pgtype.UUID `json:"delivered_comment_ids"`
-	TaskID              pgtype.UUID   `json:"task_id"`
+// Completion is the first point at which the delivered set is no longer
+// replaceable. Promote the exact version snapshot atomically with the
+// running -> completed transition; never re-read a comment's current version.
+func (q *Queries) RecordFinalCommentTriggerDeliveryReceipts(ctx context.Context, taskID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, recordFinalCommentTriggerDeliveryReceipts, taskID)
+	return err
 }
 
-// SetTaskDeliveredCommentIDs proves these exact comments were embedded in the
-// claim response. Persist their current revisions in the same transaction so
-// an edited comment is a new input even when its UUID is unchanged.
-func (q *Queries) RecordCommentTriggerDeliveryReceipts(ctx context.Context, arg RecordCommentTriggerDeliveryReceiptsParams) error {
-	_, err := q.db.Exec(ctx, recordCommentTriggerDeliveryReceipts, arg.DeliveredCommentIds, arg.TaskID)
+const recordTaskCommentDeliverySnapshots = `-- name: RecordTaskCommentDeliverySnapshots :exec
+INSERT INTO agent_task_comment_delivery_snapshot (
+    task_id, comment_id, comment_trigger_revision, claim_dispatched_at
+)
+SELECT task.id, delivered.id, delivered.trigger_revision, task.dispatched_at
+FROM agent_task_queue AS task
+JOIN comment AS delivered ON delivered.id = ANY($1::uuid[])
+WHERE task.id = $2
+  AND task.runtime_id = $3
+  AND task.status = 'dispatched'
+  AND task.started_at IS NULL
+  AND task.dispatched_at = $4
+ON CONFLICT (task_id, comment_id) DO UPDATE
+SET comment_trigger_revision = EXCLUDED.comment_trigger_revision,
+    claim_dispatched_at = EXCLUDED.claim_dispatched_at
+`
+
+type RecordTaskCommentDeliverySnapshotsParams struct {
+	DeliveredCommentIds []pgtype.UUID      `json:"delivered_comment_ids"`
+	TaskID              pgtype.UUID        `json:"task_id"`
+	RuntimeID           pgtype.UUID        `json:"runtime_id"`
+	DispatchedAt        pgtype.Timestamptz `json:"dispatched_at"`
+}
+
+func (q *Queries) RecordTaskCommentDeliverySnapshots(ctx context.Context, arg RecordTaskCommentDeliverySnapshotsParams) error {
+	_, err := q.db.Exec(ctx, recordTaskCommentDeliverySnapshots,
+		arg.DeliveredCommentIds,
+		arg.TaskID,
+		arg.RuntimeID,
+		arg.DispatchedAt,
+	)
 	return err
 }
 

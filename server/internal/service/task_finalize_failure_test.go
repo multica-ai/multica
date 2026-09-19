@@ -12,6 +12,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 // TestFinalizeTaskClaimFailureRollsBackTokenThenRequeue is the regression for
@@ -70,6 +71,117 @@ func TestFinalizeTaskClaimFailureRollsBackTokenThenRequeue(t *testing.T) {
 	}
 	if status != "queued" {
 		t.Fatalf("task status = %s, want queued after requeue", status)
+	}
+}
+
+// A prepared claim is not proof that the daemon received its response. A
+// reclaim may replace the delivered set, so only the final claim snapshot may
+// become an immutable comment-trigger receipt when the task completes.
+func TestReclaimedTaskPromotesOnlyFinalCommentDeliverySnapshot(t *testing.T) {
+	ctx := context.Background()
+	pool := newTaskClaimRacePool(t)
+	svc := NewTaskService(db.New(pool), pool, nil, events.New())
+	queries := db.New(pool)
+
+	taskID, userID, workspaceID := dispatchedCommentTaskFixture(t, ctx, pool)
+	task, err := queries.GetAgentTask(ctx, util.MustParseUUID(taskID))
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	firstCommentID := task.TriggerCommentID
+	secondCommentID := dbid.NewV7()
+	if _, err := queries.CreateComment(ctx, db.CreateCommentParams{
+		ID: secondCommentID, IssueID: task.IssueID, WorkspaceID: util.MustParseUUID(workspaceID),
+		AuthorType: "member", AuthorID: util.MustParseUUID(userID), Content: "second planned comment", Type: "comment",
+	}); err != nil {
+		t.Fatalf("create second planned comment: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE agent_task_queue SET coalesced_comment_ids=ARRAY[$2::uuid] WHERE id=$1
+	`, taskID, util.UUIDToString(secondCommentID)); err != nil {
+		t.Fatalf("add second comment to task plan: %v", err)
+	}
+	task, err = queries.GetAgentTask(ctx, util.MustParseUUID(taskID))
+	if err != nil {
+		t.Fatalf("reload expanded task: %v", err)
+	}
+
+	token := func(suffix string, current db.AgentTaskQueue) db.CreateTaskTokenParams {
+		return db.CreateTaskTokenParams{
+			TokenHash:   fmt.Sprintf("claim-snapshot-%s-%d", suffix, time.Now().UnixNano()),
+			TaskID:      current.ID,
+			AgentID:     current.AgentID,
+			WorkspaceID: util.MustParseUUID(workspaceID),
+			UserID:      util.MustParseUUID(userID),
+			ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+		}
+	}
+	if _, err := svc.FinalizeTaskClaim(ctx, task, token("first", task),
+		[]pgtype.UUID{firstCommentID, secondCommentID}, true, nil, nil); err != nil {
+		t.Fatalf("finalize first prepared claim: %v", err)
+	}
+	var snapshots, receipts int
+	if err := pool.QueryRow(ctx, `
+		SELECT (SELECT count(*) FROM agent_task_comment_delivery_snapshot WHERE task_id=$1),
+		       (SELECT count(*) FROM comment_trigger_delivery_receipt WHERE task_id=$1)
+	`, taskID).Scan(&snapshots, &receipts); err != nil {
+		t.Fatalf("read first claim evidence: %v", err)
+	}
+	if snapshots != 2 || receipts != 0 {
+		t.Fatalf("first prepared claim evidence = snapshots:%d receipts:%d, want 2/0", snapshots, receipts)
+	}
+
+	// Model a response lost after finalization: a later reclaim refreshes the
+	// claim generation and can build a smaller valid payload.
+	if _, err := pool.Exec(ctx, `
+		UPDATE agent_task_queue SET dispatched_at=clock_timestamp()+interval '1 millisecond' WHERE id=$1
+	`, taskID); err != nil {
+		t.Fatalf("refresh claim generation: %v", err)
+	}
+	task, err = queries.GetAgentTask(ctx, util.MustParseUUID(taskID))
+	if err != nil {
+		t.Fatalf("load reclaimed task: %v", err)
+	}
+	if _, err := svc.FinalizeTaskClaim(ctx, task, token("reclaim", task),
+		[]pgtype.UUID{firstCommentID}, true, nil, nil); err != nil {
+		t.Fatalf("finalize reclaimed claim: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_comment_delivery_snapshot WHERE task_id=$1
+	`, taskID).Scan(&snapshots); err != nil {
+		t.Fatalf("read replacement snapshot: %v", err)
+	}
+	if snapshots != 1 {
+		t.Fatalf("replacement snapshots = %d, want only the final claim's one comment", snapshots)
+	}
+
+	if _, err := svc.StartTask(ctx, task.ID); err != nil {
+		t.Fatalf("start reclaimed task: %v", err)
+	}
+	if _, transitioned, err := svc.CompleteTaskWithTransition(
+		ctx, task.ID, []byte(`{"output":"done"}`), "", "", "", false, "", "",
+	); err != nil || !transitioned {
+		t.Fatalf("complete reclaimed task = transitioned:%v err:%v", transitioned, err)
+	}
+	var firstReceipts, secondReceipts int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FILTER (WHERE comment_id=$2),
+		       count(*) FILTER (WHERE comment_id=$3)
+		FROM comment_trigger_delivery_receipt WHERE task_id=$1
+	`, taskID, util.UUIDToString(firstCommentID), util.UUIDToString(secondCommentID)).Scan(&firstReceipts, &secondReceipts); err != nil {
+		t.Fatalf("read final receipts: %v", err)
+	}
+	if firstReceipts != 1 || secondReceipts != 0 {
+		t.Fatalf("final receipts = first:%d second:%d, want 1/0", firstReceipts, secondReceipts)
+	}
+	covered, err := queries.HasTaskCoveringCommentTrigger(ctx, db.HasTaskCoveringCommentTriggerParams{
+		CommentID: secondCommentID, AgentID: task.AgentID, IssueID: task.IssueID,
+	})
+	if err != nil {
+		t.Fatalf("check missing comment coverage: %v", err)
+	}
+	if covered {
+		t.Fatal("comment omitted by the final claim was permanently marked covered")
 	}
 }
 

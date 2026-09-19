@@ -2324,25 +2324,27 @@ WITH locked_issue AS MATERIALIZED (
     SELECT count(*) AS locked_count FROM locked_issue
 ), target AS MATERIALIZED (
     SELECT comment.id, comment.issue_id, comment.author_type, comment.author_id, comment.content, comment.type, comment.created_at, comment.updated_at, comment.parent_id, comment.workspace_id, comment.resolved_at, comment.resolved_by_type, comment.resolved_by_id, comment.source_task_id, comment.quick_action_id, comment.via_plugin_id, comment.revision, comment.recovery_settled_at, comment.deleted_at, comment.request_key, comment.request_payload_sha256, comment.trigger_revision,
-           ROW(comment.content, comment.source_task_id) IS DISTINCT FROM
-               ROW($2, $3::uuid) AS did_change
+           comment.content IS DISTINCT FROM $2 AS did_change
     FROM comment
     CROSS JOIN issue_fence
     WHERE comment.id = $1
       AND issue_fence.locked_count >= 0
       -- A deleted comment's tombstone is not editable.
       AND comment.deleted_at IS NULL
-      AND ($4::bigint IS NULL OR revision = $4::bigint)
+      AND ($3::bigint IS NULL OR revision = $3::bigint)
       AND (
-        $5::text IS NULL
-        OR content IS NOT DISTINCT FROM $5::text
+        $4::text IS NULL
+        OR content IS NOT DISTINCT FROM $4::text
         OR content IS NOT DISTINCT FROM $2
       )
     FOR UPDATE OF comment
 ), updated_comment AS (
     UPDATE comment SET
         content = $2,
-        source_task_id = $3::uuid,
+        source_task_id = CASE
+            WHEN target.did_change THEN $5::uuid
+            ELSE comment.source_task_id
+        END,
         revision = comment.revision + CASE WHEN target.did_change THEN 1 ELSE 0 END,
         trigger_revision = comment.trigger_revision + CASE WHEN target.did_change THEN 1 ELSE 0 END,
         updated_at = CASE WHEN target.did_change THEN now() ELSE comment.updated_at END
@@ -2372,6 +2374,7 @@ SELECT updated_comment.id, updated_comment.issue_id, updated_comment.author_type
        updated_comment.source_task_id, updated_comment.quick_action_id,
        updated_comment.via_plugin_id, updated_comment.revision,
        updated_comment.trigger_revision, updated_comment.deleted_at,
+       updated_comment.did_change AS semantic_changed,
        COALESCE((SELECT revision FROM touched_issue), 0)::bigint AS issue_revision
 FROM updated_comment
 `
@@ -2379,9 +2382,9 @@ FROM updated_comment
 type UpdateCommentParams struct {
 	ID               pgtype.UUID `json:"id"`
 	Content          string      `json:"content"`
-	SourceTaskID     pgtype.UUID `json:"source_task_id"`
 	ExpectedRevision pgtype.Int8 `json:"expected_revision"`
 	ContentBase      pgtype.Text `json:"content_base"`
+	SourceTaskID     pgtype.UUID `json:"source_task_id"`
 }
 
 type UpdateCommentRow struct {
@@ -2404,6 +2407,7 @@ type UpdateCommentRow struct {
 	Revision        int64              `json:"revision"`
 	TriggerRevision int64              `json:"trigger_revision"`
 	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	SemanticChanged bool               `json:"semantic_changed"`
 	IssueRevision   int64              `json:"issue_revision"`
 }
 
@@ -2411,9 +2415,9 @@ func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (U
 	row := q.db.QueryRow(ctx, updateComment,
 		arg.ID,
 		arg.Content,
-		arg.SourceTaskID,
 		arg.ExpectedRevision,
 		arg.ContentBase,
+		arg.SourceTaskID,
 	)
 	var i UpdateCommentRow
 	err := row.Scan(
@@ -2436,6 +2440,7 @@ func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (U
 		&i.Revision,
 		&i.TriggerRevision,
 		&i.DeletedAt,
+		&i.SemanticChanged,
 		&i.IssueRevision,
 	)
 	return i, err
