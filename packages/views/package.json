@@ -47,6 +47,7 @@
     "./dingtalk": "./dingtalk/index.ts",
     "./wecom": "./wecom/index.ts",
     "./telegram": "./telegram/index.ts",
+    "./sharecrm": "./sharecrm/index.ts",
     "./invite": "./invite/index.ts",
     "./invitations": "./invitations/index.ts",
     "./onboarding": "./onboarding/index.ts",

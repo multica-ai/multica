@@ -108,6 +108,12 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   // DingTalk identity. Reserve the prefix so a workspace slug cannot shadow it.
   "dingtalk",
 
+  // ShareCRM account-bind route
+  // `/sharecrm/bind` is a global pre-workspace route where a member links their
+  // ShareCRM (纷享销客) identity. Reserve the prefix so a workspace slug cannot
+  // shadow it.
+  "sharecrm",
+
   // Backend ops / observability
   // `/health`, `/readyz`, `/healthz`, and `/ws` exist on the backend host;
   // reserving them on the workspace slug space prevents naming confusion if/when
