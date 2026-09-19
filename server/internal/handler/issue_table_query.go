@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issuequery"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -111,6 +112,13 @@ type issueTableQuerySpec struct {
 	Filters issueTableFiltersRequest `json:"filters"`
 	Search  string                   `json:"search,omitempty"`
 	Sort    issueTableSortRequest    `json:"sort"`
+	// Triage asks for the Triage queue instead of the work surface
+	// (MUL-7189 §2.4). It is part of the spec rather than a separate request
+	// field so it rides into canonicalIssueTableFingerprint: a cursor opened
+	// on one scope must not resume on the other. `omitempty` keeps the
+	// fingerprint of every existing request byte-identical, so cursors issued
+	// before this field existed stay valid.
+	Triage bool `json:"triage,omitempty"`
 }
 
 type issueTableGroupSpec struct {
@@ -440,7 +448,7 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		return issueTableSQL{}, false
 	}
 
-	where := []string{"i.workspace_id = $1"}
+	where := []string{"i.workspace_id = $1", issuequery.Filter("i", spec.Triage)}
 	args := []any{workspaceUUID}
 	addArg := func(value any) string {
 		args = append(args, value)

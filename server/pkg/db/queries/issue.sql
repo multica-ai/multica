@@ -11,6 +11,10 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.revision
 FROM issue i
 WHERE i.workspace_id = $1
+  -- A Triage entry is a proposal nobody has taken on, so it is not work and
+  -- does not belong on a work surface (MUL-7189 §2.4). The Triage queue asks
+  -- for it explicitly instead; see issuequery.WorkSurface.
+  AND i.triage_state IS NULL
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
@@ -86,6 +90,8 @@ FROM issue
 WHERE id = $1;
 
 -- name: ListIssueGCStatuses :many
+-- triage: all — GC reads the ids its caller already named, and an abandoned
+-- Triage entry has to be able to age out like anything else.
 SELECT id, status, updated_at
 FROM issue
 WHERE workspace_id = sqlc.arg('workspace_id')
@@ -397,6 +403,8 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.revision
 FROM issue i
 WHERE i.workspace_id = $1
+  -- Triage entries are proposals, not work (MUL-7189 §2.4).
+  AND i.triage_state IS NULL
   -- Negate only known terminal keys so an unknown legacy key remains visible.
   AND NOT (i.status = ANY(sqlc.arg('terminal_status_keys')::text[]))
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
@@ -500,6 +508,8 @@ ORDER BY i.position ASC, i.created_at DESC;
 -- See ListIssues for the semantics of involves_user_id.
 SELECT count(*) FROM issue i
 WHERE i.workspace_id = $1
+  -- Mirrors ListIssues: the count a list shows counts what the list shows.
+  AND i.triage_state IS NULL
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
@@ -542,6 +552,8 @@ WHERE i.workspace_id = $1
   );
 
 -- name: ListChildIssues :many
+-- triage: all — see ChildIssueProgress: parent_issue_id is locked NULL in
+-- Triage, so no entry can be a child.
 -- Order by number ASC so sub-issues display in stable creation order
 -- (oldest first), matching how a parent's plan reads top-to-bottom. The
 -- position column is computed per-(workspace, status) by NextTopPosition,
@@ -553,6 +565,7 @@ WHERE parent_issue_id = $1
 ORDER BY number ASC;
 
 -- name: ListChildrenByParents :many
+-- triage: all — see ChildIssueProgress.
 -- Batched variant of ListChildIssues: returns all children for the given
 -- parent set in one round trip. Used by Swimlane to avoid an N+1 fan-out
 -- (one request per visible parent lane). Result is grouped client-side by
@@ -585,6 +598,9 @@ SELECT
   COUNT(*)::bigint as frequency
 FROM issue
 WHERE workspace_id = $1
+  -- An assignee pre-filled on a Triage proposal is not evidence of who the
+  -- member usually assigns work to (MUL-7189 §2.4).
+  AND triage_state IS NULL
   AND creator_id = $2
   AND creator_type = 'member'
   AND assignee_type IS NOT NULL
@@ -592,6 +608,9 @@ WHERE workspace_id = $1
 GROUP BY assignee_type, assignee_id;
 
 -- name: ChildIssueProgress :many
+-- triage: all — keyed on parent_issue_id, which a Triage entry is forbidden
+-- to have (issue_triage_guard.go). No Triage row can reach this query, so the
+-- predicate would restate a guarantee the write guard already gives.
 SELECT parent_issue_id,
        COUNT(*)::bigint AS total,
        COUNT(*) FILTER (WHERE status = ANY(sqlc.arg('terminal_status_keys')::text[]))::bigint AS done
@@ -640,6 +659,10 @@ WHERE id = $1 AND first_executed_at IS NULL
 RETURNING id, workspace_id, creator_type, creator_id, first_executed_at;
 
 -- name: CountIssuesUpTo :one
+-- triage: all — deliberately NOT a work surface. This is the entitlement
+-- gate, and an entry parked in Triage is still a stored issue row: excluding
+-- it would let ingest run a workspace past its plan's issue limit and only
+-- discover it at accept, one issue at a time.
 -- Bounded count for issue-limit admission and display. Callers pass only the
 -- threshold needed for their decision, avoiding a full scan in an oversized
 -- workspace.

@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/channelmedia"
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issuequery"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -493,6 +494,15 @@ func assigneeGroupID(assigneeType pgtype.Text, assigneeID pgtype.UUID) string {
 // SearchIssueResponse extends IssueResponse with search metadata.
 type SearchIssueResponse struct {
 	IssueResponse
+	// TriageState is the entry's Triage state, present only on results that
+	// are in Triage — so only ever on an `include_triage=true` search. The
+	// frontend composes the Triage badge from it; without it a search hit and
+	// an ordinary issue would be indistinguishable in the result list.
+	//
+	// It lives here rather than on IssueResponse because search is the only
+	// read that returns Triage entries today. MUL-7218 puts the field on
+	// IssueResponse itself, at which point this one goes away.
+	TriageState               *string `json:"triage_state,omitempty"`
 	MatchSource               string  `json:"match_source"`
 	MatchedSnippet            *string `json:"matched_snippet,omitempty"`
 	MatchedDescriptionSnippet *string `json:"matched_description_snippet,omitempty"`
@@ -651,7 +661,14 @@ type searchResult struct {
 // case-insensitive LIKE semantics as the legacy query. The pipeline deliberately
 // trades the title, description, and comment content GIN fast paths for one
 // predictable pass over each relation within the selected workspace.
-func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, terminalStatusKeys []string) (string, []any) {
+//
+// includeTriage widens the search to Triage entries. Search is the one issue
+// read that can return them beside ordinary issues (MUL-7189 §2.4): the product
+// rule is that an entry in Triage stays findable — global search and the
+// "merge into an existing issue" picker both need it — while every list, board
+// and count still excludes it. Default false, so a caller that says nothing
+// gets the work surface.
+func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, includeTriage bool, terminalStatusKeys []string) (string, []any) {
 	// Lowercase in Go so SQL only needs LOWER() on the column side.
 	phrase = strings.ToLower(phrase)
 	for i, term := range terms {
@@ -731,6 +748,9 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	}
 
 	issueWhere := "i.workspace_id = " + wsParam
+	if !includeTriage {
+		issueWhere += " AND " + issuequery.WorkSurface("i")
+	}
 	if terminalStatusesParam != "" {
 		issueWhere += fmt.Sprintf(" AND NOT (i.status = ANY(%s::text[]))", terminalStatusesParam)
 	}
@@ -945,7 +965,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position,
 		i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id,
-		i.revision,
+		i.revision, i.triage_state,
 		pc.match_source,
 		COALESCE(c.content, '') AS matched_comment_content
 	FROM page_candidates pc
@@ -990,6 +1010,8 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	includeClosed := r.URL.Query().Get("include_closed") == "true"
+	// Opt-in, and only for search: see buildSearchQuery.
+	includeTriage := r.URL.Query().Get("include_triage") == "true"
 
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
@@ -1008,7 +1030,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		terminalStatusKeys = resolvedKeys
 	}
 
-	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, terminalStatusKeys)
+	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, includeTriage, terminalStatusKeys)
 	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
 	args[3] = wsUUID
 	args[len(args)-2] = limit
@@ -1041,6 +1063,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 				&sr.issue.Number,
 				&sr.issue.ProjectID,
 				&sr.issue.Revision,
+				&sr.issue.TriageState,
 				&sr.matchSource,
 				&sr.matchedCommentContent,
 			); err != nil {
@@ -1076,6 +1099,10 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		sir := SearchIssueResponse{
 			IssueResponse: issueToResponse(sr.issue, prefix),
 			MatchSource:   sr.matchSource,
+		}
+		if sr.issue.TriageState.Valid {
+			state := sr.issue.TriageState.String
+			sir.TriageState = &state
 		}
 		fillSearch(&sir.IssueResponse)
 		// Always populate comment snippet when a matching comment exists
@@ -1203,6 +1230,14 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
+		// ListOpenIssues is the work surface's fast path and carries
+		// `triage_state IS NULL` in the query itself, so it cannot answer for
+		// the Triage queue. Say so rather than return the work surface under a
+		// filter that asked for the opposite (MUL-7189 §2.4).
+		if parseIssueTriageScope(r.URL.Query()) {
+			writeError(w, http.StatusBadRequest, "triage cannot be combined with open_only")
+			return
+		}
 		// Serialize the parsed AND-of-ORs groups into the single jsonb param
 		// the static query unrolls (see properties_filter in ListOpenIssues).
 		var openPropertiesFilter []byte
@@ -1379,7 +1414,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build dynamic SQL — same approach as ListGroupedIssues.
-	where := []string{"i.workspace_id = $1"}
+	where := []string{"i.workspace_id = $1", issueTriageWhere(r.URL.Query(), "i")}
 	args := []any{wsUUID}
 	addArg := func(v any) string {
 		args = append(args, v)
@@ -1869,7 +1904,7 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	where := []string{"i.workspace_id = $1"}
+	where := []string{"i.workspace_id = $1", issueTriageWhere(r.URL.Query(), "i")}
 	args := []any{wsUUID}
 	addArg := func(v any) string {
 		args = append(args, v)

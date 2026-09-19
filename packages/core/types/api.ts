@@ -513,6 +513,13 @@ export interface ListIssuesCache {
 }
 
 export interface SearchIssueResult extends Issue {
+  /**
+   * Set only on a hit that is still in Triage, which only an
+   * `include_triage=true` search can return. Search is the one read that shows
+   * Triage entries beside ordinary issues, so this is what tells the two apart
+   * in a result list. (MUL-7189 §2.4)
+   */
+  triage_state?: string;
   match_source: "title" | "description" | "comment";
   matched_snippet?: string;
   matched_description_snippet?: string;

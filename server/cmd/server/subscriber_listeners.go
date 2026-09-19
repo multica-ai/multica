@@ -29,6 +29,36 @@ func isAssignmentRecipientType(assigneeType string) bool {
 // serialization boundary (see subscribeDelegatedHuman).
 func registerSubscriberListeners(bus *events.Bus, pool *pgxpool.Pool) {
 	queries := db.New(pool)
+	// subscribeNewIssueParticipants is the creation rule set, shared with the
+	// accept path: an accepted Triage entry enters the workspace with no
+	// subscribers at all, so it needs these rules rather than the update ones
+	// (see acceptedFromTriage).
+	subscribeNewIssueParticipants := func(workspaceID string, issue handler.IssueResponse) {
+		// Subscribe the creator
+		addSubscriber(bus, queries, workspaceID, issue.ID, issue.CreatorType, issue.CreatorID, "creator")
+
+		// Subscribe the assignee if it is a direct recipient and differs from the creator.
+		if issue.AssigneeType != nil && issue.AssigneeID != nil &&
+			isAssignmentRecipientType(*issue.AssigneeType) &&
+			!(*issue.AssigneeType == issue.CreatorType && *issue.AssigneeID == issue.CreatorID) {
+			addSubscriber(bus, queries, workspaceID, issue.ID, *issue.AssigneeType, *issue.AssigneeID, "assignee")
+		}
+
+		// Subscribe @mentioned users in description
+		if issue.Description != nil && *issue.Description != "" {
+			for _, m := range parseMentions(*issue.Description) {
+				addSubscriber(bus, queries, workspaceID, issue.ID, m.Type, m.ID, "mentioned")
+			}
+		}
+
+		// Subscribe the human this issue was created ON BEHALF OF. Every rule
+		// above keys on ACTOR identity, so when an agent creates an issue and
+		// assigns it to an agent, every subscriber is an agent — and
+		// notifyIssueSubscribers only delivers to members. The result is a full
+		// subscriber list with zero recipients (MUL-5483).
+		subscribeDelegatedHuman(bus, pool, queries, workspaceID, issue.ID)
+	}
+
 	// issue:created — subscribe creator + assignee (if different)
 	bus.Subscribe(protocol.EventIssueCreated, func(e events.Event) {
 		payload, ok := e.Payload.(map[string]any)
@@ -41,30 +71,11 @@ func registerSubscriberListeners(bus *events.Bus, pool *pgxpool.Pool) {
 		if !ok {
 			return
 		}
-
-		// Subscribe the creator
-		addSubscriber(bus, queries, e.WorkspaceID, issue.ID, issue.CreatorType, issue.CreatorID, "creator")
-
-		// Subscribe the assignee if it is a direct recipient and differs from the creator.
-		if issue.AssigneeType != nil && issue.AssigneeID != nil &&
-			isAssignmentRecipientType(*issue.AssigneeType) &&
-			!(*issue.AssigneeType == issue.CreatorType && *issue.AssigneeID == issue.CreatorID) {
-			addSubscriber(bus, queries, e.WorkspaceID, issue.ID, *issue.AssigneeType, *issue.AssigneeID, "assignee")
+		if issueInTriage(context.Background(), queries, issue.ID) {
+			return
 		}
 
-		// Subscribe @mentioned users in description
-		if issue.Description != nil && *issue.Description != "" {
-			for _, m := range parseMentions(*issue.Description) {
-				addSubscriber(bus, queries, e.WorkspaceID, issue.ID, m.Type, m.ID, "mentioned")
-			}
-		}
-
-		// Subscribe the human this issue was created ON BEHALF OF. Every rule
-		// above keys on ACTOR identity, so when an agent creates an issue and
-		// assigns it to an agent, every subscriber is an agent — and
-		// notifyIssueSubscribers only delivers to members. The result is a full
-		// subscriber list with zero recipients (MUL-5483).
-		subscribeDelegatedHuman(bus, pool, queries, e.WorkspaceID, issue.ID)
+		subscribeNewIssueParticipants(e.WorkspaceID, issue)
 	})
 
 	// issue:updated — subscribe new assignee or @mentioned users
@@ -75,6 +86,13 @@ func registerSubscriberListeners(bus *events.Bus, pool *pgxpool.Pool) {
 		}
 		issue, ok := extractIssueFields(payload["issue"])
 		if !ok {
+			return
+		}
+		if acceptedFromTriage(payload) {
+			subscribeNewIssueParticipants(e.WorkspaceID, issue)
+			return
+		}
+		if issueInTriage(context.Background(), queries, issue.ID) {
 			return
 		}
 
@@ -112,15 +130,17 @@ func registerSubscriberListeners(bus *events.Bus, pool *pgxpool.Pool) {
 		}
 
 		// Comments created via handler use CommentResponse; agent comments from task.go use map[string]any
-		var issueID, authorType, authorID string
+		var issueID, authorType, authorID, commentType string
 		if comment, ok := payload["comment"].(handler.CommentResponse); ok {
 			issueID = comment.IssueID
 			authorType = comment.AuthorType
 			authorID = comment.AuthorID
+			commentType = comment.Type
 		} else if commentMap, ok := payload["comment"].(map[string]any); ok {
 			issueID, _ = commentMap["issue_id"].(string)
 			authorType, _ = commentMap["author_type"].(string)
 			authorID, _ = commentMap["author_id"].(string)
+			commentType, _ = commentMap["type"].(string)
 		} else {
 			return
 		}
@@ -135,6 +155,18 @@ func registerSubscriberListeners(bus *events.Bus, pool *pgxpool.Pool) {
 		// anyway. Skip them at the side-effect boundary so the system event
 		// stays a pure WS broadcast for the timeline.
 		if authorType == "system" {
+			return
+		}
+
+		// A triage decision records why an entry was declined or merged. Its
+		// author is doing triage, not joining the issue's conversation, and the
+		// decision outlives accept — subscribing them would hand them every
+		// later notification on work they turned away (MUL-7189 §2.5).
+		if commentType == handler.CommentTypeTriageDecision {
+			return
+		}
+
+		if issueInTriage(context.Background(), queries, issueID) {
 			return
 		}
 

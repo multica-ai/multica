@@ -185,6 +185,8 @@ GROUP BY agent_id, LOWER(provider), model
 ORDER BY agent_id, LOWER(provider), model;
 
 -- name: ListDashboardRunTimeDaily :many
+-- triage: all — the dashboards aggregate TASK usage; the issue join only
+-- scopes by project. Minutes a triage run spent were really spent.
 -- Daily per-date run time + task counts for the workspace, optionally
 -- scoped to a single project. Powers the workspace dashboard's "Time"
 -- and "Tasks" metrics on the same toggle as Tokens / Cost. Bucketed by
@@ -227,6 +229,7 @@ GROUP BY DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text)
 ORDER BY DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text) DESC;
 
 -- name: ListDashboardAgentRunTime :many
+-- triage: all — see ListDashboardRunTimeDaily.
 -- Per-agent total task run time and task count for the workspace, optionally
 -- scoped to a single project. Counts only terminal runs (completed, failed,
 -- or cancelled) with both started_at and completed_at populated — queued/
@@ -268,6 +271,7 @@ GROUP BY atq.agent_id
 ORDER BY total_seconds DESC;
 
 -- name: ListDashboardFailuresDaily :many
+-- triage: all — see ListDashboardRunTimeDaily.
 -- Daily per-(date, failure_reason) terminal-task counts for the workspace,
 -- optionally scoped to a single project. Powers the workspace dashboard's
 -- "Errors" trend and the errors-by-class breakdown.
@@ -309,6 +313,7 @@ GROUP BY 1, 2
 ORDER BY 1 DESC, 2;
 
 -- name: ListDashboardFailuresByAgent :many
+-- triage: all — see ListDashboardRunTimeDaily.
 -- Per-(agent, failure_reason) terminal-task counts — the "top offenders"
 -- half of the dashboard's errors breakdown. Same `failure_reason = ''`
 -- succeeded-bucket convention as ListDashboardFailuresDaily, so the client

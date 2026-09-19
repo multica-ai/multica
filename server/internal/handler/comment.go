@@ -1955,6 +1955,28 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
+// CommentTypeTriageDecision is the comment a triager's decision lands as:
+// why an entry was declined, or which issue it was merged into (MUL-7189 §2.5).
+//
+// It is a type of its own because it is the one comment on an issue that must
+// not reach anybody. §2.3 deliberately lets a human name an agent by hand even
+// inside Triage, so a decision written as an ordinary comment would dispatch
+// every agent it names and drop an inbox row on every member — and the reason
+// for a decision names people constantly ("duplicate of what Ana filed"). The
+// decision also survives accept, and mentions are resolved only at creation, so
+// the comment cannot be re-read later; suppressing it at creation is what makes
+// the suppression permanent.
+//
+// Three rules key on it, all of them in this package or in the listeners:
+// triggerTasksForComment does not dispatch, notifyMentionedMembers does not
+// notify, and the commenter is not subscribed.
+//
+// Not client-authorable, and not yet writable at all: the `comment.type` CHECK
+// constraint still has to admit the value, which MUL-7216 does together with
+// the decision actions that write it. The rules land first so the value has
+// nowhere to leak through on the day it starts being written.
+const CommentTypeTriageDecision = "triage_decision"
+
 // clientAuthorableCommentTypes is what POST /comments accepts. `status_change`
 // and `system` are platform-generated narration, so a client claiming them
 // would be forging system output; they are deliberately absent.
@@ -1993,6 +2015,12 @@ func isNoteComment(content string) bool {
 // them) are removed before enqueue and produce no outcome.
 func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs []pgtype.UUID) []CommentTriggerOutcome {
 	if isNoteComment(comment.Content) {
+		return nil
+	}
+	// A triager's decision is a record, not an instruction: it names people and
+	// agents to explain itself, and §2.3 would otherwise dispatch every one of
+	// them. See CommentTypeTriageDecision.
+	if comment.Type == CommentTypeTriageDecision {
 		return nil
 	}
 	triggers, targets := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{

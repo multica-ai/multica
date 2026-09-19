@@ -5356,6 +5356,10 @@ type ListActiveTasksByIssueFamilyRow struct {
 	IssueTitle  string             `json:"issue_title"`
 }
 
+// triage: all — task-side read keyed to an issue family. A Triage entry's
+// own runs (the triage run, and a discussion run a member named an agent for,
+// MUL-7189 §2.3) are real tasks, and hiding them would let a second one start
+// on top of a running first.
 // Cross-issue coordination read for parallel sub-issue work (#7768). Given a
 // family root — the target issue's parent, or the target itself when it has
 // none — return every in-flight task on the root and on all of its children,
@@ -6642,6 +6646,9 @@ type ListWorkspaceWorkingAgentsRow struct {
 	IssueIds         []pgtype.UUID `json:"issue_ids"`
 }
 
+// triage: all — this counts RUNNING AGENT TASKS, and a triage or discussion
+// run is real work an agent is really doing. The issue joins below only narrow
+// that set by relation; they do not decide what counts as work.
 // Workspace-level source for consumers that show currently working agents.
 // One row per visible, user-authored agent with at least one task that has
 // actually started running. work_type is optional (empty = every source);

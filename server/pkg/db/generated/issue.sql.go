@@ -32,6 +32,9 @@ type ChildIssueProgressRow struct {
 	Done          int64       `json:"done"`
 }
 
+// triage: all — keyed on parent_issue_id, which a Triage entry is forbidden
+// to have (issue_triage_guard.go). No Triage row can reach this query, so the
+// predicate would restate a guarantee the write guard already gives.
 func (q *Queries) ChildIssueProgress(ctx context.Context, arg ChildIssueProgressParams) ([]ChildIssueProgressRow, error) {
 	rows, err := q.db.Query(ctx, childIssueProgress, arg.WorkspaceID, arg.TerminalStatusKeys)
 	if err != nil {
@@ -59,6 +62,9 @@ SELECT
   COUNT(*)::bigint as frequency
 FROM issue
 WHERE workspace_id = $1
+  -- An assignee pre-filled on a Triage proposal is not evidence of who the
+  -- member usually assigns work to (MUL-7189 §2.4).
+  AND triage_state IS NULL
   AND creator_id = $2
   AND creator_type = 'member'
   AND assignee_type IS NOT NULL
@@ -101,6 +107,8 @@ func (q *Queries) CountCreatedIssueAssignees(ctx context.Context, arg CountCreat
 const countIssues = `-- name: CountIssues :one
 SELECT count(*) FROM issue i
 WHERE i.workspace_id = $1
+  -- Mirrors ListIssues: the count a list shows counts what the list shows.
+  AND i.triage_state IS NULL
   AND ($2::text IS NULL OR i.status = $2)
   AND ($3::text IS NULL OR i.priority = $3)
   AND ($4::uuid IS NULL OR i.assignee_id = $4)
@@ -211,6 +219,10 @@ type CountIssuesUpToParams struct {
 	Limit       int64       `json:"limit"`
 }
 
+// triage: all — deliberately NOT a work surface. This is the entitlement
+// gate, and an entry parked in Triage is still a stored issue row: excluding
+// it would let ingest run a workspace past its plan's issue limit and only
+// discover it at accept, one issue at a time.
 // Bounded count for issue-limit admission and display. Callers pass only the
 // threshold needed for their decision, avoiding a full scan in an oversized
 // workspace.
@@ -942,6 +954,8 @@ WHERE parent_issue_id = $1
 ORDER BY number ASC
 `
 
+// triage: all — see ChildIssueProgress: parent_issue_id is locked NULL in
+// Triage, so no entry can be a child.
 // Order by number ASC so sub-issues display in stable creation order
 // (oldest first), matching how a parent's plan reads top-to-bottom. The
 // position column is computed per-(workspace, status) by NextTopPosition,
@@ -1010,6 +1024,7 @@ type ListChildrenByParentsParams struct {
 	ParentIds   []pgtype.UUID `json:"parent_ids"`
 }
 
+// triage: all — see ChildIssueProgress.
 // Batched variant of ListChildIssues: returns all children for the given
 // parent set in one round trip. Used by Swimlane to avoid an N+1 fan-out
 // (one request per visible parent lane). Result is grouped client-side by
@@ -1085,6 +1100,8 @@ type ListIssueGCStatusesRow struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+// triage: all — GC reads the ids its caller already named, and an abandoned
+// Triage entry has to be able to age out like anything else.
 func (q *Queries) ListIssueGCStatuses(ctx context.Context, arg ListIssueGCStatusesParams) ([]ListIssueGCStatusesRow, error) {
 	rows, err := q.db.Query(ctx, listIssueGCStatuses, arg.WorkspaceID, arg.IssueIds)
 	if err != nil {
@@ -1112,6 +1129,10 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.revision
 FROM issue i
 WHERE i.workspace_id = $1
+  -- A Triage entry is a proposal nobody has taken on, so it is not work and
+  -- does not belong on a work surface (MUL-7189 §2.4). The Triage queue asks
+  -- for it explicitly instead; see issuequery.WorkSurface.
+  AND i.triage_state IS NULL
   AND ($4::text IS NULL OR i.status = $4)
   AND ($5::text IS NULL OR i.priority = $5)
   AND ($6::uuid IS NULL OR i.assignee_id = $6)
@@ -1275,6 +1296,8 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.revision
 FROM issue i
 WHERE i.workspace_id = $1
+  -- Triage entries are proposals, not work (MUL-7189 §2.4).
+  AND i.triage_state IS NULL
   -- Negate only known terminal keys so an unknown legacy key remains visible.
   AND NOT (i.status = ANY($2::text[]))
   AND ($3::text IS NULL OR i.priority = $3)

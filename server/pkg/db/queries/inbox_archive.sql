@@ -1,4 +1,6 @@
 -- name: ListArchivedInboxPage :many
+-- triage: all — the issue join is decoration; Triage entries produce no
+-- inbox rows to begin with (MUL-7189 §2.5).
 -- Select narrow group representatives before loading bodies or comment anchors.
 WITH newest AS MATERIALIZED (
     SELECT DISTINCT ON (COALESCE(i.issue_id, i.id))
@@ -57,6 +59,7 @@ LEFT JOIN LATERAL (
 ORDER BY i.created_at DESC, i.id DESC;
 
 -- name: ArchivedInboxFacets :many
+-- triage: all — facets over the archived inbox rows above, same reasoning.
 -- Select narrow group representatives before loading bodies or comment anchors.
 WITH newest AS MATERIALIZED (
     SELECT DISTINCT ON (COALESCE(i.issue_id, i.id))

@@ -51,8 +51,11 @@ RETURNING *;
 DELETE FROM project WHERE id = $1 AND workspace_id = $2;
 
 -- name: CountIssuesByProject :one
+-- Triage entries are proposals, not work: a project's issue count is about
+-- what the project actually holds (MUL-7189 §2.4).
 SELECT count(*) FROM issue
-WHERE project_id = $1;
+WHERE project_id = $1
+  AND triage_state IS NULL;
 
 -- name: GetProjectIssueStats :many
 SELECT project_id,
@@ -60,5 +63,9 @@ SELECT project_id,
        count(*) FILTER (WHERE status = ANY(sqlc.arg('terminal_status_keys')::text[]))::bigint AS done_count
 FROM issue
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
+  -- A Triage entry's project is part of the proposal, so counting it would
+  -- move a project's progress bar for work nobody has accepted yet
+  -- (MUL-7189 §2.4).
+  AND triage_state IS NULL
   AND project_id = ANY(sqlc.arg('project_ids')::uuid[])
 GROUP BY project_id;

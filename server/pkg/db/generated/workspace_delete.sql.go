@@ -947,6 +947,7 @@ type ListWorkspaceIssueIDFirstPageParams struct {
 	Limit       int32       `json:"limit"`
 }
 
+// triage: all — teardown deletes the workspace's rows, all of them.
 // First page of the same walk. Split from the keyset query rather than seeded
 // with the all-zero uuid, because that value is itself a valid uuid: a row whose
 // id happened to be all zeros would be skipped forever by `id > $2`.
@@ -983,6 +984,7 @@ type ListWorkspaceIssueIDPageParams struct {
 	Limit       int32       `json:"limit"`
 }
 
+// triage: all — see ListWorkspaceIssueIDFirstPage.
 // Uses idx_issue_workspace_id_keyset (migration 282).
 func (q *Queries) ListWorkspaceIssueIDPage(ctx context.Context, arg ListWorkspaceIssueIDPageParams) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, listWorkspaceIssueIDPage, arg.WorkspaceID, arg.ID, arg.Limit)

@@ -234,6 +234,7 @@ type ListDashboardAgentRunTimeRow struct {
 	CancelledCount   int32       `json:"cancelled_count"`
 }
 
+// triage: all — see ListDashboardRunTimeDaily.
 // Per-agent total task run time and task count for the workspace, optionally
 // scoped to a single project. Counts only terminal runs (completed, failed,
 // or cancelled) with both started_at and completed_at populated — queued/
@@ -310,6 +311,7 @@ type ListDashboardFailuresByAgentRow struct {
 	TaskCount     int32       `json:"task_count"`
 }
 
+// triage: all — see ListDashboardRunTimeDaily.
 // Per-(agent, failure_reason) terminal-task counts — the "top offenders"
 // half of the dashboard's errors breakdown. Same `failure_reason = ”`
 // succeeded-bucket convention as ListDashboardFailuresDaily, so the client
@@ -371,6 +373,7 @@ type ListDashboardFailuresDailyRow struct {
 	TaskCount     int32       `json:"task_count"`
 }
 
+// triage: all — see ListDashboardRunTimeDaily.
 // Daily per-(date, failure_reason) terminal-task counts for the workspace,
 // optionally scoped to a single project. Powers the workspace dashboard's
 // "Errors" trend and the errors-by-class breakdown.
@@ -455,6 +458,8 @@ type ListDashboardRunTimeDailyRow struct {
 	CancelledCount int32       `json:"cancelled_count"`
 }
 
+// triage: all — the dashboards aggregate TASK usage; the issue join only
+// scopes by project. Minutes a triage run spent were really spent.
 // Daily per-date run time + task counts for the workspace, optionally
 // scoped to a single project. Powers the workspace dashboard's "Time"
 // and "Tasks" metrics on the same toggle as Tokens / Cost. Bucketed by

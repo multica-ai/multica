@@ -543,6 +543,7 @@ func init() {
 	issueListCmd.Flags().String("direction", "", "Sort direction (asc or desc); requires --sort to be a non-position column or a property sort (position is always ascending)")
 	issueListCmd.Flags().String("fields", "", "JSON output only: comma-separated list of issue fields to include (e.g. id,title,status,priority). Filtering happens client-side after the full response is fetched, so this shrinks CLI output size and agent context cost, not network/server-side cost. Omit for the full issue object (default, unchanged). Valid fields: "+strings.Join(validIssueFields, ", "))
 	issueListCmd.Flags().Bool("resolve-properties", false, resolvePropertiesHelp)
+	issueListCmd.Flags().Bool("triage", false, "List the Triage queue instead of the workspace's issues. An entry in Triage is a proposal nobody has taken on, so it is absent from every list, board and count until it is accepted; this flag asks for those entries and only those.")
 
 	// issue get
 	issueGetCmd.Flags().String("output", "json", "Output format: table or json")
@@ -663,6 +664,7 @@ func init() {
 	// issue search
 	issueSearchCmd.Flags().Int("limit", 20, "Maximum number of results to return")
 	issueSearchCmd.Flags().Bool("include-closed", false, "Include done and cancelled issues")
+	issueSearchCmd.Flags().Bool("include-triage", false, "Also return entries waiting in Triage, beside ordinary issues. Search is the only read that shows both, so this is how an entry stays findable before it is accepted.")
 	issueSearchCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue subscriber list
@@ -713,6 +715,9 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 
 	params := url.Values{}
 	params.Set("workspace_id", client.WorkspaceID)
+	if triage, _ := cmd.Flags().GetBool("triage"); triage {
+		params.Set("triage", "true")
+	}
 	if v, _ := cmd.Flags().GetString("status"); v != "" {
 		params.Set("status", v)
 	}
@@ -2733,6 +2738,9 @@ func runIssueSearch(cmd *cobra.Command, args []string) error {
 	}
 	if v, _ := cmd.Flags().GetBool("include-closed"); v {
 		params.Set("include_closed", "true")
+	}
+	if v, _ := cmd.Flags().GetBool("include-triage"); v {
+		params.Set("include_triage", "true")
 	}
 
 	path := "/api/issues/search?" + params.Encode()

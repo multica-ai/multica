@@ -493,6 +493,8 @@ type UnsubscribeFromIssueSubtreeParams struct {
 	UserID   pgtype.UUID `json:"user_id"`
 }
 
+// triage: all — a descendant walk has to reach every descendant. It also
+// cannot meet one: parent_issue_id is locked NULL inside Triage.
 // Leave an issue AND every descendant in one action. An agent-built tree is
 // the unit a user actually wants to stop watching; leaving 30 sub-issues one
 // at a time is not a real escape hatch.

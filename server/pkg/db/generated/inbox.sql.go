@@ -457,6 +457,7 @@ type ListArchivedInboxItemsRow struct {
 	IssuePriority pgtype.Text        `json:"issue_priority"`
 }
 
+// triage: all — see ListInboxItems: decoration only.
 // Archived counterpart of ListInboxItems, backing the inbox's "Archived"
 // sub-view (MUL-3736).
 //
@@ -552,6 +553,10 @@ type ListInboxItemsRow struct {
 	IssuePriority pgtype.Text        `json:"issue_priority"`
 }
 
+// triage: all — the issue join only projects status and priority onto inbox
+// rows. A Triage entry never gets an inbox row in the first place (the
+// listeners return before writing one, MUL-7189 §2.5), so a predicate here
+// would filter nothing and would drop rows written before an accept.
 func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) ([]ListInboxItemsRow, error) {
 	rows, err := q.db.Query(ctx, listInboxItems, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
 	if err != nil {
