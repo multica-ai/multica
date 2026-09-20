@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -57,6 +58,18 @@ func TestMigrationFilesHaveMatchingDirections(t *testing.T) {
 	for stem, directions := range directionsByStem {
 		if !directions["up"] || !directions["down"] {
 			t.Errorf("migration %s must have both .up.sql and .down.sql files", stem)
+		}
+	}
+}
+
+func TestMigrationsAvoidUnsupportedIsFiniteOnDoublePrecision(t *testing.T) {
+	for _, file := range migrationFilesForLint(t, "*.sql") {
+		contents, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read migration %s: %v", file, err)
+		}
+		if strings.Contains(string(contents), "isfinite(") {
+			t.Errorf("migration %s uses isfinite(...), which is not portable for double precision in our Postgres environments", filepath.Base(file))
 		}
 	}
 }
