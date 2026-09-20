@@ -52,7 +52,7 @@ const INBOX_GROUPS: {
   {
     key: "agent_activity",
     label: "Agent activity",
-    description: "When an agent picks up, runs, or completes a task.",
+    description: "When an agent run fails.",
   },
 ];
 
