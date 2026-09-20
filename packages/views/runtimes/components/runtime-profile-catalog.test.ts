@@ -5,6 +5,7 @@ import {
   buildRuntimeCatalog,
   formatCommandLine,
   parseCommandLine,
+  runtimeTypeLabel,
   RUNTIME_TYPES,
 } from "./runtime-profile-catalog";
 
@@ -64,6 +65,24 @@ describe("buildRuntimeCatalog", () => {
       "enabled-old",
       "disabled-new",
     ]);
+  });
+});
+
+describe("runtimeTypeLabel", () => {
+  // The picker and the profile it creates must not disagree about what the
+  // target is called: every surface reads the label from here.
+  it("names a target whose product name differs from its stored id", () => {
+    expect(runtimeTypeLabel("omp")).toBe("Oh-My-Pi");
+  });
+
+  it("passes through ids that are their own label", () => {
+    expect(runtimeTypeLabel("pi")).toBe("pi");
+    expect(runtimeTypeLabel("claude")).toBe("claude");
+  });
+
+  // A target the client does not recognise still has to render as something.
+  it("falls back to the raw value for an unknown target", () => {
+    expect(runtimeTypeLabel("future-runtime")).toBe("future-runtime");
   });
 });
 
