@@ -1343,7 +1343,7 @@ func containsString(items []string, want string) bool {
 
 // TestOpencodeBackendAnchorsDirAndPWD pins the discovery-root fix from
 // MUL-2416: OpenCode resolves its AGENTS.md walk-up and .opencode/skills
-// project config scan from `--dir` and PWD. cmd.Dir alone is not enough
+// project config scan from cwd and PWD. cmd.Dir alone is not enough
 // because OpenCode reads PWD (inherited from the daemon) before falling
 // back to process.cwd(). Without this anchor, skills written into the
 // task workdir are silently invisible and the agent runs against the
@@ -1354,8 +1354,17 @@ func TestOpencodeBackendAnchorsDirAndPWD(t *testing.T) {
 	tempDir := t.TempDir()
 	argsFile := filepath.Join(tempDir, "argv.txt")
 	pwdFile := filepath.Join(tempDir, "pwd.txt")
+	cwdFile := filepath.Join(tempDir, "cwd.txt")
 	fakePath := filepath.Join(tempDir, "opencode")
-	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScript()))
+	// Reproduce #8586: a CLI that rejects the removed flag must still run.
+	script := strings.Replace(fakeOpencodeScript(), "#!/bin/sh", `#!/bin/sh
+for arg in "$@"; do
+  case "$arg" in
+    --dir|--dir=*) echo 'Unrecognized flag: --dir in command opencode run' >&2; exit 1 ;;
+  esac
+done
+(pwd -P) > "$OPENCODE_CWD_FILE"`, 1)
+	writeTestExecutable(t, fakePath, []byte(script))
 
 	workDir := t.TempDir()
 
@@ -1365,6 +1374,8 @@ func TestOpencodeBackendAnchorsDirAndPWD(t *testing.T) {
 		Env: map[string]string{
 			"OPENCODE_ARGS_FILE": argsFile,
 			"OPENCODE_PWD_FILE":  pwdFile,
+			"OPENCODE_CWD_FILE":  cwdFile,
+			"PWD":                tempDir,
 		},
 	})
 	if err != nil {
@@ -1385,10 +1396,13 @@ func TestOpencodeBackendAnchorsDirAndPWD(t *testing.T) {
 		for range session.Messages {
 		}
 	}()
-	<-session.Result
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("run without --dir failed: %+v", result)
+	}
 
-	// argv should include `--dir <workDir>` immediately after the `run` /
-	// `--format json` prefix and nowhere else.
+	// Both v1 and v2 can discover the project from cwd/PWD; do not pass
+	// the version-specific flag, even when a task workdir is configured.
 	raw, err := os.ReadFile(argsFile)
 	if err != nil {
 		t.Fatalf("read args file: %v", err)
@@ -1397,18 +1411,19 @@ func TestOpencodeBackendAnchorsDirAndPWD(t *testing.T) {
 	if len(args) < 2 || args[0] != "run" {
 		t.Fatalf("expected first arg to be 'run', got %q", args)
 	}
-	dirIdx := -1
-	for i, a := range args {
-		if a == "--dir" {
-			dirIdx = i
-			break
-		}
+	if containsString(args, "--dir") {
+		t.Fatalf("removed --dir flag in argv: %q", args)
 	}
-	if dirIdx == -1 {
-		t.Fatalf("expected --dir flag in argv, got %q", args)
+	gotCWD, err := os.ReadFile(cwdFile)
+	if err != nil {
+		t.Fatalf("read cwd file: %v", err)
 	}
-	if dirIdx+1 >= len(args) || args[dirIdx+1] != workDir {
-		t.Fatalf("expected --dir %q, got args=%q", workDir, args)
+	resolvedWorkDir, err := filepath.EvalSymlinks(workDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(gotCWD)); got != resolvedWorkDir {
+		t.Errorf("child cwd = %q, want %q", got, resolvedWorkDir)
 	}
 
 	// PWD inside the child process must resolve to the task workdir,
@@ -1665,7 +1680,7 @@ func TestOpencodeBackendQuestionDenySurvivesUserConfig(t *testing.T) {
 }
 
 // TestOpencodeBackendBlocksDirOverride ensures user-supplied custom args
-// cannot replace the daemon-managed `--dir` anchor. Letting custom args
+// cannot replace the daemon-managed cwd/PWD anchor. Letting custom args
 // override it would re-introduce the MUL-2416 regression.
 func TestOpencodeBackendBlocksDirOverride(t *testing.T) {
 	t.Parallel()
@@ -1711,11 +1726,9 @@ func TestOpencodeBackendBlocksDirOverride(t *testing.T) {
 		t.Fatalf("read args file: %v", err)
 	}
 	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	for i, a := range args {
+	for _, a := range args {
 		if a == "--dir" {
-			if i+1 >= len(args) || args[i+1] != workDir {
-				t.Errorf("--dir was overridden by custom args: got %q", args)
-			}
+			t.Errorf("custom --dir leaked into argv: %q", args)
 		}
 		if a == bogusDir {
 			t.Errorf("custom --dir value %q leaked into argv: %q", bogusDir, args)

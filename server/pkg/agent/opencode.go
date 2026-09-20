@@ -85,18 +85,8 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	runCtx, cancel := runContext(ctx, timeout)
 
 	args := []string{"run", "--format", "json", "--dangerously-skip-permissions"}
-	// Anchor OpenCode's project discovery (AGENTS.md walk-up + .opencode/skills/
-	// project config scan) at the task workdir. Without this, OpenCode falls
-	// back to PWD (inherited from the daemon process) or process.cwd(), which
-	// in self-host deployments can resolve to the user's shell working
-	// directory and silently bypass the per-task workdir — agents lose
-	// visibility into their assigned skills and AGENTS.md instructions.
-	// PWD is also overridden below because OpenCode prefers PWD over cwd when
-	// `--dir` is absent and uses it as the starting point for any further
-	// path resolution.
-	if opts.Cwd != "" {
-		args = append(args, "--dir", opts.Cwd)
-	}
+	// Use cmd.Dir and PWD below to anchor project discovery across OpenCode
+	// versions. Do not pass --dir: v2 no longer accepts that flag (#8586).
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
