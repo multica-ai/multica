@@ -44,6 +44,7 @@ import { useIssueDraftStore, type IssueCreateDraft } from "@multica/core/issues/
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import {
   runtimeListOptions,
+  agentRuntimePreferenceOptions,
   checkQuickCreateCliVersion,
   checkQuickCreateFieldsCliVersion,
   readRuntimeCliVersion,
@@ -121,6 +122,7 @@ export function AgentCreatePanel({
   const { t } = useT("modals");
   const { t: tIssues } = useT("issues");
   const { t: tProjects } = useT("projects");
+  const { t: ta } = useT("agents");
   const sendShortcut = useShortcut("send");
   const workspaceName = useCurrentWorkspace()?.name;
   const workspacePaths = useWorkspacePaths();
@@ -331,12 +333,21 @@ export function AgentCreatePanel({
   // — frontend and server share the same signal there, so they agree by
   // construction across web/desktop/staging without comparing env flags.
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
-  const selectedRuntime = useMemo(
-    () =>
-      selectedAgent?.runtime_id
-        ? runtimes.find((r) => r.id === selectedAgent.runtime_id)
-        : undefined,
-    [runtimes, selectedAgent?.runtime_id],
+  const runtimePreference = useQuery({
+    ...agentRuntimePreferenceOptions(wsId, selectedAgent?.id ?? ""),
+    enabled: !!selectedAgent,
+  });
+  // Only a successfully loaded explicit null means default. An unreadable
+  // preference must never cause preflight to inspect another machine.
+  const selectedRuntimeId = runtimePreference.data
+    ? runtimePreference.data.runtimeId ?? selectedAgent?.runtime_id
+    : undefined;
+  const selectedRuntime = runtimes.find((runtime) => runtime.id === selectedRuntimeId);
+  const personalRuntimeUnavailable = !!runtimePreference.data?.runtimeId && (
+    !selectedRuntime || selectedRuntime.owner_id !== userId || selectedRuntime.status === "offline"
+  );
+  const routeBlocked = !!selectedAgent && (
+    runtimePreference.isPending || runtimePreference.isError || !runtimePreference.data || personalRuntimeUnavailable
   );
   // We can only pre-check a version we can actually see. A non-admin member's
   // runtime list (ListVisibleAgentRuntimes) omits other members' private
@@ -421,7 +432,7 @@ export function AgentCreatePanel({
     onSubmit: async (md): Promise<boolean> => {
       // The button already disables on !actor / versionBlocked, but the
       // ⌘+Enter path bypasses it — re-guard here and keep the draft in place.
-      if (!actor || versionBlocked || (anchorCommentId && !sourcePreview)) return false;
+      if (!actor || versionBlocked || routeBlocked || (anchorCommentId && !sourcePreview)) return false;
       // Flush the prompt editor's pending debounce before snapshotting — see
       // ManualCreatePanel.
       const pendingPrompt = editorRef.current?.flushPendingUpdate?.();
@@ -667,6 +678,16 @@ export function AgentCreatePanel({
           />
         </div>
 
+        {selectedAgent && routeBlocked && (
+          <p role="alert" className="mx-5 mb-2 text-caption text-destructive">
+            {runtimePreference.isPending
+              ? ta(($) => $.create_dialog.runtime_loading)
+              : personalRuntimeUnavailable
+                ? ta(($) => $.personal_runtime.settings.unavailable)
+                : ta(($) => $.personal_runtime.settings.load_failed)}
+          </p>
+        )}
+
         {selectedAgent && versionBlocked && (
           <div className="mx-5 mb-2 shrink-0 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-caption text-amber-700 dark:text-amber-300">
             {versionCheck.state === "missing"
@@ -894,7 +915,7 @@ export function AgentCreatePanel({
           <Button
             size="sm"
             onClick={submit}
-            disabled={!hasContent || !actor || submitting || versionBlocked || gate.uploading || (!!anchorCommentId && !sourcePreview)}
+            disabled={!hasContent || !actor || submitting || versionBlocked || routeBlocked || gate.uploading || (!!anchorCommentId && !sourcePreview)}
             aria-disabled={gate.uploading || undefined}
             // Sending is a busy state too, not just uploading.
             aria-busy={gate.uploading || submitting || undefined}

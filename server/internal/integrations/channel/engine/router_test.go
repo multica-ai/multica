@@ -2177,3 +2177,59 @@ func TestRouter_MediaDeadlineStartsBeforeAppend(t *testing.T) {
 		t.Fatal("resolver did not run")
 	}
 }
+
+func TestRouter_BatchesDifferentExecutionUsersSeparately(t *testing.T) {
+	h := newHarness(t)
+	timers := &fakeTimerFactory{}
+	h.router.batcher = newTestBatcher(timers)
+	first := p2pMessage(t)
+	first.MessageID = "first-user-message"
+	if err := h.router.Handle(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	h.ident.id.UserID = uuidFromString(t, "77777777-7777-4777-8777-777777777777")
+	second := p2pMessage(t)
+	second.MessageID = "second-user-message"
+	if err := h.router.Handle(context.Background(), second); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.router.batcher.pendingCount(); got != 2 {
+		t.Fatalf("pending batches = %d, want separate batches for two execution users", got)
+	}
+	timers.fireArmed()
+	if !waitFor(time.Second, func() bool { return h.tasks.calls() == 2 }) {
+		t.Fatalf("tasks = %d, want 2", h.tasks.calls())
+	}
+}
+
+// Recover each persisted sender bucket, including older input in the current
+// generation. A new message by Bob must not strand Alice after a restart.
+func TestRouter_RearmsEachSenderInCurrentContextAfterRestart(t *testing.T) {
+	h := newHarness(t)
+	timers := &fakeTimerFactory{}
+	h.router.batcher = newTestBatcher(timers)
+	h.binder.appendResult.ContextRevision = 1
+	alice := uuidFromString(t, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	bob := h.ident.id.UserID
+	h.binder.appendResult.PendingContexts = []PendingContext{
+		{Revision: 1, InitiatorUserID: alice},
+		{Revision: 1, InitiatorUserID: bob},
+	}
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.router.batcher.pendingCount(); got != 2 {
+		t.Fatalf("sender buckets = %d, want 2", got)
+	}
+	timers.fireArmed()
+	if !waitFor(time.Second, func() bool { return h.tasks.calls() == 2 }) {
+		t.Fatalf("flushes = %d, want 2", h.tasks.calls())
+	}
+	seen := map[pgtype.UUID]bool{}
+	for _, id := range h.tasks.initiatorArgs() {
+		seen[id] = true
+	}
+	if !seen[alice] || !seen[bob] {
+		t.Fatalf("recovered senders = %v", h.tasks.initiatorArgs())
+	}
+}

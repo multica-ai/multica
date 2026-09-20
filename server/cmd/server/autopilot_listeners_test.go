@@ -346,11 +346,11 @@ func TestAutopilotDispatchSkipsWhenRuntimeOffline(t *testing.T) {
 	var runtimeID, agentID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
-			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, owner_id
 		)
-		VALUES ($1, NULL, 'Offline runtime', 'local', 'mul1899_offline_runtime', 'offline', '{}'::jsonb, '{}'::jsonb, now())
+		VALUES ($1, NULL, 'Offline runtime', 'local', 'mul1899_offline_runtime', 'offline', '{}'::jsonb, '{}'::jsonb, now(), $2)
 		RETURNING id::text
-	`, parseUUID(testWorkspaceID)).Scan(&runtimeID); err != nil {
+	`, parseUUID(testWorkspaceID), parseUUID(testUserID)).Scan(&runtimeID); err != nil {
 		t.Fatalf("create offline runtime: %v", err)
 	}
 	t.Cleanup(func() {
@@ -435,11 +435,11 @@ func TestAutopilotCreateIssueDispatchCreatesIssueWhenRuntimeOffline(t *testing.T
 	var runtimeID, agentID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
-			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, owner_id
 		)
-		VALUES ($1, NULL, 'Offline create-issue runtime', 'local', 'ws1325_offline_runtime', 'offline', '{}'::jsonb, '{}'::jsonb, now())
+		VALUES ($1, NULL, 'Offline create-issue runtime', 'local', 'ws1325_offline_runtime', 'offline', '{}'::jsonb, '{}'::jsonb, now(), $2)
 		RETURNING id::text
-	`, parseUUID(testWorkspaceID)).Scan(&runtimeID); err != nil {
+	`, parseUUID(testWorkspaceID), parseUUID(testUserID)).Scan(&runtimeID); err != nil {
 		t.Fatalf("create offline runtime: %v", err)
 	}
 	t.Cleanup(func() {
@@ -547,11 +547,11 @@ func TestManualTriggerDoesNotErrorOnPostAdmissionSkip(t *testing.T) {
 	var runtimeID, agentID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
-			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, owner_id
 		)
-		VALUES ($1, NULL, 'Manual-trigger skip runtime', 'local', 'mul2429_manual_skip_runtime', 'offline', '{}'::jsonb, '{}'::jsonb, now())
+		VALUES ($1, NULL, 'Manual-trigger skip runtime', 'local', 'mul2429_manual_skip_runtime', 'offline', '{}'::jsonb, '{}'::jsonb, now(), $2)
 		RETURNING id::text
-	`, parseUUID(testWorkspaceID)).Scan(&runtimeID); err != nil {
+	`, parseUUID(testWorkspaceID), parseUUID(testUserID)).Scan(&runtimeID); err != nil {
 		t.Fatalf("create runtime: %v", err)
 	}
 	t.Cleanup(func() {

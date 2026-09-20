@@ -1,5 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { AgentRuntimePreference } from "../types";
 import { api } from "../api";
+import { useAuthStore } from "../auth";
 import { runtimeKeys } from "./queries";
 import { workspaceKeys } from "../workspace/queries";
 import { agentTaskSnapshotKeys } from "../agents/queries";
@@ -62,6 +64,26 @@ export function useUpdateRuntime(wsId: string) {
     }) => api.updateRuntime(runtimeId, patch),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+    },
+  });
+}
+
+export function useUpdateAgentRuntimePreference(wsId: string, agentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    onMutate: () => useAuthStore.getState().user,
+    mutationFn: (runtimeId: string | null | AgentRuntimePreference) =>
+      api.updateAgentRuntimePreference(agentId, wsId, runtimeId),
+    onSuccess: (preference, _variables, boundary) => {
+      // Clearing the query client on logout cannot cancel a pending mutation.
+      // Its response belongs only to the session that initiated the save.
+      if (boundary !== useAuthStore.getState().user) return;
+      qc.setQueryData(runtimeKeys.preference(wsId, agentId), preference);
+    },
+    onSettled: (_data, _error, _variables, boundary) => {
+      if (boundary !== useAuthStore.getState().user) return;
+      qc.invalidateQueries({ queryKey: runtimeKeys.preference(wsId, agentId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     },
   });
 }

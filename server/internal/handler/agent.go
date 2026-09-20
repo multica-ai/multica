@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
@@ -55,7 +56,9 @@ type AgentResponse struct {
 	// configuration and history when its runtime was deleted, and needs a new
 	// runtime before it can run again (MUL-5559). The wire type stays a string
 	// so installed clients keep parsing; RuntimeBound is the explicit signal.
-	RuntimeID string `json:"runtime_id"`
+	RuntimeID                   string `json:"runtime_id"`
+	PersonalRuntimeID           string `json:"personal_runtime_id,omitempty"`
+	PersonalRuntimeAvailability string `json:"personal_runtime_availability,omitempty"`
 	// RuntimeBound is false exactly when the agent has no runtime. UI should
 	// branch on this rather than on RuntimeID being falsy, and must not confuse
 	// it with a bound-but-offline runtime (a different user story: reconnect the
@@ -357,6 +360,8 @@ type TaskCancellationActor struct {
 }
 
 type AgentTaskResponse struct {
+	RuntimeRoutingSource     string                 `json:"runtime_routing_source,omitempty"`
+	RuntimeExecutionUserID   string                 `json:"runtime_execution_user_id,omitempty"`
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
 	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`
 
@@ -822,6 +827,18 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	if t.HandoffNote.Valid {
 		handoffNote = t.HandoffNote.String
 	}
+	actualRuntimeID := t.RuntimeID
+	routingSource := ""
+	executionUserID := ""
+	if routing, err := service.ParseRuntimeRouting(t.RuntimeRouting); err == nil && routing != nil {
+		if route, err := routing.Route(uuidToString(t.AgentID)); err == nil {
+			if !actualRuntimeID.Valid {
+				actualRuntimeID, _ = util.ParseUUID(route.RuntimeID)
+			}
+			routingSource = route.Source
+			executionUserID = routing.ExecutionUserID
+		}
+	}
 	return AgentTaskResponse{
 		// Task-scoped provenance must not transfer through copied retry context.
 		CancelledByCommentChange: t.Status == "cancelled" && cancellation.TaskID != "" && cancellation.TaskID == uuidToString(t.ID),
@@ -829,7 +846,9 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 
 		ID:                     uuidToString(t.ID),
 		AgentID:                uuidToString(t.AgentID),
-		RuntimeID:              uuidToString(t.RuntimeID),
+		RuntimeID:              uuidToString(actualRuntimeID),
+		RuntimeRoutingSource:   routingSource,
+		RuntimeExecutionUserID: executionUserID,
 		IssueID:                uuidToString(t.IssueID),
 		WorkspaceID:            workspaceID,
 		Status:                 t.Status,
@@ -1096,6 +1115,33 @@ func (h *Handler) loadAgentRuntimeAvailability(ctx context.Context, agents []db.
 	return result, nil
 }
 
+// Personal availability is separate from the shared default projection so a
+// workspace agent event cannot replace the caller's selected machine state.
+func (h *Handler) loadPersonalRuntimeAvailability(ctx context.Context, preferences map[string]string, workspaceID, userID string, now time.Time) (map[string]string, error) {
+	result := make(map[string]string, len(preferences))
+	ids := make([]pgtype.UUID, 0, len(preferences))
+	for _, id := range preferences {
+		if _, seen := result[id]; seen {
+			continue
+		}
+		result[id] = "offline"
+		ids = append(ids, parseUUID(id))
+	}
+	if len(ids) == 0 {
+		return result, nil
+	}
+	runtimes, err := h.Queries.GetAgentRuntimes(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, runtime := range runtimes {
+		if uuidToString(runtime.WorkspaceID) == workspaceID && runtime.OwnerID.Valid && uuidToString(runtime.OwnerID) == userID {
+			result[uuidToString(runtime.ID)] = deriveAgentRuntimeAvailability(runtime, now)
+		}
+	}
+	return result, nil
+}
+
 func deriveAgentRuntimeAvailability(runtime db.AgentRuntime, now time.Time) string {
 	status := pgtype.Text{String: runtime.Status, Valid: runtime.Status != ""}
 	return deriveRuntimeAvailability(status, runtime.LastSeenAt, now)
@@ -1167,6 +1213,22 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load agent invocation targets")
 		return
 	}
+	personalRuntimes := make(map[string]string)
+	if actorType == "member" {
+		preferences, err := h.Queries.ListAgentRuntimePreferences(r.Context(), db.ListAgentRuntimePreferencesParams{WorkspaceID: parseUUID(workspaceID), UserID: parseUUID(actorID)})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load runtime preferences")
+			return
+		}
+		for _, preference := range preferences {
+			personalRuntimes[uuidToString(preference.AgentID)] = uuidToString(preference.RuntimeID)
+		}
+	}
+	personalAvailability, err := h.loadPersonalRuntimeAvailability(r.Context(), personalRuntimes, workspaceID, actorID, time.Now())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load personal runtime availability")
+		return
+	}
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
 		targets := targetsByAgent[uuidToString(a.ID)]
@@ -1176,10 +1238,12 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		resp := h.agentToResponse(a)
+		resp.PersonalRuntimeID = personalRuntimes[resp.ID]
+		resp.PersonalRuntimeAvailability = personalAvailability[resp.PersonalRuntimeID]
 		// The map is keyed by runtime, and active + archived agents may share one.
 		// Keep the archived guard here as well as in the loader so an active sibling
 		// cannot leak its projection onto an archived response.
-		if availability, ok := runtimeAvailabilityByID[resp.RuntimeID]; ok && !a.ArchivedAt.Valid {
+		if availability, ok := runtimeAvailabilityByID[resp.RuntimeID]; ok && !a.ArchivedAt.Valid && resp.PersonalRuntimeID == "" {
 			resp.RuntimeAvailability = availability
 		}
 		applyInvocationTargetsToResponse(&resp, targets)
@@ -1232,6 +1296,23 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := h.agentToResponse(agent)
+	if actorType == "member" {
+		preference, err := h.Queries.GetAgentRuntimePreference(r.Context(), db.GetAgentRuntimePreferenceParams{WorkspaceID: agent.WorkspaceID, UserID: parseUUID(actorID), AgentID: agent.ID})
+		if err == nil {
+			resp.PersonalRuntimeID = uuidToString(preference.RuntimeID)
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusInternalServerError, "failed to load runtime preference")
+			return
+		}
+	}
+	if resp.PersonalRuntimeID != "" {
+		availability, err := h.loadPersonalRuntimeAvailability(r.Context(), map[string]string{resp.ID: resp.PersonalRuntimeID}, workspaceID, actorID, time.Now())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load personal runtime availability")
+			return
+		}
+		resp.PersonalRuntimeAvailability = availability[resp.PersonalRuntimeID]
+	}
 	viewerRole := ""
 	if member, ok := ctxMember(r.Context()); ok {
 		viewerRole = member.Role
@@ -1241,7 +1322,7 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load agent runtime availability")
 		return
 	}
-	if availability, ok := runtimeAvailability[resp.RuntimeID]; ok {
+	if availability, ok := runtimeAvailability[resp.RuntimeID]; ok && resp.PersonalRuntimeID == "" {
 		resp.RuntimeAvailability = availability
 	}
 	if !h.enrichAgentResponseWithTargetsHTTP(w, r, &resp, agent.ID) {

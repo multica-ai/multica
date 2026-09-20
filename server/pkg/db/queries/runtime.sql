@@ -472,7 +472,9 @@ FOR UPDATE;
 -- locks the owners' workspace rows in the writer's own transaction and returns
 -- false once they are gone, so this statement writes no row instead of stranding
 -- a task in a workspace that has just been deleted (MUL-5999).
--- Re-points every queued/running/completed task referencing old_runtime_id.
+-- Re-points legacy queued/running/completed tasks referencing old_runtime_id.
+-- A routed row freezes its selected runtime, so any routed history refuses
+-- the entire merge through the existing fence verdict.
 -- Required before deleting the old runtime row because agent_task_queue has
 -- an ON DELETE CASCADE FK that would otherwise drop historical tasks.
 --
@@ -485,7 +487,11 @@ WITH fence AS MATERIALIZED (
     -- Once per statement rather than once per row: the predicate is VOLATILE, so
     -- calling it from the WHERE clause of a bulk UPDATE would re-run it for every
     -- candidate row.
-    SELECT lock_task_owner_rows(NULL, NULL, @new_runtime_id) AS ok
+    SELECT COALESCE(lock_task_owner_rows(NULL, NULL, @new_runtime_id)
+      AND NOT EXISTS (
+        SELECT 1 FROM agent_task_queue routed_task
+        WHERE routed_task.runtime_id = @old_runtime_id AND routed_task.runtime_routing IS NOT NULL
+      ), FALSE)::boolean AS ok
 ),
 reassigned AS (
     UPDATE agent_task_queue
@@ -555,3 +561,7 @@ SELECT EXISTS (
 -- Final fail-closed assertion after UnbindTasksFromRuntime. A non-zero result
 -- aborts the transaction instead of relying on the legacy ON DELETE CASCADE.
 SELECT count(*) FROM agent_task_queue WHERE runtime_id = $1;
+
+-- name: HasRoutedTasksByRuntime :one
+-- Legacy-runtime deduplication may not rewrite immutable routed task selection.
+SELECT EXISTS (SELECT 1 FROM agent_task_queue WHERE runtime_id = $1 AND runtime_routing IS NOT NULL);

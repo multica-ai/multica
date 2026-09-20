@@ -387,7 +387,7 @@ export function AgentOverviewPane({
               <ActivityTab agent={agent} showPerformance={false} />
               <AgentOverviewSummary
                 agent={agent}
-                runtime={runtime}
+                runtime={agent.personal_runtime_id ? runtimes.find((r) => r.id === agent.personal_runtime_id) ?? null : runtime}
                 owner={owner}
               />
             </div>

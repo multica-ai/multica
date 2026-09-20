@@ -34,6 +34,16 @@ An autopilot is enabled by default after saving; **Run now** manually executes t
 
 **Run only** requires the runtime to be available at trigger time; otherwise the run shows as skipped, and no waiting issue is left behind.
 
+## Whose runtime executes an autopilot?
+
+Scheduled and webhook executions use the **trigger creator's** personal runtime preference for the assigned agent, or the agent's default when that creator has no preference. The trigger creator can differ from the autopilot creator. **Run now** uses the member who clicks it and that member's current preference.
+
+At the root run, Multica records the execution user, runtime routes, and model choices. Automatic follow-up runs and eligible automatic retries retain them. Changing an autopilot, agent default, or personal preference does not move an existing run to another computer. Membership, agent invocation permission, and runtime access are checked again when work is admitted or claimed; the snapshot does not preserve revoked access.
+
+A selected personal runtime must be available. An invalid or offline personal choice is reported explicitly instead of silently using the shared default. The create-issue queueing behavior described above continues to apply to the shared default route; it is not a fallback for an unavailable personal selection. Personal concurrency limits are per execution user and agent, with machine capacity applied as well.
+
+Configure these choices in the agent's [personal execution settings](/daemon-runtimes#choose-your-execution-runtime). Workdirs, CLI sessions, and credentials follow the boundaries described there.
+
 ## Run on a schedule
 
 The schedule editor lets you pick the run time, repeat days, time window, and timezone, and previews the upcoming run times. One autopilot can have multiple schedules; enabling or disabling an individual trigger is done with the CLI's `autopilot trigger-update` — see [Using the CLI](/cli) for the parameters.

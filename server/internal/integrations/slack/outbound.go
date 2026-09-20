@@ -139,6 +139,10 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	if err != nil {
 		return fmt.Errorf("decode slack credentials: %w", err)
 	}
+	if messageID, threadID, ok := engine.TaskReplyTarget(task); ok {
+		binding.LastMessageID = pgtype.Text{String: messageID, Valid: messageID != ""}
+		binding.LastThreadID = pgtype.Text{String: threadID, Valid: threadID != ""}
+	}
 	channelID, threadTS := outboundTarget(binding)
 	result, err := o.newSender(creds).SendWithMetadata(ctx, channel.OutboundMessage{
 		ChatID:   channelID,

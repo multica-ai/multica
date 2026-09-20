@@ -41,6 +41,7 @@ const (
 // only the duplicate enqueue is suppressed. Cross-issue handoffs to a fresh
 // target remain runnable. A nil func means "do not suppress".
 type IssueTriggerProbe struct {
+	IsRuntimeReady               func(agent db.Agent) bool
 	CanAccessAgent               func(agent db.Agent) bool
 	IsSelfLoop                   func() bool
 	SuppressActiveSelfAssignment func(agentID pgtype.UUID) bool
@@ -145,7 +146,7 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 	switch issue.AssigneeType.String {
 	case "agent":
 		agent, err := s.Queries.GetAgent(ctx, issue.AssigneeID)
-		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+		if err != nil || agent.ArchivedAt.Valid {
 			return IssueRunTrigger{}, false
 		}
 		if !canAccess(agent) {
@@ -183,9 +184,15 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		if err != nil {
 			return IssueRunTrigger{}, false
 		}
-		verdict, err := AgentReadiness(ctx, s.runtimeLookup(s.Queries), leader)
-		if err != nil || !verdict.Ready() {
-			return IssueRunTrigger{}, false
+		if probe.IsRuntimeReady != nil {
+			if !probe.IsRuntimeReady(leader) {
+				return IssueRunTrigger{}, false
+			}
+		} else {
+			verdict, err := AgentReadiness(ctx, s.runtimeLookup(s.Queries), leader)
+			if err != nil || !verdict.Ready() {
+				return IssueRunTrigger{}, false
+			}
 		}
 		if !canAccess(leader) {
 			return IssueRunTrigger{}, false

@@ -69,7 +69,7 @@ Detailed states and retry rules are in [Runs](/tasks).
 
 ## Concurrency limits
 
-One daemon executes at most 20 runs at a time by default; each agent at most 6. Effective concurrency is the smaller of the two.
+One daemon executes at most 20 runs at a time by default. An agent’s configured concurrency defaults to 6; routed runs apply that limit separately to each execution user, unless that user sets a personal override. Machine capacity remains a separate upper bound.
 
 Once a limit is reached, new runs keep queueing. You can adjust a single agent's concurrency in the agent settings, and the machine-wide cap through `MULTICA_DAEMON_MAX_CONCURRENT_TASKS`. Parallel runs compete for machine capacity, tool account quota, and the same working directory all at once.
 
@@ -78,6 +78,24 @@ Once a limit is reached, new runs keep queueing. You can adjust a single agent's
 A local runtime is **private** by default: only the runtime owner can create agents on it. Workspace owners and admins are no exception — the runtime is someone else's computer, and running an agent there spends their machine and their tool credentials.
 
 Only the runtime owner can make it **public** — workspace admins can rename or delete a runtime, but sharing one is the owner's decision. Other workspace members can then select this runtime as well; that does not share the underlying AI coding tool's login credentials — it only lets members route their agents' runs to this computer.
+
+## Choose your execution runtime
+
+One shared agent can execute different members' work on different computers and providers. Open the agent's **General** settings and choose **Personal runtime** under **My execution settings**. Choose any runtime you own in this workspace, including a different provider from the agent's default. This preference is specific to your account, workspace, and agent; it does not change another member's selection or the shared agent configuration.
+
+**Use agent default** restores the shared route. Agent owners initially use their shared configuration and can expand **Configure separately for myself** to override it for their own work. Agent invocation permissions still apply: selecting a personal runtime does not grant access to a restricted agent.
+
+For a personal runtime, choose its default model or enter a model supported by that runtime and your tool account. The agent's shared model and execution settings are not inherited. **My concurrency limit** accepts 1–100; leave it blank to inherit the agent's limit. It counts your active executions of this agent across machines, and machine capacity still applies. Lowering the limit does not terminate active runs; new runs wait for capacity.
+
+New root runs capture the selected routes and model choices. Automatic follow-up runs and eligible automatic retries keep that snapshot; manually starting or rerunning work uses the initiating member's current preferences. A frozen runtime-default choice delegates model selection to that runtime; it does not freeze the provider's future default model version. See [Runs](/tasks#runtime-selection-and-execution-identity).
+
+An unavailable personal runtime produces an explicit failure or blocked action. Multica does not silently fall back to the agent owner's computer or another provider. Change or reset the preference to choose a different runtime for new work.
+
+### Files, sessions, and credentials
+
+Changing runtime preferences does not move existing runs, uncommitted files, local directories, or provider CLI sessions. Work continues from shared issue history and committed repository artifacts; local workdir and session reuse stays within the same runtime and execution-user boundary.
+
+A personal route uses the selected runtime's local tool credentials. It does not copy the shared agent owner's custom environment or private MCP credentials to your machine. Integrated credentials are resolved under the execution user's authorization. Local resource paths must exist and be accessible on the selected machine.
 
 ## Custom runtime profiles
 

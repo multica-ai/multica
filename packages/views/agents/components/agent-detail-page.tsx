@@ -37,7 +37,7 @@ import {
   memberListOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
-import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
+import { runtimeDisplayLabel, runtimeKeys, runtimeListOptions } from "@multica/core/runtimes";
 import { useAgentPermissions } from "@multica/core/permissions";
 import { Button } from "@multica/ui/components/ui/button";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
@@ -181,6 +181,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       );
       cacheAgentResponse(qc, wsId, updatedAgent, { insertIntoList: false });
       void qc.invalidateQueries({ queryKey });
+      if ("runtime_id" in data) {
+        void qc.invalidateQueries({ queryKey: runtimeKeys.preference(wsId, id) });
+      }
       toast.success(t(($) => $.detail.agent_updated_toast));
     } catch (e) {
       if (prevListAgent) {
@@ -302,6 +305,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const runtime = runtimeBound
     ? runtimes.find((r) => r.id === agent.runtime_id) ?? null
     : null;
+  const executionRuntime = agent.personal_runtime_id
+    ? runtimes.find((r) => r.id === agent.personal_runtime_id) ?? null
+    : runtime;
   const owner = agent.owner_id
     ? members.find((m) => m.user_id === agent.owner_id) ?? null
     : null;
@@ -343,7 +349,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     <div className="flex flex-1 min-h-0 flex-col">
       <DetailHeader
         agent={agent}
-        runtime={runtime}
+        runtime={executionRuntime}
         presence={presence}
         backHref={paths.agents()}
         canAssign={canAssign.allowed}

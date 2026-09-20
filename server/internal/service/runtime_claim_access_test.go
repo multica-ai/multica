@@ -100,6 +100,7 @@ func TestRuntimeAccessGatesQueuedTaskClaims(t *testing.T) {
 		sameOwner       bool
 		matchingBinding bool
 		ownerlessAgent  bool
+		archivedAgent   bool
 		wantClaim       bool
 	}{
 		{name: "private runtime routes foreign agent to handler", visibility: "private", wantClaim: true, matchingBinding: true},
@@ -107,11 +108,17 @@ func TestRuntimeAccessGatesQueuedTaskClaims(t *testing.T) {
 		{name: "private runtime routes ownerless agent to handler", visibility: "private", sameOwner: true, matchingBinding: true, ownerlessAgent: true, wantClaim: true},
 		{name: "public runtime accepts foreign agent", visibility: "public", wantClaim: true, matchingBinding: true},
 		{name: "task runtime must match agent binding", visibility: "public", wantClaim: false, matchingBinding: false},
+		{name: "archived agent remains unclaimable", visibility: "private", sameOwner: true, matchingBinding: true, archivedAgent: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fixture := newRuntimeClaimAccessFixture(t, tt.visibility, tt.sameOwner, tt.matchingBinding, "queued")
+			if tt.archivedAgent {
+				if _, err := fixture.pool.Exec(ctx, `UPDATE agent SET archived_at=now() WHERE id=$1`, fixture.agentID); err != nil {
+					t.Fatalf("archive agent: %v", err)
+				}
+			}
 			if tt.ownerlessAgent {
 				if _, err := fixture.pool.Exec(ctx, `UPDATE agent SET owner_id = NULL WHERE id = $1`, fixture.agentID); err != nil {
 					t.Fatalf("clear agent owner: %v", err)

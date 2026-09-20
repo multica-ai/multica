@@ -56,6 +56,7 @@ import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
 import { resolveWorkdirCopyTarget } from "@multica/core/issues";
 import { runtimeDisplayName, providerDisplayName } from "@multica/core/runtimes";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
+import { useActorName } from "@multica/core/workspace/hooks";
 import { redactSecrets } from "./redact";
 import {
   createLiveEndFollow,
@@ -332,7 +333,8 @@ export function AgentTranscriptDialog({
   const [copiedWorkdir, showCopiedWorkdir] = useCopyFeedback();
   const [copiedBranch, showCopiedBranch] = useCopyFeedback();
   const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
-  const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
+  const [loadedRuntimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
+  const runtimeInfo = loadedRuntimeInfo?.id === task.runtime_id ? loadedRuntimeInfo : null;
   const workdirCopyTarget = useMemo(
     () => resolveWorkdirCopyTarget([task]),
     [task],
@@ -859,6 +861,8 @@ export function AgentTranscriptDialog({
     !!task.branch_name ||
     !!reasonLabel ||
     !!task.error ||
+    !!task.runtime_routing_source ||
+    !!task.runtime_execution_user_id ||
     !!createdLabel ||
     !!startedLabel ||
     !!completedLabel ||
@@ -963,6 +967,17 @@ export function AgentTranscriptDialog({
                           label={t(($) => $.transcript.details_runtime)}
                           value={runtimeDisplayName(runtimeInfo)}
                         />
+                      )}
+                      {(task.runtime_routing_source === "personal" || task.runtime_routing_source === "default") && (
+                        <RunDetailRow
+                          label={t(($) => $.personal_runtime.task.source)}
+                          value={task.runtime_routing_source === "personal"
+                            ? t(($) => $.personal_runtime.settings.label)
+                            : t(($) => $.personal_runtime.settings.shared_default)}
+                        />
+                      )}
+                      {task.runtime_execution_user_id && (
+                        <ExecutionUserDetail userId={task.runtime_execution_user_id} />
                       )}
                       {providerLabel && (
                         <RunDetailRow label={t(($) => $.transcript.details_provider)} value={providerLabel} />
@@ -1858,4 +1873,10 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ExecutionUserDetail({ userId }: { userId: string }) {
+  const { t } = useT("agents");
+  const { getActorName } = useActorName();
+  return <RunDetailRow label={t(($) => $.personal_runtime.task.execution_user)} value={getActorName("member", userId)} />;
 }

@@ -20,6 +20,8 @@ vi.mock("../../common/avatar-upload-control", () => ({
   AvatarUploadControl: () => <div data-testid="avatar-upload" />,
 }));
 
+vi.mock("./personal-runtime-settings", () => ({ PersonalRuntimeSettings: () => null }));
+
 vi.mock("./inspector/model-picker", () => ({
   ModelPicker: () => <div data-testid="model-picker" />,
 }));

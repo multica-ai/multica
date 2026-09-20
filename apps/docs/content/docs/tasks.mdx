@@ -30,6 +30,16 @@ Any of the following can trigger a run:
 
 Different entry points provide different context, but execution works the same way: Multica creates a run, a runtime claims it, and the runtime invokes the AI coding tool the agent is configured with.
 
+## Runtime selection and execution identity
+
+A shared agent can execute different members' work on their own runtimes. A new root run records its execution user and a snapshot of the available agent routes: the member's explicit personal runtime preference, or each agent's shared default. Model choices are captured with those routes. An explicit custom model is fixed; a runtime-default choice leaves the concrete model to the selected runtime.
+
+Automatic descendants and eligible automatic retries preserve the root snapshot. A manual rerun starts a new root for the member who clicks it and resolves that member's current preferences. Preference or agent-default changes never reroute an existing run. There is no automatic failover to another machine or provider.
+
+The snapshot fixes selection, not authorization. Workspace membership, agent invocation permission, and runtime ownership or sharing remain live checks. A deleted, inaccessible, or offline personal selection fails explicitly. **Run details** shows the actual runtime, selection source, and execution user; execution identity is separate from audit attribution.
+
+Workdir and provider-session reuse is restricted to the same runtime and execution user. Switching machines does not transfer uncommitted files, local directories, or CLI sessions. Personal execution does not copy the shared agent owner's private credentials. See [Daemon and runtimes](/daemon-runtimes#choose-your-execution-runtime).
+
 ## Execution lifecycle
 
 A run typically moves through these states:

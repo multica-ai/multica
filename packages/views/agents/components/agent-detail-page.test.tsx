@@ -32,12 +32,15 @@ vi.mock("./agent-overview-pane", () => ({
     agent: Agent;
     onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
   }) => (
+    <>
     <button
       type="button"
       onClick={() => void onUpdate(agent.id, { model: "new-model" })}
     >
       update model
     </button>
+    <button type="button" onClick={() => void onUpdate(agent.id, { runtime_id: "runtime-codex" })}>Change default runtime</button>
+    </>
   ),
 }));
 vi.mock("../../common/actor-avatar", () => ({
@@ -63,9 +66,8 @@ const mockUpdateAgent = vi.hoisted(() => vi.fn());
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
-vi.mock("@multica/core/agents", () => ({
-  isAgentRuntimeBound: (agent: { runtime_id: string; runtime_bound?: boolean }) =>
-    agent.runtime_bound !== false && agent.runtime_id.length > 0,
+vi.mock("@multica/core/agents", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/core/agents")>(),
   useWorkspacePresenceMap: () => ({ byAgent: new Map() }),
 }));
 vi.mock("@multica/core/workspace/queries", () => ({
@@ -113,7 +115,8 @@ vi.mock("@multica/core/workspace/queries", () => ({
     ],
   },
 }));
-vi.mock("@multica/core/runtimes", () => ({
+vi.mock("@multica/core/runtimes", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/core/runtimes")>(),
   runtimeListOptions: (wsId: string) => ({
     queryKey: ["runtimes", wsId],
     queryFn: () => Promise.resolve([]),
@@ -149,7 +152,7 @@ vi.mock("@multica/core/api", () => {
     }
   }
   return {
-    api: { getAgent: mockGetAgent, updateAgent: mockUpdateAgent },
+    api: { getAgent: mockGetAgent, updateAgent: mockUpdateAgent, getAgentRuntimePreference: vi.fn() },
     ApiError,
   };
 });
@@ -158,6 +161,8 @@ vi.mock("sonner", () => ({
 }));
 
 import { AgentDetailPage } from "./agent-detail-page";
+import { api } from "@multica/core/api";
+import { agentRuntimePreferenceOptions, runtimeKeys } from "@multica/core/runtimes";
 
 const baseAgent: Agent = {
   id: "agent-1",
@@ -184,10 +189,9 @@ const baseAgent: Agent = {
   archived_by: null,
 };
 
-function renderPage() {
-  const queryClient = new QueryClient({
+function renderPage(queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
-  });
+  })) {
   const push = vi.fn();
   const navigation: NavigationAdapter = {
     push,
@@ -375,6 +379,20 @@ describe("AgentDetailPage direct-detail fallback", () => {
   });
 });
 
+it("refreshes the personal provider after changing the shared default runtime locally", async () => {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  const key = runtimeKeys.preference("ws-1", "agent-1");
+  qc.setQueryData(key, { runtimeId: null, provider: "claude" });
+  vi.mocked(api.getAgentRuntimePreference).mockResolvedValue({ runtimeId: null, provider: "codex" });
+  renderPage(qc);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Change default runtime" }));
+
+  await waitFor(() => expect(qc.getQueryState(key)?.isInvalidated).toBe(true));
+  expect(await qc.fetchQuery(agentRuntimePreferenceOptions("ws-1", "agent-1")))
+    .toEqual({ runtimeId: null, provider: "codex" });
+});
+
 describe("AgentDetailPage DM button", () => {
   it("navigates to the chat deep link when the user can chat with the agent", async () => {
     const { push } = renderPage();
@@ -456,6 +474,15 @@ describe("AgentDetailPage DM button", () => {
     expect(
       screen.getByLabelText("Agent actions"),
     ).toBeInTheDocument();
+  });
+
+  it("allows a personal runtime when the shared agent default is unbound", async () => {
+    agentsRef.current = [{ ...baseAgent, owner_id: "user-1", runtime_id: "", runtime_bound: false, personal_runtime_id: "mine" }];
+    const { push } = renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "DM" }));
+    expect(push).toHaveBeenCalledWith("/acme/chat?agent=agent-1");
+    expect(mockToastError).not.toHaveBeenCalled();
+    expect(screen.queryByText(/needs a runtime before it can run/i)).not.toBeInTheDocument();
   });
 
   it("explains an unbound agent and blocks run actions without losing the profile", async () => {

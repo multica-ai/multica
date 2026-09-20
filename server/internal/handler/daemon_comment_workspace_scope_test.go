@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -138,9 +139,16 @@ func TestClaimDoesNotLeakForeignWorkspaceTriggerCommentOrSummary(t *testing.T) {
 	const secret = "FOREIGN-WORKSPACE-SECRET-DO-NOT-LEAK"
 	foreignCommentID := insertCommentForScopeTest(t, ctx, foreignIssueID, otherWS, secret)
 
-	// Enqueue through the production path: this is where trigger_summary is
-	// snapshotted and the originator resolved. Both must fail closed.
-	taskID := enqueueIssueTaskWithTrigger(t, ctx, agentID, issueID, foreignCommentID)
+	// New work fails closed before capturing a foreign comment's authority.
+	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testHandler.TaskService.EnqueueTaskForIssue(ctx, issue, parseUUID(foreignCommentID)); err == nil {
+		t.Fatal("foreign trigger was accepted")
+	}
+	// Existing legacy/corrupt rows must still be sanitized at claim time.
+	taskID := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "issue_id": issueID, "trigger_comment_id": foreignCommentID})
 
 	// Stored row: neither the summary nor the originator may come from the
 	// foreign comment.

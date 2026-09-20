@@ -593,7 +593,7 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary,
     originator_user_id, accountable_user_id, rule_version_id,
     originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
-    id
+    runtime_routing, runtime_mcp_overlay, runtime_connected_apps, id
 )
 SELECT
     $1, $2, NULL, 'queued', $3, $4, sqlc.narg(trigger_summary),
@@ -603,6 +603,7 @@ SELECT
     sqlc.narg(originator_source),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
+    sqlc.narg(runtime_routing), sqlc.narg(runtime_mcp_overlay), sqlc.narg(runtime_connected_apps),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, NULL, $2)
 RETURNING *;
@@ -808,3 +809,8 @@ SELECT EXISTS (
 -- Powers the per-row can_write flag on the list endpoint without an N+1.
 SELECT autopilot_id FROM autopilot_collaborator
 WHERE user_type = 'member' AND user_id = $1;
+
+-- name: SetAutopilotRunTask :exec
+UPDATE autopilot_run
+SET task_id = @task_id
+WHERE id = @id AND task_id IS NULL;

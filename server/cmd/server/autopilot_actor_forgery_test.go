@@ -26,9 +26,8 @@ import (
 func TestAutopilotWritesIgnoreForgedAgentIdentity(t *testing.T) {
 	fx := testutil.New(testPool, testWorkspaceID, testUserID)
 
-	var agentID, runtimeID string
-	fx.QueryRow(t, `SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`, testWorkspaceID).
-		Scan(&agentID, &runtimeID)
+	runtimeID := fx.Runtime(t, "Forgery regression runtime")
+	agentID := fx.Agent(t, "Forgery regression agent", runtimeID)
 
 	// A live run whose originator is the workspace owner — a writer on the
 	// autopilot below. This is the identity a forger wants to borrow.
@@ -120,6 +119,8 @@ func TestAutopilotWritesIgnoreForgedAgentIdentity(t *testing.T) {
 	t.Run("a real task token is judged by its originator", func(t *testing.T) {
 		// Bound to the OUTSIDER as runtime owner: the machine's owner holds no
 		// grant here, so admission can only come from the task's originator.
+		fx.Exec(t, `UPDATE agent_runtime SET owner_id=$2 WHERE id=$1`, runtimeID, outsider)
+		fx.Exec(t, `UPDATE agent SET owner_id=$2 WHERE id=$1`, agentID, outsider)
 		token := mintAgentTaskToken(t, agentID, taskID, outsider)
 		resp := do(t, "PATCH", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID,
 			map[string]any{"status": "paused"}, func(req *http.Request) {

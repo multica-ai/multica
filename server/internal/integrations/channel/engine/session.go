@@ -158,7 +158,7 @@ func (a dbSessionQueries) ListUnownedChannelChatContextRevisions(ctx context.Con
 	for _, row := range rows {
 		contexts = append(contexts, PendingContext{
 			Revision:        row.ContextRevision,
-			InitiatorUserID: row.InitiatorUserID,
+			InitiatorUserID: row.SenderUserID,
 		})
 	}
 	return contexts, nil
@@ -537,6 +537,10 @@ func (s *ChatSession) StartSession(ctx context.Context, in StartSessionInput) (S
 		}
 		msg, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
 			ID: dbid.NewV7(), ChatSessionID: session.ID, Role: "user", Content: in.Body,
+			ChannelSenderUserID:     in.Initiator,
+			ChannelSourceMessageID:  textOrNull(in.MessageID),
+			ChannelSourceThreadID:   textOrNull(in.ThreadID),
+			ChannelSourceSenderID:   textOrNull(in.SenderChannelID),
 			ChannelMediaPendingSecs: pgtype.Float8{Float64: in.MediaPendingSeconds, Valid: in.MediaPendingSeconds > 0},
 			ChannelIngested:         pgtype.Bool{Bool: true, Valid: true},
 			ChannelContextRevision:  pgtype.Int8{Int64: 1, Valid: true},
@@ -749,6 +753,10 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	msg, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
 		ID:                      dbid.NewV7(),
 		ChatSessionID:           in.SessionID,
+		ChannelSenderUserID:     in.Sender,
+		ChannelSourceMessageID:  textOrNull(in.MessageID),
+		ChannelSourceThreadID:   textOrNull(in.ThreadID),
+		ChannelSourceSenderID:   textOrNull(in.SenderChannelID),
 		Role:                    "user",
 		Content:                 in.Body,
 		MessageKind:             textOrNullIf(cmd != nil, channelCommandMessageKind),

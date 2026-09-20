@@ -62,6 +62,9 @@ describe("agentListOptions", () => {
         } as Agent,
       ]),
     ).toBe(false);
+    expect(queryState([{ personal_runtime_availability: "online" } as Agent])).toBe(30_000);
+    expect(queryState([{ personal_runtime_availability: "unstable" } as Agent])).toBe(30_000);
+    expect(queryState([{ personal_runtime_availability: "offline" } as Agent])).toBe(false);
     expect(queryState([])).toBe(false);
   });
 });

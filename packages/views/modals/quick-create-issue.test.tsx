@@ -132,14 +132,17 @@ const mockSquadsData = vi.hoisted(
 // present here — the case that used to be misreported as "daemon has no CLI
 // version" (#7633). Tests flip this to drop the row and prove the panel no
 // longer blocks on it.
-const mockRuntimesData = vi.hoisted(
-  () => ({ list: [{ id: "runtime-1", metadata: { cli_version: "1.2.3" } }] as Array<{ id: string; metadata: Record<string, unknown> }> }),
-);
-
 // The real handle mints an id when it inserts the placeholder and hands it to
 // the uploader, which adopts it as the draft `clientUploadId`. Mocks must do
 // the same or the two records drift apart only in tests.
 let mockUploadIdSeq = 0;
+const mockPreferenceQuery = vi.hoisted(() => ({ data: { runtimeId: null } as { runtimeId: string | null } | null, isPending: false, isError: false }));
+
+const mockRuntimesQuery = vi.hoisted(() => ({
+  data: [] as Array<{ id: string; owner_id?: string | null; visibility?: "private" | "public"; metadata: Record<string, unknown> }>,
+  isSuccess: true,
+  isError: false,
+}));
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: ({ queryKey }: { queryKey: string[] }) => {
@@ -148,6 +151,7 @@ vi.mock("@tanstack/react-query", () => ({
     if (queryKey[0] === "workspaces" && queryKey[2] === "squads") {
       return { data: mockSquadsData.list };
     }
+    if (queryKey[0] === "preference") return mockPreferenceQuery;
     switch (queryKey[0]) {
       case "members":
         return { data: [{ user_id: "user-1", role: "admin" }] };
@@ -156,7 +160,7 @@ vi.mock("@tanstack/react-query", () => ({
           data: [{ id: "agent-1", name: "Bohan", archived_at: null, runtime_id: "runtime-1" }],
         };
       case "runtimes":
-        return { data: mockRuntimesData.list };
+        return mockRuntimesQuery;
       case "projects":
         return mockProjectsQuery;
       default:
@@ -259,6 +263,7 @@ vi.mock("@multica/core/auth", () => ({
 vi.mock("@multica/core/runtimes", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/runtimes")>()),
   runtimeListOptions: () => ({ queryKey: ["runtimes"] }),
+  agentRuntimePreferenceOptions: () => ({ queryKey: ["preference"] }),
 }));
 
 
@@ -495,8 +500,9 @@ import enProjects from "../locales/en/projects.json";
 import enIssues from "../locales/en/issues.json";
 import { AgentCreatePanel } from "./quick-create-issue";
 
+import enAgents from "../locales/en/agents.json";
 const TEST_RESOURCES = {
-  en: { common: enCommon, modals: enModals, editor: enEditor, projects: enProjects, issues: enIssues },
+  en: { agents: enAgents, common: enCommon, modals: enModals, editor: enEditor, projects: enProjects, issues: enIssues },
 };
 
 function renderPanel(props: React.ComponentProps<typeof AgentCreatePanel>) {
@@ -530,10 +536,15 @@ describe("AgentCreatePanel", () => {
     mockClearDraft.mockImplementation(() => {
       mockIssueDraftStore.draft = emptyIssueDraft();
     });
+    mockRuntimesQuery.data = [{ id: "runtime-1", owner_id: "user-1", visibility: "private", metadata: { cli_version: "1.2.3" } }];
+    mockPreferenceQuery.data = { runtimeId: null };
+    mockPreferenceQuery.isPending = false;
+    mockPreferenceQuery.isError = false;
+    mockRuntimesQuery.isSuccess = true;
+    mockRuntimesQuery.isError = false;
     mockProjectsQuery.data = [];
     mockProjectsQuery.isSuccess = true;
     mockSquadsData.list = [];
-    mockRuntimesData.list = [{ id: "runtime-1", metadata: { cli_version: "1.2.3" } }];
     mockQuickCreateIssue.mockResolvedValue(undefined);
     mockCreateCommentSubIssue.mockResolvedValue({ task_id: "task-source-child" });
     mockApiUploadFile.mockResolvedValue({
@@ -556,6 +567,106 @@ describe("AgentCreatePanel", () => {
     mockSetKeepOpen.mockImplementation((value: boolean) => {
       mockQuickCreateStore.keepOpen = value;
     });
+  });
+
+  it("uses the personal runtime CLI version instead of the shared default", () => {
+    mockRuntimesQuery.data[0]!.metadata = { cli_version: "0.2.20" };
+    mockRuntimesQuery.data.push({ id: "personal", owner_id: "user-1", visibility: "private", metadata: { cli_version: "1.2.3" } });
+    mockPreferenceQuery.data = { runtimeId: "personal" };
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+    expect(screen.getByRole("button", { name: "Create" })).toBeEnabled();
+    expect(screen.queryByText(/daemon CLI is 0.2.20/)).not.toBeInTheDocument();
+  });
+
+  it.each(["missing", "unavailable", "loading"])("never falls back to default when personal preference is %s", async (state) => {
+    mockPreferenceQuery.data = state === "missing" ? { runtimeId: "deleted" } : null;
+    mockPreferenceQuery.isPending = state === "loading";
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+    expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "" }), { key: "Enter", metaKey: true });
+    await act(async () => {});
+    expect(mockQuickCreateIssue).not.toHaveBeenCalled();
+  });
+
+  it.each(["button", "shortcut"])("submits an invocable agent with a hidden private runtime via %s", async (entry) => {
+    mockRuntimesQuery.data = [];
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(screen.queryByText(/doesn't report a CLI version/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/runtime is unavailable or you don't have access/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create" })).toBeEnabled();
+    if (entry === "button") {
+      await userEvent.click(screen.getByRole("button", { name: "Create" }));
+    } else {
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "" }), { key: "Enter", metaKey: true });
+    }
+    await waitFor(() => expect(mockQuickCreateIssue).toHaveBeenCalledWith(expect.objectContaining({ agent_id: "agent-1" })));
+  });
+
+  it("does not require runtime ownership to invoke an agent", async () => {
+    mockRuntimesQuery.data[0]!.owner_id = "user-2";
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(mockQuickCreateIssue).toHaveBeenCalledOnce();
+  });
+
+  it.each(["loading", "failed"])("defers runtime checks to the server when the runtime query is %s", async (state) => {
+    mockRuntimesQuery.data = [];
+    mockRuntimesQuery.isSuccess = false;
+    mockRuntimesQuery.isError = state === "failed";
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(screen.queryByText(/doesn't report a CLI version/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(mockQuickCreateIssue).toHaveBeenCalledOnce();
+  });
+
+  it("submits a squad with a hidden leader runtime and explicit fields", async () => {
+    mockRuntimesQuery.data = [];
+    mockSquadsData.list = [{ id: "squad-1", name: "Frontend Squad", leader_id: "agent-1", archived_at: null }];
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn(), data: { squad_id: "squad-1", priority: "high", due_date: "2026-10-01" } });
+
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(mockQuickCreateIssue).toHaveBeenCalledWith(expect.objectContaining({ squad_id: "squad-1", priority: "high", due_date: "2026-10-01" }));
+  });
+
+  it.each([
+    [{ code: "agent_unavailable", reason: "agent's runtime is offline" }, /runtime is offline/],
+    [{ code: "daemon_version_unsupported", current_version: "0.2.20", min_version: "0.2.21" }, /below the required 0.2.21/],
+    [{ code: "daemon_version_unsupported", current_version: "", min_version: "0.4.3" }, /daemon CLI \(unknown\) is below the required 0.4.3/],
+  ])("preserves the draft when a hidden runtime is rejected by the server: %j", async (body, warning) => {
+    mockRuntimesQuery.data = [];
+    const rejection = Object.assign(new ApiError("Rejected", 422, "Unprocessable Entity"), { body });
+    mockQuickCreateIssue.mockRejectedValue(rejection);
+    const onClose = vi.fn();
+    renderPanel({ onClose, isExpanded: false, setIsExpanded: vi.fn() });
+
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(await screen.findByText(warning)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "" })).toHaveValue("Persisted draft prompt");
+    expect(mockClearDraft).not.toHaveBeenCalled();
+    expect(mockToastSuccess).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{}, /doesn't report a CLI version/],
+    [{ cli_version: "0.2.20" }, /daemon CLI is 0.2.20/],
+  ])("retains version warnings for an accessible runtime with metadata %j", (metadata, warning) => {
+    mockRuntimesQuery.data[0]!.metadata = metadata;
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(screen.getByText(warning)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+  });
+
+  it("allows another owner's public runtime with a supported release version", async () => {
+    mockRuntimesQuery.data[0] = { id: "runtime-1", owner_id: "user-2", visibility: "public", metadata: { cli_version: "v1.2.3" } };
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(mockQuickCreateIssue).toHaveBeenCalledOnce();
   });
 
   it("loads the persisted prompt draft when no transient prompt is provided", () => {
@@ -1167,7 +1278,7 @@ describe("AgentCreatePanel", () => {
       const user = userEvent.setup();
       // Member view: the agent's runtime-1 is a private machine they don't own,
       // so it never appears in their list.
-      mockRuntimesData.list = [];
+      mockRuntimesQuery.data = [];
 
       renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
@@ -1195,7 +1306,7 @@ describe("AgentCreatePanel", () => {
       const user = userEvent.setup();
       // The runtime IS in the list and reports a real, below-minimum version —
       // the case the gate exists for. We must keep failing closed here.
-      mockRuntimesData.list = [{ id: "runtime-1", metadata: { cli_version: "0.0.1" } }];
+      mockRuntimesQuery.data = [{ id: "runtime-1", metadata: { cli_version: "0.0.1" } }];
 
       renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
