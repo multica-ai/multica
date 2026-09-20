@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import type { MemberWithUser } from "@multica/core/types";
+import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { workspaceKeys } from "@multica/core/workspace/queries";
@@ -21,9 +21,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
-import { Archive, ArchiveRestore, Loader2, X } from "lucide-react";
+import {
+  Archive,
+  ArchiveRestore,
+  Loader2,
+  Monitor,
+  X,
+} from "lucide-react";
 import { useT } from "../../i18n";
 import { AccessPicker, type AccessChange } from "./inspector/access-picker";
+import { RuntimePicker } from "./inspector/runtime-picker";
 import type { AgentListRow } from "./agents-page";
 
 /**
@@ -38,11 +45,17 @@ import type { AgentListRow } from "./agents-page";
  */
 export function AgentBatchToolbar({
   rows,
+  runtimes,
   members,
   currentUserId,
   onClear,
 }: {
   rows: AgentListRow[];
+  /** Candidate target runtimes for the bulk "change runtime" action. Any
+   *  runtime the current user cannot use is locked inside the picker, so
+   *  unbound/private rows can never be submitted against the backend's
+   *  `canUseRuntimeForAgent` gate. */
+  runtimes: AgentRuntime[];
   members: MemberWithUser[];
   currentUserId: string | null;
   onClear: () => void;
@@ -54,6 +67,8 @@ export function AgentBatchToolbar({
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmAccess, setConfirmAccess] = useState(false);
   const [accessChange, setAccessChange] = useState<AccessChange | null>(null);
+  const [confirmRuntime, setConfirmRuntime] = useState(false);
+  const [targetRuntimeId, setTargetRuntimeId] = useState("");
   const [busy, setBusy] = useState(false);
 
   // Must be stable: AccessPicker lists this in the effect that notifies us, so
@@ -78,6 +93,12 @@ export function AgentBatchToolbar({
   const anyOwned = ownedRows.length > 0;
   const anyActive = rows.some((r) => !r.agent.archived_at);
   const anyArchived = rows.some((r) => !!r.agent.archived_at);
+  // Runtime rebinding is gated server-side by `canManageAgent` (owner,
+  // workspace owner/admin, or service admin) — unlike access which is
+  // owner-only — so the bulk runtime action targets every manageable row and
+  // skips the rest, mirroring the set-access skip pattern.
+  const manageableRows = rows.filter((r) => !r.agent.archived_at && r.canManage);
+  const anyManageable = manageableRows.length > 0;
 
   const invalidate = () =>
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
@@ -89,6 +110,8 @@ export function AgentBatchToolbar({
     setConfirmArchive(false);
     setConfirmAccess(false);
     setAccessChange(null);
+    setConfirmRuntime(false);
+    setTargetRuntimeId("");
   }, [rows.length]);
 
   const applyAccessBulk = async (change: AccessChange) => {
@@ -103,6 +126,30 @@ export function AgentBatchToolbar({
     if (summary.failed > 0) {
       toast.error(
         t(($) => $.row_actions.set_access_bulk_partial, {
+          succeeded: summary.succeeded,
+          failed: summary.failed,
+        }),
+      );
+    }
+  };
+
+  // Model, thinking level, and service tier are runtime-native (same set the
+  // detail inspector clears on a runtime change) — the new runtime must
+  // resolve its own defaults instead of inheriting incompatible tokens.
+  const applyRuntimeBulk = async (runtimeId: string) => {
+    const summary = await runBatch(
+      (id) =>
+        api.updateAgent(id, {
+          runtime_id: runtimeId,
+          model: "",
+          thinking_level: "",
+          service_tier: "",
+        }),
+      manageableRows,
+    );
+    if (summary.failed > 0) {
+      toast.error(
+        t(($) => $.row_actions.change_runtime_bulk_partial, {
           succeeded: summary.succeeded,
           failed: summary.failed,
         }),
@@ -209,6 +256,22 @@ export function AgentBatchToolbar({
             onClick={() => setAccessDialogOpen(true)}
           >
             {t(($) => $.row_actions.set_access)}
+          </Button>
+        )}
+        {anyManageable && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={runtimes.length === 0 || busy}
+            onClick={() => {
+              // Reset any previous selection on every open so it can never
+              // leak into the next dialog session.
+              setTargetRuntimeId("");
+              setConfirmRuntime(true);
+            }}
+          >
+            <Monitor className="mr-1 size-3.5" />
+            {t(($) => $.row_actions.change_runtime)}
           </Button>
         )}
         {/* Archive sits last: it is the destructive action, kept furthest from
@@ -335,6 +398,69 @@ export function AgentBatchToolbar({
                 <Loader2 className="mr-1 size-3.5 animate-spin" />
               ) : null}
               {t(($) => $.row_actions.set_access_dialog_confirm)}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>}
+
+      {/* Bulk runtime dialog — the inspector's RuntimePicker is controlled
+          (value + onChange), so the Confirm button is the sole apply trigger.
+          The picker locks runtimes the caller cannot use (MUL-6126), mirroring
+          the backend's `canUseRuntimeForAgent` gate exactly. */}
+      {rows.length > 0 && <Dialog open={confirmRuntime} onOpenChange={setConfirmRuntime}>
+        <DialogContent
+          className="sm:max-w-md"
+          aria-describedby="bulk-runtime-summary"
+        >
+          <DialogHeader>
+            <DialogTitle>
+              {t(($) => $.row_actions.change_runtime_dialog_title)}
+            </DialogTitle>
+            <DialogDescription id="bulk-runtime-summary">
+              <span aria-live="polite">
+                {t(($) => $.row_actions.change_runtime_applies_to, {
+                  count: manageableRows.length,
+                })}
+                {rows.length > manageableRows.length
+                  ? ` ${t(($) => $.row_actions.change_runtime_skipped, { count: rows.length - manageableRows.length })}`
+                  : ""}
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+          <RuntimePicker
+            value={targetRuntimeId}
+            runtimes={runtimes}
+            members={members}
+            currentUserId={currentUserId}
+            canEdit
+            variant="field"
+            showLabel
+            onChange={(id) => setTargetRuntimeId(id)}
+          />
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => setConfirmRuntime(false)}
+            >
+              {t(($) => $.row_actions.archive_dialog_cancel)}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy || targetRuntimeId === ""}
+              onClick={async () => {
+                const runtimeId = targetRuntimeId;
+                setConfirmRuntime(false);
+                await applyRuntimeBulk(runtimeId);
+              }}
+            >
+              {busy ? (
+                <Loader2 className="mr-1 size-3.5 animate-spin" />
+              ) : null}
+              {t(($) => $.row_actions.change_runtime_dialog_confirm)}
             </Button>
           </DialogFooter>
         </DialogContent>

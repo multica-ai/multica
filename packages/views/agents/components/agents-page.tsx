@@ -1188,6 +1188,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
 
       <AgentBatchToolbar
         rows={selectedRows}
+        runtimes={runtimes}
         members={members}
         currentUserId={currentUser?.id ?? null}
         onClear={() => setSelectedIds(new Set())}
