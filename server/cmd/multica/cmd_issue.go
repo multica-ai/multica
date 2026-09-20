@@ -662,6 +662,7 @@ func init() {
 
 	// issue search
 	issueSearchCmd.Flags().Int("limit", 20, "Maximum number of results to return")
+	issueSearchCmd.Flags().Int("offset", 0, "Number of matches to skip (for pagination; when the table prints Next page, advance --offset by that value)")
 	issueSearchCmd.Flags().Bool("include-closed", false, "Include done and cancelled issues")
 	issueSearchCmd.Flags().String("output", "table", "Output format: table or json")
 
@@ -2726,10 +2727,20 @@ func runIssueSearch(cmd *cobra.Command, args []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
+	limit, _ := cmd.Flags().GetInt("limit")
+	if limit < 1 {
+		return fmt.Errorf("--limit must be at least 1")
+	}
+	offset, _ := cmd.Flags().GetInt("offset")
+	if offset < 0 {
+		return fmt.Errorf("--offset must be zero or greater")
+	}
+
 	params := url.Values{}
 	params.Set("q", args[0])
-	if v, _ := cmd.Flags().GetInt("limit"); v > 0 {
-		params.Set("limit", fmt.Sprintf("%d", v))
+	params.Set("limit", fmt.Sprintf("%d", limit))
+	if offset > 0 {
+		params.Set("offset", fmt.Sprintf("%d", offset))
 	}
 	if v, _ := cmd.Flags().GetBool("include-closed"); v {
 		params.Set("include_closed", "true")
@@ -2776,9 +2787,8 @@ func runIssueSearch(cmd *cobra.Command, args []string) error {
 
 	if hasMore, _ := result["has_more"].(bool); hasMore {
 		// The search window truncated the result set; say so instead of
-		// letting the table look exhaustive. The API supports offset
-		// pagination, and raising --limit widens the window to the cap.
-		fmt.Fprintln(os.Stdout, "MORE matches available — raise --limit (or page with offset) to see them.")
+		// letting the table look exhaustive, and give the exact next offset.
+		fmt.Fprintf(os.Stdout, "MORE matches available. Next page: --offset %d\n", offset+len(rows))
 	}
 	return nil
 }

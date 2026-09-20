@@ -5098,3 +5098,141 @@ func TestRunIssueCommentDeleteKeepsReplies(t *testing.T) {
 		})
 	}
 }
+
+func newIssueSearchTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "search"}
+	cmd.Flags().Int("limit", 20, "")
+	cmd.Flags().Int("offset", 0, "")
+	cmd.Flags().Bool("include-closed", false, "")
+	cmd.Flags().String("output", "table", "")
+	return cmd
+}
+
+func newFakeIssueSearchServer(t *testing.T, issues []map[string]any, hasMore bool) (*httptest.Server, *url.Values) {
+	t.Helper()
+	var query url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/issues/search" {
+			t.Errorf("path = %q, want /api/issues/search", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		query = r.URL.Query()
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issues":   issues,
+			"has_more": hasMore,
+		})
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &query
+}
+
+func TestRunIssueSearchRejectsNegativeOffset(t *testing.T) {
+	srv, query := newFakeIssueSearchServer(t, nil, false)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueSearchTestCmd()
+	_ = cmd.Flags().Set("offset", "-1")
+	err := runIssueSearch(cmd, []string{"overflow"})
+	if err == nil {
+		t.Fatal("expected error for negative --offset")
+	}
+	if !strings.Contains(err.Error(), "--offset must be zero or greater") {
+		t.Fatalf("error = %q, want negative-offset guard", err)
+	}
+	if query != nil && query.Get("q") != "" {
+		t.Fatalf("rejected --offset must not reach the API; got query %v", *query)
+	}
+}
+
+func TestRunIssueSearchSendsOffsetAndLimit(t *testing.T) {
+	srv, query := newFakeIssueSearchServer(t, nil, false)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueSearchTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	_ = cmd.Flags().Set("limit", "10")
+	_ = cmd.Flags().Set("offset", "20")
+	_ = cmd.Flags().Set("include-closed", "true")
+	if err := runIssueSearch(cmd, []string{"overflow"}); err != nil {
+		t.Fatalf("runIssueSearch: %v", err)
+	}
+	if got := query.Get("q"); got != "overflow" {
+		t.Fatalf("q = %q, want overflow", got)
+	}
+	if got := query.Get("limit"); got != "10" {
+		t.Fatalf("limit = %q, want 10", got)
+	}
+	if got := query.Get("offset"); got != "20" {
+		t.Fatalf("offset = %q, want 20", got)
+	}
+	if got := query.Get("include_closed"); got != "true" {
+		t.Fatalf("include_closed = %q, want true", got)
+	}
+
+	cmd = newIssueSearchTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	if err := runIssueSearch(cmd, []string{"overflow"}); err != nil {
+		t.Fatalf("runIssueSearch default: %v", err)
+	}
+	if query.Has("offset") {
+		t.Fatalf("offset query = %q, want it omitted at the default of 0", query.Get("offset"))
+	}
+}
+
+func TestRunIssueSearchTableHintUsesNextOffset(t *testing.T) {
+	issues := []map[string]any{
+		{"identifier": "MUL-1", "title": "one", "status": "todo", "match_source": "title"},
+		{"identifier": "MUL-2", "title": "two", "status": "todo", "match_source": "title"},
+	}
+	srv, _ := newFakeIssueSearchServer(t, issues, true)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueSearchTestCmd()
+	_ = cmd.Flags().Set("limit", "2")
+	_ = cmd.Flags().Set("offset", "4")
+	out, err := captureStdout(t, func() error { return runIssueSearch(cmd, []string{"overflow"}) })
+	if err != nil {
+		t.Fatalf("runIssueSearch: %v", err)
+	}
+	if !strings.Contains(out, "Next page: --offset 6") {
+		t.Fatalf("table output missing actionable next offset; got:\n%s", out)
+	}
+}
+
+func TestRunIssueSearchJSONPassthroughHasMore(t *testing.T) {
+	issues := []map[string]any{
+		{"identifier": "MUL-1", "title": "one", "status": "todo", "match_source": "title"},
+	}
+	srv, _ := newFakeIssueSearchServer(t, issues, true)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueSearchTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	out, err := captureStdout(t, func() error { return runIssueSearch(cmd, []string{"overflow"}) })
+	if err != nil {
+		t.Fatalf("runIssueSearch: %v", err)
+	}
+	var env map[string]any
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("decode json: %v\n%s", err, out)
+	}
+	if got := env["has_more"]; got != true {
+		t.Fatalf("has_more = %v, want true", got)
+	}
+	if !strings.Contains(out, `"has_more"`) {
+		t.Fatalf("json output dropped has_more:\n%s", out)
+	}
+}

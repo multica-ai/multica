@@ -30,7 +30,7 @@
   "empty": {
     "no_results": "No results found.",
     "type_to_search": "Type to search issues and projects",
-    "more_results": "Show all results for \"{{query}}\""
+    "more_results": "Load more results for \"{{query}}\""
   },
   "trigger": {
     "label": "Search..."

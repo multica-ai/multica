@@ -804,7 +804,7 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) 
 		%s AS match_source
 	FROM project p
 	WHERE p.workspace_id = %s AND %s
-	ORDER BY %s, %s, p.updated_at DESC
+	ORDER BY %s, %s, p.updated_at DESC, p.id ASC
 	LIMIT %s OFFSET %s`,
 		matchSourceExpr,
 		wsParam,

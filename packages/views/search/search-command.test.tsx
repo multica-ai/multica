@@ -873,18 +873,459 @@ describe("SearchCommand", () => {
     expect(screen.queryByText("In Review")).not.toBeInTheDocument();
   });
 
-  it("surfaces a more-results row when a search is truncated, and opens the Issues page", async () => {
+  it("loads the next issue page inside the palette when results are truncated", async () => {
     const user = userEvent.setup();
-    mockSearchIssues.mockResolvedValue({
+    mockSearchIssues
+      .mockResolvedValueOnce({
+        issues: [
+          {
+            id: "overflow-issue-1",
+            workspace_id: "ws-test",
+            number: 1,
+            identifier: "MUL-1",
+            title: "First overflow match",
+            description: null,
+            status: "in_progress",
+            priority: "none",
+            assignee_type: null,
+            assignee_id: null,
+            creator_type: "member",
+            creator_id: "user-1",
+            parent_issue_id: null,
+            project_id: null,
+            position: 0,
+            start_date: null,
+            due_date: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+            match_source: "title",
+          },
+        ],
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        issues: [
+          {
+            id: "overflow-issue-2",
+            workspace_id: "ws-test",
+            number: 2,
+            identifier: "MUL-2",
+            title: "Second overflow match",
+            description: null,
+            status: "done",
+            priority: "none",
+            assignee_type: null,
+            assignee_id: null,
+            creator_type: "member",
+            creator_id: "user-1",
+            parent_issue_id: null,
+            project_id: null,
+            position: 0,
+            start_date: null,
+            due_date: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+            match_source: "title",
+          },
+        ],
+        has_more: false,
+      });
+
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "overflow");
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText(
+            (_, el) =>
+              el?.textContent === "First overflow match" && el?.tagName === "SPAN",
+          ),
+        ).toBeInTheDocument();
+      },
+      { timeout: 2000 },
+    );
+
+    const moreRow = await screen.findByText(
+      (_, el) =>
+        el?.tagName === "SPAN" &&
+        !!el.textContent?.startsWith("Load more results for"),
+    );
+    await user.click(moreRow);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          (_, el) =>
+            el?.textContent === "Second overflow match" && el?.tagName === "SPAN",
+        ),
+      ).toBeInTheDocument();
+    });
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(useSearchStore.getState().open).toBe(true);
+    expect(mockSearchIssues).toHaveBeenCalledWith(
+      expect.objectContaining({ q: "overflow", offset: 1, limit: 20 }),
+    );
+    expect(
+      screen.queryByText(
+        (_, el) =>
+          el?.tagName === "SPAN" &&
+          !!el.textContent?.startsWith("Load more results for"),
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("loads project-only overflow without requesting another issue page", async () => {
+    const user = userEvent.setup();
+    mockSearchIssues.mockResolvedValue({ issues: [], has_more: false });
+    mockSearchProjects
+      .mockResolvedValueOnce({
+        projects: [
+          {
+            id: "proj-1",
+            workspace_id: "ws-test",
+            title: "Overflow project one",
+            description: null,
+            icon: null,
+            status: "planned",
+            priority: "none",
+            lead_type: null,
+            lead_id: null,
+            start_date: null,
+            due_date: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+            issue_count: 0,
+            done_count: 0,
+            resource_count: 0,
+            match_source: "title",
+          },
+        ],
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        projects: [
+          {
+            id: "proj-2",
+            workspace_id: "ws-test",
+            title: "Overflow project two",
+            description: null,
+            icon: null,
+            status: "planned",
+            priority: "none",
+            lead_type: null,
+            lead_id: null,
+            start_date: null,
+            due_date: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+            issue_count: 0,
+            done_count: 0,
+            resource_count: 0,
+            match_source: "title",
+          },
+        ],
+        has_more: false,
+      });
+
+    renderSearch();
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "projoverflow");
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          (_, el) =>
+            el?.textContent === "Overflow project one" && el?.tagName === "SPAN",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    const issueCallsBefore = mockSearchIssues.mock.calls.length;
+    await user.click(
+      await screen.findByText(
+        (_, el) =>
+          el?.tagName === "SPAN" &&
+          !!el.textContent?.startsWith("Load more results for"),
+      ),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          (_, el) =>
+            el?.textContent === "Overflow project two" && el?.tagName === "SPAN",
+        ),
+      ).toBeInTheDocument();
+    });
+    expect(mockSearchProjects).toHaveBeenCalledWith(
+      expect.objectContaining({ q: "projoverflow", offset: 1, limit: 10 }),
+    );
+    expect(mockSearchIssues.mock.calls.length).toBe(issueCallsBefore);
+  });
+
+  it("loads both overflowing streams on one more-results activation", async () => {
+    const user = userEvent.setup();
+    mockSearchIssues
+      .mockResolvedValueOnce({
+        issues: [
+          {
+            id: "both-issue-1",
+            workspace_id: "ws-test",
+            number: 1,
+            identifier: "MUL-1",
+            title: "Both overflow issue",
+            description: null,
+            status: "todo",
+            priority: "none",
+            assignee_type: null,
+            assignee_id: null,
+            creator_type: "member",
+            creator_id: "user-1",
+            parent_issue_id: null,
+            project_id: null,
+            position: 0,
+            start_date: null,
+            due_date: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+            match_source: "title",
+          },
+        ],
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        issues: [
+          {
+            id: "both-issue-2",
+            workspace_id: "ws-test",
+            number: 2,
+            identifier: "MUL-2",
+            title: "Both overflow issue page two",
+            description: null,
+            status: "todo",
+            priority: "none",
+            assignee_type: null,
+            assignee_id: null,
+            creator_type: "member",
+            creator_id: "user-1",
+            parent_issue_id: null,
+            project_id: null,
+            position: 0,
+            start_date: null,
+            due_date: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+            match_source: "title",
+          },
+        ],
+        has_more: false,
+      });
+    mockSearchProjects
+      .mockResolvedValueOnce({
+        projects: [
+          {
+            id: "both-proj-1",
+            workspace_id: "ws-test",
+            title: "Both overflow project",
+            description: null,
+            icon: null,
+            status: "planned",
+            priority: "none",
+            lead_type: null,
+            lead_id: null,
+            start_date: null,
+            due_date: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+            issue_count: 0,
+            done_count: 0,
+            resource_count: 0,
+            match_source: "title",
+          },
+        ],
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        projects: [
+          {
+            id: "both-proj-2",
+            workspace_id: "ws-test",
+            title: "Both overflow project page two",
+            description: null,
+            icon: null,
+            status: "planned",
+            priority: "none",
+            lead_type: null,
+            lead_id: null,
+            start_date: null,
+            due_date: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+            issue_count: 0,
+            done_count: 0,
+            resource_count: 0,
+            match_source: "title",
+          },
+        ],
+        has_more: false,
+      });
+
+    renderSearch();
+    await user.type(
+      screen.getByPlaceholderText("Type a command or search..."),
+      "bothoverflow",
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          (_, el) =>
+            el?.textContent === "Both overflow issue" && el?.tagName === "SPAN",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    await user.click(
+      await screen.findByText(
+        (_, el) =>
+          el?.tagName === "SPAN" &&
+          !!el.textContent?.startsWith("Load more results for"),
+      ),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          (_, el) =>
+            el?.textContent === "Both overflow issue page two" &&
+            el?.tagName === "SPAN",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          (_, el) =>
+            el?.textContent === "Both overflow project page two" &&
+            el?.tagName === "SPAN",
+        ),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("discards a mid-flight more-results page when the query changes", async () => {
+    const user = userEvent.setup();
+    let resolveMore!: (value: unknown) => void;
+    const morePromise = new Promise((resolve) => {
+      resolveMore = resolve;
+    });
+
+    mockSearchIssues.mockImplementation(({ q, offset }: { q: string; offset?: number }) => {
+      if (q === "slowoverflow" && offset === 1) {
+        return morePromise;
+      }
+      if (q === "slowoverflow") {
+        return Promise.resolve({
+          issues: [
+            {
+              id: "slow-1",
+              workspace_id: "ws-test",
+              number: 1,
+              identifier: "MUL-1",
+              title: "Slow overflow first",
+              description: null,
+              status: "todo",
+              priority: "none",
+              assignee_type: null,
+              assignee_id: null,
+              creator_type: "member",
+              creator_id: "user-1",
+              parent_issue_id: null,
+              project_id: null,
+              position: 0,
+              start_date: null,
+              due_date: null,
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-01-01T00:00:00Z",
+              match_source: "title",
+            },
+          ],
+          has_more: true,
+        });
+      }
+      return Promise.resolve({
+        issues: [
+          {
+            id: "other-1",
+            workspace_id: "ws-test",
+            number: 9,
+            identifier: "MUL-9",
+            title: "Other query hit",
+            description: null,
+            status: "todo",
+            priority: "none",
+            assignee_type: null,
+            assignee_id: null,
+            creator_type: "member",
+            creator_id: "user-1",
+            parent_issue_id: null,
+            project_id: null,
+            position: 0,
+            start_date: null,
+            due_date: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+            match_source: "title",
+          },
+        ],
+        has_more: false,
+      });
+    });
+
+    renderSearch();
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "slowoverflow");
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          (_, el) =>
+            el?.textContent === "Slow overflow first" && el?.tagName === "SPAN",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    await user.click(
+      await screen.findByText(
+        (_, el) =>
+          el?.tagName === "SPAN" &&
+          !!el.textContent?.startsWith("Load more results for"),
+      ),
+    );
+
+    await user.clear(input);
+    await user.type(input, "other");
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          (_, el) =>
+            el?.textContent === "Other query hit" && el?.tagName === "SPAN",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    resolveMore({
       issues: [
         {
-          id: "overflow-issue-1",
+          id: "slow-2",
           workspace_id: "ws-test",
-          number: 1,
-          identifier: "MUL-1",
-          title: "First overflow match",
+          number: 2,
+          identifier: "MUL-2",
+          title: "Stale overflow second",
           description: null,
-          status: "in_progress",
+          status: "todo",
           priority: "none",
           assignee_type: null,
           assignee_id: null,
@@ -900,38 +1341,121 @@ describe("SearchCommand", () => {
           match_source: "title",
         },
       ],
-      has_more: true,
+      has_more: false,
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText(
+          (_, el) =>
+            el?.textContent === "Stale overflow second" && el?.tagName === "SPAN",
+        ),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("ignores a repeated more-results activation for the same offsets while loading", async () => {
+    const user = userEvent.setup();
+    let resolveMore!: (value: unknown) => void;
+    const morePromise = new Promise((resolve) => {
+      resolveMore = resolve;
+    });
+    let moreCalls = 0;
+
+    mockSearchIssues.mockImplementation(({ offset }: { offset?: number }) => {
+      if (offset === 1) {
+        moreCalls += 1;
+        return morePromise;
+      }
+      return Promise.resolve({
+        issues: [
+          {
+            id: "repeat-1",
+            workspace_id: "ws-test",
+            number: 1,
+            identifier: "MUL-1",
+            title: "Repeat overflow first",
+            description: null,
+            status: "todo",
+            priority: "none",
+            assignee_type: null,
+            assignee_id: null,
+            creator_type: "member",
+            creator_id: "user-1",
+            parent_issue_id: null,
+            project_id: null,
+            position: 0,
+            start_date: null,
+            due_date: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+            match_source: "title",
+          },
+        ],
+        has_more: true,
+      });
     });
 
     renderSearch();
-
-    const input = screen.getByPlaceholderText("Type a command or search...");
-    await user.type(input, "overflow");
-
-    await waitFor(
-      () => {
-        // HighlightText splits the title around the query match.
-        expect(
-          screen.getByText(
-            (_, el) =>
-              el?.textContent === "First overflow match" && el?.tagName === "SPAN",
-          ),
-        ).toBeInTheDocument();
-      },
-      { timeout: 2000 },
+    await user.type(
+      screen.getByPlaceholderText("Type a command or search..."),
+      "repeatoverflow",
     );
 
-    // Leaf span only — parent cmdk Item shares the same textContent.
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          (_, el) =>
+            el?.textContent === "Repeat overflow first" && el?.tagName === "SPAN",
+        ),
+      ).toBeInTheDocument();
+    });
+
     const moreRow = await screen.findByText(
       (_, el) =>
         el?.tagName === "SPAN" &&
-        !!el.textContent?.startsWith("Show all results for"),
+        !!el.textContent?.startsWith("Load more results for"),
     );
-    expect(moreRow).toBeInTheDocument();
-
     await user.click(moreRow);
-    expect(mockPush).toHaveBeenCalledWith("/ws-test/issues");
-    expect(useSearchStore.getState().open).toBe(false);
+    await user.click(moreRow);
+
+    expect(moreCalls).toBe(1);
+    resolveMore({
+      issues: [
+        {
+          id: "repeat-2",
+          workspace_id: "ws-test",
+          number: 2,
+          identifier: "MUL-2",
+          title: "Repeat overflow second",
+          description: null,
+          status: "todo",
+          priority: "none",
+          assignee_type: null,
+          assignee_id: null,
+          creator_type: "member",
+          creator_id: "user-1",
+          parent_issue_id: null,
+          project_id: null,
+          position: 0,
+          start_date: null,
+          due_date: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+          match_source: "title",
+        },
+      ],
+      has_more: false,
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          (_, el) =>
+            el?.textContent === "Repeat overflow second" && el?.tagName === "SPAN",
+        ),
+      ).toBeInTheDocument();
+    });
   });
 
   it("omits the more-results row when the result set is not truncated", async () => {
@@ -946,7 +1470,7 @@ describe("SearchCommand", () => {
         screen.queryByText(
           (_, el) =>
             el?.tagName === "SPAN" &&
-            !!el.textContent?.startsWith("Show all results for"),
+            !!el.textContent?.startsWith("Load more results for"),
         ),
       ).not.toBeInTheDocument();
     });
