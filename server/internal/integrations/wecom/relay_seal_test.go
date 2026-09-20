@@ -105,11 +105,18 @@ func TestASealFrameWithNoRoundHereSaysNothingAtAll(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
 
+	// The installation and chat ARE addressable, so a frame that fell through to
+	// the reply path would land in the room. Without them deliverRelayed returns
+	// at the id parse and this case passes for the wrong reason — it did, until
+	// reverse-verifying it against a seal-turned-reply stayed green.
 	res := rig.out.deliverRelayed(context.Background(), relayFrame{
-		Kind:       relayKindSeal,
-		SealReason: sealReasonCancelled,
-		TaskID:     taskUUID(t, "task-1"),
-		SessionID:  bubbleSession,
+		Kind:           relayKindSeal,
+		SealReason:     sealReasonCancelled,
+		InstallationID: util.UUIDToString(rig.instID),
+		ChatID:         "CHAT_1",
+		ChatType:       chatTypeGroupInt,
+		TaskID:         taskUUID(t, "task-1"),
+		SessionID:      bubbleSession,
 	})
 	if res.outcome != outcomeDone {
 		t.Fatalf("outcome = %v, want outcomeDone — a seal with no round is finished, not retryable", res.outcome)
