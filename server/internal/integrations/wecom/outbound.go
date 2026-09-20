@@ -127,7 +127,11 @@ type Outbound struct {
 	// relay routes a reply to the replica holding the bot's socket when this
 	// one does not. Nil on a deployment with no Redis, where it is also
 	// unnecessary: one replica publishes and holds the socket both.
-	relay *RelayOutbound
+	// noticeRouter rather than *RelayOutbound: publish is the only method used
+	// here, it is the seam typing_indicator.go already routes through, and a
+	// concrete type makes "was this ending routed at all" untestable — which is
+	// exactly the question three gaps hid behind.
+	relay noticeRouter
 
 	// Two counters bound attachment delivery, and they are two because one
 	// cannot be in both places at once.
@@ -431,6 +435,12 @@ func (o *Outbound) deliverAnswer(ctx context.Context, e events.Event, taskID pgt
 		// completion with no words and no file was never a message, and no
 		// bubble is waiting on one.
 		if !carriesFiles {
+			// NOTHING TO SAY IS STILL AN ENDING, and it still has to reach the
+			// bubble. Reaching here means no round was found ON THIS REPLICA;
+			// off-lease the round is on a sibling, and returning silently left
+			// it turning for the rest of the protocol's window over a turn that
+			// had already finished.
+			o.relaySeal(e, taskID, sealReasonNoReply, false)
 			o.skipped(ctx, e, skipNothingToSay)
 			return answerOutcome{}, errNothingToSay
 		}
@@ -493,6 +503,37 @@ func taskAddress(ctx context.Context, q deliveryLookup, taskID pgtype.UUID) (rou
 	}, "", true, nil
 }
 
+// routeFrame hands a frame to the relay, and answers false when there is none.
+//
+// THE NIL CHECK IS HERE BECAUSE THE FIELD IS AN INTERFACE. It used to be a
+// *RelayOutbound, whose publish begins with `if r == nil`, so a call through a
+// nil pointer was safe and the call sites relied on that without saying so.
+// A nil interface has no receiver to run that guard, so widening the field
+// silently removed the safety three call sites were standing on. One place to
+// check it, so the next call site cannot forget.
+func (o *Outbound) routeFrame(f relayFrame, eventID string) bool {
+	if o.relay == nil {
+		return false
+	}
+	return o.relay.publish(f, eventID)
+}
+
+// relaySeal asks whichever replica holds this round to close it. Routed by
+// round ownership, so it needs no address — see deliverRelayed.
+func (o *Outbound) relaySeal(e events.Event, taskID pgtype.UUID, reason string, carriesFiles bool) {
+	id := util.UUIDToString(taskID)
+	if id == "" {
+		return
+	}
+	o.routeFrame(relayFrame{
+		Kind:         relayKindSeal,
+		SealReason:   reason,
+		TaskID:       id,
+		SessionID:    e.ChatSessionID,
+		CarriesFiles: carriesFiles,
+	}, id)
+}
+
 // sendAsMessage pushes an answer to the chat this turn was admitted on, for a
 // round with no bubble left to put it in — a restart mid-run, a stream past its
 // window, a frame the server refused. It returns where it spoke, which is where
@@ -524,7 +565,7 @@ func (o *Outbound) sendAsMessage(ctx context.Context, e events.Event, taskID pgt
 		// A reply routed while EVERY replica is mid-reconnect is read by
 		// nobody and counted by nobody; that window is the durability problem
 		// this deliberately does not solve (relay_outbound.go).
-		if o.relay.publish(relayFrame{
+		if o.routeFrame(relayFrame{
 			Kind:           relayKindReply,
 			InstallationID: util.UUIDToString(addr.InstallationID),
 			ChatID:         addr.ChatID,
@@ -740,7 +781,7 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 		// that holds one. An inbox push is as user-visible as an answer, and
 		// leaving it local was the reason the single-replica constraint had to
 		// stay even with replies routed.
-		if o.relay.publish(relayFrame{
+		if o.routeFrame(relayFrame{
 			Kind:           relayKindInbox,
 			InstallationID: util.UUIDToString(binding.InstallationID),
 			ChatID:         binding.ChannelUserID,

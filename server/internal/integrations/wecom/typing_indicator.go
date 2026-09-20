@@ -727,9 +727,6 @@ func (m *TypingIndicatorManager) handleTaskCancelled(e events.Event) {
 	// would paint a spinner with no ending left to close it — the cancel is
 	// the last event this run produces. Retiring the round instead makes that
 	// late paint a no-op.
-	if !m.streams.holding() {
-		return
-	}
 	sessionID, ok := m.sessionFor(e)
 	if !ok {
 		return
@@ -741,6 +738,20 @@ func (m *TypingIndicatorManager) handleTaskCancelled(e events.Event) {
 	// performed. Asked before the take, so a refusal leaves the round where it
 	// was rather than having already removed it.
 	taskID := taskIDFromEvent(e)
+	if !m.streams.holding() {
+		// NO ROUNDS HERE AT ALL, which says nothing about whether one exists. The
+		// bubble is on whichever replica painted it, and with N replicas a
+		// cancellation lands off-lease about (N-1)/N of the time. Returning here
+		// left that bubble claiming work was in progress for the rest of the
+		// protocol's window — a spinner that states something false, where main
+		// was merely silent.
+		//
+		// The gate above is not consulted for this: a seal frame does nothing
+		// unless a round is there, and a round exists only because this adapter
+		// painted it for a question asked in the room.
+		m.relaySeal(sessionID, taskID, sealReasonCancelled)
+		return
+	}
 	dbCtx, cancelDB := context.WithTimeout(context.Background(), taskLookupTimeout)
 	defer cancelDB()
 	switch m.originOf(dbCtx, sessionID, taskID) {
@@ -754,7 +765,13 @@ func (m *TypingIndicatorManager) handleTaskCancelled(e events.Event) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
 	defer cancel()
 	t, _ := m.rounds().take(ctx, sessionID, byTask(taskID))
-	if !t.HasBubble || m.senders == nil {
+	if !t.HasBubble {
+		// Rounds here, just not this one — the bubble is on a sibling, and the
+		// same reasoning as the holding() branch applies.
+		m.relaySeal(sessionID, taskID, sealReasonCancelled)
+		return
+	}
+	if m.senders == nil {
 		return
 	}
 	m.writeClosing(ctx, sessionID, t.Handle, copyFor(t.Handle.Locale).StreamCancelled, "task cancelled")
@@ -811,6 +828,22 @@ type noticeRouter interface {
 func (m *TypingIndicatorManager) WithRelay(r noticeRouter) *TypingIndicatorManager {
 	m.relay = r
 	return m
+}
+
+// relaySeal asks whichever replica holds this round to close it, and says
+// nothing about where that replica is. No address lookup: a seal frame is
+// routed by round ownership — see deliverRelayed — which is what lets the
+// cancellation path keep its refusal to chase an address.
+func (m *TypingIndicatorManager) relaySeal(sessionID pgtype.UUID, taskID, reason string) bool {
+	if m.relay == nil || taskID == "" {
+		return false
+	}
+	return m.relay.publish(relayFrame{
+		Kind:       relayKindSeal,
+		SealReason: reason,
+		TaskID:     taskID,
+		SessionID:  util.UUIDToString(sessionID),
+	}, taskID)
 }
 
 func (m *TypingIndicatorManager) sayAsPlainMessage(ctx context.Context, sessionID pgtype.UUID, addr roundAddress, taskID, text string) error {
