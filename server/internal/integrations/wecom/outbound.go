@@ -57,7 +57,7 @@ type outboundQueries interface {
 	// engine.TaskInputIsChannelIngested); they ask only for turns a delivery
 	// row already claimed, and this subscriber asks for every completion in
 	// the deployment. See the contract above taskOriginOf.
-	GetTaskChannelOrigin(ctx context.Context, id pgtype.UUID) (bool, error)
+	GetTaskChannelOrigin(ctx context.Context, id pgtype.UUID) (db.GetTaskChannelOriginRow, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
 	FindChannelBindingForMember(ctx context.Context, arg db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error)
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
@@ -259,7 +259,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 			// it is counted and warned about rather than left as a quiet
 			// return. See skipNoDeliveryRow.
 			gateCtx, cancelGate := context.WithTimeout(ctx, originLookupBudget)
-			origin, gateErr := o.taskOriginOf(gateCtx, taskID)
+			origin, gateErr := o.taskOriginOf(gateCtx, taskID, false)
 			cancelGate()
 			if gateErr != nil {
 				// Counted here rather than returned, because the caller would
@@ -301,7 +301,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// No separate budget on this one, unlike the branch above: here the read is
 	// the precondition for putting words in a room, and the handler's ten
 	// seconds were sized for exactly that reply.
-	origin, err := o.taskOriginOf(ctx, taskID)
+	origin, err := o.taskOriginOf(ctx, taskID, true)
 	if err != nil {
 		// Recorded rather than returned, same as the branch above and for the
 		// same reason — the caller would file a context error as an unconfirmed
@@ -440,9 +440,28 @@ const (
 // originated in WeCom, and its answer belongs only in Multica — in a group,
 // sending it would put a private answer in front of everyone.
 //
-// Fails closed: an origin that cannot be established is not delivered. What the
-// caller does about originTaskGone is the caller's, because only it knows
-// whether a reply was owed — see both call sites in processEvent.
+// THE UNANSWERABLE ROW IS THE CALLER'S TO DECIDE, and the two callers decide it
+// oppositely — which is why this takes failOpen rather than answering for them.
+//
+// A task whose input batch has no owner (chat_input_task_id NULL) reads as web
+// UI whatever it really was: the query's COALESCE falls back to the task's own
+// id, and the task owns no messages. For a retry clone of a LEGACY CHANNEL
+// parent that is wrong and silent — CreateRetryTask copies the NULL owner
+// verbatim and CopyChannelTaskDelivery hands the clone the parent's WeCom route
+// anyway, so the reply a room is waiting on leaves by the web UI's exit at
+// DEBUG, and not even the new WARN fires because the turn is filed as the most
+// ordinary event in the deployment.
+//
+//   - failOpen=true — a delivery row already said this turn is WeCom's. The
+//     route established the origin; the only open question is whether a human
+//     typed THIS turn in a browser, and an unanswerable one keeps the
+//     deliver-by-default behaviour #5645 shipped.
+//   - failOpen=false — no delivery row. Nothing established the turn was ever a
+//     channel's, so an unanswerable one stays quiet rather than tripping
+//     no_delivery_row on ordinary web traffic.
+//
+// What the caller does about originTaskGone is the caller's too, because only
+// it knows whether a reply was owed — see both call sites in processEvent.
 //
 // THE CALL-PATH CONTRACT. This read is SYNCHRONOUS ON THE COMPLETION RESPONSE.
 // Nothing about the bus makes it otherwise:
@@ -475,18 +494,24 @@ const (
 // acquisition cannot trip it, and it is the bound this repo already puts on
 // infrastructure calls that must not stall the realtime path
 // (internal/realtime/redis_relay.go:310 and its neighbours).
-func (o *Outbound) taskOriginOf(ctx context.Context, taskID pgtype.UUID) (taskOrigin, error) {
-	ingested, err := o.q.GetTaskChannelOrigin(ctx, taskID)
+func (o *Outbound) taskOriginOf(ctx context.Context, taskID pgtype.UUID, failOpen bool) (taskOrigin, error) {
+	row, err := o.q.GetTaskChannelOrigin(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return originTaskGone, nil
 		}
 		return originTaskGone, fmt.Errorf("wecom: classify task input origin: %w", err)
 	}
-	if !ingested {
-		return originWebUI, nil
+	if row.ChannelIngested {
+		return originChannel, nil
 	}
-	return originChannel, nil
+	if row.BatchOwnerUnknown && failOpen {
+		// No owner, so the verdict above is "no messages of its own" rather
+		// than "typed in a browser". On this branch a route already said the
+		// turn was WeCom's, so the absent verdict does not override it.
+		return originChannel, nil
+	}
+	return originWebUI, nil
 }
 
 func wecomBindingFromTaskDelivery(delivery db.ChannelTaskDelivery) db.ChannelChatSessionBinding {

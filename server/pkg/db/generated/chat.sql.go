@@ -1238,16 +1238,23 @@ func (q *Queries) GetPublicChatSessionInWorkspace(ctx context.Context, arg GetPu
 }
 
 const getTaskChannelOrigin = `-- name: GetTaskChannelOrigin :one
-SELECT EXISTS (
-    SELECT 1
-    FROM chat_message
-    WHERE task_id = COALESCE(task.chat_input_task_id, task.id)
-      AND role = 'user'
-      AND channel_ingested
-) AS channel_ingested
+SELECT
+    EXISTS (
+        SELECT 1
+        FROM chat_message
+        WHERE task_id = COALESCE(task.chat_input_task_id, task.id)
+          AND role = 'user'
+          AND channel_ingested
+    ) AS channel_ingested,
+    (task.chat_input_task_id IS NULL)::boolean AS batch_owner_unknown
 FROM agent_task_queue AS task
 WHERE task.id = $1
 `
+
+type GetTaskChannelOriginRow struct {
+	ChannelIngested   bool `json:"channel_ingested"`
+	BatchOwnerUnknown bool `json:"batch_owner_unknown"`
+}
 
 // The whole origin question for one completed task, in one round trip: is the
 // task row still there, and did its input arrive over a channel?
@@ -1282,13 +1289,35 @@ WHERE task.id = $1
 //     tasks NULL here, so "NULL means channel" would report every pre-158 web
 //     turn as a channel turn whose route went missing.
 //
+// batch_owner_unknown IS THE SECOND HALF, and the two callers need it because
+// they need OPPOSITE defaults for the same unanswerable row.
+//
+// A NULL owner means the COALESCE fell back to the task's own id, and a task
+// that owns no messages then reads as web UI whatever it really was. For a
+// retry clone of a legacy CHANNEL parent that is wrong and silent: CreateRetryTask
+// copies chat_input_task_id verbatim (agent.sql says so on purpose — legacy and
+// channel parents carry NULL and must stay NULL), CopyChannelTaskDelivery hands
+// the clone the parent's WeCom route unconditionally, and the reply a room is
+// waiting on then leaves by the web UI's exit at DEBUG.
+//
+// So the verdict alone cannot serve both branches:
+//   - delivery row present and it says wecom — the route already established
+//     the turn was WeCom's, and the only open question is whether a human typed
+//     this particular turn in a browser. Unanswerable there must FAIL OPEN, as
+//     it did before this query existed.
+//   - no delivery row — nothing has established the turn was ever a channel's.
+//     Unanswerable there must FAIL CLOSED, or an ordinary web turn trips the
+//     loudest line this adapter has.
+//
+// Whoever calls this decides; the query reports and does not choose.
+//
 // Plan: agent_task_queue_pkey for the row, idx_chat_message_input_owner for
 // the EXISTS. Neither side scans.
-func (q *Queries) GetTaskChannelOrigin(ctx context.Context, id pgtype.UUID) (bool, error) {
+func (q *Queries) GetTaskChannelOrigin(ctx context.Context, id pgtype.UUID) (GetTaskChannelOriginRow, error) {
 	row := q.db.QueryRow(ctx, getTaskChannelOrigin, id)
-	var channel_ingested bool
-	err := row.Scan(&channel_ingested)
-	return channel_ingested, err
+	var i GetTaskChannelOriginRow
+	err := row.Scan(&i.ChannelIngested, &i.BatchOwnerUnknown)
+	return i, err
 }
 
 const hasActiveChatTaskForSession = `-- name: HasActiveChatTaskForSession :one

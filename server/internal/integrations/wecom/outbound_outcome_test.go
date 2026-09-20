@@ -170,6 +170,34 @@ func TestDeliveredIsCounted(t *testing.T) {
 // processEvent instead of naming a skip reason, and the counters for the two
 // exits collapse to zero while the drop rate stays at zero either way — which
 // is exactly the indistinguishability this pins. Build and vet stay silent.
+// The auto-retry of a legacy channel turn. FailTask's clone inherits the
+// parent's NULL chat_input_task_id and owns no messages of its own, so the
+// channel_ingested verdict reads it as web UI — while CopyChannelTaskDelivery
+// has already handed it the parent's WeCom route. Delivering by the verdict
+// alone leaves the room waiting forever and logs the silence at DEBUG as the
+// most ordinary event in the deployment.
+//
+// The route is what settles it here: a delivery row exists, so this turn's
+// origin was established before the verdict was ever asked for, and an
+// unanswerable verdict does not get to overrule it.
+func TestTheAutoRetryOfALegacyChannelTurnStillAnswersTheRoom(t *testing.T) {
+	t.Parallel()
+	q := deliverableTurn(t)
+	q.channelIngested = askedInTheWebUI() // the clone owns no messages to stamp
+	q.batchOwnerUnknown = true            // ...because its batch has no owner at all
+	r := newOutcomeRig(t, q, true)
+
+	r.o.handleEvent(outcomeEvent())
+
+	if n := r.frames(); n != 1 {
+		t.Fatalf("frames = %d, want 1 — the room this retry belongs to is still waiting on it. log:\n%s",
+			n, r.logs.String())
+	}
+	if got := r.mx.get("outbound_skipped:" + string(skipOriginNotChannel)); got != 0 {
+		t.Errorf("skipped as a web turn %d times; a delivery row said otherwise", got)
+	}
+}
+
 func TestNonWecomSessionIsNotADrop(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -207,6 +235,20 @@ func TestNonWecomSessionIsNotADrop(t *testing.T) {
 			// operator has to act on.
 			name: "a channel turn with no delivery row", reason: skipNoDeliveryRow, actionable: true,
 			setup: func(q *fakeOutboundQueries) { q.sessionErr = pgx.ErrNoRows },
+		},
+		{
+			// The other half of the pair below: a batch with no owner, and no
+			// delivery row either. Nothing ever said this turn was a channel's,
+			// so the branch that would page an operator has to stay closed —
+			// every pre-MUL-4351 web turn in the deployment has this shape, and
+			// reading the absent verdict as "channel" would fire the loudest
+			// line in the log once per one of them.
+			name: "a legacy row with no batch owner and no delivery row", reason: skipOriginNotChannel,
+			setup: func(q *fakeOutboundQueries) {
+				q.channelIngested = askedInTheWebUI()
+				q.batchOwnerUnknown = true
+				q.sessionErr = pgx.ErrNoRows
+			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

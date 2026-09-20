@@ -81,6 +81,10 @@ type fakeOutboundQueries struct {
 	channelIngested *bool
 	originErr       error
 	originAskedFor  []string
+	// batchOwnerUnknown is chat_input_task_id IS NULL — the second fact the
+	// query reports, and the one that lets the delivery branch fail open on a
+	// row whose verdict cannot speak for it.
+	batchOwnerUnknown bool
 	// originHangs makes the gate wait for its context instead of answering,
 	// which is what an unavailable database looks like from in here.
 	// originBudget records how long the caller gave it.
@@ -133,26 +137,32 @@ func (f *fakeOutboundQueries) ListAttachmentsByChatMessage(context.Context, db.L
 	}
 	return f.attachments, f.attachmentsErr
 }
-func (f *fakeOutboundQueries) GetTaskChannelOrigin(ctx context.Context, id pgtype.UUID) (bool, error) {
+func (f *fakeOutboundQueries) GetTaskChannelOrigin(ctx context.Context, id pgtype.UUID) (db.GetTaskChannelOriginRow, error) {
 	f.originAskedFor = append(f.originAskedFor, util.UUIDToString(id))
 	if deadline, ok := ctx.Deadline(); ok {
 		f.originBudget = time.Until(deadline)
 	}
 	if f.originHangs {
 		<-ctx.Done()
-		return false, ctx.Err()
+		return db.GetTaskChannelOriginRow{}, ctx.Err()
 	}
 	if f.originErr != nil {
-		return false, f.originErr
+		return db.GetTaskChannelOriginRow{}, f.originErr
 	}
 	if _, filed := f.tasks[util.UUIDToString(id)]; !filed {
-		return false, pgx.ErrNoRows
+		return db.GetTaskChannelOriginRow{}, pgx.ErrNoRows
 	}
 	if f.channelIngested == nil {
 		f.failStampNotSet(util.UUIDToString(id))
-		return false, nil // unreachable: failStampNotSet ends the test
+		return db.GetTaskChannelOriginRow{}, nil // unreachable: failStampNotSet ends the test
 	}
-	return *f.channelIngested, nil
+	return db.GetTaskChannelOriginRow{
+		ChannelIngested: *f.channelIngested,
+		// batchOwnerUnknown mirrors what the rig filed: a clone filed through
+		// fileRetryClone carries its parent's owner, anything else owns its own
+		// batch. A rig that files neither is describing a legacy row.
+		BatchOwnerUnknown: f.batchOwnerUnknown,
+	}, nil
 }
 
 // failStampNotSet ends the test naming what the rig left out, instead of
