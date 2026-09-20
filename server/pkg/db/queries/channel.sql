@@ -85,6 +85,14 @@ WHERE id = sqlc.arg('id')
   AND workspace_id = sqlc.arg('workspace_id')
   AND channel_type = sqlc.arg('channel_type');
 
+-- name: GetActiveChannelInstallationForAgent :one
+SELECT * FROM channel_installation
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND agent_id = sqlc.arg('agent_id')
+  AND channel_type = sqlc.arg('channel_type')
+  AND status = 'active'
+LIMIT 1;
+
 -- name: GetChannelInstallationByAppID :one
 -- Inbound routing. The platform event carries only the channel's app
 -- identifier (Feishu app_id); the dispatcher's installation resolver routes

@@ -99,6 +99,20 @@ func (s *ChannelStore) GetLarkInstallationInWorkspace(ctx context.Context, arg G
 	return installationFromRow(row)
 }
 
+// GetActiveLarkInstallationForAgent resolves only the active Feishu installation
+// owned by the exact workspace and Agent pair.
+func (s *ChannelStore) GetActiveLarkInstallationForAgent(ctx context.Context, workspaceID, agentID pgtype.UUID) (Installation, error) {
+	row, err := s.Queries.GetActiveChannelInstallationForAgent(ctx, db.GetActiveChannelInstallationForAgentParams{
+		WorkspaceID: workspaceID,
+		AgentID:     agentID,
+		ChannelType: channelTypeFeishu,
+	})
+	if err != nil {
+		return Installation{}, err
+	}
+	return installationFromRow(row)
+}
+
 func (s *ChannelStore) ListLarkInstallationsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]Installation, error) {
 	rows, err := s.Queries.ListChannelInstallationsByWorkspace(ctx, db.ListChannelInstallationsByWorkspaceParams{
 		WorkspaceID: workspaceID,
