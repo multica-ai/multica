@@ -53,6 +53,15 @@ type deadlineFlakyConn struct {
 	attempts int
 	// failOn reports whether the n-th (1-based) write deadline is refused.
 	failOn func(n int) bool
+
+	// refuseFromSend and swallowAckFromSend act on aibot_send_msg frames,
+	// counted 1-based, so a test can refuse or lose the verdict on the SECOND
+	// piece of a split answer after the first one landed. Unlike failOn these
+	// are failures the peer stated or swallowed, not ones raised before the
+	// write — which is what makes the send partial rather than unsent.
+	refuseFromSend     int
+	swallowAckFromSend int
+	sends              int
 }
 
 func (c *deadlineFlakyConn) newSender() *wsSender {
@@ -87,13 +96,21 @@ func (c *deadlineFlakyConn) WriteMessage(_ int, data []byte) error {
 	}
 	_ = json.Unmarshal(env.Body, &body)
 	c.mu.Lock()
-	if env.Cmd == cmdSendMsg && body.MsgType == "markdown" {
-		c.texts = append(c.texts, body.Markdown.Content)
+	code, msg, swallow := 0, "", false
+	if env.Cmd == cmdSendMsg {
+		c.sends++
+		if c.refuseFromSend > 0 && c.sends >= c.refuseFromSend {
+			code, msg = 45002, "content exceed max length"
+		}
+		swallow = c.swallowAckFromSend > 0 && c.sends >= c.swallowAckFromSend
+		if code == 0 && body.MsgType == "markdown" {
+			c.texts = append(c.texts, body.Markdown.Content)
+		}
 	}
 	s := c.sender
 	c.mu.Unlock()
-	if s != nil {
-		s.routeResponse(frameEnvelope{Headers: frameHeaders{ReqID: env.Headers.ReqID}})
+	if s != nil && !swallow {
+		s.routeResponse(frameEnvelope{Headers: frameHeaders{ReqID: env.Headers.ReqID}, ErrCode: code, ErrMsg: msg})
 	}
 	return nil
 }
@@ -146,6 +163,14 @@ func newRelaySendRig(t *testing.T, failOn func(n int) bool) *relaySendRig {
 // claim gate takes part in.
 func newRelaySendRigWithDedupe(t *testing.T, failOn func(n int) bool, dedupe DedupeStore) *relaySendRig {
 	t.Helper()
+	return newRelaySendRigWithConfig(t, failOn, dedupe, relayRetryConfig)
+}
+
+// newRelaySendRigWithConfig is the rig with the chain sized by the test, for
+// the ones that have to watch a whole re-offer chain run against something
+// slower than a millisecond.
+func newRelaySendRigWithConfig(t *testing.T, failOn func(n int) bool, dedupe DedupeStore, cfg RelayConfig) *relaySendRig {
+	t.Helper()
 	reg := newSendersRegistry()
 	instID := mustTestUUID(t)
 	conn := &deadlineFlakyConn{failOn: failOn}
@@ -157,7 +182,7 @@ func newRelaySendRigWithDedupe(t *testing.T, failOn func(n int) bool, dedupe Ded
 
 	// No dedupe store: that is the single-replica claim gate, and it leaves the
 	// retry chain — the thing under test — exactly as it is in production.
-	router := NewRelayOutbound(&fanoutRelay{}, dedupe, relayRetryConfig, testLogger())
+	router := NewRelayOutbound(&fanoutRelay{}, dedupe, cfg, testLogger())
 	router.SetMetrics(mx)
 	router.Attach(o)
 	ctx, cancel := context.WithCancel(context.Background())

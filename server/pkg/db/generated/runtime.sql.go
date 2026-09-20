@@ -1735,9 +1735,9 @@ type UpsertAgentRuntimeWithProfileRow struct {
 // command_name on PATH and is registering an instance of it. The arbiter is the
 // partial unique index from migration 120 (WHERE profile_id IS NOT NULL), so a
 // single daemon can host the built-in provider AND any number of custom
-// profiles of the same protocol family. provider stays the protocol family so
-// task routing (agent.New(provider)) is unchanged; profile_id is the stable
-// identity. (xmax = 0) AS inserted mirrors UpsertAgentRuntime.
+// profiles of the same protocol family. provider carries the base runtime
+// identity so ResolveBackend applies its descriptor; profile_id preserves
+// custom-profile provenance. (xmax = 0) AS inserted mirrors UpsertAgentRuntime.
 func (q *Queries) UpsertAgentRuntimeWithProfile(ctx context.Context, arg UpsertAgentRuntimeWithProfileParams) (UpsertAgentRuntimeWithProfileRow, error) {
 	row := q.db.QueryRow(ctx, upsertAgentRuntimeWithProfile,
 		arg.WorkspaceID,

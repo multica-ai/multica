@@ -1101,3 +1101,11 @@ On the API, both endpoints accept `?include=content` and `?include=metadata`.
 A request that sends neither still gets `content`, on both endpoints, so a
 server upgrade never changes what an un-upgraded client receives — it is the
 CLI that asks for the smaller shape.
+
+### Custom runtime compatibility targets
+
+Create custom Oh-My-Pi profiles with `multica runtime profile create --runtime-type omp --command-name omp --display-name "Custom Oh-My-Pi"`.
+The immutable `runtime_type` selects model discovery, skills paths, and launch behavior;
+the server derives `protocol_family` (`pi` for `omp`). Custom command/path overrides and
+fixed arguments still apply, and the runtime retains its custom-profile provenance.
+Existing profiles and the legacy `--protocol-family` flag retain their original target.

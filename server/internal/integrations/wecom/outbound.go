@@ -337,6 +337,12 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// and a round with none goes down the plain path.
 	t, _ := o.rounds().take(ctx, sessionID, byTask(taskIDFromEvent(e)))
 	said, err := o.deliverAnswer(ctx, e, taskID, t, content, carriesFiles)
+	if errors.Is(err, errOutcomeRecorded) {
+		// The branch that tried to speak has already filed its own outcome
+		// through recordSend. Counting it here as well is the double count
+		// this sentinel exists to make impossible.
+		return nil
+	}
 	if errors.Is(err, errNothingToSay) {
 		// Counted by whichever branch declined to speak — each one names its
 		// own reason, and a blanket count here would file a revoked
@@ -595,13 +601,30 @@ func (o *Outbound) sendAsMessage(ctx context.Context, e events.Event, taskID pgt
 	// Words first — and only when there are any. An empty completion reaches
 	// here only because a file is bound to the turn, and an empty markdown
 	// message ahead of that file would be noise the user has to scroll past.
+	//
+	// Empty is hasVisibleChar's sense of it, not `!= ""`. A completion of "\n"
+	// is a bubble with nothing in it on the reader's screen, and counting it as
+	// the words that answered the turn also tells the file below it that the
+	// reply has already been accounted for.
 	if !hasVisibleChar(content) {
 		return answerOutcome{addr: addr}, nil
 	}
-	if err := sender.sendTextCtx(ctx, addr.ChatID, addr.ChatType, content); err != nil {
-		return answerOutcome{addr: addr}, err
+	err = sender.sendTextCtx(ctx, addr.ChatID, addr.ChatType, content)
+	// Recorded here rather than returned, so this send and the relay's go
+	// through the one mapping in recordSend (#8344).
+	o.recordSend(ctx, e.ChatSessionID, e.Type, err)
+	if err != nil && !errors.Is(err, errPartiallySent) {
+		// Nothing of the answer landed. The files are not an answer on their
+		// own, so the turn ends here.
+		//
+		// errOutcomeRecorded, NOT err: recordSend above already filed this
+		// send, and handleEvent counts every error processEvent returns. The
+		// same refusal would land on the counters twice — measured, once, as
+		// platform_refused = 2.
+		return answerOutcome{addr: addr}, errOutcomeRecorded
 	}
-	o.delivered()
+	// errPartiallySent still spoke: part of the answer is on the reader's
+	// screen, and the files below it are not the reply.
 	return answerOutcome{addr: addr, spoke: true}, nil
 }
 

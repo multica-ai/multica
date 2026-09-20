@@ -381,8 +381,8 @@ func TestRegisterRuntimes_SkipsUnsupportedProfileFamily(t *testing.T) {
 		t.Errorf("failure command_name = %v, want gemini", failure["command_name"])
 	}
 	reason, _ := failure["reason"].(string)
-	if !strings.Contains(reason, "unsupported protocol_family: gemini") {
-		t.Errorf("failure reason = %q, want unsupported protocol_family: gemini", reason)
+	if !strings.Contains(reason, "unsupported runtime_type: gemini") {
+		t.Errorf("failure reason = %q, want unsupported runtime_type: gemini", reason)
 	}
 }
 
@@ -517,5 +517,28 @@ func TestCustomCommandPathForRuntime(t *testing.T) {
 	d.runtimeIndex["rt-unresolved"] = Runtime{ID: "rt-unresolved", Provider: "codex", ProfileID: "prof-missing"}
 	if spec, ok := d.customProfileLaunchForRuntime("rt-unresolved"); ok || spec.path != "" {
 		t.Errorf("unresolved profile: got (%+v, %v), want empty false", spec, ok)
+	}
+}
+
+func TestRegisterRuntimes_ProfileCompatibilityTarget(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	stubLookPath(t, map[string]string{"wrapper": "/opt/bin/wrapper"})
+	for _, target := range []string{"", "pi", "omp"} {
+		t.Run("target="+target, func(t *testing.T) {
+			fx := newProfileRegisterFixture(t, []RuntimeProfile{{ID: "prof-1", ProtocolFamily: "pi", RuntimeType: target, CommandName: "wrapper", FixedArgs: []string{"launch"}, Enabled: true}}, http.StatusOK)
+			fx.daemon.cfg.Agents = map[string]AgentEntry{}
+			resp, _, _, err := fx.daemon.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
+			want := target
+			if want == "" {
+				want = "pi"
+			}
+			if err != nil || len(resp.Runtimes) != 1 || resp.Runtimes[0].Provider != want || resp.Runtimes[0].ProfileID != "prof-1" {
+				t.Fatalf("lost compatibility target or provenance: %+v, %v", resp, err)
+			}
+			spec := fx.daemon.profileLaunchSpecs["prof-1"]
+			if spec.path != "/opt/bin/wrapper" || strings.Join(spec.fixedArgs, " ") != "launch" {
+				t.Fatalf("lost custom command: %+v", spec)
+			}
+		})
 	}
 }

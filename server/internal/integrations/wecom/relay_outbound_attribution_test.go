@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // ---------------------------------------------------------------------------
@@ -145,19 +147,127 @@ func TestRelayOutcomeGrace_CoversEveryStoreRoundTripTheChainCanMake(t *testing.T
 	// Worst case the chain can actually take. TWO store round trips per
 	// offer, because every offer ends in a Release or a Settle on the same
 	// budget as its Claim; the finished offer's settle retries on top; and
-	// the delivery itself. Counting one round trip per offer left up to half
-	// the store time out of the arithmetic, and the absent state is not
-	// fenced — so a grace that expires early is recorded as a loss while a
-	// later offer can still claim, deliver and settle.
+	// a DELIVERY BUDGET PER OFFER, because perform hands each claimed
+	// delivery a budget of its own (relay_outbound.go) and the failure that
+	// spends the whole of one — the chat's turn never coming — is
+	// provablyNotSent, so it releases the claim and the frame is offered
+	// again. Counting the delivery once measured a chain that cannot happen:
+	// one offer's delivery plus every offer's backoff. Counting one round
+	// trip per offer left up to half the store time out on the same
+	// arithmetic, and the absent state is not fenced — so a grace that
+	// expires early is recorded as a loss while a later offer can still
+	// claim, deliver and settle.
 	worst := chain + budget*time.Duration(2*offers) +
 		time.Duration(claimSettleAttempts-1)*(budget+r.settleRetryBackoff()) +
-		r.cfg.deliveryBudget()
+		r.cfg.deliveryBudget()*time.Duration(offers)
 
 	if r.outcomeGrace() < worst {
 		t.Fatalf("outcome grace %s is shorter than the %s a fully timed-out chain can take "+
-			"(%d offers × 2 × %s of store round trips + %s of backoff + %d settle retries + %s of delivery) — "+
+			"(%d offers × 2 × %s of store round trips + %s of backoff + %d settle retries + %d × %s of delivery) — "+
 			"the watch would call a reply lost while it was still being retried, and the retry would then deliver it",
-			r.outcomeGrace(), worst, offers, budget, chain, claimSettleAttempts-1, r.cfg.deliveryBudget())
+			r.outcomeGrace(), worst, offers, budget, chain, claimSettleAttempts-1, offers, r.cfg.deliveryBudget())
+	}
+}
+
+// graceObserverStore is a claim store that answers like sharedDedupe and
+// records HOW FAR THE CHAIN HAD GOT when the outcome watch first resolved the
+// reply. One Claim per offer, so the count is the offer the watcher landed on.
+type graceObserverStore struct {
+	*sharedDedupe
+	budget time.Duration
+
+	mu       sync.Mutex
+	resolved bool
+	claims   int
+}
+
+func (g *graceObserverStore) ClaimBudget() time.Duration { return g.budget }
+
+func (g *graceObserverStore) Resolve(ctx context.Context, key string) (claimState, error) {
+	g.mu.Lock()
+	if !g.resolved {
+		g.resolved, g.claims = true, g.sharedDedupe.claimCount()
+	}
+	g.mu.Unlock()
+	return g.sharedDedupe.Resolve(ctx, key)
+}
+
+func (g *graceObserverStore) didResolve() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.resolved
+}
+
+func (g *graceObserverStore) claimsWhenResolved() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.claims
+}
+
+// The arithmetic above is only as good as its model of what an offer costs, so
+// this checks it against the thing itself: a chat nobody ever gives up, a
+// dispatcher re-offering the frame across its whole chain, and the publisher's
+// own watcher deciding when the reply is lost.
+//
+// A busy chat is the case that makes every offer expensive. sendTextCtx waits
+// for the chat's turn before it builds anything, so an offer against a held
+// lock spends its ENTIRE DeliveryBudget and comes back errChatBusy — provably
+// unsent, so perform releases the claim and the dispatcher offers the frame
+// again with its own fresh budget. Eight offers, eight budgets.
+//
+// What must not happen is the watcher resolving mid-chain. Resolve fences the
+// key as lost in the same operation, so a holder that comes back records
+// nothing while the counter already says the reply was dropped — the "one
+// reply counted as delivered and dropped at the same time" outcome
+// deliverRelayed's comment says this package no longer has.
+//
+// REVERSE VERIFICATION: count the delivery once in outcomeGrace and this fails
+// with the watch resolving around the fifth of eight offers.
+func TestRelayOutcomeGrace_OutlastsAChainThatSpendsADeliveryBudgetPerOffer(t *testing.T) {
+	t.Parallel()
+	store := &graceObserverStore{sharedDedupe: newSharedDedupe(), budget: 20 * time.Millisecond}
+
+	instID := mustTestUUID(t)
+	conn := &recordingConn{}
+	sender := conn.autoAck(newWSSender(conn, testLogger()))
+	// Somebody else is mid-answer to this chat and never finishes.
+	release, err := sender.chats.acquire(context.Background(), "CHAT_1")
+	if err != nil {
+		t.Fatalf("taking the chat's turn: %v", err)
+	}
+	defer release()
+	reg := newSendersRegistry()
+	reg.set(instID, sender)
+
+	relay := &fanoutRelay{}
+	router := NewRelayOutbound(relay, store, RelayConfig{
+		Shards:         1,
+		DeliveryBudget: 100 * time.Millisecond,
+		LeaseSettle:    40 * time.Millisecond,
+		RetryBackoff:   5 * time.Millisecond,
+	}, testLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() { cancel(); router.Wait() })
+	router.Start(ctx)
+	router.Attach(NewOutbound(nil, reg, nil, testLogger()))
+	relay.register(router)
+
+	offers := len(router.retryPlan) + 1
+	router.publish(relayFrame{
+		Kind: relayKindReply, InstallationID: util.UUIDToString(instID),
+		ChatID: "CHAT_1", ChatType: chatTypeSingleInt, Content: "答案",
+		SessionID: testSessionID,
+	}, "ev-busy-chat")
+
+	waitLong(t, "the outcome watch to resolve the routed reply", store.didResolve)
+	if got := store.claimsWhenResolved(); got < offers {
+		t.Fatalf("the watch resolved the reply on offer %d of %d — the chain was still running, "+
+			"and Resolve fences the key, so a later offer that delivered would have recorded nothing "+
+			"while the loss was already counted (grace %s, %d offers × %s of delivery alone)",
+			got, offers, router.outcomeGrace(), offers, router.cfg.deliveryBudget())
+	}
+	if got := conn.sendFrames(); len(got) != 0 {
+		t.Fatalf("%d frame(s) reached the wire while the chat's turn was held by somebody else", len(got))
 	}
 }
 
