@@ -487,7 +487,11 @@ func TestUpdateRuntimeProfile_RejectsIdentityChange(t *testing.T) {
 	}
 	id := insertRuntimeProfileFixture(t, context.Background(), "Immutable Pi", "pi", "wrapper")
 	for _, field := range []string{"runtime_type", "protocol_family"} {
-		req := withURLParam(withURLParam(newRequest("PATCH", "/", map[string]any{field: "omp"}), "id", testWorkspaceID), "profileId", id)
+		// withURLParams, not two nested withURLParam calls: the singular helper
+		// installs a fresh chi route context each time, so the outer call would
+		// drop "id" and the handler would reject on workspace id before ever
+		// reaching the immutability check this test exists for.
+		req := withURLParams(newRequest("PATCH", "/", map[string]any{field: "omp"}), "id", testWorkspaceID, "profileId", id)
 		w := httptest.NewRecorder()
 		testHandler.UpdateRuntimeProfile(w, req)
 		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "immutable") {
