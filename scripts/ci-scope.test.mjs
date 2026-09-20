@@ -162,6 +162,26 @@ for (const gate of ["frontend", "backend"]) {
   });
 }
 
+test("backend validates migration names on the merge candidate before building or migrating", () => {
+  const backend = jobs["backend-tests"];
+  const steps = backend.split(/^      - /m).slice(1);
+  const checkout = steps.find((step) => step.includes("uses: actions/checkout@"));
+  assert.ok(checkout, "backend must check out the candidate tree");
+  // actions/checkout defaults to refs/pull/<number>/merge for pull_request.
+  // A head-ref override would miss collisions introduced by the base branch.
+  assert.doesNotMatch(checkout, /^\s+ref:/m);
+  const lintIndex = steps.findIndex((step) => step.startsWith("name: Validate migration filenames\n"));
+  assert.ok(lintIndex >= 0, "migration lint must run before migration execution");
+  const lint = steps[lintIndex];
+  assert.match(lint, /^        working-directory: server$/m);
+  assert.match(lint, /^        run: go test \.\/internal\/migrations -run '\^TestMigration\(NumericPrefixesAreUnique\|FilesHaveMatchingDirections\)\$' -count=1$/m);
+  assert.doesNotMatch(lint, /^\s+(if|continue-on-error):/m);
+  for (const name of ["Build", "Run migrations", "Test"]) {
+    const index = steps.findIndex((step) => step.startsWith(`name: ${name}\n`));
+    assert.ok(index > lintIndex, `${name} must follow migration lint`);
+  }
+});
+
 test("the backend gate owns the three-platform installer matrix", () => {
   assert.equal(productionMapping("backend").installer, "installer");
   assert.match(jobs.installer, /^        os: \[ubuntu-latest, macos-latest, windows-latest\]$/m);
