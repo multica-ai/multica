@@ -30,5 +30,25 @@
     "description": "This workspace doesn't exist or you don't have access.",
     "go_to_workspaces": "Go to my workspaces",
     "sign_in_different": "Sign in as a different user"
+  },
+  "import": {
+    "action": "Import",
+    "title": "Import from workspace",
+    "source_label": "Source workspace",
+    "source_placeholder": "Choose a workspace",
+    "runtime_label": "Runtime for imported agents",
+    "runtime_placeholder": "Choose a runtime",
+    "runtime_empty": "Add a runtime in this workspace first.",
+    "loading": "Loading…",
+    "agents_section": "Agents",
+    "squads_section": "Squads",
+    "empty_source": "Nothing to import from that workspace.",
+    "hint": "Matching names are skipped. Environment variables and MCP config are not copied.",
+    "cancel": "Cancel",
+    "submit": "Import",
+    "submitting": "Importing…",
+    "success": "Imported {{agents}} agents and {{squads}} squads.",
+    "success_partial": "Imported {{agents}} agents and {{squads}} squads. Skipped {{skipped}}.",
+    "failed": "Import failed"
   }
 }

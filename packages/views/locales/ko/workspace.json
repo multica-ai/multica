@@ -30,5 +30,25 @@
     "description": "존재하지 않는 워크스페이스이거나 접근 권한이 없습니다.",
     "go_to_workspaces": "내 워크스페이스로 이동",
     "sign_in_different": "다른 계정으로 로그인"
+  },
+  "import": {
+    "action": "가져오기",
+    "title": "다른 워크스페이스에서 가져오기",
+    "source_label": "원본 워크스페이스",
+    "source_placeholder": "워크스페이스 선택",
+    "runtime_label": "가져온 에이전트가 쓸 런타임",
+    "runtime_placeholder": "런타임 선택",
+    "runtime_empty": "이 워크스페이스에 런타임을 먼저 추가하세요.",
+    "loading": "불러오는 중…",
+    "agents_section": "에이전트",
+    "squads_section": "스쿼드",
+    "empty_source": "해당 워크스페이스에서 가져올 항목이 없습니다.",
+    "hint": "같은 이름은 건너뜁니다. 환경 변수와 MCP 설정은 복사되지 않습니다.",
+    "cancel": "취소",
+    "submit": "가져오기",
+    "submitting": "가져오는 중…",
+    "success": "에이전트 {{agents}}개, 스쿼드 {{squads}}개를 가져왔습니다.",
+    "success_partial": "에이전트 {{agents}}개, 스쿼드 {{squads}}개를 가져왔고 {{skipped}}개를 건너뛰었습니다.",
+    "failed": "가져오기에 실패했습니다"
   }
 }

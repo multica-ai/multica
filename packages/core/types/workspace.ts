@@ -19,6 +19,54 @@ export interface Workspace {
   updated_at: string;
 }
 
+export interface WorkspaceImportPreviewAgent {
+  id: string;
+  name: string;
+  description: string;
+  model: string;
+  skill_names: string[];
+}
+
+export interface WorkspaceImportPreviewSquad {
+  id: string;
+  name: string;
+  description: string;
+  leader_id: string;
+  leader_name: string;
+  member_count: number;
+  agent_member_ids: string[];
+}
+
+export interface WorkspaceImportPreview {
+  source_workspace_id: string;
+  source_workspace_name: string;
+  agents: WorkspaceImportPreviewAgent[];
+  squads: WorkspaceImportPreviewSquad[];
+}
+
+export type WorkspaceImportItemStatus = "created" | "skipped" | "reused";
+
+export interface WorkspaceImportItemResult {
+  source_id: string;
+  id?: string;
+  name: string;
+  status: WorkspaceImportItemStatus;
+}
+
+export interface WorkspaceImportResult {
+  agents: WorkspaceImportItemResult[];
+  squads: WorkspaceImportItemResult[];
+}
+
+export interface WorkspaceImportRequest {
+  source_workspace_id: string;
+  runtime_id: string;
+  agent_ids?: string[];
+  squad_ids?: string[];
+  import_all?: boolean;
+  on_conflict?: "skip" | "rename";
+}
+
 /**
  * One MCP server in the workspace's library.
  *

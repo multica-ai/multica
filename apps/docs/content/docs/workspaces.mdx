@@ -38,6 +38,17 @@ The creator automatically becomes an `owner`.
 After the issue prefix changes, every issue immediately switches to the new number (`MUL-5` becomes `NEW-5`), but the old numbers in PRs, branch names, and chat history do not update.
 </Callout>
 
+## Import agents and squads
+
+A new workspace starts empty. If you already configured agents and squads in another workspace you belong to, import them instead of recreating them.
+
+On the Agents or Squads page, choose **Import**, pick the source workspace, pick a runtime in the current workspace, and confirm. The copy includes names, instructions, access, conversation starters, and squad rosters. Environment variables, MCP config, and other secrets are not copied. Skills attach only when a skill of the same name already exists here. Names that already exist are skipped.
+
+```bash
+multica workspace import --from other-team --runtime-id <runtime-id>
+multica workspace import --from other-team --preview
+```
+
 ## Switch and leave
 
 One account can join multiple workspaces. Switching only changes what you are currently viewing; it moves no data.

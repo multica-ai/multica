@@ -51,6 +51,10 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
+vi.mock("../../workspace/import-from-workspace-dialog", () => ({
+  ImportFromWorkspaceAction: () => null,
+}));
+
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey?: readonly unknown[] }) => {
     const key = options.queryKey?.[0];

@@ -30,5 +30,25 @@
     "description": "该工作区不存在，或你没有访问权限。",
     "go_to_workspaces": "前往我的工作区",
     "sign_in_different": "使用其他账号登录"
+  },
+  "import": {
+    "action": "导入",
+    "title": "从其他工作区导入",
+    "source_label": "来源工作区",
+    "source_placeholder": "选择工作区",
+    "runtime_label": "导入后使用的运行时",
+    "runtime_placeholder": "选择运行时",
+    "runtime_empty": "请先在当前工作区添加运行时。",
+    "loading": "加载中…",
+    "agents_section": "智能体",
+    "squads_section": "小队",
+    "empty_source": "该工作区没有可导入的智能体或小队。",
+    "hint": "重名项会跳过。环境变量和 MCP 配置不会复制。",
+    "cancel": "取消",
+    "submit": "导入",
+    "submitting": "导入中…",
+    "success": "已导入 {{agents}} 个智能体、{{squads}} 个小队。",
+    "success_partial": "已导入 {{agents}} 个智能体、{{squads}} 个小队，跳过 {{skipped}} 项。",
+    "failed": "导入失败"
   }
 }

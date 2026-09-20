@@ -21,12 +21,21 @@ export const workspaceKeys = {
   skills: (wsId: string) => ["workspaces", wsId, "skills"] as const,
   assigneeFrequency: (wsId: string) => ["workspaces", wsId, "assignee-frequency"] as const,
   mcpServers: (wsId: string) => ["workspaces", wsId, "mcp-servers"] as const,
+  importPreview: (targetId: string, sourceId: string) =>
+    ["workspaces", targetId, "import-preview", sourceId] as const,
 };
 
 export function workspaceListOptions() {
   return queryOptions({
     queryKey: workspaceKeys.list(),
     queryFn: () => api.listWorkspaces(),
+  });
+}
+
+export function workspaceImportPreviewOptions(targetId: string, sourceId: string) {
+  return queryOptions({
+    queryKey: workspaceKeys.importPreview(targetId, sourceId),
+    queryFn: () => api.previewWorkspaceImport(targetId, sourceId),
   });
 }
 
