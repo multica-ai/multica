@@ -63,6 +63,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     plugins: [
       "expo-router",
       "expo-secure-store",
+      [
+        "expo-notifications",
+        { icon: "./assets/icon.png", color: "#000000" },
+      ],
       "@react-native-community/datetimepicker",
       "react-native-enriched-markdown",
       [
@@ -87,6 +91,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
       ],
     ],
-    extra: { APP_ENV: env },
+    extra: {
+      APP_ENV: env,
+      eas: process.env.EXPO_PUBLIC_EAS_PROJECT_ID
+        ? { projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID }
+        : undefined,
+    },
   };
 };

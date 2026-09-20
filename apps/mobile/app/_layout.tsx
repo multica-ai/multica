@@ -19,6 +19,7 @@ import { SessionActivityBoundary } from "@/components/auth/session-activity-boun
 import { LightboxProvider, prewarmHighlighter } from "@/lib/markdown";
 import { NAV_THEME } from "@/lib/theme";
 import { useColorScheme } from "@/lib/use-color-scheme";
+import { PushNotifications } from "@/lib/push-notifications";
 
 // Kick off Shiki highlighter init at module load — fires once per process,
 // finishes before the user navigates to any screen with a code block. If
@@ -84,6 +85,7 @@ export default function RootLayout() {
           <QueryClientProvider client={queryClient}>
             <ThemeProvider value={NAV_THEME[colorScheme]}>
               <AuthInitializer>
+                <PushNotifications />
                 <SessionActivityBoundary>
                 <LightboxProvider>
                   <StatusBar style={isDarkColorScheme ? "light" : "dark"} />

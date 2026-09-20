@@ -215,11 +215,15 @@ class ApiClient {
 
   private async fetch<T>(
     path: string,
-    init: RequestInit & { signal?: AbortSignal } = {},
+    init: RequestInit & {
+      signal?: AbortSignal;
+      suppressUnauthorized?: boolean;
+    } = {},
   ): Promise<T> {
     const rid = createRequestId();
     const start = Date.now();
     const method = init.method ?? "GET";
+    const { suppressUnauthorized = false, ...requestInit } = init;
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -266,7 +270,7 @@ class ApiClient {
     let res: Response;
     try {
       res = await fetch(`${API_URL}${path}`, {
-        ...init,
+        ...requestInit,
         signal: controller.signal,
         headers,
       });
@@ -300,7 +304,7 @@ class ApiClient {
       // 401 sign-out hook: invoke once, let the platform layer (auth-store)
       // clear the token + navigate. Subsequent requests in flight will also
       // 401 and re-enter here, so the callback must be idempotent.
-      if (res.status === 401) {
+      if (res.status === 401 && !suppressUnauthorized) {
         this.options.onUnauthorized?.();
       }
 
@@ -454,6 +458,21 @@ class ApiClient {
       { method: "PATCH", body: JSON.stringify(data) },
       { endpoint: "updateMe" },
     );
+  }
+
+  async registerPushDevice(expoPushToken: string): Promise<void> {
+    await this.fetch<unknown>("/api/push-devices", {
+      method: "PUT",
+      body: JSON.stringify({ expo_push_token: expoPushToken, platform: "ios" }),
+    });
+  }
+
+  async unregisterPushDevice(expoPushToken: string): Promise<void> {
+    await this.fetch<void>("/api/push-devices", {
+      method: "DELETE",
+      body: JSON.stringify({ expo_push_token: expoPushToken, platform: "ios" }),
+      suppressUnauthorized: true,
+    });
   }
 
   // --- Notification preferences ---

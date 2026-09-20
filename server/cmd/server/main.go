@@ -27,6 +27,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/maintenance"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/profiling"
+	"github.com/multica-ai/multica/server/internal/push"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/scheduler"
 	"github.com/multica-ai/multica/server/internal/selfhosttelemetry"
@@ -596,6 +597,7 @@ func main() {
 	registerSubscriberListeners(bus, pool)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
+	registerPushNotificationListeners(bus, queries, push.NewExpoClientFromEnv())
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server

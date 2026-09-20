@@ -1561,6 +1561,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// string (Desktop, mobile). Browsers get theirs re-issued inline by
 		// middleware.Auth and never call this (MUL-7436).
 		r.Post("/api/auth/refresh", h.RefreshSession)
+		r.Route("/api/push-devices", func(r chi.Router) {
+			r.Use(handler.RequireHumanActor)
+			r.Put("/", h.RegisterPushDevice)
+			r.Delete("/", h.UnregisterPushDevice)
+		})
 		r.Post("/api/upload-file", h.UploadFile)
 		r.Post("/api/feedback", h.CreateFeedback)
 		r.With(handler.RequireHumanActor).Post("/api/client-usage", h.UpsertClientUsage)

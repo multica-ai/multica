@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS push_device_user_idx;
