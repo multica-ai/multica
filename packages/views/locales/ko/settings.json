@@ -633,7 +633,7 @@
       },
       "agent_activity": {
         "label": "에이전트 활동",
-        "description": "에이전트 실행이 완료되거나 실패할 때"
+        "description": "에이전트 실행이 실패할 때"
       }
     },
     "system": {

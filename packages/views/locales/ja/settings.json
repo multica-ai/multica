@@ -633,7 +633,7 @@
       },
       "agent_activity": {
         "label": "エージェントのアクティビティ",
-        "description": "エージェントの実行が完了または失敗したとき"
+        "description": "エージェントの実行が失敗したとき"
       }
     },
     "system": {
