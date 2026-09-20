@@ -9,12 +9,16 @@ import {
 } from "@multica/ui/components/ui/hover-card";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import type { AgentTask } from "@multica/core/types";
+import type { AgentTask, IssueStatusCategory } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import type { AvatarSize } from "@multica/ui/lib/avatar-size";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { AgentActivityHoverContent } from "../../agents/components/agent-activity-hover-content";
-import { selectIssueTasks, type IssueTaskGroups } from "../surface/activity";
+import {
+  deriveIssueExecutionState,
+  selectIssueTasks,
+  type IssueTaskGroups,
+} from "../surface/activity";
 import { useT } from "../../i18n";
 
 const EMPTY_GROUPS: IssueTaskGroups = { running: [], queued: [] };
@@ -47,6 +51,8 @@ interface IssueAgentActivityIndicatorProps {
   // Whether hovering opens the activity card. Opt OUT where the card's only
   // incremental information is not worth a popup (Inbox — see below).
   hoverCard?: boolean;
+  childProgress?: { done: number; total: number } | null;
+  statusCategory?: IssueStatusCategory | null;
 }
 
 /**
@@ -56,7 +62,9 @@ interface IssueAgentActivityIndicatorProps {
  *
  *   - has ≥1 running task  → tiny avatar stack + shimmering "Working"
  *   - 0 running, ≥1 queued → half-opacity stack + muted "Queued"
- *   - nothing               → return null (no chrome, no placeholder)
+ *   - no active task + unfinished children on an in-progress issue
+ *                           → muted "Waiting on sub-issues"
+ *   - otherwise             → return null (no chrome, no placeholder)
  *
  * The shimmer reuses chat's `animate-chat-text-shimmer` utility (defined
  * in packages/ui/styles/base.css). Earlier iterations layered a brand
@@ -90,6 +98,8 @@ export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndic
   issueId,
   size = "xs",
   hoverCard = true,
+  childProgress,
+  statusCategory,
 }: IssueAgentActivityIndicatorProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
@@ -114,10 +124,34 @@ export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndic
     };
   }, [groups]);
 
-  if (agentIds.length === 0) return null;
-  const isRunning = opacity === "full";
+  const executionState = deriveIssueExecutionState(
+    groups,
+    statusCategory,
+    childProgress,
+  );
+  if (!executionState) return null;
 
-  const badge = (
+  const isWaiting = executionState === "waiting";
+  const isRunning = executionState === "working";
+  const waitingLabel = isWaiting
+    ? t(($) => $.agent_activity.status_waiting)
+    : "";
+  const waitingDetail = isWaiting && childProgress
+    ? t(($) => $.agent_activity.waiting_detail, {
+        done: childProgress.done,
+        total: childProgress.total,
+      })
+    : "";
+
+  const badge = isWaiting ? (
+    <span
+      className="text-micro text-muted-foreground"
+      title={waitingDetail}
+      aria-label={`${waitingLabel}, ${waitingDetail}`}
+    >
+      {waitingLabel}
+    </span>
+  ) : (
     <>
       <AgentAvatarStack
         agentIds={agentIds}
@@ -146,6 +180,30 @@ export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndic
   if (!hoverCard) {
     return (
       <span className="inline-flex shrink-0 items-center gap-1">{badge}</span>
+    );
+  }
+
+  if (isWaiting) {
+    return (
+      <HoverCard>
+        <HoverCardTrigger
+          delay={OPEN_DELAY_MS}
+          closeDelay={CLOSE_DELAY_MS}
+          render={
+            <span className="inline-flex shrink-0 items-center gap-1" />
+          }
+        >
+          {badge}
+        </HoverCardTrigger>
+        <HoverCardContent align="end" className="w-64">
+          <div className="space-y-1">
+            <div className="text-body font-medium">{waitingLabel}</div>
+            <div className="text-caption text-muted-foreground">
+              {waitingDetail}
+            </div>
+          </div>
+        </HoverCardContent>
+      </HoverCard>
     );
   }
 
