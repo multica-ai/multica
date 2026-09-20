@@ -62,6 +62,19 @@ DeepSeek Harness의 모델 카탈로그는 런타임 자체가 제공합니다(`
 도구마다 모델 이름이 다를 수 있습니다. AI 코딩 도구를 바꾸면 기존 모델 값은 새 도구에서 유효하지 않으므로 다시 선택해야 합니다.
 </Callout>
 
+### OpenCode용 OpenAI 호환 모델 검색
+
+데몬은 운영자가 설정한 하나의 OpenAI 호환 `/models` 엔드포인트에서 OpenCode 카탈로그를 보완할 수 있습니다. GPUStack, LiteLLM, LM Studio 및 models.dev에 모델을 게시하지 않는 비공개 게이트웨이에 사용할 수 있습니다.
+
+```dotenv
+MULTICA_OPENCODE_DISCOVERY_BASE_URL=https://gateway.example/v1
+MULTICA_OPENCODE_DISCOVERY_PROVIDER_ID=gpustack
+MULTICA_OPENCODE_DISCOVERY_PROVIDER_NAME=GPUStack
+OPENCODE_DISCOVERY_API_KEY=replace-with-a-local-key
+```
+
+이 변수들을 데몬의 로컬 환경에 설정한 뒤 데몬을 다시 시작하세요. Multica는 `.../models`를 가져와 반환된 모델 ID를 일반 `opencode models` 카탈로그와 병합하고, 태스크 시작 시 선택된 모델만 OpenCode에 주입합니다. API 키는 컴퓨터 환경에만 남으며 생성된 설정이나 Multica 서버 데이터베이스에 복사되지 않습니다. 검색에 실패해도 OpenCode의 일반 카탈로그는 유지됩니다.
+
 ## 세션 복원
 
 표에서 ✓로 표시된 도구는 이후 실행에서 기존 세션을 이어갈 수 있습니다. 원래 세션이 여전히 존재하고 해당 세션에 접근할 수 있는 런타임이 실행을 처리해야 합니다. MiniMax Code 0.1.2는 ACP에서 세션 로드 기능을 알리지 않으므로 이후 실행에서는 새 MCode 세션을 시작합니다.
