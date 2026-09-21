@@ -245,6 +245,61 @@ func TestListModelsWorkBuddyPreservesCatalogAndLaunchPrefix(t *testing.T) {
 	}
 }
 
+// TestListModelsWorkBuddyFallbackRetries exercises the complete identity
+// wiring. A failed fake CLI must surface the CodeBuddy fallback metadata, but
+// that fallback must not occupy the discovery cache: replacing the same fake
+// executable with a successful ACP responder must be observed immediately.
+func TestListModelsWorkBuddyFallbackRetries(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "workbuddy")
+	fallbackStub := writeCodebuddyACPStub(t, "")
+	raw, err := os.ReadFile(fallbackStub)
+	if err != nil {
+		t.Fatalf("read fallback stub: %v", err)
+	}
+	if err := os.WriteFile(path, raw, 0o755); err != nil {
+		t.Fatalf("write fallback stub: %v", err)
+	}
+	command := NewCommand(path, []string{"workbuddy-wrapper"})
+	key := discoveryCacheKey("workbuddy", command)
+	modelCacheMu.Lock()
+	delete(modelCache, key)
+	modelCacheMu.Unlock()
+	t.Cleanup(func() {
+		modelCacheMu.Lock()
+		delete(modelCache, key)
+		modelCacheMu.Unlock()
+	})
+
+	first, err := ListModels(context.Background(), "workbuddy", command)
+	if err != nil {
+		t.Fatalf("first ListModels(workbuddy): %v", err)
+	}
+	if !first.Fallback || len(first.Models) == 0 || first.Models[0].Thinking == nil {
+		t.Fatalf("first WorkBuddy catalog = %+v, want marked fallback with models/thinking metadata", first)
+	}
+
+	successStub := writeCodebuddyACPStub(t, codebuddyACPSessionResult)
+	raw, err = os.ReadFile(successStub)
+	if err != nil {
+		t.Fatalf("read success stub: %v", err)
+	}
+	if err := os.WriteFile(path, raw, 0o755); err != nil {
+		t.Fatalf("replace with success stub: %v", err)
+	}
+
+	second, err := ListModels(context.Background(), "workbuddy", command)
+	if err != nil {
+		t.Fatalf("second ListModels(workbuddy): %v", err)
+	}
+	if second.Fallback {
+		t.Fatal("second WorkBuddy catalog remained cached fallback after CLI recovery")
+	}
+	if len(second.Models) != 4 {
+		t.Fatalf("second WorkBuddy models = %d, want 4", len(second.Models))
+	}
+}
+
 // TestCodebuddyModelProviderCoversRealCatalog pins vendor inference against every
 // ID shape CodeBuddy 2.130.0 actually advertises. A miss here is invisible in the
 // backend but collapses the picker into one unlabelled list.
