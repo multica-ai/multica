@@ -2897,18 +2897,21 @@ func readRuntimeCLIVersion(metadata []byte) string {
 }
 
 type CreateIssueRequest struct {
-	Title         string   `json:"title"`
-	Description   *string  `json:"description"`
-	Status        string   `json:"status"`
-	Priority      string   `json:"priority"`
-	AssigneeType  *string  `json:"assignee_type"`
-	AssigneeID    *string  `json:"assignee_id"`
-	ParentIssueID *string  `json:"parent_issue_id"`
-	ProjectID     *string  `json:"project_id"`
-	Stage         *int32   `json:"stage,omitempty"`
-	StartDate     *string  `json:"start_date"`
-	DueDate       *string  `json:"due_date"`
-	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	Title         string  `json:"title"`
+	Description   *string `json:"description"`
+	Status        string  `json:"status"`
+	Priority      string  `json:"priority"`
+	AssigneeType  *string `json:"assignee_type"`
+	AssigneeID    *string `json:"assignee_id"`
+	ParentIssueID *string `json:"parent_issue_id"`
+	ProjectID     *string `json:"project_id"`
+	Stage         *int32  `json:"stage,omitempty"`
+	StartDate     *string `json:"start_date"`
+	DueDate       *string `json:"due_date"`
+	// StatusExplicit is a create-only control from the current manual modal.
+	// Older clients omit it and keep their explicit status behavior unchanged.
+	StatusExplicit bool     `json:"status_explicit,omitempty"`
+	AttachmentIDs  []string `json:"attachment_ids,omitempty"`
 	// LabelIDs are issue-scoped labels to attach to the new issue in the same
 	// transaction as the create. Unknown or non-issue ids are rejected with
 	// 400 (service.ErrIssueLabelNotFound) rather than silently dropped.
@@ -3145,25 +3148,27 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
-		WorkspaceID:    wsUUID,
-		Title:          req.Title,
-		Description:    ptrToText(req.Description),
-		Status:         status,
-		Priority:       priority,
-		AssigneeType:   assigneeType,
-		AssigneeID:     assigneeID,
-		CreatorType:    creatorType,
-		CreatorID:      parseUUID(actualCreatorID),
-		ParentIssueID:  parentIssueID,
-		ProjectID:      projectID,
-		StartDate:      startDate,
-		DueDate:        dueDate,
-		OriginType:     originType,
-		OriginID:       originID,
-		Stage:          ptrToInt4(req.Stage),
-		AttachmentIDs:  attachmentIDs,
-		LabelIDs:       labelIDs,
-		AllowDuplicate: req.AllowDuplicate,
+		WorkspaceID:         wsUUID,
+		Title:               req.Title,
+		Description:         ptrToText(req.Description),
+		Status:              status,
+		StatusExplicit:      req.StatusExplicit,
+		ApplyCreationPolicy: req.Status == "" || req.StatusExplicit || (originType.Valid && originType.String == "quick_create"),
+		Priority:            priority,
+		AssigneeType:        assigneeType,
+		AssigneeID:          assigneeID,
+		CreatorType:         creatorType,
+		CreatorID:           parseUUID(actualCreatorID),
+		ParentIssueID:       parentIssueID,
+		ProjectID:           projectID,
+		StartDate:           startDate,
+		DueDate:             dueDate,
+		OriginType:          originType,
+		OriginID:            originID,
+		Stage:               ptrToInt4(req.Stage),
+		AttachmentIDs:       attachmentIDs,
+		LabelIDs:            labelIDs,
+		AllowDuplicate:      req.AllowDuplicate,
 	}, service.IssueCreateOpts{
 		ActorID:          actualCreatorID,
 		AnalyticsAgentID: analyticsAgentID,

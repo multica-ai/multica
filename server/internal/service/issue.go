@@ -13,6 +13,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/issuecreation"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueposition"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
@@ -59,22 +60,28 @@ func NewIssueService(q *db.Queries, tx TxStarter, bus *events.Bus, ac analytics.
 // to IssueService.Create. The handler owns the parsing step that turns its
 // request payload into this struct; the service stays transport-agnostic.
 type IssueCreateParams struct {
-	WorkspaceID   pgtype.UUID
-	Title         string
-	Description   pgtype.Text
-	Status        string
-	Priority      string
-	AssigneeType  pgtype.Text
-	AssigneeID    pgtype.UUID
-	CreatorType   string // "agent" or "member"
-	CreatorID     pgtype.UUID
-	ParentIssueID pgtype.UUID
-	ProjectID     pgtype.UUID
-	StartDate     pgtype.Date
-	DueDate       pgtype.Date
-	OriginType    pgtype.Text
-	OriginID      pgtype.UUID
-	AttachmentIDs []pgtype.UUID
+	WorkspaceID pgtype.UUID
+	Title       string
+	Description pgtype.Text
+	Status      string
+	// StatusExplicit distinguishes a user-selected status from the legacy
+	// transport default. It is a create-only control bit; it is never stored.
+	StatusExplicit bool
+	// ApplyCreationPolicy is set only by the two unified issue-create entries.
+	// Other internal issue producers retain their existing creation semantics.
+	ApplyCreationPolicy bool
+	Priority            string
+	AssigneeType        pgtype.Text
+	AssigneeID          pgtype.UUID
+	CreatorType         string // "agent" or "member"
+	CreatorID           pgtype.UUID
+	ParentIssueID       pgtype.UUID
+	ProjectID           pgtype.UUID
+	StartDate           pgtype.Date
+	DueDate             pgtype.Date
+	OriginType          pgtype.Text
+	OriginID            pgtype.UUID
+	AttachmentIDs       []pgtype.UUID
 	// LabelIDs are the issue-scoped labels to attach to the new issue. They
 	// are validated and written inside the create transaction (see Create),
 	// so the issue is never committed with a partial or wrong label set. An
@@ -218,6 +225,26 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
+
+	if p.ApplyCreationPolicy {
+		// Both manual POST /issues and the quick-create agent eventually use
+		// this service. Resolve their shared creation policy before any
+		// status-dependent position or enqueue work, so the row and its first
+		// run cannot disagree.
+		policy := issuecreation.Decide(issuecreation.Input{
+			Title:           p.Title,
+			Description:     p.Description.String,
+			RequestedStatus: p.Status,
+			StatusExplicit:  p.StatusExplicit,
+			HasAgent:        isExecutableAssignee(p.AssigneeType, p.AssigneeID),
+		})
+		p.Status = policy.Status
+		if policy.AutoStart && !s.executableAssigneeReadyWithQueries(ctx, qtx, p.WorkspaceID, p.AssigneeType, p.AssigneeID) {
+			// A runnable classification without a reliably executable target
+			// is parked rather than leaving a misleading todo row behind.
+			p.Status = "backlog"
+		}
+	}
 
 	if p.SourceContext != nil {
 		if _, err := qtx.LockIssueForDescriptionUpdate(ctx, db.LockIssueForDescriptionUpdateParams{
@@ -508,6 +535,40 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	}
 
 	return IssueCreateResult{Issue: issue, Attachments: attachments, Labels: labels, AssignedTaskID: assignedTaskID}, nil
+}
+
+func isExecutableAssignee(assigneeType pgtype.Text, assigneeID pgtype.UUID) bool {
+	return assigneeID.Valid && assigneeType.Valid &&
+		(assigneeType.String == "agent" || assigneeType.String == "squad")
+}
+
+// executableAssigneeReadyWithQueries is only consulted after the policy has
+// decided that this create should run. It intentionally follows the existing
+// enqueue rules: an offline agent is waitable and may queue, while a squad's
+// leader must be ready because the existing squad path only dispatches a live
+// leader at create time.
+func (s *IssueService) executableAssigneeReadyWithQueries(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, assigneeType pgtype.Text, assigneeID pgtype.UUID) bool {
+	if !isExecutableAssignee(assigneeType, assigneeID) {
+		return false
+	}
+	if assigneeType.String == "agent" {
+		issue := db.Issue{AssigneeType: assigneeType, AssigneeID: assigneeID}
+		_, admitted := agentAssigneeVerdict(ctx, s.runtimeLookup(q), issue)
+		return admitted
+	}
+
+	squad, err := q.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+		ID: assigneeID, WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return false
+	}
+	leader, err := q.GetAgent(ctx, squad.LeaderID)
+	if err != nil {
+		return false
+	}
+	verdict, err := AgentReadiness(ctx, s.runtimeLookup(q), leader)
+	return err == nil && verdict.Ready()
 }
 
 // validateIssueLabels checks that every requested label exists in the

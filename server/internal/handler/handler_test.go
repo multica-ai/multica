@@ -551,10 +551,10 @@ func TestDeleteIssueRejectsInvalidUUID(t *testing.T) {
 	}
 }
 
-// TestCreateIssueDefaultStatusIsTodo verifies that issues created without an
-// explicit status default to "todo" so the daemon picks them up immediately.
-// Before this fix the default was "backlog", which daemons ignore.
-func TestCreateIssueDefaultStatusIsTodo(t *testing.T) {
+// TestCreateIssueDefaultStatusParksUnclassified verifies that an issue created
+// without an explicit status and without a reliable execution classification
+// parks in backlog instead of starting an agent by default.
+func TestCreateIssueDefaultStatusParksUnclassified(t *testing.T) {
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title": "Issue with no explicit status",
 	})
@@ -562,8 +562,8 @@ func TestCreateIssueDefaultStatusIsTodo(t *testing.T) {
 
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
-	if created.Status != "todo" {
-		t.Fatalf("CreateIssue: expected default status 'todo', got '%s'", created.Status)
+	if created.Status != "backlog" {
+		t.Fatalf("CreateIssue: expected default status 'backlog', got '%s'", created.Status)
 	}
 
 	// Cleanup

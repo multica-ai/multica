@@ -1523,7 +1523,12 @@ export class ApiClient {
         ...(params.isCreate ? { is_create: true } : {}),
         ...(params.assigneeType ? { assignee_type: params.assigneeType } : {}),
         ...(params.assigneeId ? { assignee_id: params.assigneeId } : {}),
-        ...(params.status ? { status: params.status } : {}),
+        ...(params.status && (!params.isCreate || params.statusExplicit === true)
+          ? { status: params.status }
+          : {}),
+        ...(params.isCreate && params.title ? { title: params.title } : {}),
+        ...(params.isCreate && params.description ? { description: params.description } : {}),
+        ...(params.isCreate ? { status_explicit: params.statusExplicit === true } : {}),
       }),
     });
     return parseWithFallback(raw, IssueTriggerPreviewSchema, { triggers: [], total_count: 0 }, {

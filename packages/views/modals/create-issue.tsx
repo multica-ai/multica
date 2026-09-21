@@ -122,10 +122,16 @@ function CreateRunHint({
   assigneeType,
   assigneeId,
   status,
+  title,
+  description,
+  statusExplicit,
 }: {
   assigneeType?: IssueAssigneeType;
   assigneeId?: string;
   status: IssueStatus;
+  title: string;
+  description: string;
+  statusExplicit: boolean;
 }) {
   const { t } = useT("modals");
   const { getActorName } = useActorName();
@@ -135,6 +141,9 @@ function CreateRunHint({
     assigneeType: assigneeType ?? null,
     assigneeId: assigneeId ?? null,
     status,
+    title,
+    description,
+    statusExplicit,
     enabled: isAgentLike && !!assigneeId,
   });
 
@@ -256,6 +265,12 @@ export function ManualCreatePanel({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
   });
   const [status, setStatus] = useState<IssueStatus>((data?.status as IssueStatus) || draft.manual.status);
+  // Omit the legacy todo default unless the user actually touched the status
+  // picker. The server uses presence to distinguish an explicit start choice
+  // from the form's old transport default.
+  const [statusExplicit, setStatusExplicit] = useState(
+    typeof data?.status === "string" || draft.manual.status !== "todo",
+  );
   const [priority, setPriority] = useState<IssuePriority>(
     (data?.priority as IssuePriority | undefined) ?? draft.shared.priority,
   );
@@ -378,7 +393,11 @@ export function ManualCreatePanel({
   // Sync field changes to the draft store — manual-only fields to the manual
   // slot, project / priority / due date to the shared slot.
   const updateTitle = (v: string) => { setTitle(v); setManual({ title: v }); };
-  const updateStatus = (v: IssueStatus) => { setStatus(v); setManual({ status: v }); };
+  const updateStatus = (v: IssueStatus) => {
+    setStatus(v);
+    setStatusExplicit(true);
+    setManual({ status: v });
+  };
   const updatePriority = (v: IssuePriority) => { setPriority(v); setShared({ priority: v }); };
   const updateAssignee = (type?: IssueAssigneeType, id?: string) => {
     setAssigneeType(type); setAssigneeId(id);
@@ -418,6 +437,7 @@ export function ManualCreatePanel({
   const resetForNextIssue = () => {
     setTitle("");
     setStatus("todo");
+    setStatusExplicit(false);
     setPriority("none");
     setStartDate(null);
     setDueDate(null);
@@ -495,7 +515,7 @@ export function ManualCreatePanel({
             issue: {
               title: title.trim(),
               description,
-              status,
+              ...(statusExplicit ? { status, status_explicit: true } : {}),
               priority,
               assignee_type: assigneeType,
               assignee_id: assigneeId,
@@ -512,7 +532,7 @@ export function ManualCreatePanel({
         issue = await createIssueMutation.mutateAsync({
           title: title.trim(),
           description,
-          status,
+          ...(statusExplicit ? { status, status_explicit: true } : {}),
           priority,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
@@ -975,7 +995,14 @@ export function ManualCreatePanel({
 
             {/* Pre-trigger preview — a passive caption above the toolbar; reveals
                 when an agent assignee will pick the issue up. */}
-            <CreateRunHint assigneeType={assigneeType} assigneeId={assigneeId} status={status} />
+            <CreateRunHint
+              assigneeType={assigneeType}
+              assigneeId={assigneeId}
+              status={status}
+              title={title}
+              description={draft.manual.description}
+              statusExplicit={statusExplicit}
+            />
 
             {/* Property toolbar — each field renders per the Settings → Preferences → Issue creation
                 selection (see showField above). */}

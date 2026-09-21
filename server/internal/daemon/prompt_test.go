@@ -38,6 +38,11 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 		// hard rules
 		"never invent requirements",
 		"never reduce multi-sentence input",
+		"follow the shared new-issue policy used by the manual create entry",
+		"conflicting start and defer signals",
+		"analysis, research, business, other, or uncertain work MUST use `--status backlog`",
+		"do not treat analysis or research as technical",
+		"Never create as `todo` and then update or reassign it to start work",
 		// attachment boundary (MUL-5696): the ban is scoped to URLs, and file
 		// delivery defers to the quick-create ## Output section — a blanket
 		// "do NOT pass --attachment" contradicted it (it names --attachment

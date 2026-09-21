@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issuecreation"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -116,10 +117,13 @@ type IssueTriggerPreviewRequest struct {
 	// or a batch). Empty with IsCreate=true evaluates a candidate new issue.
 	IssueIDs []string `json:"issue_ids"`
 	// IsCreate previews a not-yet-persisted issue from AssigneeType/ID/Status.
-	IsCreate     bool    `json:"is_create"`
-	AssigneeType *string `json:"assignee_type"`
-	AssigneeID   *string `json:"assignee_id"`
-	Status       *string `json:"status"`
+	IsCreate       bool    `json:"is_create"`
+	AssigneeType   *string `json:"assignee_type"`
+	AssigneeID     *string `json:"assignee_id"`
+	Status         *string `json:"status"`
+	Title          string  `json:"title"`
+	Description    string  `json:"description"`
+	StatusExplicit bool    `json:"status_explicit"`
 }
 
 // IssueTriggerPreviewItem is one issue that WILL start a run under the
@@ -205,6 +209,19 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 		if req.Status != nil && *req.Status != "" {
 			status = *req.Status
 		}
+		if req.StatusExplicit || req.Status != nil {
+			// The explicit bit is sent by the create modal; the pointer
+			// fallback keeps direct API callers' old behavior intact.
+			req.StatusExplicit = true
+		}
+		policy := issuecreation.Decide(issuecreation.Input{
+			Title:           req.Title,
+			Description:     req.Description,
+			RequestedStatus: status,
+			StatusExplicit:  req.StatusExplicit,
+			HasAgent:        hasNewAssignee && (newAssigneeType.String == "agent" || newAssigneeType.String == "squad"),
+		})
+		status = policy.Status
 		candidate := db.Issue{
 			WorkspaceID:  wsUUID,
 			Status:       status,

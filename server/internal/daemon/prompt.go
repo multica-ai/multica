@@ -340,7 +340,7 @@ func buildQuickCreatePrompt(task Task) string {
 			fmt.Fprintf(&b, "- **parent**: required for this run. Pass `--parent %q` so the new issue is filed as a sub-issue of the parent the user picked in the quick-create modal. Do not infer a different parent from the prompt text — the modal entry point is authoritative.\n", task.ParentIssueID)
 		}
 	}
-	b.WriteString("- **status**: omit (defaults to `todo`).\n")
+	b.WriteString("- **status**: follow the shared new-issue policy used by the manual create entry. Explicitly parked/deferred language always wins; conflicting start and defer signals, analysis, research, business, other, or uncertain work MUST use `--status backlog`. Explicit immediate-start language, bugfixes, product tasks, and technical implementation tasks may omit `--status` so the server selects `todo`; do not treat analysis or research as technical merely because the topic is technical. If the input does not identify a reliable executable assignee, do not guess one and use `--status backlog`. Never create as `todo` and then update or reassign it to start work.\n")
 	b.WriteString("- **attachments**: `--attachment` takes LOCAL file paths, never URLs. Image URLs in the user input are already markdown — keep them inline. Files you produced: see `## Output`.\n\n")
 
 	// How to run the create and what to print is stated once, in the brief's

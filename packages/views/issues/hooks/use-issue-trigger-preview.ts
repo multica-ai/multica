@@ -14,6 +14,9 @@ export interface UseIssueTriggerPreviewParams {
   assigneeType?: IssueAssigneeType | null;
   assigneeId?: string | null;
   status?: IssueStatus;
+  title?: string;
+  description?: string;
+  statusExplicit?: boolean;
   /** Caller gate — e.g. only fetch while a picker/modal is open. */
   enabled?: boolean;
 }
@@ -33,6 +36,9 @@ function previewSignature(params: UseIssueTriggerPreviewParams): string {
     at: params.assigneeType ?? null,
     aid: params.assigneeId ?? null,
     status: params.status ?? null,
+    title: params.title ?? "",
+    description: params.description ?? "",
+    statusExplicit: params.statusExplicit ?? false,
   });
 }
 
@@ -71,6 +77,9 @@ export function useIssueTriggerPreview(
         assigneeType: params.assigneeType,
         assigneeId: params.assigneeId,
         status: params.status,
+        title: params.title,
+        description: params.description,
+        statusExplicit: params.statusExplicit,
       }),
     enabled,
     retry: false,

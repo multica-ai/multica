@@ -8,6 +8,8 @@ export interface CreateIssueRequest {
   title: string;
   description?: string;
   status?: IssueStatus;
+  /** Create-only: true when the user selected the status picker value. */
+  status_explicit?: boolean;
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType;
   assignee_id?: string;
@@ -105,6 +107,10 @@ export interface IssueTriggerPreviewParams {
   assigneeType?: IssueAssigneeType | null;
   assigneeId?: string | null;
   status?: IssueStatus;
+  /** Create-only semantic inputs for the shared new-issue policy. */
+  title?: string;
+  description?: string;
+  statusExplicit?: boolean;
 }
 
 /** One issue that WILL start a run under the prospective write. `agent_id` is

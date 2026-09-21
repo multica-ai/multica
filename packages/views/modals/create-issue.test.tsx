@@ -729,7 +729,6 @@ describe("CreateIssueModal", () => {
       expect(mockCreateIssue).toHaveBeenCalledWith({
         title: "Ship create issue regression coverage",
         description: undefined,
-        status: "todo",
         priority: "none",
         assignee_type: undefined,
         assignee_id: undefined,
@@ -841,7 +840,6 @@ describe("CreateIssueModal", () => {
       expect(mockCreateIssue).toHaveBeenCalledWith({
         title: "First follow-up issue",
         description: "Description to clear",
-        status: "todo",
         priority: "none",
         assignee_type: undefined,
         assignee_id: undefined,
