@@ -989,13 +989,16 @@ func (d *Daemon) resolveAgentEntry(ctx context.Context, provider string, entry A
 // a binary whose version and minimum-version policy were never checked.
 func (d *Daemon) reprobeWorkBuddyEntry(ctx context.Context, entry AgentEntry) (AgentEntry, healOutcome, bool) {
 	candidate, ok := probeWorkBuddyAgent()
-	if !ok || candidate.Path == "" || len(candidate.LaunchPrefix) == 0 || !agentExecutablePresent(candidate.Path) { return entry, healOutcome{}, false }
+	if !ok || candidate.Path == "" || len(candidate.LaunchPrefix) == 0 || !agentExecutablePresent(candidate.Path) {
+		return entry, healOutcome{}, false
+	}
 	outcome := d.adoptAgentPath(ctx, "workbuddy", "", candidate.Path, candidate.LaunchPrefix, "re-probed WorkBuddy Node/CLI pair")
-	if outcome.adopted.path == "" { return entry, outcome, false }
+	if outcome.adopted.path == "" {
+		return entry, outcome, false
+	}
 	candidate.Path = outcome.adopted.path
 	return candidate, outcome, true
 }
-
 
 func (d *Daemon) resolveAgentEntryForLaunch(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string, error) {
 	resolved, version, outcome := d.resolveAgentEntryWithHeal(ctx, provider, entry)
@@ -4738,6 +4741,7 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		// upgrade deleted (MUL-4486).
 		entry, _ = d.resolveAgentEntry(ctx, rt.Provider, entry)
 		execPath = entry.Path
+		fixedArgs = agent.FilterLaunchPrefix(rt.Provider, entry.LaunchPrefix, d.logger)
 	} else {
 		d.reportModelListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",

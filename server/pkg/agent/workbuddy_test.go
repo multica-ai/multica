@@ -12,6 +12,23 @@ import (
 	"time"
 )
 
+func TestWorkbuddyModelDiscoveryPreservesFallbackCatalog(t *testing.T) {
+	t.Parallel()
+
+	// A missing test-created executable exercises the discovery fallback without
+	// resolving or invoking any user-installed agent CLI.
+	cat, err := ListModels(context.Background(), "workbuddy", NewCommand(filepath.Join(t.TempDir(), "missing-workbuddy"), nil))
+	if err != nil {
+		t.Fatalf("ListModels(workbuddy): %v", err)
+	}
+	if !cat.Fallback {
+		t.Fatal("WorkBuddy discovery fallback must remain marked non-authoritative")
+	}
+	if len(cat.Models) == 0 {
+		t.Fatal("WorkBuddy fallback catalog should remain available for manual selection")
+	}
+}
+
 // TestNewRuntimeWorkbuddyHostsCodebuddyFamily pins the descriptor wiring:
 // workbuddy must resolve through NewRuntime (identity factory), land on the
 // codebuddy backend, and receive the descriptor's executable/label overrides

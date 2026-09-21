@@ -67,6 +67,10 @@ type BuiltinRuntime struct {
 	// semantically incompatible one (omp exits non-zero on `--list-models`)
 	// is worse than degrading to manual entry.
 	ModelDiscovery ModelDiscoveryFunc
+
+	// CatalogDiscovery is the catalog-preserving variant for identities whose
+	// discovery has meaningful fallback or unavailable-model metadata.
+	CatalogDiscovery CatalogDiscoveryFunc
 }
 
 // ModelDiscoveryFunc discovers available models for a runtime identity.
@@ -75,6 +79,11 @@ type BuiltinRuntime struct {
 // missing or too old, it returns an empty slice (ListModels swallows the
 // error and degrades to manual entry).
 type ModelDiscoveryFunc func(ctx context.Context, runtimeCmd Command) ([]Model, error)
+
+// CatalogDiscoveryFunc preserves the full discovery outcome, including
+// fallback and unavailable-model metadata. It is preferred for built-in
+// identities that reuse a protocol family's richer discovery implementation.
+type CatalogDiscoveryFunc func(ctx context.Context, runtimeCmd Command) (Catalog, error)
 
 // BuiltinRuntimes is the registry of built-in runtime identities that are
 // NOT in SupportedTypes (they are protocol-family derivatives, not families
@@ -117,6 +126,7 @@ var BuiltinRuntimes = []BuiltinRuntime{
 		LaunchHeader:      "workbuddy (WorkBuddy bundled CLI)",
 		DefaultExecutable: "codebuddy",
 		ProviderLabel:     "workbuddy",
+		CatalogDiscovery: discoverCodebuddyModels,
 	},
 }
 
