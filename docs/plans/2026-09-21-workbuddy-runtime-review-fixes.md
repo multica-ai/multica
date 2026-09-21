@@ -216,6 +216,7 @@ All discovery tests must clear or override `MULTICA_WORKBUDDY_PATH`, related run
 - Modify: `server/internal/daemon/workbuddy_probe_test.go`
 - Modify/add: `server/internal/daemon/daemon_test.go`
 - Modify/add: `server/pkg/agent/launch_test.go` only if a lower-level launch assertion is needed
+ - Add: `server/pkg/agent/workbuddy_launch_test.go` (task-launch fixture that re-executes the test binary as the bundled Node interpreter)
 
 ### Required scenario
 
@@ -223,7 +224,7 @@ Use a fake Node executable and fake CodeBuddy script that record argv, then veri
 
 1. Version detection invokes `<node> <script> --version`.
 2. Model discovery invokes `<node> <script>` plus the expected discovery/protocol flags.
-3. If the permission policy is explicitly approved, a separately reviewed task-launch fixture may assert `<node> <script> -p ...` and the selected thinking effort. Otherwise, leave task-launch verification as a blocked safety-gate item.
+3. `TestWorkBuddyTaskLaunchKeepsBundledCliPrefix` (server/pkg/agent/workbuddy_launch_test.go) asserts that a completed task reaches the OS as `<node> <cli script> -p --output-format stream-json ...`. The "node" is the re-executed test binary, dispatched from the package TestMain like the existing CLI fixtures, so the real os/exec boundary is covered on Windows and macOS alike. No real agent CLI, account, or permission decision is exercised: WorkBuddy inheriting CodeBuddy's headless permission policy is the recorded product decision above, not a behavior this fixture grants.
 
 The test must also verify that a newly staged Node version is adopted after the old version disappears without daemon restart.
 
@@ -258,12 +259,13 @@ If dependency downloads fail, record that as an environment limitation and rerun
 
 ### Re-review checklist
 
-- [ ] Reviewer item 3 has a daemon-level upgrade recovery test that passes without restart.
-- [ ] WorkBuddy Node + CLI pair is validated and adopted atomically.
-- [ ] `ListModels("workbuddy", ...)` returns a real catalog or the same documented fallback as CodeBuddy.
-- [ ] Model discovery preserves `LaunchPrefix`.
-- [ ] WorkBuddy thinking capability matches CodeBuddy for supported values.
-- [ ] Existing CodeBuddy, custom profile, and other runtime tests remain green.
+- [x] Reviewer item 3 has a daemon-level upgrade recovery test that passes without restart.
+- [x] WorkBuddy Node + CLI pair is validated and adopted atomically.
+- [x] `ListModels("workbuddy", ...)` returns a real catalog or the same documented fallback as CodeBuddy.
+- [x] Model discovery preserves `LaunchPrefix`.
+- [x] WorkBuddy thinking capability matches CodeBuddy for supported values.
+- [x] Task launch reaches a real subprocess as `<node> <cli script> -p ...` (reviewer item 4).
+- [x] Existing CodeBuddy, custom profile, and launch-prefix tests remain green. The `pkg/agent` package still reports its pre-existing Windows-only POSIX-fixture failures, byte-for-byte unchanged with and without these changes.
 - [ ] PR description lists the four reviewer items and links each to a commit/test.
 - [ ] Request a new review from `multica-eve`; do not rely on the old `CHANGES_REQUESTED` state disappearing automatically.
 
