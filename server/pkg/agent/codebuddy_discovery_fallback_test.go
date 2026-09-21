@@ -140,6 +140,34 @@ func TestDiscoverCodebuddyModelsFromACP(t *testing.T) {
 	}
 }
 
+// TestListModelsWorkBuddyPreservesCatalogAndLaunchPrefix exercises the
+// built-in identity path, not only the protocol-family helper: WorkBuddy must
+// retain the live catalog marker while carrying its per-entry launch prefix.
+func TestListModelsWorkBuddyPreservesCatalogAndLaunchPrefix(t *testing.T) {
+	path := writeCodebuddyACPStub(t, codebuddyACPSessionResult)
+	command := NewCommand(path, []string{"workbuddy-wrapper"})
+	key := discoveryCacheKey("workbuddy", command)
+	modelCacheMu.Lock()
+	delete(modelCache, key)
+	modelCacheMu.Unlock()
+	t.Cleanup(func() {
+		modelCacheMu.Lock()
+		delete(modelCache, key)
+		modelCacheMu.Unlock()
+	})
+
+	catalog, err := ListModels(context.Background(), "workbuddy", command)
+	if err != nil {
+		t.Fatalf("ListModels(workbuddy): %v", err)
+	}
+	if catalog.Fallback {
+		t.Fatal("successful WorkBuddy discovery must not be marked Fallback")
+	}
+	if len(catalog.Models) != 4 {
+		t.Fatalf("WorkBuddy models = %d, want 4", len(catalog.Models))
+	}
+}
+
 // TestCodebuddyModelProviderCoversRealCatalog pins vendor inference against every
 // ID shape CodeBuddy 2.130.0 actually advertises. A miss here is invisible in the
 // backend but collapses the picker into one unlabelled list.

@@ -178,6 +178,33 @@ func TestHandleModelList_BuiltinRuntimeUnaffected(t *testing.T) {
 	}
 }
 
+// TestHandleModelList_BuiltinEntryCarriesLaunchPrefix verifies that a
+// discovered runtime pair such as WorkBuddy's node + script reaches model
+// discovery with the same argv prefix used for task launch.
+func TestHandleModelList_BuiltinEntryCarriesLaunchPrefix(t *testing.T) {
+	fx := newModelListFixture(t)
+	d := fx.daemon
+
+	builtinPath := fakeExecutable(t, "node")
+	cliScript := filepath.Join(t.TempDir(), "codebuddy.js")
+	d.cfg.Agents = map[string]AgentEntry{
+		"claude": {Path: builtinPath, LaunchPrefix: []string{cliScript}},
+	}
+	d.runtimeIndex["rt-builtin"] = Runtime{ID: "rt-builtin", Provider: "claude"}
+
+	d.handleModelList(context.Background(), d.runtimeIndex["rt-builtin"], "req-1")
+
+	fx.mu.Lock()
+	path, prefix := fx.listedPath, append([]string(nil), fx.listedPrefix...)
+	fx.mu.Unlock()
+	if path != builtinPath {
+		t.Fatalf("discovery path = %q, want %q", path, builtinPath)
+	}
+	if len(prefix) != 1 || prefix[0] != cliScript {
+		t.Fatalf("discovery launch prefix = %v, want [%s]", prefix, cliScript)
+	}
+}
+
 func TestHandleModelListReportsExplicitStandardCapability(t *testing.T) {
 	fx := newModelListFixture(t)
 	d := fx.daemon
