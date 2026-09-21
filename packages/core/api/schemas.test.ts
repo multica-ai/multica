@@ -2209,66 +2209,6 @@ describe("issue status catalog schemas", () => {
   });
 });
 
-describe("LoginResponseSchema", () => {
-  const user = {
-    id: "u1",
-    name: "Alice",
-    email: "alice@corp.example.com",
-    avatar_url: null,
-  };
-
-  it("accepts a well-formed login response", () => {
-    const parsed = LoginResponseSchema.parse({ token: "jwt-abc", user });
-    expect(parsed.token).toBe("jwt-abc");
-    expect(parsed.user.email).toBe("alice@corp.example.com");
-  });
-
-  it("keeps unknown response fields for forward compatibility", () => {
-    const parsed = LoginResponseSchema.parse({
-      token: "jwt-abc",
-      user,
-      expires_in: 7200,
-    });
-    expect(parsed.token).toBe("jwt-abc");
-  });
-
-  it("rejects a response with no token, which is the drift that matters", () => {
-    // safeParse rather than parse: the caller routes failures through
-    // parseWithFallback, and the point of the schema is that it can tell the
-    // two apart.
-    expect(LoginResponseSchema.safeParse({ user }).success).toBe(false);
-  });
-
-  it("rejects a null user instead of letting it reach the store", () => {
-    expect(LoginResponseSchema.safeParse({ token: "t", user: null }).success).toBe(
-      false,
-    );
-  });
-
-  it("rejects a non-string token", () => {
-    expect(
-      LoginResponseSchema.safeParse({ token: 123, user }).success,
-    ).toBe(false);
-  });
-});
-
-describe("AppConfigSchema ldap_enabled drift", () => {
-  it("is undefined when the server predates directory login", () => {
-    expect(AppConfigSchema.parse({}).ldap_enabled).toBeUndefined();
-  });
-
-  it("coerces a malformed value rather than trusting it", () => {
-    expect(AppConfigSchema.parse({ ldap_enabled: "yes" }).ldap_enabled).toBe(
-      false,
-    );
-  });
-
-  it("carries a genuine true through", () => {
-    expect(AppConfigSchema.parse({ ldap_enabled: true }).ldap_enabled).toBe(true);
-  });
-
-  it("falls back to false when the whole config is unreadable", () => {
-    expect(EMPTY_APP_CONFIG.ldap_enabled).toBe(false);
 describe("TaskMessageListSchema", () => {
   it("preserves call IDs and tolerates old or malformed optional identity", () => {
     const base = { task_id: "task-1", seq: 1, type: "tool_result", output: "ok" };
@@ -2345,5 +2285,68 @@ describe("TaskMessageListSchema", () => {
   it("downgrades an unknown message type instead of dropping the transcript", () => {
     const parsed = TaskMessageListSchema.parse([{ ...row, type: "video" }]);
     expect(parsed[0]?.type).toBe("text");
+  });
+});
+
+describe("LoginResponseSchema", () => {
+  const user = {
+    id: "u1",
+    name: "Alice",
+    email: "alice@corp.example.com",
+    avatar_url: null,
+  };
+
+  it("accepts a well-formed login response", () => {
+    const parsed = LoginResponseSchema.parse({ token: "jwt-abc", user });
+    expect(parsed.token).toBe("jwt-abc");
+    expect(parsed.user.email).toBe("alice@corp.example.com");
+  });
+
+  it("keeps unknown response fields for forward compatibility", () => {
+    const parsed = LoginResponseSchema.parse({
+      token: "jwt-abc",
+      user,
+      expires_in: 7200,
+    });
+    expect(parsed.token).toBe("jwt-abc");
+  });
+
+  it("rejects a response with no token, which is the drift that matters", () => {
+    // safeParse rather than parse: the caller routes failures through
+    // parseWithFallback, and the point of the schema is that it can tell the
+    // two apart.
+    expect(LoginResponseSchema.safeParse({ user }).success).toBe(false);
+  });
+
+  it("rejects a null user instead of letting it reach the store", () => {
+    expect(LoginResponseSchema.safeParse({ token: "t", user: null }).success).toBe(
+      false,
+    );
+  });
+
+  it("rejects a non-string token", () => {
+    expect(
+      LoginResponseSchema.safeParse({ token: 123, user }).success,
+    ).toBe(false);
+  });
+});
+
+describe("AppConfigSchema ldap_enabled drift", () => {
+  it("is undefined when the server predates directory login", () => {
+    expect(AppConfigSchema.parse({}).ldap_enabled).toBeUndefined();
+  });
+
+  it("coerces a malformed value rather than trusting it", () => {
+    expect(AppConfigSchema.parse({ ldap_enabled: "yes" }).ldap_enabled).toBe(
+      false,
+    );
+  });
+
+  it("carries a genuine true through", () => {
+    expect(AppConfigSchema.parse({ ldap_enabled: true }).ldap_enabled).toBe(true);
+  });
+
+  it("falls back to false when the whole config is unreadable", () => {
+    expect(EMPTY_APP_CONFIG.ldap_enabled).toBe(false);
   });
 });
