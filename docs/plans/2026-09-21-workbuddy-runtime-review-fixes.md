@@ -19,12 +19,13 @@ This plan addresses reviewer items 3 and 4 directly and preserves the already-la
 - Do not change the public runtime identity from `workbuddy` to `codebuddy` in this PR.
 - Do not mutate the daemon process `PATH`.
 - Do not silently fall back from a WorkBuddy bundle to an unrelated PATH-installed CLI when a bundle was explicitly configured through `MULTICA_WORKBUDDY_PATH`.
+- Product decision (September 21, 2026): WorkBuddy and CodeBuddy intentionally share the embedded CLI. This plan does not add WorkBuddy-specific configuration directories, authentication paths, account isolation, or duplicate embedded-CLI settings.
 
 The implementation must preserve existing behavior for `codebuddy`, custom runtime profiles, and other built-in runtimes.
 
 ## Execution safety gate
 
-Before changing or testing the task-execution path, obtain an explicit product decision about WorkBuddy's permission policy. The current `codebuddy` backend unconditionally adds `--permission-mode bypassPermissions`, blocks several interactive tools, and auto-approves permission bridge requests. Because WorkBuddy reuses that backend through `ProtocolFamily`, this policy is inherited implicitly. This plan does not add, broaden, or validate that bypass behavior.
+The product decision above confirms shared embedded-CLI configuration; it does not authorize new permission behavior. The current `codebuddy` backend unconditionally adds `--permission-mode bypassPermissions`, blocks several interactive tools, and auto-approves permission bridge requests. Because WorkBuddy reuses that backend through `ProtocolFamily`, this policy is inherited implicitly. This plan does not add, broaden, or validate that bypass behavior.
 
 Until the policy is explicitly confirmed and reviewed, execution work is limited to defensive discovery plumbing, catalog correctness, launch-pair recovery, and tests that use fake commands without running real agents. If the policy is not approved, the implementation must fail closed or introduce an explicit identity-level policy instead of silently inheriting CodeBuddy's high-privilege behavior.
 

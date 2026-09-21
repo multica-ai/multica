@@ -551,6 +551,66 @@ func TestResolveAgentEntry_WorkBuddyVersionProbeFailureDoesNotAdopt(t *testing.T
 	}
 }
 
+func TestProbeBuiltinRuntime_WorkBuddyReprobesWhenCurrentPathProbeFails(t *testing.T) {
+	bundle := stageWorkBuddyInstall(t, t.TempDir())
+	stagedRoot := t.TempDir()
+	nodeName := "node"
+	if runtime.GOOS == "windows" {
+		nodeName = "node.exe"
+	}
+	oldPath := filepath.Join(t.TempDir(), nodeName)
+	newPath := filepath.Join(stagedRoot, "versions", "22.10.0", "bin", nodeName)
+	for _, path := range []string{oldPath, newPath} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("fake node"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldCLI := filepath.Join(t.TempDir(), "stale-codebuddy")
+	if runtime.GOOS == "windows" {
+		oldCLI += ".cmd"
+	}
+	if err := os.WriteFile(oldCLI, []byte("fake stale cli"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	origRoots, origGlobs := workbuddyBundleRoots, workbuddyStagedNodeGlobs
+	workbuddyBundleRoots = func() []string { return []string{bundle} }
+	workbuddyStagedNodeGlobs = func() []string {
+		return []string{newPath}
+	}
+	t.Cleanup(func() {
+		workbuddyBundleRoots, workbuddyStagedNodeGlobs = origRoots, origGlobs
+	})
+	t.Setenv("MULTICA_WORKBUDDY_PATH", "")
+	t.Setenv("PATH", t.TempDir())
+
+	cli := filepath.Join(bundle, workbuddyBundleRelativeCLI())
+	origDetect := detectAgentVersion
+	detectAgentVersion = func(_ context.Context, cmd agent.Command) (string, error) {
+		if cmd.Path == oldPath {
+			return "", errors.New("stale fake pair")
+		}
+		if cmd.Path != newPath {
+			t.Fatalf("version probe path = %q, want old or new staged node", cmd.Path)
+		}
+		if len(cmd.Prefix) != 1 || cmd.Prefix[0] != cli {
+			t.Fatalf("version probe prefix = %v, want bundled CLI %q", cmd.Prefix, cli)
+		}
+		return "22.10.0", nil
+	}
+	t.Cleanup(func() { detectAgentVersion = origDetect })
+
+	d := newSelfHealTestDaemon()
+	entry := AgentEntry{Path: oldPath, LaunchPrefix: []string{oldCLI}}
+	version, reason, verdict := d.probeBuiltinRuntime(context.Background(), "workbuddy", entry)
+	if verdict != builtinProbeOK || reason != "" || version != "22.10.0" {
+		t.Fatalf("probe result = (%q, %q, %v), want (22.10.0, empty, ok)", version, reason, verdict)
+	}
+}
+
 func TestProbeWorkBuddyAgent_ExplicitMissingOverrideDoesNotUseBundleOrPATH(t *testing.T) {
 	bundle := stageWorkBuddyInstall(t, t.TempDir())
 	stubWorkBuddyDiscovery(t, []string{bundle}, "22.10.0")

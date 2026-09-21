@@ -2606,6 +2606,13 @@ probeLoop:
 			return heal.rejected.Detected, heal.rejected.Error(), builtinProbeBelowMinimum
 		}
 		version, err := detectAgentVersion(ctx, agent.Command{Path: resolved.Path, Prefix: resolved.LaunchPrefix})
+		if err != nil && name == "workbuddy" {
+			if recovered, outcome, ok := d.reprobeWorkBuddyEntry(ctx, entry); ok && recovered.Path != resolved.Path {
+				resolved = recovered
+				version = outcome.adopted.version
+				err = nil
+			}
+		}
 		if err != nil {
 			lastErr = err
 			if time.Since(startedAt) >= runtimeVersionProbeRetryWindow {
