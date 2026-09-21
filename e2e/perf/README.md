@@ -1,10 +1,31 @@
 # UI performance scenario
 
-One browser scenario: typing a comment on a long issue thread while three agent
+The original browser scenario measures typing a comment on a long issue thread while three agent
 runs stream progress. It exists because of MUL-7227, where a summary animation
 replaced a DOM node per streamed message and typing a comment slowed to a crawl.
 Component tests could not see it — they run in jsdom, which has no style
 recalculation, no layout and no main-thread contention.
+
+## Chat session lists
+
+`chat-session-lists.spec.ts` exercises the real Chat history, archive and floating
+history dropdown against synthetic HTTP/WebSocket boundaries. It checks that
+2,000 sessions mount fewer than 40 rows, can scroll to and select the last row,
+and also covers compact layout and empty/single-session dropdowns. Each measured
+surface emits a JSON record and a test attachment with mounted rows and time to
+readiness; timings are illustrative samples, not performance thresholds.
+
+Run against a local production Web build (no API server or account needed):
+
+```bash
+PLAYWRIGHT_BASE_URL=http://localhost:3000 pnpm exec playwright test --config=playwright.perf.config.ts chat-session-lists.spec.ts
+# Measure the original full-list implementation with the same fixture:
+CHAT_LIST_BASELINE=1 PLAYWRIGHT_BASE_URL=http://localhost:3001 pnpm exec playwright test --config=playwright.perf.config.ts chat-session-lists.spec.ts
+```
+
+`scripts/perf-compare.mjs` remains scoped to the comment-typing scenario below;
+its report format and comparisons are unchanged. Session data is still fetched
+in full: these checks measure rendering, not API pagination or network savings.
 
 ## What it runs against
 

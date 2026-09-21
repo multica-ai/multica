@@ -228,7 +228,7 @@ async function measure(ref, label) {
     const measureStart = Date.now();
     let scenarioExit = 0;
     try {
-      run("pnpm", ["exec", "playwright", "test", "--config=playwright.perf.config.ts"], {
+      run("pnpm", ["exec", "playwright", "test", "--config=playwright.perf.config.ts", "typing-under-live-runs.spec.ts"], {
         cwd: repoRoot,
         env: {
           ...process.env,
