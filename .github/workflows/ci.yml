@@ -843,7 +843,12 @@ jobs:
         if: runner.os != 'Windows'
         run: bash scripts/install.test.sh
 
-      - name: Test PowerShell installer
+      - name: Test installer with Windows PowerShell 5.1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./scripts/install.ps1.test.ps1
+
+      - name: Test installer with PowerShell 7
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/install.ps1.test.ps1
