@@ -438,40 +438,65 @@ func TestResolveWorkBuddyNode_WindowsFlatLayout_PicksNewestSemver(t *testing.T) 
 func TestResolveAgentEntry_WorkBuddyReprobesReplacedStagedNode(t *testing.T) {
 	origDetect := detectAgentVersion
 	detectAgentVersion = func(_ context.Context, cmd agent.Command) (string, error) {
-		if len(cmd.Prefix) != 1 { t.Fatalf("version probe prefix = %v, want bundled CLI", cmd.Prefix) }
+		if len(cmd.Prefix) != 1 {
+			t.Fatalf("version probe prefix = %v, want bundled CLI", cmd.Prefix)
+		}
 		return semverFromStagedNodePath(cmd.Path), nil
 	}
 	t.Cleanup(func() { detectAgentVersion = origDetect })
 	bundle := stageWorkBuddyInstall(t, t.TempDir())
 	stagedRoot := t.TempDir()
 	nodeName := "node"
-	if runtime.GOOS == "windows" { nodeName = "node.exe" }
+	if runtime.GOOS == "windows" {
+		nodeName = "node.exe"
+	}
 	stage := func(version string) string {
 		path := filepath.Join(stagedRoot, "versions", version, "bin", nodeName)
-		if runtime.GOOS == "windows" { path = filepath.Join(stagedRoot, "versions", version, nodeName) }
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { t.Fatal(err) }
-		if err := os.WriteFile(path, []byte("fake node"), 0o755); err != nil { t.Fatal(err) }
+		if runtime.GOOS == "windows" {
+			path = filepath.Join(stagedRoot, "versions", version, nodeName)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("fake node"), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		return path
 	}
 	v1 := stage("22.9.0")
-	v2 := filepath.Join(stagedRoot, "versions", "22.10.0", "bin", nodeName)
 	origRoots, origGlobs := workbuddyBundleRoots, workbuddyStagedNodeGlobs
 	workbuddyBundleRoots = func() []string { return []string{bundle} }
-	workbuddyStagedNodeGlobs = func() []string { return []string{filepath.Join(stagedRoot, "versions", "*", "bin", nodeName), filepath.Join(stagedRoot, "versions", "*", nodeName)} }
+	workbuddyStagedNodeGlobs = func() []string {
+		return []string{filepath.Join(stagedRoot, "versions", "*", "bin", nodeName), filepath.Join(stagedRoot, "versions", "*", nodeName)}
+	}
 	t.Cleanup(func() { workbuddyBundleRoots, workbuddyStagedNodeGlobs = origRoots, origGlobs })
 	t.Setenv("MULTICA_WORKBUDDY_PATH", "")
 	t.Setenv("PATH", t.TempDir())
 	entry, ok := probeWorkBuddyAgent()
-	if !ok || entry.Path != v1 { t.Fatalf("initial WorkBuddy probe = (%q, %v), want %q", entry.Path, ok, v1) }
+	if !ok || entry.Path != v1 {
+		t.Fatalf("initial WorkBuddy probe = (%q, %v), want %q", entry.Path, ok, v1)
+	}
 	cli := filepath.Join(bundle, workbuddyBundleRelativeCLI())
-	if len(entry.LaunchPrefix) != 1 || entry.LaunchPrefix[0] != cli { t.Fatalf("initial LaunchPrefix = %v, want [%s]", entry.LaunchPrefix, cli) }
+	if len(entry.LaunchPrefix) != 1 || entry.LaunchPrefix[0] != cli {
+		t.Fatalf("initial LaunchPrefix = %v, want [%s]", entry.LaunchPrefix, cli)
+	}
 	versionDir := filepath.Dir(v1)
-	if runtime.GOOS != "windows" { versionDir = filepath.Dir(versionDir) }
-	if err := os.RemoveAll(versionDir); err != nil { t.Fatal(err) }
-	if got := stage("22.10.0"); got != v2 { t.Fatalf("staged v2 path = %q, want %q", got, v2) }
+	if runtime.GOOS != "windows" {
+		versionDir = filepath.Dir(versionDir)
+	}
+	if err := os.RemoveAll(versionDir); err != nil {
+		t.Fatal(err)
+	}
+	v2 := stage("22.10.0")
 	d := newSelfHealTestDaemon()
 	got, version := d.resolveAgentEntry(context.Background(), "workbuddy", entry)
-	if got.Path != v2 { t.Fatalf("re-probed WorkBuddy path = %q, want %q", got.Path, v2) }
-	if len(got.LaunchPrefix) != 1 || got.LaunchPrefix[0] != cli { t.Fatalf("re-probed LaunchPrefix = %v, want [%s]", got.LaunchPrefix, cli) }
-	if version != "22.10.0" { t.Fatalf("re-probed version = %q, want 22.10.0", version) }
+	if got.Path != v2 {
+		t.Fatalf("re-probed WorkBuddy path = %q, want %q", got.Path, v2)
+	}
+	if len(got.LaunchPrefix) != 1 || got.LaunchPrefix[0] != cli {
+		t.Fatalf("re-probed LaunchPrefix = %v, want [%s]", got.LaunchPrefix, cli)
+	}
+	if version != "22.10.0" {
+		t.Fatalf("re-probed version = %q, want 22.10.0", version)
+	}
 }
