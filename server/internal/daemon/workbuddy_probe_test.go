@@ -15,6 +15,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -498,5 +499,65 @@ func TestResolveAgentEntry_WorkBuddyReprobesReplacedStagedNode(t *testing.T) {
 	}
 	if version != "22.10.0" {
 		t.Fatalf("re-probed version = %q, want 22.10.0", version)
+	}
+}
+
+func TestProbeWorkBuddyAgent_MissingBundleCLIHardMisses(t *testing.T) {
+	root := t.TempDir()
+	origRoots := workbuddyBundleRoots
+	workbuddyBundleRoots = func() []string { return []string{root} }
+	t.Cleanup(func() { workbuddyBundleRoots = origRoots })
+	origGlobs := workbuddyStagedNodeGlobs
+	workbuddyStagedNodeGlobs = func() []string { return []string{filepath.Join(root, "versions", "22.10.0", "bin", "node")} }
+	t.Cleanup(func() { workbuddyStagedNodeGlobs = origGlobs })
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, "versions", "22.10.0", "bin", "node")), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "versions", "22.10.0", "bin", "node"), []byte("fake node"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MULTICA_WORKBUDDY_PATH", "")
+	t.Setenv("PATH", t.TempDir())
+	if _, ok := probeWorkBuddyAgent(); ok {
+		t.Fatal("WorkBuddy probe succeeded with a staged Node but missing bundled CLI")
+	}
+}
+
+func TestResolveAgentEntry_WorkBuddyVersionProbeFailureDoesNotAdopt(t *testing.T) {
+	bundle := stageWorkBuddyInstall(t, t.TempDir())
+	stagedRoot := t.TempDir()
+	node := filepath.Join(stagedRoot, "versions", "22.10.0", "bin", "node")
+	if err := os.MkdirAll(filepath.Dir(node), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(node, []byte("fake node"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	origRoots, origGlobs := workbuddyBundleRoots, workbuddyStagedNodeGlobs
+	workbuddyBundleRoots = func() []string { return []string{bundle} }
+	workbuddyStagedNodeGlobs = func() []string { return []string{filepath.Join(stagedRoot, "versions", "*", "bin", "node")} }
+	t.Cleanup(func() { workbuddyBundleRoots, workbuddyStagedNodeGlobs = origRoots, origGlobs })
+	t.Setenv("MULTICA_WORKBUDDY_PATH", "")
+	entry := AgentEntry{Path: filepath.Join(t.TempDir(), "deleted-node"), LaunchPrefix: []string{filepath.Join(bundle, workbuddyBundleRelativeCLI())}}
+	origDetect := detectAgentVersion
+	detectAgentVersion = func(context.Context, agent.Command) (string, error) {
+		return "", errors.New("fake version probe failure")
+	}
+	t.Cleanup(func() { detectAgentVersion = origDetect })
+	d := newSelfHealTestDaemon()
+	got, _ := d.resolveAgentEntry(context.Background(), "workbuddy", entry)
+	if got.Path != entry.Path {
+		t.Fatalf("failed WorkBuddy candidate was adopted: got %q, want original %q", got.Path, entry.Path)
+	}
+}
+
+func TestProbeWorkBuddyAgent_ExplicitMissingOverrideDoesNotUseBundleOrPATH(t *testing.T) {
+	bundle := stageWorkBuddyInstall(t, t.TempDir())
+	stubWorkBuddyDiscovery(t, []string{bundle}, "22.10.0")
+	missing := filepath.Join(t.TempDir(), "missing-workbuddy")
+	t.Setenv("MULTICA_WORKBUDDY_PATH", missing)
+	t.Setenv("PATH", t.TempDir())
+	if _, ok := probeWorkBuddyAgent(); ok {
+		t.Fatal("missing explicit WorkBuddy override must not fall back to bundle or PATH")
 	}
 }
