@@ -987,19 +987,6 @@ func (d *Daemon) resolveAgentEntry(ctx context.Context, provider string, entry A
 // installer junctions must yield a verified final target before the first
 // launch; otherwise the stable entry could retarget after registration and run
 // a binary whose version and minimum-version policy were never checked.
-func (d *Daemon) reprobeWorkBuddyEntry(ctx context.Context, entry AgentEntry) (AgentEntry, healOutcome, bool) {
-	candidate, ok := probeWorkBuddyAgent()
-	if !ok || candidate.Path == "" || len(candidate.LaunchPrefix) == 0 || !agentExecutablePresent(candidate.Path) {
-		return entry, healOutcome{}, false
-	}
-	outcome := d.adoptAgentPath(ctx, "workbuddy", "", candidate.Path, candidate.LaunchPrefix, "re-probed WorkBuddy Node/CLI pair")
-	if outcome.adopted.path == "" {
-		return entry, outcome, false
-	}
-	candidate.Path = outcome.adopted.path
-	return candidate, outcome, true
-}
-
 func (d *Daemon) resolveAgentEntryForLaunch(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string, error) {
 	resolved, version, outcome := d.resolveAgentEntryWithHeal(ctx, provider, entry)
 	if outcome.rejected != nil {
@@ -1012,6 +999,19 @@ func (d *Daemon) resolveAgentEntryForLaunch(ctx context.Context, provider string
 		return resolved, version, nil
 	}
 	return resolved, version, nil
+}
+
+func (d *Daemon) reprobeWorkBuddyEntry(ctx context.Context, entry AgentEntry) (AgentEntry, healOutcome, bool) {
+	candidate, ok := probeWorkBuddyAgent()
+	if !ok || candidate.Path == "" || len(candidate.LaunchPrefix) == 0 || !agentExecutablePresent(candidate.Path) {
+		return entry, healOutcome{}, false
+	}
+	outcome := d.adoptAgentPath(ctx, "workbuddy", "", candidate.Path, candidate.LaunchPrefix, "re-probed WorkBuddy Node/CLI pair")
+	if outcome.adopted.path == "" {
+		return entry, outcome, false
+	}
+	candidate.Path = outcome.adopted.path
+	return candidate, outcome, true
 }
 
 // healOutcome is what one self-heal attempt concluded. At most one half is

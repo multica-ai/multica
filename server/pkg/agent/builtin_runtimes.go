@@ -126,7 +126,7 @@ var BuiltinRuntimes = []BuiltinRuntime{
 		LaunchHeader:      "workbuddy (WorkBuddy bundled CLI)",
 		DefaultExecutable: "codebuddy",
 		ProviderLabel:     "workbuddy",
-		CatalogDiscovery: discoverCodebuddyModels,
+		CatalogDiscovery:  discoverCodebuddyModels,
 	},
 }
 
