@@ -135,8 +135,13 @@ func TestKimiBackendSetModelFailureFailsTask(t *testing.T) {
 		if !strings.Contains(result.Error, "model not available") {
 			t.Errorf("expected error to surface upstream message, got %q", result.Error)
 		}
-		if result.SessionID != "ses_fake" {
-			t.Errorf("expected session id to be preserved on failure, got %q", result.SessionID)
+		// A fresh session that never reached session/prompt must NOT be
+		// published as a resume pointer: the runtime may never have persisted
+		// it, and a pointer to a session that does not exist wedges the whole
+		// conversation forever (GH #8116). There is no transcript behind an id
+		// that never ran a prompt, so nothing is lost by withholding it.
+		if result.SessionID != "" {
+			t.Errorf("expected the never-prompted session id to be withheld, got %q", result.SessionID)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")

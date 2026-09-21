@@ -21,14 +21,15 @@ type ModelPrice struct {
 }
 
 var modelPrices = map[string]ModelPrice{
-	// GPT-5.6 series (Codex `codex` provider). Official rates from OpenAI's
-	// GPT-5.6 announcement (openai.com/index/previewing-gpt-5-6-sol). For 5.6+
-	// cache read is the 90%-off cached-input rate (0.1x input) and cache write
-	// is billed at 1.25x the uncached input rate — unlike earlier OpenAI SKUs,
-	// which don't bill cache writes separately. NOTE: Codex's app-server usage
-	// stream (0.144.1) does not yet report cache-write tokens separately, so
-	// today those tokens fall into plain input and are billed at 1x; the
-	// CacheWrite rate below is correct but not yet exercised for Codex.
+	// GPT-5.6 series and GPT-6 Astra (Codex `codex` provider). Official rates
+	// from OpenAI's GPT-5.6 announcement (openai.com/index/previewing-gpt-5-6-sol)
+	// and Astra's published $10 / $50. For 5.6+ (including Astra) cache read is
+	// the 90%-off cached-input rate (0.1x input) and cache write is billed at
+	// 1.25x the uncached input rate — unlike earlier OpenAI SKUs, which don't
+	// bill cache writes separately. Codex app-server v0.147 reports cache-write
+	// input separately while including it in the raw input total; the collector
+	// normalizes those into mutually exclusive billing buckets.
+	"openai:gpt-6-astra":   {Provider: "openai", Model: "gpt-6-astra", InputPerM: 10.00, CacheReadPerM: 1.00, CacheWritePerM: 12.50, OutputPerM: 50.00},
 	"openai:gpt-5.6-sol":   {Provider: "openai", Model: "gpt-5.6-sol", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 30.00},
 	"openai:gpt-5.6-terra": {Provider: "openai", Model: "gpt-5.6-terra", InputPerM: 2.50, CacheReadPerM: 0.25, CacheWritePerM: 3.125, OutputPerM: 15.00},
 	"openai:gpt-5.6-luna":  {Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 1.00, CacheReadPerM: 0.10, CacheWritePerM: 1.25, OutputPerM: 6.00},
@@ -141,6 +142,7 @@ var modelAliasRules = []struct {
 	// slug is always dotted (`gpt-5.6-luna`), and the frontend resolver in
 	// utils.ts does NOT dash-normalize, so a dashed `gpt-5-6-luna` must surface
 	// as unmapped on both sides rather than silently borrowing a tier here.
+	{regexp.MustCompile(`(^|/|:)gpt-6-astra$`), "openai:gpt-6-astra"},
 	{regexp.MustCompile(`(^|/|:)gpt-5\.6-sol$`), "openai:gpt-5.6-sol"},
 	{regexp.MustCompile(`(^|/|:)gpt-5\.6-terra$`), "openai:gpt-5.6-terra"},
 	{regexp.MustCompile(`(^|/|:)gpt-5\.6-luna$`), "openai:gpt-5.6-luna"},

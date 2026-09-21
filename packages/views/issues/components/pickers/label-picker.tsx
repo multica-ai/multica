@@ -209,7 +209,7 @@ export function LabelPicker({
   const resolvedTriggerRender =
     triggerRender ??
     (hasLabels ? (
-      <div className="flex flex-wrap items-center gap-1 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors" />
+      <div className="flex flex-wrap items-center gap-1 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors" />
     ) : undefined);
 
   return (

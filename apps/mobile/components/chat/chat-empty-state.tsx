@@ -61,7 +61,7 @@ export function ChatEmptyState({ hasSessions, agent, onPickPrompt }: Props) {
         ) : null}
         {!hasSessions ? (
           <Text className="text-sm text-muted-foreground text-center">
-            Pick an example to start, then edit it before sending.
+            Examples fill the composer without sending.
           </Text>
         ) : null}
       </View>

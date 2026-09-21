@@ -238,11 +238,60 @@ describe("useIssueSurfaceController", () => {
         query: expect.objectContaining({
           scope: { kind: "project", project_id: "p1" },
         }),
-        // A workspace with no custom statuses keeps the original contract —
-        // that is what makes this safe across a rolling deploy. (MUL-6243)
         group: { kind: "status" },
       }),
     );
+  });
+
+  // The project-status filter is server-side only for the list
+  // surfaces, so the store field has to reach the request body. Nothing else
+  // asserts that hop: typecheck is happy either way with a conditional spread.
+  it("sends the project-status filter in the table query", async () => {
+    const store = getIssueSurfaceViewStore("workspace");
+    store.getState().toggleProjectStatusFilter("in_progress");
+    store.getState().toggleProjectStatusFilter("planned");
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "workspace" },
+          modes: ["board", "list"],
+        }),
+      { wrapper: makeWrapper(qc, "workspace") },
+    );
+
+    await waitFor(() => expect(listIssueTableRows).toHaveBeenCalled());
+
+    expect(result.current.tableQuerySpec.filters.project_statuses).toEqual([
+      "in_progress",
+      "planned",
+    ]);
+    // Its own dimension: turning it on must not touch the project-id filter.
+    expect(result.current.tableQuerySpec.filters.project_ids).toBeUndefined();
+    expect(listIssueTableRows).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: expect.objectContaining({
+          filters: expect.objectContaining({
+            project_statuses: ["in_progress", "planned"],
+          }),
+        }),
+      }),
+    );
+  });
+
+  // Off by default: an untouched surface sends no project-status key at all.
+  it("omits the project-status filter when nothing is selected", async () => {
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "workspace" },
+          modes: ["board", "list"],
+        }),
+      { wrapper: makeWrapper(qc, "workspace") },
+    );
+
+    await waitFor(() => expect(listIssueTableRows).toHaveBeenCalled());
+    expect(result.current.tableQuerySpec.filters.project_statuses).toBeUndefined();
   });
 
   // MUL-5477. `tableQuerySpec` is the identity every downstream consumer keys
@@ -317,7 +366,7 @@ describe("useIssueSurfaceController", () => {
     });
     expect(listIssueTableRows).toHaveBeenCalledWith(
       expect.objectContaining({
-        group_key: "status:backlog",
+        group_key: "status:todo",
         page: { limit: 50, cursor: null },
       }),
     );
@@ -1185,10 +1234,9 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.isEmpty).toBe(true);
   });
 
-  // --- cancelled as a default status (MUL-4290) ------------------------
-  // Cancelled is a first-class default lifecycle status: fetched into the
-  // cache, surfaced by default, narrowed (not unlocked) by the status filter,
-  // and hideable like any other status.
+  // --- cancelled as a hidden-by-default status -------------------------
+  // Cancelled remains fetched and filterable, but stays out of the default
+  // presentation until the user explicitly asks for it.
 
   function mockListByStatus(byStatus: Partial<Record<IssueStatus, Issue[]>>) {
     fixtureRows = Object.values(byStatus).flatMap((issues) => issues ?? []);
@@ -1207,7 +1255,7 @@ describe("useIssueSurfaceController", () => {
     getWorkspaceWorkingAgents.mockResolvedValue(agents);
   }
 
-  it("fetches and surfaces the cancelled bucket as a default status", async () => {
+  it("fetches the cancelled bucket but hides it by default", async () => {
     const { result } = renderHook(
       () =>
         useIssueSurfaceController({
@@ -1223,12 +1271,11 @@ describe("useIssueSurfaceController", () => {
     expect(listIssues).toHaveBeenCalledWith(
       expect.objectContaining({ status: "cancelled", limit: 50, offset: 0 }),
     );
-    // …and with no status filter it is a visible column, ordered last.
-    expect(result.current.visibleStatuses).toContain("cancelled");
-    expect(result.current.visibleStatuses.at(-1)).toBe("cancelled");
+    expect(result.current.visibleStatuses).not.toContain("cancelled");
+    expect(result.current.hiddenStatuses).toContain("cancelled");
   });
 
-  it("includes cancelled issues in the default surface and visible statuses", async () => {
+  it("keeps cancelled issues out of the default visible surface", async () => {
     mockListByStatus({
       todo: [makeIssue({ id: "todo-1", status: "todo" })],
       cancelled: [makeIssue({ id: "cancelled-1", status: "cancelled" })],
@@ -1245,11 +1292,10 @@ describe("useIssueSurfaceController", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(result.current.visibleStatuses).toContain("cancelled");
+    expect(result.current.visibleStatuses).not.toContain("cancelled");
     const surfaceIds = result.current.surfaceIssues.map((i) => i.id);
     expect(surfaceIds).toContain("todo-1");
-    expect(surfaceIds).toContain("cancelled-1");
-    expect(result.current.issues.map((i) => i.id)).toContain("cancelled-1");
+    expect(surfaceIds).not.toContain("cancelled-1");
   });
 
   it("narrows the visible set to the selected statuses, dropping cancelled when it is not selected", async () => {

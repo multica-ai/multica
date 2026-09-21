@@ -71,11 +71,17 @@ type BusinessMetrics struct {
 	entitlementVersionRegression   prometheus.Counter
 	autopilotQuotaDecision         *prometheus.CounterVec
 
-	// agentRuntimeLookup counts single-row agent_runtime reads by product
-	// source. Every source shares one SQL fingerprint, so this is the only
-	// place the split between daemon heartbeats, browser polling, and
-	// readiness gates is observable. See labels.go for the closed enum.
-	agentRuntimeLookup *prometheus.CounterVec
+	// agentRuntimeLookup counts logical agent_runtime lookups by product
+	// source — one increment per requested runtime id, whether that id was
+	// resolved by its own point read or as one element of a batch query, so
+	// the counter is a lookup rate and NOT a database-query QPS. Point reads
+	// share one SQL fingerprint and batch reads use another; this counter adds
+	// the product-source attribution that neither query shape exposes on its
+	// own, including daemon heartbeats, browser polling, and readiness gates.
+	// See labels.go for the closed enum.
+	agentRuntimeLookup            *prometheus.CounterVec
+	issueMetadataMutation         *prometheus.CounterVec
+	issueMetadataMutationDuration *prometheus.HistogramVec
 
 	activeMu    sync.Mutex
 	activeTasks map[string]activeTaskLabels
@@ -281,8 +287,16 @@ func NewBusinessMetrics() *BusinessMetrics {
 		}, metricLabels("multica_autopilot_quota_decision_total")),
 		agentRuntimeLookup: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "multica", Subsystem: "agent_runtime", Name: "lookup_total",
-			Help: "Total single-row agent_runtime reads by product source and outcome.",
+			Help: "Total logical agent_runtime lookups by product source and outcome (one per requested id, not per SQL query).",
 		}, metricLabels("multica_agent_runtime_lookup_total")),
+		issueMetadataMutation: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "issue_metadata", Name: "mutation_total",
+			Help: "Total issue metadata mutation attempts by operation and bounded result.",
+		}, metricLabels("multica_issue_metadata_mutation_total")),
+		issueMetadataMutationDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "multica", Subsystem: "issue_metadata", Name: "mutation_duration_seconds",
+			Help: "Duration of issue metadata database work by operation and bounded result, including fallback reads after conditional no-ops.", Buckets: chatClaimResumeQueryDurationBuckets,
+		}, metricLabels("multica_issue_metadata_mutation_duration_seconds")),
 		activeTasks: map[string]activeTaskLabels{},
 		events:      newBusinessEventMetrics(),
 	}
@@ -338,7 +352,31 @@ func (m *BusinessMetrics) Collectors() []prometheus.Collector {
 		m.entitlementVersionRegression,
 		m.autopilotQuotaDecision,
 		m.agentRuntimeLookup,
+		m.issueMetadataMutation,
+		m.issueMetadataMutationDuration,
 	}, m.events.collectors()...)
+}
+
+// RecordIssueMetadataMutation records the UPDATE and, for a no-row result, its
+// fallback read. HTTP latency and pool acquisition pressure are exposed by the
+// existing HTTP and DB pool collectors, while these labels distinguish useful
+// writes from no-op load.
+func (m *BusinessMetrics) RecordIssueMetadataMutation(op, result string, duration time.Duration) {
+	if m == nil {
+		return
+	}
+	switch op {
+	case "set", "delete":
+	default:
+		op = "other"
+	}
+	switch result {
+	case "changed", "noop", "not_found", "error":
+	default:
+		result = "error"
+	}
+	m.issueMetadataMutation.WithLabelValues(op, result).Inc()
+	m.issueMetadataMutationDuration.WithLabelValues(op, result).Observe(duration.Seconds())
 }
 
 func (m *BusinessMetrics) RecordEntitlementConfigError() {
@@ -367,7 +405,10 @@ func (m *BusinessMetrics) RecordEntitlementDecision(gate, action, reason string)
 	}
 }
 
-// RecordAgentRuntimeLookup counts one single-row agent_runtime read.
+// RecordAgentRuntimeLookup counts one logical agent_runtime lookup — one
+// requested runtime id resolved, whether by a point read or as one element of
+// a batch query. It is therefore a lookup rate, not a SQL-query count: a single
+// batch read that resolves N ids increments this N times.
 //
 // Call it from service.RuntimeLookup and nowhere else: the point of the metric
 // is that every read is attributed, and a second entry point is how a call site
@@ -665,11 +706,11 @@ func distributeAuthoritativeCost(actual float64, estimated [4]float64) [4]float6
 }
 
 func (m *BusinessMetrics) recordPricedTokens(provider, model, tokenType, runtimeMode, source string, tokens int64, cost float64) {
-	if tokens <= 0 {
-		return
-	}
 	tokenType = NormalizeTokenType(tokenType)
-	m.llmTokens.WithLabelValues(provider, model, tokenType, runtimeMode, source).Add(float64(tokens))
+	if tokens > 0 {
+		m.llmTokens.WithLabelValues(provider, model, tokenType, runtimeMode, source).Add(float64(tokens))
+	}
+	// Provider-reported cost can exist without a token breakdown.
 	if cost > 0 {
 		m.llmCostUSD.WithLabelValues(provider, model, tokenType, runtimeMode, source).Add(cost)
 	}

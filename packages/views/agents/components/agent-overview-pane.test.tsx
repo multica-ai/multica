@@ -14,6 +14,14 @@ import {
 
 const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 
+const RAIL_SENTINEL = "rail-sentinel";
+const GUTTER_SENTINEL = "gutter-sentinel";
+vi.mock("../../layout/page-header", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../layout/page-header")>()),
+  PAGE_RAIL: "rail-sentinel",
+  PAGE_GUTTER: "gutter-sentinel",
+}));
+
 // AgentOverviewPane pulls in ActorIssuesPanel which in turn touches the api
 // layer. The test only cares about which top-of-pane tab buttons render,
 // not what each tab does, so we stub the heavy children.
@@ -276,5 +284,61 @@ describe("AgentOverviewPane Environment tab visibility", () => {
     expect(
       screen.queryByRole("tab", { name: /^Environment$/i }),
     ).not.toBeInTheDocument();
+  });
+});
+
+// MUL-7107: the header, the tab bar and every panel share one leading edge.
+// The regression these guard against is a centred width cap: `mx-auto` plus a
+// `max-w-*` moves an element's edge as the viewport grows, so chrome on a
+// centred rail and a panel on the page gutter agreed at 1440px and drifted
+// hundreds of pixels apart above it. A cap must be anchored, never centred.
+describe("AgentOverviewPane horizontal alignment", () => {
+  // Every band on the page has to read the SAME rail: chrome on the rail with
+  // panels off it is the original bug, and panels on it with chrome off it is
+  // the mirror image. Both were shipped once (MUL-7107).
+  //
+  // The constants are overridden with sentinels rather than compared against
+  // their real values, which are ordinary Tailwind classes a hand-written
+  // element could match by accident. Only an element that reads the constant
+  // picks a sentinel up.
+  const panelFor = (container: HTMLElement) =>
+    container.querySelector('[role="tablist"]')?.nextElementSibling
+      ?.firstElementChild;
+
+  it("puts the tab bar row on the rail", () => {
+    const { container } = renderPane([makeRuntime("claude")]);
+    const row = container.querySelector('[role="tablist"] > div');
+
+    expect(row).toHaveClass(RAIL_SENTINEL);
+    expect(row).toHaveClass(GUTTER_SENTINEL);
+  });
+
+  it("puts the Overview panel on the same rail", () => {
+    const { container } = renderPane([makeRuntime("claude")]);
+
+    expect(panelFor(container as HTMLElement)).toHaveClass(RAIL_SENTINEL);
+    expect(panelFor(container as HTMLElement)).toHaveClass(GUTTER_SENTINEL);
+  });
+
+  it("puts the Work panel on the same rail", () => {
+    const { container } = renderPane([makeRuntime("claude")]);
+    fireEvent.click(screen.getByRole("tab", { name: /^Work$/i }));
+
+    // Work takes a bare rail: the issues toolbar inside it carries the gutter
+    // already, so adding one here would inset it past the tabs.
+    expect(panelFor(container as HTMLElement)).toHaveClass(RAIL_SENTINEL);
+  });
+
+  it.each([
+    ["Capabilities", openCapabilities],
+    ["Settings", openSettings],
+  ])("puts the %s nav-and-content row on the same rail", (_name, open) => {
+    const { container } = renderPane([makeRuntime("claude")]);
+    open();
+
+    // Bare rail for the same reason as Work — the nav aside carries the gutter,
+    // and that aside, not the form behind it, is what meets the tabs above.
+    expect(panelFor(container as HTMLElement)).toHaveClass(RAIL_SENTINEL);
+    expect(container.querySelector("aside")).toHaveClass(GUTTER_SENTINEL);
   });
 });

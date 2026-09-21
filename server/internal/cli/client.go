@@ -50,9 +50,15 @@ type APIClient struct {
 	BaseURL     string
 	WorkspaceID string
 	Token       string
-	AgentID     string // When set, requests are attributed to this agent instead of the user.
-	TaskID      string // When set, sent as X-Task-ID for agent-task validation.
-	HTTPClient  *http.Client
+	// AgentID / TaskID travel as X-Agent-ID / X-Task-ID execution context.
+	// They are NOT what makes the server treat a request as the agent's: the
+	// server strips both headers on entry and re-stamps them from the bound
+	// mat_ task token, so attribution follows the token, not these fields
+	// (MUL-3428). The CLI only sets them inside a daemon-managed task, where
+	// MULTICA_TOKEN is that mat_ token.
+	AgentID    string
+	TaskID     string
+	HTTPClient *http.Client
 
 	// Identity overrides. Empty values fall back to the package-level
 	// ClientPlatform / ClientVersion / ClientOS.

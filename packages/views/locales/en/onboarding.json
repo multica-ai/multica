@@ -3,16 +3,13 @@
     "wordmark": "Multica",
     "label": "Onboarding steps",
     "about_you": {
-      "label": "About you",
-      "description": "Your role, and what you want done."
+      "label": "About you"
     },
     "workspace": {
-      "label": "Workspace",
-      "description": "Name it and pick its URL."
+      "label": "Workspace"
     },
     "runtime": {
-      "label": "Meet Mika",
-      "description": "Your first agent teammate, and where it runs."
+      "label": "Meet Mika"
     }
   },
   "welcome": {
@@ -22,12 +19,10 @@
     "headline_emphasis": "one workspace.",
     "lede": "Assign them work like you'd assign a colleague — they pick it up, update status, and comment when done.",
     "lede_web": "Desktop bundles the runtime — nothing to install. Continue on web to connect your own CLI.",
-    "lede_desktop": "By the end, a real agent will be replying to your first issue.",
     "download_desktop": "Download Desktop",
     "continue_on_web": "Continue on web",
     "start_exploring": "Start exploring",
     "skip_existing": "I've done this before",
-    "illustration_caption": "Every issue, every thread, every decision — shared by your team and agents.",
     "illustration": {
       "card1_actor_name": "You",
       "card1_actor_initial": "N",
@@ -59,9 +54,8 @@
   },
   "source_backfill": {
     "eyebrow": "Quick question",
-    "lede": "One quick question — it helps us understand who finds Multica useful. Answer once and you're back to your work.",
+    "lede": "Help us understand how you found Multica.",
     "submit": "Submit",
-    "hint_ready": "Looks good. Hit Submit when you're ready.",
     "save_failed_toast": "Failed to save"
   },
   "questions": {
@@ -117,8 +111,7 @@
     "other_aria": "Describe something else"
   },
   "step_question": {
-    "hint_pick": "Pick one to continue — or skip if you'd rather not say.",
-    "hint_continue": "Looks good. Hit Continue when you're ready."
+    "hint_pick": "You can skip this."
   },
   "cli_install": {
     "copy_aria": "Copy",
@@ -175,7 +168,6 @@
     "issue_prefix_suffix": ". You can change this later in settings.",
     "issue_prefix_pending": "Set the URL above and issue numbers will follow it — or type a prefix here.",
     "create_new_title": "Create a new workspace",
-    "create_new_subtitle": "Start fresh — a separate space for a different side of your work.",
     "hint_opening": "Opening {{name}}.",
     "hint_creating": "Creating {{name}}.",
     "hint_creating_pending": "Creating {{name}}…",
@@ -204,7 +196,6 @@
     "scanning_lede_prefix": "Your agent works through an AI coding tool you already have — like ",
     "scanning_lede_suffix": ", and others. We're checking this computer for ones you've installed.",
     "found_headline": "Where should Mika run?",
-    "found_lede": "These are the agent runtimes we found on this computer. You can switch it or add more later.",
     "runtime_count_one": "{{count}} agent runtime",
     "runtime_count_other": "{{count}} agent runtimes",
     "status_all_online": "all online",
@@ -216,7 +207,7 @@
     "empty_lede_prefix": "An agent runtime is an AI coding tool we connect to — like ",
     "empty_lede_suffix": ". Install one and refresh, or pick a path below.",
     "empty_skip_title": "Skip for now",
-    "empty_skip_subtitle": "Enter your workspace now. Your agent can't start runs until an agent runtime is connected on this computer — but you can still browse, plan, and invite teammates.",
+    "empty_skip_subtitle": "Agents can't run until a runtime is connected.",
     "empty_skip_action": "Skip",
     "empty_waitlist_title": "Use a cloud computer",
     "empty_waitlist_subtitle": "We'll run a computer for you in the cloud. Not live yet.",
@@ -227,16 +218,15 @@
     "hint_selected": "Selected: {{name}}",
     "hint_pick": "Pick an agent runtime above to start with Mika.",
     "hint_waiting": "Waiting for the first result…",
-    "hint_skip_or_refresh": "Refresh after installing one, or skip to enter your workspace.",
     "continue": "Start with Mika"
   },
   "step_platform": {
     "eyebrow": "Connect a computer",
     "headline": "Connect a computer to run your agent.",
-    "lede": "Mika, your workspace's Chief of Staff, runs on a real computer that you connect to Multica. Pick how you want to connect one.",
-    "hint_default": "Pick a way to connect — or skip and connect a computer later.",
+    "lede": "Connect a computer so Mika can start working.",
+    "hint_default": "You can connect later.",
     "download_title": "Use this computer",
-    "download_subtitle": "Install our desktop app to connect this computer. Opens in a new tab — pick your platform there.",
+    "download_subtitle": "Install Desktop to connect this computer.",
     "download_button": "Download",
     "cli_title": "Connect from the terminal",
     "cli_subtitle": "Connect a server, remote dev box, or any headless computer. Terminal required.",
@@ -245,7 +235,6 @@
     "cloud_subtitle": "We'll run a computer for you in the cloud. Not live yet.",
     "cloud_action": "Coming soon",
     "cli_dialog_title": "Connect from the terminal",
-    "cli_dialog_description": "Same connection as Desktop, set up from the terminal. Use it for servers, remote dev boxes, or any headless computer.",
     "cli_dialog_pick_hint": "Pick a computer above.",
     "cli_dialog_connect": "Connect & continue",
     "runtimes_connected_one": "{{count}} computer connected",

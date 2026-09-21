@@ -73,7 +73,7 @@ export function parseCommentTriggerOutcomes(raw: unknown): CommentTriggerOutcome
 // a WHITELIST, not "anything that isn't blocked", so an unknown/future status —
 // or the empty status the schema defaults for a malformed entry — never passes
 // as success (MUL-4525; mirrors the Run now whitelist).
-const HANDLED_TRIGGER_STATUSES = new Set(["queued", "coalesced", "deferred"]);
+const HANDLED_TRIGGER_STATUSES = new Set(["queued", "coalesced", "deferred", "steering"]);
 
 // The explicit @agent / @squad mentions that did NOT clearly trigger, so the
 // "posted, but N not triggered" warning must cover them: `blocked` plus any

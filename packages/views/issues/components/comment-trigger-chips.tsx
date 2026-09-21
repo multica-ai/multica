@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { TriangleAlert } from "lucide-react";
+import { TriangleAlert, Users } from "lucide-react";
 import type { CommentTriggerPreviewAgent, CommentTriggerOutcome } from "@multica/core/types";
 import { useAgentPresenceDetail } from "@multica/core/agents";
 import { mentionLabelsByTarget } from "@multica/core/issues/comment-trigger-outcomes";
@@ -38,6 +38,8 @@ interface CommentTriggerChipsProps {
   // (MUL-4525 §2). Each renders as a named warning chip so the user sees WHICH
   // target won't run and why, not a silent no-op after sending.
   blocked?: CommentTriggerOutcome[];
+  /** Whether the draft contains the structured @all member broadcast. */
+  hasAllMembersMention?: boolean;
   // The draft markdown, used only to label each blocked target with the name the
   // user typed in its mention markup. The server omits blocked target names
   // (enumeration-safety); this is the user's own text, so it discloses nothing new.
@@ -88,6 +90,12 @@ function useTriggerPresenceLine(agentId: string, t: IssuesT): string | null {
     : t(($) => $.comment.trigger_starts_when_online);
 }
 
+function deliveryLabel(agent: CommentTriggerPreviewAgent, t: IssuesT): string {
+  return agent.delivery === "current_run"
+    ? t(($) => $.comment.trigger_current_work_short)
+    : t(($) => $.comment.trigger_follow_up_short);
+}
+
 // One tooltip body for every trigger surface (single chip, popover rows):
 // who · why it fires (+ presence) · what a click does.
 function TriggerAgentTooltipBody({
@@ -113,7 +121,10 @@ function TriggerAgentTooltipBody({
           {(() => {
             // Reason (when present) and presence share one line; either may be
             // absent, so join only the parts that exist to avoid a stray space.
-            const line = [sourceReason(agent, t), presenceLine].filter(Boolean).join(" ");
+            const destination = agent.delivery === "current_run"
+              ? t(($) => $.comment.trigger_current_safe_point)
+              : presenceLine;
+            const line = [sourceReason(agent, t), destination].filter(Boolean).join(" ");
             return line ? <div>{line}</div> : null;
           })()}
           <div className="text-muted-foreground">{t(($) => $.comment.trigger_click_to_skip)}</div>
@@ -126,6 +137,7 @@ function TriggerAgentTooltipBody({
 export function CommentTriggerChips({
   agents,
   blocked = [],
+  hasAllMembersMention = false,
   draftContent = "",
   suppressedAgentIds,
   onToggle,
@@ -137,7 +149,7 @@ export function CommentTriggerChips({
 
   // Loading and errors render nothing: the preview is an enhancement, and
   // any interim chrome here reads as composer noise.
-  if (agents.length === 0 && blocked.length === 0) return null;
+  if (agents.length === 0 && blocked.length === 0 && !hasAllMembersMention) return null;
 
   const allowed =
     agents.length === 1 ? (
@@ -156,10 +168,16 @@ export function CommentTriggerChips({
       />
     ) : null;
 
-  if (blocked.length === 0) return allowed;
+  if (blocked.length === 0 && !hasAllMembersMention) return allowed;
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
+      {hasAllMembersMention && (
+        <span className="inline-flex h-6 min-w-0 max-w-full animate-in fade-in items-center gap-1.5 rounded-md px-1.5 text-micro font-medium text-muted-foreground">
+          <Users className="size-3 shrink-0" />
+          <span className="truncate">{t(($) => $.comment.all_members_notice)}</span>
+        </span>
+      )}
       {allowed}
       {blocked.map((outcome) => (
         <BlockedTriggerChip
@@ -237,7 +255,9 @@ function SingleTriggerChip({
   // so it stays fixed-width and never truncates on long agent names.
   const sentence = suppressed
     ? t(($) => $.comment.trigger_wont_trigger)
-    : t(($) => $.comment.trigger_will_start);
+    : agent.delivery === "current_run"
+      ? t(($) => $.comment.trigger_will_update_current)
+      : t(($) => $.comment.trigger_will_start);
 
   return (
     <Tooltip>
@@ -291,7 +311,7 @@ function MultiTriggerChip({
   const sentence =
     activeCount === 0
       ? t(($) => $.comment.trigger_none_will_trigger)
-      : t(($) => $.comment.trigger_will_start_count, { count: activeCount });
+      : t(($) => $.comment.trigger_will_receive_count, { count: activeCount });
 
   const popoverTrigger = (
     <PopoverTrigger
@@ -355,7 +375,7 @@ function MultiTriggerChip({
             const suppressed = suppressedAgentIds.has(agent.id);
             const state = suppressed
               ? t(($) => $.comment.trigger_skipped_label)
-              : sourceLabel(agent.source, t);
+              : deliveryLabel(agent, t);
             return (
               <Tooltip key={agent.id}>
                 <TooltipTrigger

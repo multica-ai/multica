@@ -704,6 +704,11 @@ func TestSlackNativeClearCommandKeepsChatAndAdvancesContextAtomically(t *testing
 	if sessionID == "" || routeRevision != 1 || contextRevision != 2 || content != "/issue investigate native clear" || messageKind != "message" || !forceFresh || !boundaryPending || taskCount != 1 || deliveryCount != 1 || routeCount != 1 || !dedupProcessed {
 		t.Fatalf("native /clear message state: session=%s route=%d context=%d content=%q kind=%q fresh=%t pending=%t tasks=%d deliveries=%d routes=%d dedup=%t", sessionID, routeRevision, contextRevision, content, messageKind, forceFresh, boundaryPending, taskCount, deliveryCount, routeCount, dedupProcessed)
 	}
+	var title string
+	dbfx.QueryRow(t, `SELECT title FROM chat_session WHERE id = $1`, sessionID).Scan(&title)
+	if title != "/issue investigate native cle…" {
+		t.Fatalf("native /clear first-turn title = %q, want the literal command body", title)
+	}
 
 	if err := starter.ClearSlackDMContext(ctx, installation, util.MustParseUUID(testUserID), slackapi.SlashCommand{
 		ChannelID: "D-native-clear",
@@ -740,6 +745,10 @@ func TestSlackNativeClearCommandKeepsChatAndAdvancesContextAtomically(t *testing
 	}
 	if currentSessionID != sessionID || currentContextRevision != 3 || !currentBoundaryPending || currentTaskCount != 1 || currentMessageCount != 1 || currentRouteCount != 1 || !bareDedupProcessed {
 		t.Fatalf("bare native /clear state: session=%s/%s context=%d pending=%t tasks=%d messages=%d routes=%d dedup=%t", currentSessionID, sessionID, currentContextRevision, currentBoundaryPending, currentTaskCount, currentMessageCount, currentRouteCount, bareDedupProcessed)
+	}
+	dbfx.QueryRow(t, `SELECT title FROM chat_session WHERE id = $1`, sessionID).Scan(&title)
+	if title != "/issue investigate native cle…" {
+		t.Fatalf("bare native /clear changed the existing title to %q", title)
 	}
 }
 

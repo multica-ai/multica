@@ -27,11 +27,12 @@ describe("comment trigger outcomes", () => {
     expect(parseCommentTriggerOutcomes("nope")).toEqual([]);
   });
 
-  it("treats only queued/coalesced/deferred as handled; blocked warns", () => {
+  it("treats queued/coalesced/deferred/steering as handled; blocked warns", () => {
     const raw = [
       { target_type: "agent", target_id: "a1", status: "queued", reason_code: "queued" },
       { target_type: "agent", target_id: "a2", status: "coalesced", reason_code: "coalesced" },
       { target_type: "agent", target_id: "a3", status: "deferred", reason_code: "deferred" },
+      { target_type: "agent", target_id: "a4", status: "steering", reason_code: "steering" },
       { target_type: "squad", target_id: "s1", status: "blocked", reason_code: "invocation_not_allowed" },
     ];
     const unhandled = unhandledCommentTriggerOutcomes(raw);

@@ -13,7 +13,6 @@
   "delete_issue": {
     "title": "タスクを削除",
     "description": "このタスクとすべてのコメントが完全に削除されます。この操作は元に戻せません。",
-    "hint": "ワークスペースのメンバーであれば誰でもタスクを削除できます。",
     "cancel": "キャンセル",
     "confirm": "削除",
     "deleting": "削除中...",
@@ -29,7 +28,7 @@
     "toast_failed": "フィードバックを送信できませんでした",
     "send": "フィードバックを送信",
     "sending": "送信中…",
-    "github_hint_prefix": "より迅速な対応とオープンな議論をご希望ですか？こちらへ ",
+    "github_hint_prefix": "こちらでもフィードバックを送れます：",
     "github_hint_link": "GitHub"
   },
   "issue_picker": {
@@ -76,7 +75,7 @@
     "leader_placeholder": "リーダーエージェントを選択",
     "members_label": "追加メンバー",
     "members_optional": "（任意）",
-    "members_hint": "リーダーがサブタスクを委任できるメンバーです。後から追加できます。",
+    "members_hint": "リーダーはこれらのメンバーにサブタスクを委任できます。",
     "members_placeholder": "エージェントまたはワークスペースメンバーを追加",
     "members_selected_count_other": "{{count}} 件選択中",
     "members_more_count": "+{{count}}",
@@ -136,7 +135,8 @@
     "local_clear": "クリア",
     "local_pick_failed": "ディレクトリ選択画面を開けませんでした。",
     "local_invalid_dir": "このディレクトリは使用できません。別のものを選択してください。",
-    "local_hint": "他のマシンのエージェントはこのパスを参照できず、起動に失敗します。共有作業にはリポジトリを使用してください。"
+    "local_hint": "他のマシンのエージェントはこのパスを参照できず、起動に失敗します。共有作業にはリポジトリを使用してください。",
+    "repos_ref_default": "デフォルトブランチ"
   },
   "create_issue": {
     "sr_manual": "新規タスク",

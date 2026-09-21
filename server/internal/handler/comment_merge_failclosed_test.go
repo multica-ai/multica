@@ -50,6 +50,7 @@ func TestMergeCommentIntoPendingTask_FailClosedKeepsOriginalSnapshot(t *testing.
 		t.Fatalf("seed comment B: %v", err)
 	}
 
+	dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE id=$1`, cidB, cidA)
 	// A QUEUED task with a fully precise snapshot triggered by cidA.
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO agent_task_queue

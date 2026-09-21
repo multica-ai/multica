@@ -32,35 +32,26 @@ func TestRedisClientName(t *testing.T) {
 	}
 }
 
-func TestChannelLeaseRedisURLFromEnvPrefersDedicatedInstance(t *testing.T) {
-	t.Setenv("REDIS_URL", "redis://shared:6379/0")
-	t.Setenv("CHANNEL_WS_LEASE_REDIS_URL", "redis://leases:6379/0")
-	if got := channelLeaseRedisURLFromEnv(); got != "redis://leases:6379/0" {
-		t.Fatalf("channel lease Redis URL = %q", got)
+func TestValidateRealtimeRelayMode(t *testing.T) {
+	tests := []struct {
+		name        string
+		mode        string
+		clusterMode bool
+		wantErr     bool
+	}{
+		{name: "standalone legacy", mode: "legacy"},
+		{name: "standalone dual", mode: "dual"},
+		{name: "cluster sharded", mode: "sharded", clusterMode: true},
+		{name: "cluster legacy", mode: "legacy", clusterMode: true, wantErr: true},
+		{name: "cluster dual", mode: "dual", clusterMode: true, wantErr: true},
 	}
-}
-
-func TestChannelLeaseRedisURLFromEnvFallsBackToSharedRedis(t *testing.T) {
-	t.Setenv("REDIS_URL", "redis://shared:6379/0")
-	t.Setenv("CHANNEL_WS_LEASE_REDIS_URL", "")
-	if got := channelLeaseRedisURLFromEnv(); got != "redis://shared:6379/0" {
-		t.Fatalf("channel lease Redis URL = %q", got)
-	}
-}
-
-func TestRealtimeRelayRedisURLFromEnvPrefersDedicatedInstance(t *testing.T) {
-	t.Setenv("REDIS_URL", "redis://shared:6379/0")
-	t.Setenv("REALTIME_RELAY_REDIS_URL", " redis://relay:6379/0 ")
-	if got := realtimeRelayRedisURLFromEnv(); got != "redis://relay:6379/0" {
-		t.Fatalf("realtime relay Redis URL = %q", got)
-	}
-}
-
-func TestRealtimeRelayRedisURLFromEnvFallsBackToSharedRedis(t *testing.T) {
-	t.Setenv("REDIS_URL", " redis://shared:6379/0 ")
-	t.Setenv("REALTIME_RELAY_REDIS_URL", "")
-	if got := realtimeRelayRedisURLFromEnv(); got != "redis://shared:6379/0" {
-		t.Fatalf("realtime relay Redis URL = %q", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateRealtimeRelayMode(tt.mode, tt.clusterMode)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateRealtimeRelayMode(%q, %t) error = %v, wantErr %t", tt.mode, tt.clusterMode, err, tt.wantErr)
+			}
+		})
 	}
 }
 
@@ -120,11 +111,11 @@ func TestShardedRelayConfigFromEnvNormalizesUnsafeOverrides(t *testing.T) {
 
 func TestNewNamedRedisClient_SetsClientName(t *testing.T) {
 	t.Setenv("REDIS_DISABLE_CLIENT_NAME", "")
-	base := &redis.Options{Addr: "localhost:6379"}
+	base := &redis.UniversalOptions{Addrs: []string{"localhost:6379"}}
 	client := newNamedRedisClient(base, "store")
 	defer client.Close()
 
-	opts := client.Options()
+	opts := client.(*redis.Client).Options()
 	if opts.ClientName != "multica-api:store" {
 		t.Errorf("ClientName = %q, want %q", opts.ClientName, "multica-api:store")
 	}
@@ -132,11 +123,11 @@ func TestNewNamedRedisClient_SetsClientName(t *testing.T) {
 
 func TestNewNamedRedisClient_DisableClientName(t *testing.T) {
 	t.Setenv("REDIS_DISABLE_CLIENT_NAME", "true")
-	base := &redis.Options{Addr: "localhost:6379"}
+	base := &redis.UniversalOptions{Addrs: []string{"localhost:6379"}}
 	client := newNamedRedisClient(base, "store")
 	defer client.Close()
 
-	opts := client.Options()
+	opts := client.(*redis.Client).Options()
 	if opts.ClientName != "" {
 		t.Errorf("ClientName = %q, want empty when REDIS_DISABLE_CLIENT_NAME=true", opts.ClientName)
 	}
@@ -145,11 +136,11 @@ func TestNewNamedRedisClient_DisableClientName(t *testing.T) {
 func TestNewNamedRedisClient_DisableClientName_ClearsPreExistingName(t *testing.T) {
 	t.Setenv("REDIS_DISABLE_CLIENT_NAME", "true")
 	// Simulate REDIS_URL with ?client_name=foo — ParseURL sets ClientName.
-	base := &redis.Options{Addr: "localhost:6379", ClientName: "foo"}
+	base := &redis.UniversalOptions{Addrs: []string{"localhost:6379"}, ClientName: "foo"}
 	client := newNamedRedisClient(base, "store")
 	defer client.Close()
 
-	opts := client.Options()
+	opts := client.(*redis.Client).Options()
 	if opts.ClientName != "" {
 		t.Errorf("ClientName = %q, want empty: REDIS_DISABLE_CLIENT_NAME must clear pre-existing name from URL", opts.ClientName)
 	}
@@ -157,11 +148,11 @@ func TestNewNamedRedisClient_DisableClientName_ClearsPreExistingName(t *testing.
 
 func TestNewNamedRedisClient_DisableClientName_InvalidValue(t *testing.T) {
 	t.Setenv("REDIS_DISABLE_CLIENT_NAME", "not-a-bool")
-	base := &redis.Options{Addr: "localhost:6379"}
+	base := &redis.UniversalOptions{Addrs: []string{"localhost:6379"}}
 	client := newNamedRedisClient(base, "store")
 	defer client.Close()
 
-	opts := client.Options()
+	opts := client.(*redis.Client).Options()
 	// Invalid value falls back to default (false), so ClientName IS set
 	if opts.ClientName != "multica-api:store" {
 		t.Errorf("ClientName = %q, want %q (invalid env should fall back to naming enabled)", opts.ClientName, "multica-api:store")

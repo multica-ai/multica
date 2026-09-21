@@ -29,11 +29,11 @@ func modelCatalogKey(runtimeID string) string { return modelCatalogKeyPrefix + r
 
 // RedisModelCatalogCache is the multi-node implementation of ModelCatalogCache.
 type RedisModelCatalogCache struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 	ttl time.Duration
 }
 
-func NewRedisModelCatalogCache(rdb *redis.Client) *RedisModelCatalogCache {
+func NewRedisModelCatalogCache(rdb redis.UniversalClient) *RedisModelCatalogCache {
 	return &RedisModelCatalogCache{rdb: rdb, ttl: modelCatalogServeWindow}
 }
 

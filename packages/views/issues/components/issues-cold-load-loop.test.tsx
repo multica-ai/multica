@@ -72,10 +72,33 @@ vi.mock("../../navigation", () => ({
 }));
 
 vi.mock("@multica/core/issues/config", () => ({
-  ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
+  ALL_STATUSES: ["backlog", "todo", "in_progress", "completed", "canceled"],
+  STATUS_ORDER: ["backlog", "todo", "in_progress", "completed", "canceled"],
+  BUILT_IN_STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"],
+  BUILT_IN_STATUS_CATEGORY: {
+    backlog: "backlog",
+    todo: "todo",
+    in_progress: "in_progress",
+    in_review: "in_progress",
+    blocked: "in_progress",
+    done: "completed",
+    cancelled: "canceled",
+  },
+  BUILT_IN_STATUS_LABEL: {
+    backlog: "Backlog",
+    todo: "Todo",
+    in_progress: "In Progress",
+    in_review: "In Review",
+    blocked: "Blocked",
+    done: "Done",
+    cancelled: "Cancelled",
+  },
   STATUS_CONFIG: {
     backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
+    unstarted: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
+    started: { label: "In Progress", iconColor: "text-warning", hoverBg: "hover:bg-warning/10" },
+    completed: { label: "Completed", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
+    canceled: { label: "Canceled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
     todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
     in_progress: { label: "In Progress", iconColor: "text-warning", hoverBg: "hover:bg-warning/10" },
     in_review: { label: "In Review", iconColor: "text-success", hoverBg: "hover:bg-success/10" },

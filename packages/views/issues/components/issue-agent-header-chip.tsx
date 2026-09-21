@@ -16,6 +16,7 @@ import { TranscriptButton } from "../../common/task-transcript";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { ActiveTaskRow } from "./execution-log-section";
 import { useT } from "../../i18n";
+import { compareActiveIssueTasks } from "./active-task-order";
 
 // Per-issue "is an agent working on this right now?" chip for the issue
 // detail header. Lives in the header (not the scrollable body) so the live
@@ -59,9 +60,9 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
   const { running, queued } = useMemo(() => {
     const running: AgentTask[] = [];
     const queued: AgentTask[] = [];
-    // The list is already issue-scoped by the endpoint, so only the status
-    // split matters here.
-    for (const task of tasks) {
+    // The endpoint returns history newest first. Active work instead uses
+    // execution/queue order, shared with the right-panel log.
+    for (const task of tasks.toSorted(compareActiveIssueTasks)) {
       if (task.status === "running") running.push(task);
       else if (
         task.status === "queued" ||
@@ -76,11 +77,15 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
     return { running, queued };
   }, [tasks]);
 
-  const [openedTranscriptTaskSnapshot, setOpenedTranscriptTaskSnapshot] =
-    useState<AgentTask | null>(null);
-  const openedTranscriptTask = openedTranscriptTaskSnapshot
-    ? tasks.find((task) => task.id === openedTranscriptTaskSnapshot.id) ??
-      openedTranscriptTaskSnapshot
+  // The row owns the trigger, this level owns the dialog — so the row's open
+  // signal has to carry how it was requested, or the dialog would never learn
+  // it and would always drop a keyboard reader's focus on close.
+  const [openedTranscript, setOpenedTranscript] = useState<
+    { task: AgentTask; fromKeyboard: boolean } | null
+  >(null);
+  const openedTranscriptTask = openedTranscript
+    ? tasks.find((task) => task.id === openedTranscript.task.id) ??
+      openedTranscript.task
     : null;
 
   // No active work → render nothing.
@@ -93,8 +98,8 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
           issueId={issueId}
           running={running}
           queued={queued}
-          onTranscriptOpenChange={(task, open) => {
-            setOpenedTranscriptTaskSnapshot(open ? task : null);
+          onTranscriptOpenChange={(task, open, fromKeyboard) => {
+            setOpenedTranscript(open ? { task, fromKeyboard } : null);
           }}
         />
       ) : null}
@@ -106,8 +111,9 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
           title={t(($) => $.execution_log.transcript_tooltip)}
           renderButton={false}
           open
+          finalFocus={openedTranscript?.fromKeyboard === true}
           onOpenChange={(open) => {
-            if (!open) setOpenedTranscriptTaskSnapshot(null);
+            if (!open) setOpenedTranscript(null);
           }}
         />
       ) : null}
@@ -119,7 +125,11 @@ interface ActiveChipProps {
   issueId: string;
   running: AgentTask[];
   queued: AgentTask[];
-  onTranscriptOpenChange: (task: AgentTask, open: boolean) => void;
+  onTranscriptOpenChange: (
+    task: AgentTask,
+    open: boolean,
+    fromKeyboard: boolean,
+  ) => void;
 }
 
 function ActiveChip({
@@ -215,8 +225,8 @@ function ActiveChip({
                 key={task.id}
                 task={task}
                 issueId={issueId}
-                onTranscriptOpenChange={(open) => {
-                  onTranscriptOpenChange(task, open);
+                onTranscriptOpenChange={(open, fromKeyboard) => {
+                  onTranscriptOpenChange(task, open, fromKeyboard === true);
                 }}
               />
             ))}

@@ -407,7 +407,8 @@ func (blockingDeleter) DeleteObject(ctx context.Context, _ string) error {
 func TestChannelMediaReconciler_StalledDeleteIsBoundedAndBacksOff(t *testing.T) {
 	pool := newCancelFinalizePool(t)
 	f := seedReconcilerFixture(t, pool)
-	rec := &ChannelMediaReconciler{Queries: db.New(pool), Storage: blockingDeleter{}, deleteTimeout: 50 * time.Millisecond}
+	// Every due row the sweep reaches waits this out in full, so keep it small.
+	rec := &ChannelMediaReconciler{Queries: db.New(pool), Storage: blockingDeleter{}, deleteTimeout: 10 * time.Millisecond}
 
 	f.seedLedgerRow(t, "ws/lark/stalled", "https://cdn.test/stalled", "pending", ChannelMediaReconcileSettleDelay+time.Minute)
 

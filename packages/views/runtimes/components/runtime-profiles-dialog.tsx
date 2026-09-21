@@ -18,7 +18,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api";
 import type {
   RuntimeProfile,
-  RuntimeProtocolFamily,
+  RuntimeProfileType,
 } from "@multica/core/types";
 import {
   runtimeProfileListOptions,
@@ -41,10 +41,12 @@ import { cn } from "@multica/ui/lib/utils";
 import { ProviderLogo } from "./provider-logo";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import {
-  PROTOCOL_FAMILIES,
+  RUNTIME_TYPES,
   buildRuntimeCatalog,
   formatCommandLine,
   parseCommandLine,
+  profileRuntimeType,
+  runtimeTypeLabel,
   validateProfileForm,
   type ProfileFormErrorField,
   type ProfileFormValues,
@@ -94,7 +96,7 @@ export function RuntimeProfilesDialog({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Carries the chosen family from create-step-1 into the form.
   const [draftFamily, setDraftFamily] =
-    useState<RuntimeProtocolFamily>(PROTOCOL_FAMILIES[0] ?? "claude");
+    useState<RuntimeProfileType>(RUNTIME_TYPES[0] ?? "claude");
 
   const catalog = useMemo(() => buildRuntimeCatalog(profiles), [profiles]);
   const entries = useMemo(
@@ -185,7 +187,9 @@ export function RuntimeProfilesDialog({
             mode={state.mode}
             step={state.mode === "create" ? state.step : "details"}
             family={
-              state.mode === "edit" ? state.profile.protocol_family : draftFamily
+              state.mode === "edit"
+                ? profileRuntimeType(state.profile)
+                : draftFamily
             }
             profile={state.mode === "edit" ? state.profile : null}
             standaloneCreate={intent === "create"}
@@ -413,7 +417,9 @@ function CatalogRow({
 }) {
   const { t } = useT("runtimes");
   const label =
-    entry.kind === "custom" ? entry.profile.display_name : entry.protocolFamily;
+    entry.kind === "custom"
+      ? entry.profile.display_name
+      : runtimeTypeLabel(entry.protocolFamily);
   const disabled = entry.kind === "custom" && !entry.profile.enabled;
   const isBuiltin = entry.kind === "builtin";
   return (
@@ -446,14 +452,14 @@ function CatalogRow({
             {label}
           </span>
           {disabled && (
-            <span className="shrink-0 rounded bg-muted px-1 text-micro font-medium text-muted-foreground">
+            <span className="shrink-0 rounded-xs bg-muted px-1 text-micro font-medium text-muted-foreground">
               {t(($) => $.profiles.badge_disabled)}
             </span>
           )}
         </span>
         {entry.kind === "custom" && (
           <span className="block truncate text-caption capitalize text-muted-foreground">
-            {entry.protocolFamily}
+            {runtimeTypeLabel(entry.protocolFamily)}
           </span>
         )}
       </span>
@@ -512,7 +518,7 @@ function DetailPanel({
           </span>
           <div className="min-w-0">
             <h3 className="truncate text-title-sm font-semibold capitalize">
-              {entry.protocolFamily}
+              {runtimeTypeLabel(entry.protocolFamily)}
             </h3>
             <span className="text-caption text-muted-foreground">
               {t(($) => $.profiles.builtin_detail.read_only)}
@@ -521,7 +527,7 @@ function DetailPanel({
         </div>
         <p className="mt-4 text-body text-muted-foreground">
           {t(($) => $.profiles.builtin_detail.description, {
-            family: entry.protocolFamily,
+            family: runtimeTypeLabel(entry.protocolFamily),
           })}
         </p>
       </div>
@@ -541,7 +547,7 @@ function DetailPanel({
           <div className="flex min-w-0 items-center gap-3">
             <span className="flex h-10 w-10 items-center justify-center rounded-md border bg-background">
               <ProviderLogo
-                provider={profile.protocol_family}
+                provider={profileRuntimeType(profile)}
                 className="h-5 w-5"
               />
             </span>
@@ -550,7 +556,7 @@ function DetailPanel({
                 {profile.display_name}
               </h3>
               <span className="text-caption capitalize text-muted-foreground">
-                {profile.protocol_family}
+                {runtimeTypeLabel(profileRuntimeType(profile))}
               </span>
             </div>
           </div>
@@ -558,7 +564,9 @@ function DetailPanel({
 
         <dl className="mt-5 space-y-4">
           <DetailRow label={t(($) => $.profiles.detail.base_family)}>
-            <span className="capitalize">{profile.protocol_family}</span>
+            <span className="capitalize">
+              {runtimeTypeLabel(profileRuntimeType(profile))}
+            </span>
           </DetailRow>
           <DetailRow label={t(($) => $.profiles.detail.command)}>
             <span className="font-mono text-caption">{commandLine}</span>
@@ -648,11 +656,11 @@ function ProfileFormView({
   wsId: string;
   mode: "create" | "edit";
   step: "family" | "details";
-  family: RuntimeProtocolFamily;
+  family: RuntimeProfileType;
   profile: RuntimeProfile | null;
   standaloneCreate: boolean;
   standaloneEdit: boolean;
-  onPickFamily: (family: RuntimeProtocolFamily) => void;
+  onPickFamily: (family: RuntimeProfileType) => void;
   onBack: () => void;
   onCancel: () => void;
   onSaved: (profile: RuntimeProfile) => void;
@@ -676,7 +684,7 @@ function ProfileFormView({
             className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3"
             aria-label={t(($) => $.profiles.form.family_label)}
           >
-            {PROTOCOL_FAMILIES.map((option) => (
+            {RUNTIME_TYPES.map((option) => (
               <button
                 key={option}
                 type="button"
@@ -684,7 +692,9 @@ function ProfileFormView({
                 className="flex items-center gap-2 rounded-md border bg-background px-3 py-2.5 text-left text-body transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               >
                 <ProviderLogo provider={option} className="h-4 w-4 shrink-0" />
-                <span className="truncate capitalize">{option}</span>
+                <span className="truncate capitalize">
+                  {runtimeTypeLabel(option)}
+                </span>
               </button>
             ))}
           </div>
@@ -736,7 +746,7 @@ function ProfileDetailsForm({
 }: {
   wsId: string;
   mode: "create" | "edit";
-  family: RuntimeProtocolFamily;
+  family: RuntimeProfileType;
   profile: RuntimeProfile | null;
   hideEditHeading: boolean;
   onBack: () => void;
@@ -791,7 +801,7 @@ function ProfileDetailsForm({
       if (mode === "create") {
         const created = await createProfile.mutateAsync({
           display_name: values.displayName.trim(),
-          protocol_family: family,
+          runtime_type: family,
           command_name: commandName,
           fixed_args: fixedArgs,
           ...(description ? { description } : {}),
@@ -870,7 +880,9 @@ function ProfileDetailsForm({
           </Label>
           <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
             <ProviderLogo provider={family} className="h-4 w-4 shrink-0" />
-            <span className="text-body capitalize">{family}</span>
+            <span className="text-body capitalize">
+              {runtimeTypeLabel(family)}
+            </span>
           </div>
           <p className="text-micro text-muted-foreground">
             {t(($) => $.profiles.form.family_locked_hint)}
@@ -957,7 +969,7 @@ function ProfileDetailsForm({
                   {parsedCommand.fixedArgs.map((arg, index) => (
                     <span
                       key={`${arg}-${index}`}
-                      className="rounded bg-background px-1 font-mono text-foreground"
+                      className="rounded-xs bg-background px-1 font-mono text-foreground"
                     >
                       {arg}
                     </span>

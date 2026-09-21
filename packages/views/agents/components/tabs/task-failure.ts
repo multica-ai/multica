@@ -20,6 +20,7 @@ export const FAILURE_REASON_I18N_KEYS = {
   runtime_cli_timeout: "runtime_cli_timeout",
   environment_prepare_failed: "environment_prepare_failed",
   invalid_task_identity: "invalid_task_identity",
+  runtime_access_denied: "runtime_access_denied",
 
   // Agent process side — provider.
   "agent_error.provider_auth_or_access":
@@ -87,11 +88,38 @@ export function cancelReasonLabel(
     status: string;
     error?: string | null;
     failure_reason?: string | null;
+    cancelled_by?: { type: string };
   },
   t: AgentsT,
 ): string | null {
   if (task.status !== "cancelled") return null;
   const reason = failureReasonLabel(task.failure_reason, t);
   if (reason) return reason;
-  return task.error ? t(($) => $.task_failure.cancelled_by_system) : null;
+  return task.error && !task.cancelled_by
+    ? t(($) => $.task_failure.cancelled_by_system)
+    : null;
+}
+
+/**
+ * Localized cancellation status with its recorded actor. Historical rows and
+ * malformed partial metadata deliberately return null so callers preserve the
+ * legacy plain "Cancelled" label instead of inventing an unknown person.
+ */
+export function cancellationActorLabel(
+  task: {
+    status: string;
+    cancelled_by?: { type: string; name?: string };
+  },
+  t: AgentsT,
+): string | null {
+  if (task.status !== "cancelled" || !task.cancelled_by) return null;
+  const { type } = task.cancelled_by;
+  if (type !== "member" && type !== "agent" && type !== "system") return null;
+  if (type === "system") {
+    return t(($) => $.task_failure.cancelled_by_system);
+  }
+  const name = task.cancelled_by.name?.trim();
+  return name
+    ? t(($) => $.task_failure.cancelled_by_actor, { name })
+    : null;
 }

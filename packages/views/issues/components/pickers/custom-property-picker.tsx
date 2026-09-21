@@ -279,7 +279,7 @@ export function CustomPropertyValueInput({
       return (
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger
-            className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
+            className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
             render={triggerRender}
           >
             {valueTrigger}
@@ -415,7 +415,7 @@ function TextishPropertyEditor({
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger
-        className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
+        className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
         render={triggerRender}
       >
         {trigger ?? (value === undefined ? (

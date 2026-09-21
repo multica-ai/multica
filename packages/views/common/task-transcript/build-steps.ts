@@ -10,10 +10,9 @@ import type { TimelineItem } from "./build-timeline";
  * the pair back together, so one call reads as one line and its result is that
  * line's detail.
  *
- * Pairing is positional because the events carry no call id. `agent.Message`
- * has `CallID` all the way to the daemon, but `TaskMessageData` drops it before
- * the report and `task_message` has no column for it — until that lands, a
- * result belongs to the oldest still-open call with the same tool name.
+ * Identified events pair by their opaque call ID, regardless of completion
+ * order or tool name. Only events without identity use the legacy tool-name
+ * FIFO; mixing the two would attach orphan results to unrelated calls.
  */
 
 /** One tool call. Either side can be missing: a call still running has no
@@ -87,20 +86,20 @@ function durationBetween(start?: string, end?: string): number | undefined {
   const a = timeMs(start);
   const b = timeMs(end);
   if (a === undefined || b === undefined) return undefined;
-  // Clamp rather than drop: the daemon flushes in 500ms batches, so a fast
-  // call can land with its result on the same tick or one tick earlier.
+  // Clamp rather than drop: a daemon wall-clock adjustment can make a result
+  // appear just before its call. Zero is preserved as "unknown" in the UI.
   return Math.max(0, b - a);
 }
 
 /** Fold `tool_use` / `tool_result` pairs into single steps, in stream order. */
 export function buildSteps(items: TimelineItem[]): TraceStep[] {
   const steps: TraceStep[] = [];
-  // Open calls per tool, oldest first. FIFO rather than nearest-preceding:
-  // when a provider runs two calls of the same tool in parallel it returns
-  // them in call order more often than in reverse.
+  // Separate ID and tool-name keys so a missing/unmatched ID never consumes
+  // an identified call through the legacy fallback (or vice versa).
   const open = new Map<string, TraceCallStep[]>();
 
   for (const item of items) {
+    const pairingKey = item.callId ? `id:${item.callId}` : `tool:${item.tool ?? ""}`;
     if (item.type === "tool_use") {
       const tool = item.tool ?? "";
       const step: TraceCallStep = {
@@ -111,15 +110,15 @@ export function buildSteps(items: TimelineItem[]): TraceStep[] {
         startedAt: item.created_at,
       };
       steps.push(step);
-      const queue = open.get(tool);
+      const queue = open.get(pairingKey);
       if (queue) queue.push(step);
-      else open.set(tool, [step]);
+      else open.set(pairingKey, [step]);
       continue;
     }
 
     if (item.type === "tool_result") {
       const tool = item.tool ?? "";
-      const pending = open.get(tool)?.shift();
+      const pending = open.get(pairingKey)?.shift();
       if (pending) {
         pending.result = item;
         pending.endedAt = item.created_at;
@@ -160,15 +159,21 @@ export function groupSteps(steps: TraceStep[]): TraceRow[] {
       rows.push(...run);
     } else {
       const first = run[0]!;
-      const last = run[run.length - 1]!;
+      // Call order no longer implies completion order. Do not display a
+      // completed span while any member still lacks its end timestamp.
+      const endedAt = run.every((step) => timeMs(step.endedAt) !== undefined)
+        ? run.reduce((latest, step) =>
+            timeMs(step.endedAt)! > timeMs(latest)! ? step.endedAt : latest,
+          first.endedAt)
+        : undefined;
       rows.push({
         kind: "group",
         seq: first.seq,
         tool: first.tool,
         steps: run,
         startedAt: first.startedAt,
-        endedAt: last.endedAt,
-        durationMs: durationBetween(first.startedAt, last.endedAt),
+        endedAt,
+        durationMs: durationBetween(first.startedAt, endedAt),
       });
     }
     run = [];
@@ -425,14 +430,4 @@ export function toolKindTotals(steps: TraceStep[]): ToolKindTotals {
     totals[kind] += step.durationMs;
   }
   return totals;
-}
-
-/** Below these, a timeline is chrome: it would render a handful of bars that
- *  say less than the durations already on each row. */
-export const TIMELINE_MIN_STEPS = 8;
-export const TIMELINE_MIN_MS = 60_000;
-
-export function shouldShowTimeline(steps: TraceStep[], lanes: TraceLanes | null): boolean {
-  if (!lanes) return false;
-  return steps.length >= TIMELINE_MIN_STEPS && lanes.totalMs >= TIMELINE_MIN_MS;
 }

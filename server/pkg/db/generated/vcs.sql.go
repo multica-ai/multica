@@ -52,12 +52,12 @@ WITH combined AS (
     SELECT pr.state AS state, ipr.close_intent AS close_intent
     FROM github_pull_request pr
     JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-    WHERE ipr.issue_id = $1 AND NOT ipr.reference_only
+    WHERE ipr.issue_id = $1
     UNION ALL
     SELECT pr.state AS state, ipr.close_intent AS close_intent
     FROM vcs_pull_request pr
     JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
-    WHERE ipr.issue_id = $1 AND NOT ipr.reference_only
+    WHERE ipr.issue_id = $1
 )
 SELECT
     COALESCE(SUM(CASE WHEN state IN ('open', 'draft') THEN 1 ELSE 0 END), 0)::bigint AS open_count,
@@ -77,8 +77,8 @@ type GetIssueCombinedPullRequestCloseAggregateRow struct {
 // open PR on the other — either webhook is blind to the other's in-flight work.
 // Sum the in-flight (open/draft) and merged-with-close-intent counts across
 // github_pull_request+issue_pull_request and vcs_pull_request+
-// issue_vcs_pull_request. reference_only links are excluded on both sides, so a
-// bare body mention neither counts as in-flight nor gates advance.
+// issue_vcs_pull_request. A bare body mention is not linked on either side, so
+// a passing reference never counts as in-flight.
 func (q *Queries) GetIssueCombinedPullRequestCloseAggregate(ctx context.Context, issueID pgtype.UUID) (GetIssueCombinedPullRequestCloseAggregateRow, error) {
 	row := q.db.QueryRow(ctx, getIssueCombinedPullRequestCloseAggregate, issueID)
 	var i GetIssueCombinedPullRequestCloseAggregateRow
@@ -112,18 +112,14 @@ func (q *Queries) GetVCSConnectionByID(ctx context.Context, id pgtype.UUID) (Vcs
 const linkIssueToVCSPullRequest = `-- name: LinkIssueToVCSPullRequest :exec
 
 INSERT INTO issue_vcs_pull_request (
-    issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent, reference_only
+    issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent
 ) VALUES (
-    $1, $2, $4, $5, $3, $6
+    $1, $2, $4, $5, $3
 )
 ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
     close_intent = CASE
-        WHEN $7 THEN issue_vcs_pull_request.close_intent
+        WHEN $6 THEN issue_vcs_pull_request.close_intent
         ELSE EXCLUDED.close_intent
-    END,
-    reference_only = CASE
-        WHEN $7 THEN issue_vcs_pull_request.reference_only
-        ELSE EXCLUDED.reference_only
     END
 `
 
@@ -133,17 +129,14 @@ type LinkIssueToVCSPullRequestParams struct {
 	CloseIntent         bool        `json:"close_intent"`
 	LinkedByType        pgtype.Text `json:"linked_by_type"`
 	LinkedByID          pgtype.UUID `json:"linked_by_id"`
-	ReferenceOnly       bool        `json:"reference_only"`
 	PreserveCloseIntent bool        `json:"preserve_close_intent"`
 }
 
 // =====================
 // Issue ↔ VCS PR link
 // =====================
-// reference_only marks a link justified ONLY by a bare body mention (no closing
-// keyword and no title/branch reference), mirroring the GitHub link upsert.
-// preserve_close_intent freezes both close_intent and reference_only once a
-// terminal merge/close event has been recorded.
+// Mirrors the GitHub link upsert: preserve_close_intent freezes close_intent
+// once a terminal merge/close event has been recorded.
 func (q *Queries) LinkIssueToVCSPullRequest(ctx context.Context, arg LinkIssueToVCSPullRequestParams) error {
 	_, err := q.db.Exec(ctx, linkIssueToVCSPullRequest,
 		arg.IssueID,
@@ -151,7 +144,6 @@ func (q *Queries) LinkIssueToVCSPullRequest(ctx context.Context, arg LinkIssueTo
 		arg.CloseIntent,
 		arg.LinkedByType,
 		arg.LinkedByID,
-		arg.ReferenceOnly,
 		arg.PreserveCloseIntent,
 	)
 	return err
@@ -246,7 +238,7 @@ WITH checks AS (
         ON cs.connection_id = pr.connection_id
        AND cs.sha = pr.head_sha
        AND pr.head_sha <> ''
-    WHERE ipr.issue_id = $1 AND NOT ipr.reference_only
+    WHERE ipr.issue_id = $1
     GROUP BY pr.id
 )
 SELECT
@@ -258,7 +250,7 @@ SELECT
 FROM vcs_pull_request pr
 JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
 LEFT JOIN checks c ON c.pr_id = pr.id
-WHERE ipr.issue_id = $1 AND NOT ipr.reference_only
+WHERE ipr.issue_id = $1
 ORDER BY pr.pr_created_at DESC
 `
 
@@ -375,6 +367,29 @@ func (q *Queries) RotateVCSConnectionWebhookSecret(ctx context.Context, arg Rota
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const unlinkIssueFromVCSPullRequest = `-- name: UnlinkIssueFromVCSPullRequest :exec
+DELETE FROM issue_vcs_pull_request
+WHERE issue_id = $1 AND pull_request_id = $2
+`
+
+type UnlinkIssueFromVCSPullRequestParams struct {
+	IssueID       pgtype.UUID `json:"issue_id"`
+	PullRequestID pgtype.UUID `json:"pull_request_id"`
+}
+
+// Drops a link an earlier claim created, for the GitHub twin's reason: while a
+// PR is still editable, the link follows the live title/body parse, so a key the
+// payload still carries but no longer claims — "Closes MUL-1" edited down to
+// "Related MUL-1" — loses its link. A key deleted from the PR outright is NOT
+// covered: the payload keeps no trace of it, so noticing that needs the stored
+// links instead, which is its own change. Callers must not run this once the PR
+// has gone terminal — a post-merge edit cannot retroactively unlink a PR that
+// did the work.
+func (q *Queries) UnlinkIssueFromVCSPullRequest(ctx context.Context, arg UnlinkIssueFromVCSPullRequestParams) error {
+	_, err := q.db.Exec(ctx, unlinkIssueFromVCSPullRequest, arg.IssueID, arg.PullRequestID)
+	return err
 }
 
 const upsertVCSCommitStatus = `-- name: UpsertVCSCommitStatus :exec

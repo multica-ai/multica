@@ -22,6 +22,7 @@ func (r CreateCommentRow) Comment() Comment {
 		QuickActionID:  r.QuickActionID,
 		ViaPluginID:    r.ViaPluginID,
 		Revision:       r.Revision,
+		DeletedAt:      r.DeletedAt,
 	}
 }
 
@@ -47,5 +48,6 @@ func (r UpdateCommentRow) Comment() Comment {
 		QuickActionID:  r.QuickActionID,
 		ViaPluginID:    r.ViaPluginID,
 		Revision:       r.Revision,
+		DeletedAt:      r.DeletedAt,
 	}
 }

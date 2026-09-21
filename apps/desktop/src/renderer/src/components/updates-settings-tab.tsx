@@ -76,7 +76,6 @@ export function UpdatesSettingsTab() {
   return (
     <SettingsTab
       title={t(($) => $.desktop.updates.title)}
-      description={t(($) => $.desktop.updates.description)}
     >
       <SettingsCard>
         <SettingsRow label={t(($) => $.desktop.updates.current_version)}>

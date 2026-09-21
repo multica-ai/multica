@@ -178,7 +178,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// assistant message for exactly that case, and returning now would throw
 	// the work away.
 	content := deliverableContent(e)
-	if content == "" && !o.mayCarryAttachments(e) {
+	if !hasVisibleChar(content) && !o.mayCarryAttachments(e) {
 		o.skipped(ctx, e, skipNothingToSay)
 		return nil
 	}
@@ -284,11 +284,22 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// Words first. An empty completion reaches here only because a file is
 	// bound to it, and an empty markdown bubble ahead of that file would be
 	// noise the user has to scroll past.
-	if content != "" {
-		if err := sender.sendTextCtx(ctx, binding.ChannelChatID, chatType, content); err != nil {
-			return err
+	//
+	// Empty is hasVisibleChar's sense of it, not `!= ""`. A completion of "\n"
+	// is a bubble with nothing in it on the reader's screen, and counting it
+	// as the words that answered the turn also tells the file below it that
+	// the reply has already been accounted for.
+	if hasVisibleChar(content) {
+		err := sender.sendTextCtx(ctx, binding.ChannelChatID, chatType, content)
+		// Recorded here rather than returned, so this send and the relay's
+		// go through the one mapping in recordSend. Returning it as well
+		// would have handleChatDone classify the same send a second time.
+		o.recordSend(ctx, e.ChatSessionID, e.Type, err)
+		if err != nil && !errors.Is(err, errPartiallySent) {
+			// Nothing of the answer landed. The files are not an answer on
+			// their own, so the turn ends here.
+			return nil
 		}
-		o.delivered()
 	}
 	// Then whatever the agent produced alongside them, as its own message — a
 	// WeCom reply cannot carry a file inline.
@@ -300,7 +311,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		ChatID:         binding.ChannelChatID,
 		ChatType:       chatType,
 		SessionID:      e.ChatSessionID,
-	}, content == "")
+	}, !hasVisibleChar(content))
 	return nil
 }
 

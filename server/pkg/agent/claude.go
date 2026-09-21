@@ -103,8 +103,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("claude stdin pipe: %w", err)
 	}
+	input := &claudeInputStream{writer: stdin, closer: stdin}
+	var terminalResultObserved atomic.Bool
 	var closeStdinOnce sync.Once
-	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
+	closeStdin := func() { closeStdinOnce.Do(func() { _ = input.Close() }) }
 	// Capture stderr into both the daemon log (as before) and a bounded tail
 	// buffer so we can include the last few KB in Result.Error when claude
 	// exits unexpectedly. Without the tail, an exit-code-only failure looks
@@ -147,7 +149,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// timeout.
 	writeDone := make(chan error, 1)
 	go func() {
-		err := writeClaudeInput(stdin, prompt)
+		err := writeClaudeInput(input, prompt)
 		if err != nil {
 			closeStdin()
 		}
@@ -171,6 +173,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var sessionID string
 		sawAsyncLaunch := false
 		usage := make(map[string]TokenUsage)
+		seenUsage := make(map[string]struct{})
 		eventCount := 0
 		invalidEventCount := 0
 		assistantEventCount := 0
@@ -227,7 +230,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			switch msg.Type {
 			case "assistant":
 				assistantEventCount++
-				turn := b.handleAssistant(msg, msgCh, usage)
+				turn := b.handleAssistant(msg, msgCh, usage, seenUsage)
 				toolUseCount += turn.toolUses
 				if !turn.understood {
 					unreadableAssistantCount++
@@ -243,6 +246,13 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 			case "result":
+				// Close the input stream at the authoritative boundary before parsing
+				// any result detail. Close flips its atomic gate before touching the
+				// descriptor, so an already-blocked write is interrupted and every
+				// later write is rejected. Only then publish the boundary to the
+				// daemon's terminal watchdog.
+				closeStdin()
+				terminalResultObserved.Store(true)
 				sawResult = true
 				finalResultText = msg.ResultText
 				resultIsError = msg.IsError
@@ -251,7 +261,6 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if resultUsage := claudeResultUsage(msg, opts.Model); len(resultUsage) > 0 {
 					usage = resultUsage
 				}
-				closeStdin()
 			case "log":
 				if msg.Log != nil {
 					trySend(msgCh, Message{
@@ -261,7 +270,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					})
 				}
 			case "control_request":
-				b.handleControlRequest(msg, stdin)
+				b.handleControlRequest(msg, input)
 			}
 		}
 		scanErr := scanner.Err()
@@ -360,10 +369,24 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 	}()
 
-	return &Session{Messages: msgCh, Result: resCh}, nil
+	steer := func(ctx context.Context, instruction string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if terminalResultObserved.Load() {
+			return errors.New("claude turn has already produced its terminal result")
+		}
+		return writeClaudeInput(input, instruction)
+	}
+	return &Session{
+		Steer:            steer,
+		TerminalObserved: terminalResultObserved.Load,
+		Messages:         msgCh,
+		Result:           resCh,
+	}, nil
 }
 
-func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage) assistantTurn {
+func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage, seenUsage map[string]struct{}) assistantTurn {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
 		// Unreadable body: understood stays false so the caller drops any
@@ -374,11 +397,22 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 	var assistantText strings.Builder
 	toolUseCount := 0
 
-	// Accumulate token usage per model.
-	if content.Usage != nil && content.Model != "" {
+	// A response can emit several assistant blocks with the same message ID
+	// and usage. Count its input/cache tokens once, without dropping any of
+	// the blocks below. Missing IDs retain best-effort per-event accounting.
+	// This fallback covers only the main loop: assistant output_tokens is a
+	// placeholder, and subagent totals require the final result's modelUsage.
+	// https://code.claude.com/docs/en/agent-sdk/cost-tracking#track-per-step-usage
+	_, counted := seenUsage[content.ID]
+	if msg.ParentToolUseID == "" && content.Usage != nil && content.Model != "" &&
+		(content.ID == "" || !counted) && claudeUsageHasTokens(
+		content.Usage.InputTokens, 0, content.Usage.CacheReadInputTokens, content.Usage.CacheCreationInputTokens,
+	) {
+		if content.ID != "" {
+			seenUsage[content.ID] = struct{}{}
+		}
 		u := usage[content.Model]
 		u.InputTokens += content.Usage.InputTokens
-		u.OutputTokens += content.Usage.OutputTokens
 		u.CacheReadTokens += content.Usage.CacheReadInputTokens
 		u.CacheWriteTokens += content.Usage.CacheCreationInputTokens
 		usage[content.Model] = u
@@ -537,11 +571,12 @@ func claudeMapHasAsyncLaunchStatus(value map[string]any) bool {
 // ── Claude SDK JSON types ──
 
 type claudeSDKMessage struct {
-	Type      string          `json:"type"`
-	Message   json.RawMessage `json:"message,omitempty"`
-	Subtype   string          `json:"subtype,omitempty"`
-	SessionID string          `json:"session_id,omitempty"`
-	Model     string          `json:"model,omitempty"`
+	Type            string          `json:"type"`
+	Message         json.RawMessage `json:"message,omitempty"`
+	Subtype         string          `json:"subtype,omitempty"`
+	SessionID       string          `json:"session_id,omitempty"`
+	Model           string          `json:"model,omitempty"`
+	ParentToolUseID string          `json:"parent_tool_use_id,omitempty"`
 
 	// result fields
 	ResultText string `json:"result,omitempty"`
@@ -569,6 +604,7 @@ type claudeLogEntry struct {
 }
 
 type claudeMessageContent struct {
+	ID      string               `json:"id"`
 	Role    string               `json:"role"`
 	Model   string               `json:"model"`
 	Content []claudeContentBlock `json:"content"`
@@ -684,12 +720,14 @@ type claudeControlRequestPayload struct {
 
 // ── Shared helpers ──
 
-func trySend(ch chan<- Message, msg Message) {
+func trySend(ch chan<- Message, msg Message) bool {
 	select {
 	case ch <- msg:
+		return true
 	default:
 		// Channel full — drop message. Result.Output is finalized independently,
 		// so only live transcript consumers are affected.
+		return false
 	}
 }
 
@@ -780,6 +818,36 @@ func writeClaudeInput(w io.Writer, prompt string) error {
 		return err
 	}
 	return nil
+}
+
+// claudeInputStream keeps user steer frames and control responses from
+// interleaving on Claude's shared stream-json stdin. Close atomically shuts the
+// gate before closing the descriptor, so a blocked write is interrupted and a
+// later steer fails without writing a partial frame.
+type claudeInputStream struct {
+	writeMu sync.Mutex
+	writer  io.Writer
+	closer  io.Closer
+	closed  atomic.Bool
+}
+
+func (s *claudeInputStream) Write(data []byte) (int, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if s.closed.Load() {
+		return 0, errors.New("claude turn is no longer active")
+	}
+	return s.writer.Write(data)
+}
+
+func (s *claudeInputStream) Close() error {
+	// Do not wait for writeMu: Claude can emit before reading stdin, leaving the
+	// initial pipe Write blocked. Closing the descriptor is what releases that
+	// write during cancellation. The atomic gate prevents every later frame.
+	if s.closed.Swap(true) {
+		return nil
+	}
+	return s.closer.Close()
 }
 
 func buildClaudeInput(prompt string) ([]byte, error) {
@@ -1138,7 +1206,7 @@ func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	// still applied (MUL-6260).
 	cmd := runtimeCmd.exec(ctx, "--version")
 	hideAgentWindow(cmd)
-	cmd.WaitDelay = 2 * time.Second
+	cmd.WaitDelay = probeWaitDelay
 	data, err := outputOwned(cmd, runtimeCmd.logger)
 	version, recognised := extractVersionLine(string(data))
 	if err != nil {

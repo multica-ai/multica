@@ -97,9 +97,9 @@ RETURNING *, (xmax = 0) AS inserted;
 -- command_name on PATH and is registering an instance of it. The arbiter is the
 -- partial unique index from migration 120 (WHERE profile_id IS NOT NULL), so a
 -- single daemon can host the built-in provider AND any number of custom
--- profiles of the same protocol family. provider stays the protocol family so
--- task routing (agent.New(provider)) is unchanged; profile_id is the stable
--- identity. (xmax = 0) AS inserted mirrors UpsertAgentRuntime.
+-- profiles of the same protocol family. provider carries the base runtime
+-- identity so ResolveBackend applies its descriptor; profile_id preserves
+-- custom-profile provenance. (xmax = 0) AS inserted mirrors UpsertAgentRuntime.
 INSERT INTO agent_runtime (
     workspace_id,
     daemon_id,
@@ -345,7 +345,8 @@ RETURNING id, workspace_id, owner_id, daemon_id, provider;
 -- rejects an active row without a runtime — so a missed status now surfaces as
 -- a failed delete (runtime_delete_not_drained) instead of silent data loss.
 UPDATE agent_task_queue
-SET status = 'cancelled', completed_at = now()
+SET status = 'cancelled', completed_at = now(),
+    cancelled_by_type = 'system', cancelled_by_id = NULL, cancelled_by_name = NULL
 WHERE (runtime_id = ANY(@runtime_ids::uuid[]) OR agent_id = ANY(@agent_ids::uuid[]))
   AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;

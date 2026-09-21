@@ -33,6 +33,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `DATABASE_URL` | 本地 `multica` 数据库 | PostgreSQL 连接地址 |
 | `DATABASE_MAX_CONNS` | `25` | 单个 API 进程的最大数据库连接数 |
 | `DATABASE_MIN_CONNS` | `5` | 单个 API 进程保留的最小连接数 |
+| `DATABASE_SEARCH_WORK_MEM_MB` | `64` | 每个搜索计划算子的 PostgreSQL `work_mem` 上限（MB）；设为 `1`–`64` 可调低，设为 `0` 则沿用数据库/会话默认值 |
 | `DATABASE_REPLICA_URL` | 空 | 可选的 PostgreSQL 只读从库连接地址；新连接会强制校验只读状态，业务仍需在代码中显式选择最终一致读取 |
 | `DATABASE_REPLICA_MAX_CONNS` | `10` | 单个 API 进程的最大从库连接数 |
 | `DATABASE_REPLICA_MIN_CONNS` | `0` | 单个 API 进程保留的最小从库连接数 |
@@ -41,7 +42,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `PORT` | `8080` | API 监听端口 |
 | `JWT_SECRET` | 生产环境必填 | 登录 JWT、部分签名流程使用的密钥；生产环境对空值或已知占位值拒绝启动 |
 | `APP_ENV` | 空 | 生产环境设为 `production` |
-| `AUTH_TOKEN_TTL` | `720h`（30 天） | 浏览器 JWT 与 cookie 有效期；接受 Go duration 或正整数秒数 |
+| `AUTH_TOKEN_TTL` | `720h`（30 天） | 浏览器 JWT 与 cookie 有效期；接受 Go duration 或正整数秒数。会话会滑动续期：剩余有效期过半后，持续使用的会话会被续期而不是到期。低于 `60s` 的取值会按 `60s` 处理 |
 | `LOG_LEVEL` | 应用默认 | 日志级别 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 收到终止信号后，开始优雅退出前等待多久 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 运行时离线后可重新连接且不终止在途运行的宽限时间；低于 `150s` 时按 `150s` 处理 |
@@ -174,7 +175,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `REDIS_URL` | 空 | 用于共享限流、实时事件和 token cache；未设置时实时事件和邀请限流回退到进程内存，认证限流不生效 |
+| `REDIS_URL` | 空 | 所有 Redis 功能共用的唯一连接地址，包括共享限流、实时事件、频道 WebSocket 租约和 token cache |
+| `REDIS_CLUSTER_MODE` | `false` | 设为 `true` 后强制使用 Redis Cluster 客户端，单配置地址也适用；集群模式只能使用数据库 0，且要求 `REALTIME_RELAY_MODE=sharded` |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | 托管 Redis 禁止 `CLIENT SETNAME` 时设为 `true` |
 | `RATE_LIMIT_AUTH` | `5` | 单 IP 每分钟发送验证码、发起 Google 登录或目录账号登录的次数 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | 单 IP 每分钟验证验证码的次数 |
@@ -252,11 +254,12 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 单个守护进程的并发运行上限 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 单次执行的绝对时限；`0` 表示不设置 |
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 没有输出且没有工具执行时的静默上限；`0` 表示整套 watchdog 关闭 |
-| `MULTICA_AGENT_TOOL_WATCHDOG` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | 单个工具调用持续静默的上限；只有希望工具比模型有更多余量时才单独设置，`0` 表示工具执行期间永不强制停止 |
+| `MULTICA_AGENT_TOOL_WATCHDOG` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | 单个工具调用持续静默的上限；只有希望工具比模型有更多余量时才单独设置，`0` 表示工具执行期间永不强制停止。Cursor 的后台 shell 在它启动的进程退出前一直算作执行中；到达这个上限时，守护进程会停止这些进程，并给 Cursor 一段新的 watchdog 预算来产出终态结果。若进程归属或清理无法验证，则回到普通的运行取消策略 |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 专用静默阈值 |
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | Codex 语义静默阈值。Codex 自己的计时器看不到工具是否在执行，因此跟随 idle / tool 预算中较大的那个，而不再单独保留一个更短的上限 |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | 显式覆盖 Codex 首轮无进展上限；`0` 保持默认值。实际首轮等待仍受 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 和总执行超时限制——需将 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 设为严格大于此值（并留出余量），否则等待会被截断至该值，且会跳过模型目录启动重试。设为相等还不够：语义计时器先启动，两者相等时仍可能丢失该重试 |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`；`thread/start`、`thread/resume`：`60s` | Codex app-server 启动握手上限；显式设置后会统一覆盖两类预算 |
+| `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` | 任务取消后等待 Codex app-server 确认 `turn/interrupt` 并发出 `turn/completed` 的宽限期，以便在强制清理进程前保留最终 token 用量。主机异常缓慢时，可根据 daemon 日志记录的中断延迟调整 |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`；自托管 `false` | 是否自动检查并更新 CLI |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 检查更新的间隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 是否在 `multica` 二进制被带外替换（`brew upgrade`、重新下载、本地构建）后重启到新二进制。与 `MULTICA_DAEMON_AUTO_UPDATE` 相互独立 |
@@ -266,12 +269,16 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 
 守护进程注入智能体 task 的内部上下文见 [Task 运行时环境](/daemon-runtimes#task-运行时环境)。
 
-各 AI 编程工具可以使用 `MULTICA_<PROVIDER>_PATH` 覆盖命令路径；支持模型覆盖的工具还可以使用 `MULTICA_<PROVIDER>_MODEL`。QwenPaw 和 MiniMax Code 没有模型变量，因为 Multica 不会向它们传模型；MiniMax Code 的路径变量是 `MULTICA_MCODE_PATH`。详见 [AI 编程工具对比](/providers#模型来源)。DeepSeek Harness 支持 `MULTICA_DSH_PATH` 和 `MULTICA_DSH_MODEL`（取值为 dsh 模型目录中的模型 id，例如 `deepseek-official/deepseek-chat`）。ZeroClaw 支持 `MULTICA_ZEROCLAW_PATH`，但没有模型变量；模型由 ZeroClaw 的智能体配置管理。全机默认参数 `MULTICA_<PROVIDER>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具。对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
+各 AI 编程工具可以使用 `MULTICA_<PROVIDER>_PATH` 覆盖命令路径；支持模型覆盖的工具还可以使用 `MULTICA_<PROVIDER>_MODEL`。QwenPaw 和 MiniMax Code 没有模型变量，因为 Multica 不会向它们传模型；MiniMax Code 的路径变量是 `MULTICA_MCODE_PATH`。详见 [AI 编程工具对比](/providers#模型来源)。DeepSeek Harness 支持 `MULTICA_DSH_PATH` 和 `MULTICA_DSH_MODEL`（取值为 dsh 模型目录中的模型 id，例如 `deepseek-official/deepseek-chat`）。 DeepSeek Harness 另外支持 `MULTICA_DSH_PROFILE_BUNDLE`：当 `multica` profile 缺失时，用它指定要安装的 bundle，多个候选用逗号分隔、按序尝试，每项可以是 npm 包名、目录或打包好的 tarball。该变量默认不设置；Multica 驱动的 `--stdio` 协议正是由这个 profile 提供，所以不设置时不会改动 DSH 的安装，守护进程会报告缺少 profile，而不是注册一个不可用的运行时。Multica 自己的桥接还没有发布到公共 npm registry，如何选取值见[安装智能体运行时](/install-agent-runtime)；这里填的东西会在没有二次确认的情况下装进每一台守护进程宿主的 DSH 家目录，请当作供应链决策来对待。`MULTICA_DSH_PROFILE_BUNDLE` 开启的安装被刻意限制了范围：每个守护进程生命周期最多执行一次，只在探测确认 profile 确实缺失时执行；失败时会把包管理器自身的输出记入日志，且只有重启守护进程后才会重试。探测超时、或返回本守护进程不支持的协议版本时，只做报告，绝不覆盖安装——守护进程不会覆盖一个明显是刻意装上去的 profile。排查时在守护进程日志中搜索 `DSH runtime profile`；要撤销安装，删除 `$DSH_HOME/profiles/multica`（默认 `~/.dsh/profiles/multica`）。`MULTICA_DSH_PLUGIN_PATH` 用于覆盖安装时解析 pnpm 的目录。`dsh plugin` 转发到的那个 pnpm 由 DSH Desktop 放在它私有的 runtime-commands 目录里，macOS 和 Windows 都是如此，守护进程会自动找到并加到 PATH 最前——包括较新版 Desktop 采用的带版本号目录结构。所以只有守护进程找不到的安装位置、或者你想让安装使用自己的 pnpm 时，才需要这个变量。一旦设置就完全取代自动查找：目录不存在时，安装会退回使用守护进程 `PATH` 上的 pnpm，而不是内置的那个。Linux 上没有 DSH Desktop，安装始终使用 `PATH`。ZeroClaw 支持 `MULTICA_ZEROCLAW_PATH`，但没有模型变量；模型由 ZeroClaw 的智能体配置管理。全机默认参数 `MULTICA_<PROVIDER>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具。对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
 MULTICA_CLAUDE_ARGS=--max-turns 40
 ```
+
+Cursor 已验证的后台清理需要 Linux 6.9 及以上（进程组 pidfd）、macOS 内核对进程身份查询与 audit token 发信号的支持，或 Windows 上成功分配的嵌套 Job Object。在 macOS 上，每个进程都按内核校验的 PID version 发信号，不需要加入同一 session 的进程组；这些 macOS 接口是私有的，会在捕获时做探测。无法认领的后台启动会返回它原本的工具结果并回到普通的 idle watchdog，工具 watchdog 为 `0` 时同样如此。已经认领的工作在清理无法确认时会继续算作执行中。当工具 watchdog 设为 `0` 时则完全没有这个边界：已认领的后台工作只要还活着就一直让运行处于执行中，此时运行仅受 `MULTICA_AGENT_TIMEOUT` 约束，而它默认也是 `0`。
+
+运行正常结束时，被认领的 Cursor 后台进程同样会被停止，因此该次运行启动的后台服务不会有意地在收尾之后继续存活。macOS 可以通过保留的原始父进程身份识别后期产生的子进程，但无法证明中间进程在被观察到之前就已消失的那条链路。这类进程、离开被追踪进程组的工作，以及持续的归属或发信号错误，都可能留下残余的后台工作。未确认的清理会被记录下来，且永远不会换取一次「清理成功」的恢复窗口；不会仅凭数字 PID 或进程组就去杀掉未知进程。
 
 优先级为命令行 flag → 环境变量 → `~/.multica/config.json` → 内置默认。watchdog 的行为见[守护进程与运行时](/daemon-runtimes)。
 
@@ -316,11 +323,16 @@ multica config show
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
+| `DO_NOT_TRACK` | 空（默认开启遥测） | 设为 `1` 或 `true`（不区分大小写）后，停止首方匿名自托管遥测的采集与发送 |
 | `ANALYTICS_DISABLED` | `false` | 设为 `true` 关闭 PostHog 上报 |
 | `POSTHOG_API_KEY` | 空 | 不设置时统计上报关闭；接入自己的 PostHog 项目时填写 |
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog 地址 |
 | `METRICS_ADDR` | 空 | Prometheus metrics 监听地址；空表示不启动 |
 | `REALTIME_METRICS_TOKEN` | 空 | 保护 `/health/realtime` 的 bearer token |
+
+首方自托管遥测每天按 UTC 发送一份部署级快照，固定且不可配置的地址为 `https://telemetry.multica.ai/v1/telemetry/events`。快照只包含正式发布版本、工作区数/去重成员数/活跃智能体数/过去 24 小时活跃守护进程数的分桶，以及过去 24 小时运行的开始、完成、失败和取消总数。不会发送名称、邮箱或域名、IP、业务标识符、主机或设备信息、代码仓库、模型或 plugin、prompt/output、评论或聊天、文件路径、token/费用、凭据、错误文本、stack 或日志。此数据只用于了解自托管版本采用、部署规模区间与聚合使用量，不用于计费、授权、认证或安全决策。
+
+`DO_NOT_TRACK` 与 `ANALYTICS_DISABLED` 相互独立：前者控制这份首方匿名快照，后者控制可选的 PostHog 集成。
 
 ## 接下来
 

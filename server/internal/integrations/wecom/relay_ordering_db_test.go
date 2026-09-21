@@ -88,7 +88,7 @@ type blipOnce struct {
 	done bool
 }
 
-func (b *blipOnce) Claim(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+func (b *blipOnce) Claim(ctx context.Context, key, token string, ttl time.Duration) (bool, error) {
 	b.mu.Lock()
 	first := !b.done
 	b.done = true
@@ -96,7 +96,7 @@ func (b *blipOnce) Claim(ctx context.Context, key string, ttl time.Duration) (bo
 	if first {
 		return false, errors.New("wecom test: redis blip")
 	}
-	return b.DedupeStore.Claim(ctx, key, ttl)
+	return b.DedupeStore.Claim(ctx, key, token, ttl)
 }
 
 // sentTexts is what actually reached the chat, in order.
@@ -297,15 +297,15 @@ type failsOnceHandler struct {
 }
 
 func (h *failsOnceHandler) ownsSocket(string) bool { return true }
-func (h *failsOnceHandler) deliverRelayed(context.Context, relayFrame) deliveryOutcome {
+func (h *failsOnceHandler) deliverRelayed(context.Context, relayFrame) relayResult {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.n++
 	if h.n == 1 {
-		return outcomeProvablyNotSent
+		return relayResult{outcome: outcomeProvablyNotSent}
 	}
 	h.delivered = true
-	return outcomeDone
+	return relayResult{outcome: outcomeDone}
 }
 func (h *failsOnceHandler) calls() int {
 	h.mu.Lock()
@@ -338,8 +338,17 @@ func TestRelay_AReplyNoReplicaCouldSendIsCountedOnce(t *testing.T) {
 	relay := &fanoutRelay{}
 	dedupe := NewRedisDedupe(rdb, testClaimBudget, slog.Default())
 	// A short chain so the grace the watch waits out is a test's worth of time
-	// rather than a lease poll's.
-	cfg := RelayConfig{Shards: 1, LeaseSettle: 120 * time.Millisecond, RetryBackoff: 20 * time.Millisecond}
+	// rather than a lease poll's. Every term outcomeGrace is built from has to
+	// come down together, and DeliveryBudget is one of them: it is charged per
+	// OFFER, because an offer that fails provably-unsent hands the claim back
+	// and the next one gets a budget of its own. Left at its ackTimeout
+	// default this chain's grace is forty seconds.
+	cfg := RelayConfig{
+		Shards:         1,
+		LeaseSettle:    120 * time.Millisecond,
+		RetryBackoff:   20 * time.Millisecond,
+		DeliveryBudget: 20 * time.Millisecond,
+	}
 
 	// Neither replica holds the socket: both are mid-reconnect, which is the
 	// residual window SELF_HOSTING.md describes.
@@ -375,7 +384,12 @@ func TestRelay_ADeliveredReplyIsCountedOnceAndNotAlsoLost(t *testing.T) {
 
 	relay := &fanoutRelay{}
 	dedupe := NewRedisDedupe(rdb, testClaimBudget, slog.Default())
-	cfg := RelayConfig{Shards: 1, LeaseSettle: 120 * time.Millisecond, RetryBackoff: 20 * time.Millisecond}
+	cfg := RelayConfig{
+		Shards:         1,
+		LeaseSettle:    120 * time.Millisecond,
+		RetryBackoff:   20 * time.Millisecond,
+		DeliveryBudget: 20 * time.Millisecond, // per offer, like the claim budget — see the test above
+	}
 	holder := newRelayReplicaWith(t, pool, turn.instID, true, relay, dedupe, cfg)
 	publisher := newRelayReplicaWith(t, pool, turn.instID, false, relay, dedupe, cfg)
 
@@ -388,8 +402,12 @@ func TestRelay_ADeliveredReplyIsCountedOnceAndNotAlsoLost(t *testing.T) {
 	if got := sentTexts(t, holder.conn); len(got) != 1 {
 		t.Fatalf("the chat received %v, want the one answer", got)
 	}
-	// Past the whole grace, so the watch has run and had its say.
-	time.Sleep(600 * time.Millisecond)
+	// Past the whole grace, so the watch has run and had its say. Read off
+	// the dispatcher rather than written down: a fixed 600ms was under the
+	// grace this config produces, so the assertions below were passing on a
+	// watch that had not run yet — they proved nothing about what it does
+	// when it does run.
+	time.Sleep(publisher.router.outcomeGrace() + 200*time.Millisecond)
 
 	if got := holder.mx.get("outbound_delivered"); got != 1 {
 		t.Errorf("outbound_delivered on the holder = %d, want 1", got)

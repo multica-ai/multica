@@ -27,7 +27,7 @@ export function ProjectStatusBadge({ project, handleUpdate, triggerClassName, al
       <DropdownMenuTrigger
         render={
           <button type="button" className={cn(
-            "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-caption font-medium cursor-pointer hover:opacity-80 transition-opacity",
+            "inline-flex items-center gap-1 rounded-xs px-1.5 py-0.5 text-caption font-medium cursor-pointer hover:opacity-80 transition-opacity",
             statusCfg.badgeBg, statusCfg.badgeText,
             triggerClassName
           )}>
@@ -57,7 +57,7 @@ export function ProjectPriorityBadge({ project, handleUpdate, triggerClassName, 
       <DropdownMenuTrigger
         render={
           <button type="button" className={cn(
-            "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-caption font-medium hover:bg-accent/60 transition-colors cursor-pointer",
+            "inline-flex items-center gap-1 rounded-xs px-1.5 py-0.5 text-caption font-medium hover:bg-accent/60 transition-colors cursor-pointer",
             triggerClassName
           )}>
             <PriorityIcon priority={project.priority} />

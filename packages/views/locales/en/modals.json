@@ -13,7 +13,6 @@
   "delete_issue": {
     "title": "Delete issue",
     "description": "This will permanently delete this issue and all its comments. This action cannot be undone.",
-    "hint": "Any workspace member can delete issues.",
     "cancel": "Cancel",
     "confirm": "Delete",
     "deleting": "Deleting...",
@@ -29,7 +28,7 @@
     "toast_failed": "Failed to send feedback",
     "send": "Send feedback",
     "sending": "Sending…",
-    "github_hint_prefix": "Want faster handling and open discussion? Head to ",
+    "github_hint_prefix": "You can also send feedback on ",
     "github_hint_link": "GitHub"
   },
   "issue_picker": {
@@ -76,7 +75,7 @@
     "leader_placeholder": "Select a leader agent",
     "members_label": "Additional Members",
     "members_optional": "(optional)",
-    "members_hint": "Members the leader can delegate sub-issues to. Can be added later.",
+    "members_hint": "The leader can delegate sub-issues to these members.",
     "members_placeholder": "Add agents or workspace members",
     "members_selected_count_one": "{{count}} selected",
     "members_selected_count_other": "{{count}} selected",
@@ -138,7 +137,8 @@
     "local_clear": "Clear",
     "local_pick_failed": "Could not open the directory picker.",
     "local_invalid_dir": "This directory can't be used. Pick another.",
-    "local_hint": "Agents on other machines won't see this path — they'll fail to start. Use repos for shared work."
+    "local_hint": "Agents on other machines won't see this path — they'll fail to start. Use repos for shared work.",
+    "repos_ref_default": "Default branch"
   },
   "create_issue": {
     "sr_manual": "New Issue",

@@ -137,14 +137,15 @@ WHERE workspace_id = $1 AND repo_owner = $2 AND repo_name = $3 AND pr_number = $
 -- refresh pipeline — NOT the legacy suite-level webhook aggregation, which is
 -- removed. The `issue_prs` CTE narrows to this issue's PR ids first so the
 -- aggregation only touches check rows for those PRs. Rows for an OLD head are
--- excluded by the snapshot_head_sha filter. reference_only links (a PR that
--- merely mentions the issue identifier in its body, with no closing keyword and
--- no title/branch reference) are filtered out — they are not working PRs.
+-- excluded by the snapshot_head_sha filter. Every link row is a working PR:
+-- the webhook only links an identifier it read from the PR title, the branch
+-- name, or a body closing keyword, so a bare body mention never lands here
+-- (MUL-7072).
 WITH issue_prs AS (
     SELECT pr.id, pr.snapshot_head_sha
     FROM github_pull_request pr
     JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-    WHERE ipr.issue_id = sqlc.arg('issue_id') AND NOT ipr.reference_only
+    WHERE ipr.issue_id = sqlc.arg('issue_id')
 ),
 checks AS (
     SELECT
@@ -185,7 +186,7 @@ SELECT
 FROM github_pull_request pr
 JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
 LEFT JOIN checks c ON c.pr_id = pr.id
-WHERE ipr.issue_id = sqlc.arg('issue_id') AND NOT ipr.reference_only
+WHERE ipr.issue_id = sqlc.arg('issue_id')
 ORDER BY pr.pr_created_at DESC;
 
 -- name: GetIssueReviewHeadSha :one
@@ -202,20 +203,16 @@ ORDER BY pr.pr_created_at DESC;
 -- Spans both GitHub and self-hosted VCS PRs: a self-hosted PR pushing a new
 -- commit must move the dedup head SHA the same way a GitHub PR does, otherwise
 -- a fresh review round could be merged away against a stale key.
--- reference_only links are excluded on both arms, matching the PR-list and
--- close-aggregate queries: a body-only mention is hidden from the list and the
--- close gate, so it must not win this ORDER BY and become the review dedup head
--- SHA either, masking the real working PR's SHA.
 SELECT head_sha FROM (
     SELECT pr.head_sha AS head_sha, pr.state AS state, pr.pr_updated_at AS pr_updated_at
     FROM github_pull_request pr
     JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-    WHERE ipr.issue_id = $1 AND pr.head_sha <> '' AND NOT ipr.reference_only
+    WHERE ipr.issue_id = $1 AND pr.head_sha <> ''
     UNION ALL
     SELECT pr.head_sha AS head_sha, pr.state AS state, pr.pr_updated_at AS pr_updated_at
     FROM vcs_pull_request pr
     JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
-    WHERE ipr.issue_id = $1 AND pr.head_sha <> '' AND NOT ipr.reference_only
+    WHERE ipr.issue_id = $1 AND pr.head_sha <> ''
 ) combined
 ORDER BY (state IN ('open', 'draft')) DESC, pr_updated_at DESC
 LIMIT 1;
@@ -232,20 +229,14 @@ WHERE pull_request_id = $1;
 -- merged_with_close_intent_count > 0. Both the PR state and the link row
 -- (with close_intent) are persisted before this query runs, so the result
 -- is event-agnostic — a link-only sibling closing after a closing-keyword
--- PR has already merged still resolves the issue.
---
--- reference_only links (a PR that merely mentions the issue identifier in its
--- body) are excluded: they are hidden from the issue PR list, so they must not
--- silently gate auto-advance either. An open body-only mention would otherwise
--- keep open_count > 0 and block the issue from advancing while being invisible
--- in the UI. (reference_only rows never carry close_intent, so excluding them
--- does not change merged_with_close_intent_count.)
+-- PR has already merged still resolves the issue. A bare body mention is not
+-- linked at all, so a passing reference can never keep open_count > 0.
 SELECT
     COALESCE(SUM(CASE WHEN pr.state IN ('open', 'draft') THEN 1 ELSE 0 END), 0)::bigint AS open_count,
     COALESCE(SUM(CASE WHEN pr.state = 'merged' AND ipr.close_intent THEN 1 ELSE 0 END), 0)::bigint AS merged_with_close_intent_count
 FROM github_pull_request pr
 JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-WHERE ipr.issue_id = $1 AND NOT ipr.reference_only;
+WHERE ipr.issue_id = $1;
 
 -- =====================
 -- Issue ↔ Pull Request link
@@ -257,24 +248,15 @@ WHERE ipr.issue_id = $1 AND NOT ipr.reference_only;
 -- the current title/body parse result so authors can remove a closing keyword
 -- before merge. Post-terminal edits can opt into preserving the stored value,
 -- keeping the merge-time decision stable.
---
--- reference_only marks a link justified ONLY by a bare body mention (no closing
--- keyword, no title/branch reference). It follows the same preserve gate as
--- close_intent so a post-terminal edit can't retroactively hide a PR that did
--- the work. The issue's PR list filters these out (see ListPullRequestsByIssue).
 INSERT INTO issue_pull_request (
-    issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent, reference_only
+    issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent
 ) VALUES (
-    $1, $2, sqlc.narg('linked_by_type'), sqlc.narg('linked_by_id'), $3, sqlc.arg('reference_only')
+    $1, $2, sqlc.narg('linked_by_type'), sqlc.narg('linked_by_id'), $3
 )
 ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
     close_intent = CASE
         WHEN sqlc.arg('preserve_close_intent') THEN issue_pull_request.close_intent
         ELSE EXCLUDED.close_intent
-    END,
-    reference_only = CASE
-        WHEN sqlc.arg('preserve_close_intent') THEN issue_pull_request.reference_only
-        ELSE EXCLUDED.reference_only
     END;
 
 -- name: UnlinkIssueFromPullRequest :exec

@@ -71,6 +71,8 @@ AI로 만들려면 Builder 대화를 진행할 온라인 런타임이 필요합�
 
 목록을 비워 두면 채팅에 현지화된 범용 기본값이 표시됩니다. 에이전트의 역할과 경계에 맞춘 예시가 보통 더 유용합니다.
 
+CLI에서는 `agent create` / `agent update`의 `--conversation-starters`로 설정합니다(`{"label","prompt"}` 객체의 JSON 배열, 업데이트 시 `'[]'`를 넘기면 지워집니다). `agent copy`는 원본 값만 복사하며 덮어쓰기 플래그는 없습니다.
+
 ## 런타임, 모델, 사고 강도 선택
 
 런타임은 이미 특정 AI 코딩 도구에 대응합니다. 런타임을 선택한 뒤 해당 도구가 지원하는 모델과 사고 강도를 선택할 수 있습니다. Codex 같은 일부 도구에서는 속도 단계도 선택할 수 있습니다.
@@ -146,7 +148,8 @@ multica agent create \
   --name "Frontend Reviewer" \
   --runtime-id <runtime-id> \
   --description "프런트엔드 Pull Request 검토" \
-  --instructions "먼저 변경 사항과 테스트를 읽고 태스크 댓글에만 검토 결론을 제출하세요."
+  --instructions "먼저 변경 사항과 테스트를 읽고 태스크 댓글에만 검토 결론을 제출하세요." \
+  --conversation-starters '[{"label":"PR 검토","prompt":"가장 관련 있는 미병합 Pull Request를 검토하세요."}]'
 ```
 
 명령줄 인수의 평문은 shell 기록에 남습니다. stdin과 권한이 제한된 파일은 기록에 남지 않습니다.

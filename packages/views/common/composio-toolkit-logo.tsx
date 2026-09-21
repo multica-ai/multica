@@ -49,9 +49,9 @@ export function ComposioToolkitLogo({
     setFailedDarkSources(0);
   }, [slug, fallbackLogo]);
 
-  const imgClassName = cn("h-8 w-8 shrink-0 rounded bg-muted object-contain", className);
+  const imgClassName = cn("h-8 w-8 shrink-0 rounded-xs bg-muted object-contain", className);
   const fallbackClassName = cn(
-    "h-8 w-8 shrink-0 items-center justify-center rounded bg-muted text-caption font-semibold text-muted-foreground",
+    "h-8 w-8 shrink-0 items-center justify-center rounded-xs bg-muted text-caption font-semibold text-muted-foreground",
     className,
   );
   const lightSrc = lightSources[failedLightSources];

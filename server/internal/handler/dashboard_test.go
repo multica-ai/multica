@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // dashboardFixtureTZ is the zone the day-boundary fixtures in this file are
@@ -362,6 +364,60 @@ func TestDashboardEndpoints(t *testing.T) {
 		if aTotal < 1500 {
 			t.Errorf("by-agent ws: expected >=1500 tokens across workspace, got %d", aTotal)
 		}
+	}
+}
+
+// TestDashboardAgentRunTimeReportsMeteredTaskCoverage proves the runtime
+// rollup distinguishes terminal runs from the subset that reported usage.
+func TestDashboardAgentRunTimeReportsMeteredTaskCoverage(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	var agentID, runtimeID string
+	dbfx.QueryRow(t, `
+		SELECT id, runtime_id FROM agent
+		WHERE workspace_id = $1 AND runtime_id IS NOT NULL
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID)
+
+	readCoverage := func() (int32, int32) {
+		rows, err := testHandler.Queries.ListDashboardAgentRunTime(context.Background(), db.ListDashboardAgentRunTimeParams{
+			WorkspaceID: parseUUID(testWorkspaceID),
+			Since:       pgtype.Timestamptz{Time: time.Now().Add(-24 * time.Hour), Valid: true},
+		})
+		if err != nil {
+			t.Fatalf("list dashboard agent runtime: %v", err)
+		}
+		for _, row := range rows {
+			if uuidToString(row.AgentID) == agentID {
+				return row.TaskCount, row.MeteredTaskCount
+			}
+		}
+		return 0, 0
+	}
+	baseTasks, baseMetered := readCoverage()
+
+	issueID := dbfx.Issue(t, "dashboard usage coverage")
+	finished := testutil.Cols{
+		"issue_id":     issueID,
+		"runtime_id":   runtimeID,
+		"started_at":   testutil.Raw("now() - interval '2 minutes'"),
+		"completed_at": testutil.Raw("now() - interval '1 minute'"),
+	}
+	meteredTaskID := dbfx.Task(t, agentID, finished, testutil.Cols{"status": "completed"})
+	dbfx.Task(t, agentID, finished, testutil.Cols{"status": "failed"})
+	dbfx.Insert(t, "task_usage", testutil.Cols{
+		"task_id":       meteredTaskID,
+		"provider":      "qoderclicn",
+		"model":         "bailian/tp/qwen3.8-max",
+		"input_tokens":  120,
+		"output_tokens": 30,
+	})
+
+	tasks, metered := readCoverage()
+	if tasks-baseTasks != 2 || metered-baseMetered != 1 {
+		t.Fatalf("coverage delta = terminal:%d metered:%d, want 2/1", tasks-baseTasks, metered-baseMetered)
 	}
 }
 

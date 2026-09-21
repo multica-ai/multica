@@ -36,7 +36,7 @@ The **GitHub connection** decides which repositories Multica receives PR events 
 | GitHub integration | Master switch. When off, the three below stop working, but the GitHub App stays connected. |
 | PR sidebar | Shows linked pull requests in issue detail. |
 | Co-authored-by | Adds `Co-authored-by: multica-agent <github@multica.ai>` to commits created by agents. |
-| Auto-link PRs | Detects issue identifiers in a PR's branch name, title, and body. |
+| Auto-link PRs | Detects issue identifiers in a PR's branch name or title, and in the body when they follow a close intent. |
 | **PR card → CI & mergeability** | For each linked PR, Multica fetches an authenticated GitHub API snapshot and mirrors its **CI status** and **mergeability** onto the card (see **What the PR card shows** below). |
 
 
@@ -55,7 +55,7 @@ MUL-123 Fix the redirect after login
 
 Multica ignores case and only matches the current workspace's issue prefix. One PR can link to multiple issues.
 
-If the identifier appears only in the PR body, use one of GitHub's close intents:
+If the identifier appears only in the PR body, you must use one of GitHub's close intents:
 
 ```text
 Closes MUL-123
@@ -63,7 +63,7 @@ Fixes MUL-123
 Resolves MUL-123
 ```
 
-A reference-only mention in the body, such as `Related to MUL-123`, is not shown as a working PR for that issue. Commit messages and PR comments don't trigger linking either.
+A bare mention in the body, such as `Related to MUL-123`, doesn't link the PR to that issue at all. Commit messages and PR comments don't trigger linking either.
 
 ## View PRs on an issue
 
@@ -84,7 +84,7 @@ Click an entry to open the PR on GitHub. Turning off the **PR sidebar** only hid
 A merged PR doesn't necessarily mean the issue is finished. Multica only moves an issue to `Done` when all of the following hold:
 
 1. at least one merged linked PR used a close intent immediately followed by the identifier, such as `Closes MUL-123` (forms with words in between, like `Closes login MUL-123`, don't count);
-2. the issue has no other working PR still `Open` or `Draft` (reference-only mentions in the body don't count);
+2. the issue has no other linked PR still `Open` or `Draft`;
 3. the issue is not currently `done` or `cancelled`.
 
 So writing `MUL-123` only in the branch name or title establishes the link but doesn't by itself trigger completion. A PR closed without merging doesn't complete the issue either.
@@ -176,7 +176,7 @@ Restart the API server, then complete the connection in **Settings → GitHub**.
 - **Connect button disabled**: check that `GITHUB_APP_SLUG` and `GITHUB_WEBHOOK_SECRET` reached the API process.
 - **Webhook returns 401**: confirm the GitHub App and the API use the same webhook secret, then redeliver from GitHub's **Recent Deliveries**.
 - **PR not linked**: check that the repository is in the App's authorized scope, auto-linking is on, and the identifier belongs to the current workspace.
-- **Identifier in the body but not shown**: switch to `Closes MUL-123`, or put the identifier in the branch name or PR title.
+- **Identifier in the body but not linked**: switch to `Closes MUL-123`, or put the identifier in the branch name or PR title.
 - **No CI status**: confirm `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are configured, and that the App has read-only Contents, Checks, and Commit statuses permissions with the matching events subscribed. Without Contents the whole snapshot fails, so the PR card shows neither CI nor merge state. After adding permissions to an installed App, each installation's owner must also approve them on GitHub before they take effect.
 - **Issue not completed after the PR merged**: confirm the PR used a close intent, and check whether other linked PRs are still Open or Draft.
 

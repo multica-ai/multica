@@ -227,9 +227,6 @@ export function McpTab() {
               <p className="mt-3 text-body font-medium">
                 {t(($) => $.mcp.empty_title)}
               </p>
-              <p className="mx-auto mt-1 max-w-md text-caption leading-5 text-muted-foreground">
-                {t(($) => $.mcp.empty_description)}
-              </p>
             </div>
           ) : (
             <ul className="divide-y divide-surface-border">

@@ -25,6 +25,7 @@ import {
   isProjectDirectHit,
 } from "@multica/core/search/cancelled-rank";
 import { isImeComposing } from "@multica/core/utils";
+import { isMentionBoundaryAfter } from "@multica/core/markdown";
 import type {
   Issue,
   ListIssuesCache,
@@ -47,6 +48,7 @@ import { cn } from "@multica/ui/lib/utils";
 import type { IssueStatus, IssueStatusCategory, ProjectStatus } from "@multica/core/types";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import type { SuggestionOptions } from "@tiptap/suggestion";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { PluginKey } from "@tiptap/pm/state";
 import {
   getRecencyMap,
@@ -203,7 +205,7 @@ function mergeMentionItems(
  */
 function isDemotedCancelled(item: MentionItem, query: string): boolean {
   if (isPinnedAboveTruncation(item, query)) return false;
-  if (item.type === "issue") return item.statusCategory === "cancelled";
+  if (item.type === "issue") return item.statusCategory === "closed";
   if (item.type === "project") return item.projectStatus === "cancelled";
   return false;
 }
@@ -263,7 +265,7 @@ function demoteCancelledItems(items: MentionItem[], query: string): MentionItem[
 export const MentionList = forwardRef<MentionListRef, MentionListProps>(
   function MentionList({ items, query, command, includeProjectSearch = false }, ref) {
     const { t } = useT("editor");
-    const { colorOf: statusColorOf } = useIssueStatuses(getCurrentWsId() ?? "");
+    const { colorOf: statusColorOf, iconOf: statusIconOf } = useIssueStatuses(getCurrentWsId() ?? "");
     // Selection is tracked by item identity, NOT by a positional index. The
     // list is re-bucketed by groupItems() and grows asynchronously (server
     // search results), so a slot index is not a stable target — the row under
@@ -409,9 +411,14 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
         // see pickerNavigationDirection.
         const direction = pickerNavigationDirection(event);
         if (direction !== null) {
+          // With no rows, including while remote search is pending, the picker
+          // has nothing to navigate. Let the host editor own the key instead.
+          if (orderedItems.length === 0) return false;
           const selectableIndexes = orderedItems.flatMap((item, index) =>
             item.disabledReason ? [] : [index],
           );
+          // Rows exist but all are disabled: keep the picker inert rather than
+          // moving the caret behind the visible popup.
           if (selectableIndexes.length === 0) return true;
           const current = selectableIndexes.indexOf(selectedIndex);
           const delta =
@@ -427,6 +434,11 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
         // Enter is the canonical accept; plain Tab is an additive alias (see
         // isPickerAcceptKey). Shift/modifier+Tab fall through to focus nav.
         if (isPickerAcceptKey(event)) {
+          // An empty picker cannot accept anything, so preserve the editor's
+          // newline, submit shortcut, and focus-navigation behavior.
+          if (orderedItems.length === 0) return false;
+          // A non-empty list can still have no selectable row when every item
+          // is disabled. Keep those visible rows inert instead of falling through.
           if (selectedIndex < 0) return true;
           selectItem(orderedItems[selectedIndex]);
           return true;
@@ -471,6 +483,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
           <MentionRow
             key={`${item.type}-${item.id}`}
             item={item}
+            statusIcon={item.type === "issue" && item.status ? statusIconOf(item.status) : null}
             statusColor={
               item.type === "issue" && item.status
                 ? statusColorOf(item.status)
@@ -525,12 +538,14 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
 function MentionRow({
   item,
   statusColor,
+  statusIcon,
   selected,
   onSelect,
   buttonRef,
 }: {
   item: MentionItem;
   statusColor?: string | null;
+  statusIcon?: string | null;
   selected: boolean;
   onSelect: () => void;
   buttonRef: (el: HTMLButtonElement | null) => void;
@@ -541,7 +556,7 @@ function MentionRow({
     // Visually dim closed issues (done/cancelled) so they're distinguishable
     // from active ones in the suggestion list — they're still selectable.
     const isClosed =
-      item.statusCategory === "done" || item.statusCategory === "cancelled";
+      item.statusCategory === "done" || item.statusCategory === "closed";
     return (
       <button
         type="button"
@@ -557,6 +572,7 @@ function MentionRow({
               status={item.status}
               category={item.statusCategory}
               color={statusColor}
+              icon={statusIcon}
               className="h-3.5 w-3.5"
             />
           ) : (
@@ -686,6 +702,21 @@ function projectToMention(p: { id: string; title: string; description?: string |
   };
 }
 
+/**
+ * True when the `@` at `pos` starts a token instead of continuing one.
+ *
+ * The rule itself — which characters make an `@` part of the word it follows,
+ * and why CJK needs the exception — lives in @multica/core/markdown, shared
+ * with the mobile composer so the two clients cannot drift apart.
+ */
+function isMentionBoundary(doc: ProseMirrorNode, pos: number): boolean {
+  if (pos <= 0) return true;
+  // Two units wide, so a code point outside the BMP arrives whole; one would
+  // hand back a lone surrogate. Across a block boundary this is the separator,
+  // which is not a word character either.
+  return isMentionBoundaryAfter(doc.textBetween(Math.max(0, pos - 2), pos, "\n", "\n"));
+}
+
 function matchesMentionQuery(item: MentionItem, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
@@ -813,10 +844,15 @@ export function createMentionSuggestion(
   return {
     pluginKey,
     allowSpaces: true,
+    // The boundary rule is isMentionBoundary's, not Tiptap's default of "a
+    // half-width space and nothing else" (see the note there).
+    allowedPrefixes: null,
     // Only open over an `@` the user actually typed. Tiptap matches on document
     // content alone, so without this a pasted, dropped, undone or server-loaded
     // `@` opens the picker just as readily (MUL-5429).
-    shouldShow: ({ editor, range }) => isTriggerArmedAt(editor, range.from),
+    shouldShow: ({ editor, range, transaction }) =>
+      isTriggerArmedAt(editor, range.from) &&
+      isMentionBoundary(transaction.doc, range.from),
     items: ({ query }) => {
       if (options.mode === "context") {
         const normalizedQuery = query.trim();

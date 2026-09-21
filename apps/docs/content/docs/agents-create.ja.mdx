@@ -71,6 +71,8 @@ Build with AI には、Builder との対話のためにオンラインのラン�
 
 空のままなら、チャットにはローカライズされた汎用の初期値が表示されます。エージェントの役割と境界に合わせた例のほうが通常は役立ちます。
 
+CLI では `agent create` / `agent update` の `--conversation-starters` で設定します（`{"label","prompt"}` オブジェクトの JSON 配列。更新時に `'[]'` を渡すとクリア）。`agent copy` は元の値をコピーするだけで、上書き用のフラグはありません。
+
 ## ランタイム・モデル・思考レベルの選択
 
 ランタイムは、それぞれ 1 つの AI コーディングツールに対応しています。ランタイムを選ぶと、そのツールがサポートするモデルと思考レベルを続けて選べます。一部のツール（Codex など）ではサービスティアも選べます。
@@ -146,7 +148,8 @@ multica agent create \
   --name "Frontend Reviewer" \
   --runtime-id <runtime-id> \
   --description "フロントエンドの Pull Request をレビューする" \
-  --instructions "まず変更とテストを読み、レビュー結果は issue のコメントだけに投稿する。"
+  --instructions "まず変更とテストを読み、レビュー結果は issue のコメントだけに投稿する。" \
+  --conversation-starters '[{"label":"PR をレビュー","prompt":"今いちばん関連する未マージの Pull Request をレビューする。"}]'
 ```
 
 コマンドライン引数の平文はシェル履歴に残ります。stdin と権限を制限したファイルは残りません。

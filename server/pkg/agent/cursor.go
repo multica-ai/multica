@@ -70,6 +70,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
+	background := newCursorBackgroundTools(runCtx, cmd, msgCh, b.cfg.Logger)
 
 	// The prompt is delivered on stdin (see buildCursorArgs). Write it from its
 	// own goroutine so it cannot deadlock against the stdout reader below: a
@@ -88,12 +89,14 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
+		defer background.Close()
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
 		// Closing stdin too releases a prompt write still blocked on a full pipe
 		// (e.g. the child died before draining it), so that goroutine cannot leak.
 		go func() {
 			<-runCtx.Done()
+			background.Close()
 			closeStdin()
 			_ = stdout.Close()
 		}()
@@ -140,6 +143,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		scanner := newAgentStreamScanner(stdout)
 
+	scanLoop:
 		for scanner.Scan() {
 			raw := scanner.Text()
 			line := normalizeCursorStreamLine(raw)
@@ -161,6 +165,9 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 			switch evt.Type {
 			case "system":
+				if evt.Subtype == "task_notification" {
+					background.Reap()
+				}
 				if evt.Subtype == "init" {
 					trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
 				}
@@ -174,7 +181,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 			case "assistant":
 				assistantEventCount++
-				assistantBytes += b.handleCursorAssistant(&evt, msgCh, &output)
+				assistantBytes += b.handleCursorAssistant(&evt, background.Send, &output)
 
 			case "thinking":
 				// Reasoning is a top-level event streamed as deltas, not a
@@ -207,7 +214,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				case "started":
 					call := parseCursorToolCall(&evt)
 					toolUseCount++
-					trySend(msgCh, Message{
+					background.Send(Message{
 						Type:   MessageToolUse,
 						Tool:   call.Name,
 						CallID: call.CallID,
@@ -215,12 +222,11 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					})
 				case "completed":
 					call := parseCursorToolCall(&evt)
-					trySend(msgCh, Message{
-						Type:   MessageToolResult,
-						Tool:   call.Name,
-						CallID: call.CallID,
-						Output: call.Result,
-					})
+					if call.Background {
+						background.Add(call)
+					} else {
+						background.SendResult(call)
+					}
 				default:
 					unhandledSubtypeCount++
 				}
@@ -231,7 +237,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if evt.Parameters != nil {
 					_ = json.Unmarshal(evt.Parameters, &params)
 				}
-				trySend(msgCh, Message{
+				background.Send(Message{
 					Type:   MessageToolUse,
 					Tool:   evt.ToolName,
 					CallID: evt.ToolID,
@@ -239,7 +245,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				})
 
 			case "tool_result":
-				trySend(msgCh, Message{
+				background.Send(Message{
 					Type:   MessageToolResult,
 					CallID: evt.ToolID,
 					Output: evt.Output,
@@ -247,10 +253,17 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 			case "result":
 				resultSeen = true
+				// Publish the decided outcome BEFORE cleanup. Close() can block
+				// on the tracker lock behind a tool watchdog Interrupt already in
+				// progress, and that Interrupt can return false without moving
+				// native accounting — which would leave the watchdog free to
+				// cancel and re-tag this completed run as idle_watchdog.
+				background.ObserveTerminal()
+				background.Close()
 				if evt.IsError || evt.Subtype == "error" {
+					resultIsError = true
 					finalStatus = "failed"
 					finalError = cursorErrorText(&evt)
-					resultIsError = true
 				}
 				resultBytes = len(evt.ResultText)
 				if evt.ResultText != "" && output.Len() == 0 {
@@ -265,6 +278,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				// event but keep a worker process alive. Treat result as the
 				// protocol boundary so the daemon can report completion.
 				cancel()
+				break scanLoop
 
 			case "error":
 				errMsg := cursorErrorText(&evt)
@@ -331,6 +345,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			resultUsage = stepUsage
 		}
 
+		background.Close()
 		exitErr := cmd.Wait()
 		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
@@ -448,7 +463,13 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 	}()
 
-	return &Session{Messages: msgCh, Result: resCh}, nil
+	return &Session{
+		Messages:                 msgCh,
+		Result:                   resCh,
+		ToolActivity:             background.Activity,
+		InterruptBackgroundTools: background.Interrupt,
+		TerminalObserved:         background.TerminalObserved,
+	}, nil
 }
 
 const cursorIncompleteFinalizationWarning = "actions completed before finalization may already have taken effect"
@@ -583,7 +604,7 @@ func (t *cursorUnhandledTypeTally) summary() string {
 // returns how many bytes of model-authored text it appended to output. The
 // caller tracks that separately from output.Len(), which also absorbs the
 // terminal result text.
-func (b *cursorBackend) handleCursorAssistant(evt *cursorStreamEvent, ch chan<- Message, output *strings.Builder) int {
+func (b *cursorBackend) handleCursorAssistant(evt *cursorStreamEvent, send func(Message), output *strings.Builder) int {
 	if evt.Message == nil {
 		return 0
 	}
@@ -604,18 +625,18 @@ func (b *cursorBackend) handleCursorAssistant(evt *cursorStreamEvent, ch chan<- 
 			if block.Text != "" {
 				output.WriteString(block.Text)
 				written += len(block.Text)
-				trySend(ch, Message{Type: MessageText, Content: block.Text})
+				send(Message{Type: MessageText, Content: block.Text})
 			}
 		case "thinking":
 			if block.Text != "" {
-				trySend(ch, Message{Type: MessageThinking, Content: block.Text})
+				send(Message{Type: MessageThinking, Content: block.Text})
 			}
 		case "tool_use":
 			var input map[string]any
 			if block.Input != nil {
 				_ = json.Unmarshal(block.Input, &input)
 			}
-			trySend(ch, Message{
+			send(Message{
 				Type:   MessageToolUse,
 				Tool:   block.Name,
 				CallID: block.ID,
@@ -669,6 +690,9 @@ type cursorToolCall struct {
 	CallID string
 	Input  map[string]any
 	Result string
+
+	Background bool
+	PID        int
 }
 
 // cursorToolCallKeySuffix is how Cursor names the per-tool payload: the tool is
@@ -714,8 +738,30 @@ func parseCursorToolCall(evt *cursorStreamEvent) cursorToolCall {
 	call.Input = payload.Args
 	if len(payload.Result) > 0 {
 		call.Result = string(payload.Result)
+		if call.Name == "shell" {
+			call.Background = cursorResultReportsBackground(payload.Result)
+			var metadata struct {
+				Success struct {
+					PID int `json:"pid"`
+				} `json:"success"`
+			}
+			if json.Unmarshal(payload.Result, &metadata) == nil && call.Background {
+				call.PID = metadata.Success.PID
+			}
+		}
 	}
 	return call
+}
+
+// cursorResultReportsBackground reads only the root boolean, never output text.
+func cursorResultReportsBackground(raw json.RawMessage) bool {
+	var resultMeta struct {
+		IsBackground bool `json:"isBackground"`
+	}
+	if err := json.Unmarshal(raw, &resultMeta); err != nil {
+		return false
+	}
+	return resultMeta.IsBackground
 }
 
 // cursorToolPayloadKey picks the `<name>ToolCall` key of a tool_call envelope.

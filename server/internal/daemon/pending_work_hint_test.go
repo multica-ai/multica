@@ -91,6 +91,52 @@ func TestHandlePendingWorkHint_IgnoresUnknownRuntime(t *testing.T) {
 	}
 }
 
+func TestHandlePendingWorkHint_TaskSteerUsesActiveSessionPoll(t *testing.T) {
+	d, calls := pendingWorkHintDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	wake, unregister := d.registerTaskSteerWakeup("rt-1")
+	defer unregister()
+	d.handlePendingWorkHint("rt-1", protocol.PendingWorkKindTaskSteer)
+	if !d.taskSteerServerSupported.Load() {
+		t.Fatal("task steer hint did not negotiate server support")
+	}
+	select {
+	case <-wake:
+	case <-time.After(time.Second):
+		t.Fatal("task steer hint did not wake the active provider session")
+	}
+
+	if got := atomic.LoadInt32(calls); got != 0 {
+		t.Fatalf("task steer hint sent %d heartbeat calls, want active-session poll only", got)
+	}
+}
+
+func TestHandleHeartbeatActionsNegotiatesTaskSteerServerCapability(t *testing.T) {
+	d := &Daemon{logger: slog.Default()}
+	d.handleHeartbeatActions(t.Context(), "rt-1", &HeartbeatResponse{
+		ServerCapabilities: []string{protocol.DaemonCapabilityTaskSteerV1},
+	})
+	if !d.taskSteerServerSupported.Load() {
+		t.Fatal("current server capability was not enabled")
+	}
+
+	// Absence is authoritative and fail-safe for a downgrade or old server.
+	d.handleHeartbeatActions(t.Context(), "rt-1", &HeartbeatResponse{})
+	if d.taskSteerServerSupported.Load() {
+		t.Fatal("missing server capability left steering enabled")
+	}
+}
+
+func TestFormatCommentSteerInstructionCarriesHumanSource(t *testing.T) {
+	got := formatCommentSteerInstruction("Alice\nAdmin", "keep the migration reversible")
+	want := "[STEER] Human \"Alice Admin\" left a new comment while you were working:\n\nkeep the migration reversible"
+	if got != want {
+		t.Fatalf("steer instruction = %q, want %q", got, want)
+	}
+}
+
 // TestHandlePendingWorkHint_CoalescesConcurrentHints pins the stampede guard:
 // several UI surfaces (model picker, thinking level, service tier) each request
 // the catalog for the same runtime within milliseconds, and one heartbeat

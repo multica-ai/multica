@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/skillbundle"
-	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 func TestSkillBundleResolveTimeout(t *testing.T) {
@@ -300,67 +299,6 @@ func TestEnsureTaskSkillBundles_RejectsPluginHashDrift(t *testing.T) {
 	}
 }
 
-// TestEnsureTaskSkillBundles_DeadlineIsLabelledStructurally is the MUL-5370
-// regression. A stalled bundle download used to surface as the bare string
-// "resolve skill bundles: context deadline exceeded", which taskfailure.Classify
-// could only file under agent_error.unknown — a bucket that is NOT on the
-// server's retry allowlist. So a transient stall became a terminal chat failure
-// carrying a label nobody could act on, and the user was told only "something
-// went wrong". The wrap must now (a) name the skill and how long we waited,
-// (b) preserve the transport cause, and (c) carry a sentinel that
-// taskRunFailureReason maps to the retryable platform-side reason.
-func TestEnsureTaskSkillBundles_DeadlineIsLabelledStructurally(t *testing.T) {
-	defer noSleepRetry(t)()
-
-	block := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		// Accept the connection and never answer — the shape of a link that
-		// is up but cannot carry the response (blocked route, missing proxy).
-		<-block
-	}))
-	// LIFO: release the handler before tearing the server down, so Close
-	// doesn't block on an in-flight request.
-	defer srv.Close()
-	defer close(block)
-
-	ref := skillRefFromBundle(makeResolvableSkillBundle("frontend-review"))
-	d := &Daemon{
-		client:     NewClient(srv.URL),
-		skillCache: NewSkillBundleCache(t.TempDir()),
-	}
-	task := &Task{
-		ID:          "task-1",
-		RuntimeID:   "rt-1",
-		WorkspaceID: "ws-1",
-		Agent:       &AgentData{ID: "agent-1", SkillRefs: []SkillRefData{ref}},
-	}
-
-	// Squeeze the parent below the per-skill floor so the deadline fires
-	// without the test waiting skillBundleResolveMinTimeout for it.
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
-	defer cancel()
-
-	err := d.ensureTaskSkillBundles(ctx, task)
-	if err == nil {
-		t.Fatal("expected an error when the bundle download never completes")
-	}
-	if !errors.Is(err, errSkillBundleUnavailable) {
-		t.Errorf("error must carry the skill-bundle sentinel, got %v", err)
-	}
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("error must preserve the transport cause, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "frontend-review") {
-		t.Errorf("error must name the skill that failed, got %v", err)
-	}
-	want := taskfailure.ReasonSkillBundleUnavailable.String()
-	if got := taskRunFailureReason(err); got != want {
-		t.Errorf("taskRunFailureReason = %q, want %q (retryable platform-side reason)", got, want)
-	}
-}
-
-// clearProxyEnv unsets every variable proxyEnvSummary consults, so a developer
-// machine that happens to run behind a proxy does not flip these assertions.
 func clearProxyEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"} {
@@ -592,47 +530,4 @@ func TestTransferStatsKeepsHighWaterMark(t *testing.T) {
 		t.Error("nil TransferStats must still return a usable reader")
 	}
 	nilStats.observeResponseStarted()
-}
-
-// TestEnsureTaskSkillBundles_SlowLinkReportsPartialTransfer is the other half
-// of #7386. A link that accepts the connection and then trickles must be
-// reported as a partial transfer, not as "no response" — that is exactly the
-// distinction that decides whether raising the deadline would have helped.
-func TestEnsureTaskSkillBundles_SlowLinkReportsPartialTransfer(t *testing.T) {
-	defer noSleepRetry(t)()
-	clearProxyEnv(t)
-
-	block := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		// Emit a valid prefix of the response, flush it so it really lands on
-		// the wire, then stall — a body that started but cannot finish.
-		io.WriteString(w, `{"bundles":[{"id":"x","content":"`+strings.Repeat("a", 4096))
-		w.(http.Flusher).Flush()
-		<-block
-	}))
-	defer srv.Close()
-	defer close(block)
-
-	ref := skillRefFromBundle(makeResolvableSkillBundle("frontend-review"))
-	d := &Daemon{client: NewClient(srv.URL), skillCache: NewSkillBundleCache(t.TempDir())}
-	task := &Task{
-		ID: "task-1", RuntimeID: "rt-1", WorkspaceID: "ws-1",
-		Agent: &AgentData{ID: "agent-1", SkillRefs: []SkillRefData{ref}},
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancel()
-
-	err := d.ensureTaskSkillBundles(ctx, task)
-	if err == nil {
-		t.Fatal("expected an error when the body never completes")
-	}
-	if !errors.Is(err, errSkillBundleUnavailable) {
-		t.Errorf("sentinel must survive, got %v", err)
-	}
-	if got := err.Error(); !strings.Contains(got, "received") || strings.Contains(got, "no response from server") {
-		t.Errorf("a stalled body must report a partial transfer, got:\n%s", got)
-	}
 }

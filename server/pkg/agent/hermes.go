@@ -290,6 +290,14 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	hermesArgs := hermesCLIArgs(opts.CustomArgs, b.cfg.Logger)
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, hermesArgs...)
 	hideAgentWindow(cmd)
+	// What makes the shutdown below bounded. Wait waits on the direct child, and
+	// a child that ignores the cancel would otherwise hold it forever; with a
+	// WaitDelay, a cancelled context makes Wait kill and reap within it. Wait
+	// returning is also what closes the parent ends of the pipes, which is the
+	// step that frees a reader an escaped descendant is holding — so bounding
+	// Wait is what lets the forced shutdown join its readers at all. Same 10s
+	// the claude, codearts and antigravity backends use.
+	cmd.WaitDelay = 10 * time.Second
 	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(hermesArgs, trustAgentCommandPositional(0, hermesACPSubcommand)))
 	agentsMDPresent := false
 	if opts.Cwd != "" {
@@ -427,6 +435,23 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		c.closeAllPending(fmt.Errorf("hermes process exited"))
 	}()
 
+	// reapProcess runs cmd.Wait() — which may only be called once — and returns
+	// when it has. Wait is what closes the parent ends of the stdout and stderr
+	// pipes, so it is also the only way to free a reader blocked on a pipe that
+	// a descendant outside the process group is still holding. Both the forced
+	// shutdown below and the deferred cleanup need it, in that order.
+	var waitOnce sync.Once
+	waitDone := make(chan struct{})
+	reapProcess := func() {
+		waitOnce.Do(func() {
+			go func() {
+				defer close(waitDone)
+				_ = cmd.Wait()
+			}()
+		})
+		<-waitDone
+	}
+
 	// Drive the ACP session lifecycle in a goroutine.
 	go func() {
 		defer close(msgCh)
@@ -438,7 +463,13 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			// process alive; waiting first would then block until the overall
 			// task timeout and make a later deferred cancel ineffective.
 			cancel()
-			_ = cmd.Wait()
+			reapProcess()
+			// Wait has closed the pipes, so both readers are now guaranteed to
+			// reach EOF and return. Join them before the enclosing goroutine
+			// returns and closes msgCh: a reader that outlived that close would
+			// panic sending on it.
+			<-readerDone
+			<-stderrDone
 			releaseProcessGroup(cmd)
 		}()
 
@@ -513,9 +544,13 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				"mcpServers": mcpServers,
 			})
 			if err != nil {
-				finalStatus = "failed"
-				finalError = fmt.Sprintf("hermes session/resume failed: %v", err)
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				// A runtime that refuses the recorded id has to say so here:
+				// without ResumeRejected the daemon reads the bare failure as
+				// "checked, not a rejection", keeps the pointer and replays the
+				// same dead session on every later turn (GH #8116).
+				finalStatus, finalError, resumeRejected = classifyACPResumeFailure(
+					runCtx, "hermes", "session/resume", err, timeout, b.cfg.Logger)
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds(), ResumeRejected: resumeRejected}
 				return
 			}
 			sessionResult = result
@@ -555,9 +590,6 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		c.sessionID = sessionID
 		b.cfg.Logger.Info("hermes session created", "session_id", sessionID)
-		// Mid-flight pin: daemon PinTaskSession keys off MessageStatus+SessionID.
-		trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
-
 		// 3. If the caller picked a model (via agent.model from the
 		// UI dropdown), ask hermes to switch the session to it
 		// before we send any prompt. Hermes' _build_model_state
@@ -599,7 +631,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				b.cfg.Logger.Warn("hermes set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("hermes could not switch to model %q: %v", opts.Model, err)
-				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+				if setupFailureWithholdsSessionID(opts) {
+					sessionID = ""
+				} else if isACPSessionNotFound(err) {
 					// On a resumed session with a model override, the dead
 					// session surfaces here instead of at session/prompt.
 					// Same fix as the prompt path below: clear the id so
@@ -646,6 +680,16 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// just before the request so any history replay flushed during
 		// initialize / session setup stays dropped, but every notification
 		// belonging to this turn is processed.
+		// Session pin for the daemon (PinTaskSession keys off
+		// MessageStatus+SessionID), deliberately sent only once setup has
+		// succeeded and the prompt is about to go out. Pinning right after
+		// session creation used to publish the id before set_model could fail,
+		// and FailAgentTask merges session_id with COALESCE — so a setup failure
+		// could no longer take the id back and left a ghost pointer on the task
+		// row for the next turn to resume forever (GH #8116). A cancel between
+		// here and the prompt response is still covered: this send happens first.
+		trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
+
 		streamingCurrentTurn.Store(true)
 		_, err = c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
@@ -723,7 +767,23 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				"pid", cmd.Process.Pid,
 				"grace", hermesReaderDrainGrace.String(),
 			)
+			// Cancel kills the owned process tree, so every descendant in it
+			// releases the pipes and both readers reach EOF. A descendant
+			// outside that tree does not get the signal: on POSIX because it
+			// called setsid and left the process group, on Windows because
+			// startOwnedProcessTree failed open and the child runs unowned, so
+			// the kill reaches the leader alone. Joining the readers is then an
+			// unbounded wait — the turn hangs with no result until the user
+			// cancels by hand, which is the MUL-5241 report.
 			cancel()
+			// Reap here rather than leaving it to the deferred cleanup. Wait
+			// closes the pipes, which is what frees a reader the kill could not
+			// reach, and cmd.WaitDelay bounds Wait itself now that the context
+			// is cancelled. Both joins below therefore terminate, and they still
+			// run before the buffers are read: providerErr.Finalize requires a
+			// drained stderr pipe, and it is not safe to call while the copier
+			// can still write.
+			reapProcess()
 			<-readerDone
 			<-stderrDone
 		}
@@ -826,7 +886,9 @@ func waitForHermesNotificationQuiescence(ctx context.Context, activity <-chan st
 // before concluding an ACP agent has stopped emitting notifications. It is a
 // protocol-level heuristic rather than a per-backend trait, so backends that
 // have no reason to differ share it; the hard bound stays per-backend.
-const acpNotificationQuietTime = 250 * time.Millisecond
+// Package tests shorten it globally while keeping their late-output fixtures
+// inside the window; production never reassigns it.
+var acpNotificationQuietTime = 250 * time.Millisecond
 
 // waitForACPNotificationQuiescence gives the shared ACP stdout reader a
 // bounded chance to consume notifications a backend may emit just after its
@@ -1371,6 +1433,14 @@ func (e *acpRPCError) Error() string {
 	return fmt.Sprintf("%s: %s (code=%d)", e.Method, e.Message, e.Code)
 }
 
+// isACPSessionErrorCode reports whether a JSON-RPC error code is one the ACP
+// runtimes have been observed to report a lost session under. It is a guard,
+// not the decision: -32000 and -32603 are generic, so the wording checks in
+// isACPSessionNotFound / isACPResumeRejected are what actually discriminate.
+func isACPSessionErrorCode(code int) bool {
+	return code == -32603 || code == -32602 || code == -32002 || code == -32000
+}
+
 // isACPSessionNotFound reports whether err is the agent rejecting a
 // session id it no longer knows. Runtimes signal this with codes and
 // wording that vary — Hermes says "Session not found" under -32603
@@ -1389,10 +1459,16 @@ func isACPSessionNotFound(err error) bool {
 	if !errors.As(err, &rpcErr) {
 		return false
 	}
-	if rpcErr.Code != -32603 && rpcErr.Code != -32602 && rpcErr.Code != -32002 && rpcErr.Code != -32000 {
+	if !isACPSessionErrorCode(rpcErr.Code) {
 		return false
 	}
-	text := strings.ToLower(rpcErr.Message + " " + rpcErr.Data)
+	return acpSessionNotFoundWording(strings.ToLower(rpcErr.Message + " " + rpcErr.Data))
+}
+
+// acpSessionNotFoundWording is the wording half of isACPSessionNotFound, split
+// out so isACPResumeRejected can run it over text it has already scrubbed of
+// request-shaped complaints. Callers pass lower-cased Message+Data.
+func acpSessionNotFoundWording(text string) bool {
 	return strings.Contains(text, "session not found") ||
 		strings.Contains(text, "no session found") ||
 		strings.Contains(text, "unknown session")

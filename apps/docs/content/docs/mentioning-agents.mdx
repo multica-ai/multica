@@ -43,11 +43,15 @@ A plain comment (containing no @ at all) is routed by discussion context:
 
 When a comment explicitly @-mentions other targets (including members), the assignee fallback no longer applies.
 
-When a reply triggers an agent other than the assignee, Multica schedules a delayed fallback run for the assignee: if the target agent replies within about 5 minutes, the fallback is cancelled automatically; otherwise the assignee starts a run too.
+Replies stay with the target agent even while its runtime is offline or busy. Multica does not automatically start the issue assignee after a timeout. To involve another agent, explicitly @-mention it.
 
 ## Coalescing consecutive comments
 
-When the same agent already has a waiting run on the issue, new consecutive comments merge into the pending run; if the agent is already running, later comments wait for the current run to finish and merge into a single follow-up run. You can keep adding information without waiting for the agent to reply.
+When the same agent already has a waiting run on the issue, new consecutive comments merge into the pending run. If a human posts in the same thread while that agent has exactly one active Codex or Claude turn on a compatible runtime, Multica delivers the comment to that turn at its next safe boundary. The composer shows this destination before sending, and the saved comment shows a separate receipt for each agent.
+
+If the runtime does not support steering, the route is ambiguous, the turn ends first, or delivery fails or times out, the comment falls back losslessly to the existing single follow-up path. Stop remains independent: stopping a run never starts a replacement run. An instruction that was not delivered stays marked for follow-up and remains in issue history for the agent's next natural run to re-read.
+
+An “already delivered” receipt is historical: its timestamp does not disappear if the turn later fails or is stopped. Editing a comment before it is claimed lets the active turn read the updated text; editing it after claiming has begun does not inject it a second time or start a duplicate follow-up. All steered comments remain in issue history so later natural runs can re-read the current text.
 
 When one comment @-mentions several different agents, each agent gets its own run; multiple mentions resolving to the same agent keep only one.
 

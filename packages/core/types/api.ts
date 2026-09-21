@@ -1,7 +1,7 @@
 import type { Issue, IssueMetadata, IssueStatus, IssueStatusCategory, IssuePriority, IssueAssigneeType } from "./issue";
 import type { PropertyFilterValue } from "./property";
 import type { MemberRole } from "./workspace";
-import type { Project } from "./project";
+import type { Project, ProjectStatus } from "./project";
 
 // Issue API
 export interface CreateIssueRequest {
@@ -130,10 +130,9 @@ export interface ListIssuesParams {
   /** Multi-value table facet. OR within the field. */
   statuses?: IssueStatus[];
   /**
-   * Filter by status CATEGORY rather than by exact key, so one bucket holds a
-   * category's canonical status plus every custom status that inherits it.
-   * This is what keeps the board's fan-out fixed at 7 requests however many
-   * custom statuses a workspace defines. (MUL-6243)
+   * Filter by lifecycle category rather than by exact key, so one bucket holds
+   * all concrete and custom statuses in that phase. Task views use exact
+   * status keys for their columns instead.
    */
   status_category?: IssueStatusCategory;
   /** Multi-value form of `status_category`. OR within the field. */
@@ -294,6 +293,10 @@ export interface IssueTableFilters {
   creators?: IssueActorRef[];
   project_ids?: string[];
   include_no_project?: boolean;
+  /** Lifecycle status of the parent project. A separate dimension from
+   *  `project_ids` (AND across the two); an issue with no project never
+   *  matches. */
+  project_statuses?: ProjectStatus[];
   label_ids?: string[];
   /** Same shape as `ListIssuesParams.properties`: bare strings are exact
    *  equality / "No value", operator objects narrow scalar matches. */
@@ -338,15 +341,15 @@ export type IssueTableGroupSpec =
   /**
    * Group by the CATEGORY a status behaves as, not by the status key.
    *
-   * Board columns, list sections and swimlane cells are categories, so a custom
-   * status folds into the column it behaves as instead of getting one of its
-   * own — which is what keeps the surface's fan-out pinned at 7 no matter how
-   * many statuses a workspace defines. The descriptor still reports
-   * `value.kind === "status"` because a category's value IS its canonical
-   * status key; the group KEY is what distinguishes the two contracts.
+   * Retained for installed clients. New Board/List/Swimlane surfaces group by
+   * concrete status keys, not categories. The descriptor still reports
+   * `value.kind === "status"` for response compatibility; the group KEY is
+   * what distinguishes category buckets from concrete statuses. By default
+   * buckets use the seven-value wire enum; category_format=lifecycle opts into
+   * unstarted/started/done/closed.
    * (MUL-6243)
    */
-  | { kind: "status_category" }
+  | { kind: "status_category"; category_format?: "lifecycle" }
   | { kind: "assignee" }
   | { kind: "project" }
   | { kind: "parent" }
@@ -355,6 +358,8 @@ export type IssueTableGroupSpec =
       primary: "assignee" | "project" | "parent";
       /** `status_category` folds custom statuses into their category's cell. */
       secondary: "status" | "status_category";
+      /** Omit for legacy seven-value category buckets; only for status_category. */
+      category_format?: "lifecycle";
       /** Optional visible secondary buckets. When present, the server pages
        * only primary groups that contain at least one matching card and
        * returns `total` for that complete visible result set. */

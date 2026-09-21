@@ -38,6 +38,38 @@ describe("CommentTriggerChips", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it("describes @all semantics without promising any recipients", () => {
+    renderWithI18n(
+      <CommentTriggerChips
+        agents={[]}
+        hasAllMembersMention
+        suppressedAgentIds={new Set()}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText("Member broadcast · @all does not start agents"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/notif/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps explicit agent triggers visible alongside @all semantics", () => {
+    renderWithI18n(
+      <CommentTriggerChips
+        agents={[bob]}
+        hasAllMembersMention
+        suppressedAgentIds={new Set()}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText("Member broadcast · @all does not start agents"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button")).toHaveTextContent("Will start when sent");
+  });
+
   it("renders a single agent as a full sentence and toggles on click", () => {
     const onToggle = vi.fn();
     renderWithI18n(
@@ -66,6 +98,17 @@ describe("CommentTriggerChips", () => {
     expect(chip).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("previews delivery into the current turn", () => {
+    renderWithI18n(
+      <CommentTriggerChips
+        agents={[{ ...walt, delivery: "current_run" }]}
+        suppressedAgentIds={new Set()}
+        onToggle={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button")).toHaveTextContent("Will update current work");
+  });
+
   it("collapses several agents into a stack with an active count", () => {
     renderWithI18n(
       <CommentTriggerChips
@@ -75,7 +118,7 @@ describe("CommentTriggerChips", () => {
       />,
     );
 
-    expect(screen.getByRole("button")).toHaveTextContent("2 agents will start when sent");
+    expect(screen.getByRole("button")).toHaveTextContent("2 agents will receive this");
   });
 
   it("counts only non-suppressed agents in the sentence", () => {
@@ -87,7 +130,7 @@ describe("CommentTriggerChips", () => {
       />,
     );
 
-    expect(screen.getByRole("button")).toHaveTextContent("1 agent will start when sent");
+    expect(screen.getByRole("button")).toHaveTextContent("1 agent will receive this");
   });
 
   it("switches to the none-will-trigger state when every agent is suppressed", () => {

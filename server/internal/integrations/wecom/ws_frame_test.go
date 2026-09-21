@@ -166,3 +166,142 @@ func TestSendMsgTextBody_ShapeAndChatTypeValidation(t *testing.T) {
 		t.Error("chat_type 3 should be rejected (must be 1 or 2)")
 	}
 }
+
+// TestQuotedContext pins how the message a sender replied to is rendered into
+// the body: labelled, blockquoted on every line, and empty when there is
+// nothing to show.
+func TestQuotedContext(t *testing.T) {
+	t.Parallel()
+
+	textQuote := func(content string) quotedMessage {
+		var q quotedMessage
+		q.MsgType = "text"
+		q.Text.Content = content
+		return q
+	}
+
+	t.Run("a quoted line is labelled and blockquoted", func(t *testing.T) {
+		t.Parallel()
+		mc := aibotMsgCallback{MsgType: "text", Quote: textQuote("这是今日的测试情况")}
+		if got, want := mc.quotedContext(), "> [Quote] 这是今日的测试情况"; got != want {
+			t.Errorf("quotedContext() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("every line of a multi-line quote stays inside the block", func(t *testing.T) {
+		t.Parallel()
+		mc := aibotMsgCallback{MsgType: "text", Quote: textQuote("第一行\n第二行")}
+		if got, want := mc.quotedContext(), "> [Quote] 第一行\n> 第二行"; got != want {
+			t.Errorf("quotedContext() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("a quoted attachment shows the same placeholder a sent one does", func(t *testing.T) {
+		t.Parallel()
+		var q quotedMessage
+		q.MsgType = "image"
+		q.Image = mediaBody{URL: "https://example.invalid/i", AESKey: "k"}
+		mc := aibotMsgCallback{MsgType: "text", Quote: q}
+		if got, want := mc.quotedContext(), "> [Quote] [Image]"; got != want {
+			t.Errorf("quotedContext() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("a quoted mixed message renders its runs", func(t *testing.T) {
+		t.Parallel()
+		var q quotedMessage
+		q.MsgType = "mixed"
+		var words mixedItem
+		words.MsgType = "text"
+		words.Text.Content = "看这个"
+		shot := mixedItem{MsgType: "image", Image: mediaBody{URL: "https://example.invalid/i", AESKey: "k"}}
+		q.Mixed.MsgItem = []mixedItem{words, shot}
+		mc := aibotMsgCallback{MsgType: "text", Quote: q}
+		if got, want := mc.quotedContext(), "> [Quote] 看这个\n> [Image]"; got != want {
+			t.Errorf("quotedContext() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("no quote renders nothing", func(t *testing.T) {
+		t.Parallel()
+		mc := aibotMsgCallback{MsgType: "text"}
+		mc.Text.Content = "hello"
+		if got := mc.quotedContext(); got != "" {
+			t.Errorf("quotedContext() = %q, want empty", got)
+		}
+	})
+
+	t.Run("a quote of a kind we do not know renders nothing", func(t *testing.T) {
+		t.Parallel()
+		var q quotedMessage
+		q.MsgType = "location"
+		mc := aibotMsgCallback{MsgType: "text", Quote: q}
+		if got := mc.quotedContext(); got != "" {
+			t.Errorf("quotedContext() = %q, want empty", got)
+		}
+	})
+}
+
+// TestChannelMessageFromCallback_QuoteLeadsBodyButNotCommand is the contract
+// that makes the quote safe to add: the agent sees what was pointed at, and
+// the command parsers still only ever see the line the sender typed here.
+func TestChannelMessageFromCallback_QuoteLeadsBodyButNotCommand(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the quote leads the stored body", func(t *testing.T) {
+		t.Parallel()
+		mc := aibotMsgCallback{MsgID: "m1", ChatID: "TUSER", ChatType: "single", MsgType: "text"}
+		mc.From.UserID = "TUSER"
+		mc.Text.Content = "这个怎么处理"
+		mc.Quote.MsgType = "text"
+		mc.Quote.Text.Content = "生产库连接数打满了"
+
+		msg := channelMessageFromCallback("bot-1", "", mc, mc.Text.Content, "req-q1")
+
+		want := "> [Quote] 生产库连接数打满了\n\n这个怎么处理"
+		if msg.Text != want {
+			t.Errorf("Text = %q, want %q", msg.Text, want)
+		}
+		// The sender typed three words; that is all the parsers may read.
+		if msg.CommandText != "这个怎么处理" {
+			t.Errorf("CommandText = %q, want the sender's own line", msg.CommandText)
+		}
+	})
+
+	t.Run("quoting somebody else's /issue does not file an issue", func(t *testing.T) {
+		t.Parallel()
+		mc := aibotMsgCallback{MsgID: "m2", ChatID: "TUSER", ChatType: "single", MsgType: "text"}
+		mc.From.UserID = "TUSER"
+		mc.Text.Content = "他这条是什么意思"
+		mc.Quote.MsgType = "text"
+		mc.Quote.Text.Content = "/issue 登录坏了"
+
+		msg := channelMessageFromCallback("bot-1", "", mc, mc.Text.Content, "req-q2")
+
+		if _, ok := engine.ParseIssueCommand(msg.CommandText); ok {
+			t.Fatalf("CommandText %q parsed as an issue command", msg.CommandText)
+		}
+		if msg.SkipAgentRun {
+			t.Error("SkipAgentRun set: the quoted command was read as this sender's")
+		}
+	})
+
+	t.Run("a control command keeps the quote in its first turn", func(t *testing.T) {
+		t.Parallel()
+		mc := aibotMsgCallback{MsgID: "m3", ChatID: "TUSER", ChatType: "single", MsgType: "text"}
+		mc.From.UserID = "TUSER"
+		mc.Text.Content = "/new 帮我看看这个"
+		mc.Quote.MsgType = "text"
+		mc.Quote.Text.Content = "生产库连接数打满了"
+
+		msg := channelMessageFromCallback("bot-1", "", mc, mc.Text.Content, "req-q3")
+
+		want := "> [Quote] 生产库连接数打满了\n\n帮我看看这个"
+		if msg.Text != want {
+			t.Errorf("Text = %q, want the directive gone and the quote kept", msg.Text)
+		}
+		if _, ok := engine.ParseNewChatCommand(msg.CommandText); !ok {
+			t.Errorf("CommandText = %q, want /new still parseable", msg.CommandText)
+		}
+	})
+}

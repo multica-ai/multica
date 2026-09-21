@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { renderWithI18n } from "../../test/i18n";
 
 const { getAttachmentTextContentMock } = vi.hoisted(() => ({
   getAttachmentTextContentMock: vi.fn(),
@@ -41,7 +42,7 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
   };
 });
 
-import { AttachmentList } from "./comment-card";
+import { AttachmentList, CommentDeliveryReceipts } from "./comment-card";
 
 function renderWithQuery(ui: ReactElement) {
   const qc = new QueryClient({
@@ -52,6 +53,25 @@ function renderWithQuery(ui: ReactElement) {
 
 beforeEach(() => vi.clearAllMocks());
 afterEach(() => vi.restoreAllMocks());
+
+describe("CommentDeliveryReceipts", () => {
+  it("renders an independent delivery state for every agent recipient", () => {
+    renderWithI18n(
+      <CommentDeliveryReceipts
+        entry={{
+          agent_deliveries: [
+            { agent_id: "a1", agent_name: "Walt", status: "pending" },
+            { agent_id: "a2", agent_name: "Bob", status: "delivered", delivered_at: new Date().toISOString() },
+            { agent_id: "a3", agent_name: "Kim", status: "follow_up" },
+          ],
+        } as any}
+      />,
+    );
+    expect(screen.getByText("Waiting to deliver to Walt's current work")).toBeInTheDocument();
+    expect(screen.getByText(/Delivered to Bob's current work/)).toBeInTheDocument();
+    expect(screen.getByText("Kim will handle this in follow-up work")).toBeInTheDocument();
+  });
+});
 
 describe("AttachmentList — standalone HTML attachment routes through AttachmentBlock", () => {
   // Regression pin for comment-card.tsx:152. This is the entry point

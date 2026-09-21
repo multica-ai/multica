@@ -481,14 +481,52 @@ process_group_id() {
   ps -p "$1" -o pgid= 2>/dev/null | tr -d ' ' || true
 }
 
-listener_belongs_to_component() {
-  local component=$1 port=$2 launcher listener recorded
+process_parent_id() {
+  ps -p "$1" -o ppid= 2>/dev/null | tr -d ' ' || true
+}
+
+# Package runners may put a descendant in a nested process group (for example,
+# Turbo does this before Next binds its port). Follow PPIDs so ownership still
+# comes from the launcher tree instead of accepting a weaker command/user match.
+process_is_descendant_of() {
+  local pid=$1 ancestor=$2 parent depth=0
+  [ -n "$pid" ] && [ -n "$ancestor" ] || return 1
+  while [ "$depth" -lt 64 ]; do
+    [ "$pid" = "$ancestor" ] && return 0
+    [ "$pid" != 1 ] || return 1
+    parent="$(process_parent_id "$pid")"
+    [ -n "$parent" ] && [ "$parent" != "$pid" ] || return 1
+    pid="$parent"
+    depth=$((depth + 1))
+  done
+  return 1
+}
+
+listener_pid_belongs_to_component() {
+  local component=$1 listener=$2 launcher recorded
   launcher="$(component_pid "$component" || true)"
-  listener="$(port_listener_pid "$port")"
   [ -n "$launcher" ] && [ -n "$listener" ] || return 1
   recorded="$(cat "$(listener_pid_file "$component")" 2>/dev/null || true)"
   [ -n "$recorded" ] && [ "$listener" = "$recorded" ] && return 0
-  [ "$(process_group_id "$listener")" = "$launcher" ]
+  [ "$(process_group_id "$listener")" = "$launcher" ] && return 0
+  process_is_descendant_of "$listener" "$launcher"
+}
+
+listener_belongs_to_component() {
+  local component=$1 port=$2 listener
+  listener="$(port_listener_pid "$port")"
+  listener_pid_belongs_to_component "$component" "$listener"
+}
+
+# Persist only listeners whose live process tree proves component ownership.
+# stop_component can then clean up a nested process group after its launcher has
+# exited and the listener has been reparented.
+record_component_listener() {
+  local component=$1 port=$2 listener
+  listener="$(port_listener_pid "$port")"
+  listener_pid_belongs_to_component "$component" "$listener" || return 1
+  printf '%s\n' "$listener" > "$(listener_pid_file "$component")"
+  printf '%s' "$listener"
 }
 
 health_belongs_to_api() {
@@ -513,6 +551,8 @@ start_api() {
   expected_commit="$(checkout_commit)"
   if health="$(health_json)" && [ -n "$health" ] && component_pid api >/dev/null; then
     if api_identity_matches "$health" "$expected_commit"; then
+      record_component_listener api "$BACKEND_PORT" >/dev/null \
+        || die "The API listener changed while its identity was being verified. Refusing to reuse it."
       ok "api already running on :$BACKEND_PORT (pid $(json_field "$health" pid), commit $expected_commit)"
       return 0
     fi
@@ -541,6 +581,10 @@ Run 'make down' here first — a leftover instance answers /health with 200 and 
         stop_component api
         die "Something else is serving :$BACKEND_PORT, or the launched api did not report pid/commit/started_at for commit $expected_commit."
       fi
+      if ! record_component_listener api "$BACKEND_PORT" >/dev/null; then
+        stop_component api
+        die "The API listener changed while its identity was being recorded."
+      fi
       ok "api healthy at http://localhost:$BACKEND_PORT (pid $(json_field "$health" pid), commit $expected_commit)"
       return 0
     fi
@@ -553,10 +597,12 @@ Run 'make down' here first — a leftover instance answers /health with 200 and 
 
 start_web() {
   local waited=0 listener
-  if curl -sf --max-time 15 "http://localhost:${FRONTEND_PORT}" >/dev/null 2>&1 \
-    && listener_belongs_to_component web "$FRONTEND_PORT"; then
-    ok "web already running on :$FRONTEND_PORT"
-    return 0
+  if curl -sf --max-time 15 "http://localhost:${FRONTEND_PORT}" >/dev/null 2>&1; then
+    listener="$(record_component_listener web "$FRONTEND_PORT" || true)"
+    if [ -n "$listener" ]; then
+      ok "web already running on :$FRONTEND_PORT (pid $listener)"
+      return 0
+    fi
   fi
   if ! port_free "$FRONTEND_PORT"; then
     die "Port $FRONTEND_PORT is busy: $(describe_port_owner "$FRONTEND_PORT"). Run 'make down' here first."
@@ -567,10 +613,10 @@ start_web() {
 
   while [ "$waited" -lt 300 ]; do
     if curl -sf --max-time 15 "http://localhost:${FRONTEND_PORT}" >/dev/null 2>&1; then
-      listener="$(port_listener_pid "$FRONTEND_PORT")"
-      if ! listener_belongs_to_component web "$FRONTEND_PORT"; then
+      listener="$(record_component_listener web "$FRONTEND_PORT" || true)"
+      if [ -z "$listener" ]; then
         stop_component web
-        die "Web on :$FRONTEND_PORT is not owned by the process group this environment launched."
+        die "Web on :$FRONTEND_PORT is not descended from the process this environment launched."
       fi
       ok "web serving http://localhost:$FRONTEND_PORT (pid ${listener:-?})"
       return 0
@@ -712,7 +758,9 @@ start_desktop() {
     && curl -sf --max-time 10 "http://localhost:${DESKTOP_RENDERER_PORT}" >/dev/null 2>&1 \
     && listener_belongs_to_component desktop "$DESKTOP_RENDERER_PORT" \
     && desktop_env_matches; then
-      ok "desktop already running (pid $(component_pid desktop), renderer :$DESKTOP_RENDERER_PORT)"
+      listener="$(record_component_listener desktop "$DESKTOP_RENDERER_PORT" || true)"
+      [ -n "$listener" ] || die "The Desktop listener changed while its identity was being recorded."
+      ok "desktop already running (pid $(component_pid desktop), renderer $listener on :$DESKTOP_RENDERER_PORT)"
       return 0
   fi
   if component_pid desktop >/dev/null; then
@@ -738,7 +786,7 @@ EOF
   while [ "$waited" -lt 300 ]; do
     if curl -sf --max-time 10 "http://localhost:${DESKTOP_RENDERER_PORT}" >/dev/null 2>&1; then
       listener="$(port_listener_pid "$DESKTOP_RENDERER_PORT")"
-      if ! component_pid desktop >/dev/null || [ -z "$listener" ] || ! desktop_env_matches; then
+      if ! listener_pid_belongs_to_component desktop "$listener" || ! desktop_env_matches; then
         stop_component desktop
         die "Desktop renderer on :$DESKTOP_RENDERER_PORT does not belong to this environment."
       fi
@@ -773,7 +821,7 @@ desktop_env_matches() {
 }
 
 stop_component() {
-  local name=$1 pid launcher="" status state recorded_listener=""
+  local name=$1 pid launcher="" status state recorded_listener="" port="" listener=""
   case "$name" in
     daemon)
       if [ -x "$MULTICA_BIN" ]; then
@@ -802,10 +850,25 @@ stop_component() {
       ;;
   esac
 
+  case "$name" in
+    api) port="$BACKEND_PORT" ;;
+    web) port="$FRONTEND_PORT" ;;
+    desktop) port="$DESKTOP_RENDERER_PORT" ;;
+  esac
   recorded_listener="$(cat "$(listener_pid_file "$name")" 2>/dev/null || true)"
   pid="$(component_pid "$name" || true)"
   if [ -n "$pid" ]; then
     launcher="$pid"
+    # Capture an older environment's listener before killing the launcher. A
+    # nested process group may survive that signal and then lose its PPID chain
+    # when the launcher exits, so it must be proven and recorded first.
+    if [ -n "$port" ]; then
+      listener="$(port_listener_pid "$port")"
+      if [ -n "$listener" ] && listener_pid_belongs_to_component "$name" "$listener"; then
+        recorded_listener="$listener"
+        printf '%s\n' "$listener" > "$(listener_pid_file "$name")"
+      fi
+    fi
     # Negative pid targets the process group, so make → go run → server all go
     # down together instead of leaving the real listener orphaned.
     kill -TERM -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
@@ -825,18 +888,10 @@ stop_component() {
     info "$name was not running"
   fi
 
-  # A process group kill can miss a listener that has reparented away from its
-  # launcher. Only kill that listener when its process group still proves it
-  # belongs to the recorded launcher; a stale manifest must never kill an
-  # unrelated process that later reused the port.
-  local port=""
-  case "$name" in
-    api) port="$BACKEND_PORT" ;;
-    web) port="$FRONTEND_PORT" ;;
-    desktop) port="$DESKTOP_RENDERER_PORT" ;;
-  esac
+  # A process group kill can miss a nested listener that has reparented away
+  # from its launcher. Only kill the listener captured above or one still in
+  # the launcher's direct process group; never infer ownership from the port.
   if [ -n "$port" ]; then
-    local listener
     listener="$(port_listener_pid "$port")"
     if [ -n "$listener" ]; then
       if { [ -n "$recorded_listener" ] && [ "$listener" = "$recorded_listener" ]; } \

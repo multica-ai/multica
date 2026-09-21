@@ -728,6 +728,34 @@ func TestLoadConfig_CodexHandshakeTimeout(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_CodexTurnInterruptTimeout(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT", "750ms")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with interrupt timeout: %v", err)
+	}
+	if cfg.CodexTurnInterruptTimeout != 750*time.Millisecond {
+		t.Fatalf("CodexTurnInterruptTimeout = %s, want 750ms", cfg.CodexTurnInterruptTimeout)
+	}
+
+	t.Setenv("MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT", "0")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with zero interrupt timeout: %v", err)
+	}
+	if cfg.CodexTurnInterruptTimeout != DefaultCodexTurnInterruptTimeout {
+		t.Fatalf("CodexTurnInterruptTimeout = %s, want default %s", cfg.CodexTurnInterruptTimeout, DefaultCodexTurnInterruptTimeout)
+	}
+}
+
 // TestLoadConfig_CodexFirstTurnNoProgressTimeout pins the env-only
 // MULTICA_CODEX_FIRST_TURN_TIMEOUT resolution (GH #3262 / #5959): unset and an
 // explicit "0" both mean "keep the backend default" (0 = unset), while a positive
@@ -1243,6 +1271,11 @@ func TestResolveAgentsViaLoginShell_HardTimeoutOnBackgroundedStdout(t *testing.T
 	}
 	t.Setenv("SHELL", sh)
 	t.Setenv("ENV", rc)
+	// The shell itself exits at once, so the whole run is the wait delay; a
+	// short one proves the same ceiling without the test paying the real 2s.
+	origWaitDelay := loginShellResolveWaitDelay
+	loginShellResolveWaitDelay = 100 * time.Millisecond
+	t.Cleanup(func() { loginShellResolveWaitDelay = origWaitDelay })
 
 	// Cap = context timeout + wait delay + generous slack for goroutine
 	// scheduling. A bug that disables WaitDelay would blow past 60s here.

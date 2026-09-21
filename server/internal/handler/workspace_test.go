@@ -536,6 +536,7 @@ RETURNING id
 `, neighborSlug).Scan(&neighborWorkspaceID)
 	t.Cleanup(func() {
 		for _, workspaceID := range []string{targetWorkspaceID, neighborWorkspaceID} {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM comment_agent_delivery WHERE comment_id IN (SELECT id FROM comment WHERE workspace_id = $1)`, workspaceID)
 			_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
 			_, _ = testPool.Exec(context.Background(), `DELETE FROM task_usage_hourly_dirty WHERE workspace_id = $1`, workspaceID)
 			_, _ = testPool.Exec(context.Background(), `DELETE FROM runtime_profile WHERE workspace_id = $1`, workspaceID)
@@ -552,6 +553,7 @@ VALUES ($1, $2, 'owner')
 		workspaceID string
 		mediaKey    string
 		issueID     string
+		commentID   string
 	}
 	fixtures := []*tenantFixture{
 		{workspaceID: targetWorkspaceID, mediaKey: targetMediaKey},
@@ -563,10 +565,15 @@ INSERT INTO issue (workspace_id, title, creator_type, creator_id)
 VALUES ($1, 'Workspace delete tenant isolation', 'member', $2)
 RETURNING id
 `, fixture.workspaceID, testUserID).Scan(&fixture.issueID)
-		dbfx.Exec(t, `
+		dbfx.QueryRow(t, `
 INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content)
 VALUES ($1, $2, 'member', $3, 'Workspace delete tenant isolation')
-`, fixture.issueID, fixture.workspaceID, testUserID)
+RETURNING id
+`, fixture.issueID, fixture.workspaceID, testUserID).Scan(&fixture.commentID)
+		dbfx.Exec(t, `
+INSERT INTO comment_agent_delivery (comment_id, agent_id, status)
+VALUES ($1, gen_random_uuid(), 'follow_up')
+`, fixture.commentID)
 		dbfx.Exec(t, `
 INSERT INTO inbox_item (
 	workspace_id, recipient_type, recipient_id, type, issue_id, title
@@ -613,6 +620,20 @@ SELECT COUNT(*) FROM `+table+` WHERE `+predicate+` = $1
 		if count != 1 {
 			t.Fatalf("neighbor %s rows = %d, want 1", table, count)
 		}
+	}
+
+	var targetDeliveryCount, neighborDeliveryCount int
+	dbfx.QueryRow(t, `
+SELECT COUNT(*) FROM comment_agent_delivery WHERE comment_id = $1
+`, fixtures[0].commentID).Scan(&targetDeliveryCount)
+	dbfx.QueryRow(t, `
+SELECT COUNT(*) FROM comment_agent_delivery WHERE comment_id = $1
+`, fixtures[1].commentID).Scan(&neighborDeliveryCount)
+	if targetDeliveryCount != 0 {
+		t.Fatalf("target comment delivery rows = %d, want 0", targetDeliveryCount)
+	}
+	if neighborDeliveryCount != 1 {
+		t.Fatalf("neighbor comment delivery rows = %d, want 1", neighborDeliveryCount)
 	}
 
 	var neighborMediaState string

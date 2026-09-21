@@ -16,6 +16,14 @@ import enCommon from "../../locales/en/common.json";
 import enAuth from "../../locales/en/auth.json";
 import enSettings from "../../locales/en/settings.json";
 
+const navigationState = vi.hoisted(() => ({ search: "", replace: vi.fn() }));
+vi.mock("../../navigation", () => ({
+  useNavigation: () => ({
+    pathname: "/acme/settings",
+    searchParams: new URLSearchParams(navigationState.search),
+    replace: navigationState.replace,
+  }),
+}));
 const mockPersist = vi.hoisted(() => vi.fn());
 const mockUpdateMe = vi.hoisted(() => vi.fn());
 const mockReload = vi.hoisted(() => vi.fn());
@@ -33,10 +41,9 @@ vi.mock("@multica/ui/components/common/theme-provider", () => ({
 }));
 
 vi.mock("@multica/core/i18n/react", async () => {
-  const actual =
-    await vi.importActual<typeof import("@multica/core/i18n/react")>(
-      "@multica/core/i18n/react",
-    );
+  const actual = await vi.importActual<
+    typeof import("@multica/core/i18n/react")
+  >("@multica/core/i18n/react");
   return {
     ...actual,
     useLocaleAdapter: () => ({
@@ -73,8 +80,7 @@ vi.mock("@multica/core/auth", async () => {
     setUser: mockSetUser,
   });
   const useAuthStore = Object.assign(
-    (sel?: (s: AuthState) => unknown) =>
-      sel ? sel(state()) : state(),
+    (sel?: (s: AuthState) => unknown) => (sel ? sel(state()) : state()),
     { getState: state },
   );
   return { ...actual, useAuthStore };
@@ -171,16 +177,19 @@ describe("PreferencesTab — Language switcher", () => {
     expect(mockToastWarning).not.toHaveBeenCalled();
   });
 
-  it("when logged in + PATCH success: confirms the save before reloading", async () => {
+  it.each([
+    { name: "中文", locale: "zh-Hans" },
+    { name: "Français", locale: "fr" },
+  ])("when logged in: saves $locale before reloading", async ({ name, locale }) => {
     userRef.current = { id: "user-1" };
     mockUpdateMe.mockResolvedValueOnce({});
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    await pickLanguage(user, "中文");
+    await pickLanguage(user, name);
 
-    expect(mockPersist).toHaveBeenCalledWith("zh-Hans");
-    expect(mockUpdateMe).toHaveBeenCalledWith({ language: "zh-Hans" });
+    expect(mockPersist).toHaveBeenCalledWith(locale);
+    expect(mockUpdateMe).toHaveBeenCalledWith({ language: locale });
     expect(mockToastWarning).not.toHaveBeenCalled();
     expect(mockToastSuccess).toHaveBeenCalledTimes(1);
     expect(mockReload).not.toHaveBeenCalled();
@@ -247,7 +256,9 @@ describe("PreferencesTab — Timezone section", () => {
     user: ReturnType<typeof userEvent.setup>,
     name: RegExp | string,
   ) {
-    await user.click(screen.getByRole("combobox", { name: "Viewing Timezone" }));
+    await user.click(
+      screen.getByRole("combobox", { name: "Viewing Timezone" }),
+    );
     await user.click(await screen.findByRole("option", { name }));
   }
 
@@ -328,7 +339,7 @@ describe("PreferencesTab — Sticky comment bar", () => {
     const user = userEvent.setup();
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    const toggle = screen.getByRole("switch", { name: "Sticky comment bar" });
+    const toggle = screen.getByRole("switch", { name: "Pin comment bar to bottom" });
     expect(toggle).toHaveAttribute("aria-checked", "true");
 
     await user.click(toggle);
@@ -336,5 +347,30 @@ describe("PreferencesTab — Sticky comment bar", () => {
     expect(useCommentComposerStore.getState().sticky).toBe(false);
     expect(toggle).toHaveAttribute("aria-checked", "false");
     expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Preferences sections", () => {
+  afterEach(() => {
+    navigationState.search = "";
+    cleanup();
+  });
+  it("opens the issue creation controls from an old bookmark", () => {
+    navigationState.search = "tab=issue";
+    render(
+      <I18nWrapper>
+        <PreferencesTab />
+      </I18nWrapper>,
+    );
+    expect(screen.getByRole("tab", { name: "Issue creation" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(
+      screen.getByText(enSettings.preferences.issue_scope),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "Theme" }),
+    ).not.toBeInTheDocument();
   });
 });

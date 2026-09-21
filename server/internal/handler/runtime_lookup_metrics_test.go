@@ -88,6 +88,59 @@ func TestAgentRuntimeLookupWSHotPathIsZeroRead(t *testing.T) {
 	}
 }
 
+// TestAgentRuntimeLookupBatchClaimIsAttributed pins the MUL-6788 review fix at
+// the handler level: the batch claim endpoint must report its runtime reads on
+// multica_agent_runtime_lookup_total like every other reader.
+//
+// This is the counter's most load-bearing series, not a completeness exercise.
+// Both /tasks/claim and /claim route here (router.go) and the WebSocket claim
+// RPC replays through the same handler, so a claim path that reads the rows
+// straight off h.Queries contributes nothing while once-per-shutdown
+// deregisters contribute steadily — making the busiest reader in the system
+// read as idle when the sources are compared, which is the exact inversion the
+// source label was added to prevent.
+//
+// One request mixes an existing runtime with a well-formed but unregistered id
+// so both classifications are covered, and asserts the batch bills exactly one
+// result per requested id rather than one per SQL query.
+func TestAgentRuntimeLookupBatchClaimIsAttributed(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	m := withTestMetrics(t)
+	runtimeID := dbfx.Runtime(t, "Batch claim lookup attribution", testutil.Cols{
+		"daemon_id":   batchClaimTestDaemonID,
+		"device_info": "batch claim lookup attribution",
+	})
+	missing := uuid.NewString()
+
+	before := lookupSnapshot(t, m)
+
+	// max_tasks=0 returns before the runtime read, so claim a real slot.
+	testutil.Call(t, testHandler.ClaimTasksByRuntime,
+		batchClaimRequest(testWorkspaceID, []string{runtimeID, missing}, 1, "")).Want(http.StatusOK)
+
+	after := lookupSnapshot(t, m)
+	for _, want := range []struct {
+		source, result string
+		delta          float64
+	}{
+		{obsmetrics.RuntimeLookupSourceDaemonAPI, obsmetrics.RuntimeLookupResultOK, 1},
+		{obsmetrics.RuntimeLookupSourceDaemonAPI, obsmetrics.RuntimeLookupResultNotFound, 1},
+		// A successful batch read is not an error for the ids that missed.
+		{obsmetrics.RuntimeLookupSourceDaemonAPI, obsmetrics.RuntimeLookupResultError, 0},
+		// The claim must not land on the bucket for unclassified call sites.
+		{obsmetrics.RuntimeLookupSourceOther, obsmetrics.RuntimeLookupResultOK, 0},
+		{obsmetrics.RuntimeLookupSourceOther, obsmetrics.RuntimeLookupResultNotFound, 0},
+	} {
+		key := want.source + "/" + want.result
+		if got := after[key] - before[key]; got != want.delta {
+			t.Errorf("%s delta = %v, want %v", key, got, want.delta)
+		}
+	}
+}
+
 // ---- helpers --------------------------------------------------------------
 
 // withTestMetrics installs a fresh collector on the shared test handler for the
