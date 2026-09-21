@@ -158,6 +158,25 @@ func TestCommandArgvNeverAliasesItsInputs(t *testing.T) {
 	}
 }
 
+func TestWorkBuddyCommandConstructionKeepsNodeScriptPrefix(t *testing.T) {
+	t.Parallel()
+
+	desc, ok := BuiltinRuntimeByID("workbuddy")
+	if !ok {
+		t.Fatal("workbuddy descriptor is missing")
+	}
+	if desc.ProtocolFamily != "codebuddy" {
+		t.Fatalf("WorkBuddy protocol family = %q, want codebuddy", desc.ProtocolFamily)
+	}
+
+	cmd := NewCommand("/staged/node", []string{"/bundle/codebuddy-cli.js"})
+	got := cmd.Argv("--acp")
+	want := []string{"/bundle/codebuddy-cli.js", "--acp"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("WorkBuddy discovery argv = %#v, want %#v", got, want)
+	}
+}
+
 func TestRedactAgentCommandArgsPreservesOnlySafeFlagNames(t *testing.T) {
 	t.Parallel()
 
