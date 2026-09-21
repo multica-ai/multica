@@ -20,6 +20,12 @@ import (
 // invoked with a real agent CLI's argv: TestMain runs before the testing
 // package parses flags, so arguments like `run --format json` never reach it.
 func TestMain(m *testing.M) {
+	// WorkBuddy's bundled CLI is a script, so its task-launch fixture re-executes
+	// this binary as the Node interpreter (workbuddy_launch_test.go).
+	if os.Getenv(workbuddyFakeNodeEnv) == "1" {
+		runFakeWorkBuddyNode()
+		os.Exit(0)
+	}
 	if os.Getenv(codeartsModelHelperEnv) == "1" {
 		runFakeCodeArtsModelHelper()
 		os.Exit(0)
