@@ -1001,6 +1001,18 @@ func (d *Daemon) resolveAgentEntryForLaunch(ctx context.Context, provider string
 	return resolved, version, nil
 }
 
+func workBuddyEntryPairMissing(entry AgentEntry) bool {
+	if !agentExecutablePresent(entry.Path) {
+		return true
+	}
+	for _, arg := range entry.LaunchPrefix {
+		if !agentExecutablePresent(arg) {
+			return true
+		}
+	}
+	return false
+}
+
 func (d *Daemon) reprobeWorkBuddyEntry(ctx context.Context, entry AgentEntry) (AgentEntry, healOutcome, bool) {
 	candidate, ok := probeWorkBuddyAgent()
 	if !ok || candidate.Path == "" || len(candidate.LaunchPrefix) == 0 || !agentExecutablePresent(candidate.Path) {
@@ -1037,7 +1049,7 @@ type healOutcome struct {
 // fails, and reports "version detection failed" — which by design leaves the
 // runtime online, claiming tasks for a CLI that cannot launch.
 func (d *Daemon) resolveAgentEntryWithHeal(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string, healOutcome) {
-	if provider == "workbuddy" && !agentExecutablePresent(entry.Path) {
+	if provider == "workbuddy" && workBuddyEntryPairMissing(entry) {
 		if recovered, outcome, ok := d.reprobeWorkBuddyEntry(ctx, entry); ok {
 			return recovered, outcome.adopted.version, outcome
 		}

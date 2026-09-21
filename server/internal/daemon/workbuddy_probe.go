@@ -223,10 +223,9 @@ func workbuddyBundleCLIUsable(cliPath string) bool {
 // runtime must never be re-resolved — node is an interpreter shared by every
 // npm-installed CLI, and "resolving" it would return an unrelated binary (or
 // the WorkBuddy CLI script itself, since Command doubles as the launch prefix
-// token here). Empty Command makes resolveAgentEntryWithHeal treat a vanished
-// node as an unrecoverable launch failure with a clear error, which is the
-// honest state: WorkBuddy stages node at install time and an operator repairs
-// a missing one by reinstalling / reconfiguring.
+// token here). WorkBuddy has a provider-specific re-probe before the generic
+// self-heal path, so a missing Node or bundled CLI can be replaced by a newly
+// validated Node + CLI pair without restarting the daemon.
 func workbuddyEntryWithRuntime(cliPath, model string) (AgentEntry, bool) {
 	node, ok := resolveWorkBuddyNode()
 	if !ok {
