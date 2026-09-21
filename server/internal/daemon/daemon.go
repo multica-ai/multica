@@ -987,6 +987,16 @@ func (d *Daemon) resolveAgentEntry(ctx context.Context, provider string, entry A
 // installer junctions must yield a verified final target before the first
 // launch; otherwise the stable entry could retarget after registration and run
 // a binary whose version and minimum-version policy were never checked.
+func (d *Daemon) reprobeWorkBuddyEntry(ctx context.Context, entry AgentEntry) (AgentEntry, healOutcome, bool) {
+	candidate, ok := probeWorkBuddyAgent()
+	if !ok || candidate.Path == "" || len(candidate.LaunchPrefix) == 0 || !agentExecutablePresent(candidate.Path) { return entry, healOutcome{}, false }
+	outcome := d.adoptAgentPath(ctx, "workbuddy", "", candidate.Path, candidate.LaunchPrefix, "re-probed WorkBuddy Node/CLI pair")
+	if outcome.adopted.path == "" { return entry, outcome, false }
+	candidate.Path = outcome.adopted.path
+	return candidate, outcome, true
+}
+
+
 func (d *Daemon) resolveAgentEntryForLaunch(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string, error) {
 	resolved, version, outcome := d.resolveAgentEntryWithHeal(ctx, provider, entry)
 	if outcome.rejected != nil {
@@ -1024,6 +1034,11 @@ type healOutcome struct {
 // fails, and reports "version detection failed" — which by design leaves the
 // runtime online, claiming tasks for a CLI that cannot launch.
 func (d *Daemon) resolveAgentEntryWithHeal(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string, healOutcome) {
+	if provider == "workbuddy" && !agentExecutablePresent(entry.Path) {
+		if recovered, outcome, ok := d.reprobeWorkBuddyEntry(ctx, entry); ok {
+			return recovered, outcome.adopted.version, outcome
+		}
+	}
 	// Windows installer entry points are stable junctions whose final target can
 	// change while the old release remains installed. Resolve the final path on
 	// every launch and adopt a changed target only after pairing it with a freshly
