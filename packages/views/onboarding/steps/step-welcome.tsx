@@ -96,11 +96,11 @@ export function StepWelcome({
               <p className="text-title leading-relaxed text-foreground">
                 {t(($) => $.welcome.lede)}
               </p>
-              <p className="text-body leading-relaxed text-muted-foreground">
-                {isWeb
-                  ? t(($) => $.welcome.lede_web)
-                  : t(($) => $.welcome.lede_desktop)}
-              </p>
+              {isWeb && (
+                <p className="text-body leading-relaxed text-muted-foreground">
+                  {t(($) => $.welcome.lede_web)}
+                </p>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -175,9 +175,6 @@ export function StepWelcome({
       <div className="hidden border-l bg-muted/40 lg:flex lg:flex-1 lg:flex-col lg:overflow-hidden">
         <DragStrip />
         <div className="flex flex-1 flex-col items-center justify-center gap-7 px-8 py-8">
-          <p className="max-w-[440px] text-balance text-center font-serif text-body-lg italic leading-snug text-muted-foreground">
-            {t(($) => $.welcome.illustration_caption)}
-          </p>
           <WelcomeIllustration />
         </div>
       </div>

@@ -63,6 +63,8 @@ import type {
 import {
   AppConfigSchema,
   EMPTY_APP_CONFIG,
+  EMPTY_REFRESH_SESSION_RESPONSE,
+  RefreshSessionResponseSchema,
   EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_TIMELINE_ENTRIES,
@@ -72,7 +74,10 @@ import {
   TimelineEntriesSchema,
   WorkspaceSubscriptionSummarySchema,
 } from "@multica/core/api/schemas";
-import type { AppConfigResponse } from "@multica/core/api/schemas";
+import type {
+  AppConfigResponse,
+  RefreshSessionResponse,
+} from "@multica/core/api/schemas";
 import {
   ActiveTasksResponseSchema,
   AgentListSchema,
@@ -195,6 +200,13 @@ class ApiClient {
 
   setToken(token: string | null) {
     this.token = token;
+  }
+
+  /** The bearer token in use, or null when signed out. Session renewal reads
+   *  it to confirm the session it started from is still the live one, and the
+   *  WS client reads it so a reconnect uses the current credential. */
+  getToken(): string | null {
+    return this.token;
   }
 
   setOptions(options: ApiClientOptions) {
@@ -386,6 +398,21 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify({ email, code }),
     });
+  }
+
+  /**
+   * Ask the server to extend this session if it has entered its renewal
+   * window (MUL-7436). The server owns that decision — the app never reads
+   * `exp`, so a device with a skewed clock behaves exactly like one without.
+   */
+  async refreshSession(): Promise<RefreshSessionResponse> {
+    return this.fetchValidatedWith(
+      "/api/auth/refresh",
+      RefreshSessionResponseSchema,
+      EMPTY_REFRESH_SESSION_RESPONSE,
+      { method: "POST" },
+      { endpoint: "refreshSession" },
+    );
   }
 
   async getMe(opts?: { signal?: AbortSignal }): Promise<User> {

@@ -2208,6 +2208,23 @@ describe("issue status catalog schemas", () => {
 });
 
 describe("TaskMessageListSchema", () => {
+  it("preserves call IDs and tolerates old or malformed optional identity", () => {
+    const base = { task_id: "task-1", seq: 1, type: "tool_result", output: "ok" };
+    const parsed = parseWithFallback<{ call_id?: string; output?: string }[]>(
+      [
+        { ...base, call_id: "execution:A" },
+        base,
+        { ...base, call_id: null },
+        { ...base, call_id: 42 },
+        { ...base, call_id: {} },
+      ],
+      TaskMessageListSchema, [], { endpoint: "GET /api/tasks/:id/messages" },
+    );
+    expect(parsed).toHaveLength(5);
+    expect(parsed.map((m) => m.call_id)).toEqual(["execution:A", undefined, undefined, undefined, undefined]);
+    expect(parsed.every((m) => m.output === "ok")).toBe(true);
+  });
+
   const row = { task_id: "task-1", issue_id: "issue-1", seq: 1, type: "tool_result", output: "log line" };
 
   // The whole point of the field: a server that never sends it is saying

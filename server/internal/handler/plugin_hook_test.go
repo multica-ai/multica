@@ -129,15 +129,11 @@ func TestInvokePluginHookRefusesUnknownHook(t *testing.T) {
 // The flag gates the hook endpoint like every other plugin route: fail closed,
 // not merely hidden from the UI.
 func TestInvokePluginHookRequiresTheFeatureFlag(t *testing.T) {
-	withPluginsV1Flag(t, testHandler, true)
-	cleanupPluginInstallations(t)
-	installationID := installHookPlugin(t)
-
 	withPluginsV1Flag(t, testHandler, false)
 	recorder := httptest.NewRecorder()
-	testHandler.InvokePluginHook(recorder, invokeHookRequest(installationID, "summarize", map[string]any{"trigger": "manual"}))
-	if recorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status=%d body=%s, want 503", recorder.Code, recorder.Body.String())
+	testHandler.InvokePluginHook(recorder, invokeHookRequest("11111111-1111-1111-1111-111111111111", "summarize", map[string]any{"trigger": "manual"}))
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s, want 403", recorder.Code, recorder.Body.String())
 	}
 }
 

@@ -57,11 +57,13 @@ const (
 	ReasonTargetUnavailable     = dispatch.ReasonTargetUnavailable
 	ReasonRuntimeOffline        = dispatch.ReasonRuntimeOffline
 	ReasonRuntimeUnusable       = dispatch.ReasonRuntimeUnusable
+	ReasonRuntimeAccessDenied   = dispatch.ReasonRuntimeAccessDenied
 	ReasonRuntimeProfileMissing = dispatch.ReasonRuntimeProfileMissing
 	ReasonAgentRuntimeRequired  = dispatch.ReasonAgentRuntimeRequired
 	ReasonAttributionBlocked    = dispatch.ReasonAttributionBlocked
 	ReasonAlreadyActive         = dispatch.ReasonAlreadyActive
 	ReasonSelfTriggerSuppressed = dispatch.ReasonSelfTriggerSuppressed
+	ReasonIssueInTriage         = dispatch.ReasonIssueInTriage
 	ReasonInternalError         = dispatch.ReasonInternalError
 )
 
@@ -120,6 +122,8 @@ func dispatchBlockedFallbackMessage(code DispatchReasonCode) string {
 		return "the target's runtime is offline"
 	case ReasonRuntimeUnusable:
 		return "the target's agent CLI cannot run on its machine"
+	case ReasonRuntimeAccessDenied:
+		return "the target cannot run on this runtime"
 	case ReasonRuntimeProfileMissing:
 		return "the target's agent CLI is missing a runtime profile on its machine"
 	case ReasonAgentRuntimeRequired:
@@ -128,6 +132,8 @@ func dispatchBlockedFallbackMessage(code DispatchReasonCode) string {
 		return "the run couldn't be attributed to a responsible member"
 	case ReasonAlreadyActive:
 		return "a run is already active for this target"
+	case ReasonIssueInTriage:
+		return "the issue is in Triage and has no owner to run yet; accept it out of Triage first"
 	default:
 		return "the run was blocked"
 	}

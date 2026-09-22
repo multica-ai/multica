@@ -47,7 +47,11 @@ func TestClaudeExecuteFallbackUsage(t *testing.T) {
 		return mustMarshal(t, map[string]any{
 			"type": "assistant", "parent_tool_use_id": parent,
 			"message": map[string]any{"id": id, "role": "assistant", "model": model, "usage": u,
-				"content": []any{map[string]any{"type": "text", "text": "visible text"}, map[string]any{"type": "tool_use", "id": fmt.Sprintf("tool_%d", blockIndex), "name": "Read", "input": map[string]string{"file_path": "fixture.txt"}}}},
+				"content": []any{
+					map[string]any{"type": "thinking", "thinking": "fixture thinking", "signature": "fixture-signature"},
+					map[string]any{"type": "text", "text": "visible text"},
+					map[string]any{"type": "tool_use", "id": fmt.Sprintf("tool_%d", blockIndex), "name": "Read", "input": map[string]string{"file_path": "fixture.txt"}},
+				}},
 		})
 	}
 	terminal := func(failed bool, usage any, modelUsage any) json.RawMessage {

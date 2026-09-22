@@ -13,7 +13,6 @@ import (
 
 const archiveIssueStatusEntry = `-- name: ArchiveIssueStatusEntry :one
 UPDATE issue_status SET
-    category = issue_status_category(category),
     archived_at = now(),
     updated_at = now()
 WHERE id = $1::uuid
@@ -88,7 +87,7 @@ VALUES (
     COALESCE(
         (SELECT MAX(position) + 1 FROM issue_status
          WHERE workspace_id = $1::uuid
-		   AND issue_status_category(category) = $5::text),
+		   AND category = $5::text),
         0
     )
 )
@@ -213,7 +212,7 @@ func (q *Queries) GetIssueStatusEntryByKey(ctx context.Context, arg GetIssueStat
 const listActiveCustomIssueStatusEntries = `-- name: ListActiveCustomIssueStatusEntries :many
 SELECT id, workspace_id, key, name, description, category, color, is_system, position, archived_at, created_at, updated_at, icon FROM issue_status
 WHERE workspace_id = $1::uuid
-  AND issue_status_category(category) = $2::text
+  AND category = $2::text
   AND is_system = FALSE
   AND archived_at IS NULL
 ORDER BY position, key
@@ -266,7 +265,7 @@ SELECT id, workspace_id, key, name, description, category, color, is_system, pos
 WHERE workspace_id = $1::uuid
   AND ($2::bool OR archived_at IS NULL)
 ORDER BY
-    CASE issue_status_category(category) WHEN 'unstarted' THEN 0 WHEN 'started' THEN 1 WHEN 'done' THEN 2 WHEN 'closed' THEN 3 ELSE 4 END,
+    CASE category WHEN 'unstarted' THEN 0 WHEN 'started' THEN 1 WHEN 'done' THEN 2 WHEN 'closed' THEN 3 ELSE 4 END,
     position,
 	CASE WHEN is_system THEN 0 ELSE 1 END,
 	CASE key
@@ -326,7 +325,7 @@ func (q *Queries) ListIssueStatusEntries(ctx context.Context, arg ListIssueStatu
 const listIssueStatusKeysByCategories = `-- name: ListIssueStatusKeysByCategories :many
 SELECT key FROM issue_status
 WHERE workspace_id = $1::uuid
-  AND issue_status_category(category) = ANY($2::text[])
+  AND category = ANY($2::text[])
 `
 
 type ListIssueStatusKeysByCategoriesParams struct {
@@ -393,8 +392,7 @@ func (q *Queries) LockIssueStatusCatalogShared(ctx context.Context, workspaceID 
 
 const reorderIssueStatusEntries = `-- name: ReorderIssueStatusEntries :execrows
 UPDATE issue_status s
-SET category = issue_status_category(s.category),
-    position = ($1::float8[])[v.ordinality],
+SET position = ($1::float8[])[v.ordinality],
     updated_at = now()
 FROM unnest($4::uuid[]) WITH ORDINALITY AS v(id, ordinality)
 WHERE s.id = v.id
@@ -457,7 +455,6 @@ func (q *Queries) SeedIssueStatusEntries(ctx context.Context, workspaceID pgtype
 
 const updateIssueStatusEntry = `-- name: UpdateIssueStatusEntry :one
 UPDATE issue_status SET
-    category = issue_status_category(category),
     name = COALESCE($1, name),
     description = COALESCE($2, description),
     color = COALESCE($3, color),

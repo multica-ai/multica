@@ -19,7 +19,7 @@ Read the invariants below, then open the reference(s) your task actually needs
 
 | Open | When the task is about |
 |---|---|
-| `references/issues.md` | Issues: PR linking vs close intent, reading a linked PR's state, custom properties, status side effects, sub-issues and stages, who else is running |
+| `references/issues.md` | Issues: PR linking vs close intent, reading a linked PR's state, custom properties, status side effects, sub-issues and stages, who else is running, event/time wakeups |
 | `references/mentions.md` | Writing a `mention://` link: which types enqueue a run, which are inert, why one silently did nothing |
 | `references/agents.md` | Creating, copying or debugging an agent definition: fields, secrets, MCP config, skill binding |
 | `references/squads.md` | Squads: leader routing, roster, recording leader activity, why a squad did or did not run |
@@ -74,7 +74,10 @@ effects and API field meanings, read `references/issues.md`.
 (`--roots-only --summary --compact`), then expand only what matters
 (`--thread <thread-id> --tail 30`). Never one unbounded pull — a wide read on a
 busy issue costs more than the answer is worth and still buries the reply
-bodies where triggers and instructions actually live.
+bodies where triggers and instructions actually live. One exception, and it is
+narrower than it looks: when the per-turn message hands you a `--since` delta
+read, that read is the bounded scan — the server already computed which
+comments are new, so running it returns exactly those and nothing else.
 
 ## When behavior looks wrong
 

@@ -77,7 +77,7 @@ func (h *Handler) requirePluginActionV1(w http.ResponseWriter, r *http.Request) 
 	if h.pluginsV1Enabled(r.Context()) {
 		return true
 	}
-	publicapiv1.WriteProblem(w, r, http.StatusServiceUnavailable, "plugin_api_disabled", "Plugin management is not enabled")
+	publicapiv1.WriteProblem(w, r, http.StatusForbidden, "plugin_api_disabled", "Plugin management is not enabled")
 	return false
 }
 
@@ -615,7 +615,7 @@ func (h *Handler) CreatePluginComment(w http.ResponseWriter, r *http.Request) {
 		"issue_status":        issue.Status,
 	})
 	if rootComment != nil {
-		h.TaskService.AutoUnresolveThreadOnReply(r.Context(), rootComment, uuidToString(caller.WorkspaceID), authorType, uuidToString(authorID))
+		h.TaskService.AutoUnresolveThreadOnReply(r.Context(), rootComment, uuidToString(caller.WorkspaceID), authorType, uuidToString(authorID), pgtype.UUID{})
 	}
 
 	writeJSON(w, http.StatusCreated, publicPluginComment(comment))

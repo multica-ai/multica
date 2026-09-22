@@ -52,12 +52,9 @@ import { useRestoredScrollRef } from "../../platform";
 import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
 import { toast } from "sonner";
 
-// List rows are a fixed 36px (h-9). Sharing the estimate between the seed's
-// trailing spacer and Virtuoso's defaultItemHeight keeps the shared
-// scroller's height truthful from the first frame — which both stops the
-// scrollbar from re-drawing across the seed → Virtuoso handoff and lets the
-// restored scrollTop assignment stick at ref-attach (MUL-4741).
-const LIST_ROW_ESTIMATED_HEIGHT = 36;
+// The seed must use the same CSS height as ListRow before scroll restoration
+// runs at ref-attach. Virtuoso receives the seed's resolved pixel height below.
+const LIST_ROW_HEIGHT = "var(--issue-row-height)";
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 const EMPTY_IDS: string[] = [];
@@ -358,12 +355,19 @@ function ListViewImpl({
   // the current sticky-header + cross-section scroll behavior; only the rows
   // inside each expanded panel virtualize.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const [rowHeight, setRowHeight] = useState<number>();
   // Pull-based scroll restoration (MUL-4741): assign the saved offset when
   // the shared scroller attaches — the per-status seeds plus their estimate
   // spacers give it a truthful height on the first commit.
   const restoreScrollRef = useRestoredScrollRef("list");
   const attachScroller = useCallback(
     (el: HTMLDivElement | null) => {
+      const row = el?.querySelector<HTMLElement>('[data-slot="issue-list-row"]');
+      // Read the rendered height, not parseFloat of the custom property: the
+      // source token may be a rem/calc length. With no seed rows, let Virtuoso
+      // measure its first item when a group is expanded or data arrives.
+      const height = row ? Number.parseFloat(getComputedStyle(row).height) : 0;
+      setRowHeight(height > 0 ? height : undefined);
       setScrollEl(el);
       restoreScrollRef(el);
     },
@@ -404,6 +408,7 @@ function ListViewImpl({
               isExpanded={isExpanded}
               sortLabel={sortLabel}
               scrollParent={scrollEl}
+              rowHeight={rowHeight}
             />
           );
         })}
@@ -471,6 +476,7 @@ function StatusAccordionItem({
   isExpanded,
   sortLabel,
   scrollParent,
+  rowHeight,
 }: {
   status: IssueStatus;
   issueIds: string[];
@@ -484,6 +490,7 @@ function StatusAccordionItem({
   isExpanded: boolean;
   sortLabel: string | null;
   scrollParent: HTMLElement | null;
+  rowHeight: number | undefined;
 }) {
   const { t } = useT("issues");
   const selection = useIssueSurfaceSelection();
@@ -572,7 +579,7 @@ function StatusAccordionItem({
           data={issues}
           computeItemKey={computeItemKey}
           initialItemCount={Math.min(issues.length, VIRTUOSO_SEED_COUNT)}
-          defaultItemHeight={LIST_ROW_ESTIMATED_HEIGHT}
+          defaultItemHeight={rowHeight}
           increaseViewportBy={{ top: 400, bottom: 400 }}
           components={listComponents}
           itemContent={itemContent}
@@ -582,7 +589,7 @@ function StatusAccordionItem({
           data={issues}
           itemContent={itemContent}
           computeItemKey={computeItemKey}
-          estimatedItemHeight={LIST_ROW_ESTIMATED_HEIGHT}
+          estimatedItemHeight={LIST_ROW_HEIGHT}
         />
       )
     ) : null;

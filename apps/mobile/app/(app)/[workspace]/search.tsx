@@ -474,12 +474,6 @@ export default function SearchModal() {
                   No results for &ldquo;{trimmedQuery}&rdquo;
                 </Text>
               </View>
-            ) : !trimmedQuery && recentIssues.length === 0 ? (
-              <View className="items-center justify-center py-12 px-6">
-                <Text className="text-sm text-muted-foreground text-center">
-                  Type to search issues and projects.
-                </Text>
-              </View>
             ) : null
           }
           ListFooterComponent={

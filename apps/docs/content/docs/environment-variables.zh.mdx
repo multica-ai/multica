@@ -42,7 +42,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `PORT` | `8080` | API 监听端口 |
 | `JWT_SECRET` | 生产环境必填 | 登录 JWT、部分签名流程使用的密钥；生产环境对空值或已知占位值拒绝启动 |
 | `APP_ENV` | 空 | 生产环境设为 `production` |
-| `AUTH_TOKEN_TTL` | `720h`（30 天） | 浏览器 JWT 与 cookie 有效期；接受 Go duration 或正整数秒数 |
+| `AUTH_TOKEN_TTL` | `720h`（30 天） | 浏览器 JWT 与 cookie 有效期；接受 Go duration 或正整数秒数。会话会滑动续期：剩余有效期过半后，持续使用的会话会被续期而不是到期。低于 `60s` 的取值会按 `60s` 处理 |
 | `LOG_LEVEL` | 应用默认 | 日志级别 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 收到终止信号后，开始优雅退出前等待多久 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 运行时离线后可重新连接且不终止在途运行的宽限时间；低于 `150s` 时按 `150s` 处理 |
@@ -304,11 +304,16 @@ multica config show
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
+| `DO_NOT_TRACK` | 空（默认开启遥测） | 设为 `1` 或 `true`（不区分大小写）后，停止首方匿名自托管遥测的采集与发送 |
 | `ANALYTICS_DISABLED` | `false` | 设为 `true` 关闭 PostHog 上报 |
 | `POSTHOG_API_KEY` | 空 | 不设置时统计上报关闭；接入自己的 PostHog 项目时填写 |
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog 地址 |
 | `METRICS_ADDR` | 空 | Prometheus metrics 监听地址；空表示不启动 |
 | `REALTIME_METRICS_TOKEN` | 空 | 保护 `/health/realtime` 的 bearer token |
+
+首方自托管遥测每天按 UTC 发送一份部署级快照，固定且不可配置的地址为 `https://telemetry.multica.ai/v1/telemetry/events`。快照只包含正式发布版本、工作区数/去重成员数/活跃智能体数/过去 24 小时活跃守护进程数的分桶，以及过去 24 小时运行的开始、完成、失败和取消总数。不会发送名称、邮箱或域名、IP、业务标识符、主机或设备信息、代码仓库、模型或 plugin、prompt/output、评论或聊天、文件路径、token/费用、凭据、错误文本、stack 或日志。此数据只用于了解自托管版本采用、部署规模区间与聚合使用量，不用于计费、授权、认证或安全决策。
+
+`DO_NOT_TRACK` 与 `ANALYTICS_DISABLED` 相互独立：前者控制这份首方匿名快照，后者控制可选的 PostHog 集成。
 
 ## 接下来
 

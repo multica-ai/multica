@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 const preparationHelperTestMode = "execenv-preparation-helper"
@@ -30,9 +32,19 @@ const preparationHelperTestMode = "execenv-preparation-helper"
 // as their one job is done. The parent read GORACE at startup, so it keeps
 // its own settings.
 //
+// It also clears TaskConfigRootEnv, which the daemon sets for every task it
+// runs. Tests here isolate themselves by pointing HOME at a t.TempDir(), but
+// cli.ProfileDir consults that variable first and never reaches HOME while it
+// is set — so a test asserting a path under $HOME/.multica passed in CI and
+// failed for any agent running the suite from inside a Multica task. Clearing
+// it once here makes the package resolve profile dirs the same way everywhere,
+// and keeps working for parallel tests, which cannot call t.Setenv. A test
+// that wants the task-local branch sets the variable itself.
+//
 // It also removes the template repository newTestRepo copies from.
 func TestMain(m *testing.M) {
 	os.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
+	os.Unsetenv(cli.TaskConfigRootEnv)
 	code := m.Run()
 	if testRepoTemplate.dir != "" {
 		os.RemoveAll(testRepoTemplate.dir)

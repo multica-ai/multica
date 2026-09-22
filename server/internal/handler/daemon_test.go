@@ -1121,7 +1121,7 @@ func TestGetTaskStatus_WithDaemonToken_CrossWorkspace(t *testing.T) {
 }
 
 // TestGetTaskStatus_TransientDBError_Returns500 verifies that a transient DB
-// error from GetAgentTask is reported as 500 rather than 404. The daemon
+// error from GetAgentTaskStatus is reported as 500 rather than 404. The daemon
 // uses 404+"task not found" as a hard cancel signal; a transient lookup
 // failure must therefore not be smuggled into that body, otherwise a single
 // DB hiccup would kill an in-flight agent.
@@ -4201,6 +4201,12 @@ type claimCommentTaskResp struct {
 		NewCommentCount  int    `json:"new_comment_count"`
 		NewCommentsSince string `json:"new_comments_since"`
 		DeltaKnown       bool   `json:"new_comments_delta_known"`
+
+		IssueStateDeltaKnown bool     `json:"issue_state_delta_known"`
+		IssueChangedFields   []string `json:"issue_changed_fields"`
+		IssueStatus          string   `json:"issue_status"`
+		IssueAssigneeType    string   `json:"issue_assignee_type"`
+		IssueAssigneeID      string   `json:"issue_assignee_id"`
 	} `json:"task"`
 }
 
@@ -4232,10 +4238,14 @@ func TestClaimTaskByRuntime_CommentTaskPopulatesNewCommentCount(t *testing.T) {
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Comment newcount agent")
 
 	// A prior run establishes the "since" anchor (its started_at, in the past).
+	// It must be RESUMABLE — the delta is measured from the run whose session
+	// the claim hands back, so a prior run with no session is a cold start and
+	// reports no delta at all (MUL-7344).
 	dbfx.Task(t, agentID, testutil.Cols{
 		"runtime_id":   runtimeID,
 		"issue_id":     issueID,
 		"status":       "completed",
+		"session_id":   "newcount-prior-session",
 		"started_at":   testutil.Raw("now() - interval '1 hour'"),
 		"completed_at": testutil.Raw("now() - interval '50 minutes'"),
 	})
@@ -4289,11 +4299,14 @@ func TestClaimTaskByRuntime_CommentTaskMarksComputedZeroDelta(t *testing.T) {
 	runtimeID := createClaimReclaimRuntime(t, ctx, "Zero delta runtime")
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Zero delta agent")
 
-	// A prior run supplies the anchor, so the count query runs and returns 0.
+	// A prior RESUMABLE run supplies the anchor, so the count query runs and
+	// returns 0. Without a session there would be nothing to resume, hence no
+	// delta to report (MUL-7344).
 	dbfx.Task(t, agentID, testutil.Cols{
 		"runtime_id":   runtimeID,
 		"issue_id":     issueID,
 		"status":       "completed",
+		"session_id":   "zero-delta-prior-session",
 		"started_at":   testutil.Raw("now() - interval '1 hour'"),
 		"completed_at": testutil.Raw("now() - interval '50 minutes'"),
 	})
@@ -4701,5 +4714,27 @@ func TestBatchIssueGCCheckReadsNoCatalogForBuiltInStatuses(t *testing.T) {
 	if counter.entryReads != 0 || counter.keyReads != 0 {
 		t.Fatalf("built-in batch read the catalog (%d entry, %d key), want 0 — a built-in key IS its own category",
 			counter.entryReads, counter.keyReads)
+	}
+}
+
+func TestDaemonRegister_ProfileUsesStoredRuntimeIdentity(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	profileID := insertRuntimeProfileFixture(t, ctx, "Custom OMP", "pi", "wrapper")
+	if _, err := testPool.Exec(ctx, `UPDATE runtime_profile SET runtime_type = 'omp' WHERE id = $1`, profileID); err != nil {
+		t.Fatal(err)
+	}
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID, "daemon_id": "test-omp-profile", "device_name": "test-device",
+		"runtimes": []map[string]any{{"name": "Custom OMP", "type": "pi", "profile_id": profileID, "status": "online"}},
+	}, testWorkspaceID, "test-omp-profile")
+	testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE profile_id = $1`, profileID) })
+	var provider string
+	dbfx.QueryRow(t, `SELECT provider FROM agent_runtime WHERE profile_id = $1`, profileID).Scan(&provider)
+	if provider != "omp" {
+		t.Fatalf("provider = %q, want stored omp identity", provider)
 	}
 }

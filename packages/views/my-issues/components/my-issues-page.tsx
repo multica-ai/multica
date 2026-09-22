@@ -8,6 +8,7 @@ import {
   myIssuesViewStore,
 } from "@multica/core/issues/stores/my-issues-view-store";
 import { PageHeader } from "../../layout/page-header";
+import { RefreshablePageIcon } from "../../layout/refreshable-page-icon";
 import { IssueSurface } from "../../issues/surface/issue-surface";
 import { useT } from "../../i18n";
 import { MyIssuesHeader } from "./my-issues-header";
@@ -18,13 +19,17 @@ export function MyIssuesPage() {
   const scope = useStore(myIssuesViewStore, (s) => s.scope);
   const setScope = useStore(myIssuesViewStore, (s) => s.setScope);
 
+  const renderTitle = (refreshing = false) => (
+    <PageHeader>
+      <RefreshablePageIcon refreshing={refreshing}>
+        <ListTodo className="size-4" />
+      </RefreshablePageIcon>
+      <h1 className="text-body font-medium">{t(($) => $.page.breadcrumb)}</h1>
+    </PageHeader>
+  );
+
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeader>
-        <ListTodo className="h-4 w-4 text-muted-foreground" />
-        <h1 className="text-body font-medium">{t(($) => $.page.breadcrumb)}</h1>
-      </PageHeader>
-
       {user ? (
         <IssueSurface
           scope={{
@@ -35,16 +40,18 @@ export function MyIssuesPage() {
           modes={["board", "list", "table", "swimlane"]}
           batchToolbar="list"
           renderHeader={({ controller }) => (
-            <MyIssuesHeader
-              allIssues={controller.surfaceIssues}
-              workingAgents={controller.workingAgents}
-              scope={scope}
-              onScopeChange={setScope}
-              isRefreshing={controller.isRefreshing}
-              facetCountsExact={controller.facetCountsExact}
-              tableFacetCounts={controller.tableFacetCounts}
-              onTableFacetChange={controller.setActiveTableFacet}
-            />
+            <>
+              {renderTitle(controller.isRefreshing)}
+              <MyIssuesHeader
+                allIssues={controller.surfaceIssues}
+                workingAgents={controller.workingAgents}
+                scope={scope}
+                onScopeChange={setScope}
+                facetCountsExact={controller.facetCountsExact}
+                tableFacetCounts={controller.tableFacetCounts}
+                onTableFacetChange={controller.setActiveTableFacet}
+              />
+            </>
           )}
           renderEmpty={() => (
             <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
@@ -54,7 +61,7 @@ export function MyIssuesPage() {
             </div>
           )}
         />
-      ) : null}
+      ) : renderTitle()}
     </div>
   );
 }

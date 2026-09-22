@@ -1,4 +1,1 @@
--- Intentionally empty. Workspaces whose custom `triage` status was renamed keep
--- the replacement key: restoring `triage` would hand their issues back to a key
--- the Triage feature owns. The constraint this migration validated is dropped
--- by 475's down migration.
+-- Intentionally empty: the up migration is a no-op.

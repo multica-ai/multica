@@ -808,7 +808,7 @@ describe("IssueSurface — filtered empty state", () => {
     render(filteredSurface());
 
     await screen.findByText("filtered_empty.title");
-    expect(screen.getByText("filtered_empty.hint")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "filtered_empty.clear_button" })).toBeEnabled();
     // The project's own "nothing linked yet" copy would be a lie here.
     expect(screen.queryByText("detail.empty_issues_title")).toBeNull();
   });

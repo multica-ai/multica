@@ -104,21 +104,17 @@ func replyMarkdownChunks(text, quote string) ([]replyMarkdownChunk, error) {
 }
 
 func replyMarkdownChunksWithBudget(text, quote string, byteBudget int) []replyMarkdownChunk {
-	var chunks []replyMarkdownChunk
-	if prefix := prependMarkdownQuote("", quote); prefix != "" {
-		for _, chunk := range chunkMarkdownWithBudget(prefix, byteBudget) {
-			chunks = append(chunks, replyMarkdownChunk{text: chunk, title: defaultMarkdownTitle})
-		}
-	}
-	for i, body := range chunkMarkdownWithBudget(text, byteBudget) {
-		// Derive the title from the answer, independently of the source quote.
+	prefix := prependMarkdownQuote("", quote)
+	// A multiline quote can outgrow the shrinking body budget while its wire
+	// payload still fits. Keep room for an answer and continuation fence; the
+	// caller validates the combined serialized prefix, title and body.
+	firstBudget := max(byteBudget-len(prefix), maxMarkdownFenceInfoBytes+32)
+	bodies := chunkMarkdownWithFirstBudget(text, firstBudget, byteBudget)
+	chunks := make([]replyMarkdownChunk, 0, len(bodies))
+	for i, body := range bodies {
 		chunk := replyMarkdownChunk{text: body, title: markdownTitle(body)}
 		if i == 0 {
-			if last := len(chunks) - 1; last >= 0 && len(chunks[last].text)+len(body) <= byteBudget {
-				chunk.text = chunks[last].text + body
-				chunks[last] = chunk
-				continue
-			}
+			chunk.text = prefix + body
 		}
 		chunks = append(chunks, chunk)
 	}

@@ -80,9 +80,10 @@ function ListRowContent({
     <IssueActionsContextMenu issue={issue}>
       <div
         ref={containerRef}
+        data-slot="issue-list-row"
         style={containerStyle}
         {...containerProps}
-        className={`group/row flex h-9 items-center gap-2 px-4 text-body transition-colors ${
+        className={`group/row flex h-[var(--issue-row-height)] items-center gap-2 px-4 text-body transition-colors ${
           selected
             ? "bg-surface-selected hover:not-data-[popup-open]:bg-surface-selected data-[popup-open]:bg-surface-selected"
             : "hover:not-data-[popup-open]:bg-surface-hover data-[popup-open]:bg-surface-hover"

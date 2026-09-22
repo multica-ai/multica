@@ -706,11 +706,11 @@ func distributeAuthoritativeCost(actual float64, estimated [4]float64) [4]float6
 }
 
 func (m *BusinessMetrics) recordPricedTokens(provider, model, tokenType, runtimeMode, source string, tokens int64, cost float64) {
-	if tokens <= 0 {
-		return
-	}
 	tokenType = NormalizeTokenType(tokenType)
-	m.llmTokens.WithLabelValues(provider, model, tokenType, runtimeMode, source).Add(float64(tokens))
+	if tokens > 0 {
+		m.llmTokens.WithLabelValues(provider, model, tokenType, runtimeMode, source).Add(float64(tokens))
+	}
+	// Provider-reported cost can exist without a token breakdown.
 	if cost > 0 {
 		m.llmCostUSD.WithLabelValues(provider, model, tokenType, runtimeMode, source).Add(cost)
 	}

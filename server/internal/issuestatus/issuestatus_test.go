@@ -15,6 +15,41 @@ import (
 
 var testWorkspace = pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
 
+func TestCategoryWithError(t *testing.T) {
+	ctx := context.Background()
+	q := newFakeQuerier()
+	q.err = errors.New("catalog unavailable")
+	for _, status := range Canonical() {
+		want, _ := CategoryForBehavior(status)
+		if got, err := CategoryWithError(ctx, q, testWorkspace, status); err != nil || got != want {
+			t.Errorf("built-in %s: category=%q err=%v; want %q", status, got, err, want)
+		}
+	}
+	if q.lookups != 0 {
+		t.Fatalf("built-in resolution read the catalog %d times", q.lookups)
+	}
+	if got, err := CategoryWithError(ctx, q, testWorkspace, "custom"); got != "" || !errors.Is(err, q.err) {
+		t.Fatalf("catalog error: category=%q err=%v; want the original read error", got, err)
+	}
+	q.err = nil
+	if got, err := CategoryWithError(ctx, q, testWorkspace, "missing"); got != "" || !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("missing status: category=%q err=%v; want no rows", got, err)
+	}
+	for _, category := range Categories() {
+		q.entries["custom"] = db.IssueStatus{Key: "custom", Category: category, Name: "Custom", ArchivedAt: pgtype.Timestamptz{Valid: true}}
+		if got, err := CategoryWithError(ctx, q, testWorkspace, "custom"); err != nil || got != category {
+			t.Errorf("archived custom %s: category=%q err=%v", category, got, err)
+		}
+	}
+	q.entries["custom"] = db.IssueStatus{Key: "custom", Category: "invalid", Name: "Custom"}
+	if got, err := CategoryWithError(ctx, q, testWorkspace, "custom"); got != "" || err == nil {
+		t.Fatalf("invalid category: category=%q err=%v; want an error", got, err)
+	}
+	if category, name := CategoryAndName(ctx, q, testWorkspace, "custom"); category != "" || name != "Custom" {
+		t.Fatalf("display lookup changed: category=%q name=%q", category, name)
+	}
+}
+
 // fakeQuerier is an in-memory catalog keyed by (workspace, key). It records
 // lookups so a test can assert that the built-in fast path issues NO query.
 type fakeQuerier struct {
@@ -211,106 +246,49 @@ func TestCategoriesCollapseBuiltInsIntoFourLifecycleGroups(t *testing.T) {
 	}
 }
 
-// Triage is reserved like a built-in but is not one of the four lifecycle
-// categories. Were it one, `{key: "foo", category: "triage"}` would pass
-// custom-status validation and give the catalog a row that resolves to it,
-// breaking the equivalence of `status = 'triage'` with the Go check. (MUL-7212)
-func TestTriageIsReservedButNotACategory(t *testing.T) {
-	if !IsBuiltIn(Triage) {
-		t.Error("triage must be built-in so no custom status can reuse the key")
-	}
-	if IsCategory(Triage) {
-		t.Error("triage must not be a stored category a custom status can declare")
-	}
-	if slices.Contains(Canonical(), Triage) {
-		t.Error("triage must not be a canonical status: it is not a board column or a settings row")
-	}
-	if slices.Contains(Categories(), Triage) {
-		t.Error("triage must not appear among the four lifecycle categories")
-	}
-	if _, err := ValidateKey("Triage"); err == nil {
-		t.Error("ValidateKey must refuse triage as a custom key")
-	}
-	if _, err := DeriveKey("Triage", CategoryUnstarted, takenSet()); err == nil {
-		t.Error("DeriveKey must refuse a name that slugs onto triage")
-	}
-	if _, err := DeriveKey("待分诊", Triage, takenSet()); err == nil {
-		t.Error("DeriveKey must refuse triage as the fallback category")
-	}
-	// A name that merely starts with it is unrelated and keeps its slug.
-	if got, err := DeriveKey("Triage Later", CategoryUnstarted, takenSet()); err != nil || got != "triage_later" {
-		t.Errorf("DeriveKey(Triage Later) = %q, %v; want triage_later", got, err)
-	}
-}
-
-// Triage resolves to itself on every read path without a catalog read, and is
-// never a write target. (MUL-7212)
-func TestTriageResolvesWithoutTheCatalog(t *testing.T) {
+// `triage` is an ordinary custom status key (MUL-7400). The name was reserved
+// while the server read `status = 'triage'` as "in Triage"; since Triage moved
+// to issue.triage_state nothing reads it that way, so nothing here may treat
+// the key as platform-owned — a workspace that names a status Triage keeps the
+// obvious key instead of being pushed onto triage_2.
+func TestTriageIsNotReserved(t *testing.T) {
 	ctx := context.Background()
+	const triage = "triage"
+
+	if IsBuiltIn(triage) {
+		t.Error("IsBuiltIn(triage) = true; the key is not platform-owned")
+	}
+	if IsCategory(triage) {
+		t.Error("IsCategory(triage) = true; it was never a lifecycle category")
+	}
+	if slices.Contains(Canonical(), triage) {
+		t.Error("triage must not be a canonical status")
+	}
+	if got, err := ValidateKey("Triage"); err != nil || got != triage {
+		t.Errorf("ValidateKey(Triage) = %q, %v; want triage", got, err)
+	}
+	if got, err := DeriveKey("Triage", CategoryUnstarted, takenSet()); err != nil || got != triage {
+		t.Errorf("DeriveKey(Triage) = %q, %v; want triage", got, err)
+	}
+	if got, err := firstFreeKey(triage, takenSet()); err != nil || got != triage {
+		t.Errorf("firstFreeKey(triage) = %q, %v; want triage", got, err)
+	}
+	// Only a workspace that already owns the key gets a derived one, by the
+	// same rule as any other name.
+	if got, err := firstFreeKey(triage, takenSet(triage)); err != nil || got != "triage_2" {
+		t.Errorf("firstFreeKey(triage) with triage taken = %q, %v; want triage_2", got, err)
+	}
+
+	// And it resolves like any custom key: unknown without a catalog row,
+	// itself with one.
 	q := newFakeQuerier(custom("human_review", InReview))
-
-	if got := Effective(ctx, q, testWorkspace, Triage); got != Triage {
-		t.Errorf("Effective(triage) = %q, want triage", got)
+	if _, err := Resolve(ctx, q, testWorkspace, triage); !errors.Is(err, ErrUnknownStatus) {
+		t.Errorf("Resolve(triage) with no row = %v, want ErrUnknownStatus", err)
 	}
-	behavior, name := EffectiveAndName(ctx, q, testWorkspace, Triage)
-	if behavior != Triage || name != "" {
-		t.Errorf("EffectiveAndName(triage) = (%q, %q), want (triage, \"\") — clients localize it from the key", behavior, name)
-	}
-	// Triage is its own category, so the lifecycle question stays answerable
-	// for an issue whose status has no catalog row.
-	if got, ok := CategoryForBehavior(Triage); !ok || got != Triage {
-		t.Errorf("CategoryForBehavior(triage) = %q, %v; want triage, true", got, ok)
-	}
-	if got := Category(ctx, q, testWorkspace, Triage); got != Triage {
-		t.Errorf("Category(triage) = %q, want triage", got)
-	}
-	// ParseCategory is the input side: naming triage as a category must fail,
-	// or a custom status could declare it and land a row the catalog's CHECK
-	// rejects.
-	if got, ok := ParseCategory(Triage); ok {
-		t.Errorf("ParseCategory(triage) = %q, %v; want refused", got, ok)
-	}
-	if got := WireCategory(Triage, Triage); got != Triage {
-		t.Errorf("WireCategory(triage) = %q, want triage", got)
-	}
-	r := NewResolver(testWorkspace)
-	if got := r.Effective(ctx, q, Triage); got != Triage {
-		t.Errorf("Resolver.Effective(triage) = %q, want triage", got)
-	}
-	if got := r.Category(ctx, q, Triage); got != Triage {
-		t.Errorf("Resolver.Category(triage) = %q, want triage", got)
-	}
-	if got := r.Name(ctx, q, Triage); got != "" {
-		t.Errorf("Resolver.Name(triage) = %q, want empty", got)
-	}
-	for _, input := range []string{Triage, "  TRIAGE "} {
-		if _, err := Resolve(ctx, q, testWorkspace, input); !errors.Is(err, ErrReservedStatus) {
-			t.Errorf("Resolve(%q) = %v, want ErrReservedStatus", input, err)
-		}
-	}
-	if q.lookups != 0 || q.lists != 0 {
-		t.Errorf("triage resolution touched the catalog: %d lookup(s), %d list(s)", q.lookups, q.lists)
-	}
-
-	// A key that merely starts with triage still needs a catalog row: the
-	// reservation covers the exact key, not a prefix.
-	if _, err := Resolve(ctx, q, testWorkspace, "triage_2"); !errors.Is(err, ErrUnknownStatus) {
-		t.Errorf("Resolve(triage_2) with no row = %v, want ErrUnknownStatus", err)
-	}
-}
-
-// With Triage occupying its key, disambiguation lands on triage_2 — the same
-// replacement migration 476 picks for a workspace that already owned a custom
-// `triage`. The two must agree, or a renamed status and a newly derived one
-// could disagree about which key is next.
-func TestFirstFreeKeySkipsTriage(t *testing.T) {
-	got, err := firstFreeKey(Triage, takenSet())
-	if err != nil || got != "triage_2" {
-		t.Errorf("firstFreeKey(triage) = %q, %v; want triage_2", got, err)
-	}
-	got, err = firstFreeKey(Triage, takenSet("triage_2"))
-	if err != nil || got != "triage_3" {
-		t.Errorf("firstFreeKey(triage) with triage_2 taken = %q, %v; want triage_3", got, err)
+	withRow := newFakeQuerier(custom(triage, CategoryUnstarted))
+	entry, err := Resolve(ctx, withRow, testWorkspace, triage)
+	if err != nil || entry.Key != triage {
+		t.Errorf("Resolve(triage) with a row = %q, %v; want the custom entry", entry.Key, err)
 	}
 }
 
@@ -686,26 +664,16 @@ func TestExpandCategories(t *testing.T) {
 		}
 	})
 
-	t.Run("triage expands to exactly itself", func(t *testing.T) {
-		q := newFakeQuerier(custom("human_review", InReview))
-		got, err := ExpandCategories(ctx, q, testWorkspace, []string{Triage, Triage})
-		if err != nil {
-			t.Fatalf("expand: %v", err)
-		}
-		if !slices.Equal(got, []string{Triage}) {
-			t.Errorf("expand(triage) = %v, want [triage] — no custom status can carry it", got)
-		}
-	})
-
-	t.Run("triage rides along with real categories", func(t *testing.T) {
+	// A non-category mixed in with real ones drops out; the rest still expand.
+	t.Run("drops a non-category alongside real ones", func(t *testing.T) {
 		q := newFakeQuerier(custom("shipped", CategoryDone))
-		got, err := ExpandCategories(ctx, q, testWorkspace, []string{CategoryDone, CategoryClosed, Triage})
+		alongside, err := ExpandCategories(ctx, q, testWorkspace, []string{CategoryDone, CategoryClosed, "not_a_category"})
 		if err != nil {
 			t.Fatalf("expand: %v", err)
 		}
-		slices.Sort(got)
-		if want := []string{Cancelled, Done, "shipped", Triage}; !slices.Equal(got, want) {
-			t.Errorf("expand(done, closed, triage) = %v, want %v", got, want)
+		slices.Sort(alongside)
+		if want := []string{Cancelled, Done, "shipped"}; !slices.Equal(alongside, want) {
+			t.Errorf("expand(done, closed, not_a_category) = %v, want %v", alongside, want)
 		}
 	})
 }

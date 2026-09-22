@@ -28,27 +28,17 @@ const (
 	// prefix so an adversarially long info string cannot consume the entire
 	// piece budget (or make it negative) when the next code line is split.
 	maxMarkdownFenceInfoBytes = 256
-	// defaultMarkdownTitle is the preview for answers without a leading heading.
+	// defaultMarkdownTitle is used when an answer chunk contains only whitespace.
 	defaultMarkdownTitle = "Multica has replied."
 )
 
-// markdownTitle derives the sampleMarkdown title (the notification preview) from
-// the body's first ATX heading, falling back to a default. The heading is left
-// in the body; only its leading hashes are stripped for the preview.
+// DingTalk's text quote callback carries the selected message's title.
+// Preserve the entire answer chunk. The sender budgets serialized title + text.
 func markdownTitle(body string) string {
-	for _, line := range strings.Split(body, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "#") {
-			heading := strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
-			if heading != "" {
-				return heading
-			}
-		}
-		if trimmed != "" {
-			break
-		}
+	if strings.TrimSpace(body) == "" {
+		return defaultMarkdownTitle
 	}
-	return defaultMarkdownTitle
+	return body
 }
 
 // quotePreview is only the source-user excerpt displayed in an outbound reply.
@@ -135,7 +125,15 @@ func chunkMarkdown(body string) []string {
 }
 
 func chunkMarkdownWithBudget(body string, byteBudget int) []string {
+	return chunkMarkdownWithFirstBudget(body, byteBudget, byteBudget)
+}
+
+// Reserve attribution space only in the first emitted answer chunk. Later
+// chunks use the full budget, including when an oversized line is split.
+func chunkMarkdownWithFirstBudget(body string, firstBudget, laterBudget int) []string {
+	byteBudget := firstBudget
 	contentByteBudget := byteBudget - markdownSyntheticFenceCloseBytes
+	resetBudget := func() { byteBudget = laterBudget; contentByteBudget = byteBudget - markdownSyntheticFenceCloseBytes }
 	if len(body) <= byteBudget {
 		return []string{body}
 	}
@@ -163,6 +161,7 @@ func chunkMarkdownWithBudget(body string, byteBudget int) []string {
 		// after it — so it never renders as an empty code block.
 		if !isBlankChunk(text) {
 			chunks = append(chunks, text)
+			resetBudget()
 		}
 		cur.Reset()
 		if reopen && fenceOpen {
@@ -174,26 +173,33 @@ func chunkMarkdownWithBudget(body string, byteBudget int) []string {
 		// A single oversized line cannot fit a chunk; hard-split it.
 		if len(line) > contentByteBudget {
 			flush(true)
-			pieceBudget := contentByteBudget
 			quotePrefix := ""
-			if fenceOpen {
-				pieceBudget = byteBudget - len(fenceInfo) - len("\n") - len("\n```")
-			} else if strings.HasPrefix(line, "> ") {
-				// Each wire message must retain the source attribution of a long
-				// quoted line. A prefix on only the first piece makes later pieces
-				// appear to be the robot's own answer.
+			if !fenceOpen && strings.HasPrefix(line, "> ") {
 				quotePrefix = "> "
 				line = strings.TrimPrefix(line, quotePrefix)
-				pieceBudget -= len(quotePrefix)
 			}
-			for _, piece := range hardSplit(line, pieceBudget) {
-				// A piece split out of an oversized line inside a code block must
-				// carry its own fences, or it would render as plain text.
+			for line != "" {
+				pieceBudget := contentByteBudget - len(quotePrefix)
+				if fenceOpen {
+					pieceBudget = byteBudget - len(fenceInfo) - len("\n") - len("\n```")
+				}
+				// Production budgets reserve room for the longest continuation fence.
+				if pieceBudget < utf8.UTFMax {
+					pieceBudget = utf8.UTFMax
+				}
+				cut := min(len(line), pieceBudget)
+				if cut < len(line) {
+					for cut > 0 && !utf8.RuneStart(line[cut]) {
+						cut--
+					}
+				}
+				piece := line[:cut]
+				line = line[cut:]
 				if fenceOpen {
 					piece = fenceInfo + "\n" + piece + "\n```"
 				}
-				piece = quotePrefix + piece
-				chunks = append(chunks, piece)
+				chunks = append(chunks, quotePrefix+piece)
+				resetBudget()
 			}
 			continue
 		}

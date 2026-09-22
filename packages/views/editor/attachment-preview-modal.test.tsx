@@ -536,6 +536,21 @@ describe("AttachmentPreviewModal — URL-only source", () => {
     expect(screen.getByText("This file type can't be previewed.")).toBeTruthy();
   });
 
+  it("renders an <img> for a caller-declared image whose filename is a caption (MUL-7518)", () => {
+    // A body image's "filename" is the markdown caption — prose, with no
+    // extension to read. The caller knows the slot is an image and says so.
+    const url = "https://cdn.example.test/chart.png?Signature=s";
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "url", url, filename: "报告图表", forceKind: "image" }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.queryByText("This file type can't be previewed.")).toBeNull();
+    expect(document.querySelector("img")?.getAttribute("src")).toBe(url);
+  });
+
   it("Download button opens the raw URL externally when no attachment id is available", () => {
     const url = "https://cdn.example.test/orphan.pdf?Signature=s";
     render(
@@ -697,6 +712,34 @@ describe("useAttachmentPreview — tryOpen gate", () => {
         kind: "url",
         url: "https://x/y.md",
         filename: "y.md",
+      });
+    });
+    expect(opened).toBe(false);
+  });
+
+  it("accepts a URL source whose kind the caller declares, extension or not (MUL-7518)", () => {
+    const { result } = renderHook(() => useAttachmentPreview());
+    let opened = false;
+    hookAct(() => {
+      opened = result.current.tryOpen({
+        kind: "url",
+        url: "https://x/chart.png",
+        filename: "报告图表",
+        forceKind: "image",
+      });
+    });
+    expect(opened).toBe(true);
+  });
+
+  it("still rejects a declared text kind from a URL source — the id gate wins", () => {
+    const { result } = renderHook(() => useAttachmentPreview());
+    let opened = true;
+    hookAct(() => {
+      opened = result.current.tryOpen({
+        kind: "url",
+        url: "https://x/notes",
+        filename: "notes",
+        forceKind: "markdown",
       });
     });
     expect(opened).toBe(false);

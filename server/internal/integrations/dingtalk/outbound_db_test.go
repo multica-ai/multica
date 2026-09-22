@@ -202,7 +202,7 @@ func testOutboundSealedInput(t *testing.T, scenario string, restart bool) {
 		wantQuote = "> second question\n\n---\n\n"
 		wantSource = "second-message"
 	}
-	if param.Title != defaultMarkdownTitle || param.Text != wantQuote+"first answer" {
+	if param.Title != "first answer" || param.Text != wantQuote+"first answer" {
 		t.Fatalf("wrong sealed quote: %q", param.Text)
 	}
 	if restart {

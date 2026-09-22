@@ -9,7 +9,7 @@ import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-
 import type { GanttZoom } from "@multica/core/issues/stores/view-store";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { Issue, IssueStatusCategory } from "@multica/core/types";
-import { issueStatusCategory } from "@multica/core/issues";
+import { issueStatusCategory, statusColumnKeys } from "@multica/core/issues";
 import { dateOnlyToUTCDate } from "@multica/core/issues/date";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -459,6 +459,10 @@ export function GanttView({ issues }: { issues: Issue[] }) {
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const act = useViewStoreApi().getState();
+  // Board order for `sort=status`, archived included: an issue can still sit on
+  // an archived status and has to rank with the rest (MUL-7379).
+  const statusCatalog = useIssueStatuses(useWorkspaceId());
+  const statusOrder = useMemo(() => statusColumnKeys(statusCatalog, true), [statusCatalog]);
 
   const today = useMemo(() => startOfDayUTC(new Date()), []);
   const dayPx = DAY_PX_BY_ZOOM[zoom];
@@ -473,8 +477,8 @@ export function GanttView({ issues }: { issues: Issue[] }) {
     // "position" makes no sense on a gantt — default to start_date asc when
     // the user hasn't picked a more specific sort.
     const sortField = sortBy === "position" ? "start_date" : sortBy;
-    return sortIssues(issues, sortField, sortDirection);
-  }, [issues, sortBy, sortDirection]);
+    return sortIssues(issues, sortField, sortDirection, statusOrder);
+  }, [issues, sortBy, sortDirection, statusOrder]);
 
   const range = useMemo(
     () => computeRange(scheduled, today, zoom),

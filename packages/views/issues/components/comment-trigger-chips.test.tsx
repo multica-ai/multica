@@ -38,6 +38,38 @@ describe("CommentTriggerChips", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it("describes @all semantics without promising any recipients", () => {
+    renderWithI18n(
+      <CommentTriggerChips
+        agents={[]}
+        hasAllMembersMention
+        suppressedAgentIds={new Set()}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText("Member broadcast · @all does not start agents"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/notif/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps explicit agent triggers visible alongside @all semantics", () => {
+    renderWithI18n(
+      <CommentTriggerChips
+        agents={[bob]}
+        hasAllMembersMention
+        suppressedAgentIds={new Set()}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText("Member broadcast · @all does not start agents"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button")).toHaveTextContent("Will start when sent");
+  });
+
   it("renders a single agent as a full sentence and toggles on click", () => {
     const onToggle = vi.fn();
     renderWithI18n(

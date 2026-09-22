@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // Hermes discovers skills from exactly two places (verified against the bundled
@@ -278,30 +280,17 @@ func hermesRootFromHomeFor(base, native string) string {
 // resolvePathBestEffort resolves symlinks like Python's Path.resolve(strict=False):
 // it follows every symlink in the existing prefix of p and appends the remaining
 // non-existent tail unchanged, rather than failing (as filepath.EvalSymlinks does)
-// when p doesn't fully exist. The result is absolute.
+// when p doesn't fully exist. The result is absolute. When the kernel's own
+// resolution cannot be determined (util.ErrUnresolvablePath — an unknown
+// redirecting reparse point, an unobservable drive), the input is returned
+// unchanged: the containment comparison downstream then fails to relate it and
+// treats it as under nothing, which is the conservative answer.
 func resolvePathBestEffort(p string) string {
-	if p == "" {
+	resolved, err := util.ResolveSymlinksBestEffort(p)
+	if err != nil {
 		return p
 	}
-	if abs, err := filepath.Abs(p); err == nil {
-		p = abs
-	}
-	if resolved, err := filepath.EvalSymlinks(p); err == nil {
-		return resolved
-	}
-	dir := p
-	var tail []string
-	for {
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return p // reached the root without an existing ancestor
-		}
-		tail = append([]string{filepath.Base(dir)}, tail...)
-		dir = parent
-		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
-			return filepath.Join(append([]string{resolved}, tail...)...)
-		}
-	}
+	return resolved
 }
 
 // isPathUnder reports whether child is parent or nested under it.

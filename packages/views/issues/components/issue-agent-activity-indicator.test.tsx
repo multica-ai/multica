@@ -1,9 +1,11 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import en from "../../locales/en/issues.json";
 import type { AgentTask } from "@multica/core/types";
 
 const mockState = vi.hoisted(() => ({
   snapshot: [] as unknown[],
+  summaries: [] as unknown[],
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -27,7 +29,16 @@ vi.mock("../../agents/components/agent-activity-hover-content", () => ({
 }));
 
 vi.mock("../../i18n", () => ({
-  useT: () => ({ t: () => "Working" }),
+  useT: () => ({
+    t: (
+      selector: (strings: typeof en) => string,
+      params: Record<string, unknown> = {},
+    ) =>
+      selector(en).replace(/{{(\w+)}}/g, (_, key: string) =>
+        String(params[key] ?? ""),
+      ),
+  }),
+  useLocale: () => "en",
 }));
 
 // The hover card only portals its content once open, so absence of the body
@@ -60,10 +71,9 @@ vi.mock("@multica/ui/components/ui/hover-card", () => ({
 }));
 
 vi.mock("@tanstack/react-query", async () => {
-  const actual =
-    await vi.importActual<typeof import("@tanstack/react-query")>(
-      "@tanstack/react-query",
-    );
+  const actual = await vi.importActual<typeof import("@tanstack/react-query")>(
+    "@tanstack/react-query",
+  );
   return {
     ...actual,
     useQuery: (opts: {
@@ -77,6 +87,12 @@ vi.mock("@tanstack/react-query", async () => {
             : mockState.snapshot,
         };
       }
+      if (opts.queryKey?.[0] === "issue-wakeup-summaries")
+        return {
+          data: opts.select
+            ? opts.select(mockState.summaries)
+            : mockState.summaries,
+        };
       return { data: undefined };
     },
   };
@@ -105,6 +121,7 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
 beforeEach(() => {
   cleanup();
   mockState.snapshot = [makeTask()];
+  mockState.summaries = [];
 });
 
 describe("IssueAgentActivityIndicator", () => {
@@ -141,4 +158,51 @@ describe("IssueAgentActivityIndicator", () => {
 
     expect(container.firstChild).toBeNull();
   });
+});
+
+const eventSummary = {
+  id: "wake-1",
+  issue_id: "issue-1",
+  agent_id: "agent-1",
+  agent_name: "Emacs",
+  kind: "event",
+  mode: "continuous",
+  event_types: ["task.completed"],
+  timezone: "UTC",
+  next_fire_at: null,
+  active_count: 2,
+  event_count: 2,
+};
+it("shows waiting and aggregate count even without an active run", () => {
+  mockState.snapshot = [];
+  mockState.summaries = [eventSummary];
+  render(<IssueAgentActivityIndicator issueId="issue-1" hoverCard={false} />);
+  expect(screen.getByText("Waiting for trigger")).toBeInTheDocument();
+  expect(screen.getByText("+1")).toBeInTheDocument();
+  expect(screen.queryByTestId("agent-avatar-stack")).toBeNull();
+});
+it("prioritizes active runs, marking wakeup origin separately from future count", () => {
+  mockState.snapshot = [
+    makeTask(),
+    makeTask({ id: "task-2", status: "deferred", wakeup_id: "wake-2" }),
+  ];
+  mockState.summaries = [eventSummary];
+  render(<IssueAgentActivityIndicator issueId="issue-1" hoverCard={false} />);
+  expect(screen.getByText("Working")).toBeInTheDocument();
+  expect(screen.getByLabelText("Triggered by wakeup")).toBeInTheDocument();
+  expect(screen.getByText("+2")).toBeInTheDocument();
+  expect(screen.queryByText("Waiting for trigger")).toBeNull();
+});
+it("does not expose another issue's wakeups", () => {
+  mockState.snapshot = [];
+  mockState.summaries = [{ ...eventSummary, issue_id: "other-issue" }];
+  const { container } = render(
+    <IssueAgentActivityIndicator issueId="issue-1" />,
+  );
+  expect(container.firstChild).toBeNull();
+});
+it("shows deferred wakeup retries as queued", () => {
+  mockState.snapshot = [makeTask({ status: "deferred", wakeup_id: "wake-1" })];
+  render(<IssueAgentActivityIndicator issueId="issue-1" hoverCard={false} />);
+  expect(screen.getByText("Queued")).toBeInTheDocument();
 });

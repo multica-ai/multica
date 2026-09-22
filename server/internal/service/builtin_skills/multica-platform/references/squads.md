@@ -22,8 +22,8 @@ Inspect first:
 multica issue get <issue-id> --output json
 multica squad get <squad-id> --output json
 multica squad member list <squad-id> --output json
-multica issue comment list <issue-id> --roots-only --summary --output json
-multica issue comment list <issue-id> --thread <thread-id> --tail 30 --output json
+multica issue comment list <issue-id> --roots-only --summary --compact --output json
+multica issue comment list <issue-id> --thread <thread-id> --tail 30 --compact --output json
 ```
 
 The two comment reads are a sequence: scan the roots first, then open the
@@ -89,7 +89,7 @@ Issue/comment commands often needed with squads:
 ```bash
 multica issue get <issue-id> --output json
 multica issue update <issue-id> --help
-multica issue comment list <issue-id> --roots-only --summary --output json
+multica issue comment list <issue-id> --roots-only --summary --compact --output json
 multica issue comment add <issue-id> --help
 ```
 

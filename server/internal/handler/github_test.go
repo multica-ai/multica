@@ -2454,6 +2454,18 @@ func TestListGitHubInstallationRepositoriesRejectsCrossWorkspaceRow(t *testing.T
 	}
 }
 
+func TestGitHubWebhook_UnconfiguredDeploymentReturns404(t *testing.T) {
+	t.Setenv("GITHUB_WEBHOOK_SECRET", "")
+	req := httptest.NewRequest(http.MethodPost, "/api/webhooks/github", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+
+	(&Handler{}).HandleGitHubWebhook(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when webhook is unconfigured, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
 // TestFetchInstallationAccount_AuthenticatedPopulatesRow simulates the
 // GitHub `/app/installations/{id}` endpoint with a JWT-gated mock and
 // verifies that fetchInstallationAccount, when fully configured,

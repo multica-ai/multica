@@ -28,12 +28,7 @@ func TestClaimTaskByRuntime_PopulatesIssueStatusCatalog(t *testing.T) {
 	createTestCustomStatus(t, "awaiting_response", "started")
 	createTestCustomStatus(t, "accepted", "done")
 	createTestCustomStatus(t, "withdrawn", "closed")
-	// The catalog remains mixed until the independent backfill runs. The wire
-	// contract (and its ordering) must not depend on whether a row was converted.
-	dbfx.Exec(t, `UPDATE issue_status SET category = CASE key
-		WHEN 'rework' THEN 'todo' WHEN 'awaiting_response' THEN 'in_review'
-		WHEN 'withdrawn' THEN 'cancelled' ELSE category END
-		WHERE workspace_id = $1 AND key IN ('rework', 'awaiting_response', 'withdrawn')`, testWorkspaceID)
+	// Contracted storage must retain the installed daemon wire vocabulary.
 	dbfx.Exec(t, `UPDATE issue_status SET description = 'Custom guidance' WHERE workspace_id = $1 AND key IN ('awaiting_response', 'accepted', 'withdrawn')`, testWorkspaceID)
 	// A different workspace's catalog must never enter this claim.
 	otherWorkspace := dbfx.Workspace(t, "Other catalog", "other-claim-catalog")

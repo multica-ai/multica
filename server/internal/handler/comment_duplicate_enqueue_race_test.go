@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -98,7 +99,7 @@ func TestCommentEnqueueRaceQueuedWinnerFoldsLoser(t *testing.T) {
 			issueNumber: 999311,
 			source:      commentTriggerSourceMentionAgent,
 			enqueueWinner: func(ctx context.Context, issue db.Issue, agentID, commentID pgtype.UUID) error {
-				_, err := testHandler.TaskService.EnqueueTaskForMention(ctx, issue, agentID, commentID)
+				_, err := testHandler.TaskService.EnqueueTaskForMention(ctx, issue, agentID, commentID, service.OriginNamed)
 				return err
 			},
 		},
@@ -437,7 +438,7 @@ func TestCommentEnqueueRaceQueuedWinnerReattributesOriginator(t *testing.T) {
 
 	// Winner: a queued task attributed to M1 (testUserID) via its own comment.
 	winnerCommentID := insertDupRaceComment(t, issueID, "M1 instruction", "6 minutes")
-	if _, err := testHandler.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, util.MustParseUUID(winnerCommentID)); err != nil {
+	if _, err := testHandler.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, util.MustParseUUID(winnerCommentID), service.OriginNamed); err != nil {
 		t.Fatalf("enqueue winning task: %v", err)
 	}
 	// Losing comment authored by M2 in the same thread.

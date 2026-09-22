@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // fakeGrokACPScript impersonates `grok agent --always-approve stdio` for unit
@@ -163,6 +165,69 @@ func TestGrokBackendStreamsAndCompletes(t *testing.T) {
 	}
 	if !sawToolUse {
 		t.Errorf("expected the Shell tool_call to normalize to 'terminal'; messages=%+v", messages)
+	}
+}
+
+// Protocol limits end the RPC successfully, but do not mean the task completed.
+func TestGrokPromptStopReasons(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		reason     string
+		wantStatus string
+		wantError  string
+	}{
+		{"end_turn", "completed", ""},
+		{"max_tokens", "failed", "grok reached its maximum generated tokens (max_tokens)"},
+		{"max_turn_requests", "failed", "grok reached its maximum turn requests (max_turn_requests)"},
+		{"cancelled", "aborted", "grok cancelled the prompt"},
+		{"refusal", "completed", ""},
+	} {
+		t.Run(tc.reason, func(t *testing.T) {
+			t.Parallel()
+			fakePath := filepath.Join(t.TempDir(), "grok")
+			script := strings.ReplaceAll(fakeGrokACPScript(), `"stopReason":"end_turn"`, `"stopReason":"`+tc.reason+`"`)
+			writeTestExecutable(t, fakePath, []byte(script))
+			backend, err := New("grok", Config{
+				ExecutablePath: fakePath,
+				Env:            map[string]string{"GROK_USAGE": "1"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			session, err := backend.Execute(ctx, "say pong", ExecOptions{Timeout: 5 * time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			drained := make(chan struct{})
+			go func() {
+				defer close(drained)
+				for range session.Messages {
+				}
+			}()
+			result := <-session.Result
+			<-drained
+			if result.Status != tc.wantStatus || result.Error != tc.wantError {
+				t.Errorf("status=%q error=%q, want status=%q error=%q", result.Status, result.Error, tc.wantStatus, tc.wantError)
+			}
+			if tc.reason == "max_tokens" || tc.reason == "max_turn_requests" {
+				// A turn budget is not evidence of a broken or oversized history.
+				if reason := taskfailure.Classify(result.Error); reason != taskfailure.ReasonAgentUnknown {
+					t.Errorf("failure reason=%q, want generic agent failure", reason)
+				}
+			}
+			if result.Output != "pong" {
+				t.Errorf("output=%q, want partial output preserved", result.Output)
+			}
+			if result.SessionID != "ses_new" || result.ResumeRejected {
+				t.Errorf("session=%q resumeRejected=%v, want resumable session preserved", result.SessionID, result.ResumeRejected)
+			}
+			usage := result.Usage["grok-4.6"]
+			if usage.InputTokens != 100 || usage.OutputTokens != 30 || usage.CacheReadTokens != 20 || usage.CacheWriteTokens != 5 || usage.CostUSDTicks != 98765 {
+				t.Errorf("usage not preserved: %+v", result.Usage)
+			}
+		})
 	}
 }
 

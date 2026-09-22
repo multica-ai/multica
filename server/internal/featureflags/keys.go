@@ -28,8 +28,7 @@ const (
 	// targeting has no production wiring — which is enough because a
 	// workspace with no triager configured and no Triage issues sees nothing
 	// either way. Turning it off stops new intake and triage runs but leaves
-	// existing Triage issues workable; the reserved `triage` status itself is
-	// not gated.
+	// existing Triage issues workable.
 	TriageV1 = "triage_v1"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation

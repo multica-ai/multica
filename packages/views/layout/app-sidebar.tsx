@@ -589,10 +589,20 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         push(paths.workspace(joined.slug).issues());
       }
     },
+    onError: () => {
+      // "invitation is not pending" means the invite was concluded from
+      // another surface while this row was on screen. Refetch so the stale
+      // row drops instead of sticking around until restart — a silent
+      // failure here reads as "the button does nothing".
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
+    },
   });
   const declineInvitationMut = useMutation({
     mutationFn: (id: string) => api.declineInvitation(id),
-    onSuccess: () => {
+    // Either outcome must refresh the list: success drops the declined row,
+    // and a failure ("invitation is not pending") means the invite was
+    // concluded from another surface — refetch drops the stale row.
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
     },
   });
@@ -917,10 +927,9 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
               );
             })}
           </SidebarMenu>
-          {/* One utility strip: the Discord link takes the leading space the
-              help trigger was leaving empty. `justify-end` keeps the trigger
-              right-aligned once the Discord link is dismissed. */}
-          <div className="flex items-center justify-end gap-1">
+          {/* Discord fills the strip while visible; once dismissed, help
+              aligns with the navigation icons above. */}
+          <div className="flex items-center gap-1">
             <JoinDiscordCard />
             <HelpLauncher />
           </div>

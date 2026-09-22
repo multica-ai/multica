@@ -8,8 +8,10 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import {
   inboxListOptions,
-  archivedInboxListOptions,
+  archivedInboxPagesOptions,
+  archivedInboxLookupOptions,
 } from "@multica/core/inbox/queries";
+import { EMPTY_INBOX_FILTERS } from "@multica/core/inbox/filter-store";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 
@@ -73,11 +75,22 @@ function seed(qc: QueryClient) {
     { id: "n1", issue_id: "i9", title: "Assigned to you", type: "issue_assigned" },
     { id: "n2", issue_id: null, title: "Quick create failed", type: "quick_create_failed" },
   ] as never);
+  const archiveRow = {
+    workspace_id: "ws1", recipient_type: "member" as const, recipient_id: "user",
+    actor_type: null, actor_id: null, severity: "info" as const, body: null,
+    issue_status: null, read: true, archived: true, created_at: "2026-09-01T00:00:00Z", details: null,
+  };
   // Archived list is a distinct cache; these items are NOT in the main list.
-  qc.setQueryData(archivedInboxListOptions("ws1").queryKey, [
-    { id: "a1", issue_id: "i1", title: "Old assignment", type: "issue_assigned" },
-    { id: "a2", issue_id: null, title: "Archived note", type: "quick_create_failed" },
-  ] as never);
+  qc.setQueryData(archivedInboxPagesOptions("ws1", EMPTY_INBOX_FILTERS).queryKey, {
+    pages: [{ items: [
+      { ...archiveRow, id: "a1", issue_id: "i1", title: "Old assignment", type: "issue_assigned" },
+      { ...archiveRow, id: "a2", issue_id: null, title: "Archived note", type: "quick_create_failed" },
+    ], hasMore: false, nextCursor: null }], pageParams: [null],
+  });
+  qc.setQueryData(archivedInboxLookupOptions("ws1", "a3").queryKey, {
+    items: [{ ...archiveRow, id: "a3", issue_id: null, title: "Deep archived note", type: "quick_create_failed" }],
+    hasMore: false, nextCursor: null,
+  });
   qc.setQueryData(agentListOptions("ws1").queryKey, [
     { id: "ag1", name: "Robby", avatar_url: null },
   ] as never);
@@ -219,7 +232,7 @@ describe("useTabPresentation — live from cache", () => {
     const qc = makeClient();
     seed(qc);
     qc.removeQueries({ queryKey: inboxListOptions("ws1").queryKey });
-    qc.removeQueries({ queryKey: archivedInboxListOptions("ws1").queryKey });
+    qc.removeQueries({ queryKey: archivedInboxPagesOptions("ws1", EMPTY_INBOX_FILTERS).queryKey });
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={qc}>{children}</QueryClientProvider>
     );
@@ -260,6 +273,12 @@ describe("useTabPresentation — live from cache", () => {
     expect(presentationOf("/acme/inbox?view=archived&issue=a2")).toEqual({
       visual: { kind: "icon", icon: "Inbox" },
       title: "Archived note",
+    });
+  });
+
+  it("archived inbox: a deep-link lookup supplies the title outside loaded pages", () => {
+    expect(presentationOf("/acme/inbox?view=archived&issue=a3")).toEqual({
+      visual: { kind: "icon", icon: "Inbox" }, title: "Deep archived note",
     });
   });
 

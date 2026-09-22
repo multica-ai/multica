@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -62,4 +63,50 @@ func headerListContains(header, want string) bool {
 		}
 	}
 	return false
+}
+
+// Every header the browser clients send has to be preflight-allowed, and the
+// CSRF header is the one where getting this wrong is invisible in same-origin
+// development and fatal in a split app/API deployment: the preflight fails, so
+// the request never reaches a handler and the failure looks nothing like a
+// rejected CSRF token.
+//
+// It is also the header whose name must not change casually. A rolled-back
+// server allowlists only the names it shipped with, so a client that starts
+// sending a NEW header can be blocked by a version of the server that predates
+// it — which is why MUL-7436 carries two CSRF cookie values through this one
+// header name rather than adding a second.
+func TestRouterCORSAllowsTheCSRFHeader(t *testing.T) {
+	const origin = "https://cors-client.example"
+	t.Setenv("CORS_ALLOWED_ORIGINS", origin)
+	router := NewRouter(nil, realtime.NewHub(), events.New(), analytics.NoopClient{}, nil)
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/config", nil)
+	req.Header.Set("Origin", origin)
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	req.Header.Set("Access-Control-Request-Headers", auth.CSRFHeaderName)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("preflight status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	allowed := rec.Header().Get("Access-Control-Allow-Headers")
+	if !headerListContains(allowed, auth.CSRFHeaderName) {
+		t.Errorf("Access-Control-Allow-Headers = %q, missing %q", allowed, auth.CSRFHeaderName)
+	}
+}
+
+// Pins the invariant rather than one name: whatever header the auth package
+// tells clients to send, the router must allow. If someone introduces a second
+// CSRF header without touching corsAllowedHeaders, this fails here instead of
+// in a production split-origin deployment.
+func TestCSRFHeaderIsInTheCORSAllowlist(t *testing.T) {
+	for _, h := range corsAllowedHeaders {
+		if strings.EqualFold(h, auth.CSRFHeaderName) {
+			return
+		}
+	}
+	t.Fatalf("auth.CSRFHeaderName (%q) is not in corsAllowedHeaders; browsers would fail the preflight", auth.CSRFHeaderName)
 }

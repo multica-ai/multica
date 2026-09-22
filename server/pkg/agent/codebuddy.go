@@ -142,7 +142,11 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	// Multica closes stdin after the first result and cannot wait for
+	// cross-turn task_notification events. Force CodeBuddy's documented
+	// headless disable so Bash/PowerShell/Agent never take the background
+	// path (CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS; see CLI headless docs).
+	cmd.Env = buildCodebuddyEnv(b.cfg.Env)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -201,6 +205,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		var finalResultText string
 		sawResult := false
 		resultIsError := false
+		sawBackgroundTask := false
 		var sessionID string
 		usage := make(map[string]TokenUsage)
 		seenUsage := make(map[string]struct{})
@@ -247,6 +252,14 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
 				}
+				// CodeBuddy background lifecycle rides on system subtypes
+				// (task_started / task_progress / task_updated /
+				// task_notification), not Claude's async_launched tool_result.
+				// With CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS these should
+				// never appear; if they do, fail rather than report success.
+				if codebuddySystemIsBackgroundTask(msg.Subtype) {
+					sawBackgroundTask = true
+				}
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 			case "result":
 				sawResult = true
@@ -287,6 +300,10 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		// broken pipe, or been unblocked by the kill that ended cmd.
 		writeErr := <-writeDone
 
+		completionGuardError := ""
+		if sawBackgroundTask {
+			completionGuardError = "codebuddy emitted a background task system event; Multica-managed runs require foreground execution (set CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS=1)"
+		}
 		finalStatus, finalOutput, finalError := finalizeStreamResult(
 			"codebuddy",
 			timeout,
@@ -301,11 +318,14 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 				resultIsError:     resultIsError,
 				scanErr:           scanErr,
 			},
-			"",
+			completionGuardError,
 		)
 
+		// cmd.Wait() has returned — stderrBuf.Tail() is complete. Resume
+		// rejection phrases often land only on stderr (mirror Claude MUL-4966).
+		stderrTail := stderrBuf.Tail()
 		if finalError != "" {
-			finalError = withAgentStderr(finalError, "codebuddy", stderrBuf.Tail())
+			finalError = withAgentStderr(finalError, "codebuddy", stderrTail)
 		}
 		logStreamProtocolObservation(b.cfg.Logger, streamProtocolObservation{
 			provider:                   "codebuddy",
@@ -327,8 +347,8 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 
 		b.cfg.Logger.Info("codebuddy finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
-		resumeRejected := resumeWasRejected(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError)
-		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError)
+		resumeRejected := resumeWasRejected(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError, stderrTail)
+		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError, stderrTail)
 		if resumeRejected {
 			b.cfg.Logger.Info("codebuddy resume was rejected; dropping session id and signalling fresh-session retry",
 				"requested_resume", opts.ResumeSessionID,
@@ -455,6 +475,10 @@ func (b *codebuddyBackend) handleControlRequest(msg codebuddySDKMessage, stdin i
 	if inputMap == nil {
 		inputMap = map[string]any{}
 	}
+	// Do not rewrite run_in_background here: under bypassPermissions most
+	// tools never emit control_request, and CodeBuddy does not use Claude's
+	// async_launched tool_result shape. Background work is disabled via
+	// CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS before tool execution.
 
 	response := map[string]any{
 		"type": "control_response",
@@ -508,6 +532,32 @@ func writeCodebuddyInput(w io.Writer, prompt string) error {
 	return nil
 }
 
+const codebuddyDisableBackgroundTasksEnv = "CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS"
+
+// buildCodebuddyEnv merges task env and always forces background tasks off.
+// Multica's adapter closes stdin after the first result; CodeBuddy's
+// background lifecycle can push task_notification after that point, which we
+// cannot observe. The official CLI documents this variable for exactly that
+// headless shape (https://www.codebuddy.ai/docs/cli/headless).
+//
+// Append the forced entry last so os/exec's platform-aware dedup
+// (case-insensitive on Windows, last-wins) keeps our "=1" even when the
+// inherited or custom_env key differs only by case.
+func buildCodebuddyEnv(extra map[string]string) []string {
+	return append(buildEnv(extra), codebuddyDisableBackgroundTasksEnv+"=1")
+}
+
+// codebuddySystemIsBackgroundTask reports CodeBuddy's real background-task
+// system subtypes (not Claude's async_launched tool_result).
+func codebuddySystemIsBackgroundTask(subtype string) bool {
+	switch strings.TrimSpace(subtype) {
+	case "task_started", "task_progress", "task_updated", "task_notification":
+		return true
+	default:
+		return false
+	}
+}
+
 // ── Codebuddy SDK JSON types ──
 
 type codebuddySDKMessage struct {
@@ -518,7 +568,9 @@ type codebuddySDKMessage struct {
 	Model           string          `json:"model,omitempty"`
 	ParentToolUseID string          `json:"parent_tool_use_id,omitempty"`
 
-	// result fields
+	// result fields — CodeBuddy failures use is_error + errors/errors_info;
+	// there is no Claude-style terminal_reason=prompt_too_long signal in the
+	// shipped @tencent-ai/codebuddy-code 2.150.0 protocol.
 	ResultText string                               `json:"result,omitempty"`
 	IsError    bool                                 `json:"is_error,omitempty"`
 	DurationMs float64                              `json:"duration_ms,omitempty"`

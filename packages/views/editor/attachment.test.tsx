@@ -698,6 +698,26 @@ describe("Attachment — image dispatch", () => {
     expect(screen.queryByText("Uploading")).toBeNull();
   });
 
+  it("View opens the image preview when the caption is prose, not a filename (MUL-7518)", () => {
+    // Outside an image sequence the dispatcher falls back to its own
+    // single-image preview. It must carry the kind it already resolved over
+    // to the modal — re-reading "报告图表" as a filename finds no extension
+    // and used to leave the reader on "can't be previewed".
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: "https://external.example/chart.png",
+          filename: "报告图表",
+          forceKind: "image",
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByTitle("View"));
+    expect(screen.queryByText("This file type can't be previewed.")).toBeNull();
+    expect(screen.getByRole("dialog").querySelector("img")).toBeTruthy();
+  });
+
   it("external image (no resolver match) renders <img> and falls back to openByUrl on Download", () => {
     renderWithQuery(
       <Attachment

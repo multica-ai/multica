@@ -1,21 +1,12 @@
--- Reserve the `triage` status key, step 1 of 2: the write barrier (MUL-7212).
+-- Intentionally empty (MUL-7400).
 --
--- `triage` becomes a platform-reserved key: the status of an issue waiting in
--- Triage. It has no catalog row, it is not a category, and the server refuses
--- it as a custom key. Before this change nothing reserved it, so a workspace
--- may already own a CUSTOM status keyed `triage`; migration 476 renames those.
+-- This file reserved the `triage` status key: a CHECK that no issue_status row
+-- may be keyed `triage`, so the server could read `status = 'triage'` as "in
+-- Triage". Migration 483 moved Triage onto issue.triage_state, after which
+-- nothing reads that key as Triage and the name protects nothing. The Go side
+-- of the reservation is gone with it.
 --
--- The CHECK lands first, NOT VALID and in a file of its own, so it commits
--- before 476 scans for conflicts. From then on no pod — including an old one
--- still running during the rollout, which accepts `triage` as a custom key —
--- can create or keep writing a `triage` row, and the conflict set 476 scans
--- cannot grow behind its back. A single migration that scanned first and added
--- the CHECK last left that window open: a row created in between failed the
--- final validation and aborted the deploy.
---
--- NOT VALID skips the existing rows, which still hold the key until 476
--- renames them and validates the constraint. Until then an old pod updating one
--- of those rows (rename, archive, reorder) is refused by the CHECK; the window
--- is the gap between two files of one migration run.
-ALTER TABLE issue_status
-    ADD CONSTRAINT issue_status_key_not_reserved CHECK (key <> 'triage') NOT VALID;
+-- Emptied rather than reverted with a new migration because 475-477 have never
+-- run outside development and CI: releases deploy from tags, and the newest tag
+-- predates them. Migration 490 drops the constraint wherever a database did run
+-- this file from main.

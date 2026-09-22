@@ -329,9 +329,11 @@ export function BuilderWorkspace({
                   <h2 className="text-title-sm font-semibold tracking-tight">
                     {t(($) => $.creation_studio.live_draft)}
                   </h2>
-                  <p className="mt-1 text-caption text-muted-foreground">
-                    {t(($) => $.creation_studio.live_draft_hint)}
-                  </p>
+                  {displayMessages.length === 0 && !builder.messagesLoading && (
+                    <p className="mt-1 text-caption text-muted-foreground">
+                      {t(($) => $.creation_studio.live_draft_hint)}
+                    </p>
+                  )}
                 </div>
                 <AgentConfigurationPanel
                   compact

@@ -51,10 +51,10 @@ func TestBriefStatusCatalogRendered(t *testing.T) {
 	}
 	for _, want := range []string{
 		"- `multica issue status <id> <status> [--no-start]` — flip status. Available statuses by lifecycle category:\n",
-		"  - `unstarted`: `backlog`, `todo` (built-in), `later` (Later — Deferred on purpose), `rework` (Rework)\n",
-		"  - `done`: `done` (built-in)\n",
-		"  - `started`: `in_progress`, `in_review`, `blocked` (built-in), `human_review` (Human Review — Awaiting human acceptance)\n",
-		"  - `closed`: `cancelled` (built-in)\n",
+		"  - unstarted category: `backlog`, `todo` (built-in), `later` (Later — Deferred on purpose), `rework` (Rework)\n",
+		"  - done category: `done` (built-in)\n",
+		"  - started category: `in_progress`, `in_review`, `blocked` (built-in), `human_review` (Human Review — Awaiting human acceptance)\n",
+		"  - closed category: `cancelled` (built-in)\n",
 		catalogBridgeBullet,
 	} {
 		if !strings.Contains(out, want) {
@@ -82,8 +82,8 @@ func TestBriefStatusCatalogSanitizesAndDiscloses(t *testing.T) {
 	}
 	out := buildMetaSkillContent("claude", ctx)
 	for _, want := range []string{
-		`  - ` + "`started`: `in_progress`, `in_review`, `blocked`" + ` (built-in), ` + "`qa`" + ` (QA \*bold\* # Heading — line1 line2 \[x\])` + "\n",
-		"  - `unstarted`: `backlog`, `todo` (built-in)\n",
+		`  - started category: ` + "`in_progress`, `in_review`, `blocked`" + ` (built-in), ` + "`qa`" + ` (QA \*bold\* # Heading — line1 line2 \[x\])` + "\n",
+		"  - unstarted category: `backlog`, `todo` (built-in)\n",
 		"  - …and 4 more custom statuses not listed; an invalid status errors with the full valid list.\n",
 	} {
 		if !strings.Contains(out, want) {

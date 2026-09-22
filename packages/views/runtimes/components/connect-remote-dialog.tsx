@@ -358,9 +358,6 @@ function LiveListening() {
       <span className="font-medium text-foreground">
         {t(($) => $.connect.live_listening)}
       </span>
-      <span className="text-muted-foreground">
-        {t(($) => $.connect.live_listening_hint)}
-      </span>
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import {
   issueStatusCategory,
+  statusColumnKeys,
 } from "@multica/core/issues";
 import { memo, useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
@@ -656,6 +657,9 @@ function SwimLaneViewImpl({
   const wsId = useWorkspaceId();
   const statusCatalog = useIssueStatuses(wsId);
   const { categoryOf, entryOf } = statusCatalog;
+  // Board order for `sort=status`, archived included: an issue can still sit
+  // on an archived status and has to rank with the rest (MUL-7379).
+  const statusSortOrder = useMemo(() => statusColumnKeys(statusCatalog, true), [statusCatalog]);
 
   const activeFilters = useMemo(() => ({
     // Status is enforced by visible-column rendering, not by filterIssues
@@ -671,6 +675,10 @@ function SwimLaneViewImpl({
     creatorFilters: activeFiltersProp?.creatorFilters ?? [],
     projectFilters: activeFiltersProp?.projectFilters ?? [],
     includeNoProject: activeFiltersProp?.includeNoProject ?? false,
+    projectStatusFilters: activeFiltersProp?.projectStatusFilters ?? [],
+    // Needed to evaluate the project-status predicate: an Issue only carries
+    // `project_id`. Absent → the predicate is a no-op, never match-none.
+    projectStatusById: activeFiltersProp?.projectStatusById,
     labelFilters: activeFiltersProp?.labelFilters ?? [],
     // Carry the "Show sub-issues" toggle through to the extra-children merge
     // path (see `filterIssues(extra, activeFilters)` below); otherwise batch /
@@ -867,7 +875,7 @@ function SwimLaneViewImpl({
         : null;
 
     const issueSource = swimlaneGrouping === "parent" ? mergedIssues : issues;
-    const sorted = sortIssues(issueSource, sortBy, sortDirection);
+    const sorted = sortIssues(issueSource, sortBy, sortDirection, statusSortOrder);
     for (const issue of sorted) {
       let placed = false;
       for (const lane of laneGroups) {
@@ -903,7 +911,7 @@ function SwimLaneViewImpl({
       }
     }
     return result;
-  }, [issues, mergedIssues, laneGroups, sortedStatuses, sortBy, sortDirection, headerIssueIds, swimlaneGrouping]);
+  }, [issues, mergedIssues, laneGroups, sortedStatuses, sortBy, sortDirection, statusSortOrder, headerIssueIds, swimlaneGrouping]);
 
   const laneByKey = useMemo(() => {
     const map = new Map<string, LaneGroup>();

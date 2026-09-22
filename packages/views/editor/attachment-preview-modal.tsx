@@ -97,7 +97,22 @@ import { CodeBlockStatic } from "./code-block-static";
 
 export type PreviewSource =
   | { kind: "full"; attachment: Attachment }
-  | { kind: "url"; url: string; filename: string };
+  | {
+      kind: "url";
+      url: string;
+      filename: string;
+      /**
+       * What the call site already knows this source to be. A URL-only source
+       * has no content-type, so without it the modal can only re-derive the
+       * kind from `filename` — and for a body image that "filename" is the
+       * markdown caption, which is prose, not a file name. `![报告图表](…png)`
+       * then reads as an extension-less unknown and the reader is told the
+       * image can't be previewed (MUL-7518). Callers that know the slot is
+       * definitionally an image (markdown `![]()`, the Tiptap image node, any
+       * member of an image sequence) pass it through instead of guessing.
+       */
+      forceKind?: PreviewKind;
+    };
 
 // PreviewKinds that can render from a URL-only source. Text-based kinds
 // (markdown / html / text) need the /content proxy which is ID-keyed.
@@ -111,6 +126,13 @@ interface PreviewState {
   contentType: string;
   mediaUrl: string;
   attachmentId: string | null;
+  /**
+   * The kind every consumer dispatches on — resolved once, here, so the
+   * tryOpen gate and the rendered panel can never disagree about what the
+   * source is. A URL-only source's `forceKind` wins over autodetect; a full
+   * attachment always has server metadata to detect from.
+   */
+  kind: PreviewKind | null;
 }
 
 function resolvePreviewMediaUrl(attachment: Attachment): string {
@@ -134,6 +156,10 @@ function normalize(source: PreviewSource): PreviewState {
       contentType: source.attachment.content_type,
       mediaUrl: resolvePreviewMediaUrl(source.attachment),
       attachmentId: source.attachment.id,
+      kind: getPreviewKind(
+        source.attachment.content_type,
+        source.attachment.filename,
+      ),
     };
   }
   return {
@@ -141,6 +167,7 @@ function normalize(source: PreviewSource): PreviewState {
     contentType: "",
     mediaUrl: resolvePublicFileUrl(source.url) ?? source.url,
     attachmentId: null,
+    kind: source.forceKind ?? getPreviewKind("", source.filename),
   };
 }
 
@@ -209,8 +236,7 @@ export function useAttachmentPreview(): AttachmentPreviewHandle {
     setPreviewOpen(true);
   }, []);
   const tryOpen = useCallback((source: PreviewSource) => {
-    const state = normalize(source);
-    const kind = getPreviewKind(state.contentType, state.filename);
+    const { kind } = normalize(source);
     if (!kind) return false;
     // URL-only sources cannot drive text kinds — the /content proxy is ID-keyed.
     if (source.kind === "url" && !URL_ONLY_KINDS.has(kind)) return false;
@@ -356,7 +382,7 @@ export function AttachmentPreviewModal({
     return () => document.removeEventListener("keydown", handler);
   }, [open, onClose, onPrev, onNext]);
 
-  const kind = getPreviewKind(state.contentType, state.filename);
+  const kind = state.kind;
 
   // Download dispatcher: re-sign through `getAttachment` when an id is
   // available; otherwise fall back to opening the (possibly stale) URL

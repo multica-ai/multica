@@ -93,18 +93,20 @@ func (m *botCallbackRepliedMessage) UnmarshalJSON(data []byte) error {
 }
 
 type botCallbackRepliedContent struct {
-	Text                string        `json:"text"`
-	RichText            richTextItems `json:"richText"`
-	DownloadCode        string        `json:"downloadCode"`
-	PictureDownloadCode string        `json:"pictureDownloadCode"`
-	FileName            string        `json:"fileName"`
-	Recognition         string        `json:"recognition"`
+	Text                string          `json:"text"`
+	RichText            richTextItems   `json:"richText"`
+	CardContent         json.RawMessage `json:"cardContent"`
+	DownloadCode        string          `json:"downloadCode"`
+	PictureDownloadCode string          `json:"pictureDownloadCode"`
+	FileName            string          `json:"fileName"`
+	Recognition         string          `json:"recognition"`
 }
 
 func (content *botCallbackRepliedContent) UnmarshalJSON(data []byte) error {
 	type wireContent struct {
 		Text                json.RawMessage `json:"text"`
 		RichText            json.RawMessage `json:"richText"`
+		CardContent         json.RawMessage `json:"cardContent"`
 		DownloadCode        string          `json:"downloadCode"`
 		PictureDownloadCode string          `json:"pictureDownloadCode"`
 		FileName            string          `json:"fileName"`
@@ -114,6 +116,7 @@ func (content *botCallbackRepliedContent) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
+	content.CardContent = append(json.RawMessage(nil), wire.CardContent...)
 	content.Text = ""
 	_ = json.Unmarshal(wire.Text, &content.Text)
 	// Reply snapshots use text/content wrappers and msgType aliases that differ
@@ -539,9 +542,8 @@ func renderDingTalkQuotedMessage(replied *botCallbackRepliedMessage) (string, []
 	case "text":
 		appendText(dingTalkReadableQuotedText(replied.Content.Text))
 	case "interactiveCard":
-		// cardParamMap belongs to a template, not a universal body schema.
-		// https://open.dingtalk.com/document/orgapp/create-and-deliver-cards
-		appendText("[quoted content unavailable]")
+		quotedBody := renderDingTalkQuotedCard(replied.Content.CardContent)
+		appendText(quotedBody)
 	case "picture", "image":
 		appendPicture(replied.Content.DownloadCode, replied.Content.PictureDownloadCode)
 		// The snapshot's text field has no documented caption meaning.
@@ -679,6 +681,8 @@ func normalizeDingTalkRichTextControlLayout(msg *channel.InboundMessage, items [
 // including legitimate quoted code/prose containing ||. Current input is never
 // filtered. Apply this only to provider text values, not rendered quote blocks,
 // so a fallback cannot discard generated image markers and their media slots.
+// This tradeoff was accepted in the review of PR #8061:
+// https://github.com/multica-ai/multica/pull/8061#pullrequestreview-5130718174
 func dingTalkReadableQuotedText(value string) string {
 	if strings.Contains(value, "||") {
 		return "[quoted content unavailable]"

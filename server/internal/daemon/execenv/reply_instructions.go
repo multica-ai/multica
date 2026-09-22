@@ -10,15 +10,40 @@ import "fmt"
 // so the server stays cheap and the agent pulls details on demand.
 //
 // The hint carries facts and this turn's exact commands: the issue-wide
-// volume, the triggering thread's delta, and the scan that workflow step 2
-// requires — pointed at as the wide read, with `last_activity_at` as the way
-// to see which OTHER threads moved since the anchor. It states no modality:
-// whether the scan runs is decided by step 2 alone, never here. The earlier
-// wording ("don't read them all blindly … only if you need context from the
-// other threads") made the same read optional that the brief calls mandatory,
-// and measured across 537 comment-triggered runs the "only if needed" form
-// meant "never": 0 of 36 non-scanning runs opened a thread the prompt had not
-// already named, against 1 in 10 of the scanning runs (MUL-6984).
+// volume and ONE read that returns exactly the comments behind it. It states
+// no modality: whether the scan runs is decided by step 2 alone, never here.
+// The earlier wording ("don't read them all blindly … only if you need context
+// from the other threads") made the same read optional that the brief calls
+// mandatory, and measured across 537 comment-triggered runs the "only if
+// needed" form meant "never": 0 of 36 non-scanning runs opened a thread the
+// prompt had not already named, against 1 in 10 of the scanning runs
+// (MUL-6984).
+//
+// That wide read used to be the roots scan plus a per-thread expansion — two
+// or more calls to rediscover what the server already computed. A single
+// `--since <anchor>` with no `--thread` IS the delta: ListCommentsSinceForIssue
+// returns every comment on the issue created after the anchor, in every thread
+// and at every nesting level, with no folding, and its predicate is the same
+// `created_at > since` the server counted with (CountNewCommentsSince). It is
+// therefore a strict superset of what the scan could surface: roots-only
+// `last_activity_at` is MAX(created_at) over a thread, so any comment that
+// could move a thread's activity is already in the `--since` result. Reading
+// it satisfies step 2's scan, and the hint says so — the same rule as
+// BuildResumedCommentsHint, where a server-computed EMPTY delta answers the
+// scan (MUL-7344).
+//
+// The count and the read deliberately do not agree, and the text says so. The
+// COUNT is what the agent needs to size the catch-up, so it excludes the
+// injected trigger and the agent's own comments (CountNewCommentsSince). The
+// READ has no such filter — `--since` returns everything after the anchor —
+// and narrowing it to match would mean building a second, count-shaped query
+// for no gain. An agent that sees more rows than the number was told why.
+//
+// Known bounds of the `--since` read, unchanged by this hint: the handler caps
+// a page at 2000 comments and reports the cut in `X-Comments-Truncated`, which
+// the CLI does not surface; and `--thread` combined with `--since` drops the
+// thread root unless `--tail` is passed. The thread command below therefore
+// stays on `--tail 30`, never `--thread ... --since ...`.
 //
 // Since MUL-5377 the per-turn prompt (daemon.buildCommentPrompt) is the only
 // caller — the brief must not carry per-run routing state. The caller invokes
@@ -34,28 +59,28 @@ func BuildNewCommentsHint(issueID, triggerCommentID, triggerThreadID, newComment
 		return ""
 	}
 	threadID := activeThreadID(triggerThreadID, triggerCommentID)
-	// The triggering thread's delta is the first command; the scan is phrased
-	// as a flag swap on it instead of a second full command, so the issue UUID
-	// and anchor are not restated for no routing value (MUL-5721 OPT-1).
-	if threadID != "" {
-		return fmt.Sprintf(
-			"%d new comment(s) on this issue since your last run, across all threads. "+
-				"Triggering thread's delta: "+
-				"`multica issue comment list %s --thread %s --since %s --compact --output json` "+
-				"(swap `--since` for `--tail 30` for the full thread). "+
-				"The scan workflow step 2 requires is the same command with `--roots-only --summary` in place of `--thread ... --since ...`; "+
-				"its `last_activity_at` shows which other threads moved since your last run — expand those with `--thread <thread-id>` and the same `--since`.\n\n",
-			newCommentCount, issueID, threadID, newCommentsSince,
-		)
-	}
-	// Defensive: comment triggers always carry a trigger id, but if one is
-	// missing there is no thread to anchor on, so hand over the scan directly.
-	return fmt.Sprintf(
-		"%d new comment(s) on this issue since your last run, across all threads. "+
-			"The scan workflow step 2 requires: "+
-			"`multica issue comment list %s --roots-only --summary --compact --output json`; "+
-			"expand the threads that moved with `--thread <thread-id> --since %s --compact --output json`.\n\n",
+	// One command, not two: the server already computed this delta, so the
+	// agent reads it instead of rediscovering it with a scan plus expansions
+	// (MUL-7344). The optional second command is a THREAD read, offered only
+	// for the reply itself — it is never the wide read.
+	delta := fmt.Sprintf(
+		"%d new comment(s) on this issue since your last run, across all threads — "+
+			"the server computed this delta, and reading it is the scan workflow step 2 requires. "+
+			"Read exactly those comments with "+
+			"`multica issue comment list %s --since %s --compact --output json` "+
+			"(every comment created after that anchor, in every thread — it also returns the triggering comment and your own replies, "+
+			"which the count above excludes, so expect more rows than that number).",
 		newCommentCount, issueID, newCommentsSince,
+	)
+	// Defensive: comment triggers always carry a trigger id, but if one is
+	// missing there is no thread to anchor the optional full-thread read on.
+	if threadID == "" {
+		return delta + "\n\n"
+	}
+	return fmt.Sprintf(
+		"%s Triggering thread in full, if resumed memory is not enough for the reply: "+
+			"`multica issue comment list %s --thread %s --tail 30 --compact --output json`.\n\n",
+		delta, issueID, threadID,
 	)
 }
 
@@ -259,17 +284,29 @@ func buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID strin
 	// gate also keeps ./reply.md on disk after a failure, so the retry does
 	// not have to regenerate the body.
 	if runtimeGOOS == "windows" {
-		// PowerShell 5.1 has no `&&` (it landed in PowerShell 7), so the
-		// Windows variant checks $LASTEXITCODE — which carries the exit
-		// code of the last NATIVE command — and propagates it instead.
+		// The daemon knows the host OS, not the shell behind the agent's
+		// command tool: Codex runs PowerShell on Windows, Claude Code runs
+		// Git Bash for its Bash tool and (by default on claude.ai accounts)
+		// a PowerShell tool the user can turn off with
+		// CLAUDE_CODE_USE_POWERSHELL_TOOL=0 (#8627). A PowerShell-only
+		// cookbook pasted into Git Bash fails at the `if (` line AFTER the
+		// post succeeded, so the agent sees a failure and may re-post. Offer
+		// one variant per shell and let the agent pick.
+		//
+		// PowerShell 5.1 has no `&&` (it landed in PowerShell 7), so that
+		// variant checks $LASTEXITCODE — which carries the exit code of the
+		// last NATIVE command — and propagates it instead.
 		return fmt.Sprintf(
 			lead+
 				"do NOT reuse --parent values from previous turns in this session.\n\n"+
-				"Write the body file first — never pipe via `--content-stdin` (PowerShell drops non-ASCII; full rules: ## Comment Formatting above):\n\n"+
-				"    multica issue comment add %s --parent %s --content-file ./reply.md --output table\n"+
+				"Write the body file first — never pipe via `--content-stdin` (PowerShell drops non-ASCII; full rules: ## Comment Formatting above). Use the variant for the shell your command tool runs:\n\n"+
+				"PowerShell:\n\n"+
+				"    multica issue comment add %[1]s --parent %[2]s --content-file ./reply.md --output table\n"+
 				"    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n"+
 				"    Remove-Item ./reply.md\n\n"+
-				"Do NOT drop the exit-code check: a bare `Remove-Item` after a failed post reports success and deletes the body.\n\n"+
+				"Git Bash:\n\n"+
+				"    multica issue comment add %[1]s --parent %[2]s --content-file ./reply.md --output table && rm ./reply.md\n\n"+
+				"Do NOT drop the exit-code check or the `&&`: a bare cleanup after a failed post reports success and deletes the body.\n\n"+
 				"Do NOT write literal `\\n` escapes to simulate line breaks; the file preserves real newlines.\n",
 			issueID, triggerCommentID,
 		)

@@ -8,12 +8,12 @@ import (
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
-func TestPendingRecoveryLegacyTerminalHistoryDoesNotStarveAnotherWorkspace(t *testing.T) {
+func TestPendingRecoveryConvertedTerminalHistoryDoesNotStarveAnotherWorkspace(t *testing.T) {
 	ctx := context.Background()
 	history, historyService := seedDelegatedFailureFixture(t)
 	historyRows := testutil.New(history.pool, history.workspaceID, history.userID)
 	historyRows.Insert(t, "issue_status", testutil.Cols{
-		"workspace_id": history.workspaceID, "key": "legacy_closed", "name": "Closed", "category": "cancelled", "color": "#123456",
+		"workspace_id": history.workspaceID, "key": "legacy_closed", "name": "Closed", "category": "closed", "color": "#123456",
 	})
 	signal := func(f *delegatedFailureFixture, svc *TaskService) pgtype.UUID {
 		t.Helper()

@@ -560,9 +560,6 @@ function CreateNewWorkspaceCard({
           <div className="truncate text-body font-medium text-foreground">
             {t(($) => $.step_workspace.create_new_title)}
           </div>
-          <div className="truncate text-caption text-muted-foreground">
-            {t(($) => $.step_workspace.create_new_subtitle)}
-          </div>
         </div>
         <RadioMark selected={selected} />
       </button>

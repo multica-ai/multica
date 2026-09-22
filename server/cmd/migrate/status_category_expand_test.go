@@ -52,7 +52,7 @@ func TestStatusCategoryExpandUpgradePaths(t *testing.T) {
 			if err := pool.QueryRow(ctx, `SELECT jsonb_agg(to_jsonb(s) ORDER BY key)::text FROM issue_status s`).Scan(&before); err != nil {
 				t.Fatal(err)
 			}
-			opts.Files = realMigrationFiles(t, []string{"469_issue_status_lifecycle_categories", "477_issue_effective_status_triage", "478_issue_status_category_expand"}, "up")
+			opts.Files = realMigrationFiles(t, []string{"469_issue_status_lifecycle_categories", "478_issue_status_category_expand"}, "up")
 			opts.Conditions = conditionsForDirection("up")
 			if !applied {
 				// A normal reader prevents the expand DDL. The real runner must time out,

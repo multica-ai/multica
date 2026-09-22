@@ -55,7 +55,7 @@ func TestSender_QuotedURLsPreserveSourceBytes(t *testing.T) {
 				if transport == "private" {
 					want = "answer"
 				}
-				if param.Text != want || param.Title != defaultMarkdownTitle {
+				if param.Text != want || param.Title != "answer" {
 					t.Fatalf("wire Markdown = %#v; want title=answer, text=%q", param, want)
 				}
 			})

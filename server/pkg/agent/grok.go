@@ -453,9 +453,16 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		} else {
 			select {
 			case pr := <-promptDone:
-				if pr.stopReason == "cancelled" {
+				switch pr.stopReason {
+				case "cancelled":
 					finalStatus = "aborted"
 					finalError = "grok cancelled the prompt"
+				case "max_tokens":
+					finalStatus = "failed"
+					finalError = "grok reached its maximum generated tokens (max_tokens)"
+				case "max_turn_requests":
+					finalStatus = "failed"
+					finalError = "grok reached its maximum turn requests (max_turn_requests)"
 				}
 				// `session/load` carries no model id (only `session/new`
 				// does), so a resumed session with no configured model would

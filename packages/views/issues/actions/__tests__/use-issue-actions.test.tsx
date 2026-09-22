@@ -298,6 +298,18 @@ describe("useIssueActions", () => {
     );
   });
 
+  it("copyCommentLink writes the issue's shareable URL anchored at the comment", async () => {
+    const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+
+    await act(async () => {
+      await result.current.copyCommentLink("comment-7");
+    });
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      "https://app.multica.com/test/issues/TES-1#comment-comment-7",
+    );
+  });
+
   it("openSetParent / openAddChild / openDeleteConfirm / openCreateSubIssue open the correct modal with payload", () => {
     const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
 

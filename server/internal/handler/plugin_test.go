@@ -378,7 +378,7 @@ func TestPluginManagementRequiresPluginsV1(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			handler(recorder, pluginHandlerRequest(http.MethodPost, "/plugins", []byte(`{}`), map[string]string{"id": testWorkspaceID}))
-			if recorder.Code != http.StatusServiceUnavailable {
+			if recorder.Code != http.StatusForbidden {
 				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 			}
 		})

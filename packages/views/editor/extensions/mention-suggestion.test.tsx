@@ -178,6 +178,28 @@ function itemArgs(query: string) {
   };
 }
 
+const PICKER_INTERACTION_KEYS: KeyboardEventInit[] = [
+  { key: "Enter" },
+  { key: "Enter", shiftKey: true },
+  { key: "Enter", metaKey: true },
+  { key: "Enter", ctrlKey: true },
+  { key: "Enter", altKey: true },
+  { key: "Tab" },
+  { key: "ArrowUp" },
+  { key: "ArrowDown" },
+  { key: "n", ctrlKey: true },
+  { key: "j", ctrlKey: true },
+  { key: "p", ctrlKey: true },
+  { key: "k", ctrlKey: true },
+];
+
+function pressPickerInteractionKeys(ref: MentionListRef | null): boolean[] {
+  if (!ref) return [];
+  return PICKER_INTERACTION_KEYS.map((init) =>
+    ref.onKeyDown({ event: new KeyboardEvent("keydown", init) }),
+  );
+}
+
 describe("createMentionSuggestion", () => {
   beforeEach(() => {
     searchIssuesMock.mockReset();
@@ -258,7 +280,7 @@ describe("createMentionSuggestion", () => {
     );
   });
 
-  it("does not select a runtime-required mention row by click or keyboard", () => {
+  it("keeps picker keys inert when every mention row is disabled", () => {
     const command = vi.fn<(item: MentionItem) => void>();
     const ref = createRef<MentionListRef>();
     render(
@@ -284,11 +306,10 @@ describe("createMentionSuggestion", () => {
     });
     expect(row).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(row);
-    expect(
-      ref.current?.onKeyDown({
-        event: new KeyboardEvent("keydown", { key: "Enter" }),
-      }),
-    ).toBe(true);
+
+    expect(pressPickerInteractionKeys(ref.current)).toEqual(
+      PICKER_INTERACTION_KEYS.map(() => true),
+    );
     expect(command).not.toHaveBeenCalled();
   });
 
@@ -357,14 +378,23 @@ describe("createMentionSuggestion", () => {
     expect(searchProjectsMock).not.toHaveBeenCalled();
   });
 
-  it("captures Enter while the popup has no selectable items", () => {
+  it("lets picker keys reach the editor while search has no result rows", async () => {
+    searchIssuesMock.mockResolvedValue({ issues: [], total: 0 });
     const ref = createRef<MentionListRef>();
 
     render(<I18nWrapper><MentionList ref={ref} items={[]} query="协作" command={vi.fn()} /></I18nWrapper>);
 
-    expect(
-      ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", { key: "Enter" }) }),
-    ).toBe(true);
+    expect(screen.getByText("Searching...")).toBeInTheDocument();
+    expect(pressPickerInteractionKeys(ref.current)).toEqual(
+      PICKER_INTERACTION_KEYS.map(() => false),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("No results")).toBeInTheDocument();
+    });
+    expect(pressPickerInteractionKeys(ref.current)).toEqual(
+      PICKER_INTERACTION_KEYS.map(() => false),
+    );
   });
 
   // MUL-3685: plain Tab accepts the highlighted row exactly like Enter.
@@ -412,16 +442,6 @@ describe("createMentionSuggestion", () => {
     expect(press({ key: "Tab", ctrlKey: true })).toBe(false);
     expect(press({ key: "Tab", altKey: true })).toBe(false);
     expect(command).not.toHaveBeenCalled();
-  });
-
-  it("captures Tab while the popup has no selectable items, like Enter", () => {
-    const ref = createRef<MentionListRef>();
-
-    render(<I18nWrapper><MentionList ref={ref} items={[]} query="协作" command={vi.fn()} /></I18nWrapper>);
-
-    expect(
-      ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", { key: "Tab" }) }),
-    ).toBe(true);
   });
 
   // MUL-3607: groupItems() re-buckets the list (current → recent → search →

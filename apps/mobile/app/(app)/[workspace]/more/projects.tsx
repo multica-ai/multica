@@ -114,10 +114,6 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
       <Text className="text-base font-medium text-foreground">
         No projects yet
       </Text>
-      <Text className="text-sm text-muted-foreground text-center">
-        Group related issues into a project to track progress and assign a
-        lead.
-      </Text>
       <Button variant="default" onPress={onCreate}>
         <Text>Create project</Text>
       </Button>

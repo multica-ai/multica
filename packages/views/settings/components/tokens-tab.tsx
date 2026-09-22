@@ -130,16 +130,16 @@ export function TokensTab() {
   };
 
   return (
-    <SettingsTab title={t(($) => $.tokens.title)}>
+    <SettingsTab title={t(($) => $.tokens.title)} description={t(($) => $.tokens.purpose)}>
       <SettingsSection
-        description={
-          <>
-            {t(($) => $.tokens.description)}
-            <br />
-            {t(($) => $.tokens.security_note)}
-          </>
-        }
+        description={t(($) => $.tokens.security_note)}
       >
+        <details className="text-caption text-muted-foreground">
+          <summary className="cursor-pointer rounded-sm py-2 focus-visible:outline-2 focus-visible:outline-ring">
+            {t(($) => $.tokens.usage_help)}
+          </summary>
+          <p className="mt-1">{t(($) => $.tokens.description)}</p>
+        </details>
         <Card>
           <CardContent className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">

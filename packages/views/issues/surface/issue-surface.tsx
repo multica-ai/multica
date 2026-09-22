@@ -9,6 +9,8 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useQuery } from "@tanstack/react-query";
+import { workspaceWakeupSummariesOptions } from "@multica/core/issues/wakeups";
 import {
   useViewStore,
   ViewStoreProvider,
@@ -194,6 +196,9 @@ function IssueSurfaceContent({
   batchToolbar,
   contentClassName,
 }: Omit<IssueSurfaceComponentProps, "surfaceKey">) {
+  const workspaceId = useWorkspaceId();
+  // One polling owner for the whole surface; individual cards only select cache data.
+  useQuery({ ...workspaceWakeupSummariesOptions(workspaceId), refetchInterval: 10_000 });
   const { t } = useT("projects");
   const controller = useIssueSurfaceController({
     scope,
@@ -428,7 +433,6 @@ function FilteredEmptyState() {
     <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
       <FilterX className="h-10 w-10 text-faint-foreground" />
       <p className="text-body">{t(($) => $.filtered_empty.title)}</p>
-      <p className="text-caption">{t(($) => $.filtered_empty.hint)}</p>
       <Button variant="outline" size="sm" className="mt-1" onClick={handleClear}>
         {t(($) => $.filtered_empty.clear_button)}
       </Button>

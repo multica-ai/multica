@@ -109,7 +109,7 @@ func TestStageProgressSummary(t *testing.T) {
 		child(2, "backlog"), child(2, "backlog"), child(2, "backlog"), child(2, "backlog"),
 		child(3, "backlog"), child(3, "backlog"),
 	}
-	summary, next := stageProgressSummary(children, 1, literalTerminalChild)
+	summary, next := stageProgressSummary(children, 1, literalChildStatus)
 	want := "Stage 1: 3/3 done; Stage 2: 0/4 done (next); Stage 3: 0/2 done"
 	if summary != want {
 		t.Fatalf("summary = %q, want %q", summary, want)
@@ -124,7 +124,7 @@ func TestStageProgressSummary_FinalStageNoNext(t *testing.T) {
 		child(1, "done"), child(1, "done"),
 		child(2, "done"),
 	}
-	_, next := stageProgressSummary(children, 2, literalTerminalChild)
+	_, next := stageProgressSummary(children, 2, literalChildStatus)
 	if next != 0 {
 		t.Fatalf("nextStage = %d, want 0 (no further stages)", next)
 	}
@@ -137,7 +137,7 @@ func TestStageProgressSummary_SkipsUnstaged(t *testing.T) {
 		child(1, "done"), child(1, "done"),
 		child(2, "backlog"),
 	}
-	summary, next := stageProgressSummary(children, 1, literalTerminalChild)
+	summary, next := stageProgressSummary(children, 1, literalChildStatus)
 	want := "Stage 1: 2/2 done; Stage 2: 0/1 done (next)"
 	if summary != want {
 		t.Fatalf("summary = %q, want %q", summary, want)
@@ -155,14 +155,14 @@ func TestStageAdvanceInstruction(t *testing.T) {
 	const parentID = "parent-uuid"
 
 	t.Run("a known next stage points the leader at it", func(t *testing.T) {
-		got := stageAdvanceInstruction(3, parentID)
+		got := stageAdvanceInstruction(3, parentID, 0, false)
 		if !strings.Contains(got, "Stage 3 is next") {
 			t.Fatalf("expected next-stage instruction, got %q", got)
 		}
 	})
 
 	t.Run("no created next stage does not assert finality", func(t *testing.T) {
-		got := stageAdvanceInstruction(0, parentID)
+		got := stageAdvanceInstruction(0, parentID, 0, false)
 		// Regression guard for MUL-4062: an intermediate stage in a lazily
 		// created workflow also reaches nextStage==0, so the message must not
 		// claim this was definitively the final stage.
@@ -227,6 +227,10 @@ func TestStageBarrierClosed_UnstagedIgnoredInStagedSet(t *testing.T) {
 			t.Fatal("an unstaged child's completion must not fire a stage barrier")
 		}
 	})
+}
+
+func literalChildStatus(c db.Issue) string {
+	return c.Status
 }
 
 // literalTerminalChild is the pre-MUL-6243 terminal test: it reads the status

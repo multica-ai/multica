@@ -184,7 +184,6 @@ export function IssueStatusesTab() {
   return (
     <SettingsTab
       title={t(($) => $.issue_statuses.title)}
-      description={t(($) => $.issue_statuses.description)}
     >
       <div className="space-y-4">
         {isAdmin && (

@@ -7,7 +7,7 @@ import { issueStatusKeys } from "@multica/core/issue-statuses/queries";
 import type { Issue, IssueStatus, IssueStatusEntry } from "@multica/core/types";
 import { ListView } from "./list-view";
 import { IssueContextMenuProvider } from "../actions";
-import { ScrollRestorationProvider } from "../../platform";
+import { ScrollRestorationProvider, type ScrollRestorationAdapter } from "../../platform";
 import type { IssueStatusPagination } from "../surface/use-issue-status-branches";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
@@ -156,8 +156,8 @@ vi.mock("@dnd-kit/utilities", () => ({
 // jsdom has no layout, so the real Virtuoso measures a 0-height viewport and
 // renders nothing. Render rows inline so the panel's contents are assertable.
 vi.mock("react-virtuoso", () => ({
-  Virtuoso: ({ data, itemContent }: any) => (
-    <div data-testid="virtuoso-mock">
+  Virtuoso: ({ data, itemContent, defaultItemHeight }: any) => (
+    <div data-testid="virtuoso-mock" data-estimated-height={defaultItemHeight}>
       {(data ?? []).map((item: any, i: number) => (
         <div key={i}>{itemContent(i, item)}</div>
       ))}
@@ -211,6 +211,7 @@ function renderListView(
   hiddenStatuses: IssueStatus[] = [],
   onMoveIssue = vi.fn(),
   statuses: IssueStatusEntry[] = [],
+  scrollAdapter: ScrollRestorationAdapter = { get: () => undefined },
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -220,7 +221,7 @@ function renderListView(
     <QueryClientProvider client={queryClient}>
       <I18nProvider resources={TEST_RESOURCES} locale="en">
         <IssueContextMenuProvider>
-          <ScrollRestorationProvider adapter={{ get: () => undefined }}>
+          <ScrollRestorationProvider adapter={scrollAdapter}>
             <ListView
               issues={issues}
               visibleStatuses={visibleStatuses}
@@ -253,6 +254,34 @@ describe("ListView status header collapse", () => {
     renderListView();
 
     expect(screen.queryByTestId("priority-icon")).not.toBeInTheDocument();
+  });
+
+  it.each([32, 36, 48])("reserves token-sized rows before restoring scroll and hands %ipx rows to Virtuoso", (height) => {
+    // jsdom has no layout engine or Tailwind compiler. Supply the resolved
+    // row height, but inspect the real seed DOM at the restoration boundary.
+    const styles = document.createElement("style");
+    styles.textContent = `[class~="group/row"] { height: ${height}px; }`;
+    document.head.append(styles);
+    const issues = Array.from({ length: 100 }, (_, index) => ({
+      ...ISSUES[0]!, id: `issue-${index}`, identifier: `MUL-${index}`, position: index,
+    }));
+    let seedRows = 0;
+    let spacerHeight: string | undefined;
+    const get = vi.fn(() => {
+      const scroller = document.querySelector('[data-tab-scroll-root="list"]')!;
+      seedRows = scroller.querySelectorAll('[class~="group/row"]').length;
+      spacerHeight = scroller.querySelector<HTMLElement>('div[aria-hidden="true"][style*="height"]')?.style.height;
+      return { top: 2400, height: 600 };
+    });
+    try {
+      renderListView(issues, ["todo"], [], vi.fn(), [], { get });
+      expect(get).toHaveBeenCalledWith("list");
+      expect(seedRows).toBe(30);
+      expect(spacerHeight).toBe("calc(70 * var(--issue-row-height))");
+      expect(screen.getByTestId("virtuoso-mock")).toHaveAttribute("data-estimated-height", String(height));
+    } finally {
+      styles.remove();
+    }
   });
 
   it("shows hidden statuses with a recovery action", async () => {

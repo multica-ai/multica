@@ -35,7 +35,7 @@ ALTER TABLE issue_status
 CREATE OR REPLACE FUNCTION issue_effective_status(p_workspace_id UUID, p_status TEXT)
 RETURNS TEXT LANGUAGE sql STABLE PARALLEL SAFE AS $function$
     SELECT CASE
-        WHEN p_status IN ('backlog', 'todo', 'in_progress', 'in_review', 'done', 'blocked', 'cancelled', 'triage') THEN p_status
+        WHEN p_status IN ('backlog', 'todo', 'in_progress', 'in_review', 'done', 'blocked', 'cancelled') THEN p_status
         ELSE COALESCE((SELECT CASE s.category
             WHEN 'done' THEN 'done'
             WHEN 'cancelled' THEN 'cancelled'

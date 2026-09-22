@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -921,8 +922,8 @@ func TestParseCodexSessionFileSubtractsCachedInput(t *testing.T) {
 	if got.usage.CacheReadTokens != 300 {
 		t.Fatalf("cache read tokens = %d, want 300", got.usage.CacheReadTokens)
 	}
-	if got.usage.OutputTokens != 50 {
-		t.Fatalf("output tokens = %d, want 50", got.usage.OutputTokens)
+	if got.usage.OutputTokens != 40 {
+		t.Fatalf("output tokens = %d, want 40 (including reasoning)", got.usage.OutputTokens)
 	}
 }
 
@@ -1008,7 +1009,7 @@ func TestScanCodexSessionUsageSubtractsResumeBaseline(t *testing.T) {
 	}
 	// total_token_usage is cumulative for the resumed Codex session. This task
 	// should report only the delta after startTime, not the whole session total.
-	want := TokenUsage{InputTokens: 100, OutputTokens: 65, CacheReadTokens: 700}
+	want := TokenUsage{InputTokens: 100, OutputTokens: 50, CacheReadTokens: 700}
 	if got.usage != want {
 		t.Fatalf("usage = %+v, want resumed-task delta %+v", got.usage, want)
 	}
@@ -1414,11 +1415,327 @@ func TestCodexRawItemAgentMessageFinalAnswerWaitsForTurnCompleted(t *testing.T) 
 	}
 }
 
+func TestCodexRawItemAgentMessageReconciliation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                 string
+		deltas               []string
+		completed            string
+		rejectFirstHandoff   bool
+		wantStream           string
+		wantAuthoritativeOut string
+	}{
+		{
+			name:                 "exact prefix is not duplicated",
+			deltas:               []string{"Hel", "lo"},
+			completed:            "Hello",
+			wantStream:           "Hello",
+			wantAuthoritativeOut: "Hello",
+		},
+		{
+			name:                 "completed fills a missing last delta",
+			deltas:               []string{"Hel"},
+			completed:            "Hello",
+			wantStream:           "Hello",
+			wantAuthoritativeOut: "Hello",
+		},
+		{
+			name:                 "unacknowledged delta is not counted as delivered",
+			deltas:               []string{"Hel"},
+			completed:            "Hello",
+			rejectFirstHandoff:   true,
+			wantStream:           "Hello",
+			wantAuthoritativeOut: "Hello",
+		},
+		{
+			name:                 "mismatch keeps append-only stream without duplicating snapshot",
+			deltas:               []string{"Hx", "llo"},
+			completed:            "Hello",
+			wantStream:           "Hxllo",
+			wantAuthoritativeOut: "Hello",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c, _, _ := newTestCodexClient(t)
+			c.notificationProtocol = "raw"
+
+			var chunks []string
+			var completed string
+			handoffs := 0
+			c.onAgentMessageChunk = func(text string) bool {
+				handoffs++
+				if tt.rejectFirstHandoff && handoffs == 1 {
+					return false
+				}
+				chunks = append(chunks, text)
+				return true
+			}
+			c.onAgentMessage = func(text string) { completed = text }
+
+			for _, delta := range tt.deltas {
+				c.handleLine(fmt.Sprintf(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-1","turnId":"turn-1","itemId":"msg-1","delta":%q}}`, delta))
+			}
+			// item/completed keeps its documented nested item; itemId is flat only
+			// on item/agentMessage/delta.
+			c.handleLine(fmt.Sprintf(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-1","turnId":"turn-1","item":{"type":"agentMessage","id":"msg-1","text":%q}}}`, tt.completed))
+
+			if got := strings.Join(chunks, ""); got != tt.wantStream {
+				t.Fatalf("streamed text = %q, want %q exactly once (chunks=%q)", got, tt.wantStream, chunks)
+			}
+			if completed != tt.wantAuthoritativeOut {
+				t.Fatalf("authoritative output = %q, want %q", completed, tt.wantAuthoritativeOut)
+			}
+		})
+	}
+}
+
+func TestCodexRawAgentMessageBelowAggregationThresholdDefersTailUntilCompleted(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	var chunks []string
+	c.onAgentMessageChunk = func(text string) bool {
+		chunks = append(chunks, text)
+		return true
+	}
+	var authoritative string
+	c.onAgentMessage = func(text string) { authoritative = text }
+
+	deltas := []string{"The ", "answer ", "is 42."}
+	completed := strings.Join(deltas, "")
+	if len(completed) >= codexAgentMessageAggregateBytes {
+		t.Fatalf("fixture is %d bytes, want below %d-byte aggregation threshold", len(completed), codexAgentMessageAggregateBytes)
+	}
+	for _, delta := range deltas {
+		c.handleLine(fmt.Sprintf(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-1","turnId":"turn-1","itemId":"msg-1","delta":%q}}`, delta))
+	}
+
+	if len(chunks) != 1 || chunks[0] != deltas[0] {
+		t.Fatalf("chunks before item/completed = %q, want only leading delta %q", chunks, deltas[0])
+	}
+
+	c.handleLine(fmt.Sprintf(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-1","turnId":"turn-1","item":{"type":"agentMessage","id":"msg-1","text":%q}}}`, completed))
+
+	wantTail := strings.Join(deltas[1:], "")
+	if len(chunks) != 2 || chunks[1] != wantTail {
+		t.Fatalf("chunks after item/completed = %q, want leading delta then tail %q exactly once", chunks, wantTail)
+	}
+	if got := strings.Join(chunks, ""); got != completed {
+		t.Fatalf("joined transcript = %q, want %q", got, completed)
+	}
+	if authoritative != completed {
+		t.Fatalf("authoritative output = %q, want %q", authoritative, completed)
+	}
+	c.flushAgentMessageDeltas()
+	if len(chunks) != 2 {
+		t.Fatalf("EOF flush duplicated tail: chunks=%q", chunks)
+	}
+}
+
+func TestCodexRawAgentMessageMismatchRetriesRejectedPendingAtTerminal(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	messages := make(chan Message, 2)
+	c.onAgentMessageChunk = func(text string) bool {
+		return trySend(messages, Message{Type: MessageText, Content: text})
+	}
+	var completed string
+	c.onAgentMessage = func(text string) { completed = text }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"itemId":"msg-1","delta":"Hx"}}`)
+	// Fill the remaining slot after Hx was accepted. The mismatch path's first
+	// attempt to hand off pending "llo" must fail without clearing it.
+	messages <- Message{Type: MessageStatus, Status: "filler"}
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"itemId":"msg-1","delta":"llo"}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg-1","text":"Hello"}}}`)
+
+	stream := c.agentMessageStreams["msg-1"]
+	if stream == nil {
+		t.Fatal("rejected mismatch pending stream was deleted")
+	}
+	if got := stream.pending.String(); got != "llo" {
+		t.Fatalf("rejected mismatch pending = %q, want retained llo", got)
+	}
+	first := <-messages
+	if first.Type != MessageText || first.Content != "Hx" {
+		t.Fatalf("first delivered message = %+v, want Hx", first)
+	}
+
+	// Consuming Hx frees one slot. The terminal flush must retry llo exactly
+	// once, then clear the stream without appending completed="Hello".
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed"}}}`)
+	var tail strings.Builder
+	for len(messages) > 0 {
+		msg := <-messages
+		if msg.Type == MessageText {
+			tail.WriteString(msg.Content)
+		}
+	}
+	c.flushAgentMessageDeltas()
+	if len(messages) != 0 {
+		t.Fatalf("second terminal/EOF flush duplicated text: %+v", <-messages)
+	}
+	if got := first.Content + tail.String(); got != "Hxllo" {
+		t.Fatalf("append-only mismatch transcript = %q, want Hxllo", got)
+	}
+	if completed != "Hello" {
+		t.Fatalf("authoritative completed output = %q, want Hello", completed)
+	}
+	if c.agentMessageStreams["msg-1"] != nil {
+		t.Fatal("mismatch stream remained after successful terminal retry")
+	}
+}
+
+func TestCodexRawAgentMessageBurstDoesNotLoseTextUnderChannelPressure(t *testing.T) {
+	t.Parallel()
+
+	for _, status := range []string{"completed", "interrupted"} {
+		status := status
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			c, _, _ := newTestCodexClient(t)
+			c.notificationProtocol = "raw"
+			messages := make(chan Message, 256)
+			c.onAgentMessageChunk = func(text string) bool {
+				return trySend(messages, Message{Type: MessageText, Content: text})
+			}
+
+			var want strings.Builder
+			for i := 0; i < 300; i++ {
+				delta := fmt.Sprintf("%03d", i)
+				want.WriteString(delta)
+				c.handleLine(fmt.Sprintf(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-1","turnId":"turn-1","itemId":"msg-1","delta":%q}}`, delta))
+			}
+			// There is deliberately no item/completed. A terminal turn must flush
+			// the coalesced tail for both normal and cancellation paths.
+			c.handleLine(fmt.Sprintf(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-1","turn":{"id":"turn-1","status":%q}}}`, status))
+
+			var got strings.Builder
+			for len(messages) > 0 {
+				got.WriteString((<-messages).Content)
+			}
+			if got.String() != want.String() {
+				t.Fatalf("delivered %d/%d bytes under pressure", got.Len(), want.Len())
+			}
+		})
+	}
+}
+
+func TestCodexRawAgentMessageDeltaFraming(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	text := make(chan string, 1)
+	c.onAgentMessageChunk = func(chunk string) bool {
+		text <- chunk
+		return true
+	}
+
+	reader, writer := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		scanner := newAgentStreamScanner(reader)
+		for scanner.Scan() {
+			c.handleLine(strings.TrimSpace(scanner.Text()))
+		}
+		c.flushAgentMessageDeltas()
+		done <- scanner.Err()
+	}()
+
+	first := `{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-1","turnId":"turn-1","itemId":"msg-1","delta":"Hel`
+	if _, err := writer.Write([]byte(first)); err != nil {
+		t.Fatalf("write first JSON fragment: %v", err)
+	}
+	select {
+	case leaked := <-text:
+		t.Fatalf("incomplete JSON bytes leaked as text: %q", leaked)
+	default:
+	}
+	if _, err := writer.Write([]byte("lo\"}}\n")); err != nil {
+		t.Fatalf("write final JSON fragment: %v", err)
+	}
+	if got := <-text; got != "Hello" {
+		t.Fatalf("complete JSON delta = %q, want Hello", got)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close pipe: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("scan split JSON: %v", err)
+	}
+}
+
+func TestCodexRawAgentMessageMalformedAndIncompleteEOFDoNotLeak(t *testing.T) {
+	t.Parallel()
+
+	for _, input := range []string{
+		"not-json\n",
+		`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"itemId":"msg-1","delta":"must not leak"}`,
+	} {
+		input := input
+		t.Run(input[:min(len(input), 8)], func(t *testing.T) {
+			t.Parallel()
+			c, _, _ := newTestCodexClient(t)
+			c.notificationProtocol = "raw"
+			var chunks []string
+			c.onAgentMessageChunk = func(chunk string) bool {
+				chunks = append(chunks, chunk)
+				return true
+			}
+			scanner := newAgentStreamScanner(strings.NewReader(input))
+			for scanner.Scan() {
+				c.handleLine(scanner.Text())
+			}
+			c.flushAgentMessageDeltas()
+			if err := scanner.Err(); err != nil {
+				t.Fatalf("scan malformed fixture: %v", err)
+			}
+			if len(chunks) != 0 {
+				t.Fatalf("malformed/incomplete JSON leaked text: %q", chunks)
+			}
+		})
+	}
+}
+
+func TestCodexRawAgentMessageAbnormalEOFFlushesCompleteDeltas(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	var chunks []string
+	c.onAgentMessageChunk = func(chunk string) bool {
+		chunks = append(chunks, chunk)
+		return true
+	}
+	input := "" +
+		`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"itemId":"msg-1","delta":"Hel"}}` + "\n" +
+		`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"itemId":"msg-1","delta":"lo"}}` + "\n"
+	scanner := newAgentStreamScanner(strings.NewReader(input))
+	for scanner.Scan() {
+		c.handleLine(scanner.Text())
+	}
+	c.flushAgentMessageDeltas()
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan EOF fixture: %v", err)
+	}
+	if got := strings.Join(chunks, ""); got != "Hello" {
+		t.Fatalf("abnormal EOF delivered %q, want Hello", got)
+	}
+}
+
 // TestCodexDeliverableOutputExcludesNarration pins Result.Output to the turn's
 // deliverable. Codex used to concatenate every agent message, so a tool-using
 // run shipped its intermediate narration to Slack and Lark along with the answer
-// (GH #6006). The wiring mirrors executeOnce: onMessage tracks the last agent
-// message, onFinalAnswer captures the phase-labelled one, and
+// (GH #6006). The wiring mirrors executeOnce: onAgentMessage tracks the last
+// authoritative completed message, onFinalAnswer captures the phase-labelled one, and
 // codexDeliverableOutput picks between them.
 func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 	t.Parallel()
@@ -1468,10 +1785,10 @@ func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 			var streamed []string
 			c.onMessage = func(msg Message) {
 				if msg.Type == MessageText {
-					lastAgentMessage = msg.Content
 					streamed = append(streamed, msg.Content)
 				}
 			}
+			c.onAgentMessage = func(text string) { lastAgentMessage = text }
 			c.onFinalAnswer = func(text string) { finalAnswer = text }
 
 			for _, line := range tc.lines {
@@ -3260,6 +3577,7 @@ func TestCodexExecuteCancellationInterruptsTurnAndPreservesUsage(t *testing.T) {
 		`read line`+"\n"+
 		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-cancel-usage","turn":{"id":"turn-cancel-usage"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-cancel-usage","turnId":"turn-cancel-usage","itemId":"msg-partial","delta":"partial before cancel"}}'`+"\n"+
 		`echo started > `+startedPath+"\n"+
 		`read line`+"\n"+
 		`printf '%s\n' "$line" > `+interruptPath+"\n"+
@@ -3282,8 +3600,15 @@ func TestCodexExecuteCancellationInterruptsTurnAndPreservesUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
+	var messagesMu sync.Mutex
+	var messages []Message
+	messagesDone := make(chan struct{})
 	go func() {
-		for range session.Messages {
+		defer close(messagesDone)
+		for message := range session.Messages {
+			messagesMu.Lock()
+			messages = append(messages, message)
+			messagesMu.Unlock()
 		}
 	}()
 
@@ -3316,6 +3641,18 @@ func TestCodexExecuteCancellationInterruptsTurnAndPreservesUsage(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for cancelled Codex result")
+	}
+	<-messagesDone
+	messagesMu.Lock()
+	var partial string
+	for _, message := range messages {
+		if message.Type == MessageText {
+			partial += message.Content
+		}
+	}
+	messagesMu.Unlock()
+	if partial != "partial before cancel" {
+		t.Fatalf("cancelled turn streamed text = %q, want its pre-cancel delta preserved", partial)
 	}
 
 	rawInterrupt, err := os.ReadFile(interruptPath)
@@ -3428,7 +3765,7 @@ func TestCodexThreadTokenUsageUpdatedAccumulatesCurrentTurnResponses(t *testing.
 	c.usageMu.Lock()
 	got := c.usage
 	c.usageMu.Unlock()
-	want := (TokenUsage{InputTokens: 160, OutputTokens: 35, CacheReadTokens: 80, CacheWriteTokens: 10})
+	want := (TokenUsage{InputTokens: 160, OutputTokens: 30, CacheReadTokens: 80, CacheWriteTokens: 10})
 	if got != want {
 		t.Fatalf("multi-response usage = %+v, want %+v", got, want)
 	}
@@ -3690,7 +4027,7 @@ func TestCodexExecuteSemanticInactivityAllowsContinuousDeltaProgress(t *testing.
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-delta","turn":{"id":"turn-delta"}}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"item/commandExecution/outputDelta","params":{"threadId":"thr-delta","item":{"type":"commandExecution","id":"cmd-1"},"delta":"line 1\n"}}'`+"\n"+
 		`sleep 0.05`+"\n"+
-		`echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-delta","item":{"type":"agentMessage","id":"msg-1"},"delta":"thinking"}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-delta","turnId":"turn-delta","itemId":"msg-1","delta":"thinking"}}'`+"\n"+
 		`sleep 0.05`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"item/fileChange/outputDelta","params":{"threadId":"thr-delta","item":{"type":"fileChange","id":"patch-1"},"delta":"patched"}}'`+"\n"+
 		`sleep 0.05`+"\n"+
@@ -3704,6 +4041,108 @@ func TestCodexExecuteSemanticInactivityAllowsContinuousDeltaProgress(t *testing.
 	})
 	if result.Status != "completed" {
 		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+}
+
+// TestCodexExecuteStreamsCompleteJSONDeltaBeforeItemCompleted is the latency
+// regression for chat: app-server emits agent text as JSON-RPC delta events
+// before the authoritative item/completed snapshot. A JSON event may itself be
+// split across pipe writes, so no text is visible until its newline-delimited
+// frame is complete; once complete, however, the adapter must not wait for the
+// later item/completed event.
+func TestCodexExecuteStreamsCompleteJSONDeltaBeforeItemCompleted(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-stream"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-stream","turn":{"id":"turn-stream"}}}'`+"\n"+
+		`printf '%s' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-stream","turnId":"turn-stream","itemId":"msg-1","delta":"Hel'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`printf '%s\n' 'lo"}}'`+"\n"+
+		`sleep 0.8`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-stream","turnId":"turn-stream","item":{"type":"agentMessage","id":"msg-1","text":"Hello","phase":"final_answer"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-stream","turn":{"id":"turn-stream","status":"completed"}}}'`+"\n")
+
+	cfg := Config{ExecutablePath: fakePath, Logger: slog.Default()}
+	backend, err := New("codex", cfg)
+	if err != nil {
+		t.Fatalf("new codex backend: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	var started time.Time
+	for {
+		select {
+		case msg, ok := <-session.Messages:
+			if !ok {
+				t.Fatal("message stream closed before the delta became visible")
+			}
+			if msg.Type == MessageStatus && msg.Status == "running" {
+				started = time.Now()
+				continue
+			}
+			if msg.Type != MessageText {
+				continue
+			}
+			if started.IsZero() {
+				t.Fatal("text delta arrived before turn/started")
+			}
+			if msg.Content != "Hello" {
+				t.Fatalf("first streamed text = %q, want Hello", msg.Content)
+			}
+			elapsed := time.Since(started)
+			t.Logf("complete delta JSON became visible %s after turn/started", elapsed.Round(time.Millisecond))
+			if elapsed >= 500*time.Millisecond {
+				t.Fatalf("first streamed text arrived after %s; adapter waited for item/completed", elapsed.Round(time.Millisecond))
+			}
+			return
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for streamed text")
+		}
+	}
+}
+
+func TestCodexExecutePhaseLessCompletedMessageRemainsAuthoritative(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-output"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-output","turn":{"id":"turn-output"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-output","turnId":"turn-output","itemId":"msg-1","delta":"Hel"}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-output","turnId":"turn-output","item":{"type":"agentMessage","id":"msg-1","text":"Hello"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-output","turn":{"id":"turn-output","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed (error=%q)", result.Status, result.Error)
+	}
+	if result.Output != "Hello" {
+		t.Fatalf("phase-less Result.Output = %q, want authoritative Hello", result.Output)
 	}
 }
 
