@@ -11,6 +11,7 @@ import { defaultStorage } from "../platform/storage";
 import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { projectKeys } from "../projects/queries";
+import { workflowKeys } from "../workflows/queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
@@ -30,6 +31,7 @@ import { slackKeys } from "../slack/queries";
 import { dingtalkKeys } from "../dingtalk/queries";
 import { wecomKeys } from "../wecom/queries";
 import { telegramKeys } from "../telegram/queries";
+import { knowledgeKeys } from "../knowledge/queries";
 import {
   onIssueCreated,
   onIssueUpdated,
@@ -117,6 +119,7 @@ import type {
   ChatSession,
   ChatSessionCreatedPayload,
   InvitationCreatedPayload,
+  KnowledgeInvalidationPayload,
 } from "../types";
 
 const chatWsLogger = createLogger("chat.ws");
@@ -651,6 +654,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: workflowKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
@@ -802,6 +806,18 @@ export function useRealtimeSync(
           qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
         }
       },
+      workflow: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: workflowKeys.all(wsId) });
+      },
+      workflow_run: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: workflowKeys.all(wsId) });
+      },
+      workflow_work_item: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: workflowKeys.all(wsId) });
+      },
       squad: () => {
         const wsId = getCurrentWsId();
         if (wsId) {
@@ -900,6 +916,10 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: telegramKeys.installations(wsId) });
       },
+      knowledge: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: knowledgeKeys.all(wsId) });
+      },
       pull_request: () => {
         // PR list is keyed by issue id, not workspace, so we invalidate all
         // PR queries — the open issue detail page will refetch its own list.
@@ -916,7 +936,7 @@ export function useRealtimeSync(
         qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
         qc.invalidateQueries({ queryKey: workspaceWorkingAgentsKeys.all(wsId) });
         // The Table working-agent shortcut derives an assignee set from the
-        // projection above. Refresh its server-owned graph alongside that set
+        // projection above. Refresh its server-owned table alongside that set
         // so rows/groups/facets cannot remain on an old task transition while
         // the projection refetches (global staleTime is Infinity).
         qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
@@ -990,6 +1010,7 @@ export function useRealtimeSync(
       // Chat events are handled explicitly below; do not double-invalidate.
       "chat:message", "chat:done", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
       "chat:session_created", "chat:session_deleted", "chat:session_updated",
+      "knowledge:invalidate",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -1007,6 +1028,22 @@ export function useRealtimeSync(
       const prefix = msg.type.split(":")[0] ?? "";
       const refresh = refreshMap[prefix];
       if (refresh) debouncedRefresh(prefix, refresh);
+    });
+
+    // The server sends this event only to users who can currently see the
+    // affected base. Use the payload workspace rather than the active route so
+    // a background tab's cache is invalidated without exposing or refetching a
+    // private base in the wrong workspace.
+    const unsubKnowledgeInvalidate = ws.on("knowledge:invalidate", (p) => {
+      const payload = p as KnowledgeInvalidationPayload;
+      if (!payload.workspace_id) return;
+      if (payload.knowledge_base_id) {
+        qc.invalidateQueries({
+          queryKey: knowledgeKeys.base(payload.workspace_id, payload.knowledge_base_id),
+        });
+      } else {
+        qc.invalidateQueries({ queryKey: knowledgeKeys.all(payload.workspace_id) });
+      }
     });
 
     // --- Specific event handlers (granular cache updates) ---
@@ -1739,6 +1776,7 @@ export function useRealtimeSync(
 
     return () => {
       unsubAny();
+      unsubKnowledgeInvalidate();
       unsubIssueUpdated();
       unsubIssueCreated();
       unsubIssueDeleted();

@@ -62,7 +62,9 @@
     "./attachments": "./attachments/index.ts",
     "./locales": "./locales/index.ts",
     "./locales/*": "./locales/*",
-    "./issues/visuals": "./issues/components/visuals.ts"
+    "./issues/visuals": "./issues/components/visuals.ts",
+    "./workflows": "./workflows/index.ts",
+    "./knowledge": "./knowledge/index.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",
@@ -95,7 +97,9 @@
     "@tiptap/react": "3.27.1",
     "@tiptap/starter-kit": "3.27.1",
     "@tiptap/suggestion": "3.27.1",
+    "@xyflow/react": "catalog:",
     "cmdk": "^1.1.1",
+    "elkjs": "catalog:",
     "hast-util-to-html": "^9.0.5",
     "katex": "catalog:",
     "lowlight": "^3.3.0",

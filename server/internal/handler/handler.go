@@ -34,6 +34,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/knowledge"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -42,6 +43,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
+	"github.com/multica-ai/multica/server/internal/workflow"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/llm"
@@ -144,6 +146,17 @@ type Config struct {
 	// and cmd/server additionally fails the boot on an out-of-range value before
 	// one reaches this struct. See llm.Config.MaxRetries for the full semantics.
 	LLMMaxRetries *llm.RetryOverride
+	// KnowledgeEnabled gates the independent knowledge-base product. Its
+	// objects and private storage are never coupled to project/workflow state.
+	KnowledgeEnabled           bool
+	KnowledgeStore             storage.Storage
+	KnowledgeSecretBox         *secretbox.Box
+	KnowledgeMaxUploadBytes    int64
+	KnowledgeParserURL         string
+	KnowledgeParserToken       string
+	KnowledgeParserTimeout     time.Duration
+	KnowledgePrivateModelHosts []string
+	KnowledgeModelConcurrency  int
 	// ServerVersion is the build version of the running API binary (the same
 	// value main.go stamps via -X main.version and reports on /metrics).
 	// Surfaced through /api/config so self-hosted operators can confirm which
@@ -217,6 +230,8 @@ type Handler struct {
 	LocalSkillListStore   LocalSkillListStore
 	LocalSkillImportStore LocalSkillImportStore
 	FeatureFlags          *featureflag.Service
+	Workflow              *workflow.Service
+	Knowledge             *knowledge.Service
 	// IssueStatusCatalog reads the workspace status catalog. Defaults to
 	// Queries; a test can substitute a counting wrapper to assert HOW MANY
 	// catalog reads a request performs, which is the only property that
@@ -463,6 +478,18 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	// backs auto-titling. A deployment with no MULTICA_LLM_* configuration gets
 	// a disabled client, which turns the feature off rather than failing.
 	taskSvc.QuickActions = llmClient
+	knowledgeSvc := knowledge.NewService(executor, txStarter, knowledge.Config{
+		Enabled:           cfg.KnowledgeEnabled,
+		Store:             cfg.KnowledgeStore,
+		SecretBox:         cfg.KnowledgeSecretBox,
+		MaxUploadBytes:    cfg.KnowledgeMaxUploadBytes,
+		ParserURL:         cfg.KnowledgeParserURL,
+		ParserToken:       cfg.KnowledgeParserToken,
+		ParserTimeout:     cfg.KnowledgeParserTimeout,
+		PrivateModelHosts: cfg.KnowledgePrivateModelHosts,
+		ModelConcurrency:  cfg.KnowledgeModelConcurrency,
+		EventBus:          bus,
+	})
 	h := &Handler{
 		Queries:                      queries,
 		ReadSelector:                 dbreader.NewPrimaryOnly(queries),
@@ -487,6 +514,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		LivenessStore:                NewNoopLivenessStore(),
 		HeartbeatScheduler:           NewPassthroughHeartbeatScheduler(queries),
 		Storage:                      store,
+		Knowledge:                    knowledgeSvc,
 		CFSigner:                     cfSigner,
 		Analytics:                    analyticsClient,
 		WebhookRateLimiter:           NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
@@ -517,6 +545,33 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		slog.Warn("github: PR snapshot pipeline disabled (invalid App private key)", "err", err)
 	}
 	h.PRRefresh = ghsnapshot.NewManager(ghClient, queries, txStarter, h.broadcastPRSnapshotApplied)
+	if executor != nil {
+		h.Workflow = workflow.New(executor, txStarter, taskSvc, bus)
+		h.Workflow.ValidateAgent = func(ctx context.Context, workspaceID, userID, agentID string) error {
+			agent, err := queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: util.MustParseUUID(agentID), WorkspaceID: util.MustParseUUID(workspaceID)})
+			if err != nil {
+				return &workflow.Error{Status: http.StatusNotFound, Message: "agent not found", Code: "agent_not_found"}
+			}
+			if agent.ArchivedAt.Valid || !h.canInvokeAgent(ctx, agent, "member", userID, userID, workspaceID) {
+				return &workflow.Error{Status: http.StatusForbidden, Message: "you do not have access to this agent", Code: "agent_forbidden"}
+			}
+			return nil
+		}
+		h.Workflow.ValidateAttachment = func(ctx context.Context, workspaceID, userID, attachmentID string) error {
+			attachmentUUID, err := util.ParseUUID(attachmentID)
+			if err != nil {
+				return &workflow.Error{Status: http.StatusUnprocessableEntity, Message: "attachment id is invalid", Code: "attachment_invalid"}
+			}
+			workspaceUUID, workspaceErr := util.ParseUUID(workspaceID)
+			if workspaceErr != nil {
+				return &workflow.Error{Status: http.StatusUnprocessableEntity, Message: "workspace id is invalid", Code: "workspace_invalid"}
+			}
+			if _, err = queries.GetAttachment(ctx, db.GetAttachmentParams{ID: attachmentUUID, WorkspaceID: workspaceUUID}); err != nil {
+				return &workflow.Error{Status: http.StatusNotFound, Message: "attachment is not accessible in this workspace", Code: "attachment_not_found"}
+			}
+			return nil
+		}
+	}
 
 	return h
 }

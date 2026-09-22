@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { createMemoryRouter, Outlet, useMatches } from "react-router-dom";
+import { createMemoryRouter, Outlet, useMatches, useParams } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
@@ -30,6 +30,8 @@ import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/vie
 import { InboxPage } from "@multica/views/inbox";
 import { ChatPage } from "@multica/views/chat";
 import { SettingsPage } from "@multica/views/settings";
+import { WorkflowListPage, WorkflowInboxPage, WorkflowEditorPage } from "@multica/views/workflows";
+import { KnowledgeListPage, KnowledgeBasePage, KnowledgeAskPage, KnowledgeGraphPage, KnowledgeDocumentPage, KnowledgeSettingsPage } from "@multica/views/knowledge";
 import { useT } from "@multica/views/i18n";
 import { Download, Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
@@ -62,6 +64,36 @@ function DesktopSettingsRoute() {
       ]}
     />
   );
+}
+
+function DesktopWorkflowEditorRoute() {
+  const { id } = useParams<{ id: string }>();
+  return id ? <WorkflowEditorPage workflowId={id} /> : null;
+}
+
+function DesktopKnowledgeBaseRoute() {
+  const { baseId } = useParams<{ baseId: string }>();
+  return baseId ? <KnowledgeBasePage baseId={baseId} /> : null;
+}
+
+function DesktopKnowledgeAskRoute() {
+  const { baseId } = useParams<{ baseId: string }>();
+  return baseId ? <KnowledgeAskPage baseId={baseId} /> : null;
+}
+
+function DesktopKnowledgeGraphRoute() {
+  const { baseId } = useParams<{ baseId: string }>();
+  return baseId ? <KnowledgeGraphPage baseId={baseId} /> : null;
+}
+
+function DesktopKnowledgeDocumentRoute() {
+  const { baseId, documentId } = useParams<{ baseId: string; documentId: string }>();
+  return baseId && documentId ? <KnowledgeDocumentPage baseId={baseId} documentId={documentId} /> : null;
+}
+
+function DesktopKnowledgeSettingsRoute() {
+  const { baseId } = useParams<{ baseId: string }>();
+  return baseId ? <KnowledgeSettingsPage baseId={baseId} /> : null;
 }
 
 /**
@@ -147,6 +179,15 @@ export const appRoutes: RouteObject[] = [
             element: <ProjectDetailPage />,
             handle: { title: "Project" },
           },
+          { path: "workflows", element: <WorkflowListPage />, handle: { title: "Workflows" } },
+          { path: "workflows/inbox", element: <WorkflowInboxPage />, handle: { title: "Workflow work items" } },
+          { path: "workflows/:id", element: <DesktopWorkflowEditorRoute />, handle: { title: "Workflow" } },
+          { path: "knowledge", element: <KnowledgeListPage />, handle: { title: "Knowledge" } },
+          { path: "knowledge/:baseId", element: <DesktopKnowledgeBaseRoute />, handle: { title: "Knowledge base" } },
+          { path: "knowledge/:baseId/ask", element: <DesktopKnowledgeAskRoute />, handle: { title: "Ask knowledge" } },
+          { path: "knowledge/:baseId/graph", element: <DesktopKnowledgeGraphRoute />, handle: { title: "Knowledge graph" } },
+          { path: "knowledge/:baseId/settings", element: <DesktopKnowledgeSettingsRoute />, handle: { title: "Knowledge settings" } },
+          { path: "knowledge/:baseId/documents/:documentId", element: <DesktopKnowledgeDocumentRoute />, handle: { title: "Knowledge document" } },
           {
             path: "autopilots",
             element: <AutopilotsPage />,

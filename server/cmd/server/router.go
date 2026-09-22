@@ -79,6 +79,7 @@ var corsAllowedHeaders = []string{
 	"X-Client-Version",
 	"X-Client-OS",
 	"X-Client-Capabilities",
+	"X-Workflow-Schema-Version",
 	// Sent by the host page when it relays a plugin surface's Action API call.
 	"X-Multica-Plugin-Installation",
 }
@@ -143,6 +144,17 @@ func appURLFromEnv() string {
 		return v
 	}
 	return strings.TrimRight(strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN")), "/")
+}
+
+func knowledgeUploadLimitFromEnv() int64 {
+	const defaultLimit = int64(100 << 20)
+	if strings.TrimSpace(os.Getenv("KNOWLEDGE_UPLOAD_MAX_BYTES")) != "" {
+		return int64(envPositiveInt("KNOWLEDGE_UPLOAD_MAX_BYTES", int(defaultLimit)))
+	}
+	// Keep the earlier name as a compatibility fallback for existing self-host
+	// deployments while the independent knowledge configuration uses the
+	// documented KNOWLEDGE_* namespace.
+	return int64(envPositiveInt("MULTICA_KNOWLEDGE_MAX_UPLOAD_BYTES", int(defaultLimit)))
 }
 
 // pluginActionBaseURL resolves the versioned public base a hook handler calls
@@ -413,30 +425,55 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			store = local
 		}
 	}
+	var knowledgeStore storage.Storage
+	if os.Getenv("MULTICA_KNOWLEDGE_ENABLED") == "true" {
+		knowledgeStore = storage.NewPrivateStorageFromEnv()
+	}
+	var knowledgeSecretBox *secretbox.Box
+	if key, err := secretbox.LoadKey("MULTICA_KNOWLEDGE_SECRET_KEY"); err == nil {
+		knowledgeSecretBox, err = secretbox.New(key)
+		if err != nil {
+			slog.Warn("knowledge provider secret storage disabled", "error", err)
+		}
+	}
+	knowledgeParserURL := strings.TrimRight(strings.TrimSpace(os.Getenv("KNOWLEDGE_PARSER_URL")), "/")
+	// An empty parser URL intentionally selects the in-process parser. The
+	// self-hosted compose file supplies the isolated parser service explicitly;
+	// local development should not fail merely because that optional service is
+	// not running.
 
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
 	origins := allowedOrigins()
 
 	signupConfig := handler.Config{
-		AllowSignup:              os.Getenv("ALLOW_SIGNUP") != "false",
-		AllowedEmails:            splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
-		AllowedEmailDomains:      splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
-		DisableWorkspaceCreation: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
-		VCSIntegrationEnabled:    os.Getenv("MULTICA_VCS_INTEGRATION_ENABLED") == "true",
-		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
-		AppURL:                   appURLFromEnv(),
-		TrustedProxies:           parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
-		CloudURL:                 strings.TrimSpace(os.Getenv("MULTICA_CLOUD_URL")),
-		CloudTimeout:             35 * time.Second,
-		AttachmentDownloadMode:   os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
-		AttachmentDownloadURLTTL: envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
-		AttachmentFrameAncestors: origins,
-		PluginSurfaceOrigin:      strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PLUGIN_SURFACE_ORIGIN")), "/"),
-		LLMAPIKey:                strings.TrimSpace(os.Getenv("MULTICA_LLM_API_KEY")),
-		LLMBaseURL:               strings.TrimSpace(os.Getenv("MULTICA_LLM_BASE_URL")),
-		LLMDefaultModel:          strings.TrimSpace(os.Getenv("MULTICA_LLM_DEFAULT_MODEL")),
-		LLMMaxRetries:            opts.LLMMaxRetries,
-		ServerVersion:            normalizeServerVersion(version),
+		AllowSignup:                os.Getenv("ALLOW_SIGNUP") != "false",
+		AllowedEmails:              splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
+		AllowedEmailDomains:        splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
+		DisableWorkspaceCreation:   os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
+		VCSIntegrationEnabled:      os.Getenv("MULTICA_VCS_INTEGRATION_ENABLED") == "true",
+		PublicURL:                  strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
+		AppURL:                     appURLFromEnv(),
+		TrustedProxies:             parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
+		CloudURL:                   strings.TrimSpace(os.Getenv("MULTICA_CLOUD_URL")),
+		CloudTimeout:               35 * time.Second,
+		AttachmentDownloadMode:     os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
+		AttachmentDownloadURLTTL:   envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
+		AttachmentFrameAncestors:   origins,
+		PluginSurfaceOrigin:        strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PLUGIN_SURFACE_ORIGIN")), "/"),
+		LLMAPIKey:                  strings.TrimSpace(os.Getenv("MULTICA_LLM_API_KEY")),
+		LLMBaseURL:                 strings.TrimSpace(os.Getenv("MULTICA_LLM_BASE_URL")),
+		LLMDefaultModel:            strings.TrimSpace(os.Getenv("MULTICA_LLM_DEFAULT_MODEL")),
+		LLMMaxRetries:              opts.LLMMaxRetries,
+		KnowledgeEnabled:           os.Getenv("MULTICA_KNOWLEDGE_ENABLED") == "true",
+		KnowledgeStore:             knowledgeStore,
+		KnowledgeSecretBox:         knowledgeSecretBox,
+		KnowledgeMaxUploadBytes:    knowledgeUploadLimitFromEnv(),
+		KnowledgeParserURL:         knowledgeParserURL,
+		KnowledgeParserToken:       strings.TrimSpace(os.Getenv("KNOWLEDGE_PARSER_TOKEN")),
+		KnowledgeParserTimeout:     envDuration("KNOWLEDGE_PARSER_TIMEOUT", 15*time.Minute),
+		KnowledgePrivateModelHosts: splitAndTrim(os.Getenv("KNOWLEDGE_PRIVATE_MODEL_HOSTS")),
+		KnowledgeModelConcurrency:  envPositiveInt("KNOWLEDGE_MODEL_CONCURRENCY", 2),
+		ServerVersion:              normalizeServerVersion(version),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	invitationRateLimits := handler.DefaultInvitationRateLimits()
@@ -2074,6 +2111,108 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
+				})
+			})
+
+			// Agent workflows: durable DAG drafts, builder chats and runs.
+			r.Route("/api/workflows", func(r chi.Router) {
+				r.Get("/capabilities", h.WorkflowCapabilities)
+				r.Get("/templates", h.ListWorkflowTemplates)
+				r.Get("/templates/{templateId}", h.GetWorkflowTemplate)
+				r.Get("/work-items", h.ListWorkflowWorkItems)
+				r.Get("/", h.ListWorkflows)
+				r.With(handler.RequireHumanActor).Post("/", h.CreateWorkflow)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetWorkflow)
+					r.With(handler.RequireHumanActor).Patch("/", h.EditWorkflow)
+					r.With(handler.RequireHumanActor).Delete("/", h.DeleteWorkflow)
+					r.Post("/validate", h.ValidateWorkflow)
+					r.Get("/upgrade-preview", h.PreviewWorkflowUpgrade)
+					r.With(handler.RequireHumanActor).Post("/upgrade", h.UpgradeWorkflow)
+					r.Get("/releases", h.ListWorkflowReleases)
+					r.With(handler.RequireHumanActor).Post("/releases", h.PublishWorkflow)
+					r.Get("/releases/{releaseId}", h.GetWorkflowRelease)
+					r.With(handler.RequireHumanActor).Post("/releases/{releaseId}/activate", h.ActivateWorkflowRelease)
+					r.With(handler.RequireHumanActor).Post("/releases/{releaseId}/copy-to-draft", h.CopyWorkflowReleaseToDraft)
+					r.With(handler.RequireHumanActor).Post("/archive", h.ArchiveWorkflow)
+					r.With(handler.RequireHumanActor).Post("/{direction}", h.HistoryWorkflow)
+					r.Get("/runs", h.ListWorkflowRuns)
+					r.With(handler.RequireHumanActor).Post("/test-runs", h.StartWorkflowTestRun)
+					r.With(handler.RequireHumanActor).Post("/runs", h.StartWorkflowRun)
+					r.Route("/runs/{runId}", func(r chi.Router) {
+						r.Get("/", h.GetWorkflowRun)
+						r.Get("/events", h.ListWorkflowRunEvents)
+						r.With(handler.RequireHumanActor).Patch("/", h.UpdateWorkflowRun)
+						r.With(handler.RequireHumanActor).Post("/cancel", h.CancelWorkflowRun)
+						r.With(handler.RequireHumanActor).Post("/terminate", h.TerminateWorkflowRun)
+						r.Get("/nodes/{nodeId}", h.GetWorkflowRunNode)
+						r.Route("/work-items/{itemId}", func(r chi.Router) {
+							r.Get("/", h.GetWorkflowWorkItem)
+							r.With(handler.RequireHumanActor).Post("/submit", h.SubmitWorkflowWorkItem)
+							r.With(handler.RequireHumanActor).Post("/transfer", h.TransferWorkflowWorkItem)
+							r.With(handler.RequireHumanActor).Post("/extend", h.ExtendWorkflowWorkItem)
+						})
+						r.With(handler.RequireHumanActor).Post("/nodes/{nodeId}/retry", h.RetryWorkflowNode)
+						r.With(handler.RequireHumanActor).Post("/nodes/{nodeId}/takeover", h.TakeoverWorkflowNode)
+						r.With(handler.RequireHumanActor).Post("/nodes/{nodeId}/resolve", h.ResolveWorkflowNode)
+					})
+					r.With(handler.RequireHumanActor).Post("/chat-session", h.WorkflowChatSession)
+					r.With(handler.RequireHumanActor).Post("/chat-messages", h.SendWorkflowChatMessage)
+				})
+			})
+
+			// Independent knowledge bases. The route is deliberately adjacent to
+			// other workspace products but has no project/workflow/autopilot
+			// parameters or callbacks.
+			r.Route("/api/knowledge", func(r chi.Router) {
+				r.Use(h.KnowledgeIdempotency)
+				r.With(handler.RequireHumanActor).Get("/previews/{versionId}", h.RedeemKnowledgePreview)
+				r.With(handler.RequireHumanActor).Get("/providers", h.ListKnowledgeProviders)
+				r.With(handler.RequireHumanActor).Post("/providers", h.CreateKnowledgeProvider)
+				r.With(handler.RequireHumanActor).Post("/provider-tests", h.TestKnowledgeProvider)
+				r.With(handler.RequireHumanActor).Get("/providers/{providerId}/models", h.ListKnowledgeProviderModels)
+				r.With(handler.RequireHumanActor).Patch("/providers/{providerId}", h.UpdateKnowledgeProvider)
+				r.With(handler.RequireHumanActor).Delete("/providers/{providerId}", h.DeleteKnowledgeProvider)
+				r.With(handler.RequireHumanActor).Get("/model-settings", h.GetKnowledgeModelSettings)
+				r.With(handler.RequireHumanActor).Put("/model-settings", h.PutKnowledgeModelSettings)
+				r.Get("/bases", h.ListKnowledgeBases)
+				r.With(handler.RequireHumanActor).Post("/bases", h.CreateKnowledgeBase)
+				r.Route("/bases/{baseId}", func(r chi.Router) {
+					r.Get("/", h.GetKnowledgeBase)
+					r.With(handler.RequireHumanActor).Patch("/", h.UpdateKnowledgeBase)
+					r.With(handler.RequireHumanActor).Delete("/", h.DeleteKnowledgeBase)
+					r.With(handler.RequireHumanActor).Get("/model-settings", h.GetKnowledgeBaseModelSettings)
+					r.With(handler.RequireHumanActor).Put("/model-settings", h.PutKnowledgeBaseModelSettings)
+					r.Get("/documents", h.ListKnowledgeDocuments)
+					r.With(handler.RequireHumanActor).Post("/documents/files", h.CreateKnowledgeFile)
+					r.With(handler.RequireHumanActor).Post("/documents/urls", h.CreateKnowledgeURL)
+					r.Get("/chunks/{chunkId}", h.GetKnowledgeChunk)
+					r.Get("/jobs", h.ListKnowledgeJobs)
+					r.With(handler.RequireHumanActor).Post("/jobs/{jobId}/cancel", h.CancelKnowledgeJob)
+					r.With(handler.RequireHumanActor).Post("/indexes", h.CreateKnowledgeIndex)
+					r.Post("/search", h.SearchKnowledge)
+					r.With(handler.RequireHumanActor).Post("/answers", h.AnswerKnowledge)
+					r.Get("/entities", h.ListKnowledgeEntities)
+					r.Get("/entities/{entityId}", h.GetKnowledgeEntity)
+					r.Get("/graph", h.GetKnowledgeGraph)
+					r.Get("/relations/{relationId}/evidence", h.GetKnowledgeRelationEvidence)
+					r.With(handler.RequireHumanActor).Get("/graph/edits", h.ListKnowledgeGraphEdits)
+					r.With(handler.RequireHumanActor).Post("/graph/edits", h.ApplyKnowledgeGraphEdit)
+					r.With(handler.RequireHumanActor).Post("/graph/edits/{editId}/revert", h.RevertKnowledgeGraphEdit)
+					r.Route("/documents/{documentId}", func(r chi.Router) {
+						r.Get("/", h.GetKnowledgeDocument)
+						r.With(handler.RequireHumanActor).Patch("/", h.UpdateKnowledgeDocument)
+						r.With(handler.RequireHumanActor).Delete("/", h.DeleteKnowledgeDocument)
+						r.Get("/versions", h.ListKnowledgeVersions)
+						r.With(handler.RequireHumanActor).Post("/versions", h.ReplaceKnowledgeVersion)
+						r.With(handler.RequireHumanActor).Post("/reprocess", h.ReprocessKnowledgeDocument)
+						r.With(handler.RequireHumanActor).Post("/confirm-blocks", h.ConfirmKnowledgeBlocks)
+						r.Route("/versions/{versionId}", func(r chi.Router) {
+							r.Get("/content", h.GetKnowledgeVersionContent)
+							r.Get("/blocks", h.ListKnowledgeVersionBlocks)
+							r.With(handler.RequireHumanActor).Post("/preview-capability", h.IssueKnowledgePreviewCapability)
+						})
+					})
 				})
 			})
 

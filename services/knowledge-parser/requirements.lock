@@ -1,0 +1,7 @@
+# Direct runtime dependencies for the isolated parser image. Keep this file
+# version-pinned; the image build resolves these packages once and records the
+# complete installed set in /opt/docling-models/python-dependencies.lock.
+charset-normalizer==3.4.3
+jieba==0.42.1
+PyMuPDF==1.25.5
+docling==2.126.0

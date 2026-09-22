@@ -1,3 +1,13 @@
+import koWorkflows from "./ko/workflows.json";
+import jaWorkflows from "./ja/workflows.json";
+import zhHansWorkflows from "./zh-Hans/workflows.json";
+import enWorkflows from "./en/workflows.json";
+import enKnowledge from "./en/knowledge.json";
+import zhHansKnowledge from "./zh-Hans/knowledge.json";
+import koKnowledge from "./ko/knowledge.json";
+import jaKnowledge from "./ja/knowledge.json";
+import frWorkflows from "./fr/workflows.json";
+import frKnowledge from "./fr/knowledge.json";
 import type { LocaleResources, SupportedLocale } from "@multica/core/i18n";
 import enCommon from "./en/common.json";
 import enAuth from "./en/auth.json";
@@ -155,6 +165,8 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: enUi,
     squads: enSquads,
     billing: enBilling,
+    workflows: enWorkflows,
+    knowledge: enKnowledge,
   },
   "zh-Hans": {
     common: zhHansCommon,
@@ -182,6 +194,8 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: zhHansUi,
     squads: zhHansSquads,
     billing: zhHansBilling,
+    workflows: zhHansWorkflows,
+    knowledge: zhHansKnowledge,
   },
   ko: {
     common: koCommon,
@@ -209,6 +223,8 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: koUi,
     squads: koSquads,
     billing: koBilling,
+    workflows: koWorkflows,
+    knowledge: koKnowledge,
   },
   ja: {
     common: jaCommon,
@@ -236,6 +252,8 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: jaUi,
     squads: jaSquads,
     billing: jaBilling,
+    workflows: jaWorkflows,
+    knowledge: jaKnowledge,
   },
   fr: {
     common: frCommon,
@@ -263,5 +281,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: frUi,
     squads: frSquads,
     billing: frBilling,
+    workflows: frWorkflows,
+    knowledge: frKnowledge,
   },
 };

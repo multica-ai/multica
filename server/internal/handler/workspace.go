@@ -1110,6 +1110,9 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	qtx := h.Queries.WithTx(tx)
 	var sourceContextAttachmentURLs []string
 	var sourceContextIntentURLs []string
+	var knowledgeObjectKeys []string
+	knowledgeCleanupJobID := uuid.New()
+	knowledgeCleanupBaseID := uuid.New()
 
 	// SET LOCAL is transaction-scoped, so pgxpool hands this connection back
 	// out with the default (unbounded) lock_timeout after COMMIT / ROLLBACK.
@@ -1147,6 +1150,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		failWorkspaceDelete(w, r, workspaceID, "list source context pending objects", err)
 		return
 	}
+	if knowledgeObjectKeys, err = qtx.ListWorkspaceKnowledgeObjectKeys(r.Context(), requester.WorkspaceID); err != nil {
+		failWorkspaceDelete(w, r, workspaceID, "list knowledge objects", err)
+		return
+	}
 
 	// Keep the relationship graph in the application layer. Each step is a
 	// set-based delete scoped by workspace_id; the legacy cascades remain only
@@ -1170,6 +1177,37 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		{
 			name: "prepare relationship graph",
 			run:  func() error { return qtx.PrepareWorkspaceDeletionLinks(ctx, requester.WorkspaceID) },
+		},
+		{
+			// The synthetic base id lets this durable job survive the physical
+			// workspace delete. The worker only needs the object keys and its lease;
+			// it must never require a deleted workspace or knowledge base row.
+			name: "enqueue knowledge object cleanup",
+			run: func() error {
+				input, marshalErr := json.Marshal(map[string]any{
+					"scope":       "workspace",
+					"object_keys": knowledgeObjectKeys,
+				})
+				if marshalErr != nil {
+					return marshalErr
+				}
+				return qtx.EnqueueWorkspaceKnowledgeCleanup(ctx, db.EnqueueWorkspaceKnowledgeCleanupParams{
+					ID:              pgtype.UUID{Bytes: knowledgeCleanupJobID, Valid: true},
+					WorkspaceID:     requester.WorkspaceID,
+					KnowledgeBaseID: pgtype.UUID{Bytes: knowledgeCleanupBaseID, Valid: true},
+					LogicalKey:      "workspace-knowledge-cleanup",
+					Input:           input,
+				})
+			},
+		},
+		{
+			name: "delete knowledge data",
+			run: func() error {
+				return qtx.DeleteWorkspaceKnowledgeData(ctx, db.DeleteWorkspaceKnowledgeDataParams{
+					WorkspaceID: requester.WorkspaceID,
+					ID:          pgtype.UUID{Bytes: knowledgeCleanupJobID, Valid: true},
+				})
+			},
 		},
 		{
 			// These FK-free intents deliberately survive the transaction so the
@@ -1215,6 +1253,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		{
 			name: "delete leaf data",
 			run:  func() error { return qtx.DeleteWorkspaceLeafData(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete workflow commands",
+			run:  func() error { return qtx.DeleteWorkspaceWorkflowCommands(ctx, requester.WorkspaceID) },
 		},
 		{
 			name: "delete autopilot runs",

@@ -67,6 +67,9 @@ export type WSEventType =
   | "project:created"
   | "project:updated"
   | "project:deleted"
+  | "workflow:updated"
+  | "workflow_run:updated"
+  | "workflow_work_item:updated"
   | "squad:created"
   | "squad:updated"
   | "squad:deleted"
@@ -86,6 +89,7 @@ export type WSEventType =
   | "invitation:accepted"
   | "invitation:declined"
   | "invitation:revoked"
+  | "knowledge:invalidate"
   | "github_installation:created"
   | "github_installation:deleted"
   | "pull_request:linked"
@@ -517,6 +521,25 @@ export interface ProjectDeletedPayload {
   project_id: string;
 }
 
+export interface WorkflowUpdatedPayload {
+  workflow_id: string;
+  run_id?: string;
+}
+
+export interface WorkflowRunUpdatedPayload {
+  workflow_id: string;
+  run_id: string;
+  sequence?: number;
+  state_revision?: number;
+}
+
+export interface WorkflowWorkItemUpdatedPayload {
+  workflow_id: string;
+  run_id: string;
+  sequence?: number;
+  state_revision?: number;
+}
+
 export interface InvitationCreatedPayload {
   invitation: Invitation;
   workspace_name?: string;
@@ -535,6 +558,13 @@ export interface InvitationDeclinedPayload {
 export interface InvitationRevokedPayload {
   invitation_id: string;
   invitee_email: string;
+}
+
+export interface KnowledgeInvalidationPayload {
+  workspace_id: string;
+  knowledge_base_id: string;
+  revision: number;
+  acl_revision: number;
 }
 
 export interface ChatSessionCreatedPayload {
@@ -622,10 +652,14 @@ export interface WSEventPayloadMap {
   "project:created": ProjectCreatedPayload;
   "project:updated": ProjectUpdatedPayload;
   "project:deleted": ProjectDeletedPayload;
+  "workflow:updated": WorkflowUpdatedPayload;
+  "workflow_run:updated": WorkflowRunUpdatedPayload;
+  "workflow_work_item:updated": WorkflowWorkItemUpdatedPayload;
   "invitation:created": InvitationCreatedPayload;
   "invitation:accepted": InvitationAcceptedPayload;
   "invitation:declined": InvitationDeclinedPayload;
   "invitation:revoked": InvitationRevokedPayload;
+  "knowledge:invalidate": KnowledgeInvalidationPayload;
   // No formal payload interfaces yet — server emits domain objects clients
   // currently consume as opaque triggers (refetch on receipt).
   "daemon:heartbeat": unknown;

@@ -98,6 +98,12 @@ const (
 	EventProjectResourceUpdated = "project_resource:updated"
 	EventProjectResourceDeleted = "project_resource:deleted"
 
+	// Workflow events are workspace-scoped invalidation signals. The payload
+	// carries the workflow and, for run updates, the run identifier.
+	EventWorkflowUpdated         = "workflow:updated"
+	EventWorkflowRunUpdated      = "workflow_run:updated"
+	EventWorkflowWorkItemUpdated = "workflow_work_item:updated"
+
 	// Label events
 	EventLabelCreated       = "label:created"
 	EventLabelUpdated       = "label:updated"
@@ -129,6 +135,10 @@ const (
 	EventInvitationAccepted = "invitation:accepted"
 	EventInvitationDeclined = "invitation:declined"
 	EventInvitationRevoked  = "invitation:revoked"
+
+	// Knowledge-base events. The payload is a revision-bearing cache
+	// invalidation signal; recipient routing is kept in-process by the server.
+	EventKnowledgeInvalidate = "knowledge:invalidate"
 
 	// Autopilot events
 	EventAutopilotCreated  = "autopilot:created"

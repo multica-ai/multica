@@ -1,0 +1,20 @@
+CREATE TABLE workflow_work_item (
+  id uuid NOT NULL,
+  workspace_id uuid NOT NULL,
+  run_id uuid NOT NULL,
+  node_id text NOT NULL,
+  kind text NOT NULL,
+  assignee_id uuid NOT NULL,
+  form_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
+  input_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
+  output_values jsonb NOT NULL DEFAULT '{}'::jsonb,
+  decision text,
+  feedback text NOT NULL DEFAULT '',
+  version bigint NOT NULL DEFAULT 1,
+  status text NOT NULL DEFAULT 'open',
+  due_at timestamptz,
+  submitted_by uuid,
+  submitted_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);

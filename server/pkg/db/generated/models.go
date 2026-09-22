@@ -8,6 +8,7 @@ import (
 	"net/netip"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/pgvector/pgvector-go"
 )
 
 type ActivityLog struct {
@@ -1014,6 +1015,275 @@ type IssueWakeupReceipt struct {
 	CoalesceKey pgtype.Text        `json:"coalesce_key"`
 }
 
+type KnowledgeBase struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	CreatorID       pgtype.UUID        `json:"creator_id"`
+	Name            string             `json:"name"`
+	Description     string             `json:"description"`
+	Visibility      string             `json:"visibility"`
+	Revision        int64              `json:"revision"`
+	AclRevision     int64              `json:"acl_revision"`
+	CorpusRevision  int64              `json:"corpus_revision"`
+	ActiveIndexID   pgtype.UUID        `json:"active_index_id"`
+	BuildingIndexID pgtype.UUID        `json:"building_index_id"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type KnowledgeChunk struct {
+	ID              pgtype.UUID `json:"id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	KnowledgeBaseID pgtype.UUID `json:"knowledge_base_id"`
+	DocumentID      pgtype.UUID `json:"document_id"`
+	VersionID       pgtype.UUID `json:"version_id"`
+	Ordinal         int32       `json:"ordinal"`
+	BlockRefs       []byte      `json:"block_refs"`
+	Text            string      `json:"text"`
+	SourceLocator   []byte      `json:"source_locator"`
+	TokenEstimate   int32       `json:"token_estimate"`
+	TextHash        string      `json:"text_hash"`
+	KeywordText     string      `json:"keyword_text"`
+	SearchVector    interface{} `json:"search_vector"`
+}
+
+type KnowledgeDocument struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	KnowledgeBaseID  pgtype.UUID        `json:"knowledge_base_id"`
+	Title            string             `json:"title"`
+	SourceKind       string             `json:"source_kind"`
+	SourceUrl        pgtype.Text        `json:"source_url"`
+	SourceIdentity   string             `json:"source_identity"`
+	Tags             []string           `json:"tags"`
+	CurrentVersionID pgtype.UUID        `json:"current_version_id"`
+	Revision         int64              `json:"revision"`
+	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type KnowledgeDocumentVersion struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	KnowledgeBaseID pgtype.UUID        `json:"knowledge_base_id"`
+	DocumentID      pgtype.UUID        `json:"document_id"`
+	VersionNumber   int64              `json:"version_number"`
+	SourceObjectKey string             `json:"source_object_key"`
+	SourceHash      string             `json:"source_hash"`
+	ByteSize        int64              `json:"byte_size"`
+	MimeType        string             `json:"mime_type"`
+	SourceMetadata  []byte             `json:"source_metadata"`
+	ParsedObjectKey pgtype.Text        `json:"parsed_object_key"`
+	ParserVersion   string             `json:"parser_version"`
+	ChunkerVersion  string             `json:"chunker_version"`
+	ConfigSnapshot  []byte             `json:"config_snapshot"`
+	Status          string             `json:"status"`
+	ErrorCode       pgtype.Text        `json:"error_code"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type KnowledgeEmbedding struct {
+	ID              pgtype.UUID     `json:"id"`
+	WorkspaceID     pgtype.UUID     `json:"workspace_id"`
+	KnowledgeBaseID pgtype.UUID     `json:"knowledge_base_id"`
+	IndexID         pgtype.UUID     `json:"index_id"`
+	ChunkID         pgtype.UUID     `json:"chunk_id"`
+	VersionID       pgtype.UUID     `json:"version_id"`
+	Dimension       int32           `json:"dimension"`
+	Embedding       pgvector.Vector `json:"embedding"`
+}
+
+type KnowledgeEntity struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	KnowledgeBaseID pgtype.UUID        `json:"knowledge_base_id"`
+	Type            string             `json:"type"`
+	CanonicalName   string             `json:"canonical_name"`
+	NormalizedName  string             `json:"normalized_name"`
+	IdentityKey     string             `json:"identity_key"`
+	ReviewStatus    string             `json:"review_status"`
+	Revision        int64              `json:"revision"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	MergedIntoID    pgtype.UUID        `json:"merged_into_id"`
+}
+
+type KnowledgeEntityAlias struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	KnowledgeBaseID pgtype.UUID        `json:"knowledge_base_id"`
+	EntityID        pgtype.UUID        `json:"entity_id"`
+	NormalizedAlias string             `json:"normalized_alias"`
+	Disambiguator   string             `json:"disambiguator"`
+	Provenance      []byte             `json:"provenance"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type KnowledgeEvidence struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	KnowledgeBaseID pgtype.UUID        `json:"knowledge_base_id"`
+	SubjectType     string             `json:"subject_type"`
+	SubjectID       pgtype.UUID        `json:"subject_id"`
+	VersionID       pgtype.UUID        `json:"version_id"`
+	ChunkID         pgtype.UUID        `json:"chunk_id"`
+	SourceLocator   []byte             `json:"source_locator"`
+	Quote           string             `json:"quote"`
+	QuoteHash       string             `json:"quote_hash"`
+	StartOffset     pgtype.Int4        `json:"start_offset"`
+	EndOffset       pgtype.Int4        `json:"end_offset"`
+	ExtractionRunID pgtype.UUID        `json:"extraction_run_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type KnowledgeExtractionRun struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	KnowledgeBaseID   pgtype.UUID        `json:"knowledge_base_id"`
+	VersionID         pgtype.UUID        `json:"version_id"`
+	ConfigFingerprint string             `json:"config_fingerprint"`
+	SchemaVersion     string             `json:"schema_version"`
+	Status            string             `json:"status"`
+	IsActive          bool               `json:"is_active"`
+	Stats             []byte             `json:"stats"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	ActivatedAt       pgtype.Timestamptz `json:"activated_at"`
+}
+
+type KnowledgeGraphEdit struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	KnowledgeBaseID  pgtype.UUID        `json:"knowledge_base_id"`
+	Operation        string             `json:"operation"`
+	TargetID         pgtype.UUID        `json:"target_id"`
+	Payload          []byte             `json:"payload"`
+	PreviousState    []byte             `json:"previous_state"`
+	ActorID          pgtype.UUID        `json:"actor_id"`
+	ExpectedRevision int64              `json:"expected_revision"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	RevertedAt       pgtype.Timestamptz `json:"reverted_at"`
+}
+
+type KnowledgeIndex struct {
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	KnowledgeBaseID      pgtype.UUID        `json:"knowledge_base_id"`
+	Status               string             `json:"status"`
+	EmbeddingSnapshot    []byte             `json:"embedding_snapshot"`
+	EmbeddingFingerprint string             `json:"embedding_fingerprint"`
+	Dimension            int32              `json:"dimension"`
+	CorpusRevision       int64              `json:"corpus_revision"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	ActivatedAt          pgtype.Timestamptz `json:"activated_at"`
+}
+
+type KnowledgeJob struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	KnowledgeBaseID   pgtype.UUID        `json:"knowledge_base_id"`
+	DocumentVersionID pgtype.UUID        `json:"document_version_id"`
+	IndexID           pgtype.UUID        `json:"index_id"`
+	Stage             string             `json:"stage"`
+	ShardKey          string             `json:"shard_key"`
+	ConfigFingerprint string             `json:"config_fingerprint"`
+	LogicalKey        string             `json:"logical_key"`
+	Input             []byte             `json:"input"`
+	Status            string             `json:"status"`
+	Attempt           int32              `json:"attempt"`
+	AvailableAt       pgtype.Timestamptz `json:"available_at"`
+	LeaseToken        pgtype.UUID        `json:"lease_token"`
+	LeaseUntil        pgtype.Timestamptz `json:"lease_until"`
+	HeartbeatAt       pgtype.Timestamptz `json:"heartbeat_at"`
+	Progress          []byte             `json:"progress"`
+	ErrorCode         pgtype.Text        `json:"error_code"`
+	ResultRef         []byte             `json:"result_ref"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type KnowledgeModelBinding struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	KnowledgeBaseID pgtype.UUID        `json:"knowledge_base_id"`
+	Purpose         string             `json:"purpose"`
+	Mode            string             `json:"mode"`
+	ProviderID      pgtype.UUID        `json:"provider_id"`
+	Model           pgtype.Text        `json:"model"`
+	Options         []byte             `json:"options"`
+	Revision        int64              `json:"revision"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type KnowledgeModelCapability struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ProviderID     pgtype.UUID        `json:"provider_id"`
+	SecretRevision int64              `json:"secret_revision"`
+	Model          string             `json:"model"`
+	Capability     string             `json:"capability"`
+	Status         string             `json:"status"`
+	Details        []byte             `json:"details"`
+	TestedAt       pgtype.Timestamptz `json:"tested_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type KnowledgeModelSetting struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Revision    int64              `json:"revision"`
+	UpdatedBy   pgtype.UUID        `json:"updated_by"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type KnowledgeProvider struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Name            string             `json:"name"`
+	Preset          string             `json:"preset"`
+	Protocol        string             `json:"protocol"`
+	BaseUrl         string             `json:"base_url"`
+	EncryptedApiKey []byte             `json:"encrypted_api_key"`
+	SecretRevision  int64              `json:"secret_revision"`
+	IsEnabled       bool               `json:"is_enabled"`
+	Revision        int64              `json:"revision"`
+	CreatedBy       pgtype.UUID        `json:"created_by"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type KnowledgeRelation struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	KnowledgeBaseID pgtype.UUID        `json:"knowledge_base_id"`
+	SourceEntityID  pgtype.UUID        `json:"source_entity_id"`
+	TargetEntityID  pgtype.UUID        `json:"target_entity_id"`
+	Predicate       string             `json:"predicate"`
+	Qualifier       []byte             `json:"qualifier"`
+	IdentityKey     string             `json:"identity_key"`
+	ReviewStatus    string             `json:"review_status"`
+	Revision        int64              `json:"revision"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type KnowledgeRequest struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ActorKey       string             `json:"actor_key"`
+	Operation      string             `json:"operation"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	RequestHash    string             `json:"request_hash"`
+	Status         string             `json:"status"`
+	DependencyRefs []byte             `json:"dependency_refs"`
+	ResultRef      []byte             `json:"result_ref"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type LarkBindingToken struct {
 	TokenHash      string             `json:"token_hash"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -1618,6 +1888,253 @@ type WebhookDelivery struct {
 	DispatchAttempts       int32              `json:"dispatch_attempts"`
 	ReasonCode             pgtype.Text        `json:"reason_code"`
 	ReplayIdempotencyKey   pgtype.Text        `json:"replay_idempotency_key"`
+}
+
+type Workflow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	CreatorID          pgtype.UUID        `json:"creator_id"`
+	Body               []byte             `json:"body"`
+	History            []byte             `json:"history"`
+	HistoryCursor      int32              `json:"history_cursor"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	OwnerID            pgtype.UUID        `json:"owner_id"`
+	DraftRevision      int64              `json:"draft_revision"`
+	GraphSchemaVersion int32              `json:"graph_schema_version"`
+	PublishedReleaseID pgtype.UUID        `json:"published_release_id"`
+	ArchivedAt         pgtype.Timestamptz `json:"archived_at"`
+}
+
+type WorkflowChat struct {
+	WorkflowID pgtype.UUID `json:"workflow_id"`
+	UserID     pgtype.UUID `json:"user_id"`
+	AgentID    pgtype.UUID `json:"agent_id"`
+	SessionID  pgtype.UUID `json:"session_id"`
+}
+
+type WorkflowChatTurn struct {
+	WorkflowID     pgtype.UUID        `json:"workflow_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	UserID         pgtype.UUID        `json:"user_id"`
+	TaskID         pgtype.UUID        `json:"task_id"`
+	BaseRevision   int64              `json:"base_revision"`
+	ProcessedAt    pgtype.Timestamptz `json:"processed_at"`
+	Error          pgtype.Text        `json:"error"`
+	IdempotencyKey pgtype.Text        `json:"idempotency_key"`
+	RequestHash    pgtype.Text        `json:"request_hash"`
+	ResponseBody   []byte             `json:"response_body"`
+}
+
+type WorkflowCommand struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ActorID        pgtype.UUID        `json:"actor_id"`
+	Operation      string             `json:"operation"`
+	ResourceID     pgtype.UUID        `json:"resource_id"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	RequestHash    string             `json:"request_hash"`
+	StatusCode     int32              `json:"status_code"`
+	ResponseBody   []byte             `json:"response_body"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type WorkflowEvent struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	RunID       pgtype.UUID        `json:"run_id"`
+	Sequence    int64              `json:"sequence"`
+	EventType   string             `json:"event_type"`
+	ActorType   string             `json:"actor_type"`
+	ActorID     pgtype.Text        `json:"actor_id"`
+	Payload     []byte             `json:"payload"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type WorkflowJob struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	RunID       pgtype.UUID        `json:"run_id"`
+	Kind        string             `json:"kind"`
+	LogicalKey  string             `json:"logical_key"`
+	DueAt       pgtype.Timestamptz `json:"due_at"`
+	Status      string             `json:"status"`
+	LeaseOwner  pgtype.Text        `json:"lease_owner"`
+	LeaseUntil  pgtype.Timestamptz `json:"lease_until"`
+	Fence       int64              `json:"fence"`
+	PayloadRef  []byte             `json:"payload_ref"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WorkflowNodeActivation struct {
+	ID                    pgtype.UUID        `json:"id"`
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	RunID                 pgtype.UUID        `json:"run_id"`
+	NodeID                string             `json:"node_id"`
+	ScopeInstanceID       pgtype.UUID        `json:"scope_instance_id"`
+	Generation            int32              `json:"generation"`
+	ActivationNo          int32              `json:"activation_no"`
+	AutomaticRetriesUsed  int32              `json:"automatic_retries_used"`
+	Status                string             `json:"status"`
+	ReasonCode            string             `json:"reason_code"`
+	IssueID               pgtype.UUID        `json:"issue_id"`
+	EffectiveOutputID     pgtype.UUID        `json:"effective_output_id"`
+	HandledByActivationID pgtype.UUID        `json:"handled_by_activation_id"`
+	AssigneeSnapshot      []byte             `json:"assignee_snapshot"`
+	InputSnapshot         []byte             `json:"input_snapshot"`
+	Override              []byte             `json:"override"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	FinishedAt            pgtype.Timestamptz `json:"finished_at"`
+}
+
+type WorkflowNodeAttempt struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	ActivationID     pgtype.UUID        `json:"activation_id"`
+	AttemptNo        int32              `json:"attempt_no"`
+	TaskID           pgtype.UUID        `json:"task_id"`
+	RetryOfAttemptID pgtype.UUID        `json:"retry_of_attempt_id"`
+	Status           string             `json:"status"`
+	ErrorClass       string             `json:"error_class"`
+	ErrorDetail      string             `json:"error_detail"`
+	StartedAt        pgtype.Timestamptz `json:"started_at"`
+	FinishedAt       pgtype.Timestamptz `json:"finished_at"`
+	EffectState      []byte             `json:"effect_state"`
+}
+
+type WorkflowNodeRun struct {
+	RunID   pgtype.UUID `json:"run_id"`
+	NodeID  string      `json:"node_id"`
+	Attempt int32       `json:"attempt"`
+	Body    []byte      `json:"body"`
+}
+
+type WorkflowOutbox struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	EventID         pgtype.UUID        `json:"event_id"`
+	Channel         string             `json:"channel"`
+	RecipientID     string             `json:"recipient_id"`
+	DueAt           pgtype.Timestamptz `json:"due_at"`
+	DeliveredAt     pgtype.Timestamptz `json:"delivered_at"`
+	DeliveryAttempt int32              `json:"delivery_attempt"`
+	LastError       pgtype.Text        `json:"last_error"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WorkflowOutput struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ActivationID   pgtype.UUID        `json:"activation_id"`
+	SchemaSnapshot []byte             `json:"schema_snapshot"`
+	Values         []byte             `json:"values"`
+	ArtifactRefs   []byte             `json:"artifact_refs"`
+	ContentHash    string             `json:"content_hash"`
+	SupersededAt   pgtype.Timestamptz `json:"superseded_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type WorkflowRelease struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	WorkflowID         pgtype.UUID        `json:"workflow_id"`
+	VersionNumber      int32              `json:"version_number"`
+	DraftRevision      int64              `json:"draft_revision"`
+	GraphSchemaVersion int32              `json:"graph_schema_version"`
+	Graph              []byte             `json:"graph"`
+	CompiledPlan       []byte             `json:"compiled_plan"`
+	PlanVersion        int32              `json:"plan_version"`
+	ContentHash        string             `json:"content_hash"`
+	CreatedBy          pgtype.UUID        `json:"created_by"`
+	Notes              string             `json:"notes"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	IdempotencyKey     string             `json:"idempotency_key"`
+	IdempotencyHash    string             `json:"idempotency_hash"`
+}
+
+type WorkflowRun struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkflowID        pgtype.UUID        `json:"workflow_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	CreatorID         pgtype.UUID        `json:"creator_id"`
+	IdempotencyKey    string             `json:"idempotency_key"`
+	Status            string             `json:"status"`
+	Body              []byte             `json:"body"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	EngineVersion     int32              `json:"engine_version"`
+	ReleaseID         pgtype.UUID        `json:"release_id"`
+	Mode              string             `json:"mode"`
+	InputValues       []byte             `json:"input_values"`
+	OwnerID           pgtype.UUID        `json:"owner_id"`
+	StateRevision     int64              `json:"state_revision"`
+	DeadlineAt        pgtype.Timestamptz `json:"deadline_at"`
+	FinishedAt        pgtype.Timestamptz `json:"finished_at"`
+	ReasonCode        pgtype.Text        `json:"reason_code"`
+	RequestHash       pgtype.Text        `json:"request_hash"`
+	ActiveExecutionMs int64              `json:"active_execution_ms"`
+}
+
+type WorkflowScopeInstance struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	RunID             pgtype.UUID        `json:"run_id"`
+	DefinitionScopeID string             `json:"definition_scope_id"`
+	ParentScopeID     pgtype.UUID        `json:"parent_scope_id"`
+	Generation        int32              `json:"generation"`
+	ReworkCount       int32              `json:"rework_count"`
+	State             string             `json:"state"`
+	SelectedBranch    pgtype.Text        `json:"selected_branch"`
+	BranchStates      []byte             `json:"branch_states"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	FinishedAt        pgtype.Timestamptz `json:"finished_at"`
+}
+
+type WorkflowTransition struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	RunID              pgtype.UUID        `json:"run_id"`
+	SourceActivationID pgtype.UUID        `json:"source_activation_id"`
+	Outlet             string             `json:"outlet"`
+	TargetScopeID      pgtype.UUID        `json:"target_scope_id"`
+	Generation         int32              `json:"generation"`
+	BranchID           string             `json:"branch_id"`
+	PayloadRef         []byte             `json:"payload_ref"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
+type WorkflowVersion struct {
+	WorkflowID      pgtype.UUID        `json:"workflow_id"`
+	Revision        int64              `json:"revision"`
+	Body            []byte             `json:"body"`
+	SourceMessageID pgtype.UUID        `json:"source_message_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type WorkflowWorkItem struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	RunID           pgtype.UUID        `json:"run_id"`
+	NodeID          string             `json:"node_id"`
+	Kind            string             `json:"kind"`
+	AssigneeID      pgtype.UUID        `json:"assignee_id"`
+	FormSnapshot    []byte             `json:"form_snapshot"`
+	InputSnapshot   []byte             `json:"input_snapshot"`
+	OutputValues    []byte             `json:"output_values"`
+	Decision        pgtype.Text        `json:"decision"`
+	Feedback        string             `json:"feedback"`
+	Version         int64              `json:"version"`
+	Status          string             `json:"status"`
+	DueAt           pgtype.Timestamptz `json:"due_at"`
+	SubmittedBy     pgtype.UUID        `json:"submitted_by"`
+	SubmittedAt     pgtype.Timestamptz `json:"submitted_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	IdempotencyKey  string             `json:"idempotency_key"`
+	IdempotencyHash string             `json:"idempotency_hash"`
+	ActivationID    pgtype.UUID        `json:"activation_id"`
 }
 
 type Workspace struct {

@@ -76,6 +76,8 @@ interface ChatMessageListProps {
   onLoadOlderMessages?: () => void;
   /** Transform assistant task text for embedded chat protocols before render/copy. */
   transformContent?: (content: string) => string;
+  /** Transform user text for embedded chat protocols before render/copy. */
+  transformUserContent?: (content: string) => string;
   /** Send the full hidden prompt behind an assistant follow-up chip. */
   onQuickAction?: (action: ChatQuickAction) => void | Promise<unknown>;
   quickActionsDisabled?: boolean;
@@ -184,6 +186,7 @@ export function ChatMessageList({
   isFetchingOlderMessages = false,
   onLoadOlderMessages,
   transformContent,
+  transformUserContent,
   onQuickAction,
   quickActionsDisabled = false,
   onRegenerateQuickActions,
@@ -381,6 +384,7 @@ export function ChatMessageList({
               item={item}
               isPending={!!pendingTaskId && item.taskId === pendingTaskId}
               transformContent={transformContent}
+              transformUserContent={transformUserContent}
               onQuickAction={onQuickAction}
               quickActionsDisabled={quickActionsDisabled}
               onRegenerateQuickActions={onRegenerateQuickActions}
@@ -446,6 +450,7 @@ const MessageBubble = memo(function MessageBubble({
   item,
   isPending,
   transformContent,
+  transformUserContent,
   onQuickAction,
   quickActionsDisabled,
   onRegenerateQuickActions,
@@ -456,6 +461,7 @@ const MessageBubble = memo(function MessageBubble({
   item: ChatRenderItem;
   isPending: boolean;
   transformContent?: (content: string) => string;
+  transformUserContent?: (content: string) => string;
   onQuickAction?: (action: ChatQuickAction) => void | Promise<unknown>;
   quickActionsDisabled: boolean;
   onRegenerateQuickActions?: (message: ChatMessage) => void | Promise<unknown>;
@@ -490,7 +496,7 @@ const MessageBubble = memo(function MessageBubble({
            * too. `compact` trims the leading/trailing block margins so a
            * single-line bubble stays as tight as the plain-text version. */}
           <RichContent
-            content={message.content}
+            content={transformUserContent?.(message.content) ?? message.content}
             attachments={message.attachments}
             density="compact"
             phase="settled"
@@ -627,7 +633,13 @@ function AssistantMessage({
         <NoResponseNotice />
       ) : message && timeline.length === 0 ? (
         <RichContent
-          content={settledContent ?? message.content}
+          content={
+            settledContent ?? (
+              transformContent
+                ? transformContent(stripChatQuickActionsProtocol(message.content))
+                : stripChatQuickActionsProtocol(message.content)
+            )
+          }
           attachments={message.attachments}
           density="compact"
           phase="settled"

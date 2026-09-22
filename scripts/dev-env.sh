@@ -357,6 +357,30 @@ rewrite_env_ports() {
 
 # ---------------------------------------------------------------- database ---
 
+# Multica's local runtime may provision PostgreSQL under ~/.multica without
+# adding its client tools to PATH. Prefer the caller's psql, then honor an
+# explicit runtime bin directory, and finally discover the bundled client.
+database_psql_bin() {
+  local candidate
+  if command -v psql >/dev/null 2>&1; then
+    command -v psql
+    return 0
+  fi
+  if [ -n "${MULTICA_POSTGRES_BIN:-}" ]; then
+    candidate="$MULTICA_POSTGRES_BIN/psql"
+    if [ -x "$candidate" ]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  fi
+  candidate="${HOME:-}/.multica/local/postgresql-17.11/bin/psql"
+  if [ -x "$candidate" ]; then
+    printf '%s' "$candidate"
+    return 0
+  fi
+  return 1
+}
+
 admin_database_url() {
   node -e '
     const url = new URL(process.argv[1]);
@@ -374,6 +398,31 @@ database_url_with_name() {
   ' "$1" "$2" 2>/dev/null
 }
 
+ensure_vector_extension() {
+  local psql_bin=$1
+  [ -n "${DATABASE_URL:-}" ] || return 0
+
+  # Keep the migration authoritative, but make the prerequisite explicit before
+  # it starts. This also handles local Docker databases where POSTGRES_USER is
+  # a superuser, while preserving a clear error for managed databases where the
+  # application role cannot install extensions.
+  if PGCONNECT_TIMEOUT=3 "$psql_bin" "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+    -c 'CREATE EXTENSION IF NOT EXISTS vector' >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if PGCONNECT_TIMEOUT=3 "$psql_bin" "$DATABASE_URL" -tAc \
+    "SELECT 1 FROM pg_extension WHERE extname='vector'" 2>/dev/null | grep -q 1; then
+    return 0
+  fi
+
+  if PGCONNECT_TIMEOUT=3 "$psql_bin" "$DATABASE_URL" -tAc \
+    "SELECT 1 FROM pg_available_extensions WHERE name='vector'" 2>/dev/null | grep -q 1; then
+    die "PostgreSQL is reachable, but pgvector is not enabled in ${POSTGRES_DB:-the application database}; run CREATE EXTENSION vector as a database administrator."
+  fi
+  die "PostgreSQL is reachable, but the server does not provide pgvector; use the pgvector/pgvector:pg17 image or install pgvector before starting Multica."
+}
+
 # Diagnoses the failure mode this whole script exists to make impossible:
 # something other than the container owns 5432, so the container never bound
 # the host port and a docker-exec create landed in the wrong server.
@@ -389,22 +438,27 @@ diagnose_database() {
 }
 
 ensure_database() {
-  local admin_url=""
-  if command -v psql >/dev/null 2>&1 && [ -n "${DATABASE_URL:-}" ]; then
+  local admin_url="" psql_bin=""
+  if psql_bin="$(database_psql_bin 2>/dev/null)" && [ -n "${DATABASE_URL:-}" ]; then
     admin_url="$(admin_database_url "$DATABASE_URL")"
   fi
 
   # Preferred path: create through the same connection string the application
   # uses, so "created" and "reachable" cannot describe two different servers.
-  if [ -n "$admin_url" ] && PGCONNECT_TIMEOUT=3 psql "$admin_url" -tAc 'SELECT 1' >/dev/null 2>&1; then
-    if ! PGCONNECT_TIMEOUT=3 psql "$admin_url" -tAc "SELECT 1 FROM pg_database WHERE datname='${POSTGRES_DB}'" | grep -q 1; then
-      psql "$admin_url" -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${POSTGRES_DB}\"" >/dev/null
+  if [ -n "$admin_url" ] && PGCONNECT_TIMEOUT=3 "$psql_bin" "$admin_url" -tAc 'SELECT 1' >/dev/null 2>&1; then
+    if ! PGCONNECT_TIMEOUT=3 "$psql_bin" "$admin_url" -tAc "SELECT 1 FROM pg_database WHERE datname='${POSTGRES_DB}'" | grep -q 1; then
+      "$psql_bin" "$admin_url" -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${POSTGRES_DB}\"" >/dev/null
       info "Created database ${POSTGRES_DB} through DATABASE_URL."
     fi
   else
     info "Nothing is answering on ${POSTGRES_PORT:-5432} yet; starting the shared container."
     bash "$REPO_ROOT/scripts/ensure-postgres.sh" "$ENV_FILE" | sed 's/^/    /'
   fi
+
+  if [ -z "$psql_bin" ] && psql_bin="$(database_psql_bin 2>/dev/null)"; then
+    :
+  fi
+  [ -z "$psql_bin" ] || ensure_vector_extension "$psql_bin"
 }
 
 migrate_database() {
@@ -608,7 +662,11 @@ start_web() {
     die "Port $FRONTEND_PORT is busy: $(describe_port_owner "$FRONTEND_PORT"). Run 'make down' here first."
   fi
 
-  launch_detached web make -C "$REPO_ROOT" -s web-dev ENV_FILE="$ENV_FILE"
+  # Turbo's Next child can create a new process group on macOS, which makes a
+  # healthy listener look unrelated to this environment and causes the
+  # ownership check below to tear it down. Run the same Next dev command
+  # directly so the launcher owns the listener process group itself.
+  launch_detached web sh -c "cd \"$REPO_ROOT/apps/web\" && exec ./node_modules/.bin/next dev --webpack --port \"$FRONTEND_PORT\""
   info "web launching (pid $(cat "$(pid_file web)")), log: $(log_file web)"
 
   while [ "$waited" -lt 300 ]; do
@@ -723,7 +781,7 @@ daemon_task_marker() {
 }
 
 start_daemon() {
-  local status state
+  local status state build_version build_commit build_date
   ensure_credentials
 
   # Built, never `go run`: the daemon records its own executable path at startup
@@ -732,7 +790,14 @@ start_daemon() {
   # daemon registers, heartbeats, and then fails every task with
   # "fork/exec .../go-build.../exe/multica: no such file or directory".
   info "Building $MULTICA_BIN (a go run daemon would fail every task later)."
-  (cd "$REPO_ROOT/server" && go build -o bin/multica ./cmd/multica) || die "Failed to build the multica CLI."
+  # Keep the daemon's advertised CLI version aligned with the checkout. The
+  # chat project-context gate accepts tagged/dev-described builds, while a
+  # plain `go build` reports `dev` and makes a healthy local daemon look too
+  # old to the UI.
+  build_version="$(git -C "$REPO_ROOT" describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)"
+  build_commit="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  build_date="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  (cd "$REPO_ROOT/server" && go build -ldflags "-X main.version=$build_version -X main.commit=$build_commit -X main.date=$build_date" -o bin/multica ./cmd/multica) || die "Failed to build the multica CLI."
 
   "${CLEAN_ENV[@]}" MULTICA_WORKSPACES_ROOT="$WORKSPACES_ROOT" \
     "$MULTICA_BIN" daemon start --profile "$PROFILE" 2>&1 | sed 's/^/    /' || true
@@ -949,6 +1014,11 @@ component_state() {
         status="$("${CLEAN_ENV[@]}" MULTICA_WORKSPACES_ROOT="$WORKSPACES_ROOT" \
           "$MULTICA_BIN" daemon status --profile "$PROFILE" --output json 2>/dev/null || true)"
         state="$(json_field "$status" status || echo stopped)"
+        # A profile that has never been started is reported by the CLI as
+        # `unknown_profile`; for this environment registry it is simply
+        # stopped, so status JSON stays stable when the CLI binary is already
+        # available in the checkout.
+        [ "$state" = unknown_profile ] && state=stopped
         printf '%s|%s|pid %s' "$state" "$PROFILE" "$(json_field "$status" pid || echo '-')"
       else
         printf 'stopped|%s|not built' "$PROFILE"
@@ -990,11 +1060,14 @@ print_status_human() {
 # Reported from the connection string the application uses, so "present" can
 # never mean "present in a server nothing talks to".
 database_state() {
-  local admin_url
-  command -v psql >/dev/null 2>&1 || { printf 'unknown'; return; }
+  local admin_url psql_bin
+  if ! psql_bin="$(database_psql_bin 2>/dev/null)"; then
+    printf 'unknown'
+    return
+  fi
   admin_url="$(admin_database_url "$DATABASE_URL")"
-  PGCONNECT_TIMEOUT=3 psql "$admin_url" -tAc 'SELECT 1' >/dev/null 2>&1 || { printf 'no-server'; return; }
-  if PGCONNECT_TIMEOUT=3 psql "$admin_url" -tAc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" 2>/dev/null | grep -q 1; then
+  PGCONNECT_TIMEOUT=3 "$psql_bin" "$admin_url" -tAc 'SELECT 1' >/dev/null 2>&1 || { printf 'no-server'; return; }
+  if PGCONNECT_TIMEOUT=3 "$psql_bin" "$admin_url" -tAc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" 2>/dev/null | grep -q 1; then
     printf 'present'
   else
     printf 'missing'

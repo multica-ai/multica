@@ -1250,6 +1250,9 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 }
 
 func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin) (db.AgentTaskQueue, error) {
+	if !workflowEnqueueAllowed(ctx, issue) {
+		return db.AgentTaskQueue{}, ErrWorkflowManagedIssue
+	}
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -1429,6 +1432,9 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
 	if err := guardIssueNotInTriage(ctx, s.Queries, issue.ID, origin); err != nil {
 		return db.AgentTaskQueue{}, err
+	}
+	if !workflowEnqueueAllowed(ctx, issue) {
+		return db.AgentTaskQueue{}, ErrWorkflowManagedIssue
 	}
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
@@ -2279,7 +2285,30 @@ type DirectChatSendResult struct {
 	BoundAttachmentIDs []pgtype.UUID
 	Queued             bool
 	InitialTitle       string
+	Replay             *DirectChatReplay
 }
+
+// DirectChatIdempotency is used by workflow builder chat, whose request
+// creates a durable workflow_chat_turn in the same transaction as the task and
+// user message. Ordinary chat sends keep the historical method below.
+type DirectChatIdempotency struct {
+	WorkflowID   pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	UserID       pgtype.UUID
+	Key          string
+	RequestHash  string
+	BaseRevision int64
+}
+
+type DirectChatReplay struct {
+	MessageID string `json:"message_id"`
+	TaskID    string `json:"task_id"`
+	Queued    bool   `json:"queued"`
+	CreatedAt string `json:"created_at"`
+}
+
+var ErrDirectChatIdempotencyConflict = errors.New("direct chat idempotency key was already used for a different request")
+var ErrDirectChatRevisionConflict = errors.New("workflow changed while the assistant was editing it")
 
 var ErrChatSessionAlreadyStarted = errors.New("chat session already has a user message")
 
@@ -2304,6 +2333,37 @@ func (s *TaskService) SendDirectChatMessage(
 	uploaderType string,
 	uploaderID pgtype.UUID,
 ) (*DirectChatSendResult, error) {
+	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, content, attachmentIDs, uploaderType, uploaderID, nil)
+}
+
+func (s *TaskService) SendDirectChatMessageWithIdempotency(
+	ctx context.Context,
+	session db.ChatSession,
+	agent db.Agent,
+	initiatorUserID pgtype.UUID,
+	content string,
+	attachmentIDs []pgtype.UUID,
+	uploaderType string,
+	uploaderID pgtype.UUID,
+	idempotency DirectChatIdempotency,
+) (*DirectChatSendResult, error) {
+	if !idempotency.WorkflowID.Valid || !idempotency.WorkspaceID.Valid || !idempotency.UserID.Valid || strings.TrimSpace(idempotency.Key) == "" || strings.TrimSpace(idempotency.RequestHash) == "" {
+		return nil, errors.New("invalid direct chat idempotency request")
+	}
+	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, content, attachmentIDs, uploaderType, uploaderID, &idempotency)
+}
+
+func (s *TaskService) sendDirectChatMessage(
+	ctx context.Context,
+	session db.ChatSession,
+	agent db.Agent,
+	initiatorUserID pgtype.UUID,
+	content string,
+	attachmentIDs []pgtype.UUID,
+	uploaderType string,
+	uploaderID pgtype.UUID,
+	idempotency *DirectChatIdempotency,
+) (*DirectChatSendResult, error) {
 	// Build the per-task Composio overlay before the transaction — it can do
 	// network I/O and must not run with a DB transaction open.
 	overlay := s.buildRuntimeMCPOverlay(ctx, initiatorUserID, agent)
@@ -2321,7 +2381,7 @@ func (s *TaskService) SendDirectChatMessage(
 	attrSource, _, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 
 	var out DirectChatSendResult
-	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+	if err := s.runInTxWithTx(ctx, func(qtx *db.Queries, tx pgx.Tx) error {
 		// Serialise this send against a concurrent runtime rebind of the same
 		// session (MUL-5163). The lock must be taken first and the agent re-read
 		// under it: the runtime_id the caller loaded can already be stale by the
@@ -2351,6 +2411,47 @@ func (s *TaskService) SendDirectChatMessage(
 			return ErrChatTaskAgentNoRuntime
 		}
 
+		var taskID pgtype.UUID
+		if idempotency != nil {
+			if tx == nil {
+				return errors.New("workflow chat idempotency requires a transaction")
+			}
+			taskID = dbid.NewV7()
+			if _, err := tx.Exec(ctx, `
+INSERT INTO workflow_chat_turn(workflow_id,workspace_id,user_id,task_id,base_revision,idempotency_key,request_hash)
+VALUES($1,$2,$3,$4,$5,$6,$7)
+ON CONFLICT (workspace_id,user_id,workflow_id,idempotency_key) DO NOTHING`,
+				idempotency.WorkflowID, idempotency.WorkspaceID, idempotency.UserID, taskID, idempotency.BaseRevision, idempotency.Key, idempotency.RequestHash); err != nil {
+				return fmt.Errorf("reserve workflow chat turn: %w", err)
+			}
+			var storedHash string
+			var responseBody []byte
+			if err := tx.QueryRow(ctx, `SELECT request_hash,response_body FROM workflow_chat_turn WHERE workspace_id=$1 AND user_id=$2 AND workflow_id=$3 AND idempotency_key=$4 FOR UPDATE`, idempotency.WorkspaceID, idempotency.UserID, idempotency.WorkflowID, idempotency.Key).Scan(&storedHash, &responseBody); err != nil {
+				return fmt.Errorf("load workflow chat turn: %w", err)
+			}
+			if storedHash != idempotency.RequestHash {
+				return ErrDirectChatIdempotencyConflict
+			}
+			if len(responseBody) > 0 {
+				var replay DirectChatReplay
+				if err := json.Unmarshal(responseBody, &replay); err != nil {
+					return fmt.Errorf("decode workflow chat replay: %w", err)
+				}
+				out.Replay = &replay
+				out.Queued = replay.Queued
+				return nil
+			}
+			if idempotency.BaseRevision > 0 {
+				var currentRevision int64
+				if err := tx.QueryRow(ctx, `SELECT draft_revision FROM workflow WHERE workspace_id=$1 AND id=$2`, idempotency.WorkspaceID, idempotency.WorkflowID).Scan(&currentRevision); err != nil {
+					return fmt.Errorf("load workflow revision: %w", err)
+				}
+				if currentRevision != idempotency.BaseRevision {
+					return ErrDirectChatRevisionConflict
+				}
+			}
+		}
+
 		// The database status of every newly-created task is "queued" until a
 		// daemon claims it. Product queue semantics are positional instead: this
 		// send is a follow-up only when another visible task in the same session
@@ -2363,8 +2464,11 @@ func (s *TaskService) SendDirectChatMessage(
 		}
 		out.Queued = queued
 
+		if !taskID.Valid {
+			taskID = dbid.NewV7()
+		}
 		task, err := qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
-			ID:                   dbid.NewV7(),
+			ID:                   taskID,
 			AgentID:              session.AgentID,
 			RuntimeID:            carrier.RuntimeID,
 			Priority:             2, // medium priority for chat; matches EnqueueChatTask
@@ -2476,6 +2580,21 @@ func (s *TaskService) SendDirectChatMessage(
 		if err := qtx.TouchChatSession(ctx, session.ID); err != nil {
 			return fmt.Errorf("touch chat session: %w", err)
 		}
+		if idempotency != nil {
+			response := DirectChatReplay{
+				MessageID: util.UUIDToString(out.Message.ID),
+				TaskID:    util.UUIDToString(out.Task.ID),
+				Queued:    out.Queued,
+				CreatedAt: util.TimestampToString(out.Message.CreatedAt),
+			}
+			encoded, err := json.Marshal(response)
+			if err != nil {
+				return fmt.Errorf("encode workflow chat response: %w", err)
+			}
+			if _, err = tx.Exec(ctx, `UPDATE workflow_chat_turn SET response_body=$5 WHERE workspace_id=$1 AND user_id=$2 AND workflow_id=$3 AND idempotency_key=$4`, idempotency.WorkspaceID, idempotency.UserID, idempotency.WorkflowID, idempotency.Key, encoded); err != nil {
+				return fmt.Errorf("store workflow chat response: %w", err)
+			}
+		}
 		return nil
 	}); err != nil {
 		slog.Error("direct chat send failed",
@@ -2485,6 +2604,9 @@ func (s *TaskService) SendDirectChatMessage(
 		return nil, err
 	}
 
+	if out.Replay != nil {
+		return &out, nil
+	}
 	slog.Info("direct chat task enqueued",
 		"task_id", util.UUIDToString(out.Task.ID),
 		"chat_session_id", util.UUIDToString(session.ID),
@@ -6686,15 +6808,19 @@ func (s *TaskService) dispatchDelegatedFailureRecoveryComment(ctx context.Contex
 // (e.g. some tests construct TaskService directly), fn runs against the
 // regular Queries handle without transactional guarantees.
 func (s *TaskService) runInTx(ctx context.Context, fn func(*db.Queries) error) error {
+	return s.runInTxWithTx(ctx, func(qtx *db.Queries, _ pgx.Tx) error { return fn(qtx) })
+}
+
+func (s *TaskService) runInTxWithTx(ctx context.Context, fn func(*db.Queries, pgx.Tx) error) error {
 	if s.TxStarter == nil {
-		return fn(s.Queries)
+		return fn(s.Queries, nil)
 	}
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	if err := fn(s.Queries.WithTx(tx)); err != nil {
+	if err := fn(s.Queries.WithTx(tx), tx); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

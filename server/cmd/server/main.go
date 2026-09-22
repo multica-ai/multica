@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -771,6 +772,19 @@ func main() {
 	if h.ChannelMediaReconciler != nil {
 		h.ChannelMediaReconciler.Metrics = channelMediaMetrics
 		go h.ChannelMediaReconciler.Run(sweepCtx)
+	}
+	// The workflow reconciler is owned by the process lifecycle. Starting it
+	// here keeps router construction side-effect free and lets graceful shutdown
+	// stop the scheduler together with the other durable workers.
+	if h.Workflow != nil {
+		h.Workflow.Start(sweepCtx)
+	}
+	if h.Knowledge != nil && h.Knowledge.Enabled() {
+		go func() {
+			if err := h.Knowledge.Run(sweepCtx); err != nil && !errors.Is(err, context.Canceled) {
+				slog.Error("knowledge worker stopped", "error", err)
+			}
+		}()
 	}
 
 	// MUL-2957: DB-backed execution scheduler. The scheduler turns the

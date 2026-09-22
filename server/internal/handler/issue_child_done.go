@@ -69,7 +69,7 @@ import (
 // notification on the side of a successful status update; failing it must
 // not roll back the user's status change.
 func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Issue) {
-	if !issue.ParentIssueID.Valid {
+	if issue.OriginType.String == "workflow" || !issue.ParentIssueID.Valid {
 		return
 	}
 	// Fire on a transition INTO a terminal status (done OR cancelled), not only
@@ -195,7 +195,7 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 	var groups []*parentGroup
 	index := map[string]*parentGroup{}
 	for _, c := range completed {
-		if !c.ParentIssueID.Valid {
+		if c.OriginType.String == "workflow" || !c.ParentIssueID.Valid {
 			continue
 		}
 		key := uuidToString(c.ParentIssueID)

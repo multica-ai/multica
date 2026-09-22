@@ -99,7 +99,8 @@ type AppConfig struct {
 	// Only emitted on self-hosted deployments — omitted on the managed cloud,
 	// which is continuously deployed so its users can't act on the version —
 	// and empty for dev builds that aren't stamped via -X main.version.
-	ServerVersion string `json:"server_version,omitempty"`
+	ServerVersion    string `json:"server_version,omitempty"`
+	KnowledgeEnabled bool   `json:"knowledge_enabled,omitempty"`
 }
 
 // GetConfig is mounted on the public (unauthenticated) route group because
@@ -124,6 +125,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config.CdnSigned = h.CFSigner != nil
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
 	config.VCSIntegrationAvailable = h.cfg.VCSIntegrationEnabled
+	config.KnowledgeEnabled = h.cfg.KnowledgeEnabled
 	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(r.Context(), h.FeatureFlags)
 	// Only surface the build version on self-hosted deployments. The managed
 	// cloud is continuously deployed and its users can't choose the build, so

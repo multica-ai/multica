@@ -39,7 +39,8 @@ var internalOnlyPayloadKeys = map[string][]string{
 	// task:failed error text is consumed synchronously by channel outbounds.
 	// It may contain provider/runtime detail that belongs in the originating
 	// chat transcript, not in the workspace-wide realtime fanout.
-	protocol.EventTaskFailed: {"error"},
+	protocol.EventTaskFailed:          {"error"},
+	protocol.EventKnowledgeInvalidate: {"recipient_ids"},
 }
 
 // projectOutbound returns payload with the event type's internal-only keys
@@ -79,16 +80,17 @@ func projectOutbound(eventType string, payload any) any {
 func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 	// Personal events should NOT be broadcast to the whole workspace.
 	personalEvents := map[string]bool{
-		protocol.EventInboxNew:           true,
-		protocol.EventInboxRead:          true,
-		protocol.EventInboxArchived:      true,
-		protocol.EventInboxUnarchived:    true,
-		protocol.EventInboxBatchRead:     true,
-		protocol.EventInboxBatchArchived: true,
-		protocol.EventInvitationCreated:  true,
-		protocol.EventInvitationRevoked:  true,
-		protocol.EventChatSessionCreated: true,
-		protocol.EventChatSessionUpdated: true,
+		protocol.EventInboxNew:            true,
+		protocol.EventInboxRead:           true,
+		protocol.EventInboxArchived:       true,
+		protocol.EventInboxUnarchived:     true,
+		protocol.EventInboxBatchRead:      true,
+		protocol.EventInboxBatchArchived:  true,
+		protocol.EventInvitationCreated:   true,
+		protocol.EventInvitationRevoked:   true,
+		protocol.EventChatSessionCreated:  true,
+		protocol.EventChatSessionUpdated:  true,
+		protocol.EventKnowledgeInvalidate: true,
 	}
 
 	// Helper: marshal event and send to a specific user.
@@ -103,6 +105,20 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		realtime.M.RecordEvent(e.Type)
 		b.SendToUser(recipientID, data)
 	}
+
+	// knowledge:invalidate is personal even when the base is workspace-visible:
+	// the service resolves the current ACL and places the recipient list in an
+	// in-process-only payload field. Never fall back to workspace broadcasting;
+	// private-base revisions must not reveal that a base exists to other users.
+	bus.Subscribe(protocol.EventKnowledgeInvalidate, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		for _, recipientID := range knowledgeRecipientIDs(payload["recipient_ids"]) {
+			sendToRecipient(b, e, recipientID)
+		}
+	})
 
 	// inbox:new — extract recipient from nested item
 	bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
@@ -283,4 +299,32 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		}
 		// Otherwise drop — no global broadcast for non-daemon events without a workspace.
 	})
+}
+
+func knowledgeRecipientIDs(value any) []string {
+	result := make([]string, 0)
+	seen := make(map[string]struct{})
+	appendID := func(id string) {
+		if id == "" {
+			return
+		}
+		if _, exists := seen[id]; exists {
+			return
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	switch ids := value.(type) {
+	case []string:
+		for _, id := range ids {
+			appendID(id)
+		}
+	case []any:
+		for _, item := range ids {
+			if id, ok := item.(string); ok {
+				appendID(id)
+			}
+		}
+	}
+	return result
 }

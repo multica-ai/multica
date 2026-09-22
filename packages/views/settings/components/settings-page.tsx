@@ -18,9 +18,10 @@ import {
   Blocks,
   CreditCard,
   Server,
+  Library,
 } from "lucide-react";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { useFeatureEnabled } from "@multica/core/config";
+import { useConfigStore, useFeatureEnabled } from "@multica/core/config";
 import {
   BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
   PLUGINS_V1_FLAG,
@@ -44,6 +45,7 @@ import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 import { PluginsTab } from "./plugins-tab";
 import { McpTab } from "./mcp-tab";
 import { BillingTab } from "./billing-tab";
+import { KnowledgeModelSettingsTab } from "./knowledge-model-settings-tab";
 import { CollapsedNavTrigger } from "../../layout/page-header";
 import { useT } from "../../i18n";
 
@@ -71,6 +73,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
     false,
   );
+  const knowledgeEnabled = useConfigStore((state) => state.knowledgeEnabled);
   const entry = (
     value: string,
     label: string,
@@ -140,6 +143,16 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
                 t(($) => $.page.tabs.billing),
                 CreditCard,
                 <BillingTab />,
+              ),
+            ]
+          : []),
+        ...(knowledgeEnabled
+          ? [
+              entry(
+                "knowledge-model",
+                t(($) => $.page.tabs.knowledge_model),
+                Library,
+                <KnowledgeModelSettingsTab />,
               ),
             ]
           : []),

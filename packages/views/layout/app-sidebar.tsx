@@ -117,6 +117,8 @@ type NavKey =
   | "myIssues"
   | "issues"
   | "projects"
+  | "workflows"
+  | "knowledge"
   | "autopilots"
   | "agents"
   | "squads"
@@ -133,6 +135,8 @@ type NavLabelKey =
   | "my_issues"
   | "issues"
   | "projects"
+  | "workflows"
+  | "knowledge"
   | "autopilots"
   | "agents"
   | "squads"
@@ -153,6 +157,8 @@ const personalNav: { key: NavKey; labelKey: NavLabelKey }[] = [
 const workNav: { key: NavKey; labelKey: NavLabelKey }[] = [
   { key: "issues", labelKey: "issues" },
   { key: "projects", labelKey: "projects" },
+  { key: "workflows", labelKey: "workflows" },
+  { key: "knowledge", labelKey: "knowledge" },
   { key: "autopilots", labelKey: "autopilots" },
 ];
 
@@ -443,6 +449,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
   const { data: myInvitations = EMPTY_INVITATIONS } = useQuery(myInvitationListOptions());
   const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
+  const knowledgeEnabled = useConfigStore((s) => s.knowledgeEnabled);
 
   // On a phone the sidebar is a Sheet covering the page, so navigating out of
   // it has to dismiss it — otherwise the destination renders underneath and the
@@ -861,7 +868,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarGroupLabel>{t(($) => $.sidebar.work_group)}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {workNav.map((item) => {
+                {workNav.filter((item) => item.key !== "knowledge" || knowledgeEnabled).map((item) => {
                   const href = p[item.key]();
                   const Icon = routeIconForPath(href);
                   const isActive = !isActivePinnedRoute && isNavActive(pathname, href);

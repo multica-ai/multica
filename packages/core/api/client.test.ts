@@ -25,6 +25,42 @@ describe("ApiClient status reorder", () => {
   });
 });
 
+describe("ApiClient knowledge response compatibility", () => {
+  it("falls back to an empty base page when the knowledge payload is malformed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ bases: "not-an-array" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(new ApiClient("https://api.example.test").listKnowledgeBases()).resolves.toEqual({ bases: [] });
+  });
+
+  it("keeps a grounded safe answer shape when the nested response is malformed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ answer: "unvalidated" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test").answerKnowledge("base-1", { question: "question" }),
+    ).resolves.toMatchObject({
+      answer: "",
+      insufficient_evidence: true,
+      citations: [],
+      search: { results: [] },
+    });
+  });
+});
 describe("ApiClient agent conversation-starter compatibility", () => {
   const prompt = {
     label: "Review a PR",

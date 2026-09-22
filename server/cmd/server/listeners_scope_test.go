@@ -71,6 +71,44 @@ func TestRegisterListeners_ChatSessionTitleUpdateGoesOnlyToCreator(t *testing.T)
 	}
 }
 
+func TestRegisterListeners_KnowledgeInvalidationUsesExplicitRecipients(t *testing.T) {
+	bus := events.New()
+	fb := &fakeBroadcaster{}
+	registerListeners(bus, fb)
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventKnowledgeInvalidate,
+		WorkspaceID: "ws-1",
+		ActorType:   "system",
+		Payload: map[string]any{
+			"workspace_id":      "ws-1",
+			"knowledge_base_id": "base-1",
+			"revision":          int64(7),
+			"acl_revision":      int64(2),
+			"recipient_ids":     []string{"user-1", "user-2", "user-1"},
+		},
+	})
+
+	if len(fb.workspaceCalls) != 0 {
+		t.Fatalf("knowledge invalidation reached workspace fanout: %+v", fb.workspaceCalls)
+	}
+	if len(fb.userCalls) != 2 {
+		t.Fatalf("recipient fanout = %+v, want one call per explicit recipient", fb.userCalls)
+	}
+	var frame struct {
+		Payload map[string]any `json:"payload"`
+	}
+	if err := json.Unmarshal(fb.userCalls[0].msg, &frame); err != nil {
+		t.Fatalf("decode knowledge invalidation frame: %v", err)
+	}
+	if _, leaked := frame.Payload["recipient_ids"]; leaked {
+		t.Fatalf("recipient_ids leaked to WebSocket payload: %+v", frame.Payload)
+	}
+	if frame.Payload["knowledge_base_id"] != "base-1" || frame.Payload["revision"] != float64(7) {
+		t.Fatalf("projected payload = %+v", frame.Payload)
+	}
+}
+
 type scopeCall struct {
 	scopeType, scopeID string
 	msg                []byte

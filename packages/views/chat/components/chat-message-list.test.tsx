@@ -230,6 +230,35 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
     expect(screen.queryByText(/Hidden protocol/)).not.toBeInTheDocument();
   });
 
+  it("applies the content transform to settled direct replies too", async () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[
+              {
+                id: "assistant-direct",
+                chat_session_id: "session-direct",
+                role: "assistant",
+                content: "Draft ready.\n<agent_draft>Hidden protocol</agent_draft>",
+                task_id: null,
+                created_at: "2026-08-12T00:00:00Z",
+              },
+            ]}
+            pendingTask={null}
+            availability="online"
+            transformContent={(content) =>
+              content.replace(/<agent_draft>[\s\S]*?<\/agent_draft>/g, "")
+            }
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("Draft ready.")).toBeInTheDocument();
+    expect(screen.queryByText(/Hidden protocol/)).not.toBeInTheDocument();
+  });
+
   it("hides a partial quick-actions protocol footer while text streams", async () => {
     const qc = new QueryClient();
     qc.setQueryData(chatKeys.taskMessages(TASK_ID), [

@@ -3,6 +3,42 @@ import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue
 import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema } from "./schemas";
 import type { InboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
+import type { Workflow, WorkflowRun, WorkflowEvent, CreateWorkflowRequest, UpdateWorkflowRequest, StartWorkflowRunRequest, SendWorkflowChatMessageRequest, WorkflowCapabilities, WorkflowRelease, WorkflowValidationResult, WorkflowTemplate, StartWorkflowTestRunRequest, WorkflowWorkItem, SubmitWorkflowWorkItemRequest, WorkflowRunOwnerUpdateRequest, WorkflowNodeResolution, WorkflowRunNodeDetail, WorkflowUpgradeResult } from "../types/workflow";
+import type {
+  AnswerKnowledgeRequest,
+  CreateKnowledgeProviderRequest,
+  CreateKnowledgeBaseRequest,
+  KnowledgeAnswerResponse,
+  KnowledgeBase,
+  KnowledgeBaseListResponse,
+  KnowledgeChunk,
+  KnowledgeCreateDocumentResponse,
+  KnowledgeDocument,
+  KnowledgeDocumentListResponse,
+  KnowledgeEntityDetail,
+  KnowledgeEntityListResponse,
+  KnowledgeGraphEdit,
+  KnowledgeGraphResponse,
+  KnowledgeJob,
+  KnowledgeJobListResponse,
+  KnowledgeModelSettings,
+  KnowledgeModelSettingsRequest,
+  KnowledgeProvider,
+  KnowledgeProviderListResponse,
+  KnowledgeProviderModel,
+  KnowledgePreviewCapability,
+  ConfirmKnowledgeBlocksRequest,
+  KnowledgeRelationEvidenceResponse,
+  ReplaceKnowledgeVersionRequest,
+  KnowledgeSearchResponse,
+  KnowledgeVersionBlocksResponse,
+  KnowledgeVersionListResponse,
+  KnowledgeGraphEditListResponse,
+  SearchKnowledgeRequest,
+  UpdateKnowledgeBaseRequest,
+  UpdateKnowledgeProviderRequest,
+} from "../types/knowledge";
+import { WorkflowSchema, WorkflowListSchema, WorkflowRunSchema, WorkflowRunListSchema, WorkflowEventListSchema, WorkflowChatSessionSchema, WorkflowCapabilitiesSchema, WorkflowReleaseListSchema, WorkflowReleaseSchema, WorkflowValidationSchema, WorkflowUpgradeSchema, WorkflowTemplateListSchema, WorkflowTemplateSchema, WorkflowWorkItemSchema, WorkflowWorkItemListSchema, WorkflowRunNodeDetailSchema, workflowGraphToWire, parseWorkflowResponse } from "../workflows/schemas";
 import { configStore } from "../config";
 import type {
   Issue,
@@ -242,6 +278,46 @@ import { type Logger, noopLogger } from "../logger";
 import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
+import {
+  EMPTY_KNOWLEDGE_ANSWER,
+  EMPTY_KNOWLEDGE_BASE,
+  EMPTY_KNOWLEDGE_CHUNK,
+  EMPTY_KNOWLEDGE_CREATE_DOCUMENT,
+  EMPTY_KNOWLEDGE_DOCUMENT,
+  EMPTY_KNOWLEDGE_EDIT,
+  EMPTY_KNOWLEDGE_ENTITY,
+  EMPTY_KNOWLEDGE_JOB,
+  EMPTY_KNOWLEDGE_PREVIEW_CAPABILITY,
+  EMPTY_KNOWLEDGE_PROVIDER,
+  EMPTY_KNOWLEDGE_SEARCH,
+  EMPTY_KNOWLEDGE_SETTINGS,
+  EMPTY_KNOWLEDGE_VERSION_BLOCKS,
+  KnowledgeAnswerSchema,
+  KnowledgeBaseListSchema,
+  KnowledgeBaseSchema,
+  KnowledgeBlocksSchema,
+  KnowledgeChunkSchema,
+  KnowledgeCreateDocumentSchema,
+  KnowledgeDocumentListSchema,
+  KnowledgeDocumentSchema,
+  KnowledgeEntityDetailSchema,
+  KnowledgeEntityListSchema,
+  KnowledgeGraphEditListSchema,
+  KnowledgeGraphEditSchema,
+  KnowledgeGraphSchema,
+  KnowledgeIndexSchema,
+  KnowledgeJobListSchema,
+  KnowledgeJobSchema,
+  KnowledgeModelSettingsSchema,
+  KnowledgePreviewCapabilitySchema,
+  KnowledgeProviderListSchema,
+  KnowledgeProviderModelsSchema,
+  KnowledgeProviderSchema,
+  KnowledgeProviderTestSchema,
+  KnowledgeRelationEvidenceSchema,
+  KnowledgeSearchSchema,
+  KnowledgeVersionListSchema,
+} from "./knowledge-schemas";
 import {
   RuntimeProfileSchema,
   RuntimeProfileListSchema,
@@ -941,10 +1017,16 @@ export class ApiClient {
     return res;
   }
 
-  private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
+  private async fetch<T>(
+    path: string,
+    init?: RequestInit & { extraHeaders?: Record<string, string> },
+  ): Promise<T> {
     const res = await this.fetchRaw(path, {
       ...init,
-      extraHeaders: { "Content-Type": "application/json" },
+      extraHeaders: {
+        "Content-Type": "application/json",
+        ...(init?.extraHeaders ?? {}),
+      },
     });
     // Handle 204 No Content
     if (res.status === 204) {
@@ -2861,6 +2943,361 @@ export class ApiClient {
     });
   }
 
+  // Independent knowledge base API. Workspace identity is carried by the
+  // current workspace slug header; the workspace UUID is kept in React Query
+  // keys by callers so a tab switch cannot reuse another workspace's cache.
+  async listKnowledgeBases(limit?: number, cursor?: string): Promise<KnowledgeBaseListResponse> {
+    const search = new URLSearchParams();
+    if (limit !== undefined) search.set("limit", String(limit));
+    if (cursor) search.set("cursor", cursor);
+    const suffix = search.toString() ? `?${search.toString()}` : "";
+    const raw = await this.fetch<unknown>(`/api/knowledge/bases${suffix}`);
+    return parseWithFallback(raw, KnowledgeBaseListSchema, { bases: [] }, { endpoint: `GET /api/knowledge/bases${suffix}` });
+  }
+
+  async getKnowledgeBase(baseId: string): Promise<KnowledgeBase> {
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}`;
+    const raw = await this.fetch<unknown>(endpoint);
+    return parseWithFallback(raw, KnowledgeBaseSchema, EMPTY_KNOWLEDGE_BASE, { endpoint: `GET ${endpoint}` });
+  }
+
+  async createKnowledgeBase(data: CreateKnowledgeBaseRequest, idempotencyKey = createSafeId()): Promise<KnowledgeBase> {
+    const raw = await this.fetch<unknown>("/api/knowledge/bases", {
+      method: "POST",
+      body: JSON.stringify(data),
+      extraHeaders: { "Idempotency-Key": idempotencyKey },
+    });
+    return parseWithFallback(raw, KnowledgeBaseSchema, EMPTY_KNOWLEDGE_BASE, { endpoint: "POST /api/knowledge/bases" });
+  }
+
+  async updateKnowledgeBase(baseId: string, data: UpdateKnowledgeBaseRequest): Promise<KnowledgeBase> {
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}`;
+    const raw = await this.fetch<unknown>(endpoint, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, KnowledgeBaseSchema, EMPTY_KNOWLEDGE_BASE, { endpoint: `PATCH ${endpoint}` });
+  }
+
+  async deleteKnowledgeBase(baseId: string, expectedRevision: number): Promise<void> {
+    await this.fetch(`/api/knowledge/bases/${encodeURIComponent(baseId)}?expected_revision=${encodeURIComponent(String(expectedRevision))}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listKnowledgeDocuments(baseId: string, limit?: number, cursor?: string): Promise<KnowledgeDocumentListResponse> {
+    const search = new URLSearchParams();
+    if (limit !== undefined) search.set("limit", String(limit));
+    if (cursor) search.set("cursor", cursor);
+    const suffix = search.toString() ? `?${search.toString()}` : "";
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/documents${suffix}`;
+    const raw = await this.fetch<unknown>(endpoint);
+    return parseWithFallback(raw, KnowledgeDocumentListSchema, { documents: [] }, { endpoint: `GET ${endpoint}` });
+  }
+
+  async getKnowledgeDocument(baseId: string, documentId: string): Promise<KnowledgeDocument> {
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/documents/${encodeURIComponent(documentId)}`;
+    const raw = await this.fetch<unknown>(endpoint);
+    return parseWithFallback(raw, KnowledgeDocumentSchema, EMPTY_KNOWLEDGE_DOCUMENT, { endpoint: `GET ${endpoint}` });
+  }
+
+  async listKnowledgeVersions(baseId: string, documentId: string, limit?: number, cursor?: string): Promise<KnowledgeVersionListResponse> {
+    const search = new URLSearchParams();
+    if (limit !== undefined) search.set("limit", String(limit));
+    if (cursor) search.set("cursor", cursor);
+    const suffix = search.toString() ? `?${search.toString()}` : "";
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/documents/${encodeURIComponent(documentId)}/versions${suffix}`;
+    const raw = await this.fetch<unknown>(endpoint);
+    return parseWithFallback(raw, KnowledgeVersionListSchema, { versions: [] }, { endpoint: `GET ${endpoint}` });
+  }
+
+  async replaceKnowledgeFile(baseId: string, documentId: string, file: File, expectedRevision: number, idempotencyKey = createSafeId()): Promise<KnowledgeCreateDocumentResponse> {
+    const form = new FormData();
+    form.set("file", file);
+    form.set("expected_revision", String(expectedRevision));
+    const response = await this.fetchRaw(`/api/knowledge/bases/${encodeURIComponent(baseId)}/documents/${encodeURIComponent(documentId)}/versions`, {
+      method: "POST",
+      body: form,
+      extraHeaders: { "Idempotency-Key": idempotencyKey },
+    });
+    const raw = await response.json() as unknown;
+    return parseWithFallback(raw, KnowledgeCreateDocumentSchema, EMPTY_KNOWLEDGE_CREATE_DOCUMENT, {
+      endpoint: "POST /api/knowledge/bases/:baseId/documents/:documentId/versions",
+    });
+  }
+
+  async replaceKnowledgeURL(baseId: string, documentId: string, data: ReplaceKnowledgeVersionRequest, idempotencyKey = createSafeId()): Promise<KnowledgeCreateDocumentResponse> {
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/documents/${encodeURIComponent(documentId)}/versions`;
+    const raw = await this.fetch<unknown>(endpoint, {
+      method: "POST",
+      body: JSON.stringify(data),
+      extraHeaders: { "Idempotency-Key": idempotencyKey },
+    });
+    return parseWithFallback(raw, KnowledgeCreateDocumentSchema, EMPTY_KNOWLEDGE_CREATE_DOCUMENT, { endpoint: `POST ${endpoint}` });
+  }
+
+  async listKnowledgeBlocks(baseId: string, documentId: string, versionId: string, params?: { cursor?: string; limit?: number }): Promise<KnowledgeVersionBlocksResponse> {
+    const search = new URLSearchParams();
+    if (params?.cursor) search.set("cursor", params.cursor);
+    if (params?.limit !== undefined) search.set("limit", String(params.limit));
+    const suffix = search.toString() ? `?${search.toString()}` : "";
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(versionId)}/blocks${suffix}`;
+    const raw = await this.fetch<unknown>(endpoint);
+    return parseWithFallback(raw, KnowledgeBlocksSchema, EMPTY_KNOWLEDGE_VERSION_BLOCKS, { endpoint: `GET ${endpoint}` });
+  }
+
+  async confirmKnowledgeBlocks(baseId: string, documentId: string, data: ConfirmKnowledgeBlocksRequest, idempotencyKey = createSafeId()): Promise<KnowledgeCreateDocumentResponse> {
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/documents/${encodeURIComponent(documentId)}/confirm-blocks`;
+    const raw = await this.fetch<unknown>(endpoint, {
+      method: "POST",
+      body: JSON.stringify(data),
+      extraHeaders: { "Idempotency-Key": idempotencyKey },
+    });
+    return parseWithFallback(raw, KnowledgeCreateDocumentSchema, EMPTY_KNOWLEDGE_CREATE_DOCUMENT, { endpoint: `POST ${endpoint}` });
+  }
+
+  async getKnowledgeVersionContent(baseId: string, documentId: string, versionId: string): Promise<Blob> {
+    const response = await this.fetchRaw(`/api/knowledge/bases/${encodeURIComponent(baseId)}/documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(versionId)}/content`);
+    return response.blob();
+  }
+
+  async issueKnowledgePreviewCapability(baseId: string, documentId: string, versionId: string, idempotencyKey = createSafeId()): Promise<KnowledgePreviewCapability> {
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(versionId)}/preview-capability`;
+    const raw = await this.fetch<unknown>(endpoint, {
+      method: "POST",
+      extraHeaders: { "Idempotency-Key": idempotencyKey },
+    });
+    return parseWithFallback(raw, KnowledgePreviewCapabilitySchema, EMPTY_KNOWLEDGE_PREVIEW_CAPABILITY, { endpoint: `POST ${endpoint}` });
+  }
+
+  async redeemKnowledgePreview(versionId: string, capability: string): Promise<Blob> {
+    const search = new URLSearchParams({ capability });
+    const response = await this.fetchRaw(`/api/knowledge/previews/${encodeURIComponent(versionId)}?${search.toString()}`);
+    return response.blob();
+  }
+
+  async getKnowledgeChunk(baseId: string, chunkId: string): Promise<KnowledgeChunk> {
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/chunks/${encodeURIComponent(chunkId)}`;
+    const raw = await this.fetch<unknown>(endpoint);
+    return parseWithFallback(raw, KnowledgeChunkSchema, EMPTY_KNOWLEDGE_CHUNK, { endpoint: `GET ${endpoint}` });
+  }
+
+  async uploadKnowledgeFile(baseId: string, file: File, title?: string, tags?: string[], idempotencyKey = createSafeId()): Promise<KnowledgeCreateDocumentResponse> {
+    const form = new FormData();
+    form.set("file", file);
+    if (title?.trim()) form.set("title", title.trim());
+    if (tags?.length) form.set("tags", tags.join(","));
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/documents/files`;
+    const response = await this.fetchRaw(endpoint, {
+      method: "POST",
+      body: form,
+      extraHeaders: { "Idempotency-Key": idempotencyKey },
+    });
+    const raw = await response.json() as unknown;
+    return parseWithFallback(raw, KnowledgeCreateDocumentSchema, EMPTY_KNOWLEDGE_CREATE_DOCUMENT, { endpoint: `POST ${endpoint}` });
+  }
+
+  async createKnowledgeURL(baseId: string, data: { url: string; title?: string; tags?: string[]; metadata?: Record<string, unknown> }, idempotencyKey = createSafeId()): Promise<KnowledgeCreateDocumentResponse> {
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/documents/urls`;
+    const raw = await this.fetch<unknown>(endpoint, {
+      method: "POST",
+      body: JSON.stringify(data),
+      extraHeaders: { "Idempotency-Key": idempotencyKey },
+    });
+    return parseWithFallback(raw, KnowledgeCreateDocumentSchema, EMPTY_KNOWLEDGE_CREATE_DOCUMENT, { endpoint: `POST ${endpoint}` });
+  }
+
+  async updateKnowledgeDocument(baseId: string, documentId: string, data: { title?: string; tags?: string[]; expected_revision: number }): Promise<KnowledgeDocument> {
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/documents/${encodeURIComponent(documentId)}`;
+    const raw = await this.fetch<unknown>(endpoint, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, KnowledgeDocumentSchema, EMPTY_KNOWLEDGE_DOCUMENT, { endpoint: `PATCH ${endpoint}` });
+  }
+
+  async deleteKnowledgeDocument(baseId: string, documentId: string, expectedRevision: number): Promise<void> {
+    await this.fetch(`/api/knowledge/bases/${encodeURIComponent(baseId)}/documents/${encodeURIComponent(documentId)}?expected_revision=${encodeURIComponent(String(expectedRevision))}`, {
+      method: "DELETE",
+    });
+  }
+
+  async reprocessKnowledgeDocument(baseId: string, documentId: string, stage?: string, idempotencyKey = createSafeId()): Promise<KnowledgeJob> {
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/documents/${encodeURIComponent(documentId)}/reprocess`;
+    const raw = await this.fetch<unknown>(endpoint, {
+      method: "POST",
+      body: JSON.stringify({ stage }),
+      extraHeaders: { "Idempotency-Key": idempotencyKey },
+    });
+    return parseWithFallback(raw, KnowledgeJobSchema, EMPTY_KNOWLEDGE_JOB, { endpoint: `POST ${endpoint}` });
+  }
+
+  async cancelKnowledgeJob(baseId: string, jobId: string, idempotencyKey = createSafeId()): Promise<void> {
+    await this.fetch(`/api/knowledge/bases/${encodeURIComponent(baseId)}/jobs/${encodeURIComponent(jobId)}/cancel`, {
+      method: "POST",
+      extraHeaders: { "Idempotency-Key": idempotencyKey },
+    });
+  }
+
+  async listKnowledgeJobs(baseId: string, limit?: number, cursor?: string): Promise<KnowledgeJobListResponse> {
+    const search = new URLSearchParams();
+    if (limit !== undefined) search.set("limit", String(limit));
+    if (cursor) search.set("cursor", cursor);
+    const suffix = search.toString() ? `?${search.toString()}` : "";
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/jobs${suffix}`;
+    const raw = await this.fetch<unknown>(endpoint);
+    return parseWithFallback(raw, KnowledgeJobListSchema, { jobs: [] }, { endpoint: `GET ${endpoint}` });
+  }
+
+  async createKnowledgeIndex(baseId: string, idempotencyKey = createSafeId()): Promise<{ index_id: string; job?: KnowledgeJob; dimension: number }> {
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/indexes`;
+    const raw = await this.fetch<unknown>(endpoint, { method: "POST", extraHeaders: { "Idempotency-Key": idempotencyKey } });
+    return parseWithFallback(raw, KnowledgeIndexSchema, { index_id: "", dimension: 0 }, { endpoint: `POST ${endpoint}` });
+  }
+
+  async searchKnowledge(baseId: string, data: SearchKnowledgeRequest): Promise<KnowledgeSearchResponse> {
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/search`;
+    const raw = await this.fetch<unknown>(endpoint, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, KnowledgeSearchSchema, EMPTY_KNOWLEDGE_SEARCH, { endpoint: `POST ${endpoint}` });
+  }
+
+  async answerKnowledge(baseId: string, data: AnswerKnowledgeRequest, idempotencyKey = createSafeId()): Promise<KnowledgeAnswerResponse> {
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/answers`;
+    const raw = await this.fetch<unknown>(endpoint, {
+      method: "POST",
+      body: JSON.stringify(data),
+      extraHeaders: { "Idempotency-Key": idempotencyKey },
+    });
+    return parseWithFallback(raw, KnowledgeAnswerSchema, EMPTY_KNOWLEDGE_ANSWER, { endpoint: `POST ${endpoint}` });
+  }
+
+  async listKnowledgeEntities(baseId: string, query?: string, entityType?: string, limit?: number, cursor?: string): Promise<KnowledgeEntityListResponse> {
+    const search = new URLSearchParams();
+    if (query?.trim()) search.set("query", query.trim());
+    if (entityType?.trim()) search.set("type", entityType.trim());
+    if (limit !== undefined) search.set("limit", String(limit));
+    if (cursor) search.set("cursor", cursor);
+    const suffix = search.toString() ? `?${search.toString()}` : "";
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/entities${suffix}`;
+    const raw = await this.fetch<unknown>(endpoint);
+    return parseWithFallback(raw, KnowledgeEntityListSchema, { entities: [] }, { endpoint: `GET ${endpoint}` });
+  }
+
+  async getKnowledgeEntity(baseId: string, entityId: string): Promise<KnowledgeEntityDetail> {
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/entities/${encodeURIComponent(entityId)}`;
+    const raw = await this.fetch<unknown>(endpoint);
+    return parseWithFallback(raw, KnowledgeEntityDetailSchema, { entity: EMPTY_KNOWLEDGE_ENTITY, evidence: [] }, { endpoint: `GET ${endpoint}` });
+  }
+
+  async getKnowledgeGraph(baseId: string, params?: { entityId?: string; depth?: number; predicate?: string; documentId?: string; nodeLimit?: number }): Promise<KnowledgeGraphResponse> {
+    const search = new URLSearchParams();
+    if (params?.entityId?.trim()) search.set("entity_id", params.entityId.trim());
+    if (params?.depth !== undefined) search.set("depth", String(params.depth));
+    if (params?.predicate?.trim()) search.set("predicate", params.predicate.trim());
+    if (params?.documentId?.trim()) search.set("document_id", params.documentId.trim());
+    if (params?.nodeLimit !== undefined) search.set("node_limit", String(params.nodeLimit));
+    const suffix = search.toString() ? `?${search.toString()}` : "";
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/graph${suffix}`;
+    const raw = await this.fetch<unknown>(endpoint);
+    return parseWithFallback(raw, KnowledgeGraphSchema, { nodes: [], relations: [], truncated: false, node_count: 0, edge_count: 0 }, { endpoint: `GET ${endpoint}` });
+  }
+
+  async getKnowledgeRelationEvidence(baseId: string, relationId: string): Promise<KnowledgeRelationEvidenceResponse> {
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/relations/${encodeURIComponent(relationId)}/evidence`;
+    const raw = await this.fetch<unknown>(endpoint);
+    return parseWithFallback(raw, KnowledgeRelationEvidenceSchema, { evidence: [] }, { endpoint: `GET ${endpoint}` });
+  }
+
+  async applyKnowledgeGraphEdit(baseId: string, data: { operation: string; targetId: string; payload: Record<string, unknown>; expectedRevision: number }, idempotencyKey = createSafeId()): Promise<KnowledgeGraphEdit> {
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/graph/edits`;
+    const raw = await this.fetch<unknown>(endpoint, {
+      method: "POST",
+      body: JSON.stringify({ operation: data.operation, target_id: data.targetId, payload: data.payload, expected_revision: data.expectedRevision }),
+      extraHeaders: { "Idempotency-Key": idempotencyKey },
+    });
+    return parseWithFallback(raw, KnowledgeGraphEditSchema, EMPTY_KNOWLEDGE_EDIT, { endpoint: `POST ${endpoint}` });
+  }
+
+  async revertKnowledgeGraphEdit(baseId: string, editId: string, idempotencyKey = createSafeId()): Promise<KnowledgeGraphEdit> {
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/graph/edits/${encodeURIComponent(editId)}/revert`;
+    const raw = await this.fetch<unknown>(endpoint, {
+      method: "POST",
+      extraHeaders: { "Idempotency-Key": idempotencyKey },
+    });
+    return parseWithFallback(raw, KnowledgeGraphEditSchema, EMPTY_KNOWLEDGE_EDIT, { endpoint: `POST ${endpoint}` });
+  }
+
+  async getKnowledgeModelSettings(): Promise<KnowledgeModelSettings> {
+    const raw = await this.fetch<unknown>("/api/knowledge/model-settings");
+    return parseWithFallback(raw, KnowledgeModelSettingsSchema, EMPTY_KNOWLEDGE_SETTINGS, { endpoint: "GET /api/knowledge/model-settings" });
+  }
+
+  async getKnowledgeBaseModelSettings(baseId: string): Promise<KnowledgeModelSettings> {
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/model-settings`;
+    const raw = await this.fetch<unknown>(endpoint);
+    return parseWithFallback(raw, KnowledgeModelSettingsSchema, EMPTY_KNOWLEDGE_SETTINGS, { endpoint: `GET ${endpoint}` });
+  }
+
+  async putKnowledgeModelSettings(data: KnowledgeModelSettingsRequest): Promise<KnowledgeModelSettings> {
+    const raw = await this.fetch<unknown>("/api/knowledge/model-settings", { method: "PUT", body: JSON.stringify(data) });
+    return parseWithFallback(raw, KnowledgeModelSettingsSchema, EMPTY_KNOWLEDGE_SETTINGS, { endpoint: "PUT /api/knowledge/model-settings" });
+  }
+
+  async putKnowledgeBaseModelSettings(baseId: string, data: KnowledgeModelSettingsRequest): Promise<KnowledgeModelSettings> {
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/model-settings`;
+    const raw = await this.fetch<unknown>(endpoint, { method: "PUT", body: JSON.stringify(data) });
+    return parseWithFallback(raw, KnowledgeModelSettingsSchema, EMPTY_KNOWLEDGE_SETTINGS, { endpoint: `PUT ${endpoint}` });
+  }
+
+  async createKnowledgeProvider(data: CreateKnowledgeProviderRequest, idempotencyKey = createSafeId()): Promise<KnowledgeProvider> {
+    const raw = await this.fetch<unknown>("/api/knowledge/providers", { method: "POST", body: JSON.stringify(data), extraHeaders: { "Idempotency-Key": idempotencyKey } });
+    return parseWithFallback(raw, KnowledgeProviderSchema, EMPTY_KNOWLEDGE_PROVIDER, { endpoint: "POST /api/knowledge/providers" });
+  }
+
+  async updateKnowledgeProvider(providerId: string, data: UpdateKnowledgeProviderRequest): Promise<KnowledgeProvider> {
+    const endpoint = `/api/knowledge/providers/${encodeURIComponent(providerId)}`;
+    const raw = await this.fetch<unknown>(endpoint, { method: "PATCH", body: JSON.stringify(data) });
+    return parseWithFallback(raw, KnowledgeProviderSchema, EMPTY_KNOWLEDGE_PROVIDER, { endpoint: `PATCH ${endpoint}` });
+  }
+
+  async deleteKnowledgeProvider(providerId: string): Promise<void> {
+    await this.fetch(`/api/knowledge/providers/${encodeURIComponent(providerId)}`, { method: "DELETE" });
+  }
+
+  async testKnowledgeProvider(data: { provider_id?: string; base_url?: string; protocol?: string; api_key?: string; model: string; capability?: string }, idempotencyKey = createSafeId()): Promise<{ status: string; capability: string; model: string; dimension?: number; details?: Record<string, unknown> }> {
+    const raw = await this.fetch<unknown>("/api/knowledge/provider-tests", { method: "POST", body: JSON.stringify(data), extraHeaders: { "Idempotency-Key": idempotencyKey } });
+    return parseWithFallback(raw, KnowledgeProviderTestSchema, { status: "failed", capability: "", model: "", details: {} }, { endpoint: "POST /api/knowledge/provider-tests" });
+  }
+
+  async listKnowledgeProviders(limit?: number, cursor?: string): Promise<KnowledgeProviderListResponse> {
+    const search = new URLSearchParams();
+    if (limit !== undefined) search.set("limit", String(limit));
+    if (cursor) search.set("cursor", cursor);
+    const suffix = search.toString() ? `?${search.toString()}` : "";
+    const endpoint = `/api/knowledge/providers${suffix}`;
+    const raw = await this.fetch<unknown>(endpoint);
+    return parseWithFallback(raw, KnowledgeProviderListSchema, { providers: [] }, { endpoint: `GET ${endpoint}` });
+  }
+
+  async listKnowledgeProviderModels(providerId: string): Promise<{ models: KnowledgeProviderModel[] }> {
+    const endpoint = `/api/knowledge/providers/${encodeURIComponent(providerId)}/models`;
+    const raw = await this.fetch<unknown>(endpoint);
+    return parseWithFallback(raw, KnowledgeProviderModelsSchema, { models: [] }, { endpoint: `GET ${endpoint}` });
+  }
+
+  async listKnowledgeGraphEdits(baseId: string, limit?: number, cursor?: string): Promise<KnowledgeGraphEditListResponse> {
+    const search = new URLSearchParams();
+    if (limit !== undefined) search.set("limit", String(limit));
+    if (cursor) search.set("cursor", cursor);
+    const suffix = search.toString() ? `?${search.toString()}` : "";
+    const endpoint = `/api/knowledge/bases/${encodeURIComponent(baseId)}/graph/edits${suffix}`;
+    const raw = await this.fetch<unknown>(endpoint);
+    return parseWithFallback(raw, KnowledgeGraphEditListSchema, { edits: [] }, { endpoint: `GET ${endpoint}` });
+  }
+
   // Workspaces
   async listWorkspaces(): Promise<Workspace[]> {
     return this.fetch("/api/workspaces");
@@ -3871,6 +4308,203 @@ export class ApiClient {
   async getAttachmentBlob(id: string): Promise<Blob> {
     const res = await this.fetchRaw(`/api/attachments/${id}/download`);
     return res.blob();
+  }
+
+  // Workflow requests pin the workspace so tab switches cannot redirect writes.
+  async listWorkflows(wsId: string): Promise<{ workflows: Workflow[] }> {
+    const raw = await this.fetch<unknown>("/api/workflows", { headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" } });
+    return parseWorkflowResponse(raw, WorkflowListSchema, "GET /api/workflows");
+  }
+
+  async getWorkflow(wsId: string, id: string): Promise<Workflow> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}`, { headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" } });
+    return parseWorkflowResponse(raw, WorkflowSchema, "GET /api/workflows/{id}");
+  }
+
+  async createWorkflow(wsId: string, data: CreateWorkflowRequest): Promise<Workflow> {
+    const idempotencyKey = data.idempotencyKey ?? createSafeId();
+    const raw = await this.fetch<unknown>("/api/workflows", { method: "POST", headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" }, body: JSON.stringify({ name: data.name, description: data.description, template_id: data.templateId, graph: data.graph ? workflowGraphToWire(data.graph) : undefined, idempotency_key: idempotencyKey }) });
+    return parseWorkflowResponse(raw, WorkflowSchema, "POST /api/workflows");
+  }
+
+  async listWorkflowTemplates(wsId: string): Promise<{ templates: WorkflowTemplate[] }> {
+    const raw = await this.fetch<unknown>("/api/workflows/templates", { headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" } });
+    return parseWorkflowResponse(raw, WorkflowTemplateListSchema, "GET /api/workflows/templates");
+  }
+
+  async getWorkflowTemplate(wsId: string, templateId: string): Promise<WorkflowTemplate> {
+    const raw = await this.fetch<unknown>(`/api/workflows/templates/${encodeURIComponent(templateId)}`, { headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" } });
+    return parseWorkflowResponse(raw, WorkflowTemplateSchema, "GET /api/workflows/templates/{templateId}");
+  }
+
+  async updateWorkflow(wsId: string, id: string, data: UpdateWorkflowRequest): Promise<Workflow> {
+    const idempotencyKey = data.idempotencyKey ?? createSafeId();
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" }, body: JSON.stringify({ name: data.name, description: data.description, graph: workflowGraphToWire(data.graph), expected_revision: data.expectedRevision, idempotency_key: idempotencyKey }) });
+    return parseWorkflowResponse(raw, WorkflowSchema, "PATCH /api/workflows/{id}");
+  }
+
+  async deleteWorkflow(wsId: string, id: string, idempotencyKey = createSafeId()): Promise<void> {
+    await this.fetch(`/api/workflows/${encodeURIComponent(id)}`, { method: "DELETE", headers: { "X-Workspace-ID": wsId }, body: JSON.stringify({ idempotency_key: idempotencyKey }) });
+  }
+
+  async changeWorkflowHistory(wsId: string, id: string, direction: "undo" | "redo", expectedRevision: number, idempotencyKey?: string): Promise<Workflow> {
+    const key = idempotencyKey ?? createSafeId();
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/${direction}`, { method: "POST", headers: { "X-Workspace-ID": wsId }, body: JSON.stringify({ expected_revision: expectedRevision, idempotency_key: key }) });
+    return parseWorkflowResponse(raw, WorkflowSchema, "POST /api/workflows/{id}/history");
+  }
+
+  async listWorkflowRuns(wsId: string, id: string): Promise<{ runs: WorkflowRun[] }> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/runs`, { headers: { "X-Workspace-ID": wsId } });
+    return parseWorkflowResponse(raw, WorkflowRunListSchema, "GET /api/workflows/{id}/runs");
+  }
+
+  async getWorkflowRun(wsId: string, id: string, runId: string): Promise<WorkflowRun> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}`, { headers: { "X-Workspace-ID": wsId } });
+    return parseWorkflowResponse(raw, WorkflowRunSchema, "GET /api/workflows/{id}/runs/{runId}");
+  }
+
+  async getWorkflowRunNode(wsId: string, id: string, runId: string, nodeIdOrActivationId: string): Promise<WorkflowRunNodeDetail> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeIdOrActivationId)}`, { headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" } });
+    return parseWorkflowResponse(raw, WorkflowRunNodeDetailSchema, "GET /api/workflows/{id}/runs/{runId}/nodes/{activationId}");
+  }
+
+  async listWorkflowRunEvents(wsId: string, id: string, runId: string, options?: { afterSequence?: number; limit?: number }): Promise<{ events: WorkflowEvent[]; nextAfterSequence: number }> {
+    const query = new URLSearchParams();
+    if (options?.afterSequence !== undefined) query.set("after_sequence", String(options.afterSequence));
+    if (options?.limit !== undefined) query.set("limit", String(options.limit));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/events${suffix}`, { headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" } });
+    return parseWorkflowResponse(raw, WorkflowEventListSchema, "GET /api/workflows/{id}/runs/{runId}/events");
+  }
+
+  async updateWorkflowRun(wsId: string, id: string, runId: string, data: WorkflowRunOwnerUpdateRequest): Promise<WorkflowRun> {
+    const idempotencyKey = data.idempotencyKey ?? createSafeId();
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}`, { method: "PATCH", headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" }, body: JSON.stringify({ expected_state_revision: data.expectedStateRevision, owner_id: data.ownerId, reason: data.reason, idempotency_key: idempotencyKey }) });
+    return parseWorkflowResponse(raw, WorkflowRunSchema, "PATCH /api/workflows/{id}/runs/{runId}");
+  }
+
+  async startWorkflowRun(wsId: string, id: string, data: StartWorkflowRunRequest): Promise<WorkflowRun> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/runs`, { method: "POST", headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" }, body: JSON.stringify({ input: data.input, input_values: data.inputValues, expected_revision: data.expectedRevision, idempotency_key: data.idempotencyKey, release_id: data.releaseId }) });
+    return parseWorkflowResponse(raw, WorkflowRunSchema, "POST /api/workflows/{id}/runs");
+  }
+
+  async startWorkflowTestRun(wsId: string, id: string, data: StartWorkflowTestRunRequest): Promise<WorkflowRun> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/test-runs`, { method: "POST", headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" }, body: JSON.stringify({ mode: data.mode, input_values: data.inputValues, draft_revision: data.draftRevision, idempotency_key: data.idempotencyKey, simulation_fixtures: data.fixtures }) });
+    return parseWorkflowResponse(raw, WorkflowRunSchema, "POST /api/workflows/{id}/test-runs");
+  }
+
+  async getWorkflowCapabilities(wsId: string): Promise<WorkflowCapabilities> {
+    const raw = await this.fetch<unknown>("/api/workflows/capabilities", { headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" } });
+    return parseWorkflowResponse(raw, WorkflowCapabilitiesSchema, "GET /api/workflows/capabilities");
+  }
+
+  async validateWorkflow(wsId: string, id: string, data: { expectedRevision: number; target?: "publish" | "test" }): Promise<WorkflowValidationResult> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/validate`, { method: "POST", headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" }, body: JSON.stringify({ expected_revision: data.expectedRevision, target: data.target ?? "publish" }) });
+    return parseWorkflowResponse(raw, WorkflowValidationSchema, "POST /api/workflows/{id}/validate");
+  }
+
+  async previewWorkflowUpgrade(wsId: string, id: string): Promise<WorkflowUpgradeResult> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/upgrade-preview`, { headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" } });
+    return parseWorkflowResponse(raw, WorkflowUpgradeSchema, "GET /api/workflows/{id}/upgrade-preview");
+  }
+
+  async upgradeWorkflow(wsId: string, id: string, expectedRevision: number, idempotencyKey = createSafeId()): Promise<Workflow> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/upgrade`, { method: "POST", headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" }, body: JSON.stringify({ expected_revision: expectedRevision, idempotency_key: idempotencyKey }) });
+    return parseWorkflowResponse(raw, WorkflowSchema, "POST /api/workflows/{id}/upgrade");
+  }
+
+  async listWorkflowReleases(wsId: string, id: string): Promise<{ releases: WorkflowRelease[] }> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/releases`, { headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" } });
+    return parseWorkflowResponse(raw, WorkflowReleaseListSchema, "GET /api/workflows/{id}/releases");
+  }
+
+  async publishWorkflow(wsId: string, id: string, data: { expectedRevision: number; notes?: string; idempotencyKey: string }): Promise<WorkflowRelease> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/releases`, { method: "POST", headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" }, body: JSON.stringify({ expected_revision: data.expectedRevision, notes: data.notes, idempotency_key: data.idempotencyKey }) });
+    return parseWorkflowResponse(raw, WorkflowReleaseSchema, "POST /api/workflows/{id}/releases");
+  }
+
+  async activateWorkflowRelease(wsId: string, id: string, releaseId: string, expectedRevision: number, idempotencyKey = createSafeId()): Promise<Workflow> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/releases/${encodeURIComponent(releaseId)}/activate`, { method: "POST", headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" }, body: JSON.stringify({ expected_revision: expectedRevision, idempotency_key: idempotencyKey }) });
+    return parseWorkflowResponse(raw, WorkflowSchema, "POST /api/workflows/{id}/releases/{releaseId}/activate");
+  }
+
+  async copyWorkflowReleaseToDraft(wsId: string, id: string, releaseId: string, expectedRevision: number, idempotencyKey = createSafeId()): Promise<Workflow> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/releases/${encodeURIComponent(releaseId)}/copy-to-draft`, { method: "POST", headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" }, body: JSON.stringify({ expected_revision: expectedRevision, idempotency_key: idempotencyKey }) });
+    return parseWorkflowResponse(raw, WorkflowSchema, "POST /api/workflows/{id}/releases/{releaseId}/copy-to-draft");
+  }
+
+  async archiveWorkflow(wsId: string, id: string, expectedRevision: number, archived: boolean, idempotencyKey = createSafeId()): Promise<Workflow> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/archive`, { method: "POST", headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" }, body: JSON.stringify({ expected_revision: expectedRevision, archived, idempotency_key: idempotencyKey }) });
+    return parseWorkflowResponse(raw, WorkflowSchema, "POST /api/workflows/{id}/archive");
+  }
+
+  async cancelWorkflowRun(wsId: string, id: string, runId: string, expectedStateRevision?: number, idempotencyKey?: string): Promise<WorkflowRun> {
+    const key = idempotencyKey ?? createSafeId();
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST", headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" }, body: JSON.stringify({ expected_state_revision: expectedStateRevision, idempotency_key: key }) });
+    return parseWorkflowResponse(raw, WorkflowRunSchema, "POST /api/workflows/{id}/runs/{runId}/cancel");
+  }
+
+  async terminateWorkflowRun(wsId: string, id: string, runId: string, data: { expectedStateRevision?: number; reason?: string; idempotencyKey?: string }): Promise<WorkflowRun> {
+    const idempotencyKey = data.idempotencyKey ?? createSafeId();
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/terminate`, { method: "POST", headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" }, body: JSON.stringify({ expected_state_revision: data.expectedStateRevision, reason: data.reason, idempotency_key: idempotencyKey }) });
+    return parseWorkflowResponse(raw, WorkflowRunSchema, "POST /api/workflows/{id}/runs/{runId}/terminate");
+  }
+
+  async retryWorkflowNode(wsId: string, id: string, runId: string, nodeId: string, expectedStateRevision?: number, idempotencyKey?: string): Promise<WorkflowRun> {
+    const key = idempotencyKey ?? createSafeId();
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/retry`, { method: "POST", headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" }, body: JSON.stringify({ expected_state_revision: expectedStateRevision, idempotency_key: key }) });
+    return parseWorkflowResponse(raw, WorkflowRunSchema, "POST /api/workflows/{id}/runs/{runId}/nodes/{nodeId}/retry");
+  }
+
+  async takeoverWorkflowNode(wsId: string, id: string, runId: string, nodeId: string, data: { expectedStateRevision: number; memberId: string; reason?: string; idempotencyKey?: string }): Promise<WorkflowRun> {
+    const idempotencyKey = data.idempotencyKey ?? createSafeId();
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/takeover`, { method: "POST", headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" }, body: JSON.stringify({ expected_state_revision: data.expectedStateRevision, member_id: data.memberId, reason: data.reason, idempotency_key: idempotencyKey }) });
+    return parseWorkflowResponse(raw, WorkflowRunSchema, "POST /api/workflows/{id}/runs/{runId}/nodes/{nodeId}/takeover");
+  }
+
+  async resolveWorkflowNode(wsId: string, id: string, runId: string, nodeId: string, data: { expectedStateRevision: number; resolution: WorkflowNodeResolution; values?: Record<string, unknown>; evidence?: string; idempotencyKey?: string }): Promise<WorkflowRun> {
+    const idempotencyKey = data.idempotencyKey ?? createSafeId();
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/resolve`, { method: "POST", headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" }, body: JSON.stringify({ expected_state_revision: data.expectedStateRevision, resolution: data.resolution, values: data.values, evidence: data.evidence, idempotency_key: idempotencyKey }) });
+    return parseWorkflowResponse(raw, WorkflowRunSchema, "POST /api/workflows/{id}/runs/{runId}/nodes/{nodeId}/resolve");
+  }
+
+  async getWorkflowWorkItem(wsId: string, id: string, runId: string, itemId: string): Promise<WorkflowWorkItem> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/work-items/${encodeURIComponent(itemId)}`, { headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" } });
+    return parseWorkflowResponse(raw, WorkflowWorkItemSchema, "GET /api/workflows/{id}/runs/{runId}/work-items/{itemId}");
+  }
+
+  async submitWorkflowWorkItem(wsId: string, id: string, runId: string, itemId: string, data: SubmitWorkflowWorkItemRequest): Promise<WorkflowRun> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/work-items/${encodeURIComponent(itemId)}/submit`, { method: "POST", headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" }, body: JSON.stringify({ expected_state_revision: data.expectedStateRevision, expected_item_version: data.expectedItemVersion, idempotency_key: data.idempotencyKey, action: data.action, values: data.values, feedback: data.feedback }) });
+    return parseWorkflowResponse(raw, WorkflowRunSchema, "POST /api/workflows/{id}/runs/{runId}/work-items/{itemId}/submit");
+  }
+
+  async listWorkflowWorkItems(wsId: string, status?: "open" | "closed" | "expired"): Promise<{ workItems: WorkflowWorkItem[] }> {
+    const query = status ? `?status=${encodeURIComponent(status)}` : "";
+    const raw = await this.fetch<unknown>(`/api/workflows/work-items${query}`, { headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" } });
+    const parsed = parseWorkflowResponse(raw, WorkflowWorkItemListSchema, "GET /api/workflows/work-items");
+    return { workItems: parsed.work_items };
+  }
+
+  async transferWorkflowWorkItem(wsId: string, id: string, runId: string, itemId: string, data: { expectedStateRevision: number; expectedItemVersion: number; memberId: string; reason?: string; idempotencyKey?: string }): Promise<WorkflowWorkItem> {
+    const idempotencyKey = data.idempotencyKey ?? createSafeId();
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/work-items/${encodeURIComponent(itemId)}/transfer`, { method: "POST", headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" }, body: JSON.stringify({ expected_state_revision: data.expectedStateRevision, expected_item_version: data.expectedItemVersion, member_id: data.memberId, reason: data.reason, idempotency_key: idempotencyKey }) });
+    return parseWorkflowResponse(raw, WorkflowWorkItemSchema, "POST /api/workflows/{id}/runs/{runId}/work-items/{itemId}/transfer");
+  }
+
+  async extendWorkflowWorkItem(wsId: string, id: string, runId: string, itemId: string, data: { expectedStateRevision: number; expectedItemVersion: number; dueAt: string; reason?: string; idempotencyKey?: string }): Promise<WorkflowWorkItem> {
+    const idempotencyKey = data.idempotencyKey ?? createSafeId();
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/work-items/${encodeURIComponent(itemId)}/extend`, { method: "POST", headers: { "X-Workspace-ID": wsId, "X-Workflow-Schema-Version": "2" }, body: JSON.stringify({ expected_state_revision: data.expectedStateRevision, expected_item_version: data.expectedItemVersion, due_at: data.dueAt, reason: data.reason, idempotency_key: idempotencyKey }) });
+    return parseWorkflowResponse(raw, WorkflowWorkItemSchema, "POST /api/workflows/{id}/runs/{runId}/work-items/{itemId}/extend");
+  }
+
+  async workflowChatSession(wsId: string, id: string, agentId: string): Promise<{ sessionId: string }> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/chat-session`, { method: "POST", headers: { "X-Workspace-ID": wsId }, body: JSON.stringify({ agent_id: agentId }) });
+    return parseWorkflowResponse(raw, WorkflowChatSessionSchema, "POST /api/workflows/{id}/chat-session");
+  }
+
+  async sendWorkflowChatMessage(wsId: string, id: string, data: SendWorkflowChatMessageRequest): Promise<SendChatMessageResponse> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${encodeURIComponent(id)}/chat-messages`, { method: "POST", headers: { "X-Workspace-ID": wsId }, body: JSON.stringify({ session_id: data.sessionId, content: data.content, selected_node_id: data.selectedNodeId, expected_revision: data.expectedRevision, idempotency_key: data.idempotencyKey ?? createSafeId() }) });
+    return parseWorkflowResponse(raw, SendChatMessageResponseSchema, "POST /api/workflows/{id}/chat-messages");
   }
 
   // Projects

@@ -119,13 +119,11 @@ describe("useRealtimeSync — ws instance change", () => {
     // Should have called invalidateQueries for all workspace-scoped keys
     // (16 workspace-scoped [incl. property definitions] + 6 per-issue
     // prefixes + the workspace working-agents projection + 5 per-chat
-    // prefixes + 1 workspaceKeys.list() + 1 cross-workspace inbox unread
-    // summary = 31 calls).
-    //
-    // Awaited rather than counted synchronously: the inbox unread summary
-    // refresh cancels any in-flight request before invalidating (see
-    // onInboxSummaryInvalidate), so that one lands after the synchronous ones.
-    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(31));
+    // prefixes + workflow keys + 1 workspaceKeys.list() + 1 cross-workspace
+    // inbox unread summary = 32 calls). Awaited rather than counted
+    // synchronously because the inbox summary refresh cancels any in-flight
+    // request before invalidating.
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(32));
   });
 
   it("does not re-invalidate when rerendered with the same ws instance", () => {

@@ -1,0 +1,2 @@
+-- This migration is intentionally forward-only. Removing a backfill would
+-- delete audit facts that may have been extended by newer engine writes.

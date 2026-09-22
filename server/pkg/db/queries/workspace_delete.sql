@@ -664,6 +664,66 @@ deleted_runtimes AS (
 ),
 deleted_profiles AS (
     DELETE FROM runtime_profile WHERE runtime_profile.workspace_id = $1
+),
+deleted_workflow_chat_turns AS (
+    DELETE FROM workflow_chat_turn WHERE workspace_id = $1
+),
+deleted_workflow_chats AS (
+    DELETE FROM workflow_chat
+    WHERE workflow_id IN (SELECT id FROM workflow WHERE workspace_id = $1)
+),
+deleted_workflow_outbox AS (
+    DELETE FROM workflow_outbox
+    WHERE workspace_id = $1
+),
+deleted_workflow_events AS (
+    DELETE FROM workflow_event
+    WHERE workspace_id = $1
+),
+deleted_workflow_jobs AS (
+    DELETE FROM workflow_job
+    WHERE workspace_id = $1
+),
+deleted_workflow_work_items AS (
+    DELETE FROM workflow_work_item
+    WHERE workspace_id = $1
+),
+deleted_workflow_transitions AS (
+    DELETE FROM workflow_transition
+    WHERE workspace_id = $1
+),
+deleted_workflow_outputs AS (
+    DELETE FROM workflow_output
+    WHERE workspace_id = $1
+),
+deleted_workflow_attempts AS (
+    DELETE FROM workflow_node_attempt
+    WHERE workspace_id = $1
+),
+deleted_workflow_activations AS (
+    DELETE FROM workflow_node_activation
+    WHERE workspace_id = $1
+),
+deleted_workflow_scopes AS (
+    DELETE FROM workflow_scope_instance
+    WHERE workspace_id = $1
+),
+deleted_workflow_node_runs AS (
+    DELETE FROM workflow_node_run
+    WHERE run_id IN (SELECT id FROM workflow_run WHERE workspace_id = $1)
+),
+deleted_workflow_runs AS (
+    DELETE FROM workflow_run WHERE workspace_id = $1
+),
+deleted_workflow_versions AS (
+    DELETE FROM workflow_version
+    WHERE workflow_id IN (SELECT id FROM workflow WHERE workspace_id = $1)
+),
+deleted_workflows AS (
+    DELETE FROM workflow WHERE workspace_id = $1
+),
+deleted_workflow_releases AS (
+    DELETE FROM workflow_release WHERE workspace_id = $1
 )
 DELETE FROM project WHERE project.workspace_id = $1;
 
@@ -698,3 +758,93 @@ deleted_share_links AS (
 )
 DELETE FROM workspace_invitation
 WHERE workspace_invitation.workspace_id = $1;
+
+-- name: DeleteWorkspaceWorkflowCommands :exec
+DELETE FROM workflow_command
+WHERE workspace_id = $1;
+
+-- Knowledge owns private source and parsed objects outside the relational
+-- database. Keep the cleanup job itself after the workspace row is deleted so
+-- a worker can finish the object-store deletion without needing the workspace
+-- or base row to exist.
+-- name: ListWorkspaceKnowledgeObjectKeys :many
+SELECT object_key
+FROM (
+    SELECT source_object_key AS object_key
+    FROM knowledge_document_version AS document_version
+    WHERE document_version.workspace_id = $1 AND document_version.source_object_key <> ''
+    UNION
+    SELECT parsed_object_key AS object_key
+    FROM knowledge_document_version AS document_version
+    WHERE document_version.workspace_id = $1
+      AND document_version.parsed_object_key IS NOT NULL
+      AND document_version.parsed_object_key <> ''
+) AS keys
+ORDER BY object_key;
+
+-- name: EnqueueWorkspaceKnowledgeCleanup :exec
+INSERT INTO knowledge_job (
+    id, workspace_id, knowledge_base_id, stage, logical_key, input, status, available_at
+)
+VALUES ($1, $2, $3, 'cleanup', $4, sqlc.arg(input)::jsonb, 'queued', now());
+
+-- Workspace deletion is application-owned for the independent knowledge
+-- domain too. The synthetic base id belongs only to the cleanup job and lets
+-- the job retain the existing non-null knowledge_base_id contract after the
+-- real bases are removed. Every table is listed explicitly because this
+-- schema deliberately has no foreign keys or cascading actions.
+-- name: DeleteWorkspaceKnowledgeData :exec
+WITH
+deleted_evidence AS (
+    DELETE FROM knowledge_evidence WHERE workspace_id = $1 RETURNING 1
+),
+deleted_relations AS (
+    DELETE FROM knowledge_relation WHERE workspace_id = $1 RETURNING 1
+),
+deleted_aliases AS (
+    DELETE FROM knowledge_entity_alias WHERE workspace_id = $1 RETURNING 1
+),
+deleted_entities AS (
+    DELETE FROM knowledge_entity WHERE workspace_id = $1 RETURNING 1
+),
+deleted_extractions AS (
+    DELETE FROM knowledge_extraction_run WHERE workspace_id = $1 RETURNING 1
+),
+deleted_embeddings AS (
+    DELETE FROM knowledge_embedding WHERE workspace_id = $1 RETURNING 1
+),
+deleted_chunks AS (
+    DELETE FROM knowledge_chunk WHERE workspace_id = $1 RETURNING 1
+),
+deleted_versions AS (
+    DELETE FROM knowledge_document_version WHERE workspace_id = $1 RETURNING 1
+),
+deleted_documents AS (
+    DELETE FROM knowledge_document WHERE workspace_id = $1 RETURNING 1
+),
+deleted_indexes AS (
+    DELETE FROM knowledge_index WHERE workspace_id = $1 RETURNING 1
+),
+deleted_bindings AS (
+    DELETE FROM knowledge_model_binding WHERE workspace_id = $1 RETURNING 1
+),
+deleted_graph_edits AS (
+    DELETE FROM knowledge_graph_edit WHERE workspace_id = $1 RETURNING 1
+),
+deleted_capabilities AS (
+    DELETE FROM knowledge_model_capability WHERE workspace_id = $1 RETURNING 1
+),
+deleted_settings AS (
+    DELETE FROM knowledge_model_settings WHERE workspace_id = $1 RETURNING 1
+),
+deleted_providers AS (
+    DELETE FROM knowledge_provider WHERE workspace_id = $1 RETURNING 1
+),
+deleted_requests AS (
+    DELETE FROM knowledge_request WHERE workspace_id = $1 RETURNING 1
+),
+deleted_bases AS (
+    DELETE FROM knowledge_base WHERE workspace_id = $1 RETURNING 1
+)
+DELETE FROM knowledge_job AS job
+WHERE job.workspace_id = $1 AND job.id <> $2;

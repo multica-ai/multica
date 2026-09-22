@@ -52,15 +52,39 @@ services:
       timeout: 5s
       retries: 5
 
+  # The parser is deliberately a separate, stateless container. It receives
+  # only one source file and metadata from the backend and has no database,
+  # object-store, or model-provider credentials.
+  knowledge-parser:
+    build:
+      context: ./services/knowledge-parser
+    environment:
+      PORT: "8091"
+      KNOWLEDGE_PARSER_TOKEN: ${KNOWLEDGE_PARSER_TOKEN:-}
+    expose:
+      - "8091"
+    # Keep parser RSS bounded independently from the backend. The parser also
+    # applies an in-process RLIMIT_AS cap where the runtime permits it.
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   backend:
     image: ${MULTICA_BACKEND_IMAGE:-ghcr.io/multica-ai/multica-backend}:${MULTICA_IMAGE_TAG:-latest}
     depends_on:
       postgres:
         condition: service_healthy
+      knowledge-parser:
+        condition: service_healthy
     ports:
       - "127.0.0.1:${BACKEND_PORT:-${API_PORT:-${SERVER_PORT:-${PORT:-8080}}}}:8080"
     volumes:
       - backend_uploads:/app/data/uploads
+      - backend_knowledge:/app/data/knowledge
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
       DATABASE_SEARCH_WORK_MEM_MB: ${DATABASE_SEARCH_WORK_MEM_MB:-64}
@@ -160,6 +184,24 @@ services:
       MULTICA_LLM_BASE_URL: ${MULTICA_LLM_BASE_URL:-}
       MULTICA_LLM_DEFAULT_MODEL: ${MULTICA_LLM_DEFAULT_MODEL:-}
       MULTICA_LLM_MAX_RETRIES: ${MULTICA_LLM_MAX_RETRIES:-}
+      # Independent knowledge-base product. The feature remains off by
+      # default; additive migrations and the parser can run before enabling it.
+      MULTICA_KNOWLEDGE_ENABLED: ${MULTICA_KNOWLEDGE_ENABLED:-false}
+      MULTICA_KNOWLEDGE_SECRET_KEY: ${MULTICA_KNOWLEDGE_SECRET_KEY:-}
+      KNOWLEDGE_STORAGE_BACKEND: ${KNOWLEDGE_STORAGE_BACKEND:-local}
+      KNOWLEDGE_LOCAL_STORAGE_DIR: ${KNOWLEDGE_LOCAL_STORAGE_DIR:-/app/data/knowledge}
+      KNOWLEDGE_S3_BUCKET: ${KNOWLEDGE_S3_BUCKET:-}
+      KNOWLEDGE_S3_REGION: ${KNOWLEDGE_S3_REGION:-us-west-2}
+      KNOWLEDGE_S3_ENDPOINT: ${KNOWLEDGE_S3_ENDPOINT:-}
+      KNOWLEDGE_S3_ACCESS_KEY_ID: ${KNOWLEDGE_S3_ACCESS_KEY_ID:-}
+      KNOWLEDGE_S3_SECRET_ACCESS_KEY: ${KNOWLEDGE_S3_SECRET_ACCESS_KEY:-}
+      KNOWLEDGE_S3_USE_PATH_STYLE: ${KNOWLEDGE_S3_USE_PATH_STYLE:-}
+      KNOWLEDGE_PARSER_URL: ${KNOWLEDGE_PARSER_URL:-http://knowledge-parser:8091}
+      KNOWLEDGE_PARSER_TOKEN: ${KNOWLEDGE_PARSER_TOKEN:-}
+      KNOWLEDGE_PARSER_TIMEOUT: ${KNOWLEDGE_PARSER_TIMEOUT:-15m}
+      KNOWLEDGE_UPLOAD_MAX_BYTES: ${KNOWLEDGE_UPLOAD_MAX_BYTES:-104857600}
+      KNOWLEDGE_MODEL_CONCURRENCY: ${KNOWLEDGE_MODEL_CONCURRENCY:-2}
+      KNOWLEDGE_PRIVATE_MODEL_HOSTS: ${KNOWLEDGE_PRIVATE_MODEL_HOSTS:-}
       # Lark / Feishu bot integration. MULTICA_LARK_SECRET_KEY is the
       # opt-in: unset = integration disabled. Mainland 飞书 and international
       # Lark are auto-detected per installation and served side by side, so
@@ -232,3 +274,4 @@ services:
 volumes:
   pgdata:
   backend_uploads:
+  backend_knowledge:

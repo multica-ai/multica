@@ -38,9 +38,22 @@ type S3Storage struct {
 //   - AWS_ENDPOINT_URL (optional S3-compatible endpoint)
 //   - S3_USE_PATH_STYLE (optional; defaults to true when AWS_ENDPOINT_URL is set)
 func NewS3StorageFromEnv() *S3Storage {
-	bucket := os.Getenv("S3_BUCKET")
+	return newS3StorageFromEnv("")
+}
+
+// newS3StorageFromEnv also serves isolated private stores. A non-empty prefix
+// keeps knowledge credentials and endpoints separate from the public upload
+// bucket while retaining the same S3 implementation.
+func newS3StorageFromEnv(prefix string) *S3Storage {
+	env := func(name string) string {
+		if prefix == "" {
+			return os.Getenv(name)
+		}
+		return os.Getenv(prefix + name)
+	}
+	bucket := env("S3_BUCKET")
 	if bucket == "" {
-		slog.Info("S3_BUCKET not set, cloud upload disabled")
+		slog.Info("S3 bucket not set, cloud upload disabled", "prefix", prefix)
 		return nil
 	}
 	if looksLikeS3Hostname(bucket) {
@@ -50,7 +63,7 @@ func NewS3StorageFromEnv() *S3Storage {
 		)
 	}
 
-	region := os.Getenv("S3_REGION")
+	region := env("S3_REGION")
 	if region == "" {
 		region = "us-west-2"
 	}
@@ -59,8 +72,18 @@ func NewS3StorageFromEnv() *S3Storage {
 		config.WithRegion(region),
 	}
 
-	accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
-	secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
+	accessKey := env("S3_ACCESS_KEY_ID")
+	secretKey := env("S3_SECRET_ACCESS_KEY")
+	if prefix != "" {
+		// Falling back to the process credential chain is useful for IAM roles;
+		// explicit knowledge credentials remain isolated when supplied.
+		if accessKey == "" {
+			accessKey = os.Getenv("AWS_ACCESS_KEY_ID")
+		}
+		if secretKey == "" {
+			secretKey = os.Getenv("AWS_SECRET_ACCESS_KEY")
+		}
+	}
 	if accessKey != "" && secretKey != "" {
 		opts = append(opts, config.WithCredentialsProvider(
 			credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
@@ -73,10 +96,31 @@ func NewS3StorageFromEnv() *S3Storage {
 		return nil
 	}
 
-	cdnDomain := os.Getenv("CLOUDFRONT_DOMAIN")
+	cdnDomain := env("S3_CDN_DOMAIN")
+	if prefix == "" && cdnDomain == "" {
+		cdnDomain = os.Getenv("CLOUDFRONT_DOMAIN")
+	}
 
-	endpointURL := os.Getenv("AWS_ENDPOINT_URL")
-	usePathStyle := s3UsePathStyleFromEnv(endpointURL)
+	endpointURL := env("S3_ENDPOINT")
+	if endpointURL == "" {
+		endpointURL = env("S3_ENDPOINT_URL")
+	}
+	if prefix == "" && endpointURL == "" {
+		endpointURL = os.Getenv("AWS_ENDPOINT_URL")
+	}
+	usePathStyle := endpointURL != ""
+	pathStyleRaw, pathStyleSet := os.LookupEnv(prefix + "S3_USE_PATH_STYLE")
+	if prefix == "" {
+		pathStyleRaw, pathStyleSet = os.LookupEnv("S3_USE_PATH_STYLE")
+	}
+	if pathStyleSet && strings.TrimSpace(pathStyleRaw) != "" {
+		parsed, parseErr := parseBoolEnv(pathStyleRaw)
+		if parseErr == nil {
+			usePathStyle = parsed
+		} else {
+			slog.Warn("invalid S3_USE_PATH_STYLE value, using endpoint default", "value", pathStyleRaw, "prefix", prefix)
+		}
+	}
 	s3Opts := []func(*s3.Options){}
 	if endpointURL != "" || usePathStyle {
 		s3Opts = append(s3Opts, func(o *s3.Options) {
