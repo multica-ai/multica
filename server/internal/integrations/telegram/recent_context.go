@@ -7,20 +7,28 @@ import (
 )
 
 // This file holds the Telegram counterpart of Lark's <recent_context>
-// prefetch (lark/inbound_enricher.go, MUL-3084): when a member @-mentions the
-// bot in a group, the surrounding conversation is inlined ahead of their
-// instruction so the agent sees more than the single addressed line.
+// prefetch (lark/inbound_enricher.go, MUL-3084): when a member addresses the
+// bot in a group (@-mention or a reply to one of its messages), the
+// surrounding conversation is inlined ahead of their instruction so the agent
+// sees more than the single addressed line.
 //
 // Lark can fetch that window on demand (im/v1/messages.list). The Telegram
 // Bot API has no history endpoint — getUpdates is consume-once — so the
 // polling loop keeps a small in-memory ring of the group messages it has
 // already seen, per chat (and per forum topic), and reads the window back
-// from that ring at @-mention time. The ring is scoped to one installation's
-// polling loop and lives only as long as the loop does: a restart starts
-// empty, which is the accepted trade-off for keeping this out of the
-// database. A non-addressed group message is still never persisted or
-// turned into a session (MUL-2671); it only ever surfaces as read-context
-// attached to a turn a member explicitly directed at the bot.
+// from that ring when an addressed message arrives. The ring is scoped to
+// one installation's polling loop and lives only as long as the loop does: a
+// restart starts empty, which is the accepted trade-off for keeping this out
+// of the database.
+//
+// Retention contract: a non-addressed group message never creates a session
+// or a turn on its own (MUL-2671). It is held in this in-memory ring, and once
+// an addressed turn pulls it into its <recent_context> block it is persisted
+// with that turn — the rewritten Text becomes the turn's
+// chat_message.content, exactly as Lark's enricher documents for its own
+// block. What the ring can hold depends on what Telegram delivers: with Group
+// Privacy on, only commands, explicit @-mentions and replies to the bot; with
+// it off, or for a bot that is a group admin, every group message.
 
 // DefaultRecentContextSize is the window the production wiring uses: the
 // number of preceding group messages kept per chat and inlined on an

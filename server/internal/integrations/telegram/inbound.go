@@ -41,9 +41,11 @@ func inboundFromUpdate(u Update, botID int64, botUsername string) (channel.Inbou
 //
 // Group addressing policy mirrors Slack v1: a group message is addressed to
 // the bot only when it carries an explicit @bot mention or directly replies to
-// one of the bot's messages. Privacy mode is left ON, so Telegram already
-// withholds unaddressed group chatter from the bot; this check is the
-// defense-in-depth for bots whose privacy mode was disabled in BotFather.
+// one of the bot's messages. Telegram only withholds unaddressed group
+// chatter while the bot's privacy mode is ON and the bot is not a group admin;
+// the recent-context feature actively invites operators to turn privacy off,
+// so this check — not Telegram — is what keeps unaddressed chatter from
+// starting a turn.
 //
 // recent, when non-nil, supplies the preceding messages of the same
 // chat/topic. They are inlined as a <recent_context> block ahead of an
