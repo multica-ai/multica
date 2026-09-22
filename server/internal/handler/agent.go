@@ -2695,34 +2695,7 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tasks, err := h.Queries.ListAgentTasks(r.Context(), agent.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list agent tasks")
-		return
-	}
-
-	tasks = visibleTaskHistory(tasks)
-	resp := make([]AgentTaskResponse, len(tasks))
-	var taskIDs []pgtype.UUID
-	if includeUsage {
-		taskIDs = make([]pgtype.UUID, len(tasks))
-	}
-	for i, t := range tasks {
-		resp[i] = taskToResponse(t, workspaceID)
-		if includeUsage {
-			taskIDs[i] = t.ID
-		}
-	}
-	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
-	if includeUsage {
-		if err := h.hydrateAgentTaskUsage(r.Context(), agent.ID, taskIDs, resp); err != nil {
-			slog.Warn("list agent task usage failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-			writeError(w, http.StatusInternalServerError, "failed to list agent task usage")
-			return
-		}
-	}
-
-	writeJSON(w, http.StatusOK, resp)
+	h.writeAgentTaskHistory(w, r, agent, includeUsage)
 }
 
 // AgentActivityBucket is one day-bucketed throughput sample for the

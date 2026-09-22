@@ -223,6 +223,22 @@ func (q *Queries) DeleteTaskMessages(ctx context.Context, taskID pgtype.UUID) er
 	return err
 }
 
+const getTaskMessageHighWatermark = `-- name: GetTaskMessageHighWatermark :one
+SELECT seq, id FROM task_message WHERE task_id = $1 ORDER BY seq DESC, id DESC LIMIT 1
+`
+
+type GetTaskMessageHighWatermarkRow struct {
+	Seq int32       `json:"seq"`
+	ID  pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) GetTaskMessageHighWatermark(ctx context.Context, taskID pgtype.UUID) (GetTaskMessageHighWatermarkRow, error) {
+	row := q.db.QueryRow(ctx, getTaskMessageHighWatermark, taskID)
+	var i GetTaskMessageHighWatermarkRow
+	err := row.Scan(&i.Seq, &i.ID)
+	return i, err
+}
+
 const listTaskMessages = `-- name: ListTaskMessages :many
 SELECT id, task_id, seq, type, tool, content, input, output, created_at, output_truncated, call_id FROM task_message
 WHERE task_id = $1
@@ -231,6 +247,64 @@ ORDER BY seq ASC
 
 func (q *Queries) ListTaskMessages(ctx context.Context, taskID pgtype.UUID) ([]TaskMessage, error) {
 	rows, err := q.db.Query(ctx, listTaskMessages, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TaskMessage{}
+	for rows.Next() {
+		var i TaskMessage
+		if err := rows.Scan(
+			&i.ID,
+			&i.TaskID,
+			&i.Seq,
+			&i.Type,
+			&i.Tool,
+			&i.Content,
+			&i.Input,
+			&i.Output,
+			&i.CreatedAt,
+			&i.OutputTruncated,
+			&i.CallID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTaskMessagesPage = `-- name: ListTaskMessagesPage :many
+SELECT id, task_id, seq, type, tool, content, input, output, created_at, output_truncated, call_id FROM task_message
+WHERE task_id = $1
+  AND (seq, id) > ($2::bigint, $3::uuid)
+  AND (seq, id) <= ($4::int, $5::uuid)
+ORDER BY seq ASC, id ASC
+LIMIT $6
+`
+
+type ListTaskMessagesPageParams struct {
+	TaskID     pgtype.UUID `json:"task_id"`
+	AfterSeq   int64       `json:"after_seq"`
+	AfterID    pgtype.UUID `json:"after_id"`
+	ThroughSeq int32       `json:"through_seq"`
+	ThroughID  pgtype.UUID `json:"through_id"`
+	PageSize   int32       `json:"page_size"`
+}
+
+// seq is not unique. The UUID tie-breaker must be retained across batches.
+func (q *Queries) ListTaskMessagesPage(ctx context.Context, arg ListTaskMessagesPageParams) ([]TaskMessage, error) {
+	rows, err := q.db.Query(ctx, listTaskMessagesPage,
+		arg.TaskID,
+		arg.AfterSeq,
+		arg.AfterID,
+		arg.ThroughSeq,
+		arg.ThroughID,
+		arg.PageSize,
+	)
 	if err != nil {
 		return nil, err
 	}

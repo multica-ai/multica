@@ -5358,36 +5358,7 @@ func (h *Handler) ListTaskMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var (
-		messages []db.TaskMessage
-		err      error
-	)
-	if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
-		sinceSeq, parseErr := strconv.Atoi(sinceStr)
-		if parseErr != nil {
-			writeError(w, http.StatusBadRequest, "invalid since parameter")
-			return
-		}
-		messages, err = h.Queries.ListTaskMessagesSince(r.Context(), db.ListTaskMessagesSinceParams{
-			TaskID: parseUUID(taskID),
-			Seq:    int32(sinceSeq),
-		})
-	} else {
-		messages, err = h.Queries.ListTaskMessages(r.Context(), parseUUID(taskID))
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list task messages")
-		return
-	}
-
-	issueID := uuidToString(task.IssueID)
-
-	resp := make([]protocol.TaskMessagePayload, len(messages))
-	for i, m := range messages {
-		resp[i] = taskMessageToPayload(m, taskID, issueID)
-	}
-
-	writeJSON(w, http.StatusOK, resp)
+	h.writeTaskMessageHistory(w, r, task)
 }
 
 // GetActiveTaskForIssue returns all currently active tasks for an issue.
@@ -5507,7 +5478,7 @@ type ActiveRunSummary struct {
 // `multica issue runs --active` / `--siblings`.
 //
 // Two optional query params narrow or widen it; with neither, the response is
-// byte-identical to what it has always been (full history, newest first), which
+// semantically identical to the legacy response (full history, newest first), which
 // is what the UI and the CLI's short-task-ID resolver both depend on:
 //
 //   - active=true — restrict to in-flight statuses, the same set the
@@ -5545,8 +5516,6 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
-	workspaceID := uuidToString(issue.WorkspaceID)
 
 	if scope == "family" {
 		// Root the family at the parent when there is one, so a child sees its
@@ -5594,42 +5563,12 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var tasks []db.AgentTaskQueue
-	var err error
-	if activeOnly {
-		tasks, err = h.Queries.ListActiveTasksByIssue(r.Context(), issue.ID)
-	} else {
-		tasks, err = h.Queries.ListTasksByIssue(r.Context(), issue.ID)
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list tasks")
-		return
-	}
-
-	tasks = visibleTaskHistory(tasks)
-	resp := make([]AgentTaskResponse, len(tasks))
-	for i, t := range tasks {
-		resp[i] = taskToResponse(t, workspaceID)
-	}
-	// Execution-log rows render the "on behalf of <member>" badge, so this
-	// issue-facing surface must resolve initiator/originator names (departed-safe,
-	// one batch) — otherwise the badge falls back to "someone" on issue detail.
-	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
-	// Usage belongs to the execution log, not to a coordination read.
-	// ListIssueTaskUsage returns a row per (task, provider, model) for EVERY
-	// task the issue ever ran, so hydrating it on the active path would keep
-	// paying the full-history cost this filter exists to remove — and pay it
-	// for a column that is near-empty on runs that have not finished.
-	if !activeOnly {
-		h.hydrateTaskUsage(r.Context(), issue.ID, resp)
-	}
-
-	writeJSON(w, http.StatusOK, resp)
+	h.writeIssueTaskHistory(w, r, issue, activeOnly)
 }
 
 // hydrateTaskUsage attaches each run's own token usage to the execution-log
-// rows. One query for the whole issue, then a map join — not one query per
-// task, which would be an N+1 over a list the UI always renders in full.
+// rows. Read only the current bounded batch of task IDs, never the whole
+// issue history again for each batch.
 //
 // Usage is display metadata: a failure here must not take the execution log
 // down with it, so the error is swallowed and every row keeps its nil Usage,
@@ -5639,7 +5578,11 @@ func (h *Handler) hydrateTaskUsage(ctx context.Context, issueID pgtype.UUID, res
 		return
 	}
 
-	rows, err := h.Queries.ListIssueTaskUsage(ctx, issueID)
+	ids := make([]pgtype.UUID, len(resp))
+	for i := range resp {
+		ids[i] = parseUUID(resp[i].ID)
+	}
+	rows, err := h.Queries.ListIssueTaskUsageForTasks(ctx, db.ListIssueTaskUsageForTasksParams{IssueID: issueID, TaskIds: ids})
 	if err != nil || len(rows) == 0 {
 		return
 	}
@@ -5757,36 +5700,7 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var (
-		messages []db.TaskMessage
-		queryErr error
-	)
-	if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
-		sinceSeq, parseErr := strconv.Atoi(sinceStr)
-		if parseErr != nil {
-			writeError(w, http.StatusBadRequest, "invalid since parameter")
-			return
-		}
-		messages, queryErr = h.Queries.ListTaskMessagesSince(r.Context(), db.ListTaskMessagesSinceParams{
-			TaskID: taskUUID,
-			Seq:    int32(sinceSeq),
-		})
-	} else {
-		messages, queryErr = h.Queries.ListTaskMessages(r.Context(), taskUUID)
-	}
-	if queryErr != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list task messages")
-		return
-	}
-
-	issueID := uuidToString(task.IssueID)
-
-	resp := make([]protocol.TaskMessagePayload, len(messages))
-	for i, m := range messages {
-		resp[i] = taskMessageToPayload(m, taskID, issueID)
-	}
-
-	writeJSON(w, http.StatusOK, resp)
+	h.writeTaskMessageHistory(w, r, task)
 }
 
 // GetIssueUsage returns aggregated token usage for all tasks belonging to an issue.

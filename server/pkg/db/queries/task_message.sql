@@ -96,3 +96,15 @@ ORDER BY seq ASC;
 -- name: DeleteTaskMessages :exec
 DELETE FROM task_message
 WHERE task_id = $1;
+
+-- name: GetTaskMessageHighWatermark :one
+SELECT seq, id FROM task_message WHERE task_id = $1 ORDER BY seq DESC, id DESC LIMIT 1;
+
+-- name: ListTaskMessagesPage :many
+-- seq is not unique. The UUID tie-breaker must be retained across batches.
+SELECT * FROM task_message
+WHERE task_id = @task_id
+  AND (seq, id) > (@after_seq::bigint, @after_id::uuid)
+  AND (seq, id) <= (@through_seq::int, @through_id::uuid)
+ORDER BY seq ASC, id ASC
+LIMIT @page_size;
