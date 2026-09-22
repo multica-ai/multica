@@ -107,7 +107,7 @@ export default function IssuesFilterRoute() {
               <StatusIcon
                 status={option.key}
                 category={option.category}
-                color={option.color}
+                icon={option.icon} color={option.color}
                 size={16}
               />
               <Text className="flex-1 text-sm text-foreground">

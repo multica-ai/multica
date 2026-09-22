@@ -290,6 +290,14 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	hermesArgs := hermesCLIArgs(opts.CustomArgs, b.cfg.Logger)
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, hermesArgs...)
 	hideAgentWindow(cmd)
+	// What makes the shutdown below bounded. Wait waits on the direct child, and
+	// a child that ignores the cancel would otherwise hold it forever; with a
+	// WaitDelay, a cancelled context makes Wait kill and reap within it. Wait
+	// returning is also what closes the parent ends of the pipes, which is the
+	// step that frees a reader an escaped descendant is holding — so bounding
+	// Wait is what lets the forced shutdown join its readers at all. Same 10s
+	// the claude, codearts and antigravity backends use.
+	cmd.WaitDelay = 10 * time.Second
 	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(hermesArgs, trustAgentCommandPositional(0, hermesACPSubcommand)))
 	agentsMDPresent := false
 	if opts.Cwd != "" {
@@ -427,6 +435,23 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		c.closeAllPending(fmt.Errorf("hermes process exited"))
 	}()
 
+	// reapProcess runs cmd.Wait() — which may only be called once — and returns
+	// when it has. Wait is what closes the parent ends of the stdout and stderr
+	// pipes, so it is also the only way to free a reader blocked on a pipe that
+	// a descendant outside the process group is still holding. Both the forced
+	// shutdown below and the deferred cleanup need it, in that order.
+	var waitOnce sync.Once
+	waitDone := make(chan struct{})
+	reapProcess := func() {
+		waitOnce.Do(func() {
+			go func() {
+				defer close(waitDone)
+				_ = cmd.Wait()
+			}()
+		})
+		<-waitDone
+	}
+
 	// Drive the ACP session lifecycle in a goroutine.
 	go func() {
 		defer close(msgCh)
@@ -438,7 +463,13 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			// process alive; waiting first would then block until the overall
 			// task timeout and make a later deferred cancel ineffective.
 			cancel()
-			_ = cmd.Wait()
+			reapProcess()
+			// Wait has closed the pipes, so both readers are now guaranteed to
+			// reach EOF and return. Join them before the enclosing goroutine
+			// returns and closes msgCh: a reader that outlived that close would
+			// panic sending on it.
+			<-readerDone
+			<-stderrDone
 			releaseProcessGroup(cmd)
 		}()
 
@@ -736,7 +767,23 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				"pid", cmd.Process.Pid,
 				"grace", hermesReaderDrainGrace.String(),
 			)
+			// Cancel kills the owned process tree, so every descendant in it
+			// releases the pipes and both readers reach EOF. A descendant
+			// outside that tree does not get the signal: on POSIX because it
+			// called setsid and left the process group, on Windows because
+			// startOwnedProcessTree failed open and the child runs unowned, so
+			// the kill reaches the leader alone. Joining the readers is then an
+			// unbounded wait — the turn hangs with no result until the user
+			// cancels by hand, which is the MUL-5241 report.
 			cancel()
+			// Reap here rather than leaving it to the deferred cleanup. Wait
+			// closes the pipes, which is what frees a reader the kill could not
+			// reach, and cmd.WaitDelay bounds Wait itself now that the context
+			// is cancelled. Both joins below therefore terminate, and they still
+			// run before the buffers are read: providerErr.Finalize requires a
+			// drained stderr pipe, and it is not safe to call while the copier
+			// can still write.
+			reapProcess()
 			<-readerDone
 			<-stderrDone
 		}
@@ -839,7 +886,9 @@ func waitForHermesNotificationQuiescence(ctx context.Context, activity <-chan st
 // before concluding an ACP agent has stopped emitting notifications. It is a
 // protocol-level heuristic rather than a per-backend trait, so backends that
 // have no reason to differ share it; the hard bound stays per-backend.
-const acpNotificationQuietTime = 250 * time.Millisecond
+// Package tests shorten it globally while keeping their late-output fixtures
+// inside the window; production never reassigns it.
+var acpNotificationQuietTime = 250 * time.Millisecond
 
 // waitForACPNotificationQuiescence gives the shared ACP stdout reader a
 // bounded chance to consume notifications a backend may emit just after its

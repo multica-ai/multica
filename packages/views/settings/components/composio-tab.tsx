@@ -141,10 +141,10 @@ export function ComposioTab() {
     );
   }, [toolkits, query]);
 
-  // 503 handling lives in the parent IntegrationsTab, which hides the whole
-  // Composio section when COMPOSIO_API_KEY is unset — this component only
-  // mounts when the integration is configured, so it deals with the loaded /
-  // error / empty / list states below.
+  // Deployment-disabled handling lives in the parent IntegrationsTab, which
+  // hides the whole Composio section when COMPOSIO_API_KEY is unset — this
+  // component only mounts when the integration is configured, so it deals with
+  // the loaded / error / empty / list states below.
 
   async function handleConnect(tk: ComposioToolkit) {
     if (connectingSlug) return;

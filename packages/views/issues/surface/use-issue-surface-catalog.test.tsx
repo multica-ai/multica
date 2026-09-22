@@ -22,8 +22,7 @@ import { useIssueSurfaceController } from "./use-issue-surface-controller";
  * - A CUSTOM status filter cannot be routed to a column until the catalog
  *   answers. Fetching zero branches meanwhile renders an empty board with no
  *   spinner; failing renders one permanently, with no way to retry.
- * - `status_category` is a server contract this feature introduced, so it must
- *   not be sent until the catalog proves this workspace has a custom status.
+ * - Each concrete status becomes a branch only after catalog resolution.
  */
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
@@ -34,7 +33,7 @@ const QA_ENTRY: IssueStatusEntry = {
   key: "qa",
   name: "QA",
   description: "",
-  category: "in_review",
+  category: "started",
   color: "#ff0000",
   is_system: false,
   position: 1,
@@ -56,11 +55,15 @@ function deferred<T>() {
 let groupRequests: IssueTableGroupsRequest[] = [];
 let rowRequests: IssueTableRowsRequest[] = [];
 
-function installApi(listIssueStatuses: () => Promise<unknown>) {
+function installApi(
+  listIssueStatuses: () => Promise<unknown>,
+  listProjects: () => Promise<unknown> = async () => ({ projects: [], total: 0 }),
+) {
   groupRequests = [];
   rowRequests = [];
   setApiInstance({
     listIssueStatuses,
+    listProjects,
     listIssueTableGroups: async (request: IssueTableGroupsRequest) => {
       groupRequests.push(request);
       return { query_fingerprint: "test", total: 0, groups: [], next_cursor: null };
@@ -79,7 +82,6 @@ function installApi(listIssueStatuses: () => Promise<unknown>) {
     },
     listIssueTableFacets: async () => ({ query_fingerprint: "test", total: 0, facets: [] }),
     listIssues: async () => ({ issues: [], total: 0 }),
-    listProjects: async () => ({ projects: [], total: 0 }),
     getWorkspaceWorkingAgents: async () => [],
     getChildIssueProgress: async () => ({ progress: [] }),
     getAgentTaskSnapshot: async () => ({ tasks: [] }),
@@ -142,7 +144,7 @@ describe("useIssueSurfaceController — custom status filter vs a late catalog",
     });
 
     // Once the catalog answers, the filter routes to the column `qa` behaves as.
-    await waitFor(() => expect(result.current.visibleStatuses).toEqual(["in_review"]));
+    await waitFor(() => expect(result.current.visibleStatuses).toEqual(["qa"]));
     await waitFor(() => expect(result.current.isLoading).toBe(false));
   });
 
@@ -172,8 +174,80 @@ describe("useIssueSurfaceController — custom status filter vs a late catalog",
   });
 });
 
+// The project-status filter is evaluated client-side on Gantt and
+// the swimlane extra-children merge, against the project catalog. An
+// unresolved catalog is not "no filter": returning UNFILTERED rows under an
+// active chip is as wrong as blanking the surface, and a failed request would
+// leave it that way for good.
+describe("useIssueSurfaceController — project-status filter vs a late catalog", () => {
+  function renderGantt(surfaceKey: string, projects: () => Promise<unknown>) {
+    installApi(async () => ({ statuses: [], categories: [], total: 0 }), projects);
+    const { store, Wrapper } = makeWrapper(qc, surfaceKey);
+    act(() => {
+      store.getState().setViewMode("gantt");
+      store.getState().toggleProjectStatusFilter("in_progress");
+    });
+    return renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "workspace", actorKind: "all" },
+          modes: ["gantt"],
+        }),
+      { wrapper: Wrapper },
+    );
+  }
+
+  it("stays loading while the project catalog is in flight", async () => {
+    const projects = deferred<{ projects: never[]; total: number }>();
+    const { result } = renderGantt("workspace:pstatus-pending", () => projects.promise);
+
+    await waitFor(() => expect(result.current.isLoading).toBe(true));
+
+    await act(async () => {
+      projects.resolve({ projects: [], total: 0 });
+      await projects.promise;
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+  });
+
+  it("surfaces a retryable error when the project catalog fails", async () => {
+    const projects = deferred<never>();
+    const { result } = renderGantt("workspace:pstatus-failed", () => projects.promise);
+
+    await act(async () => {
+      projects.reject(new Error("projects unavailable"));
+      await projects.promise.catch(() => {});
+    });
+
+    await waitFor(() => expect(result.current.isStatusCatalogError).toBe(true));
+    expect(result.current.isEmpty).toBe(false);
+  });
+
+  it("does not hold the surface when no project-status filter is active", async () => {
+    const projects = deferred<{ projects: never[]; total: number }>();
+    installApi(
+      async () => ({ statuses: [], categories: [], total: 0 }),
+      () => projects.promise,
+    );
+    const { store, Wrapper } = makeWrapper(qc, "workspace:pstatus-inactive");
+    act(() => store.getState().setViewMode("gantt"));
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "workspace", actorKind: "all" },
+          modes: ["gantt"],
+        }),
+      { wrapper: Wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.isStatusCatalogError).toBe(false);
+  });
+});
+
 describe("useIssueSurfaceController — swimlane protocol", () => {
-  it("keeps the swimlane on the original contract with no custom statuses", async () => {
+  it("uses the category axis with no custom statuses", async () => {
     installApi(async () => ({ statuses: [], categories: [], total: 0 }));
     const { store, Wrapper } = makeWrapper(qc, "workspace:swimlane-plain");
     act(() => store.getState().setViewMode("swimlane"));
@@ -188,8 +262,7 @@ describe("useIssueSurfaceController — swimlane protocol", () => {
     );
 
     await waitFor(() => expect(groupRequests.length).toBeGreaterThan(0));
-    // Every request, not just the first: a new Web build must never send a
-    // group kind an un-upgraded backend would reject.
+    // Every request uses lifecycle grouping, even for built-in-only catalogs.
     for (const request of groupRequests) {
       expect(request.group).toMatchObject({ kind: "compound", secondary: "status" });
     }
@@ -198,7 +271,7 @@ describe("useIssueSurfaceController — swimlane protocol", () => {
     }
   });
 
-  it("upgrades the swimlane to the category axis once a custom status exists", async () => {
+  it("keeps the category axis when a custom status exists", async () => {
     installApi(async () => ({ statuses: [QA_ENTRY], categories: [], total: 1 }));
     const { store, Wrapper } = makeWrapper(qc, "workspace:swimlane-custom");
     act(() => store.getState().setViewMode("swimlane"));
@@ -215,7 +288,7 @@ describe("useIssueSurfaceController — swimlane protocol", () => {
     await waitFor(() =>
       expect(
         groupRequests.some((request) =>
-          request.group.kind === "compound" && request.group.secondary === "status_category",
+          request.group.kind === "compound" && request.group.secondary === "status",
         ),
       ).toBe(true),
     );

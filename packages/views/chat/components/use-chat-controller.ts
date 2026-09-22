@@ -11,7 +11,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
-import { canAssignAgent } from "@multica/views/issues/components";
+import { canAssignAgent } from "../../issues/components/pickers/assignee-picker";
 import { api, dispatchReasonCode } from "@multica/core/api";
 import {
   isAgentRuntimeBound as hasAgentRuntime,
@@ -553,7 +553,9 @@ export function useChatController(opts?: { isActive?: boolean }) {
             ? t(($) => $.input.send_blocked_toast)
             : reason === "agent_runtime_required"
               ? t(($) => $.input.runtime_required_toast)
-              : t(($) => $.input.send_failed_toast),
+              : reason === "runtime_access_denied"
+                ? t(($) => $.input.runtime_access_denied_toast)
+                : t(($) => $.input.send_failed_toast),
         );
         return false;
       }
@@ -583,7 +585,9 @@ export function useChatController(opts?: { isActive?: boolean }) {
             ? t(($) => $.input.send_blocked_toast)
             : reason === "agent_runtime_required"
               ? t(($) => $.input.runtime_required_toast)
-              : t(($) => $.input.send_failed_toast),
+              : reason === "runtime_access_denied"
+                ? t(($) => $.input.runtime_access_denied_toast)
+                : t(($) => $.input.send_failed_toast),
         );
         return false;
       }

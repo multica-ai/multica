@@ -13,7 +13,7 @@
     "filter_all_description": "이 보기의 모든 런타임",
     "empty": {
       "title": "아직 런타임이 없습니다",
-      "hint": "데스크톱 앱은 이 컴퓨터를 자동으로 스캔합니다. 서버, 개발용 박스, 터미널이 있는 다른 컴퓨터를 쓰려면 여기에 추가하세요."
+      "hint": "데스크톱 앱은 이 컴퓨터를 자동 감지합니다. 다른 컴퓨터는 여기서 연결하세요."
     },
     "no_matches": {
       "title": "일치하는 결과 없음",
@@ -24,16 +24,15 @@
     },
     "bootstrapping": {
       "title": "로컬 런타임 시작 중...",
-      "hint": "보통 몇 초 정도 걸립니다. 데몬이 워크스페이스에 등록되는 중입니다."
+      "hint": "워크스페이스에 연결 중..."
     }
   },
   "mika_setup": {
     "title": "런타임이 준비되었습니다. Mika와 시작하세요.",
-    "description": "Mika가 목표를 태스크로 구체화하고 적합한 에이전트를 조율하며, 워크플로에 필요할 때 재사용 가능한 specialist 추가를 돕습니다.",
+    "description": "Mika가 태스크를 정리하고 에이전트를 조율하도록 하세요.",
     "action": "Mika와 시작",
     "failed": "Mika를 시작하지 못했습니다",
     "dialog_title": "Mika를 어디에서 실행할까요?",
-    "dialog_description": "Mika가 사용할 런타임을 선택하세요. 나중에 설정에서 변경할 수 있습니다.",
     "cancel": "취소"
   },
   "machine": {
@@ -76,7 +75,7 @@
     "rename": "기기 이름 변경",
     "rename_dialog": {
       "title": "기기 이름 변경",
-      "description": "이 기기에 알아보기 쉬운 이름을 지정합니다. 이 기기의 모든 런타임에 적용되며 에이전트의 런타임을 선택할 때 표시됩니다.",
+      "description": "이 컴퓨터와 모든 런타임에 사용됩니다.",
       "placeholder": "예: 내 MacBook",
       "hint": "비워 두면 기기의 기본 이름을 사용합니다.",
       "cancel": "취소",
@@ -194,7 +193,6 @@
     "step2_label": "데몬 시작",
     "step2_hint": "로그인을 위해 브라우저를 열고, 이후 데몬을 백그라운드에서 계속 실행합니다.",
     "live_listening": "컴퓨터를 기다리는 중",
-    "live_listening_hint": "데몬이 시작되면 바로 감지합니다. 보통 1분 이내입니다.",
     "troubleshooting": "해당 컴퓨터에서 브라우저를 열 수 없나요?",
     "trouble_intro": "브라우저 로그인 대신 토큰을 사용하세요. 2단계를 대체하며 터미널이 있는 곳이면 어디서든 작동합니다.",
     "trouble_token_hint_prefix": "토큰은 ",
@@ -205,21 +203,20 @@
     "copy_aria": "복사",
     "cancel": "취소",
     "success_title": "컴퓨터 연결됨",
-    "success_description": "컴퓨터가 온라인이며 준비되었습니다. 에이전트를 만들면 여기서 실행을 시작할 수 있습니다.",
+    "success_description": "컴퓨터가 연결되었습니다. 에이전트를 만들 수 있습니다.",
     "view_runtime": "런타임 보기",
     "create_agent": "에이전트 만들기"
   },
   "cloud_runtime": {
     "action": "클라우드 런타임",
     "title": "클라우드 런타임",
-    "description": "관리형 클라우드 노드를 시작하고 Fleet 상태를 확인합니다.",
+    "description": "클라우드 런타임을 만듭니다.",
     "create_title": "새 노드",
-    "create_hint": "이름, 인스턴스 유형, 디스크 크기를 선택하세요. 나머지는 Fleet이 적용합니다.",
     "nodes_title": "Fleet 노드",
     "refresh": "새로고침",
     "nodes_empty": "클라우드 노드 없음",
     "nodes_failed": "클라우드 런타임을 사용할 수 없습니다",
-    "nodes_failed_hint": "Fleet이 노드 목록을 반환하지 않았습니다.",
+    "nodes_failed_hint": "클라우드 노드를 불러올 수 없습니다. 다시 시도하세요.",
     "node_fallback_name": "클라우드 노드",
     "create": "노드 만들기",
     "creating": "만드는 중...",
@@ -338,7 +335,7 @@
       "read_only": "읽기 전용"
     },
     "detail": {
-      "base_family": "기본 프로토콜 제품군",
+      "base_family": "기본 런타임",
       "command": "명령",
       "description": "설명",
       "no_description": "설명 없음",
@@ -350,12 +347,12 @@
     "form": {
       "create_title": "새 사용자 지정 런타임",
       "edit_title": "사용자 지정 런타임 편집",
-      "step_family_label": "기본 프로토콜 제품군 선택",
-      "step_family_hint": "이 런타임이 사용하는 기반 CLI 프로토콜입니다.",
+      "step_family_label": "기본 런타임 선택",
+      "step_family_hint": "이 명령과 호환되는 CLI를 선택하세요.",
       "step_details_label": "런타임 구성",
       "step_progress": "{{current}} / {{total}}단계",
-      "family_label": "기본 프로토콜 제품군",
-      "family_locked_hint": "생성 후에는 기본 프로토콜 제품군을 변경할 수 없습니다.",
+      "family_label": "기본 런타임",
+      "family_locked_hint": "생성 후에는 기본 런타임을 변경할 수 없습니다.",
       "display_name_label": "표시 이름",
       "display_name_placeholder": "예: 내 사용자 지정 Claude…",
       "command_name_label": "명령",
@@ -389,7 +386,7 @@
       "cancel": "취소",
       "deleting": "삭제 중…",
       "toast_deleted": "사용자 지정 런타임이 워크스페이스에서 삭제되었습니다",
-      "error_bound": "아직 에이전트가 사용 중이어서 이 런타임을 삭제할 수 없습니다.",
+      "error_bound": "아직 에이전트가 사용 중이어서 이 사용자 지정 런타임을 삭제할 수 없습니다. 해당 에이전트는 이 런타임을 등록한 다른 컴퓨터에 있을 수 있습니다.",
       "error_generic": "런타임 삭제에 실패했습니다."
     }
   },

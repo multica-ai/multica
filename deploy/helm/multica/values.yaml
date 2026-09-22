@@ -110,6 +110,8 @@ backend:
         - ReadWriteOnce
   # All non-secret backend env. Secret values come from `existingSecret`.
   config:
+    # Optional container-loopback maintenance API; empty disables it. Never expose via Service/Ingress.
+    maintenancePort: ""
     # The migrator and API server retry transient PostgreSQL startup failures
     # within this budget. Set to 0 to restore fail-fast startup behavior.
     databaseStartupTimeout: 3m
@@ -134,6 +136,9 @@ backend:
     # every caller. Bootstrap the workspace with this false, then flip to
     # true so users can only join via invitation.
     disableWorkspaceCreation: false
+    # Set to "1" or "true" to disable first-party anonymous self-host
+    # telemetry collection and delivery.
+    doNotTrack: ""
     # Self-host-only VCS integration (Forgejo / Gitea / GitLab). The official
     # chart enables the product surface by default; operators must also provide
     # MULTICA_VCS_SECRET_KEY through existingSecret before connections work.

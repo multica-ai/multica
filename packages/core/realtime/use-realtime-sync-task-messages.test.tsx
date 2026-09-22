@@ -126,24 +126,23 @@ describe("useRealtimeSync — task:message fanout guards (MUL-6396)", () => {
     // Mounting registers the cache entry immediately; the queryFn above has
     // not resolved yet. A frame landing in that window must still be kept.
     handler(msg(HELD_TASK, 1));
-    vi.advanceTimersByTime(FLUSH_MS);
 
     expect(cached(qc, HELD_TASK)?.map((m) => m.seq)).toEqual([1]);
     release();
   });
 
-  it("coalesces a burst into a single cache write", () => {
+  it("writes a burst's first frame immediately and coalesces its tail", () => {
     const handler = mount();
     const release = holdTimeline(HELD_TASK);
     const writes = vi.spyOn(qc, "setQueryData");
 
     for (let seq = 1; seq <= 5; seq++) handler(msg(HELD_TASK, seq));
-    // Nothing is written until the window closes.
-    expect(writes).not.toHaveBeenCalled();
+    expect(writes).toHaveBeenCalledTimes(1);
+    expect(cached(qc, HELD_TASK)?.map((m) => m.seq)).toEqual([1]);
 
     vi.advanceTimersByTime(FLUSH_MS);
 
-    expect(writes).toHaveBeenCalledTimes(1);
+    expect(writes).toHaveBeenCalledTimes(2);
     expect(cached(qc, HELD_TASK)?.map((m) => m.seq)).toEqual([1, 2, 3, 4, 5]);
     release();
   });
@@ -177,9 +176,8 @@ describe("useRealtimeSync — task:message fanout guards (MUL-6396)", () => {
     const release = holdTimeline(HELD_TASK);
     await vi.waitFor(() => expect(listTaskMessages).toHaveBeenCalled());
 
-    // Live frame arrives and flushes while the request is still open.
+    // The leading-edge live frame lands while the request is still open.
     handler(msg(HELD_TASK, 2, { content: "live" }));
-    vi.advanceTimersByTime(FLUSH_MS);
     expect(cached(qc, HELD_TASK)?.map((m) => m.seq)).toEqual([2]);
 
     // The response was snapshotted before seq 2 was persisted.
@@ -206,8 +204,10 @@ describe("useRealtimeSync — task:message fanout guards (MUL-6396)", () => {
     const release = holdTimeline(HELD_TASK);
     await vi.waitFor(() => expect(cached(qc, HELD_TASK)?.map((m) => m.seq)).toEqual([1]));
 
-    // Frame batched while the entry is still held, then the viewer closes.
+    // The leading edge writes immediately. The second frame is batched while
+    // the entry is still held, then the viewer closes.
     handler(msg(HELD_TASK, 2, { content: "live" }));
+    handler(msg(HELD_TASK, 3, { content: "batched tail" }));
     release();
 
     // GC lands first (50ms), flush second (100ms).

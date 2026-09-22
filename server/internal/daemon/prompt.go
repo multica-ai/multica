@@ -199,6 +199,17 @@ func BuildPrompt(task Task, provider string, options ...PromptOption) string {
 }
 
 func buildPromptBody(task Task, provider string) string {
+	if task.WakeupID != "" {
+		var b strings.Builder
+		fmt.Fprintf(&b, "You are running as a local coding agent for a Multica workspace.\n\nYour assigned issue ID is: %s\n\n[WAKEUP]\n%s\n\n", task.IssueID, task.HandoffNote)
+		fmt.Fprintf(&b, "Start by running `multica issue get %s --output json`, then read current run/comment state. Decide whether the instruction's goal is met; the trigger reports a fact, not business completion. This is an ordinary run with normal result delivery.\n", task.IssueID)
+		fmt.Fprintf(&b, "Scan comment threads with `multica issue comment list %s --roots-only --summary --compact --output json`, then expand relevant threads with `--thread <id> --tail 30`.\n", task.IssueID)
+		fmt.Fprintf(&b, "Inspect this configuration with `multica issue wakeup get %s %s --output json`. If recurring work is no longer needed, disable it with `multica issue wakeup disable %s %s`.\n", task.IssueID, task.WakeupID, task.IssueID, task.WakeupID)
+		if task.TriggerCommentID != "" {
+			fmt.Fprintf(&b, "Post your result using `multica issue comment add %s --parent %s --content-file ./reply.md --output table && rm ./reply.md`. This is the original delivery thread, not a new comment trigger.\n", task.IssueID, task.TriggerCommentID)
+		}
+		return b.String()
+	}
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}
@@ -420,7 +431,7 @@ func buildCommentPrompt(task Task, provider string) string {
 			//   - A retry inherits the previous attempt's coalesced_comment_ids
 			//     verbatim (queries/agent.sql RetryTask), while the anchor is
 			//     recomputed from the last STARTED task's started_at
-			//     (GetLastTaskStartedAtForIssueAndAgent). An inherited id can
+			//     (the resumed run, via GetLastTaskSession). An inherited id can
 			//     therefore predate the anchor.
 			//   - The anchor is only populated when some comment landed after it,
 			//     which is independent of where these ids sit.
@@ -436,7 +447,16 @@ func buildCommentPrompt(task Task, provider string) string {
 				task.IssueID)
 		}
 	}
-	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
+	// Issue-reading pointer (MUL-7344). Same gate as the comment hint below —
+	// `resumed` is computed once for both, so one turn can never claim the
+	// session is warm enough to skip the issue read while treating it as cold
+	// for comments. On anything but a real resume with a server-computed
+	// comparison this renders the unconditional read, byte for byte.
+	resumed := task.PriorSessionID != "" && !task.PriorSessionResumeUnavailable
+	b.WriteString(execenv.BuildIssueStateHint(
+		task.IssueID, task.IssueStatus, task.IssueAssigneeType, task.IssueAssigneeID,
+		task.IssueChangedFields, task.IssueStateDeltaKnown, resumed,
+	))
 	// Comment-reading pointer. Which hint renders is decided by whether this
 	// run actually RESUMES a provider session, and only then by the new-comment
 	// delta — never by the delta alone.
@@ -471,7 +491,7 @@ func buildCommentPrompt(task Task, provider string) string {
 	// that; these hints carry this turn's facts and exact commands. Final
 	// fallback (no trigger id, shouldn't happen here): plain read.
 	var hint string
-	if task.PriorSessionID != "" && !task.PriorSessionResumeUnavailable {
+	if resumed {
 		hint = execenv.BuildNewCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID, task.NewCommentsSince, task.NewCommentCount)
 		if hint == "" {
 			if task.NewCommentsDeltaKnown {

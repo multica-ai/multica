@@ -20,6 +20,7 @@ vi.mock("@multica/core/issue-statuses/hooks", () => ({
     statuses: [],
     activeStatuses: [],
     categoryOf: (key: string) => key,
+    iconOf: () => null,
     colorOf: (key: string) =>
       key === "awaiting_response" ? "#f97316" : null,
     labelOf: (key: string) => key,
@@ -253,14 +254,14 @@ describe("IssueHoverCard", () => {
     mockIssue({
       ...BASE_ISSUE,
       status: "awaiting_response",
-      status_category: "in_review",
+      status_category: "started",
     });
 
     await openCard();
 
     expect(screen.getByTestId("status-icon")).toHaveAttribute(
       "data-category",
-      "in_review",
+      "started",
     );
     expect(screen.getByTestId("status-icon")).toHaveAttribute(
       "data-color",

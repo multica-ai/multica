@@ -106,6 +106,65 @@ func TestCompleteTask_ReconcilesMemberCommentPostedDuringRun(t *testing.T) {
 	}
 }
 
+// A daemon may replay /complete after the server committed but its response was
+// lost. The task CAS makes that replay a 200, but the handler must also skip the
+// transaction-external reconciliation; otherwise a follow-up that finished
+// between deliveries leaves no pending dedupe row and the same member comment
+// creates a second real agent run.
+func TestCompleteTask_ReplayDoesNotCreateSecondFollowUp(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	dbfx.QueryRow(t,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
+		testWorkspaceID).Scan(&agentID, &runtimeID)
+	issueID := dbfx.Issue(t, "replayed-complete fixture", testutil.Cols{
+		"status":        "in_progress",
+		"number":        999009,
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
+	triggerCommentID := dbfx.Comment(t, issueID, "initial request", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '10 minutes'"),
+	})
+	var taskID string
+	dbfx.QueryRow(t, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, started_at)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
+		RETURNING id
+	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID)
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
+	dbfx.Exec(t, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at)
+		VALUES ($1, $2, 'member', $3, 'also handle this once', 'comment', $4, now() - interval '1 minute')
+	`, issueID, testWorkspaceID, testUserID, triggerCommentID)
+
+	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
+		t.Fatalf("first CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var followUpID string
+	dbfx.QueryRow(t, `
+		SELECT id FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND id <> $3 AND status = 'queued'
+	`, issueID, agentID, taskID).Scan(&followUpID)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1`, followUpID)
+
+	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
+		t.Fatalf("replayed CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var total int
+	dbfx.QueryRow(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2`, issueID, agentID).Scan(&total)
+	if total != 2 {
+		t.Fatalf("task rows after replay = %d, want original + exactly one follow-up", total)
+	}
+	if pending := pendingTaskCountForAgentIssue(t, issueID, agentID); pending != 0 {
+		t.Fatalf("replayed completion created %d additional pending follow-up(s)", pending)
+	}
+}
+
 // TestCompleteTask_NoReconcileWhenNoNewMemberComment guards against spurious
 // follow-ups: when no member comment arrived after the run started, completion
 // must not enqueue any new task.

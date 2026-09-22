@@ -13,7 +13,6 @@
   "delete_issue": {
     "title": "删除任务",
     "description": "将永久删除该任务及其所有评论。此操作不可撤销。",
-    "hint": "工作区任何成员都可以删除任务。",
     "cancel": "取消",
     "confirm": "删除",
     "deleting": "删除中...",
@@ -29,7 +28,7 @@
     "toast_failed": "发送反馈失败",
     "send": "发送反馈",
     "sending": "发送中...",
-    "github_hint_prefix": "想被更快处理、参与讨论？请去 ",
+    "github_hint_prefix": "也可在以下平台提交反馈：",
     "github_hint_link": "GitHub"
   },
   "issue_picker": {
@@ -76,7 +75,7 @@
     "leader_placeholder": "选择一个队长智能体",
     "members_label": "附加成员",
     "members_optional": "（可选）",
-    "members_hint": "队长可以向这些成员委派子任务，也可稍后再添加。",
+    "members_hint": "队长可向这些成员委派子任务。",
     "members_placeholder": "添加智能体或工作区成员",
     "members_selected_count_other": "已选 {{count}} 人",
     "members_more_count": "+{{count}}",
@@ -136,7 +135,8 @@
     "local_clear": "清除",
     "local_pick_failed": "无法打开目录选择器。",
     "local_invalid_dir": "该目录不可用，请重新选择。",
-    "local_hint": "其他机器上的智能体看不到这个路径，会启动失败。需要协作请用仓库模式。"
+    "local_hint": "其他机器上的智能体看不到这个路径，会启动失败。需要协作请用仓库模式。",
+    "repos_ref_default": "默认分支"
   },
   "create_issue": {
     "sr_manual": "新建任务",

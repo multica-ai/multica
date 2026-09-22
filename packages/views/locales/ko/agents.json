@@ -44,7 +44,7 @@
   },
   "empty": {
     "title": "아직 에이전트가 없습니다",
-    "description": "팀원에게 하듯 에이전트를 만들고 태스크를 할당하세요. 로컬 에이전트는 내 기기에서, 클라우드 에이전트는 Multica 런타임에서 실행됩니다."
+    "description": "에이전트를 만든 후 태스크를 할당하세요."
   },
   "no_matches": {
     "title": "일치하는 결과 없음",
@@ -161,11 +161,8 @@
   },
   "inspector": {
     "section_profile": "프로필",
-    "section_profile_hint": "워크스페이스에서 이 에이전트가 표시되는 방식을 관리합니다.",
     "section_execution": "실행 설정",
-    "section_execution_hint": "런타임, 모델, 추론 수준, 속도와 병렬 실행 한도를 설정합니다.",
     "section_access": "접근 권한",
-    "section_access_hint": "이 에이전트와 연결된 기능을 사용할 수 있는 대상을 관리합니다.",
     "section_properties": "속성",
     "section_details": "세부 정보",
     "section_details_hint": "소유권과 수명 주기에 대한 읽기 전용 정보입니다.",
@@ -182,7 +179,6 @@
     "prop_updated": "수정일",
     "no_description_placeholder": "설명 없음",
     "avatar_label": "아바타",
-    "avatar_hint": "할당, 활동 및 채팅에 표시됩니다.",
     "name_label": "이름",
     "description_label": "설명",
     "change_avatar_aria": "아바타 변경",
@@ -281,7 +277,6 @@
   "create_dialog": {
     "title_create": "에이전트 만들기",
     "title_duplicate": "에이전트 복제",
-    "description_create": "워크스페이스에 새 AI 에이전트를 만듭니다.",
     "description_duplicate": "\"{{name}}\"을(를) 바탕으로 새 에이전트를 만듭니다. 지침, 환경 변수, 스킬이 복사됩니다.",
     "name_label": "이름",
     "name_placeholder": "예: 심층 리서치 에이전트",
@@ -345,7 +340,7 @@
   },
   "conversation_starters": {
     "label": "대화 시작 예시",
-    "hint": "이 에이전트로 새 채팅을 열 때 표시되는 예시입니다(최대 3개). 선택하면 전송하지 않고 입력창에 채웁니다.",
+    "hint": "최대 3개입니다. 선택하면 입력란에 채워지며 전송되지 않습니다.",
     "add": "추천 추가",
     "item_label": "추천 {{number}} 라벨",
     "prompt_label": "추천 {{number}} 프롬프트",
@@ -402,7 +397,7 @@
       "reveal_action": "공개하고 수정",
       "revealing": "공개하는 중...",
       "reveal_failed_toast": "환경 변수 값을 불러오지 못했습니다",
-      "empty_editable": "설정된 환경 변수가 없습니다. 시작 시 에이전트에 주입할 변수를 추가하세요."
+      "empty_editable": "설정된 환경 변수가 없습니다."
     },
     "custom_args": {
       "intro": "에이전트를 시작할 때 전달할 CLI 인자를 추가하세요.",
@@ -417,7 +412,6 @@
       "input_aria": "인자 {{index}}",
       "new_argument_aria": "새 인자",
       "empty_title": "아직 인자가 없습니다",
-      "empty_hint": "첫 번째 토큰을 추가하여 시작 명령어를 만드세요.",
       "edit_aria": "인자 {{index}} 편집",
       "remove_aria": "인자 {{index}} 제거",
       "saved_toast": "사용자 지정 인자를 저장했습니다",
@@ -472,7 +466,6 @@
       "dialog_edit_title": "MCP Server 편집",
       "dialog_edit_title_named": "{{name}} 설정 편집",
       "dialog_replace_title": "{{name}} 설정 교체",
-      "dialog_description": "연결 방식을 선택하고 설정을 입력하세요. 고급 설정에는 JSON을 사용할 수 있습니다.",
       "dialog_replace_description": "민감한 정보를 보호하기 위해 저장된 내용은 다시 표시되지 않습니다. 새 설정을 모두 입력하세요. 기존 에이전트 할당은 그대로 유지됩니다.",
       "dialog_name_label": "Server 이름",
       "dialog_name_hint": "Runtime에서 이 Server를 식별하는 이름입니다. 문자, 숫자, 하이픈, 밑줄을 사용할 수 있습니다.",
@@ -521,14 +514,14 @@
       "invalid_json": "잘못된 JSON: {{error}}",
       "save_failed_toast": "MCP config를 저장하지 못했습니다",
       "redacted_title": "설정됨 — 보기에서 숨김",
-      "redacted_hint": "에이전트 소유자 또는 워크스페이스 관리자만 이 config를 읽을 수 있습니다."
+      "redacted_hint": "에이전트 소유자 또는 워크스페이스 관리자만 이 config를 읽을 수 있습니다.",
+      "dialog_json_help": "전체 서버 설정을 JSON으로 편집합니다."
     },
     "composio_mcp": {
       "subtitle": "툴킷을 선택하면, 본인(이 에이전트의 생성자)이 직접 또는 하위 에이전트 체인을 통해 이 에이전트를 트리거할 때만 MCP 서버로 마운트됩니다.",
       "loading": "연결을 불러오는 중…",
       "load_failed": "연결된 앱을 불러오지 못했습니다. 잠시 후 다시 시도하세요.",
       "empty_title": "아직 연결된 앱이 없습니다",
-      "empty_hint": "아직 서드파티 서비스를 연결하지 않았습니다. 먼저 하나를 인증한 뒤 여기서 허용하세요.",
       "empty_link_to_settings": "설정 → 연동에서 연결하기",
       "connected": "연결됨",
       "toggle_aria": "이 에이전트에 {{toolkit}} 허용",
@@ -540,11 +533,10 @@
       "workspace_warning": "워크스페이스에 공개: 워크스페이스의 모든 구성원이 이 에이전트를 통해 이러한 Composio 앱을 사용할 수 있습니다."
     },
     "runtime_config": {
-      "intro": "OpenClaw 런타임이 이 에이전트의 각 턴을 어떻게 실행할지 선택하세요. Local 모드는 에이전트를 daemon 프로세스 내부에서 실행합니다. Gateway 모드는 각 턴을 OpenClaw Gateway로 전달합니다 — daemon 호스트가 가벼운 조율기 역할을 하고 실제 작업은 더 강력한 머신에서 돌리고 싶을 때 유용합니다.",
       "mode_label": "라우팅 모드",
       "mode_local": "Local",
       "mode_gateway": "Gateway",
-      "mode_local_hint": "기본값. daemon이 `openclaw agent --local …`을 실행하고 에이전트 루프가 이 호스트에서 동작합니다.",
+      "mode_local_hint": "이 컴퓨터에서 실행합니다.",
       "mode_gateway_hint": "daemon이 OpenClaw Gateway에 다이얼합니다. 엔드포인트 필드를 비워두면 daemon 호스트의 `~/.openclaw/openclaw.json`에서 상속받습니다.",
       "gateway_legend": "Gateway 엔드포인트",
       "host_label": "Host",
@@ -561,7 +553,7 @@
     },
     "skills": {
       "assigned_title": "에이전트에 할당됨",
-      "assigned_hint": "워크스페이스 스킬은 에이전트와 함께 이동합니다. 제거하지 않고 일시적으로 끌 수 있습니다.",
+      "assigned_hint": "끄면 할당은 유지한 채 사용을 중지합니다.",
       "runtime_title": "런타임에서 상속",
       "runtime_hint": "{{runtime}}에서 자동으로 탐색되며 이 에이전트가 해당 런타임에서 실행될 때 사용할 수 있습니다.",
       "workspace_badge": "워크스페이스",
@@ -587,13 +579,10 @@
       "detail_plugin": "플러그인",
       "detail_files": "파일",
       "detail_supporting_files": "지원 파일",
-      "intro": "이 에이전트의 유효한 스킬입니다. Codex와 Claude Code에서 상속된 스킬도 에이전트별로 끌 수 있습니다.",
       "add_action": "스킬 추가",
       "empty_title": "할당된 스킬이 없습니다",
-      "empty_hint": "워크스페이스 스킬을 추가해 이 에이전트와 팀 지식을 공유하세요.",
       "remove_failed_toast": "스킬을 제거하지 못했습니다",
       "add_dialog_title": "스킬 추가",
-      "add_dialog_description": "이 에이전트에 할당할 워크스페이스 스킬을 선택하세요.",
       "add_dialog_search_placeholder": "스킬 검색",
       "add_dialog_empty": "모든 워크스페이스 스킬이 이미 할당되어 있습니다.",
       "add_dialog_no_match": "검색 결과와 일치하는 스킬이 없습니다.",
@@ -605,7 +594,6 @@
       "add_failed_toast": "스킬을 추가하지 못했습니다"
     },
     "integrations": {
-      "intro": "이 에이전트를 외부 채팅 플랫폼에 연결해 팀원이 평소 사용하는 도구에서 바로 함께 작업할 수 있도록 합니다.",
       "members_note": "이 연결을 관리할 수 있는 사람은 워크스페이스 소유자와 관리자뿐입니다. 연결된 봇은 설정 → 연동에서 확인할 수 있습니다."
     },
     "activity": {
@@ -633,7 +621,10 @@
       "show_more": "더 보기 →",
       "runs_other": "회 실행",
       "success_pct": "성공률 {{percent}}%",
-      "success_label": "성공",
+      "success_label": "성공률",
+      "success_hint": "완료 및 실패한 실행 수 중 완료한 실행의 비율입니다. 취소한 실행은 제외됩니다.",
+      "success_unavailable": "이 기간에 완료하거나 실패한 실행이 없어 성공률을 계산할 수 없습니다.",
+      "cancelled_count": "{{count}}개 취소됨",
       "avg_duration": "평균 {{value}}",
       "avg_duration_label": "평균 소요 시간",
       "failed_count": "{{count}}회 실패",
@@ -824,6 +815,7 @@
       "skill_bundle_unavailable": "에이전트 스킬을 다운로드할 수 없음",
       "runtime_cli_timeout": "로컬 런타임 CLI 시간 초과",
       "environment_prepare_failed": "실행 환경을 준비하지 못함",
+      "runtime_access_denied": "이 에이전트는 비공개 런타임에서 실행할 수 없어 답변할 수 없습니다. 런타임을 공개로 변경하거나, 소유자가 사용할 수 있는 런타임으로 에이전트를 다시 연결/복사하세요.",
       "invalid_task_identity": "실행 ID 정보가 일치하지 않음",
       "agent_error_provider_auth_or_access": "공급자 인증 실패",
       "agent_error_provider_quota_limit": "공급자 할당량 소진",
@@ -878,7 +870,6 @@
     "back": "뒤로",
     "eyebrow": "에이전트 만들기",
     "choose_title": "어떻게 시작하시겠어요?",
-    "choose_description": "모든 항목을 직접 설정하거나, 필요한 내용을 설명하고 대화로 만들 수 있습니다.",
     "recommended": "추천",
     "continue": "계속",
     "step_choose": "시작 방법 선택",
@@ -887,7 +878,7 @@
     "modes": {
       "blank": {
         "title": "빈 상태로 시작",
-        "description": "모든 항목을 직접 설정합니다. 에이전트의 동작 방식을 정확히 알고 있을 때 적합합니다."
+        "description": "이름, 지침, 런타임을 직접 설정합니다."
       },
       "template": {
         "title": "템플릿 사용",
@@ -895,18 +886,15 @@
       },
       "ai": {
         "title": "AI로 만들기",
-        "description": "원하는 결과를 설명하면 Agent Builder가 핵심 질문을 하고 실시간 초안을 준비합니다."
+        "description": "대화를 통해 수정 가능한 설정 초안을 만듭니다."
       }
     },
     "sections": {
       "identity": "기본 정보",
-      "identity_hint": "알아보기 쉬운 이름과 간결한 목적을 지정하세요.",
       "behavior": "동작 및 기능",
-      "behavior_hint": "작업 방식을 정의하고 사용할 워크스페이스 스킬을 추가하세요.",
       "execution": "실행 설정",
-      "execution_hint": "에이전트를 실행할 위치를 선택하고 필요하면 런타임 기본 모델, 추론 수준, 속도를 변경하세요.",
-      "access": "접근 권한",
-      "access_hint": "이 에이전트를 실행할 수 있는 사용자를 설정합니다. 나중에 변경할 수 있습니다."
+      "execution_hint": "지정하지 않은 옵션은 런타임 기본값을 사용합니다.",
+      "access": "접근 권한"
     },
     "thinking_label": "추론",
     "speed_label": "속도",
@@ -927,7 +915,7 @@
     },
     "builder": {
       "setup_title": "Agent Builder 런타임 선택",
-      "setup_description": "선택한 온라인 런타임이 설정 대화를 실행하고 새 에이전트의 기본 런타임이 됩니다.",
+      "setup_description": "이 런타임은 생성 대화에 사용되며 새 에이전트의 기본값이 됩니다.",
       "start": "대화 시작",
       "connect_runtime": "런타임 연결",
       "start_failed": "Agent Builder를 시작하지 못했습니다.",
@@ -937,11 +925,10 @@
       "switch_runtime_pending": "현재 답변을 중지하면 런타임을 전환할 수 있습니다.",
       "switch_runtime_success": "런타임을 전환했습니다. 설정 초안은 유지되며, 이후 대화는 새 런타임에서 새로운 모델 세션으로 이어집니다.",
       "chat_title": "Agent Builder",
-      "chat_hint": "대화로 요구 사항을 정리하고 옆의 설정을 다듬으세요.",
       "runtime_online": "런타임 온라인",
       "runtime_offline": "런타임 오프라인",
       "empty_title": "이 에이전트는 무엇을 해야 하나요?",
-      "empty_description": "역할, 작업 흐름, 출력 또는 제약 사항을 설명하세요. 오른쪽에 첫 초안이 표시됩니다.",
+      "empty_description": "이 에이전트가 할 일을 설명하세요.",
       "prompt_review": "프런트엔드 Pull Request 검토",
       "prompt_research": "경쟁사를 조사하고 결과 요약",
       "prompt_assistant": "팀의 프로젝트 계획과 작성 지원",
@@ -950,7 +937,7 @@
       "send": "메시지 보내기"
     },
     "live_draft": "에이전트 설정",
-    "live_draft_hint": "대화 내용이 여기에 반영되며 각 항목을 직접 조정할 수 있습니다.",
+    "live_draft_hint": "초안을 직접 수정할 수 있습니다.",
     "duplicate_env_notice": "지침, 스킬, 명령 인수는 복사됩니다. 환경 변수, MCP 서버, 머신 로컬 런타임 설정은 복사되지 않습니다.",
     "duplicate_runtime_reset_notice": "원래 런타임을 사용할 수 없어 이 복사본은 다른 런타임에서 실행됩니다. 모델, 추론 수준, 속도는 선택한 런타임에서만 유효하므로 초기화되었습니다.",
     "create_and_open": "만들고 열기",

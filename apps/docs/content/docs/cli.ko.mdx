@@ -98,6 +98,7 @@ multica issue assign MUL-123 --to "Backend Agent"
 # 댓글 및 실행 기록
 multica issue comment list MUL-123
 multica issue comment add MUL-123 --content "회귀 테스트를 먼저 확인해 주세요"
+multica issue comment update <comment-id> --expected-revision 2 --content "회귀 테스트와 릴리스 노트를 확인해 주세요"
 multica issue runs MUL-123
 ```
 
@@ -106,6 +107,7 @@ multica issue runs MUL-123
 ```bash
 multica issue create --title "업그레이드 안내" --description-stdin < notes.md
 multica issue comment add MUL-123 --content-stdin < review.md
+multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
 ```
 
 특정 실행의 메시지를 확인하거나 실행을 중지합니다.
@@ -247,7 +249,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | `project` | `list/get/create/update/delete` | 프로젝트 관리 | |
 | | `status <id> <status>` | 프로젝트 상태 변경 | |
 | | `resource list/add/update/remove` | 프로젝트 추가 리소스 관리 | `--type`, `--url`, `--local-path`, `--daemon-id`, `--execution-mode`(로컬 디렉터리의 `in_place` / `worktree`) |
-| `label` | `list/get/create/update/delete` | 워크스페이스 라벨 관리 | |
+| `label` | `list/get/create/update/delete` | 워크스페이스 라벨 관리 | `list`: `--resource-type`(`issue` 또는 `skill`), `--full-id`; `create`: `--name`, `--color`, `--resource-type`(`issue` 또는 `skill`), `--description` |
 | `property` | `list/get/create/update/archive/unarchive` | 워크스페이스 사용자 지정 속성 관리 | `create`: `--name`, `--type`(`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`), `--option`(반복 가능, select 유형만). `list`: `--include-archived`. 유형은 생성 후 변경 불가 |
 | `agent` | `list/get/create/update/archive/restore` | 에이전트 관리 | `--name`, `--runtime-id`(`create`에서 필수), `--instructions`, `--conversation-starters`, `--model`, `--thinking-level`, `--mcp-config`, `--permission-mode`, `--max-concurrent-tasks` |
 | | `copy <agent-id>` | 원래 에이전트에 영향 없이 새 에이전트로 복사 | `--name`(기본값은 원래 이름 + ` (copy)`), `--runtime-id`(다른 런타임으로 복사할 때 `--model`도 필수), `--no-skills`. `custom_env`, `mcp_config`, `runtime_config` 같은 기밀 설정은 복사되지 않으며 `create`와 같은 flag로 다시 제공해야 함 |
@@ -268,6 +270,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `import` | URL 또는 로컬 파일에서 스킬 가져오기 | `--url` / `--file`, `--on-conflict`(`fail`, `overwrite`, `rename`, `skip`, 기본 `fail`) |
 | | `search <query>` | 스킬 검색 | |
 | | `files list/upsert/delete <skill-id>` | 스킬 내부 파일 관리 | |
+| | `label list/add/remove <skill-id>` | 스킬 라벨 관리 | `add` / `remove`: `<label-id>`에 전체 UUID 또는 짧은 접두사 사용 가능 |
 | `squad` | `list/get/create/update/delete` | 스쿼드 관리(`delete`는 보관) | |
 | | `member list/add/set-role/remove` | 스쿼드 멤버 관리 | |
 | | `activity <issue-id> <outcome>` | 리더 평가 기록 | |

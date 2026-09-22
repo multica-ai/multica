@@ -13,7 +13,7 @@
     "filter_all_description": "All runtimes in this view",
     "empty": {
       "title": "No runtimes yet",
-      "hint": "Desktop auto-scans this computer. To use another machine — a server, dev box, or any computer with a terminal — add it here."
+      "hint": "Desktop detects this computer automatically. Connect other computers here."
     },
     "no_matches": {
       "title": "No matches",
@@ -24,16 +24,15 @@
     },
     "bootstrapping": {
       "title": "Starting local runtime…",
-      "hint": "This usually takes a few seconds. Your daemon is registering with the workspace."
+      "hint": "Connecting to the workspace..."
     }
   },
   "mika_setup": {
     "title": "Your runtime is ready. Start with Mika.",
-    "description": "Mika turns your goal into an issue, coordinates the right agent, and helps you add reusable specialists when your workflow needs them.",
+    "description": "Let Mika organize work and coordinate agents.",
     "action": "Start with Mika",
     "failed": "Couldn't start Mika",
     "dialog_title": "Where should Mika run?",
-    "dialog_description": "Pick the runtime Mika will use. You can change it later in settings.",
     "cancel": "Cancel"
   },
   "machine": {
@@ -80,7 +79,7 @@
     "rename": "Rename machine",
     "rename_dialog": {
       "title": "Rename machine",
-      "description": "Give this machine a name you'll recognize. It applies to every runtime on this machine and shows up when you pick a runtime for an agent.",
+      "description": "Used for this computer and all its runtimes.",
       "placeholder": "e.g. Bohan's MacBook",
       "hint": "Leave empty to use the device's default name.",
       "cancel": "Cancel",
@@ -206,7 +205,6 @@
     "step2_label": "Start the daemon",
     "step2_hint": "Opens a browser to sign in, then keeps the daemon running in the background.",
     "live_listening": "Waiting for your computer",
-    "live_listening_hint": "We'll detect it as soon as the daemon starts — usually under a minute.",
     "troubleshooting": "Can't open a browser on that computer?",
     "trouble_intro": "Use a token instead of the browser sign-in. This replaces step 2 and works anywhere you have a terminal.",
     "trouble_token_hint_prefix": "Create a token in ",
@@ -217,21 +215,20 @@
     "copy_aria": "Copy",
     "cancel": "Cancel",
     "success_title": "Computer connected",
-    "success_description": "Your computer is online and ready. Create an agent and it can start picking up runs here.",
+    "success_description": "Computer connected. You can now create an agent.",
     "view_runtime": "View runtime",
     "create_agent": "Create an agent"
   },
   "cloud_runtime": {
     "action": "Cloud Runtime",
     "title": "Cloud Runtime",
-    "description": "Launch a managed cloud node and watch its Fleet status.",
+    "description": "Create a cloud runtime.",
     "create_title": "New node",
-    "create_hint": "Choose a name, instance type, and disk size. Fleet applies the rest.",
     "nodes_title": "Fleet nodes",
     "refresh": "Refresh",
     "nodes_empty": "No cloud nodes",
     "nodes_failed": "Cloud Runtime unavailable",
-    "nodes_failed_hint": "Fleet did not return a node list.",
+    "nodes_failed_hint": "Couldn't load cloud nodes. Try again.",
     "node_fallback_name": "Cloud node",
     "create": "Create node",
     "creating": "Creating...",
@@ -351,7 +348,7 @@
       "read_only": "Read-only"
     },
     "detail": {
-      "base_family": "Base protocol family",
+      "base_family": "Base runtime",
       "command": "Command",
       "description": "Description",
       "no_description": "No description",
@@ -363,12 +360,12 @@
     "form": {
       "create_title": "New custom runtime",
       "edit_title": "Edit custom runtime",
-      "step_family_label": "Choose a base protocol family",
-      "step_family_hint": "The underlying CLI protocol this runtime speaks.",
+      "step_family_label": "Choose a base runtime",
+      "step_family_hint": "Select the CLI this command is compatible with.",
       "step_details_label": "Configure the runtime",
       "step_progress": "Step {{current}} of {{total}}",
-      "family_label": "Base protocol family",
-      "family_locked_hint": "The base protocol family can't be changed after creation.",
+      "family_label": "Base runtime",
+      "family_locked_hint": "The base runtime cannot be changed after creation.",
       "display_name_label": "Display name",
       "display_name_placeholder": "e.g. My custom Claude…",
       "command_name_label": "Command",
@@ -402,7 +399,7 @@
       "cancel": "Cancel",
       "deleting": "Deleting…",
       "toast_deleted": "Custom runtime deleted from workspace",
-      "error_bound": "This runtime can't be deleted while agents are still using it.",
+      "error_bound": "This custom runtime can't be deleted while agents are still using it — including agents on other machines that registered it.",
       "error_generic": "Failed to delete the runtime."
     }
   },

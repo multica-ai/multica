@@ -46,6 +46,16 @@ filters may be repeated, and `--runtime` / `--project` accept UUIDs. The CLI
 follows every server cursor before printing one deterministic JSON document, so
 the exported result is never a silently truncated first page.
 
+`runtime usage` reports what the provider CLI reported. Claude and CodeBuddy
+usage prefers the CLI's final per-model totals. If a run ends without usable
+final usage, Multica can recover only main-loop input and cache tokens: split
+assistant events with the same response ID count once. Output tokens stay zero
+when no final count is available; that does not establish that the model
+produced no output. Subagent totals require final per-model usage. Streams that
+omit response IDs retain best-effort per-event input/cache accounting. These
+fallback figures can be incomplete; use the provider's billing records for
+actual charges. This correction applies to new runs, not historical usage rows.
+
 `runtime update` and `runtime delete` are writes. Starting a runtime update is
 limited to its owner or a workspace owner/admin; the original initiator may keep
 polling that specific in-flight request if their admin role changes.

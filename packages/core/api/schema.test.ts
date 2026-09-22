@@ -129,6 +129,64 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listSkills", () => {
+    const baseSkill = {
+      id: "skill-1",
+      workspace_id: "ws-1",
+      name: "review-helper",
+      description: "",
+      config: {},
+      created_by: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const skillLabel = {
+      id: "label-1",
+      workspace_id: "ws-1",
+      resource_type: "skill",
+      name: "mattpocock",
+      color: "#3b82f6",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+
+    it("falls back to an empty list when the response is malformed", async () => {
+      stubFetchJson({ skills: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listSkills();
+      expect(res).toEqual([]);
+    });
+
+    it("treats a missing labels field as an empty array (older backends)", async () => {
+      stubFetchJson([baseSkill]);
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listSkills();
+      expect(res).toHaveLength(1);
+      expect(res[0]?.id).toBe("skill-1");
+      expect(res[0]?.labels).toEqual([]);
+      // List parsing must not invent detail-only fields (GH #2174).
+      expect(res[0]).not.toHaveProperty("content");
+      expect(res[0]).not.toHaveProperty("files");
+    });
+
+    it("keeps a well-formed labels array", async () => {
+      stubFetchJson([{ ...baseSkill, labels: [skillLabel] }]);
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listSkills();
+      expect(res[0]?.labels?.map((l) => l.id)).toEqual(["label-1"]);
+      expect(res[0]?.labels?.[0]?.resource_type).toBe("skill");
+    });
+
+    it("catches malformed labels to [] without dropping the skill", async () => {
+      stubFetchJson([{ ...baseSkill, labels: [{ nope: true }] }]);
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listSkills();
+      expect(res).toHaveLength(1);
+      expect(res[0]?.id).toBe("skill-1");
+      expect(res[0]?.labels).toEqual([]);
+    });
+  });
+
   describe("getIssue", () => {
     // Unlike a list, a single issue has no safe-empty shape, and the bare
     // identifier autolink caches this result for 5 minutes. A malformed 2xx
@@ -1076,7 +1134,7 @@ describe("parseWithFallback", () => {
 
 // Workspace subscription reads carry a specific hazard the wallet schemas do
 // not: the fallback for a paid workspace must never be a shape that reads as
-// Free. An older cloud, a 503, or a renamed field has to surface as "unknown"
+// Free. An older/disabled cloud, an upstream 503, or a renamed field has to surface as "unknown"
 // so the UI shows "unavailable" instead of quietly downgrading a paying team.
 describe("workspace subscription contract", () => {
   const entitlement = {
@@ -1231,7 +1289,7 @@ describe("workspace subscription contract", () => {
     // parsing: fetch rejects first and a React Query caller sees isError. What
     // matters for both paths is the same — no snapshot is produced, so nothing
     // can be mistaken for a Free workspace.
-    for (const status of [404, 503]) {
+    for (const status of [403, 404, 503]) {
       stubFetchJson({ error: "unavailable" }, status);
       const client = new ApiClient("https://api.example.test");
       await expect(client.getWorkspaceSubscriptionSummary()).rejects.toThrow();

@@ -1063,6 +1063,110 @@ func TestShouldCleanTaskDir_CompletedTaskTTLUnknownIssueStatusFailsClosed(t *tes
 	}
 }
 
+// MUL-7240 collapsed issue_status.category to four values and stopped
+// projecting nonterminal custom statuses onto a built-in key, so the gc-check
+// response started carrying keys this binary has never heard of. The full
+// cleanup path required a status it recognized, which silently turned that path
+// off for any workspace using a custom status — environment skeletons pile up
+// for as long as the parent issue sits there. Deciding on the lifecycle
+// category instead keeps it alive without teaching the daemon about custom
+// keys. (MUL-7364)
+func TestShouldCleanTaskDir_CompletedTaskTTLAcceptsCustomStatusByCategory(t *testing.T) {
+	t.Parallel()
+	issueID := "88888888-8888-8888-8888-88888888886a"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "human_review", "category": "started", "updated_at": time.Now(),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = time.Hour
+	// Artifact cleanup does not consult the status at all, so switching it off
+	// leaves the full-cleanup decision as the only thing this can measure.
+	d.cfg.GCArtifactTTL = 0
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "completed-custom-status", &execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-2 * time.Hour),
+	})
+
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionClean {
+		t.Fatalf("expected full cleanup for a started-category custom status, got %d", action)
+	}
+}
+
+// A category the daemon does not recognize is not an answer. It falls back to
+// the legacy status enum, which fails closed on a raw custom key — data is kept
+// rather than deleted on a response this binary cannot read. (MUL-7364)
+func TestShouldCleanTaskDir_CompletedTaskTTLUnknownCategoryFallsBackAndFailsClosed(t *testing.T) {
+	t.Parallel()
+	issueID := "88888888-8888-8888-8888-88888888886b"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "human_review", "category": "lifecycle_from_the_future", "updated_at": time.Now(),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = time.Hour
+	d.cfg.GCArtifactTTL = 0
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "completed-unknown-category", &execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-2 * time.Hour),
+	})
+
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+		t.Fatalf("expected unknown category to fail closed, got %d", action)
+	}
+}
+
+// Terminality is a category question too: `closed` covers Cancelled and every
+// custom status a workspace parks cancelled work on, and neither key is
+// something this binary can enumerate. (MUL-7364)
+func TestShouldCleanTaskDir_TerminalCategoryReclaimsWorkdir(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		status   string
+		category string
+	}{
+		{"custom done-category status", "gate_approved", "done"},
+		{"custom closed-category status", "wont_fix", "closed"},
+		{"built-in cancelled", "cancelled", "closed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			issueID := "88888888-8888-8888-8888-88888888886c"
+
+			mux := http.NewServeMux()
+			mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+				json.NewEncoder(w).Encode(map[string]any{
+					"status": tc.status, "category": tc.category,
+					"updated_at": time.Now().Add(-30 * 24 * time.Hour),
+				})
+			})
+
+			d := newGCTestDaemon(t, mux)
+			taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "terminal-category", &execenv.GCMeta{
+				Kind: execenv.GCKindIssue, IssueID: issueID, WorkspaceID: "ws1",
+				CompletedAt: time.Now().Add(-30 * 24 * time.Hour),
+			})
+
+			if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionClean {
+				t.Fatalf("expected terminal category to reclaim the workdir, got %d", action)
+			}
+		})
+	}
+}
+
 func TestShouldCleanTaskDir_CompletedTaskTTLRequiresCompletionTime(t *testing.T) {
 	t.Parallel()
 	issueID := "88888888-8888-8888-8888-888888888881"

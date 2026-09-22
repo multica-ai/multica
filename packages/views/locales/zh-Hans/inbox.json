@@ -28,6 +28,7 @@
     "open_in_new_tab": "在新标签页打开"
   },
   "list": {
+    "loading_selection": "正在加载通知…",
     "empty": "暂无通知",
     "mark_done_tooltip": "标为已完成",
     "archive_tooltip": "归档",
@@ -40,7 +41,10 @@
     "archived_title": "已归档",
     "archived_empty": "暂无已归档通知",
     "unarchive_tooltip": "取消归档",
-    "actions_aria": "通知操作"
+    "actions_aria": "通知操作",
+    "load_more": "加载更多",
+    "loading_more": "加载中...",
+    "retry": "重试"
   },
   "detail": {
     "select_prompt": "选择一条通知查看详情",
@@ -96,6 +100,7 @@
     "unarchived": "已恢复通知"
   },
   "errors": {
+    "archived_lookup_failed": "无法加载链接指向的通知",
     "source_context_retry_failed": "无法使用原始上下文重试",
     "source_context_retry_unavailable": "该上下文已无法重试，请从派生起点重新发起。",
     "mark_read_failed": "标为已读失败",
@@ -107,6 +112,7 @@
     "archive_all_read_failed": "归档已读失败",
     "archive_completed_failed": "归档已完成失败",
     "unarchive_failed": "取消归档失败",
-    "archived_load_failed": "无法加载已归档通知"
+    "archived_load_failed": "无法加载已归档通知",
+    "filters_load_failed": "无法加载筛选项"
   }
 }

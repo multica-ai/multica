@@ -10,6 +10,9 @@ const state = vi.hoisted(() => ({
   error: null as Error | null,
   connectionError: false,
   pending: false,
+  // The IM channels keep revoked rows for audit, so the fixture carries a real
+  // status — a row without one is not evidence of a live connection (#8496).
+  installationStatus: "active" as string,
   calls: [] as { queryKey: readonly unknown[]; enabled?: boolean }[],
   push: vi.fn(),
 }));
@@ -39,7 +42,10 @@ vi.mock("@tanstack/react-query", () => ({
     const data =
       opts.queryKey[0] === "composio"
         ? [{ status: "active" }]
-        : { installations: [{ id: "one" }], connections: [] };
+        : {
+            installations: [{ id: "one", status: state.installationStatus }],
+            connections: [],
+          };
     return {
       data: opts.select?.(data),
       isPending: state.pending,
@@ -69,6 +75,7 @@ beforeEach(() => {
   state.error = null;
   state.connectionError = false;
   state.pending = false;
+  state.installationStatus = "active";
   state.calls = [];
   state.push.mockClear();
   configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
@@ -128,6 +135,15 @@ describe("Integration directory", () => {
     ).toBe(true);
   });
   it("hides Composio when the server reports it unconfigured", () => {
+    state.error = new ApiError("unavailable", 403, "Forbidden", {
+      code: "composio_not_configured",
+    });
+    renderWithI18n(<IntegrationsTab />);
+    expect(
+      screen.queryByRole("link", { name: /Composio/ }),
+    ).not.toBeInTheDocument();
+  });
+  it("keeps hiding Composio when an older server reports 503", () => {
     state.error = new ApiError("unavailable", 503, "Service Unavailable");
     renderWithI18n(<IntegrationsTab />);
     expect(
@@ -146,6 +162,22 @@ describe("Integration directory", () => {
     state.search = "tab=integrations&integration=vcs";
     renderWithI18n(<IntegrationsTab />);
     expect(screen.getByText("VCS detail")).toBeInTheDocument();
+  });
+  it("reports revoked IM channels as disconnected while GitHub keeps counting rows", () => {
+    // Revoking an IM bot flips status and KEEPS the row, so counting rows would
+    // leave a torn-down bot showing a green "Connected" here forever (#8496).
+    // GitHub hard-deletes instead, so its count-based read stays correct and a
+    // row that is still present really does mean connected.
+    state.installationStatus = "revoked";
+    renderWithI18n(<IntegrationsTab />);
+    expect(
+      screen.getByRole("link", { name: /GitHub Connected/ }),
+    ).toBeInTheDocument();
+    for (const channel of ["Lark", "Slack", "DingTalk", "WeCom", "Telegram"]) {
+      expect(
+        screen.getByRole("link", { name: new RegExp(`${channel} Not connected`) }),
+      ).toBeInTheDocument();
+    }
   });
   it("does not report failed status reads as disconnected", () => {
     state.connectionError = true;

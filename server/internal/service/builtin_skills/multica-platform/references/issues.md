@@ -230,10 +230,21 @@ multica issue get <issue-id> --resolve-properties
 A status change is not cosmetic — the server enqueues or skips agent work based
 on it. These are the contracts, not advice.
 
-Read them as category rules: a custom status inherits its category's behavior in
-full. Two writes are literal-key exceptions, not category rules — the failed-task
-rollback below writes the literal `todo` key, and a merged PR with close intent
-writes the literal `done` key.
+The rules below name fixed built-in status keys, not category-wide behaviors.
+Custom statuses have only lifecycle semantics: unstarted, started, done
+(successful terminal), or closed (cancelled terminal). They do not inherit
+Backlog parking, In Review completion, Blocked failure, or In Progress recovery.
+Use the built-in key when its special behavior is needed. Built-in definitions
+cannot be edited or archived.
+
+Archive a custom status only after moving every issue off it, including
+completed/canceled issues. An occupied status returns HTTP 409 with code
+`issue_status_in_use` and `issue_count`; it remains active. Use Settings >
+View issues to inspect and move its issues, then retry. For terminal-status
+replacement, preserve the lifecycle meaning (`done` to `done`, `closed` to
+`closed`); do not reopen or cancel completed work just to retire a status.
+Archival does not move issues automatically. Historical issues on previously
+archived statuses remain readable via an explicit status filter.
 
 - **`backlog`** parks an agent-assigned issue: the assignee is set but no task
   fires. Moving `backlog → todo` (or any non-done/non-cancelled status) enqueues
@@ -371,10 +382,15 @@ multica issue children <parent-id>             # sub-issues grouped by stage
 multica issue status <stage-2-child-id> todo   # promote when its deps are met
 ```
 
-`issue children --output json` reports per-stage `done` counts. A custom status
-counts as done here when its category is `done` or `cancelled`, which is what
-`status_category` on each child carries. Read `status_category` rather than
-matching `status` against the built-in names.
+`issue children --output json` reports per-stage `done` counts, including custom
+statuses in terminal categories. When reading issue JSON, `status` is the exact
+key; `status_category` retains the seven-value API enum for installed clients:
+`backlog` / `todo` mean unstarted, `in_progress` / `in_review` / `blocked` mean
+started, `done` means successful terminal, and `cancelled` means cancelled
+terminal (the internal closed category). These values encode lifecycle, not
+built-in automation behavior. Check `status_category` for `done` / `cancelled`
+(or use the stage counts), not just the concrete `status` key, to recognize
+terminal children.
 
 Read each sub-issue's description before promoting and only promote items whose
 stated dependencies are met; if a description conflicts with the parent's
@@ -403,3 +419,31 @@ multica issue create --title "Step 1" --parent <issue-id> --assignee <agent> --s
 multica issue create --title "Step 2" --parent <issue-id> --assignee <agent> --stage 2 --status backlog
 multica issue create --title "Step 3" --parent <issue-id> --assignee <agent> --stage 3 --status backlog
 ```
+
+## Issue wakeups
+
+Use `multica issue wakeup` to arrange a future ordinary run, then finish the
+current run. A wakeup persists on the issue; it is not a sleeping process.
+
+- `wakeup events` lists supported business facts. These work with plugins disabled.
+- `wakeup create <issue> --agent-id <target> --kind event --event task.completed,task.failed,task.cancelled --task-id <run> --instruction-file ./instruction.md` wakes once. Omit `--agent-id` only when acting as the authenticated agent. A specific run must belong to this issue; if already terminal, registration captures its matching state immediately.
+- For a continuing subscription use `--mode continuous`. For task events, use `--filter-agent-id` to match that agent's future runs; this does not replay historical runs. For comment/issue/reaction/attachment changes, use `--filter-actor-type member|agent --filter-actor-id <user-or-agent-id>` to match the actual author/editor. Mutation-only `--filter-agent-id` remains a legacy alias for actor=agent; do not combine it with actor flags.
+- `wakeup create <issue> --kind at --after 10m --instruction-file ./instruction.md` schedules one run. Alternatively use `--at <RFC3339>`.
+- `wakeup create <issue> --kind every --every 1h --instruction-file ./instruction.md` schedules a repeating check. Or use `--kind cron --cron '0 * * * *' --timezone Asia/Shanghai`.
+- `wakeup list <issue>` / `wakeup get <issue> <id>` show the saved configuration, next time and latest run. Only promise that a reminder is arranged after creation succeeds.
+- `wakeup update <issue> <id>` uses the same flags as create and replaces the whole configuration, explicitly re-enabling it. Supply all intended fields. Old unclaimed work is withdrawn.
+- `wakeup disable <issue> <id>` stops future triggers and withdraws unclaimed work. Users can also turn it off in the issue sidebar. Closing/cancelling/completing the issue disables its wakeups; reopening does not restore them.
+- `--parent <comment-id>` keeps result delivery in the original thread.
+
+Read current state with issue get, comment list, and run inspection before
+judging business completion. For CI, use the existing GitHub tools from a time
+wakeup; CI events are not supported here yet. A failed run does not imply its
+business goal is complete. Automatic retry chains are not followed by event
+filters; subscribe to a new run if needed. Once the goal is met, disable any
+continuous configuration. Every wakeup runs under ordinary execution and comment
+delivery rules, even when a periodic check finds no change.
+
+Self-trigger protection excludes the registering run and runs started by the
+same rule when their source identity is available. It does not prevent cycles
+between different rules. Avoid mutually triggering continuous comment subscriptions;
+when waiting for a person's reply, filter that member explicitly.

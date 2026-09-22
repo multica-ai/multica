@@ -144,6 +144,10 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 
 	d.logger.Info("task wakeup websocket connected", "runtimes", len(runtimeIDs))
 	signalTaskWakeup(taskWakeups, "")
+	// A healthy reconnect is the strongest signal that a terminal callback
+	// stranded during an outage may now succeed. The buffered wakeup also
+	// preserves a connect that races replay-loop startup.
+	d.signalTerminalReportReplay()
 	// signalTaskWakeup only wakes idle ClaimTask pollers. In-flight tasks and
 	// the workspace sync loop park on coarse tickers (5s and 30s) that do not
 	// observe the wakeup channel, so anything the server changed during the

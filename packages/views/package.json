@@ -24,6 +24,12 @@
     "./my-issues": "./my-issues/index.ts",
     "./skills": "./skills/index.ts",
     "./agents": "./agents/index.ts",
+    "./agents/agent-detail-page": "./agents/components/agent-detail-page.tsx",
+    "./agents/agents-page": "./agents/components/agents-page.tsx",
+    "./agents/ai-builder-session-page": "./agents/create/ai-builder-session-page.tsx",
+    "./agents/ai-create-agent-page": "./agents/create/ai-create-agent-page.tsx",
+    "./agents/choose-create-method-page": "./agents/create/choose-create-method-page.tsx",
+    "./agents/manual-create-agent-page": "./agents/create/manual-create-agent-page.tsx",
     "./members": "./members/index.ts",
     "./inbox": "./inbox/index.ts",
     "./runtimes": "./runtimes/index.ts",
@@ -40,6 +46,7 @@
     "./auth": "./auth/index.ts",
     "./search": "./search/index.ts",
     "./chat": "./chat/index.ts",
+    "./chat/floating-chat": "./chat/floating-chat.tsx",
     "./settings": "./settings/index.ts",
     "./settings/lark-tab": "./settings/components/lark-tab.tsx",
     "./lark": "./lark/index.ts",
@@ -54,7 +61,8 @@
     "./i18n": "./i18n/index.ts",
     "./attachments": "./attachments/index.ts",
     "./locales": "./locales/index.ts",
-    "./locales/*": "./locales/*"
+    "./locales/*": "./locales/*",
+    "./issues/visuals": "./issues/components/visuals.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",

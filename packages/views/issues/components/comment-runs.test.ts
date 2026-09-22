@@ -134,6 +134,23 @@ describe("groupCommentRuns", () => {
     expect(timeline.find((entry) => entry.id === "assigned-answer")?.parent_id).toBe("root");
   });
 
+  it("moves a run's earlier top-level comments into the thread with its reply", () => {
+    // MUL-7548: only the latest comment used to move under the trigger, so it
+    // rendered above the run's earlier top-level comments.
+    const run = task("run", { trigger_comment_id: "confirm", delivered_comment_ids: ["confirm"] });
+    const timeline = [comment("confirm"),
+      comment("other-thread"),
+      comment("step2", { actor_type: "agent", source_task_id: run.id, created_at: "2026-09-07T00:01:00Z" }),
+      comment("fan-out", { parent_id: "other-thread", actor_type: "agent", source_task_id: run.id, created_at: "2026-09-07T00:02:00Z" }),
+      comment("step3", { actor_type: "agent", source_task_id: run.id, created_at: "2026-09-07T00:03:00Z" })];
+    const view = buildCommentRunView([run], timeline);
+    const parentOf = (id: string) => view.timeline.find((entry) => entry.id === id)?.parent_id;
+    expect(parentOf("step2")).toBe("confirm");
+    expect(parentOf("step3")).toBe("confirm");
+    expect(parentOf("fan-out")).toBe("other-thread");
+    expect(view.runs.get("confirm")).toEqual([{ task: run, commentId: "step3", anchorCommentId: "confirm", hasReply: true }]);
+  });
+
   it("does not project reply relationships that would create a comment cycle", () => {
     const first = task("first", { trigger_comment_id: "b" });
     const second = task("second", { trigger_comment_id: "a" });

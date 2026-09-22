@@ -475,17 +475,24 @@ func (o *Outbound) sendAttachment(ctx context.Context, sender *wsSender, row db.
 // reader has. Only what fails before the write — a marshal error, a deadline
 // the connection refused — is provably undelivered.
 //
-// A context error lands on the same side, and less precisely than one would
-// like. wsSender.request returns the same ctx.Err() whether the context ended
-// before the frame was written or while waiting for its verdict, so from out
-// here the two cannot be told apart. Reading all of these as unknown is the
-// direction that costs least: an unknown is never resent and is described in
-// words that hold either way, so a send that never happened is under-claimed
-// rather than a send that did happen being denied.
+// A context error lands on the same side. One of the two request can raise
+// says so itself — errAckAbandoned, the frame written and the wait for its
+// verdict cut short — and the other, raised before any byte left, is read as
+// unknown anyway. That is the direction that costs least here: an unknown is
+// never resent and is described to the user in words that hold either way, so
+// a send that never happened is under-claimed rather than a send that did
+// happen being denied.
 func sendOutcome(err error) deliveryState {
 	switch {
 	case err == nil:
 		return deliveryDelivered
+	case errors.Is(err, errNotAttempted):
+		// AHEAD of the context arm below, which this also matches: every
+		// not-attempted failure wraps the ctx.Err() that ended it. A push that
+		// never got the chat's turn, or whose context was already over when
+		// request was entered, was never built let alone written — so the file
+		// is definitely not there, and the person can be told so plainly.
+		return deliveryDefinitelyFailed
 	case errors.Is(err, errAckTimeout),
 		errors.Is(err, errWriteAttempted),
 		errors.Is(err, context.Canceled),

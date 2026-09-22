@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 
@@ -555,16 +556,51 @@ describe("issueIdentifierOptions", () => {
     ).rejects.toThrow("boom");
   });
 
-  it("passes the query's abort signal down so unmount cancels the lookup", async () => {
-    const getIssue = vi
-      .fn<(id: string, options?: { signal?: AbortSignal }) => Promise<Issue>>()
-      .mockResolvedValue(makeIssue(7));
-    installFakeIssueApi(getIssue);
+  it.each(["found", "missing"] as const)(
+    "shares a pending %s lookup across rapid observer remounts and caches its result",
+    async (outcome) => {
+      let resolveLookup!: (issue: Issue) => void;
+      let rejectLookup!: (error: Error) => void;
+      let abortedLookups = 0;
+      const getIssue = vi
+        .fn<(id: string, options?: { signal?: AbortSignal }) => Promise<Issue>>()
+        .mockImplementation((_id, options) => new Promise((resolve, reject) => {
+          resolveLookup = resolve;
+          rejectLookup = reject;
+          options?.signal?.addEventListener("abort", () => {
+            abortedLookups++;
+            reject(new DOMException("Unmounted", "AbortError"));
+          }, { once: true });
+        }));
+      installFakeIssueApi(getIssue);
 
-    await qc.fetchQuery(issueIdentifierOptions(WS_ID, "MUL-7"));
+      const options = issueIdentifierOptions(WS_ID, "MUL-7");
+      // Streaming rich content can remove the last mention observer before
+      // its response arrives, then render that same identifier again.
+      for (let i = 0; i < 20; i++) {
+        const observer = new QueryObserver(qc, options);
+        const unsubscribe = observer.subscribe(() => {});
+        unsubscribe();
+      }
 
-    expect(getIssue.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
-  });
+      expect(getIssue).toHaveBeenCalledTimes(1);
+      expect(abortedLookups).toBe(0);
+      const completed = qc.fetchQuery(options);
+      if (outcome === "found") {
+        resolveLookup(makeIssue(7));
+      } else {
+        rejectLookup(new ApiError("issue not found", 404, "Not Found"));
+      }
+      const expected = outcome === "found" ? makeIssue(7) : null;
+      await expect(completed).resolves.toEqual(expected);
+
+      const observer = new QueryObserver(qc, options);
+      const unsubscribe = observer.subscribe(() => {});
+      expect(observer.getCurrentResult().data).toEqual(expected);
+      expect(getIssue).toHaveBeenCalledTimes(1);
+      unsubscribe();
+    },
+  );
 
   it("keys the query by workspace and identifier", () => {
     expect(issueKeys.identifier(WS_ID, "MUL-7")).toEqual([

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -301,6 +302,203 @@ func TestResolveTextFlag(t *testing.T) {
 	})
 }
 
+// withWorkdirShape chdirs into a workdir that is either reached through a
+// symlink (logical) or is its own canonical path, and returns the temp dir the
+// case may use as "outside". BOTH shapes matter, and for opposite reasons:
+//
+//   - logical: os.Getwd() prefers $PWD when it names the current directory, and
+//     everything that sets $PWD carries the path as typed — a shell's `cd`,
+//     testing.T.Chdir, and the PWD the daemon exports to agent processes (see
+//     pkg/agent/opencode.go). This is the shape where an unresolved candidate
+//     reads as "outside the workdir" though it plainly is not.
+//   - canonical: this is the shape where an unresolved candidate reads as
+//     "inside the workdir" although a symlink takes it out — so it is the only
+//     shape in which the escape-hatch cases below can fail. Run them only under
+//     the logical shape and they pass no matter what the code does, because
+//     there everything unresolved looks outside.
+func withWorkdirShape(t *testing.T, canonical bool) (outside string) {
+	t.Helper()
+	root := t.TempDir()
+	physical := filepath.Join(root, "physical")
+	if err := os.MkdirAll(physical, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	workdir := filepath.Join(root, "logical")
+	if err := os.Symlink(physical, workdir); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if canonical {
+		resolved, err := filepath.EvalSymlinks(physical)
+		if err != nil {
+			t.Fatalf("resolve workdir: %v", err)
+		}
+		workdir = resolved
+	}
+	t.Chdir(workdir)
+	return t.TempDir()
+}
+
+// TestFileWithinWorkingDir covers the containment predicate behind the
+// MUL-4252 guardrail directly, because the callers only ever exercise it with
+// files that already exist — and existence is precisely what used to hide the
+// bug. A candidate that does not exist yet cannot go through
+// filepath.EvalSymlinks, and the fallbacks it used to have (one filepath.Dir
+// step, then filepath.Clean) left it unresolved as soon as an intermediate
+// directory was missing too. That failed in both directions:
+//
+//   - Against a workdir reached through a symlink, `subdir/report.md` read as
+//     outside the workdir. The command then reported a missing file as a
+//     guardrail violation and advised --allow-external-file — the one move that
+//     makes things worse, since it only disables the guard.
+//   - Against a canonical workdir, `escape/sub/report.md` — where `escape` is a
+//     symlink out of the workdir — read as INSIDE it, so the guard admitted a
+//     path that resolves to a machine-shared directory.
+func TestFileWithinWorkingDir(t *testing.T) {
+	for _, shape := range []struct {
+		name      string
+		canonical bool
+	}{
+		{name: "workdir reached through a symlink", canonical: false},
+		{name: "canonical workdir", canonical: true},
+	} {
+		t.Run(shape.name, func(t *testing.T) {
+			outside := withWorkdirShape(t, shape.canonical)
+			sep := string(filepath.Separator)
+			if err := os.WriteFile("exists.txt", []byte("x"), 0o644); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			// `nested` exists so the ".."-comes-back-inside row exercises real
+			// resolution. It deliberately is NOT the directory the
+			// missing-intermediate rows name: give those an existing parent and
+			// a one-level fallback handles them, so the rows stop failing
+			// against unresolved comparisons and stop covering the regression
+			// they exist for.
+			if err := os.Mkdir("nested", 0o755); err != nil {
+				t.Fatalf("mkdir fixture: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(outside, "stale.md"), []byte("x"), 0o644); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			// sibling.md sits NEXT TO the symlink's target, i.e. one ".." away
+			// from it, and it exists — so a guard that collapses ".." lexically
+			// does not merely misjudge, it admits a readable outside file.
+			escapeTarget := filepath.Join(outside, "shared")
+			if err := os.Mkdir(escapeTarget, 0o755); err != nil {
+				t.Fatalf("mkdir fixture: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(outside, "sibling.md"), []byte("another run's file"), 0o644); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(escapeTarget, "stale.md"), []byte("x"), 0o644); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			// A symlink inside the workdir pointing out of it: the escape hatch
+			// the resolution exists to close. It has to stay closed however much
+			// of the path below it is missing.
+			if err := os.Symlink(escapeTarget, "escape"); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+
+			cases := []struct {
+				name string
+				path string
+				want bool
+			}{
+				{name: "existing file in the workdir", path: "exists.txt", want: true},
+				{name: "missing leaf in the workdir", path: "missing.txt", want: true},
+				{name: "missing intermediate directory", path: "subdir/report.md", want: true},
+				{name: "several missing levels", path: "a/b/c/d/report.md", want: true},
+				{name: "the workdir itself", path: ".", want: true},
+				{name: "existing file outside the workdir", path: filepath.Join(outside, "stale.md"), want: false},
+				{name: "missing file outside the workdir", path: filepath.Join(outside, "gone", "stale.md"), want: false},
+				{name: "relative traversal out of the workdir", path: filepath.Join("..", "escaped.md"), want: false},
+				{name: "traversal that comes back inside", path: "nested" + sep + ".." + sep + "exists.txt", want: true},
+				{name: "symlinked escape hatch", path: filepath.Join("escape", "stale.md"), want: false},
+				{name: "symlinked escape hatch with a missing leaf", path: filepath.Join("escape", "missing.md"), want: false},
+				{name: "symlinked escape hatch with a missing directory", path: filepath.Join("escape", "sub", "missing.md"), want: false},
+				{name: "symlinked escape hatch with several missing levels", path: filepath.Join("escape", "a", "b", "missing.md"), want: false},
+				// ".." AFTER a symlink is the case a lexical clean gets wrong:
+				// the string collapses to a path inside the workdir, while the
+				// kernel follows `escape` out of it first and then goes up. The
+				// file it lands on exists, so os.ReadFile really would read
+				// another run's file — no race needed.
+				{name: "dot-dot across the symlinked escape hatch", path: "escape" + sep + ".." + sep + "sibling.md", want: false},
+			}
+
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					got, err := fileWithinWorkingDir(tc.path)
+					if err != nil {
+						t.Fatalf("fileWithinWorkingDir(%q): %v", tc.path, err)
+					}
+					if got != tc.want {
+						t.Errorf("fileWithinWorkingDir(%q) = %v, want %v", tc.path, got, tc.want)
+					}
+				})
+			}
+		})
+	}
+}
+
+// TestEnsureFileFlagWithinWorkdirReportsMissingFileAsMissing is the
+// caller-level shape of the same bug: the guardrail must not intercept a path
+// that is inside the workdir, or the error the agent reads points at
+// --allow-external-file instead of at the file it forgot to write.
+func TestEnsureFileFlagWithinWorkdirReportsMissingFileAsMissing(t *testing.T) {
+	withWorkdirShape(t, false)
+	cmd := &cobra.Command{Use: "test"}
+	cmd.Flags().Bool("allow-external-file", false, "")
+
+	if err := ensureFileFlagWithinWorkdir(cmd, "content-file", "content", "subdir/report.md"); err != nil {
+		t.Fatalf("in-workdir path must pass the guardrail, got %v", err)
+	}
+	if err := ensureAttachmentWithinWorkdir(cmd, "out/chart.png"); err != nil {
+		t.Fatalf("in-workdir attachment must pass the guardrail, got %v", err)
+	}
+}
+
+// TestExternalFileErrorLeadsWithMissingFile pins the remaining half of the
+// misleading diagnosis. For a path that is genuinely outside the workdir AND
+// does not exist, the guard used to advise --allow-external-file and nothing
+// else, so the agent's reasonable next move was to disable the guard and retry
+// — earning a second, unrelated "no such file" error. There is no stale file to
+// protect anyone from when the path does not exist, so the missing file is the
+// fact that leads.
+func TestExternalFileErrorLeadsWithMissingFile(t *testing.T) {
+	outside := withWorkdirShape(t, false)
+	cmd := &cobra.Command{Use: "test"}
+	cmd.Flags().Bool("allow-external-file", false, "")
+
+	missing := filepath.Join(outside, "desc.md")
+	err := ensureFileFlagWithinWorkdir(cmd, "description-file", "description", missing)
+	if err == nil {
+		t.Fatal("expected an error for a missing path outside the workdir")
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("error should lead with the missing file, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "outside the current working directory") {
+		t.Errorf("error should still record that the path is external, got: %v", err)
+	}
+
+	// An existing external file is the case the guard was built for: the
+	// wording must keep pointing at the escape hatch.
+	stale := filepath.Join(outside, "stale.md")
+	if err := os.WriteFile(stale, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	err = ensureAttachmentWithinWorkdir(cmd, stale)
+	if err == nil {
+		t.Fatal("expected an error for an existing path outside the workdir")
+	}
+	if strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("an existing file must not be reported as missing, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "allow-external-file") {
+		t.Errorf("error should point at --allow-external-file, got: %v", err)
+	}
+}
+
 // TestEnsureAttachmentWithinWorkdir covers the MUL-4252 guardrail extended to
 // --attachment: a local attachment path outside the task workdir is rejected
 // (so an agent can't attach another run's stale /tmp file), with the same
@@ -363,6 +561,210 @@ func newIssueCommentAddTestCmd() *cobra.Command {
 	cmd.Flags().String("parent", "", "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
+}
+
+func newIssueCommentUpdateTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("content", "", "")
+	cmd.Flags().Bool("content-stdin", false, "")
+	cmd.Flags().String("content-file", "", "")
+	cmd.Flags().Bool("allow-external-file", false, "")
+	cmd.Flags().Int64("expected-revision", 0, "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func TestIssueCommentUpdateCommandRegistration(t *testing.T) {
+	cmd, _, err := issueCommentCmd.Find([]string{"update"})
+	if err != nil {
+		t.Fatalf("find issue comment update: %v", err)
+	}
+	if cmd != issueCommentUpdateCmd {
+		t.Fatalf("found command = %q, want issue comment update", cmd.CommandPath())
+	}
+	for _, anchor := range []string{
+		"merge your change into it before retrying",
+		"re-enqueues every agent the new body mentions",
+	} {
+		if !strings.Contains(cmd.Long, anchor) {
+			t.Fatalf("long help should carry the conflict rule and the re-trigger side effect (missing %q), got %q", anchor, cmd.Long)
+		}
+	}
+	for _, name := range []string{"content", "content-stdin", "content-file", "allow-external-file", "expected-revision", "output"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("issue comment update missing --%s", name)
+		}
+	}
+}
+
+func TestRunIssueCommentUpdateSendsExpectedRequest(t *testing.T) {
+	chdirWithDaemonTaskMarker(t)
+	const commentID = "11111111-1111-4111-8111-111111111111"
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Method != http.MethodPut {
+			t.Fatalf("method = %s, want PUT", r.Method)
+		}
+		if r.URL.Path != "/api/comments/"+commentID {
+			t.Fatalf("path = %q, want /api/comments/%s", r.URL.Path, commentID)
+		}
+		if ws := r.Header.Get("X-Workspace-ID"); ws != "ws-1" {
+			t.Fatalf("X-Workspace-ID = %q, want ws-1", ws)
+		}
+		if contentType := r.Header.Get("Content-Type"); contentType != "application/json" {
+			t.Fatalf("Content-Type = %q, want application/json", contentType)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if len(body) != 2 || body["content"] != "updated\ncomment" || body["expected_revision"] != float64(7) {
+			t.Fatalf("body = %#v, want content plus expected revision", body)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":      commentID,
+			"content": body["content"],
+		})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueCommentUpdateTestCmd()
+	_ = cmd.Flags().Set("content", `updated\ncomment`)
+	_ = cmd.Flags().Set("expected-revision", "7")
+	stderr := captureStderr(t)
+	defer stderr.restore()
+	out, err := captureStdout(t, func() error {
+		return runIssueCommentUpdate(cmd, []string{commentID})
+	})
+	if err != nil {
+		t.Fatalf("runIssueCommentUpdate: %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+	if got := stderr.read(); got != "Comment "+commentID+" updated.\n" {
+		t.Fatalf("stderr = %q", got)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode stdout JSON %q: %v", out, err)
+	}
+	if got["id"] != commentID || got["content"] != "updated\ncomment" {
+		t.Fatalf("stdout = %#v", got)
+	}
+}
+
+func TestRunIssueCommentUpdateReadsContentFileAndHonorsTableOutput(t *testing.T) {
+	const commentID = "22222222-2222-4222-8222-222222222222"
+	t.Chdir(t.TempDir())
+	const content = "Updated title\n\nChinese: \u4e2d\u6587; literal \\n stays literal.\n"
+	if err := os.WriteFile("comment.md", []byte(content), 0o644); err != nil {
+		t.Fatalf("write comment file: %v", err)
+	}
+
+	var gotContent string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		gotContent, _ = body["content"].(string)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": commentID, "content": gotContent})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	cmd := newIssueCommentUpdateTestCmd()
+	_ = cmd.Flags().Set("content-file", "comment.md")
+	_ = cmd.Flags().Set("expected-revision", "4")
+	_ = cmd.Flags().Set("output", "table")
+	stderr := captureStderr(t)
+	defer stderr.restore()
+	out, err := captureStdout(t, func() error {
+		return runIssueCommentUpdate(cmd, []string{commentID})
+	})
+	if err != nil {
+		t.Fatalf("runIssueCommentUpdate: %v", err)
+	}
+	if gotContent != strings.TrimSuffix(content, "\n") {
+		t.Fatalf("request content = %q, want file body preserved", gotContent)
+	}
+	if out != "" {
+		t.Fatalf("table output wrote stdout %q, want empty", out)
+	}
+	if got := stderr.read(); got != "Comment "+commentID+" updated.\n" {
+		t.Fatalf("stderr = %q", got)
+	}
+}
+
+func TestRunIssueCommentUpdateRejectsMissingContentBeforeRequest(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	cmd := newIssueCommentUpdateTestCmd()
+	_ = cmd.Flags().Set("expected-revision", "1")
+	err := runIssueCommentUpdate(cmd, []string{"comment-1"})
+	if err == nil || err.Error() != "--content, --content-stdin, or --content-file is required" {
+		t.Fatalf("error = %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("requests = %d, want 0 for local validation failure", requests)
+	}
+}
+
+func TestRunIssueCommentUpdateRejectsMissingOrInvalidRevisionBeforeRequest(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	for _, revision := range []string{"", "0", "-1"} {
+		cmd := newIssueCommentUpdateTestCmd()
+		_ = cmd.Flags().Set("content", "updated")
+		if revision != "" {
+			_ = cmd.Flags().Set("expected-revision", revision)
+		}
+		err := runIssueCommentUpdate(cmd, []string{"comment-1"})
+		if err == nil || !strings.Contains(err.Error(), "--expected-revision is required and must be a positive integer") {
+			t.Fatalf("revision %q error = %v", revision, err)
+		}
+	}
+	if requests != 0 {
+		t.Fatalf("requests = %d, want 0 for local revision validation failures", requests)
+	}
+}
+
+func TestRunIssueCommentUpdateWrapsAPIError(t *testing.T) {
+	chdirWithDaemonTaskMarker(t)
+	const commentID = "33333333-3333-4333-8333-333333333333"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "only comment author or admin can edit", http.StatusForbidden)
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueCommentUpdateTestCmd()
+	_ = cmd.Flags().Set("content", "not allowed")
+	_ = cmd.Flags().Set("expected-revision", "2")
+	err := runIssueCommentUpdate(cmd, []string{commentID})
+	if err == nil {
+		t.Fatal("expected API error")
+	}
+	if !strings.Contains(err.Error(), "update comment: PUT /api/comments/"+commentID+" returned 403") {
+		t.Fatalf("error lacks update context: %v", err)
+	}
 }
 
 // TestRunIssueCommentAddRejectsExternalAttachmentWithZeroUploads is the MUL-4252
@@ -609,10 +1011,12 @@ func TestRunIssuePullRequestsListsLinkedPRsAsJSON(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	drainCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); drainCh <- b }()
 	err := runIssuePullRequests(cmd, []string{"MUL-2818"})
 	_ = w.Close()
 	os.Stdout = old
-	out, _ := io.ReadAll(r)
+	out := <-drainCh
 	if err != nil {
 		t.Fatalf("runIssuePullRequests: %v", err)
 	}
@@ -677,10 +1081,12 @@ func TestRunIssueUsageReturnsTokenSummaryAsJSON(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	drainCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); drainCh <- b }()
 	err := runIssueUsage(cmd, []string{"MUL-2818"})
 	_ = w.Close()
 	os.Stdout = old
-	out, _ := io.ReadAll(r)
+	out := <-drainCh
 	if err != nil {
 		t.Fatalf("runIssueUsage: %v", err)
 	}
@@ -822,10 +1228,12 @@ func TestRunIssuePullRequestsTableIncludesCoreFields(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	drainCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); drainCh <- b }()
 	printIssuePullRequestsTable(prs)
 	_ = w.Close()
 	os.Stdout = old
-	out, _ := io.ReadAll(r)
+	out := <-drainCh
 	text := string(out)
 	for _, want := range []string{"NUMBER", "STATE", "TITLE", "URL", "42", "open", "MUL-2818 add issue PR CLI", "https://github.com/multica-ai/multica/pull/42"} {
 		if !strings.Contains(text, want) {
@@ -4220,13 +4628,15 @@ func TestRunIssueCommentListCompactWiring(t *testing.T) {
 			t.Fatalf("pipe: %v", err)
 		}
 		os.Stdout = w
+		drainCh := make(chan []byte, 1)
+		go func() { b, _ := io.ReadAll(r); drainCh <- b }()
 		runErr := runIssueCommentList(cmd, []string{issueID})
 		w.Close()
 		os.Stdout = orig
 		if runErr != nil {
 			t.Fatalf("runIssueCommentList: %v", runErr)
 		}
-		out, _ := io.ReadAll(r)
+		out := <-drainCh
 		var got []map[string]any
 		if err := json.Unmarshal(out, &got); err != nil {
 			t.Fatalf("output not JSON: %v\n---\n%s", err, out)
@@ -4820,6 +5230,67 @@ func TestRunIssueListTableFooterReportsPage(t *testing.T) {
 			}
 			if got := strings.TrimSpace(stderr.read()); got != tc.wantStderr {
 				t.Errorf("stderr = %q, want %q", got, tc.wantStderr)
+			}
+		})
+	}
+}
+
+// #8296: the CLI deletes through the keep-replies route, which only servers
+// that keep a deleted comment's replies expose. An older server does not route
+// it, and the CLI refuses rather than falling back to a delete that would
+// remove the replies too.
+func TestRunIssueCommentDeleteKeepsReplies(t *testing.T) {
+	commentID := "comment-123"
+	tests := []struct {
+		name    string
+		respond func(http.ResponseWriter)
+		wantErr string
+	}{
+		{
+			name:    "server keeps replies",
+			respond: func(w http.ResponseWriter) { w.WriteHeader(http.StatusNoContent) },
+		},
+		{
+			name:    "older server without the route",
+			respond: func(w http.ResponseWriter) { http.Error(w, "404 page not found", http.StatusNotFound) },
+			wantErr: "would delete the comment's replies too",
+		},
+		{
+			name: "comment not found",
+			respond: func(w http.ResponseWriter) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(map[string]string{"error": "comment not found"})
+			},
+			wantErr: "comment not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var paths []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodDelete {
+					t.Errorf("method = %s, want DELETE", r.Method)
+				}
+				paths = append(paths, r.URL.Path)
+				tt.respond(w)
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			err := runIssueCommentDelete(newIssueCommentResolutionTestCmd("delete"), []string{commentID})
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("run command: %v", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("error = %v, want it to mention %q", err, tt.wantErr)
+			}
+			if want := []string{"/api/comments/" + commentID + "/keep-replies"}; !slices.Equal(paths, want) {
+				t.Fatalf("requests = %v, want only %v", paths, want)
 			}
 		})
 	}

@@ -284,6 +284,7 @@ export function IssueUsageTotal({
 
 const STATUS_TONE: Record<AgentTask["status"], string> = {
   queued: "text-warning",
+  deferred: "text-warning",
   dispatched: "text-warning",
   // Same tone as queued/dispatched — visually "stopped" so users see the
   // task is parked, but distinguished by the status label.

@@ -25,7 +25,7 @@
     },
     "empty": {
       "title": "まだスキルがありません",
-      "description": "最初のスキルを作成するか、URL やローカルフォルダからインポートするか、接続済みのランタイムからコピーしてください。ワークスペースのすべてのエージェントが使用できます。"
+      "description": "skill を作成またはインポートします。"
     },
     "no_matches": {
       "title": "一致なし",
@@ -93,7 +93,6 @@
     "update_updating": "更新中 {{done}}/{{total}}…",
     "updated_toast_other": "ソースから {{count}} 件のスキルを更新しました",
     "update_partial_toast": "{{count}} 件を更新、{{failed}} 件は失敗しました",
-    "add_dialog_description": "選択したスキルを追加するエージェントを選んでください。",
     "cancel": "キャンセル",
     "add_confirm": "追加（{{num}}）",
     "adding": "追加中...",
@@ -105,6 +104,10 @@
     "filter_active_count_other": "{{count}} 件のフィルター",
     "clear_filters": "フィルターを解除",
     "section_usage": "使用状況",
+    "section_labels": "ラベル",
+    "filter_search_placeholder": "フィルター...",
+    "no_labels": "まだラベルがありません",
+    "no_results": "結果なし",
     "display": "表示",
     "sort_by": "並び替え",
     "direction_asc": "昇順",
@@ -205,13 +208,15 @@
       "properties_hint": "これらの項目は SKILL.md のフロントマターと同期します。",
       "name": "名前",
       "description": "説明",
-      "description_hint": "{{count}} 文字。エージェントはこの説明を読んでスキルを読み込むか判断します。",
+      "description_hint": "エージェントはこれを基に skill を読み込むタイミングを判断します。",
       "labels": "ラベル",
       "used_by_other": "{{count}} 個のエージェントが使用中",
       "used_by_empty": "まだどのエージェントにも割り当てられていません。エージェントのスキルタブを開いて割り当ててください。",
       "permissions_owner": "このスキルを編集・削除できます。変更は次回のエージェント実行から反映されます。",
       "permissions_locked_creator": "作成者（{{name}}）またはワークスペース管理者のみがこのスキルを編集できます。",
-      "permissions_locked": "作成者またはワークスペース管理者のみがこのスキルを編集できます。"
+      "permissions_locked": "作成者またはワークスペース管理者のみがこのスキルを編集できます。",
+      "properties_help": "skill のプロパティについて",
+      "character_count": "{{count}} 文字"
     },
     "files": {
       "list_aria": "スキルのファイル",
@@ -306,9 +311,7 @@
     "load_failed": "ランタイムのローカルスキルを読み込めませんでした",
     "not_supported": "このランタイムプロバイダーは、まだローカルスキル一覧の取得に対応していません。",
     "no_skills_title": "ローカルスキルが見つかりません",
-    "no_skills_hint": "このランタイムには、まだ検出可能なローカルスキルがありません。",
     "search_placeholder": "ローカルスキルを検索",
-    "no_search_results_title": "一致するローカルスキルはありません",
     "no_search_results_hint": "\"{{query}}\" に一致するローカルスキルはありません。",
     "ignored_files_hint": "シンボリックリンク、読み取れないファイル、サイズが大きすぎるファイル、非常に大きなバンドルはインポート時に無視されます。",
     "ready": "インポートの準備完了",

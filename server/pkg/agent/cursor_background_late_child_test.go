@@ -1,5 +1,15 @@
 //go:build linux || darwin || windows
 
+// Windows was excluded here for a while: over 40 main pushes this test never
+// failed on the ubuntu runner, while the Windows arm failed twice in 43 -- once
+// as `Access is denied.` and once as `not an owned descendant`, both from the
+// same capture call. Those were two faces of one race: the capture walked a
+// machine-wide PID->PPID snapshot, Windows keeps a child's recorded PPID after
+// the parent exits, and the PID is then free to be reused, so the walk could
+// reach a PID owned by someone else. The Windows capture now takes its
+// candidates from the launch's own Job Object instead (MUL-7417), so a foreign
+// PID is never opened and Windows is back in the build.
+
 package agent
 
 import (

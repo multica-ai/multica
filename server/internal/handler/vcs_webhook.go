@@ -97,7 +97,7 @@ func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.isVCSConfigured() {
-		writeError(w, http.StatusServiceUnavailable, "vcs webhooks not configured")
+		writeError(w, http.StatusNotFound, "unknown connection")
 		return
 	}
 	connUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "connectionId"), "connection id")

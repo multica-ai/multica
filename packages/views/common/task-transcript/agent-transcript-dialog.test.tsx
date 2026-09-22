@@ -249,6 +249,27 @@ afterEach(() => {
 });
 
 describe("AgentTranscriptDialog", () => {
+  it("opens the matching result and duration for parallel same-tool calls", () => {
+    const at = (seconds: number) =>
+      new Date(Date.parse(baseTask.started_at!) + seconds * 1000).toISOString();
+    renderDialog([
+      { seq: 1, type: "tool_use", tool: "Bash", callId: "A", input: { command: "slow-A" }, created_at: at(0) },
+      { seq: 2, type: "tool_use", tool: "Bash", callId: "B", input: { command: "fast-B" }, created_at: at(1) },
+      { seq: 3, type: "tool_result", tool: "Bash", callId: "B", output: "B finished", created_at: at(3) },
+      { seq: 4, type: "tool_result", tool: "Bash", callId: "A", output: "A finished", created_at: at(10) },
+    ]);
+    const slow = screen.getByRole("button", { name: /slow-A/ });
+    const fast = screen.getByRole("button", { name: /fast-B/ });
+    expect(slow).toHaveTextContent("10s");
+    expect(fast).toHaveTextContent("2.0s");
+    fireEvent.click(slow);
+    expect(screen.getByText("A finished", { selector: "pre" })).toBeInTheDocument();
+    expect(screen.queryByText("B finished", { selector: "pre" })).not.toBeInTheDocument();
+    fireEvent.click(fast);
+    expect(screen.getByText("B finished", { selector: "pre" })).toBeInTheDocument();
+    expect(screen.queryByText("A finished", { selector: "pre" })).not.toBeInTheDocument();
+  });
+
   it("explains unavailable live events for an empty Antigravity transcript", async () => {
     vi.mocked(api.listRuntimes).mockResolvedValue([runtimeFor("antigravity")]);
 

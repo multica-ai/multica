@@ -110,6 +110,13 @@ func ensureFileFlagWithinWorkdir(cmd *cobra.Command, fileFlag, flagName, filePat
 		return fmt.Errorf("resolve --%s path %q: %w", fileFlag, filePath, err)
 	}
 	if !within {
+		if !pathExists(filePath) {
+			return fmt.Errorf(
+				"--%s path %q does not exist; it also resolves outside the current working directory, "+
+					"so --allow-external-file would not make this read succeed. Write the file inside the "+
+					"task workdir (e.g. ./%s.md) and pass that path.",
+				fileFlag, filePath, flagName)
+		}
 		return fmt.Errorf(
 			"--%s path %q resolves outside the current working directory; "+
 				"write agent temp files inside the run workdir (e.g. ./%s.md) rather than machine-shared "+
@@ -120,42 +127,89 @@ func ensureFileFlagWithinWorkdir(cmd *cobra.Command, fileFlag, flagName, filePat
 	return nil
 }
 
+// pathExists reports whether filePath names something on disk. It exists to
+// separate the two facts the containment guard used to merge: a rejected path
+// that is ALSO missing has no stale file behind it for anyone to read by
+// mistake, so leading with --allow-external-file sends the caller to disable
+// the guard and hit an unrelated not-found error on the retry. Any stat error
+// other than "not exists" (a permission wall, a broken mount) is treated as
+// "exists" so the guard keeps its own wording and stays fail-closed.
+func pathExists(filePath string) bool {
+	_, err := os.Stat(filePath)
+	return !errors.Is(err, os.ErrNotExist)
+}
+
 // fileWithinWorkingDir reports whether filePath resolves to a location inside
-// the process working directory. Both sides are symlink-resolved so aliased
-// roots (e.g. macOS /tmp -> /private/tmp) and symlinks planted inside the
-// workdir fail closed. A path that does not exist yet is judged on its cleaned
-// absolute form so the caller's os.ReadFile still surfaces the real not-found
-// error afterwards.
+// the process working directory. Both sides are canonicalized the same way, so
+// aliased roots (e.g. macOS /tmp -> /private/tmp), symlinks planted inside the
+// workdir, and directory junctions pointing out of it all fail closed. A path
+// that does not exist yet is resolved as far as it exists, so the caller's
+// os.ReadFile still surfaces the real not-found error afterwards.
+//
+// Windows relative paths are handed over for what they are, not for what they
+// look like: `\tmp\desc.md` resolves against the workdir's volume ROOT and
+// `C:tmp\desc.md` against the current directory on C:, so prefixing the
+// workdir onto either would judge a shadow file while os.ReadFile opens the
+// real one. util.ResolveSymlinksBestEffort preserves those kinds, for link
+// targets as well as for the input itself.
 func fileWithinWorkingDir(filePath string) (bool, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return false, err
 	}
-	base := cwd
-	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
-		base = resolved
+	base, err := util.ResolveSymlinksBestEffort(cwd)
+	if err != nil {
+		// The workdir's own resolution cannot be determined (an unobservable
+		// drive, a reparse point no query can name). Comparing a candidate
+		// against a root that cannot be named judges whatever string the
+		// resolver would have guessed, so fail closed.
+		return false, nil
 	}
-	abs := filePath
-	if !filepath.IsAbs(abs) {
-		abs = filepath.Join(cwd, abs)
-	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = resolved
-	} else {
-		// The file may not exist yet (the caller's os.ReadFile surfaces that).
-		// Resolve symlinks on the parent directory instead so the comparison
-		// base and the candidate share the same canonical prefix — otherwise a
-		// workdir under a symlinked root (e.g. macOS temp dirs) would falsely
-		// read as "outside". A missing parent falls back to a plain clean.
-		if resolvedParent, perr := filepath.EvalSymlinks(filepath.Dir(abs)); perr == nil {
-			abs = filepath.Join(resolvedParent, filepath.Base(abs))
-		} else {
-			abs = filepath.Clean(abs)
-		}
+	// Canonicalize the candidate exactly the way the base was, and hand it over
+	// as typed: util.ResolveSymlinksBestEffort makes it absolute itself, because
+	// pre-joining it here would clean the string first and collapse a ".."
+	// across a symlink — judging a different path than the one os.ReadFile then
+	// opens.
+	//
+	// os.Getwd() returns the LOGICAL working directory when $PWD names it (a
+	// shell's `cd`, and the PWD the daemon exports to agent processes, both
+	// carry unresolved symlinks), so the two sides only agree once both are
+	// resolved. Resolving best-effort is what makes that possible for a
+	// candidate that does not exist yet — a typo, or an artifact a build step
+	// never produced — and every cheaper approximation gets one direction wrong:
+	//
+	//   - Leaving the candidate unresolved (filepath.Clean) reads a path inside
+	//     the workdir as outside it, which reports a missing file as a
+	//     guardrail violation and points the caller at --allow-external-file
+	//     instead of at the real error.
+	//   - Resolving only one level up (filepath.Dir) still breaks once an
+	//     intermediate directory is missing, and worse: with an already-
+	//     canonical cwd it reads `escape/sub/x.md` — under a symlink pointing
+	//     out of the workdir — as INSIDE it, because the unresolvable tail
+	//     falls back to a lexical clean that never sees the symlink.
+	abs, err := util.ResolveSymlinksBestEffort(filePath)
+	if err != nil {
+		// ErrUnresolvablePath: the kernel may open this path somewhere this
+		// process cannot name — a reparse point that redirects but survives
+		// both os.Readlink and a handle query, or a drive-relative path on a
+		// drive whose current directory is unobservable. The string the input
+		// spells is not evidence of where the kernel would read, so fail
+		// closed; the caller's own os.ReadFile would surface a plain error
+		// for the same path.
+		return false, nil
 	}
 	rel, err := filepath.Rel(base, abs)
 	if err != nil {
-		return false, err
+		// Two absolute paths that filepath.Rel cannot relate are on different
+		// volumes, which is as far outside the workdir as a path can get. Only
+		// Windows produces this: with a workdir on C:, `--content-file
+		// Z:\report.md` used to surface `Rel: can't make Z:\report.md relative
+		// to C:\...` as an internal resolve failure instead of the guardrail's
+		// own explanation — the same misleading-diagnosis shape this guard is
+		// being fixed for. Measured on 10.0.19045 / go1.26.6. There is no Unix
+		// input that reaches this branch, so the windows-tagged test in this
+		// package is the only thing that covers it.
+		return false, nil
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return false, nil
@@ -267,11 +321,28 @@ var issueCommentAddCmd = &cobra.Command{
 	RunE:  runIssueCommentAdd,
 }
 
+var issueCommentUpdateCmd = &cobra.Command{
+	Use:   "update <comment-id>",
+	Short: "Update a comment",
+	Long: "Update a comment you authored. Workspace owners and admins can update any comment.\n\n" +
+		"Pass the revision returned by `multica issue comment list <issue-id> --output json`; " +
+		"the update is rejected if another editor changed the comment first. On that rejection, " +
+		"read the latest body and merge your change into it before retrying. Do not just resend " +
+		"with the newer revision: that overwrites the other edit.\n\n" +
+		"Changing the content is a new trigger, not a silent fix: the server cancels runs this " +
+		"comment triggered that are still in flight and re-enqueues every agent the new body " +
+		"mentions. Attachments are left as they are.",
+	Args: exactArgs(1),
+	RunE: runIssueCommentUpdate,
+}
+
 var issueCommentDeleteCmd = &cobra.Command{
 	Use:   "delete <comment-id>",
 	Short: "Delete a comment",
-	Args:  exactArgs(1),
-	RunE:  runIssueCommentDelete,
+	Long: "Delete a single comment. Its replies are kept: a comment that has replies stays in the thread " +
+		"as an empty placeholder (deleted_at set) so they keep their place.",
+	Args: exactArgs(1),
+	RunE: runIssueCommentDelete,
 }
 
 var issueCommentResolveCmd = &cobra.Command{
@@ -501,6 +572,7 @@ func init() {
 
 	issueCommentCmd.AddCommand(issueCommentListCmd)
 	issueCommentCmd.AddCommand(issueCommentAddCmd)
+	issueCommentCmd.AddCommand(issueCommentUpdateCmd)
 	issueCommentCmd.AddCommand(issueCommentDeleteCmd)
 	issueCommentCmd.AddCommand(issueCommentResolveCmd)
 	issueCommentCmd.AddCommand(issueCommentUnresolveCmd)
@@ -629,6 +701,14 @@ func init() {
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID to reply under. A comment-triggered agent run must reply under its trigger comment; omitting --parent to post a top-level comment is rejected")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// issue comment update
+	issueCommentUpdateCmd.Flags().String("content", "", "New comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
+	issueCommentUpdateCmd.Flags().Bool("content-stdin", false, "Read new comment content from stdin (preserves multi-line content verbatim)")
+	issueCommentUpdateCmd.Flags().String("content-file", "", "Read new comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
+	issueCommentUpdateCmd.Flags().Bool("allow-external-file", false, "Allow --content-file to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
+	issueCommentUpdateCmd.Flags().Int64("expected-revision", 0, "Current positive comment revision from issue comment list --output json (required; prevents overwriting a concurrent edit)")
+	issueCommentUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue comment resolve/unresolve
 	issueCommentResolveCmd.Flags().String("output", "json", "Output format: table or json")
@@ -1203,6 +1283,13 @@ func ensureAttachmentWithinWorkdir(cmd *cobra.Command, filePath string) error {
 		return fmt.Errorf("resolve --attachment path %q: %w", filePath, err)
 	}
 	if !within {
+		if !pathExists(filePath) {
+			return fmt.Errorf(
+				"--attachment path %q does not exist; it also resolves outside the current working "+
+					"directory, so --allow-external-file would not make this upload succeed. Generate the "+
+					"file inside the task workdir and attach that path.",
+				filePath)
+		}
 		return fmt.Errorf(
 			"--attachment path %q resolves outside the current working directory; "+
 				"attach files generated inside the run workdir rather than machine-shared "+
@@ -2157,6 +2244,10 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	rows := make([][]string, 0, len(comments))
 	for _, c := range comments {
 		content := strVal(c, "content")
+		if strVal(c, "deleted_at") != "" {
+			// A deleted comment kept only so its replies stay attached.
+			content = "(deleted)"
+		}
 		if utf8.RuneCountInString(content) > 80 {
 			runes := []rune(content)
 			content = string(runes[:77]) + "..."
@@ -2256,6 +2347,49 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	return cli.PrintJSON(os.Stdout, result)
 }
 
+func runIssueCommentUpdate(cmd *cobra.Command, args []string) error {
+	expectedRevision, _ := cmd.Flags().GetInt64("expected-revision")
+	if !cmd.Flags().Changed("expected-revision") || expectedRevision < 1 {
+		return fmt.Errorf("--expected-revision is required and must be a positive integer; read the current revision with `multica issue comment list <issue-id> --output json`")
+	}
+
+	content, hasContent, err := resolveTextFlag(cmd, "content")
+	if err != nil {
+		return err
+	}
+	if !hasContent {
+		return fmt.Errorf("--content, --content-stdin, or --content-file is required")
+	}
+	if err := guardLocalPathLinks(content, "comment body",
+		"Comment updates cannot attach files; deliver the file in a new comment with `multica issue comment add <issue-id> --attachment <path>` and drop the link."); err != nil {
+		return err
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	commentID := args[0]
+	var result map[string]any
+	if err := client.PutJSON(ctx, "/api/comments/"+url.PathEscape(commentID), map[string]any{
+		"content":           content,
+		"expected_revision": expectedRevision,
+	}, &result); err != nil {
+		return fmt.Errorf("update comment: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Comment %s updated.\n", commentID)
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+
 func runIssueCommentDelete(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -2265,7 +2399,16 @@ func runIssueCommentDelete(cmd *cobra.Command, args []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
-	if err := client.DeleteJSON(ctx, "/api/comments/"+args[0]); err != nil {
+	// The keep-replies route exists only on servers that keep a deleted
+	// comment's replies. An older server does not route it — a plain-text 404,
+	// unlike the JSON "comment not found" — and would delete the replies too,
+	// so refuse there rather than fall back.
+	err = client.DeleteJSON(ctx, "/api/comments/"+args[0]+"/keep-replies")
+	var httpErr *cli.HTTPError
+	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound && !strings.HasPrefix(httpErr.Body, "{") {
+		return fmt.Errorf("delete comment: this server would delete the comment's replies too; upgrade the server first")
+	}
+	if err != nil {
 		return fmt.Errorf("delete comment: %w", err)
 	}
 

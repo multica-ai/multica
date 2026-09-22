@@ -66,6 +66,20 @@ LIMIT $2 OFFSET $3;
 SELECT * FROM issue
 WHERE id = $1;
 
+-- name: CountIssuesInTriage :one
+-- How many of these issues are in Triage. The batch parent-write guard only
+-- needs "any", and a count keeps the check one round trip regardless of size.
+SELECT count(*) FROM issue
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND id = ANY(sqlc.arg('issue_ids')::uuid[])
+  AND triage_state IS NOT NULL;
+
+-- name: GetIssueTriageState :one
+-- Answers "is this issue in Triage" for the queue door, which runs immediately
+-- before an INSERT and must see the status its own transaction wrote. NULL is
+-- an ordinary issue.
+SELECT triage_state FROM issue WHERE id = $1;
+
 -- name: GetIssueGCStatus :one
 SELECT workspace_id, status, updated_at
 FROM issue
@@ -94,6 +108,22 @@ WHERE id = $1 AND workspace_id = $2;
 SELECT id FROM issue
 WHERE id = $1 AND workspace_id = $2
 FOR KEY SHARE;
+
+-- name: LockIssueForAttachmentWrite :one
+-- Owner-first guard for a write to one of an issue's attachments: take the
+-- issue before the attachment row, so a writer that reaches the same row
+-- through the issue — teardown's issue_id cascade, or the revision bump this
+-- write itself performs — either waits for this transaction or is waited on,
+-- never both.
+--
+-- FOR NO KEY UPDATE, the mode of that revision bump, is the weakest mode that
+-- actually serializes issue writers. FOR KEY SHARE is NOT enough: it is
+-- compatible with FOR NO KEY UPDATE (see LockLiveComment), so a concurrent
+-- CreateComment would take the issue anyway, wait on the attachment this
+-- transaction holds, and deadlock with its bump.
+SELECT id FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR NO KEY UPDATE;
 
 -- name: LockIssueForDescriptionUpdate :one
 -- Serialize field-baseline checks and combined attachment binding on the
@@ -163,7 +193,7 @@ SELECT * FROM issue
 WHERE workspace_id = $1 AND number = $2;
 
 -- name: UpdateIssue :one
-WITH candidate AS (
+WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', COALESCE(sqlc.narg('source_task_id')::uuid::text, ''), true)), candidate AS (
     SELECT
         i.*,
         COALESCE(sqlc.narg('title')::text, i.title) AS next_title,
@@ -248,7 +278,7 @@ UPDATE issue AS i SET
         ELSE i.last_activity_at
     END,
     updated_at = CASE WHEN changed.did_change THEN now() ELSE i.updated_at END
-FROM changed
+FROM changed CROSS JOIN wakeup_source
 WHERE i.id = changed.id
   -- Re-check the precondition on the row version that UPDATE actually locks.
   -- Under READ COMMITTED, concurrent statements may both populate candidate
@@ -263,6 +293,7 @@ RETURNING i.*;
 -- completion) so a status write cannot land without one: an issue carrying its
 -- old column's rank into a new column is the bug this guards against. See the
 -- next_position CASE in UpdateIssue for the policy.
+WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', COALESCE(sqlc.narg('source_task_id')::uuid::text, ''), true))
 UPDATE issue AS i SET
     status = $2,
     position = CASE WHEN i.status IS DISTINCT FROM $2 THEN (
@@ -277,8 +308,9 @@ UPDATE issue AS i SET
         ELSE i.last_activity_at
     END,
     updated_at = now()
+FROM wakeup_source
 WHERE i.id = $1 AND i.workspace_id = $3
-RETURNING *;
+RETURNING i.*;
 
 -- name: CreateIssueWithOrigin :one
 INSERT INTO issue (
@@ -299,6 +331,10 @@ SELECT * FROM issue
 WHERE workspace_id = $1
   -- Negate only known terminal keys so an unknown legacy key remains active.
   AND NOT (status = ANY(sqlc.arg('terminal_status_keys')::text[]))
+  -- An entry waiting in Triage has not been taken on, so it never blocks
+  -- someone filing the same work; a duplicate there is resolved by merging
+  -- it out of Triage (MUL-7189 §2.6).
+  AND triage_state IS NULL
   AND project_id IS NOT DISTINCT FROM sqlc.arg('project_id')::uuid
   AND parent_issue_id IS NOT DISTINCT FROM sqlc.arg('parent_issue_id')::uuid
   AND lower(btrim(regexp_replace(title, '[[:space:]]+', ' ', 'g'))) = sqlc.arg('normalized_title')
@@ -310,6 +346,10 @@ SELECT i.* FROM issue i
 WHERE i.workspace_id = $1
   -- Negate only known terminal keys so an unknown legacy key remains active.
   AND NOT (i.status = ANY(sqlc.arg('terminal_status_keys')::text[]))
+  -- An entry waiting in Triage has not been taken on, so it never blocks
+  -- someone filing the same work; a duplicate there is resolved by merging
+  -- it out of Triage (MUL-7189 §2.6).
+  AND i.triage_state IS NULL
   AND i.origin_type = 'autopilot'
   AND i.origin_id = $2
   AND i.project_id IS NOT DISTINCT FROM sqlc.arg('project_id')::uuid
@@ -344,6 +384,12 @@ LIMIT 1;
 -- cross-tenant leak the #1661 guard above exists to prevent.
 WITH target AS (
     SELECT issue.id FROM issue WHERE issue.id = $1 AND issue.workspace_id = $2
+),
+cleared_wakeup_receipts AS (
+ DELETE FROM issue_wakeup_receipt WHERE wakeup_id IN (SELECT id FROM issue_wakeup WHERE issue_id IN (SELECT target.id FROM target))
+),
+cleared_wakeups AS (
+ DELETE FROM issue_wakeup WHERE issue_id IN (SELECT target.id FROM target)
 ),
 cleared_vcs_pr_links AS (
     DELETE FROM issue_vcs_pull_request WHERE issue_id IN (SELECT target.id FROM target)

@@ -91,3 +91,61 @@ describe("WSClient application heartbeat", () => {
     client.disconnect();
   });
 });
+
+// A phone reconnects constantly — after every backgrounding, every network
+// switch. By the time it does, a sliding session may have been renewed, and
+// the token captured when this client was built is on its way out (MUL-7436).
+describe("WSClient session renewal", () => {
+  beforeEach(() => {
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    MockWebSocket.instances = [];
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("authenticates each connection with the current token", () => {
+    let current = "token-v1";
+    const client = new WSClient({
+      url: "wss://example.test/ws",
+      token: "token-v1",
+      workspaceSlug: "workspace",
+      getToken: () => current,
+    });
+
+    client.connect();
+    MockWebSocket.instances[0].open();
+    expect(JSON.parse(MockWebSocket.instances[0].sent[0])).toEqual({
+      type: "auth",
+      payload: { token: "token-v1" },
+    });
+
+    current = "token-v2";
+    client.forceReconnect();
+    const reconnected = MockWebSocket.instances[MockWebSocket.instances.length - 1];
+    reconnected.open();
+
+    expect(JSON.parse(reconnected.sent[0])).toEqual({
+      type: "auth",
+      payload: { token: "token-v2" },
+    });
+  });
+
+  it("falls back to the constructor token when no reader is supplied", () => {
+    const client = new WSClient({
+      url: "wss://example.test/ws",
+      token: "token-only",
+      workspaceSlug: "workspace",
+    });
+
+    client.connect();
+    MockWebSocket.instances[0].open();
+
+    expect(JSON.parse(MockWebSocket.instances[0].sent[0])).toEqual({
+      type: "auth",
+      payload: { token: "token-only" },
+    });
+  });
+});

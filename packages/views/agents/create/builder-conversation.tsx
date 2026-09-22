@@ -176,9 +176,6 @@ export function BuilderConversation({
           <h2 className="truncate text-body font-semibold">
             {t(($) => $.creation_studio.builder.chat_title)}
           </h2>
-          <p className="truncate text-caption text-muted-foreground">
-            {t(($) => $.creation_studio.builder.chat_hint)}
-          </p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground">
           <span

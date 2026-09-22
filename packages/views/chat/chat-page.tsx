@@ -392,7 +392,7 @@ export function ChatPage() {
     >
       <ResizablePanel
         id="list"
-        defaultSize={320}
+        defaultSize={260}
         minSize={240}
         maxSize={480}
         groupResizeBehavior="preserve-pixel-size"

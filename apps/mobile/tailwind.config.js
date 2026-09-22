@@ -4,7 +4,7 @@
  * Colors map to CSS variables in apps/mobile/global.css. When changing a
  * variable name there, mirror the change here AND in apps/mobile/lib/theme.ts.
  *
- * See apps/mobile/docs/rnr-migration.md §5 for the sync rule.
+ * See apps/mobile/AGENTS.md, "Theming model", for the sync rule.
  */
 const { hairlineWidth } = require("nativewind/theme");
 const radiusTokens = require("./lib/radius-tokens.json");

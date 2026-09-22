@@ -45,7 +45,7 @@
   },
   "empty": {
     "title": "No agents yet",
-    "description": "Create an agent and assign it issues, like any teammate. Local agents run on your machine; cloud agents run on Multica's runtime."
+    "description": "Create an agent, then assign it issues."
   },
   "no_matches": {
     "title": "No matches",
@@ -170,11 +170,8 @@
   },
   "inspector": {
     "section_profile": "Profile",
-    "section_profile_hint": "Manage how this agent appears across the workspace.",
     "section_execution": "Execution",
-    "section_execution_hint": "Choose the runtime, model, reasoning level, speed, and parallel run limit.",
     "section_access": "Access",
-    "section_access_hint": "Control who can run this agent and use its connected capabilities.",
     "section_properties": "Properties",
     "section_details": "Details",
     "section_details_hint": "Read-only ownership and lifecycle information.",
@@ -191,7 +188,6 @@
     "prop_updated": "Updated",
     "no_description_placeholder": "No description",
     "avatar_label": "Avatar",
-    "avatar_hint": "Shown in assignments, activity, and chat.",
     "name_label": "Name",
     "description_label": "Description",
     "change_avatar_aria": "Change avatar",
@@ -295,7 +291,6 @@
     "back": "Go back",
     "eyebrow": "Agent creation",
     "choose_title": "How would you like to start?",
-    "choose_description": "Start with full control, or describe what you need and build it through conversation.",
     "recommended": "Recommended",
     "continue": "Continue",
     "step_choose": "Choose a starting point",
@@ -304,7 +299,7 @@
     "modes": {
       "blank": {
         "title": "Start blank",
-        "description": "Configure every field yourself. Best when you already know exactly how this agent should work."
+        "description": "Set the name, instructions, and runtime yourself."
       },
       "template": {
         "title": "Use a template",
@@ -312,18 +307,15 @@
       },
       "ai": {
         "title": "Build with AI",
-        "description": "Describe the outcome you want. An Agent Builder will ask focused questions and prepare a live draft."
+        "description": "Create an editable configuration through conversation."
       }
     },
     "sections": {
       "identity": "Identity",
-      "identity_hint": "Give the agent a recognizable name and a concise purpose.",
       "behavior": "Behavior & capabilities",
-      "behavior_hint": "Define how it should work and attach workspace skills it can rely on.",
       "execution": "Execution",
-      "execution_hint": "Choose where the agent runs, and optionally override the runtime's default model, thinking level and speed.",
-      "access": "Access",
-      "access_hint": "Control who can start runs with this agent. You can change this later."
+      "execution_hint": "Unspecified options use the runtime defaults.",
+      "access": "Access"
     },
     "thinking_label": "Thinking",
     "speed_label": "Speed",
@@ -344,7 +336,7 @@
     },
     "builder": {
       "setup_title": "Choose a runtime for Agent Builder",
-      "setup_description": "The selected online runtime powers the setup conversation and becomes the new agent's runtime by default.",
+      "setup_description": "This runtime powers setup and is the default for the new agent.",
       "start": "Start conversation",
       "connect_runtime": "Connect a runtime",
       "start_failed": "Could not start Agent Builder.",
@@ -354,11 +346,10 @@
       "switch_runtime_pending": "Stop the current reply to switch runtime.",
       "switch_runtime_success": "Runtime switched. Your draft is kept and the conversation continues on the new runtime with a fresh model session.",
       "chat_title": "Agent Builder",
-      "chat_hint": "Shape the requirements through conversation and refine the configuration beside it.",
       "runtime_online": "Runtime online",
       "runtime_offline": "Runtime offline",
       "empty_title": "What should this agent do?",
-      "empty_description": "Describe its role, workflow, output, or constraints. A useful first draft will appear on the right.",
+      "empty_description": "Describe what this agent should do.",
       "prompt_review": "Review frontend pull requests",
       "prompt_research": "Research competitors and summarize findings",
       "prompt_assistant": "Help our team plan and write projects",
@@ -367,7 +358,7 @@
       "send": "Send message"
     },
     "live_draft": "Agent configuration",
-    "live_draft_hint": "Conversation updates appear here, and you can adjust any field directly.",
+    "live_draft_hint": "You can edit the draft directly.",
     "duplicate_env_notice": "Instructions, skills and command arguments are copied. Environment variables, MCP servers and machine-local runtime config are not.",
     "duplicate_runtime_reset_notice": "The original runtime is unavailable, so this copy runs on another one. Model, thinking level and speed were cleared because they only apply to the runtime they were chosen on.",
     "create_and_open": "Create & open agent",
@@ -390,7 +381,6 @@
   "create_dialog": {
     "title_create": "Create Agent",
     "title_duplicate": "Duplicate Agent",
-    "description_create": "Create a new AI agent for your workspace.",
     "description_duplicate": "Create a new agent based on \"{{name}}\". Instructions, env, and skills are copied for you.",
     "name_label": "Name",
     "name_placeholder": "e.g. Deep Research Agent",
@@ -455,7 +445,7 @@
   },
   "conversation_starters": {
     "label": "Conversation starters",
-    "hint": "Up to three examples, shown when someone opens a new chat with this agent. Selecting one fills the composer without sending it.",
+    "hint": "Up to three. Selecting one fills the composer without sending.",
     "add": "Add suggestion",
     "item_label": "Suggestion {{number}} label",
     "prompt_label": "Suggestion {{number}} prompt",
@@ -513,7 +503,7 @@
       "reveal_action": "Reveal & edit",
       "revealing": "Revealing…",
       "reveal_failed_toast": "Failed to load env values",
-      "empty_editable": "No environment variables configured. Add one to inject it into the agent at launch."
+      "empty_editable": "No environment variables configured."
     },
     "custom_args": {
       "intro": "Add CLI arguments passed when this agent starts.",
@@ -528,7 +518,6 @@
       "input_aria": "Argument {{index}}",
       "new_argument_aria": "New argument",
       "empty_title": "No arguments yet",
-      "empty_hint": "Add the first token to build the launch command.",
       "edit_aria": "Edit argument {{index}}",
       "remove_aria": "Remove argument {{index}}",
       "saved_toast": "Custom arguments saved",
@@ -583,7 +572,6 @@
       "dialog_edit_title": "Edit MCP Server",
       "dialog_edit_title_named": "Edit configuration for {{name}}",
       "dialog_replace_title": "Replace configuration for {{name}}",
-      "dialog_description": "Choose a connection method and enter its settings. Switch to JSON for advanced configuration.",
       "dialog_replace_description": "To protect sensitive information, saved values aren't shown again. Enter the complete new configuration. Existing agent assignments will stay the same.",
       "dialog_name_label": "Server name",
       "dialog_name_hint": "Used to identify this server at runtime. Use letters, numbers, hyphens, and underscores.",
@@ -632,14 +620,14 @@
       "invalid_json": "Invalid JSON: {{error}}",
       "save_failed_toast": "Failed to save MCP config",
       "redacted_title": "Configured — hidden from your view",
-      "redacted_hint": "Only the agent owner or a workspace admin can read this config."
+      "redacted_hint": "Only the agent owner or a workspace admin can read this config.",
+      "dialog_json_help": "Edit the full server configuration as JSON."
     },
     "composio_mcp": {
       "subtitle": "Check a toolkit to let this agent mount it as an MCP server — but only when you (its creator) are the one who triggered the run, directly or down a sub-agent chain.",
       "loading": "Loading your connections…",
       "load_failed": "Couldn't load your connected apps. Try again shortly.",
       "empty_title": "No connected apps yet",
-      "empty_hint": "You haven't connected any third-party services. Authorize one first, then come back here to allow it.",
       "empty_link_to_settings": "Connect one in Settings → Integrations",
       "connected": "Connected",
       "toggle_aria": "Allow {{toolkit}} for this agent",
@@ -651,11 +639,10 @@
       "workspace_warning": "Public to workspace: any workspace member may use these Composio apps through this agent."
     },
     "runtime_config": {
-      "intro": "Choose how the OpenClaw runtime executes this agent's turns. Local mode runs the agent inside the daemon process. Gateway mode forwards each turn to an OpenClaw Gateway — useful when the daemon host is a lightweight coordinator and the agent should run on a more powerful machine.",
       "mode_label": "Routing mode",
       "mode_local": "Local",
       "mode_gateway": "Gateway",
-      "mode_local_hint": "Default. The daemon spawns `openclaw agent --local …` and the agent loop runs on this host.",
+      "mode_local_hint": "Run on this computer.",
       "mode_gateway_hint": "The daemon dials an OpenClaw Gateway. Leave the endpoint fields blank to inherit them from the daemon host's `~/.openclaw/openclaw.json`.",
       "gateway_legend": "Gateway endpoint",
       "host_label": "Host",
@@ -671,9 +658,8 @@
       "save_failed_toast": "Failed to save routing config"
     },
     "skills": {
-      "intro": "This is the agent's effective skill set. Workspace skills are managed here; inherited Codex and Claude Code skills can also be turned off per agent.",
       "assigned_title": "Assigned to agent",
-      "assigned_hint": "Workspace skills travel with the agent. Turn one off temporarily without removing it.",
+      "assigned_hint": "Turn off a skill to pause its use without removing it.",
       "runtime_title": "Inherited from runtime",
       "runtime_hint": "Discovered automatically from {{runtime}} and available whenever this agent runs there.",
       "workspace_badge": "Workspace",
@@ -701,10 +687,8 @@
       "detail_supporting_files": "Supporting files",
       "add_action": "Add skill",
       "empty_title": "No skills assigned",
-      "empty_hint": "Add workspace skills to share team knowledge with this agent.",
       "remove_failed_toast": "Failed to remove skill",
       "add_dialog_title": "Add skill",
-      "add_dialog_description": "Select a workspace skill to assign to this agent.",
       "add_dialog_search_placeholder": "Search skills",
       "add_dialog_empty": "All workspace skills are already assigned.",
       "add_dialog_no_match": "No skills match your search.",
@@ -717,7 +701,6 @@
       "add_failed_toast": "Failed to add skill"
     },
     "integrations": {
-      "intro": "Connect this agent to external chat platforms so people can work with it where they already are.",
       "members_note": "Only workspace owners and admins can manage this connection. You can view connected bots in Settings → Integrations."
     },
     "activity": {
@@ -747,7 +730,10 @@
       "runs_one": "run",
       "runs_other": "runs",
       "success_pct": "{{percent}}% success",
-      "success_label": "succeeded",
+      "success_label": "success rate",
+      "success_hint": "Completed runs divided by completed and failed runs. Cancelled runs are excluded.",
+      "success_unavailable": "No completed or failed runs in this period, so there is no success rate to show.",
+      "cancelled_count": "{{count}} cancelled",
       "avg_duration": "avg {{value}}",
       "avg_duration_label": "average duration",
       "failed_count": "{{count}} failed",
@@ -942,6 +928,7 @@
       "skill_bundle_unavailable": "Couldn't download the agent's skills",
       "runtime_cli_timeout": "Local runtime CLI timed out",
       "environment_prepare_failed": "Couldn't prepare the execution environment",
+      "runtime_access_denied": "This agent can't run on its private runtime, so it couldn't reply. Make the runtime public, or rebind/copy the agent to a runtime its owner can use.",
       "invalid_task_identity": "Run identity mismatch",
       "agent_error_provider_auth_or_access": "Provider auth failed",
       "agent_error_provider_quota_limit": "Provider quota exhausted",

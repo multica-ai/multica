@@ -9,7 +9,7 @@ import {
 import { api } from "../api";
 import { issueKeys } from "./queries";
 import { projectKeys } from "../projects/queries";
-import { inboxKeys } from "../inbox/queries";
+import { inboxKeys, type ArchivedInboxCache } from "../inbox/queries";
 import {
   cancelInboxLists,
   isInboxListRequestInFlight,
@@ -48,6 +48,8 @@ import type {
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
 import { sortTimelineEntriesAsc } from "./timeline-sort";
+import { applyCommentDeletion, removeCommentSubtree } from "./comment-deletion";
+import { configStore } from "../config";
 import {
   onIssueAuxiliaryRevision,
   invalidateIssueOwnerProjections,
@@ -537,7 +539,7 @@ export function useBatchUpdateIssues() {
       >();
       const prevDetailById = new Map<string, Issue>();
       let prevInboxList: InboxItem[] | undefined;
-      let prevArchivedInboxList: InboxItem[] | undefined;
+      let prevArchivedInboxCaches: [QueryKey, ArchivedInboxCache | undefined][] | undefined;
       const staleKeys: QueryKey[] = [];
       for (const id of ids) {
         const base = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
@@ -566,10 +568,10 @@ export function useBatchUpdateIssues() {
           prevInboxList = change.prevInboxList;
         }
         if (
-          prevArchivedInboxList === undefined &&
-          change.prevArchivedInboxList !== undefined
+          prevArchivedInboxCaches === undefined &&
+          change.prevArchivedInboxCaches !== undefined
         ) {
-          prevArchivedInboxList = change.prevArchivedInboxList;
+          prevArchivedInboxCaches = change.prevArchivedInboxCaches;
         }
         staleKeys.push(...change.staleKeys);
       }
@@ -599,7 +601,7 @@ export function useBatchUpdateIssues() {
         prevTableRows: [...prevTableRowByHash.values()],
         prevDetailById,
         prevInboxList,
-        prevArchivedInboxList,
+        prevArchivedInboxCaches,
         inboxWrite,
         staleKeys,
         prevChildren,
@@ -630,11 +632,8 @@ export function useBatchUpdateIssues() {
       if (ctx?.prevInboxList !== undefined) {
         qc.setQueryData(inboxKeys.list(wsId), ctx.prevInboxList);
       }
-      if (ctx?.prevArchivedInboxList !== undefined) {
-        qc.setQueryData(
-          inboxKeys.archived(wsId),
-          ctx.prevArchivedInboxList,
-        );
+      for (const [key, snapshot] of ctx?.prevArchivedInboxCaches ?? []) {
+        qc.setQueryData(key, snapshot);
       }
       if (ctx?.prevChildren) {
         for (const [parentId, snapshot] of ctx.prevChildren) {
@@ -930,41 +929,24 @@ export function useDeleteComment(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: (commentId: string) => api.deleteComment(commentId),
-    onMutate: async (commentId) => {
-      await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
-      const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
-
-      // Cascade: collect all descendants of the deleted comment.
-      const toRemove = new Set<string>([commentId]);
-      if (prev) {
-        let changed = true;
-        while (changed) {
-          changed = false;
-          for (const e of prev) {
-            if (
-              e.parent_id &&
-              toRemove.has(e.parent_id) &&
-              !toRemove.has(e.id)
-            ) {
-              toRemove.add(e.id);
-              changed = true;
-            }
-          }
-        }
-      }
-
-      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
-        old?.filter((e) => !toRemove.has(e.id)),
-      );
-      return { prev };
+    // The capability is read when the delete runs, so the route matches the
+    // copy the confirmation showed. Older servers delete the replies too.
+    mutationFn: async (commentId: string) => {
+      const keepReplies = configStore.getState().commentDeleteKeepRepliesSupported;
+      await api.deleteComment(commentId, { keepReplies });
+      return keepReplies;
     },
-    onError: (_err, _id, ctx) => {
-      if (ctx?.prev !== undefined) {
-        qc.setQueryData(issueKeys.timeline(issueId), ctx.prev);
-      }
-    },
-    onSuccess: () => {
+    // Not optimistic: whether the comment disappears or stays as a tombstone
+    // depends on replies only the server sees for certain (#8296). Once it
+    // confirms, mirror its outcome; realtime events and the settle refetch
+    // reconcile the rest.
+    onSuccess: (keptReplies, commentId) => {
+      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
+        if (!old) return old;
+        return keptReplies
+          ? applyCommentDeletion(old, commentId, new Date().toISOString())
+          : removeCommentSubtree(old, commentId);
+      });
       // The endpoint remains 204 for compatibility, so the local caller has
       // no body carrying issue_revision. The realtime event will narrow this
       // with its revision when connected; this is the no-WS safety net.

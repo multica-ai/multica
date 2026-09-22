@@ -1,4 +1,7 @@
-import { queryOptions, useQuery } from "@tanstack/react-query";
+import type { InfiniteData, QueryClient } from "@tanstack/react-query";
+import type { ArchivedInboxPage } from "../types/inbox";
+import { EMPTY_INBOX_FILTERS, type InboxFilters } from "./filter-store";
+import { infiniteQueryOptions, queryOptions, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import type { InboxItem, InboxWorkspaceUnread } from "../types";
 
@@ -6,6 +9,9 @@ export const inboxKeys = {
   all: (wsId: string) => ["inbox", wsId] as const,
   list: (wsId: string) => [...inboxKeys.all(wsId), "list"] as const,
   archived: (wsId: string) => [...inboxKeys.all(wsId), "archived"] as const,
+  pages: (wsId: string) => [...inboxKeys.archived(wsId), "pages"] as const,
+  lookup: (wsId: string) => [...inboxKeys.archived(wsId), "lookup"] as const,
+  facets: (wsId: string) => [...inboxKeys.all(wsId), "archived-facets"] as const,
   // Account-level (not workspace-scoped): a single shared cache entry that
   // holds unread counts for every workspace the user belongs to.
   unreadSummary: () => ["inbox", "unread-summary"] as const,
@@ -19,17 +25,63 @@ export function inboxListOptions(wsId: string) {
 }
 
 /**
- * Archived notifications, backing the inbox's "Archived" sub-view. A separate
- * cache entry from the main list rather than one flat cache split locally
- * (which is what chat does): the archive grows without end, so it is fetched
- * from its own capped endpoint, and the server — not the client — decides
- * which issues belong in which list.
+ * @deprecated Legacy array endpoint, capped at 200 groups. New archive
+ * consumers must use archivedInboxPagesOptions for the complete archive.
+ * Retained for compatibility with legacy cache consumers.
  */
 export function archivedInboxListOptions(wsId: string) {
   return queryOptions({
     queryKey: inboxKeys.archived(wsId),
     queryFn: () => api.listArchivedInbox(),
   });
+}
+
+function normalizedInboxFilters(filters: InboxFilters): InboxFilters {
+  return { statuses: [...filters.statuses].sort(), priorities: [...filters.priorities].sort(),
+    actors: [...filters.actors].sort(), unreadOnly: filters.unreadOnly };
+}
+
+export function archivedInboxPagesOptions(wsId: string, filters: InboxFilters) {
+  return infiniteQueryOptions({
+    queryKey: [...inboxKeys.pages(wsId), normalizedInboxFilters(filters)],
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam, signal }) => api.listArchivedInboxPage(filters, { cursor: pageParam, signal }),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+    retry: false,
+  });
+}
+
+export function archivedInboxLookupOptions(wsId: string, groupId: string, filters: InboxFilters = EMPTY_INBOX_FILTERS) {
+  return queryOptions({
+    queryKey: [...inboxKeys.lookup(wsId), groupId, normalizedInboxFilters(filters)],
+    queryFn: ({ signal }) => api.listArchivedInboxPage(filters, { groupId, signal }),
+    enabled: !!groupId,
+    retry: false,
+  });
+}
+
+export function archivedInboxFacetsOptions(wsId: string, filters: InboxFilters) {
+  return queryOptions({
+    queryKey: [...inboxKeys.facets(wsId), normalizedInboxFilters(filters)],
+    queryFn: ({ signal }) => api.getArchivedInboxFacets(filters, signal),
+    retry: false,
+  });
+}
+
+export type ArchivedInboxCache = InboxItem[] | ArchivedInboxPage | InfiniteData<ArchivedInboxPage>;
+
+export function mapArchivedInboxCache(data: ArchivedInboxCache, patch: (items: InboxItem[]) => InboxItem[]): ArchivedInboxCache {
+  if (Array.isArray(data)) return patch(data);
+  if ("pages" in data) return { ...data, pages: data.pages.map((page) => ({ ...page, items: patch(page.items) })) };
+  return { ...data, items: patch(data.items) };
+}
+
+export function patchArchivedInboxCaches(qc: QueryClient, wsId: string, patch: (items: InboxItem[]) => InboxItem[]) {
+  const snapshot = qc.getQueriesData<ArchivedInboxCache>({ queryKey: inboxKeys.archived(wsId) });
+  for (const [key, data] of snapshot) {
+    if (data) qc.setQueryData(key, mapArchivedInboxCache(data, patch));
+  }
+  return snapshot;
 }
 
 /**

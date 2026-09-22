@@ -31,7 +31,23 @@ For install script or manual installs, use:
 multica update
 ```
 
-`multica update` auto-detects your installation method and upgrades accordingly.
+`multica update` uses GitHub Releases by default. Self-hosted installations can
+point the CLI at a GitHub Releases-compatible metadata mirror and an artifact
+mirror without changing the command. To let a daemon poll that source, also
+enable self-update explicitly because self-hosted auto-update is disabled by
+default:
+
+```bash
+export MULTICA_RELEASE_API_BASE_URL=https://updates.example/api
+export MULTICA_RELEASE_DOWNLOAD_BASE_URL=https://updates.example/releases/download
+export MULTICA_DAEMON_AUTO_UPDATE=true
+multica update
+```
+
+The metadata mirror must serve `/repos/multica-ai/multica/releases/latest` and
+`/repos/multica-ai/multica/releases/tags/<tag>`. The artifact mirror must serve
+`/<tag>/<asset-name>` and preserve the published `checksums.txt` contents.
+When these variables are unset, the GitHub defaults remain unchanged.
 
 ## Quick Start
 
@@ -598,7 +614,10 @@ Pass `--to-id <uuid>` to assign by canonical UUID (mutually exclusive with `--to
 multica issue status <id> in_progress
 ```
 
-Valid statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`.
+Built-in statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`,
+`cancelled`. A workspace can define custom statuses on top of these; their keys are
+shown in **Settings → Issue Statuses**, and passing an unknown value returns the full
+list.
 
 ### Comments
 
@@ -1098,3 +1117,11 @@ On the API, both endpoints accept `?include=content` and `?include=metadata`.
 A request that sends neither still gets `content`, on both endpoints, so a
 server upgrade never changes what an un-upgraded client receives — it is the
 CLI that asks for the smaller shape.
+
+### Custom runtime compatibility targets
+
+Create custom Oh-My-Pi profiles with `multica runtime profile create --runtime-type omp --command-name omp --display-name "Custom Oh-My-Pi"`.
+The immutable `runtime_type` selects model discovery, skills paths, and launch behavior;
+the server derives `protocol_family` (`pi` for `omp`). Custom command/path overrides and
+fixed arguments still apply, and the runtime retains its custom-profile provenance.
+Existing profiles and the legacy `--protocol-family` flag retain their original target.

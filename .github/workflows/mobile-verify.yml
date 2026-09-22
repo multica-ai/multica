@@ -16,6 +16,8 @@ name: Mobile Verify
 # Mobile's vitest suite is intentionally narrow (Node env, pure-function
 # tests under apps/mobile/lib/*.test.ts — see apps/mobile/vitest.config.ts).
 # RN component-level rendering is not exercised here.
+# Repository-wide radius checks run once in CI: frontend-build owns them when
+# selected, otherwise frontend-quality handles docs/mobile-only changes.
 
 on:
   push:
@@ -27,8 +29,6 @@ on:
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "turbo.json"
-      - "scripts/check-ui-radius-tokens.mjs"
-      - "scripts/check-ui-radius-tokens.test.mjs"
       - ".github/workflows/mobile-verify.yml"
   pull_request:
     branches: [main]
@@ -39,8 +39,6 @@ on:
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "turbo.json"
-      - "scripts/check-ui-radius-tokens.mjs"
-      - "scripts/check-ui-radius-tokens.test.mjs"
       - ".github/workflows/mobile-verify.yml"
 
 concurrency:
@@ -68,8 +66,3 @@ jobs:
 
       - name: Type check, lint, and test
         run: pnpm exec turbo typecheck lint test --filter=@multica/mobile
-
-      - name: Check UI radius tokens
-        run: |
-          node --test scripts/check-ui-radius-tokens.test.mjs
-          node scripts/check-ui-radius-tokens.mjs

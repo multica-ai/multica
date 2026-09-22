@@ -1,5 +1,5 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
-import { inboxKeys } from "./queries";
+import { inboxKeys, mapArchivedInboxCache, type ArchivedInboxCache } from "./queries";
 import type { InboxItem, IssuePriority, IssueStatus } from "../types";
 
 // Re-read a query because the server changed — in a way that is never answered
@@ -53,11 +53,11 @@ function patchInboxLists(
   wsId: string,
   patch: (items: InboxItem[]) => InboxItem[],
 ) {
-  for (const queryKey of [inboxKeys.list(wsId), inboxKeys.archived(wsId)]) {
+  for (const queryKey of [inboxKeys.list(wsId), ...qc.getQueryCache().findAll({ queryKey: inboxKeys.archived(wsId) }).map((query) => query.queryKey)]) {
     const invalidated = qc.getQueryState(queryKey)?.isInvalidated === true;
-    qc.setQueryData<InboxItem[]>(queryKey, (old) => {
+    qc.setQueryData<ArchivedInboxCache>(queryKey, (old) => {
       if (!old) return undefined;
-      const next = patch(old);
+      const next = mapArchivedInboxCache(old, patch);
       return next === old ? undefined : next;
     });
     if (invalidated) {
@@ -111,6 +111,7 @@ export function onInboxIssueStatusChanged(
   issueId: string,
   status: IssueStatus,
 ) {
+  // The issue cache coordinator owns membership invalidation after commit.
   patchInboxIssueStatus(qc, wsId, issueId, status);
 }
 
@@ -133,7 +134,12 @@ export async function onInboxIssueDeleted(
   patchInboxLists(qc, wsId, (items) =>
     items.filter((i) => i.issue_id !== issueId),
   );
-  await onInboxSummaryInvalidate(qc);
+  await Promise.all([
+    onInboxSummaryInvalidate(qc),
+    refreshInboxQuery(qc, inboxKeys.pages(wsId)),
+    refreshInboxQuery(qc, inboxKeys.lookup(wsId)),
+    refreshInboxQuery(qc, inboxKeys.facets(wsId)),
+  ]);
 }
 
 // Whether a request for either inbox list is out (paused ones included).

@@ -1,0 +1,11 @@
+{
+  "attach_file": "Joindre un fichier",
+  "toggle_sidebar": "Afficher ou masquer la barre latérale gauche",
+  "copy_code": "Copier le code",
+  "plain_text": "texte brut",
+  "error_boundary": {
+    "title": "Une erreur s'est produite lors de l'affichage de cette section.",
+    "description": "Une erreur inattendue s'est produite.",
+    "try_again": "Réessayer"
+  }
+}
