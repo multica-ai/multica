@@ -137,7 +137,8 @@
     "local_clear": "Effacer",
     "local_pick_failed": "Impossible d'ouvrir le sélecteur de répertoire.",
     "local_invalid_dir": "Ce répertoire ne peut pas être utilisé. Choisissez-en un autre.",
-    "local_hint": "Les agents des autres machines ne verront pas ce chemin — ils ne pourront pas démarrer. Utilisez des dépôts pour le travail partagé."
+    "local_hint": "Les agents des autres machines ne verront pas ce chemin — ils ne pourront pas démarrer. Utilisez des dépôts pour le travail partagé.",
+    "repos_ref_default": "Branche par défaut"
   },
   "create_issue": {
     "sr_manual": "Nouvelle tâche",

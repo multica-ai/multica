@@ -146,6 +146,11 @@ func TestBuildCommentReplyInstructionsWindowsUsesContentFile(t *testing.T) {
 				// Formatting variant; the per-turn cookbook keeps the ban,
 				// the one-line consequence, and the pointer.
 				"if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
+				// #8627: the host OS does not fix the agent's shell — Claude
+				// Code with CLAUDE_CODE_USE_POWERSHELL_TOOL=0 runs Git Bash —
+				// so the Windows cookbook carries a `&&` variant too.
+				"Git Bash",
+				"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file ./reply.md --output table && rm ./reply.md",
 				"Write the body file first",
 				"never pipe via `--content-stdin`",
 				"PowerShell drops non-ASCII",

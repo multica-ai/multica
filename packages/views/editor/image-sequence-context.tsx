@@ -75,7 +75,18 @@ export function useImageSequencePreview(): ImageSequenceApi {
 function toPreviewSource(item: ImageSequenceItem): PreviewSource {
   return item.attachment
     ? { kind: "full", attachment: item.attachment }
-    : { kind: "url", url: item.url, filename: item.filename };
+    : // Everything in a sequence is an image by construction —
+      // `collectImageSequence` admits nothing else — so the viewer says so
+      // rather than letting the modal re-derive it from `filename`. For an
+      // item with no attachment record that field holds the markdown caption
+      // (`![报告图表](…)`), which is prose and has no extension to read
+      // (MUL-7518).
+      {
+        kind: "url",
+        url: item.url,
+        filename: item.filename,
+        forceKind: "image",
+      };
 }
 
 interface Session {

@@ -294,6 +294,36 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.5.1",
+        date: "2026-09-21",
+        title: "Issue wakeup rules, comment permalinks, project starting branches, and steadier channels and runtimes",
+        changes: [],
+        features: [
+          "Set an Issue to wake an agent up again when a comment arrives, or on a schedule you choose.",
+          "Manage those wakeup rules from the Issue sidebar or from an Autopilot.",
+          "Choose the branch or commit a project's repository work starts from.",
+          "Copy a direct link to any comment or reply, and open it with that comment highlighted.",
+          "A WeCom answer comes back inside the message you asked from.",
+          "Point a self-hosted Multica at Gitea or a compatible mirror for updates.",
+        ],
+        improvements: [
+          "A long WeCom answer arrives in full instead of being dropped.",
+          "Pages open faster, and runtime usage figures fit on a phone screen.",
+        ],
+        fixes: [
+          "Two tools with the same name running at once no longer mix up their results.",
+          "OpenCode 2.x runs again, and custom Oh-My-Pi runtimes are recognized and discovered as before.",
+          "Telegram replies once per message, even after a restart or a retry.",
+          "Telegram and DingTalk on a self-hosted server accept the secrets you set.",
+          "Cancelling sub-tasks tells you which stage was affected and how many.",
+          "Comments keep their order, and an Issue link still resolves after you reopen a view.",
+          "A local folder resource no longer offers a rename that cannot work.",
+          "An image pasted into the editor keeps the format it already had.",
+          "Inbox wording about agent activity matches what actually happened.",
+          "Tasks on Windows deliver their results without extra steps.",
+        ],
+      },
+      {
         version: "0.5.0",
         date: "2026-09-18",
         title: "French interface, steadier and leaner agent runs, the full Inbox archive, and longer-lasting sign-ins",

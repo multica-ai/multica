@@ -110,6 +110,7 @@ function responseFor(pathname: string): unknown | undefined {
     case `/api/issues/${fx.ISSUE_ID}/timeline`: return fx.buildTimelineEntries();
     case `/api/issues/${fx.ISSUE_ID}/task-runs`: return fx.buildTaskRuns();
     case `/api/issues/${fx.ISSUE_ID}/subscribers`:
+    case `/api/issues/${fx.ISSUE_ID}/wakeups`:
     case `/api/issues/${fx.ISSUE_ID}/attachments`: return [];
     case `/api/issues/${fx.ISSUE_ID}/labels`: return { labels: [] };
     case `/api/issues/${fx.ISSUE_ID}/children`: return { issues: [] };

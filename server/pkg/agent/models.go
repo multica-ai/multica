@@ -1013,7 +1013,7 @@ func discoverPiModelsWithin(ctx context.Context, runtimeCmd Command, rpcTimeout,
 	}
 	lookedUp, err := exec.LookPath(runtimeCmd.Path)
 	if err != nil {
-		return []Model{}, nil
+		return nil, fmt.Errorf("pi model discovery: %w", err)
 	}
 	// Split the established 15-second discovery budget so an RPC surface that
 	// accepts the mode but never answers cannot starve the compatibility table
@@ -1216,14 +1216,16 @@ func discoverPiModelsTable(ctx context.Context, runtimeCmd Command) ([]Model, er
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	stdout, err := outputOwned(cmd, runtimeCmd.logger)
-	if err != nil && len(stdout) == 0 && stderr.Len() == 0 {
-		return []Model{}, nil
-	}
+
 	text := string(stdout)
 	if strings.TrimSpace(text) == "" {
 		text = stderr.String()
 	}
-	return parsePiModels(text), nil
+	models := parsePiModels(text)
+	if len(models) == 0 && err != nil {
+		return nil, fmt.Errorf("pi model discovery: RPC probe failed; --list-models: %w: %s", err, strings.TrimSpace(text))
+	}
+	return models, nil
 }
 
 // parsePiModels accepts the `pi --list-models` output. Pi historically
@@ -1341,15 +1343,17 @@ func discoverOmpModels(ctx context.Context, runtimeCmd Command) ([]Model, error)
 		runtimeCmd.Path = "omp"
 	}
 	if _, err := exec.LookPath(runtimeCmd.Path); err != nil {
-		return []Model{}, nil
+		return nil, fmt.Errorf("omp model discovery: %w", err)
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := runtimeCmd.exec(runCtx, "models", "--json")
 	hideAgentWindow(cmd)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
 	stdout, err := outputOwned(cmd, runtimeCmd.logger)
-	if err != nil || len(stdout) == 0 {
-		return []Model{}, nil
+	if err != nil {
+		return nil, fmt.Errorf("omp models --json: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return parseOmpModels(stdout)
 }

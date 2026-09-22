@@ -49,6 +49,8 @@ vi.mock("sonner", () => ({ toast: { error: toastErrorMock } }));
 const STRINGS: Record<string, Record<string, string>> = {
   image: {
     download: "Download",
+    view: "View",
+    copy_link: "Copy link",
     canvas_label: "Image canvas",
     previous: "Previous image",
     next: "Next image",
@@ -85,6 +87,8 @@ import {
   ImageSequenceProvider,
   useImageSequencePreview,
 } from "./image-sequence-context";
+import { Attachment as InlineAttachment } from "./attachment";
+import { AttachmentDownloadProvider } from "./attachment-download-context";
 
 function render(ui: ReactElement) {
   const qc = new QueryClient({
@@ -325,6 +329,69 @@ describe("ImageSequenceProvider", () => {
     });
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Next image" })).toBeNull();
+  });
+});
+
+// An agent that rewrites an issue body swaps the markdown image URL but does
+// not register the new file as an attachment of that issue, so these images
+// reach the viewer with no server metadata at all — the caption is the only
+// "filename" there is. It is a caption, not a file name (MUL-7518).
+describe("body images with no attachment record", () => {
+  function CaptionedBody({ captions }: { captions: string[] }) {
+    const urls = captions.map((_, i) => `https://cdn.example.test/chart-${i}.png`);
+    const content = captions
+      .map((caption, i) => `![${caption}](${urls[i]})`)
+      .join("\n\n");
+    return (
+      <AttachmentDownloadProvider attachments={[]}>
+        <ImageSequenceProvider
+          items={collectImageSequence([{ content, attachments: [] }])}
+        >
+          {captions.map((caption, i) => (
+            <InlineAttachment
+              key={urls[i]}
+              attachment={{
+                kind: "url",
+                url: urls[i]!,
+                filename: caption,
+                forceKind: "image",
+              }}
+            />
+          ))}
+        </ImageSequenceProvider>
+      </AttachmentDownloadProvider>
+    );
+  }
+
+  it.each(["报告图表", ""])(
+    "zooms a body image whose caption is %j, not a filename",
+    (caption) => {
+      render(<CaptionedBody captions={[caption]} />);
+
+      act(() => {
+        fireEvent.click(screen.getAllByTitle("View")[0]!);
+      });
+
+      expect(
+        screen.queryByText("This file type can't be previewed."),
+      ).toBeNull();
+      expect(screen.getByRole("dialog").querySelector("img")).not.toBeNull();
+    },
+  );
+
+  it("still pages between captioned body images", () => {
+    render(<CaptionedBody captions={["报告图表", "对比图"]} />);
+
+    act(() => {
+      fireEvent.click(screen.getAllByTitle("View")[0]!);
+    });
+    expectCounter("1 / 2");
+
+    act(() => {
+      fireEvent.click(nextButton());
+    });
+    expectCounter("2 / 2");
+    expect(screen.getByRole("dialog").querySelector("img")).not.toBeNull();
   });
 });
 

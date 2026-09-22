@@ -633,7 +633,7 @@
       },
       "agent_activity": {
         "label": "智能体活动",
-        "description": "智能体运行完成或失败时"
+        "description": "智能体运行失败时"
       }
     },
     "system": {

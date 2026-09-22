@@ -11,10 +11,15 @@ package wecom
 // The wire is documented at https://developer.work.weixin.qq.com/document/path/101463 .
 
 import (
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
@@ -861,6 +866,185 @@ func aibotChatTypeFromChannel(t channel.ChatType) int {
 	return chatTypeSingleInt
 }
 
+// ---- streaming replies ----
+
+// streamContentLimit is aibot's cap on stream.content: 20480 bytes of utf8
+// (https://developer.work.weixin.qq.com/document/path/101031). Content is a
+// FULL replacement of the bubble's body on every frame, never a delta, so this
+// bounds the whole answer rather than one chunk of it.
+const streamContentLimit = 20480
+
+// streamThinkingPlaceholder is what the opening frame says. Per 101031 a
+// content carrying <think></think> renders as the client's own thinking
+// affordance — the animated dots — which is exactly the "working on it" bubble
+// we want and costs no copy in any language. Tencent's own OpenClaw plugin
+// opens its streams with the same literal.
+const streamThinkingPlaceholder = "<think></think>"
+
+// aibot errcodes worth branching on.
+//
+// A wrong guess about either degrades rather than breaks — an errcode this file
+// does not recognise falls through to the plain-message fallback, which is
+// where a refused frame ends up anyway.
+const (
+	// errcodeStreamExpired — the stream ran past its window and the server
+	// will not take another frame for it.
+	//
+	// Measured on 2026-08-09 against the live tenant, not inferred: a stream
+	// framed every thirty seconds was refused with exactly this code, and the
+	// server's own errmsg named the reason — "stream message update expired
+	// (>10 minutes), cannot update". The published global errcode table
+	// defines it the same way. The window it implies is streamMaxAge; see
+	// stream_store.go for the numbers and what else the probe settled.
+	errcodeStreamExpired = 846608
+
+	// errcodeStreamBadReqID — this req_id may not carry a stream.
+	//
+	// ASSUMPTION, unconfirmed by the vendor and unmeasured: this number is
+	// read off Tencent's OpenClaw plugin source, with no version pinned, and
+	// it does not appear in WeCom's published error tables the way 846608
+	// does. What would settle it: the code appearing in the published tables,
+	// a support answer naming it, or a probe that opens a stream on an event
+	// callback's req_id and reads back what the server says.
+	//
+	// An event callback's req_id looks usable and is not; only a message
+	// callback's works, so the event path has to use aibot_send_msg.
+	errcodeStreamBadReqID = 846605
+)
+
+// streamError is a server rejection of a stream frame, carrying the errcode so
+// callers can tell "this bubble is beyond saving" from "that frame did not
+// land".
+type streamError struct {
+	Code int
+	Msg  string
+}
+
+func (e *streamError) Error() string {
+	return fmt.Sprintf("wecom: stream frame rejected errcode=%d errmsg=%s", e.Code, e.Msg)
+}
+
+// Unusable reports whether the rejection means this stream can never be
+// written to again — the caller must fall back to a plain message rather than
+// retry.
+func (e *streamError) Unusable() bool {
+	return e.Code == errcodeStreamExpired || e.Code == errcodeStreamBadReqID
+}
+
+// streamUnusable is the package-level predicate over any error, so callers do
+// not each re-implement the type assertion.
+//
+// Only a verdict from the server counts. A write that failed, an ack that
+// never came, errNoLiveConnection from a registry holding no socket for the
+// installation — none of those is in here, because none of them says anything
+// about the stream. A req_id belongs to the turn and not to the connection it
+// arrived on (measured 2026-08-09; sendersRegistry.stream), so a missing socket
+// is a fact about this moment rather than about the bubble.
+func streamUnusable(err error) bool {
+	var se *streamError
+	if errors.As(err, &se) {
+		return se.Unusable()
+	}
+	return false
+}
+
+// respondStreamBody builds an aibot_respond_msg body carrying one frame of a
+// streaming reply. finish=false paints or updates the bubble; finish=true
+// seals it, after which the message is immutable.
+//
+// The blank-closing-frame check is the one rule that is not obvious from the
+// wire format: WeCom ignores content with nothing visible in it, so a closing
+// frame of spaces closes nothing and leaves the user with a bubble that spins
+// forever. Refusing here means every caller inherits the check.
+func respondStreamBody(streamID, content string, finish bool) (map[string]any, error) {
+	if streamID == "" {
+		return nil, errors.New("wecom: stream frame requires a stream id")
+	}
+	if finish {
+		content = defuseThinkTags(content)
+	}
+	content = truncateStreamContent(content)
+	if finish && !hasVisibleChar(content) {
+		return nil, errors.New("wecom: closing stream frame needs visible content")
+	}
+	return map[string]any{
+		"msgtype": "stream",
+		"stream": map[string]any{
+			"id":      streamID,
+			"finish":  finish,
+			"content": content,
+		},
+	}, nil
+}
+
+// defuseThinkTags stops an answer that talks about <think> from being read as
+// one.
+//
+// The tag is the client's, not ours: per 101031 a stream body wrapped in
+// <think></think> renders as WeCom's own collapsed thinking affordance, which
+// is what the opening frame is built from. An answer that happens to contain
+// the literal — quoting a prompt, explaining this very feature, pasting XML —
+// gets the same treatment, and half the reply disappears into a fold with no
+// edit and no unsend to undo it with.
+//
+// A zero-width space after the angle bracket is enough: the scanner no longer
+// matches, and the reader sees the same characters they would have seen. Only
+// the tag's own opening is touched, so comparisons, generics and HTML samples
+// in the rest of the answer come through as written. Callers apply this to
+// closing frames only — the opening frame IS the affordance.
+func defuseThinkTags(s string) string {
+	if !strings.Contains(s, "<") {
+		return s
+	}
+	const zwsp = "​"
+	var b strings.Builder
+	last := 0
+	// Indexing s directly, never a case-folded copy of it. Walking s while
+	// reading strings.ToLower(s) at the same offsets looks equivalent and is
+	// not: case folding does not preserve length. U+212A KELVIN SIGN is three
+	// bytes and lowercases to a one-byte "k", so the folded copy can be
+	// SHORTER than the original and an offset taken from s can be past its
+	// end. "KK<x" — two Kelvin signs and an angle bracket — is enough to slice
+	// out of range, and the string being scanned is the agent's own answer, so
+	// any text a user can talk the agent into echoing would take the backend
+	// down with it.
+	for i := 0; i < len(s); i++ {
+		if s[i] != '<' {
+			continue
+		}
+		j := i + 1
+		if j < len(s) && s[j] == '/' {
+			j++
+		}
+		if j+len("think") > len(s) || !strings.EqualFold(s[j:j+len("think")], "think") {
+			continue
+		}
+		b.WriteString(s[last : i+1])
+		b.WriteString(zwsp)
+		last = i + 1
+	}
+	if last == 0 {
+		return s
+	}
+	b.WriteString(s[last:])
+	return b.String()
+}
+
+// truncateStreamContent cuts content to the protocol's byte limit on a
+// character boundary. An answer that arrives clipped still answers; one the
+// server rejects for length does not.
+func truncateStreamContent(s string) string {
+	if len(s) <= streamContentLimit {
+		return s
+	}
+	const ellipsis = "…"
+	cut := streamContentLimit - len(ellipsis)
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + ellipsis
+}
+
 // hasVisibleChar reports whether s contains a rune that is neither whitespace
 // nor a control character. That is the test a completion has to pass before it
 // becomes a message: a body the client renders as nothing still occupies a
@@ -880,4 +1064,124 @@ func hasVisibleChar(s string) bool {
 		}
 	}
 	return false
+}
+
+// newStreamID mints the developer-chosen id that names one streaming message.
+// Reusing an id replaces that message's body; a fresh one opens another
+// bubble, which is why this must never collide across concurrent turns.
+func newStreamID() string {
+	var buf [12]byte
+	if _, err := cryptorand.Read(buf[:]); err != nil {
+		return fmt.Sprintf("wecom-stream-%d", time.Now().UnixNano())
+	}
+	return "s" + hex.EncodeToString(buf[:])
+}
+
+// sendMsgContentLimit is the cap on one aibot_send_msg markdown body: the same
+// 20480 utf8 bytes the stream frame gets
+// (https://developer.work.weixin.qq.com/document/path/101138). A body past it
+// is refused WHOLE — the server does not clip it — and the refusal arrives as
+// errcode 45002 on the ack, so before splitForWire a long answer simply never
+// appeared in the chat.
+const sendMsgContentLimit = 20480
+
+// splitForWire cuts a reply into pieces the platform will accept, and returns
+// the input untouched when it already fits — which is nearly always, so the
+// common path allocates nothing.
+//
+// Splitting rather than truncating is the point. A long answer is a code
+// review, a pasted log, a document draft: the tail is not filler, and neither
+// a reply the server refuses whole nor one that stops at an ellipsis with no
+// way to read the rest is an answer. The cut prefers a line boundary, then a
+// rune boundary, so a piece never ends mid-character and rarely ends mid-line.
+//
+// Each piece carries a marker so the reader knows the answer continues. This
+// is the one place the adapter adds words to an agent's own text, which is why
+// the marker is a bare counter rather than a sentence: it belongs to no
+// language, so it needs no translation and cannot contradict an answer written
+// in one.
+func splitForWire(content string) []string {
+	if len(content) <= sendMsgContentLimit {
+		return []string{content}
+	}
+
+	var pieces []string
+	remaining := content
+	for len(remaining) > 0 {
+		// Reserve room for the widest marker this piece could end up with.
+		// The total is not known until the split is done, so the placeholder
+		// stands in for it: "…" is three bytes, which covers a total up to
+		// three digits — far past any answer that reaches this function.
+		marker := fmt.Sprintf("\n\n(%d/…)", len(pieces)+1)
+		budget := sendMsgContentLimit - len(marker)
+		if len(remaining) <= sendMsgContentLimit {
+			pieces = append(pieces, remaining)
+			break
+		}
+		cut := wireCutPoint(remaining, budget)
+		// Nothing is dropped at the seam. The cut is an index into remaining
+		// and both sides of it are kept: a line break the cut point chose ends
+		// the piece it belongs to, so concatenating the pieces with their
+		// markers stripped gives the answer back byte for byte. An earlier
+		// version trimmed leading newlines here, which silently ate a
+		// paragraph break out of every log and code block long enough to
+		// split.
+		pieces = append(pieces, remaining[:cut])
+		remaining = remaining[cut:]
+	}
+
+	// A piece with nothing visible in it is not sent. A long answer that ends
+	// in a run of blank lines puts that run in a piece of its own — the last
+	// piece carries no marker, so nothing else makes it visible — and that
+	// piece reaches the chat as an empty bubble, which is the thing
+	// hasVisibleChar exists at the call sites to prevent. Dropping it costs
+	// the reader nothing: what is dropped is whitespace that would have
+	// occupied a whole message on its own.
+	//
+	// Filtered before the markers go on, so the numbering counts the pieces
+	// the person actually receives.
+	kept := pieces[:0]
+	for _, p := range pieces {
+		if hasVisibleChar(p) {
+			kept = append(kept, p)
+		}
+	}
+	pieces = kept
+
+	// The count is only knowable once the split is done, so the markers go on
+	// afterwards. The last piece gets none: there is nothing after it to
+	// promise, and the reader can see that for themselves.
+	total := len(pieces)
+	for i := range pieces {
+		if i == total-1 {
+			continue
+		}
+		pieces[i] += fmt.Sprintf("\n\n(%d/%d)", i+1, total)
+	}
+	return pieces
+}
+
+// wireCutPoint picks where to end a piece: the last line break inside the
+// budget when there is one worth using, otherwise the last rune boundary.
+func wireCutPoint(s string, budget int) int {
+	if budget >= len(s) {
+		return len(s)
+	}
+	// A line break in the last quarter of the budget is worth taking; one
+	// near the start would waste most of a frame. The cut goes AFTER it, so
+	// the break stays at the end of the piece it terminated rather than
+	// falling into the gap between two frames.
+	if nl := strings.LastIndexByte(s[:budget], '\n'); nl > budget*3/4 {
+		return nl + 1
+	}
+	cut := budget
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	if cut == 0 {
+		// A single rune wider than the budget cannot happen at this size, but
+		// returning 0 would loop forever, so fall back to the raw cut.
+		return budget
+	}
+	return cut
 }

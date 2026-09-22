@@ -88,6 +88,32 @@ while IFS= read -r llm_var; do
   fi
 done < <(grep -oE '^MULTICA_LLM_[A-Z_]+' .env.example)
 
+# The same drift for integration encryption keys, keyed on the server rather
+# than on .env.example: each secretbox.LoadKey() gates an integration that
+# stays silently disabled when its key never reaches the container. Telegram's
+# key was once missing from both files, so a check that trusted the
+# documentation alone would not have caught it.
+secret_keys="$(
+  grep -rhoE --include='*.go' --exclude='*_test.go' 'secretbox\.LoadKey\("[A-Z0-9_]+"\)' server |
+    sed -E 's/.*"([A-Z0-9_]+)".*/\1/' | sort -u
+)" || true
+if [ -z "$secret_keys" ]; then
+  echo "Found no secretbox.LoadKey(\"...\") calls under server/; this check no longer"
+  echo "sees the integration keys and needs updating."
+  exit 1
+fi
+while IFS= read -r secret_key; do
+  if ! grep -Eq "^[[:space:]]+${secret_key}: \\\$\{${secret_key}:-" docker-compose.selfhost.yml; then
+    echo "$secret_key is loaded by the server but not mapped into the backend service"
+    echo "in docker-compose.selfhost.yml, so self-hosted deployments cannot enable it."
+    exit 1
+  fi
+  if ! grep -Eq "^${secret_key}=" .env.example; then
+    echo "$secret_key is loaded by the server but missing from .env.example."
+    exit 1
+  fi
+done <<<"$secret_keys"
+
 for script in scripts/dev.sh scripts/check.sh; do
   if ! grep -Fq '. scripts/local-env.sh' "$script"; then
     echo "$script must source scripts/local-env.sh for shared local env derivation."

@@ -460,13 +460,15 @@ export function issueDetailOptions(wsId: string, id: string) {
 export function issueIdentifierOptions(wsId: string, identifier: string) {
   return queryOptions({
     queryKey: issueKeys.identifier(wsId, identifier),
-    queryFn: async ({ signal }) => {
+    // Keep this small, cacheable lookup alive when the last mention unmounts.
+    // A remount can then share its request instead of aborting and restarting it.
+    queryFn: async () => {
       try {
-        return await api.getIssue(identifier, { signal });
+        return await api.getIssue(identifier);
       } catch (err) {
         // Unknown identifier / wrong workspace prefix → render as plain text.
-        // Any other failure (401/5xx/abort) must keep propagating so the query
-        // is retried or cancelled instead of being cached as "no such issue".
+        // Any other failure (401/5xx) must keep propagating so the query
+        // can retry instead of being cached as "no such issue".
         if (err instanceof ApiError && err.status === 404) return null;
         throw err;
       }

@@ -438,6 +438,10 @@ deleted_channel_outbound_messages AS (
     DELETE FROM channel_outbound_message
     WHERE installation_id IN (SELECT id FROM ws_channel_installations)
 ),
+deleted_channel_reply_deliveries AS (
+    DELETE FROM channel_reply_delivery
+    WHERE installation_id IN (SELECT id FROM ws_channel_installations)
+),
 deleted_channel_chat_contexts AS (
     DELETE FROM channel_chat_context_generation
     WHERE chat_session_id IN (SELECT id FROM ws_sessions)
@@ -529,7 +533,11 @@ DELETE FROM lark_installation WHERE lark_installation.workspace_id = $1;
 DELETE FROM comment WHERE comment.workspace_id = $1;
 
 -- name: DeleteWorkspaceIssueRoots :exec
-WITH
+WITH deleted_wakeup_receipts AS (
+ DELETE FROM issue_wakeup_receipt WHERE wakeup_id IN (SELECT id FROM issue_wakeup WHERE workspace_id=$1)
+), deleted_wakeups AS (
+ DELETE FROM issue_wakeup WHERE workspace_id=$1
+),
 deleted_issues AS (
     DELETE FROM issue WHERE issue.workspace_id = $1
 ),

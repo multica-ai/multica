@@ -123,6 +123,21 @@ function ResourceRow({
             {describeResource(resource)}
           </Text>
         ) : null}
+        {/* Its own line rather than appended to the URL: a custom label already
+            takes the first slot, and this is the one project setting that
+            silently changes what every task starts from. */}
+        {checkoutRefOf(resource) ? (
+          <View className="flex-row items-center gap-1">
+            <Ionicons
+              name="git-branch-outline"
+              size={11}
+              color={THEME[colorScheme].mutedForeground}
+            />
+            <Text className="text-xs text-muted-foreground" numberOfLines={1}>
+              {checkoutRefOf(resource)}
+            </Text>
+          </View>
+        ) : null}
       </View>
     </Pressable>
   );
@@ -145,4 +160,19 @@ function getResourceUrl(resource: ProjectResource): string | null {
 
 function describeResource(resource: ProjectResource): string {
   return getResourceUrl(resource) ?? resource.resource_type;
+}
+
+/**
+ * The repo's pinned checkout ref, or null when tasks use the default branch.
+ *
+ * Matches the web/desktop badge in
+ * packages/views/projects/components/project-resources-section.tsx — a ref set
+ * on any client has to be visible on every client, or the two disagree about
+ * what the project is configured to do.
+ */
+function checkoutRefOf(resource: ProjectResource): string | null {
+  if (resource.resource_type !== "github_repo") return null;
+  const ref = resource.resource_ref as GithubRepoResourceRef | undefined;
+  const value = ref?.ref?.trim();
+  return value ? value : null;
 }

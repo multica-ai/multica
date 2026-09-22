@@ -635,7 +635,7 @@
       },
       "agent_activity": {
         "label": "Activité des agents",
-        "description": "Lorsqu'une exécution d'agent se termine ou échoue"
+        "description": "Lorsqu'une exécution d'agent échoue"
       }
     },
     "system": {

@@ -375,6 +375,12 @@ export function Attachment({
         kind: "url",
         url: mediaUrl,
         filename: state.filename,
+        // This dispatcher has already decided what the slot is — from the
+        // call site's `forceKind`, or from a content-type the modal's
+        // URL-only source doesn't carry. Hand that answer over instead of
+        // letting the modal re-guess from `filename`, which for a body image
+        // is the markdown caption (MUL-7518).
+        forceKind: kind ?? undefined,
       });
     }
   };

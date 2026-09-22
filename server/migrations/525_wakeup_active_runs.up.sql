@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY agent_task_wakeup_active_idx ON agent_task_queue ((context->>'wakeup_id'), (status IN ('running','waiting_local_directory','dispatched')) DESC,created_at DESC,id DESC) WHERE context->>'wakeup_id' IS NOT NULL AND status IN ('queued','deferred','dispatched','running','waiting_local_directory');

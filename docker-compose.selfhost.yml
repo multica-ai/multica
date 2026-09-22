@@ -178,6 +178,11 @@ services:
       # in the database, so this single deployment-wide key is all the operator
       # needs to set here.
       MULTICA_SLACK_SECRET_KEY: ${MULTICA_SLACK_SECRET_KEY:-}
+      # DingTalk bot integration. MULTICA_DINGTALK_SECRET_KEY is the opt-in:
+      # unset = integration disabled. It encrypts each installation's AppSecret
+      # at rest, so this single deployment-wide key is all the operator needs
+      # to set here.
+      MULTICA_DINGTALK_SECRET_KEY: ${MULTICA_DINGTALK_SECRET_KEY:-}
       # Self-hosted Git provider integration (Forgejo / Gitea / GitLab). This
       # is a self-host-only feature, so the compose file turns it on by default;
       # the managed cloud leaves it unset (off). It still needs a valid
@@ -202,6 +207,12 @@ services:
       # for a debugging session and unset it when that session ends, because
       # what it records is user message content.
       MULTICA_WECOM_TRACE: ${MULTICA_WECOM_TRACE:-}
+      # Telegram bot integration. MULTICA_TELEGRAM_SECRET_KEY is the
+      # opt-in: unset = integration disabled. It decrypts the
+      # per-installation bot token stored in channel_installation.config
+      # (bot_token_encrypted), so this single deployment-wide key is all
+      # the operator needs to set here.
+      MULTICA_TELEGRAM_SECRET_KEY: ${MULTICA_TELEGRAM_SECRET_KEY:-}
     restart: unless-stopped
 
   frontend:

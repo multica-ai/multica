@@ -29,6 +29,7 @@ import {
   PROJECT_STATUS_ORDER,
   PROJECT_PRIORITY_ORDER,
 } from "@multica/core/projects/config";
+import { splitGithubUrlRef } from "@multica/core/github";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
@@ -61,6 +62,10 @@ import { ProjectStartDatePicker } from "../projects/components/project-start-dat
 import { ProjectDueDatePicker } from "../projects/components/project-due-date-picker";
 import { PillButton } from "../common/pill-button";
 import { githubShortLabel } from "../common/github-url";
+import {
+  GithubRefField,
+  githubRefHasError,
+} from "../projects/components/github-ref-field";
 import {
   isDesktopShell,
   pickDirectory,
@@ -166,9 +171,15 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   // created. Stored as URLs (not full ProjectResource rows) — they're not
   // persisted until handleSubmit fires the createProjectResource calls.
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
+  // Checkout ref per selected repo URL, absent when the repo starts from its
+  // default branch. Keyed by URL rather than folded into selectedRepos so
+  // toggling a repo off and on again does not silently drop the ref.
+  const [repoRefs, setRepoRefs] = useState<Record<string, string>>({});
   const [repoPopoverOpen, setRepoPopoverOpen] = useState(false);
   const [repoSearch, setRepoSearch] = useState("");
   const [customRepoUrl, setCustomRepoUrl] = useState("");
+  const [customRepoRef, setCustomRepoRef] = useState("");
+  const [editingRefFor, setEditingRefFor] = useState<string | null>(null);
   const workspaceRepos = workspace?.repos ?? [];
   const repoQuery = repoSearch.trim().toLowerCase();
   const filteredWorkspaceRepos = workspaceRepos.filter((repo) =>
@@ -318,8 +329,19 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   const createProject = useCreateProject();
 
+  // Every selected repo's branch, not just the one in the add field. A branch
+  // edited on an already-selected row goes through setRepoRef and used to
+  // reach the payload with only an inline error to show for it — the server
+  // accepts commit ids by design, so nothing downstream would have caught it.
+  const hasRejectedRepoRef = selectedRepos.some((url) =>
+    githubRefHasError(repoRefs[url] ?? ""),
+  );
+
   const handleSubmit = async () => {
+    // Checked here as well as on the button: TitleEditor's onSubmit calls this
+    // directly, so a disabled button alone leaves the keyboard path open.
     if (!title.trim() || submitting) return;
+    if (sourceMode === "repos" && hasRejectedRepoRef) return;
     // `sourceMode` decides which side's stash gets persisted — the other
     // side is silently dropped, so repos picked then abandoned for local
     // mode don't leak into the project.
@@ -327,10 +349,15 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
       | Array<{ resource_type: "github_repo" | "local_directory"; resource_ref: Record<string, unknown> }>
       | undefined;
     if (sourceMode === "repos" && selectedRepos.length > 0) {
-      resources = selectedRepos.map((url) => ({
-        resource_type: "github_repo" as const,
-        resource_ref: { url },
-      }));
+      resources = selectedRepos.map((url) => {
+        const ref = repoRefs[url]?.trim();
+        return {
+          resource_type: "github_repo" as const,
+          // Omit the key entirely when empty: an absent ref is what "use the
+          // default branch" looks like on the wire.
+          resource_ref: ref ? { url, ref } : { url },
+        };
+      });
     } else if (
       sourceMode === "local" &&
       selectedLocalPath &&
@@ -386,9 +413,47 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   const addCustomRepo = () => {
     const url = customRepoUrl.trim();
-    if (!url) return;
+    const ref = customRepoRef.trim();
+    if (!url || githubRefHasError(ref)) return;
     setSelectedRepos((prev) => (prev.includes(url) ? prev : [...prev, url]));
+    setRepoRefs((prev) => {
+      if (!ref) {
+        const { [url]: _dropped, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [url]: ref };
+    });
     setCustomRepoUrl("");
+    setCustomRepoRef("");
+  };
+
+  // Someone who wants a branch copies it out of the address bar, so a pasted
+  // .../tree/<branch> URL is split into its two halves rather than added whole
+  // as a clone URL that does not exist. Both halves land in visible fields, so
+  // a wrong guess is obvious before the project is created.
+  //
+  // Normalising the URL is unconditional. Gating it on the branch field being
+  // empty meant a second pasted browse URL — changing your mind about which
+  // repo — was stored whole, producing a clone target that does not exist.
+  // Whether to overwrite the BRANCH is the separate question, and the pasted
+  // pair wins: the branch field only appears once a URL is present, so a value
+  // sitting in it came from the previous URL, not from something the user
+  // typed ahead of time.
+  const handleCustomRepoUrlChange = (next: string) => {
+    const split = splitGithubUrlRef(next);
+    setCustomRepoUrl(split.url);
+    if (split.ref) setCustomRepoRef(split.ref);
+  };
+
+  const setRepoRef = (url: string, ref: string) => {
+    const trimmed = ref.trim();
+    setRepoRefs((prev) => {
+      if (!trimmed) {
+        const { [url]: _dropped, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [url]: trimmed };
+    });
   };
 
   return (
@@ -781,24 +846,37 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                       e.preventDefault();
                       addCustomRepo();
                     }}
-                    className="flex items-center gap-1.5 pt-1 border-t"
+                    className="space-y-1.5 pt-1 border-t"
                   >
-                    <input
-                      type="text"
-                      value={customRepoUrl}
-                      onChange={(e) => setCustomRepoUrl(e.target.value)}
-                      placeholder={t(($) => $.create_project.repos_url_placeholder)}
-                      className="flex-1 bg-transparent text-caption px-2 py-1 outline-none placeholder:text-muted-foreground"
-                    />
-                    <Button
-                      type="submit"
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 px-2 text-caption"
-                      disabled={!customRepoUrl.trim()}
-                    >
-                      {t(($) => $.create_project.repos_add)}
-                    </Button>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={customRepoUrl}
+                        onChange={(e) => handleCustomRepoUrlChange(e.target.value)}
+                        placeholder={t(($) => $.create_project.repos_url_placeholder)}
+                        className="flex-1 min-w-0 bg-transparent text-caption px-2 py-1 outline-none placeholder:text-muted-foreground"
+                      />
+                      <Button
+                        type="submit"
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 px-2 text-caption"
+                        disabled={!customRepoUrl.trim() || githubRefHasError(customRepoRef)}
+                      >
+                        {t(($) => $.create_project.repos_add)}
+                      </Button>
+                    </div>
+                    {/* Only once a URL is entered: an empty form should still
+                        read as one field, and the default branch is the right
+                        answer often enough that this must not look like a
+                        second required step. */}
+                    {customRepoUrl.trim() && (
+                      <GithubRefField
+                        id="create-project-repo-ref"
+                        value={customRepoRef}
+                        onChange={setCustomRepoRef}
+                      />
+                    )}
                   </form>
                   {selectedRepos.length > 0 && (
                     <div className="space-y-1 pt-1 border-t">
@@ -806,19 +884,52 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                         {t(($) => $.create_project.repos_selected)}
                       </div>
                       {selectedRepos.map((url) => (
-                        <div
-                          key={url}
-                          className="flex items-center gap-2 text-caption"
-                        >
-                          <GithubIcon className="size-3 text-muted-foreground" />
-                          <RepoUrlText url={url} />
-                          <button
-                            type="button"
-                            onClick={() => toggleRepo(url)}
-                            className="text-muted-foreground hover:text-foreground"
-                          >
-                            <XIcon className="size-3" />
-                          </button>
+                        <div key={url} className="space-y-1">
+                          <div className="flex items-center gap-2 text-caption">
+                            <GithubIcon className="size-3 shrink-0 text-muted-foreground" />
+                            <RepoUrlText url={url} />
+                            {/* The ref rides beside the repo it belongs to,
+                                not in one field for the whole list: each repo
+                                can start somewhere different. */}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEditingRefFor(editingRefFor === url ? null : url)
+                              }
+                              className={cn(
+                                "flex shrink-0 items-center gap-1 rounded-sm px-1 py-0.5 text-micro transition-colors hover:bg-accent",
+                                repoRefs[url]
+                                  ? "text-foreground"
+                                  : "text-muted-foreground",
+                              )}
+                            >
+                              <GitBranch className="size-3" />
+                              <span className="max-w-24 truncate">
+                                {repoRefs[url] ??
+                                  t(($) => $.create_project.repos_ref_default)}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                toggleRepo(url);
+                                if (editingRefFor === url) setEditingRefFor(null);
+                              }}
+                              className="shrink-0 text-muted-foreground hover:text-foreground"
+                            >
+                              <XIcon className="size-3" />
+                            </button>
+                          </div>
+                          {editingRefFor === url && (
+                            <div className="pl-5">
+                              <GithubRefField
+                                value={repoRefs[url] ?? ""}
+                                onChange={(next) => setRepoRef(url, next)}
+                                onSubmit={() => setEditingRefFor(null)}
+                                autoFocus
+                              />
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -984,7 +1095,11 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           <Button
             size="sm"
             onClick={handleSubmit}
-            disabled={!title.trim() || submitting}
+            disabled={
+              !title.trim() ||
+              submitting ||
+              (sourceMode === "repos" && hasRejectedRepoRef)
+            }
             className="shrink-0"
           >
             {submitting ? t(($) => $.create_project.submitting) : t(($) => $.create_project.submit)}

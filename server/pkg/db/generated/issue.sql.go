@@ -403,6 +403,12 @@ const deleteIssue = `-- name: DeleteIssue :exec
 WITH target AS (
     SELECT issue.id FROM issue WHERE issue.id = $1 AND issue.workspace_id = $2
 ),
+cleared_wakeup_receipts AS (
+ DELETE FROM issue_wakeup_receipt WHERE wakeup_id IN (SELECT id FROM issue_wakeup WHERE issue_id IN (SELECT target.id FROM target))
+),
+cleared_wakeups AS (
+ DELETE FROM issue_wakeup WHERE issue_id IN (SELECT target.id FROM target)
+),
 cleared_vcs_pr_links AS (
     DELETE FROM issue_vcs_pull_request WHERE issue_id IN (SELECT target.id FROM target)
 )
@@ -1760,20 +1766,20 @@ func (q *Queries) SetIssueMetadataKey(ctx context.Context, arg SetIssueMetadataK
 }
 
 const updateIssue = `-- name: UpdateIssue :one
-WITH candidate AS (
+WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', COALESCE($3::uuid::text, ''), true)), candidate AS (
     SELECT
         i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state,
-        COALESCE($3::text, i.title) AS next_title,
-        COALESCE($4::text, i.description) AS next_description,
-        COALESCE($5::text, i.status) AS next_status,
-        COALESCE($6::text, i.priority) AS next_priority,
-        $7::text AS next_assignee_type,
-        $8::uuid AS next_assignee_id,
+        COALESCE($4::text, i.title) AS next_title,
+        COALESCE($5::text, i.description) AS next_description,
+        COALESCE($6::text, i.status) AS next_status,
+        COALESCE($7::text, i.priority) AS next_priority,
+        $8::text AS next_assignee_type,
+        $9::uuid AS next_assignee_id,
         CASE
             -- An explicit position wins. Cross-column drag-and-drop sends
             -- status and position together and means the slot it dropped on.
-            WHEN $9::double precision IS NOT NULL
-                THEN $9::double precision
+            WHEN $10::double precision IS NOT NULL
+                THEN $10::double precision
             -- position ranks an issue *within* its (workspace, status)
             -- column, so it stops meaning anything the moment the column
             -- changes: the value that put the issue on top of Todo lands it
@@ -1788,20 +1794,20 @@ WITH candidate AS (
             -- unstable across pages. Creation avoids the tie by computing its
             -- min under the workspace counter lock; a status change holds no
             -- such lock and is not worth taking one for.
-            WHEN i.status IS DISTINCT FROM COALESCE($5::text, i.status)
+            WHEN i.status IS DISTINCT FROM COALESCE($6::text, i.status)
                 THEN (
                     SELECT COALESCE(MIN(target.position), 0) - 1
                     FROM issue AS target
                     WHERE target.workspace_id = i.workspace_id
-                      AND target.status = $5::text
+                      AND target.status = $6::text
                 )
             ELSE i.position
         END AS next_position,
-        $10::date AS next_start_date,
-        $11::date AS next_due_date,
-        $12::uuid AS next_parent_issue_id,
-        $13::uuid AS next_project_id,
-        $14::integer AS next_stage
+        $11::date AS next_start_date,
+        $12::date AS next_due_date,
+        $13::uuid AS next_parent_issue_id,
+        $14::uuid AS next_project_id,
+        $15::integer AS next_stage
     FROM issue AS i
     WHERE i.id = $1
       AND ($2::bigint IS NULL OR i.revision = $2::bigint)
@@ -1845,7 +1851,7 @@ UPDATE issue AS i SET
         ELSE i.last_activity_at
     END,
     updated_at = CASE WHEN changed.did_change THEN now() ELSE i.updated_at END
-FROM changed
+FROM changed CROSS JOIN wakeup_source
 WHERE i.id = changed.id
   -- Re-check the precondition on the row version that UPDATE actually locks.
   -- Under READ COMMITTED, concurrent statements may both populate candidate
@@ -1858,6 +1864,7 @@ RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.
 type UpdateIssueParams struct {
 	ID               pgtype.UUID   `json:"id"`
 	ExpectedRevision pgtype.Int8   `json:"expected_revision"`
+	SourceTaskID     pgtype.UUID   `json:"source_task_id"`
 	Title            pgtype.Text   `json:"title"`
 	Description      pgtype.Text   `json:"description"`
 	Status           pgtype.Text   `json:"status"`
@@ -1876,6 +1883,7 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 	row := q.db.QueryRow(ctx, updateIssue,
 		arg.ID,
 		arg.ExpectedRevision,
+		arg.SourceTaskID,
 		arg.Title,
 		arg.Description,
 		arg.Status,
@@ -1925,6 +1933,7 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 }
 
 const updateIssueStatus = `-- name: UpdateIssueStatus :one
+WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', COALESCE($4::uuid::text, ''), true))
 UPDATE issue AS i SET
     status = $2,
     position = CASE WHEN i.status IS DISTINCT FROM $2 THEN (
@@ -1939,14 +1948,16 @@ UPDATE issue AS i SET
         ELSE i.last_activity_at
     END,
     updated_at = now()
+FROM wakeup_source
 WHERE i.id = $1 AND i.workspace_id = $3
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state
+RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state
 `
 
 type UpdateIssueStatusParams struct {
-	ID          pgtype.UUID `json:"id"`
-	Status      string      `json:"status"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ID           pgtype.UUID `json:"id"`
+	Status       string      `json:"status"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	SourceTaskID pgtype.UUID `json:"source_task_id"`
 }
 
 // Workspace_id in the WHERE clause is a SQL-layer tenant guard; see DeleteIssue.
@@ -1955,7 +1966,12 @@ type UpdateIssueStatusParams struct {
 // old column's rank into a new column is the bug this guards against. See the
 // next_position CASE in UpdateIssue for the policy.
 func (q *Queries) UpdateIssueStatus(ctx context.Context, arg UpdateIssueStatusParams) (Issue, error) {
-	row := q.db.QueryRow(ctx, updateIssueStatus, arg.ID, arg.Status, arg.WorkspaceID)
+	row := q.db.QueryRow(ctx, updateIssueStatus,
+		arg.ID,
+		arg.Status,
+		arg.WorkspaceID,
+		arg.SourceTaskID,
+	)
 	var i Issue
 	err := row.Scan(
 		&i.ID,
