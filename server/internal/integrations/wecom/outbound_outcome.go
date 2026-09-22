@@ -128,17 +128,36 @@ const (
 	// and queued channel tasks before swapping the image, or backfill the rows
 	// for the ones still in flight.
 	//
-	// Not a DROP: with no row this adapter cannot establish the turn was ever
-	// WeCom's, and filing another platform's turn as a WeCom delivery failure
-	// would put a number an operator pages on at the mercy of Slack's traffic.
+	// Not a DROP: this adapter never wrote to a socket and was never going to —
+	// there is no address to write to — and dropped is the number an operator
+	// reads as "a reply this adapter owed did not arrive at the platform".
 	//
-	// Its neighbour in that same branch IS filed as a drop under the same
-	// uncertainty — no delivery row and no task row either, dropTaskMissing.
-	// The difference is how ordinary the two are on a shared bus: most of the
-	// traffic through here is not WeCom's, so an unroutable channel turn may
-	// well belong to Slack, while a task row that vanished mid-completion is
-	// not ordinary for any platform.
+	// It is reached BEHIND the origin gate, which is what makes it mean
+	// anything. Ahead of the gate the same branch also caught every question
+	// ever typed in the Multica web UI, and an exit shared with those could
+	// only be silent. A delivery row naming another platform leaves by
+	// skipNotWecomTurn above, so what is left here is a channel turn nobody can
+	// address.
 	skipNoDeliveryRow skipReason = "no_delivery_row"
+
+	// skipRouteUnattributable — no delivery row, and no way to say whose turn
+	// it was. The gate delivered it on the open side of an unanswerable
+	// verdict: its input batch has no owner (chat_input_task_id NULL), which
+	// migration 158 left on legacy web rows and legacy channel rows alike, so
+	// nothing establishes this turn was ever a channel's.
+	//
+	// Same branch as skipNoDeliveryRow, one level quieter, and the split is the
+	// point. Delivering under an unanswerable verdict is right — the auto-retry
+	// of a legacy channel turn depends on it, and a reply in the wrong place
+	// costs less than a room waiting forever. WARNING under one is not: a
+	// pre-158 web turn that auto-retried has exactly this shape, and it would
+	// arrive as the loudest line this adapter has.
+	//
+	// So one verdict, two directions: deliver on the open side, warn on the
+	// closed one. Counted rather than folded into the reason above, because an
+	// operator who sees this number rise has learned something different — that
+	// rows this old are still finishing — and nothing they can act on.
+	skipRouteUnattributable skipReason = "route_unattributable"
 )
 
 // actionable reports whether a reason is one a person should look at. Every

@@ -66,6 +66,9 @@ type fakeOutboundQueries struct {
 	tasks    map[string]db.AgentTaskQueue
 	taskErr  error
 	taskGets int
+	// originGateReads counts GetTaskChannelOrigin calls. It is the gate's whole
+	// price: one keyed read per completion, where it used to be two.
+	originGateReads int
 	// channelIngested is the channel_ingested stamp on the input batch the
 	// task owns: askedOverWecom for a question typed in the room,
 	// askedInTheWebUI for one typed in Multica.
@@ -269,6 +272,35 @@ func (f *fakeOutboundQueries) GetAgentTask(_ context.Context, id pgtype.UUID) (d
 	}
 	return task, nil
 }
+
+// GetTaskChannelOrigin is one read in production, so it is one method here —
+// but the ANSWER is composed from the same two facts the two-read path composes
+// it from, rather than being a second stamp this double could set
+// independently. A double that can disagree with
+// engine.TaskInputIsChannelIngested about the same row is a double that will.
+func (f *fakeOutboundQueries) GetTaskChannelOrigin(ctx context.Context, id pgtype.UUID) (db.GetTaskChannelOriginRow, error) {
+	f.originGateReads++
+	if f.taskErr != nil {
+		return db.GetTaskChannelOriginRow{}, f.taskErr
+	}
+	task, ok := f.tasks[util.UUIDToString(id)]
+	if !ok {
+		// The query selects from agent_task_queue, so a task nobody filed has
+		// no row here either — and ErrNoRows is the answer the caller tells
+		// apart from a negative verdict.
+		return db.GetTaskChannelOriginRow{}, pgx.ErrNoRows
+	}
+	if !task.ChatInputTaskID.Valid {
+		// A batch with no owner is channel-ingested: no stamp is read, so no
+		// rig is asked for one. fileNoOwnerTask is the only way to get here,
+		// and it says in its own comment that it opts that task out of
+		// failStampNotSet.
+		return db.GetTaskChannelOriginRow{ChannelIngested: true, BatchOwnerUnknown: true}, nil
+	}
+	ingested, err := f.TaskHasChannelIngestedMessages(ctx, task.ChatInputTaskID)
+	return db.GetTaskChannelOriginRow{ChannelIngested: ingested}, err
+}
+
 func (f *fakeOutboundQueries) TaskHasChannelIngestedMessages(_ context.Context, taskID pgtype.UUID) (bool, error) {
 	f.originAskedFor = append(f.originAskedFor, util.UUIDToString(taskID))
 	if f.originErr != nil {
@@ -323,6 +355,21 @@ func (f *fakeOutboundQueries) fileRetryClone(t testing.TB, id, owner string) {
 		f.tasks = map[string]db.AgentTaskQueue{}
 	}
 	f.tasks[util.UUIDToString(taskID)] = db.AgentTaskQueue{ID: taskID, ChatInputTaskID: ownerID}
+}
+
+// fileNoOwnerTask files a row migration 158 left behind: chat_input_task_id
+// NULL, so the origin gate delivers it without evidence and the log level on a
+// missing route has to come from somewhere else. Such a task reads no
+// channel_ingested stamp, so this is the one way to file a task without
+// answering failStampNotSet for it.
+func (f *fakeOutboundQueries) fileNoOwnerTask(t testing.TB, id string) {
+	t.Helper()
+	f.t = t
+	taskID := mustParseTaskUUID(t, id)
+	if f.tasks == nil {
+		f.tasks = map[string]db.AgentTaskQueue{}
+	}
+	f.tasks[util.UUIDToString(taskID)] = db.AgentTaskQueue{ID: taskID}
 }
 
 func mustParseTaskUUID(t testing.TB, id string) pgtype.UUID {

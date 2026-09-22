@@ -59,7 +59,6 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
-	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -74,12 +73,17 @@ type outboundQueries interface {
 	// answer still in flight across one of those belongs to the room that
 	// asked, not to whatever the session points at by the time it lands.
 	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
-	// GetAgentTask serves two readers on this path. The origin gate reads the
-	// row to get at the channel_ingested stamp; the round matcher reads it to
-	// resolve an auto-retry clone back to the turn that owns its input batch,
-	// which is the id the round was bound under.
+	// GetTaskChannelOrigin is the origin gate's whole question — does the task
+	// row exist, and did its input arrive over a channel — in one round trip.
+	// It answers what GetAgentTask followed by TaskHasChannelIngestedMessages
+	// answers, and the query is a transcription of
+	// engine.TaskInputIsChannelIngested rather than a second opinion on it.
+	GetTaskChannelOrigin(ctx context.Context, id pgtype.UUID) (db.GetTaskChannelOriginRow, error)
+	// GetAgentTask is the round matcher's, not the gate's: it resolves an
+	// auto-retry clone back to the turn that owns its input batch, which is the
+	// id the round was bound under. NewOutbound passes this same value as the
+	// roundTaker's taskLookup.
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
-	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
 	FindChannelBindingForMember(ctx context.Context, arg db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error)
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
@@ -298,20 +302,31 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		o.dropped(ctx, e, dropTaskMissing, nil)
 		return nil
 	}
-	task, err := o.q.GetAgentTask(ctx, taskID)
+	// One keyed read, not two: GetTaskChannelOrigin answers what GetAgentTask
+	// followed by engine.TaskInputIsChannelIngested answers, and answers it the
+	// same way — including for a task whose input batch has no owner, which is
+	// channel-ingested. This read is synchronous on the completion response
+	// (see the query's comment), so the round trip it saves is one the daemon
+	// waits for.
+	origin, err := o.q.GetTaskChannelOrigin(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Cancelled and deleted while its completion was in flight.
+			// Cancelled and deleted while its completion was in flight. NOT
+			// folded into "asked in the web UI": that exit is the ordinary one
+			// and this row was owed an answer.
 			o.dropped(ctx, e, dropTaskMissing, nil)
 			return nil
 		}
-		return fmt.Errorf("wecom: load agent task: %w", err)
+		// Recorded rather than returned. The caller would file a context error
+		// as an unconfirmed delivery — unconfirmedReason maps it to
+		// "interrupted", which tells an operator the user may ALREADY HAVE this
+		// reply and a resend would duplicate it. Nothing was written to a
+		// socket here and nothing was going to be: this gate is upstream of
+		// every send. The honest record is the one dropTransport describes.
+		o.dropped(ctx, e, dropTransport, err)
+		return nil
 	}
-	deliver, err := engine.TaskInputIsChannelIngested(ctx, o.q, task)
-	if err != nil {
-		return fmt.Errorf("wecom: classify task input origin: %w", err)
-	}
-	if !deliver {
+	if !origin.ChannelIngested {
 		// Give the bubble back. A run typed in Multica can hold the room's
 		// round — it is bound off task:queued, and a chat task's event carries
 		// nothing that tells the two apart — so returning here without
@@ -336,7 +351,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// found a bubble is all deliverAnswer needs to know: the bubble is a cache,
 	// and a round with none goes down the plain path.
 	t, _ := o.rounds().take(ctx, sessionID, byTask(taskIDFromEvent(e)))
-	said, err := o.deliverAnswer(ctx, e, taskID, t, content, carriesFiles)
+	said, err := o.deliverAnswer(ctx, e, taskID, t, content, carriesFiles, origin.BatchOwnerUnknown)
 	if errors.Is(err, errOutcomeRecorded) {
 		// The branch that tried to speak has already filed its own outcome
 		// through recordSend. Counting it here as well is the double count
@@ -391,7 +406,10 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 // Nothing here re-asks where the question came from. processEvent has already
 // refused every run that is not this room's, which is what makes it safe for
 // this function to write without asking.
-func (o *Outbound) deliverAnswer(ctx context.Context, e events.Event, taskID pgtype.UUID, t roundTurn, content string, carriesFiles bool) (answerOutcome, error) {
+// ownerUnknown is the origin gate's second fact, carried rather than re-read:
+// it decides the LOG LEVEL on a turn that turns out to have no delivery row,
+// and nothing else. See sendAsMessage.
+func (o *Outbound) deliverAnswer(ctx context.Context, e events.Event, taskID pgtype.UUID, t roundTurn, content string, carriesFiles, ownerUnknown bool) (answerOutcome, error) {
 	if t.HasBubble {
 		// A bubble on screen has to end in words. An empty completion is a
 		// legitimate outcome — the agent had nothing to add — but an endless
@@ -452,7 +470,7 @@ func (o *Outbound) deliverAnswer(ctx context.Context, e events.Event, taskID pgt
 		// no words to carry it sends none, and returns the address the files go
 		// to.
 	}
-	return o.sendAsMessage(ctx, e, taskID, content, carriesFiles)
+	return o.sendAsMessage(ctx, e, taskID, content, carriesFiles, ownerUnknown)
 }
 
 // taskAddress resolves the chat a turn's words go to, off the task's own
@@ -541,8 +559,8 @@ func (o *Outbound) relaySeal(e events.Event, taskID pgtype.UUID, reason string, 
 // round with no bubble left to put it in — a restart mid-run, a stream past its
 // window, a frame the server refused. It returns where it spoke, which is where
 // the files that follow go.
-func (o *Outbound) sendAsMessage(ctx context.Context, e events.Event, taskID pgtype.UUID, content string, carriesFiles bool) (answerOutcome, error) {
-	addr, skip, _, err := taskAddress(ctx, o.q, taskID)
+func (o *Outbound) sendAsMessage(ctx context.Context, e events.Event, taskID pgtype.UUID, content string, carriesFiles, ownerUnknown bool) (answerOutcome, error) {
+	addr, skip, hadRow, err := taskAddress(ctx, o.q, taskID)
 	if err != nil {
 		return answerOutcome{}, err
 	}
@@ -551,8 +569,32 @@ func (o *Outbound) sendAsMessage(ctx context.Context, e events.Event, taskID pgt
 		return answerOutcome{}, errNothingToSay
 	}
 	if !addr.known() {
-		// No route recorded for this turn, or the row names another platform.
-		// Nothing to send and nobody to count it against.
+		// The two reasons to have no address are one quiet return from the
+		// outside, and only one of them means somebody is waiting. Every turn
+		// that reaches here is past the origin gate, so its question DID come
+		// in over a channel — which is what makes a missing row worth a word
+		// rather than the ordinary traffic of a shared bus. Ahead of the gate
+		// this same branch also caught every question ever typed in the Multica
+		// web UI, and an exit shared with those could only be silent.
+		//
+		// Behind the gate, a missing row means a turn the channel ingested and
+		// nobody can now address. In a steady-state deployment there is no such
+		// turn: the row is written inside the same transaction that enqueues a
+		// channel task. What produces one is an upgrade, and the answer it
+		// belongs to is going nowhere — so it is counted and warned about
+		// rather than left as a quiet return. See skipNoDeliveryRow.
+		switch {
+		case hadRow:
+			o.skippedFor(ctx, e.ChatSessionID, skipNotWecomTurn)
+		case ownerUnknown:
+			// The gate delivered this turn on the open side of an unanswerable
+			// verdict: its input batch has no owner, so nothing here ever
+			// established it was a channel's. Warning would put the loudest
+			// line this adapter has on a pre-158 web turn that auto-retried.
+			o.skippedFor(ctx, e.ChatSessionID, skipRouteUnattributable)
+		default:
+			o.skippedFor(ctx, e.ChatSessionID, skipNoDeliveryRow)
+		}
 		return answerOutcome{}, errNothingToSay
 	}
 	if o.senders == nil {

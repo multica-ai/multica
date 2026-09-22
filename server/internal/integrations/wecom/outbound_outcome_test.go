@@ -16,7 +16,6 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -172,19 +171,19 @@ func TestDeliveredIsCounted(t *testing.T) {
 // is exactly the indistinguishability this pins. Build and vet stay silent.
 // The auto-retry of a legacy channel turn. FailTask's clone inherits the
 // parent's NULL chat_input_task_id and owns no messages of its own, so the
-// channel_ingested verdict reads it as web UI — while CopyChannelTaskDelivery
-// has already handed it the parent's WeCom route. Delivering by the verdict
-// alone leaves the room waiting forever and logs the silence at DEBUG as the
-// most ordinary event in the deployment.
+// batch is the one migration 158 left with no owner at all, and the clone owns
+// no messages of its own — so a gate that keyed the batch on the task's own id
+// would read it as web UI, while CopyChannelTaskDelivery has already handed it
+// the parent's WeCom route. The room waits forever and the silence is logged at
+// DEBUG as the most ordinary event in the deployment.
 //
-// The route is what settles it here: a delivery row exists, so this turn's
-// origin was established before the verdict was ever asked for, and an
-// unanswerable verdict does not get to overrule it.
+// A batch with no owner is channel-ingested, which is what
+// engine.TaskInputIsChannelIngested has always answered for the same row and
+// what #5645 shipped. This pins that the one-read gate did not change it.
 func TestTheAutoRetryOfALegacyChannelTurnStillAnswersTheRoom(t *testing.T) {
 	t.Parallel()
 	q := deliverableTurn(t)
-	q.channelIngested = askedInTheWebUI() // the clone owns no messages to stamp
-	q.batchOwnerUnknown = true            // ...because its batch has no owner at all
+	q.fileNoOwnerTask(t, outcomeTask) // NULL chat_input_task_id, no messages of its own
 	r := newOutcomeRig(t, q, true)
 
 	r.o.handleEvent(outcomeEvent())
@@ -204,18 +203,18 @@ func TestNonWecomSessionIsNotADrop(t *testing.T) {
 		name       string
 		reason     skipReason
 		actionable bool
-		setup      func(q *fakeOutboundQueries)
+		setup      func(t *testing.T, q *fakeOutboundQueries)
 	}{
 		{
 			// Slack's or Lark's turn, on the bus this subscriber shares.
 			name: "another platform's delivery row", reason: skipNotWecomTurn,
-			setup: func(q *fakeOutboundQueries) { q.deliveryChannelType = "slack" },
+			setup: func(_ *testing.T, q *fakeOutboundQueries) { q.sessionChannelType = "slack" },
 		},
 		{
 			// Asked in the Multica web UI on a session that originated in a
 			// room. There is no room waiting.
 			name: "asked in the web UI", reason: skipOriginNotChannel,
-			setup: func(q *fakeOutboundQueries) { q.channelIngested = askedInTheWebUI() },
+			setup: func(_ *testing.T, q *fakeOutboundQueries) { q.channelIngested = askedInTheWebUI() },
 		},
 		{
 			// Asked in the Multica web UI on a session that never touched a
@@ -224,7 +223,7 @@ func TestNonWecomSessionIsNotADrop(t *testing.T) {
 			// UI's exit and not the missing-route one, or the loudest line in
 			// the log fires once per web message.
 			name: "asked in the web UI with no delivery row", reason: skipOriginNotChannel,
-			setup: func(q *fakeOutboundQueries) {
+			setup: func(_ *testing.T, q *fakeOutboundQueries) {
 				q.channelIngested = askedInTheWebUI()
 				q.sessionErr = pgx.ErrNoRows
 			},
@@ -234,19 +233,18 @@ func TestNonWecomSessionIsNotADrop(t *testing.T) {
 			// a room and nothing here can say which one, so this is the one an
 			// operator has to act on.
 			name: "a channel turn with no delivery row", reason: skipNoDeliveryRow, actionable: true,
-			setup: func(q *fakeOutboundQueries) { q.sessionErr = pgx.ErrNoRows },
+			setup: func(_ *testing.T, q *fakeOutboundQueries) { q.sessionErr = pgx.ErrNoRows },
 		},
 		{
-			// The other half of the pair below: a batch with no owner, and no
-			// delivery row either. Nothing ever said this turn was a channel's,
-			// so the branch that would page an operator has to stay closed —
-			// every pre-MUL-4351 web turn in the deployment has this shape, and
-			// reading the absent verdict as "channel" would fire the loudest
-			// line in the log once per one of them.
-			name: "a legacy row with no batch owner and no delivery row", reason: skipOriginNotChannel,
-			setup: func(q *fakeOutboundQueries) {
-				q.channelIngested = askedInTheWebUI()
-				q.batchOwnerUnknown = true
+			// The other half of the pair above. The gate delivered this one
+			// because a batch with no owner is channel-ingested, and then there
+			// was no route to deliver it on. It leaves by its own exit, one
+			// level quieter: a pre-158 web turn that auto-retried has exactly
+			// this shape, and warning about it would put the loudest line this
+			// adapter has on ordinary traffic.
+			name: "no delivery row and no batch owner to attribute it to", reason: skipRouteUnattributable,
+			setup: func(t *testing.T, q *fakeOutboundQueries) {
+				q.fileNoOwnerTask(t, outcomeTask)
 				q.sessionErr = pgx.ErrNoRows
 			},
 		},
@@ -254,7 +252,7 @@ func TestNonWecomSessionIsNotADrop(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			q := deliverableTurn(t)
-			tc.setup(q)
+			tc.setup(t, q)
 			r := newOutcomeRig(t, q, true)
 
 			r.o.handleEvent(outcomeEvent())
@@ -588,26 +586,32 @@ func TestAReapedTaskRowIsStillADrop(t *testing.T) {
 	}
 }
 
-// Another channel's turn must not pay for the origin gate. A delivery row that
-// exists and says slack or lark has already answered everything this subscriber
-// needs, and this subscriber is on the bus every channel publishes to, so that
-// exit stays at the one query it costs today. The gate is asked only where its
-// answer changes what is recorded — see the price it carries there in the test
-// below, and the branch comment in processEvent for why it is worth paying.
+// Every channel's chat:done pays for the origin gate, and what this pins is the
+// PRICE. The gate runs ahead of the delivery-row lookup so a run typed in the
+// web UI can give the room's bubble back before anything else touches the round
+// (#8355), which means this subscriber asks it once for every completion on a
+// bus every channel publishes to — another platform's turn included.
 //
-// REVERSE VERIFICATION: hoist the gate ahead of GetChannelTaskDelivery and
-// this fails with one task lookup for a turn that was never WeCom's.
-func TestAnotherPlatformsTurnDoesNotPayForTheOriginGate(t *testing.T) {
+// ONE keyed read, where it used to be two: GetAgentTask, then the
+// channel_ingested stamp. Both were on the completion response's path — this
+// runs inside events.Bus.Publish, below CompleteTaskWithTransition, which the
+// daemon's POST /tasks/{id}/complete waits for — so the round trip saved is one
+// the user waits for, on every completion in the deployment.
+//
+// Pinned because a cost paid once per completion is the kind that is measured
+// once, written into a comment, and then grows back.
+//
+// REVERSE VERIFICATION: put the two-read pair back and this fails with 2.
+func TestTheOriginGateCostsOneReadPerCompletion(t *testing.T) {
 	t.Parallel()
 	q := deliverableTurn(t)
-	q.deliveryChannelType = "slack"
+	q.sessionChannelType = "slack" // another channel's turn: the busiest shape on a shared bus
 	r := newOutcomeRig(t, q, true)
 
 	r.o.handleEvent(outcomeEvent())
 
-	if len(q.originAskedFor) != 0 {
-		t.Fatalf("the origin gate ran %d lookup(s) for another platform's turn; every channel's "+
-			"chat:done passes through here, so that cost is paid on all of them", len(q.originAskedFor))
+	if got := q.originGateReads; got != 1 {
+		t.Fatalf("the origin gate ran %d read(s) for one completion, want exactly 1", got)
 	}
 	if got := r.mx.get("outbound_skipped:" + string(skipNotWecomTurn)); got != 1 {
 		t.Fatalf("outbound_skipped:%s = %d, want 1", skipNotWecomTurn, got)
@@ -722,42 +726,5 @@ func TestAGateFailureIsNotAnUnconfirmedReply(t *testing.T) {
 				t.Errorf("frames = %d, want 0", n)
 			}
 		})
-	}
-}
-
-// TestTheObservabilityLookupHasItsOwnBudget — and the budget is not the
-// handler's.
-//
-// handleEvent's ten seconds cover a whole delivery: the lookups, a WebSocket
-// write, and the ack the platform owes it. The no-delivery-row branch delivers
-// nothing — it reads to decide whether a missing route is worth a WARN — and it
-// is reached by every web-UI completion in the deployment, on a publish the
-// daemon's POST /tasks/{id}/complete is waiting for (see the call-path contract
-// above taskOriginOf). Ten seconds of that per completion is the cost this
-// branch must not be able to impose.
-//
-// The database here never answers at all, which is the worst case and the one
-// the ceiling exists for.
-//
-// REVERSE VERIFICATION: hand the gate ctx instead of its own budget and this
-// fails twice — a budget of ~10s, and a handler that took the full 10s.
-func TestTheObservabilityLookupHasItsOwnBudget(t *testing.T) {
-	t.Parallel()
-	q := deliverableTurn(t)
-	q.sessionErr = pgx.ErrNoRows // no delivery row: the observability branch
-	q.originHangs = true         // ... and a database that never answers
-	r := newOutcomeRig(t, q, true)
-
-	started := time.Now()
-	r.o.handleEvent(outcomeEvent())
-	elapsed := time.Since(started)
-
-	if q.originBudget <= 0 || q.originBudget > originLookupBudget {
-		t.Errorf("the gate was given %s; want a budget of its own, at most %s",
-			q.originBudget, originLookupBudget)
-	}
-	if elapsed >= outboundHandlerBudget {
-		t.Errorf("the handler took %s — the gate spent the whole delivery budget (%s) on a read "+
-			"that delivers nothing", elapsed, outboundHandlerBudget)
 	}
 }

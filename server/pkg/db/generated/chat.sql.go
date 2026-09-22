@@ -1238,14 +1238,16 @@ func (q *Queries) GetPublicChatSessionInWorkspace(ctx context.Context, arg GetPu
 }
 
 const getTaskChannelOrigin = `-- name: GetTaskChannelOrigin :one
-SELECT
-    EXISTS (
+SELECT (
+    task.chat_input_task_id IS NULL
+    OR EXISTS (
         SELECT 1
         FROM chat_message
-        WHERE task_id = COALESCE(task.chat_input_task_id, task.id)
+        WHERE task_id = task.chat_input_task_id
           AND role = 'user'
           AND channel_ingested
-    ) AS channel_ingested,
+    )
+)::boolean AS channel_ingested,
     (task.chat_input_task_id IS NULL)::boolean AS batch_owner_unknown
 FROM agent_task_queue AS task
 WHERE task.id = $1
@@ -1256,63 +1258,58 @@ type GetTaskChannelOriginRow struct {
 	BatchOwnerUnknown bool `json:"batch_owner_unknown"`
 }
 
-// The whole origin question for one completed task, in one round trip: is the
+// The whole origin question for one completed task in one round trip: is the
 // task row still there, and did its input arrive over a channel?
 //
-// GetAgentTask followed by TaskHasChannelIngestedMessages answers the same
-// question in two, which is what the other channel adapters do. They ask it
-// only after a channel_task_delivery row has already said the turn was theirs.
-// WeCom's reply path also asks it for a completion with NO delivery row, to
-// tell an unroutable channel turn apart from an ordinary web-UI one, and that
-// branch is reached by every web-UI completion in the deployment. It runs
-// synchronously inside events.Bus.Publish (internal/events/bus.go:61-76),
-// below TaskService.broadcastChatDone (internal/service/task.go:7330) and
-// CompleteTaskWithTransition (internal/service/task.go:4518), which the
-// daemon's POST /tasks/{id}/complete waits for before it answers
-// (internal/handler/daemon.go:4269). A round trip here is a round trip the
-// completion response and the realtime fanout both wait for, so there is one.
+// This answers exactly what engine.TaskInputIsChannelIngested answers, in one
+// read instead of two (GetAgentTask, then TaskHasChannelIngestedMessages). That
+// function is the definition; this is a transcription of it, not an improvement
+// on it. Both halves are load-bearing:
+//
+//   - A task with NO input batch owner is channel-ingested. Migration 158 left
+//     both legacy direct rows and channel tasks NULL here, so the owner cannot
+//     say which one a row was, and the adapters that read this deliver by
+//     default — the behaviour #5645 shipped. Keying the EXISTS on the task's
+//     own id instead (COALESCE(chat_input_task_id, id)) silently stops
+//     delivering the auto-retry of a legacy channel task: CreateRetryTask
+//     copies a NULL owner verbatim, on purpose (see agent.sql), and the clone
+//     owns no messages — so it reads as web UI while CopyChannelTaskDelivery
+//     has already given it the room's route.
+//   - Otherwise the verdict is the batch OWNER'S, not the task's. An auto-retry
+//     clone inherits its parent's chat_input_task_id while the user's message
+//     stays tagged with the parent, so reading the owner is what lets the clone
+//     reach the verdict its parent already has (MUL-4351).
 //
 // NO ROW means the task is gone — cancelled and reaped while its ending was in
 // flight. Callers receive pgx.ErrNoRows and must not fold that into "asked in
 // the web UI": it is the absence of a verdict, not a negative one, and the two
 // are recorded differently.
 //
-// The batch key is COALESCE(chat_input_task_id, id) — the same key migration
-// 427 used to decide which in-flight tasks were owed a delivery row, so a row
-// this query calls channel-ingested is a row that backfill would have given a
-// route to:
-//   - an auto-retry clone inherits its parent's chat_input_task_id while its
-//     own messages stay tagged with the parent, so keying on the owner makes
-//     the clone reach its parent's verdict (MUL-4351);
-//   - a legacy row with NO owner falls back to its own id rather than being
-//     assumed channel-ingested. Migration 158 left both legacy and channel
-//     tasks NULL here, so "NULL means channel" would report every pre-158 web
-//     turn as a channel turn whose route went missing.
+// One round trip rather than two because this read is SYNCHRONOUS ON THE
+// COMPLETION RESPONSE. It runs inside events.Bus.Publish
+// (internal/events/bus.go:61-76), below TaskService.broadcastChatDone
+// (internal/service/task.go:7330) and CompleteTaskWithTransition
+// (internal/service/task.go:4518), which the daemon's POST /tasks/{id}/complete
+// waits for before it answers (internal/handler/daemon.go:4269).
 //
-// batch_owner_unknown IS THE SECOND HALF, and the two callers need it because
-// they need OPPOSITE defaults for the same unanswerable row.
+// batch_owner_unknown IS THE SAME FACT, REPORTED SEPARATELY, and it exists for
+// one reader: the log level on a turn that has no delivery row.
 //
-// A NULL owner means the COALESCE fell back to the task's own id, and a task
-// that owns no messages then reads as web UI whatever it really was. For a
-// retry clone of a legacy CHANNEL parent that is wrong and silent: CreateRetryTask
-// copies chat_input_task_id verbatim (agent.sql says so on purpose — legacy and
-// channel parents carry NULL and must stay NULL), CopyChannelTaskDelivery hands
-// the clone the parent's WeCom route unconditionally, and the reply a room is
-// waiting on then leaves by the web UI's exit at DEBUG.
+// channel_ingested above says "deliver this", and for a NULL owner it says so
+// without evidence — which is right, because delivering is the safe side and
+// the auto-retry of a legacy channel turn depends on it. Warning is the other
+// direction: a missing route is worth paging an operator about only when
+// something actually established the turn was a channel's. A NULL owner
+// establishes nothing, so a missing route on one of those is not evidence of a
+// lost reply; migration 158 left legacy web rows and channel rows alike NULL
+// here, and reading it as "channel" would put the loudest line this adapter has
+// on a pre-158 web turn that auto-retried.
 //
-// So the verdict alone cannot serve both branches:
-//   - delivery row present and it says wecom — the route already established
-//     the turn was WeCom's, and the only open question is whether a human typed
-//     this particular turn in a browser. Unanswerable there must FAIL OPEN, as
-//     it did before this query existed.
-//   - no delivery row — nothing has established the turn was ever a channel's.
-//     Unanswerable there must FAIL CLOSED, or an ordinary web turn trips the
-//     loudest line this adapter has.
+// So one verdict, two readings: deliver on the open side, warn on the closed
+// one. The query reports both and chooses neither.
 //
-// Whoever calls this decides; the query reports and does not choose.
-//
-// Plan: agent_task_queue_pkey for the row, idx_chat_message_input_owner for
-// the EXISTS. Neither side scans.
+// Plan: agent_task_queue_pkey for the row, idx_chat_message_input_owner for the
+// EXISTS. Neither side scans.
 func (q *Queries) GetTaskChannelOrigin(ctx context.Context, id pgtype.UUID) (GetTaskChannelOriginRow, error) {
 	row := q.db.QueryRow(ctx, getTaskChannelOrigin, id)
 	var i GetTaskChannelOriginRow

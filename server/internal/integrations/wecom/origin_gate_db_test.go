@@ -211,28 +211,38 @@ func TestGetTaskChannelOrigin_RealSQL(t *testing.T) {
 			why: "the turn a missing delivery row is actionable for",
 		},
 		{
-			name: "a legacy row with no batch owner, asked in Multica", taskID: lab.legacyPlain, ingested: false,
+			// These two rows differ in the only place a verdict could come
+			// from — one's own message carries the channel stamp and the
+			// other's does not — and the query answers both the same, because
+			// with no owner it reads neither. That is not a gap: delivering a
+			// turn that may be the room's costs a reply in the wrong place,
+			// while refusing one costs a room waiting forever, and
+			// engine.TaskInputIsChannelIngested has always picked the first.
+			// batch_owner_unknown is how a caller that needs the OTHER
+			// direction — whether to warn about a missing route — tells this
+			// pair apart from a verdict that was actually established.
+			name: "a legacy row with no batch owner, asked in Multica", taskID: lab.legacyPlain, ingested: true,
 			ownerUnknown: true,
-			why: "NULL chat_input_task_id is 'legacy row OR channel task' (migration 158). Reading " +
-				"NULL as channel-ingested reports every pre-MUL-4351 web turn as a channel turn " +
-				"whose route went missing",
+			why: "NULL chat_input_task_id is 'legacy row OR channel task' (migration 158), so the " +
+				"row cannot say which. It is delivered, and batch_owner_unknown is what keeps the " +
+				"no-route WARN off it",
 		},
 		{
 			name: "a legacy row with no batch owner, asked in the room", taskID: lab.legacyInRoom, ingested: true,
 			ownerUnknown: true,
-			why: "COALESCE falls back to the task's own id, which is the same key migration 427 " +
-				"used to decide this row was owed a delivery route",
+			why: "the same answer as the row above, from the same absent owner — which is why the " +
+				"second fact exists rather than a second verdict",
 		},
 		{
 			// THE SEVENTH SHAPE, and the one that regressed. Built through the
 			// real CreateRetryTask and CopyChannelTaskDelivery so the fixture
 			// cannot drift from what FailTask actually writes.
 			name: "the auto-retry of a legacy row with no batch owner", taskID: lab.legacyRetry,
-			ingested: false, ownerUnknown: true,
-			why: "CreateRetryTask copies a NULL owner verbatim and the clone owns no messages, so " +
-				"the verdict alone reads it as web UI — while CopyChannelTaskDelivery has already " +
-				"given it the parent's WeCom route. batch_owner_unknown is what lets the delivery " +
-				"branch keep failing open, which is how the reply a room is waiting on still leaves",
+			ingested: true, ownerUnknown: true,
+			why: "CreateRetryTask copies a NULL owner verbatim and the clone owns no messages, so a " +
+				"gate keyed on the task's own id reads it as web UI — while CopyChannelTaskDelivery " +
+				"has already given it the parent's WeCom route, and the room is waiting. Keying on " +
+				"the owner alone, as engine.TaskInputIsChannelIngested does, is what delivers it",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
