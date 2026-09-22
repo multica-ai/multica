@@ -7480,6 +7480,30 @@ type taskModelSelection struct {
 	ServiceTier   string
 }
 
+// modelAction names what resolveTaskModelSelection did to the persisted model
+// pin for THIS execution. It is audit signal (SE-37741 F8): a runtime-scoped
+// quota/auth circuit can route an execution onto a fallback runtime whose
+// provider differs from the one the pin was made for, and a pin that the target
+// runtime cannot honour is cleared to the runtime default rather than failing
+// the launch. The value is logged and surfaced to the caller; the agent's saved
+// configuration is never mutated (the selector is passed and returned by value).
+const (
+	// modelActionKept: the pin reached the CLI unchanged.
+	modelActionKept = "kept"
+	// modelActionQualified: the pin was promoted to the runtime catalog's
+	// canonical `<provider>/<id>` form.
+	modelActionQualified = "qualified"
+	// modelActionClearedIncompatible: the pin is a known model of a different
+	// provider family (static classification, no catalog read), so it was
+	// cleared along with its capability overrides.
+	modelActionClearedIncompatible = "cleared_incompatible"
+	// modelActionClearedUnresolved: the runtime's live catalog was consulted and
+	// the pin resolved to neither an exact nor a uniquely-qualified catalog
+	// entry (unknown / ambiguous / unavailable / empty catalog), so it was
+	// cleared along with its capability overrides.
+	modelActionClearedUnresolved = "cleared_unresolved"
+)
+
 // resolveTaskModelSelection settles the model selector and its capability
 // overrides against the runtime's own model catalog, reading that catalog at
 // most once per task — and not at all when nothing needs it.
@@ -7512,7 +7536,28 @@ func resolveTaskModelSelection(
 	runtimeCmd agent.Command,
 	sel taskModelSelection,
 	taskLog *slog.Logger,
-) taskModelSelection {
+) (taskModelSelection, string) {
+	// A runtime-scoped quota/auth circuit can route this execution onto a
+	// fallback runtime whose provider differs from the one the persisted model
+	// pin was made for (SE-37711 / SE-37664 / SE-37741). A model that is a known
+	// mismatch for the selected provider would make the CLI refuse to launch,
+	// turning a recoverable quota event into a hard failure. Drop such a pin —
+	// and the capability overrides that were keyed on it — for THIS execution
+	// only, so the runtime launches with its own default model; the agent's
+	// persisted configuration is left untouched. This static classification
+	// reads no CLI subprocess, preserving the at-most-one discovery read below;
+	// unknown or custom ids it cannot confidently place fall through to the live
+	// catalog check further down (which only runs when the catalog is read for
+	// another reason).
+	if sel.Model != "" && agent.ModelKnownIncompatibleWithProvider(provider, sel.Model) {
+		taskLog.Info("model: persisted pin is incompatible with the selected runtime provider; using the runtime default for this execution",
+			"provider", provider,
+			"configured_model", sel.Model,
+			"model_action", modelActionClearedIncompatible,
+		)
+		return taskModelSelection{}, modelActionClearedIncompatible
+	}
+
 	capabilityChecksPending := sel.ThinkingLevel != "" || sel.ServiceTier != ""
 
 	read := false
@@ -7528,7 +7573,31 @@ func resolveTaskModelSelection(
 		return catalog, catalogErr
 	}
 
+	before := sel.Model
 	sel.Model = qualifyTaskModel(provider, sel.Model, capabilityChecksPending, loadCatalog, taskLog)
+	modelAction := modelActionKept
+	if sel.Model != before {
+		modelAction = modelActionQualified
+	}
+
+	// Live-catalog fail-safe (SE-37741 F8). When qualification actually read the
+	// runtime's catalog and it came back usable (no error, not a static
+	// fallback), a pin that resolves to neither an exact nor a uniquely-qualified
+	// entry is unknown / ambiguous / unavailable to this runtime — the shape a
+	// cross-provider fallback produces. Launching it would fail the CLI, so clear
+	// it and its capability overrides to the runtime default for this execution.
+	// This adds no catalog read: it reuses the one qualification already took, so
+	// tasks that never read the catalog (claude/codex with no override, pinned
+	// or not) keep the manual-entry pass-through the static check leaves them.
+	if sel.Model != "" && read && catalogErr == nil && !catalog.Fallback && !modelInCatalog(catalog, sel.Model) {
+		taskLog.Info("model: persisted pin is not in the selected runtime's live catalog; using the runtime default for this execution",
+			"provider", provider,
+			"configured_model", sel.Model,
+			"catalog_models", len(catalog.Models),
+			"model_action", modelActionClearedUnresolved,
+		)
+		return taskModelSelection{}, modelActionClearedUnresolved
+	}
 
 	// service_tier is catalog-owned and currently Codex-only. As with
 	// thinking_level, stale or incompatible persisted values degrade to the
@@ -7584,7 +7653,21 @@ func resolveTaskModelSelection(
 		}
 	}
 
-	return sel
+	return sel, modelAction
+}
+
+// modelInCatalog reports whether the (already-qualified) model id is an exact
+// entry in the runtime's live catalog. Qualification has already rewritten a
+// uniquely-owned bare id to its canonical form, so an exact match here means
+// the runtime advertises the model; anything else is unknown, ambiguous, or
+// unavailable to this runtime.
+func modelInCatalog(catalog agent.Catalog, model string) bool {
+	for _, m := range catalog.Models {
+		if m.ID == model {
+			return true
+		}
+	}
+	return false
 }
 
 // qualifyTaskModel promotes a persisted model id to the canonical
@@ -8622,9 +8705,28 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		thinkingLevel = task.Agent.ThinkingLevel
 		serviceTier = task.Agent.ServiceTier
 	}
-	selection := resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),
+	selection, modelAction := resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),
 		taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
 	model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
+	if modelAction != modelActionKept {
+		// Durable per-execution audit of the fallback model decision (SE-37741
+		// F8): a cleared or qualified pin is a routing event operators need to
+		// see, not just a debug detail.
+		taskLog.Info("task model selection resolved",
+			"task_id", task.ID,
+			"provider", provider,
+			"model_action", modelAction,
+			"model", model,
+		)
+		// Enrich this task's runtime-failover audit (F6) with the model action.
+		// Best-effort and independent of the terminal callback: the merge no-ops
+		// unless the task actually failed over, so a lost report only drops
+		// enrichment, never correctness.
+		if err := d.client.ReportTaskDispatchModelAction(ctx, task.ID, modelAction); err != nil {
+			taskLog.Warn("report task dispatch model action failed",
+				"task_id", task.ID, "model_action", modelAction, "error", err)
+		}
+	}
 
 	var idleWatchdogTimeout time.Duration
 	if provider == "opencode" || provider == "codearts" {

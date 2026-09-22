@@ -161,7 +161,8 @@ func init() {
 	agentCreateCmd.Flags().String("description", "", "Agent description")
 	agentCreateCmd.Flags().String("instructions", "", "Agent instructions")
 	agentCreateCmd.Flags().String("conversation-starters", "", "Conversation starters as a JSON array of {\"label\",\"prompt\"} objects (at most 3; label ≤80, prompt ≤4000). Shown above the Chat composer; selecting one fills the composer and does not start a run. Omit to default to none.")
-	agentCreateCmd.Flags().String("runtime-id", "", "Runtime ID (required)")
+	agentCreateCmd.Flags().String("runtime-id", "", "Runtime ID. Provide this OR --runtime-ids, not both. Required unless --runtime-ids is given.")
+	agentCreateCmd.Flags().String("runtime-ids", "", "Ordered runtime pool as a JSON array of runtime IDs, highest priority first, e.g. '[\"id-a\",\"id-b\"]'. Element 0 is the default runtime; the rest are ordered fallbacks. A pool with more than one runtime must span at least two provider families. Mutually exclusive with --runtime-id.")
 	agentCreateCmd.Flags().String("runtime-config", "", "Runtime config as JSON string")
 	agentCreateCmd.Flags().String("model", "", "Model identifier (e.g. claude-sonnet-4-6, openai/gpt-4o). Prefer this over passing --model in --custom-args.")
 	agentCreateCmd.Flags().String("thinking-level", "", "Reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex values come from the runtime model catalog). The set is runtime/model-specific; malformed values are rejected server-side and the daemon validates the exact model/level pair. Some runtimes (e.g. hermes) expose no reasoning control and reject every value. Empty = runtime default.")
@@ -185,7 +186,8 @@ func init() {
 	agentUpdateCmd.Flags().String("description", "", "New description")
 	agentUpdateCmd.Flags().String("instructions", "", "New instructions")
 	agentUpdateCmd.Flags().String("conversation-starters", "", "New conversation starters as a JSON array of {\"label\",\"prompt\"} objects (at most 3; label ≤80, prompt ≤4000). Pass '[]' to clear. Omit to leave the stored value unchanged.")
-	agentUpdateCmd.Flags().String("runtime-id", "", "New runtime ID")
+	agentUpdateCmd.Flags().String("runtime-id", "", "New runtime ID. Mutually exclusive with --runtime-ids.")
+	agentUpdateCmd.Flags().String("runtime-ids", "", "New ordered runtime pool as a JSON array of runtime IDs, highest priority first, e.g. '[\"id-a\",\"id-b\"]'. Element 0 is the default runtime; the rest are ordered fallbacks. A pool with more than one runtime must span at least two provider families. Pass '[]' to clear the pool and unbind the agent. Mutually exclusive with --runtime-id.")
 	agentUpdateCmd.Flags().String("runtime-config", "", "New runtime config as JSON string")
 	agentUpdateCmd.Flags().String("model", "", "New model identifier. Pass an empty string to clear and fall back to the runtime default.")
 	agentUpdateCmd.Flags().String("thinking-level", "", "New reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex values come from the runtime model catalog). The set is runtime/model-specific; malformed values are rejected server-side and the daemon validates the exact model/level pair. Some runtimes (e.g. hermes) expose no reasoning control and reject every value. Pass an empty string to clear and fall back to the runtime default.")
@@ -641,13 +643,26 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--name is required")
 	}
 	runtimeID, _ := cmd.Flags().GetString("runtime-id")
-	if runtimeID == "" {
-		return fmt.Errorf("--runtime-id is required")
+	hasRuntimeIDs := cmd.Flags().Changed("runtime-ids")
+	if runtimeID != "" && hasRuntimeIDs {
+		return fmt.Errorf("--runtime-id and --runtime-ids are mutually exclusive; pass one")
+	}
+	if runtimeID == "" && !hasRuntimeIDs {
+		return fmt.Errorf("--runtime-id or --runtime-ids is required")
 	}
 
 	body := map[string]any{
-		"name":       name,
-		"runtime_id": runtimeID,
+		"name": name,
+	}
+	if hasRuntimeIDs {
+		raw, _ := cmd.Flags().GetString("runtime-ids")
+		ids, err := parseRuntimeIDs(raw)
+		if err != nil {
+			return err
+		}
+		body["runtime_ids"] = ids
+	} else {
+		body["runtime_id"] = runtimeID
 	}
 	if v, _ := cmd.Flags().GetString("description"); v != "" {
 		body["description"] = v
@@ -752,9 +767,20 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	if err := applyConversationStartersFlag(cmd, body); err != nil {
 		return err
 	}
+	if cmd.Flags().Changed("runtime-id") && cmd.Flags().Changed("runtime-ids") {
+		return fmt.Errorf("--runtime-id and --runtime-ids are mutually exclusive; pass one")
+	}
 	if cmd.Flags().Changed("runtime-id") {
 		v, _ := cmd.Flags().GetString("runtime-id")
 		body["runtime_id"] = v
+	}
+	if cmd.Flags().Changed("runtime-ids") {
+		raw, _ := cmd.Flags().GetString("runtime-ids")
+		ids, err := parseRuntimeIDs(raw)
+		if err != nil {
+			return err
+		}
+		body["runtime_ids"] = ids
 	}
 	if cmd.Flags().Changed("runtime-config") {
 		v, _ := cmd.Flags().GetString("runtime-config")
@@ -810,7 +836,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --conversation-starters, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --custom-args, --mcp-config, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --conversation-starters, --runtime-id, --runtime-ids, --runtime-config, --model, --thinking-level, --service-tier, --custom-args, --mcp-config, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())
@@ -1241,6 +1267,20 @@ func parseCustomArgs(raw string) ([]string, error) {
 		return nil, fmt.Errorf("--custom-args must be a valid JSON array of strings")
 	}
 	return ca, nil
+}
+
+// parseRuntimeIDs parses the --runtime-ids flag value: a JSON array of runtime
+// ID strings in priority order (element 0 is the default runtime). A non-nil
+// empty slice is returned for "[]" so it JSON-encodes as [] — the server reads
+// that as "clear the pool and unbind the agent" on update. The server owns the
+// remaining semantics (two-provider-family rule for pools >1, non-empty on
+// create), so the CLI only enforces well-formedness here.
+func parseRuntimeIDs(raw string) ([]string, error) {
+	ids := []string{}
+	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+		return nil, fmt.Errorf("--runtime-ids must be a valid JSON array of runtime ID strings, e.g. '[\"id-a\",\"id-b\"]'")
+	}
+	return ids, nil
 }
 
 // agentConversationStarter is the CLI wire shape for conversation_starters.

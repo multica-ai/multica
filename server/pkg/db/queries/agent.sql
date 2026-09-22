@@ -179,6 +179,17 @@ UPDATE agent SET mcp_config = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: ClearAgentRuntimeID :one
+-- Explicit NULL-clear for the legacy runtime_id projection. COALESCE-based
+-- UpdateAgent cannot null a column, so an owner emptying an agent's runtime pool
+-- (runtime_id="" / runtime_ids=[]) routes the projection clear through here. The
+-- kind filter keeps this off system agents, whose builder runtime is rebound by
+-- RebindAgentBuilderRuntime rather than cleared. An unbound agent keeps its
+-- config and history and simply needs a new runtime before it can run (MUL-5559).
+UPDATE agent SET runtime_id = NULL, updated_at = now()
+WHERE id = $1 AND kind = 'user'
+RETURNING *;
+
 -- name: UpdateAgentCustomEnv :one
 -- Replaces an agent's custom_env map wholesale. Used by the dedicated
 -- env-management endpoint (POST/PUT /api/agents/{id}/env), which is the
@@ -766,8 +777,26 @@ WHERE id = (
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            -- A task's persisted runtime is not authority after an agent rebind.
-            AND a.runtime_id = atq.runtime_id
+            -- A task's persisted runtime is not authority after an agent
+            -- rebind: it must still be one of the agent's current bindings
+            -- (agent_runtime_binding). With no binding rows, agent.runtime_id
+            -- is the singleton pool, so fall back to it. This is what lets a
+            -- quota fallback pin a non-priority-0 binding and still be claimed
+            -- (agent_runtime_binding.sql).
+            AND (
+                EXISTS (
+                    SELECT 1 FROM agent_runtime_binding arb
+                    WHERE arb.agent_id = a.id
+                      AND arb.runtime_id = atq.runtime_id
+                )
+                OR (
+                    a.runtime_id = atq.runtime_id
+                    AND NOT EXISTS (
+                        SELECT 1 FROM agent_runtime_binding arbx
+                        WHERE arbx.agent_id = a.id
+                    )
+                )
+            )
             -- Queued private-runtime rows are claimable so the handler can
             -- settle an owner mismatch through the existing FailTask path
             -- before daemon delivery. Public runtimes remain shareable across
@@ -885,7 +914,23 @@ WHERE id = (
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            AND a.runtime_id = atq.runtime_id
+            -- Task runtime must still be a current binding of the agent (or the
+            -- singleton agent.runtime_id when the pool is empty); keep in sync
+            -- with ClaimAgentTask so a fallback-pinned task is reclaimable too.
+            AND (
+                EXISTS (
+                    SELECT 1 FROM agent_runtime_binding arb
+                    WHERE arb.agent_id = a.id
+                      AND arb.runtime_id = atq.runtime_id
+                )
+                OR (
+                    a.runtime_id = atq.runtime_id
+                    AND NOT EXISTS (
+                        SELECT 1 FROM agent_runtime_binding arbx
+                        WHERE arbx.agent_id = a.id
+                    )
+                )
+            )
             AND (
                 r.visibility = 'public'
                 OR (
@@ -932,7 +977,23 @@ WHERE id IN (
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            AND a.runtime_id = atq.runtime_id
+            -- Task runtime must still be a current binding of the agent (or the
+            -- singleton agent.runtime_id when the pool is empty); keep in sync
+            -- with ClaimAgentTask so a fallback-pinned task is reclaimable too.
+            AND (
+                EXISTS (
+                    SELECT 1 FROM agent_runtime_binding arb
+                    WHERE arb.agent_id = a.id
+                      AND arb.runtime_id = atq.runtime_id
+                )
+                OR (
+                    a.runtime_id = atq.runtime_id
+                    AND NOT EXISTS (
+                        SELECT 1 FROM agent_runtime_binding arbx
+                        WHERE arbx.agent_id = a.id
+                    )
+                )
+            )
             AND (
                 r.visibility = 'public'
                 OR (
@@ -981,6 +1042,26 @@ SET status = 'running',
     prepare_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('dispatched', 'waiting_local_directory')
 RETURNING *;
+
+-- name: SetTaskDispatchModelAction :exec
+-- Enriches an existing runtime-failover audit (F6) with the per-execution model
+-- fail-safe outcome (F8 model_action). The daemon resolves the model action at
+-- pickup, after the autopilot dispatch that recorded the failover audit, so both
+-- events land on the same jsonb object keyed to the task. The WHERE guard scopes
+-- the write to tasks that actually failed over: an ordinary dispatch has no
+-- audit, and model_action there is already visible in the task log, so we do not
+-- stamp a stray audit onto every routed task. Idempotent — one audit per task,
+-- model_action overwritten in place; a no-op (zero rows) when no failover audit
+-- exists.
+UPDATE agent_task_queue
+SET dispatch_runtime_audit = jsonb_set(
+        dispatch_runtime_audit,
+        '{model_action}',
+        to_jsonb(sqlc.arg(model_action)::text),
+        true
+    )
+WHERE id = $1
+  AND dispatch_runtime_audit IS NOT NULL;
 
 -- name: MarkAgentTaskWaitingLocalDirectory :one
 -- Transitions a freshly-dispatched task into 'waiting_local_directory' while
@@ -2287,7 +2368,22 @@ WHERE atq.runtime_id = $1
       FROM agent a
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
-        AND a.runtime_id = atq.runtime_id
+        -- Keep the current-binding check in sync with ClaimAgentTask so a
+        -- fallback-pinned task shows up as a claim candidate for its runtime.
+        AND (
+            EXISTS (
+                SELECT 1 FROM agent_runtime_binding arb
+                WHERE arb.agent_id = a.id
+                  AND arb.runtime_id = atq.runtime_id
+            )
+            OR (
+                a.runtime_id = atq.runtime_id
+                AND NOT EXISTS (
+                    SELECT 1 FROM agent_runtime_binding arbx
+                    WHERE arbx.agent_id = a.id
+                )
+            )
+        )
         AND (
             r.visibility = 'public'
             OR r.visibility = 'private'
@@ -2408,7 +2504,22 @@ WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
       FROM agent a
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
-        AND a.runtime_id = atq.runtime_id
+        -- Keep the current-binding check in sync with ClaimAgentTask so a
+        -- fallback-pinned task shows up as a claim candidate for its runtime.
+        AND (
+            EXISTS (
+                SELECT 1 FROM agent_runtime_binding arb
+                WHERE arb.agent_id = a.id
+                  AND arb.runtime_id = atq.runtime_id
+            )
+            OR (
+                a.runtime_id = atq.runtime_id
+                AND NOT EXISTS (
+                    SELECT 1 FROM agent_runtime_binding arbx
+                    WHERE arbx.agent_id = a.id
+                )
+            )
+        )
         AND (
             r.visibility = 'public'
             OR r.visibility = 'private'

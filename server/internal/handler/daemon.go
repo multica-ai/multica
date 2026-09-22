@@ -4887,6 +4887,55 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// dispatchModelActions is the closed set of model fail-safe outcomes the daemon
+// may report (SE-37741 F8). "kept" is excluded: the daemon reports only when the
+// pin actually changed, so a "kept" here is a malformed report. The allowlist is
+// a trust boundary — the value lands in the audit jsonb, so an unknown label is
+// rejected rather than persisted.
+var dispatchModelActions = map[string]struct{}{
+	"qualified":            {},
+	"cleared_incompatible": {},
+	"cleared_unresolved":   {},
+}
+
+// ReportTaskDispatchModelAction merges the daemon-side model fail-safe outcome
+// (F8) into this task's runtime-failover audit (F6). Called independently of
+// complete/fail because the model is resolved at pickup, before the agent runs.
+// The merge no-ops unless the task carries a failover audit, so an ordinary
+// dispatch is never stamped with a stray audit.
+func (h *Handler) ReportTaskDispatchModelAction(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+
+	// Verify the caller owns this task's workspace.
+	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		ModelAction string `json:"model_action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if _, valid := dispatchModelActions[req.ModelAction]; !valid {
+		writeError(w, http.StatusBadRequest, "invalid model_action")
+		return
+	}
+
+	if err := h.Queries.SetTaskDispatchModelAction(r.Context(), db.SetTaskDispatchModelActionParams{
+		ID:          task.ID,
+		ModelAction: req.ModelAction,
+	}); err != nil {
+		slog.Warn("set task dispatch model action failed", "task_id", taskID, "model_action", req.ModelAction, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to record model action")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 // GetTaskStatus returns the current status of a task.
 // Used by the daemon to detect terminal/interruption signals (cancelled,
 // failed, completed) while a task is executing mid-flight.

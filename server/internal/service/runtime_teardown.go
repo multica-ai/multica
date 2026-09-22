@@ -115,6 +115,31 @@ func TeardownRuntime(ctx context.Context, qtx *db.Queries, runtimeID pgtype.UUID
 		return out, fmt.Errorf("%w: %d", ErrRuntimeNotDrained, undrained)
 	}
 
+	// Remove the deleted runtime from every ordered pool it appears in and
+	// promote each affected agent's next binding into the legacy runtime_id
+	// projection. An agent whose pool still has a runtime is repointed at its
+	// lowest-priority remaining one and stays runnable; only an agent whose pool
+	// is now empty keeps runtime_id pointing at this runtime, so the unbind pass
+	// below nulls exactly those and pauses their autopilots (invariant I14).
+	// Agents that predate the binding table (no rows here) are matched by neither
+	// query and fall through to the same unbind pass as before.
+	affectedAgentIDs, err := qtx.DeleteAgentRuntimeBindingsByRuntime(ctx, runtimeID)
+	if err != nil {
+		return out, fmt.Errorf("remove runtime from pools: %w", err)
+	}
+	if len(affectedAgentIDs) > 0 {
+		if _, err := qtx.PromoteAgentRuntimeToLowestBinding(ctx, affectedAgentIDs); err != nil {
+			return out, fmt.Errorf("promote next binding: %w", err)
+		}
+	}
+
+	// The runtime's provider circuit(s) describe a hold on a runtime that no
+	// longer exists; drop them so a re-created runtime does not inherit a stale
+	// open breaker.
+	if err := qtx.DeleteRuntimeProviderCircuitsByRuntime(ctx, runtimeID); err != nil {
+		return out, fmt.Errorf("remove runtime provider circuits: %w", err)
+	}
+
 	unbound, err := qtx.UnbindUserAgentsFromRuntime(ctx, runtimeID)
 	if err != nil {
 		return out, fmt.Errorf("unbind agents: %w", err)

@@ -683,6 +683,58 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	if err != nil {
 		return fmt.Errorf("resolve leader: %w", err)
 	}
+
+	// SE-37711 / SE-37664 (F5): breaker-aware runtime selection for the
+	// scheduled/webhook create_issue path, mirroring dispatchRunOnly. Selection
+	// runs BEFORE the issue is created so an auth hold or an all-held pool skips
+	// the dispatch without leaving a doomed issue+task nobody can run. A manual
+	// trigger (valid actor) bypasses the pool the same way run_only does (I8).
+	// On a quota failover the chosen runtime is pinned onto the enqueued task and
+	// a single visible system comment records the reassignment.
+	selectedRuntime := leader.RuntimeID
+	fellBack := false
+	var fellBackAudit dispatchRuntimeAudit
+	if !actorUserID.Valid {
+		decision, firstVerdict, selErr := s.selectPoolRuntime(ctx, leader)
+		if selErr != nil {
+			return fmt.Errorf("select runtime from pool: %w", selErr)
+		}
+		switch decision.Outcome {
+		case fallbackSelected:
+			selectedRuntime = decision.Chosen.RuntimeID
+			if selectedRuntime != leader.RuntimeID {
+				fellBack = true
+				fellBackAudit = buildDispatchRuntimeAudit(
+					dispatchAuditReason(true, decision.Chosen),
+					leader.RuntimeID, decision.Chosen, decision.Candidates)
+				slog.Info("autopilot create_issue auto-failover to fallback runtime",
+					"autopilot_id", util.UUIDToString(ap.ID),
+					"run_id", util.UUIDToString(run.ID),
+					"agent_id", util.UUIDToString(leader.ID),
+					"primary_runtime_id", util.UUIDToString(leader.RuntimeID),
+					"selected_runtime_id", util.UUIDToString(selectedRuntime),
+				)
+			}
+		case fallbackEmptyPool:
+			return &errDispatchSkipped{reason: formatAdmissionReason(ap, "agent has no runtime bound"), code: dispatch.ReasonAgentRuntimeRequired}
+		case fallbackAllHeld:
+			return &errDispatchSkipped{reason: poolAllHeldReason(ap, decision), code: dispatch.ReasonDeferred}
+		case fallbackAuthHeld:
+			return &errDispatchSkipped{reason: poolAuthHeldReason(ap, decision), code: dispatch.ReasonDeferred}
+		case fallbackNoneAvailable:
+			// No binding is circuit-held, but none is ready right now (e.g. the
+			// home runtime is offline). Unlike run_only, create_issue must NOT
+			// skip here: the WS-1325 audit-trail contract requires a visible
+			// issue to still be created so the task is claimed once the runtime
+			// comes back, instead of silently recording an unrecoverable skipped
+			// run. Only a circuit hold (auth/all-held) or a genuinely empty pool
+			// is doomed enough to skip; a transient not-ready home runtime falls
+			// through with selectedRuntime unchanged (the primary), preserving
+			// the pre-F5 behaviour.
+			_ = firstVerdict
+		}
+	}
+
 	issueCountPolicy := ResolveIssueCountPolicy(ctx, s.Entitlements, ap.WorkspaceID)
 
 	tx, err := s.TxStarter.Begin(ctx)
@@ -849,6 +901,12 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 			if _, err := s.TaskSvc.EnqueueTaskForSquadLeaderByActor(ctx, issue, leader.ID, ap.AssigneeID, actorUserID); err != nil {
 				return fmt.Errorf("enqueue squad leader task: %w", err)
 			}
+		} else if fellBack {
+			// Quota failover: pin the task to the breaker-selected runtime so it
+			// lands where it can actually run, not on the held home runtime.
+			if _, err := s.TaskSvc.EnqueueTaskForSquadLeaderOnRuntime(ctx, issue, leader.ID, ap.AssigneeID, selectedRuntime); err != nil {
+				return fmt.Errorf("enqueue squad leader task: %w", err)
+			}
 		} else if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, ap.AssigneeID, pgtype.UUID{}, OriginDerived); err != nil {
 			return fmt.Errorf("enqueue squad leader task: %w", err)
 		}
@@ -856,8 +914,20 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		if _, err := s.TaskSvc.EnqueueTaskForIssueByActor(ctx, issue, actorUserID); err != nil {
 			return fmt.Errorf("enqueue task for issue: %w", err)
 		}
+	} else if fellBack {
+		if _, err := s.TaskSvc.EnqueueTaskForIssueOnRuntime(ctx, issue, selectedRuntime); err != nil {
+			return fmt.Errorf("enqueue task for issue: %w", err)
+		}
 	} else if _, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue); err != nil {
 		return fmt.Errorf("enqueue task for issue: %w", err)
+	}
+
+	// SE-37711 / SE-37664 (F5/F6): on a quota failover the create_issue path must
+	// not be silent — record one visible system comment on the fresh issue naming
+	// the source→target runtime failover. A fresh issue+run is created per
+	// dispatch, so exactly one comment per run is inherently idempotent.
+	if fellBack {
+		s.postCreateIssueFailoverComment(ctx, ap, issue, leader, fellBackAudit)
 	}
 
 	slog.Info("autopilot dispatched (create_issue)",
@@ -868,6 +938,57 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		"run_id", util.UUIDToString(run.ID),
 	)
 	return nil
+}
+
+// postCreateIssueFailoverComment writes one visible system comment recording a
+// quota failover on the create_issue path (F5/F6 "never silent"). It runs after
+// the issue+task are committed, so a failure here is logged, not propagated: the
+// dispatch already succeeded and a missing narration must not undo it. Exactly
+// one comment is written per created issue, which is inherently one per run.
+func (s *AutopilotService) postCreateIssueFailoverComment(ctx context.Context, ap db.Autopilot, issue db.Issue, leader db.Agent, audit dispatchRuntimeAudit) {
+	source := audit.SourceProvider
+	if source == "" {
+		source = "primary runtime"
+	}
+	target := audit.TargetProvider
+	if target == "" {
+		target = "fallback runtime"
+	}
+	content := fmt.Sprintf(
+		"Runtime failover: %s's home runtime (%s) is on a quota hold, so this task was dispatched to the fallback runtime (%s). Selection route: %s.",
+		leader.Name, source, target, audit.Reason,
+	)
+	created, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ID:          dbid.NewV7(),
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		AuthorType:  "system",
+		AuthorID:    pgtype.UUID{Valid: true},
+		Content:     content,
+		Type:        "system",
+	})
+	if err != nil {
+		slog.Error("autopilot create_issue failover comment failed",
+			"autopilot_id", util.UUIDToString(ap.ID),
+			"issue_id", util.UUIDToString(issue.ID),
+			"error", err,
+		)
+		return
+	}
+	if s.Bus != nil {
+		comment := created.Comment()
+		s.Bus.Publish(events.Event{
+			Type:        protocol.EventCommentCreated,
+			WorkspaceID: util.UUIDToString(issue.WorkspaceID),
+			ActorType:   "system",
+			ActorID:     "",
+			Payload: map[string]any{
+				"comment":      commentEventFields(comment),
+				"issue_title":  issue.Title,
+				"issue_status": issue.Status,
+			},
+		})
+	}
 }
 
 // notifyAutopilotSubscribersOnCreate writes an inbox_item for each template
@@ -978,6 +1099,29 @@ func (e *errDispatchSkipped) Error() string { return e.reason }
 // applies also run here as belt-and-braces: if the leader changed between
 // admission and dispatch, or the runtime went offline in the gap, we still
 // fail closed instead of enqueueing a doomed task.
+// runOnlyTriggerSummary snapshots the autopilot title for a run_only task,
+// appending a specific route marker when the pool selector routed the dispatch
+// off the agent's default runtime (F6: the marker names the target provider and
+// route, built by fallbackRouteMarker, not a generic "via fallback runtime").
+// The task's runtime_id column records which runtime ran; this marker is the
+// human-readable "why it moved" beside it, kept visible in every task-list
+// response and run/task detail (SE-37711 / SE-37664, parent §5: never silent).
+// When a marker is present the title is truncated with the marker's width
+// reserved so the marker itself is never cut, and an empty title still yields a
+// visible marker. An empty marker leaves the snapshot exactly as before.
+func runOnlyTriggerSummary(title, marker string) string {
+	if marker == "" {
+		return truncateForSummary(title, triggerSummaryMaxLen)
+	}
+	// Reserve the marker's width plus one rune for the ellipsis truncateForSummary
+	// appends when it cuts the title, so title+marker never exceeds the budget.
+	budget := triggerSummaryMaxLen - len([]rune(marker)) - 1
+	if budget < 0 {
+		budget = 0
+	}
+	return truncateForSummary(title, budget) + marker
+}
+
 func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun, actorUserID pgtype.UUID) error {
 	agent, _, err := s.resolveAutopilotLeader(ctx, ap)
 	if err != nil {
@@ -989,12 +1133,58 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		}
 		return fmt.Errorf("resolve leader: %w", err)
 	}
-	verdict, err := AgentReadiness(ctx, s.runtimeLookup(), agent)
-	if err != nil {
-		return fmt.Errorf("check agent readiness: %w", err)
-	}
-	if !verdict.Ready() {
-		return &errDispatchSkipped{reason: formatAdmissionReason(ap, verdict.Detail), code: verdict.Reason}
+	// SE-37711 / SE-37664: re-select the runtime from the agent's ordered pool at
+	// dispatch time (breaker-aware), closing the admission->dispatch gap the same
+	// way the legacy readiness recheck did. A manual "run now" bypasses the
+	// breaker/pool and pins the agent's own runtime after a plain readiness check
+	// (I8). Selection errors fail the run — no task is created — rather than
+	// routing work onto a runtime whose circuit could not be read.
+	selectedRuntime := agent.RuntimeID
+	fellBack := false
+	var chosen runtimeCandidate
+	var poolCandidates []runtimeCandidate
+	if actorUserID.Valid {
+		verdict, err := AgentReadiness(ctx, s.runtimeLookup(), agent)
+		if err != nil {
+			return fmt.Errorf("check agent readiness: %w", err)
+		}
+		if !verdict.Ready() {
+			return &errDispatchSkipped{reason: formatAdmissionReason(ap, verdict.Detail), code: verdict.Reason}
+		}
+	} else {
+		decision, firstVerdict, err := s.selectPoolRuntime(ctx, agent)
+		if err != nil {
+			return fmt.Errorf("select runtime from pool: %w", err)
+		}
+		poolCandidates = decision.Candidates
+		switch decision.Outcome {
+		case fallbackSelected:
+			selectedRuntime = decision.Chosen.RuntimeID
+			chosen = decision.Chosen
+			// A pick other than the agent's default runtime is an automatic
+			// quota/availability failover. Never silent (SE-37711 / SE-37664,
+			// parent §5): record it in the audit log now and mark the task
+			// snapshot below so run/task detail shows the reassignment.
+			if selectedRuntime != agent.RuntimeID {
+				fellBack = true
+				slog.Info("autopilot run_only auto-failover to fallback runtime",
+					"autopilot_id", util.UUIDToString(ap.ID),
+					"run_id", util.UUIDToString(run.ID),
+					"agent_id", util.UUIDToString(agent.ID),
+					"primary_runtime_id", util.UUIDToString(agent.RuntimeID),
+					"selected_runtime_id", util.UUIDToString(selectedRuntime),
+				)
+			}
+		case fallbackEmptyPool:
+			return &errDispatchSkipped{reason: formatAdmissionReason(ap, "agent has no runtime bound"), code: dispatch.ReasonAgentRuntimeRequired}
+		case fallbackAllHeld:
+			return &errDispatchSkipped{reason: poolAllHeldReason(ap, decision), code: dispatch.ReasonDeferred}
+		case fallbackAuthHeld:
+			// Auth/access hold on the primary: skip and hold, never fall over (F3).
+			return &errDispatchSkipped{reason: poolAuthHeldReason(ap, decision), code: dispatch.ReasonDeferred}
+		case fallbackNoneAvailable:
+			return &errDispatchSkipped{reason: formatAdmissionReason(ap, firstVerdict.Detail), code: firstVerdict.Reason}
+		}
 	}
 
 	// Fail-closed invocation gate for squad autopilots (admission principal =
@@ -1030,27 +1220,51 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	if err != nil {
 		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "workspace fail-closed: no accountable human for autopilot run"), code: dispatch.ReasonAttributionBlocked}
 	}
+	// Never-silent audit (F6): when the pool selector routed this dispatch off
+	// the agent's default runtime — a failover or a half-open probe — record the
+	// specific route in the visible trigger summary and the full structured
+	// evidence (source/target runtime+provider, binding priorities, per-binding
+	// hold class/until/reset source, circuit generation) in dispatch_runtime_audit.
+	// An ordinary dispatch onto the default runtime produces neither, so the
+	// common path is untouched.
+	routeMarker := fallbackRouteMarker(fellBack, chosen)
+	var dispatchAudit []byte
+	if routeMarker != "" {
+		audit := buildDispatchRuntimeAudit(dispatchAuditReason(fellBack, chosen), agent.RuntimeID, chosen, poolCandidates)
+		dispatchAudit, err = json.Marshal(audit)
+		if err != nil {
+			return fmt.Errorf("marshal dispatch runtime audit: %w", err)
+		}
+	}
 	apSource, _, apEvidenceKind, apEvidenceRef := attributionCreateParams(autopilotAttr)
-	task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
+	createParams := db.CreateAutopilotTaskParams{
 		ID:             dbid.NewV7(),
 		AgentID:        agent.ID,
-		RuntimeID:      agent.RuntimeID,
+		RuntimeID:      selectedRuntime,
 		Priority:       0,
 		AutopilotRunID: run.ID,
 		// Snapshot the autopilot title so task rows self-describe later
 		// without joining back to autopilot. Truncated for the same
 		// transmission-cost reason as comment-driven summaries.
 		TriggerSummary: pgtype.Text{
-			String: truncateForSummary(ap.Title, triggerSummaryMaxLen),
-			Valid:  ap.Title != "",
+			String: runOnlyTriggerSummary(ap.Title, routeMarker),
+			Valid:  ap.Title != "" || routeMarker != "",
 		},
+		DispatchRuntimeAudit: dispatchAudit,
 		OriginatorUserID:     autopilotAttr.UserID,
 		AccountableUserID:    autopilotAttr.AccountableUserID,
 		RuleVersionID:        autopilotAttr.RuleVersionID,
 		OriginatorSource:     apSource,
 		TriggerEvidenceKind:  apEvidenceKind,
 		TriggerEvidenceRefID: apEvidenceRef,
-	})
+	}
+	task, err := s.createRunOnlyTask(ctx, chosen, createParams)
+	if errors.Is(err, errProbeLeaseLost) {
+		// A concurrent scheduler already won the half-open probe for this
+		// runtime; defer rather than pile a second probe onto a provider that
+		// may still be refusing (F4).
+		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "half-open probe already in flight on selected runtime"), code: dispatch.ReasonDeferred}
+	}
 	if err != nil {
 		return fmt.Errorf("create autopilot task: %w", err)
 	}
@@ -1356,28 +1570,65 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 		// chance to succeed.
 		return "", "", false
 	}
-	verdict, err := AgentReadiness(ctx, s.runtimeLookup(), agent)
-	if err != nil {
-		slog.Warn("autopilot admission: failed to load runtime",
-			"autopilot_id", util.UUIDToString(ap.ID),
-			"runtime_id", util.UUIDToString(agent.RuntimeID),
-			"error", err,
-		)
-		return "", "", false
-	}
-	if !verdict.Ready() {
-		// A merely-offline machine still gets create_issue work: the issue is
-		// written server-side and the run waits for the laptop to come back. An
-		// unusable runtime does not qualify — nothing there can run until a
-		// human repairs it, so a doomed issue-create is not an improvement.
-		if ap.ExecutionMode == "create_issue" && verdict.Availability == AgentWaitable {
-			slog.Info("autopilot admission: allowing create_issue dispatch for offline runtime",
+	// SE-37711 / SE-37664: automatic run_only dispatch admits against the agent's
+	// ordered runtime pool, deferring when every ready runtime is held by a
+	// provider circuit (quota/auth) and failing over to a healthy binding
+	// otherwise. Manual "run now" (actorUserID valid) bypasses the breaker/pool
+	// and keeps the legacy single-runtime readiness check (I8: a deliberate human
+	// action targets the agent's own runtime). create_issue also keeps the legacy
+	// check: it writes the issue server-side and never pins an executing runtime
+	// here — the created issue is routed to a runtime later through the
+	// binding-aware claim path.
+	if ap.ExecutionMode == "run_only" && !actorUserID.Valid {
+		decision, firstVerdict, err := s.selectPoolRuntime(ctx, agent)
+		if err != nil {
+			// Same fail-open as the readiness DB error below: nothing is routed at
+			// admission time, so let the next tick (and dispatchRunOnly, which
+			// fails closed) handle a transient DB hiccup rather than swallow a run.
+			slog.Warn("autopilot admission: failed to select runtime from pool",
+				"autopilot_id", util.UUIDToString(ap.ID),
+				"agent_id", util.UUIDToString(agent.ID),
+				"error", err,
+			)
+			return "", "", false
+		}
+		switch decision.Outcome {
+		case fallbackEmptyPool:
+			return formatAdmissionReason(ap, "agent has no runtime bound"), dispatch.ReasonAgentRuntimeRequired, true
+		case fallbackAllHeld:
+			return poolAllHeldReason(ap, decision), dispatch.ReasonDeferred, true
+		case fallbackAuthHeld:
+			// Auth/access hold on the primary: skip and hold, never fall over (F3).
+			return poolAuthHeldReason(ap, decision), dispatch.ReasonDeferred, true
+		case fallbackNoneAvailable:
+			return formatAdmissionReason(ap, firstVerdict.Detail), firstVerdict.Reason, true
+		case fallbackSelected:
+			// A runtime is available; fall through to the invocation gate below.
+		}
+	} else {
+		verdict, err := AgentReadiness(ctx, s.runtimeLookup(), agent)
+		if err != nil {
+			slog.Warn("autopilot admission: failed to load runtime",
 				"autopilot_id", util.UUIDToString(ap.ID),
 				"runtime_id", util.UUIDToString(agent.RuntimeID),
-				"reason", verdict.Detail,
+				"error", err,
 			)
-		} else {
-			return formatAdmissionReason(ap, verdict.Detail), verdict.Reason, true
+			return "", "", false
+		}
+		if !verdict.Ready() {
+			// A merely-offline machine still gets create_issue work: the issue is
+			// written server-side and the run waits for the laptop to come back. An
+			// unusable runtime does not qualify — nothing there can run until a
+			// human repairs it, so a doomed issue-create is not an improvement.
+			if ap.ExecutionMode == "create_issue" && verdict.Availability == AgentWaitable {
+				slog.Info("autopilot admission: allowing create_issue dispatch for offline runtime",
+					"autopilot_id", util.UUIDToString(ap.ID),
+					"runtime_id", util.UUIDToString(agent.RuntimeID),
+					"reason", verdict.Detail,
+				)
+			} else {
+				return formatAdmissionReason(ap, verdict.Detail), verdict.Reason, true
+			}
 		}
 	}
 	// Invocation gate at the autopilot layer (MUL-3963 / MUL-4525). The
