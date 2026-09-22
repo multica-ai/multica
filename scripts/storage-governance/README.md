@@ -1,0 +1,118 @@
+# Storage governance runbook
+
+This directory contains two deliberately small host-safety jobs:
+
+- `storage_guard.py` samples the host once per minute and applies configured
+  low-water admission controls. It never archives or deletes data.
+- `retention_worker.py` is the single owner of external-volume canaries,
+  workspace GC eligibility, transactional archives, and the monthly ST-1
+  Electron updater residue audit.
+
+## Safe rollout
+
+Start the retention worker with both `archive_enabled` and `delete_source` set
+to `false`. In this mode every formal cron invocation checks the exact external
+volume UUID, verifies a nested canary tree by file count, byte count, entry
+metadata, and deterministic sample hashes, and writes only a GC dry-run report.
+
+GC eligibility is fail-closed. A workspace is listed as eligible only when its
+issue is `done` or `cancelled`, its matching run is terminal, the configured
+seven-day retention window has elapsed, children are terminal, no run/lease is
+active, no pin or open file exists, no recent write exists, and local identity
+agrees with the control plane. Filesystem traversal never follows symlinks;
+out-of-tree symlinks reject the candidate.
+
+After an operator approves a dry-run list, its one-time `approval_token` values
+must be put in `approved_candidates` before `archive_enabled` is enabled; keep
+`delete_source` false. A completed archive marker consumes the token so a later
+cron run cannot archive the same snapshot again. A transaction freezes the source manifest,
+copies to `.partial`, fsyncs and verifies it, atomically renames the archive,
+and writes `COMPLETE.json`, then re-hashes the committed payload. Automated
+source deletion is deliberately rejected until Multica exposes a producer-shared
+lease; filesystem isolation alone cannot close the open-file-descriptor race.
+
+The guard's minute path samples free space, swap, and daemon state before any
+recursive work. Directory/category scans run from a 15-minute cache after the
+breaker decision, so capacity attribution cannot delay low-water enforcement.
+
+Admission control is grouped by `daemon_id`, not by the first profile found.
+The guard discovers every live local `multica daemon start` process, resolves
+its profile-specific health endpoint, applies the same owner claim to every
+instance with the selected ID, and then re-reads every PID. An unqueryable or
+changing group fails the enforcement check closed; a different daemon ID is
+never paused by that claim.
+
+`retention_worker.py --workspace-stale-dry-run` is an observation-only scan of
+task directories whose directory mtime is older than one day. It writes paths
+and byte counts to `workspace_stale_report_path` with deletion explicitly
+unauthorized. The guard reports that amount as
+`workspace_gc_eligible_bytes` for capacity planning, while
+`workspace_gc_deletion_eligible_bytes` remains the stricter control-plane and
+lease-gated value. The stale signal never supplies an archive approval token.
+
+## ST-1 Electron updater audit
+
+The canonical producer is `~/.org/scripts/st1-electron-updater-audit.py`. The
+retention worker invokes that script once per Shanghai month, on or after
+`electron_updater_audit.producer_day_of_month`, from the verified cron-to-
+LaunchAgent lineage. The default producer day is 14, one day before the hard
+evidence gate opens. This preserves the LaunchAgent's Full Disk Access and
+prevents a permission-truncated report from being mistaken for valid evidence.
+
+A separate monthly producer receipt proves that the scheduled owner actually
+ran. Merely finding a report created by hand does not satisfy that receipt, so
+the first scheduled run after deployment commissions the schedule by producing
+fresh evidence. On or after `electron_updater_audit.day_of_month`, the worker
+validates the exact canonical schema and fails closed unless
+`scan_complete=true` and `scan_errors=[]`.
+
+When the monthly producer actually runs, that cron slot ends after publishing
+and validating its receipt. The next 15-minute slot performs the ordinary
+canary and GC pass. This keeps an FDA scan and the normal retention workload
+from sharing one sub-900-second launch budget.
+
+The canonical report's totals, per-candidate sizes, and mtimes feed the
+`warn_total_gib`, `warn_candidate_gib`, and stale thresholds. Threshold findings
+emit the existing alert once per evidence revision. They never move or delete a
+match; an incomplete `red` scan fails the formal worker closed.
+
+Commission the exact same scanner without cron lineage or the external archive:
+
+```bash
+/usr/bin/python3 /Users/example/.local/libexec/storage-governance/retention_worker.py \
+  --config /Users/example/.local/libexec/storage-governance/retention-config.json \
+  --electron-audit-only
+```
+
+Audit-only mode still takes the retention worker's single-instance lock, but is
+validation-only. Run the canonical script directly for manual incident
+response; scheduled evidence continues to come from the formal cron owner.
+
+## Formal cron lineage
+
+Use the same command for canary, GC audit, and archive. The environment marker
+prevents a normal manual invocation from being mistaken for a cron result:
+
+On macOS, `/usr/sbin/cron` and `/usr/bin/osascript` normally lack Full Disk
+Access. The formal entry therefore runs a receipt-synchronous bridge. The
+bridge proves its own live `cron` ancestry, writes a fresh one-time token, and
+starts a LaunchAgent whose AppleScript asks the FDA-approved Terminal app to
+execute the worker. The bridge then waits for a token-matched receipt. The
+worker refuses a green result unless that bridge process and its cron parent
+are still alive. Grant Terminal Full Disk Access before commissioning; a plain
+`do shell script` remains attributed to `osascript` and is insufficient for
+protected user containers:
+
+```cron
+*/15 * * * * /usr/bin/python3 /Users/example/.local/libexec/storage-governance/retention_cron_bridge.py --trigger /Users/example/.local/state/storage-governance/cron-trigger.json --receipt /Users/example/.local/state/storage-governance/cron-receipt.json --alert-log /Users/example/.local/state/storage-governance/retention-alerts.jsonl --config /Users/example/.local/libexec/storage-governance/retention-config.json --timeout 870
+```
+
+Keep the lock and report on the internal volume, and the archive root on the
+external volume. A lock collision or canary failure exits nonzero and records
+an alert; it never starts a second copy or removes a source.
+
+Keep the compiled AppleScript and its source on the same Terminal-mediated
+command, with the worker bounded by the 840-second Perl alarm and the bridge at
+870 seconds. Both bounds stay below the 900-second cron interval; the bridge
+gets 30 seconds to observe the worker result after the worker deadline instead
+of holding the overlap lock for hours.
