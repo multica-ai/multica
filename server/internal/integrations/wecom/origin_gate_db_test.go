@@ -30,6 +30,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	dbfx "github.com/multica-ai/multica/server/internal/testutil"
+
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -57,51 +59,46 @@ func seedOriginLab(t *testing.T, pool *pgxpool.Pool) originLab {
 		return id
 	}
 	tag := strings.ReplaceAll(newID(), "-", "")[:12]
-	wsID, userID, agentID, sessionID := newID(), newID(), newID(), newID()
 	lab := originLab{
 		retryClone: newID(), webUI: newID(), channel: newID(),
 		legacyPlain: newID(), legacyInRoom: newID(), legacyRetry: newID(), reaped: newID(),
 	}
 	parentID := newID() // the retry clone's batch owner
 
-	exec := func(sql string, args ...any) {
-		t.Helper()
-		if _, err := pool.Exec(ctx, sql, args...); err != nil {
-			t.Fatalf("seed: %s: %v", strings.SplitN(strings.TrimSpace(sql), "\n", 2)[0], err)
-		}
-	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM chat_message WHERE chat_session_id = $1`, sessionID)
-		_, _ = pool.Exec(ctx, `DELETE FROM agent_task_queue WHERE chat_session_id = $1`, sessionID)
-		_, _ = pool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID)
-		_, _ = pool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID)
-		_, _ = pool.Exec(ctx, `DELETE FROM channel_task_delivery WHERE task_id = ANY($1)`,
-			[]string{lab.legacyInRoom, lab.legacyRetry})
-		_, _ = pool.Exec(ctx, `DELETE FROM agent_runtime WHERE workspace_id = $1`, wsID)
-		_, _ = pool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, userID)
-		_, _ = pool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wsID)
+	// Fixtures rather than hand-written INSERTs and a hand-maintained DELETE
+	// chain: they delete in reverse creation order, so a shape added later
+	// cannot leave the teardown one row behind (AGENTS.md:118).
+	f := dbfx.New(pool, "", "")
+	f.WorkspaceID = f.Workspace(t, "origin "+tag, "origin-"+tag)
+	f.UserID = f.User(t, "Origin "+tag, "origin-"+tag+"@example.com")
+	agentID := f.Agent(t, "origin-agent-"+tag, "", dbfx.Cols{"runtime_mode": "local"})
+	sessionID := f.Insert(t, "chat_session", dbfx.Cols{
+		"workspace_id": f.WorkspaceID,
+		"agent_id":     agentID,
+		"creator_id":   f.UserID,
 	})
-
-	exec(`INSERT INTO workspace (id, name, slug) VALUES ($1, $2, $3)`,
-		wsID, "origin "+tag, "origin-"+tag)
-	exec(`INSERT INTO "user" (id, name, email) VALUES ($1, $2, $3)`,
-		userID, "Origin "+tag, "origin-"+tag+"@example.com")
-	exec(`INSERT INTO agent (id, workspace_id, name, runtime_mode) VALUES ($1, $2, $3, 'local')`,
-		agentID, wsID, "origin-agent-"+tag)
-	exec(`INSERT INTO chat_session (id, workspace_id, agent_id, creator_id) VALUES ($1, $2, $3, $4)`,
-		sessionID, wsID, agentID, userID)
 
 	// completed_at is not decoration: agent_task_queue_active_requires_runtime
 	// insists a row is either attached to a runtime or finished.
 	task := func(id string, owner any) {
 		t.Helper()
-		exec(`INSERT INTO agent_task_queue (id, agent_id, chat_session_id, status, completed_at, chat_input_task_id)
-		      VALUES ($1, $2, $3, 'completed', now(), $4)`, id, agentID, sessionID, owner)
+		f.Task(t, agentID, dbfx.Cols{
+			"id":                 id,
+			"chat_session_id":    sessionID,
+			"status":             "completed",
+			"completed_at":       dbfx.Raw("now()"),
+			"chat_input_task_id": owner,
+		})
 	}
 	msg := func(owner string, ingested bool) {
 		t.Helper()
-		exec(`INSERT INTO chat_message (chat_session_id, role, content, task_id, channel_ingested)
-		      VALUES ($1, 'user', 'q', $2, $3)`, sessionID, owner, ingested)
+		f.Insert(t, "chat_message", dbfx.Cols{
+			"chat_session_id":  sessionID,
+			"role":             "user",
+			"content":          "q",
+			"task_id":          owner,
+			"channel_ingested": ingested,
+		})
 	}
 
 	// The retry chain: FailTask's child inherits chat_input_task_id, and the
@@ -131,18 +128,17 @@ func seedOriginLab(t *testing.T, pool *pgxpool.Pool) originLab {
 	// the verdict alone reads it as web UI. CopyChannelTaskDelivery then hands
 	// it the parent's WeCom route anyway. A hand-built row could drift from
 	// either; these cannot.
+	//
 	// CreateRetryTask makes the clone ACTIVE, and
 	// agent_task_queue_active_requires_runtime (migration 251) needs a runtime
 	// on an active row. A real parent has one and the clone inherits it, so the
 	// fixture gives the parent one rather than relaxing the constraint.
-	runtimeID := newID()
-	exec(`INSERT INTO agent_runtime (id, workspace_id, name, runtime_mode, provider)
-	      VALUES ($1, $2, $3, 'local', 'claude_code')`,
-		runtimeID, wsID, "origin-runtime-"+tag)
-	exec(`UPDATE agent_task_queue SET runtime_id = $1 WHERE id = $2`, runtimeID, lab.legacyInRoom)
+	runtimeID := f.Runtime(t, "origin-runtime-"+tag)
+	f.Exec(t, `UPDATE agent_task_queue SET runtime_id = $1 WHERE id = $2`, runtimeID, lab.legacyInRoom)
 
 	q := db.New(pool)
-	clone, err := q.CreateRetryTask(context.Background(), db.CreateRetryTaskParams{
+	f.Cleanup(t, `DELETE FROM agent_task_queue WHERE id = $1`, lab.legacyRetry)
+	clone, err := q.CreateRetryTask(ctx, db.CreateRetryTaskParams{
 		ID:        mustPgUUID(t, lab.legacyInRoom),
 		NewTaskID: mustPgUUID(t, lab.legacyRetry),
 	})
@@ -157,17 +153,23 @@ func seedOriginLab(t *testing.T, pool *pgxpool.Pool) originLab {
 	// The other half of what FailTask writes. The parent's route is seeded flat
 	// because it is the inbound path's output, not the retry's; the clone's is
 	// made by the query FailTask actually calls.
-	exec(`INSERT INTO channel_task_delivery
-	        (task_id, binding_id, installation_id, channel_type, channel_chat_id, chat_type, route_revision)
-	      VALUES ($1, $2, $3, 'wecom', $4, 'group', 1)`,
-		lab.legacyInRoom, newID(), newID(), "room-"+tag)
-	if err := q.CopyChannelTaskDelivery(context.Background(), db.CopyChannelTaskDeliveryParams{
+	f.InsertNoID(t, "channel_task_delivery", dbfx.Cols{
+		"task_id":         lab.legacyInRoom,
+		"binding_id":      newID(),
+		"installation_id": newID(),
+		"channel_type":    "wecom",
+		"channel_chat_id": "room-" + tag,
+		"chat_type":       "group",
+		"route_revision":  1,
+	}, "task_id = $1", lab.legacyInRoom)
+	f.Cleanup(t, `DELETE FROM channel_task_delivery WHERE task_id = $1`, lab.legacyRetry)
+	if err := q.CopyChannelTaskDelivery(ctx, db.CopyChannelTaskDeliveryParams{
 		ChildTaskID:  mustPgUUID(t, lab.legacyRetry),
 		ParentTaskID: mustPgUUID(t, lab.legacyInRoom),
 	}); err != nil {
 		t.Fatalf("CopyChannelTaskDelivery: %v", err)
 	}
-	route, err := q.GetChannelTaskDelivery(context.Background(), mustPgUUID(t, lab.legacyRetry))
+	route, err := q.GetChannelTaskDelivery(ctx, mustPgUUID(t, lab.legacyRetry))
 	if err != nil {
 		t.Fatalf("the clone has no route: %v — without one it is not a row anyone is waiting on, "+
 			"and the case stops being the one that regressed", err)
