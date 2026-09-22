@@ -1614,6 +1614,194 @@ func TestFinalizeRefusesToRecordADeliveryFromOffTheBranch(t *testing.T) {
 	_ = removeLocalWorktreeDir(repo, wt.Path, worktreeTestLogger())
 }
 
+// The PR workflow asks the agent to work on a task-named feature branch and
+// push it for the PR. Ending the run there must not fail the delivery: the
+// delivered tip strictly extends the conversation branch, so Finalize books it
+// by fast-forwarding the branch instead (MYMO-124).
+func TestFinalizeFastForwardsTheConversationBranchToAFeatureBranchDelivery(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+
+	wt := prepareTurn(t, repo, "MUL-124", turnOneTask)
+	base := gitRun(t, repo, "rev-parse", wt.Branch)
+	if base != wt.BaseCommit {
+		t.Fatalf("branch tip = %s, want this turn's base %s", base, wt.BaseCommit)
+	}
+
+	gitRun(t, wt.Path, "checkout", "-b", "feature/task-delivery")
+	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "delivered on the feature branch\n")
+	gitRun(t, wt.Path, "add", "-A")
+	gitRun(t, wt.Path, "commit", "-m", "feature delivery")
+	delivered := gitRun(t, wt.Path, "rev-parse", "HEAD")
+
+	outcome := finalizeOK(t, wt)
+	if outcome.Branch != wt.Branch {
+		t.Fatalf("Branch = %q, want conversation branch %q", outcome.Branch, wt.Branch)
+	}
+	if got := gitRun(t, repo, "rev-parse", wt.Branch); got != delivered {
+		t.Fatalf("conversation branch = %s, want fast-forwarded delivery %s", got, delivered)
+	}
+	ref, err := readUserStateRef(repo, wt.Branch)
+	if err != nil {
+		t.Fatalf("readUserStateRef: %v", err)
+	}
+	record, err := readBranchRecord(repo, ref)
+	if err != nil {
+		t.Fatalf("readBranchRecord: %v", err)
+	}
+	if record.checkpoint != delivered {
+		t.Errorf("checkpoint = %s, want delivered tip %s", record.checkpoint, delivered)
+	}
+
+	// The next turn continues from the recovered delivery, not the old tip.
+	next := prepareTurn(t, repo, "MUL-124", turnTwoTask)
+	if !next.Continued {
+		t.Fatal("next turn did not continue the fast-forwarded conversation branch")
+	}
+	if got := strings.TrimRight(readFile(t, filepath.Join(next.WorkDir, "agent.txt")), "\r\n"); got != "delivered on the feature branch" {
+		t.Errorf("next turn lost the delivered file: %q", got)
+	}
+	finalizeOK(t, next)
+}
+
+// A read-only run may end with its worktree on a foreign ref — a QA task
+// inspecting the PR branch, a detached checkout of another line. Nothing was
+// delivered onto the conversation branch and the branch still sits on this
+// turn's baseline, so recording the branch's own tip lets the run finish
+// instead of failing it after the fact (MYMO-124).
+func TestFinalizeSucceedsWhenTheRunEndedOnAForeignRefWithoutDelivering(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	writeFile(t, filepath.Join(repo, "tracked.txt"), "user work in progress\n")
+
+	wt := prepareTurn(t, repo, "MUL-124", turnOneTask)
+	baseline := gitRun(t, repo, "rev-parse", wt.Branch)
+	if baseline != wt.BaseCommit {
+		t.Fatalf("branch tip = %s, want this turn's base %s", baseline, wt.BaseCommit)
+	}
+
+	// The agent lines the worktree up on a foreign branch diverging from the
+	// baseline, works there, and ends the run without touching its own line.
+	gitRun(t, wt.Path, "checkout", "-b", "pr-branch", "HEAD^")
+	writeFile(t, filepath.Join(wt.WorkDir, "pr.txt"), "inspected elsewhere\n")
+	gitRun(t, wt.Path, "add", "-A")
+	gitRun(t, wt.Path, "commit", "-m", "work on the foreign line")
+	foreign := gitRun(t, wt.Path, "rev-parse", "HEAD")
+
+	outcome := finalizeOK(t, wt)
+	if outcome.Branch != wt.Branch {
+		t.Fatalf("Branch = %q, want conversation branch %q", outcome.Branch, wt.Branch)
+	}
+	if got := gitRun(t, repo, "rev-parse", wt.Branch); got != baseline {
+		t.Fatalf("conversation branch = %s, want its untouched baseline %s", got, baseline)
+	}
+	// The checkpoint is the branch's own tip, never the foreign head.
+	ref, err := readUserStateRef(repo, wt.Branch)
+	if err != nil {
+		t.Fatalf("readUserStateRef: %v", err)
+	}
+	record, err := readBranchRecord(repo, ref)
+	if err != nil {
+		t.Fatalf("readBranchRecord: %v", err)
+	}
+	if record.checkpoint != baseline {
+		t.Errorf("checkpoint = %s, want the branch's baseline %s", record.checkpoint, baseline)
+	}
+	// The foreign work is not destroyed: it lives on its own ref in the repo.
+	if got := gitRun(t, repo, "rev-parse", "pr-branch"); got != foreign {
+		t.Errorf("foreign branch = %s, want the work it carried %s", got, foreign)
+	}
+
+	next := prepareTurn(t, repo, "MUL-124", turnTwoTask)
+	if !next.Continued {
+		t.Fatal("next turn did not continue the conversation branch after an off-ref run")
+	}
+	finalizeOK(t, next)
+}
+
+// The fast-forward recovery is only safe while nobody else has the
+// conversation branch checked out: update-ref would move that checkout's HEAD
+// underneath it (MYMO-124).
+func TestFinalizeRefusesTheFastForwardWhileTheBranchIsCheckedOutElsewhere(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+
+	wt := prepareTurn(t, repo, "MUL-124", turnOneTask)
+	gitRun(t, wt.Path, "checkout", "-b", "feature/task-delivery")
+	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "off-branch delivery\n")
+	gitRun(t, wt.Path, "add", "-A")
+	gitRun(t, wt.Path, "commit", "-m", "off-branch delivery")
+	delivered := gitRun(t, wt.Path, "rev-parse", "HEAD")
+
+	other := filepath.Join(t.TempDir(), "conversation")
+	gitRun(t, repo, "worktree", "add", "--quiet", other, wt.Branch)
+
+	outcome, err := wt.Finalize(worktreeTestLogger())
+	if err == nil {
+		t.Fatal("Finalize moved a conversation branch another worktree had checked out")
+	}
+	if !strings.Contains(err.Error(), "checked out at") {
+		t.Errorf("error does not explain that the branch is in use: %v", err)
+	}
+	if outcome.PreservedPath != wt.Path {
+		t.Errorf("PreservedPath = %q, want %q", outcome.PreservedPath, wt.Path)
+	}
+	if got := gitRun(t, repo, "rev-parse", wt.Branch); got != wt.BaseCommit {
+		t.Errorf("branch moved to %s, want its baseline %s", got, wt.BaseCommit)
+	}
+	if got := gitRun(t, repo, "rev-parse", "feature/task-delivery"); got != delivered {
+		t.Errorf("delivery ref = %s, want %s", got, delivered)
+	}
+	_ = removeLocalWorktreeDir(repo, wt.Path, worktreeTestLogger())
+}
+
+// The fast-forward recovery must never become a force-update. When the
+// conversation branch moved on a different line while the delivery sits on its
+// own diverged line, no honest answer exists for whose work the record would
+// pin: refuse, keep the worktree, leave the branch alone (MYMO-124).
+func TestFinalizeRefusesWhenTheBranchMovedAndTheDeliveryDiverged(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+
+	wt := prepareTurn(t, repo, "MUL-124", turnOneTask)
+	gitRun(t, wt.Path, "checkout", "-b", "feature/task-delivery")
+	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "diverged delivery\n")
+	gitRun(t, wt.Path, "add", "-A")
+	gitRun(t, wt.Path, "commit", "-m", "diverged delivery")
+	delivered := gitRun(t, wt.Path, "rev-parse", "HEAD")
+
+	// A concurrent checkout advances the conversation branch meanwhile.
+	other := filepath.Join(t.TempDir(), "conversation")
+	gitRun(t, repo, "worktree", "add", "--quiet", other, wt.Branch)
+	writeFile(t, filepath.Join(other, "concurrent.txt"), "concurrent conversation work\n")
+	gitRun(t, other, "add", "-A")
+	gitRun(t, other, "commit", "-m", "concurrent conversation work")
+	conversationTip := gitRun(t, repo, "rev-parse", wt.Branch)
+	gitRun(t, repo, "worktree", "remove", "--force", other)
+
+	if _, err := gitTry(t, repo, "merge-base", "--is-ancestor", conversationTip, delivered); err == nil {
+		t.Fatal("test setup did not create divergent histories")
+	}
+
+	outcome, err := wt.Finalize(worktreeTestLogger())
+	if err == nil {
+		t.Fatal("Finalize accepted a delivery that diverged from the conversation branch")
+	}
+	if !strings.Contains(err.Error(), "did not deliver onto its own branch") {
+		t.Errorf("error does not explain the mismatch: %v", err)
+	}
+	if outcome.Branch != "" {
+		t.Errorf("outcome named branch %q for a refused delivery", outcome.Branch)
+	}
+	if outcome.PreservedPath != wt.Path {
+		t.Errorf("PreservedPath = %q, want %q", outcome.PreservedPath, wt.Path)
+	}
+	if got := gitRun(t, repo, "rev-parse", wt.Branch); got != conversationTip {
+		t.Errorf("branch moved to %s, want the concurrent tip %s", got, conversationTip)
+	}
+	_ = removeLocalWorktreeDir(repo, wt.Path, worktreeTestLogger())
+}
+
 // A branch created by this prepare always gets a commit of its own, even when
 // the user's directory was clean and there was nothing to replay. Without it
 // the branch would sit exactly where the user's HEAD does, and nothing would
