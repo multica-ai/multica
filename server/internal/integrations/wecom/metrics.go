@@ -100,14 +100,21 @@ type Metrics interface {
 	// deliver, labelled with why (outbound_outcome.go's closed reason set).
 	// Every reason here leaves somebody in WeCom waiting on an answer that is
 	// not coming, so this IS an error total and the label says which failure it
-	// was. The ordinary outcomes — a question typed in the web UI on a
-	// WeCom-bound session, an installation revoked between trigger and reply —
-	// are not counted here; RecordOutboundSkipped has them.
+	// was — most of them before the frame ever reaches WeCom. The completions
+	// this adapter did not owe, and the ones nothing here can attribute to a
+	// WeCom chat, are counted apart, by RecordOutboundSkipped.
 	RecordOutboundDropped(reason string)
-	// RecordOutboundSkipped — a completion this adapter was never going to
-	// deliver, because it was not owed to a WeCom user in the first place. Kept
-	// apart from dropped on purpose: counting a web-UI question's answer as a
-	// failed WeCom delivery makes ordinary web usage look like an outage.
+	// RecordOutboundSkipped — a completion this adapter did not send because it
+	// was not WeCom's to send, labelled with why (outbound_outcome.go's closed
+	// skip set). Kept apart from dropped on purpose: counting a web-UI
+	// question's answer as a failed WeCom delivery makes ordinary web usage look
+	// like an outage.
+	//
+	// Not every reason here is harmless, so this total is not one to read as a
+	// single number. no_delivery_row is a turn the channel ingested with no row
+	// saying which chat — a reply that may well be owed, with nothing left that
+	// can name the room — and it is the one reason in the set that logs at
+	// WARN. Alert on it by label, not on the sum.
 	RecordOutboundSkipped(reason string)
 
 	// RecordAttachmentDelivered / RecordAttachmentDropped count FILES, one per

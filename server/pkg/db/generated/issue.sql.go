@@ -226,10 +226,10 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    stage, last_activity_at, id
+    stage, properties, last_activity_at, id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, now(), COALESCE($17::uuid, gen_random_uuid())
+    $16, COALESCE($17::jsonb, '{}'::jsonb), now(), COALESCE($18::uuid, gen_random_uuid())
 ) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state
 `
 
@@ -250,6 +250,7 @@ type CreateIssueParams struct {
 	Number        int32       `json:"number"`
 	ProjectID     pgtype.UUID `json:"project_id"`
 	Stage         pgtype.Int4 `json:"stage"`
+	Properties    []byte      `json:"properties"`
 	ID            pgtype.UUID `json:"id"`
 }
 
@@ -271,6 +272,7 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 		arg.Number,
 		arg.ProjectID,
 		arg.Stage,
+		arg.Properties,
 		arg.ID,
 	)
 	var i Issue
@@ -313,10 +315,10 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    origin_type, origin_id, stage, last_activity_at, id
+    origin_type, origin_id, stage, properties, last_activity_at, id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17, $18, now(), COALESCE($19::uuid, gen_random_uuid())
+    $16, $17, $18, COALESCE($19::jsonb, '{}'::jsonb), now(), COALESCE($20::uuid, gen_random_uuid())
 ) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state
 `
 
@@ -339,6 +341,7 @@ type CreateIssueWithOriginParams struct {
 	OriginType    pgtype.Text `json:"origin_type"`
 	OriginID      pgtype.UUID `json:"origin_id"`
 	Stage         pgtype.Int4 `json:"stage"`
+	Properties    []byte      `json:"properties"`
 	ID            pgtype.UUID `json:"id"`
 }
 
@@ -362,6 +365,7 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 		arg.OriginType,
 		arg.OriginID,
 		arg.Stage,
+		arg.Properties,
 		arg.ID,
 	)
 	var i Issue

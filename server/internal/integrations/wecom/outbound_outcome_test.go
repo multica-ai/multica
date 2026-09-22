@@ -158,19 +158,136 @@ func TestDeliveredIsCounted(t *testing.T) {
 // TestNonWecomSessionIsNotADrop — this subscriber sees every chat:done in the
 // deployment, including Slack's and the web UI's. Those are not this adapter's
 // to answer and must not inflate the drop rate.
-func TestNonWecomSessionIsNotADrop(t *testing.T) {
+//
+// The three of them leave by three different exits, and which one fired is the
+// whole question an operator brings here: "the answer is in Multica and the
+// chat stayed quiet" is a report about somebody waiting when the turn had a
+// route and nobody can name it, and a non-event when it was Slack's turn all
+// along.
+//
+// REVERSE VERIFICATION: return nil from either of the two branches in
+// processEvent instead of naming a skip reason, and the counters for the two
+// exits collapse to zero while the drop rate stays at zero either way — which
+// is exactly the indistinguishability this pins. Build and vet stay silent.
+// The auto-retry of a legacy channel turn. FailTask's clone inherits the
+// parent's NULL chat_input_task_id and owns no messages of its own, so the
+// batch is the one migration 158 left with no owner at all, and the clone owns
+// no messages of its own — so a gate that keyed the batch on the task's own id
+// would read it as web UI, while CopyChannelTaskDelivery has already handed it
+// the parent's WeCom route. The room waits forever and the silence is logged at
+// DEBUG as the most ordinary event in the deployment.
+//
+// A batch with no owner is channel-ingested, which is what
+// engine.TaskInputIsChannelIngested has always answered for the same row and
+// what #5645 shipped. This pins that the one-read gate did not change it.
+func TestTheAutoRetryOfALegacyChannelTurnStillAnswersTheRoom(t *testing.T) {
 	t.Parallel()
 	q := deliverableTurn(t)
-	q.sessionErr = pgx.ErrNoRows
+	q.fileNoOwnerTask(t, outcomeTask) // NULL chat_input_task_id, no messages of its own
 	r := newOutcomeRig(t, q, true)
 
 	r.o.handleEvent(outcomeEvent())
 
-	if got := r.mx.get("outbound_dropped"); got != 0 {
-		t.Errorf("dropped = %d; another platform's session is not a WeCom drop", got)
+	if n := r.frames(); n != 1 {
+		t.Fatalf("frames = %d, want 1 — the room this retry belongs to is still waiting on it. log:\n%s",
+			n, r.logs.String())
 	}
-	if r.logs.Len() != 0 {
-		t.Errorf("logged something for another platform's session:\n%s", r.logs.String())
+	if got := r.mx.get("outbound_skipped:" + string(skipOriginNotChannel)); got != 0 {
+		t.Errorf("skipped as a web turn %d times; a delivery row said otherwise", got)
+	}
+}
+
+func TestNonWecomSessionIsNotADrop(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		reason     skipReason
+		actionable bool
+		// notOwed is whether the log may say "not owed to WeCom". True only
+		// where that is established; the missing-route pair are the two exits
+		// where a reply may have been owed, or nothing can say.
+		notOwed bool
+		setup   func(t *testing.T, q *fakeOutboundQueries)
+	}{
+		{
+			// Slack's or Lark's turn, on the bus this subscriber shares.
+			name: "another platform's delivery row", reason: skipNotWecomTurn, notOwed: true,
+			setup: func(_ *testing.T, q *fakeOutboundQueries) { q.sessionChannelType = "slack" },
+		},
+		{
+			// Asked in the Multica web UI on a session that originated in a
+			// room. There is no room waiting.
+			name: "asked in the web UI", reason: skipOriginNotChannel, notOwed: true,
+			setup: func(_ *testing.T, q *fakeOutboundQueries) { q.channelIngested = askedInTheWebUI() },
+		},
+		{
+			// Asked in the Multica web UI on a session that never touched a
+			// channel, which is every ordinary turn in the deployment: no
+			// delivery row, and none was ever owed. It has to leave by the web
+			// UI's exit and not the missing-route one, or the loudest line in
+			// the log fires once per web message.
+			name: "asked in the web UI with no delivery row", reason: skipOriginNotChannel, notOwed: true,
+			setup: func(_ *testing.T, q *fakeOutboundQueries) {
+				q.channelIngested = askedInTheWebUI()
+				q.sessionErr = pgx.ErrNoRows
+			},
+		},
+		{
+			// A channel turn whose route was never recorded. Somebody asked in
+			// a room and nothing here can say which one, so this is the one an
+			// operator has to act on.
+			name: "a channel turn with no delivery row", reason: skipNoDeliveryRow, actionable: true,
+			setup: func(_ *testing.T, q *fakeOutboundQueries) { q.sessionErr = pgx.ErrNoRows },
+		},
+		{
+			// The other half of the pair above. The gate delivered this one
+			// because a batch with no owner is channel-ingested, and then there
+			// was no route to deliver it on. It leaves by its own exit, one
+			// level quieter: a pre-158 web turn that auto-retried has exactly
+			// this shape, and warning about it would put the loudest line this
+			// adapter has on ordinary traffic.
+			name: "no delivery row and no batch owner to attribute it to", reason: skipRouteUnattributable,
+			setup: func(t *testing.T, q *fakeOutboundQueries) {
+				q.fileNoOwnerTask(t, outcomeTask)
+				q.sessionErr = pgx.ErrNoRows
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			q := deliverableTurn(t)
+			tc.setup(t, q)
+			r := newOutcomeRig(t, q, true)
+
+			r.o.handleEvent(outcomeEvent())
+
+			if got := r.mx.get("outbound_dropped"); got != 0 {
+				t.Errorf("dropped = %d; a turn this adapter never owed is not a WeCom drop", got)
+			}
+			if got := r.mx.get("outbound_skipped:" + string(tc.reason)); got != 1 {
+				t.Fatalf("outbound_skipped:%s = %d, want 1 — this exit is unnamed from outside. log:\n%s",
+					tc.reason, got, r.logs.String())
+			}
+			if n := r.frames(); n != 0 {
+				t.Errorf("frames = %d, want 0 — nothing was owed to this chat", n)
+			}
+			out := r.logs.String()
+			if !strings.Contains(out, "reason="+string(tc.reason)) {
+				t.Errorf("log does not name the reason:\n%s", out)
+			}
+			// The actionable one is a WARN an operator can alert on; the
+			// ordinary two stay at DEBUG, where they are a rate rather than a
+			// page.
+			if warned := strings.Contains(out, "level=WARN"); warned != tc.actionable {
+				t.Errorf("level=WARN present = %v, want %v:\n%s", warned, tc.actionable, out)
+			}
+			// "Not owed" is a claim about the obligation, and the log is what an
+			// operator greps. It holds for the exits where it is established and
+			// for no other.
+			if said := strings.Contains(out, "not owed"); said != tc.notOwed {
+				t.Errorf("log says \"not owed\" = %v, want %v:\n%s", said, tc.notOwed, out)
+			}
+		})
 	}
 }
 
@@ -403,5 +520,221 @@ func TestWorseUnconfirmedReason_IsARuleNotALoopOrder(t *testing.T) {
 		if got := worseUnconfirmedReason(tc.a, tc.b); got != tc.want {
 			t.Errorf("worseUnconfirmedReason(%q, %q) = %q, want %q", tc.a, tc.b, got, tc.want)
 		}
+	}
+}
+
+// TestAReapedTaskRowIsStillADrop — the origin gate has to read a task row to
+// answer anything, and that row can be gone: cancelled and reaped while its
+// completion was in flight. That is not an answer to "where was this asked", it
+// is the absence of one, and main counted it as
+// outbound_dropped{reason="task_missing"} at WARN.
+//
+// Folded into a gate that returns a bool it became origin_not_channel at DEBUG
+// — a lost reply wearing the label of the most ordinary event in the
+// deployment, one level below where anybody is looking. That is the
+// indistinguishability this file exists to remove, put back by the change that
+// removes it.
+//
+// REVERSE VERIFICATION: return originWebUI from taskOriginOf's pgx.ErrNoRows
+// branch (the collapse a bool forces) and both cases fail on the first
+// assertion, with outbound_dropped:task_missing = 0 and a DEBUG
+// origin_not_channel line in the log the failure prints.
+func TestAReapedTaskRowIsStillADrop(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		setup func(q *fakeOutboundQueries)
+	}{
+		{
+			// The case main covered: the delivery row is there and says wecom,
+			// so this turn WAS ours and somebody is owed the answer.
+			name:  "with a wecom delivery row",
+			setup: func(*fakeOutboundQueries) {},
+		},
+		{
+			// No delivery row either, so nothing here can even say which
+			// platform the turn belonged to. Counted the same way regardless: a
+			// task row that vanished mid-completion is not ordinary for any of
+			// them, and the missing-task-id branch at the top of processEvent
+			// already files every platform's ending under this reason.
+			name:  "with no delivery row",
+			setup: func(q *fakeOutboundQueries) { q.sessionErr = pgx.ErrNoRows },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			q := deliverableTurn(t)
+			q.originErr = pgx.ErrNoRows
+			tc.setup(q)
+			r := newOutcomeRig(t, q, true)
+
+			r.o.handleEvent(outcomeEvent())
+
+			if got := r.mx.get("outbound_dropped:" + string(dropTaskMissing)); got != 1 {
+				t.Fatalf("outbound_dropped:%s = %d, want 1 — a task row that is gone is a missing row, "+
+					"not a verdict about where the question was asked. log:\n%s",
+					dropTaskMissing, got, r.logs.String())
+			}
+			if got := r.mx.get("outbound_skipped:" + string(skipOriginNotChannel)); got != 0 {
+				t.Errorf("outbound_skipped:%s = %d; this was not a question typed in the web UI, and "+
+					"filing it as one is how the case disappears", skipOriginNotChannel, got)
+			}
+			out := r.logs.String()
+			if !strings.Contains(out, "reason="+string(dropTaskMissing)) {
+				t.Errorf("log does not name the reason:\n%s", out)
+			}
+			// WARN, not DEBUG: main's level for this, and the level an operator
+			// alerts on. At DEBUG it is read as a rate, which is the wrong
+			// treatment for a row that should never be missing.
+			if !strings.Contains(out, "level=WARN") {
+				t.Errorf("a reaped task row logged below WARN:\n%s", out)
+			}
+			if n := r.frames(); n != 0 {
+				t.Errorf("frames = %d, want 0 — nothing could be addressed", n)
+			}
+		})
+	}
+}
+
+// Every channel's chat:done pays for the origin gate, and what this pins is the
+// PRICE. The gate runs ahead of the delivery-row lookup so a run typed in the
+// web UI can give the room's bubble back before anything else touches the round
+// (#8355), which means this subscriber asks it once for every completion on a
+// bus every channel publishes to — another platform's turn included.
+//
+// ONE keyed read, where it used to be two: GetAgentTask, then the
+// channel_ingested stamp. Both were on the completion response's path — this
+// runs inside events.Bus.Publish, below CompleteTaskWithTransition, which the
+// daemon's POST /tasks/{id}/complete waits for — so the round trip saved is one
+// the user waits for, on every completion in the deployment.
+//
+// Pinned because a cost paid once per completion is the kind that is measured
+// once, written into a comment, and then grows back.
+//
+// REVERSE VERIFICATION: put the two-read pair back and this fails with 2.
+func TestTheOriginGateCostsOneReadPerCompletion(t *testing.T) {
+	t.Parallel()
+	q := deliverableTurn(t)
+	q.sessionChannelType = "slack" // another channel's turn: the busiest shape on a shared bus
+	r := newOutcomeRig(t, q, true)
+
+	r.o.handleEvent(outcomeEvent())
+
+	if got := q.originGateReads; got != 1 {
+		t.Fatalf("the origin gate ran %d read(s) for one completion, want exactly 1", got)
+	}
+	if got := r.mx.get("outbound_skipped:" + string(skipNotWecomTurn)); got != 1 {
+		t.Fatalf("outbound_skipped:%s = %d, want 1", skipNotWecomTurn, got)
+	}
+}
+
+// And the path that DOES pay for it, with the price written down. Every
+// completion of a question typed in the Multica web UI arrives in the
+// no-delivery-row branch — EnqueueChatTask writes no delivery row, only
+// EnqueueChannelChatTask does — so on a deployment running WeCom this branch,
+// not the one with a row, carries most of the traffic.
+//
+// ONE read each time, and the assertion is an equality on both sides for that
+// reason: GetTaskChannelOrigin answers task existence and channel provenance
+// together, so the branch costs one round trip on top of the delivery lookup
+// main already did. It was two — GetAgentTask, then the channel_ingested stamp
+// — and every one of them was on the completion response's path, see the
+// contract above taskOriginOf.
+//
+// Pinned because a cost paid once per web message is the kind that is measured
+// once, written into a comment, and then grows. The exit table is
+// TestNonWecomSessionIsNotADrop's; what this one owns is the price and what the
+// price buys.
+//
+// REVERSE VERIFICATION: split the gate back into GetAgentTask plus
+// TaskHasChannelIngestedMessages and this fails with 2 lookups; drop the gate
+// from that branch and record skipNoDeliveryRow unconditionally — the cheap
+// version the cost argument pushes toward — and it fails with 0 lookups and
+// no_delivery_row in place of origin_not_channel, which is the loudest line in
+// the file firing once per web message.
+func TestTheWebUITurnWithNoRowPaysForTheOriginGate(t *testing.T) {
+	t.Parallel()
+	q := deliverableTurn(t)
+	q.channelIngested = askedInTheWebUI()
+	q.sessionErr = pgx.ErrNoRows
+	r := newOutcomeRig(t, q, true)
+
+	r.o.handleEvent(outcomeEvent())
+
+	if got := q.originAskedFor; len(got) != 1 || got[0] != outcomeTask {
+		t.Errorf("origin-classification queries = %v, want exactly one, keyed on the completed task "+
+			"%s — this runs on every web-UI completion in the deployment, and the completion "+
+			"response waits for it", got, outcomeTask)
+	}
+	// What the read buys: this turn leaves by the web UI's exit at DEBUG
+	// instead of the missing-route WARN.
+	if got := r.mx.get("outbound_skipped:" + string(skipOriginNotChannel)); got != 1 {
+		t.Fatalf("outbound_skipped:%s = %d, want 1 — then the lookup bought nothing. log:\n%s",
+			skipOriginNotChannel, got, r.logs.String())
+	}
+}
+
+// TestAGateFailureIsNotAnUnconfirmedReply — a read that fails before anything
+// reaches a socket is not an unconfirmed delivery.
+//
+// unconfirmedReason maps context.Canceled and context.DeadlineExceeded to
+// "interrupted", and it is right to: on the SEND path a context error leaves a
+// frame that may already be at the peer, which outbound_media.go:478-485 argues
+// for at length. handleEvent then applies that reading to everything
+// processEvent returns, including reads taken long before any byte moves — and
+// an unconfirmed reply tells an operator the user may ALREADY HAVE this
+// message, so a resend would duplicate it and the right move is to go and look.
+// For a lookup that failed, all of that is false.
+//
+// Both of the origin gate's call sites are here because they fail for the same
+// reason and must record the same thing. What they do NOT share is the budget:
+// see the test below.
+//
+// REVERSE VERIFICATION: return the gate's error from either branch instead of
+// recording it, and that row fails with outbound_dropped:transport_error = 0
+// and an outbound_unconfirmed:interrupted WARN in the log the failure prints.
+func TestAGateFailureIsNotAnUnconfirmedReply(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		setup func(q *fakeOutboundQueries)
+	}{
+		{
+			// The observability call site: no delivery row, so nothing was
+			// ever going to be sent and the read only decides a log level.
+			name:  "no delivery row",
+			setup: func(q *fakeOutboundQueries) { q.sessionErr = pgx.ErrNoRows },
+		},
+		{
+			// The delivery call site: the row says the turn is WeCom's, so a
+			// reply WAS owed. Still nothing on the wire — the gate is upstream
+			// of the socket — so still a definite drop, not an unknown.
+			name:  "a wecom delivery row",
+			setup: func(*fakeOutboundQueries) {},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			q := deliverableTurn(t)
+			q.originErr = context.DeadlineExceeded
+			tc.setup(q)
+			r := newOutcomeRig(t, q, true)
+
+			r.o.handleEvent(outcomeEvent())
+
+			if got := r.mx.get("outbound_unconfirmed"); got != 0 {
+				t.Errorf("outbound_unconfirmed = %d; nothing was written to a socket, so telling an "+
+					"operator the user may already have this reply is false. log:\n%s",
+					got, r.logs.String())
+			}
+			if got := r.mx.get("outbound_dropped:" + string(dropTransport)); got != 1 {
+				t.Fatalf("outbound_dropped:%s = %d, want 1 — a turn this adapter could not classify "+
+					"at all still has to be counted once, and definitely. log:\n%s",
+					dropTransport, got, r.logs.String())
+			}
+			if n := r.frames(); n != 0 {
+				t.Errorf("frames = %d, want 0", n)
+			}
+		})
 	}
 }

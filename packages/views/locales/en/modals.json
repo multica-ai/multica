@@ -186,6 +186,7 @@
     "toast_link_subissues_partial": "Failed to link {{failed}} of {{total}} sub-issues",
     "toast_link_labels_failed": "Failed to attach labels",
     "toast_set_properties_failed": "Could not set {{count}} custom property values",
+    "unavailable_property_removed": "An unavailable custom property was removed from the draft. Review it before submitting again.",
     "switch_to_agent": "Switch to Agent",
     "switch_to_agent_tooltip": "Switch to create with agent — describe in one line and let the agent file it",
     "switch_to_manual": "Switch to Manual",

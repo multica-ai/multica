@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issueproperty"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -307,126 +307,20 @@ func selectOptionsHint(cfg PropertyConfig) string {
 // Actor values (MUL-6286)
 // ---------------------------------------------------------------------------
 
-// actorPropertyKinds is the V1 value range for actor properties: workspace
-// members only. The issue assignee also accepts "agent" and "squad", but
-// neither belongs in a passive reference yet — an agent reference drags in the
-// whole agent-visibility question (private / non-allow-listed agents must not
-// become discoverable by id) for no demonstrated use case, and a squad is a
-// routing target rather than a person.
-//
-// The stored form is "<kind>:<uuid>", so widening this list is a one-line
-// change: no migration, no new property type, and existing definitions gain
-// the new kind in place. Anything added here that is NOT universally visible
-// to every workspace member (an agent, for one) must also restore a visibility
-// gate on both the write path and the table-facet read path.
-var actorPropertyKinds = []string{"member"}
+// Compatibility aliases keep the focused handler tests on the same helper
+// names while the implementation is shared with IssueService.Create.
+type actorRef = issueproperty.ActorRef
 
-// actorRef is a parsed "<kind>:<uuid>" property value.
-type actorRef struct {
-	Kind string
-	ID   string
-}
-
-func (a actorRef) String() string { return a.Kind + ":" + a.ID }
-
-func propertyTypeIsActor(t string) bool {
-	return t == "actor" || t == "multi_actor"
-}
-
-func actorKindsHint() string {
-	return strings.Join(actorPropertyKinds, " / ")
-}
-
-// parseActorRef splits a stored actor value. Members are referenced by
-// user_id — the same id the assignee pair uses — so "who is this" resolves
-// identically everywhere in the product.
+func propertyTypeIsActor(t string) bool { return issueproperty.IsActor(t) }
+func actorKindsHint() string            { return issueproperty.ActorKindsHint() }
 func parseActorRef(s string) (actorRef, error) {
-	kind, id, found := strings.Cut(s, ":")
-	if !found {
-		return actorRef{}, fmt.Errorf("value must look like \"<kind>:<uuid>\" where kind is one of: %s", actorKindsHint())
-	}
-	valid := false
-	for _, k := range actorPropertyKinds {
-		if kind == k {
-			valid = true
-			break
-		}
-	}
-	if !valid {
-		return actorRef{}, fmt.Errorf("unknown actor kind %q; valid kinds: %s", kind, actorKindsHint())
-	}
-	parsed, err := uuid.Parse(id)
-	if err != nil {
-		return actorRef{}, fmt.Errorf("actor id in %q must be a UUID", s)
-	}
-	// Store the canonical lowercase-hyphenated form. uuid.Parse also accepts
-	// uppercase, braces and the urn: prefix; every consumer downstream (the
-	// member directory lookup in the client, the "= me" filter, @> containment)
-	// compares reference strings exactly, so an unnormalized id would store
-	// fine and then render as Unknown and never match a filter.
-	return actorRef{Kind: kind, ID: parsed.String()}, nil
+	return issueproperty.ParseActorRef(s)
 }
-
-// parseActorRefList validates a multi_actor array: every element must parse,
-// duplicates are dropped, and the caller's order is preserved. Unlike
-// multi_select there is no config order to canonicalize against, and sorting
-// by id would make the avatar row reshuffle on every edit. @> containment is
-// order-insensitive, so filtering is unaffected either way.
 func parseActorRefList(items []any) ([]actorRef, error) {
-	if len(items) == 0 {
-		return nil, errors.New("value must be a non-empty array of actor references")
-	}
-	if len(items) > maxPropertyActorValues {
-		return nil, fmt.Errorf("value cannot list more than %d actors", maxPropertyActorValues)
-	}
-	seen := make(map[string]struct{}, len(items))
-	refs := make([]actorRef, 0, len(items))
-	for _, item := range items {
-		s, ok := item.(string)
-		if !ok {
-			return nil, errors.New("value must be an array of actor reference strings")
-		}
-		ref, err := parseActorRef(s)
-		if err != nil {
-			return nil, err
-		}
-		if _, dup := seen[ref.String()]; dup {
-			continue
-		}
-		seen[ref.String()] = struct{}{}
-		refs = append(refs, ref)
-	}
-	return refs, nil
+	return issueproperty.ParseActorRefList(items)
 }
-
-// actorRefsInValue re-reads the canonical stored JSON for an actor property.
-// SetIssueProperty uses it to resolve references against the workspace after
-// the pure shape validation has run.
 func actorRefsInValue(propType string, stored []byte) ([]actorRef, error) {
-	if propType == "actor" {
-		var s string
-		if err := json.Unmarshal(stored, &s); err != nil {
-			return nil, err
-		}
-		ref, err := parseActorRef(s)
-		if err != nil {
-			return nil, err
-		}
-		return []actorRef{ref}, nil
-	}
-	var list []string
-	if err := json.Unmarshal(stored, &list); err != nil {
-		return nil, err
-	}
-	refs := make([]actorRef, 0, len(list))
-	for _, s := range list {
-		ref, err := parseActorRef(s)
-		if err != nil {
-			return nil, err
-		}
-		refs = append(refs, ref)
-	}
-	return refs, nil
+	return issueproperty.ActorRefsInValue(propType, stored)
 }
 
 // resolveActorRefs checks that every reference points at a real member of this
@@ -458,126 +352,7 @@ func (h *Handler) resolveActorRefs(r *http.Request, workspaceID string, refs []a
 // and returns the canonical JSON to store. Error strings enumerate the legal
 // values where possible — agents consume these directly to self-correct.
 func validatePropertyValue(def db.IssueProperty, raw json.RawMessage) ([]byte, error) {
-	if len(raw) == 0 {
-		return nil, errors.New("value is required")
-	}
-	var v any
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return nil, fmt.Errorf("value must be valid JSON: %w", err)
-	}
-	if v == nil {
-		return nil, errors.New("value cannot be null (use DELETE to unset a property)")
-	}
-
-	cfg := parsePropertyConfig(def.Config)
-	switch def.Type {
-	case "text":
-		s, ok := v.(string)
-		if !ok {
-			return nil, errors.New("value must be a string")
-		}
-		if strings.TrimSpace(s) == "" {
-			return nil, errors.New("value cannot be empty (use DELETE to unset a property)")
-		}
-		if utf8.RuneCountInString(s) > maxPropertyTextValueLen {
-			return nil, fmt.Errorf("value must be %d characters or fewer", maxPropertyTextValueLen)
-		}
-		return json.Marshal(sanitizeNullBytes(s))
-	case "url":
-		s, ok := v.(string)
-		if !ok {
-			return nil, errors.New("value must be a URL string")
-		}
-		s = strings.TrimSpace(s)
-		if len(s) > maxPropertyURLValueLen {
-			return nil, fmt.Errorf("value must be %d characters or fewer", maxPropertyURLValueLen)
-		}
-		u, err := url.Parse(s)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return nil, errors.New("value must be an http(s) URL")
-		}
-		return json.Marshal(s)
-	case "number":
-		if _, ok := v.(float64); !ok {
-			return nil, errors.New("value must be a number")
-		}
-		return json.Marshal(v)
-	case "checkbox":
-		if _, ok := v.(bool); !ok {
-			return nil, errors.New("value must be true or false")
-		}
-		return json.Marshal(v)
-	case "date":
-		s, ok := v.(string)
-		if !ok {
-			return nil, errors.New("value must be a date string in YYYY-MM-DD format")
-		}
-		if _, err := time.Parse("2006-01-02", s); err != nil {
-			return nil, errors.New("value must be a date string in YYYY-MM-DD format")
-		}
-		return json.Marshal(s)
-	case "select":
-		s, ok := v.(string)
-		if !ok {
-			return nil, fmt.Errorf("value must be one of the option ids: %s", selectOptionsHint(cfg))
-		}
-		if _, exists := propertyOptionIDs(cfg)[s]; !exists {
-			return nil, fmt.Errorf("value must be one of the option ids: %s", selectOptionsHint(cfg))
-		}
-		return json.Marshal(s)
-	case "multi_select":
-		items, ok := v.([]any)
-		if !ok || len(items) == 0 {
-			return nil, fmt.Errorf("value must be a non-empty array of option ids: %s", selectOptionsHint(cfg))
-		}
-		order := propertyOptionIDs(cfg)
-		seen := make(map[string]struct{}, len(items))
-		ids := make([]string, 0, len(items))
-		for _, item := range items {
-			s, ok := item.(string)
-			if !ok {
-				return nil, fmt.Errorf("value must be a non-empty array of option ids: %s", selectOptionsHint(cfg))
-			}
-			if _, exists := order[s]; !exists {
-				return nil, fmt.Errorf("unknown option id %q; valid option ids: %s", s, selectOptionsHint(cfg))
-			}
-			if _, dup := seen[s]; dup {
-				continue
-			}
-			seen[s] = struct{}{}
-			ids = append(ids, s)
-		}
-		// Canonicalize to config order so equal selections serialize equally
-		// (stable @> containment filtering and change detection).
-		sort.SliceStable(ids, func(a, b int) bool { return order[ids[a]] < order[ids[b]] })
-		return json.Marshal(ids)
-	case "actor":
-		s, ok := v.(string)
-		if !ok {
-			return nil, fmt.Errorf("value must be an actor reference string like \"member:<uuid>\" (kinds: %s)", actorKindsHint())
-		}
-		ref, err := parseActorRef(s)
-		if err != nil {
-			return nil, err
-		}
-		return json.Marshal(ref.String())
-	case "multi_actor":
-		items, ok := v.([]any)
-		if !ok {
-			return nil, fmt.Errorf("value must be an array of actor reference strings like \"member:<uuid>\" (kinds: %s)", actorKindsHint())
-		}
-		refs, err := parseActorRefList(items)
-		if err != nil {
-			return nil, err
-		}
-		out := make([]string, len(refs))
-		for i, ref := range refs {
-			out[i] = ref.String()
-		}
-		return json.Marshal(out)
-	default:
-		return nil, fmt.Errorf("unsupported property type %q", def.Type)
-	}
+	return issueproperty.ValidateValue(def, raw)
 }
 
 // removedOptionIDs returns option ids present in the stored config but

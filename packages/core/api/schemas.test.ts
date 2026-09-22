@@ -1280,6 +1280,26 @@ describe("AppConfigSchema agent_conversation_starters_supported drift", () => {
   });
 });
 
+describe("AppConfigSchema issue_create_properties_supported drift", () => {
+  it("defaults to false when the server predates atomic create properties", () => {
+    expect(AppConfigSchema.parse({}).issue_create_properties_supported).toBe(false);
+  });
+
+  it("coerces a malformed declaration to false", () => {
+    expect(
+      AppConfigSchema.parse({ issue_create_properties_supported: "yes" })
+        .issue_create_properties_supported,
+    ).toBe(false);
+  });
+
+  it("carries a genuine declaration through", () => {
+    expect(
+      AppConfigSchema.parse({ issue_create_properties_supported: true })
+        .issue_create_properties_supported,
+    ).toBe(true);
+  });
+});
+
 describe("AppConfigSchema cdn_signed drift", () => {
   it("defaults cdn_signed to false when the server omits it (pre-MUL-3254 servers)", () => {
     const parsed = AppConfigSchema.parse({ cdn_domain: "cdn.example.com" });

@@ -7,6 +7,8 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -69,6 +71,64 @@ func TestActivityIssueCreated(t *testing.T) {
 	}
 	if util.UUIDToString(activities[0].ActorID) != testUserID {
 		t.Fatalf("expected actor_id %s, got %s", testUserID, util.UUIDToString(activities[0].ActorID))
+	}
+}
+
+func TestActivityIssueCreated_AutopilotMapPayload(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	registerActivityListeners(bus, queries)
+
+	agentID, _ := firstFixtureAgent(t)
+	issueID := workspaceFixture(t).Issue(t, "autopilot-created activity", testutil.Cols{
+		"creator_type": "agent",
+		"creator_id":   agentID,
+	})
+	t.Cleanup(func() { cleanupActivities(t, issueID) })
+	issue, err := queries.GetIssue(ctx, util.MustParseUUID(issueID))
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+
+	var broadcasts []events.Event
+	bus.Subscribe(protocol.EventActivityCreated, func(e events.Event) {
+		broadcasts = append(broadcasts, e)
+	})
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "agent",
+		ActorID:     agentID,
+		Payload: map[string]any{
+			// Use the same payload builder as AutopilotService.dispatchCreateIssue.
+			"issue": service.IssueToMapResolved(ctx, queries, issue, "ACT"),
+		},
+	})
+
+	activities := listActivitiesForIssue(t, queries, issueID)
+	if len(activities) != 1 {
+		t.Fatalf("expected one created activity for autopilot issue, got %d", len(activities))
+	}
+	activity := activities[0]
+	if activity.Action != "created" || activity.ActorType.String != "agent" ||
+		util.UUIDToString(activity.ActorID) != agentID || util.UUIDToString(activity.WorkspaceID) != testWorkspaceID {
+		t.Fatalf("unexpected autopilot creation activity: %+v", activity)
+	}
+	if len(broadcasts) != 1 {
+		t.Fatalf("expected one activity broadcast, got %d", len(broadcasts))
+	}
+	broadcast := broadcasts[0]
+	if broadcast.WorkspaceID != testWorkspaceID || broadcast.ActorType != "agent" || broadcast.ActorID != agentID {
+		t.Fatalf("unexpected activity broadcast attribution: %+v", broadcast)
+	}
+	payload, ok := broadcast.Payload.(map[string]any)
+	if !ok || payload["issue_id"] != issueID {
+		t.Fatalf("unexpected activity broadcast payload: %#v", broadcast.Payload)
+	}
+	entry, ok := payload["entry"].(map[string]any)
+	if !ok || entry["id"] != util.UUIDToString(activity.ID) || entry["action"] != "created" {
+		t.Fatalf("broadcast must reference the persisted creation activity: %#v", payload["entry"])
 	}
 }
 

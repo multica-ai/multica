@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_github_pull_request_pr_owner_repo;

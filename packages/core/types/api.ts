@@ -1,5 +1,5 @@
 import type { Issue, IssueMetadata, IssueStatus, IssueStatusCategory, IssuePriority, IssueAssigneeType } from "./issue";
-import type { PropertyFilterValue } from "./property";
+import type { IssuePropertyValues, PropertyFilterValue } from "./property";
 import type { MemberRole } from "./workspace";
 import type { Project, ProjectStatus } from "./project";
 
@@ -21,6 +21,9 @@ export interface CreateIssueRequest {
   /** Issue-scoped label IDs to attach in the same transaction as the create.
    *  Unknown or non-issue ids are rejected by the server with 400. */
   label_ids?: string[];
+  /** ID-keyed custom-property values validated and persisted atomically with
+   * the issue. */
+  properties?: IssuePropertyValues;
 }
 
 export interface CreateCommentSubIssueManualRequest {

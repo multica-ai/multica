@@ -233,7 +233,7 @@ describe("InlineCommentRun", () => {
     const { client, rerender } = setup(current);
     await screen.findByText("pnpm test");
     const progress = screen.getByText("pnpm test");
-    expect(progress).not.toHaveClass("animate-chat-text-shimmer");
+    expect(progress).not.toHaveClass("shimmer-text");
     expect(progress.closest("[data-run-summary]")).toHaveClass("h-[1lh]", "overflow-hidden");
     expect(document.querySelector("[data-run-loading-indicator]")).toHaveClass(
       "motion-safe:animate-spin",

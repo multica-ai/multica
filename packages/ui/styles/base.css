@@ -132,35 +132,57 @@
   animation: chat-impulse 1.6s ease-in-out infinite;
 }
 
-/* ChatGPT-style "thinking" shimmer for inline text — a soft light sweep
- * runs across the glyphs, signalling "the agent is doing something" without
- * a separate spinner. Pure CSS: linear-gradient clipped to the text shape,
- * the gradient slid across via background-position. Uses the same muted →
- * foreground tokens chat copy normally uses, so the effect adapts to light
- * and dark mode without per-mode overrides.
- *
- * Apply to a <span> wrapping the label only — not the whole pill, since
- * the timer counter and Cancel button shouldn't shimmer. */
-@keyframes chat-text-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+/* ShimmerText keeps the base glyphs still and moves a masked highlight over
+ * them. Counter-translate the copy so only the light moves, avoiding the
+ * per-frame text repaint caused by animating a clipped background-position.
+ * The old 200%-wide gradient travelled four label widths per 2.5s cycle.
+ * A six-width window with a repeating two-width mask preserves that spacing
+ * and covers the label throughout the sweep, including the loop seam. */
+@keyframes shimmer-text-window {
+  from { transform: translateX(-66.6666666667%); }
+  to { transform: translateX(0%); }
 }
 
-.animate-chat-text-shimmer {
-  background-image: linear-gradient(
-    90deg,
-    var(--muted-foreground) 0%,
-    var(--muted-foreground) 35%,
-    var(--foreground) 50%,
-    var(--muted-foreground) 65%,
-    var(--muted-foreground) 100%
-  );
-  background-size: 200% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  animation: chat-text-shimmer 2.5s linear infinite;
+@keyframes shimmer-text-copy {
+  from { transform: translateX(400%); }
+  to { transform: translateX(0%); }
+}
+
+.shimmer-text {
+  display: inline-block;
+  position: relative;
+  max-width: 100%;
+  overflow: hidden;
+  vertical-align: bottom;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted-foreground);
+}
+
+.shimmer-text-window {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 600%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+  mask-image: linear-gradient(90deg, transparent 35%, black 50%, transparent 65%);
+  mask-size: calc(100% / 3) 100%;
+  mask-repeat: repeat-x;
+  animation: shimmer-text-window 2.5s linear infinite;
+}
+
+.shimmer-text-copy {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: calc(100% / 6);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--foreground);
+  animation: shimmer-text-copy 2.5s linear infinite;
 }
 
 /* Navigation progress bar: 2px brand-colored indeterminate sweep with a
@@ -178,36 +200,44 @@
 }
 
 /* Border beam: a brand-tinted highlight sweeps continuously around the
- * element's rounded border, drawing the eye to a CTA that would otherwise
- * blend into the chrome (e.g. the "switch to agent" affordance in manual
- * create). Built with a conic-gradient on a ::before whose mask carves out a
- * 1px ring; an animated @property angle drives the rotation so only the
- * gradient repaints, not layout. The ring respects `border-radius: inherit`,
- * so any rounded host picks up the right curvature for free. Pair with a
- * subtle background tint on the host so the highlight has something to ride
- * on at low contrast. */
-@property --border-beam-angle {
-  syntax: "<angle>";
-  initial-value: 0deg;
-  inherits: false;
-}
-
+ * host's rounded border, drawing the eye to a CTA that would otherwise blend
+ * into the chrome (e.g. the "switch to agent" affordance in manual create).
+ * Rendered by <BorderBeam /> inside a positioned host. The ring is a static
+ * mask that carves a 1px band out of the host's border box and inherits its
+ * radius; inside it, a square conic gradient rotates via transform. Rotating
+ * the gradient about the host's center looks the same as sweeping its start
+ * angle, but the compositor can run it without repainting the ring every
+ * frame. Pair with a subtle background tint on the host so the highlight has
+ * something to ride on at low contrast. */
 @keyframes border-beam-rotate {
-  to { --border-beam-angle: 360deg; }
+  from { transform: translate(-50%, -50%) rotate(0turn); }
+  to { transform: translate(-50%, -50%) rotate(1turn); }
 }
 
-.border-beam {
-  position: relative;
-}
-
-.border-beam::before {
-  content: "";
+.border-beam-ring {
   position: absolute;
   inset: 0;
   border-radius: inherit;
   padding: 1px;
+  overflow: hidden;
+  pointer-events: none;
+  container-type: size;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+}
+
+.border-beam-light {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  /* Width + height is at least the diagonal, so the square covers the ring at
+   * every angle. */
+  width: calc(100cqw + 100cqh);
+  aspect-ratio: 1;
   background: conic-gradient(
-    from var(--border-beam-angle),
     transparent 0deg,
     transparent 220deg,
     #ffbe7b 245deg,
@@ -217,18 +247,11 @@
     #5b9dff 345deg,
     transparent 360deg
   );
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-          mask-composite: exclude;
   animation: border-beam-rotate 3.2s linear infinite;
-  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .border-beam::before {
-    animation: none;
+  .border-beam-ring {
     background: linear-gradient(
       90deg,
       #ffbe7b,
@@ -237,6 +260,10 @@
       #a07cfe,
       #5b9dff
     );
+  }
+
+  .border-beam-light {
+    display: none;
   }
 }
 
@@ -313,15 +340,14 @@ html[data-dnd-dragging="true"] * {
   .animate-completion-badge,
   .animate-completion-check,
   .animate-chat-impulse,
-  .animate-chat-text-shimmer,
+  .shimmer-text-window,
+  .shimmer-text-copy,
   .animate-nav-progress-sweep {
     animation: none;
   }
 
-  .animate-chat-text-shimmer {
-    background-image: none;
-    color: var(--muted-foreground);
-    -webkit-text-fill-color: currentColor;
+  .shimmer-text-window {
+    display: none;
   }
 
   [data-comment-actions],
@@ -331,11 +357,17 @@ html[data-dnd-dragging="true"] * {
 }
 
 @media (forced-colors: active) {
-  .animate-chat-text-shimmer {
-    animation: none;
-    background-image: none;
+  .shimmer-text {
     color: CanvasText;
-    -webkit-text-fill-color: currentColor;
+  }
+
+  .shimmer-text-window,
+  .shimmer-text-copy {
+    animation: none;
+  }
+
+  .shimmer-text-window {
+    display: none;
   }
 }
 

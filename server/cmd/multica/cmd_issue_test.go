@@ -10,12 +10,14 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
@@ -844,7 +846,147 @@ func newIssueCreateTestCmd() *cobra.Command {
 	cmd.Flags().String("output", "json", "")
 	cmd.Flags().StringSlice("attachment", nil, "")
 	cmd.Flags().StringSlice("attachment-id", nil, "")
+	cmd.Flags().StringArray("property", nil, "")
 	return cmd
+}
+
+func TestRunIssueCreatePropertiesFailClosedBeforePost(t *testing.T) {
+	t.Chdir(t.TempDir())
+	posts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/config":
+			json.NewEncoder(w).Encode(map[string]any{})
+		case "/api/issues":
+			posts++
+			w.WriteHeader(http.StatusCreated)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Must stay atomic")
+	_ = cmd.Flags().Set("property", "Owner=Alice")
+	err := runIssueCreate(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "does not support atomic custom properties") {
+		t.Fatalf("error = %v, want capability failure", err)
+	}
+	if posts != 0 {
+		t.Fatalf("old server received %d create POST(s), want zero", posts)
+	}
+}
+
+func TestRunIssueCreateSendsCanonicalIDKeyedProperties(t *testing.T) {
+	t.Chdir(t.TempDir())
+	textID := uuid.NewString()
+	multiID := uuid.NewString()
+	firstID := uuid.NewString()
+	secondID := uuid.NewString()
+	var createBody map[string]any
+	posts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/config":
+			json.NewEncoder(w).Encode(map[string]any{"issue_create_properties_supported": true})
+		case "/api/properties":
+			json.NewEncoder(w).Encode(map[string]any{"properties": []map[string]any{
+				{"id": textID, "name": "Summary", "type": "text", "config": map[string]any{}, "archived": false},
+				{"id": multiID, "name": "Platforms", "type": "multi_select", "config": map[string]any{"options": []map[string]any{
+					{"id": firstID, "name": "One"}, {"id": secondID, "name": "Two"},
+				}}, "archived": false},
+			}})
+		case "/api/issues":
+			posts++
+			if err := json.NewDecoder(r.Body).Decode(&createBody); err != nil {
+				t.Errorf("decode create body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"id": "issue-1", "identifier": "MUL-1", "title": "With properties",
+				"status": "todo", "priority": "none", "properties": createBody["properties"],
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "With properties")
+	_ = cmd.Flags().Set("property", "Summary=  exact text  ")
+	_ = cmd.Flags().Set("property", "Platforms=Two,One,Two")
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+	if posts != 1 {
+		t.Fatalf("create POST count = %d, want 1", posts)
+	}
+	properties, ok := createBody["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties body = %#v", createBody["properties"])
+	}
+	if properties[textID] != "  exact text  " {
+		t.Fatalf("text property = %#v", properties[textID])
+	}
+	if got := properties[multiID]; !reflect.DeepEqual(got, []any{firstID, secondID}) {
+		t.Fatalf("multi property = %#v, want config-order dedupe", got)
+	}
+}
+
+func TestRunIssueCreateRejectsDuplicateAndFilterPropertySyntaxBeforePost(t *testing.T) {
+	t.Chdir(t.TempDir())
+	propertyID := uuid.NewString()
+	posts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/config":
+			json.NewEncoder(w).Encode(map[string]any{"issue_create_properties_supported": true})
+		case "/api/properties":
+			json.NewEncoder(w).Encode(map[string]any{"properties": []map[string]any{{
+				"id": propertyID, "name": "Owner", "type": "text", "config": map[string]any{}, "archived": false,
+			}}})
+		case "/api/issues":
+			posts++
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	for _, test := range []struct {
+		name  string
+		flags []string
+		want  string
+	}{
+		{name: "same definition by name and id", flags: []string{"Owner=Alice", propertyID + "=Bob"}, want: "provided more than once"},
+		{name: "none sentinel", flags: []string{"Owner=__none__"}, want: "list-filter value"},
+		{name: "comparison operator", flags: []string{"Owner>=Alice"}, want: "comparison operators"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := newIssueCreateTestCmd()
+			_ = cmd.Flags().Set("title", "Rejected properties")
+			for _, flag := range test.flags {
+				_ = cmd.Flags().Set("property", flag)
+			}
+			err := runIssueCreate(cmd, nil)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+	if posts != 0 {
+		t.Fatalf("invalid property flags sent %d create POST(s)", posts)
+	}
 }
 
 func TestRunIssueCreateSendsAllowDuplicate(t *testing.T) {

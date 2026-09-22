@@ -72,6 +72,7 @@
     "@types/linkify-it": "^5.0.0",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "esbuild": "^0.25.12",
     "typescript": "catalog:"
   }
 }

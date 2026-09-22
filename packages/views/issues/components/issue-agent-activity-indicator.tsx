@@ -3,6 +3,7 @@
 import { memo, useCallback, useMemo, useState } from "react";
 import { Bell, Clock3 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import {
   HoverCard,
   HoverCardTrigger,
@@ -62,9 +63,8 @@ interface IssueAgentActivityIndicatorProps {
  *   - future wakeups only   → next time/event + remaining count
  *   - no tasks or wakeups   → return null (no chrome, no placeholder)
  *
- * The shimmer reuses chat's `animate-chat-text-shimmer` utility (defined
- * in packages/ui/styles/base.css). Earlier iterations layered a brand
- * ring + opacity pulse around the avatars; both read as nervous on a
+ * The shimmer shares chat's ShimmerText component. Earlier iterations layered
+ * a brand ring + opacity pulse around the avatars; both read as nervous on a
  * dense board. Moving the "alive" signal onto the label keeps the
  * avatars themselves still and lets the cue ride a piece of text the
  * user can already read.
@@ -159,19 +159,14 @@ export const IssueAgentActivityIndicator = memo(
           opacity={opacity}
           max={3}
         />
-        {/* No leading-none: the shimmer paints glyphs via background-clip:
-          text, and the background only covers the line box — a squeezed
-          line box leaves descenders transparent. */}
-        <span
-          className={cn(
-            "text-micro",
-            isRunning ? "animate-chat-text-shimmer" : "text-muted-foreground",
-          )}
+        <ShimmerText
+          active={isRunning}
+          className="text-micro text-muted-foreground"
         >
           {isRunning
             ? t(($) => $.agent_activity.status_running)
             : t(($) => $.agent_activity.status_queued)}
-        </span>
+        </ShimmerText>
         {wakeupTriggered && (
           <Bell
             className="size-3 text-muted-foreground"

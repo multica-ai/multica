@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -627,6 +628,7 @@ func init() {
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCreateCmd.Flags().StringSlice("attachment-id", nil, "Existing attachment UUID(s) to bind to the created issue (can be specified multiple times)")
+	issueCreateCmd.Flags().StringArray("property", nil, `Set a custom property atomically with creation as "Name=Value" (repeatable, one distinct property per flag). Multi-value properties use comma-separated values inside one flag. Property and option/member names are case-insensitive; UUIDs are accepted. Filter-only __none__, >=, <=, and != forms are rejected.`)
 
 	// issue update
 	issueUpdateCmd.Flags().String("title", "", "New title")
@@ -1396,6 +1398,24 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	body := map[string]any{"title": title}
+	propertyFlags, _ := cmd.Flags().GetStringArray("property")
+	var createProperties map[string]json.RawMessage
+	if len(propertyFlags) > 0 {
+		var config struct {
+			IssueCreatePropertiesSupported bool `json:"issue_create_properties_supported"`
+		}
+		if err := client.GetJSON(ctx, "/api/config", &config); err != nil {
+			return fmt.Errorf("check issue-create property support: %w", err)
+		}
+		if !config.IssueCreatePropertiesSupported {
+			return errors.New("this server version does not support atomic custom properties on issue creation; update the server before using --property")
+		}
+		createProperties, err = buildIssueCreateProperties(ctx, client, propertyFlags)
+		if err != nil {
+			return err
+		}
+		body["properties"] = createProperties
+	}
 	desc, hasDesc, err := resolveTextFlag(cmd, "description")
 	if err != nil {
 		return err
@@ -1491,6 +1511,9 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		}
 		return fmt.Errorf("create issue: %w", err)
 	}
+	if err := verifyIssueCreateProperties(createProperties, result); err != nil {
+		return fmt.Errorf("issue %s was created, but the server did not confirm its custom properties; review it before retrying: %w", issueDisplayKey(result), err)
+	}
 
 	// Upload attachments and link them to the newly created issue.
 	// Failures here are partial-success: the issue exists already, so
@@ -1520,6 +1543,30 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	}
 
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+func verifyIssueCreateProperties(expected map[string]json.RawMessage, issue map[string]any) error {
+	if len(expected) == 0 {
+		return nil
+	}
+	bag, ok := issue["properties"].(map[string]any)
+	if !ok {
+		return errors.New("response omitted the properties snapshot")
+	}
+	for propertyID, encoded := range expected {
+		actual, exists := bag[propertyID]
+		if !exists {
+			return fmt.Errorf("response omitted property %s", propertyID)
+		}
+		var want any
+		if err := json.Unmarshal(encoded, &want); err != nil {
+			return fmt.Errorf("decode expected property %s: %w", propertyID, err)
+		}
+		if !reflect.DeepEqual(actual, want) {
+			return fmt.Errorf("response property %s does not match the canonical value", propertyID)
+		}
+	}
+	return nil
 }
 
 func activeDuplicateIssueCreateMessage(err error) (string, bool) {

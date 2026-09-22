@@ -38,12 +38,15 @@ import "github.com/prometheus/client_golang/prometheus"
 // unrelated causes end that way and from the chat they are one symptom, so
 // each is counted where an operator can act on it: a frame the platform
 // refused, or no socket for this installation in this process, is a drop; a
-// turn that originated in the web UI, or an installation revoked between
-// trigger and reply, was never owed to WeCom and is a skip; a frame whose
-// verdict never came back may already be on the user's screen and is
-// unconfirmed, not a drop. Delivered is the denominator: without it, a drop
-// rate of zero and a bot nobody messaged look identical, which is the same
-// ambiguity the connection counters exist to remove.
+// turn that originated in the web UI, another platform's turn on the bus this
+// adapter shares, or an installation revoked between trigger and reply, was
+// never owed to WeCom and is a skip — as is a channel turn with no row saying
+// which chat, the one skip worth waking somebody for, because there a reply may
+// well be owed and nothing left can name the room; a frame whose verdict never
+// came back may already be on the user's screen and is unconfirmed, not a
+// drop. Delivered is the denominator: without it, a drop rate of zero and a bot
+// nobody messaged look identical, which is the same ambiguity the connection
+// counters exist to remove.
 //
 // reason is a closed set (wecom/outbound_outcome.go). It is the only label
 // here, and it stays bounded by construction — no installation, workspace or
@@ -95,11 +98,11 @@ func NewWecomMetrics() *WecomMetrics {
 			"Agent replies this adapter put in front of a WeCom user. The denominator the drop breakdown is read against."),
 		OutboundDropped: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "multica", Subsystem: "wecom", Name: "outbound_dropped_total",
-			Help: "Agent replies the adapter owed a WeCom user and did not deliver, by reason. Every reason here means somebody in WeCom is waiting on an answer that is not coming; the completions the adapter was never going to deliver are counted apart, in outbound_skipped_total.",
+			Help: "Agent replies the adapter owed a WeCom user and did not deliver, by reason. Every reason here means somebody in WeCom is waiting on an answer that is not coming; most of them are settled before the frame reaches WeCom, so read this as a count of unpaid obligations rather than of network failures. The completions this adapter did not owe, and the ones nothing here can attribute to a WeCom chat, are counted apart, in outbound_skipped_total.",
 		}, []string{"reason"}),
 		OutboundSkipped: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "multica", Subsystem: "wecom", Name: "outbound_skipped_total",
-			Help: "Completions this adapter was never going to deliver to WeCom, by reason. Kept apart from dropped because none of these is a delivery failure: origin_not_channel is a question typed in Multica on a WeCom-bound session, installation_inactive means there is no longer an installation to deliver through, nothing_to_say is an empty completion carrying no file. Counting them as drops would make ordinary web usage read as a WeCom outage.",
+			Help: "Completions this adapter did not send to WeCom, by reason: it did not owe them, or nothing here could attribute them to a WeCom chat. Kept apart from dropped, which counts the replies a WeCom user was owed and did not get; what separates the two is the obligation, not whether a frame was written. Four of these were never owed to WeCom, and counting them as drops would make ordinary usage read as an outage: origin_not_channel is a question typed in Multica on a WeCom-bound session, not_wecom_turn is another platform's turn on the bus this subscriber shares, installation_inactive means there is no longer an installation to deliver through, nothing_to_say is an empty completion carrying no file. The fifth is the one label here worth an alert: no_delivery_row is a turn the channel ingested with no row saying which chat, so a reply may well be owed and nothing left can name the room — in practice a task enqueued before an upgrade and finishing after it. The sixth is neither: route_unattributable is a turn with no row and no batch owner, so nothing here can say whether it was ever a channel's, let alone whether a reply was owed — in practice a row old enough to predate batch owners still finishing, and a rising count says only that such rows remain.",
 		}, []string{"reason"}),
 		AttachmentDelivered: counter("outbound_attachment_delivered_total",
 			"Files put in front of a WeCom user. Counts FILES; the outbound_delivered/dropped/skipped trio counts REPLIES."),

@@ -61,11 +61,6 @@ mentioning, triggering and status changes mutate durable workspace state or
 start agent runs that cost real budget. Never run one to see what happens. When
 the user has not asked for a specific mutation, propose it instead of making it.
 
-**`--no-start` when you are only recording.** Assignment and status writes
-normally enqueue a run. When the work is already underway and the write merely
-records ownership or progress, pass `--no-start` on EVERY command in that flow —
-suppressing the assignment alone does not suppress a later status update.
-
 **Status keys identify workflow states; categories describe lifecycle only.**
 Custom statuses do not inherit built-in automation behavior. For status side
 effects and API field meanings, read `references/issues.md`.

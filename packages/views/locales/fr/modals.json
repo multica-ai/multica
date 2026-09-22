@@ -186,6 +186,7 @@
     "toast_link_subissues_partial": "Échec de la liaison de {{failed}} sous-tâches sur {{total}}",
     "toast_link_labels_failed": "Échec du rattachement des étiquettes",
     "toast_set_properties_failed": "Impossible de définir {{count}} valeurs de propriétés personnalisées",
+    "unavailable_property_removed": "Une propriété personnalisée qui n’est plus disponible a été retirée du brouillon. Vérifiez-le avant de le soumettre à nouveau.",
     "switch_to_agent": "Passer en mode agent",
     "switch_to_agent_tooltip": "Passer à la création avec un agent — décrivez en une ligne et laissez l'agent rédiger la tâche",
     "switch_to_manual": "Passer en mode manuel",
