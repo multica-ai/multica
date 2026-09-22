@@ -2893,10 +2893,6 @@ func (h *Handler) routeGuestSquadLeaderFallback(ctx context.Context, issue db.Is
 	return []commentAgentTrigger{trigger}, true
 }
 
-type conversationRoutedAgentInfo struct {
-	SquadID pgtype.UUID
-}
-
 func (h *Handler) routeThreadRootOwners(ctx context.Context, issue db.Issue, parent *db.Comment, memberID string, opts commentTriggerComputeOptions) ([]commentAgentTrigger, bool) {
 	if parent == nil || !parent.ID.Valid {
 		return nil, false
@@ -2922,38 +2918,22 @@ func (h *Handler) routeConversationOwnersForRoot(ctx context.Context, issue db.I
 		return []commentAgentTrigger{trigger}, true
 	}
 
-	rootID := uuidToString(root.ID)
-	excludedID := uuidToString(opts.ExcludeTriggerCommentID)
-
-	tasks, err := h.Queries.ListTasksByIssue(ctx, issue.ID)
+	if opts.ExcludeTriggerCommentID == root.ID {
+		return nil, false
+	}
+	owners, err := h.Queries.ListConversationRootOwners(ctx, db.ListConversationRootOwnersParams{
+		IssueID: issue.ID, TriggerCommentID: root.ID,
+	})
 	if err != nil {
 		return nil, false
 	}
-	routedAgents := make(map[string]conversationRoutedAgentInfo)
-	for _, task := range tasks {
-		if !task.TriggerCommentID.Valid || !task.AgentID.Valid {
-			continue
-		}
-		if excludedID != "" && uuidToString(task.TriggerCommentID) == excludedID {
-			continue
-		}
-		if uuidToString(task.TriggerCommentID) != rootID {
-			continue
-		}
-		agentID := uuidToString(task.AgentID)
-		info := routedAgents[agentID]
-		if !info.SquadID.Valid {
-			info.SquadID = task.SquadID
-		}
-		routedAgents[agentID] = info
-	}
-	if len(routedAgents) == 0 {
+	if len(owners) == 0 {
 		return nil, false
 	}
 
-	triggers := make([]commentAgentTrigger, 0, len(routedAgents))
-	for agentID, info := range routedAgents {
-		trigger, ok := h.routeConversationContinuationToAgent(ctx, issue, parseUUID(agentID), info.SquadID, memberID, opts)
+	triggers := make([]commentAgentTrigger, 0, len(owners))
+	for _, owner := range owners {
+		trigger, ok := h.routeConversationContinuationToAgent(ctx, issue, owner.AgentID, owner.SquadID, memberID, opts)
 		if ok {
 			triggers = append(triggers, trigger)
 		}
