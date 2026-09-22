@@ -249,12 +249,18 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 	var closeStdinOnce sync.Once
 	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[opencode:stderr] ")
+	// Capture stderr into both the daemon log and a bounded tail so a launcher
+	// or CLI crash that exits before emitting a structured JSON error still
+	// surfaces its diagnosis in Result.Error — otherwise users only see
+	// "opencode exited with error: exit status 1" while the real reason stays
+	// buried in daemon.log (OS-589 / Claude parity via withAgentStderr).
+	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[opencode:stderr] "), agentStderrTailBytes)
+	cmd.Stderr = stderrBuf
 
 	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		closeStdin()
 		cancel()
-		return nil, fmt.Errorf("start opencode: %w", err)
+		return nil, fmt.Errorf("%s", withAgentStderr(fmt.Sprintf("start opencode: %v", err), "opencode", stderrBuf.Tail()))
 	}
 
 	b.cfg.Logger.Info("opencode started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
@@ -370,6 +376,12 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 				scanResult.errMsg = fmt.Sprintf("%s; opencode prompt write failed: %v", scanResult.errMsg, writeErr)
 			}
 			scanResult.status = "failed"
+		}
+
+		// cmd.Wait() has returned — os/exec's stderr copy goroutine has observed
+		// every byte opencode wrote before exiting, so Tail() is safe now.
+		if scanResult.errMsg != "" {
+			scanResult.errMsg = withAgentStderr(scanResult.errMsg, "opencode", stderrBuf.Tail())
 		}
 
 		b.cfg.Logger.Info("opencode finished", "pid", cmd.Process.Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())

@@ -1780,6 +1780,64 @@ func TestOpencodeBackendFailsOnStreamEndingMidTool(t *testing.T) {
 	}
 }
 
+// fakeOpencodeRefuseWithStderrScript impersonates a Manifest-only launcher that
+// prints a diagnosis on stderr and exits 1 before emitting any JSON events —
+// the OS-589 failure shape.
+func fakeOpencodeRefuseWithStderrScript() string {
+	return `#!/bin/sh
+cat > /dev/null
+echo 'refusing to start OpenCode with invalid locked config: signed skill projection marker does not match the accepted release' >&2
+exit 1
+`
+}
+
+// TestOpencodeBackendIncludesStderrTailOnBareExit pins that a process-exit
+// failure without a structured JSON error still carries the stderr diagnosis
+// in Result.Error, matching Claude/Codex/Qwen via withAgentStderr.
+func TestOpencodeBackendIncludesStderrTailOnBareExit(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakePath := filepath.Join(tempDir, "opencode")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeRefuseWithStderrScript()))
+
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new opencode backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+
+	if result.Status != "failed" {
+		t.Fatalf("result status = %q, error = %q; want failed", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "exit status 1") {
+		t.Errorf("result error = %q, want it to include the process exit status", result.Error)
+	}
+	if !strings.Contains(result.Error, "signed skill projection marker does not match the accepted release") {
+		t.Errorf("result error = %q, want it to include the stderr diagnosis", result.Error)
+	}
+	if !strings.Contains(result.Error, "opencode stderr:") {
+		t.Errorf("result error = %q, want the withAgentStderr label", result.Error)
+	}
+}
+
 // fakeOpencodeStepThenExit1Script impersonates an `opencode run` that crashes
 // mid-step: it opens a step, then the process itself dies nonzero with no
 // step_finish and no error event.
