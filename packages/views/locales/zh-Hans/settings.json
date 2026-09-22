@@ -507,7 +507,9 @@
       "checkbox": "勾选",
       "url": "链接",
       "actor": "成员",
-      "multi_actor": "成员（多选）"
+      "multi_actor": "成员（多选）",
+      "multi_text": "文本列表",
+      "multi_url": "链接列表"
     },
     "actions": {
       "open": "{{name}} 的操作",

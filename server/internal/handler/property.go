@@ -50,9 +50,12 @@ const (
 	// bag shares one 16KB row budget, and a property holding hundreds of
 	// actors would crowd out every other property on the same issue.
 	maxPropertyActorValues = 20
+	// Same budget rationale for free-form list values (multi_text /
+	// multi_url); url entries can individually reach 2048 bytes.
+	maxPropertyListValues = 20
 )
 
-var validPropertyTypes = []string{"text", "number", "select", "multi_select", "date", "checkbox", "url", "actor", "multi_actor"}
+var validPropertyTypes = []string{"text", "number", "select", "multi_select", "date", "checkbox", "url", "actor", "multi_actor", "multi_text", "multi_url"}
 
 // Property icons use stable catalog keys that the Web client maps to Lucide
 // glyphs. Keeping this allowlist at the API boundary prevents arbitrary text
@@ -454,6 +457,63 @@ func (h *Handler) resolveActorRefs(r *http.Request, workspaceID string, refs []a
 	return 0, ""
 }
 
+// propertyTextItem validates one text value — a single `text` value or one
+// `multi_text` element. Text keeps interior spacing as written.
+func propertyTextItem(s string) (string, error) {
+	if strings.TrimSpace(s) == "" {
+		return "", errors.New("value cannot be empty (use DELETE to unset a property)")
+	}
+	if utf8.RuneCountInString(s) > maxPropertyTextValueLen {
+		return "", fmt.Errorf("value must be %d characters or fewer", maxPropertyTextValueLen)
+	}
+	return sanitizeNullBytes(s), nil
+}
+
+// propertyURLItem validates and canonicalizes one http(s) URL value — a single
+// `url` value or one `multi_url` element.
+func propertyURLItem(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if len(s) > maxPropertyURLValueLen {
+		return "", fmt.Errorf("value must be %d characters or fewer", maxPropertyURLValueLen)
+	}
+	u, err := url.Parse(s)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return "", errors.New("value must be an http(s) URL")
+	}
+	return s, nil
+}
+
+// validatePropertyStringList validates a multi_text / multi_url value: a
+// non-empty array whose every element passes the item validator. Duplicates
+// are dropped and the caller's order preserved, mirroring multi_actor.
+func validatePropertyStringList(v any, itemValidator func(string) (string, error)) ([]byte, error) {
+	items, ok := v.([]any)
+	if !ok || len(items) == 0 {
+		return nil, errors.New("value must be a non-empty array of strings")
+	}
+	if len(items) > maxPropertyListValues {
+		return nil, fmt.Errorf("value cannot list more than %d entries", maxPropertyListValues)
+	}
+	seen := make(map[string]struct{}, len(items))
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		s, ok := item.(string)
+		if !ok {
+			return nil, errors.New("value must be a non-empty array of strings")
+		}
+		canonical, err := itemValidator(s)
+		if err != nil {
+			return nil, err
+		}
+		if _, dup := seen[canonical]; dup {
+			continue
+		}
+		seen[canonical] = struct{}{}
+		out = append(out, canonical)
+	}
+	return json.Marshal(out)
+}
+
 // validatePropertyValue checks a raw JSON value against the definition's type
 // and returns the canonical JSON to store. Error strings enumerate the legal
 // values where possible — agents consume these directly to self-correct.
@@ -476,27 +536,25 @@ func validatePropertyValue(def db.IssueProperty, raw json.RawMessage) ([]byte, e
 		if !ok {
 			return nil, errors.New("value must be a string")
 		}
-		if strings.TrimSpace(s) == "" {
-			return nil, errors.New("value cannot be empty (use DELETE to unset a property)")
+		item, err := propertyTextItem(s)
+		if err != nil {
+			return nil, err
 		}
-		if utf8.RuneCountInString(s) > maxPropertyTextValueLen {
-			return nil, fmt.Errorf("value must be %d characters or fewer", maxPropertyTextValueLen)
-		}
-		return json.Marshal(sanitizeNullBytes(s))
+		return json.Marshal(item)
+	case "multi_text":
+		return validatePropertyStringList(v, propertyTextItem)
 	case "url":
 		s, ok := v.(string)
 		if !ok {
 			return nil, errors.New("value must be a URL string")
 		}
-		s = strings.TrimSpace(s)
-		if len(s) > maxPropertyURLValueLen {
-			return nil, fmt.Errorf("value must be %d characters or fewer", maxPropertyURLValueLen)
+		item, err := propertyURLItem(s)
+		if err != nil {
+			return nil, err
 		}
-		u, err := url.Parse(s)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return nil, errors.New("value must be an http(s) URL")
-		}
-		return json.Marshal(s)
+		return json.Marshal(item)
+	case "multi_url":
+		return validatePropertyStringList(v, propertyURLItem)
 	case "number":
 		if _, ok := v.(float64); !ok {
 			return nil, errors.New("value must be a number")

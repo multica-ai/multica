@@ -787,6 +787,7 @@
       "number_placeholder": "0",
       "actor_search_placeholder": "Rechercher des membres…",
       "open_link": "Ouvrir le lien",
+      "remove_item": "Retirer {{value}}",
       "archived_hint": "Propriété archivée — la valeur est en lecture seule",
       "unknown_value": "Indisponible",
       "unknown_value_hint": "Cette valeur a été définie par une version plus récente de Multica et ne peut pas être modifiée ici — mettez l'application à jour, ou effacez-la"

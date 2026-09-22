@@ -22,7 +22,7 @@ import (
 // multica property {list|get|create|update|archive|unarchive} — workspace
 // custom property definitions, and multica issue property {list|set|unset} —
 // typed values on a single issue. See server/internal/handler/property.go
-// for the validation contract (9 types, 20 active definitions/workspace,
+// for the validation contract (11 types, 20 active definitions/workspace,
 // owner/admin-only definition management, agents rejected on definition
 // writes).
 //
@@ -75,14 +75,18 @@ var propertyCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a property definition (workspace owner/admin only)",
 	Long: `Create a property definition. Types: text, number, select, multi_select,
-date, checkbox, url, actor, multi_actor. Select types take repeatable --option
-flags:
+date, checkbox, url, actor, multi_actor, multi_text, multi_url. Select types
+take repeatable --option flags:
   multica property create --name Severity --type select \
       --option "Critical:#ef4444" --option "Major:#f59e0b" --option "Minor:#6b7280"
 The ":#rrggbb" color suffix is optional.
 
 The actor types hold workspace members; they take no options:
-  multica property create --name Reviewer --type actor`,
+  multica property create --name Reviewer --type actor
+
+multi_text / multi_url hold free-form lists (comma-separated --value), also
+without options:
+  multica property create --name Related links --type multi_url`,
 	Args: exactArgs(0),
 	RunE: runPropertyCreate,
 }
@@ -134,7 +138,9 @@ var issuePropertySetCmd = &cobra.Command{
   checkbox      --value true|false
   number        --value 3.5
   date          --value 2026-07-13
-  text / url    --value "any string"`,
+  text / url    --value "any string"
+  multi_text    --value "alpha,beta"      (comma-separated strings)
+  multi_url     --value "https://a.example,https://b.example"`,
 	Args: exactArgs(1),
 	RunE: runIssuePropertySet,
 }
@@ -159,7 +165,7 @@ func init() {
 	propertyGetCmd.Flags().String("output", "json", "Output format: table or json")
 	propertyCreateCmd.Flags().String("output", "table", "Output format: table or json")
 	propertyCreateCmd.Flags().String("name", "", "Property name (required)")
-	propertyCreateCmd.Flags().String("type", "", "Property type: text, number, select, multi_select, date, checkbox, url, actor, multi_actor (required)")
+	propertyCreateCmd.Flags().String("type", "", "Property type: text, number, select, multi_select, date, checkbox, url, actor, multi_actor, multi_text, multi_url (required)")
 	propertyCreateCmd.Flags().String("description", "", "Property description")
 	propertyCreateCmd.Flags().String("icon", "", "Property icon key from the Web picker (for example, flag, tag, or shield)")
 	propertyCreateCmd.Flags().StringArray("option", nil, `Select option as "Name" or "Name:#rrggbb" (repeatable; select types only)`)
@@ -572,6 +578,20 @@ func encodeIssuePropertyValue(ctx context.Context, client *cli.APIClient, direct
 			return nil, fmt.Errorf("--value must list at least one member")
 		}
 		return json.Marshal(refs)
+	case "multi_text", "multi_url":
+		// Comma form, like multi_select/multi_actor: each token trimmed,
+		// empty tokens skipped. Elements are validated server-side.
+		parts := strings.Split(raw, ",")
+		items := make([]string, 0, len(parts))
+		for _, part := range parts {
+			if trimmed := strings.TrimSpace(part); trimmed != "" {
+				items = append(items, trimmed)
+			}
+		}
+		if len(items) == 0 {
+			return nil, fmt.Errorf("--value must list at least one entry")
+		}
+		return json.Marshal(items)
 	case "number":
 		if _, err := strconv.ParseFloat(raw, 64); err != nil {
 			return nil, fmt.Errorf("value %q is not a valid number", raw)
@@ -606,12 +626,15 @@ func actorPropertyName(actorNames map[string]string, ref string) string {
 	return ref
 }
 
-// issuePropertyDisplayValues resolves each item of a multi_select or
-// multi_actor value to its display name. The result stays index-parallel
-// with the stored array (a non-string item renders as JSON rather than being
-// dropped) and is nil for every other type or a non-array value.
+// issuePropertyDisplayValues resolves each item of a multi-value property to
+// its display string: option ids to names (multi_select), actor references to
+// member names (multi_actor), elements as-is (multi_text / multi_url). The
+// result stays index-parallel with the stored array (a non-string item renders
+// as JSON rather than being dropped) and is nil for every other type or a
+// non-array value.
 func issuePropertyDisplayValues(property propertyDTO, value any, actorNames map[string]string) []string {
-	if property.Type != "multi_select" && property.Type != "multi_actor" {
+	if property.Type != "multi_select" && property.Type != "multi_actor" &&
+		property.Type != "multi_text" && property.Type != "multi_url" {
 		return nil
 	}
 	items, ok := value.([]any)
@@ -1052,7 +1075,8 @@ func resolvePropertyFilterValue(ctx context.Context, client *cli.APIClient, dire
 			return "", fmt.Errorf("--property %s: value %q is not a date in YYYY-MM-DD form", property.Name, trimmed)
 		}
 		return trimmed, nil
-	case "url":
+	case "url", "multi_url":
+		// One --value token matches one element exactly.
 		if len(trimmed) > maxPropertyURLValueLen {
 			return "", fmt.Errorf("--property %s: value must be %d characters or fewer", property.Name, maxPropertyURLValueLen)
 		}
@@ -1060,7 +1084,7 @@ func resolvePropertyFilterValue(ctx context.Context, client *cli.APIClient, dire
 			return "", fmt.Errorf("--property %s: value %q is not an http(s) URL", property.Name, trimmed)
 		}
 		return trimmed, nil
-	case "text":
+	case "text", "multi_text":
 		if utf8.RuneCountInString(raw) > maxPropertyTextValueLen {
 			return "", fmt.Errorf("--property %s: value must be %d characters or fewer", property.Name, maxPropertyTextValueLen)
 		}
