@@ -138,16 +138,11 @@ func seedOriginLab(t *testing.T, pool *pgxpool.Pool) originLab {
 
 	q := db.New(pool)
 	f.Cleanup(t, `DELETE FROM agent_task_queue WHERE id = $1`, lab.legacyRetry)
-	clone, err := q.CreateRetryTask(ctx, db.CreateRetryTaskParams{
+	if _, err := q.CreateRetryTask(ctx, db.CreateRetryTaskParams{
 		ID:        mustPgUUID(t, lab.legacyInRoom),
 		NewTaskID: mustPgUUID(t, lab.legacyRetry),
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("CreateRetryTask: %v", err)
-	}
-	if clone.ChatInputTaskID.Valid {
-		t.Fatalf("the clone inherited owner %v; this case only exists because it stays NULL",
-			clone.ChatInputTaskID)
 	}
 
 	// The other half of what FailTask writes. The parent's route is seeded flat
@@ -169,14 +164,6 @@ func seedOriginLab(t *testing.T, pool *pgxpool.Pool) originLab {
 	}); err != nil {
 		t.Fatalf("CopyChannelTaskDelivery: %v", err)
 	}
-	route, err := q.GetChannelTaskDelivery(ctx, mustPgUUID(t, lab.legacyRetry))
-	if err != nil {
-		t.Fatalf("the clone has no route: %v — without one it is not a row anyone is waiting on, "+
-			"and the case stops being the one that regressed", err)
-	}
-	if route.ChannelChatID != "room-"+tag {
-		t.Fatalf("the clone's route points at %q, want the parent's room", route.ChannelChatID)
-	}
 
 	return lab
 }
@@ -196,6 +183,11 @@ func TestGetTaskChannelOrigin_RealSQL(t *testing.T) {
 		// one where ingested is false and this is true.
 		ownerUnknown bool
 		why          string
+		// precondition checks that the fixture really built the shape this
+		// case is about, before the query is asked. It lives here rather than
+		// in seedOriginLab because it is an assertion about the product's own
+		// writes (AGENTS.md: product assertions stay in the test).
+		precondition func(t *testing.T)
 	}{
 		{
 			name: "a retry clone reaches its parent's batch", taskID: lab.retryClone, ingested: true,
@@ -243,9 +235,36 @@ func TestGetTaskChannelOrigin_RealSQL(t *testing.T) {
 				"gate keyed on the task's own id reads it as web UI — while CopyChannelTaskDelivery " +
 				"has already given it the parent's WeCom route, and the room is waiting. Keying on " +
 				"the owner alone, as engine.TaskInputIsChannelIngested does, is what delivers it",
+			precondition: func(t *testing.T) {
+				ctx := context.Background()
+				clone, err := q.GetAgentTask(ctx, mustPgUUID(t, lab.legacyRetry))
+				if err != nil {
+					t.Fatalf("load the retry clone: %v", err)
+				}
+				if clone.ChatInputTaskID.Valid {
+					t.Fatalf("the clone inherited owner %v; this case only exists because it stays NULL",
+						clone.ChatInputTaskID)
+				}
+				parent, err := q.GetChannelTaskDelivery(ctx, mustPgUUID(t, lab.legacyInRoom))
+				if err != nil {
+					t.Fatalf("load the parent's route: %v", err)
+				}
+				route, err := q.GetChannelTaskDelivery(ctx, clone.ID)
+				if err != nil {
+					t.Fatalf("the clone has no route: %v — without one it is not a row anyone is "+
+						"waiting on, and the case stops being the one that regressed", err)
+				}
+				if route.ChannelType != channelTypeWecom || route.ChannelChatID != parent.ChannelChatID {
+					t.Fatalf("the clone's route is %s/%s, want the parent's wecom/%s",
+						route.ChannelType, route.ChannelChatID, parent.ChannelChatID)
+				}
+			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.precondition != nil {
+				tc.precondition(t)
+			}
 			got, err := q.GetTaskChannelOrigin(context.Background(), mustPgUUID(t, tc.taskID))
 			if err != nil {
 				t.Fatalf("GetTaskChannelOrigin: %v", err)
