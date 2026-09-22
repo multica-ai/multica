@@ -203,17 +203,21 @@ func TestNonWecomSessionIsNotADrop(t *testing.T) {
 		name       string
 		reason     skipReason
 		actionable bool
-		setup      func(t *testing.T, q *fakeOutboundQueries)
+		// notOwed is whether the log may say "not owed to WeCom". True only
+		// where that is established; the missing-route pair are the two exits
+		// where a reply may have been owed, or nothing can say.
+		notOwed bool
+		setup   func(t *testing.T, q *fakeOutboundQueries)
 	}{
 		{
 			// Slack's or Lark's turn, on the bus this subscriber shares.
-			name: "another platform's delivery row", reason: skipNotWecomTurn,
+			name: "another platform's delivery row", reason: skipNotWecomTurn, notOwed: true,
 			setup: func(_ *testing.T, q *fakeOutboundQueries) { q.sessionChannelType = "slack" },
 		},
 		{
 			// Asked in the Multica web UI on a session that originated in a
 			// room. There is no room waiting.
-			name: "asked in the web UI", reason: skipOriginNotChannel,
+			name: "asked in the web UI", reason: skipOriginNotChannel, notOwed: true,
 			setup: func(_ *testing.T, q *fakeOutboundQueries) { q.channelIngested = askedInTheWebUI() },
 		},
 		{
@@ -222,7 +226,7 @@ func TestNonWecomSessionIsNotADrop(t *testing.T) {
 			// delivery row, and none was ever owed. It has to leave by the web
 			// UI's exit and not the missing-route one, or the loudest line in
 			// the log fires once per web message.
-			name: "asked in the web UI with no delivery row", reason: skipOriginNotChannel,
+			name: "asked in the web UI with no delivery row", reason: skipOriginNotChannel, notOwed: true,
 			setup: func(_ *testing.T, q *fakeOutboundQueries) {
 				q.channelIngested = askedInTheWebUI()
 				q.sessionErr = pgx.ErrNoRows
@@ -276,6 +280,12 @@ func TestNonWecomSessionIsNotADrop(t *testing.T) {
 			// page.
 			if warned := strings.Contains(out, "level=WARN"); warned != tc.actionable {
 				t.Errorf("level=WARN present = %v, want %v:\n%s", warned, tc.actionable, out)
+			}
+			// "Not owed" is a claim about the obligation, and the log is what an
+			// operator greps. It holds for the exits where it is established and
+			// for no other.
+			if said := strings.Contains(out, "not owed"); said != tc.notOwed {
+				t.Errorf("log says \"not owed\" = %v, want %v:\n%s", said, tc.notOwed, out)
 			}
 		})
 	}

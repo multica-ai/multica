@@ -69,7 +69,8 @@ func TestSkippedHelpPutsEachReasonOnTheRightSideOfTheAlertLine(t *testing.T) {
 	help := helpFor(t, "multica_wecom_outbound_skipped_total", func(m *WecomMetrics) {
 		m.RecordOutboundSkipped("no_delivery_row")
 	})
-	// Four that were never owed to WeCom, and the one that may well have been.
+	// Four that were never owed to WeCom, the one that may well have been, and
+	// (below) the one nothing here can say either way about.
 	ordinary := []string{
 		"origin_not_channel", "not_wecom_turn", "installation_inactive", "nothing_to_say",
 	}
@@ -94,6 +95,24 @@ func TestSkippedHelpPutsEachReasonOnTheRightSideOfTheAlertLine(t *testing.T) {
 			t.Errorf("the %q sentence does not say it was never owed to WeCom — without that, the "+
 				"reader has no rule for why these four are not drops:\n%s", reason, line)
 		}
+	}
+
+	// And the one on neither side. With no route and no batch owner nothing can
+	// say whether a reply was owed, so the Help must neither file it with the
+	// harmless four ("never owed") nor with the alert.
+	const unattributable = "route_unattributable"
+	line := sentenceNaming(t, help, unattributable)
+	if strings.Contains(alert, unattributable) {
+		t.Errorf("%q shares a sentence with %q, so the Help reads as though the alert covers it:\n%s",
+			unattributable, actionable, alert)
+	}
+	if containsAny(line, "never owed", "not owed") {
+		t.Errorf("the %q sentence says it was not owed, which is the one thing nothing here can "+
+			"establish about it:\n%s", unattributable, line)
+	}
+	if !strings.Contains(line, "nothing here can say") {
+		t.Errorf("the %q sentence does not say the owner is unknowable, so the reader has no rule "+
+			"for why it is neither a drop nor an alert:\n%s", unattributable, line)
 	}
 }
 

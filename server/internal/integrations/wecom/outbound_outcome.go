@@ -300,15 +300,21 @@ func (o *Outbound) skipped(ctx context.Context, e events.Event, reason skipReaso
 func (o *Outbound) skippedFor(ctx context.Context, sessionID string, reason skipReason) {
 	o.mx().RecordOutboundSkipped(string(reason))
 	attrs := []any{"reason", string(reason), "chat_session_id", sessionID}
-	if reason.actionable() {
-		// Its own line, not the one below at a louder level: "not owed to
-		// WeCom" is what the ordinary four mean, and the actionable one is
+	switch {
+	case reason.actionable():
+		// Its own line, not the default one at a louder level: "not owed to
+		// WeCom" is what the ordinary reasons mean, and the actionable one is
 		// precisely the case where the reply may well have been owed and there
 		// is no longer anything that can say to whom.
 		o.logger.WarnContext(ctx, "wecom outbound: a channel turn with no route, so nothing was sent", attrs...)
-		return
+	case reason == skipRouteUnattributable:
+		// Its own line too, at DEBUG. "Not owed" is a claim this reason cannot
+		// make: with no route and no batch owner, nothing here can say whether
+		// the turn was ever a channel's, let alone whether a reply was owed.
+		o.logger.DebugContext(ctx, "wecom outbound: no route and no batch owner to attribute the turn to, so nothing was sent", attrs...)
+	default:
+		o.logger.DebugContext(ctx, "wecom outbound: reply not owed to WeCom", attrs...)
 	}
-	o.logger.DebugContext(ctx, "wecom outbound: reply not owed to WeCom", attrs...)
 }
 
 // attachmentDelivered / attachmentDropped record ONE FILE. See the note on the
