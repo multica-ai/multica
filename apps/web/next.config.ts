@@ -30,7 +30,7 @@ const allowedDevOrigins = process.env.CORS_ALLOWED_ORIGINS
   ? process.env.CORS_ALLOWED_ORIGINS.split(",")
       .map((origin) => {
         try {
-          return new URL(origin.trim()).host;
+          return new URL(origin.trim()).hostname;
         } catch {
           return origin.trim();
         }
