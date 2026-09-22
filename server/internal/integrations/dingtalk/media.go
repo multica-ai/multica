@@ -26,12 +26,13 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// DingTalk publishes no inbound image limits. Keep the adapter's memory and
+// DingTalk publishes no inbound media limits. Keep the adapter's memory and
 // remote-I/O budget deliberately below the shared Router's 45-second media
 // deadline: at most two 10 MiB downloads are buffered concurrently.
 const (
 	maxImagesPerMessage   = 4
 	maxInboundImageBytes  = 10 << 20
+	maxInboundFileBytes   = 10 << 20
 	imageFetchTimeout     = 30 * time.Second
 	mediaFetchConcurrency = 2
 	maxDownloadRedirects  = 3
@@ -211,11 +212,35 @@ func (m *mediaResolver) HasMedia(msg channel.InboundMessage) bool {
 	return err == nil && len(raw.Media) > 0
 }
 
-func (m *mediaResolver) ResolveMedia(ctx context.Context, inst engine.ResolvedInstallation, _ engine.ResolvedIdentity, _ pgtype.UUID, chatMessageID pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage {
+func (m *mediaResolver) ResolveMedia(ctx context.Context, inst engine.ResolvedInstallation, _ engine.ResolvedIdentity, _ pgtype.UUID, chatMessageID pgtype.UUID, msg channel.InboundMessage) (result channel.InboundMessage) {
 	raw, err := decodeDingTalkRaw(msg)
 	if err != nil || len(raw.Media) == 0 {
 		return msg
 	}
+	// File failures must survive in the durable message body, including early
+	// dependency failures. Do not expose provider errors or signed URLs.
+	fileErrors := make([]string, len(raw.Media))
+	for i, resource := range raw.Media {
+		if resource.Type == channel.MsgTypeFile {
+			fileErrors[i] = "download failed; please send the file again"
+		}
+	}
+	defer func() {
+		var notices []string
+		for _, reason := range fileErrors {
+			if reason != "" {
+				result.Text += "\n[File unavailable: " + reason + "]"
+				notices = append(notices, "File unavailable: "+reason+".")
+			}
+		}
+		if len(notices) > 0 && m.client != nil {
+			noticeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			if _, err := sendInstallationText(noticeCtx, m.client, m.decrypt, inst, targetFromMessage(msg), strings.Join(notices, "\n")); err != nil {
+				m.logWarn(msg, fmt.Errorf("send file failure notice: %w", err))
+			}
+		}
+	}()
 	if len(raw.Media) > maxImagesPerMessage {
 		m.logWarn(msg, fmt.Errorf("%d images exceed the limit of %d", len(raw.Media), maxImagesPerMessage))
 		return msg
@@ -261,25 +286,38 @@ func (m *mediaResolver) ResolveMedia(ctx context.Context, inst engine.ResolvedIn
 			data, contentType, err := m.fetchResource(gctx, creds, resource)
 			if err != nil {
 				m.logWarn(msg, err)
+				var rejected fileRejectedError
+				if resource.Type == channel.MsgTypeFile && errors.As(err, &rejected) {
+					fileErrors[i] = string(rejected)
+				}
 				return nil
 			}
 			ext := allowedImageTypes[contentType]
 			filename := fmt.Sprintf("dingtalk-image-%d%s", i+1, ext)
+			kind, placeholder := channel.MsgTypeImage, dingtalkImagePlaceholder
+			if resource.Type == channel.MsgTypeFile {
+				kind, placeholder = channel.MsgTypeFile, "[File]"
+				filename = cleanDingTalkFilename(resource.Filename)
+				if filename == "" {
+					filename = fmt.Sprintf("dingtalk-file-%d", i+1)
+				}
+			}
 			if _, err := m.store.Upload(gctx, key, data, contentType, filename); err != nil {
-				m.logWarn(msg, fmt.Errorf("upload image: %w", err))
+				m.logWarn(msg, fmt.Errorf("upload media: %w", err))
 				return nil
 			}
 			refs[i] = channel.MediaRef{
-				Type:              channel.MsgTypeImage,
+				Type:              kind,
 				StorageKey:        key,
 				StorageURL:        link,
 				Filename:          filename,
 				MimeType:          contentType,
 				SizeBytes:         int64(len(data)),
-				InlinePlaceholder: dingtalkImagePlaceholder,
+				InlinePlaceholder: placeholder,
 				InlineIndex:       resource.InlineIndex,
 			}
 			valid[i] = true
+			fileErrors[i] = ""
 			return nil
 		})
 	}
@@ -298,11 +336,11 @@ func dingtalkMediaObjectKey(inst engine.ResolvedInstallation, chatMessageID pgty
 }
 
 func (m *mediaResolver) fetchResource(ctx context.Context, creds credentials, resource dingtalkMediaResource) ([]byte, string, error) {
-	data, contentType, primaryErr := m.fetchByCode(ctx, creds, resource.Ref)
+	data, contentType, primaryErr := m.fetchByCode(ctx, creds, resource.Ref, resource.Type)
 	if primaryErr == nil || resource.Alt == "" || resource.Alt == resource.Ref {
 		return data, contentType, primaryErr
 	}
-	data, contentType, fallbackErr := m.fetchByCode(ctx, creds, resource.Alt)
+	data, contentType, fallbackErr := m.fetchByCode(ctx, creds, resource.Alt, resource.Type)
 	if fallbackErr == nil {
 		return data, contentType, nil
 	}
@@ -312,15 +350,15 @@ func (m *mediaResolver) fetchResource(ctx context.Context, creds credentials, re
 	)
 }
 
-func (m *mediaResolver) fetchByCode(ctx context.Context, creds credentials, code string) ([]byte, string, error) {
+func (m *mediaResolver) fetchByCode(ctx context.Context, creds credentials, code string, kind channel.MsgType) ([]byte, string, error) {
 	downloadURL, err := m.client.messageFileDownloadURL(ctx, creds.AppKey, creds.AppSecret, creds.RobotCode, code)
 	if err != nil {
 		return nil, "", fmt.Errorf("resolve download url: %w", err)
 	}
-	return m.fetchBytes(ctx, downloadURL)
+	return m.fetchBytes(ctx, downloadURL, kind)
 }
 
-func (m *mediaResolver) fetchBytes(ctx context.Context, rawURL string) ([]byte, string, error) {
+func (m *mediaResolver) fetchBytes(ctx context.Context, rawURL string, kind channel.MsgType) ([]byte, string, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, "", errors.New("invalid image download URL")
@@ -349,12 +387,26 @@ func (m *mediaResolver) fetchBytes(ctx context.Context, rawURL string) ([]byte, 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, "", fmt.Errorf("download image: http %d", resp.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxInboundImageBytes+1))
+	limit := int64(maxInboundImageBytes)
+	if kind == channel.MsgTypeFile {
+		limit = maxInboundFileBytes
+	}
+	if resp.ContentLength > limit && kind == channel.MsgTypeFile {
+		return nil, "", fileRejectedError("file exceeds the 10 MB limit")
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return nil, "", fmt.Errorf("read image: %w", err)
 	}
-	if len(data) > maxInboundImageBytes {
+	if int64(len(data)) > limit {
+		if kind == channel.MsgTypeFile {
+			return nil, "", fileRejectedError("file exceeds the 10 MB limit")
+		}
 		return nil, "", fmt.Errorf("image exceeds the %d MB limit", maxInboundImageBytes>>20)
+	}
+	if kind == channel.MsgTypeFile {
+		contentType, err := dingTalkFileContentType(data)
+		return data, contentType, err
 	}
 	sniff := data
 	if len(sniff) > 512 {

@@ -52,7 +52,11 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ### 发送图片
 
-私聊和群聊都支持图文混排消息，图片支持 PNG、JPEG、GIF、WebP 和 BMP；每条消息最多 4 张，每张不超过 10 MB。暂不支持文件和语音消息。
+私聊和群聊都支持图文混排消息，图片支持 PNG、JPEG、GIF、WebP 和 BMP；每条消息最多 4 张，每张不超过 10 MB。暂不支持语音消息。
+
+### 发送文件
+
+可以发送 PDF、DOCX、XLSX、PPTX、ZIP、纯文本文件或上述图片格式，每个文件不超过 10 MB。Multica 会保留文件名、检查下载内容，并将文件添加为对话附件，供智能体通过附件 ID 下载。文件被拒绝时会显示失败提示。暂不支持旧版 Office 二进制格式（`.doc`、`.xls`、`.ppt`）。
 
 注意，群聊中的图文混排消息，@ Bot 产生的内容也会作为消息内容的一部分发送给智能体，如果想精准剔除掉 Bot 名称，需添加“钉群基础信息管理权限”（`qyapi_chat_manage`）。
 

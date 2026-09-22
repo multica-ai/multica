@@ -34,7 +34,7 @@ type botCallbackData struct {
 	IsInAtList        bool                `json:"isInAtList"`
 	Text              botCallbackText     `json:"text"`
 	// Content is the msgtype-discriminated payload of non-text messages
-	// (picture / richText). Decoded lazily per msgtype; absent on over-quota
+	// (picture / richText / file). Decoded lazily per msgtype; absent on over-quota
 	// callbacks (errorCode 20001 strips text/content entirely).
 	Content json.RawMessage `json:"content"`
 }
@@ -145,6 +145,14 @@ type pictureContent struct {
 	PictureDownloadCode string `json:"pictureDownloadCode"`
 }
 
+// fileContent follows DingTalk's receive-message schema. The download code
+// uses the same authenticated messageFiles/download API as pictures.
+// https://open-dingtalk.github.io/developerpedia/docs/learn/bot/message/
+type fileContent struct {
+	DownloadCode string `json:"downloadCode"`
+	FileName     string `json:"fileName"`
+}
+
 // richTextContent is the content shape of msgtype=richText: an ORDERED array
 // of heterogeneous items — text runs {"text":…} interleaved with picture items
 // {"type":"picture","downloadCode":…} in send order. Item kinds beyond
@@ -251,8 +259,10 @@ type dingtalkRawEvent struct {
 }
 
 type dingtalkMediaResource struct {
-	Ref string `json:"ref"`
-	Alt string `json:"alt,omitempty"`
+	Ref      string          `json:"ref"`
+	Alt      string          `json:"alt,omitempty"`
+	Type     channel.MsgType `json:"type,omitempty"`
+	Filename string          `json:"filename,omitempty"`
 	// InlineIndex is the occurrence of the adapter-generated marker in the
 	// visible body, including identical user-authored text.
 	InlineIndex int `json:"inline_index,omitempty"`
@@ -275,7 +285,7 @@ const (
 // ingestable messages; a malformed/over-quota media payload (the 20001 shape
 // strips content) still reaches the core as an explicit unavailable-image
 // placeholder rather than the adapter dropping it silently;
-// audio/video/file/unknown kinds likewise pass through as text placeholders.
+// audio/video/unknown kinds likewise pass through as text placeholders.
 // A direct (1:1) message is always addressed to the bot; a group
 // message reaches the bot only when it carries an @-mention of it, which
 // DingTalk reports via isInAtList.
@@ -397,7 +407,13 @@ func inboundFromCallbackWithBotName(data *botCallbackData, appID, botName string
 		msg.Text = "[Video message]"
 	case "file":
 		msg.Type = channel.MsgTypeFile
+		var fc fileContent
+		if json.Unmarshal(data.Content, &fc) != nil || strings.TrimSpace(fc.DownloadCode) == "" {
+			msg.Text = "[File unavailable: DingTalk did not provide a download reference]"
+			break
+		}
 		msg.Text = "[File]"
+		rawEvent.Media = []dingtalkMediaResource{{Ref: fc.DownloadCode, Type: channel.MsgTypeFile, Filename: cleanDingTalkFilename(fc.FileName)}}
 	default:
 		msg.Type = channel.MsgTypeUnknown
 		msg.Text = "[Unsupported DingTalk message]"
@@ -466,9 +482,12 @@ func applyDingTalkReplyContext(data *botCallbackData, msg *channel.InboundMessag
 	// occurrence introduced by that block, including user-authored literals,
 	// preserving InlineIndex's occurrence-based contract.
 	currentMedia := rawEvent.Media
-	placeholderOffset := strings.Count(block, dingtalkImagePlaceholder)
 	for i := range currentMedia {
-		currentMedia[i].InlineIndex += placeholderOffset
+		placeholder := dingtalkImagePlaceholder
+		if currentMedia[i].Type == channel.MsgTypeFile {
+			placeholder = "[File]"
+		}
+		currentMedia[i].InlineIndex += strings.Count(block, placeholder)
 	}
 	rawEvent.Media = make([]dingtalkMediaResource, 0, len(quotedMedia)+len(currentMedia))
 	rawEvent.Media = append(rawEvent.Media, quotedMedia...)
@@ -479,7 +498,7 @@ func applyDingTalkReplyContext(data *botCallbackData, msg *channel.InboundMessag
 	if visibleInstruction != "" {
 		msg.Text += "\n\n" + visibleInstruction
 	}
-	if len(rawEvent.Media) > 0 {
+	if len(rawEvent.Media) > 0 && msg.Type != channel.MsgTypeFile {
 		msg.Type = channel.MsgTypeImage
 	}
 }

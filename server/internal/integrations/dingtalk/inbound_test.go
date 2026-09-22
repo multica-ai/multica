@@ -970,7 +970,7 @@ func TestInboundFromCallback_NonTextReplyKindsKeepQuotedContext(t *testing.T) {
 	}{
 		{name: "audio", msgType: "audio", currentText: "[Audio message]"},
 		{name: "video", msgType: "video", currentText: "[Video message]"},
-		{name: "file", msgType: "file", currentText: "[File]"},
+		{name: "file", msgType: "file", currentText: "[File unavailable: DingTalk did not provide a download reference]"},
 		{name: "unknown", msgType: "location", currentText: "[Unsupported DingTalk message]"},
 	}
 	for _, tt := range tests {
