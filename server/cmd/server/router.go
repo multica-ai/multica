@@ -1187,7 +1187,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Per-installation inbound: the Supervisor builds + supervises one
 			// long-polling loop per active Telegram installation.
-			telegram.RegisterTelegram(channelRegistry, telegram.ChannelDeps{Decrypt: box.Open, Logger: slog.Default()})
+			telegram.RegisterTelegram(channelRegistry, telegram.ChannelDeps{
+				Decrypt:           box.Open,
+				Logger:            slog.Default(),
+				RecentContextSize: telegram.DefaultRecentContextSize,
+			})
 
 			installSvc, ierr := telegram.NewInstallService(queries, pool, box, slog.Default())
 			if ierr != nil {

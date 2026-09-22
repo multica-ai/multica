@@ -43,7 +43,7 @@ Multica는 Telegram에서 Bot을 검증하고 long polling과 충돌하는 webho
 ## Bot 사용하기
 
 - **개인 채팅**: @mention 없이 텍스트를 보냅니다.
-- **그룹**: Bot을 추가한 뒤 @mention하거나 Bot 메시지에 직접 답장합니다. 수락된 메시지는 이어지는 Multica 대화에 남지만 Bot을 지정하지 않은 그룹 대화는 수집하지 않습니다. 다른 사람의 메시지에 답장할 때는 Bot도 명시적으로 @mention해야 하며, 이 경우에만 인용한 발신자와 텍스트(또는 caption)가 새 지시의 맥락에 포함됩니다. Bot @mention 없이 사람에게 답장하면 Bot이 실행되지 않습니다. forum topic은 topic별로 세션이 분리됩니다.
+- **그룹**: Bot을 추가한 뒤 @mention하거나 Bot 메시지에 직접 답장합니다. 수락된 메시지는 이어지는 Multica 대화에 남습니다. Bot을 지정하지 않은 그룹 대화는 대화를 시작하지도, 저장되지도 않지만, 누군가 Bot을 @mention하면 같은 그룹(또는 forum topic)에서 Bot이 폴링을 시작한 뒤 본 최근 10개 메시지가 읽기 전용 컨텍스트로 함께 전달되어 에이전트가 그룹의 논의 내용을 파악할 수 있습니다. `/new`로 시작한 새 대화에는 이 컨텍스트가 붙지 않습니다. Group Privacy가 켜져 있으면 Telegram은 명령과 답장만 Bot에 전달하므로 창에는 이전에 Bot에게 보낸 메시지만 남습니다. 주변 대화까지 보게 하려면 @BotFather에서 Group Privacy를 끄고 Bot을 그룹에서 내보낸 뒤 다시 추가하세요. 다른 사람의 메시지에 답장할 때는 Bot도 명시적으로 @mention해야 하며, 이 경우에만 인용한 발신자와 텍스트(또는 caption)가 새 지시의 맥락에 포함됩니다. Bot @mention 없이 사람에게 답장하면 Bot이 실행되지 않습니다. forum topic은 topic별로 세션이 분리됩니다.
 - **`/new` / `/new <message>`**: 비어 있는 새 Multica Chat을 만들고 해당 Telegram 대화의 이후 메시지를 새 Chat으로 라우팅합니다. 메시지를 함께 보내면 새 Chat의 첫 번째 대화가 됩니다. 다른 멤버에게 답장하면서 Bot을 명시적으로 @mention하면 선택한 인용 내용도 첫 번째 대화에 포함됩니다.
 - **`/clear` / `/clear <message>`**: 현재 Multica Chat을 유지하면서 다음 비어 있지 않은 메시지에 새 에이전트 컨텍스트를 적용합니다. 메시지를 함께 보내면 경계 이후의 첫 번째 대화가 되며 명시적으로 선택한 답장 인용도 유지됩니다.
 - **`/issue <title>`**: Multica issue를 만듭니다. 다음 줄은 선택 설명으로 사용됩니다. `/issue@your_bot` 형식도 지원합니다.

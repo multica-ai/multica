@@ -50,7 +50,7 @@ Open the Bot and send text directly. No @-mention is required.
 
 ### Groups and forum topics
 
-Add the Bot to a group, then either @-mention it or reply directly to one of its messages. Accepted messages remain in the continued Multica conversation; unaddressed group chatter is not collected. When replying to another person's message, explicitly @-mention the Bot: only then are that quoted sender and text (or caption) included with your instruction. Replying to a human message without mentioning the Bot does not trigger it. Each ordinary group has its own continued Multica chat; forum topics are isolated into separate chats.
+Add the Bot to a group, then either @-mention it or reply directly to one of its messages. Accepted messages remain in the continued Multica conversation. Unaddressed group chatter never starts a conversation or gets stored, but the last 10 messages of the same group (or forum topic) that the Bot has seen since it started polling are inlined as read-only context when someone @-mentions it, so the agent understands what the group was discussing. `/new` starts a fresh chat without that ambient context. With Group Privacy on, Telegram only delivers commands and replies to the Bot, so the window then contains earlier addressed messages only; turn Group Privacy off in @BotFather (and re-add the Bot to the group) if you want it to see the surrounding conversation. When replying to another person's message, explicitly @-mention the Bot: only then are that quoted sender and text (or caption) included with your instruction. Replying to a human message without mentioning the Bot does not trigger it. Each ordinary group has its own continued Multica chat; forum topics are isolated into separate chats.
 
 ### Commands
 
