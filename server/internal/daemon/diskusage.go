@@ -149,6 +149,13 @@ type workspaceReapRefusal struct {
 
 func (e *workspaceReapRefusal) Error() string { return e.reason }
 
+// Deterministic seams for identity-swap regressions around the reap lock.
+// They are nil outside tests.
+var (
+	reapLockTestHook          func()
+	reapBeforeRemovalTestHook func()
+)
+
 // ScanDiskUsageRoots scans every root in order and returns the combined report.
 // It reuses ScanDiskUsage per root — a missing root yields an empty per-root
 // report (not an error), matching the single-root command, so a never-used
@@ -685,6 +692,10 @@ func removeOwnedCleanTaskRoot(ctx context.Context, workspacesRoot, taskRoot stri
 	if _, err := reapTaskRootOwner(workspacesRoot, taskRoot); err != nil {
 		return &workspaceReapRefusal{reason: fmt.Sprintf("task root ownership could not be proven: %v", err)}
 	}
+	validatedInfo, err := os.Stat(taskRoot)
+	if err != nil {
+		return &workspaceReapRefusal{reason: fmt.Sprintf("could not inspect task root before locking: %v", err)}
+	}
 	root, err := os.OpenRoot(workspacesRoot)
 	if err != nil {
 		return fmt.Errorf("open workspaces root: %w", err)
@@ -695,12 +706,19 @@ func removeOwnedCleanTaskRoot(ctx context.Context, workspacesRoot, taskRoot stri
 	if err != nil || !filepath.IsLocal(rel) {
 		return &workspaceReapRefusal{reason: "task root is outside the workspaces root"}
 	}
-	claim, _, err := execenv.LockEnvRootForReuse(root, rel, taskRoot)
+	if reapLockTestHook != nil {
+		reapLockTestHook()
+	}
+	claim, lockedInfo, err := execenv.LockEnvRootForReuse(root, rel, taskRoot)
 	if err != nil {
 		return &workspaceReapRefusal{reason: fmt.Sprintf("task root is active or could not be exclusively locked: %v", err)}
 	}
 	if claim == nil {
 		return &workspaceReapRefusal{reason: "task root disappeared before it could be removed"}
+	}
+	if lockedInfo == nil || !os.SameFile(validatedInfo, lockedInfo) {
+		claim.Release()
+		return &workspaceReapRefusal{reason: "task root changed identity before it could be locked"}
 	}
 	defer claim.Release()
 
@@ -714,6 +732,16 @@ func removeOwnedCleanTaskRoot(ctx context.Context, workspacesRoot, taskRoot stri
 	}
 	if len(changes) > 0 {
 		return &workspaceReapRefusal{reason: "Git tree changed before removal", files: changes}
+	}
+	if reapBeforeRemovalTestHook != nil {
+		reapBeforeRemovalTestHook()
+	}
+	currentInfo, err := os.Stat(taskRoot)
+	if err != nil {
+		return &workspaceReapRefusal{reason: fmt.Sprintf("could not inspect task root before removal: %v", err)}
+	}
+	if !os.SameFile(lockedInfo, currentInfo) {
+		return &workspaceReapRefusal{reason: "task root changed identity before removal"}
 	}
 	if err := os.RemoveAll(taskRoot); err != nil {
 		return err

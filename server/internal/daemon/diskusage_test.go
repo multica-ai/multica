@@ -832,6 +832,64 @@ func TestReapTerminalCleanWorkspaces_TreeCheckControlsApply(t *testing.T) {
 	})
 }
 
+func TestRemoveOwnedCleanTaskRootRefusesIdentitySwap(t *testing.T) {
+	for _, phase := range []string{"before lock", "before removal"} {
+		t.Run(phase, func(t *testing.T) {
+			root := t.TempDir()
+			workspaceID := "11111111-1111-1111-1111-111111111111"
+			taskID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+			taskRoot := filepath.Join(root, workspaceID, taskID)
+			writeReapTaskOwner(t, taskRoot, workspaceID, taskID)
+
+			movedRoot := filepath.Join(root, "moved-"+strings.ReplaceAll(phase, " ", "-"))
+			swap := func() {
+				if err := os.Rename(taskRoot, movedRoot); err != nil {
+					t.Fatalf("move locked fixture root: %v", err)
+				}
+				writeReapTaskOwner(t, taskRoot, workspaceID, taskID)
+			}
+			switch phase {
+			case "before lock":
+				reapLockTestHook = swap
+				t.Cleanup(func() { reapLockTestHook = nil })
+			case "before removal":
+				reapBeforeRemovalTestHook = swap
+				t.Cleanup(func() { reapBeforeRemovalTestHook = nil })
+			}
+
+			err := removeOwnedCleanTaskRoot(context.Background(), root, taskRoot, func(context.Context, string) ([]string, error) {
+				return nil, nil
+			})
+			var refusal *workspaceReapRefusal
+			if !errors.As(err, &refusal) {
+				t.Fatalf("removeOwnedCleanTaskRoot error = %v, want identity-swap refusal", err)
+			}
+			if !strings.Contains(refusal.reason, "changed identity") {
+				t.Fatalf("refusal reason = %q, want identity change", refusal.reason)
+			}
+			for _, path := range []string{taskRoot, movedRoot} {
+				if _, statErr := os.Stat(path); statErr != nil {
+					t.Fatalf("identity-swap refusal removed %s: %v", path, statErr)
+				}
+			}
+		})
+	}
+}
+
+func writeReapTaskOwner(t *testing.T, taskRoot, workspaceID, taskID string) {
+	t.Helper()
+	if err := os.MkdirAll(taskRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := json.Marshal(execenv.EnvRootOwner{WorkspaceID: workspaceID, TaskID: taskID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(taskRoot, ".task_owner"), owner, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestScanDiskUsage_ReportsRepoCacheSeparately pins the accounting split: the
 // bare-repo cache is measured (it used to be invisible, which made the reported
 // total silently disagree with the user's file manager) but kept out of the
