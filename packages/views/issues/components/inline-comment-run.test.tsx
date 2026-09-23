@@ -111,8 +111,14 @@ describe("InlineCommentRun", () => {
     expect(api.createTaskSupplement).not.toHaveBeenCalled();
   });
 
-  it("disables additional messages without negotiated support", () => {
+  it("hides additional messages without negotiated support", () => {
     const { client } = setup(task());
+    expect(screen.queryByRole("button", { name: "Add message" })).not.toBeInTheDocument();
+    client.clear();
+  });
+
+  it("disables additional messages when support is negotiated but permission is denied", () => {
+    const { client } = setup(task({ supplement_capability: "task-supplement-v1", can_supplement: false }));
     expect(screen.getByRole("button", { name: "Add message" })).toBeDisabled();
     client.clear();
   });

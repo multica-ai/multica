@@ -181,7 +181,9 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     onClick={() => setConfirmStop(true)}>
     {cancel.isPending || cancel.isSuccess ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Square className="size-3.5" />}
   </Button>;
-  const supplementButton = active && <Tooltip>
+  const supplementButton = active
+    && task.supplement_capability === "task-supplement-v1"
+    && <Tooltip>
     <TooltipTrigger render={<span className="inline-flex">
       <Button type="button" size="sm" variant="ghost" className="text-muted-foreground"
         aria-label={t(($) => $.inline_run.supplement_action)}
