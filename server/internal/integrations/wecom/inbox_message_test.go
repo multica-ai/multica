@@ -1,6 +1,7 @@
 package wecom
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -24,6 +25,37 @@ func TestBuildInboxMarkdown_TitleBodyLink(t *testing.T) {
 	}
 	if !strings.Contains(got, "[查看详情](https://example.com/acme/inbox?issue=9194c058-e8a4-4c15-9c65-86d1784ba715)") {
 		t.Fatalf("missing detail link: %q", got)
+	}
+}
+
+func TestInboxStatusTransitionBody_FallsBackWhenOneSideIsMissing(t *testing.T) {
+	t.Parallel()
+	name := func(key string) string {
+		if label, ok := inboxStatusLabels[key]; ok {
+			return label
+		}
+		return key
+	}
+	for _, tc := range []struct {
+		name    string
+		details string
+		want    string
+	}{
+		{"both", `{"from":"todo","to":"in_review"}`, "Todo → In Review"},
+		{"from only", `{"from":"todo"}`, "Todo →"},
+		{"to only", `{"to":"in_review"}`, "→ In Review"},
+		{"neither", `{}`, ""},
+		{"malformed", `{`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			item := map[string]any{
+				"type":    "status_changed",
+				"details": json.RawMessage(tc.details),
+			}
+			if got := inboxStatusTransitionBody(item, name); got != tc.want {
+				t.Fatalf("inboxStatusTransitionBody() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
