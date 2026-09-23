@@ -134,7 +134,10 @@
     "archive_dialog_title": "Archiver « {{name}} » ?",
     "archive_dialog_description": "L'agent ne pourra plus être assigné ni mentionné, et ses exécutions actives seront annulées. Tout l'historique sera conservé et vous pourrez le restaurer plus tard.",
     "archive_dialog_cancel": "Annuler",
-    "archive_dialog_confirm": "Archiver"
+    "archive_dialog_confirm": "Archiver",
+    "make_global": "Rendre global",
+    "made_global_toast": "« {{name}} » est désormais un agent global",
+    "make_global_failed_toast": "Impossible de rendre l'agent global"
   },
   "detail": {
     "back_to_agents": "Agents",
@@ -166,7 +169,11 @@
     "runtime_required_toast": "Associez un runtime avant d'exécuter cet agent.",
     "assign_work": "Assigner du travail",
     "more_actions_aria": "Actions de l'agent",
-    "updated": "Mis à jour {{when}}"
+    "updated": "Mis à jour {{when}}",
+    "global_badge": "Agent global",
+    "global_banner_owner": "Synchronisé depuis votre agent global : les modifications de son nom, de son avatar, de sa description, de ses instructions et de ses amorces de conversation s'appliquent dans chaque espace de travail où il est activé.",
+    "global_banner_viewer": "Synchronisé depuis un agent global. Seul son propriétaire peut modifier son nom, son avatar, sa description, ses instructions et ses amorces de conversation.",
+    "global_manage": "Gérer"
   },
   "inspector": {
     "section_profile": "Profil",

@@ -379,7 +379,8 @@
       "quick_actions": "퀵 액션",
       "plugins": "Plugins",
       "mcp": "MCP",
-      "billing": "결제 및 요금제"
+      "billing": "결제 및 요금제",
+      "global_agents": "글로벌 에이전트"
     },
     "groups": {
       "personal": "개인 설정",
@@ -1358,5 +1359,69 @@
     "status_loading": "확인 중...",
     "status_unknown": "상태를 확인할 수 없음",
     "channel_hint": "{{channel}}에서 에이전트와 대화하고 태스크를 생성합니다."
+  },
+  "global_agents": {
+    "title": "글로벌 에이전트",
+    "description": "에이전트를 한 번 정의하면 어느 워크스페이스에서든 활성화할 수 있습니다. 이름, 아바타, 설명, 지침, 대화 시작 예시는 동기화되며 런타임, 모델, skill, 접근 권한은 워크스페이스마다 설정합니다.",
+    "create": "새 글로벌 에이전트",
+    "empty": "아직 글로벌 에이전트가 없습니다.",
+    "load_failed": "글로벌 에이전트를 불러오지 못했습니다.",
+    "enabled_in": "{{workspaces}}에서 활성화됨",
+    "not_enabled": "어느 워크스페이스에서도 활성화되지 않음",
+    "manage_workspaces": "워크스페이스",
+    "actions_aria": "{{name}} 작업",
+    "edit": "편집",
+    "delete": "삭제",
+    "form": {
+      "create_title": "새 글로벌 에이전트",
+      "edit_title": "글로벌 에이전트 편집",
+      "avatar_aria": "에이전트 아바타",
+      "name_label": "이름",
+      "name_placeholder": "예: 코드 리뷰어",
+      "description_label": "설명",
+      "description_placeholder": "이 에이전트는 무엇을 하나요?",
+      "instructions_label": "지침",
+      "instructions_placeholder": "이 에이전트는 어떻게 일해야 하나요?",
+      "sync_note": "저장하면 이 에이전트가 활성화된 모든 워크스페이스에 반영됩니다.",
+      "cancel": "취소",
+      "create": "만들기",
+      "creating": "만드는 중…",
+      "save": "저장",
+      "saving": "저장 중…",
+      "created_toast": "글로벌 에이전트를 만들었습니다",
+      "saved_toast": "글로벌 에이전트를 저장했습니다",
+      "create_failed_toast": "글로벌 에이전트를 만들지 못했습니다",
+      "save_failed_toast": "글로벌 에이전트를 저장하지 못했습니다"
+    },
+    "workspaces": {
+      "title": "{{name}}의 워크스페이스",
+      "description": "활성화하면 선택한 런타임으로 이 에이전트의 연결된 사본이 워크스페이스에 추가됩니다.",
+      "load_failed": "워크스페이스를 불러오지 못했습니다.",
+      "empty": "아직 어떤 워크스페이스의 멤버도 아닙니다.",
+      "status_enabled": "활성화됨",
+      "status_disabled": "비활성화됨",
+      "status_not_added": "추가되지 않음",
+      "runtime_label": "{{workspace}} 런타임",
+      "runtime_placeholder": "런타임 선택",
+      "runtime_offline": "{{name}} (오프라인)",
+      "no_runtime": "여기서 사용할 수 있는 런타임이 아직 없습니다.",
+      "enable": "활성화",
+      "disable": "비활성화",
+      "enable_all": "모든 워크스페이스에서 활성화",
+      "close": "닫기",
+      "enabled_toast": "{{workspace}}에서 활성화했습니다",
+      "disabled_toast": "{{workspace}}에서 비활성화했습니다",
+      "enable_all_done_toast_other": "워크스페이스 {{count}}개에서 활성화했습니다",
+      "enable_failed_toast": "{{workspace}}에서 활성화하지 못했습니다: {{message}}",
+      "disable_failed_toast": "{{workspace}}에서 비활성화하지 못했습니다: {{message}}"
+    },
+    "delete_dialog": {
+      "title": "“{{name}}”을(를) 삭제할까요?",
+      "description": "워크스페이스에 추가된 에이전트는 일반 에이전트로 유지되며 더 이상 동기화되지 않습니다.",
+      "cancel": "취소",
+      "confirm": "삭제",
+      "deleted_toast": "글로벌 에이전트를 삭제했습니다",
+      "delete_failed_toast": "글로벌 에이전트를 삭제하지 못했습니다"
+    }
   }
 }

@@ -203,6 +203,11 @@ import type {
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
+  GlobalAgent,
+  GlobalAgentWorkspaceTarget,
+  CreateGlobalAgentRequest,
+  UpdateGlobalAgentRequest,
+  EnableGlobalAgentRequest,
   BillingBalance,
   BillingTransactionsPage,
   BillingBatchesPage,
@@ -244,6 +249,13 @@ import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
+  GlobalAgentSchema,
+  GlobalAgentListSchema,
+  GlobalAgentWorkspaceTargetListSchema,
+  GlobalAgentLinkedAgentSchema,
+  EMPTY_GLOBAL_AGENT,
+  EMPTY_GLOBAL_AGENT_LIST,
+  EMPTY_GLOBAL_AGENT_WORKSPACE_TARGETS,
   RuntimeProfileSchema,
   RuntimeProfileListSchema,
   AgentTaskListSchema,
@@ -1882,6 +1894,109 @@ export class ApiClient {
 
   async restoreAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}/restore`, { method: "POST" });
+  }
+
+  /**
+   * Turns a workspace agent into a global agent: its name, description,
+   * instructions, avatar and conversation starters become an account-level
+   * definition and this agent becomes its first linked copy. Agent owner only.
+   */
+  async makeAgentGlobal(id: string): Promise<GlobalAgent> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/make-global`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, GlobalAgentSchema, EMPTY_GLOBAL_AGENT, {
+      endpoint: "POST /api/agents/:id/make-global",
+    });
+  }
+
+  // Global agents (#8775) are account-level: the server ignores the
+  // workspace header on these routes and scopes everything to the caller.
+  async listGlobalAgents(): Promise<GlobalAgent[]> {
+    const raw = await this.fetch<unknown>("/api/global-agents");
+    return parseWithFallback(raw, GlobalAgentListSchema, EMPTY_GLOBAL_AGENT_LIST, {
+      endpoint: "GET /api/global-agents",
+    });
+  }
+
+  async getGlobalAgent(id: string): Promise<GlobalAgent> {
+    const raw = await this.fetch<unknown>(`/api/global-agents/${id}`);
+    return parseWithFallback(raw, GlobalAgentSchema, EMPTY_GLOBAL_AGENT, {
+      endpoint: "GET /api/global-agents/:id",
+    });
+  }
+
+  async createGlobalAgent(data: CreateGlobalAgentRequest): Promise<GlobalAgent> {
+    const raw = await this.fetch<unknown>("/api/global-agents", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, GlobalAgentSchema, EMPTY_GLOBAL_AGENT, {
+      endpoint: "POST /api/global-agents",
+    });
+  }
+
+  /** Saves the definition and propagates it to every linked workspace agent. */
+  async updateGlobalAgent(
+    id: string,
+    data: UpdateGlobalAgentRequest,
+  ): Promise<GlobalAgent> {
+    const raw = await this.fetch<unknown>(`/api/global-agents/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, GlobalAgentSchema, EMPTY_GLOBAL_AGENT, {
+      endpoint: "PUT /api/global-agents/:id",
+    });
+  }
+
+  /** Linked workspace agents are kept and become regular agents. */
+  async deleteGlobalAgent(id: string): Promise<void> {
+    await this.fetch(`/api/global-agents/${id}`, { method: "DELETE" });
+  }
+
+  async listGlobalAgentWorkspaces(
+    id: string,
+  ): Promise<GlobalAgentWorkspaceTarget[]> {
+    const raw = await this.fetch<unknown>(`/api/global-agents/${id}/workspaces`);
+    return parseWithFallback(
+      raw,
+      GlobalAgentWorkspaceTargetListSchema,
+      EMPTY_GLOBAL_AGENT_WORKSPACE_TARGETS,
+      { endpoint: "GET /api/global-agents/:id/workspaces" },
+    );
+  }
+
+  /**
+   * Creates the linked agent in a workspace, or restores it when it was
+   * disabled there. Returns the workspace agent, or null when the response
+   * did not carry one.
+   */
+  async enableGlobalAgentInWorkspace(
+    id: string,
+    data: EnableGlobalAgentRequest,
+  ): Promise<Agent | null> {
+    const raw = await this.fetch<unknown>(`/api/global-agents/${id}/workspaces`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback<Agent | null>(raw, GlobalAgentLinkedAgentSchema, null, {
+      endpoint: "POST /api/global-agents/:id/workspaces",
+    });
+  }
+
+  /** Archives the linked agent in one workspace. */
+  async disableGlobalAgentInWorkspace(
+    id: string,
+    workspaceId: string,
+  ): Promise<Agent | null> {
+    const raw = await this.fetch<unknown>(
+      `/api/global-agents/${id}/workspaces/${workspaceId}`,
+      { method: "DELETE" },
+    );
+    return parseWithFallback<Agent | null>(raw, GlobalAgentLinkedAgentSchema, null, {
+      endpoint: "DELETE /api/global-agents/:id/workspaces/:workspaceId",
+    });
   }
 
   // Bulk-cancel every active task (queued/dispatched/running) for the agent.

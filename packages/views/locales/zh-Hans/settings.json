@@ -379,7 +379,8 @@
       "quick_actions": "快捷操作",
       "plugins": "Plugins",
       "mcp": "MCP",
-      "billing": "账单与套餐"
+      "billing": "账单与套餐",
+      "global_agents": "全局智能体"
     },
     "groups": {
       "personal": "个人设置",
@@ -1358,5 +1359,69 @@
     "status_loading": "正在检查...",
     "status_unknown": "状态暂不可用",
     "channel_hint": "在 {{channel}} 中与智能体对话、创建任务。"
+  },
+  "global_agents": {
+    "title": "全局智能体",
+    "description": "只需定义一次智能体，即可在你的任意工作区中启用。名称、头像、描述、指令和对话开场建议会保持同步；运行时、模型、skill 和访问权限按工作区单独设置。",
+    "create": "新建全局智能体",
+    "empty": "还没有全局智能体。",
+    "load_failed": "无法加载你的全局智能体。",
+    "enabled_in": "已在 {{workspaces}} 启用",
+    "not_enabled": "尚未在任何工作区启用",
+    "manage_workspaces": "工作区",
+    "actions_aria": "{{name}} 的操作",
+    "edit": "编辑",
+    "delete": "删除",
+    "form": {
+      "create_title": "新建全局智能体",
+      "edit_title": "编辑全局智能体",
+      "avatar_aria": "智能体头像",
+      "name_label": "名称",
+      "name_placeholder": "例如：代码审查员",
+      "description_label": "描述",
+      "description_placeholder": "这个智能体做什么？",
+      "instructions_label": "指令",
+      "instructions_placeholder": "这个智能体应该如何工作？",
+      "sync_note": "保存后会更新所有已启用该智能体的工作区。",
+      "cancel": "取消",
+      "create": "创建",
+      "creating": "创建中…",
+      "save": "保存",
+      "saving": "保存中…",
+      "created_toast": "已创建全局智能体",
+      "saved_toast": "已保存全局智能体",
+      "create_failed_toast": "创建全局智能体失败",
+      "save_failed_toast": "保存全局智能体失败"
+    },
+    "workspaces": {
+      "title": "{{name}} 的工作区",
+      "description": "启用后，会在该工作区中用你选择的运行时添加一个关联的智能体副本。",
+      "load_failed": "无法加载你的工作区。",
+      "empty": "你还不是任何工作区的成员。",
+      "status_enabled": "已启用",
+      "status_disabled": "已停用",
+      "status_not_added": "未添加",
+      "runtime_label": "{{workspace}} 的运行时",
+      "runtime_placeholder": "选择运行时",
+      "runtime_offline": "{{name}}（离线）",
+      "no_runtime": "这里还没有你可以使用的运行时。",
+      "enable": "启用",
+      "disable": "停用",
+      "enable_all": "在所有工作区启用",
+      "close": "关闭",
+      "enabled_toast": "已在 {{workspace}} 启用",
+      "disabled_toast": "已在 {{workspace}} 停用",
+      "enable_all_done_toast_other": "已在 {{count}} 个工作区启用",
+      "enable_failed_toast": "无法在 {{workspace}} 启用：{{message}}",
+      "disable_failed_toast": "无法在 {{workspace}} 停用：{{message}}"
+    },
+    "delete_dialog": {
+      "title": "删除「{{name}}」？",
+      "description": "它添加到各工作区的智能体会保留为普通智能体，不再同步。",
+      "cancel": "取消",
+      "confirm": "删除",
+      "deleted_toast": "已删除全局智能体",
+      "delete_failed_toast": "删除全局智能体失败"
+    }
   }
 }

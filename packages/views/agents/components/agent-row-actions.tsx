@@ -5,6 +5,7 @@ import {
   AlertCircle,
   Copy,
   ExternalLink,
+  Globe,
   MoreHorizontal,
   RotateCcw,
   Square,
@@ -15,6 +16,8 @@ import { toast } from "sonner";
 import type { Agent } from "@multica/core/types";
 import type { AgentPresenceDetail } from "@multica/core/agents";
 import { api } from "@multica/core/api";
+import { useAuthStore } from "@multica/core/auth";
+import { useMakeAgentGlobal } from "@multica/core/global-agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { workspaceKeys } from "@multica/core/workspace/queries";
@@ -75,6 +78,8 @@ export function AgentRowActions({
   const intentNavigate = useIntentNavigate();
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null);
+  const makeGlobal = useMakeAgentGlobal(wsId);
 
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
@@ -95,6 +100,14 @@ export function AgentRowActions({
   const isSystemAgent = !!agent.system_key;
   const showArchive = canManage && !isArchived && !isSystemAgent;
   const showRestore = canManage && isArchived;
+  // Only the owner may turn their agent into a global one — the server
+  // refuses anyone else, and a linked agent already is one.
+  const showMakeGlobal =
+    !isArchived &&
+    !isSystemAgent &&
+    !agent.global_agent_id &&
+    !!currentUserId &&
+    agent.owner_id === currentUserId;
 
   const invalidateAgents = () => {
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
@@ -117,6 +130,15 @@ export function AgentRowActions({
       toast.success(t(($) => $.row_actions.agent_restored_toast));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.row_actions.restore_failed_toast));
+    }
+  };
+
+  const handleMakeGlobal = async () => {
+    try {
+      await makeGlobal.mutateAsync(agent.id);
+      toast.success(t(($) => $.row_actions.made_global_toast, { name: agent.name }));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.row_actions.make_global_failed_toast));
     }
   };
 
@@ -178,6 +200,15 @@ export function AgentRowActions({
             <DropdownMenuItem render={<AppLink href={duplicateHref} />}>
               <Copy className="h-3.5 w-3.5" />
               {t(($) => $.row_actions.duplicate)}
+            </DropdownMenuItem>
+          )}
+          {showMakeGlobal && (
+            <DropdownMenuItem
+              disabled={makeGlobal.isPending}
+              onClick={() => void handleMakeGlobal()}
+            >
+              <Globe className="h-3.5 w-3.5" />
+              {t(($) => $.row_actions.make_global)}
             </DropdownMenuItem>
           )}
           {showRestore && (

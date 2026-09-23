@@ -125,7 +125,10 @@
     "archive_dialog_title": "归档\"{{name}}\"？",
     "archive_dialog_description": "归档后这个智能体将无法被分配或提及，进行中的运行会被取消。所有历史会被保留，可以稍后恢复。",
     "archive_dialog_cancel": "取消",
-    "archive_dialog_confirm": "归档"
+    "archive_dialog_confirm": "归档",
+    "make_global": "设为全局",
+    "made_global_toast": "「{{name}}」已成为全局智能体",
+    "make_global_failed_toast": "无法设为全局智能体"
   },
   "detail": {
     "back_to_agents": "智能体",
@@ -157,7 +160,11 @@
     "runtime_required_toast": "请先绑定运行时，再运行该智能体。",
     "assign_work": "分配工作",
     "more_actions_aria": "智能体操作",
-    "updated": "{{when}}更新"
+    "updated": "{{when}}更新",
+    "global_badge": "全局智能体",
+    "global_banner_owner": "同步自你的全局智能体：对名称、头像、描述、指令和对话开场建议的修改会应用到所有已启用它的工作区。",
+    "global_banner_viewer": "同步自一个全局智能体。只有其所有者可以修改名称、头像、描述、指令和对话开场建议。",
+    "global_manage": "管理"
   },
   "inspector": {
     "section_profile": "资料",

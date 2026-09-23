@@ -379,7 +379,8 @@
       "quick_actions": "クイックアクション",
       "plugins": "Plugins",
       "mcp": "MCP",
-      "billing": "請求とプラン"
+      "billing": "請求とプラン",
+      "global_agents": "グローバルエージェント"
     },
     "groups": {
       "personal": "個人設定",
@@ -1358,5 +1359,69 @@
     "status_loading": "確認中...",
     "status_unknown": "状態を取得できません",
     "channel_hint": "{{channel}} でエージェントと会話し、タスクを作成します。"
+  },
+  "global_agents": {
+    "title": "グローバルエージェント",
+    "description": "エージェントを一度定義すれば、どのワークスペースでも有効にできます。名前、アバター、説明、指示、会話の開始例は同期され、ランタイム、モデル、skill、アクセス権はワークスペースごとに設定します。",
+    "create": "新しいグローバルエージェント",
+    "empty": "グローバルエージェントはまだありません。",
+    "load_failed": "グローバルエージェントを読み込めませんでした。",
+    "enabled_in": "{{workspaces}} で有効",
+    "not_enabled": "どのワークスペースでも有効になっていません",
+    "manage_workspaces": "ワークスペース",
+    "actions_aria": "{{name}} の操作",
+    "edit": "編集",
+    "delete": "削除",
+    "form": {
+      "create_title": "新しいグローバルエージェント",
+      "edit_title": "グローバルエージェントを編集",
+      "avatar_aria": "エージェントのアバター",
+      "name_label": "名前",
+      "name_placeholder": "例：コードレビュアー",
+      "description_label": "説明",
+      "description_placeholder": "このエージェントは何をしますか？",
+      "instructions_label": "指示",
+      "instructions_placeholder": "このエージェントはどのように動作すべきですか？",
+      "sync_note": "保存すると、このエージェントが有効なすべてのワークスペースに反映されます。",
+      "cancel": "キャンセル",
+      "create": "作成",
+      "creating": "作成中…",
+      "save": "保存",
+      "saving": "保存中…",
+      "created_toast": "グローバルエージェントを作成しました",
+      "saved_toast": "グローバルエージェントを保存しました",
+      "create_failed_toast": "グローバルエージェントを作成できませんでした",
+      "save_failed_toast": "グローバルエージェントを保存できませんでした"
+    },
+    "workspaces": {
+      "title": "{{name}} のワークスペース",
+      "description": "有効にすると、選択したランタイムでこのエージェントのリンクされたコピーがワークスペースに追加されます。",
+      "load_failed": "ワークスペースを読み込めませんでした。",
+      "empty": "どのワークスペースのメンバーでもありません。",
+      "status_enabled": "有効",
+      "status_disabled": "無効",
+      "status_not_added": "未追加",
+      "runtime_label": "{{workspace}} のランタイム",
+      "runtime_placeholder": "ランタイムを選択",
+      "runtime_offline": "{{name}}（オフライン）",
+      "no_runtime": "ここで使えるランタイムはまだありません。",
+      "enable": "有効にする",
+      "disable": "無効にする",
+      "enable_all": "すべてのワークスペースで有効にする",
+      "close": "閉じる",
+      "enabled_toast": "{{workspace}} で有効にしました",
+      "disabled_toast": "{{workspace}} で無効にしました",
+      "enable_all_done_toast_other": "{{count}} 件のワークスペースで有効にしました",
+      "enable_failed_toast": "{{workspace}} で有効にできませんでした：{{message}}",
+      "disable_failed_toast": "{{workspace}} で無効にできませんでした：{{message}}"
+    },
+    "delete_dialog": {
+      "title": "「{{name}}」を削除しますか？",
+      "description": "各ワークスペースに追加されたエージェントは通常のエージェントとして残り、同期されなくなります。",
+      "cancel": "キャンセル",
+      "confirm": "削除",
+      "deleted_toast": "グローバルエージェントを削除しました",
+      "delete_failed_toast": "グローバルエージェントを削除できませんでした"
+    }
   }
 }

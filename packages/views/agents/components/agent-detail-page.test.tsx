@@ -138,6 +138,7 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     agents: () => "/acme/agents",
     chat: () => "/acme/chat",
+    settings: () => "/acme/settings",
   }),
 }));
 vi.mock("@multica/core/api", () => {
@@ -481,5 +482,42 @@ describe("AgentDetailPage DM button", () => {
       "Bind a runtime before running this agent.",
     );
     expect(mockModalOpen).not.toHaveBeenCalled();
+  });
+});
+
+describe("AgentDetailPage global agent link", () => {
+  it("tells the owner edits fan out and links to the global agent settings", async () => {
+    agentsRef.current = [
+      { ...baseAgent, owner_id: "user-1", global_agent_id: "ga-1" },
+    ];
+
+    renderPage();
+
+    expect(
+      await screen.findByText(/apply in every workspace where it is enabled/),
+    ).toBeInTheDocument();
+    // A Button rendered as an AppLink keeps role="button" on the anchor.
+    expect(screen.getByRole("button", { name: "Manage" })).toHaveAttribute(
+      "href",
+      "/acme/settings?tab=global-agents",
+    );
+  });
+
+  it("tells everyone else only the owner can change the synced fields", async () => {
+    agentsRef.current = [{ ...baseAgent, global_agent_id: "ga-1" }];
+
+    renderPage();
+
+    expect(
+      await screen.findByText(/Only its owner can change/),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Manage" })).toBeNull();
+  });
+
+  it("shows nothing for a regular agent", async () => {
+    renderPage();
+
+    await screen.findByRole("button", { name: "Assign work" });
+    expect(screen.queryByText(/global agent/i)).toBeNull();
   });
 });

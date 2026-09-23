@@ -117,7 +117,10 @@
     "archive_dialog_title": "\"{{name}}\" をアーカイブしますか？",
     "archive_dialog_description": "このエージェントは割り当てやメンションができなくなり、アクティブな実行はすべてキャンセルされます。履歴はすべて保持され、後で復元できます。",
     "archive_dialog_cancel": "キャンセル",
-    "archive_dialog_confirm": "アーカイブ"
+    "archive_dialog_confirm": "アーカイブ",
+    "make_global": "グローバルにする",
+    "made_global_toast": "「{{name}}」はグローバルエージェントになりました",
+    "make_global_failed_toast": "グローバルエージェントにできませんでした"
   },
   "detail": {
     "back_to_agents": "エージェント",
@@ -149,7 +152,11 @@
     "runtime_required_toast": "このエージェントを実行する前にランタイムを設定してください。",
     "assign_work": "作業を割り当てる",
     "more_actions_aria": "エージェントの操作",
-    "updated": "{{when}}に更新"
+    "updated": "{{when}}に更新",
+    "global_badge": "グローバルエージェント",
+    "global_banner_owner": "あなたのグローバルエージェントから同期されています。名前、アバター、説明、指示、会話の開始例の変更は、有効なすべてのワークスペースに反映されます。",
+    "global_banner_viewer": "グローバルエージェントから同期されています。名前、アバター、説明、指示、会話の開始例を変更できるのはオーナーだけです。",
+    "global_manage": "管理"
   },
   "inspector": {
     "section_profile": "プロフィール",

@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   Bot,
   Clock3,
+  Globe,
   Lock,
   MessageSquare,
   MoreHorizontal,
@@ -367,6 +368,13 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         </div>
       )}
 
+      {agent.global_agent_id && !isArchived && (
+        <GlobalAgentBanner
+          isOwner={!!currentUser && agent.owner_id === currentUser.id}
+          manageHref={`${paths.settings()}?tab=global-agents`}
+        />
+      )}
+
       {isArchived && (
         <div className="shrink-0 border-b bg-muted/50 py-2 text-caption text-muted-foreground">
           <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex items-center gap-2")}>
@@ -610,6 +618,45 @@ function DetailHeader({
         </div>
       </div>
     </header>
+  );
+}
+
+/**
+ * A linked copy of a global agent shares its name, avatar, description,
+ * instructions and conversation starters with every workspace it is enabled
+ * in. The owner learns that edits fan out; everyone else learns why those
+ * fields will not save for them.
+ */
+function GlobalAgentBanner({
+  isOwner,
+  manageHref,
+}: {
+  isOwner: boolean;
+  manageHref: string;
+}) {
+  const { t } = useT("agents");
+  return (
+    <div className="shrink-0 border-b bg-muted/50 py-2 text-caption text-muted-foreground">
+      <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex items-center gap-2")}>
+        <Globe className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span className="flex-1">
+          {isOwner
+            ? t(($) => $.detail.global_banner_owner)
+            : t(($) => $.detail.global_banner_viewer)}
+        </span>
+        {isOwner && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 text-caption"
+            render={<AppLink href={manageHref} />}
+            nativeButton={false}
+          >
+            {t(($) => $.detail.global_manage)}
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 

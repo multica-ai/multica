@@ -379,7 +379,8 @@
       "quick_actions": "Actions rapides",
       "plugins": "Plugins",
       "mcp": "MCP",
-      "billing": "Facturation"
+      "billing": "Facturation",
+      "global_agents": "Agents globaux"
     },
     "groups": {
       "personal": "Personnel",
@@ -1365,5 +1366,70 @@
     "status_loading": "Vérification...",
     "status_unknown": "État indisponible",
     "channel_hint": "Discutez avec les agents et créez des tâches depuis {{channel}}."
+  },
+  "global_agents": {
+    "title": "Agents globaux",
+    "description": "Définissez un agent une seule fois et activez-le dans n'importe lequel de vos espaces de travail. Son nom, son avatar, sa description, ses instructions et ses amorces de conversation restent synchronisés ; le runtime, le modèle, les skills et l'accès se règlent par espace de travail.",
+    "create": "Nouvel agent global",
+    "empty": "Aucun agent global pour l'instant.",
+    "load_failed": "Impossible de charger vos agents globaux.",
+    "enabled_in": "Activé dans {{workspaces}}",
+    "not_enabled": "Activé dans aucun espace de travail",
+    "manage_workspaces": "Espaces de travail",
+    "actions_aria": "Actions pour {{name}}",
+    "edit": "Modifier",
+    "delete": "Supprimer",
+    "form": {
+      "create_title": "Nouvel agent global",
+      "edit_title": "Modifier l'agent global",
+      "avatar_aria": "Avatar de l'agent",
+      "name_label": "Nom",
+      "name_placeholder": "p. ex. Relecteur de code",
+      "description_label": "Description",
+      "description_placeholder": "Que fait cet agent ?",
+      "instructions_label": "Instructions",
+      "instructions_placeholder": "Comment cet agent doit-il travailler ?",
+      "sync_note": "L'enregistrement met à jour cet agent dans chaque espace de travail où il est activé.",
+      "cancel": "Annuler",
+      "create": "Créer",
+      "creating": "Création…",
+      "save": "Enregistrer",
+      "saving": "Enregistrement…",
+      "created_toast": "Agent global créé",
+      "saved_toast": "Agent global enregistré",
+      "create_failed_toast": "Impossible de créer l'agent global",
+      "save_failed_toast": "Impossible d'enregistrer l'agent global"
+    },
+    "workspaces": {
+      "title": "Espaces de travail de {{name}}",
+      "description": "L'activation ajoute une copie liée de cet agent à l'espace de travail, sur le runtime choisi.",
+      "load_failed": "Impossible de charger vos espaces de travail.",
+      "empty": "Vous n'êtes membre d'aucun espace de travail.",
+      "status_enabled": "Activé",
+      "status_disabled": "Désactivé",
+      "status_not_added": "Non ajouté",
+      "runtime_label": "Runtime pour {{workspace}}",
+      "runtime_placeholder": "Choisir un runtime",
+      "runtime_offline": "{{name}} (hors ligne)",
+      "no_runtime": "Aucun runtime utilisable ici pour l'instant.",
+      "enable": "Activer",
+      "disable": "Désactiver",
+      "enable_all": "Activer dans tous les espaces de travail",
+      "close": "Fermer",
+      "enabled_toast": "Activé dans {{workspace}}",
+      "disabled_toast": "Désactivé dans {{workspace}}",
+      "enable_all_done_toast_one": "Activé dans {{count}} espace de travail",
+      "enable_all_done_toast_other": "Activé dans {{count}} espaces de travail",
+      "enable_failed_toast": "Impossible d'activer dans {{workspace}} : {{message}}",
+      "disable_failed_toast": "Impossible de désactiver dans {{workspace}} : {{message}}"
+    },
+    "delete_dialog": {
+      "title": "Supprimer « {{name}} » ?",
+      "description": "Les agents ajoutés à vos espaces de travail sont conservés comme agents ordinaires et ne sont plus synchronisés.",
+      "cancel": "Annuler",
+      "confirm": "Supprimer",
+      "deleted_toast": "Agent global supprimé",
+      "delete_failed_toast": "Impossible de supprimer l'agent global"
+    }
   }
 }
