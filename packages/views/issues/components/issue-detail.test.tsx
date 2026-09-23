@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useRef, useState, useImperativeHandle } from "re
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { AgentTask, Issue, IssueStatusEntry, Label, TimelineEntry } from "@multica/core/types";
+import type { AgentTask, Attachment, Issue, IssueStatusEntry, Label, TimelineEntry } from "@multica/core/types";
 import { issueKeys } from "@multica/core/issues/queries";
 import { issueStatusKeys } from "@multica/core/issue-statuses";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -171,7 +171,15 @@ vi.mock("../../editor", async () => ({
   // preview-sequence-context.test.tsx against the real provider.
   PreviewSequenceProvider: ({ children }: { children: React.ReactNode }) =>
     children,
+  usePreviewSequence: () => ({ openAt: () => false }),
   collectPreviewSequence: () => [],
+  // Comment attachments render as their filename — the viewer and file cards
+  // have their own suites.
+  AttachmentDownloadProvider: ({ children }: { children: React.ReactNode }) =>
+    children,
+  Attachment: ({ attachment }: { attachment: { filename?: string } }) => (
+    <span data-testid="comment-attachment">{attachment.filename}</span>
+  ),
   isPreviewable: () => false,
   ReadonlyContent: ({ content }: { content: string }) => {
     readonlyContentRenders.push(content);
@@ -728,6 +736,44 @@ describe("IssueDetail (shared)", () => {
     // Reset project mock — individual tests override per case. Default fixture
     // has project_id: null so getProject is not invoked.
     mockApiObj.getProject.mockReset();
+  });
+
+  it("counts comment files as deliverables, a re-upload once as v2, never the description's (MUL-7649)", async () => {
+    const file = (id: string, over: Partial<Attachment>): Attachment => ({
+      id,
+      workspace_id: "ws-1",
+      issue_id: "issue-1",
+      comment_id: null,
+      chat_session_id: null,
+      chat_message_id: null,
+      uploader_type: "agent",
+      uploader_id: "agent-1",
+      filename: "report.md",
+      url: `https://cdn.example.test/${id}`,
+      download_url: `https://cdn.example.test/${id}`,
+      markdown_url: `https://cdn.example.test/${id}`,
+      content_type: "text/markdown",
+      size_bytes: 2048,
+      created_at: "2026-01-16T00:00:00Z",
+      ...over,
+    });
+    const brief = file("brief", { filename: "brief.pdf", content_type: "application/pdf", uploader_type: "member" });
+    const v1 = file("report-v1", { comment_id: "comment-1" });
+    const v2 = file("report-v2", { comment_id: "comment-2", created_at: "2026-01-17T00:00:00Z" });
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, description: "!file[brief.pdf](https://cdn.example.test/brief)" });
+    mockApiObj.listAttachments.mockResolvedValue([brief, v1, v2]);
+    mockApiObj.listTimeline.mockResolvedValue([
+      { ...mockTimeline[0]!, attachments: [v1] },
+      { ...mockTimeline[1]!, attachments: [v2] },
+    ]);
+
+    renderIssueDetail();
+
+    const header = await screen.findByRole("button", { name: /^Deliverables/ });
+    expect(header).toHaveTextContent("1");
+    expect(screen.getByRole("button", { name: "report.md, version 2" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View all 1 deliverable" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "brief.pdf" })).toBeNull();
   });
 
   it("opens source-context creation from both a root comment and a reply", async () => {

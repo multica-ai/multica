@@ -1,0 +1,178 @@
+"use client";
+
+import { useState } from "react";
+import { ChevronRight, LayoutGrid } from "lucide-react";
+import type { DeliverableFile } from "@multica/core/attachments/deliverables";
+import { cn } from "@multica/ui/lib/utils";
+import { useT } from "../../../i18n";
+import { formatBytes } from "../../../common/format-bytes";
+import { getPreviewKind } from "../../../editor/utils/preview";
+import { PullRequestsGroup } from "../pull-requests-section";
+import { deliverableIcon } from "./deliverable-kind";
+import { DeliverableThumbnail } from "./deliverable-thumbnail";
+import { useOpenAttachment, type IssueDeliverables } from "./use-issue-deliverables";
+
+// The sidebar is a summary, not the list: the newest few of each, and the
+// overview for the rest.
+const RECENT_IMAGES = 3;
+const RECENT_FILES = 4;
+
+/**
+ * "Deliverables" in the issue sidebar (MUL-7649): what this issue has
+ * delivered as a whole — its pull requests, then the files its comments
+ * uploaded. Not grouped by run; each comment still shows its own files.
+ *
+ * Absorbs the former standalone "Pull requests" section and follows its
+ * workspace switch: with the PR sidebar on, the code group — and so the
+ * section — is always there, since that is where a PR gets linked by hand;
+ * with it off, the section shows only once a comment has delivered a file.
+ */
+export function DeliverablesSection({
+  issueId,
+  identifier,
+  deliverables,
+  onOpenOverview,
+}: {
+  issueId: string;
+  identifier: string;
+  deliverables: IssueDeliverables;
+  onOpenOverview: () => void;
+}) {
+  const { t } = useT("issues");
+  const [open, setOpen] = useState(true);
+  const { open: openAttachment, modal } = useOpenAttachment();
+  const { showCode, files, count } = deliverables;
+
+  if (!showCode && files.length === 0) return null;
+
+  const images: DeliverableFile[] = [];
+  const others: DeliverableFile[] = [];
+  for (const file of files) {
+    const isImage =
+      getPreviewKind(file.latest.content_type, file.latest.filename) === "image";
+    if (isImage && images.length < RECENT_IMAGES) images.push(file);
+    else if (!isImage && others.length < RECENT_FILES) others.push(file);
+  }
+
+  return (
+    <div>
+      <button
+        type="button"
+        className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${open ? "" : "text-muted-foreground hover:text-foreground"}`}
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+      >
+        {t(($) => $.deliverables.section_title)}{" "}
+        {count > 0 && (
+          <span className="rounded-xs bg-muted px-1 text-micro font-medium tabular-nums text-muted-foreground">
+            {count}
+          </span>
+        )}
+        <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && (
+        <div className="space-y-3 pl-2">
+          {showCode && <PullRequestsGroup issueId={issueId} identifier={identifier} />}
+          {files.length > 0 && (
+            <section aria-label={t(($) => $.deliverables.group_files)}>
+              <p className="mb-1.5 text-micro font-medium text-muted-foreground">
+                {t(($) => $.deliverables.group_files)}
+                <span className="tabular-nums"> · {files.length}</span>
+              </p>
+              {images.length > 0 && (
+                <div className="mb-1.5 grid grid-cols-3 gap-1.5">
+                  {images.map((file) => (
+                    <button
+                      key={file.key}
+                      type="button"
+                      className="relative aspect-[4/3] overflow-hidden rounded-md ring-1 ring-border transition-shadow hover:ring-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      title={file.latest.filename}
+                      aria-label={versionedName(file, t)}
+                      onClick={() => openAttachment(file.latest)}
+                    >
+                      <DeliverableThumbnail
+                        attachment={file.latest}
+                        showTypeLabel={false}
+                        className="size-full"
+                      />
+                    </button>
+                  ))}
+                </div>
+              )}
+              {others.map((file) => (
+                <FileRow
+                  key={file.key}
+                  file={file}
+                  onOpen={() => openAttachment(file.latest)}
+                />
+              ))}
+              <button
+                type="button"
+                className="mt-0.5 flex w-[calc(100%+1rem)] -mx-2 items-center gap-2 rounded-md px-2 py-1 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+                onClick={onOpenOverview}
+              >
+                <LayoutGrid className="size-3.5 shrink-0" />
+                {t(($) => $.deliverables.view_all, { count })}
+              </button>
+            </section>
+          )}
+        </div>
+      )}
+      {modal}
+    </div>
+  );
+}
+
+type IssuesT = ReturnType<typeof useT<"issues">>["t"];
+
+function versionedName(file: DeliverableFile, t: IssuesT): string {
+  return file.versions.length > 1
+    ? t(($) => $.deliverables.name_with_version, {
+        name: file.latest.filename,
+        version: file.versions.length,
+      })
+    : file.latest.filename;
+}
+
+function FileRow({ file, onOpen }: { file: DeliverableFile; onOpen: () => void }) {
+  const { t } = useT("issues");
+  const { latest } = file;
+  const Icon = deliverableIcon(latest.content_type, latest.filename);
+  return (
+    <button
+      type="button"
+      className="group flex w-[calc(100%+1rem)] -mx-2 items-center gap-2 rounded-md px-2 py-1 text-left text-caption transition-colors hover:bg-accent/50"
+      title={latest.filename}
+      aria-label={versionedName(file, t)}
+      onClick={onOpen}
+    >
+      <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 truncate">{latest.filename}</span>
+      {file.versions.length > 1 && <VersionBadge version={file.versions.length} />}
+      <span className="ml-auto shrink-0 pl-2 text-micro tabular-nums text-muted-foreground">
+        {latest.size_bytes > 0 ? formatBytes(latest.size_bytes) : null}
+      </span>
+    </button>
+  );
+}
+
+export function VersionBadge({
+  version,
+  className,
+}: {
+  version: number;
+  className?: string;
+}) {
+  const { t } = useT("issues");
+  return (
+    <span
+      className={cn(
+        "shrink-0 rounded-xs bg-muted px-1 text-micro font-medium tabular-nums text-muted-foreground",
+        className,
+      )}
+      aria-hidden
+    >
+      {t(($) => $.deliverables.version_short, { version })}
+    </span>
+  );
+}

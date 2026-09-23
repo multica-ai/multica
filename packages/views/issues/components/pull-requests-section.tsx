@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronRight, CircleSlash, MoreHorizontal, Plus, RotateCcw, Settings } from "lucide-react";
+import { CircleSlash, MoreHorizontal, Plus, RotateCcw, Settings } from "lucide-react";
 import { ApiError } from "@multica/core/api";
 import {
   issuePullRequestsOptions,
@@ -26,65 +26,48 @@ import { useT } from "../../i18n";
 import { PullRequestList } from "./pull-request-list";
 
 /**
- * The issue sidebar's Pull requests section: the linked PRs, what the
- * "every linked PR merged → Done" rule will do for this issue, and the two
- * exceptions a person can make — link a PR by hand, or turn auto-complete off
- * for this one issue (MUL-7429).
+ * The code group of the issue sidebar's Deliverables section (MUL-7649): the
+ * linked PRs, what the "every linked PR merged → Done" rule will do for this
+ * issue, and the two exceptions a person can make — link a PR by hand, or
+ * turn auto-complete off for this one issue (MUL-7429).
  */
-export function PullRequestsSection({
+export function PullRequestsGroup({
   issueId,
   identifier,
-  open,
-  onOpenChange,
 }: {
   issueId: string;
   identifier: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
 }) {
   const { t } = useT("issues");
   const { data } = useQuery(issuePullRequestsOptions(issueId));
-  // Older backends have no link / auto-complete endpoints; keep the header
-  // actions hidden until the server says it supports them.
+  // Older backends have no link / auto-complete endpoints; keep the actions
+  // hidden until the server says it supports them.
   const supported = !!data?.auto_complete;
 
   return (
-    <div>
-      {/* Label and actions are siblings, not a button wrapping buttons. */}
-      <div className="mb-2 flex w-full items-center gap-0.5">
-        <button
-          type="button"
-          aria-expanded={open}
-          className={`flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors hover:bg-accent/70 ${open ? "" : "text-muted-foreground hover:text-foreground"}`}
-          onClick={() => onOpenChange(!open)}
-        >
-          <span className="truncate">{t(($) => $.detail.section_pull_requests)}</span>
-          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
-        </button>
+    <section aria-label={t(($) => $.deliverables.group_code)}>
+      <div className="mb-1 flex min-h-6 items-center gap-0.5">
+        <p className="min-w-0 flex-1 truncate text-micro font-medium text-muted-foreground">
+          {t(($) => $.deliverables.group_code)}
+        </p>
         {supported ? (
           <>
-            <LinkPullRequestPopover issueId={issueId} identifier={identifier} onLinked={() => onOpenChange(true)} />
+            <LinkPullRequestPopover issueId={issueId} identifier={identifier} />
             <AutoCompleteMenu issueId={issueId} disabled={data?.auto_complete?.issue_disabled ?? false} />
           </>
         ) : null}
       </div>
-      {open && (
-        <div className="pl-2">
-          <PullRequestList issueId={issueId} identifier={identifier} />
-        </div>
-      )}
-    </div>
+      <PullRequestList issueId={issueId} identifier={identifier} />
+    </section>
   );
 }
 
 function LinkPullRequestPopover({
   issueId,
   identifier,
-  onLinked,
 }: {
   issueId: string;
   identifier: string;
-  onLinked: () => void;
 }) {
   const { t } = useT("issues");
   const [open, setOpen] = useState(false);
@@ -127,7 +110,6 @@ function LinkPullRequestPopover({
                 onSuccess: () => {
                   setOpen(false);
                   setUrl("");
-                  onLinked();
                 },
               },
             );
