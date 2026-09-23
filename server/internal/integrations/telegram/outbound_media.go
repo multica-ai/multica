@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -42,13 +44,27 @@ const (
 	// each). Admission is decided before anything is spawned: a reply that
 	// finds every slot busy is shed with the notice, never queued.
 	maxConcurrentAttachmentDeliveries = 4
+	// The attachment lookup is a side-effect-free read, so a failure is
+	// retried a few times before the member is told; the whole retry stays
+	// well under a second of the worker's time.
+	attachmentLookupAttempts   = 3
+	attachmentLookupRetryDelay = 250 * time.Millisecond
 )
 
-// attachmentNoticeText is said once per reply when a file may not have
-// arrived. It has to hold in every ending that leads here — a refused upload,
-// a shed delivery, and a send whose response was lost after Telegram accepted
-// it — so it claims nothing about what did or did not land.
-const attachmentNoticeText = "⚠️ I couldn't confirm that every file from this reply reached Telegram. Anything missing is still attached to the reply in Multica."
+// The two notices say only what is known at the point they are sent.
+const (
+	// attachmentNoticeText: a file is known to exist and may not have
+	// arrived. It has to hold in every ending that leads here — a refused
+	// upload, a shed delivery, and a send whose response was lost after
+	// Telegram accepted it — so it claims nothing about what did or did not
+	// land.
+	attachmentNoticeText = "⚠️ I couldn't confirm that every file from this reply reached Telegram. Anything missing is still attached to the reply in Multica."
+	// attachmentLookupFailedText: the lookup itself failed, so whether the
+	// reply had files at all is unknown. Saying nothing would leave a member
+	// waiting for a file the text refers to; claiming a file existed would
+	// be a guess.
+	attachmentLookupFailedText = "⚠️ I couldn't check whether this reply had files attached, so if it did, they were not sent. They stay attached to the reply in Multica."
+)
 
 // EnableFileDelivery turns on the attachment hop. Call at boot, before
 // Register. Without it — no object storage — replies are text only, and the
@@ -76,21 +92,20 @@ func (o *Outbound) deliverAttachments(ctx context.Context, reply *terminalReply)
 	if err != nil || !workspaceID.Valid {
 		return
 	}
-	// Detached from the call budget the text delivery ran under, which may
-	// have just about run out; the read is short and its own.
-	ctx, cancel := o.recordContext(ctx)
-	defer cancel()
-	rows, err := o.q.ListAttachmentsByChatMessage(ctx, db.ListAttachmentsByChatMessageParams{
-		ChatMessageID: messageID, WorkspaceID: workspaceID,
-	})
+	target := *reply.target
+	api := newBotAPI(o.apiBase, target.botToken, o.client)
+	rows, err := o.lookupAttachments(ctx, messageID, workspaceID)
 	if err != nil {
+		// Whether the reply had files is now unknown. The text is already on
+		// the member's screen and may refer to one, so this is said, in words
+		// that do not presume a file existed.
 		o.logger.WarnContext(ctx, "telegram outbound: attachment lookup failed", "error", err, "chat_message_id", uuidText(messageID))
+		o.tellUser(ctx, api, target, attachmentLookupFailedText)
 		return
 	}
 	if len(rows) == 0 {
 		return
 	}
-	target := *reply.target
 	select {
 	case attachmentSlots <- struct{}{}:
 	default:
@@ -98,7 +113,7 @@ func (o *Outbound) deliverAttachments(ctx context.Context, reply *terminalReply)
 		// said, not just logged; they stay in Multica.
 		o.logger.WarnContext(ctx, "telegram outbound: attachment delivery shed, every slot busy",
 			"attachments", len(rows), "chat_message_id", uuidText(messageID))
-		o.tellUser(ctx, newBotAPI(o.apiBase, target.botToken, o.client), target)
+		o.tellUser(ctx, api, target, attachmentNoticeText)
 		return
 	}
 	o.spawn(func() {
@@ -107,6 +122,29 @@ func (o *Outbound) deliverAttachments(ctx context.Context, reply *terminalReply)
 		defer cancel()
 		o.sendAttachments(ctx, rows, target)
 	})
+}
+
+// lookupAttachments reads the files bound to the reply, retrying a failed
+// read a few times. Each attempt is detached from the call budget the text
+// delivery ran under, which may have just about run out, and bounded on its
+// own; the spacing goes through o.wait so a test does not sleep.
+func (o *Outbound) lookupAttachments(ctx context.Context, messageID, workspaceID pgtype.UUID) ([]db.Attachment, error) {
+	var err error
+	for attempt := 0; attempt < attachmentLookupAttempts; attempt++ {
+		if attempt > 0 && o.wait(ctx, attachmentLookupRetryDelay) != nil {
+			break
+		}
+		readCtx, cancel := o.recordContext(ctx)
+		var rows []db.Attachment
+		rows, err = o.q.ListAttachmentsByChatMessage(readCtx, db.ListAttachmentsByChatMessageParams{
+			ChatMessageID: messageID, WorkspaceID: workspaceID,
+		})
+		cancel()
+		if err == nil {
+			return rows, nil
+		}
+	}
+	return nil, err
 }
 
 // sendAttachments delivers every file bound to one reply. Files are
@@ -122,15 +160,17 @@ func (o *Outbound) sendAttachments(ctx context.Context, rows []db.Attachment, ta
 		}
 	}
 	if failed > 0 {
-		o.tellUser(ctx, api, target)
+		o.tellUser(ctx, api, target, attachmentNoticeText)
 	}
 }
 
-// tellUser puts the notice into the conversation, best effort: every caller
-// is already on a path where something went wrong.
-func (o *Outbound) tellUser(ctx context.Context, api *botAPI, target replyTarget) {
+// tellUser puts a notice into the conversation, best effort and on its own
+// short budget: every caller is already on a path where something went wrong.
+func (o *Outbound) tellUser(ctx context.Context, api *botAPI, target replyTarget, text string) {
+	ctx, cancel := o.recordContext(ctx)
+	defer cancel()
 	if _, err := api.SendMessage(ctx, sendMessageParams{
-		ChatID: target.chatID, Text: attachmentNoticeText, MessageThreadID: target.threadID,
+		ChatID: target.chatID, Text: text, MessageThreadID: target.threadID,
 	}); err != nil {
 		o.logger.WarnContext(ctx, "telegram outbound: could not tell the user about the file", "error", err)
 	}

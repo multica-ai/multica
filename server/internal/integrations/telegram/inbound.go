@@ -44,6 +44,10 @@ type inboundMedia struct {
 	// attachment replaces with its Markdown link. It stays as plain text when
 	// the fetch fails, so the agent still knows a file was there.
 	Placeholder string `json:"placeholder"`
+	// PlaceholderIndex is which occurrence of Placeholder in the body is the
+	// sender's: quoted and recent context go in front of it, and a member
+	// who typed the same marker there must not receive the file.
+	PlaceholderIndex int `json:"placeholder_index,omitempty"`
 }
 
 // mediaFromMessage picks the message's downloadable file, or nil. Photos come
@@ -140,14 +144,16 @@ func inboundFromUpdateWithContext(u Update, botID int64, botUsername string, rec
 		startChat = control.Kind == engine.ControlCommandNewChat
 	}
 	agentText := cleaned
+	own := ""
 	if media != nil {
 		// The placeholder leads the sender's own text, so a caption reads as
 		// the caption of the file above it once the resolver swaps the marker
 		// for the attachment link. Quoted and recent context still go in front.
-		agentText = media.Placeholder
+		own = media.Placeholder
 		if cleaned != "" {
-			agentText += "\n" + cleaned
+			own += "\n" + cleaned
 		}
+		agentText = own
 	}
 	quotedHuman := m.ReplyToMessage != nil && m.ReplyToMessage.From != nil && !m.ReplyToMessage.From.IsBot
 	hasSelectedContext := chatType == channel.ChatTypeGroup && mentioned && quotedHuman
@@ -156,6 +162,14 @@ func inboundFromUpdateWithContext(u Update, botID int64, botUsername string, rec
 	}
 	if recent != nil && chatType == channel.ChatTypeGroup && addressed && !startChat {
 		agentText = enrichWithRecentContext(agentText, m, recent)
+	}
+	if media != nil {
+		// The engine replaces the placeholder by occurrence, and the context
+		// enrichers only ever prepend, so the sender's own segment is the
+		// suffix. Count every occurrence ahead of it — user-typed literals
+		// included — so a member who wrote "[Image]" in the window does not
+		// receive the sender's file. Same rule as DingTalk's quoted block.
+		media.PlaceholderIndex = strings.Count(agentText[:len(agentText)-len(own)], media.Placeholder)
 	}
 
 	senderID := strconv.FormatInt(m.From.ID, 10)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -50,6 +52,91 @@ func TestInboundPhotoWithCaptionCarriesMediaAndPlaceholder(t *testing.T) {
 	}
 	if raw.Media.FileID != "large" || raw.Media.Kind != channel.MsgTypeImage || raw.Media.Placeholder != "[Image]" || raw.Media.FileSize != 120000 {
 		t.Fatalf("media = %+v, want the largest rendition", *raw.Media)
+	}
+	if raw.Media.PlaceholderIndex != 0 {
+		t.Fatalf("a p2p photo has nothing ahead of its placeholder, index = %d", raw.Media.PlaceholderIndex)
+	}
+}
+
+// nthOccurrence scans the way the engine does (channel/engine/session.go
+// nthSubstringIndex): non-overlapping, left to right, zero-based.
+func nthOccurrence(s, marker string, n int) int {
+	offset := 0
+	for i := 0; ; i++ {
+		found := strings.Index(s[offset:], marker)
+		if found < 0 {
+			return -1
+		}
+		found += offset
+		if i == n {
+			return found
+		}
+		offset = found + len(marker)
+	}
+}
+
+// A member who typed the marker in the recent window must not receive the
+// sender's file: the index the resolver carries skips their literal.
+func TestInboundPlaceholderIndexSkipsLiteralsInRecentContext(t *testing.T) {
+	var handled []channel.InboundMessage
+	c := &telegramChannel{
+		botID: 999, botUsername: "my_bot", acceptsMedia: true,
+		handler: func(_ context.Context, msg channel.InboundMessage) error { handled = append(handled, msg); return nil },
+		logger:  testLogger(),
+		recent:  newRecentContextBuffer(DefaultRecentContextSize),
+	}
+	ada := &User{ID: 111, FirstName: "Ada"}
+	bob := &User{ID: 222, FirstName: "Bob"}
+	ctx := context.Background()
+	if err := c.dispatch(ctx, groupUpdate(1, ada, "I pasted [Image] in the doc, not here", nil, 0)); err != nil {
+		t.Fatal(err)
+	}
+	photo := groupUpdate(2, bob, "", nil, 0)
+	photo.Message.Caption = "@my_bot what is wrong here?"
+	photo.Message.CaptionEntities = []MessageEntity{{Type: "mention", Offset: 0, Length: 7}}
+	photo.Message.Photo = []PhotoSize{{FileID: "p1"}}
+	if err := c.dispatch(ctx, photo); err != nil {
+		t.Fatal(err)
+	}
+	if len(handled) != 2 || !handled[1].AddressedToBot {
+		t.Fatalf("handler calls = %+v", handled)
+	}
+	msg := handled[1]
+	raw, _ := decodeTelegramRaw(msg)
+	if raw.Media == nil || raw.Media.PlaceholderIndex != 1 {
+		t.Fatalf("media = %+v, want placeholder index 1 (Ada's literal is occurrence 0)", raw.Media)
+	}
+	contextEnd := strings.Index(msg.Text, "</recent_context>")
+	if contextEnd < 0 {
+		t.Fatalf("no recent context in\n%s", msg.Text)
+	}
+	if pos := nthOccurrence(msg.Text, raw.Media.Placeholder, raw.Media.PlaceholderIndex); pos < contextEnd {
+		t.Fatalf("occurrence %d is inside the context block (at %d, block ends %d):\n%s", raw.Media.PlaceholderIndex, pos, contextEnd, msg.Text)
+	}
+	if pos := nthOccurrence(msg.Text, raw.Media.Placeholder, 0); pos > contextEnd {
+		t.Fatalf("Ada's literal should be occurrence 0, found at %d:\n%s", pos, msg.Text)
+	}
+}
+
+// Same for an explicitly quoted human message that contains the marker.
+func TestInboundPlaceholderIndexSkipsLiteralsInQuotedMessage(t *testing.T) {
+	quoted := &Message{MessageID: 9, From: &User{ID: 111, FirstName: "Ada"}, Text: "the doc says [Image] where the diagram goes"}
+	u := groupUpdate(10, &User{ID: 222, FirstName: "Bob"}, "", quoted, 0)
+	u.Message.Caption = "@my_bot like this?"
+	u.Message.CaptionEntities = []MessageEntity{{Type: "mention", Offset: 0, Length: 7}}
+	u.Message.Photo = []PhotoSize{{FileID: "p1"}}
+
+	msg, ok := inboundFromUpdate(u, 999, "my_bot")
+	if !ok || !msg.HasSelectedContext {
+		t.Fatalf("ok=%v selected=%v", ok, msg.HasSelectedContext)
+	}
+	raw, _ := decodeTelegramRaw(msg)
+	if raw.Media == nil || raw.Media.PlaceholderIndex != 1 {
+		t.Fatalf("media = %+v, want placeholder index 1", raw.Media)
+	}
+	quoteEnd := strings.Index(msg.Text, "</quoted_message>")
+	if pos := nthOccurrence(msg.Text, raw.Media.Placeholder, raw.Media.PlaceholderIndex); quoteEnd < 0 || pos < quoteEnd {
+		t.Fatalf("occurrence %d is not on Bob's line (at %d, quote ends %d):\n%s", raw.Media.PlaceholderIndex, pos, quoteEnd, msg.Text)
 	}
 }
 
@@ -270,14 +357,14 @@ func TestMediaResolverIngestsPhoto(t *testing.T) {
 	defer srv.Close()
 	store, ledger := newFakeObjectStore(nil), &fakeMediaLedger{}
 	r := NewMediaResolver(nil, store, ledger, srv.URL, srv.Client(), testLogger())
-	inst, chatMessageID, msg := mediaResolverFixture(t, &inboundMedia{Kind: channel.MsgTypeImage, FileID: "p1", FileUniqueID: "u1", MimeType: "image/jpeg", Placeholder: "[Image]"})
+	inst, chatMessageID, msg := mediaResolverFixture(t, &inboundMedia{Kind: channel.MsgTypeImage, FileID: "p1", FileUniqueID: "u1", MimeType: "image/jpeg", Placeholder: "[Image]", PlaceholderIndex: 1})
 
 	got := r.ResolveMedia(context.Background(), inst, engine.ResolvedIdentity{}, pgtype.UUID{}, chatMessageID, msg)
 	if len(got.MediaRefs) != 1 {
 		t.Fatalf("media refs = %+v", got.MediaRefs)
 	}
 	ref := got.MediaRefs[0]
-	if ref.Type != channel.MsgTypeImage || ref.MimeType != "image/jpeg" || ref.Filename != "file_9.jpg" || ref.SizeBytes != int64(len(jpeg)) || ref.InlinePlaceholder != "[Image]" {
+	if ref.Type != channel.MsgTypeImage || ref.MimeType != "image/jpeg" || ref.Filename != "file_9.jpg" || ref.SizeBytes != int64(len(jpeg)) || ref.InlinePlaceholder != "[Image]" || ref.InlineIndex != 1 {
 		t.Fatalf("ref = %+v", ref)
 	}
 	if !strings.HasPrefix(ref.StorageKey, "workspaces/") || !strings.Contains(ref.StorageKey, "/telegram/") || ref.StorageURL != store.ObjectURL(ref.StorageKey) {
@@ -428,10 +515,18 @@ type attachmentOnlyQueries struct {
 	outboundQueries
 	rows []db.Attachment
 	err  error
+	// failFirst makes that many lookups return err before rows are served;
+	// zero with a non-nil err fails every lookup. calls counts them all.
+	failFirst int
+	calls     int
 }
 
-func (q attachmentOnlyQueries) ListAttachmentsByChatMessage(context.Context, db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error) {
-	return q.rows, q.err
+func (q *attachmentOnlyQueries) ListAttachmentsByChatMessage(context.Context, db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error) {
+	q.calls++
+	if q.err != nil && (q.failFirst == 0 || q.calls <= q.failFirst) {
+		return nil, q.err
+	}
+	return q.rows, nil
 }
 
 func attachmentRow(id byte, url, name, contentType string, size int64) db.Attachment {
@@ -476,12 +571,47 @@ func newAttachmentOutbound(t *testing.T, bot *fakeBotUploads, q outboundQueries,
 	o := NewOutbound(q, nil, srv.URL, srv.Client(), testLogger())
 	o.EnableFileDelivery(newFakeObjectStore(objects))
 	o.spawn = func(f func()) { f() }
+	o.wait = func(context.Context, time.Duration) error { return nil }
 	return o, replyTarget{chatID: 42, threadID: 8, botToken: "123:secret"}
+}
+
+// The lookup is a side-effect-free read: a failure is retried, and only one
+// that keeps failing is reported — in words that do not presume a file existed.
+func TestDeliverAttachmentsTellsUserWhenTheLookupKeepsFailing(t *testing.T) {
+	bot := &fakeBotUploads{}
+	q := &attachmentOnlyQueries{err: errors.New("database unavailable")}
+	o, target := newAttachmentOutbound(t, bot, q, nil)
+	o.spawn = func(func()) { t.Fatal("nothing is known to deliver") }
+
+	o.deliverAttachments(context.Background(), attachmentReply(target))
+
+	if q.calls != attachmentLookupAttempts {
+		t.Fatalf("lookup attempts = %d, want %d", q.calls, attachmentLookupAttempts)
+	}
+	if len(bot.sends) != 0 || len(bot.messages) != 1 || bot.messages[0] != attachmentLookupFailedText {
+		t.Fatalf("sends=%+v messages=%q", bot.sends, bot.messages)
+	}
+}
+
+func TestDeliverAttachmentsRetriesATransientLookupFailure(t *testing.T) {
+	bot := &fakeBotUploads{}
+	q := &attachmentOnlyQueries{err: errors.New("database unavailable"), failFirst: attachmentLookupAttempts - 1,
+		rows: []db.Attachment{attachmentRow(1, "https://cdn.example/k/shot.png", "shot.png", "image/png", 3)}}
+	o, target := newAttachmentOutbound(t, bot, q, map[string][]byte{"k/shot.png": []byte("png")})
+
+	o.deliverAttachments(context.Background(), attachmentReply(target))
+
+	if q.calls != attachmentLookupAttempts {
+		t.Fatalf("lookup attempts = %d, want %d", q.calls, attachmentLookupAttempts)
+	}
+	if len(bot.sends) != 1 || bot.sends[0].method != "sendPhoto" || len(bot.messages) != 0 {
+		t.Fatalf("sends=%+v messages=%q", bot.sends, bot.messages)
+	}
 }
 
 func TestSendAttachmentsPicksMethodByContentType(t *testing.T) {
 	bot := &fakeBotUploads{}
-	o, target := newAttachmentOutbound(t, bot, attachmentOnlyQueries{rows: []db.Attachment{
+	o, target := newAttachmentOutbound(t, bot, &attachmentOnlyQueries{rows: []db.Attachment{
 		attachmentRow(1, "https://cdn.example/k/shot", "shot.png", "image/png", 3),
 		attachmentRow(2, "https://cdn.example/k/report.pdf", "report.pdf", "application/pdf", 3),
 		attachmentRow(3, "https://cdn.example/k/clip.mp4", "clip.mp4", "video/mp4", 3),
@@ -514,7 +644,7 @@ func TestSendAttachmentsPicksMethodByContentType(t *testing.T) {
 
 func TestSendAttachmentsFallsBackToDocumentOnPhotoRejection(t *testing.T) {
 	bot := &fakeBotUploads{reject: map[string]string{"sendPhoto": "Bad Request: IMAGE_PROCESS_FAILED"}}
-	o, target := newAttachmentOutbound(t, bot, attachmentOnlyQueries{rows: []db.Attachment{
+	o, target := newAttachmentOutbound(t, bot, &attachmentOnlyQueries{rows: []db.Attachment{
 		attachmentRow(1, "https://cdn.example/k/odd.png", "odd.png", "image/png", 3),
 	}}, map[string][]byte{"k/odd.png": []byte("png")})
 
@@ -530,7 +660,7 @@ func TestSendAttachmentsFallsBackToDocumentOnPhotoRejection(t *testing.T) {
 
 func TestSendAttachmentsTellsUserAboutFilesThatDidNotArrive(t *testing.T) {
 	bot := &fakeBotUploads{reject: map[string]string{"sendDocument": "Bad Request: file is too big"}}
-	o, target := newAttachmentOutbound(t, bot, attachmentOnlyQueries{rows: []db.Attachment{
+	o, target := newAttachmentOutbound(t, bot, &attachmentOnlyQueries{rows: []db.Attachment{
 		attachmentRow(1, "https://cdn.example/k/ok.png", "ok.png", "image/png", 3),
 		attachmentRow(2, "https://cdn.example/k/missing.pdf", "missing.pdf", "application/pdf", 3),
 		attachmentRow(3, "https://cdn.example/k/refused.pdf", "refused.pdf", "application/pdf", 3),
@@ -555,7 +685,7 @@ func attachmentReply(target replyTarget) *terminalReply {
 
 func TestDeliverAttachmentsSpawnsNothingWithoutStorageOrRows(t *testing.T) {
 	bot := &fakeBotUploads{}
-	o, target := newAttachmentOutbound(t, bot, attachmentOnlyQueries{}, nil)
+	o, target := newAttachmentOutbound(t, bot, &attachmentOnlyQueries{}, nil)
 	o.spawn = func(func()) { t.Fatal("spawned a delivery with nothing to deliver") }
 	o.deliverAttachments(context.Background(), attachmentReply(target))
 
@@ -578,7 +708,7 @@ func TestDeliverAttachmentsShedsWhenEverySlotIsBusy(t *testing.T) {
 		}
 	}()
 	bot := &fakeBotUploads{}
-	o, target := newAttachmentOutbound(t, bot, attachmentOnlyQueries{rows: []db.Attachment{
+	o, target := newAttachmentOutbound(t, bot, &attachmentOnlyQueries{rows: []db.Attachment{
 		attachmentRow(1, "https://cdn.example/k/shot.png", "shot.png", "image/png", 3),
 	}}, map[string][]byte{"k/shot.png": []byte("png")})
 	o.spawn = func(func()) { t.Fatal("a shed delivery must not be spawned") }

@@ -171,6 +171,7 @@ func (r *mediaResolver) ingest(ctx context.Context, inst engine.ResolvedInstalla
 		MimeType:          contentType,
 		SizeBytes:         int64(len(data)),
 		InlinePlaceholder: m.Placeholder,
+		InlineIndex:       m.PlaceholderIndex,
 	}, nil
 }
 
