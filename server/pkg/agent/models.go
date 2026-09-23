@@ -175,6 +175,11 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 	// discovery command (e.g. omp rejecting --list-models) is worse than
 	// degrading to manual entry.
 	if desc, ok := BuiltinRuntimeByID(providerType); ok {
+		if desc.CatalogDiscovery != nil {
+			return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+				return desc.CatalogDiscovery(ctx, runtimeCmd)
+			})
+		}
 		if desc.ModelDiscovery != nil {
 			return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 				return discovered(desc.ModelDiscovery(ctx, runtimeCmd))

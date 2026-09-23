@@ -66,6 +66,40 @@ done
 	return path
 }
 
+// writeCodebuddyNodeStub is a fake Node interpreter. It records the complete
+// argv after the interpreter path, then serves the same minimal ACP handshake
+// as the direct CodeBuddy stub. Keeping the interpreter and CLI script as
+// separate argv entries catches regressions where WorkBuddy's LaunchPrefix is
+// dropped or reordered.
+func writeCodebuddyNodeStub(t *testing.T, versionArgv, discoveryArgv string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "node")
+	script := `#!/bin/sh
+if [ "$2" = "--version" ]; then
+  printf '%s\n' "$@" > '` + versionArgv + `'
+  echo '22.10.0'
+  exit 0
+fi
+printf '%s\n' "$@" > '` + discoveryArgv + `'
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[]}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":` + codebuddyACPSessionResult + `}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write codebuddy Node stub: %v", err)
+	}
+	return path
+}
+
 func resetCodebuddyDiscoveryCaches(t *testing.T) {
 	t.Helper()
 	clear := func() {
@@ -137,6 +171,132 @@ func TestDiscoverCodebuddyModelsFromACP(t *testing.T) {
 		if want := wantProvider[m.ID]; m.Provider != want {
 			t.Errorf("provider(%q) = %q, want %q — the picker groups on this", m.ID, m.Provider, want)
 		}
+	}
+}
+
+func TestWorkBuddyDiscoveryPreservesNodeScriptLaunchPrefix(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	versionArgv := filepath.Join(dir, "version-argv.txt")
+	discoveryArgv := filepath.Join(dir, "discovery-argv.txt")
+	node := writeCodebuddyNodeStub(t, versionArgv, discoveryArgv)
+	cliScript := filepath.Join(dir, "codebuddy-cli.js")
+	if err := os.WriteFile(cliScript, []byte("#!/usr/bin/env node\n"), 0o644); err != nil {
+		t.Fatalf("write fake WorkBuddy CLI script: %v", err)
+	}
+	runtimeCmd := NewCommand(node, []string{cliScript})
+
+	version, err := DetectVersion(context.Background(), runtimeCmd)
+	if err != nil {
+		t.Fatalf("DetectVersion with WorkBuddy command: %v", err)
+	}
+	if version != "22.10.0" {
+		t.Fatalf("detected version = %q, want 22.10.0", version)
+	}
+	if got, err := os.ReadFile(versionArgv); err != nil {
+		t.Fatalf("read version argv: %v", err)
+	} else if want := []string{cliScript, "--version"}; strings.Join(strings.Split(strings.TrimSpace(string(got)), "\n"), "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("version argv = %q, want %q", strings.TrimSpace(string(got)), want)
+	}
+
+	catalog, err := ListModels(context.Background(), "workbuddy", runtimeCmd)
+	if err != nil {
+		t.Fatalf("ListModels(workbuddy): %v", err)
+	}
+	if catalog.Fallback || len(catalog.Models) == 0 {
+		t.Fatalf("WorkBuddy discovery = fallback=%v models=%d, want successful catalog", catalog.Fallback, len(catalog.Models))
+	}
+	got, err := os.ReadFile(discoveryArgv)
+	if err != nil {
+		t.Fatalf("read discovery argv: %v", err)
+	}
+	wantPrefix := []string{cliScript, "--acp"}
+	if gotArgs := strings.Split(strings.TrimSpace(string(got)), "\n"); strings.Join(gotArgs, "\x00") != strings.Join(wantPrefix, "\x00") {
+		t.Fatalf("discovery argv = %#v, want %#v", gotArgs, wantPrefix)
+	}
+}
+
+// TestListModelsWorkBuddyPreservesCatalogAndLaunchPrefix exercises the
+// built-in identity path, not only the protocol-family helper: WorkBuddy must
+// retain the live catalog marker while carrying its per-entry launch prefix.
+func TestListModelsWorkBuddyPreservesCatalogAndLaunchPrefix(t *testing.T) {
+	path := writeCodebuddyACPStub(t, codebuddyACPSessionResult)
+	command := NewCommand(path, []string{"workbuddy-wrapper"})
+	key := discoveryCacheKey("workbuddy", command)
+	modelCacheMu.Lock()
+	delete(modelCache, key)
+	modelCacheMu.Unlock()
+	t.Cleanup(func() {
+		modelCacheMu.Lock()
+		delete(modelCache, key)
+		modelCacheMu.Unlock()
+	})
+
+	catalog, err := ListModels(context.Background(), "workbuddy", command)
+	if err != nil {
+		t.Fatalf("ListModels(workbuddy): %v", err)
+	}
+	if catalog.Fallback {
+		t.Fatal("successful WorkBuddy discovery must not be marked Fallback")
+	}
+	if len(catalog.Models) != 4 {
+		t.Fatalf("WorkBuddy models = %d, want 4", len(catalog.Models))
+	}
+}
+
+// TestListModelsWorkBuddyFallbackRetries exercises the complete identity
+// wiring. A failed fake CLI must surface the CodeBuddy fallback metadata, but
+// that fallback must not occupy the discovery cache: replacing the same fake
+// executable with a successful ACP responder must be observed immediately.
+func TestListModelsWorkBuddyFallbackRetries(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "workbuddy")
+	fallbackStub := writeCodebuddyACPStub(t, "")
+	raw, err := os.ReadFile(fallbackStub)
+	if err != nil {
+		t.Fatalf("read fallback stub: %v", err)
+	}
+	if err := os.WriteFile(path, raw, 0o755); err != nil {
+		t.Fatalf("write fallback stub: %v", err)
+	}
+	command := NewCommand(path, []string{"workbuddy-wrapper"})
+	key := discoveryCacheKey("workbuddy", command)
+	modelCacheMu.Lock()
+	delete(modelCache, key)
+	modelCacheMu.Unlock()
+	t.Cleanup(func() {
+		modelCacheMu.Lock()
+		delete(modelCache, key)
+		modelCacheMu.Unlock()
+	})
+
+	first, err := ListModels(context.Background(), "workbuddy", command)
+	if err != nil {
+		t.Fatalf("first ListModels(workbuddy): %v", err)
+	}
+	if !first.Fallback || len(first.Models) == 0 || first.Models[0].Thinking == nil {
+		t.Fatalf("first WorkBuddy catalog = %+v, want marked fallback with models/thinking metadata", first)
+	}
+
+	successStub := writeCodebuddyACPStub(t, codebuddyACPSessionResult)
+	raw, err = os.ReadFile(successStub)
+	if err != nil {
+		t.Fatalf("read success stub: %v", err)
+	}
+	if err := os.WriteFile(path, raw, 0o755); err != nil {
+		t.Fatalf("replace with success stub: %v", err)
+	}
+
+	second, err := ListModels(context.Background(), "workbuddy", command)
+	if err != nil {
+		t.Fatalf("second ListModels(workbuddy): %v", err)
+	}
+	if second.Fallback {
+		t.Fatal("second WorkBuddy catalog remained cached fallback after CLI recovery")
+	}
+	if len(second.Models) != 4 {
+		t.Fatalf("second WorkBuddy models = %d, want 4", len(second.Models))
 	}
 }
 

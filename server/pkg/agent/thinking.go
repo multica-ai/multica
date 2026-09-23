@@ -1005,9 +1005,21 @@ var acpCatalogThinkingProviders = map[string]bool{
 	"dim": true,
 }
 
+// thinkingCapabilityProvider maps a built-in runtime identity to the protocol
+// family that owns its thinking capability. Runtime identity remains the
+// caller-facing value; only capability lookup is normalized. Unknown and
+// custom runtime IDs are deliberately left unchanged.
+func thinkingCapabilityProvider(providerType string) string {
+	if desc, ok := BuiltinRuntimeByID(providerType); ok && desc.ProtocolFamily != "" {
+		return desc.ProtocolFamily
+	}
+	return providerType
+}
+
 // usesDynamicThinkingCatalog reports whether a provider's effort vocabulary is
 // owned by a daemon-local catalog rather than a fixed server-side enum.
 func usesDynamicThinkingCatalog(providerType string) bool {
+	providerType = thinkingCapabilityProvider(providerType)
 	return thinkingDynamicCatalogProviders[providerType] || acpCatalogThinkingProviders[providerType]
 }
 
@@ -1021,6 +1033,7 @@ func usesDynamicThinkingCatalog(providerType string) bool {
 // the provider name is not a sufficient answer for either. See
 // acpCatalogThinkingProviders.
 func UsesACPCatalogThinking(providerType string) bool {
+	providerType = thinkingCapabilityProvider(providerType)
 	return acpCatalogThinkingProviders[providerType]
 }
 
@@ -1041,6 +1054,7 @@ func UsesACPCatalogThinking(providerType string) bool {
 // true here and the per-session catalog decides whether a picker actually
 // appears. See acpCatalogThinkingProviders for the evidence on each.
 func ThinkingControlSupported(providerType string) bool {
+	providerType = thinkingCapabilityProvider(providerType)
 	if usesDynamicThinkingCatalog(providerType) {
 		return true
 	}
@@ -1064,6 +1078,7 @@ func IsKnownThinkingValue(providerType, value string) bool {
 	if value == "" {
 		return true
 	}
+	providerType = thinkingCapabilityProvider(providerType)
 	if usesDynamicThinkingCatalog(providerType) {
 		return isValidDynamicThinkingValue(value)
 	}

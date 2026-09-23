@@ -685,6 +685,7 @@ func TestThinkingControlSupported(t *testing.T) {
 	}{
 		{"claude", true},
 		{"codebuddy", true},
+		{"workbuddy", true}, // built-in identity inherits codebuddy capability
 		{"grok", true},
 		{"codex", true},    // dynamic catalog, validated per model by the daemon
 		{"dsh", true},      // dynamic catalog from the installed DSH profile
@@ -700,6 +701,47 @@ func TestThinkingControlSupported(t *testing.T) {
 	for _, tc := range tests {
 		if got := ThinkingControlSupported(tc.provider); got != tc.want {
 			t.Errorf("ThinkingControlSupported(%q) = %v, want %v", tc.provider, got, tc.want)
+		}
+	}
+}
+
+func TestWorkBuddyThinkingCapabilityUsesCodeBuddyFamily(t *testing.T) {
+	t.Parallel()
+
+	if got, want := ThinkingControlSupported("workbuddy"), ThinkingControlSupported("codebuddy"); got != want {
+		t.Fatalf("ThinkingControlSupported(workbuddy) = %v, want codebuddy result %v", got, want)
+	}
+	for _, value := range []string{"low", "medium", "high", "max"} {
+		if got, want := IsKnownThinkingValue("workbuddy", value), IsKnownThinkingValue("codebuddy", value); got != want {
+			t.Errorf("IsKnownThinkingValue(workbuddy, %q) = %v, want codebuddy result %v", value, got, want)
+		}
+	}
+	if !IsKnownThinkingValue("workbuddy", "") {
+		t.Error("empty WorkBuddy thinking value should mean runtime default")
+	}
+	if got, want := UsesACPCatalogThinking("workbuddy"), UsesACPCatalogThinking("codebuddy"); got != want {
+		t.Fatalf("UsesACPCatalogThinking(workbuddy) = %v, want codebuddy result %v", got, want)
+	}
+}
+
+func TestThinkingCapabilityNormalizationLeavesUnknownAndCustomProvidersUnchanged(t *testing.T) {
+	t.Parallel()
+
+	for _, provider := range []string{"workbuddy-custom", "custom-codebuddy", "not-a-runtime"} {
+		if got := thinkingCapabilityProvider(provider); got != provider {
+			t.Errorf("thinkingCapabilityProvider(%q) = %q, want unchanged provider identity", provider, got)
+		}
+		if ThinkingControlSupported(provider) {
+			t.Errorf("ThinkingControlSupported(%q) = true, want false for unknown/custom provider", provider)
+		}
+		if IsKnownThinkingValue(provider, "high") {
+			t.Errorf("IsKnownThinkingValue(%q, high) = true, want false for unknown/custom provider", provider)
+		}
+		if UsesACPCatalogThinking(provider) {
+			t.Errorf("UsesACPCatalogThinking(%q) = true, want false for unknown/custom provider", provider)
+		}
+		if !IsKnownThinkingValue(provider, "") {
+			t.Errorf("IsKnownThinkingValue(%q, empty) = false, want runtime-default sentinel accepted", provider)
 		}
 	}
 }

@@ -67,6 +67,10 @@ type BuiltinRuntime struct {
 	// semantically incompatible one (omp exits non-zero on `--list-models`)
 	// is worse than degrading to manual entry.
 	ModelDiscovery ModelDiscoveryFunc
+
+	// CatalogDiscovery is the catalog-preserving variant for identities whose
+	// discovery has meaningful fallback or unavailable-model metadata.
+	CatalogDiscovery CatalogDiscoveryFunc
 }
 
 // ModelDiscoveryFunc discovers available models for a runtime identity.
@@ -74,6 +78,11 @@ type BuiltinRuntime struct {
 // runtime's launch prefix — and returns a model catalog. Discovery failures
 // propagate to the picker, which shows the reason and supports manual entry.
 type ModelDiscoveryFunc func(ctx context.Context, runtimeCmd Command) ([]Model, error)
+
+// CatalogDiscoveryFunc preserves the full discovery outcome, including
+// fallback and unavailable-model metadata. It is preferred for built-in
+// identities that reuse a protocol family's richer discovery implementation.
+type CatalogDiscoveryFunc func(ctx context.Context, runtimeCmd Command) (Catalog, error)
 
 // BuiltinRuntimes is the registry of built-in runtime identities that are
 // NOT in SupportedTypes (they are protocol-family derivatives, not families
@@ -96,6 +105,27 @@ var BuiltinRuntimes = []BuiltinRuntime{
 		DefaultExecutable: "omp",
 		ProviderLabel:     "omp",
 		ModelDiscovery:    discoverOmpModels,
+	},
+	{
+		// workbuddy is the CodeBuddy CLI that Tencent's WorkBuddy desktop app
+		// bundles. It speaks the codebuddy stream-json protocol (the bundle is
+		// the same @genie/agent-cli CodeBuddy Code ships), so it reuses the
+		// codebuddy backend and family skills dirs. The daemon probes the
+		// desktop-app bundle locations when neither MULTICA_WORKBUDDY_PATH nor
+		// a PATH install of the default command exists; on Windows the bundled
+		// CLI is a shebang script, so discovery pairs it with the Node runtime
+		// WorkBuddy stages and launches it through a node <script> prefix.
+		ID:                "workbuddy",
+		ProtocolFamily:    "codebuddy",
+		DefaultCommand:    "codebuddy", // bundled CLI binary name inside the app resources
+		EnvPrefix:         "MULTICA_WORKBUDDY",
+		DisplayName:       "WorkBuddy",
+		SkillsDir:         ".codebuddy/skills",
+		UserSkillsDir:     ".codebuddy/skills",
+		LaunchHeader:      "workbuddy (WorkBuddy bundled CLI)",
+		DefaultExecutable: "codebuddy",
+		ProviderLabel:     "workbuddy",
+		CatalogDiscovery:  discoverCodebuddyModels,
 	},
 }
 
@@ -143,6 +173,13 @@ func (b *piBackend) applyBuiltinRuntimeOverrides(desc BuiltinRuntime) {
 	b.defaultExecutable = desc.DefaultExecutable
 	b.providerLabel = desc.ProviderLabel
 }
+
+// codebuddyBackend implements backendOverrideApplicator too: a runtime
+// identity such as "workbuddy" is hosted by the codebuddy protocol family
+// and overrides the fallback executable and error label through its
+// descriptor. The method body lives in codebuddy.go next to the fields it
+// fills.
+var _ backendOverrideApplicator = (*codebuddyBackend)(nil)
 
 // ResolveBackend is the single production entry point the daemon uses to
 // construct a backend from a provider key. It routes built-in runtime
