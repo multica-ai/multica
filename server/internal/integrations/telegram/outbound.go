@@ -66,6 +66,12 @@ type Outbound struct {
 	workerOnce               sync.Once
 	workerWG                 sync.WaitGroup
 	terminalWorkerWG         sync.WaitGroup
+
+	// objects is the deployment's object storage, or nil when there is none.
+	// Non-nil is what turns file delivery on (outbound_media.go).
+	objects objectStore
+	// spawn runs an attachment delivery. A field so a test can run it inline.
+	spawn func(func())
 }
 
 // outboundQueries is the slice of generated queries the subscriber needs.
@@ -73,6 +79,9 @@ type Outbound struct {
 type outboundQueries interface {
 	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
+	// ListAttachmentsByChatMessage is the files the agent bound to its reply,
+	// read by the attachment hop (outbound_media.go).
+	ListAttachmentsByChatMessage(ctx context.Context, arg db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error)
 
 	// Reply-delivery ownership. The streamed placeholder, the final answer and
 	// the failure notice agree on who owns a reply through these and nothing
@@ -284,6 +293,7 @@ func NewOutbound(q outboundQueries, decrypt Decrypter, apiBase string, client *h
 		terminalWake:       make(chan struct{}, 1),
 		terminalWork:       make(chan terminalWork, terminalWorkerCount),
 		terminalResults:    make(chan terminalResult, terminalWorkerCount),
+		spawn:              func(f func()) { go f() },
 	}
 	return o
 }
@@ -831,6 +841,11 @@ func (o *Outbound) initializeTerminalReply(ctx context.Context, reply *terminalR
 			return terminalRequestResult{done: true}
 		}
 		o.clearStream(reply.event)
+		if reply.settleReason == "empty_reply" {
+			// The agent may have said nothing and bound a file instead; the
+			// files are then the whole reply.
+			o.deliverAttachments(reply)
+		}
 		return terminalRequestResult{done: true}
 	}
 
@@ -981,6 +996,7 @@ func (o *Outbound) editStreamedReply(ctx context.Context, api *botAPI, reply *te
 	o.recordSend(ctx, reply.lease, false, reply.streamedMessageID, reply.chunkIndex, nil)
 	if reply.chunkIndex == len(reply.chunks) {
 		o.settleDelivery(ctx, reply.lease, "delivered")
+		o.deliverAttachments(reply)
 		return terminalRequestResult{done: true}
 	}
 	return terminalRequestResult{retryAt: schedule.lastEdit.Add(editInterval)}
@@ -1035,6 +1051,9 @@ func (o *Outbound) sendReplyChunk(ctx context.Context, api *botAPI, reply *termi
 	schedule.setBackoffTill(time.Time{})
 	if reply.chunkIndex == len(reply.chunks) {
 		o.settleDelivery(ctx, reply.lease, "delivered")
+		// The text is in the chat; the files the agent bound to it follow as
+		// their own messages, off this worker.
+		o.deliverAttachments(reply)
 		return terminalRequestResult{done: true}
 	}
 	return terminalRequestResult{retryAt: schedule.lastEdit.Add(editInterval)}

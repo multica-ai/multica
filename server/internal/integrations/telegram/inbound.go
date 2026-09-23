@@ -26,6 +26,61 @@ type telegramRawEvent struct {
 	// SenderName is the sender's Telegram display name, carried for
 	// group-context attribution.
 	SenderName string `json:"sender_name,omitempty"`
+	// Media is the one file this message carries, for the media resolver to
+	// fetch off the ACK path. Nil for text-only messages.
+	Media *inboundMedia `json:"media,omitempty"`
+}
+
+// inboundMedia is what the media resolver needs to fetch a message's file:
+// the getFile handle plus the display metadata Telegram already told us.
+type inboundMedia struct {
+	Kind         channel.MsgType `json:"kind"`
+	FileID       string          `json:"file_id"`
+	FileUniqueID string          `json:"file_unique_id,omitempty"`
+	FileName     string          `json:"file_name,omitempty"`
+	MimeType     string          `json:"mime_type,omitempty"`
+	FileSize     int64           `json:"file_size,omitempty"`
+	// Placeholder is the exact marker in the message body the bound
+	// attachment replaces with its Markdown link. It stays as plain text when
+	// the fetch fails, so the agent still knows a file was there.
+	Placeholder string `json:"placeholder"`
+}
+
+// mediaFromMessage picks the message's downloadable file, or nil. Photos come
+// in several renditions; the largest is the one worth keeping.
+func mediaFromMessage(m *Message) *inboundMedia {
+	switch {
+	case len(m.Photo) > 0:
+		best := m.Photo[0]
+		for _, p := range m.Photo[1:] {
+			if p.Width*p.Height >= best.Width*best.Height {
+				best = p
+			}
+		}
+		return &inboundMedia{Kind: channel.MsgTypeImage, FileID: best.FileID, FileUniqueID: best.FileUniqueID,
+			MimeType: "image/jpeg", FileSize: best.FileSize, Placeholder: "[Image]"}
+	case m.Document != nil:
+		return fileRefMedia(channel.MsgTypeFile, m.Document, "[File: "+firstNonEmpty(m.Document.FileName, "attachment")+"]")
+	case m.Video != nil:
+		return fileRefMedia(channel.MsgTypeVideo, m.Video, "[Video]")
+	case m.VideoNote != nil:
+		return fileRefMedia(channel.MsgTypeVideo, m.VideoNote, "[Video note]")
+	case m.Animation != nil:
+		return fileRefMedia(channel.MsgTypeVideo, m.Animation, "[Animation]")
+	case m.Audio != nil:
+		return fileRefMedia(channel.MsgTypeAudio, m.Audio, "[Audio]")
+	case m.Voice != nil:
+		return fileRefMedia(channel.MsgTypeAudio, m.Voice, "[Voice message]")
+	}
+	return nil
+}
+
+func fileRefMedia(kind channel.MsgType, f *FileRef, placeholder string) *inboundMedia {
+	if f.FileID == "" {
+		return nil
+	}
+	return &inboundMedia{Kind: kind, FileID: f.FileID, FileUniqueID: f.FileUniqueID,
+		FileName: f.FileName, MimeType: f.MimeType, FileSize: f.FileSize, Placeholder: placeholder}
 }
 
 // inboundFromUpdate normalizes one Telegram update without any recent group
@@ -69,6 +124,7 @@ func inboundFromUpdateWithContext(u Update, botID int64, botUsername string, rec
 		text = m.Caption
 	}
 	msgType := classifyMessage(m)
+	media := mediaFromMessage(m)
 
 	mentioned := mentionsBot(m, botUsername)
 	repliedToBot := m.ReplyToMessage != nil && m.ReplyToMessage.From != nil && m.ReplyToMessage.From.ID == botID
@@ -84,10 +140,19 @@ func inboundFromUpdateWithContext(u Update, botID int64, botUsername string, rec
 		startChat = control.Kind == engine.ControlCommandNewChat
 	}
 	agentText := cleaned
+	if media != nil {
+		// The placeholder leads the sender's own text, so a caption reads as
+		// the caption of the file above it once the resolver swaps the marker
+		// for the attachment link. Quoted and recent context still go in front.
+		agentText = media.Placeholder
+		if cleaned != "" {
+			agentText += "\n" + cleaned
+		}
+	}
 	quotedHuman := m.ReplyToMessage != nil && m.ReplyToMessage.From != nil && !m.ReplyToMessage.From.IsBot
 	hasSelectedContext := chatType == channel.ChatTypeGroup && mentioned && quotedHuman
 	if hasSelectedContext {
-		agentText = enrichWithQuotedHumanMessage(cleaned, m.Chat.ID, m.ReplyToMessage)
+		agentText = enrichWithQuotedHumanMessage(agentText, m.Chat.ID, m.ReplyToMessage)
 	}
 	if recent != nil && chatType == channel.ChatTypeGroup && addressed && !startChat {
 		agentText = enrichWithRecentContext(agentText, m, recent)
@@ -104,6 +169,7 @@ func inboundFromUpdateWithContext(u Update, botID int64, botUsername string, rec
 		BotID:      strconv.FormatInt(botID, 10),
 		EventType:  "message",
 		SenderName: senderDisplayName(m.From),
+		Media:      media,
 	})
 
 	var reply *channel.ReplyCtx
@@ -158,18 +224,18 @@ func telegramChatType(t string) (channel.ChatType, bool) {
 	}
 }
 
-// classifyMessage maps the message payload to the normalized MsgType. Only
-// text is actionable in v1 (aligned with Feishu/Slack); media kinds are
-// reported so the caller can reply "unsupported" rather than stay silent.
+// classifyMessage maps the message payload to the normalized MsgType. Text and
+// the downloadable media kinds are ingested; MsgTypeUnknown (stickers,
+// locations, polls, …) is what the caller answers with the unsupported notice.
 func classifyMessage(m *Message) channel.MsgType {
 	switch {
 	case m.Text != "":
 		return channel.MsgTypeText
 	case len(m.Photo) > 0:
 		return channel.MsgTypeImage
-	case m.Voice != nil:
+	case m.Voice != nil, m.Audio != nil:
 		return channel.MsgTypeAudio
-	case m.Video != nil:
+	case m.Video != nil, m.VideoNote != nil, m.Animation != nil:
 		return channel.MsgTypeVideo
 	case m.Document != nil:
 		return channel.MsgTypeFile

@@ -1180,8 +1180,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				Logger: slog.Default(),
 			})
 			telegramTyping := telegram.NewTypingNotifier(box.Open, "", nil, slog.Default())
-			channelRouter.Register(telegram.TypeTelegram, telegram.NewTelegramResolverSet(queries, pool, telegramReplier, telegramTyping))
+			// Media both ways needs object storage: inbound photos/files become
+			// chat attachments only when there is somewhere to put the bytes,
+			// and the agent is promised outbound file delivery only where the
+			// same storage exists to read them back from. One `if` decides both
+			// halves so the capability and the promise cannot drift (same rule
+			// as WeCom above).
+			var telegramMedia engine.MediaResolver
 			telegramOutbound := telegram.NewOutbound(queries, box.Open, "", nil, slog.Default())
+			if store != nil {
+				telegramMedia = telegram.NewMediaResolver(box.Open, store, engine.NewDBMediaIntentLedger(queries), "", nil, slog.Default())
+				telegramOutbound.EnableFileDelivery(store)
+				h.DeclareChannelFileDelivery(string(telegram.TypeTelegram))
+			}
+			channelRouter.Register(telegram.TypeTelegram, telegram.NewTelegramResolverSet(queries, pool, telegramReplier, telegramTyping, telegramMedia))
 			telegramOutbound.Register(bus)
 			h.TelegramOutbound = telegramOutbound
 

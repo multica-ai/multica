@@ -63,7 +63,7 @@ Add the Bot to a group, then either @-mention it or reply directly to one of its
 
 The Bot streams text by posting and editing a Telegram message, quotes the triggering message, preserves forum topics, and splits long replies under Telegram's message limit. Final replies are delivered asynchronously by an in-process queue. Normally, one chat's backoff does not occupy a worker; if cache pressure compacts exact backoff state, other chats under the same Bot installation may be conservatively delayed. The terminal queue has fixed capacity: overflow is rejected and logged, and queued replies are not recovered after a service restart.
 
-This version accepts text only. Photos, files, video, voice, stickers, and other non-text messages receive a clear unsupported-message response in private chats; addressed group media receives the same response, while unaddressed group media remains silent.
+Photos, files, video, voice, and audio messages reach the agent as attachments on the same conversation, with the caption as the message text. Telegram lets a Bot download files up to 20 MB; larger media arrives as a placeholder only. Files the agent produces are sent back into the chat as separate messages after its reply: photos up to 10 MB render inline, everything else up to 50 MB arrives as a file. Both directions need object storage on the server (see the self-hosting section below); without it, media arrives as placeholder text and the agent is told it cannot send files. Stickers, locations, polls, and other non-file messages receive an unsupported-message response in private chats and when addressed in groups; unaddressed group messages of those kinds remain silent.
 
 ## Manage connections
 
