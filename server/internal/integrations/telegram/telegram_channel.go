@@ -26,6 +26,9 @@ type telegramChannel struct {
 	api         *botAPI
 	handler     channel.InboundHandler
 	logger      *slog.Logger
+	// recent buffers the group messages this loop has seen so an @-mention can
+	// carry the surrounding conversation (see recent_context.go). Nil disables.
+	recent *recentContextBuffer
 }
 
 // pollRetryDelay spaces retries after a transient getUpdates failure inside
@@ -112,10 +115,11 @@ func (c *telegramChannel) Connect(ctx context.Context) error {
 // duplicates). Product drops return nil. Unsupported media in a private chat,
 // or explicitly addressed to the bot in a group, gets a courteous notice.
 func (c *telegramChannel) dispatch(ctx context.Context, u Update) error {
-	msg, ok := inboundFromUpdate(u, c.botID, c.botUsername)
+	msg, ok := inboundFromUpdateWithContext(u, c.botID, c.botUsername, c.recent)
 	if !ok {
 		return nil
 	}
+	c.recordRecent(u.Message, msg)
 	if msg.Type != channel.MsgTypeText {
 		if msg.Source.ChatType == channel.ChatTypeP2P || msg.AddressedToBot {
 			c.notifyUnsupported(ctx, u)
@@ -130,6 +134,22 @@ func (c *telegramChannel) dispatch(ctx context.Context, u Update) error {
 		return err
 	}
 	return nil
+}
+
+// recordRecent buffers a human group message after it has been translated,
+// so the window an @-mention reads never contains the mention itself. Runs
+// for every group message the loop sees — addressed or not, text or media —
+// because the next @-mention wants the conversation as members saw it. p2p
+// messages are never buffered: a 1:1 chat is already one continuous session.
+func (c *telegramChannel) recordRecent(m *Message, msg channel.InboundMessage) {
+	if c.recent == nil || m == nil || msg.Source.ChatType != channel.ChatTypeGroup {
+		return
+	}
+	var threadID int64
+	if m.IsTopicMessage {
+		threadID = m.MessageThreadID
+	}
+	c.recent.Record(m.Chat.ID, threadID, recentEntryFromMessage(m))
 }
 
 const (
@@ -211,6 +231,12 @@ type ChannelDeps struct {
 	// HTTPClient overrides the polling client (tests). Nil uses a default with
 	// a timeout sized for long polling.
 	HTTPClient *http.Client
+	// RecentContextSize caps how many preceding group messages each polling
+	// loop buffers per chat/topic and inlines as a <recent_context> block when
+	// a member @-mentions the bot. <=0 disables the feature; the production
+	// wiring sets DefaultRecentContextSize. Mirrors
+	// lark.InboundEnricherConfig.RecentContextSize.
+	RecentContextSize int
 }
 
 // RegisterTelegram registers the per-installation Telegram Factory so the
@@ -248,6 +274,7 @@ func newTelegramFactory(deps ChannelDeps) channel.Factory {
 			api:         newBotAPI(deps.APIBase, token, deps.HTTPClient),
 			handler:     cfg.Handler,
 			logger:      logger,
+			recent:      newRecentContextBuffer(deps.RecentContextSize),
 		}, nil
 	}
 }

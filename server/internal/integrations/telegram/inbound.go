@@ -28,17 +28,33 @@ type telegramRawEvent struct {
 	SenderName string `json:"sender_name,omitempty"`
 }
 
-// inboundFromUpdate normalizes one Telegram update. ok=false means the update
-// must not reach the core: bot/self messages, channel posts, edits (excluded
-// via allowed_updates already), or unsupported media (the caller decides
-// whether to send an "unsupported" notice for p2p).
+// inboundFromUpdate normalizes one Telegram update without any recent group
+// context. See inboundFromUpdateWithContext.
+func inboundFromUpdate(u Update, botID int64, botUsername string) (channel.InboundMessage, bool) {
+	return inboundFromUpdateWithContext(u, botID, botUsername, nil)
+}
+
+// inboundFromUpdateWithContext normalizes one Telegram update. ok=false means
+// the update must not reach the core: bot/self messages, channel posts, edits
+// (excluded via allowed_updates already), or unsupported media (the caller
+// decides whether to send an "unsupported" notice for p2p).
 //
 // Group addressing policy mirrors Slack v1: a group message is addressed to
 // the bot only when it carries an explicit @bot mention or directly replies to
-// one of the bot's messages. Privacy mode is left ON, so Telegram already
-// withholds unaddressed group chatter from the bot; this check is the
-// defense-in-depth for bots whose privacy mode was disabled in BotFather.
-func inboundFromUpdate(u Update, botID int64, botUsername string) (channel.InboundMessage, bool) {
+// one of the bot's messages. Telegram only withholds unaddressed group
+// chatter while the bot's privacy mode is ON and the bot is not a group admin;
+// the recent-context feature actively invites operators to turn privacy off,
+// so this check — not Telegram — is what keeps unaddressed chatter from
+// starting a turn.
+//
+// recent, when non-nil, supplies the preceding messages of the same
+// chat/topic. They are inlined as a <recent_context> block ahead of an
+// addressed group message (never p2p, never an unaddressed one, and never
+// for /new — a new Chat must not inherit the previous Chat's ambient
+// context), matching Lark's enricher composition: recent → quoted → own.
+// Ambient context is not "selected" context: HasSelectedContext stays tied
+// to the explicitly quoted reply.
+func inboundFromUpdateWithContext(u Update, botID int64, botUsername string, recent recentContextSource) (channel.InboundMessage, bool) {
 	m := u.Message
 	if m == nil || m.From == nil || m.From.IsBot || m.From.ID == botID {
 		return channel.InboundMessage{}, false
@@ -61,15 +77,20 @@ func inboundFromUpdate(u Update, botID int64, botUsername string) (channel.Inbou
 	cleaned := normalizeText(text, botUsername)
 	commandText := cleaned
 	forceFresh := false
+	startChat := false
 	if control, ok := engine.ParseControlCommand(cleaned); ok {
 		cleaned = control.Body
 		forceFresh = control.Kind == engine.ControlCommandFreshSession
+		startChat = control.Kind == engine.ControlCommandNewChat
 	}
 	agentText := cleaned
 	quotedHuman := m.ReplyToMessage != nil && m.ReplyToMessage.From != nil && !m.ReplyToMessage.From.IsBot
 	hasSelectedContext := chatType == channel.ChatTypeGroup && mentioned && quotedHuman
 	if hasSelectedContext {
 		agentText = enrichWithQuotedHumanMessage(cleaned, m.Chat.ID, m.ReplyToMessage)
+	}
+	if recent != nil && chatType == channel.ChatTypeGroup && addressed && !startChat {
+		agentText = enrichWithRecentContext(agentText, m, recent)
 	}
 
 	senderID := strconv.FormatInt(m.From.ID, 10)
@@ -222,6 +243,30 @@ func enrichWithQuotedHumanMessage(instruction string, chatID int64, quoted *Mess
 	msgType := classifyMessage(quoted)
 	block := fmt.Sprintf("<quoted_message message_id=%q sender=%q type=%q>\n%s\n</quoted_message>",
 		messageKey(chatID, quoted.MessageID), sender, msgType, quotedText)
+	if instruction == "" {
+		return block
+	}
+	return block + "\n\n" + instruction
+}
+
+// enrichWithRecentContext prepends the chat/topic's preceding messages to the
+// instruction. The trigger itself and an explicitly quoted parent are excluded
+// from the window: the first is the instruction, the second is already
+// rendered as <quoted_message>. An empty window leaves the text untouched.
+func enrichWithRecentContext(instruction string, m *Message, recent recentContextSource) string {
+	exclude := []int64{m.MessageID}
+	if m.ReplyToMessage != nil {
+		exclude = append(exclude, m.ReplyToMessage.MessageID)
+	}
+	var threadID int64
+	if m.IsTopicMessage {
+		threadID = m.MessageThreadID
+	}
+	entries := recent.Snapshot(m.Chat.ID, threadID, exclude...)
+	if len(entries) == 0 {
+		return instruction
+	}
+	block := renderRecentContextBlock(entries)
 	if instruction == "" {
 		return block
 	}

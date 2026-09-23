@@ -3183,11 +3183,11 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 		if err := lockChatSessionForTaskWrite(ctx, qtx, task.ID); err != nil {
 			return err
 		}
-		messages, err := qtx.ListTaskMessages(ctx, task.ID)
+		hasMessages, err := qtx.HasTaskMessages(ctx, task.ID)
 		if err != nil {
 			return fmt.Errorf("list cancelled chat task messages: %w", err)
 		}
-		restorable := len(messages) == 0
+		restorable := !hasMessages
 		if restorable {
 			// Channel-ingested user messages are the durable record of what
 			// the platform sender wrote — the sender has no Multica composer
@@ -3355,11 +3355,11 @@ func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID 
 		payload.TaskID = util.UUIDToString(claimed.ID)
 		payload.InitiatorUserID = util.UUIDToString(claimed.InitiatorUserID)
 
-		messages, err := qtx.ListTaskMessages(ctx, claimed.ID)
+		hasMessages, err := qtx.HasTaskMessages(ctx, claimed.ID)
 		if err != nil {
 			return fmt.Errorf("list cancelled chat task messages: %w", err)
 		}
-		restorable := len(messages) == 0
+		restorable := !hasMessages
 		if restorable {
 			// Same immutable-provenance guard as finalizeCancelledChatMessage:
 			// channel tasks never restore-delete their sealed input. The sync
@@ -4165,11 +4165,56 @@ func (s *TaskService) maybeLogClaimSlow(agentID pgtype.UUID, outcome string, sta
 
 // StartTask transitions a dispatched task to running.
 // Issue status is NOT changed here — the agent manages it via the CLI.
-func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
-	task, err := s.Queries.StartAgentTask(ctx, taskID)
+func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID, supplementSupport ...bool) (*db.AgentTaskQueue, error) {
+	enableTaskSupplement := len(supplementSupport) > 0 && supplementSupport[0]
+	task, err := s.Queries.StartAgentTaskWithSupplement(ctx, db.StartAgentTaskWithSupplementParams{
+		TaskID:               taskID,
+		EnableTaskSupplement: enableTaskSupplement,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("start task: %w", err)
 	}
+	s.taskStarted(ctx, task)
+	return &task, nil
+}
+
+// StartTaskForClaim serializes the ownership check and transition with reclaim,
+// cancellation and other start requests. A replay linearizes at the locked read;
+// a cancellation that commits later can still cancel the acknowledged task.
+func (s *TaskService) StartTaskForClaim(ctx context.Context, claim db.LockAgentTaskStartClaimParams, supplementSupport ...bool) (*db.AgentTaskQueue, error) {
+	if !claim.ID.Valid || !claim.RuntimeID.Valid || !claim.DispatchedAt.Valid {
+		return nil, fmt.Errorf("start task: incomplete claim")
+	}
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin task start: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.Queries.WithTx(tx)
+	task, err := qtx.LockAgentTaskStartClaim(ctx, claim)
+	if err != nil {
+		return nil, fmt.Errorf("lock task start claim: %w", err)
+	}
+	replay := task.Status == "running"
+	if !replay {
+		task, err = qtx.StartAgentTaskWithSupplement(ctx, db.StartAgentTaskWithSupplementParams{
+			TaskID:               task.ID,
+			EnableTaskSupplement: len(supplementSupport) > 0 && supplementSupport[0],
+		})
+		if err != nil {
+			return nil, fmt.Errorf("start claimed task: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit task start: %w", err)
+	}
+	if !replay {
+		s.taskStarted(ctx, task)
+	}
+	return &task, nil
+}
+
+func (s *TaskService) taskStarted(ctx context.Context, task db.AgentTaskQueue) {
 	s.forgetTaskReclaim(task)
 
 	slog.Info("task started", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
@@ -4186,7 +4231,6 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 	// the issue-card agent activity indicator) lags by up to half a minute
 	// on the transition users care about most.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskRunning, task)
-	return &task, nil
 }
 
 // ExtendTaskPrepareLease keeps a claimed-but-not-started task protected while
@@ -6014,9 +6058,10 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 						)
 					} else if !hasActive {
 						updatedIssue, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-							ID:          t.IssueID,
-							Status:      "todo",
-							WorkspaceID: issue.WorkspaceID,
+							SourceTaskID: t.ID,
+							ID:           t.IssueID,
+							Status:       "todo",
+							WorkspaceID:  issue.WorkspaceID,
 						})
 						if updateErr != nil {
 							slog.Warn("handle failed tasks: reset stuck issue failed",
@@ -7452,7 +7497,7 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 			"issue_revision": created.IssueRevision,
 		},
 	})
-	s.AutoUnresolveThreadOnReply(ctx, rootComment, util.UUIDToString(issue.WorkspaceID), "agent", util.UUIDToString(agentID))
+	s.AutoUnresolveThreadOnReply(ctx, rootComment, util.UUIDToString(issue.WorkspaceID), "agent", util.UUIDToString(agentID), sourceTaskID)
 }
 
 // AutoUnresolveThreadOnReply clears resolved_at on the thread root when a
@@ -7461,13 +7506,30 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 // TaskService.createAgentComment path so the resolved-then-replied state can
 // never desync (one of the bugs Emacs flagged on PR #2300). Errors are logged
 // — the reply itself already committed, the desync is recoverable on next read.
-func (s *TaskService) AutoUnresolveThreadOnReply(ctx context.Context, parent *db.Comment, workspaceID, actorType, actorID string) {
+func (s *TaskService) AutoUnresolveThreadOnReply(ctx context.Context, parent *db.Comment, workspaceID, actorType, actorID string, sourceTaskID pgtype.UUID) {
 	if parent == nil || !parent.ResolvedAt.Valid {
 		return
 	}
-	updated, err := s.Queries.UnresolveComment(ctx, parent.ID)
+	// This follow-up write is a consequence of the reply's run, not a new
+	// system action. Preserve that lineage for event subscriptions as well.
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		slog.Warn("auto-unresolve transaction failed", "error", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	_, err = tx.Exec(ctx, `SELECT set_config('multica.actor_type',$1,true),set_config('multica.actor_id',$2,true),set_config('multica.source_task_id',$3,true)`, actorType, actorID, util.UUIDToString(sourceTaskID))
+	if err != nil {
+		slog.Warn("auto-unresolve source attribution failed", "error", err)
+		return
+	}
+	updated, err := s.Queries.WithTx(tx).UnresolveComment(ctx, parent.ID)
 	if err != nil {
 		slog.Warn("auto-unresolve on reply failed", "error", err, "comment_id", util.UUIDToString(parent.ID))
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		slog.Warn("auto-unresolve commit failed", "error", err)
 		return
 	}
 	s.Bus.Publish(events.Event{
@@ -7552,13 +7614,17 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		// — clients localize those from the key — and a CUSTOM one is filled in
 		// by IssueToMapResolved, which has the catalog. Emitted unconditionally
 		// so this rendering cannot lose a key the HTTP one carries. (MUL-6749)
-		"status_name":      "",
-		"priority":         issue.Priority,
-		"assignee_type":    util.TextToPtr(issue.AssigneeType),
-		"assignee_id":      util.UUIDToPtr(issue.AssigneeID),
-		"creator_type":     issue.CreatorType,
-		"creator_id":       util.UUIDToString(issue.CreatorID),
-		"parent_issue_id":  util.UUIDToPtr(issue.ParentIssueID),
+		"status_name":     "",
+		"priority":        issue.Priority,
+		"assignee_type":   util.TextToPtr(issue.AssigneeType),
+		"assignee_id":     util.UUIDToPtr(issue.AssigneeID),
+		"creator_type":    issue.CreatorType,
+		"creator_id":      util.UUIDToString(issue.CreatorID),
+		"parent_issue_id": util.UUIDToPtr(issue.ParentIssueID),
+		// Mirrors handler.IssueResponse.DuplicateOf. The paths that render this
+		// map (autopilot creates, background status resets) never carry a live
+		// duplicate mark, and a reset clears one, so null is the true value.
+		"duplicate_of":     nil,
 		"project_id":       util.UUIDToPtr(issue.ProjectID),
 		"position":         issue.Position,
 		"stage":            util.Int4ToPtr(issue.Stage),

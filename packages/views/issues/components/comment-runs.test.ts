@@ -14,6 +14,29 @@ function comment(id: string, overrides: Partial<TimelineEntry> = {}): TimelineEn
 }
 
 describe("groupCommentRuns", () => {
+  it("moves one run after each accepted supplement and keeps the final answer in that block", () => {
+    const root = comment("root");
+    const supplement = comment("supplement", {
+      parent_id: root.id,
+      created_at: "2026-09-07T00:01:00Z",
+      supplement_task_id: "run",
+      supplement_status: "delivered",
+    });
+    const answer = comment("answer", {
+      actor_type: "agent",
+      source_task_id: "run",
+      created_at: "2026-09-07T00:02:00Z",
+    });
+    const run = task("run", { trigger_comment_id: root.id, delivered_comment_ids: [root.id] });
+    const view = buildCommentRunView([run], [root, supplement, answer]);
+    expect(view.runs.get(root.id)?.[0]).toMatchObject({
+      anchorCommentId: supplement.id,
+      commentId: answer.id,
+      hasReply: true,
+    });
+    expect(view.timeline.find((entry) => entry.id === answer.id)?.parent_id).toBe(supplement.id);
+  });
+
   it.each(["queued", "dispatched", "running", "completed"] as const)("waits for a missing trigger before placing a %s run and its reply", (status) => {
     const run = task("run", { status, trigger_comment_id: "trigger",
       delivered_comment_ids: status === "queued" || status === "dispatched" ? [] : ["trigger"] });
@@ -132,6 +155,23 @@ describe("groupCommentRuns", () => {
     expect(view.timeline.find((entry) => entry.id === "answer-b")?.parent_id).toBe("answer-a");
     expect(view.timeline.find((entry) => entry.id === "assigned-answer")?.parent_id).toBeUndefined();
     expect(timeline.find((entry) => entry.id === "assigned-answer")?.parent_id).toBe("root");
+  });
+
+  it("moves a run's earlier top-level comments into the thread with its reply", () => {
+    // MUL-7548: only the latest comment used to move under the trigger, so it
+    // rendered above the run's earlier top-level comments.
+    const run = task("run", { trigger_comment_id: "confirm", delivered_comment_ids: ["confirm"] });
+    const timeline = [comment("confirm"),
+      comment("other-thread"),
+      comment("step2", { actor_type: "agent", source_task_id: run.id, created_at: "2026-09-07T00:01:00Z" }),
+      comment("fan-out", { parent_id: "other-thread", actor_type: "agent", source_task_id: run.id, created_at: "2026-09-07T00:02:00Z" }),
+      comment("step3", { actor_type: "agent", source_task_id: run.id, created_at: "2026-09-07T00:03:00Z" })];
+    const view = buildCommentRunView([run], timeline);
+    const parentOf = (id: string) => view.timeline.find((entry) => entry.id === id)?.parent_id;
+    expect(parentOf("step2")).toBe("confirm");
+    expect(parentOf("step3")).toBe("confirm");
+    expect(parentOf("fan-out")).toBe("other-thread");
+    expect(view.runs.get("confirm")).toEqual([{ task: run, commentId: "step3", anchorCommentId: "confirm", hasReply: true }]);
   });
 
   it("does not project reply relationships that would create a comment cycle", () => {
@@ -316,12 +356,14 @@ describe("orderTimelineWithRuns", () => {
       .toEqual(["first", "second", "run"]);
   });
 
-  it("parks a working run at the live end and keeps live runs in enqueue order", () => {
-    const earlier = task("earlier", { status: "running", created_at: "2026-09-07T10:00:00Z" });
+  it.each(["queued", "dispatched", "waiting_local_directory", "running"] as const)("keeps a %s run before later comments in enqueue order", (status) => {
+    const earlier = task("earlier", { status, created_at: "2026-09-07T10:00:00Z" });
     const later = task("later", { status: "queued", created_at: "2026-09-07T10:30:00Z" });
+    const before = comment("before", { created_at: "2026-09-07T09:45:00Z" });
+    const between = comment("between", { created_at: "2026-09-07T10:15:00Z" });
     const posted = comment("posted", { created_at: "2026-09-07T10:45:00Z" });
-    expect(order([posted], [{ task: earlier, hasReply: false }, { task: later, hasReply: false }]))
-      .toEqual(["posted", "earlier", "later"]);
+    expect(order([before, between, posted], [{ task: later, hasReply: false }, { task: earlier, hasReply: false }]))
+      .toEqual(["before", "earlier", "between", "later", "posted"]);
   });
 
   it("settles a run that ended without a reply at the time it ended", () => {

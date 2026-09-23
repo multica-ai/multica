@@ -915,6 +915,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.2.0
         version: 19.2.3(@types/react@19.2.14)
+      esbuild:
+        specifier: ^0.25.12
+        version: 0.25.12
       typescript:
         specifier: 'catalog:'
         version: 5.9.3

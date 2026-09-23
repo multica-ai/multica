@@ -437,7 +437,6 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				// home, so losing one here loses it everywhere.
 				"A name is not an id",
 				"`--output json` writes to stdout",
-				"`--no-start` when you are only recording",
 				"categories describe lifecycle only",
 				"Custom statuses do not inherit built-in automation behavior",
 				"Comment reads stay bounded",
@@ -449,6 +448,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"that read is the bounded scan",
 			},
 			notWant: []string{
+				"--no-start",
 				// The singular forms this replaced.
 				"open the ONE reference",
 				"there is never a reason to read all eight",
@@ -513,6 +513,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"`value` keeps the stored ids",
 			},
 			notWant: []string{
+				"--no-start",
 				// MUL-6966 phase 1: this reference must not teach the KV bag
 				// at all — not as a section, not as a command, and not as a
 				// named key inside a warning. A blanket ban on the vocabulary
@@ -597,6 +598,10 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"--roots-only --summary",
 				"--thread <thread-id> --tail 30",
 				"scan the roots first, then open the threads",
+				// MUL-5850: the reads carry --compact, matching the brief and
+				// the router's bounded-reads rule.
+				"--roots-only --summary --compact --output json",
+				"--thread <thread-id> --tail 30 --compact --output json",
 			},
 			notWant: []string{
 				// MUL-5696: no unbounded comment pull. Both shapes contradict

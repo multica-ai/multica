@@ -5,6 +5,21 @@ import (
 	"testing"
 )
 
+func TestTaskSupplementVersionGate(t *testing.T) {
+	for _, tc := range []struct {
+		provider, version string
+		want              bool
+	}{
+		{"codex", "codex-cli 0.100.0", true}, {"codex", "0.99.0", false},
+		{"claude", "2.1.110 (Claude Code)", true}, {"claude", "2.1.109", false},
+		{"codex", "", false}, {"claude", "dev", false}, {"kimi", "9.0.0", false},
+	} {
+		if got := SupportsTaskSupplement(tc.provider, tc.version); got != tc.want {
+			t.Errorf("%s %q: supported=%v, want %v", tc.provider, tc.version, got, tc.want)
+		}
+	}
+}
+
 func TestParseSemver(t *testing.T) {
 	tests := []struct {
 		input   string

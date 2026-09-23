@@ -2013,7 +2013,9 @@ func TestStartTask_AutopilotRunOnlyTask_ResolvesWorkspace(t *testing.T) {
 
 	// Same-workspace daemon token must succeed — this is the bug in #1224.
 	w = httptest.NewRecorder()
-	req = newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/start", nil,
+	req = newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/start", map[string]any{
+		"capabilities": []string{protocol.DaemonCapabilityTaskSupplementV1},
+	},
 		testWorkspaceID, "legit-daemon")
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
@@ -2026,6 +2028,11 @@ func TestStartTask_AutopilotRunOnlyTask_ResolvesWorkspace(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
 	if status != "running" {
 		t.Fatalf("expected task status 'running' after StartTask, got %q", status)
+	}
+	var capabilityRows int
+	dbfx.QueryRow(t, `SELECT count(*) FROM task_supplement_capability WHERE task_id = $1`, taskID).Scan(&capabilityRows)
+	if capabilityRows != 0 {
+		t.Fatalf("run-only autopilot persisted %d supplement capabilities, want 0", capabilityRows)
 	}
 }
 

@@ -215,6 +215,24 @@ describe("IssueAgentHeaderChip", () => {
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
   });
 
+  it("wears the decorative border beam only while an agent is running", () => {
+    mockState.tasks = [makeTask({})];
+    const { unmount } = renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    const running = screen.getByRole("button", { name: "Walt is working" });
+    const ring = running.querySelector(".border-beam-ring");
+    expect(running).toHaveClass("relative");
+    expect(ring).toHaveAttribute("aria-hidden", "true");
+    expect(ring?.querySelector(".border-beam-light")).not.toBeNull();
+    unmount();
+
+    mockState.tasks = [makeTask({ status: "queued" })];
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    const queued = screen.getByRole("button", { name: "Walt is queued" });
+    expect(queued.querySelector(".border-beam-ring")).toBeNull();
+  });
+
   it("keeps the header popover card with active task rows", () => {
     mockState.tasks = [makeTask({ id: "task-running" })];
 

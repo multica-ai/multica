@@ -44,6 +44,13 @@ export function buildCommentRunView(
   // in Execution history, but it must not become an unanchored Activity block.
   const inlineTasks = tasks.filter((task) => task.kind !== "quick_create");
   const comments = new Map(timeline.filter((entry) => entry.type === "comment").map((entry) => [entry.id, entry]));
+  const supplementalByTask = new Map<string, string[]>();
+  for (const entry of comments.values()) {
+    if (!entry.supplement_task_id) continue;
+    const ids = supplementalByTask.get(entry.supplement_task_id) ?? [];
+    ids.push(entry.id);
+    supplementalByTask.set(entry.supplement_task_id, ids);
+  }
   const timelineOrder = new Map(timeline.map((entry, index) => [entry.id, index]));
   const threadRoot = (id: string): string | undefined => {
     const seen = new Set<string>();
@@ -63,6 +70,13 @@ export function buildCommentRunView(
       replies.set(entry.source_task_id, entry);
     }
   }
+  const topLevelOutputs = new Map<string, TimelineEntry[]>();
+  for (const entry of comments.values()) {
+    if (!entry.source_task_id || entry.actor_type !== "agent" || entry.parent_id) continue;
+    const outputs = topLevelOutputs.get(entry.source_task_id) ?? [];
+    outputs.push(entry);
+    topLevelOutputs.set(entry.source_task_id, outputs);
+  }
   const byTask = new Map(inlineTasks.map((task) => [task.id, task]));
   const priorAnchors = new Map([...previous.values()].flatMap((runs) => runs.map((run) => [run.task.id, run.anchorCommentId] as const)));
   const placements: CommentRun[] = [];
@@ -81,9 +95,14 @@ export function buildCommentRunView(
         || (source.status === "dispatched" && !source.delivered_comment_ids?.length)
         || ((source.status === "cancelled" || source.status === "failed")
           && !source.dispatched_at && !source.started_at);
-      const ids = !usesPlannedCoverage && source.delivered_comment_ids !== undefined
+      const baseIds = !usesPlannedCoverage && source.delivered_comment_ids !== undefined
         ? source.delivered_comment_ids
         : [source.trigger_comment_id, ...(source.coalesced_comment_ids ?? [])];
+      const ids = [...new Set([
+        ...baseIds,
+        ...(source.supplement_comment_ids ?? []),
+        ...(supplementalByTask.get(source.id) ?? []),
+      ])];
       const candidates = ids.flatMap((id) => id && comments.has(id) ? [comments.get(id)!] : []);
       const latestCandidateId = () => [...candidates].sort((a, b) => b.created_at.localeCompare(a.created_at)
         || (timelineOrder.get(b.id) ?? -1) - (timelineOrder.get(a.id) ?? -1))[0]?.id;
@@ -118,9 +137,13 @@ export function buildCommentRunView(
   // Project every task-owned answer first, then use that same tree for run
   // grouping, replies, resolution, and navigation. Assignment answers become
   // roots even if the agent originally posted them inside an existing thread.
+  // The run's other top-level comments follow its reply: moving only the
+  // latest one would render it above the progress posted before it (MUL-7548).
+  // Comments the agent placed in a thread stay where it put them.
   const parents = new Map<string, string | undefined>();
   for (const run of placements) {
     if (run.hasReply && run.commentId && run.commentId !== run.anchorCommentId) {
+      for (const output of topLevelOutputs.get(run.task.id) ?? []) parents.set(output.id, run.anchorCommentId);
       parents.set(run.commentId, run.anchorCommentId);
     }
   }
@@ -173,19 +196,13 @@ export function buildCommentRunView(
 /**
  * Where a standalone run block sits in the timeline.
  *
- * A block's slot must agree with the timestamp it renders, or the timeline
- * stops reading chronologically (MUL-7211): a run enqueued at 10:00 that
- * replies at 10:40 used to sit in the 10:00 slot while its card showed 10:40,
- * pushing it above every comment written in between. The sort key is the run's
- * `created_at` — the moment it was ENQUEUED, not started — and runs serialize
- * per (issue, agent), so even a five-minute run can carry a slot from far
- * earlier and bracket several later comments.
+ * Once a run publishes a reply, the reply's own time owns the slot (MUL-7211).
+ * This keeps the card's timestamp in chronological order even after a long
+ * queue wait or execution. A run that ended without a reply sorts when it ended.
  *
- * So: once a run has published its reply, the reply's own time owns the slot.
- * A run still working has no timestamp to show (its card counts elapsed time),
- * so it parks at the live end and settles in place when the reply lands —
- * no jump. A run that ended without a reply is history, not live: it sorts at
- * the moment it ended.
+ * Until then, an active run keeps its enqueue-time slot (MUL-7632). Parking it
+ * at the live end would insert every later comment above an already visible
+ * assignment block, including a mention that starts another agent's run.
  */
 function publishedReply(run: CommentRun, entryById: ReadonlyMap<string, TimelineEntry>): TimelineEntry | undefined {
   return run.hasReply && run.commentId ? entryById.get(run.commentId) : undefined;
@@ -194,7 +211,7 @@ function publishedReply(run: CommentRun, entryById: ReadonlyMap<string, Timeline
 function standaloneRunSortTime(run: CommentRun, entryById: ReadonlyMap<string, TimelineEntry>): number {
   const reply = publishedReply(run, entryById);
   if (reply) return Date.parse(reply.created_at);
-  if (isActiveCommentRun(run.task)) return Number.POSITIVE_INFINITY;
+  if (isActiveCommentRun(run.task)) return Date.parse(run.task.created_at);
   return Date.parse(run.task.completed_at ?? run.task.created_at);
 }
 
@@ -220,9 +237,6 @@ export function orderTimelineWithRuns(
   // invariant sortTimelineEntriesAsc holds for the flat cache.
   const slotRow = (item: TimelineEntry | CommentRun): { created_at: string; id: string } =>
     "task" in item ? publishedReply(item, entryById) ?? item.task : item;
-  // Compare with `<` rather than subtraction: two live runs both sort at
-  // Infinity, and Infinity - Infinity is NaN, which would leave the
-  // comparator inconsistent.
   return [...topLevel.filter((entry) => !slotted.has(entry.id)), ...standaloneRuns].sort((a, b) => {
     const left = sortTime(a), right = sortTime(b);
     if (left !== right) return left < right ? -1 : 1;

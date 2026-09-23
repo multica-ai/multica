@@ -11,6 +11,7 @@
   "exports": {
     "./navigation": "./navigation/index.ts",
     "./common/actor-avatar": "./common/actor-avatar.tsx",
+    "./common/cli-install-command": "./common/cli-install-command.tsx",
     "./editor": "./editor/index.ts",
     "./issues/components": "./issues/components/index.ts",
     "./issues/hooks": "./issues/hooks/index.ts",

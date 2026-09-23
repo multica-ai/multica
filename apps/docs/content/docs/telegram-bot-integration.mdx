@@ -20,7 +20,7 @@ Telegram support is [community-maintained](/community-maintained): it ships in e
 1. Open [@BotFather](https://t.me/BotFather) and send `/newbot`.
 2. Choose a display name and a username ending in `bot`.
 3. Copy the HTTP API token.
-4. Keep **Group Privacy** enabled. Multica only needs commands, explicit @-mentions, and replies to the Bot in groups.
+4. Leave **Group Privacy** enabled for the default, minimal-visibility setup: Telegram then delivers only commands, explicit @-mentions, and replies to the Bot in groups. Turning it off is optional. It lets the Bot include the surrounding group conversation as context, at the cost that the Bot then receives every message in the group — see [Groups and forum topics](#groups-and-forum-topics).
 
 <Callout type="warning">
 Never paste the token into an issue, chat message, log, or source repository. If it is exposed, use @BotFather to revoke it, then reconnect the Bot with the replacement token.
@@ -50,7 +50,7 @@ Open the Bot and send text directly. No @-mention is required.
 
 ### Groups and forum topics
 
-Add the Bot to a group, then either @-mention it or reply directly to one of its messages. Accepted messages remain in the continued Multica conversation; unaddressed group chatter is not collected. When replying to another person's message, explicitly @-mention the Bot: only then are that quoted sender and text (or caption) included with your instruction. Replying to a human message without mentioning the Bot does not trigger it. Each ordinary group has its own continued Multica chat; forum topics are isolated into separate chats.
+Add the Bot to a group, then either @-mention it or reply directly to one of its messages. Accepted messages remain in the continued Multica conversation. A group message that does not address the Bot never starts a conversation or a turn on its own. It is, however, held in a short in-memory buffer: the last 10 messages per group (or per forum topic) that the Bot has received, cleared whenever the server restarts. When a member then addresses the Bot — by @-mention or by replying to one of its messages — those buffered messages are prepended to that turn as read-only context, and they are saved together with the turn as part of the conversation. `/new` starts a fresh chat without that context. What reaches the buffer depends on what Telegram delivers: with Group Privacy enabled, that is only commands, explicit @-mentions, and replies to the Bot, so the context holds earlier addressed messages only. To include ordinary group chatter, turn Group Privacy off in @BotFather and then remove and re-add the Bot to the group; the Bot receives every group message from then on. A Bot that is a group admin receives every message regardless of the privacy setting, so its context includes ordinary chatter without any change in @BotFather. When replying to another person's message, explicitly @-mention the Bot: only then are that quoted sender and text (or caption) included with your instruction. Replying to a human message without mentioning the Bot does not trigger it. Each ordinary group has its own continued Multica chat; forum topics are isolated into separate chats.
 
 ### Commands
 

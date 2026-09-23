@@ -20,7 +20,7 @@ Telegram 集成[由社区维护](/community-maintained)：每个版本都会随�
 1. 打开 [@BotFather](https://t.me/BotFather)，发送 `/newbot`。
 2. 设置显示名称和一个以 `bot` 结尾的用户名。
 3. 复制 HTTP API token。
-4. 保持 **Group Privacy** 开启。群聊里 Multica 只需要接收命令、明确的 @ 和对 Bot 消息的回复。
+4. 默认保持 **Group Privacy** 开启，这是可见范围最小的配置：Telegram 只会把命令、明确的 @ 和对 Bot 消息的回复投递给 Bot。关闭它是可选项，能让 Bot 把群里周围的讨论作为上下文，代价是 Bot 会收到群里的每一条消息，详见[群聊与 forum topic](#群聊与-forum-topic)。
 
 <Callout type="warning">
 不要把 token 发到任务、聊天、日志或代码仓库。若已泄露，请在 @BotFather 中撤销，再用替换后的 token 重新连接。
@@ -50,7 +50,7 @@ Multica 会实时请求 Telegram 验证 Bot，检查是否存在与长轮询冲�
 
 ### 群聊与 forum topic
 
-把 Bot 加入群后，@它，或直接回复它发过的消息。被接受的消息会保留在持续的 Multica 对话中；未明确发给 Bot 的群聊内容不会被收集。回复其他成员的消息时必须同时 @ Bot，只有这种情况下，被引用消息的发送者及文字（或 caption）才会随新指令进入上下文；只回复成员而不 @ Bot 不会触发。普通群聊各自延续一段 Multica 对话；forum 的每个 topic 分别隔离。
+把 Bot 加入群后，@它，或直接回复它发过的消息。被接受的消息会保留在持续的 Multica 对话中。未明确发给 Bot 的群消息本身不会开启对话，也不会单独形成一轮，但会被暂存在一个很小的内存缓冲里：每个群（或每个 forum topic）保留 Bot 收到的最近 10 条，服务器重启即清空。之后当有成员通过 @ 或回复 Bot 的消息向它发出指令时，这些暂存消息会作为只读上下文附在该轮指令之前，并随这一轮一起保存进对话记录。`/new` 开启的新对话不带这段上下文。缓冲里有什么取决于 Telegram 投递了什么：Group Privacy 开启时只有命令、明确的 @ 和对 Bot 的回复，所以上下文里只有之前明确发给它的消息。想让它看到普通群聊，请在 @BotFather 里关闭 Group Privacy，再把 Bot 移出群重新加入，此后 Bot 会收到群里的每一条消息。被设为群管理员的 Bot 无论隐私设置如何都会收到全部消息，因此不改 @BotFather 也会把普通群聊纳入上下文。回复其他成员的消息时必须同时 @ Bot，只有这种情况下，被引用消息的发送者及文字（或 caption）才会随新指令进入上下文；只回复成员而不 @ Bot 不会触发。普通群聊各自延续一段 Multica 对话；forum 的每个 topic 分别隔离。
 
 ### 命令
 

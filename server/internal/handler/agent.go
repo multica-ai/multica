@@ -357,6 +357,7 @@ type TaskCancellationActor struct {
 }
 
 type AgentTaskResponse struct {
+	StartClaimSupported      bool                   `json:"start_claim_supported,omitempty"`
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
 	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`
 
@@ -454,10 +455,13 @@ type AgentTaskResponse struct {
 	// Populated on both terminal paths — a failed run can still have committed
 	// partial work, and that is when the pointer matters most.
 	BranchName            string                 `json:"branch_name,omitempty"`
-	TriggerCommentID      *string                `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
-	CoalescedCommentIDs   []string               `json:"coalesced_comment_ids,omitempty"`   // MUL-4195: earlier comments folded into this run when it had not yet started, so a single run still covers every deliberate comment; trigger_comment_id is the newest. Surfaced so the UI can show which comments a run covered. omitempty so old clients ignore it
-	CoalescedComments     []CoalescedCommentData `json:"coalesced_comments,omitempty"`      // MUL-4195: full detail (thread_id/author/created_at/content) of the folded comments, so the daemon prompt can address each without assuming they share the triggering thread. omitempty so old clients ignore it
-	DeliveredCommentIDs   []string               `json:"delivered_comment_ids"`             // always present: [] is an authoritative empty receipt, while field absence identifies responses from legacy servers
+	TriggerCommentID      *string                `json:"trigger_comment_id,omitempty"`    // comment that triggered this task
+	CoalescedCommentIDs   []string               `json:"coalesced_comment_ids,omitempty"` // MUL-4195: earlier comments folded into this run when it had not yet started, so a single run still covers every deliberate comment; trigger_comment_id is the newest. Surfaced so the UI can show which comments a run covered. omitempty so old clients ignore it
+	CoalescedComments     []CoalescedCommentData `json:"coalesced_comments,omitempty"`    // MUL-4195: full detail (thread_id/author/created_at/content) of the folded comments, so the daemon prompt can address each without assuming they share the triggering thread. omitempty so old clients ignore it
+	DeliveredCommentIDs   []string               `json:"delivered_comment_ids"`           // always present: [] is an authoritative empty receipt, while field absence identifies responses from legacy servers
+	SupplementCapability  string                 `json:"supplement_capability,omitempty"`
+	SupplementCommentIDs  []string               `json:"supplement_comment_ids,omitempty"`
+	CanSupplement         bool                   `json:"can_supplement,omitempty"`
 	TriggerThreadID       string                 `json:"trigger_thread_id,omitempty"`       // root comment ID for the triggering thread
 	TriggerCommentContent string                 `json:"trigger_comment_content,omitempty"` // content of the triggering comment
 	TriggerSummary        *string                `json:"trigger_summary,omitempty"`         // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
@@ -507,11 +511,12 @@ type AgentTaskResponse struct {
 	QuickCreateDueDate       string               `json:"quick_create_due_date,omitempty"`       // explicit calendar due date selected in quick-create
 	QuickCreateAttachmentIDs []string             `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
 	QuickCreateSourceContext json.RawMessage      `json:"quick_create_source_context,omitempty"` // immutable historical context for source-context quick-create
-	HandoffNote              string               `json:"handoff_note,omitempty"`                // legacy assignment handoff instruction retained for installed clients; rendered by the daemon only in the per-turn prompt
-	SquadID                  string               `json:"squad_id,omitempty"`                    // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
-	SquadName                string               `json:"squad_name,omitempty"`                  // display name for the picker squad
-	ParentIssueID            string               `json:"parent_issue_id,omitempty"`             // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
-	ParentIssueIdentifier    string               `json:"parent_issue_identifier,omitempty"`     // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
+	WakeupID                 string               `json:"wakeup_id,omitempty"`
+	HandoffNote              string               `json:"handoff_note,omitempty"`            // legacy assignment handoff instruction retained for installed clients; rendered by the daemon only in the per-turn prompt
+	SquadID                  string               `json:"squad_id,omitempty"`                // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
+	SquadName                string               `json:"squad_name,omitempty"`              // display name for the picker squad
+	ParentIssueID            string               `json:"parent_issue_id,omitempty"`         // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
+	ParentIssueIdentifier    string               `json:"parent_issue_identifier,omitempty"` // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
 	// RequestingUserName + RequestingUserProfileDescription mirror the user
 	// the agent is acting on behalf of (see daemon/types.go). v1 sources them
 	// from the runtime owner so they're populated for daemon runtimes and
@@ -819,6 +824,10 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	if t.BranchName.Valid {
 		branchName = t.BranchName.String
 	}
+	var wakeupContext struct {
+		ID string `json:"wakeup_id"`
+	}
+	_ = json.Unmarshal(t.Context, &wakeupContext)
 	handoffNote := ""
 	if t.HandoffNote.Valid {
 		handoffNote = t.HandoffNote.String
@@ -853,6 +862,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		DeliveredCommentIDs:    uuidStringsOrEmpty(t.DeliveredCommentIds),
 		TriggerSummary:         textToPtr(t.TriggerSummary),
 		HandoffNote:            handoffNote,
+		WakeupID:               wakeupContext.ID,
 		WorkDir:                workDir,
 		RelativeWorkDir:        relativeWorkDir(workDir, workspaceID, uuidToString(t.ID)),
 		DurableWorkDir:         durableWorkDir,
@@ -2709,6 +2719,7 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 			taskIDs[i] = t.ID
 		}
 	}
+	h.hydrateTaskSupplementMetadata(r.Context(), r, agent.WorkspaceID, tasks, resp)
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 	if includeUsage {
 		if err := h.hydrateAgentTaskUsage(r.Context(), agent.ID, taskIDs, resp); err != nil {

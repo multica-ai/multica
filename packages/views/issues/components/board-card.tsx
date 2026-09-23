@@ -29,6 +29,7 @@ import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { CustomStatusChip, useIsCustomStatus } from "./custom-status-chip";
+import { IssueDuplicateOfMarker } from "./issue-duplicates";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 function formatDate(date: string, locale: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, locale);
@@ -196,6 +197,7 @@ export const BoardCardContent = memo(function BoardCardContent({
         <div className="flex items-center gap-1.5 min-w-0">
           {priorityIconNode}
           <p className="text-caption text-muted-foreground truncate">{issue.identifier}</p>
+          <IssueDuplicateOfMarker issue={issue} insideLink />
         </div>
         <IssueAgentActivityIndicator issueId={issue.id} />
       </div>

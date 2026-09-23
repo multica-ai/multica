@@ -870,6 +870,8 @@
     "agent_bot_connected_label_lark": "Lark に接続済み",
     "agent_bot_manage_link_feishu": "Feishu で管理",
     "agent_bot_manage_link_lark": "Lark で管理",
+    "agent_bot_silent_hint": "接続済みなのに Bot が応答しない場合は、アプリのイベント購読方法が長時間接続になっているか確認してください。",
+    "agent_bot_silent_hint_link": "トラブルシューティング",
     "agent_bot_manage_tooltip_feishu": "Feishu のデベロッパーコンソールでこのボットのアプリページを開き、スコープ管理 / 名称変更 / 追加権限の申請ができます。",
     "agent_bot_manage_tooltip_lark": "Lark のデベロッパーコンソールでこのボットのアプリページを開き、スコープ管理 / 名称変更 / 追加権限の申請ができます。",
     "agent_bot_disconnect_tooltip": "この Lark ボットとエージェントの連携を解除します。ボットは Lark メッセージの受信を停止します。",

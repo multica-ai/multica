@@ -1115,6 +1115,8 @@
     "agent_bot_connected_label_lark": "Lark에 연결됨",
     "agent_bot_manage_link_feishu": "Feishu에서 관리",
     "agent_bot_manage_link_lark": "Lark에서 관리",
+    "agent_bot_silent_hint": "연결됐는데 Bot이 응답하지 않나요? 앱의 이벤트 구독 방식이 롱 커넥션인지 확인하세요.",
+    "agent_bot_silent_hint_link": "문제 해결",
     "agent_bot_manage_tooltip_feishu": "Feishu 개발자 콘솔에서 이 봇의 앱 페이지를 열어 스코프 관리, 이름 변경, 추가 권한 신청을 할 수 있어요.",
     "agent_bot_manage_tooltip_lark": "Lark 개발자 콘솔에서 이 봇의 앱 페이지를 열어 스코프 관리, 이름 변경, 추가 권한 신청을 할 수 있어요.",
     "agent_bot_disconnect_tooltip": "이 Lark 봇과 에이전트 연결을 해제합니다. 봇은 Lark 메시지 수신을 중단합니다.",

@@ -23,8 +23,8 @@
 --
 -- No index: the column is never a lookup key or a sort key. It is projected off
 -- rows some other query already located by agent_id. That also keeps the bump a
--- non-indexed update, so the row rewrite can be HOT and leave this table's ~29
--- indexes untouched — measured heap-only on every bump in a local run.
+-- non-indexed update, so the row rewrite can be HOT and leave every index on
+-- this table untouched — measured heap-only on every bump in a local run.
 --
 -- No server logic branches on it. It is written by the two task_message writers
 -- and projected read-only onto the agent-tasks response, so an external

@@ -872,6 +872,8 @@
     "agent_bot_connected_label_lark": "Connected to Lark",
     "agent_bot_manage_link_feishu": "Manage in Feishu",
     "agent_bot_manage_link_lark": "Manage in Lark",
+    "agent_bot_silent_hint": "Bot connected but silent? Check that the app delivers events over the long connection.",
+    "agent_bot_silent_hint_link": "Troubleshooting",
     "agent_bot_manage_tooltip_feishu": "Open this Bot's app page in Feishu — manage scopes, edit display name, request additional permissions.",
     "agent_bot_manage_tooltip_lark": "Open this Bot's app page in Lark — manage scopes, edit display name, request additional permissions.",
     "agent_bot_disconnect_tooltip": "Unbind this Lark Bot from the Agent. The Bot will stop receiving Lark messages.",

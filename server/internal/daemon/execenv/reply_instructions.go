@@ -284,17 +284,29 @@ func buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID strin
 	// gate also keeps ./reply.md on disk after a failure, so the retry does
 	// not have to regenerate the body.
 	if runtimeGOOS == "windows" {
-		// PowerShell 5.1 has no `&&` (it landed in PowerShell 7), so the
-		// Windows variant checks $LASTEXITCODE — which carries the exit
-		// code of the last NATIVE command — and propagates it instead.
+		// The daemon knows the host OS, not the shell behind the agent's
+		// command tool: Codex runs PowerShell on Windows, Claude Code runs
+		// Git Bash for its Bash tool and (by default on claude.ai accounts)
+		// a PowerShell tool the user can turn off with
+		// CLAUDE_CODE_USE_POWERSHELL_TOOL=0 (#8627). A PowerShell-only
+		// cookbook pasted into Git Bash fails at the `if (` line AFTER the
+		// post succeeded, so the agent sees a failure and may re-post. Offer
+		// one variant per shell and let the agent pick.
+		//
+		// PowerShell 5.1 has no `&&` (it landed in PowerShell 7), so that
+		// variant checks $LASTEXITCODE — which carries the exit code of the
+		// last NATIVE command — and propagates it instead.
 		return fmt.Sprintf(
 			lead+
 				"do NOT reuse --parent values from previous turns in this session.\n\n"+
-				"Write the body file first — never pipe via `--content-stdin` (PowerShell drops non-ASCII; full rules: ## Comment Formatting above):\n\n"+
-				"    multica issue comment add %s --parent %s --content-file ./reply.md --output table\n"+
+				"Write the body file first — never pipe via `--content-stdin` (PowerShell drops non-ASCII; full rules: ## Comment Formatting above). Use the variant for the shell your command tool runs:\n\n"+
+				"PowerShell:\n\n"+
+				"    multica issue comment add %[1]s --parent %[2]s --content-file ./reply.md --output table\n"+
 				"    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n"+
 				"    Remove-Item ./reply.md\n\n"+
-				"Do NOT drop the exit-code check: a bare `Remove-Item` after a failed post reports success and deletes the body.\n\n"+
+				"Git Bash:\n\n"+
+				"    multica issue comment add %[1]s --parent %[2]s --content-file ./reply.md --output table && rm ./reply.md\n\n"+
+				"Do NOT drop the exit-code check or the `&&`: a bare cleanup after a failed post reports success and deletes the body.\n\n"+
 				"Do NOT write literal `\\n` escapes to simulate line breaks; the file preserves real newlines.\n",
 			issueID, triggerCommentID,
 		)

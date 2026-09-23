@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -110,6 +111,13 @@ func ensureFileFlagWithinWorkdir(cmd *cobra.Command, fileFlag, flagName, filePat
 		return fmt.Errorf("resolve --%s path %q: %w", fileFlag, filePath, err)
 	}
 	if !within {
+		if !pathExists(filePath) {
+			return fmt.Errorf(
+				"--%s path %q does not exist; it also resolves outside the current working directory, "+
+					"so --allow-external-file would not make this read succeed. Write the file inside the "+
+					"task workdir (e.g. ./%s.md) and pass that path.",
+				fileFlag, filePath, flagName)
+		}
 		return fmt.Errorf(
 			"--%s path %q resolves outside the current working directory; "+
 				"write agent temp files inside the run workdir (e.g. ./%s.md) rather than machine-shared "+
@@ -120,42 +128,89 @@ func ensureFileFlagWithinWorkdir(cmd *cobra.Command, fileFlag, flagName, filePat
 	return nil
 }
 
+// pathExists reports whether filePath names something on disk. It exists to
+// separate the two facts the containment guard used to merge: a rejected path
+// that is ALSO missing has no stale file behind it for anyone to read by
+// mistake, so leading with --allow-external-file sends the caller to disable
+// the guard and hit an unrelated not-found error on the retry. Any stat error
+// other than "not exists" (a permission wall, a broken mount) is treated as
+// "exists" so the guard keeps its own wording and stays fail-closed.
+func pathExists(filePath string) bool {
+	_, err := os.Stat(filePath)
+	return !errors.Is(err, os.ErrNotExist)
+}
+
 // fileWithinWorkingDir reports whether filePath resolves to a location inside
-// the process working directory. Both sides are symlink-resolved so aliased
-// roots (e.g. macOS /tmp -> /private/tmp) and symlinks planted inside the
-// workdir fail closed. A path that does not exist yet is judged on its cleaned
-// absolute form so the caller's os.ReadFile still surfaces the real not-found
-// error afterwards.
+// the process working directory. Both sides are canonicalized the same way, so
+// aliased roots (e.g. macOS /tmp -> /private/tmp), symlinks planted inside the
+// workdir, and directory junctions pointing out of it all fail closed. A path
+// that does not exist yet is resolved as far as it exists, so the caller's
+// os.ReadFile still surfaces the real not-found error afterwards.
+//
+// Windows relative paths are handed over for what they are, not for what they
+// look like: `\tmp\desc.md` resolves against the workdir's volume ROOT and
+// `C:tmp\desc.md` against the current directory on C:, so prefixing the
+// workdir onto either would judge a shadow file while os.ReadFile opens the
+// real one. util.ResolveSymlinksBestEffort preserves those kinds, for link
+// targets as well as for the input itself.
 func fileWithinWorkingDir(filePath string) (bool, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return false, err
 	}
-	base := cwd
-	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
-		base = resolved
+	base, err := util.ResolveSymlinksBestEffort(cwd)
+	if err != nil {
+		// The workdir's own resolution cannot be determined (an unobservable
+		// drive, a reparse point no query can name). Comparing a candidate
+		// against a root that cannot be named judges whatever string the
+		// resolver would have guessed, so fail closed.
+		return false, nil
 	}
-	abs := filePath
-	if !filepath.IsAbs(abs) {
-		abs = filepath.Join(cwd, abs)
-	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = resolved
-	} else {
-		// The file may not exist yet (the caller's os.ReadFile surfaces that).
-		// Resolve symlinks on the parent directory instead so the comparison
-		// base and the candidate share the same canonical prefix — otherwise a
-		// workdir under a symlinked root (e.g. macOS temp dirs) would falsely
-		// read as "outside". A missing parent falls back to a plain clean.
-		if resolvedParent, perr := filepath.EvalSymlinks(filepath.Dir(abs)); perr == nil {
-			abs = filepath.Join(resolvedParent, filepath.Base(abs))
-		} else {
-			abs = filepath.Clean(abs)
-		}
+	// Canonicalize the candidate exactly the way the base was, and hand it over
+	// as typed: util.ResolveSymlinksBestEffort makes it absolute itself, because
+	// pre-joining it here would clean the string first and collapse a ".."
+	// across a symlink — judging a different path than the one os.ReadFile then
+	// opens.
+	//
+	// os.Getwd() returns the LOGICAL working directory when $PWD names it (a
+	// shell's `cd`, and the PWD the daemon exports to agent processes, both
+	// carry unresolved symlinks), so the two sides only agree once both are
+	// resolved. Resolving best-effort is what makes that possible for a
+	// candidate that does not exist yet — a typo, or an artifact a build step
+	// never produced — and every cheaper approximation gets one direction wrong:
+	//
+	//   - Leaving the candidate unresolved (filepath.Clean) reads a path inside
+	//     the workdir as outside it, which reports a missing file as a
+	//     guardrail violation and points the caller at --allow-external-file
+	//     instead of at the real error.
+	//   - Resolving only one level up (filepath.Dir) still breaks once an
+	//     intermediate directory is missing, and worse: with an already-
+	//     canonical cwd it reads `escape/sub/x.md` — under a symlink pointing
+	//     out of the workdir — as INSIDE it, because the unresolvable tail
+	//     falls back to a lexical clean that never sees the symlink.
+	abs, err := util.ResolveSymlinksBestEffort(filePath)
+	if err != nil {
+		// ErrUnresolvablePath: the kernel may open this path somewhere this
+		// process cannot name — a reparse point that redirects but survives
+		// both os.Readlink and a handle query, or a drive-relative path on a
+		// drive whose current directory is unobservable. The string the input
+		// spells is not evidence of where the kernel would read, so fail
+		// closed; the caller's own os.ReadFile would surface a plain error
+		// for the same path.
+		return false, nil
 	}
 	rel, err := filepath.Rel(base, abs)
 	if err != nil {
-		return false, err
+		// Two absolute paths that filepath.Rel cannot relate are on different
+		// volumes, which is as far outside the workdir as a path can get. Only
+		// Windows produces this: with a workdir on C:, `--content-file
+		// Z:\report.md` used to surface `Rel: can't make Z:\report.md relative
+		// to C:\...` as an internal resolve failure instead of the guardrail's
+		// own explanation — the same misleading-diagnosis shape this guard is
+		// being fixed for. Measured on 10.0.19045 / go1.26.6. There is no Unix
+		// input that reaches this branch, so the windows-tagged test in this
+		// package is the only thing that covers it.
+		return false, nil
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return false, nil
@@ -441,7 +496,7 @@ var validIssueFields = []string{
 	"id", "workspace_id", "number", "identifier", "title", "description",
 	"status", "status_category", "status_name", "priority", "assignee_type",
 	"assignee_id", "creator_type", "creator_id", "parent_issue_id",
-	"project_id", "position", "stage", "start_date", "due_date", "created_at",
+	"duplicate_of", "project_id", "position", "stage", "start_date", "due_date", "created_at",
 	"updated_at", "revision", "last_activity_at", "metadata", "properties",
 	"labels",
 }
@@ -571,8 +626,9 @@ func init() {
 	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
-	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
+	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times). Each file is uploaded and its markdown reference is appended to the description, which is what makes it render on the issue page")
 	issueCreateCmd.Flags().StringSlice("attachment-id", nil, "Existing attachment UUID(s) to bind to the created issue (can be specified multiple times)")
+	issueCreateCmd.Flags().StringArray("property", nil, `Set a custom property atomically with creation as "Name=Value" (repeatable, one distinct property per flag). Multi-value properties use comma-separated values inside one flag. Property and option/member names are case-insensitive; UUIDs are accepted. Filter-only __none__, >=, <=, and != forms are rejected.`)
 
 	// issue update
 	issueUpdateCmd.Flags().String("title", "", "New title")
@@ -1229,6 +1285,13 @@ func ensureAttachmentWithinWorkdir(cmd *cobra.Command, filePath string) error {
 		return fmt.Errorf("resolve --attachment path %q: %w", filePath, err)
 	}
 	if !within {
+		if !pathExists(filePath) {
+			return fmt.Errorf(
+				"--attachment path %q does not exist; it also resolves outside the current working "+
+					"directory, so --allow-external-file would not make this upload succeed. Generate the "+
+					"file inside the task workdir and attach that path.",
+				filePath)
+		}
 		return fmt.Errorf(
 			"--attachment path %q resolves outside the current working directory; "+
 				"attach files generated inside the run workdir rather than machine-shared "+
@@ -1271,6 +1334,49 @@ func collectLocalAttachments(cmd *cobra.Command, attachments []string) ([]pendin
 		pending = append(pending, pendingAttachment{path: filePath, data: data})
 	}
 	return pending, nil
+}
+
+// appendAttachmentReferences appends the markdown snippet of every uploaded
+// attachment to an issue description, so the file renders on the issue page
+// instead of only existing as a stored row. Each snippet goes in its own
+// paragraph because file cards are block-level. An attachment the description
+// already references is skipped — a caller may have composed the markdown
+// itself (quick-create keeps the user's pasted image inline), and appending it
+// again would render the same file twice.
+func appendAttachmentReferences(description string, attachments []cli.AttachmentResponse) string {
+	snippets := make([]string, 0, len(attachments))
+	for _, att := range attachments {
+		if descriptionReferencesAttachment(description, att) {
+			continue
+		}
+		snippets = append(snippets, attachmentMarkdown(filepath.Base(att.Filename), att.ContentType, att.MarkdownURL))
+	}
+	if len(snippets) == 0 {
+		return description
+	}
+	appended := strings.Join(snippets, "\n\n")
+	if strings.TrimSpace(description) == "" {
+		return appended
+	}
+	return strings.TrimRight(description, "\n") + "\n\n" + appended
+}
+
+// descriptionReferencesAttachment reports whether a description body already
+// points at this attachment. It matches the durable `markdown_url` and the
+// `/api/attachments/<id>` path it is built from rather than the raw storage
+// `url`, which bodies never carry — the same rule the web composers use
+// (`contentReferencesAttachment`).
+func descriptionReferencesAttachment(description string, att cli.AttachmentResponse) bool {
+	if description == "" {
+		return false
+	}
+	if att.MarkdownURL != "" && strings.Contains(description, att.MarkdownURL) {
+		return true
+	}
+	if att.ID != "" && strings.Contains(description, "/api/attachments/"+att.ID) {
+		return true
+	}
+	return false
 }
 
 func appendUniqueStrings(dst []string, values ...string) []string {
@@ -1335,6 +1441,24 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	body := map[string]any{"title": title}
+	propertyFlags, _ := cmd.Flags().GetStringArray("property")
+	var createProperties map[string]json.RawMessage
+	if len(propertyFlags) > 0 {
+		var config struct {
+			IssueCreatePropertiesSupported bool `json:"issue_create_properties_supported"`
+		}
+		if err := client.GetJSON(ctx, "/api/config", &config); err != nil {
+			return fmt.Errorf("check issue-create property support: %w", err)
+		}
+		if !config.IssueCreatePropertiesSupported {
+			return errors.New("this server version does not support atomic custom properties on issue creation; update the server before using --property")
+		}
+		createProperties, err = buildIssueCreateProperties(ctx, client, propertyFlags)
+		if err != nil {
+			return err
+		}
+		body["properties"] = createProperties
+	}
 	desc, hasDesc, err := resolveTextFlag(cmd, "description")
 	if err != nil {
 		return err
@@ -1344,7 +1468,6 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 			"Deliver the file itself with `multica issue create --attachment <path>` (repeatable) and drop the link."); err != nil {
 			return err
 		}
-		body["description"] = desc
 	}
 	if statusFlag != "" {
 		body["status"] = statusFlag
@@ -1408,9 +1531,6 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	attachmentIDs = appendUniqueStrings(attachmentIDs, envAttachmentIDs...)
-	if len(attachmentIDs) > 0 {
-		body["attachment_ids"] = attachmentIDs
-	}
 
 	// Pre-validate attachments BEFORE creating the issue so a bad path can
 	// never produce a half-created issue (which would otherwise trigger
@@ -1423,6 +1543,33 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	// Upload BEFORE creating the issue, and append each file's markdown to the
+	// description. A file is visible on an issue only when the description
+	// references it — every other writer honors that (the web create dialog and
+	// the description editor bind exactly what the body references). Uploading
+	// after the create, as this used to, stored the file with an `issue_id` and
+	// left the description untouched, so it rendered nowhere on web, desktop or
+	// mobile (MUL-7600 / #8692). Uploading first also removes the old
+	// partial-success state: a failure here means no issue was created, so the
+	// retry is safe and cannot duplicate.
+	uploaded := make([]cli.AttachmentResponse, 0, len(pending))
+	for _, att := range pending {
+		result, uploadErr := client.UploadIssueAttachment(ctx, att.data, att.path, "")
+		if uploadErr != nil {
+			return fmt.Errorf("upload attachment %s (no issue created): %w", att.path, uploadErr)
+		}
+		uploaded = append(uploaded, result)
+		attachmentIDs = appendUniqueStrings(attachmentIDs, result.ID)
+		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
+	}
+	desc = appendAttachmentReferences(desc, uploaded)
+	if hasDesc || len(uploaded) > 0 {
+		body["description"] = desc
+	}
+	if len(attachmentIDs) > 0 {
+		body["attachment_ids"] = attachmentIDs
+	}
+
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/issues", body, &result); err != nil {
 		if msg, ok := activeDuplicateIssueCreateMessage(err); ok {
@@ -1430,19 +1577,8 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		}
 		return fmt.Errorf("create issue: %w", err)
 	}
-
-	// Upload attachments and link them to the newly created issue.
-	// Failures here are partial-success: the issue exists already, so
-	// turning a non-zero exit on the caller would invite a retry that
-	// duplicates the issue. Warn on stderr and continue.
-	issueID := strVal(result, "id")
-	for _, att := range pending {
-		if _, uploadErr := client.UploadFile(ctx, att.data, att.path, issueID); uploadErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: upload attachment %s failed (issue already created, %s): %v\n",
-				att.path, strVal(result, "identifier"), uploadErr)
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
+	if err := verifyIssueCreateProperties(createProperties, result); err != nil {
+		return fmt.Errorf("issue %s was created, but the server did not confirm its custom properties; review it before retrying: %w", issueDisplayKey(result), err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -1459,6 +1595,30 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	}
 
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+func verifyIssueCreateProperties(expected map[string]json.RawMessage, issue map[string]any) error {
+	if len(expected) == 0 {
+		return nil
+	}
+	bag, ok := issue["properties"].(map[string]any)
+	if !ok {
+		return errors.New("response omitted the properties snapshot")
+	}
+	for propertyID, encoded := range expected {
+		actual, exists := bag[propertyID]
+		if !exists {
+			return fmt.Errorf("response omitted property %s", propertyID)
+		}
+		var want any
+		if err := json.Unmarshal(encoded, &want); err != nil {
+			return fmt.Errorf("decode expected property %s: %w", propertyID, err)
+		}
+		if !reflect.DeepEqual(actual, want) {
+			return fmt.Errorf("response property %s does not match the canonical value", propertyID)
+		}
+	}
+	return nil
 }
 
 func activeDuplicateIssueCreateMessage(err error) (string, bool) {

@@ -375,25 +375,31 @@ LIMIT 1;
 -- recorded in this run's planned inputs. Timestamp-only implicit agent replies
 -- remain excluded. Replays are scoped to the completing agent, never a fan-out.
 -- Ordered ASC so later comments coalesce onto the follow-up created by the first.
-SELECT * FROM comment
-WHERE issue_id = @issue_id
-  AND (id = ANY(@planned_comment_ids::uuid[])
-       OR comment_thread_root_id(id) = sqlc.narg('comment_thread_id')::uuid)
+SELECT c.* FROM comment c
+WHERE c.issue_id = @issue_id
+  AND (c.id = ANY(@planned_comment_ids::uuid[])
+       OR comment_thread_root_id(c.id) = sqlc.narg('comment_thread_id')::uuid)
   -- A deleted comment is no longer input, even when replies keep its row.
-  AND deleted_at IS NULL
+  AND c.deleted_at IS NULL
+  -- Explicit supplements belong only to their bound run, regardless of
+  -- delivery status. Failed delivery must not become an automatic new run.
+  AND NOT EXISTS (
+      SELECT 1 FROM task_supplement s
+      WHERE s.comment_id = c.id AND s.workspace_id = c.workspace_id
+  )
   AND (
       (
-          author_type IN ('member', 'agent')
-          AND (created_at > @since OR id = ANY(@planned_comment_ids::uuid[]))
+          c.author_type IN ('member', 'agent')
+          AND (c.created_at > @since OR c.id = ANY(@planned_comment_ids::uuid[]))
       )
       OR (
-          author_type = 'system'
-          AND type = 'progress_update'
-          AND source_task_id IS NOT NULL
-          AND id = ANY(@planned_comment_ids::uuid[])
+          c.author_type = 'system'
+          AND c.type = 'progress_update'
+          AND c.source_task_id IS NOT NULL
+          AND c.id = ANY(@planned_comment_ids::uuid[])
       )
   )
-ORDER BY created_at ASC, id ASC;
+ORDER BY c.created_at ASC, c.id ASC;
 
 -- name: GetComment :one
 SELECT * FROM comment

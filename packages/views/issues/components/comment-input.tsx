@@ -36,10 +36,8 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
   // Sending mid-upload would strip the pending image's blob URL out of the
   // markdown and bind no attachment id — the comment posts without the file.
   const uploadGate = useUploadGate(editorRef);
-  // Read the persisted draft once on mount. ContentEditor only honors
-  // `defaultValue` at mount time, so this snapshot drives both the editor's
-  // initial content and the submit-button enable state — without this the
-  // button would be disabled even though the editor visibly contains text.
+  // Subscribe to the persisted draft so an explicit recovery action from a
+  // completed run can move text here even while this composer is mounted.
   // Quick actions in the `/` menu: picking one inserts the server-rendered
   // body so the user can edit before sending, instead of firing immediately.
   const quickActionMenu = useQuickActionMenu(issueId);
@@ -47,6 +45,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
   const [initialDraft] = useState(() =>
     useCommentDraftStore.getState().getDraft(draftKey),
   );
+  const persistedDraft = useCommentDraftStore((store) => store.getDraft(draftKey));
   const [content, setContent] = useState(initialDraft ?? "");
   const [isEmpty, setIsEmpty] = useState(() => !initialDraft?.trim());
   const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
@@ -88,6 +87,17 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
   // Flush on every onUpdate (debounced upstream) + visibilitychange/pagehide
   // so tab close / mobile background doesn't lose work. Cleared on submit.
   const setDraft = useCommentDraftStore((s) => s.setDraft);
+  useEffect(() => {
+    // Only an actual stored value is an external update. An absent entry is
+    // not a command to erase the editor: it is normal during the synchronous
+    // keystroke -> store handoff and after explicit submit cleanup.
+    if (persistedDraft === undefined) return;
+    const next = persistedDraft;
+    if (next === content) return;
+    setContent(next);
+    setIsEmpty(!next.trim());
+    if (next.trim()) lazy.activate();
+  }, [content, lazy, persistedDraft]);
   useEffect(() => {
     const flush = () => {
       const md = editorRef.current?.getMarkdown();
@@ -232,7 +242,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
       >
         <ContentEditor
           ref={editorRef}
-          defaultValue={initialDraft}
+          value={persistedDraft ?? content}
           onReady={lazy.onReady}
           placeholder={t(($) => $.comment.leave_comment_placeholder)}
           onUpdate={(md) => {

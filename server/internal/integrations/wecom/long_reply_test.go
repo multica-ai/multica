@@ -465,7 +465,7 @@ func newPartialSendRig(t *testing.T) (*Outbound, *recordingConn, *countingMetric
 	q.sessionBinding.InstallationID = instID
 	q.installation.ID = instID
 	mx := newCountingMetrics()
-	return NewOutbound(q, reg, testLogger(), WithOutboundMetrics(mx)), conn, mx
+	return NewOutbound(q, reg, nil, testLogger(), WithOutboundMetrics(mx)), conn, mx
 }
 
 func aLongAnswerEvent() events.Event {
@@ -753,7 +753,7 @@ func TestGivingUpOnTheChatsTurnIsAProvableNonDelivery(t *testing.T) {
 
 	// And the direct path's own verdict, through the one mapping it uses.
 	mx := newCountingMetrics()
-	o := NewOutbound(&fakeOutboundQueries{}, newSendersRegistry(), testLogger(), WithOutboundMetrics(mx))
+	o := NewOutbound(&fakeOutboundQueries{}, newSendersRegistry(), nil, testLogger(), WithOutboundMetrics(mx))
 	o.recordSend(context.Background(), testSessionID, "chat:done", sendErr)
 	if got := mx.get("outbound_dropped"); got != 1 {
 		t.Errorf("outbound_dropped = %d, want 1 — the reply is definitely not delivered", got)

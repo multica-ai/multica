@@ -103,8 +103,18 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("claude stdin pipe: %w", err)
 	}
+	inputWriter := &claudeInputWriter{w: stdin}
+	var supplements *claudeSupplementSession
+	if opts.EnableTaskSupplement {
+		supplements = newClaudeSupplementSession(runCtx)
+	}
 	var closeStdinOnce sync.Once
-	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
+	closeStdin := func() {
+		closeStdinOnce.Do(func() { _ = stdin.Close() })
+		if supplements != nil {
+			supplements.end()
+		}
+	}
 	// Capture stderr into both the daemon log (as before) and a bounded tail
 	// buffer so we can include the last few KB in Result.Error when claude
 	// exits unexpectedly. Without the tail, an exit-code-only failure looks
@@ -147,9 +157,18 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// timeout.
 	writeDone := make(chan error, 1)
 	go func() {
-		err := writeClaudeInput(stdin, prompt)
+		if supplements != nil {
+			if initErr := supplements.initialize(inputWriter, claudeSupplementHandshakeTimeout); initErr != nil {
+				b.cfg.Logger.Warn("Claude additional messages unavailable; continuing normally", "error", initErr)
+				supplements.end()
+			}
+		}
+		err := writeClaudeInput(inputWriter, prompt)
 		if err != nil {
 			closeStdin()
+			if supplements != nil {
+				cancel()
+			}
 		}
 		writeDone <- err
 	}()
@@ -177,6 +196,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		assistantEventCount := 0
 		toolUseCount := 0
 		unreadableAssistantCount := 0
+		controlErrors := make(chan error, 1)
+		var controlWrites sync.WaitGroup
 
 		// On cancellation / timeout, terminate claude (and every MCP server and
 		// tool subprocess it spawned) BEFORE unblocking the scanner. EOF stdin
@@ -262,7 +283,29 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					})
 				}
 			case "control_request":
-				b.handleControlRequest(msg, stdin)
+				var reply func(io.Writer) error
+				if supplements != nil {
+					reply, _ = supplements.prepareHook(msg)
+				}
+				controlWrites.Add(1)
+				go func(msg claudeSDKMessage, reply func(io.Writer) error) {
+					defer controlWrites.Done()
+					if reply == nil {
+						b.handleControlRequest(msg, inputWriter)
+						return
+					}
+					if err := reply(inputWriter); err != nil {
+						select {
+						case controlErrors <- err:
+						default:
+						}
+						cancel()
+					}
+				}(msg, reply)
+			case "control_response":
+				if supplements != nil {
+					supplements.handleResponse(msg.Response)
+				}
 			}
 		}
 		scanErr := scanner.Err()
@@ -287,6 +330,18 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// time cmd has exited, the prompt write has either succeeded, hit a
 		// broken pipe, or been unblocked by the kill that ended cmd.
 		writeErr := <-writeDone
+		controlWrites.Wait()
+		if writeErr == nil {
+			select {
+			case writeErr = <-controlErrors:
+			default:
+			}
+		}
+		// Internal protocol failures cancel the process to unblock its pipes.
+		// Preserve the actual failure instead of reporting a user cancellation.
+		if supplements != nil && writeErr != nil && ctx.Err() == nil && terminalReasonError == "" && !errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			terminalReasonError = fmt.Sprintf("claude input/control protocol failed: %v", writeErr)
+		}
 
 		completionGuardError := ""
 		if sawAsyncLaunch {
@@ -361,7 +416,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 	}()
 
-	return &Session{Messages: msgCh, Result: resCh}, nil
+	session := &Session{Messages: msgCh, Result: resCh}
+	if supplements != nil {
+		session.Supplement = supplements.supplement
+		session.SupplementReady = supplements.ready
+	}
+	return session, nil
 }
 
 func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage, seenUsage map[string]struct{}) assistantTurn {
@@ -574,6 +634,7 @@ type claudeSDKMessage struct {
 	// control request fields
 	RequestID string          `json:"request_id,omitempty"`
 	Request   json.RawMessage `json:"request,omitempty"`
+	Response  json.RawMessage `json:"response,omitempty"`
 }
 
 type claudeLogEntry struct {

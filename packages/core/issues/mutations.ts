@@ -37,7 +37,7 @@ import {
 } from "./delete-cache";
 import { useWorkspaceId } from "../hooks";
 import { useRecentContextStore } from "../chat/recent-context-store";
-import { useRecentIssuesStore } from "./stores";
+import { useRecentIssuesStore, useTaskSupplementDraftStore } from "./stores";
 import type { InboxItem, Issue, IssueReaction } from "../types";
 import type {
   CreateCommentSubIssueManualRequest,
@@ -206,6 +206,7 @@ export function useUpdateIssue() {
       // a rapid follow-up edit. mutationFn still sends the full payload.
       const {
         suppress_run: _suppressRun,
+        duplicate_of_issue_id: _duplicateOfIssueId,
         description: _description,
         description_base: _descriptionBase,
         title_base: _titleBase,
@@ -317,6 +318,7 @@ export function useUpdateIssue() {
       // is the plain surgical patch it always was.
       const {
         suppress_run: _suppressRun,
+        duplicate_of_issue_id: _duplicateOfIssueId,
         description_base: _descriptionBase,
         move_intent: _moveIntent,
         id: _id,
@@ -376,6 +378,14 @@ export function useUpdateIssue() {
       // payload mutates the attachment join table.
       if (vars.attachment_ids?.length) {
         qc.invalidateQueries({ queryKey: issueKeys.attachments(vars.id) });
+      }
+      // A duplicate mark is not on Issue; refresh both sides now rather than
+      // waiting for the realtime echo.
+      if (vars.duplicate_of_issue_id) {
+        qc.invalidateQueries({ queryKey: issueKeys.duplicates(wsId, vars.id) });
+        qc.invalidateQueries({
+          queryKey: issueKeys.duplicates(wsId, vars.duplicate_of_issue_id),
+        });
       }
       // Invalidate old parent's children cache
       if (ctx?.parentId) {
@@ -1195,6 +1205,60 @@ export function useCancelIssueRun(issueId: string) {
   return useMutation({
     mutationFn: (taskId: string) => api.cancelTask(issueId, taskId),
     onSuccess: () => client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) }),
+  });
+}
+
+export function useCreateTaskSupplement(issueId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, content, clientRequestId }: {
+      taskId: string;
+      content: string;
+      clientRequestId: string;
+    }) => api.createTaskSupplement(issueId, taskId, content, clientRequestId),
+    onSuccess: (comment, { taskId, clientRequestId }) => {
+      // Re-anchoring the run can unmount its composer before this response.
+      // Clear the submitted draft here, without discarding any newer edits.
+      const drafts = useTaskSupplementDraftStore.getState();
+      if (drafts.drafts[taskId]?.clientRequestId === clientRequestId) {
+        drafts.clear(taskId);
+      }
+      const entry: TimelineEntry = {
+        type: "comment",
+        id: comment.id,
+        actor_type: comment.author_type,
+        actor_id: comment.author_id,
+        content: comment.content,
+        parent_id: comment.parent_id,
+        comment_type: comment.type,
+        reactions: comment.reactions ?? [],
+        attachments: comment.attachments ?? [],
+        created_at: comment.created_at,
+        updated_at: comment.updated_at,
+        supplement_task_id: comment.supplement_task_id,
+        supplement_status: comment.supplement_status,
+        supplement_failure_reason: comment.supplement_failure_reason,
+        supplement_delivered_at: comment.supplement_delivered_at,
+      };
+      client.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
+        if (!old) return [entry];
+        if (old.some((item) => item.id === entry.id)) return old;
+        return sortTimelineEntriesAsc([...old, entry]);
+      });
+      client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
+    },
+  });
+}
+
+export function useRetryTaskSupplement(issueId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, commentId }: { taskId: string; commentId: string }) =>
+      api.retryTaskSupplement(issueId, taskId, commentId),
+    onSettled: () => {
+      client.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
+    },
   });
 }
 

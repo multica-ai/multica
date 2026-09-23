@@ -92,15 +92,7 @@ func runAttachmentUpload(cmd *cobra.Command, args []string) error {
 	}
 
 	filename := filepath.Base(path)
-	// Escape markdown label metacharacters in the filename so a name like
-	// `report[v2].pdf` does not truncate the snippet's label. Files render as a
-	// block-level attachment card via `!file[...]( )`; images render inline via
-	// `![...]( )`.
-	label := escapeMarkdownLabel(filename)
-	markdown := fmt.Sprintf("!file[%s](%s)", label, att.MarkdownURL)
-	if strings.HasPrefix(att.ContentType, "image/") {
-		markdown = fmt.Sprintf("![%s](%s)", label, att.MarkdownURL)
-	}
+	markdown := attachmentMarkdown(filename, att.ContentType, att.MarkdownURL)
 	fmt.Fprintln(os.Stderr, "Uploaded:", filename)
 
 	return cli.PrintJSON(os.Stdout, map[string]any{
@@ -109,6 +101,20 @@ func runAttachmentUpload(cmd *cobra.Command, args []string) error {
 		"markdown_url": att.MarkdownURL,
 		"markdown":     markdown,
 	})
+}
+
+// attachmentMarkdown renders the markdown snippet that makes an uploaded file
+// visible in a body: images inline via `![...]( )`, every other file as a
+// block-level attachment card via `!file[...]( )`. The label is escaped so a
+// name like `report[v2].pdf` stays one label instead of truncating the
+// snippet. Shared by `attachment upload` (prints it for the agent to paste)
+// and `issue create --attachment` (appends it to the description).
+func attachmentMarkdown(filename, contentType, markdownURL string) string {
+	label := escapeMarkdownLabel(filename)
+	if strings.HasPrefix(contentType, "image/") {
+		return fmt.Sprintf("![%s](%s)", label, markdownURL)
+	}
+	return fmt.Sprintf("!file[%s](%s)", label, markdownURL)
 }
 
 // escapeMarkdownLabel escapes the metacharacters a markdown link/image label

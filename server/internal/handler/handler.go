@@ -174,6 +174,12 @@ type DaemonPendingWorkNotifier interface {
 	NotifyPendingWork(runtimeID, kind string)
 }
 
+// DaemonTaskSupplementNotifier sends a content-free wakeup for one exact run.
+// The daemon still pulls and authenticates the durable supplement over HTTP.
+type DaemonTaskSupplementNotifier interface {
+	NotifyTaskSupplementAvailable(runtimeID, taskID string)
+}
+
 // RuntimeGoneNotifier invalidates a runtime that was deleted while its daemon
 // still has an authenticated WebSocket connection.
 type RuntimeGoneNotifier interface {
@@ -232,7 +238,8 @@ type Handler struct {
 	// heartbeat-carried requests (MUL-5444). Optional: when nil,
 	// requestDaemonPendingWork falls back to the local DaemonHub, which is the
 	// correct delivery scope for a single-node deployment.
-	DaemonPendingWork DaemonPendingWorkNotifier
+	DaemonPendingWork    DaemonPendingWorkNotifier
+	DaemonTaskSupplement DaemonTaskSupplementNotifier
 	// ModelCatalogCache serves the last known good model list for a runtime so
 	// the picker can render without waiting for a daemon round trip
 	// (stale-while-revalidate, MUL-5444). Nil-safe: every call site treats a nil

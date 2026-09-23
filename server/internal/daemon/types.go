@@ -68,6 +68,9 @@ type IssueStatusData struct {
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
+	// StartClaimSupported gates retries when talking to older servers.
+	StartClaimSupported  bool                   `json:"start_claim_supported,omitempty"`
+	DispatchedAt         string                 `json:"dispatched_at,omitempty"`
 	ID                   string                 `json:"id"`
 	AgentID              string                 `json:"agent_id"`
 	RuntimeID            string                 `json:"runtime_id"`
@@ -143,7 +146,8 @@ type Task struct {
 	QuickCreateDueDate            string                 `json:"quick_create_due_date,omitempty"`            // explicit calendar due date selected in quick-create
 	QuickCreateAttachmentIDs      []string               `json:"quick_create_attachment_ids,omitempty"`      // attachments uploaded in the quick-create prompt and bound by issue create
 	QuickCreateSourceContext      json.RawMessage        `json:"quick_create_source_context,omitempty"`      // immutable historical context, separate from the new instruction
-	HandoffNote                   string                 `json:"handoff_note,omitempty"`                     // legacy assignment handoff instruction; rendered only in the per-turn prompt
+	WakeupID                      string                 `json:"wakeup_id,omitempty"`
+	HandoffNote                   string                 `json:"handoff_note,omitempty"` // legacy assignment handoff instruction; rendered only in the per-turn prompt
 
 	SquadID               string `json:"squad_id,omitempty"`                // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName             string `json:"squad_name,omitempty"`              // display name for the picker squad, used in prompt text

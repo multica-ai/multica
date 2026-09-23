@@ -278,21 +278,39 @@ func (c RelayConfig) retryPlan() []time.Duration {
 // read for itself, so an attachment is fetched by the replica that will send
 // it rather than shipped through Redis.
 type relayFrame struct {
-	Kind           string `json:"kind"` // relayKindReply | relayKindInbox
+	Kind           string `json:"kind"` // relayKindReply | relayKindInbox | relayKindSeal
 	InstallationID string `json:"installation_id"`
 	ChatID         string `json:"chat_id"`
 	ChatType       int    `json:"chat_type"`
 	Content        string `json:"content"`
-	TaskID         string `json:"task_id,omitempty"`
-	MessageID      string `json:"message_id,omitempty"`
-	WorkspaceID    string `json:"workspace_id,omitempty"`
-	SessionID      string `json:"session_id,omitempty"`
-	CarriesFiles   bool   `json:"carries_files,omitempty"`
+	// SealReason names the ending a relayKindSeal frame carries, instead of the
+	// words for it. The words are the ROUND's, and the round is on the holder:
+	// its locale was captured when its bubble was opened, so the holder is the
+	// only replica that can say the sentence in the language the asker reads.
+	SealReason   string `json:"seal_reason,omitempty"`
+	TaskID       string `json:"task_id,omitempty"`
+	MessageID    string `json:"message_id,omitempty"`
+	WorkspaceID  string `json:"workspace_id,omitempty"`
+	SessionID    string `json:"session_id,omitempty"`
+	CarriesFiles bool   `json:"carries_files,omitempty"`
 }
 
 const (
 	relayKindReply = "reply"
 	relayKindInbox = "inbox"
+	// relayKindSeal ENDS A ROUND WITHOUT CARRYING WORDS, which is the one thing
+	// a reply frame cannot express: every wordless ending — a cancellation, a
+	// completion with nothing to say, an answer that is only files — had no way
+	// to reach the replica holding the bubble, so off-lease it left a spinner
+	// claiming work was still in progress for the rest of the protocol's
+	// window. Nothing else ends it: the sweep writes no frame, OnSettled needs
+	// an unbound round, and the next question opens its own bubble.
+	//
+	// It is NOT a reply with an empty body, and the difference is the point. A
+	// reply whose round is gone falls through to an ordinary push; one
+	// cancel-all click would then put 这次处理已取消 into every chat in the
+	// deployment. A seal frame with no round does NOTHING AT ALL.
+	relayKindSeal = "seal"
 )
 
 // relayHandler performs a delivery on the replica that holds the socket.
@@ -1250,7 +1268,7 @@ func (r *RelayOutbound) awaitOutcome(f relayFrame, eventID string) {
 // WithRelay attaches the cross-replica router to the subscriber. Without it the
 // subscriber keeps the behaviour it had: a reply produced off-lease is dropped
 // where it stands.
-func WithRelay(r *RelayOutbound) OutboundOption {
+func WithRelay(r noticeRouter) OutboundOption {
 	return func(o *Outbound) { o.relay = r }
 }
 
@@ -1275,6 +1293,20 @@ func relayInboxEventID(itemID, recipientID string) string {
 // attachment rows are fetched by this replica, which is the one that can send
 // them, and are never shipped through Redis.
 func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult {
+	// A SEAL FRAME IS ANSWERED BEFORE ANY OF THIS, and it is filtered by who
+	// holds the ROUND rather than by who holds a socket. That is why it needs
+	// no installation id: a cancellation deliberately does not chase an address
+	// (typing_indicator.go), and a bubble is writable only on the replica that
+	// painted it — so "do I have this round" asks the same question without a
+	// database read.
+	//
+	// It writes no message, so none of the reply machinery below applies: no
+	// counters move, no fallback push, and a round that is not here means the
+	// frame did its whole job by doing nothing.
+	if f.Kind == relayKindSeal {
+		o.sealRelayedRound(ctx, f)
+		return relayResult{outcome: outcomeDone}
+	}
 	instID, err := util.ParseUUID(f.InstallationID)
 	if err != nil || !instID.Valid {
 		return relayResult{outcome: outcomeDone} // unaddressable; a retry cannot make it addressable
@@ -1300,8 +1332,52 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult
 	// conclusions or which replica held the socket decides whether the user
 	// sees a blank message and whether the text or the file is what the reply
 	// counter is counting.
-	if hasVisibleChar(f.Content) {
-		if err := sender.sendTextCtx(ctx, f.ChatID, f.ChatType, f.Content); err != nil {
+	// THE BUBBLE THIS REPLY BELONGS TO IS ON THIS REPLICA, so seal it rather
+	// than pushing a second message underneath it. The replica that takes a
+	// relayed reply is by definition the one holding the socket, and a bubble
+	// is writable only where it was painted — which is that same replica. The
+	// frame carries the task id for exactly this lookup.
+	//
+	// Replies only: an inbox push is not an answer to a round and must never
+	// close one.
+	// NOT GATED ON HAVING WORDS. An answer that is only files still ends the
+	// round, and gating the take on hasVisibleChar left that round open: the
+	// file arrived and the spinner above it kept turning. What the words should
+	// be is decided AFTER the round is in hand, because the copy has to be in
+	// the round's own locale and that was captured when its bubble was opened.
+	spoke := false
+	text := f.Content
+	if f.Kind == relayKindReply && f.TaskID != "" {
+		if sessionID, err := util.ParseUUID(f.SessionID); err == nil && sessionID.Valid {
+			if t, _ := o.rounds().take(ctx, sessionID, byTask(f.TaskID)); t.HasBubble {
+				if !hasVisibleChar(text) {
+					text = wordlessSealCopy(t.Handle.Locale, f.CarriesFiles)
+				}
+				sealErr := o.finishStream(ctx, t.Handle, text)
+				switch classifySeal(sealErr) {
+				case sealOnScreen:
+					record, spoke = o.delivered, true
+				case sealUnknown:
+					se := sealErr
+					record = func() {
+						o.unconfirmedFor(ctx, f.SessionID, f.Kind, unconfirmedSealReason(se), se)
+					}
+					spoke = true
+				default:
+					// Proof the words are not in the bubble. They still have to
+					// reach the room, on a budget the seal cannot have spent.
+					var cancel context.CancelFunc
+					ctx, cancel = fallbackBudget(ctx)
+					defer cancel()
+				}
+			}
+		}
+	}
+	// text, not f.Content: when a wordless ending's seal was refused, the copy
+	// that was going to close the bubble is what the room gets instead — the
+	// same substitution the local path makes (outbound.go).
+	if hasVisibleChar(text) && !spoke {
+		if err := sender.sendTextCtx(ctx, f.ChatID, f.ChatType, text); err != nil {
 			// WHETHER THIS FRAME IS FINISHED IS SETTLED BEFORE ANY COUNTER
 			// MOVES. A frame that is owed another offer is still in flight,
 			// and counting it here counts it once per attempt: the dispatcher
@@ -1364,6 +1440,55 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult
 	return relayResult{outcome: outcomeDone, record: record}
 }
 
+// wordlessSealCopy is what closes a bubble for an ending that has no words of
+// its own. One place, so a relayed round and a local one cannot say different
+// sentences about the same outcome.
+func wordlessSealCopy(locale Locale, carriesFiles bool) string {
+	c := copyFor(locale)
+	if carriesFiles {
+		return c.StreamNoReplyWithFiles
+	}
+	return c.StreamNoReply
+}
+
+// sealReason names the ending a seal frame carries. The words are not shipped:
+// they are the round's, and the round's locale is on the holder.
+const (
+	sealReasonCancelled = "cancelled"
+	sealReasonNoReply   = "no_reply"
+)
+
+// sealRelayedRound closes a round on behalf of a replica that could not reach
+// it, and does NOTHING when the round is not here — which is the reason this is
+// its own frame kind rather than a reply with an empty body.
+func (o *Outbound) sealRelayedRound(ctx context.Context, f relayFrame) {
+	if f.TaskID == "" {
+		return
+	}
+	sessionID, err := util.ParseUUID(f.SessionID)
+	if err != nil || !sessionID.Valid {
+		return
+	}
+	t, _ := o.rounds().take(ctx, sessionID, byTask(f.TaskID))
+	if !t.HasBubble {
+		// No bubble here. Nothing to close and nothing to say: this ending was
+		// silent before the frame existed and stays silent.
+		return
+	}
+	text := wordlessSealCopy(t.Handle.Locale, f.CarriesFiles)
+	if f.SealReason == sealReasonCancelled {
+		text = copyFor(t.Handle.Locale).StreamCancelled
+	}
+	if err := o.finishStream(ctx, t.Handle, text); err != nil {
+		// A seal that cannot land leaves the bubble where it was. Saying the
+		// words as a message instead is the local path's move for an ANSWER,
+		// which the asker is waiting for; nobody is waiting on this one, and a
+		// push here is the plain message this frame kind exists to avoid.
+		o.logger.WarnContext(ctx, "wecom relay: could not seal a routed round's ending",
+			"task_id", f.TaskID, "reason", f.SealReason, "error", err)
+	}
+}
+
 // ownsSocket is the pre-claim ownership gate. Cheap by design: one map read.
 func (o *Outbound) ownsSocket(installationID string) bool {
 	if o.senders == nil {
@@ -1404,6 +1529,18 @@ func provablyNotSent(err error) bool {
 	case errors.As(err, &apiErr):
 		return false
 	case errors.Is(err, errAckTimeout):
+		return false
+	case errors.Is(err, errStreamBusy):
+		// Nothing was written: the gate refused to put a frame out while the
+		// server still owed a verdict on this req_id. Provably not sent is
+		// what lets the answer go out once, by the plain route.
+		return true
+	case errors.Is(err, errStreamAckTimeout):
+		// A stream frame whose verdict never came back is the same evidence as
+		// errAckTimeout and has to be read the same way: the frame went to the
+		// socket and the server said nothing. Missing here it fell to the
+		// default and was reported as provably unsent, which is what let a
+		// sealed bubble's answer go out a second time as a plain message.
 		return false
 	case errors.Is(err, errWriteAttempted):
 		return false

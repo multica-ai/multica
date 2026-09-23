@@ -130,6 +130,25 @@ CLI 的可达性探测会 GET `<server-url>/health` 并要求 200。backend 提�
 curl -fsS <server-url>/health
 ```
 
+## `multica login` 报告 TLS 握手超时
+
+`multica login` 能打开浏览器、网页登录也能完成，但 CLI 仍以 "Sign-in did not complete" 或 "TLS 握手超时" 失败。`multica --debug login` 在 `POST /api/tokens` 上显示 `net/http: TLS handshake timeout`，而同一台机器上的 `curl.exe -I https://api.multica.ai` 或浏览器都能正常连接。
+
+TCP 连接已建立，但 TLS 握手始终没有完成。Go 客户端（包括 Multica CLI 和守护进程）默认在 TLS ClientHello 中携带后量子密钥交换，报文约 1.5 KB，会拆成两个包发送。部分安全软件、VPN、路由器和防火墙会丢弃这种握手；curl 的 ClientHello 小得多，所以能通过。
+
+先关闭后量子密钥交换重试，确认是否为此原因：
+
+```powershell
+$env:GODEBUG = 'tlsmlkem=0'
+multica --debug login
+```
+
+```bash
+GODEBUG=tlsmlkem=0 multica --debug login
+```
+
+如果这样能成功，请为运行 CLI 和守护进程的用户永久设置 `GODEBUG=tlsmlkem=0`——Windows 上执行 `[Environment]::SetEnvironmentVariable('GODEBUG', 'tlsmlkem=0', 'User')` 后重新打开终端——然后重启守护进程或桌面应用。调高 `MULTICA_HTTP_TIMEOUT` 无效，它不控制握手。根本解决需要在网络侧处理：升级或重新配置丢弃分包 TLS 握手的设备或软件。
+
 ## 验证码与邀请邮件未送达
 
 先查看 backend 启动日志。日志会说明当前使用 `SMTP relay`、`Resend API` 还是 `DEV mode`：

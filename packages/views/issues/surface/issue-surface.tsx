@@ -9,6 +9,8 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useQuery } from "@tanstack/react-query";
+import { workspaceWakeupSummariesOptions } from "@multica/core/issues/wakeups";
 import {
   useViewStore,
   ViewStoreProvider,
@@ -194,6 +196,9 @@ function IssueSurfaceContent({
   batchToolbar,
   contentClassName,
 }: Omit<IssueSurfaceComponentProps, "surfaceKey">) {
+  const workspaceId = useWorkspaceId();
+  // One polling owner for the whole surface; individual cards only select cache data.
+  useQuery({ ...workspaceWakeupSummariesOptions(workspaceId), refetchInterval: 10_000 });
   const { t } = useT("projects");
   const controller = useIssueSurfaceController({
     scope,

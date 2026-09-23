@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -34,6 +35,39 @@ func (s *afterCommitTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
 type afterCommitTx struct {
 	pgx.Tx
 	afterCommit func()
+}
+
+type rejectIssueCommitTxStarter struct {
+	pool *pgxpool.Pool
+	err  error
+}
+
+func (s *rejectIssueCommitTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &rejectIssueCommitTx{Tx: tx, err: s.err}, nil
+}
+
+type rejectIssueCommitTx struct {
+	pgx.Tx
+	err error
+}
+
+type recordingIssueAnalytics struct {
+	events []analytics.Event
+}
+
+func (a *recordingIssueAnalytics) Capture(event analytics.Event) {
+	a.events = append(a.events, event)
+}
+
+func (*recordingIssueAnalytics) Close() {}
+
+func (t *rejectIssueCommitTx) Commit(ctx context.Context) error {
+	_ = t.Tx.Rollback(ctx)
+	return t.err
 }
 
 func (t *afterCommitTx) Commit(ctx context.Context) error {
@@ -278,6 +312,151 @@ func TestCreateMediaGatedIssueCommitsDeferredTaskAtomicallyBeforeCreatedEvent(t 
 	}
 	if wakeup.calls[0].runtimeID != util.UUIDToString(runtimeID) {
 		t.Fatalf("schedule wakeup runtime = %q, want %q", wakeup.calls[0].runtimeID, util.UUIDToString(runtimeID))
+	}
+}
+
+func TestCreateIssuePropertiesCommitFailureHasNoSideEffects(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+	workspaceUUID := util.MustParseUUID(workspaceID)
+	userUUID := util.MustParseUUID(userID)
+	agentUUID := util.MustParseUUID(agentID)
+	propertyID := pgtype.UUID{Bytes: [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}, Valid: true}
+	if _, err := pool.Exec(ctx, `INSERT INTO issue_property (id, workspace_id, name, type, config) VALUES ($1, $2, 'Commit property', 'text', '{}')`, propertyID, workspaceUUID); err != nil {
+		t.Fatalf("insert property: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM issue_property WHERE id = $1`, propertyID) })
+
+	bus := events.New()
+	createdEvents := 0
+	bus.Subscribe(protocol.EventIssueCreated, func(events.Event) { createdEvents++ })
+	taskService := &TaskService{Queries: q, TxStarter: pool, Bus: bus}
+	analyticsSink := &recordingIssueAnalytics{}
+	injected := errors.New("injected issue commit failure")
+	issueService := NewIssueService(q, &rejectIssueCommitTxStarter{pool: pool, err: injected}, bus, analyticsSink, taskService)
+	var taskCountBefore int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM agent_task_queue WHERE agent_id = $1`, agentUUID).Scan(&taskCountBefore); err != nil {
+		t.Fatalf("count tasks before create: %v", err)
+	}
+	if taskCountBefore != 0 {
+		t.Fatalf("fixture agent has %d tasks before create, want 0", taskCountBefore)
+	}
+
+	_, err := issueService.Create(ctx, IssueCreateParams{
+		WorkspaceID:  workspaceUUID,
+		Title:        "properties commit failure",
+		Status:       "todo",
+		Priority:     "none",
+		AssigneeType: pgtype.Text{String: "agent", Valid: true},
+		AssigneeID:   agentUUID,
+		CreatorType:  "member",
+		CreatorID:    userUUID,
+		Properties: map[pgtype.UUID]json.RawMessage{
+			propertyID: json.RawMessage(`"kept only if committed"`),
+		},
+	}, IssueCreateOpts{})
+	if !errors.Is(err, injected) {
+		t.Fatalf("Create error = %v, want injected commit failure", err)
+	}
+	if createdEvents != 0 {
+		t.Fatalf("published %d issue:created events after failed commit", createdEvents)
+	}
+	if len(analyticsSink.events) != 0 {
+		t.Fatalf("captured %d analytics events after failed commit", len(analyticsSink.events))
+	}
+	var issueCount, taskCountAfter int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM issue WHERE workspace_id = $1 AND title = 'properties commit failure'`, workspaceUUID).Scan(&issueCount); err != nil {
+		t.Fatalf("count issues: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM agent_task_queue WHERE agent_id = $1`, agentUUID).Scan(&taskCountAfter); err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if issueCount != 0 || taskCountAfter != 0 {
+		t.Fatalf("failed commit left side effects: issues=%d tasks_before=%d tasks_after=%d", issueCount, taskCountBefore, taskCountAfter)
+	}
+}
+
+func TestCreateIssuePropertiesAreVisibleAtCommitBeforeEnqueue(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+	workspaceUUID := util.MustParseUUID(workspaceID)
+	userUUID := util.MustParseUUID(userID)
+	agentUUID := util.MustParseUUID(agentID)
+	propertyID := pgtype.UUID{Bytes: [16]byte{16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1}, Valid: true}
+	if _, err := pool.Exec(ctx, `INSERT INTO issue_property (id, workspace_id, name, type, config) VALUES ($1, $2, 'Enqueue property', 'text', '{}')`, propertyID, workspaceUUID); err != nil {
+		t.Fatalf("insert property: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM issue_property WHERE id = $1`, propertyID) })
+
+	var atCommit map[string]any
+	txStarter := &afterCommitTxStarter{pool: pool, afterCommit: func() {
+		var raw []byte
+		if err := pool.QueryRow(ctx, `SELECT properties FROM issue WHERE workspace_id = $1 AND title = 'properties before enqueue'`, workspaceUUID).Scan(&raw); err != nil {
+			atCommit = map[string]any{"error": err.Error()}
+			return
+		}
+		_ = json.Unmarshal(raw, &atCommit)
+	}}
+	bus := events.New()
+	var createdEvents []events.Event
+	propertyChangedEvents := 0
+	bus.Subscribe(protocol.EventIssueCreated, func(event events.Event) {
+		createdEvents = append(createdEvents, event)
+	})
+	bus.Subscribe(protocol.EventIssuePropertiesChanged, func(events.Event) {
+		propertyChangedEvents++
+	})
+	taskService := &TaskService{Queries: q, TxStarter: pool, Bus: bus}
+	issueService := NewIssueService(q, txStarter, bus, nil, taskService)
+
+	result, err := issueService.Create(ctx, IssueCreateParams{
+		WorkspaceID:  workspaceUUID,
+		Title:        "properties before enqueue",
+		Status:       "todo",
+		Priority:     "none",
+		AssigneeType: pgtype.Text{String: "agent", Valid: true},
+		AssigneeID:   agentUUID,
+		CreatorType:  "member",
+		CreatorID:    userUUID,
+		Properties: map[pgtype.UUID]json.RawMessage{
+			propertyID: json.RawMessage(`"ready"`),
+		},
+	}, IssueCreateOpts{
+		BroadcastPayload: func(issue db.Issue, _ []db.Attachment, _ []db.IssueLabel) map[string]any {
+			var properties map[string]any
+			if err := json.Unmarshal(issue.Properties, &properties); err != nil {
+				return map[string]any{"error": err.Error()}
+			}
+			return map[string]any{"issue": map[string]any{"properties": properties}}
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if atCommit[util.UUIDToString(propertyID)] != "ready" {
+		t.Fatalf("properties visible immediately after commit = %#v", atCommit)
+	}
+	if !result.AssignedTaskID.Valid {
+		t.Fatal("assigned task was not enqueued after property-bearing commit")
+	}
+	if len(createdEvents) != 1 || propertyChangedEvents != 0 {
+		t.Fatalf("create events = %d issue:created, %d property-changed; want 1 and 0", len(createdEvents), propertyChangedEvents)
+	}
+	payload, ok := createdEvents[0].Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("issue:created payload = %#v", createdEvents[0].Payload)
+	}
+	issueSnapshot, ok := payload["issue"].(map[string]any)
+	if !ok {
+		t.Fatalf("issue:created issue snapshot = %#v", payload["issue"])
+	}
+	properties, ok := issueSnapshot["properties"].(map[string]any)
+	if !ok || properties[util.UUIDToString(propertyID)] != "ready" {
+		t.Fatalf("issue:created properties = %#v", issueSnapshot["properties"])
 	}
 }
 

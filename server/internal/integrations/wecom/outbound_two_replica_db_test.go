@@ -199,7 +199,7 @@ func newReplica(t *testing.T, pool *pgxpool.Pool, instID string, holdsSocket boo
 		}
 		reg.set(pg, r.conn.autoAck(newWSSender(r.conn, nil)))
 	}
-	o := NewOutbound(db.New(pool), reg,
+	o := NewOutbound(db.New(pool), reg, nil,
 		slog.New(slog.NewTextHandler(r.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		WithOutboundMetrics(r.mx))
 	o.Register(r.bus)
@@ -506,7 +506,7 @@ func newRelayReplicaWith(t *testing.T, pool *pgxpool.Pool, instID string, holdsS
 	t.Cleanup(func() { cancel(); router.Wait() })
 	router.Start(ctx)
 
-	o := NewOutbound(db.New(pool), reg, log, WithOutboundMetrics(base.mx), WithRelay(router))
+	o := NewOutbound(db.New(pool), reg, nil, log, WithOutboundMetrics(base.mx), WithRelay(router))
 	o.Register(base.bus)
 	router.Attach(o)
 	return &relayReplica{replica: base, router: router, reg: reg, instID: pg}
@@ -788,7 +788,7 @@ func TestRelay_AttemptedWriteKeepsTheClaim(t *testing.T) {
 	t.Cleanup(func() { cancel(); router.Wait() })
 	router.Start(ctx)
 	mx := newCountingMetrics()
-	router.Attach(NewOutbound(nil, reg, slog.Default(), WithOutboundMetrics(mx)))
+	router.Attach(NewOutbound(nil, reg, nil, slog.Default(), WithOutboundMetrics(mx)))
 
 	body, _ := json.Marshal(relayFrame{
 		Kind: relayKindReply, InstallationID: util.UUIDToString(instID),
@@ -826,8 +826,8 @@ func TestDeliverRelayed_APreWriteContextErrorReleasesTheClaim(t *testing.T) {
 	instID := mustTestUUID(t)
 	reg := newSendersRegistry()
 	conn := &recordingConn{}
-	reg.set(instID, conn.autoAck(newWSSender(conn, slog.Default())))
-	o := NewOutbound(nil, reg, slog.Default())
+	reg.set(instID, conn.autoAck(newWSSender(conn, nil)))
+	o := NewOutbound(nil, reg, nil, slog.Default())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // already over: the chat is free, so request's pre-write check is what fails
@@ -859,7 +859,7 @@ func TestDeliverRelayed_AContextErrorAwaitingTheAckKeepsTheClaim(t *testing.T) {
 	conn := &recordingConn{} // no autoAck: the frame goes out and no verdict comes back
 	reg.set(instID, newWSSender(conn, slog.Default()))
 	mx := newCountingMetrics()
-	o := NewOutbound(nil, reg, slog.Default(), WithOutboundMetrics(mx))
+	o := NewOutbound(nil, reg, nil, slog.Default(), WithOutboundMetrics(mx))
 
 	// Cancelled once the frame is ON THE WIRE, so which of request's two
 	// context errors this raises is a fact about the run rather than a race
@@ -1019,7 +1019,7 @@ func TestRelayedInboxPushDoesNotMoveTheReplyCounters(t *testing.T) {
 	okReg := newSendersRegistry()
 	okReg.set(instID, okConn.autoAck(newWSSender(okConn, nil)))
 	okMx := newCountingMetrics()
-	ok := NewOutbound(nil, okReg, slog.Default(), WithOutboundMetrics(okMx))
+	ok := NewOutbound(nil, okReg, nil, slog.Default(), WithOutboundMetrics(okMx))
 	if got := ok.deliverRelayed(context.Background(), relayFrame{
 		Kind: relayKindInbox, InstallationID: util.UUIDToString(instID),
 		ChatID: "T-USER", ChatType: chatTypeSingleInt, Content: "you were mentioned",
@@ -1038,7 +1038,7 @@ func TestRelayedInboxPushDoesNotMoveTheReplyCounters(t *testing.T) {
 	badReg := newSendersRegistry()
 	badReg.set(instID, badConn.autoAck(newWSSender(badConn, nil)))
 	badMx := newCountingMetrics()
-	bad := NewOutbound(nil, badReg, slog.Default(), WithOutboundMetrics(badMx))
+	bad := NewOutbound(nil, badReg, nil, slog.Default(), WithOutboundMetrics(badMx))
 	bad.deliverRelayed(context.Background(), relayFrame{
 		Kind: relayKindInbox, InstallationID: util.UUIDToString(instID),
 		ChatID: "T-USER", ChatType: chatTypeSingleInt, Content: "you were mentioned",
