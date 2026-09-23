@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 )
 
 // childDoneFixture creates a parent + child pair so the parent-notification
@@ -375,6 +377,185 @@ func TestChildDoneSkippedWhenParentMember(t *testing.T) {
 	}
 	if got := countInboxItems(t, userID, fx.parent.ID); got != 0 {
 		t.Errorf("parent with member assignee should not receive an inbox row, got %d", got)
+	}
+}
+
+// TestChildAttentionInReviewWakesParentSquad is the direct-agent delivery
+// regression from #5464: a child assigned to an ordinary agent stops in
+// in_review while its parent is owned by a squad. The child transition must
+// create a parent-level handoff and wake the squad leader exactly once.
+func TestChildAttentionInReviewWakesParentSquad(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+	sq := newSquadCommentTriggerFixture(t)
+
+	setIssueAssigneeDirect(t, fx.parent.ID, "squad", sq.SquadID)
+	setIssueAssigneeDirect(t, fx.child.ID, "agent", sq.OtherID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_task_queue WHERE issue_id IN ($1, $2)`,
+			fx.parent.ID, fx.child.ID)
+	})
+
+	updateChildStatus(t, fx.child.ID, "in_review")
+
+	content := parentSystemCommentContent(t, fx.parent.ID)
+	for _, want := range []string{
+		"A sub-issue needs attention",
+		"is in review",
+		"mention://issue/" + fx.child.ID,
+		"mention://squad/" + sq.SquadID,
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("expected %q in parent handoff, got: %s", want, content)
+		}
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, sq.LeaderID); got != 1 {
+		t.Fatalf("expected exactly 1 pending squad-leader task, got %d", got)
+	}
+
+	// Re-saving the same status is not a new delivery revision and must not
+	// duplicate either the timeline handoff or the leader task.
+	updateChildStatus(t, fx.child.ID, "in_review")
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("same-status save duplicated the parent handoff: got %d comments", got)
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, sq.LeaderID); got != 1 {
+		t.Fatalf("same-status save duplicated the leader task: got %d", got)
+	}
+
+	// Model the leader consuming the review wake. A later transition to blocked
+	// is a stronger attention state and deserves a fresh handoff.
+	if _, err := testPool.Exec(context.Background(),
+		`DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.parent.ID); err != nil {
+		t.Fatalf("clear consumed parent task: %v", err)
+	}
+	updateChildStatus(t, fx.child.ID, "blocked")
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 2 {
+		t.Fatalf("in_review -> blocked should add one handoff, got %d comments", got)
+	}
+	content, _, _, _ = systemCommentOn(t, fx.parent.ID)
+	if !strings.Contains(content, "is blocked") {
+		t.Errorf("expected blocked handoff, got: %s", content)
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, sq.LeaderID); got != 1 {
+		t.Fatalf("expected a fresh leader task for blocked child, got %d", got)
+	}
+
+	// Attention is not completion. Once the only child becomes terminal, the
+	// existing stage-barrier path still emits its separate completion handoff.
+	if _, err := testPool.Exec(context.Background(),
+		`DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.parent.ID); err != nil {
+		t.Fatalf("clear consumed blocked task: %v", err)
+	}
+	updateChildStatus(t, fx.child.ID, "done")
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 3 {
+		t.Fatalf("terminal transition should retain the child-done barrier, got %d comments", got)
+	}
+	content, _, _, _ = systemCommentOn(t, fx.parent.ID)
+	if !strings.Contains(content, "All sub-issues are complete") {
+		t.Errorf("expected terminal barrier handoff, got: %s", content)
+	}
+}
+
+// TestChildAttentionUsesEffectiveStatus verifies that custom statuses inherit
+// their category's orchestration behavior. Moving between two custom statuses
+// in the same category is presentation-only and must not generate a duplicate
+// handoff; moving to the blocked category is a new escalation.
+func TestChildAttentionUsesEffectiveStatus(t *testing.T) {
+	createTestCustomStatus(t, "review_ready_a", issuestatus.InReview)
+	createTestCustomStatus(t, "review_ready_b", issuestatus.InReview)
+	createTestCustomStatus(t, "waiting_dependency", issuestatus.Blocked)
+	fx := newChildDoneFixture(t, "in_progress")
+
+	updateChildStatus(t, fx.child.ID, "review_ready_a")
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("custom in-review status should create one handoff, got %d", got)
+	}
+	content, _, _, _ := systemCommentOn(t, fx.parent.ID)
+	if !strings.Contains(content, "is in review") {
+		t.Errorf("custom in-review status should use canonical wording, got: %s", content)
+	}
+
+	updateChildStatus(t, fx.child.ID, "review_ready_b")
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("same effective category should not duplicate handoff, got %d", got)
+	}
+
+	updateChildStatus(t, fx.child.ID, "waiting_dependency")
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 2 {
+		t.Fatalf("custom blocked status should add one escalation, got %d", got)
+	}
+	content, _, _, _ = systemCommentOn(t, fx.parent.ID)
+	if !strings.Contains(content, "is blocked") {
+		t.Errorf("custom blocked status should use canonical wording, got: %s", content)
+	}
+}
+
+func TestChildAttentionSkipsParkedOrClosedCustomParent(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		key      string
+		category string
+	}{
+		{name: "backlog", key: "parent_parked", category: issuestatus.Backlog},
+		{name: "done", key: "parent_accepted", category: issuestatus.Done},
+		{name: "cancelled", key: "parent_cancelled", category: issuestatus.Cancelled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			createTestCustomStatus(t, tc.key, tc.category)
+			fx := newChildDoneFixture(t, tc.key)
+
+			updateChildStatus(t, fx.child.ID, "in_review")
+			if got := countSystemCommentsOn(t, fx.parent.ID); got != 0 {
+				t.Fatalf("custom %s parent should stay inert, got %d comments", tc.category, got)
+			}
+		})
+	}
+}
+
+func TestChildAttentionBlockedNotifiesParentMember(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+	memberID := createPermissionTestMember(t, "child-attention-owner@multica.test")
+
+	setIssueAssigneeDirect(t, fx.parent.ID, "member", memberID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM inbox_item WHERE issue_id IN ($1, $2)`, fx.parent.ID, fx.child.ID)
+	})
+
+	updateChildStatus(t, fx.child.ID, "blocked")
+
+	content := parentSystemCommentContent(t, fx.parent.ID)
+	if !strings.Contains(content, "is blocked") {
+		t.Errorf("expected blocked status in handoff, got: %s", content)
+	}
+	if strings.Contains(content, "mention://member/") {
+		t.Errorf("system handoff should not inject a member mention, got: %s", content)
+	}
+
+	var notifType, severity, issueID, body string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT type, severity, issue_id::text, body
+		  FROM inbox_item
+		 WHERE recipient_type = 'member'
+		   AND recipient_id = $1
+		   AND issue_id = $2
+		 ORDER BY created_at DESC
+		 LIMIT 1
+	`, memberID, fx.child.ID).Scan(&notifType, &severity, &issueID, &body); err != nil {
+		t.Fatalf("read parent member inbox: %v", err)
+	}
+	if notifType != "status_changed" {
+		t.Errorf("inbox type = %q, want status_changed", notifType)
+	}
+	if severity != "action_required" {
+		t.Errorf("inbox severity = %q, want action_required", severity)
+	}
+	if issueID != fx.child.ID {
+		t.Errorf("inbox should point to child issue %s, got %s", fx.child.ID, issueID)
+	}
+	if !strings.Contains(body, "needs attention") {
+		t.Errorf("expected action body, got %q", body)
 	}
 }
 
