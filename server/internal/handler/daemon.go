@@ -2989,14 +2989,40 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				IssueID: task.IssueID,
 			}); err == nil && prior.SessionID.Valid {
 				if prior.RuntimeID == task.RuntimeID {
-					resp.PriorSessionID = prior.SessionID.String
+					// GH #4754: resume is not free. A session that has already
+					// run substantial tool-heavy work makes the NEXT turn start
+					// from its whole transcript, so a one-line comment inherits
+					// a context that costs more than answering it from scratch
+					// would — and eventually one that does not fit at all.
+					// Past the budget, drop the session and let this turn read
+					// what it needs.
+					//
+					// The workdir is deliberately kept: the repository is still
+					// checked out and the branch is still the conversation's,
+					// so this resets the transcript without re-paying for the
+					// environment.
+					budgetExceeded := h.resumeExceedsContextBudget(r.Context(), task, prior.SessionID.String)
+					if budgetExceeded {
+						resp.PriorSessionResumeUnavailable = true
+					} else {
+						resp.PriorSessionID = prior.SessionID.String
+					}
 					// Same rule as the rerun path: date the deltas from the run
 					// this session belongs to. GetLastTaskSession skips poisoned
 					// and retired sessions, so `prior` can be an older run than
 					// the newest one on the issue; it also accepts failed and
 					// cancelled rows, which keep the session resumable but prove
 					// nothing about delivery (MUL-7344).
-					resumeAnchor = newResumedRunAnchor(prior.Status, prior.StartedAt, prior.IssueSnapshot)
+					//
+					// Left nil on the budget path above, because the anchor dates
+					// deltas for a run the agent is CONTINUING. Past the budget it
+					// continues nothing: the transcript is dropped, so "changed
+					// since that run" describes a conversation this turn has never
+					// read, and reporting it would waive the comment scan the
+					// fresh context depends on.
+					if !budgetExceeded {
+						resumeAnchor = newResumedRunAnchor(prior.Status, prior.StartedAt, prior.IssueSnapshot)
+					}
 				}
 				if prior.WorkDir.Valid {
 					resp.PriorWorkDir = prior.WorkDir.String
