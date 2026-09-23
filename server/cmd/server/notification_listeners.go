@@ -667,17 +667,11 @@ func notifyMentionedMembers(
 func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 	ctx := context.Background()
 
-	// issue:created — Direct notification to assignee if assignee != actor
-	bus.Subscribe(protocol.EventIssueCreated, func(e events.Event) {
-		payload, ok := e.Payload.(map[string]any)
-		if !ok {
-			return
-		}
-		issue, ok := payload["issue"].(handler.IssueResponse)
-		if !ok {
-			return
-		}
-
+	// notifyIssueCreated is the creation rule set, shared with the accept path:
+	// an accepted Triage entry reaches the workspace for the first time here,
+	// so its assignee is being told about the assignment now even though the
+	// field itself did not change (see acceptedFromTriage).
+	notifyIssueCreated := func(e events.Event, issue handler.IssueResponse) {
 		// Track who already got notified to avoid duplicates
 		skip := map[string]bool{e.ActorID: true}
 
@@ -700,6 +694,23 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			notifyMentionedMembers(bus, queries, e, mentions, issue.ID, issue.Title, issue.Status,
 				issue.Title, skip, emptyDetails)
 		}
+	}
+
+	// issue:created — Direct notification to assignee if assignee != actor
+	bus.Subscribe(protocol.EventIssueCreated, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		issue, ok := payload["issue"].(handler.IssueResponse)
+		if !ok {
+			return
+		}
+		if issueInTriage(ctx, queries, issue.ID) {
+			return
+		}
+
+		notifyIssueCreated(e, issue)
 	})
 
 	// issue:updated — handle assignee changes, status changes, priority, due date
@@ -710,6 +721,13 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		}
 		issue, ok := payload["issue"].(handler.IssueResponse)
 		if !ok {
+			return
+		}
+		if acceptedFromTriage(payload) {
+			notifyIssueCreated(e, issue)
+			return
+		}
+		if issueInTriage(ctx, queries, issue.ID) {
 			return
 		}
 		assigneeChanged, _ := payload["assignee_changed"].(bool)
@@ -902,18 +920,20 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		// The comment payload can come as handler.CommentResponse from the
 		// HTTP handler, or as map[string]any from the agent comment path in
 		// task.go. Handle both.
-		var issueID, commentID, commentContent, authorType string
+		var issueID, commentID, commentContent, authorType, commentType string
 		switch c := payload["comment"].(type) {
 		case handler.CommentResponse:
 			issueID = c.IssueID
 			commentID = c.ID
 			commentContent = c.Content
 			authorType = c.AuthorType
+			commentType = c.Type
 		case map[string]any:
 			issueID, _ = c["issue_id"].(string)
 			commentID, _ = c["id"].(string)
 			commentContent, _ = c["content"].(string)
 			authorType, _ = c["author_type"].(string)
+			commentType, _ = c["type"].(string)
 		default:
 			return
 		}
@@ -927,6 +947,18 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		// Skip the listener entirely; the WS broadcast still delivers the
 		// comment to the issue timeline.
 		if authorType == "system" {
+			return
+		}
+
+		// A triage decision explains itself by naming people. It is a record of
+		// what the triager did, not a message to anyone — and it outlives
+		// accept, so nothing later re-reads it (MUL-7189 §2.5). Same reason the
+		// body is never dispatched; see handler.CommentTypeTriageDecision.
+		if commentType == handler.CommentTypeTriageDecision {
+			return
+		}
+
+		if issueInTriage(ctx, queries, issueID) {
 			return
 		}
 
@@ -975,6 +1007,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if creatorType == "" || creatorID == "" {
 			return
 		}
+		if issueInTriage(ctx, queries, issueID) {
+			return
+		}
 
 		details, _ := json.Marshal(map[string]string{
 			"emoji": reaction.Emoji,
@@ -1009,6 +1044,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		issueStatus, _ := payload["issue_status"].(string)
 
 		if commentAuthorType == "" || commentAuthorID == "" {
+			return
+		}
+		if issueInTriage(ctx, queries, issueID) {
 			return
 		}
 
@@ -1046,6 +1084,11 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		issue, err := queries.GetIssue(ctx, parseUUID(issueID))
 		if err != nil {
 			slog.Error("task:failed notification: failed to get issue", "issue_id", issueID, "error", err)
+			return
+		}
+		// This block already holds the row, so it reads the column directly
+		// rather than paying for issueInTriage's second lookup.
+		if issue.TriageState.Valid {
 			return
 		}
 

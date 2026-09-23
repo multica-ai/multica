@@ -65,6 +65,7 @@ ORDER BY id
 LIMIT $3;
 
 -- name: ListWorkspaceIssueIDFirstPage :many
+-- triage: all — teardown deletes the workspace's rows, all of them.
 -- First page of the same walk. Split from the keyset query rather than seeded
 -- with the all-zero uuid, because that value is itself a valid uuid: a row whose
 -- id happened to be all zeros would be skipped forever by `id > $2`.
@@ -74,6 +75,7 @@ ORDER BY id
 LIMIT $2;
 
 -- name: ListWorkspaceIssueIDPage :many
+-- triage: all — see ListWorkspaceIssueIDFirstPage.
 -- Uses idx_issue_workspace_id_keyset (migration 282).
 SELECT id FROM issue
 WHERE issue.workspace_id = $1 AND id > $2

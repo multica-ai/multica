@@ -75,6 +75,7 @@ type ArchivedInboxFacetsRow struct {
 	Count     int64  `json:"count"`
 }
 
+// triage: all — facets over the archived inbox rows above, same reasoning.
 // Select narrow group representatives before loading bodies or comment anchors.
 func (q *Queries) ArchivedInboxFacets(ctx context.Context, arg ArchivedInboxFacetsParams) ([]ArchivedInboxFacetsRow, error) {
 	rows, err := q.db.Query(ctx, archivedInboxFacets,
@@ -181,6 +182,8 @@ type ListArchivedInboxPageRow struct {
 	CommentID     string      `json:"comment_id"`
 }
 
+// triage: all — the issue join is decoration; Triage entries produce no
+// inbox rows to begin with (MUL-7189 §2.5).
 // Select narrow group representatives before loading bodies or comment anchors.
 func (q *Queries) ListArchivedInboxPage(ctx context.Context, arg ListArchivedInboxPageParams) ([]ListArchivedInboxPageRow, error) {
 	rows, err := q.db.Query(ctx, listArchivedInboxPage,

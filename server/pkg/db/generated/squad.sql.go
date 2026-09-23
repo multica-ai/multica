@@ -409,6 +409,8 @@ type ListSquadMemberStatusRowsRow struct {
 	IssueStatus       pgtype.Text        `json:"issue_status"`
 }
 
+// triage: all — the issue join labels what a squad member is currently doing.
+// The task is the subject of the row; the issue is its caption.
 // Per-row join used to build the squad-members status view. One row per
 // (squad_member × in_flight_task); members with no in-flight task return a
 // single row with NULL task_* columns. Human members and agent members

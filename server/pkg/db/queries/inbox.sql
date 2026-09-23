@@ -1,4 +1,8 @@
 -- name: ListInboxItems :many
+-- triage: all — the issue join only projects status and priority onto inbox
+-- rows. A Triage entry never gets an inbox row in the first place (the
+-- listeners return before writing one, MUL-7189 §2.5), so a predicate here
+-- would filter nothing and would drop rows written before an accept.
 SELECT i.*,
        iss.status AS issue_status,
        iss.priority AS issue_priority
@@ -8,6 +12,7 @@ WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND 
 ORDER BY i.created_at DESC;
 
 -- name: ListArchivedInboxItems :many
+-- triage: all — see ListInboxItems: decoration only.
 -- Archived counterpart of ListInboxItems, backing the inbox's "Archived"
 -- sub-view (MUL-3736).
 --

@@ -65,6 +65,8 @@ type CountIssuesUsingStatusKeyParams struct {
 	Key         string      `json:"key"`
 }
 
+// triage: all — a Triage entry carries a PROPOSED status (MUL-7189 §2.1), so
+// it holds a real reference to this key and must block archiving it.
 // Archive precondition, including terminal issues. Call under the catalog lock
 // so a concurrent status assignment cannot invalidate the empty check.
 func (q *Queries) CountIssuesUsingStatusKey(ctx context.Context, arg CountIssuesUsingStatusKeyParams) (int64, error) {

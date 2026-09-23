@@ -1336,6 +1336,8 @@ export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
 };
 
 const SearchIssueResultSchema = IssueSchema.extend({
+  // Present only on Triage hits, which only an include_triage search returns.
+  triage_state: z.string().optional(),
   match_source: z.string(),
   matched_snippet: z.string().optional(),
   matched_description_snippet: z.string().optional(),

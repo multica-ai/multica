@@ -1,4 +1,7 @@
 -- name: ListIssueProperties :many
+-- triage: all — usage_count is the census shown before archiving a property.
+-- A Triage entry carries proposed property values, so leaving it out would
+-- under-report usage and lose those values the moment it is accepted.
 -- usage_count = number of issues in the workspace that currently carry a
 -- value for this property. `properties ? id` is a seq scan today; fine at
 -- the 20-definition / small-workspace scale this feature targets.
@@ -77,6 +80,8 @@ WHERE id = sqlc.arg('id')::uuid AND workspace_id = sqlc.arg('workspace_id')::uui
 RETURNING *;
 
 -- name: CountIssuesUsingPropertyOptions :many
+-- triage: all — see ListIssueProperties: a census taken before a destructive
+-- change has to count proposals too.
 -- Usage census for specific option ids of one property. jsonb `?` matches
 -- both value shapes: array element for multi_select, string equality for
 -- select. Only options with at least one referencing issue come back.

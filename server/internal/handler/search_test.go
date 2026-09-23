@@ -6,7 +6,7 @@ import (
 )
 
 func TestBuildSearchQuery_SingleTerm(t *testing.T) {
-	query, args := buildSearchQuery("Hello", []string{"Hello"}, 0, false, false, []string{"done", "cancelled"})
+	query, args := buildSearchQuery("Hello", []string{"Hello"}, 0, false, false, false, []string{"done", "cancelled"})
 
 	// Pattern should be lowercased in Go.
 	if args[0] != "hello" {
@@ -45,7 +45,7 @@ func TestBuildSearchQuery_SingleTerm(t *testing.T) {
 }
 
 func TestBuildSearchQuery_OmitsUnusedExactTotal(t *testing.T) {
-	query, _ := buildSearchQuery("Hello", []string{"Hello"}, 0, false, false, []string{"done", "cancelled"})
+	query, _ := buildSearchQuery("Hello", []string{"Hello"}, 0, false, false, false, []string{"done", "cancelled"})
 
 	if strings.Contains(query, "COUNT(*) OVER()") || strings.Contains(query, "total_count") {
 		t.Fatalf("search query should not calculate an unused exact total:\n%s", query)
@@ -68,6 +68,7 @@ func TestBuildSearchQuery_CustomTerminalStatuses(t *testing.T) {
 		0,
 		false,
 		false,
+		false,
 		terminalStatusKeys,
 	)
 
@@ -86,7 +87,7 @@ func TestBuildSearchQuery_CustomTerminalStatuses(t *testing.T) {
 }
 
 func TestBuildSearchQuery_MultiTerm(t *testing.T) {
-	query, args := buildSearchQuery("Foo Bar", []string{"Foo", "Bar"}, 0, false, false, []string{"done", "cancelled"})
+	query, args := buildSearchQuery("Foo Bar", []string{"Foo", "Bar"}, 0, false, false, false, []string{"done", "cancelled"})
 
 	// Both phrase and terms should be lowercased.
 	if args[0] != "foo bar" {
@@ -107,7 +108,7 @@ func TestBuildSearchQuery_MultiTerm(t *testing.T) {
 }
 
 func TestBuildSearchQuery_LowersCommentContentOnce(t *testing.T) {
-	query, _ := buildSearchQuery("Foo Bar Baz", []string{"Foo", "Bar", "Baz"}, 0, false, false, []string{"done", "cancelled"})
+	query, _ := buildSearchQuery("Foo Bar Baz", []string{"Foo", "Bar", "Baz"}, 0, false, false, false, []string{"done", "cancelled"})
 
 	if count := strings.Count(query, "LOWER(c.content)"); count != 1 {
 		t.Fatalf("query lowers comment content %d times, want exactly once:\n%s", count, query)
@@ -130,7 +131,7 @@ func TestBuildSearchQuery_LowersCommentContentOnce(t *testing.T) {
 }
 
 func TestBuildSearchQuery_LowersIssueTextOnceAndSkipsDescriptionForTitleMatches(t *testing.T) {
-	query, _ := buildSearchQuery("Foo Bar Baz", []string{"Foo", "Bar", "Baz"}, 0, false, false, []string{"done", "cancelled"})
+	query, _ := buildSearchQuery("Foo Bar Baz", []string{"Foo", "Bar", "Baz"}, 0, false, false, false, []string{"done", "cancelled"})
 	normalizedQuery := strings.Join(strings.Fields(query), " ")
 
 	if count := strings.Count(query, "LOWER(i.title)"); count != 1 {
@@ -182,7 +183,7 @@ func assertSQLBefore(t *testing.T, query, earlier, later string) {
 }
 
 func TestBuildSearchQuery_WithNumber(t *testing.T) {
-	query, args := buildSearchQuery("MUL-42", []string{"MUL-42"}, 42, true, false, []string{"done", "cancelled"})
+	query, args := buildSearchQuery("MUL-42", []string{"MUL-42"}, 42, true, false, false, []string{"done", "cancelled"})
 
 	_ = args
 	// Number match should be in WHERE.
@@ -196,7 +197,7 @@ func TestBuildSearchQuery_WithNumber(t *testing.T) {
 }
 
 func TestBuildSearchQuery_IncludeClosed(t *testing.T) {
-	query, _ := buildSearchQuery("test", []string{"test"}, 0, false, true, nil)
+	query, _ := buildSearchQuery("test", []string{"test"}, 0, false, true, false, nil)
 
 	if strings.Contains(query, "i.status = ANY(") {
 		t.Error("query should not exclude done/cancelled when includeClosed=true")
@@ -204,7 +205,7 @@ func TestBuildSearchQuery_IncludeClosed(t *testing.T) {
 }
 
 func TestBuildSearchQuery_SpecialChars(t *testing.T) {
-	query, args := buildSearchQuery("100%", []string{"100%"}, 0, false, false, []string{"done", "cancelled"})
+	query, args := buildSearchQuery("100%", []string{"100%"}, 0, false, false, false, []string{"done", "cancelled"})
 
 	_ = query
 	// % should be escaped in the phrase arg.
@@ -323,7 +324,7 @@ func TestExtractSnippet_CJKContent(t *testing.T) {
 // --- Ranking regression tests ---
 
 func TestBuildSearchQuery_CommentRankTiers(t *testing.T) {
-	query, _ := buildSearchQuery("test phrase", []string{"test", "phrase"}, 0, false, false, []string{"done", "cancelled"})
+	query, _ := buildSearchQuery("test phrase", []string{"test", "phrase"}, 0, false, false, false, []string{"done", "cancelled"})
 
 	// Comment phrase match should be tier 7
 	if !strings.Contains(query, "THEN 7") {
@@ -340,7 +341,7 @@ func TestBuildSearchQuery_CommentRankTiers(t *testing.T) {
 }
 
 func TestBuildSearchQuery_DescriptionRankTiers(t *testing.T) {
-	query, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, []string{"done", "cancelled"})
+	query, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, false, []string{"done", "cancelled"})
 
 	// Description phrase match should be tier 5
 	if !strings.Contains(query, "THEN 5") {
@@ -353,7 +354,7 @@ func TestBuildSearchQuery_DescriptionRankTiers(t *testing.T) {
 }
 
 func TestBuildSearchQuery_SingleTermNoAllTermTiers(t *testing.T) {
-	query, _ := buildSearchQuery("html", []string{"html"}, 0, false, false, []string{"done", "cancelled"})
+	query, _ := buildSearchQuery("html", []string{"html"}, 0, false, false, false, []string{"done", "cancelled"})
 
 	// Extract the rank CASE expression (ends with "ELSE 9 END") to avoid
 	// false matches against statusRank which also contains THEN 4/6.
@@ -384,7 +385,7 @@ func TestBuildSearchQuery_SingleTermNoAllTermTiers(t *testing.T) {
 // $4 is buildSearchQuery's canonical workspace_id placeholder (the
 // caller writes wsUUID into args[3] before executing).
 func TestBuildSearchQuery_CommentSubqueryWorkspaceScope(t *testing.T) {
-	singleQuery, _ := buildSearchQuery("html", []string{"html"}, 0, false, false, []string{"done", "cancelled"})
+	singleQuery, _ := buildSearchQuery("html", []string{"html"}, 0, false, false, false, []string{"done", "cancelled"})
 
 	// Candidate-first search aggregates comments in one workspace-first pass;
 	// it must not grow a second scan for eligibility, ranking, or snippets.
@@ -404,7 +405,7 @@ func TestBuildSearchQuery_CommentSubqueryWorkspaceScope(t *testing.T) {
 	}
 
 	// Adding terms adds boolean aggregates, not extra comment relation scans.
-	multiQuery, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, []string{"done", "cancelled"})
+	multiQuery, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, false, []string{"done", "cancelled"})
 	fromCountMulti := strings.Count(multiQuery, "FROM comment c")
 	if fromCountMulti != 1 {
 		t.Errorf("multi-term query has %d comment scans, want exactly one:\n%s", fromCountMulti, multiQuery)
@@ -418,7 +419,7 @@ func TestBuildSearchQuery_CommentSubqueryWorkspaceScope(t *testing.T) {
 }
 
 func TestBuildSearchQuery_HydratesOnlyTheSelectedPage(t *testing.T) {
-	query, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, []string{"done", "cancelled"})
+	query, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, false, []string{"done", "cancelled"})
 
 	if strings.Contains(query, "issue_matches AS MATERIALIZED") {
 		t.Fatalf("issue flag CTE must remain inlineable; forced materialization spills in production:\n%s", query)
@@ -537,6 +538,6 @@ func TestBuildProjectSearchQuery_CancelledDemotedAheadOfRelevance(t *testing.T) 
 // keeps each test's literals independent.
 func buildSearchQueryForTest(t *testing.T, phrase string, terms []string, num int, hasNum bool, includeClosed bool) string {
 	t.Helper()
-	query, _ := buildSearchQuery(phrase, append([]string(nil), terms...), num, hasNum, includeClosed, []string{"done", "cancelled"})
+	query, _ := buildSearchQuery(phrase, append([]string(nil), terms...), num, hasNum, includeClosed, false, []string{"done", "cancelled"})
 	return query
 }

@@ -162,7 +162,7 @@ func TestBuildSearchQuery_CandidateFirstParity(t *testing.T) {
 			legacyArgs[len(legacyArgs)-1] = tt.offset
 
 			candidateQuery, candidateArgs := buildSearchQuery(
-				tt.phrase, append([]string(nil), terms...), tt.queryNum, tt.hasNum, tt.includeClosed, tt.terminalKeys,
+				tt.phrase, append([]string(nil), terms...), tt.queryNum, tt.hasNum, tt.includeClosed, false, tt.terminalKeys,
 			)
 			candidateArgs[3] = testWorkspaceID
 			candidateArgs[len(candidateArgs)-2] = tt.limit
@@ -256,7 +256,7 @@ func runBuiltSearchForParity(t *testing.T, phrase string, includeClosed bool, te
 	t.Helper()
 	terms := splitSearchTerms(phrase)
 	queryNum, hasNum := parseQueryNumber(phrase)
-	query, args := buildSearchQuery(phrase, terms, queryNum, hasNum, includeClosed, terminalKeys)
+	query, args := buildSearchQuery(phrase, terms, queryNum, hasNum, includeClosed, false, terminalKeys)
 	args[3] = testWorkspaceID
 	args[len(args)-2] = limit
 	args[len(args)-1] = offset
@@ -280,6 +280,14 @@ func runLegacySearchForParity(t *testing.T, query string, args []any) []searchPa
 	return runSearchForParity(t, "legacy", query, args)
 }
 
+// runSearchForParity reads the three things parity is about — which issues came
+// back, in what order, and what each match was attributed to — by COLUMN NAME.
+//
+// Scanning positionally would tie this oracle to the projection of both
+// queries, so adding a column to one of them (search grew `triage_state` for
+// include_triage, MUL-7214) would fail a test that has nothing to say about
+// projections. Reading by name keeps the failure signal pointed at ordering and
+// match attribution, which is what the test exists to protect.
 func runSearchForParity(t *testing.T, label, query string, args []any) []searchParityRow {
 	t.Helper()
 	rows, err := testPool.Query(context.Background(), query, args...)
@@ -288,47 +296,54 @@ func runSearchForParity(t *testing.T, label, query string, args []any) []searchP
 	}
 	defer rows.Close()
 
+	column := map[string]int{}
+	for i, field := range rows.FieldDescriptions() {
+		column[string(field.Name)] = i
+	}
+	for _, required := range []string{"id", "match_source", "matched_comment_content"} {
+		if _, ok := column[required]; !ok {
+			t.Fatalf("%s search projection has no %q column", label, required)
+		}
+	}
+
 	var result []searchParityRow
 	for rows.Next() {
-		var sr searchResult
-		if err := rows.Scan(
-			&sr.issue.ID,
-			&sr.issue.WorkspaceID,
-			&sr.issue.Title,
-			&sr.issue.Description,
-			&sr.issue.Status,
-			&sr.issue.Priority,
-			&sr.issue.AssigneeType,
-			&sr.issue.AssigneeID,
-			&sr.issue.CreatorType,
-			&sr.issue.CreatorID,
-			&sr.issue.ParentIssueID,
-			&sr.issue.AcceptanceCriteria,
-			&sr.issue.ContextRefs,
-			&sr.issue.Position,
-			&sr.issue.StartDate,
-			&sr.issue.DueDate,
-			&sr.issue.CreatedAt,
-			&sr.issue.UpdatedAt,
-			&sr.issue.LastActivityAt,
-			&sr.issue.Number,
-			&sr.issue.ProjectID,
-			&sr.issue.Revision,
-			&sr.matchSource,
-			&sr.matchedCommentContent,
-		); err != nil {
-			t.Fatalf("scan %s row: %v", label, err)
+		values, err := rows.Values()
+		if err != nil {
+			t.Fatalf("read %s row: %v", label, err)
 		}
 		result = append(result, searchParityRow{
-			id:                    uuidToString(sr.issue.ID),
-			matchSource:           sr.matchSource,
-			matchedCommentContent: sr.matchedCommentContent,
+			id:                    parityUUID(t, values[column["id"]]),
+			matchSource:           parityString(t, values[column["match_source"]]),
+			matchedCommentContent: parityString(t, values[column["matched_comment_content"]]),
 		})
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("%s rows: %v", label, err)
 	}
 	return result
+}
+
+func parityUUID(t *testing.T, value any) string {
+	t.Helper()
+	switch id := value.(type) {
+	case [16]byte:
+		return uuid.UUID(id).String()
+	case string:
+		return id
+	default:
+		t.Fatalf("unexpected uuid representation %T", value)
+		return ""
+	}
+}
+
+func parityString(t *testing.T, value any) string {
+	t.Helper()
+	text, ok := value.(string)
+	if !ok {
+		t.Fatalf("unexpected text representation %T", value)
+	}
+	return text
 }
 
 // buildLegacySearchQueryForParity is the parent commit's buildSearchQuery copied

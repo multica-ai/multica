@@ -165,6 +165,8 @@ SET unsubscribed_at = now(), opt_out_scope = 'issue'
 WHERE issue_id = $1 AND user_type = $2 AND user_id = $3 AND unsubscribed_at IS NULL;
 
 -- name: UnsubscribeFromIssueSubtree :many
+-- triage: all — a descendant walk has to reach every descendant. It also
+-- cannot meet one: parent_issue_id is locked NULL inside Triage.
 -- Leave an issue AND every descendant in one action. An agent-built tree is
 -- the unit a user actually wants to stop watching; leaving 30 sub-issues one
 -- at a time is not a real escape hatch.

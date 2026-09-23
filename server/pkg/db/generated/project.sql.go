@@ -14,8 +14,11 @@ import (
 const countIssuesByProject = `-- name: CountIssuesByProject :one
 SELECT count(*) FROM issue
 WHERE project_id = $1
+  AND triage_state IS NULL
 `
 
+// Triage entries are proposals, not work: a project's issue count is about
+// what the project actually holds (MUL-7189 §2.4).
 func (q *Queries) CountIssuesByProject(ctx context.Context, projectID pgtype.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countIssuesByProject, projectID)
 	var count int64
@@ -129,6 +132,10 @@ SELECT project_id,
        count(*) FILTER (WHERE status = ANY($1::text[]))::bigint AS done_count
 FROM issue
 WHERE workspace_id = $2::uuid
+  -- A Triage entry's project is part of the proposal, so counting it would
+  -- move a project's progress bar for work nobody has accepted yet
+  -- (MUL-7189 §2.4).
+  AND triage_state IS NULL
   AND project_id = ANY($3::uuid[])
 GROUP BY project_id
 `
