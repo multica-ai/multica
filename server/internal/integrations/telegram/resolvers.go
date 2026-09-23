@@ -316,7 +316,7 @@ func NewTypingNotifier(decrypt Decrypter, apiBase string, client *http.Client, l
 	return &typingNotifier{decrypt: decrypt, apiBase: apiBase, client: client, logger: logger}
 }
 
-func (n *typingNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID) {
+func (n *typingNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID, chatMessageID pgtype.UUID) {
 	row, ok := inst.Platform.(db.ChannelInstallation)
 	if !ok {
 		return
@@ -339,4 +339,5 @@ func (n *typingNotifier) OnIngested(ctx context.Context, inst engine.ResolvedIns
 	}
 }
 
-func (n *typingNotifier) OnSettled(ctx context.Context, sessionID pgtype.UUID) {}
+func (n *typingNotifier) OnSettled(ctx context.Context, sessionID pgtype.UUID, scope engine.TypingSettlement) {
+}

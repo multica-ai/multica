@@ -5,6 +5,14 @@ import (
 	"sync"
 )
 
+// ChannelReactionTarget retains the non-secret cleanup anchor when a transaction
+// deletes the delivery row. It is internal bus metadata, never a client payload.
+type ChannelReactionTarget struct {
+	ChannelType    string
+	InstallationID string
+	MessageID      string
+}
+
 // Event represents a domain event published by handlers or services.
 type Event struct {
 	Type        string // e.g. "issue:created", "inbox:new"
@@ -17,8 +25,9 @@ type Event struct {
 	// event to a more specific scope than `workspace:{WorkspaceID}`. When set
 	// these tell the listener which Redis stream / Hub room to publish on
 	// without re-deserializing Payload. See MUL-1138 phase 1.
-	TaskID        string
-	ChatSessionID string
+	TaskID                string
+	ChatSessionID         string
+	ChannelReactionTarget *ChannelReactionTarget `json:"-"`
 }
 
 // Handler is a function that processes an event.

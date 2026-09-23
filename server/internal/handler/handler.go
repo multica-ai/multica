@@ -305,6 +305,8 @@ type Handler struct {
 	// where the storage backend exists; main.go starts it as an independent
 	// worker goroutine. Nil when no storage backend is configured.
 	ChannelMediaReconciler *service.ChannelMediaReconciler
+	// LarkTyping owns the durable reaction cleanup worker, started under sweepCtx.
+	LarkTyping *lark.TypingIndicatorManager
 	// SlackInstall owns the bring-your-own-app Slack install lifecycle (register
 	// pasted tokens / list / revoke) and the at-rest encryption of each app's bot
 	// + app tokens (MUL-3666). Nil unless MULTICA_SLACK_SECRET_KEY is set.

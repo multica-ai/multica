@@ -216,20 +216,27 @@ func (f *fakeReplier) calls() []Result {
 }
 
 type fakeTyping struct {
-	mu      sync.Mutex
-	count   int
-	settled int
+	settledScope TypingSettlement
+	sequence     []string
+	messageID    pgtype.UUID
+	mu           sync.Mutex
+	count        int
+	settled      int
 }
 
-func (f *fakeTyping) OnIngested(_ context.Context, _ ResolvedInstallation, _ channel.InboundMessage, _ pgtype.UUID) {
+func (f *fakeTyping) OnIngested(_ context.Context, _ ResolvedInstallation, _ channel.InboundMessage, _ pgtype.UUID, chatMessageID pgtype.UUID) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.count++
+	f.messageID = chatMessageID
+	f.sequence = append(f.sequence, "ingested")
 }
-func (f *fakeTyping) OnSettled(_ context.Context, _ pgtype.UUID) {
+func (f *fakeTyping) OnSettled(_ context.Context, _ pgtype.UUID, scope TypingSettlement) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.settled++
+	f.settledScope = scope
+	f.sequence = append(f.sequence, "settled")
 }
 func (f *fakeTyping) calls() int        { f.mu.Lock(); defer f.mu.Unlock(); return f.count }
 func (f *fakeTyping) settledCalls() int { f.mu.Lock(); defer f.mu.Unlock(); return f.settled }
@@ -715,6 +722,12 @@ func TestRouter_Ingested_InTxMark_FinalizeNone(t *testing.T) {
 	if !waitFor(time.Second, func() bool { return h.typing.calls() == 1 }) {
 		t.Fatalf("ingest must show the typing indicator")
 	}
+	h.typing.mu.Lock()
+	messageID := h.typing.messageID
+	h.typing.mu.Unlock()
+	if messageID != h.binder.appendResult.MessageID {
+		t.Fatalf("typing lost persisted input identity: %v", messageID)
+	}
 	// Media resolution runs on its own goroutine (r.mediaWg), and the binding
 	// happens only after it returns, so both of these are downstream of work
 	// that Handle does not wait for. Reading them bare raced with that
@@ -935,8 +948,8 @@ func TestRouter_ContextGenerationsUseIndependentBatchWindows(t *testing.T) {
 	sessionID := h.binder.ensureID
 	initiator := h.ident.id.UserID
 
-	h.router.scheduleRunWithFresh(h.router.sets[channel.TypeFeishu], h.inst.inst, msg, sessionID, initiator, pgtype.UUID{}, 1, false, 1)
-	h.router.scheduleRunWithFresh(h.router.sets[channel.TypeFeishu], h.inst.inst, msg, sessionID, initiator, pgtype.UUID{}, 1, false, 2)
+	h.router.scheduleRunWithFresh(h.router.sets[channel.TypeFeishu], h.inst.inst, msg, sessionID, initiator, pgtype.UUID{}, 1, false, 1, pgtype.UUID{})
+	h.router.scheduleRunWithFresh(h.router.sets[channel.TypeFeishu], h.inst.inst, msg, sessionID, initiator, pgtype.UUID{}, 1, false, 2, pgtype.UUID{})
 	if got := h.router.batcher.pendingCount(); got != 2 {
 		t.Fatalf("pending generation windows = %d, want 2", got)
 	}
@@ -1018,7 +1031,8 @@ func TestRouter_RecoveryDoesNotDelayLiveOlderGeneration(t *testing.T) {
 	h.router.batcher = newTestBatcher(timers)
 	msg := p2pMessage(t)
 	h.router.scheduleRunWithFresh(h.router.sets[channel.TypeFeishu], h.inst.inst, msg,
-		h.binder.ensureID, h.ident.id.UserID, pgtype.UUID{}, 1, false, 1)
+		h.binder.ensureID, h.ident.id.UserID, pgtype.UUID{}, 1, false, 1, pgtype.UUID{},
+	)
 
 	h.binder.appendResult.ContextRevision = 2
 	h.binder.appendResult.PendingContexts = []PendingContext{
@@ -1509,11 +1523,23 @@ func TestRouter_FlushOffline_RepliesAgentOffline(t *testing.T) {
 	}) {
 		t.Fatalf("agent-no-runtime must emit an AgentOffline reply")
 	}
-	// The reaction was added on ingest but no task will run, so the bus-driven
-	// clear never fires — the flush must clear the typing indicator itself.
+	// Inline failed enqueue precedes the detached ingestion hook. Its persisted
+	// settlement boundary must suppress that later Add without a task event.
 	if !waitFor(time.Second, func() bool { return h.typing.settledCalls() == 1 }) {
 		t.Fatalf("offline flush must clear the typing indicator, got %d OnSettled calls", h.typing.settledCalls())
 	}
+	if !waitFor(time.Second, func() bool { return h.typing.calls() == 1 }) {
+		t.Fatal("detached ingestion hook did not run")
+	}
+	h.typing.mu.Lock()
+	defer h.typing.mu.Unlock()
+	if h.typing.settledScope.ThroughMessageID != h.binder.appendResult.MessageID || h.typing.settledScope.WorkspaceID != h.inst.inst.WorkspaceID || h.typing.settledScope.InstallationID != h.inst.inst.ID {
+		t.Fatalf("failed flush lost its durable input boundary: %+v", h.typing.settledScope)
+	}
+	if len(h.typing.sequence) != 2 || h.typing.sequence[0] != "settled" || h.typing.sequence[1] != "ingested" {
+		t.Fatalf("unexpected inline flush/async Add ordering: %+v", h.typing.sequence)
+	}
+
 }
 
 func TestRouter_FlushArchived_ClearsTyping(t *testing.T) {

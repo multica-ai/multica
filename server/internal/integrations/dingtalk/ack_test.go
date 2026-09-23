@@ -52,10 +52,10 @@ func TestAckNotifierClearsSessionWithoutMarkingOtherInputsDone(t *testing.T) {
 	ctx := context.Background()
 	sid := sessionUUID(1)
 	inst := engine.ResolvedInstallation{ID: sessionUUID(9)}
-	n.OnIngested(ctx, inst, groupReactionMessage("a"), sid)
-	n.OnIngested(ctx, inst, groupReactionMessage("b"), sid)
-	n.OnIngested(ctx, inst, groupReactionMessage("other"), sessionUUID(2))
-	n.OnSettled(ctx, sid)
+	n.OnIngested(ctx, inst, groupReactionMessage("a"), sid, sid)
+	n.OnIngested(ctx, inst, groupReactionMessage("b"), sid, sid)
+	n.OnIngested(ctx, inst, groupReactionMessage("other"), sessionUUID(2), sessionUUID(2))
+	n.OnSettled(ctx, sid, engine.TypingSettlement{})
 	n.client.rememberReplySource(inst.ID, sessionUUID(10), sid, groupReactionMessage("a"))
 	n.OnReplyDelivered(ctx, inst, sessionUUID(10))
 	want := []string{"add:a:收到", "add:b:收到", "add:other:收到", "recall:a:收到", "recall:b:收到", "add:a:Done"}
@@ -67,8 +67,8 @@ func TestAckNotifierDuplicateIngestDoesNotDuplicateReaction(t *testing.T) {
 	n, actions := newTestAck(time.Now)
 	ctx := context.Background()
 	sid := sessionUUID(1)
-	n.OnIngested(ctx, engine.ResolvedInstallation{}, groupReactionMessage("a"), sid)
-	n.OnIngested(ctx, engine.ResolvedInstallation{}, groupReactionMessage("a"), sid)
+	n.OnIngested(ctx, engine.ResolvedInstallation{}, groupReactionMessage("a"), sid, sid)
+	n.OnIngested(ctx, engine.ResolvedInstallation{}, groupReactionMessage("a"), sid, sid)
 	if len(*actions) != 1 {
 		t.Fatalf("duplicate reactions: %v", *actions)
 	}
@@ -85,10 +85,10 @@ func TestAckNotifierFailedAddStillAttemptsBoundedRecall(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	sid := sessionUUID(1)
-	n.OnIngested(ctx, engine.ResolvedInstallation{}, groupReactionMessage("a"), sid)
+	n.OnIngested(ctx, engine.ResolvedInstallation{}, groupReactionMessage("a"), sid, sid)
 	cancel()
-	n.OnSettled(ctx, sid)
-	n.OnSettled(context.Background(), sid)
+	n.OnSettled(ctx, sid, engine.TypingSettlement{})
+	n.OnSettled(context.Background(), sid, engine.TypingSettlement{})
 	if calls != 2 || len(n.active) != 0 {
 		t.Fatalf("calls=%d active=%d", calls, len(n.active))
 	}
@@ -117,14 +117,14 @@ func TestAckNotifierRecallsAddThatFinishesAfterClear(t *testing.T) {
 	sid := sessionUUID(1)
 	go func() {
 		defer close(done)
-		n.OnIngested(context.Background(), engine.ResolvedInstallation{}, groupReactionMessage("a"), sid)
+		n.OnIngested(context.Background(), engine.ResolvedInstallation{}, groupReactionMessage("a"), sid, sid)
 	}()
 	select {
 	case <-started:
 	case <-time.After(time.Second):
 		t.Fatal("add did not start")
 	}
-	n.OnSettled(context.Background(), sid)
+	n.OnSettled(context.Background(), sid, engine.TypingSettlement{})
 	close(release)
 	select {
 	case <-done:
@@ -139,9 +139,9 @@ func TestAckNotifierRecallsAddThatFinishesAfterClear(t *testing.T) {
 }
 func TestAckNotifierInvalidCoordinatesDoNothing(t *testing.T) {
 	n, actions := newTestAck(time.Now)
-	n.OnIngested(context.Background(), engine.ResolvedInstallation{}, groupReactionMessage("a"), pgtype.UUID{})
-	n.OnIngested(context.Background(), engine.ResolvedInstallation{}, groupReactionMessage(""), sessionUUID(1))
-	n.OnIngested(context.Background(), engine.ResolvedInstallation{}, channel.InboundMessage{MessageID: "a"}, sessionUUID(1))
+	n.OnIngested(context.Background(), engine.ResolvedInstallation{}, groupReactionMessage("a"), pgtype.UUID{}, pgtype.UUID{})
+	n.OnIngested(context.Background(), engine.ResolvedInstallation{}, groupReactionMessage(""), sessionUUID(1), sessionUUID(1))
+	n.OnIngested(context.Background(), engine.ResolvedInstallation{}, channel.InboundMessage{MessageID: "a"}, sessionUUID(1), sessionUUID(1))
 	n.OnReplyDelivered(context.Background(), engine.ResolvedInstallation{}, pgtype.UUID{})
 	if len(*actions) != 0 {
 		t.Fatalf("invalid coordinates sent: %v", *actions)

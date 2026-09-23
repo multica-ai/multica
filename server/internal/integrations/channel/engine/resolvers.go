@@ -50,10 +50,12 @@ const (
 // consumed by the outbound side (OutboundReplier / typing). It mirrors the
 // legacy lark.DispatchResult.
 type Result struct {
-	Outcome              Outcome
-	DropReason           DropReason
-	InstallationID       pgtype.UUID
-	ChatSessionID        pgtype.UUID
+	Outcome        Outcome
+	DropReason     DropReason
+	InstallationID pgtype.UUID
+	ChatSessionID  pgtype.UUID
+	// ChatMessageID identifies this persisted input, including before debounce creates a task.
+	ChatMessageID        pgtype.UUID
 	ChannelBindingID     pgtype.UUID
 	ChannelRouteRevision int64
 	// Sender is the platform-native sender id (e.g. Lark open_id), so the
@@ -381,14 +383,14 @@ type OutboundReplier interface {
 // it.
 type TypingNotifier interface {
 	// OnIngested shows the indicator for a successfully ingested message.
-	OnIngested(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID)
+	OnIngested(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID, chatMessageID pgtype.UUID)
 	// OnSettled clears the indicator for a session whose run trigger produced no
 	// task (agent offline / archived, or an enqueue failure). In that case no
 	// task lifecycle event is ever published, so the platform's own bus-driven
 	// clear (on chat-done / task-failed) would never fire and the indicator would
 	// stick. The Router calls this from the debounced flush. Idempotent: a
 	// session with no indicator is a no-op.
-	OnSettled(ctx context.Context, sessionID pgtype.UUID)
+	OnSettled(ctx context.Context, sessionID pgtype.UUID, scope TypingSettlement)
 }
 
 // ResolverSet is the per-platform bundle the Router runs the pipeline through.
@@ -430,4 +432,11 @@ type TaskEnqueuer interface {
 type SessionReader interface {
 	GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error)
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
+}
+
+// TypingSettlement identifies the failed flush's immutable input boundary.
+// It excludes later arrivals and other context generations in the same session.
+type TypingSettlement struct {
+	WorkspaceID, InstallationID, ThroughMessageID pgtype.UUID
+	ContextRevision                               int64
 }

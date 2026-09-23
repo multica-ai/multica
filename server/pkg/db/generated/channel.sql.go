@@ -1987,6 +1987,59 @@ func (q *Queries) GetChannelUserBindingByUserID(ctx context.Context, arg GetChan
 	return i, err
 }
 
+const isChannelMessageTypingActive = `-- name: IsChannelMessageTypingActive :one
+SELECT EXISTS (
+    SELECT 1 FROM chat_message AS message
+    JOIN chat_session AS session ON session.id = message.chat_session_id
+    JOIN channel_chat_session_binding AS binding ON binding.chat_session_id = session.id
+    JOIN channel_installation AS installation ON installation.id = binding.installation_id
+    LEFT JOIN agent_task_queue AS task ON task.id = message.task_id
+    LEFT JOIN agent AS task_agent ON task_agent.id = task.agent_id
+    WHERE message.id = $1
+      AND session.id = $2
+      AND session.workspace_id = $3
+      AND installation.workspace_id = $3
+      AND installation.id = $4
+      AND installation.channel_type = $5
+      AND binding.channel_type = $5
+      AND installation.status = 'active'
+      AND session.status = 'active'
+      AND binding.retired_at IS NULL
+      AND message.role = 'user'
+      AND message.channel_ingested
+      AND NOT message.channel_typing_settled
+      AND (message.task_id IS NULL OR (
+          task_agent.workspace_id = $3
+          AND task.chat_session_id = session.id
+          AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+      ))
+)
+`
+
+type IsChannelMessageTypingActiveParams struct {
+	MessageID      pgtype.UUID `json:"message_id"`
+	ChatSessionID  pgtype.UUID `json:"chat_session_id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	InstallationID pgtype.UUID `json:"installation_id"`
+	ChannelType    string      `json:"channel_type"`
+}
+
+// Revalidate the exact input after a remote reaction Add. A pending debounce
+// input has no task yet; a sealed input follows its immutable owning task.
+// Do not use the binding's latest message or another turn's active task.
+func (q *Queries) IsChannelMessageTypingActive(ctx context.Context, arg IsChannelMessageTypingActiveParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isChannelMessageTypingActive,
+		arg.MessageID,
+		arg.ChatSessionID,
+		arg.WorkspaceID,
+		arg.InstallationID,
+		arg.ChannelType,
+	)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listActiveChannelInstallations = `-- name: ListActiveChannelInstallations :many
 SELECT ci.id, ci.workspace_id, ci.agent_id, ci.channel_type, ci.config, ci.status, ci.ws_lease_token, ci.ws_lease_expires_at, ci.installer_user_id, ci.installed_at, ci.created_at, ci.updated_at FROM channel_installation ci
 JOIN workspace w ON w.id = ci.workspace_id

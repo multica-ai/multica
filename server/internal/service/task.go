@@ -2720,11 +2720,20 @@ func (s *TaskService) CancelTasksByTriggerComment(ctx context.Context, commentID
 // showing a run that no longer exists. Each caller already knows the workspace
 // — it is the one whose session, member or runtime is being torn down — so the
 // lookup is not needed and cannot fail.
-func (s *TaskService) BroadcastCancelledTasks(ctx context.Context, workspaceID string, cancelled []db.AgentTaskQueue) {
+//
+// reactionTargets optionally carries anchors captured before deleting the
+// channel delivery rows. They stay on the internal event, outside its payload.
+func (s *TaskService) BroadcastCancelledTasks(ctx context.Context, workspaceID string, cancelled []db.AgentTaskQueue, reactionTargets ...map[string]*events.ChannelReactionTarget) {
 	for _, t := range cancelled {
 		s.captureTaskCancelled(ctx, t)
 		s.ReconcileAgentStatus(ctx, t.AgentID)
-		s.publishTaskEvent(protocol.EventTaskCancelled, workspaceID, t)
+		if workspaceID != "" {
+			e := taskEvent(protocol.EventTaskCancelled, workspaceID, t)
+			if len(reactionTargets) > 0 {
+				e.ChannelReactionTarget = reactionTargets[0][util.UUIDToString(t.ID)]
+			}
+			s.Bus.Publish(e)
+		}
 	}
 	s.notifyTasksFinished(cancelled)
 }

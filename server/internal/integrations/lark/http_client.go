@@ -1002,6 +1002,81 @@ func (c *httpAPIClient) DeleteMessageReaction(ctx context.Context, p DeleteReact
 	return nil
 }
 
+// larkListReactionsMaxPageSize is Lark's page-size cap for the message
+// reaction list endpoint.
+const larkListReactionsMaxPageSize = 50
+
+// larkListReactionsMaxPages bounds the pagination loop. A Typing badge is a
+// handful of reactions at most; the bound only exists so a misbehaving
+// has_more cannot turn the sweep into an unbounded poll loop on the
+// synchronous bus-delivery path.
+const larkListReactionsMaxPages = 10
+
+// ListMessageReactions lists the reactions on a message via
+// GET /open-apis/im/v1/messages/{message_id}/reactions, optionally filtered
+// server-side by emoji type (Lark's reaction_type query parameter). All pages
+// are followed (bounded by larkListReactionsMaxPages) so the caller sees every
+// reaction, not just the first window.
+func (c *httpAPIClient) ListMessageReactions(ctx context.Context, p ListMessageReactionsParams) ([]MessageReaction, error) {
+	if p.MessageID == "" {
+		return nil, errors.New("lark http client: missing message_id")
+	}
+	base := "/open-apis/im/v1/messages/" + url.PathEscape(p.MessageID) + "/reactions"
+
+	var out []MessageReaction
+	pageToken := ""
+	for page := 0; page < larkListReactionsMaxPages; page++ {
+		q := url.Values{}
+		q.Set("page_size", strconv.Itoa(larkListReactionsMaxPageSize))
+		if p.EmojiType != "" {
+			q.Set("reaction_type", p.EmojiType)
+		}
+		if pageToken != "" {
+			q.Set("page_token", pageToken)
+		}
+		var resp struct {
+			Code int    `json:"code"`
+			Msg  string `json:"msg"`
+			Data struct {
+				Items []struct {
+					ReactionID string `json:"reaction_id"`
+					Operator   struct {
+						OperatorType string `json:"operator_type"`
+						OperatorID   string `json:"operator_id"`
+					} `json:"operator"`
+					ReactionType struct {
+						EmojiType string `json:"emoji_type"`
+					} `json:"reaction_type"`
+				} `json:"items"`
+				HasMore   bool   `json:"has_more"`
+				PageToken string `json:"page_token"`
+			} `json:"data"`
+		}
+		if err := c.doAuthedJSON(ctx, p.InstallationID, http.MethodGet, base+"?"+q.Encode(), nil, &resp); err != nil {
+			return nil, fmt.Errorf("lark http client: list message reactions: %w", err)
+		}
+		if resp.Code != 0 {
+			if isTokenError(resp.Code) {
+				c.invalidateToken(p.InstallationID.AppID)
+			}
+			return nil, fmt.Errorf("lark http client: list message reactions: code=%d msg=%q", resp.Code, resp.Msg)
+		}
+		for _, it := range resp.Data.Items {
+			out = append(out, MessageReaction{
+				ReactionID:   it.ReactionID,
+				OperatorType: it.Operator.OperatorType,
+				OperatorID:   it.Operator.OperatorID,
+				EmojiType:    it.ReactionType.EmojiType,
+			})
+		}
+		if !resp.Data.HasMore || resp.Data.PageToken == "" {
+			return out, nil
+		}
+		pageToken = resp.Data.PageToken
+	}
+	return out, nil
+}
+
 // BatchGetUsers resolves user open_ids to display names via
 // GET /open-apis/contact/v3/users/batch?user_ids=…&user_id_type=open_id.
 // It mirrors fetchBotUnionID's single-user contact lookup, batched. Only

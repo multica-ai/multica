@@ -274,7 +274,7 @@ func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 		go func() {
 			tctx, cancel := context.WithTimeout(context.Background(), r.replyTimeout)
 			defer cancel()
-			set.Typing.OnIngested(tctx, inst, msg, res.ChatSessionID)
+			set.Typing.OnIngested(tctx, inst, msg, res.ChatSessionID, res.ChatMessageID)
 		}()
 	}
 	r.scheduleReply(set, inst, msg, res)
@@ -544,6 +544,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		Outcome:              OutcomeIngested,
 		InstallationID:       inst.ID,
 		ChatSessionID:        sessionID,
+		ChatMessageID:        appendRes.MessageID,
 		ChannelBindingID:     appendRes.BindingID,
 		ChannelRouteRevision: appendRes.RouteRevision,
 		Sender:               msg.Source.SenderID,
@@ -654,12 +655,12 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 			if revision == appendRes.ContextRevision {
 				r.scheduleRunWithFresh(
 					set, inst, msg, sessionID, identity.UserID,
-					res.ChannelBindingID, res.ChannelRouteRevision, forceFresh, revision,
+					res.ChannelBindingID, res.ChannelRouteRevision, forceFresh, revision, appendRes.MessageID,
 				)
 			} else if pending.InitiatorUserID.Valid {
 				r.scheduleRecoveredRun(
 					set, inst, msg, sessionID, pending.InitiatorUserID,
-					res.ChannelBindingID, res.ChannelRouteRevision, revision,
+					res.ChannelBindingID, res.ChannelRouteRevision, revision, appendRes.MessageID,
 				)
 			} else {
 				slog.Warn("skipping recovered channel context without initiator snapshot",
@@ -895,10 +896,11 @@ func (r *Router) scheduleRunWithFresh(
 	routeRevision int64,
 	fresh bool,
 	contextRevision int64,
+	throughMessageID pgtype.UUID,
 ) {
 	r.scheduleRunMode(
 		set, inst, msg, sessionID, initiatorUserID, bindingID,
-		routeRevision, fresh, contextRevision, true,
+		routeRevision, fresh, contextRevision, true, throughMessageID,
 	)
 }
 
@@ -908,10 +910,11 @@ func (r *Router) scheduleRecoveredRun(
 	msg channel.InboundMessage,
 	sessionID, initiatorUserID, bindingID pgtype.UUID,
 	routeRevision, contextRevision int64,
+	throughMessageID pgtype.UUID,
 ) {
 	r.scheduleRunMode(
 		set, inst, msg, sessionID, initiatorUserID, bindingID,
-		routeRevision, false, contextRevision, false,
+		routeRevision, false, contextRevision, false, throughMessageID,
 	)
 }
 
@@ -924,11 +927,12 @@ func (r *Router) scheduleRunMode(
 	fresh bool,
 	contextRevision int64,
 	replace bool,
+	throughMessageID pgtype.UUID,
 ) {
 	if r.batcher == nil {
 		r.flushChatRun(
 			set, inst, msg, sessionID, initiatorUserID, bindingID,
-			routeRevision, fresh, contextRevision,
+			routeRevision, fresh, contextRevision, throughMessageID,
 		)
 		return
 	}
@@ -939,7 +943,7 @@ func (r *Router) scheduleRunMode(
 		// batch key; the pre-boundary flush remains armed independently.
 		r.flushChatRun(
 			set, inst, msg, sessionID, initiatorUserID, bindingID,
-			routeRevision, fresh, contextRevision,
+			routeRevision, fresh, contextRevision, throughMessageID,
 		)
 	}
 	if replace {
@@ -964,6 +968,7 @@ func (r *Router) flushChatRun(
 	routeRevision int64,
 	forceFresh bool,
 	contextRevision int64,
+	throughMessageID pgtype.UUID,
 ) {
 	ctx, cancel := context.WithTimeout(context.Background(), chatRunFlushTimeout)
 	defer cancel()
@@ -972,7 +977,7 @@ func (r *Router) flushChatRun(
 	if err != nil {
 		r.logger.Error("channel router: flush reload chat session failed",
 			"chat_session_id", uuidString(sessionID), "err", err.Error())
-		r.clearTyping(ctx, set, sessionID)
+		r.clearTyping(ctx, set, sessionID, TypingSettlement{WorkspaceID: inst.WorkspaceID, InstallationID: inst.ID, ThroughMessageID: throughMessageID, ContextRevision: contextRevision})
 		return
 	}
 	if _, err := r.tasks.EnqueueChannelChatTask(
@@ -982,7 +987,7 @@ func (r *Router) flushChatRun(
 		// the platform's bus-driven typing clear can never fire. Clear the
 		// indicator here (before any notice) so the "processing" reaction does
 		// not stick on the user's message.
-		r.clearTyping(ctx, set, sessionID)
+		r.clearTyping(ctx, set, sessionID, TypingSettlement{WorkspaceID: inst.WorkspaceID, InstallationID: inst.ID, ThroughMessageID: throughMessageID, ContextRevision: contextRevision})
 		switch {
 		case errors.Is(err, service.ErrChatTaskAgentNoRuntime):
 			r.emitFlushReply(ctx, set, inst, msg, sessionID, bindingID, routeRevision, OutcomeAgentOffline)
@@ -998,9 +1003,9 @@ func (r *Router) flushChatRun(
 // clearTyping asks the platform to drop the "processing" indicator for a session
 // whose flush produced no task run. A nil TypingNotifier (platform without the
 // feature) is a no-op.
-func (r *Router) clearTyping(ctx context.Context, set ResolverSet, sessionID pgtype.UUID) {
+func (r *Router) clearTyping(ctx context.Context, set ResolverSet, sessionID pgtype.UUID, scope TypingSettlement) {
 	if set.Typing != nil {
-		set.Typing.OnSettled(ctx, sessionID)
+		set.Typing.OnSettled(ctx, sessionID, scope)
 	}
 }
 

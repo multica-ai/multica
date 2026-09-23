@@ -605,10 +605,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				patcher.Register(bus)
 
 				// Typing indicator: shows a "processing" reaction on the user's
-				// message while the agent is working, then removes it before the
-				// reply is sent. Best-effort; failures are logged only.
+				// message while the agent is working. Terminal cleanup has its own
+				// budget, with a durable retry worker for failed or missed cleanup.
 				typingIndicator := lark.NewTypingIndicatorManager(larkClient, installSvc, cs, slog.Default())
 				patcher.SetTypingIndicatorManager(typingIndicator)
+				h.LarkTyping = typingIndicator
 
 				// Inbound pipeline seams: lark_inbound_audit logger and the
 				// shared channel-agnostic chat-session service. They back the
