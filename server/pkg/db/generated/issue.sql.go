@@ -1027,6 +1027,32 @@ func (q *Queries) GetIssueTriageState(ctx context.Context, id pgtype.UUID) (pgty
 	return triage_state, err
 }
 
+const issueHasDuplicates = `-- name: IssueHasDuplicates :one
+
+SELECT EXISTS (
+    SELECT 1 FROM issue
+    WHERE workspace_id = $1
+      AND duplicate_of_issue_id = $2::uuid
+      AND status = 'cancelled'
+) AS has_duplicates
+`
+
+type IssueHasDuplicatesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+// A mark only counts while the duplicate is cancelled and its original still
+// exists. Writes keep that true, but a server predating this feature (after a
+// rollback that kept the column) can reopen a duplicate or delete an original
+// without touching the pointer, so every read applies the rule itself.
+func (q *Queries) IssueHasDuplicates(ctx context.Context, arg IssueHasDuplicatesParams) (bool, error) {
+	row := q.db.QueryRow(ctx, issueHasDuplicates, arg.WorkspaceID, arg.IssueID)
+	var has_duplicates bool
+	err := row.Scan(&has_duplicates)
+	return has_duplicates, err
+}
+
 const listChildIssues = `-- name: ListChildIssues :many
 SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id FROM issue
 WHERE parent_issue_id = $1
@@ -1111,6 +1137,70 @@ type ListChildrenByParentsParams struct {
 // creation order as ListChildIssues.
 func (q *Queries) ListChildrenByParents(ctx context.Context, arg ListChildrenByParentsParams) ([]Issue, error) {
 	rows, err := q.db.Query(ctx, listChildrenByParents, arg.WorkspaceID, arg.ParentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.ProjectID,
+			&i.OriginType,
+			&i.OriginID,
+			&i.FirstExecutedAt,
+			&i.StartDate,
+			&i.Metadata,
+			&i.Stage,
+			&i.Properties,
+			&i.Revision,
+			&i.LastActivityAt,
+			&i.TriageState,
+			&i.DuplicateOfIssueID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssueDuplicates = `-- name: ListIssueDuplicates :many
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id FROM issue
+WHERE workspace_id = $1
+  AND duplicate_of_issue_id = $2::uuid
+  AND status = 'cancelled'
+ORDER BY created_at ASC, id ASC
+`
+
+type ListIssueDuplicatesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+func (q *Queries) ListIssueDuplicates(ctx context.Context, arg ListIssueDuplicatesParams) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listIssueDuplicates, arg.WorkspaceID, arg.IssueID)
 	if err != nil {
 		return nil, err
 	}
@@ -1698,6 +1788,55 @@ func (q *Queries) LockIssueForDescriptionUpdate(ctx context.Context, arg LockIss
 	return i, err
 }
 
+const lockIssuesForDuplicateMark = `-- name: LockIssuesForDuplicateMark :many
+SELECT i.id,
+       (i.status = 'cancelled' AND EXISTS (
+           SELECT 1 FROM issue AS original
+           WHERE original.id = i.duplicate_of_issue_id
+             AND original.workspace_id = i.workspace_id
+       ))::boolean AS is_duplicate
+FROM issue AS i
+WHERE i.workspace_id = $1
+  AND i.id = ANY($2::uuid[])
+ORDER BY i.id
+FOR UPDATE OF i
+`
+
+type LockIssuesForDuplicateMarkParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	IssueIds    []pgtype.UUID `json:"issue_ids"`
+}
+
+type LockIssuesForDuplicateMarkRow struct {
+	ID          pgtype.UUID `json:"id"`
+	IsDuplicate bool        `json:"is_duplicate"`
+}
+
+// Locks the issue being marked and its target, in id order, before the mark is
+// validated. Two marks that share an issue (A -> B racing B -> A, or C -> A
+// racing A -> B) then run one after the other, so the second one validates
+// against what the first wrote. A target outside the workspace is not returned.
+// is_duplicate applies the same validity rule as the reads below.
+func (q *Queries) LockIssuesForDuplicateMark(ctx context.Context, arg LockIssuesForDuplicateMarkParams) ([]LockIssuesForDuplicateMarkRow, error) {
+	rows, err := q.db.Query(ctx, lockIssuesForDuplicateMark, arg.WorkspaceID, arg.IssueIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LockIssuesForDuplicateMarkRow{}
+	for rows.Next() {
+		var i LockIssuesForDuplicateMarkRow
+		if err := rows.Scan(&i.ID, &i.IsDuplicate); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markIssueFirstExecuted = `-- name: MarkIssueFirstExecuted :one
 UPDATE issue
 SET first_executed_at = now()
@@ -1904,11 +2043,14 @@ WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', 
         $13::uuid AS next_parent_issue_id,
         $14::uuid AS next_project_id,
         $15::integer AS next_stage,
-        -- A duplicate mark only survives a write that leaves an already
-        -- cancelled issue cancelled. Every other write drops it, so reopening
-        -- an issue removes its mark and cancelling it again does not bring the
-        -- mark back. Nothing writes the pointer yet; see the migration.
+        -- A supplied pointer marks the issue (the handler also sets cancelled).
+        -- Otherwise a mark only survives a write that leaves an already
+        -- cancelled issue cancelled. Every other write drops it: reopening is
+        -- how a mark is removed, and re-entering cancelled does not revive a
+        -- pointer that a server predating this rule left on a reopened issue.
         CASE
+            WHEN $16::uuid IS NOT NULL
+                THEN $16::uuid
             WHEN i.status = 'cancelled' AND COALESCE($6::text, i.status) = 'cancelled'
                 THEN i.duplicate_of_issue_id
             ELSE NULL
@@ -1973,21 +2115,22 @@ RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.
 `
 
 type UpdateIssueParams struct {
-	ID               pgtype.UUID   `json:"id"`
-	ExpectedRevision pgtype.Int8   `json:"expected_revision"`
-	SourceTaskID     pgtype.UUID   `json:"source_task_id"`
-	Title            pgtype.Text   `json:"title"`
-	Description      pgtype.Text   `json:"description"`
-	Status           pgtype.Text   `json:"status"`
-	Priority         pgtype.Text   `json:"priority"`
-	AssigneeType     pgtype.Text   `json:"assignee_type"`
-	AssigneeID       pgtype.UUID   `json:"assignee_id"`
-	Position         pgtype.Float8 `json:"position"`
-	StartDate        pgtype.Date   `json:"start_date"`
-	DueDate          pgtype.Date   `json:"due_date"`
-	ParentIssueID    pgtype.UUID   `json:"parent_issue_id"`
-	ProjectID        pgtype.UUID   `json:"project_id"`
-	Stage            pgtype.Int4   `json:"stage"`
+	ID                 pgtype.UUID   `json:"id"`
+	ExpectedRevision   pgtype.Int8   `json:"expected_revision"`
+	SourceTaskID       pgtype.UUID   `json:"source_task_id"`
+	Title              pgtype.Text   `json:"title"`
+	Description        pgtype.Text   `json:"description"`
+	Status             pgtype.Text   `json:"status"`
+	Priority           pgtype.Text   `json:"priority"`
+	AssigneeType       pgtype.Text   `json:"assignee_type"`
+	AssigneeID         pgtype.UUID   `json:"assignee_id"`
+	Position           pgtype.Float8 `json:"position"`
+	StartDate          pgtype.Date   `json:"start_date"`
+	DueDate            pgtype.Date   `json:"due_date"`
+	ParentIssueID      pgtype.UUID   `json:"parent_issue_id"`
+	ProjectID          pgtype.UUID   `json:"project_id"`
+	Stage              pgtype.Int4   `json:"stage"`
+	DuplicateOfIssueID pgtype.UUID   `json:"duplicate_of_issue_id"`
 }
 
 func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue, error) {
@@ -2007,6 +2150,7 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 		arg.ParentIssueID,
 		arg.ProjectID,
 		arg.Stage,
+		arg.DuplicateOfIssueID,
 	)
 	var i Issue
 	err := row.Scan(

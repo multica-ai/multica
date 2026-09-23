@@ -1075,6 +1075,196 @@ func TestRunIssueCreateSendsExistingAttachmentIDs(t *testing.T) {
 	}
 }
 
+// issueCreateAttachmentServer serves the upload + create pair `issue create
+// --attachment` walks, recording the request order so a test can assert the
+// upload happens BEFORE the issue exists. uploadStatus != 200 fails every
+// upload.
+type issueCreateAttachmentServer struct {
+	srv          *httptest.Server
+	uploadStatus int
+	calls        []string
+	createBody   map[string]any
+	uploadNames  []string
+}
+
+func newIssueCreateAttachmentServer(t *testing.T) *issueCreateAttachmentServer {
+	t.Helper()
+	s := &issueCreateAttachmentServer{uploadStatus: http.StatusOK}
+	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/upload-file":
+			s.calls = append(s.calls, "upload")
+			if s.uploadStatus != http.StatusOK {
+				w.WriteHeader(s.uploadStatus)
+				_, _ = w.Write([]byte(`{"error":"storage unavailable"}`))
+				return
+			}
+			file, header, err := r.FormFile("file")
+			if err != nil {
+				t.Errorf("upload without file part: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			defer file.Close()
+			if issueID := r.FormValue("issue_id"); issueID != "" {
+				t.Errorf("upload carried issue_id %q; issue create must upload unbound and bind via attachment_ids", issueID)
+			}
+			name := header.Filename
+			s.uploadNames = append(s.uploadNames, name)
+			id := fmt.Sprintf("att-%d", len(s.uploadNames))
+			contentType := "application/octet-stream"
+			if strings.HasSuffix(name, ".png") {
+				contentType = "image/png"
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":           id,
+				"filename":     name,
+				"content_type": contentType,
+				"url":          "https://storage.example/" + id,
+				"download_url": "/api/attachments/" + id + "/download",
+				"markdown_url": "https://api.example/api/attachments/" + id + "/download",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues":
+			s.calls = append(s.calls, "create")
+			if err := json.NewDecoder(r.Body).Decode(&s.createBody); err != nil {
+				t.Errorf("decode create body: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+				"title":      "With attachments",
+				"status":     "todo",
+				"priority":   "none",
+			})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(s.srv.Close)
+	setCLITestServerEnv(t, s.srv.URL)
+	return s
+}
+
+// writeIssueCreateAttachment writes a file in the current working directory so
+// it passes the MUL-4252 workdir guard.
+func writeIssueCreateAttachment(t *testing.T, name string) string {
+	t.Helper()
+	if err := os.WriteFile(name, []byte("payload"), 0o600); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+	return name
+}
+
+// TestRunIssueCreateAppendsAttachmentReferencesToDescription is the MUL-7600 /
+// #8692 regression: a file passed to `issue create --attachment` was uploaded
+// with an issue_id but never referenced from the description, and an issue
+// renders only the files its description references — so the file existed
+// server-side and appeared nowhere on web, desktop or mobile. The upload must
+// now precede the create and its markdown must land in the description.
+func TestRunIssueCreateAppendsAttachmentReferencesToDescription(t *testing.T) {
+	t.Chdir(t.TempDir())
+	srv := newIssueCreateAttachmentServer(t)
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "With attachments")
+	_ = cmd.Flags().Set("description", "Repro steps below.")
+	_ = cmd.Flags().Set("attachment", writeIssueCreateAttachment(t, "shot.png"))
+	_ = cmd.Flags().Set("attachment", writeIssueCreateAttachment(t, "server.log"))
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+
+	if want := []string{"upload", "upload", "create"}; !slices.Equal(srv.calls, want) {
+		t.Fatalf("request order = %v, want %v (uploads must precede the create so a failure leaves no issue)", srv.calls, want)
+	}
+	desc, _ := srv.createBody["description"].(string)
+	wantImage := "![shot.png](https://api.example/api/attachments/att-1/download)"
+	wantFile := "!file[server.log](https://api.example/api/attachments/att-2/download)"
+	if !strings.Contains(desc, wantImage) {
+		t.Errorf("description missing image reference %q; got %q", wantImage, desc)
+	}
+	if !strings.Contains(desc, wantFile) {
+		t.Errorf("description missing file card reference %q; got %q", wantFile, desc)
+	}
+	if !strings.HasPrefix(desc, "Repro steps below.\n\n") {
+		t.Errorf("description dropped the author's body; got %q", desc)
+	}
+	ids, ok := srv.createBody["attachment_ids"].([]any)
+	if !ok || len(ids) != 2 || ids[0] != "att-1" || ids[1] != "att-2" {
+		t.Fatalf("attachment_ids = %#v, want [att-1 att-2]", srv.createBody["attachment_ids"])
+	}
+}
+
+// TestRunIssueCreateKeepsDescriptionWhenAttachmentIsOnlyFile covers a create
+// with no --description: the snippet alone becomes the description, otherwise
+// the file still has nothing referencing it.
+func TestRunIssueCreateKeepsDescriptionWhenAttachmentIsOnlyFile(t *testing.T) {
+	t.Chdir(t.TempDir())
+	srv := newIssueCreateAttachmentServer(t)
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Screenshot only")
+	_ = cmd.Flags().Set("attachment", writeIssueCreateAttachment(t, "shot.png"))
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+
+	if got, want := srv.createBody["description"], "![shot.png](https://api.example/api/attachments/att-1/download)"; got != want {
+		t.Fatalf("description = %#v, want %q", got, want)
+	}
+}
+
+// TestRunIssueCreateDoesNotDuplicateReferencedAttachment guards the
+// quick-create path: the agent keeps the user's pasted markdown in the
+// description, so appending the same reference again would render one file
+// twice.
+func TestRunIssueCreateDoesNotDuplicateReferencedAttachment(t *testing.T) {
+	t.Chdir(t.TempDir())
+	srv := newIssueCreateAttachmentServer(t)
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Already referenced")
+	_ = cmd.Flags().Set("description", "Before\n\n![shot.png](https://api.example/api/attachments/att-1/download)\n\nAfter")
+	_ = cmd.Flags().Set("attachment", writeIssueCreateAttachment(t, "shot.png"))
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+
+	desc, _ := srv.createBody["description"].(string)
+	if got := strings.Count(desc, "/api/attachments/att-1/download"); got != 1 {
+		t.Fatalf("attachment referenced %d times, want 1; got %q", got, desc)
+	}
+	ids, ok := srv.createBody["attachment_ids"].([]any)
+	if !ok || len(ids) != 1 || ids[0] != "att-1" {
+		t.Fatalf("attachment_ids = %#v, want [att-1] so the referenced file still binds", srv.createBody["attachment_ids"])
+	}
+}
+
+// TestRunIssueCreateFailsBeforeCreateWhenUploadFails pins the new failure
+// shape: the upload runs first, so a storage failure means no issue was
+// created and the caller can retry without duplicating one. The old order
+// created the issue, warned on stderr, and silently lost the file.
+func TestRunIssueCreateFailsBeforeCreateWhenUploadFails(t *testing.T) {
+	t.Chdir(t.TempDir())
+	srv := newIssueCreateAttachmentServer(t)
+	srv.uploadStatus = http.StatusInternalServerError
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Upload fails")
+	_ = cmd.Flags().Set("attachment", writeIssueCreateAttachment(t, "shot.png"))
+	err := runIssueCreate(cmd, nil)
+	if err == nil {
+		t.Fatal("expected upload failure to abort the create")
+	}
+	if !strings.Contains(err.Error(), "no issue created") {
+		t.Errorf("error should tell the caller no issue exists; got %v", err)
+	}
+	if slices.Contains(srv.calls, "create") {
+		t.Fatalf("issue was created despite the failed upload: %v", srv.calls)
+	}
+}
+
 func TestRunIssueCreateShowsDuplicateMessage(t *testing.T) {
 	want := "Active duplicate issue exists: YUA-36 SH-PM-SYNTH-01 Synthesize recommendation-to-shortlist planning outputs (status: in_progress). Set allow_duplicate=true or use --allow-duplicate to create another."
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

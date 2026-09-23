@@ -269,6 +269,11 @@ func (h *Handler) updateIssueWithStatusGuard(ctx context.Context, workspaceID pg
 	var issue db.Issue
 	var cancelledWakeups []db.AgentTaskQueue
 	err := h.runWithIssueStatusGuard(ctx, workspaceID, statusKey, func(q *db.Queries) error {
+		if params.DuplicateOfIssueID.Valid {
+			if err := lockAndCheckDuplicateMark(ctx, q, workspaceID, params.ID, params.DuplicateOfIssueID); err != nil {
+				return err
+			}
+		}
 		var innerErr error
 		issue, cancelledWakeups, innerErr = updateIssueStoppingWakeups(ctx, q, params)
 		return innerErr
@@ -3408,6 +3413,13 @@ type UpdateIssueRequest struct {
 	// predate the handoff UI removal. It is consumed only when this write starts
 	// a run and is never stored on the issue itself.
 	HandoffNote string `json:"handoff_note,omitempty"`
+	// DuplicateOfIssueID marks this issue as a duplicate of another issue in
+	// the same workspace (MUL-7349). A duplicate is an ordinary cancelled issue
+	// that remembers its original, so this also sets status to cancelled.
+	// Any later status change away from cancelled removes the mark; there is
+	// no explicit null. Write-only: read the relation back from
+	// GET /api/issues/{id}/duplicates. Not accepted by batch updates.
+	DuplicateOfIssueID *string `json:"duplicate_of_issue_id,omitempty"`
 }
 
 func mergeIssueChannelMediaDescription(current, incoming string, base *string, attachments []db.Attachment) string {
@@ -3629,6 +3641,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	duplicateOfID, ok := parseDuplicateMark(w, &req, rawFields, prevIssue.ID)
+	if !ok {
+		return
+	}
+
 	// Pre-fill nullable fields (bare sqlc.narg) with current values
 	params := db.UpdateIssueParams{
 		SourceTaskID:  h.wakeupSourceTaskID(r),
@@ -3640,6 +3657,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		ParentIssueID: prevIssue.ParentIssueID,
 		ProjectID:     prevIssue.ProjectID,
 		Stage:         prevIssue.Stage,
+		// Checked against the locked rows in updateIssueWithStatusGuard.
+		DuplicateOfIssueID: duplicateOfID,
 	}
 	if req.ExpectedRevision != nil {
 		if *req.ExpectedRevision < 1 {
@@ -3839,6 +3858,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		if writeIssueStatusRaceError(w, err) {
 			return
 		}
+		if writeDuplicateMarkError(w, err) {
+			return
+		}
 		if errors.Is(err, errIssueFieldConflict) {
 			writeEditConflict(w, "issue", prevIssue.ID)
 			return
@@ -3901,6 +3923,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"prev_description":    textToPtr(prevIssue.Description),
 		"creator_type":        prevIssue.CreatorType,
 		"creator_id":          uuidToString(prevIssue.CreatorID),
+		// The duplicate mark is not on IssueResponse, so both ends of a
+		// change ride here for clients refreshing the two issues' relations.
+		"duplicate_of_issue_id":      uuidToPtr(issue.DuplicateOfIssueID),
+		"prev_duplicate_of_issue_id": uuidToPtr(prevIssue.DuplicateOfIssueID),
 	})
 	if attachmentsChanged {
 		// The full owner snapshot must be admitted before an auxiliary event at
@@ -4341,6 +4367,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	if raw, exists := rawTop["updates"]; exists {
 		json.Unmarshal(raw, &rawUpdates)
 	}
+	if _, ok := rawUpdates["duplicate_of_issue_id"]; ok {
+		writeError(w, http.StatusBadRequest, "duplicate_of_issue_id is not supported in batch updates")
+		return
+	}
 
 	// Short-circuit when no mutation field is present in `updates`. Without
 	// this, the loop below runs N no-op UPDATEs (every if-guard skips, every
@@ -4615,11 +4645,13 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		projectChanged := req.Updates.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
 
 		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
-			"issue":            resp,
-			"assignee_changed": assigneeChanged,
-			"status_changed":   statusChanged,
-			"priority_changed": priorityChanged,
-			"project_changed":  projectChanged,
+			"issue":                      resp,
+			"assignee_changed":           assigneeChanged,
+			"status_changed":             statusChanged,
+			"priority_changed":           priorityChanged,
+			"project_changed":            projectChanged,
+			"duplicate_of_issue_id":      uuidToPtr(issue.DuplicateOfIssueID),
+			"prev_duplicate_of_issue_id": uuidToPtr(prevIssue.DuplicateOfIssueID),
 		})
 
 		// Reassignment does not cancel existing tasks (#4963 / MUL-4113) —

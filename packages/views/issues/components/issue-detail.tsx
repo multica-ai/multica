@@ -12,6 +12,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type React
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink, useBackOrReplace } from "../../navigation";
+import { IssueDuplicateBanner, IssueDuplicatesSection } from "./issue-duplicates";
 import {
   Archive,
   Calendar,
@@ -2323,7 +2324,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
           {/* Core props — always rendered. */}
           <PropRow label={t(($) => $.detail.prop_status)}>
-            <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
+            <StatusPicker
+              status={issue.status}
+              onUpdate={handleUpdateField}
+              align="start"
+              onMarkDuplicate={actions.openMarkDuplicate}
+            />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
@@ -2554,6 +2560,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>}
         </div>
       )}
+
+      <IssueDuplicatesSection issueId={issue.id} />
 
       {/* Pull requests — hidden when the workspace disables the PR sidebar
           (or the GitHub master switch is off). Backend data is kept either
@@ -2899,6 +2907,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             `useStickyComposer`), so it lands here — right where the launcher
             floats — once the reader scrolls to the bottom. */}
         <div className="mx-auto w-full max-w-4xl px-3 py-6 max-md:pb-chat-launcher md:px-8 md:py-8">
+          <IssueDuplicateBanner
+            issue={issue}
+            onUnmark={() => handleUpdateField({ status: "todo" })}
+          />
           {titleLazy.active && (
             <div className={titleLazy.ready ? undefined : "hidden"}>
               <TitleEditor

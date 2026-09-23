@@ -872,6 +872,8 @@
     "agent_bot_connected_label_lark": "Connecté à Lark",
     "agent_bot_manage_link_feishu": "Gérer dans Feishu",
     "agent_bot_manage_link_lark": "Gérer dans Lark",
+    "agent_bot_silent_hint": "Bot connecté mais silencieux ? Vérifiez que l'application envoie les événements via la connexion longue.",
+    "agent_bot_silent_hint_link": "Dépannage",
     "agent_bot_manage_tooltip_feishu": "Ouvrir la page d'application de ce bot dans Feishu — gérer les portées, modifier le nom affiché, demander des permissions supplémentaires.",
     "agent_bot_manage_tooltip_lark": "Ouvrir la page d'application de ce bot dans Lark — gérer les portées, modifier le nom affiché, demander des permissions supplémentaires.",
     "agent_bot_disconnect_tooltip": "Dissocier ce bot Lark de l'agent. Le bot cessera de recevoir les messages Lark.",

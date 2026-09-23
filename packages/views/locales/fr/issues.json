@@ -769,7 +769,8 @@
     "remove_parent_issue": "Retirer la tâche parente",
     "remove_parent_issue_success": "Tâche parente retirée",
     "add_sub_issue": "Ajouter une sous-tâche...",
-    "delete_issue": "Supprimer la tâche"
+    "delete_issue": "Supprimer la tâche",
+    "mark_duplicate": "Marquer comme doublon..."
   },
   "pickers": {
     "custom_property": {
@@ -817,6 +818,9 @@
       "manage_dialog_title": "Gérer les étiquettes",
       "create_action": "Créer",
       "create_failed": "Échec de la création de l'étiquette"
+    },
+    "status": {
+      "mark_duplicate": "Marquer comme doublon..."
     }
   },
   "labels_panel": {
@@ -1069,5 +1073,10 @@
     },
     "hourly": "Réveil chaque heure",
     "today_time": "Aujourd’hui {{time}}"
+  },
+  "duplicates": {
+    "banner_prefix": "Doublon de",
+    "unmark": "Retirer la marque et repasser en À faire",
+    "section_title": "Doublons"
   }
 }

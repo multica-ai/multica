@@ -244,5 +244,13 @@
       "error_unknown": "제출하지 못했습니다. 다시 시도하세요.",
       "sub_issue_of": "{{identifier}}의 하위 태스크"
     }
+  },
+  "mark_duplicate": {
+    "title": "중복으로 표시",
+    "description": "원본 태스크를 검색하세요. 이 태스크는 취소되고 원본 태스크에 연결됩니다.",
+    "toast_success": "{{identifier}}의 중복으로 표시했습니다",
+    "toast_failed": "중복으로 표시하지 못했습니다",
+    "error_target_is_duplicate": "{{identifier}}은(는) 이미 중복입니다. 원본 태스크를 선택하세요",
+    "error_has_duplicates": "다른 태스크가 이 태스크의 중복으로 표시되어 있습니다. 먼저 해당 표시를 해제하세요"
   }
 }

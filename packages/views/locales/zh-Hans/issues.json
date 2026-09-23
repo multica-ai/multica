@@ -738,7 +738,8 @@
     "remove_parent_issue": "移除父任务",
     "remove_parent_issue_success": "已移除父任务",
     "add_sub_issue": "添加子任务...",
-    "delete_issue": "删除任务"
+    "delete_issue": "删除任务",
+    "mark_duplicate": "标记为重复..."
   },
   "pickers": {
     "custom_property": {
@@ -786,6 +787,9 @@
       "manage_dialog_title": "管理标签",
       "create_action": "创建",
       "create_failed": "创建标签失败"
+    },
+    "status": {
+      "mark_duplicate": "标记为重复..."
     }
   },
   "labels_panel": {
@@ -1038,5 +1042,10 @@
     },
     "hourly": "每小时唤醒",
     "today_time": "今天 {{time}}"
+  },
+  "duplicates": {
+    "banner_prefix": "重复于",
+    "unmark": "取消标记并移至待办",
+    "section_title": "重复项"
   }
 }

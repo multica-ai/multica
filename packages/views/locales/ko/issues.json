@@ -738,7 +738,8 @@
     "remove_parent_issue": "상위 태스크 제거",
     "remove_parent_issue_success": "상위 태스크를 제거했습니다",
     "add_sub_issue": "하위 태스크 추가...",
-    "delete_issue": "태스크 삭제"
+    "delete_issue": "태스크 삭제",
+    "mark_duplicate": "중복으로 표시..."
   },
   "pickers": {
     "custom_property": {
@@ -786,6 +787,9 @@
       "manage_dialog_title": "라벨 관리",
       "create_action": "만들기",
       "create_failed": "라벨을 만들지 못했습니다"
+    },
+    "status": {
+      "mark_duplicate": "중복으로 표시..."
     }
   },
   "labels_panel": {
@@ -1038,5 +1042,10 @@
     },
     "hourly": "매시간 깨우기",
     "today_time": "오늘 {{time}}"
+  },
+  "duplicates": {
+    "banner_prefix": "중복 원본:",
+    "unmark": "표시 해제 후 할 일로 이동",
+    "section_title": "중복 항목"
   }
 }

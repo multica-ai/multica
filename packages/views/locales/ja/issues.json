@@ -738,7 +738,8 @@
     "remove_parent_issue": "親タスクを解除",
     "remove_parent_issue_success": "親タスクを解除しました",
     "add_sub_issue": "サブタスクを追加...",
-    "delete_issue": "タスクを削除"
+    "delete_issue": "タスクを削除",
+    "mark_duplicate": "重複としてマーク..."
   },
   "pickers": {
     "custom_property": {
@@ -786,6 +787,9 @@
       "manage_dialog_title": "ラベルを管理",
       "create_action": "作成",
       "create_failed": "ラベルを作成できませんでした"
+    },
+    "status": {
+      "mark_duplicate": "重複としてマーク..."
     }
   },
   "labels_panel": {
@@ -1038,5 +1042,10 @@
     },
     "hourly": "毎時起動",
     "today_time": "今日 {{time}}"
+  },
+  "duplicates": {
+    "banner_prefix": "重複元:",
+    "unmark": "マークを解除して未着手に戻す",
+    "section_title": "重複"
   }
 }

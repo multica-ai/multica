@@ -246,5 +246,13 @@
       "error_unknown": "Échec de l'envoi. Réessayez.",
       "sub_issue_of": "Sous-tâche de {{identifier}}"
     }
+  },
+  "mark_duplicate": {
+    "title": "Marquer comme doublon",
+    "description": "Recherchez la tâche d'origine. Cette tâche sera annulée et liée à celle-ci.",
+    "toast_success": "Marquée comme doublon de {{identifier}}",
+    "toast_failed": "Échec du marquage comme doublon",
+    "error_target_is_duplicate": "{{identifier}} est elle-même un doublon. Choisissez plutôt sa tâche d'origine.",
+    "error_has_duplicates": "D'autres tâches sont marquées comme doublons de celle-ci. Retirez d'abord ces marques."
   }
 }

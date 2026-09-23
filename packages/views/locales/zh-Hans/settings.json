@@ -870,6 +870,8 @@
     "agent_bot_connected_label_lark": "已连接到 Lark",
     "agent_bot_manage_link_feishu": "在飞书中管理",
     "agent_bot_manage_link_lark": "在 Lark 中管理",
+    "agent_bot_silent_hint": "Bot 已连接但不回复？确认应用的事件订阅方式是长连接。",
+    "agent_bot_silent_hint_link": "排查指南",
     "agent_bot_manage_tooltip_feishu": "打开飞书开发者控制台中该 Bot 的应用页面——管理权限、修改名称、申请新的权限范围。",
     "agent_bot_manage_tooltip_lark": "打开 Lark 开发者控制台中该 Bot 的应用页面——管理权限、修改名称、申请新的权限范围。",
     "agent_bot_disconnect_tooltip": "将该飞书 Bot 与智能体解绑，Bot 将停止接收飞书消息。",

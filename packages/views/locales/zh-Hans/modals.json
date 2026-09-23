@@ -244,5 +244,13 @@
       "error_unknown": "提交失败，请重试。",
       "sub_issue_of": "作为 {{identifier}} 的子任务"
     }
+  },
+  "mark_duplicate": {
+    "title": "标记为重复",
+    "description": "搜索原始任务。当前任务会被取消，并关联到它。",
+    "toast_success": "已标记为 {{identifier}} 的重复",
+    "toast_failed": "无法标记为重复",
+    "error_target_is_duplicate": "{{identifier}} 本身是重复任务，请选择它的原始任务",
+    "error_has_duplicates": "已有任务被标记为此任务的重复，请先解除这些标记"
   }
 }

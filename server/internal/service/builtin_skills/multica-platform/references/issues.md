@@ -276,6 +276,10 @@ archived statuses remain readable via an explicit status filter.
   `done` it enqueues no new agent work, but it does **not** stop tasks already in
   flight — a run in progress keeps going. To stop a running task, cancel the
   task itself.
+  A cancelled issue may also be marked as a **duplicate** of another issue
+  (`GET /api/issues/<id>/duplicates` shows both sides). Moving it to any
+  status other than `cancelled` removes the mark, so reopen a duplicate only
+  when it is really separate work.
 - **Failed issue-triggered tasks** may roll an issue from `in_progress` back to
   `todo` when no active task / retry remains — that is the main server-owned
   status write on the agent-run path.

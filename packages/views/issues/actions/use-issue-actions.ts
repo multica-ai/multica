@@ -33,6 +33,7 @@ export interface UseIssueActionsResult {
   openSetParent: () => void;
   removeParent: () => void;
   openAddChild: () => void;
+  openMarkDuplicate: () => void;
   openDeleteConfirm: (opts?: { onDeletedFallbackPath?: string }) => void;
 }
 
@@ -220,6 +221,11 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     openModal("issue-set-parent", { issueId });
   }, [openModal, issueId]);
 
+  const openMarkDuplicate = useCallback(() => {
+    if (!issueId) return;
+    openModal("issue-mark-duplicate", { issueId });
+  }, [openModal, issueId]);
+
   // Detach from the parent and promote to a standalone issue. Reversible
   // (Set parent re-links it), non-destructive, and mirrors the clear-date
   // actions — so it applies directly instead of a confirm modal. `stage`
@@ -292,6 +298,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     openSetParent,
     removeParent,
     openAddChild,
+    openMarkDuplicate,
     openDeleteConfirm,
   };
 }

@@ -244,5 +244,13 @@
       "error_unknown": "送信できませんでした。再試行してください。",
       "sub_issue_of": "{{identifier}} のサブタスク"
     }
+  },
+  "mark_duplicate": {
+    "title": "重複としてマーク",
+    "description": "元のタスクを検索してください。このタスクはキャンセルされ、元のタスクに関連付けられます。",
+    "toast_success": "{{identifier}} の重複としてマークしました",
+    "toast_failed": "重複としてマークできませんでした",
+    "error_target_is_duplicate": "{{identifier}} 自体が重複です。元のタスクを選択してください",
+    "error_has_duplicates": "他のタスクがこのタスクの重複としてマークされています。先にそのマークを解除してください"
   }
 }

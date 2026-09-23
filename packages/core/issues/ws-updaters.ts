@@ -753,12 +753,31 @@ export function invalidatePropertyWindowQueries(qc: QueryClient, wsId: string) {
   });
 }
 
+/**
+ * Refreshes the duplicate relations an issue:updated event touched: the issue
+ * itself and the originals it was marked against before and after the write.
+ */
+export function onIssueDuplicateMarkChanged(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  next: string | null | undefined,
+  prev: string | null | undefined,
+) {
+  if ((next ?? null) === (prev ?? null)) return;
+  for (const id of [issueId, next, prev]) {
+    if (id) qc.invalidateQueries({ queryKey: issueKeys.duplicates(wsId, id) });
+  }
+}
+
 export function onIssueDeleted(
   qc: QueryClient,
   wsId: string,
   issueId: string,
 ) {
   cleanupDeletedIssueCaches(qc, wsId, issueId);
+  // Deleting an original clears its duplicates' marks server-side.
+  qc.invalidateQueries({ queryKey: issueKeys.duplicatesAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });

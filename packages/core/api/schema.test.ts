@@ -911,6 +911,22 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listIssueDuplicates", () => {
+    it("falls back to an empty relation when the body is null", async () => {
+      stubFetchJson(null);
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssueDuplicates("issue-1");
+      expect(res).toEqual({ duplicate_of: null, duplicates: [] });
+    });
+
+    it("defaults missing fields instead of failing", async () => {
+      stubFetchJson({});
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssueDuplicates("issue-1");
+      expect(res).toEqual({ duplicate_of: null, duplicates: [] });
+    });
+  });
+
   describe("getChildIssueProgress", () => {
     it("validates the response before query selectors iterate it", async () => {
       stubFetchJson({ progress: "invalid" });

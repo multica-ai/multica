@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses";
 import type { IssueStatusEntry } from "@multica/core/types";
@@ -110,5 +110,40 @@ describe("StatusPicker trigger color", () => {
     expect(row?.style.color).toBe(trigger?.style.color);
     expect(trigger?.querySelector("line")).not.toBeNull();
     expect(row?.innerHTML).toBe(trigger?.innerHTML);
+  });
+});
+
+describe("StatusPicker mark-as-duplicate action", () => {
+  // Create and batch surfaces must never offer it: an issue that does not
+  // exist yet cannot duplicate anything.
+  it("is absent unless the caller opts in", () => {
+    renderWithI18n(
+      <StatusPicker status="todo" onUpdate={() => {}} open onOpenChange={() => {}} />,
+    );
+    expect(screen.queryByRole("button", { name: "Mark as duplicate..." })).toBeNull();
+  });
+
+  it("is an action beside the options, not another status", () => {
+    const onMarkDuplicate = vi.fn();
+    const onUpdate = vi.fn();
+    const onOpenChange = vi.fn();
+    renderWithI18n(
+      <StatusPicker
+        status="todo"
+        onUpdate={onUpdate}
+        open
+        onOpenChange={onOpenChange}
+        onMarkDuplicate={onMarkDuplicate}
+      />,
+    );
+
+    const action = screen.getByRole("button", { name: "Mark as duplicate..." });
+    // Outside the arrow-key listbox, so keyboard nav and search skip it.
+    expect(action.hasAttribute("data-picker-item")).toBe(false);
+
+    fireEvent.click(action);
+    expect(onMarkDuplicate).toHaveBeenCalledTimes(1);
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });

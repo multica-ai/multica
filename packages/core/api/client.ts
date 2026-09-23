@@ -10,6 +10,7 @@ import type {
   CreateIssueRequest,
   MoveIssueRequest,
   UpdateIssueRequest,
+  IssueDuplicates,
   GroupedIssuesResponse,
   ListIssuesResponse,
   SearchIssuesResponse,
@@ -259,6 +260,7 @@ import {
   SendChatMessageResponseSchema,
   StartMikaOnboardingResponseSchema,
   ChildIssuesResponseSchema,
+  IssueDuplicatesResponseSchema,
   ChildIssueProgressResponseSchema,
   CommentsListSchema,
   CommentTriggerPreviewSchema,
@@ -1451,6 +1453,16 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  async listIssueDuplicates(id: string): Promise<IssueDuplicates> {
+    const raw = await this.fetch<unknown>(`/api/issues/${id}/duplicates`);
+    return parseWithFallback(
+      raw,
+      IssueDuplicatesResponseSchema,
+      { duplicate_of: null, duplicates: [] },
+      { endpoint: "GET /api/issues/:id/duplicates" },
+    );
   }
 
   async listChildIssues(id: string): Promise<{ issues: Issue[] }> {

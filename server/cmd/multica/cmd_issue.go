@@ -626,7 +626,7 @@ func init() {
 	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
-	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
+	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times). Each file is uploaded and its markdown reference is appended to the description, which is what makes it render on the issue page")
 	issueCreateCmd.Flags().StringSlice("attachment-id", nil, "Existing attachment UUID(s) to bind to the created issue (can be specified multiple times)")
 	issueCreateCmd.Flags().StringArray("property", nil, `Set a custom property atomically with creation as "Name=Value" (repeatable, one distinct property per flag). Multi-value properties use comma-separated values inside one flag. Property and option/member names are case-insensitive; UUIDs are accepted. Filter-only __none__, >=, <=, and != forms are rejected.`)
 
@@ -1336,6 +1336,49 @@ func collectLocalAttachments(cmd *cobra.Command, attachments []string) ([]pendin
 	return pending, nil
 }
 
+// appendAttachmentReferences appends the markdown snippet of every uploaded
+// attachment to an issue description, so the file renders on the issue page
+// instead of only existing as a stored row. Each snippet goes in its own
+// paragraph because file cards are block-level. An attachment the description
+// already references is skipped — a caller may have composed the markdown
+// itself (quick-create keeps the user's pasted image inline), and appending it
+// again would render the same file twice.
+func appendAttachmentReferences(description string, attachments []cli.AttachmentResponse) string {
+	snippets := make([]string, 0, len(attachments))
+	for _, att := range attachments {
+		if descriptionReferencesAttachment(description, att) {
+			continue
+		}
+		snippets = append(snippets, attachmentMarkdown(filepath.Base(att.Filename), att.ContentType, att.MarkdownURL))
+	}
+	if len(snippets) == 0 {
+		return description
+	}
+	appended := strings.Join(snippets, "\n\n")
+	if strings.TrimSpace(description) == "" {
+		return appended
+	}
+	return strings.TrimRight(description, "\n") + "\n\n" + appended
+}
+
+// descriptionReferencesAttachment reports whether a description body already
+// points at this attachment. It matches the durable `markdown_url` and the
+// `/api/attachments/<id>` path it is built from rather than the raw storage
+// `url`, which bodies never carry — the same rule the web composers use
+// (`contentReferencesAttachment`).
+func descriptionReferencesAttachment(description string, att cli.AttachmentResponse) bool {
+	if description == "" {
+		return false
+	}
+	if att.MarkdownURL != "" && strings.Contains(description, att.MarkdownURL) {
+		return true
+	}
+	if att.ID != "" && strings.Contains(description, "/api/attachments/"+att.ID) {
+		return true
+	}
+	return false
+}
+
 func appendUniqueStrings(dst []string, values ...string) []string {
 	seen := make(map[string]struct{}, len(dst)+len(values))
 	out := make([]string, 0, len(dst)+len(values))
@@ -1425,7 +1468,6 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 			"Deliver the file itself with `multica issue create --attachment <path>` (repeatable) and drop the link."); err != nil {
 			return err
 		}
-		body["description"] = desc
 	}
 	if statusFlag != "" {
 		body["status"] = statusFlag
@@ -1489,9 +1531,6 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	attachmentIDs = appendUniqueStrings(attachmentIDs, envAttachmentIDs...)
-	if len(attachmentIDs) > 0 {
-		body["attachment_ids"] = attachmentIDs
-	}
 
 	// Pre-validate attachments BEFORE creating the issue so a bad path can
 	// never produce a half-created issue (which would otherwise trigger
@@ -1504,6 +1543,33 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	// Upload BEFORE creating the issue, and append each file's markdown to the
+	// description. A file is visible on an issue only when the description
+	// references it — every other writer honors that (the web create dialog and
+	// the description editor bind exactly what the body references). Uploading
+	// after the create, as this used to, stored the file with an `issue_id` and
+	// left the description untouched, so it rendered nowhere on web, desktop or
+	// mobile (MUL-7600 / #8692). Uploading first also removes the old
+	// partial-success state: a failure here means no issue was created, so the
+	// retry is safe and cannot duplicate.
+	uploaded := make([]cli.AttachmentResponse, 0, len(pending))
+	for _, att := range pending {
+		result, uploadErr := client.UploadIssueAttachment(ctx, att.data, att.path, "")
+		if uploadErr != nil {
+			return fmt.Errorf("upload attachment %s (no issue created): %w", att.path, uploadErr)
+		}
+		uploaded = append(uploaded, result)
+		attachmentIDs = appendUniqueStrings(attachmentIDs, result.ID)
+		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
+	}
+	desc = appendAttachmentReferences(desc, uploaded)
+	if hasDesc || len(uploaded) > 0 {
+		body["description"] = desc
+	}
+	if len(attachmentIDs) > 0 {
+		body["attachment_ids"] = attachmentIDs
+	}
+
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/issues", body, &result); err != nil {
 		if msg, ok := activeDuplicateIssueCreateMessage(err); ok {
@@ -1513,20 +1579,6 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	}
 	if err := verifyIssueCreateProperties(createProperties, result); err != nil {
 		return fmt.Errorf("issue %s was created, but the server did not confirm its custom properties; review it before retrying: %w", issueDisplayKey(result), err)
-	}
-
-	// Upload attachments and link them to the newly created issue.
-	// Failures here are partial-success: the issue exists already, so
-	// turning a non-zero exit on the caller would invite a retry that
-	// duplicates the issue. Warn on stderr and continue.
-	issueID := strVal(result, "id")
-	for _, att := range pending {
-		if _, uploadErr := client.UploadFile(ctx, att.data, att.path, issueID); uploadErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: upload attachment %s failed (issue already created, %s): %v\n",
-				att.path, strVal(result, "identifier"), uploadErr)
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
 
 	output, _ := cmd.Flags().GetString("output")

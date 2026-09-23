@@ -507,6 +507,19 @@ function larkDevConsoleHost(region?: string): string {
     : "https://open.feishu.cn";
 }
 
+// larkDocsUrl points at the Lark/Feishu integration guide, localized the
+// same way as the Telegram and Slack docs links.
+function larkDocsUrl(lang: string | undefined): string {
+  const prefix = lang?.startsWith("zh")
+    ? "/zh"
+    : lang?.startsWith("ja")
+      ? "/ja"
+      : lang?.startsWith("ko")
+        ? "/ko"
+        : "";
+  return `https://multica.ai/docs${prefix}/lark-bot-integration`;
+}
+
 function LarkAgentBotConnectedBadge({
   installation,
   className,
@@ -514,7 +527,7 @@ function LarkAgentBotConnectedBadge({
   installation: LarkInstallation;
   className?: string;
 }) {
-  const { t } = useT("settings");
+  const { t, i18n } = useT("settings");
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const manageHref = `${larkDevConsoleHost(installation.region)}/app/${encodeURIComponent(installation.app_id)}`;
@@ -603,6 +616,23 @@ function LarkAgentBotConnectedBadge({
           ? t(($) => $.lark.agent_bot_manage_link_lark)
           : t(($) => $.lark.agent_bot_manage_link_feishu)}
       </a>
+
+      {/* Row 3: the check a silent Bot almost always needs (#8496). An app
+          whose events go to a request URL instead of the long connection
+          binds fine and shows exactly this badge while receiving nothing,
+          and this row is where someone looks when the Bot stays quiet —
+          the install dialog closes itself a beat after success. */}
+      <p className="text-caption text-muted-foreground">
+        {t(($) => $.lark.agent_bot_silent_hint)}{" "}
+        <a
+          href={larkDocsUrl(i18n.language)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline underline-offset-2 transition-colors hover:text-foreground"
+        >
+          {t(($) => $.lark.agent_bot_silent_hint_link)}
+        </a>
+      </p>
 
       <AlertDialog
         open={confirmOpen}

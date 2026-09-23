@@ -246,5 +246,13 @@
       "error_unknown": "Failed to submit. Try again.",
       "sub_issue_of": "Sub-issue of {{identifier}}"
     }
+  },
+  "mark_duplicate": {
+    "title": "Mark as duplicate",
+    "description": "Search for the original issue. This issue will be cancelled and linked to it.",
+    "toast_success": "Marked as a duplicate of {{identifier}}",
+    "toast_failed": "Failed to mark as duplicate",
+    "error_target_is_duplicate": "{{identifier}} is itself a duplicate. Pick its original instead.",
+    "error_has_duplicates": "Other issues are marked as duplicates of this one. Remove those marks first."
   }
 }

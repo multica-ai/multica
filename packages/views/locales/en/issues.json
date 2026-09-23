@@ -769,7 +769,8 @@
     "remove_parent_issue": "Remove parent issue",
     "remove_parent_issue_success": "Removed parent issue",
     "add_sub_issue": "Add sub-issue...",
-    "delete_issue": "Delete issue"
+    "delete_issue": "Delete issue",
+    "mark_duplicate": "Mark as duplicate..."
   },
   "pickers": {
     "custom_property": {
@@ -817,6 +818,9 @@
       "manage_dialog_title": "Manage labels",
       "create_action": "Create",
       "create_failed": "Failed to create label"
+    },
+    "status": {
+      "mark_duplicate": "Mark as duplicate..."
     }
   },
   "labels_panel": {
@@ -1069,5 +1073,10 @@
     },
     "hourly": "Wake every hour",
     "today_time": "Today {{time}}"
+  },
+  "duplicates": {
+    "banner_prefix": "Duplicate of",
+    "unmark": "Unmark and move to Todo",
+    "section_title": "Duplicates"
   }
 }
