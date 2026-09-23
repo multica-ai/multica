@@ -174,3 +174,50 @@ Workspace repos and project resources are not the same thing:
 Do not add a project resource just because `repo checkout` failed. First
 determine whether the user asked for durable project context or just a task
 checkout.
+
+## Qoder Cloud Agent bridge (PoC)
+
+A server-hosted `qoder-runtime` service can register the `qoder_cloud` provider.
+Bind a Multica agent to the runtime and set its `runtime_config.qoder_agent_id` to the selected QCA Agent ID. The Web/Desktop agent creation form and runtime configuration tab provide a name-based QCA Agent picker.
+The bridge executes issue runs through Qoder's managed session API; it does not
+run a local coding-agent CLI. Model, tools, skills and credentials are configured
+on Qoder. Local-directory resources and Multica execution overrides are rejected.
+
+Each run uses a fresh session, with its ID pinned to the Multica run. The service
+needs persistent state for restart recovery. Cancel from Multica to stop remote
+work; stopping the bridge process alone leaves remote execution running. Do not
+use `runtime update` to upgrade the bridge: deploy its binary through its service
+manager. For setup and recovery, consult the Qoder Cloud Agent section of the
+Multica runtime documentation or ask the deployment administrator.
+
+The bridge registers `runtime_mode=cloud`. Other daemons may omit
+`runtimes[].runtime_mode` to retain local registration; custom CLI profiles
+remain local. `qoder-runtime --config <private-config.json> --check` verifies
+workspace and Qoder resource access without starting execution.
+
+Daemon `/tasks/{taskId}/messages` requests may include an `idempotency_key`
+(maximum 512 bytes) per message. Keys are scoped to a run: repeated keys retain
+the first persisted payload and do not rebroadcast it. Omitted keys preserve
+append-only behavior. The Qoder bridge uses its remote event IDs as these keys.
+
+Qoder Cloud bridge repository runs require `github_token_files` in its private JSON configuration, mapping each GitHub repository URL to a 0600 token file. Credentials are injected only into session creation requests, never into prompts or recovery state. Managed connections also support repository credential configuration in the runtime dialog.
+
+Workspace admins may also configure one managed QCA connection in **Runtimes →
+Add remote runtime → Qoder Cloud Agent** (web and desktop). Server prerequisites are
+`MULTICA_VCS_SECRET_KEY` and persistent `MULTICA_QODER_STATE_DIR`. The server
+supervises the bridge, encrypts credentials in the database, and supports idle
+stop/restart. Active tasks must finish or be cancelled before configuration
+changes. `GET/PUT /api/workspaces/{id}/qoder`, `POST .../qoder/check`, and
+`POST .../qoder/stop` expose this flow; writes/checks are admin-only and no
+credential plaintext is returned. Blank secrets retain saved values; an empty
+`github_tokens` object removes all repository credentials.
+
+
+Managed runtimes store the QCA PAT and selected environment. Entering a PAT loads
+available environments automatically; a single environment is selected by default.
+`POST .../qoder/environments` lists environments using an entered or saved PAT
+(admin-only). `GET .../qoder/agents` lists names and IDs using the saved PAT for
+workspace members. Lists exclude archived resources. Each Multica agent stores its
+own `runtime_config.qoder_agent_id`; each run creates a session using that
+association and the shared runtime's environment. QCA model/tool/skill management
+remains in Qoder.

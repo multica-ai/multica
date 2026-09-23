@@ -170,6 +170,7 @@ var concurrentIndexCleanups = map[string]string{
 	"486_maintenance_job_id_index":                              "idx_maintenance_job_id",
 	"487_maintenance_job_idempotency_index":                     "idx_maintenance_job_idempotency",
 	"488_maintenance_job_active_index":                          "idx_maintenance_job_active",
+	"510_qoder_connection_workspace_index":                      "qoder_connection_workspace_index",
 	"035_task_queue_issue_id_index":                             "idx_agent_task_queue_issue_id",
 	"067_task_queue_claim_candidate_index":                      "idx_agent_task_queue_claim_candidates",
 	"074_task_usage_updated_at_index":                           "idx_task_usage_updated_at",
