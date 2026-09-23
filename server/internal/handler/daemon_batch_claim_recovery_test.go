@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -44,10 +45,8 @@ func TestClaimTasksByRuntime_DeadlineRecoveryOverWebSocket(t *testing.T) {
 
 	h := *testHandler
 	h.Queries = db.New(&expireClaimBuildDB{DBTX: testPool})
-	svc := *testHandler.TaskService
-	h.TaskService = &svc
 	hub := daemonws.NewHub()
-	svc.Wakeup = hub
+	h.TaskService = service.NewTaskService(testHandler.Queries, testPool, testHandler.TaskService.Hub, testHandler.TaskService.Bus, hub)
 	hub.SetRPCHandler(h.DaemonRPCHandler)
 	identity := daemonws.ClientIdentity{
 		DaemonID: batchClaimTestDaemonID, UserID: testUserID,
