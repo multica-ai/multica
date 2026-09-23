@@ -37,6 +37,9 @@ type auditBot struct {
 	forbidEdits            bool
 	sends                  int64
 	edits                  int
+	// uploads counts sendPhoto / sendDocument / … calls: the attachment hop
+	// behind a reply, which must never run twice for one turn.
+	uploads int
 }
 
 func (a *auditBot) serve(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +82,9 @@ func (a *auditBot) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	case "sendPhoto", "sendDocument", "sendVideo", "sendAudio":
+		a.uploads++
+		_, _ = fmt.Fprintf(w, `{"ok":true,"result":{"message_id":%d}}`, 1000+a.uploads)
 	}
 }
 

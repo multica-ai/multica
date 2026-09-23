@@ -18,6 +18,7 @@ import (
 	"mime"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -85,13 +86,40 @@ func (r *mediaResolver) ResolveMedia(ctx context.Context, inst engine.ResolvedIn
 		r.logWarn(msg, fmt.Errorf("decode credentials: %w", err))
 		return msg
 	}
-	ref, err := r.ingest(ctx, inst, chatMessageID, *raw.Media, newBotAPI(r.apiBase, creds.BotToken, r.client))
+	api := newBotAPI(r.apiBase, creds.BotToken, r.client)
+	ref, err := r.ingest(ctx, inst, chatMessageID, *raw.Media, api)
 	if err != nil {
 		r.logWarn(msg, err)
+		r.notifyUnavailable(ctx, api, msg)
 		return msg
 	}
 	msg.MediaRefs = append(msg.MediaRefs, ref)
 	return msg
+}
+
+// notifyUnavailable tells the sender their file did not make it — over
+// Telegram's 20 MB bot download limit, or a failed fetch — so the placeholder
+// the agent is left with is not mistaken for a file it saw. Best effort, on
+// its own short budget: the failure may be the fetch context running out.
+func (r *mediaResolver) notifyUnavailable(ctx context.Context, api *botAPI, msg channel.InboundMessage) {
+	chatID, err := strconv.ParseInt(msg.Source.ChatID, 10, 64)
+	if err != nil {
+		return
+	}
+	var threadID int64
+	if msg.Source.ThreadID != "" {
+		threadID, _ = strconv.ParseInt(msg.Source.ThreadID, 10, 64)
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if _, err := api.SendMessage(ctx, sendMessageParams{
+		ChatID:          chatID,
+		Text:            msgMediaUnavailable,
+		MessageThreadID: threadID,
+		ReplyParameters: optionalReplyParameters(parseMessageRef(msg.MessageID)),
+	}); err != nil {
+		r.logger.Warn("telegram media: unavailable notice failed", "message_id", msg.MessageID, "error", err)
+	}
 }
 
 // ingest carries one file from Telegram to object storage. The intent row goes

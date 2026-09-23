@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -114,9 +115,10 @@ func TestDispatchForwardsPhotoToEngine(t *testing.T) {
 	var handled []channel.InboundMessage
 	c := &telegramChannel{
 		botID: 999, botUsername: "my_bot",
-		api:     newBotAPI("http://127.0.0.1:1", "123:secret", nil),
-		handler: func(_ context.Context, m channel.InboundMessage) error { handled = append(handled, m); return nil },
-		logger:  testLogger(),
+		acceptsMedia: true,
+		api:          newBotAPI("http://127.0.0.1:1", "123:secret", nil),
+		handler:      func(_ context.Context, m channel.InboundMessage) error { handled = append(handled, m); return nil },
+		logger:       testLogger(),
 	}
 	u := Update{UpdateID: 1, Message: &Message{
 		MessageID: 21, From: &User{ID: 3}, Chat: Chat{ID: 42, Type: "private"},
@@ -188,6 +190,8 @@ type fakeBotFiles struct {
 	files        map[string]fakeBotFile // file_id -> file
 	getFileCalls int
 	downloads    []string
+	// notices records the sendMessage calls: the fetch-failure notice.
+	notices []sendMessageParams
 }
 
 type fakeBotFile struct {
@@ -224,6 +228,12 @@ func (f *fakeBotFiles) serve(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		http.NotFound(w, r)
+	case strings.HasSuffix(r.URL.Path, "/sendMessage"):
+		var p sendMessageParams
+		_ = json.NewDecoder(r.Body).Decode(&p)
+		f.notices = append(f.notices, p)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":9,"chat":{"id":42,"type":"private"}}}`))
 	default:
 		http.Error(w, "unexpected "+r.URL.Path, http.StatusTeapot)
 	}
@@ -241,7 +251,7 @@ func mediaResolverFixture(t *testing.T, media *inboundMedia) (engine.ResolvedIns
 	if media != nil {
 		text = media.Placeholder
 	}
-	return inst, chatMessageID, channel.InboundMessage{MessageID: "42:7", Type: channel.MsgTypeText, Text: text, Raw: raw}
+	return inst, chatMessageID, channel.InboundMessage{MessageID: "42:7", Source: channel.Source{ChatID: "42"}, Type: channel.MsgTypeText, Text: text, Raw: raw}
 }
 
 func TestMediaResolverHasMedia(t *testing.T) {
@@ -335,6 +345,7 @@ func TestMediaResolverRefusesFailuresWithoutTouchingStorage(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bot.files["p1"] = fakeBotFile{path: "photos/p1.jpg", data: []byte("x")}
+			before := len(bot.notices)
 			store, ledger := newFakeObjectStore(nil), &fakeMediaLedger{refuse: tc.refuseLedger}
 			r := NewMediaResolver(nil, store, ledger, srv.URL, srv.Client(), testLogger())
 			inst, chatMessageID, msg := mediaResolverFixture(t, tc.media)
@@ -344,6 +355,12 @@ func TestMediaResolverRefusesFailuresWithoutTouchingStorage(t *testing.T) {
 			}
 			if len(store.objects) != 0 || len(ledger.records) != tc.wantLedger {
 				t.Fatalf("uploads=%d ledger=%d", len(store.objects), len(ledger.records))
+			}
+			if len(bot.notices) != before+1 {
+				t.Fatalf("notices = %+v, want one more than %d", bot.notices, before)
+			}
+			if got := bot.notices[before]; got.Text != msgMediaUnavailable || got.ChatID != 42 || got.ReplyParameters == nil || got.ReplyParameters.MessageID != 7 {
+				t.Fatalf("notice = %+v", got)
 			}
 		})
 	}
@@ -473,7 +490,7 @@ func TestSendAttachmentsPicksMethodByContentType(t *testing.T) {
 		"k/shot": []byte("png"), "k/report.pdf": []byte("pdf"), "k/clip.mp4": []byte("mp4"), "k/notes": []byte("txt"),
 	})
 
-	o.sendAttachments(context.Background(), telegramTestUUID(9), telegramTestUUID(8), target)
+	o.deliverAttachments(context.Background(), attachmentReply(target))
 
 	want := []struct{ method, part, filename string }{
 		{"sendPhoto", "photo", "shot.png"},
@@ -501,7 +518,7 @@ func TestSendAttachmentsFallsBackToDocumentOnPhotoRejection(t *testing.T) {
 		attachmentRow(1, "https://cdn.example/k/odd.png", "odd.png", "image/png", 3),
 	}}, map[string][]byte{"k/odd.png": []byte("png")})
 
-	o.sendAttachments(context.Background(), telegramTestUUID(9), telegramTestUUID(8), target)
+	o.deliverAttachments(context.Background(), attachmentReply(target))
 
 	if len(bot.sends) != 2 || bot.sends[0].method != "sendPhoto" || bot.sends[1].method != "sendDocument" || bot.sends[1].filename != "odd.png" {
 		t.Fatalf("sends = %+v", bot.sends)
@@ -519,26 +536,57 @@ func TestSendAttachmentsTellsUserAboutFilesThatDidNotArrive(t *testing.T) {
 		attachmentRow(3, "https://cdn.example/k/refused.pdf", "refused.pdf", "application/pdf", 3),
 	}}, map[string][]byte{"k/ok.png": []byte("png"), "k/refused.pdf": []byte("pdf")})
 
-	o.sendAttachments(context.Background(), telegramTestUUID(9), telegramTestUUID(8), target)
+	o.deliverAttachments(context.Background(), attachmentReply(target))
 
 	if len(bot.sends) != 2 || bot.sends[0].method != "sendPhoto" || bot.sends[1].method != "sendDocument" {
 		t.Fatalf("sends = %+v", bot.sends)
 	}
-	if len(bot.messages) != 1 || bot.messages[0] != attachmentFailedText {
+	if len(bot.messages) != 1 || bot.messages[0] != attachmentNoticeText {
 		t.Fatalf("notice = %q", bot.messages)
 	}
 }
 
-func TestSendAttachmentsDoesNothingWithoutStorageOrRows(t *testing.T) {
+// attachmentReply is a settled reply whose assistant message the fake queries
+// answer for.
+func attachmentReply(target replyTarget) *terminalReply {
+	return &terminalReply{event: events.Event{WorkspaceID: "00000000-0000-0000-0000-000000000008",
+		Payload: protocol.ChatDonePayload{MessageID: "00000000-0000-0000-0000-000000000009"}}, target: &target}
+}
+
+func TestDeliverAttachmentsSpawnsNothingWithoutStorageOrRows(t *testing.T) {
 	bot := &fakeBotUploads{}
 	o, target := newAttachmentOutbound(t, bot, attachmentOnlyQueries{}, nil)
-	o.sendAttachments(context.Background(), telegramTestUUID(9), telegramTestUUID(8), target)
+	o.spawn = func(func()) { t.Fatal("spawned a delivery with nothing to deliver") }
+	o.deliverAttachments(context.Background(), attachmentReply(target))
 
 	o.objects = nil
-	o.deliverAttachments(&terminalReply{event: events.Event{WorkspaceID: "00000000-0000-0000-0000-000000000008",
-		Payload: protocol.ChatDonePayload{MessageID: "00000000-0000-0000-0000-000000000009"}}, target: &target})
+	o.deliverAttachments(context.Background(), attachmentReply(target))
 	if len(bot.sends) != 0 || len(bot.messages) != 0 {
 		t.Fatalf("unexpected traffic: sends=%+v messages=%q", bot.sends, bot.messages)
+	}
+}
+
+// Admission is decided before the spawn: with every slot busy, a reply that
+// has files is shed with the notice rather than parked behind a goroutine.
+func TestDeliverAttachmentsShedsWhenEverySlotIsBusy(t *testing.T) {
+	for range maxConcurrentAttachmentDeliveries {
+		attachmentSlots <- struct{}{}
+	}
+	defer func() {
+		for range maxConcurrentAttachmentDeliveries {
+			<-attachmentSlots
+		}
+	}()
+	bot := &fakeBotUploads{}
+	o, target := newAttachmentOutbound(t, bot, attachmentOnlyQueries{rows: []db.Attachment{
+		attachmentRow(1, "https://cdn.example/k/shot.png", "shot.png", "image/png", 3),
+	}}, map[string][]byte{"k/shot.png": []byte("png")})
+	o.spawn = func(func()) { t.Fatal("a shed delivery must not be spawned") }
+
+	o.deliverAttachments(context.Background(), attachmentReply(target))
+
+	if len(bot.sends) != 0 || len(bot.messages) != 1 || bot.messages[0] != attachmentNoticeText {
+		t.Fatalf("sends=%+v messages=%q", bot.sends, bot.messages)
 	}
 }
 
@@ -632,5 +680,108 @@ func TestEmptyReplyStillDeliversBoundAttachments(t *testing.T) {
 	}
 	if len(bot.sends) != 1 || bot.sends[0].method != "sendDocument" {
 		t.Fatalf("sends = %+v", bot.sends)
+	}
+}
+
+// Without object storage the loop keeps the old contract: media gets the
+// unsupported notice, and never a placeholder the agent cannot see behind.
+func TestDispatchKeepsUnsupportedNoticeWithoutStorage(t *testing.T) {
+	var notices []sendMessageParams
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body sendMessageParams
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		notices = append(notices, body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":7,"chat":{"id":42,"type":"private"}}}`))
+	}))
+	defer srv.Close()
+	c := &telegramChannel{
+		botID: 999, botUsername: "my_bot", api: newBotAPI(srv.URL, "123:secret", srv.Client()),
+		handler: func(context.Context, channel.InboundMessage) error {
+			t.Fatal("media reached the handler without storage")
+			return nil
+		},
+		logger: testLogger(),
+	}
+	u := Update{UpdateID: 1, Message: &Message{
+		MessageID: 21, From: &User{ID: 3}, Chat: Chat{ID: 42, Type: "private"},
+		Caption: "look", Photo: []PhotoSize{{FileID: "p1"}},
+	}}
+	if err := c.dispatch(context.Background(), u); err != nil {
+		t.Fatal(err)
+	}
+	if len(notices) != 1 || notices[0].Text != msgUnsupportedType || notices[0].ReplyParameters == nil || notices[0].ReplyParameters.MessageID != 21 {
+		t.Fatalf("notices = %+v", notices)
+	}
+}
+
+// fileOnlyCompletion is a chat:done with no text and a bound file.
+func fileOnlyCompletion(e events.Event, taskID string) events.Event {
+	done := e
+	done.TaskID = taskID
+	done.WorkspaceID = "00000000-0000-0000-0000-000000000008"
+	done.Payload = protocol.ChatDonePayload{TaskID: taskID, ChatSessionID: e.ChatSessionID, MessageID: "00000000-0000-0000-0000-000000000009"}
+	return done
+}
+
+func enableTestFileDelivery(o *Outbound, q *review8545Queries) {
+	q.routing.attachments = []db.Attachment{attachmentRow(1, "https://cdn.example/k/report.pdf", "report.pdf", "application/pdf", 3)}
+	o.EnableFileDelivery(newFakeObjectStore(map[string][]byte{"k/report.pdf": []byte("pdf")}))
+	o.spawn = func(f func()) { f() }
+}
+
+// A file-only reply whose chat:done arrives twice — a replay, here on another
+// replica — sends its files once: the second close finds the turn ended.
+func TestReview8545PostgresDuplicateEmptyCompletionSendsFilesOnce(t *testing.T) {
+	bot := &auditBot{}
+	a, q, c, e := review8545Setup(t, bot)
+	enableTestFileDelivery(a, q)
+	done := fileOnlyCompletion(e, e.TaskID)
+	a.enqueueTerminalReply(done)
+	auditDrain(t, a, c, done.ChatSessionID)
+
+	b := review8545Second(a)
+	enableTestFileDelivery(b, q)
+	b.enqueueTerminalReply(done)
+	auditDrain(t, b, c, done.ChatSessionID)
+
+	bot.mu.Lock()
+	defer bot.mu.Unlock()
+	if bot.uploads != 1 || len(bot.messages) != 0 {
+		t.Fatalf("uploads=%d messages=%v methods=%v", bot.uploads, bot.messages, bot.methods)
+	}
+}
+
+// A file-only completion belonging to an attempt the retry chain has moved
+// past must not send its files: the retry owns the turn and answers it.
+func TestReview8545PostgresSupersededAttemptDoesNotSendFiles(t *testing.T) {
+	bot := &auditBot{}
+	o, q, c, e := review8545Setup(t, bot)
+	enableTestFileDelivery(o, q)
+	oldTask := e.TaskID
+	retryTask := util.UUIDToString(review8545ID())
+	seedRetryChain(t, oldTask, retryTask)
+
+	// The retry takes the turn and starts streaming.
+	o.handleTaskMessage(telegramPartialEvent(retryTask, "retry streaming"))
+
+	// The attempt it superseded completes late, with a file bound.
+	o.enqueueTerminalReply(fileOnlyCompletion(e, oldTask))
+	auditDrain(t, o, c, e.ChatSessionID)
+
+	retry := e
+	retry.TaskID = retryTask
+	retry.Payload = protocol.ChatDonePayload{TaskID: retryTask, ChatSessionID: e.ChatSessionID, Content: "retry complete answer"}
+	o.enqueueTerminalReply(retry)
+	auditDrain(t, o, c, retry.ChatSessionID)
+
+	review8545MessageCount(t, bot, 1)
+	bot.mu.Lock()
+	defer bot.mu.Unlock()
+	if bot.uploads != 0 {
+		t.Fatalf("superseded attempt sent its files: uploads=%d methods=%v", bot.uploads, bot.methods)
+	}
+	if bot.messages[1] != "retry complete answer" {
+		t.Fatalf("retry's answer not delivered: %q methods=%v", bot.messages[1], bot.methods)
 	}
 }

@@ -340,11 +340,27 @@ func (o *Outbound) settleDelivery(ctx context.Context, lease *deliveryLease, rea
 	}
 }
 
+// closeOutcome is what closeTurn learned about the turn. The two closed
+// outcomes are kept apart because a file-only reply delivers its files from
+// the close: only the call that actually ended the turn may do that, or a
+// duplicate chat:done would send them again.
+type closeOutcome int
+
+const (
+	// closeHeld: a live owner still holds the turn; worth waiting for.
+	closeHeld closeOutcome = iota
+	// closedNow: this call ended the turn.
+	closedNow
+	// closedAlready: settled earlier, or superseded by a later attempt —
+	// closed as far as this attempt is concerned, but not by it.
+	closedAlready
+)
+
 // closeTurn ends a turn with no answer to deliver — cancelled, or completed
 // empty. It creates the row when the turn never reached Telegram at all:
 // without that, a first text frame arriving after the cancellation would find
 // nothing, open a placeholder, and leave it there with nothing to finish it.
-func (o *Outbound) closeTurn(ctx context.Context, target *replyTarget, turn replyTurn, reason string) (bool, error) {
+func (o *Outbound) closeTurn(ctx context.Context, target *replyTarget, turn replyTurn, reason string) (closeOutcome, error) {
 	turnID := turn.id
 	_, err := o.q.CloseChannelReplyDeliveryTurn(ctx, db.CloseChannelReplyDeliveryTurnParams{
 		TurnID:         turnID,
@@ -357,24 +373,27 @@ func (o *Outbound) closeTurn(ctx context.Context, target *replyTarget, turn repl
 		SettledReason:  reason,
 	})
 	if err == nil {
-		return true, nil
+		return closedNow, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return false, err
+		return closeHeld, err
 	}
 	// Settled, superseded, or held by a live owner — only the last is worth
 	// waiting for.
 	current, readErr := o.q.GetChannelReplyDelivery(ctx, turnID)
 	if readErr != nil {
-		return false, readErr
+		return closeHeld, readErr
 	}
 	if turn.depth < current.AttemptDepth {
 		// A later attempt owns this turn. Closing it is not this attempt's to
 		// do, and waiting for the chance would hold the session's queue for a
 		// reply that is already someone else's.
-		return true, nil
+		return closedAlready, nil
 	}
-	return current.Phase == deliveryPhaseSettled, nil
+	if current.Phase == deliveryPhaseSettled {
+		return closedAlready, nil
+	}
+	return closeHeld, nil
 }
 
 // recordContext detaches a write that records what Telegram did from the

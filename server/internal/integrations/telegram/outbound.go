@@ -827,8 +827,8 @@ func (o *Outbound) initializeTerminalReply(ctx context.Context, reply *terminalR
 		// Nothing to deliver — a cancelled run, or a completion with no answer.
 		// The close still has to land: it is what stops a text frame arriving
 		// afterwards from opening a placeholder nothing will ever finish.
-		closed, err := o.closeTurn(ctx, target, reply.turn, reply.settleReason)
-		if err != nil || !closed {
+		outcome, err := o.closeTurn(ctx, target, reply.turn, reply.settleReason)
+		if err != nil || outcome == closeHeld {
 			budget := maxDeliveryAcquireAttempts
 			if err != nil {
 				budget = maxDeliveryClaimErrorAttempts
@@ -841,10 +841,12 @@ func (o *Outbound) initializeTerminalReply(ctx context.Context, reply *terminalR
 			return terminalRequestResult{done: true}
 		}
 		o.clearStream(reply.event)
-		if reply.settleReason == "empty_reply" {
+		if outcome == closedNow && reply.settleReason == "empty_reply" {
 			// The agent may have said nothing and bound a file instead; the
-			// files are then the whole reply.
-			o.deliverAttachments(reply)
+			// files are then the whole reply. Only the call that ended the
+			// turn sends them: a duplicate chat:done, or a completion an
+			// automatic retry has superseded, finds the turn closed already.
+			o.deliverAttachments(ctx, reply)
 		}
 		return terminalRequestResult{done: true}
 	}
@@ -996,7 +998,7 @@ func (o *Outbound) editStreamedReply(ctx context.Context, api *botAPI, reply *te
 	o.recordSend(ctx, reply.lease, false, reply.streamedMessageID, reply.chunkIndex, nil)
 	if reply.chunkIndex == len(reply.chunks) {
 		o.settleDelivery(ctx, reply.lease, "delivered")
-		o.deliverAttachments(reply)
+		o.deliverAttachments(ctx, reply)
 		return terminalRequestResult{done: true}
 	}
 	return terminalRequestResult{retryAt: schedule.lastEdit.Add(editInterval)}
@@ -1053,7 +1055,7 @@ func (o *Outbound) sendReplyChunk(ctx context.Context, api *botAPI, reply *termi
 		o.settleDelivery(ctx, reply.lease, "delivered")
 		// The text is in the chat; the files the agent bound to it follow as
 		// their own messages, off this worker.
-		o.deliverAttachments(reply)
+		o.deliverAttachments(ctx, reply)
 		return terminalRequestResult{done: true}
 	}
 	return terminalRequestResult{retryAt: schedule.lastEdit.Add(editInterval)}

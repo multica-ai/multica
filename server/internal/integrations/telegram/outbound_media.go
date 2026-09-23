@@ -7,11 +7,12 @@ package telegram
 // settled, each as its own sendPhoto / sendDocument / … message (Telegram has
 // no way to embed a file in a text message). Mirrors wecom/outbound_media.go.
 //
-// Ordering and duplicates: delivery starts only from the code path that just
-// settled the turn's reply as delivered (or found it empty), which the
-// delivery lease guarantees happens in exactly one process. A crash mid-way
-// loses the remaining files; nothing resends, because Telegram offers no
-// idempotency key and a duplicate cannot be taken back.
+// Duplicates: delivery starts only from the call that ended the turn — settled
+// it as delivered, or closed it as an empty completion — and the delivery row
+// lets exactly one call do that across replicas, replays and retries; a
+// duplicate chat:done finds the turn already ended and sends nothing. A crash
+// mid-way loses the remaining files; nothing resends, because Telegram offers
+// no idempotency key and a duplicate cannot be taken back.
 
 import (
 	"context"
@@ -23,8 +24,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -35,15 +34,21 @@ import (
 const (
 	maxOutboundPhotoBytes = 10 << 20
 	maxOutboundFileBytes  = 50 << 20
-	attachmentBudget      = 5 * time.Minute
-	// maxConcurrentAttachmentDeliveries bounds how many objects are resident
-	// at once across every chat this process serves.
-	maxConcurrentAttachmentDeliveries = 2
+	// attachmentBudget bounds one reply's whole delivery — every object read
+	// and every upload. Nothing waits on it.
+	attachmentBudget = 5 * time.Minute
+	// maxConcurrentAttachmentDeliveries bounds the deliveries in flight, and
+	// with them the goroutines and the resident bytes (one object at a time
+	// each). Admission is decided before anything is spawned: a reply that
+	// finds every slot busy is shed with the notice, never queued.
+	maxConcurrentAttachmentDeliveries = 4
 )
 
-// attachmentFailedText is said once per reply, after the files that could be
-// sent were sent, so the user is not left waiting for one that is not coming.
-const attachmentFailedText = "⚠️ Some files from this reply could not be sent to Telegram. They are still attached to the reply in Multica."
+// attachmentNoticeText is said once per reply when a file may not have
+// arrived. It has to hold in every ending that leads here — a refused upload,
+// a shed delivery, and a send whose response was lost after Telegram accepted
+// it — so it claims nothing about what did or did not land.
+const attachmentNoticeText = "⚠️ I couldn't confirm that every file from this reply reached Telegram. Anything missing is still attached to the reply in Multica."
 
 // EnableFileDelivery turns on the attachment hop. Call at boot, before
 // Register. Without it — no object storage — replies are text only, and the
@@ -54,9 +59,12 @@ func (o *Outbound) EnableFileDelivery(objects objectStore) {
 
 var attachmentSlots = make(chan struct{}, maxConcurrentAttachmentDeliveries)
 
-// deliverAttachments hands the reply's files to their own goroutine, if this
-// deployment delivers files at all. Called after the words are out.
-func (o *Outbound) deliverAttachments(reply *terminalReply) {
+// deliverAttachments sends the files bound to a reply once its text is in the
+// chat. The lookup runs here, on the terminal worker: a reply with nothing
+// bound — the common case — costs one indexed read and no goroutine, and a
+// delivery is spawned only for files known to exist, under a slot claimed
+// first. Called after the turn is ended, so the lease is no longer held.
+func (o *Outbound) deliverAttachments(ctx context.Context, reply *terminalReply) {
 	if o.objects == nil || reply.target == nil {
 		return
 	}
@@ -68,17 +76,10 @@ func (o *Outbound) deliverAttachments(reply *terminalReply) {
 	if err != nil || !workspaceID.Valid {
 		return
 	}
-	target := *reply.target
-	o.spawn(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), attachmentBudget)
-		defer cancel()
-		o.sendAttachments(ctx, messageID, workspaceID, target)
-	})
-}
-
-// sendAttachments delivers every file bound to one reply. Files are
-// independent: one that fails does not stop the rest.
-func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID pgtype.UUID, target replyTarget) {
+	// Detached from the call budget the text delivery ran under, which may
+	// have just about run out; the read is short and its own.
+	ctx, cancel := o.recordContext(ctx)
+	defer cancel()
 	rows, err := o.q.ListAttachmentsByChatMessage(ctx, db.ListAttachmentsByChatMessageParams{
 		ChatMessageID: messageID, WorkspaceID: workspaceID,
 	})
@@ -89,27 +90,47 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 	if len(rows) == 0 {
 		return
 	}
+	target := *reply.target
 	select {
 	case attachmentSlots <- struct{}{}:
-		defer func() { <-attachmentSlots }()
-	case <-ctx.Done():
-		o.logger.WarnContext(ctx, "telegram outbound: attachment delivery gave up waiting for a slot", "attachments", len(rows))
+	default:
+		// Every slot is uploading. The files are known to exist, so this is
+		// said, not just logged; they stay in Multica.
+		o.logger.WarnContext(ctx, "telegram outbound: attachment delivery shed, every slot busy",
+			"attachments", len(rows), "chat_message_id", uuidText(messageID))
+		o.tellUser(ctx, newBotAPI(o.apiBase, target.botToken, o.client), target)
 		return
 	}
+	o.spawn(func() {
+		defer func() { <-attachmentSlots }()
+		ctx, cancel := context.WithTimeout(context.Background(), attachmentBudget)
+		defer cancel()
+		o.sendAttachments(ctx, rows, target)
+	})
+}
+
+// sendAttachments delivers every file bound to one reply. Files are
+// independent: one that fails does not stop the rest.
+func (o *Outbound) sendAttachments(ctx context.Context, rows []db.Attachment, target replyTarget) {
 	api := newBotAPI(o.apiBase, target.botToken, o.client)
 	failed := 0
 	for _, row := range rows {
 		if err := o.sendAttachment(ctx, api, row, target); err != nil {
 			failed++
-			o.logger.WarnContext(ctx, "telegram outbound: attachment not delivered",
+			o.logger.WarnContext(ctx, "telegram outbound: attachment not confirmed delivered",
 				"error", err, "attachment_id", uuidText(row.ID), "content_type", row.ContentType, "size_bytes", row.SizeBytes)
 		}
 	}
-	if failed == 0 {
-		return
+	if failed > 0 {
+		o.tellUser(ctx, api, target)
 	}
+}
+
+// tellUser puts the notice into the conversation, best effort: every caller
+// is already on a path where something went wrong.
+func (o *Outbound) tellUser(ctx context.Context, api *botAPI, target replyTarget) {
 	if _, err := api.SendMessage(ctx, sendMessageParams{
-		ChatID: target.chatID, Text: attachmentFailedText, MessageThreadID: target.threadID,
+		ChatID: target.chatID, Text: attachmentNoticeText, MessageThreadID: target.threadID,
 	}); err != nil {
 		o.logger.WarnContext(ctx, "telegram outbound: could not tell the user about the file", "error", err)
 	}
@@ -118,8 +139,9 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 // sendAttachment carries one file from object storage into the chat. A photo
 // Telegram refuses to process (a 400 — bad dimensions, an SVG, a PNG it will
 // not convert) is sent again as a document: a 400 means nothing was posted,
-// and a file card beats a dropped image. Any other failure is final, because
-// a lost response may mean the message already landed.
+// and a file card beats a dropped image. Any other error is final, and not a
+// verdict: a lost response may mean the message already landed, which is why
+// nothing here retries and why the notice is worded the way it is.
 func (o *Outbound) sendAttachment(ctx context.Context, api *botAPI, row db.Attachment, target replyTarget) error {
 	if row.SizeBytes > maxOutboundFileBytes {
 		return fmt.Errorf("attachment is %d bytes, over the %d MiB upload limit", row.SizeBytes, maxOutboundFileBytes>>20)

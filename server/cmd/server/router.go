@@ -1203,6 +1203,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				Decrypt:           box.Open,
 				Logger:            slog.Default(),
 				RecentContextSize: telegram.DefaultRecentContextSize,
+				AcceptsMedia:      store != nil,
 			})
 
 			installSvc, ierr := telegram.NewInstallService(queries, pool, box, slog.Default())
