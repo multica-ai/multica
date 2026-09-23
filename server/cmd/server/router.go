@@ -1663,6 +1663,24 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// workspace context.
 		r.Get("/api/attachments/{id}/download", h.DownloadAttachment)
 
+		// Global agents (#8775): agent definitions owned by the user and
+		// enabled per workspace. Account-scoped, so no workspace context; the
+		// handlers check membership of every workspace they touch. Human-only:
+		// an agent must not be able to rewrite agents across workspaces.
+		r.Route("/api/global-agents", func(r chi.Router) {
+			r.Use(handler.RequireHumanActor)
+			r.Get("/", h.ListGlobalAgents)
+			r.Post("/", h.CreateGlobalAgent)
+			r.Route("/{id}", func(r chi.Router) {
+				r.Get("/", h.GetGlobalAgent)
+				r.Put("/", h.UpdateGlobalAgent)
+				r.Delete("/", h.DeleteGlobalAgent)
+				r.Get("/workspaces", h.ListGlobalAgentWorkspaces)
+				r.Post("/workspaces", h.EnableGlobalAgentInWorkspace)
+				r.Delete("/workspaces/{workspaceId}", h.DisableGlobalAgentInWorkspace)
+			})
+		})
+
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
 			r.Post("/", h.CreateWorkspace)
@@ -2202,6 +2220,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/", h.UpdateAgent)
 					r.Post("/archive", h.ArchiveAgent)
 					r.Post("/restore", h.RestoreAgent)
+					// Promotes this agent to a global agent (#8775).
+					r.With(handler.RequireHumanActor).Post("/make-global", h.MakeAgentGlobal)
 					r.Post("/cancel-tasks", h.CancelAgentTasks)
 					r.Get("/tasks", h.ListAgentTasks)
 					r.Get("/dingtalk/groups", h.ListDingTalkGroupsForAgent)

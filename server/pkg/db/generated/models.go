@@ -53,6 +53,7 @@ type Agent struct {
 	DisabledRuntimeSkills []byte      `json:"disabled_runtime_skills"`
 	ServiceTier           pgtype.Text `json:"service_tier"`
 	ConversationStarters  []byte      `json:"conversation_starters"`
+	GlobalAgentID         pgtype.UUID `json:"global_agent_id"`
 }
 
 type AgentBuilderDraft struct {
@@ -762,6 +763,18 @@ type GithubPullRequestCheckSuite struct {
 	Conclusion pgtype.Text        `json:"conclusion"`
 	Status     string             `json:"status"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+type GlobalAgent struct {
+	ID                   pgtype.UUID        `json:"id"`
+	OwnerID              pgtype.UUID        `json:"owner_id"`
+	Name                 string             `json:"name"`
+	Description          string             `json:"description"`
+	Instructions         string             `json:"instructions"`
+	AvatarUrl            pgtype.Text        `json:"avatar_url"`
+	ConversationStarters []byte             `json:"conversation_starters"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 }
 
 type InboxItem struct {

@@ -124,10 +124,16 @@ RETURNING *;
 -- Distinguish "field omitted" (preserve) from "explicit clear" via
 -- ClearAgentComposioToolkitAllowlist below, mirroring the
 -- thinking_level / mcp_config two-query pattern: COALESCE can't restore NULL.
+--
+-- On a copy of a global agent (global_agent_id set) the synced columns —
+-- name, description, avatar_url, instructions, conversation_starters — are
+-- written only by SyncLinkedAgentsFromGlobalAgent. The handler routes those
+-- edits there; the CASE guards keep a write that read the agent before it was
+-- linked from changing one copy on its own.
 UPDATE agent SET
-    name = COALESCE(sqlc.narg('name'), name),
-    description = COALESCE(sqlc.narg('description'), description),
-    avatar_url = COALESCE(sqlc.narg('avatar_url'), avatar_url),
+    name = CASE WHEN global_agent_id IS NULL THEN COALESCE(sqlc.narg('name'), name) ELSE name END,
+    description = CASE WHEN global_agent_id IS NULL THEN COALESCE(sqlc.narg('description'), description) ELSE description END,
+    avatar_url = CASE WHEN global_agent_id IS NULL THEN COALESCE(sqlc.narg('avatar_url'), avatar_url) ELSE avatar_url END,
     runtime_config = COALESCE(sqlc.narg('runtime_config'), runtime_config),
     runtime_mode = COALESCE(sqlc.narg('runtime_mode'), runtime_mode),
     runtime_id = COALESCE(sqlc.narg('runtime_id'), runtime_id),
@@ -135,14 +141,14 @@ UPDATE agent SET
     permission_mode = COALESCE(sqlc.narg('permission_mode'), permission_mode),
     status = COALESCE(sqlc.narg('status'), status),
     max_concurrent_tasks = COALESCE(sqlc.narg('max_concurrent_tasks'), max_concurrent_tasks),
-    instructions = COALESCE(sqlc.narg('instructions'), instructions),
+    instructions = CASE WHEN global_agent_id IS NULL THEN COALESCE(sqlc.narg('instructions'), instructions) ELSE instructions END,
     custom_env = COALESCE(sqlc.narg('custom_env'), custom_env),
     custom_args = COALESCE(sqlc.narg('custom_args'), custom_args),
     mcp_config = COALESCE(sqlc.narg('mcp_config'), mcp_config),
     model = COALESCE(sqlc.narg('model'), model),
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
     service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
-    conversation_starters = COALESCE(sqlc.narg('conversation_starters'), conversation_starters),
+    conversation_starters = CASE WHEN global_agent_id IS NULL THEN COALESCE(sqlc.narg('conversation_starters'), conversation_starters) ELSE conversation_starters END,
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
     updated_at = now()
 WHERE id = $1
