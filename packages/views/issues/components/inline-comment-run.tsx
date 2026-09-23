@@ -136,11 +136,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     && !supplementDraft?.ended;
   const supplementDisabledReason = supplementDraft?.ended
     ? t(($) => $.inline_run.supplement_ended)
-    : task.status !== "running"
-      ? t(($) => $.inline_run.supplement_waiting_start)
-    : task.supplement_capability !== "task-supplement-v1"
-      ? t(($) => $.inline_run.supplement_unsupported)
-      : !task.can_supplement ? t(($) => $.inline_run.supplement_forbidden) : "";
+    : t(($) => $.inline_run.supplement_forbidden);
   useEffect(() => {
     if (supplementDraft && task.status !== "running" && !active) {
       useTaskSupplementDraftStore.getState().markEnded(task.id);

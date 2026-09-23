@@ -24,7 +24,6 @@
     "supplement_placeholder": "Add guidance for this running turn",
     "supplement_send": "Send",
     "supplement_notice": "The agent keeps working on the original goal.",
-    "supplement_waiting_start": "Available after this run starts.",
     "supplement_unsupported": "This run did not negotiate support for additional messages.",
     "supplement_forbidden": "You do not have permission to run this agent.",
     "supplement_ended": "This run has ended. Your text is preserved; start another run explicitly to send it.",

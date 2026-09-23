@@ -24,7 +24,6 @@
     "supplement_placeholder": "Ajouter une consigne à cette exécution",
     "supplement_send": "Envoyer",
     "supplement_notice": "L'agent poursuit l'objectif initial.",
-    "supplement_waiting_start": "Disponible après le démarrage de l'exécution.",
     "supplement_unsupported": "Cette exécution ne prend pas en charge les messages supplémentaires.",
     "supplement_forbidden": "Vous n'êtes pas autorisé à exécuter cet agent.",
     "supplement_ended": "Cette exécution est terminée. Votre texte est conservé ; lancez explicitement une autre exécution pour l'envoyer.",

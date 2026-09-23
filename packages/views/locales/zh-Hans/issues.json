@@ -23,7 +23,6 @@
     "supplement_placeholder": "为本次运行补充纯文字要求",
     "supplement_send": "发送",
     "supplement_notice": "智能体会继续处理原目标。",
-    "supplement_waiting_start": "运行开始后才可补充消息。",
     "supplement_unsupported": "本次运行未协商支持补充消息。",
     "supplement_forbidden": "你无权运行这个智能体。",
     "supplement_ended": "本次运行已结束。输入已保留；如需发送，请显式另起一轮。",
