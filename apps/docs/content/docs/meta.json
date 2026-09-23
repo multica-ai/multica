@@ -29,6 +29,7 @@
     "inbox",
     "---Runtime & execution---",
     "tasks",
+    "interactive-issue-conversations",
     "daemon-runtimes",
     "install-agent-runtime",
     "providers",

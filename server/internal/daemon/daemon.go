@@ -7747,6 +7747,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Repos are passed as metadata only — the agent checks them out on demand
 	// via `multica repo checkout <url>`.
 	taskCtx := execenv.TaskContextForEnv{
+		InteractiveIssue:    interactiveIssueEnabled(task, provider),
 		IssueID:             task.IssueID,
 		TriggerCommentID:    task.TriggerCommentID,
 		TriggerThreadID:     task.TriggerThreadID,
@@ -8664,6 +8665,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ClaudeSettingsPath:     env.ClaudeSettingsPath,
 		QwenpawWorkspace:       env.QwenpawWorkspace,
 	}
+	ctx = withInteractiveIssueRun(ctx, task, provider)
+	if task.RequireSessionResume {
+		if _, interactive := ctx.Value(interactiveRunKey{}).(string); !interactive || execOpts.ResumeSessionID == "" {
+			return TaskResult{}, fmt.Errorf("saved conversation or interactive runtime is unavailable; refusing to start a fresh conversation")
+		}
+		execOpts.RequireSessionResume = true
+	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
 	//   - openclaw is pinned to the task workdir via the per-task config we
@@ -8749,7 +8757,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var retiredSessionID string
 	defer func() { taskResult.RetiredSessionID = retiredSessionID }()
 
-	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
+	_, isInteractiveRun := ctx.Value(interactiveRunKey{}).(string)
+	if !isInteractiveRun && shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
 		firstResult := result
 		firstUsage := result.Usage
 		firstTools := tools
@@ -9256,7 +9265,17 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	agentCtx, agentCancel := context.WithCancel(ctx)
 	defer agentCancel()
 
-	session, err := backend.Execute(agentCtx, prompt, opts)
+	var session *agent.Session
+	var err error
+	if runtimeID, interactive := ctx.Value(interactiveRunKey{}).(string); interactive {
+		liveBackend, supported := backend.(agent.InteractiveBackend)
+		if !supported {
+			return agent.Result{}, 0, fmt.Errorf("runtime does not support interactive issue execution")
+		}
+		session, err = d.startInteractiveExecution(agentCtx, liveBackend, prompt, opts, taskID, runtimeID)
+	} else {
+		session, err = backend.Execute(agentCtx, prompt, opts)
+	}
 	if err != nil {
 		// One provider-agnostic boundary for launches: every backend's
 		// cmd.Start() failure arrives here, so diagnosing ENOEXEC at this point
@@ -9331,6 +9350,16 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			return count
 		}
 	}
+	if session.Control != nil {
+		baseToolCount := watchdogToolCount
+		watchdogToolCount = func() int32 {
+			if session.Control.Snapshot().State == agent.InteractionAwaitingInput {
+				lastActivityAt.Store(time.Now().UnixNano())
+				return 0
+			}
+			return baseToolCount()
+		}
+	}
 	// A backend that can prove its outcome is already decided outranks every
 	// liveness policy below: a run whose terminal result has been read is not a
 	// hang, no matter how long its cleanup then takes.
@@ -9361,6 +9390,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		var pendingType string
 		var pendingAt time.Time
 		var batch []TaskMessageData
+		progressInBatch := map[string]int{}
 		callIDToTool := map[string]string{}
 		// Provider IDs can restart on a same-task retry (for example item_0).
 		// Allocate opaque transcript IDs per execution, including orphan results,
@@ -9419,6 +9449,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			sealPendingLocked()
 			toSend := batch
 			batch = nil
+			progressInBatch = map[string]int{}
 			mu.Unlock()
 
 			if len(toSend) > 0 {
@@ -9545,6 +9576,22 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					})
 					mu.Unlock()
 					flushFirstVisible()
+				case agent.MessageToolProgress:
+					output, truncated := toolOutputPreview(msg.Output)
+					mu.Lock()
+					sealPendingLocked()
+					toolName := msg.Tool
+					if toolName == "" {
+						toolName = callIDToTool[msg.CallID]
+					}
+					callID := transcriptCallID(msg.CallID)
+					if index, exists := progressInBatch[callID]; exists {
+						batch[index].Output, batch[index].OutputTruncated = output, &truncated
+					} else {
+						progressInBatch[callID] = len(batch)
+						batch = append(batch, TaskMessageData{Seq: int(msgSeq.Add(1)), Type: "tool_progress", CallID: callID, Tool: toolName, Output: output, OutputTruncated: &truncated, CreatedAt: observedAt})
+					}
+					mu.Unlock()
 				case agent.MessageToolResult:
 					// Decrement only when the count would stay >= 0. A stray
 					// tool_result with no matching tool_use (backend bug or

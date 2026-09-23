@@ -25,6 +25,8 @@ export interface TraceCallStep {
   tool: string;
   call?: TimelineItem;
   result?: TimelineItem;
+  /** Latest output snapshot; does not make the tool completed. */
+  progress?: TimelineItem;
   startedAt?: string;
   endedAt?: string;
   /** Wall-clock ms between call and result. Undefined when either side is
@@ -113,6 +115,18 @@ export function buildSteps(items: TimelineItem[]): TraceStep[] {
       const queue = open.get(pairingKey);
       if (queue) queue.push(step);
       else open.set(pairingKey, [step]);
+      continue;
+    }
+
+    if (item.type === "tool_progress") {
+      const pending = open.get(pairingKey)?.[0];
+      const progress = { ...item, type: "tool_result" as const };
+      if (pending) pending.progress = progress;
+      else {
+        const step: TraceCallStep = { kind: "call", seq: item.seq, tool: item.tool ?? "", progress, startedAt: item.created_at };
+        steps.push(step);
+        open.set(pairingKey, [step]);
+      }
       continue;
     }
 

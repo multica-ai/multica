@@ -6,6 +6,7 @@ import { useTraceIssueLabels } from "./use-trace-issue-labels";
 import { Virtuoso, type VirtuosoHandle, type Components } from "react-virtuoso";
 import {
   Bot,
+  ArrowLeft,
   Brain,
   CircleAlert,
   CheckCircle2,
@@ -23,6 +24,7 @@ import {
   Terminal,
   Wrench,
   MoreHorizontal,
+  MessageCircle,
   ArrowDownNarrowWide,
   ArrowUpNarrowWide,
   Info,
@@ -32,6 +34,7 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import {
@@ -111,11 +114,13 @@ import "./task-transcript.css";
 // than splitting the surface in two before the reader has asked anything.
 
 interface AgentTranscriptDialogProps {
+  inline?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   task: AgentTask;
   items: TimelineItem[];
   agentName: string;
+  agentNameSlot?: React.ReactNode;
   isLive?: boolean;
   /**
    * Whether focus returns to the trigger when the dialog closes. Pass `true`
@@ -134,6 +139,13 @@ interface AgentTranscriptDialogProps {
    * The dialog stays generic — slot content is the caller's concern.
    */
   headerSlot?: React.ReactNode;
+  headerActions?: React.ReactNode;
+  footerSlot?: React.ReactNode;
+  /** Alternate conversation body; hides log-only inspection chrome. */
+  conversationSlot?: React.ReactNode;
+  /** Keep the run's outcome visible when the alternate body is this run's chat. */
+  showOutcomeInConversation?: boolean;
+  onOpenConversation?: () => void;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -197,7 +209,7 @@ function stepFilterKey(step: TraceStep): TranscriptFilterKey {
 function stepHaystack(step: TraceStep): string {
   if (step.kind !== "call") return (step.item.content ?? "").toLowerCase();
   const input = step.call?.input ? JSON.stringify(step.call.input) : "";
-  return `${step.tool} ${input} ${(step.result?.output ?? "").slice(0, 4000)}`.toLowerCase();
+  return `${step.tool} ${input} ${((step.result ?? step.progress)?.output ?? "").slice(0, 4000)}`.toLowerCase();
 }
 
 function StepIcon({ step, className }: { step: TraceStep; className?: string }) {
@@ -311,15 +323,22 @@ function useCopyFeedback() {
 }
 
 export function AgentTranscriptDialog({
+  inline = false,
   open,
   onOpenChange,
   task,
   items,
   agentName,
+  agentNameSlot,
   isLive = false,
   finalFocus = false,
   headerSlot,
+  headerActions,
+  footerSlot,
   contentState,
+  conversationSlot,
+  showOutcomeInConversation = false,
+  onOpenConversation,
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
   const locale = useLocale();
@@ -865,20 +884,19 @@ export function AgentTranscriptDialog({
     !!usage;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="!max-w-5xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
-        showCloseButton={false}
-        finalFocus={finalFocus}
-      >
-        <DialogTitle className="sr-only">{t(($) => $.transcript.dialog_title)}</DialogTitle>
+    <TranscriptFrame inline={inline} open={open} onOpenChange={onOpenChange} finalFocus={finalFocus}>
+        {inline ? <div className="shrink-0 px-4 py-2">
+          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
+            <ArrowLeft data-icon="inline-start" />{t(($) => $.interaction.back_to_issue)}
+          </Button>
+        </div> : <DialogTitle className="sr-only">{t(($) => $.transcript.dialog_title)}</DialogTitle>}
 
         {/* ── Header: outcome, identity, spend ─────────────────────────
             Everything a viewer needs BEFORE reading: how it ended, who ran
             it, why it exists, how long it took and what it cost. Diagnostics
             stay in the ⓘ popover. */}
         <div className="border-b px-4 py-3 shrink-0">
-          <div className="flex min-w-0 items-center gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
             {statusBadge}
             {/* Primary identity: the agent that ran this. It is the one
                 foreground entity — avatar + medium weight. */}
@@ -890,9 +908,9 @@ export function AgentTranscriptDialog({
                   <Bot className="h-3 w-3" />
                 </div>
               )}
-              <span className="truncate font-medium text-body">
+              {agentNameSlot ?? <span className="truncate font-medium text-body">
                 {agentName || agentInfo?.name || ""}
-              </span>
+              </span>}
             </div>
             {/* Provenance, one muted secondary unit set apart from the agent:
                 who triggered the run and how — reads as "<person> · <how>",
@@ -911,15 +929,10 @@ export function AgentTranscriptDialog({
                 </>
               )}
               <span className="shrink-0">{triggerLabel}</span>
-              {duration && (
-                <>
-                  <FactDot />
-                  <span className="shrink-0 tabular-nums">
-                    {t(($) => $.transcript.fact_took, { duration })}
-                  </span>
-                </>
-              )}
             </div>
+            {duration && <span className="shrink-0 text-caption text-muted-foreground tabular-nums">
+              {t(($) => $.transcript.fact_took, { duration })}
+            </span>}
 
             {/* What this run cost, in the header of the run you are reading —
                 so "why was this one expensive" is answerable without going
@@ -938,6 +951,14 @@ export function AgentTranscriptDialog({
             )}
 
             <div className="flex shrink-0 items-center gap-0.5">
+              {headerActions}
+              {onOpenConversation && <Tooltip>
+                <TooltipTrigger render={<Button variant="ghost" size="icon-sm" className="text-muted-foreground"
+                  aria-label={t(($) => $.interaction.open)} onClick={onOpenConversation}>
+                  <MessageCircle aria-hidden="true" />
+                </Button>} />
+                <TooltipContent side="bottom">{t(($) => $.interaction.open)}</TooltipContent>
+              </Tooltip>}
               {hasRunDetails && (
                 <Popover>
                   <PopoverTrigger
@@ -1074,7 +1095,7 @@ export function AgentTranscriptDialog({
                   </PopoverContent>
                 </Popover>
               )}
-              <Button
+              {!inline && <Button
                 variant="ghost"
                 size="icon-sm"
                 onClick={() => onOpenChange(false)}
@@ -1082,16 +1103,16 @@ export function AgentTranscriptDialog({
                 className="text-muted-foreground"
               >
                 <X className="h-4 w-4" />
-              </Button>
+              </Button>}
             </div>
           </div>
         </div>
 
         {/* ── What the run produced ──────────────────────────────────── */}
-        <RunOutcomeRow outcome={outcome} branch={task.branch_name} />
+        {(!conversationSlot || showOutcomeInConversation) && <RunOutcomeRow outcome={outcome} branch={task.branch_name} />}
 
         {/* ── Where the time went ────────────────────────────────────── */}
-        {lanes && (
+        {!conversationSlot && lanes && (
           <RunTimeline
             lanes={lanes}
             toolKinds={toolKinds}
@@ -1108,7 +1129,7 @@ export function AgentTranscriptDialog({
         )}
 
         {/* ── List toolbar: search left, the two menus right ── */}
-        <div className="flex items-center gap-2 border-b px-4 py-1.5 shrink-0">
+        {!conversationSlot && <div className="flex items-center gap-2 border-b px-4 py-1.5 shrink-0">
           <label className="flex h-7 min-w-0 max-w-xs flex-1 items-center gap-1.5 rounded-md bg-muted px-2 text-caption">
             <Search aria-hidden className="h-3 w-3 shrink-0 text-faint-foreground" />
             <input
@@ -1213,12 +1234,11 @@ export function AgentTranscriptDialog({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        </div>
-
+        </div>}
         {/* ── Steps, and the inspector when one is selected ───────────── */}
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
-            {contentState ? <div className="flex h-full items-center justify-center p-4">{contentState}</div> : displayRows.length === 0 ? (
+            {conversationSlot ?? (contentState ? <div className="flex h-full items-center justify-center p-4">{contentState}</div> : displayRows.length === 0 ? (
               <div className="flex h-full items-center justify-center text-body text-muted-foreground">
                 {isAntigravityLiveEmpty ? (
                   <div className="flex max-w-md items-center gap-2 px-4 text-center">
@@ -1275,9 +1295,9 @@ export function AgentTranscriptDialog({
                   />
                 )}
               />
-            )}
+            ))}
           </div>
-          {selectedStep && (
+          {!conversationSlot && selectedStep && (
             <StepInspector
               step={selectedStep}
               runStartMs={runStartMs}
@@ -1285,9 +1305,23 @@ export function AgentTranscriptDialog({
             />
           )}
         </div>
-      </DialogContent>
-    </Dialog>
+        {footerSlot}
+    </TranscriptFrame>
   );
+}
+
+function TranscriptFrame({ inline, open, onOpenChange, finalFocus, children }: {
+  inline: boolean; open: boolean; onOpenChange: (open: boolean) => void;
+  finalFocus: boolean; children: React.ReactNode;
+}) {
+  if (inline) return <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{children}</section>;
+  return <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent
+      className="!max-w-5xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
+      showCloseButton={false} finalFocus={finalFocus}>
+      {children}
+    </DialogContent>
+  </Dialog>;
 }
 
 // Provider slugs this view names differently from the runtime list. The daemon
@@ -1326,7 +1360,7 @@ function FactDot() {
  * Renders nothing when the run produced nothing nameable; a row of zeroes
  * would read as "it did nothing" rather than "we have nothing to summarize".
  */
-function RunOutcomeRow({
+export function RunOutcomeRow({
   outcome,
   branch,
 }: {
@@ -1658,9 +1692,9 @@ function callSummary(step: TraceCallStep, labels: TraceSummaryLabels): string {
     const summary = traceToolArgSummary(step.call.input, labels);
     if (summary) return summary;
   }
-  if (!step.result) return "";
-  if (readImageResult(step.result.output)) return "";
-  return traceEventSummary({ type: "tool_result", output: step.result.output }, labels);
+  const output = step.result ?? step.progress;
+  if (!output || readImageResult(output.output)) return "";
+  return traceEventSummary({ type: "tool_result", output: output.output }, labels);
 }
 
 function firstLineOf(value: string | undefined): string {
@@ -1760,9 +1794,9 @@ function StepInspector({
                 <StepBody item={call.call} />
               </InspectorSection>
             )}
-            {call.result && (
+            {(call.result ?? call.progress) && (
               <InspectorSection label={t(($) => $.transcript.step_result)}>
-                <StepBody item={call.result} />
+                <StepBody item={(call.result ?? call.progress)!} />
               </InspectorSection>
             )}
           </>

@@ -1,4 +1,5 @@
 import type { IssueWakeup, IssueWakeupSummaryRow } from "../types/issue-wakeup";
+import { TaskInteractionSchema, TaskInteractionFollowupSchema, type TaskInteraction, type TaskInteractionCommand } from "./task-interaction-schema";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
 import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema } from "./schemas";
 import type { InboxFilters } from "../inbox/filter-store";
@@ -2670,6 +2671,31 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/messages`);
     return parseWithFallback<TaskMessagePayload[]>(raw, TaskMessageListSchema, [], {
       endpoint: "GET /api/tasks/:id/messages",
+    });
+  }
+
+  async getTaskInteraction(taskId: string): Promise<TaskInteraction | null> {
+    const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/interaction`);
+    return parseWithFallback<TaskInteraction | null>(raw, TaskInteractionSchema, null, {
+      endpoint: "GET /api/tasks/:id/interaction",
+    });
+  }
+
+  async followupTaskInteraction(taskId: string, id: string, text: string): Promise<{ runId: string } | null> {
+    const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/interaction/follow-up`, {
+      method: "POST", body: JSON.stringify({ id, text }),
+    });
+    return parseWithFallback<{ runId: string } | null>(raw, TaskInteractionFollowupSchema, null, {
+      endpoint: "POST /api/tasks/:id/interaction/follow-up",
+    });
+  }
+
+  async sendTaskInteraction(taskId: string, command: TaskInteractionCommand): Promise<TaskInteraction | null> {
+    const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/interaction`, {
+      method: "POST", body: JSON.stringify(command),
+    });
+    return parseWithFallback<TaskInteraction | null>(raw, TaskInteractionSchema, null, {
+      endpoint: "POST /api/tasks/:id/interaction",
     });
   }
 

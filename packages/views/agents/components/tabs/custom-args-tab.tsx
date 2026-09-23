@@ -13,6 +13,8 @@ import type { Agent, RuntimeDevice } from "@multica/core/types";
 import { createSafeId } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
+import { Switch } from "@multica/ui/components/ui/switch";
+import { Field, FieldLabel, FieldDescription } from "@multica/ui/components/ui/field";
 import { toast } from "sonner";
 import { useT } from "../../../i18n";
 import {
@@ -60,11 +62,13 @@ export function CustomArgsTab({
   const [editor, setEditor] = useState<EditorState>(null);
   const [editorValue, setEditorValue] = useState("");
   const [saving, setSaving] = useState(false);
+  const originallyInteractive = agent.runtime_config?.interactive_task_sessions === true;
+  const [interactive, setInteractive] = useState(originallyInteractive);
   const editorInputRef = useRef<HTMLInputElement>(null);
 
   const currentArgs = entriesToArgs(entries);
   const originalArgs = agent.custom_args ?? [];
-  const dirty = JSON.stringify(currentArgs) !== JSON.stringify(originalArgs);
+  const dirty = JSON.stringify(currentArgs) !== JSON.stringify(originalArgs) || interactive !== originallyInteractive;
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -113,7 +117,9 @@ export function CustomArgsTab({
   const handleSave = async () => {
     setSaving(true);
     try {
-      await onSave({ custom_args: currentArgs });
+      await onSave({ custom_args: currentArgs, ...(interactive !== originallyInteractive ? {
+        runtime_config: { ...agent.runtime_config, interactive_task_sessions: interactive },
+      } : {}) });
       toast.success(t(($) => $.tab_body.custom_args.saved_toast));
     } catch (err) {
       toast.error(
@@ -172,6 +178,15 @@ export function CustomArgsTab({
 
   return (
     <div className="space-y-6">
+      {(runtimeDevice?.provider === "pi" || runtimeDevice?.provider === "codex") && (
+        <Field orientation="horizontal">
+          <div className="flex flex-col gap-1">
+            <FieldLabel htmlFor="interactive-task-sessions">{t(($) => $.interaction.setting)}</FieldLabel>
+            <FieldDescription>{t(($) => $.interaction.setting_help)}</FieldDescription>
+          </div>
+          <Switch id="interactive-task-sessions" checked={interactive} onCheckedChange={setInteractive} disabled={saving} />
+        </Field>
+      )}
       <p className="max-w-2xl text-pretty text-body leading-6 text-muted-foreground">
         {t(($) => $.tab_body.custom_args.intro)}
       </p>

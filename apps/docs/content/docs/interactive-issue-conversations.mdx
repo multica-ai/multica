@@ -1,0 +1,72 @@
+---
+title: Interactive issue conversations
+description: Join a Pi or Codex issue worker while it runs, or attach to it from an ACP editor.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+An issue can have a live conversation with the agent doing its work. You see the same run's messages and tool activity, can send a correction while it works, and can return to its history later. This is different from a [private standalone chat](/chat): the worker is executing the issue, not a second chat agent created for display.
+
+## Enable it for an agent
+
+1. Configure a **Pi** or **Codex** agent with an online local runtime.
+2. Open the agent's **Custom args** tab, enable **Interactive task sessions**, and save.
+3. Start a new issue run by assigning or invoking that agent.
+
+The setting is off by default and affects new issue runs only. Other providers and standalone chats keep their existing execution behavior. A custom Pi command or sandbox wrapper must forward Pi's RPC arguments and keep its standard input open; Codex uses the existing app-server connection and its configured sandbox and approval behavior.
+
+<Callout type="info">
+The server, worker daemon, CLI, and web or desktop app must all run compatible versions. Updating only the web UI or editor bridge does not change a worker that is already running.
+</Callout>
+
+## Open the worker's conversation
+
+On an issue with agent runs, use the chat icon in the issue header. The chat icon beside an agent's comment opens that specific run directly; the nearby transcript icon opens its full log. **Open conversation** is also available from the full-log header.
+
+The conversation stays inside the issue detail pane. Select an agent when several agents have worked on the issue. **Full chat** shows that agent's runs together with a divider and produced-work summary for each run; individual run buttons focus on one run. **Chat** keeps thinking and tool details collapsed, while **Logs** shows the detailed event stream. Neither view creates a new provider session just by opening it.
+
+## Steer, interrupt, or finish
+
+| Control | What happens |
+| --- | --- |
+| **Send** | Delivers input to the current worker. While it is working, this steers the active native turn; while awaiting input, it continues the same run. |
+| **Interrupt** | Aborts the current native turn. The run, provider process, and session remain open so you can send a correction. |
+| **Finish run** | Successfully closes a run that is awaiting input. It does not change the issue's status. |
+| **Cancel run** | Cancels the run; it does not merely pause the current turn. |
+| **Start follow-up run** | After a run has ended, starts a new run that resumes its saved provider session when available. It is a new process, not a warm continuation of the completed run. |
+
+A normal agent reply leaves an interactive run **Awaiting input**. The agent can explicitly request completion from inside its run with `multica issue finish-run`, then deliver its final reply. New human input or an interruption cancels that pending completion request. Updating the issue to `in_review` or `done` is a separate action from finishing the run.
+
+An idle interactive run still occupies its execution slot and counts toward elapsed time. It ends on explicit completion, cancellation, failure, or its displayed deadline. Closing the browser or editor only detaches your view; it does not stop the worker. A follow-up run requires the prior provider session to be accessible and resumable. If it cannot resume, the follow-up fails rather than silently starting with empty history.
+
+## Join from an ACP editor
+
+The `multica acp` command exposes existing issue-worker conversations to ACP clients such as Zed. It is a bridge to Multica's recorded run and live controls; it does not launch another Pi or Codex process. Build or install a CLI version that matches your server, sign in with a **human** CLI profile, and select a workspace. Do not pass a task-scoped agent token or provider credentials to the editor.
+
+For example, add a custom agent server to Zed's settings, replacing the command path and profile with values from your installation:
+
+```json
+{
+  "agent_servers": {
+    "Multica": {
+      "type": "custom",
+      "command": "/absolute/path/to/multica",
+      "args": ["acp", "--profile", "my-profile", "--workspace-id", "<workspace-uuid>"]
+    }
+  }
+}
+```
+
+Select an existing conversation from the editor's session history. Each discovered ACP session represents one issue and one agent; its runs appear as that conversation's history. This version does not create standalone chats or new issues from ACP. Discovery is workspace-scoped, not automatically filtered to the repository open in the editor. The session's displayed working directory comes from the worker's recorded checkout when available; open that checkout in the editor if you want to inspect its files.
+
+Normal text goes to the selected open worker. ACP **Stop** interrupts the current turn, not the whole run. When attaching to work that began outside the editor, use `/interrupt` if the editor has no active Stop control. Other bridge commands are `/status`, `/finish-run`, `/cancel-run`, and `/follow-up <message>`; the last one explicitly starts a new run after completion. Closing the ACP tab only detaches.
+
+<Callout type="warning">
+The editor bridge accepts text only. It does not provide a separate approval UI, delegate editor tools, import changes made directly in a provider's own session outside Multica, or guarantee a complete transcript during a worker-to-server outage. The worker keeps its configured tools, sandbox, and approvals.
+</Callout>
+
+## If controls are unavailable
+
+Check that the selected run was started **after** enabling Interactive task sessions, that its agent uses Pi or Codex, and that the matching worker daemon is online. A finished run is read-only until you explicitly start a follow-up. A paused run can also reach its deadline. If the ACP editor cannot connect, verify the CLI profile is signed in as a human, the workspace ID is correct, and the command path points to the updated CLI binary.
+
+See [Runs](/tasks) for the general run lifecycle and [AI coding tools comparison](/providers) for provider sessions.

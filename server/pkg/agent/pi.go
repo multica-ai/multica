@@ -834,11 +834,12 @@ type piStreamEvent struct {
 	AssistantMessageEvent *piAssistantMessageEvent `json:"assistantMessageEvent,omitempty"`
 
 	// tool_execution_start / tool_execution_end
-	ToolCallID string          `json:"toolCallId,omitempty"`
-	ToolName   string          `json:"toolName,omitempty"`
-	Args       json.RawMessage `json:"args,omitempty"`
-	Result     json.RawMessage `json:"result,omitempty"`
-	IsError    bool            `json:"isError,omitempty"`
+	ToolCallID    string          `json:"toolCallId,omitempty"`
+	ToolName      string          `json:"toolName,omitempty"`
+	Args          json.RawMessage `json:"args,omitempty"`
+	Result        json.RawMessage `json:"result,omitempty"`
+	PartialResult json.RawMessage `json:"partialResult,omitempty"`
+	IsError       bool            `json:"isError,omitempty"`
 
 	// error: Message is a string. turn_end: Message is an object.
 	Message json.RawMessage `json:"message,omitempty"`
@@ -991,9 +992,13 @@ var piCustomArgModes = map[string]blockedArgMode{
 // print/JSON mode; using that supported path prevents Windows PowerShell's npm
 // shim from re-tokenising prompt content into options.
 func buildPiArgs(sessionPath string, opts ExecOptions, logger *slog.Logger) []string {
-	args := []string{
-		"-p",
-		"--mode", "json",
+	return buildPiModeArgs(sessionPath, opts, logger, false)
+}
+
+func buildPiModeArgs(sessionPath string, opts ExecOptions, logger *slog.Logger, interactive bool) []string {
+	args := []string{"-p", "--mode", "json"}
+	if interactive {
+		args = []string{"--mode", "rpc"}
 	}
 	if sessionPath != "" {
 		args = append(args, "--session", sessionPath)

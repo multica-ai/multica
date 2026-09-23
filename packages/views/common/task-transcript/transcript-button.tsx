@@ -19,6 +19,8 @@ import type { AgentTask } from "@multica/core/types/agent";
 import type { TaskMessagePayload } from "@multica/core/types/events";
 import { AgentTranscriptDialog } from "./agent-transcript-dialog";
 import { buildTimeline, type TimelineItem } from "./build-timeline";
+import { IssueConversation } from "../../issues/components/issue-conversation";
+import { useIssueConversationView } from "../../issues/components/issue-conversation-view-context";
 
 interface TranscriptButtonProps {
   task: AgentTask;
@@ -83,6 +85,8 @@ export function TranscriptButton({
   headerSlot,
 }: TranscriptButtonProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const [conversationOpen, setConversationOpen] = useState(false);
+  const inlineView = useIssueConversationView();
   // A click carrying no detail count came from Enter/Space. Only that reader
   // gets focus handed back when the dialog closes: after a pointer open it
   // would return a focus ring and this button's tooltip on Esc.
@@ -94,6 +98,12 @@ export function TranscriptButton({
   const [loadedItems, setLoadedItems] = useState<TimelineItem[] | null>(null);
   const open = controlledOpen ?? uncontrolledOpen;
   const setOpen = controlledOnOpenChange ?? setUncontrolledOpen;
+  const openConversation = task.issue_id ? () => {
+    if (inlineView?.issueId === task.issue_id) {
+      setOpen(false);
+      inlineView.open(task.id);
+    } else setConversationOpen(true);
+  } : undefined;
 
   // Live cache mode: the running task feeds the shared task-messages cache, so
   // we render straight off that cache instead of a one-shot local snapshot.
@@ -189,7 +199,10 @@ export function TranscriptButton({
       ) : null}
 
       {open &&
-        (liveSession ? (
+        (conversationOpen && task.issue_id ? (
+          <IssueConversation issueId={task.issue_id} initialTasks={[task]} initialRunId={task.id}
+            onClose={() => { setConversationOpen(false); setOpen(false); }} />
+        ) : liveSession ? (
           <LiveTranscriptDialog
             task={task}
             agentName={agentName}
@@ -197,6 +210,7 @@ export function TranscriptButton({
             onOpenChange={setOpen}
             finalFocus={returnFocus}
             headerSlot={headerSlot}
+            onOpenConversation={openConversation}
           />
         ) : (
           <AgentTranscriptDialog
@@ -208,6 +222,7 @@ export function TranscriptButton({
             isLive={isLive}
             finalFocus={returnFocus}
             headerSlot={headerSlot}
+            onOpenConversation={openConversation}
           />
         ))}
     </>
@@ -215,6 +230,7 @@ export function TranscriptButton({
 }
 
 interface LiveTranscriptDialogProps {
+  onOpenConversation?: () => void;
   task: AgentTask;
   agentName: string;
   isLive: boolean;
@@ -235,6 +251,7 @@ interface LiveTranscriptDialogProps {
  * whereas the backfill merges by seq.
  */
 function LiveTranscriptDialog({
+  onOpenConversation,
   task,
   agentName,
   isLive,
@@ -286,6 +303,7 @@ function LiveTranscriptDialog({
       isLive={isLive}
       finalFocus={finalFocus}
       headerSlot={headerSlot}
+      onOpenConversation={onOpenConversation}
     />
   );
 }

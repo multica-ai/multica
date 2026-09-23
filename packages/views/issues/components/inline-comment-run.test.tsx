@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -8,6 +8,7 @@ import type { AgentTask } from "@multica/core/types";
 import type { TaskMessagePayload } from "@multica/core/types/events";
 import { renderWithI18n } from "../../test/i18n";
 import { InlineCommentRun } from "./inline-comment-run";
+import { IssueConversationViewContext } from "./issue-conversation-view-context";
 
 vi.mock("@multica/core/api", () => ({ api: {
   getIssue: vi.fn(), listTaskMessages: vi.fn(), cancelTask: vi.fn(), rerunIssue: vi.fn(),
@@ -17,7 +18,7 @@ vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActo
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
 vi.mock("../../editor", () => ({ ReadonlyContent: ({ content }: { content: string }) => <div>{content}</div> }));
 vi.mock("../../common/task-transcript/agent-transcript-dialog", () => ({
-  AgentTranscriptDialog: ({ contentState, isLive }: { contentState?: ReactNode; isLive?: boolean }) => <div role="dialog" data-live={isLive}>{contentState ?? "Full transcript"}</div>,
+  AgentTranscriptDialog: ({ contentState, isLive, onOpenConversation }: { contentState?: ReactNode; isLive?: boolean; onOpenConversation?: () => void }) => <div role="dialog" data-live={isLive}>{onOpenConversation && <button onClick={onOpenConversation}>Open conversation</button>}{contentState ?? "Full transcript"}</div>,
   StepBody: ({ item }: { item: { content?: string; output?: string } }) => <div data-testid="step-body">{item.content ?? item.output}</div>,
 }));
 
@@ -33,16 +34,38 @@ const messages: TaskMessagePayload[] = [
 ];
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
-function setup(initialTask: AgentTask, hasReply = false, presentation: "inline" | "header" = "inline") {
+function setup(initialTask: AgentTask, hasReply = false, presentation: "inline" | "header" = "inline", openConversation?: (runId: string) => void) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const view = (current: AgentTask, reply = hasReply) => <QueryClientProvider client={client}>
-    <InlineCommentRun run={{ task: current, commentId: "comment", hasReply: reply }} presentation={presentation} />
+    <IssueConversationViewContext.Provider value={openConversation ? {issueId: current.issue_id, open: openConversation} : null}>
+      <InlineCommentRun run={{ task: current, commentId: "comment", hasReply: reply }} presentation={presentation} />
+    </IssueConversationViewContext.Provider>
   </QueryClientProvider>;
   const rendered = renderWithI18n(view(initialTask));
   return { client, rerender: (current: AgentTask, reply = hasReply) => rendered.rerender(view(current, reply)) };
 }
 
 describe("InlineCommentRun", () => {
+  it("opens the exact run's chat directly beside the full-log icon", () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([]);
+    const openConversation = vi.fn();
+    setup(task(), true, "header", openConversation);
+    const chatButton = screen.getByRole("button", { name: "Open conversation" });
+    expect(chatButton.querySelector("svg.lucide-message-circle")).toBeInTheDocument();
+    fireEvent.click(chatButton);
+    expect(openConversation).toHaveBeenCalledWith(id);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("opens the same run's conversation from the full log", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([]);
+    const openConversation = vi.fn();
+    setup(task(), true, "header", openConversation);
+    fireEvent.click(screen.getByRole("button", { name: "Open full log" }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Open conversation" }));
+    expect(openConversation).toHaveBeenCalledWith(id);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
   it("previews streamed agent messages in collapsed steps and expands the full body", async () => {
     const message: TaskMessagePayload = {
       task_id: id, issue_id: "issue", seq: 1, type: "text", content: "Checking the PR",

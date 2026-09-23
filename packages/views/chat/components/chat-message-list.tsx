@@ -481,28 +481,7 @@ const MessageBubble = memo(function MessageBubble({
   const { message } = item;
 
   if (message.role === "user") {
-    return (
-      <div className="flex justify-end">
-        <div className="rounded-2xl bg-muted px-3.5 py-2 text-body max-w-[80%] break-words">
-          {/* User messages are authored as markdown in ContentEditor, so they
-           * render through the SAME RichContent as assistant replies and as
-           * Issue/Comment — a Mermaid fence a user pastes is a diagram here
-           * too. `compact` trims the leading/trailing block margins so a
-           * single-line bubble stays as tight as the plain-text version. */}
-          <RichContent
-            content={message.content}
-            attachments={message.attachments}
-            density="compact"
-            phase="settled"
-          />
-          <AttachmentList
-            attachments={message.attachments}
-            content={message.content}
-            className="mt-1.5"
-          />
-        </div>
-      </div>
-    );
+    return <UserMessageContent content={message.content} attachments={message.attachments} />;
   }
 
   return (
@@ -520,6 +499,31 @@ const MessageBubble = memo(function MessageBubble({
     />
   );
 });
+
+export function UserMessageContent({ content, attachments }: Pick<ChatMessage, "content" | "attachments">) {
+  return (
+      <div className="flex justify-end">
+        <div className="rounded-2xl bg-muted px-3.5 py-2 text-body max-w-[80%] break-words">
+          {/* User messages are authored as markdown in ContentEditor, so they
+           * render through the SAME RichContent as assistant replies and as
+           * Issue/Comment — a Mermaid fence a user pastes is a diagram here
+           * too. `compact` trims the leading/trailing block margins so a
+           * single-line bubble stays as tight as the plain-text version. */}
+          <RichContent
+            content={content}
+            attachments={attachments}
+            density="compact"
+            phase="settled"
+          />
+          <AttachmentList
+            attachments={attachments}
+            content={content}
+            className="mt-1.5"
+          />
+        </div>
+      </div>
+    );
+}
 
 /**
  * Assistant turn body — renders BOTH the in-flight (live) and the persisted
@@ -1229,11 +1233,12 @@ function MiddleTextRow({
 
 // ─── Individual item rows ────────────────────────────────────────────────
 
-function ItemRow({ item }: { item: ChatTimelineItem }) {
+export function ItemRow({ item }: { item: ChatTimelineItem }) {
   switch (item.type) {
     case "tool_use":
       return <ToolCallRow item={item} />;
     case "tool_result":
+    case "tool_progress":
       return <ToolResultRow item={item} />;
     case "thinking":
       return <ThinkingRow item={item} />;

@@ -13,6 +13,21 @@ import {
 import { buildTimeline, type TimelineItem } from "./build-timeline";
 
 const T0 = "2026-08-15T10:00:00.000Z";
+
+it("updates a live tool preview without completing or duplicating its call", () => {
+  const events: TimelineItem[] = [
+    { seq: 1, type: "tool_use", callId: "tool", tool: "bash" },
+    { seq: 2, type: "tool_progress", callId: "tool", output: "first" },
+    { seq: 3, type: "tool_progress", callId: "tool", output: "first second" },
+  ];
+  const live = buildSteps(events) as TraceCallStep[];
+  expect(live).toHaveLength(1);
+  expect(live[0]?.progress?.output).toBe("first second");
+  expect(live[0]?.result).toBeUndefined();
+  const completed = buildSteps([...events, { seq: 4, type: "tool_result", callId: "tool", output: "final" }]) as TraceCallStep[];
+  expect(completed).toHaveLength(1);
+  expect(completed[0]?.result?.output).toBe("final");
+});
 function at(seconds: number): string {
   return new Date(Date.parse(T0) + seconds * 1000).toISOString();
 }

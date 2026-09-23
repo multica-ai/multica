@@ -234,6 +234,25 @@ function renderDialog(
   );
 }
 
+it("renders inline without a modal and returns through Back to issue", () => {
+  const onBack = vi.fn();
+  renderWithI18n(<AgentTranscriptDialog inline open onOpenChange={onBack} task={baseTask}
+    items={[]} agentName="Worker" conversationSlot={<div>Conversation body</div>} />);
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Back to issue" }));
+  expect(onBack).toHaveBeenCalledWith(false);
+});
+
+it("shows an accessible chat icon in the full-log header", () => {
+  const onOpenConversation = vi.fn();
+  renderWithI18n(<AgentTranscriptDialog inline open onOpenChange={vi.fn()} task={baseTask}
+    items={[]} agentName="Worker" onOpenConversation={onOpenConversation} />);
+  const button = screen.getByRole("button", { name: "Open conversation" });
+  expect(button.querySelector("svg.lucide-message-circle")).toBeInTheDocument();
+  fireEvent.click(button);
+  expect(onOpenConversation).toHaveBeenCalledOnce();
+});
+
 beforeEach(() => {
   cleanup();
   copyTextMock.mockClear();

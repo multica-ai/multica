@@ -37,13 +37,16 @@ vi.mock("./agent-transcript-dialog", () => ({
     open,
     onOpenChange,
     items,
+    onOpenConversation,
   }: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     items: TimelineItem[];
+    onOpenConversation?: () => void;
   }) =>
     open ? (
       <div role="dialog" data-testid="transcript-dialog">
+        {onOpenConversation && <button onClick={onOpenConversation}>Open conversation</button>}
         <button type="button" onClick={() => onOpenChange(false)}>
           Close
         </button>
@@ -53,6 +56,16 @@ vi.mock("./agent-transcript-dialog", () => ({
       </div>
     ) : null,
 }));
+vi.mock("../../issues/components/issue-conversation", () => ({
+  IssueConversation: ({ initialRunId }: { initialRunId: string }) => <div data-testid="conversation">{initialRunId}</div>,
+}));
+
+it("opens the exact issue run from its full log without starting work", () => {
+  renderWith(newClient(), <TranscriptButton task={baseTask} agentName="Worker" items={[]} open />);
+  fireEvent.click(screen.getByRole("button", { name: "Open conversation" }));
+  expect(screen.getByTestId("conversation")).toHaveTextContent(LIVE_TASK_ID);
+  expect(screen.queryByTestId("transcript-dialog")).not.toBeInTheDocument();
+});
 
 const LIVE_TASK_ID = "4a2e8d1c-7f9b-4e2a-9c1d-123456789abc";
 

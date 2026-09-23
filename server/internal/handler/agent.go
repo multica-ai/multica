@@ -419,7 +419,8 @@ type AgentTaskResponse struct {
 	ProjectResources     []ProjectResourceData `json:"project_resources,omitempty"`   // resources attached to the project
 	CreatedAt            string                `json:"created_at"`
 	PriorSessionID       string                `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
-	PriorWorkDir         string                `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	RequireSessionResume bool                  `json:"require_session_resume,omitempty"`
+	PriorWorkDir         string                `json:"prior_work_dir,omitempty"` // work_dir from a previous task on same issue
 	// PriorSessionResumeUnavailable is set when a more recent Codex session was
 	// withheld because its rollout was missing (MUL-5305); PriorSessionID (if
 	// any) is then an older fallback, and the daemon surfaces the continuity gap
@@ -796,7 +797,8 @@ func visibleTaskHistory(tasks []db.AgentTaskQueue) []db.AgentTaskQueue {
 // it, in which case RelativeWorkDir falls back to the existing WorkDir.
 func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	var cancellation struct {
-		TaskID string `json:"comment_change_cancelled_task_id"`
+		TaskID               string `json:"comment_change_cancelled_task_id"`
+		RequireSessionResume bool   `json:"require_session_resume"`
 	}
 	_ = json.Unmarshal(t.Context, &cancellation)
 	var result any
@@ -831,6 +833,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		// Task-scoped provenance must not transfer through copied retry context.
 		CancelledByCommentChange: t.Status == "cancelled" && cancellation.TaskID != "" && cancellation.TaskID == uuidToString(t.ID),
 		CancelledBy:              taskCancellationActorToResponse(t),
+		RequireSessionResume:     cancellation.RequireSessionResume,
 
 		ID:                     uuidToString(t.ID),
 		AgentID:                uuidToString(t.AgentID),

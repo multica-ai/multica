@@ -51,12 +51,13 @@ const runtimeDevice = {
 function renderTab(
   overrides: Partial<Agent> = {},
   onSave = vi.fn().mockResolvedValue(undefined),
+  device = runtimeDevice,
 ) {
   const result = render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <CustomArgsTab
         agent={{ ...baseAgent, ...overrides }}
-        runtimeDevice={runtimeDevice}
+        runtimeDevice={device}
         onSave={onSave}
       />
     </I18nProvider>,
@@ -68,6 +69,14 @@ function renderTab(
 describe("CustomArgsTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("opts supported agents into interactive runs without replacing other runtime settings", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderTab({ runtime_config: { keep: "value" } }, vi.fn().mockResolvedValue(undefined), { ...runtimeDevice, provider: "pi" });
+    await user.click(screen.getByRole("switch", { name: "Interactive task sessions" }));
+    await user.click(screen.getByRole("button", { name: /save/i }));
+    expect(onSave).toHaveBeenCalledWith({ custom_args: baseAgent.custom_args, runtime_config: { keep: "value", interactive_task_sessions: true } });
   });
 
   it("renders configured arguments as a list, not persistent inputs", () => {

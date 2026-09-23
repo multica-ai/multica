@@ -117,6 +117,8 @@ multica issue run-messages <task-id> --issue MUL-123
 multica issue cancel-task <task-id> --issue MUL-123
 ```
 
+For an opted-in interactive issue run, the executing agent can request a successful finish with `multica issue finish-run`. This command requires that run's injected task token; it is not a human command for closing another agent's run. See [Interactive issue conversations](/interactive-issue-conversations) for human controls and the ACP editor bridge.
+
 ## Agents and skills
 
 ```bash

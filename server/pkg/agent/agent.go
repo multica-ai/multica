@@ -24,8 +24,14 @@ type Backend interface {
 
 // ExecOptions configures a single execution.
 type ExecOptions struct {
-	Cwd   string
-	Model string
+	// InteractiveBeforeFinish fences natural completion against durable input
+	// accepted by the run owner. False asks the backend to keep pumping controls.
+	// Only ExecuteInteractive consumes it; ordinary executions ignore it.
+	InteractiveBeforeFinish func() bool
+	// KeepInteractiveOpen waits for explicit finish after a normal native reply.
+	KeepInteractiveOpen bool
+	Cwd                 string
+	Model               string
 	// SystemPrompt carries the Multica runtime brief for the few providers
 	// that cannot pick it up from disk. The daemon leaves it empty for every
 	// other provider (see daemon.providerNeedsInlineSystemPrompt), because the
@@ -71,6 +77,8 @@ type ExecOptions struct {
 	// HandshakeTimeout; when both are zero Codex uses separate built-in defaults.
 	ThreadHandshakeTimeout time.Duration
 	ResumeSessionID        string // if non-empty, resume a previous agent session
+	// RequireSessionResume forbids fresh-thread fallback for an explicit continuation.
+	RequireSessionResume bool
 	// ResumeExpected records that this task intended to continue a prior
 	// conversation, independent of ResumeSessionID (which a fallback retry may
 	// clear). When it is true but the backend ends up on a fresh thread — the
@@ -147,6 +155,9 @@ func runContext(ctx context.Context, timeout time.Duration) (context.Context, co
 
 // Session represents a running agent execution.
 type Session struct {
+	// Control is non-nil only for an explicitly requested interactive run.
+	// Its commands control activity inside this execution, not task cancellation.
+	Control *LiveControl
 	// ToolActivity optionally reports backend-owned tool accounting and its last
 	// transition time, independent of the best-effort transcript. Nil uses the
 	// daemon's message-based accounting. The timestamp gives completed tools a
@@ -186,13 +197,14 @@ type Session struct {
 type MessageType string
 
 const (
-	MessageText       MessageType = "text"
-	MessageThinking   MessageType = "thinking"
-	MessageToolUse    MessageType = "tool-use"
-	MessageToolResult MessageType = "tool-result"
-	MessageStatus     MessageType = "status"
-	MessageError      MessageType = "error"
-	MessageLog        MessageType = "log"
+	MessageText         MessageType = "text"
+	MessageThinking     MessageType = "thinking"
+	MessageToolUse      MessageType = "tool-use"
+	MessageToolResult   MessageType = "tool-result"
+	MessageToolProgress MessageType = "tool-progress" // accumulated, nonterminal output snapshot
+	MessageStatus       MessageType = "status"
+	MessageError        MessageType = "error"
+	MessageLog          MessageType = "log"
 )
 
 // Message is a unified event emitted by an agent during execution.
