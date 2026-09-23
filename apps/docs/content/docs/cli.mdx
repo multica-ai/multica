@@ -292,6 +292,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | | `stop` / `status` / `restart` | Stop, check status, restart (`restart` takes the same flags as `start`) | |
 | | `logs` | View daemon logs | `--follow`, `--lines` |
 | | `disk-usage` | View local disk usage | `--by-workspace`, `--by-task`, `--top` |
+| | `reap-workspaces` | Report or remove terminal, clean task workspaces | `--apply` is required to delete; `--workspaces-root`, `--output` |
 | `runtime` | `list/usage/activity/update/rename/delete` | View and manage runtimes | `delete`: `--cascade` (unbinds bound agents, preserves their data, and cancels their runs) |
 | | `profile list/create/update/delete` | Manage custom runtime profiles | |
 | | `profile set-path/unset-path <profile-id>` | Pin a local executable path (local only, never uploaded to the server) | |

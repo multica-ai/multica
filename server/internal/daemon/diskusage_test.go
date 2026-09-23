@@ -754,6 +754,84 @@ func TestResolveParentStatuses_NoFetcherIsNoOp(t *testing.T) {
 	}
 }
 
+// TestReapTerminalCleanWorkspaces_TreeCheckControlsApply sabotages both arms of
+// the tree check. The clean arm must reach removal before after-counts are
+// read; the dirty arm must refuse before the remover can run.
+func TestReapTerminalCleanWorkspaces_TreeCheckControlsApply(t *testing.T) {
+	newTask := func(t *testing.T) (string, DiskUsageReport) {
+		t.Helper()
+		root := t.TempDir()
+		taskDir := filepath.Join(root, "11111111-1111-1111-1111-111111111111", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+		writeFile(t, filepath.Join(taskDir, "workdir", "deliverable.txt"), 10)
+		return root, DiskUsageReport{
+			WorkspacesRoot: root,
+			Tasks: []TaskDiskUsage{{
+				Path:         taskDir,
+				Kind:         string(execenv.GCKindIssue),
+				ParentID:     "issue-done",
+				ParentStatus: "done",
+			}},
+			TotalTaskCount: 1,
+			TotalSizeBytes: 10,
+		}
+	}
+
+	t.Run("forced clean reaches removal", func(t *testing.T) {
+		root, diskReport := newTask(t)
+		inspected := false
+		removed := false
+		reapReport, err := reapTerminalCleanWorkspaces(context.Background(), root, diskReport, nil, true, workspaceReapOptions{
+			inspectTree: func(context.Context, string) ([]string, error) {
+				inspected = true
+				return nil, nil
+			},
+			removeRoot: func(_ context.Context, _ string, taskRoot string, _ func(context.Context, string) ([]string, error)) error {
+				if !inspected {
+					t.Fatal("clean inspector was not applied before removal")
+				}
+				removed = true
+				return os.RemoveAll(taskRoot)
+			},
+		})
+		if err != nil {
+			t.Fatalf("reapTerminalCleanWorkspaces: %v", err)
+		}
+		if !inspected || !removed {
+			t.Fatalf("clean arm inspected=%v removed=%v, want both true", inspected, removed)
+		}
+		if got := reapReport.After.TaskRootCount; got != 0 {
+			t.Fatalf("after task roots=%d, want 0 after applied removal", got)
+		}
+	})
+
+	t.Run("forced dirty refuses removal", func(t *testing.T) {
+		root, diskReport := newTask(t)
+		inspected := false
+		reapReport, err := reapTerminalCleanWorkspaces(context.Background(), root, diskReport, nil, true, workspaceReapOptions{
+			inspectTree: func(context.Context, string) ([]string, error) {
+				inspected = true
+				return []string{"repo: untracked-deliverable.txt"}, nil
+			},
+			removeRoot: func(context.Context, string, string, func(context.Context, string) ([]string, error)) error {
+				t.Fatal("dirty tree reached remover")
+				return nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("reapTerminalCleanWorkspaces: %v", err)
+		}
+		if !inspected {
+			t.Fatal("dirty inspector was not applied")
+		}
+		if got := reapReport.Results[0].Action; got != "skipped" {
+			t.Fatalf("dirty action=%q, want skipped", got)
+		}
+		if got := reapReport.After.TaskRootCount; got != 1 {
+			t.Fatalf("after task roots=%d, want 1 after refusal", got)
+		}
+	})
+}
+
 // TestScanDiskUsage_ReportsRepoCacheSeparately pins the accounting split: the
 // bare-repo cache is measured (it used to be invisible, which made the reported
 // total silently disagree with the user's file manager) but kept out of the

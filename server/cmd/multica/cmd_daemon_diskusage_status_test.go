@@ -43,6 +43,7 @@ type gcCheckRecorder struct {
 	// tokenByIssue maps a requested issue id to the bearer token it was
 	// requested with, so --all-profiles can be checked per profile.
 	tokenByIssue map[string]string
+	statuses     map[string]string
 	calls        int
 	statusCode   int
 }
@@ -75,8 +76,12 @@ func newGCCheckServer(t *testing.T, rec *gcCheckRecorder) *httptest.Server {
 		}
 		issues := make([]map[string]any, 0, len(body.IssueIDs))
 		for _, id := range body.IssueIDs {
+			status := "in_review"
+			if rec.statuses != nil && rec.statuses[id] != "" {
+				status = rec.statuses[id]
+			}
 			issues = append(issues, map[string]any{
-				"id": id, "found": true, "status": "in_review",
+				"id": id, "found": true, "status": status,
 				"updated_at": time.Now().UTC().Format(time.RFC3339Nano),
 			})
 		}

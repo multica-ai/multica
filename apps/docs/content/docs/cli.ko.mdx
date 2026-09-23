@@ -284,6 +284,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `stop` / `status` / `restart` | 중지, 상태 확인, 다시 시작(`restart`와 `start`의 flag가 같음) | |
 | | `logs` | 데몬 로그 확인 | `--follow`, `--lines` |
 | | `disk-usage` | 로컬 디스크 사용량 확인 | `--by-workspace`, `--by-task`, `--top` |
+| | `reap-workspaces` | done/cancelled 상태이고 Git 작업 트리가 깨끗한 태스크 workspace를 보고하거나 삭제 | 삭제에는 `--apply` 필요; `--workspaces-root`, `--output` |
 | `runtime` | `list/usage/activity/update/rename/delete` | 런타임 확인 및 관리 | `delete`: `--cascade`(연결된 에이전트의 런타임을 해제하고 데이터를 보존하며 실행 취소) |
 | | `profile list/create/update/delete` | 사용자 지정 런타임 profile 관리 | |
 | | `profile set-path/unset-path <profile-id>` | 로컬 실행 파일 경로 고정(로컬에만 적용되고 서버에 업로드되지 않음) | |
