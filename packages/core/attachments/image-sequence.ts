@@ -295,10 +295,17 @@ export interface ImageSequenceItem {
    * markdown caption, which is prose with no extension to read (MUL-7518).
    */
   imageByConstruction: boolean;
+  /**
+   * `id` of the block the item first appeared in, when the caller named its
+   * blocks — lets a viewer say where a file came from (MUL-7649).
+   */
+  blockId?: string;
 }
 
 /** One renderable unit: an issue description, a comment, a chat message. */
 export interface ImageSequenceBlock {
+  /** Caller-chosen identity, copied onto each item as `blockId`. */
+  id?: string;
   content?: string | null;
   attachments?: ReadonlyArray<Attachment> | null;
   /**
@@ -370,6 +377,7 @@ export function collectAttachmentSequence(
         filename: attachment?.filename || ref.filename,
         attachment,
         imageByConstruction: !ref.isFileCard,
+        blockId: block.id,
       });
     }
 
@@ -391,6 +399,7 @@ export function collectAttachmentSequence(
         filename: attachment.filename,
         attachment,
         imageByConstruction: false,
+        blockId: block.id,
       });
     }
   }

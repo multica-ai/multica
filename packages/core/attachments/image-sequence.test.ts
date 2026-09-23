@@ -292,6 +292,29 @@ describe("collectAttachmentSequence", () => {
     ]);
   });
 
+  it("tags each item with the block it first appeared in", () => {
+    const shared = attachment({ id: UUID_A });
+    const own = attachment({ id: UUID_B, filename: "own.png" });
+    const sequence = collectAttachmentSequence(
+      [
+        {
+          id: "description",
+          content: `![](/api/attachments/${UUID_A}/download)`,
+          attachments: [shared],
+          standalone: false,
+        },
+        { id: "comment-1", content: `![](/api/attachments/${UUID_A}/download)`, attachments: [shared, own] },
+        { content: "![untagged](https://cdn/x.png)" },
+      ],
+      previewable,
+    );
+    expect(sequence.map((i) => [i.key, i.blockId])).toEqual([
+      [UUID_A, "description"],
+      [UUID_B, "comment-1"],
+      ["https://cdn/x.png", undefined],
+    ]);
+  });
+
   it("keeps markdown images even when the rule would reject their caption", () => {
     const sequence = collectAttachmentSequence(
       [{ content: "![报告图表](https://cdn/chart)" }],
