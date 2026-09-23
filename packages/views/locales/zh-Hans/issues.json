@@ -16,6 +16,7 @@
     "empty": "暂无执行记录。",
     "show_earlier": "显示前面的 {{count}} 个步骤",
     "full_log": "打开完整日志",
+    "open_chat": "打开聊天",
     "message": "智能体消息",
     "error": "错误",
     "waiting_result": "等待工具返回结果..."

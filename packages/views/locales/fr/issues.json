@@ -17,6 +17,7 @@
     "empty": "Aucune activité enregistrée pour l'instant.",
     "show_earlier": "Afficher {{count}} étapes précédentes",
     "full_log": "Ouvrir le journal complet",
+    "open_chat": "Ouvrir le chat",
     "message": "Message de l'agent",
     "error": "Erreur",
     "waiting_result": "En attente du résultat de l'outil..."

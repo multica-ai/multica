@@ -202,8 +202,13 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           {rows.length > visibleCount && <button type="button" className="py-1 text-caption text-muted-foreground hover:text-foreground"
             onClick={() => setVisibleCount((count) => count + 12)}>{t(($) => $.inline_run.show_earlier, { count: rows.length - visibleCount })}</button>}
           {rows.slice(-visibleCount).map((row) => <InlineStep key={row.seq} row={row} live={active} formatText={formatText} />)}
-          <button type="button" className="flex items-center gap-1.5 rounded-xs py-2 text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={openFullLog}>{t(($) => $.inline_run.full_log)}<ExternalLink className="size-3" /></button>
+          <div className="flex items-center gap-1">
+            <button type="button" className="flex items-center gap-1.5 rounded-xs py-2 text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={openFullLog}>{t(($) => $.inline_run.full_log)}<ExternalLink className="size-3" /></button>
+            {conversationView?.issueId === task.issue_id && <button type="button"
+              className="flex items-center gap-1.5 rounded-xs py-2 text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => conversationView.open(task.id)}>{t(($) => $.inline_run.open_chat)}<MessageCircle aria-hidden className="size-3" /></button>}
+          </div>
         </div>}
       </div>
       {transcript}

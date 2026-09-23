@@ -17,6 +17,7 @@
     "empty": "No activity recorded yet.",
     "show_earlier": "Show {{count}} earlier steps",
     "full_log": "Open full log",
+    "open_chat": "Open chat",
     "message": "Agent message",
     "error": "Error",
     "waiting_result": "Waiting for the tool result..."

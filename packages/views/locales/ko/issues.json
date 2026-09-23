@@ -16,6 +16,7 @@
     "empty": "아직 실행 기록이 없습니다.",
     "show_earlier": "이전 {{count}}단계 보기",
     "full_log": "전체 로그 열기",
+    "open_chat": "채팅 열기",
     "message": "에이전트 메시지",
     "error": "오류",
     "waiting_result": "도구 결과를 기다리고 있습니다..."

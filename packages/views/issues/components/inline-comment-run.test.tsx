@@ -46,6 +46,20 @@ function setup(initialTask: AgentTask, hasReply = false, presentation: "inline" 
 }
 
 describe("InlineCommentRun", () => {
+  it("opens a cancelled run's conversation beside its full-log action", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue(messages);
+    const openConversation = vi.fn();
+    setup(task({ status: "cancelled", completed_at: "2026-09-07T00:01:23Z" }), false, "inline", openConversation);
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    await screen.findByRole("button", { name: "Open full log" });
+    const chatButton = screen.getByRole("button", { name: "Open chat" });
+    expect(chatButton).toHaveClass("text-caption");
+    expect(chatButton.querySelector("svg.lucide-message-circle")).toHaveClass("size-3");
+    fireEvent.click(chatButton);
+    expect(openConversation).toHaveBeenCalledWith(id);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("opens the exact run's chat directly beside the full-log icon", () => {
     vi.mocked(api.listTaskMessages).mockResolvedValue([]);
     const openConversation = vi.fn();

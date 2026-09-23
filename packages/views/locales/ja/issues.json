@@ -16,6 +16,7 @@
     "empty": "実行記録はまだありません。",
     "show_earlier": "前の {{count}} ステップを表示",
     "full_log": "完全なログを開く",
+    "open_chat": "チャットを開く",
     "message": "エージェントのメッセージ",
     "error": "エラー",
     "waiting_result": "ツールの結果を待っています..."
