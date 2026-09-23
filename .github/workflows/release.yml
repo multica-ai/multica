@@ -30,7 +30,7 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME}"
           echo "Triggered by tag: $tag"
-          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+          if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::Release tags must look like vX.Y.Z or vX.Y.Z-suffix; got '$tag'."
             exit 1
           fi
@@ -109,6 +109,95 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+  operator-skill:
+    needs: [verify, release]
+    if: github.repository_owner == 'multica-ai' && needs.verify.outputs.is_stable == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-operator-skill
+      cancel-in-progress: false
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate and validate distribution
+        env:
+          TAG_NAME: ${{ needs.verify.outputs.tag_name }}
+        run: |
+          version="${TAG_NAME#v}"
+          bash scripts/build-operator-distribution.test.sh
+          bash scripts/build-operator-distribution.sh "$version" /tmp/multica-operator-dist
+
+      - name: Upload Skill archive
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.verify.outputs.tag_name }}
+        run: |
+          version="${TAG_NAME#v}"
+          archive="multica-operator-${version}.tar.gz"
+          checksum="${archive}.sha256"
+          assets="$(gh release view "$TAG_NAME" --json assets --jq '.assets[].name')"
+          archive_exists=false
+          checksum_exists=false
+          grep -Fxq "$archive" <<<"$assets" && archive_exists=true
+          grep -Fxq "$checksum" <<<"$assets" && checksum_exists=true
+
+          if [[ "$archive_exists" == true && "$checksum_exists" == true ]]; then
+            echo "Skill release assets already exist for $TAG_NAME; nothing to upload."
+          elif [[ "$archive_exists" == false && "$checksum_exists" == false ]]; then
+            gh release upload "$TAG_NAME" \
+              "/tmp/multica-operator-dist/release/$archive" \
+              "/tmp/multica-operator-dist/release/$checksum"
+          else
+            echo "::error::Incomplete Skill release assets for $TAG_NAME; expected both $archive and $checksum."
+            exit 1
+          fi
+
+      - name: Advance Marketplace branch
+        env:
+          TAG_NAME: ${{ needs.verify.outputs.tag_name }}
+        run: |
+          version="${TAG_NAME#v}"
+          marketplace_exists=false
+          if git fetch origin marketplace; then
+            marketplace_exists=true
+            remote_version="$(git show origin/marketplace:release.json | jq -r .version)"
+            if [[ ! "$remote_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "::error::Remote marketplace has invalid version '$remote_version'."
+              exit 1
+            fi
+            newest="$(printf '%s\n%s\n' "$remote_version" "$version" | sort -V | tail -n 1)"
+            if [[ "$remote_version" != "$version" && "$newest" == "$remote_version" ]]; then
+              echo "Marketplace already has newer version $remote_version; skipping $version."
+              exit 0
+            fi
+          fi
+
+          if [[ "$marketplace_exists" == true ]]; then
+            git switch --create marketplace --track origin/marketplace
+            git rm -r --ignore-unmatch .
+          else
+            git switch --orphan marketplace
+            git rm -r --ignore-unmatch .
+          fi
+          cp -R /tmp/multica-operator-dist/marketplace/. .
+          git add .agents .claude-plugin plugins release.json LICENSE
+          if git diff --cached --quiet; then
+            echo "Marketplace already contains Multica Operator $version; nothing to publish."
+            exit 0
+          fi
+          if [[ "${remote_version:-}" == "$version" ]]; then
+            echo "::error::Marketplace version $version exists with different content."
+            exit 1
+          fi
+          git -c user.name=github-actions -c user.email=github-actions@github.com \
+            commit -m "chore: publish Multica Operator $version"
+          git push origin marketplace
 
   # Multi-arch images are built natively per platform on dedicated runners
   # (amd64 on ubuntu-latest, arm64 on ubuntu-24.04-arm) and merged into a
