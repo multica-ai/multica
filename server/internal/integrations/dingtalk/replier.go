@@ -328,7 +328,7 @@ func issueMarkdownIdentifier(res engine.Result, appURL string) string {
 	// Parentheses in an application's base path must not terminate the Markdown
 	// link destination, even when they are valid URL path characters.
 	href = strings.NewReplacer("(", "%28", ")", "%29").Replace(href)
-	return "[" + escapeMarkdownText(identifier) + "](" + href + ")"
+	return "[" + escapeMarkdownLinkLabel(identifier) + "](" + href + ")"
 }
 
 func issueResultIdentifier(res engine.Result) string {
