@@ -154,6 +154,7 @@ func newChatAttachmentReadFailureHandler(t *testing.T) *Handler {
 		testHandler.EmailService,
 		nil,
 		nil,
+		nil,
 		analytics.NoopClient{},
 		Config{},
 	)

@@ -61,6 +61,7 @@ function LoginPageContent() {
   const qc = useQueryClient();
   const { t } = useT("auth");
   const googleClientId = useConfigStore((state) => state.googleClientId);
+  const ldapEnabled = useConfigStore((state) => state.ldapEnabled);
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const searchParams = useSearchParams();
@@ -232,6 +233,9 @@ function LoginPageContent() {
           ? { url: cliCallbackRaw, state: cliState }
           : undefined
       }
+      // Directory login is offered whenever the connected server says it is
+      // configured -- no client-side env flag to keep in sync.
+      ldap={{ enabled: ldapEnabled }}
       onTokenObtained={setLoggedInCookie}
       extra={
         <span className="text-caption text-muted-foreground">

@@ -97,6 +97,69 @@ Do not enable a fixed code on a publicly reachable instance. The production comb
 
 The URLs in the Google Console and in `GOOGLE_REDIRECT_URI` must match exactly, including protocol, port, and trailing slash. Once configured, the sign-in page shows a Google sign-in button; the frontend image needs no rebuild.
 
+## Enterprise directory (LDAP) sign-in
+
+Self-hosted Multica can accept the same username and password your corporate OpenLDAP or Active Directory already issues. It is a third sign-in front door, parallel to email verification codes and Google: on success it reuses the existing session pipeline, so nothing downstream (workspaces, invitations, tokens, the CLI) knows which door a person came through.
+
+1. Point `LDAP_*` at the directory. Two limits are worth keeping in mind: the service account needs read/search permission on `LDAP_BASE_DN` and nothing else, and `LDAP_USER_FILTER` must contain exactly one `%s`.
+
+```dotenv
+LDAP_ENABLED=true
+LDAP_URL=ldaps://openldap.corp.example.com:636
+LDAP_BASE_DN=ou=people,dc=corp,dc=example,dc=com
+LDAP_BIND_DN=cn=lookup,dc=corp,dc=example,dc=com
+LDAP_BIND_PASSWORD=lookup-only-password
+LDAP_USER_FILTER=(uid=%s)
+```
+
+2. Match the filter and attributes to your directory. OpenLDAP keys logins on `uid`, AD on `sAMAccountName`.
+
+```dotenv
+# OpenLDAP
+LDAP_USER_FILTER=(uid=%s)
+
+# Active Directory
+LDAP_USER_FILTER=(sAMAccountName=%s)
+```
+
+3. Restart the API service.
+
+Like `GOOGLE_CLIENT_ID`, the frontend learns whether directory login exists from `/api/config` at runtime, so the login page picks the tab up without rebuilding the web image.
+
+### Behavior
+
+- The login name is the directory's own identifier (`uid` / `sAMAccountName`), not an email. The request carries no email field, so a caller cannot claim somebody else's account by typing its address.
+- Multica matches accounts on `users.email`. The value read from `LDAP_EMAIL_ATTR` is lowercased before the match; an existing account keeps its identity, and a first-time directory login creates one. `LDAP_NAME_ATTR` prefills the display name on a brand-new account only, and never overwrites the email of an existing one.
+- A wrong password and an unknown username produce the same `401` with the same message, so the endpoint cannot be used to enumerate directory accounts. A username that matches several entries is treated the same way, with a server-side error telling you to fix the overlap in the directory rather than picking one at random.
+- Directory login does not run the signup restriction check. `ALLOW_SIGNUP`, `ALLOWED_EMAILS`, and `ALLOWED_EMAIL_DOMAINS` do not apply here: a successful bind is itself the admission decision, which is why an existing account stays reachable when signup is closed.
+- Directory groups are not mapped to Multica roles. A new account starts with no workspace membership and needs an invitation like anyone else.
+- Neither the user's password nor the service-account password is written to a log, and the directory's own error text is summarised rather than forwarded. The login name is RFC 4515-escaped before substitution into `LDAP_USER_FILTER`, so filter metacharacters match literally and cannot widen the query.
+- The endpoint shares the send-code and Google limiter (`RATE_LIMIT_AUTH`, 5 requests per minute per IP by default) rather than the more generous verification-code limit.
+
+### Failures
+
+What the person signing in sees and what you see in the server log differ on purpose:
+
+| Status | Meaning |
+|---|---|
+| `400` | username or password was missing |
+| `401` | the directory rejected the credentials, or no single entry matched |
+| `403` | the Multica account is temporarily disabled |
+| `502` | the directory could not be reached, or the config is incomplete |
+| `503` | `LDAP_ENABLED` is not `true`, so the integration is off |
+
+A `502` when a password was certainly correct is the one to read in the log: a service-account bind failure, an unparsable `LDAP_USER_FILTER`, or an entry whose `LDAP_EMAIL_ATTR` is empty all mean the deployment, not the person, needs fixing.
+
+Directory login adds no database migration and no new table; accounts are matched on the existing `users.email` unique key.
+
+`LDAP_TLS_INSECURE=true` skips certificate verification. It exposes directory traffic, including the service-account password, to interception, so treat it as temporary bring-up on a trusted internal network:
+
+<Callout type="warning">
+Add the directory's CA to the container trust store instead. `LDAP_TLS_INSECURE=true` is accepted only on `ldaps://` (or `ldapi://`) URLs: a plain `ldap://` connection has no certificate to verify and sends the password unencrypted, so the server refuses that combination rather than starting up half-protected.
+</Callout>
+
+The full variable list with defaults is in [Environment variables](/environment-variables#enterprise-directory-ldap).
+
 ## Signup restrictions
 
 Three variables together decide whether a new account can be created:
