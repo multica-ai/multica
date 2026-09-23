@@ -541,6 +541,25 @@ describe("IssueTriggerPreviewSchema", () => {
 });
 
 describe("TimelineEntriesSchema", () => {
+  it("preserves run-bound supplement delivery receipts", () => {
+    const parsed = TimelineEntriesSchema.parse([{
+      type: "comment",
+      id: "supplement-1",
+      actor_type: "member",
+      actor_id: "user-1",
+      created_at: "2026-01-01T00:00:00Z",
+      content: "also cover rollback",
+      supplement_task_id: "task-1",
+      supplement_status: "delivered",
+      supplement_delivered_at: "2026-01-01T00:00:01Z",
+    }]);
+    expect(parsed[0]).toMatchObject({
+      supplement_task_id: "task-1",
+      supplement_status: "delivered",
+      supplement_delivered_at: "2026-01-01T00:00:01Z",
+    });
+  });
+
   it("preserves source_task_id for agent failure comments", () => {
     const parsed = TimelineEntriesSchema.parse([
       {
@@ -613,6 +632,20 @@ describe("TimelineEntriesSchema", () => {
 });
 
 describe("AgentTaskListSchema", () => {
+  it("preserves negotiated supplement capability, ordered coverage and permission", () => {
+    const parsed = AgentTaskListSchema.parse([{
+      id: "run",
+      supplement_capability: "task-supplement-v1",
+      supplement_comment_ids: ["comment-1", "comment-2"],
+      can_supplement: true,
+    }]);
+    expect(parsed[0]).toMatchObject({
+      supplement_capability: "task-supplement-v1",
+      supplement_comment_ids: ["comment-1", "comment-2"],
+      can_supplement: true,
+    });
+  });
+
   it.each([true, false, undefined, null, "true", 1])("safely parses comment cancellation metadata: %s", (value) => {
     const parsed = AgentTaskListSchema.parse([{ id: "run", cancelled_by_comment_change: value }]);
     expect(parsed).toHaveLength(1);

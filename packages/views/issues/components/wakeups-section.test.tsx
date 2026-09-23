@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import type { IssueWakeup } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
@@ -8,6 +8,7 @@ const enable = vi.fn();
 let pending = false;
 let wakeup: IssueWakeup;
 let status = "queued";
+let viewTZ = "UTC";
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ id: "ws" }),
 }));
@@ -22,6 +23,9 @@ vi.mock("@tanstack/react-query", () => ({
     data: queryKey[0] === "wakeups" ? [wakeup] : [{ id: "task", status }],
   }),
 }));
+vi.mock("../../common/use-viewing-timezone", () => ({
+  useViewingTimezone: () => viewTZ,
+}));
 vi.mock("../../common/task-transcript", () => ({
   TranscriptButton: () => <button>Transcript</button>,
 }));
@@ -33,6 +37,7 @@ beforeEach(() => {
   enable.mockReset().mockResolvedValue(undefined);
   pending = false;
   status = "queued";
+  viewTZ = "UTC";
   wakeup = {
     id: "wake",
     revision: 2,
@@ -70,6 +75,36 @@ describe("Wakeups sidebar", () => {
     expect(row).not.toHaveTextContent("0 9 * * *");
     fireEvent.click(row);
     await waitFor(() => expect(screen.getByText("0 9 * * * · UTC")).toBeVisible());
+  });
+  describe("one-time wakeup stored in UTC", () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-09-23T10:00:00Z"));
+      viewTZ = "Asia/Shanghai";
+      wakeup.kind = "at";
+      wakeup.mode = "once";
+      wakeup.interval_seconds = null;
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it("shows the fire time in the viewer's timezone", async () => {
+      wakeup.next_fire_at = "2026-09-23T14:05:00Z";
+      renderWithI18n(<WakeupsSection issueId="issue" />);
+      const row = screen.getByRole("button", { name: /Wake Emacs/ });
+      expect(row).toHaveTextContent("Wake at Today 10:05 PM");
+      fireEvent.click(row);
+      await waitFor(() =>
+        expect(screen.getByText(/· Asia\/Shanghai$/)).toBeVisible(),
+      );
+    });
+
+    it("moves the fire time to the viewer's next day", () => {
+      wakeup.next_fire_at = "2026-09-23T17:00:00Z";
+      renderWithI18n(<WakeupsSection issueId="issue" />);
+      const row = screen.getByRole("button", { name: /Wake Emacs/ });
+      expect(row).toHaveTextContent("Wake at Sep 24, 01:00 AM");
+      expect(row).not.toHaveTextContent("Today");
+    });
   });
   it("exposes the toggle and reveals the full prompt only on opening details", async () => {
     renderWithI18n(<WakeupsSection issueId="issue" />);

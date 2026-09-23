@@ -2692,6 +2692,24 @@ export class ApiClient {
     });
   }
 
+  async createTaskSupplement(issueId: string, taskId: string, content: string, clientRequestId: string): Promise<Comment> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/tasks/${taskId}/supplements`, {
+      method: "POST",
+      body: JSON.stringify({ content, client_request_id: clientRequestId }),
+    });
+    const comment = parseWithFallback<Comment>(raw, CommentSchema, EMPTY_COMMENT, {
+      endpoint: "POST /api/issues/:id/tasks/:taskId/supplements",
+    });
+    if (!comment.id) throw new Error("Invalid additional-message response");
+    return comment;
+  }
+
+  async retryTaskSupplement(issueId: string, taskId: string, commentId: string): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/tasks/${taskId}/supplements/${commentId}/retry`, {
+      method: "POST",
+    });
+  }
+
   async getIssueUsage(issueId: string): Promise<IssueUsageSummary> {
     return this.fetch(`/api/issues/${issueId}/usage`);
   }

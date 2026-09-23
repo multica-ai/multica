@@ -21,6 +21,7 @@ import {
 import { WakeupInstructionEditor } from "./wakeup-instruction-editor";
 import { WakeupControl } from "./wakeup-control";
 import { TranscriptButton } from "../../common/task-transcript";
+import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { useT } from "../../i18n";
 import {
   isCurrentWakeup,
@@ -49,6 +50,7 @@ function WakeupRow({
   const { t } = useT("issues");
   const workspaceId = useCurrentWorkspace()?.id ?? "";
   const text = useWakeupText();
+  const viewTZ = useViewingTimezone();
   const status = task?.status ?? wakeup.last_task_status;
   const activeRun = isActiveWakeupRun(status);
   const Icon = wakeup.kind === "event" ? Bell : Clock3;
@@ -166,9 +168,9 @@ function WakeupRow({
           {wakeup.next_fire_at && (
             <p className="text-caption text-muted-foreground">
               {new Date(wakeup.next_fire_at).toLocaleString(undefined, {
-                timeZone: wakeup.timezone,
+                timeZone: viewTZ,
               })}{" "}
-              · {wakeup.timezone}
+              · {viewTZ}
             </p>
           )}
           {wakeup.cron_expression && (

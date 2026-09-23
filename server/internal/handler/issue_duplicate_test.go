@@ -269,3 +269,67 @@ func TestDuplicateReadsIgnoreLeftoverMarks(t *testing.T) {
 		markDuplicate(t, other, duplicate).Want(http.StatusOK)
 	})
 }
+
+// Responses carry the original as a validated summary (MUL-7349). An older
+// server can delete an original without clearing the pointers of its
+// duplicates, so detail, list and search must all check the original exists
+// rather than expose the bare pointer.
+func TestDuplicateOfSummaryFollowsTheOriginal(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	original := dbfx.Issue(t, "summary-original", testutil.Cols{"status": "in_progress"})
+	duplicate := dbfx.Issue(t, "summary-duplicate-needle", testutil.Cols{"status": "todo"})
+	markDuplicate(t, duplicate, original).Want(http.StatusOK)
+
+	type page struct {
+		Issues []IssueResponse `json:"issues"`
+	}
+	find := func(issues []IssueResponse) *IssueResponse {
+		for i := range issues {
+			if issues[i].ID == duplicate {
+				return &issues[i]
+			}
+		}
+		return nil
+	}
+	read := func() (detail IssueResponse, listed, searched *IssueResponse) {
+		t.Helper()
+		testutil.Call(t, testHandler.GetIssue, withURLParam(newRequest("GET", "/api/issues/"+duplicate, nil), "id", duplicate)).
+			Want(http.StatusOK).JSON(&detail)
+		var list, search page
+		testutil.Call(t, testHandler.ListIssues, newRequest("GET", "/api/issues?status=cancelled&limit=200", nil)).
+			Want(http.StatusOK).JSON(&list)
+		testutil.Call(t, testHandler.SearchIssues, newRequest("GET", "/api/issues/search?q=summary-duplicate-needle&include_closed=true", nil)).
+			Want(http.StatusOK).JSON(&search)
+		return detail, find(list.Issues), find(search.Issues)
+	}
+
+	var originalDetail IssueResponse
+	testutil.Call(t, testHandler.GetIssue, withURLParam(newRequest("GET", "/api/issues/"+original, nil), "id", original)).
+		Want(http.StatusOK).JSON(&originalDetail)
+
+	detail, listed, searched := read()
+	for name, resp := range map[string]*IssueResponse{"detail": &detail, "list": listed, "search": searched} {
+		if resp == nil {
+			t.Fatalf("%s: duplicate missing from response", name)
+		}
+		want := IssueRefResponse{ID: original, Identifier: originalDetail.Identifier, Title: "summary-original", Status: "in_progress"}
+		if resp.DuplicateOf == nil || *resp.DuplicateOf != want {
+			t.Fatalf("%s: duplicate_of = %+v, want %+v", name, resp.DuplicateOf, want)
+		}
+	}
+
+	// An older server deleting the original leaves the pointer behind.
+	dbfx.Exec(t, `DELETE FROM issue WHERE id = $1`, original)
+
+	detail, listed, searched = read()
+	for name, resp := range map[string]*IssueResponse{"detail": &detail, "list": listed, "search": searched} {
+		if resp == nil {
+			t.Fatalf("%s: duplicate missing from response", name)
+		}
+		if resp.DuplicateOf != nil {
+			t.Fatalf("%s: duplicate_of = %+v after the original was deleted, want null", name, resp.DuplicateOf)
+		}
+	}
+}

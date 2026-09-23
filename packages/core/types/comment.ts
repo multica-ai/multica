@@ -47,6 +47,10 @@ export interface Comment {
   // Per-target result of every explicit @agent / @squad mention in this comment
   // (MUL-4525 §2). Present only on create/edit responses; older servers omit it.
   trigger_outcomes?: CommentTriggerOutcome[];
+  supplement_task_id?: string;
+  supplement_status?: "pending" | "delivering" | "delivered" | "failed";
+  supplement_failure_reason?: string;
+  supplement_delivered_at?: string;
 }
 
 // The domain result of one explicitly-mentioned trigger target. Success-shaped

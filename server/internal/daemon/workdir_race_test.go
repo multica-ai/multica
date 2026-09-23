@@ -44,7 +44,7 @@ func TestHandleTask_DoesNotCallStartTaskItself(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/start"):
 			startCalls.Add(1)
 		}
-		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -113,7 +113,7 @@ func TestRunTask_StartTaskCalledAfterWorkdirOnDisk(t *testing.T) {
 				envRootOnDisk.Store(true)
 			}
 		}
-		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -189,7 +189,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -423,7 +423,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 	writeTestExecutable(t, fakeBin, []byte(script))
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -521,7 +521,7 @@ printf 'ran\n' > "$CAPTURE_FILE"
 	writeTestExecutable(t, fakeBin, []byte(script))
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -589,7 +589,7 @@ func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
 				leaseDuringStart.Store(true)
 				closeLeaseOnce.Do(func() { close(leaseSeenDuringStart) })
 			}
-			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
 		case strings.HasSuffix(r.URL.Path, "/start"):
 			attempt := startAttempts.Add(1)
 			startEntered.Store(true)
@@ -601,9 +601,9 @@ func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
 			}
-			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
 		default:
-			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
 		}
 	}))
 	t.Cleanup(srv.Close)
@@ -711,7 +711,7 @@ func prepareTimeoutStopsLeaseDuringBlockedStart(t *testing.T, budget time.Durati
 		if strings.HasSuffix(r.URL.Path, "/start") {
 			<-releaseStart
 		}
-		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 	// LIFO: unblock /start before Close waits for its handler.
@@ -838,7 +838,7 @@ func TestHandleTask_KeepsEnvRootActiveAcrossCompletion(t *testing.T) {
 				activeAtComplete.Store(true)
 			}
 		}
-		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	t.Cleanup(srv.Close)
 	d.client = NewClient(srv.URL)

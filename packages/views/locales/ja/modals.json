@@ -35,7 +35,9 @@
     "search_placeholder": "タスクを検索...",
     "searching": "検索中...",
     "no_results": "タスクが見つかりません。",
-    "prompt_to_search": "タスクを検索するには入力してください"
+    "prompt_to_search": "タスクを検索するには入力してください",
+    "suggested_similar": "タイトルが似ているタスク",
+    "suggested_recent": "最近表示したタスク"
   },
   "set_parent": {
     "title": "親タスクを設定",

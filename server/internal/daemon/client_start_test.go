@@ -18,6 +18,22 @@ type startTaskTransport func(*http.Request) (*http.Response, error)
 
 func (f startTaskTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+func TestStartTaskBoundsResponseRead(t *testing.T) {
+	const responseSize = 2 << 20
+	body := strings.NewReader(strings.Repeat(" ", responseSize))
+	client := NewClient("https://daemon.test")
+	client.client.Transport = startTaskTransport(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(body)}, nil
+	})
+	_, err := client.StartTask(context.Background(), Task{ID: "task-1"})
+	if !errors.Is(err, errInvalidResponseBody) || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("StartTask error = %v, want response size error", err)
+	}
+	if read := responseSize - body.Len(); read > (1<<20)+1 {
+		t.Fatalf("read %d bytes before rejecting oversized response", read)
+	}
+}
+
 func TestStartTaskRetries(t *testing.T) {
 	defer noSleepRetry(t)()
 	for _, tc := range []struct {
@@ -58,7 +74,7 @@ func TestStartTaskRetries(t *testing.T) {
 				}
 				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader("{}")), Header: make(http.Header)}, nil
 			})
-			err := client.StartTask(context.Background(), startTestClaim())
+			_, err := client.StartTask(context.Background(), startTestClaim())
 			if tc.status == http.StatusConflict && !errors.Is(err, errStartClaimRejected) {
 				t.Fatalf("lost claim rejection: %v", err)
 			}
@@ -84,7 +100,7 @@ func TestStartTaskCancellationStopsRetry(t *testing.T) {
 		calls++
 		return nil, io.ErrUnexpectedEOF
 	})
-	err := client.StartTask(ctx, startTestClaim())
+	_, err := client.StartTask(ctx, startTestClaim())
 	if err == nil || !errors.Is(ctx.Err(), context.Canceled) || calls != 1 {
 		t.Fatalf("error = %v, context = %v, calls = %d; want cancelled backoff and one attempt", err, ctx.Err(), calls)
 	}
@@ -126,14 +142,14 @@ func TestStartTaskLegacyServerDoesNotRetry(t *testing.T) {
 	client.client.Transport = startTaskTransport(func(r *http.Request) (*http.Response, error) {
 		calls++
 		body, _ := io.ReadAll(r.Body)
-		if string(body) != "{}" {
+		if string(body) != `{"capabilities":null}` {
 			t.Fatalf("legacy body: %s", body)
 		}
 		return nil, io.ErrUnexpectedEOF
 	})
 	claim := startTestClaim()
 	claim.StartClaimSupported = false
-	if err := client.StartTask(context.Background(), claim); err == nil || calls != 1 {
+	if _, err := client.StartTask(context.Background(), claim); err == nil || calls != 1 {
 		t.Fatalf("legacy start: err=%v calls=%d", err, calls)
 	}
 }
@@ -152,12 +168,12 @@ func TestStartTaskBudgetAndMissingClaim(t *testing.T) {
 	})
 	claim := startTestClaim()
 	claim.DispatchedAt = ""
-	if err := client.StartTask(context.Background(), claim); err == nil || calls != 0 {
+	if _, err := client.StartTask(context.Background(), claim); err == nil || calls != 0 {
 		t.Fatalf("missing claim: %v, calls=%d", err, calls)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	if err := client.StartTask(ctx, startTestClaim()); err == nil || calls != 1 {
+	if _, err := client.StartTask(ctx, startTestClaim()); err == nil || calls != 1 {
 		t.Fatalf("deadline: %v, calls=%d", err, calls)
 	}
 }

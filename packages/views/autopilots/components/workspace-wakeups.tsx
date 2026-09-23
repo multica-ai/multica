@@ -47,6 +47,7 @@ import { useLocale, useT, useTimeAgo } from "../../i18n";
 import { CollectionPageState } from "../../layout/collection-page";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { TranscriptButton } from "../../common/task-transcript";
+import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { WakeupInstructionEditor } from "../../issues/components/wakeup-instruction-editor";
 import { WakeupControl } from "../../issues/components/wakeup-control";
 import {
@@ -72,6 +73,7 @@ function WakeupListRow({
   const locale = useLocale();
   const timeAgo = useTimeAgo();
   const text = useWakeupText();
+  const viewTZ = useViewingTimezone();
   const disable = useDisableIssueWakeup(wsId, row.issue_id);
   const enable = useEnableIssueWakeup(wsId, row.issue_id);
   const Icon = row.kind === "event" ? Bell : Clock3;
@@ -127,7 +129,7 @@ function WakeupListRow({
           <span className="line-clamp-2 break-words">{text.trigger(row)}</span>
         </span>
         <span className="block truncate text-caption text-muted-foreground">
-          {row.kind === "event" ? text.frequency(row) : row.timezone}
+          {row.kind === "cron" ? row.timezone : text.frequency(row)}
         </span>
       </TableCell>
       <TableCell className="max-w-48">
@@ -135,7 +137,7 @@ function WakeupListRow({
           className="block truncate"
           title={
             row.next_fire_at && row.enabled
-              ? `${new Date(row.next_fire_at).toLocaleString(locale, { timeZone: row.timezone })} · ${row.timezone}`
+              ? `${new Date(row.next_fire_at).toLocaleString(locale, { timeZone: viewTZ })} · ${viewTZ}`
               : undefined
           }
         >

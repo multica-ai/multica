@@ -6,6 +6,7 @@ import type {
   WakeupPreview,
 } from "@multica/core/types";
 import { useLocale, useT } from "../../i18n";
+import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { parseCron } from "../../autopilots/components/schedule-editor/cron-mapping";
 import { useDescribeSchedule } from "../../autopilots/components/schedule-editor/describe";
 
@@ -83,6 +84,9 @@ export function formatWakeupTime(
 export function useWakeupText() {
   const { t } = useT("issues");
   const locale = useLocale();
+  // Fire times are absolute instants: show them in the viewer's timezone.
+  // A wakeup's stored timezone only defines cron semantics.
+  const viewTZ = useViewingTimezone();
   const describe = useDescribeSchedule();
   const eventLabels = (agent: string): Record<string, string> => ({
     "task.queued": t(($) => $.wakeups.conditions.run_queued, { agent }),
@@ -173,15 +177,15 @@ export function useWakeupText() {
       );
     return frequency(w);
   };
-  const time = (value: string, timezone: string) => {
+  const time = (value: string) => {
     if (!Number.isFinite(Date.parse(value))) return value;
     const day = new Intl.DateTimeFormat(locale, {
-      timeZone: timezone,
+      timeZone: viewTZ,
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
     });
-    const formatted = formatWakeupTime(value, locale, timezone);
+    const formatted = formatWakeupTime(value, locale, viewTZ);
     return day.format(new Date(value)) === day.format(new Date())
       ? t(($) => $.wakeups.today_time, { time: formatted })
       : formatted;
@@ -200,7 +204,7 @@ export function useWakeupText() {
     if (w.kind === "at")
       return w.next_fire_at
         ? t(($) => $.wakeups.at_time, {
-            time: time(w.next_fire_at, w.timezone),
+            time: time(w.next_fire_at),
           })
         : t(($) => $.wakeups.scheduled_time);
     const event = w.event_types[0] ?? "";
@@ -226,7 +230,7 @@ export function useWakeupText() {
   const state = (w: Omit<IssueWakeup, "instruction">, closed = false) => {
     const key = wakeupState(w, closed);
     return key === "scheduled" && w.next_fire_at
-      ? t(($) => $.wakeups.next_at, { time: time(w.next_fire_at, w.timezone) })
+      ? t(($) => $.wakeups.next_at, { time: time(w.next_fire_at) })
       : t(($) => $.wakeups.rule_states[key]);
   };
   const error = (err: unknown, fallback: string) => {

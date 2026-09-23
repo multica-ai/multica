@@ -35,7 +35,9 @@
     "search_placeholder": "Rechercher des tâches...",
     "searching": "Recherche...",
     "no_results": "Aucune tâche trouvée.",
-    "prompt_to_search": "Saisissez du texte pour rechercher des tâches"
+    "prompt_to_search": "Saisissez du texte pour rechercher des tâches",
+    "suggested_similar": "Titres similaires",
+    "suggested_recent": "Consultées récemment"
   },
   "set_parent": {
     "title": "Définir la tâche parente",

@@ -18,7 +18,28 @@
     "full_log": "打开完整日志",
     "message": "智能体消息",
     "error": "错误",
-    "waiting_result": "等待工具返回结果..."
+    "waiting_result": "等待工具返回结果...",
+    "supplement_action": "补充消息",
+    "supplement_placeholder": "为本次运行补充纯文字要求",
+    "supplement_send": "发送",
+    "supplement_notice": "智能体会继续处理原目标。",
+    "supplement_waiting_start": "运行开始后才可补充消息。",
+    "supplement_unsupported": "本次运行未协商支持补充消息。",
+    "supplement_forbidden": "你无权运行这个智能体。",
+    "supplement_ended": "本次运行已结束。输入已保留；如需发送，请显式另起一轮。",
+    "supplement_failed": "消息发送失败，输入已保留。",
+    "supplement_waiting_delivery": "等待送达",
+    "supplement_not_delivered": "未送达 · {{reason}}",
+    "supplement_failure_turn_ended": "送达前运行已结束",
+    "supplement_failure_turn_not_started": "智能体尚未就绪",
+    "supplement_failure_provider_rejected": "智能体拒绝了该消息",
+    "supplement_failure_timeout": "送达超时",
+    "supplement_failure_unknown": "原因未知",
+    "supplement_move_to_new": "移到新消息",
+    "supplement_discard": "丢弃",
+    "supplement_moved": "已移到新消息输入框。",
+    "supplement_retry": "重试",
+    "supplement_retry_failed": "无法重试送达。"
   },
   "status_catalog_error": {
     "title": "状态列表加载失败",
@@ -484,7 +505,13 @@
     "squad_leader_failed_reason": "评估失败：{{reason}}",
     "coalesced_badge": "×{{count}}",
     "activity_count_other": "{{count}} 条动态",
-    "show_more_activities_other": "展开更早 {{count}} 条动态"
+    "show_more_activities_other": "展开更早 {{count}} 条动态",
+    "duplicate_marked": "把这个任务标记为 {{identifier}} 的重复",
+    "duplicate_unmarked": "取消了这个任务对 {{identifier}} 的重复标记",
+    "duplicate_unmarked_to": "取消了这个任务对 {{identifier}} 的重复标记，并移至{{status}}",
+    "duplicate_unmarked_original_deleted": "移除了重复标记，{{identifier}} 已被删除",
+    "duplicate_added": "把 {{identifier}} 标记为这个任务的重复",
+    "duplicate_removed": "取消了 {{identifier}} 对这个任务的重复标记"
   },
   "comment": {
     "add_reaction": "添加表情回应",
@@ -789,7 +816,8 @@
       "create_failed": "创建标签失败"
     },
     "status": {
-      "mark_duplicate": "标记为重复..."
+      "mark_duplicate": "标记为重复",
+      "change_original": "更改原始任务"
     }
   },
   "labels_panel": {
@@ -1045,7 +1073,8 @@
   },
   "duplicates": {
     "banner_prefix": "重复于",
-    "unmark": "取消标记并移至待办",
-    "section_title": "重复项"
+    "unmark": "不是重复",
+    "section_title": "重复项",
+    "unmark_toast": "已重新打开为待办"
   }
 }

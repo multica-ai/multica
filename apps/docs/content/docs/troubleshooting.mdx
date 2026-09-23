@@ -130,6 +130,25 @@ Routing `/health` to the backend (port 8080) explicitly in your proxy works acro
 curl -fsS <server-url>/health
 ```
 
+## `multica login` fails with a TLS handshake timeout
+
+`multica login` opens the browser and the web sign-in completes, but the CLI still fails with "Sign-in did not complete" or "TLS handshake timed out". `multica --debug login` shows `net/http: TLS handshake timeout` on `POST /api/tokens`, while `curl.exe -I https://api.multica.ai` or a browser on the same machine connects fine.
+
+The TCP connection opens, but the TLS handshake never completes. Go clients, including the Multica CLI and daemon, send a post-quantum key share in the TLS ClientHello by default, which makes it about 1.5 KB and splits it across two packets. Some security software, VPNs, routers, and firewalls drop such handshakes; curl sends a much smaller ClientHello and gets through.
+
+Confirm the cause by retrying with the post-quantum key share disabled:
+
+```powershell
+$env:GODEBUG = 'tlsmlkem=0'
+multica --debug login
+```
+
+```bash
+GODEBUG=tlsmlkem=0 multica --debug login
+```
+
+If that succeeds, set `GODEBUG=tlsmlkem=0` permanently for the user that runs the CLI and the daemon — on Windows, run `[Environment]::SetEnvironmentVariable('GODEBUG', 'tlsmlkem=0', 'User')` and open a new terminal — then restart the daemon or the desktop app. Raising `MULTICA_HTTP_TIMEOUT` does not help: it does not govern the handshake. The permanent fix is on the network side: update or reconfigure the device or software that drops split TLS handshakes.
+
 ## Verification code and invitation emails not delivered
 
 Check the backend startup log first. It states whether the server is using `SMTP relay`, `Resend API`, or `DEV mode`:

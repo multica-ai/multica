@@ -44,6 +44,13 @@ export function buildCommentRunView(
   // in Execution history, but it must not become an unanchored Activity block.
   const inlineTasks = tasks.filter((task) => task.kind !== "quick_create");
   const comments = new Map(timeline.filter((entry) => entry.type === "comment").map((entry) => [entry.id, entry]));
+  const supplementalByTask = new Map<string, string[]>();
+  for (const entry of comments.values()) {
+    if (!entry.supplement_task_id) continue;
+    const ids = supplementalByTask.get(entry.supplement_task_id) ?? [];
+    ids.push(entry.id);
+    supplementalByTask.set(entry.supplement_task_id, ids);
+  }
   const timelineOrder = new Map(timeline.map((entry, index) => [entry.id, index]));
   const threadRoot = (id: string): string | undefined => {
     const seen = new Set<string>();
@@ -88,9 +95,14 @@ export function buildCommentRunView(
         || (source.status === "dispatched" && !source.delivered_comment_ids?.length)
         || ((source.status === "cancelled" || source.status === "failed")
           && !source.dispatched_at && !source.started_at);
-      const ids = !usesPlannedCoverage && source.delivered_comment_ids !== undefined
+      const baseIds = !usesPlannedCoverage && source.delivered_comment_ids !== undefined
         ? source.delivered_comment_ids
         : [source.trigger_comment_id, ...(source.coalesced_comment_ids ?? [])];
+      const ids = [...new Set([
+        ...baseIds,
+        ...(source.supplement_comment_ids ?? []),
+        ...(supplementalByTask.get(source.id) ?? []),
+      ])];
       const candidates = ids.flatMap((id) => id && comments.has(id) ? [comments.get(id)!] : []);
       const latestCandidateId = () => [...candidates].sort((a, b) => b.created_at.localeCompare(a.created_at)
         || (timelineOrder.get(b.id) ?? -1) - (timelineOrder.get(a.id) ?? -1))[0]?.id;

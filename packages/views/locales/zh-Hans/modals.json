@@ -35,7 +35,9 @@
     "search_placeholder": "搜索任务...",
     "searching": "搜索中...",
     "no_results": "未找到任务。",
-    "prompt_to_search": "输入关键词搜索任务"
+    "prompt_to_search": "输入关键词搜索任务",
+    "suggested_similar": "标题相似",
+    "suggested_recent": "最近查看"
   },
   "set_parent": {
     "title": "设置父任务",

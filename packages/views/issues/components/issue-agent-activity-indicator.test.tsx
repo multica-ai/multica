@@ -8,6 +8,9 @@ const mockState = vi.hoisted(() => ({
   summaries: [] as unknown[],
 }));
 
+vi.mock("../../common/use-viewing-timezone", () => ({
+  useViewingTimezone: () => "UTC",
+}));
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));

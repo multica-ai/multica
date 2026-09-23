@@ -10,6 +10,9 @@ import type {
 import { renderWithI18n } from "../../test/i18n";
 import { WorkspaceWakeups } from "./workspace-wakeups";
 
+vi.mock("../../common/use-viewing-timezone", () => ({
+  useViewingTimezone: () => "UTC",
+}));
 vi.mock("@multica/core/api", () => ({
   api: {
     listWorkspaceWakeups: vi.fn(),

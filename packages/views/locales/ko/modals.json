@@ -35,7 +35,9 @@
     "search_placeholder": "태스크 검색...",
     "searching": "검색 중...",
     "no_results": "태스크를 찾을 수 없습니다.",
-    "prompt_to_search": "태스크를 검색하려면 입력하세요"
+    "prompt_to_search": "태스크를 검색하려면 입력하세요",
+    "suggested_similar": "제목이 비슷한 태스크",
+    "suggested_recent": "최근 본 태스크"
   },
   "set_parent": {
     "title": "상위 태스크 설정",

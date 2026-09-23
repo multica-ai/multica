@@ -1332,25 +1332,31 @@ func (q *Queries) ListRecentThreadCommentsForIssue(ctx context.Context, arg List
 }
 
 const listReconcilableCommentsForIssueSince = `-- name: ListReconcilableCommentsForIssueSince :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at, deleted_at FROM comment
-WHERE issue_id = $1
-  AND (id = ANY($2::uuid[])
-       OR comment_thread_root_id(id) = $3::uuid)
+SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type, c.created_at, c.updated_at, c.parent_id, c.workspace_id, c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.source_task_id, c.quick_action_id, c.via_plugin_id, c.revision, c.recovery_settled_at, c.deleted_at FROM comment c
+WHERE c.issue_id = $1
+  AND (c.id = ANY($2::uuid[])
+       OR comment_thread_root_id(c.id) = $3::uuid)
   -- A deleted comment is no longer input, even when replies keep its row.
-  AND deleted_at IS NULL
+  AND c.deleted_at IS NULL
+  -- Explicit supplements belong only to their bound run, regardless of
+  -- delivery status. Failed delivery must not become an automatic new run.
+  AND NOT EXISTS (
+      SELECT 1 FROM task_supplement s
+      WHERE s.comment_id = c.id AND s.workspace_id = c.workspace_id
+  )
   AND (
       (
-          author_type IN ('member', 'agent')
-          AND (created_at > $4 OR id = ANY($2::uuid[]))
+          c.author_type IN ('member', 'agent')
+          AND (c.created_at > $4 OR c.id = ANY($2::uuid[]))
       )
       OR (
-          author_type = 'system'
-          AND type = 'progress_update'
-          AND source_task_id IS NOT NULL
-          AND id = ANY($2::uuid[])
+          c.author_type = 'system'
+          AND c.type = 'progress_update'
+          AND c.source_task_id IS NOT NULL
+          AND c.id = ANY($2::uuid[])
       )
   )
-ORDER BY created_at ASC, id ASC
+ORDER BY c.created_at ASC, c.id ASC
 `
 
 type ListReconcilableCommentsForIssueSinceParams struct {

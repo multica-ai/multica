@@ -212,6 +212,12 @@ deleted_task_messages AS (
 deleted_task_tokens AS (
     DELETE FROM task_token WHERE task_id IN (SELECT id FROM batch)
 ),
+deleted_task_supplements AS (
+    DELETE FROM task_supplement WHERE task_id IN (SELECT id FROM batch)
+),
+deleted_task_supplement_capabilities AS (
+    DELETE FROM task_supplement_capability WHERE task_id IN (SELECT id FROM batch)
+),
 deleted_channel_outbound_cards AS (
     DELETE FROM channel_outbound_card_message WHERE task_id IN (SELECT id FROM batch)
 ),
@@ -310,6 +316,12 @@ ws_lark_installations AS MATERIALIZED (
 deleted_task_tokens AS (
     DELETE FROM task_token
     WHERE workspace_id = $1
+),
+deleted_orphan_task_supplements AS (
+    DELETE FROM task_supplement WHERE workspace_id = $1
+),
+deleted_orphan_task_supplement_capabilities AS (
+    DELETE FROM task_supplement_capability WHERE workspace_id = $1
 ),
 deleted_hourly_dirty AS (
     DELETE FROM task_usage_hourly_dirty WHERE workspace_id = $1

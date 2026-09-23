@@ -14,6 +14,29 @@ function comment(id: string, overrides: Partial<TimelineEntry> = {}): TimelineEn
 }
 
 describe("groupCommentRuns", () => {
+  it("moves one run after each accepted supplement and keeps the final answer in that block", () => {
+    const root = comment("root");
+    const supplement = comment("supplement", {
+      parent_id: root.id,
+      created_at: "2026-09-07T00:01:00Z",
+      supplement_task_id: "run",
+      supplement_status: "delivered",
+    });
+    const answer = comment("answer", {
+      actor_type: "agent",
+      source_task_id: "run",
+      created_at: "2026-09-07T00:02:00Z",
+    });
+    const run = task("run", { trigger_comment_id: root.id, delivered_comment_ids: [root.id] });
+    const view = buildCommentRunView([run], [root, supplement, answer]);
+    expect(view.runs.get(root.id)?.[0]).toMatchObject({
+      anchorCommentId: supplement.id,
+      commentId: answer.id,
+      hasReply: true,
+    });
+    expect(view.timeline.find((entry) => entry.id === answer.id)?.parent_id).toBe(supplement.id);
+  });
+
   it.each(["queued", "dispatched", "running", "completed"] as const)("waits for a missing trigger before placing a %s run and its reply", (status) => {
     const run = task("run", { status, trigger_comment_id: "trigger",
       delivered_comment_ids: status === "queued" || status === "dispatched" ? [] : ["trigger"] });

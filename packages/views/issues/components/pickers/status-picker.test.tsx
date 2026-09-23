@@ -120,7 +120,7 @@ describe("StatusPicker mark-as-duplicate action", () => {
     renderWithI18n(
       <StatusPicker status="todo" onUpdate={() => {}} open onOpenChange={() => {}} />,
     );
-    expect(screen.queryByRole("button", { name: "Mark as duplicate..." })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Mark as duplicate" })).toBeNull();
   });
 
   it("is an action beside the options, not another status", () => {
@@ -137,7 +137,7 @@ describe("StatusPicker mark-as-duplicate action", () => {
       />,
     );
 
-    const action = screen.getByRole("button", { name: "Mark as duplicate..." });
+    const action = screen.getByRole("button", { name: "Mark as duplicate" });
     // Outside the arrow-key listbox, so keyboard nav and search skip it.
     expect(action.hasAttribute("data-picker-item")).toBe(false);
 
@@ -145,5 +145,21 @@ describe("StatusPicker mark-as-duplicate action", () => {
     expect(onMarkDuplicate).toHaveBeenCalledTimes(1);
     expect(onUpdate).not.toHaveBeenCalled();
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("StatusPicker on an issue that already is a duplicate", () => {
+  it("relabels the action to re-point the mark", () => {
+    renderWithI18n(
+      <StatusPicker
+        status="cancelled"
+        onUpdate={() => {}}
+        open
+        onOpenChange={() => {}}
+        onMarkDuplicate={() => {}}
+        isDuplicate
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Change original" })).toBeTruthy();
   });
 });

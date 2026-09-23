@@ -19,7 +19,28 @@
     "full_log": "Open full log",
     "message": "Agent message",
     "error": "Error",
-    "waiting_result": "Waiting for the tool result..."
+    "waiting_result": "Waiting for the tool result...",
+    "supplement_action": "Add message",
+    "supplement_placeholder": "Add guidance for this running turn",
+    "supplement_send": "Send",
+    "supplement_notice": "The agent keeps working on the original goal.",
+    "supplement_waiting_start": "Available after this run starts.",
+    "supplement_unsupported": "This run did not negotiate support for additional messages.",
+    "supplement_forbidden": "You do not have permission to run this agent.",
+    "supplement_ended": "This run has ended. Your text is preserved; start another run explicitly to send it.",
+    "supplement_failed": "Could not send the message. Your text is preserved.",
+    "supplement_waiting_delivery": "Waiting for delivery",
+    "supplement_not_delivered": "Not delivered · {{reason}}",
+    "supplement_failure_turn_ended": "the run ended before delivery",
+    "supplement_failure_turn_not_started": "the agent was not ready",
+    "supplement_failure_provider_rejected": "the agent rejected the message",
+    "supplement_failure_timeout": "delivery timed out",
+    "supplement_failure_unknown": "unknown reason",
+    "supplement_move_to_new": "Move to new message",
+    "supplement_discard": "Discard",
+    "supplement_moved": "Moved to the new message box.",
+    "supplement_retry": "Retry",
+    "supplement_retry_failed": "Could not retry delivery."
   },
   "status_catalog_error": {
     "title": "Couldn't load the status list",
@@ -493,7 +514,13 @@
     "activity_count_one": "{{count}} activity",
     "activity_count_other": "{{count}} activities",
     "show_more_activities_one": "Show {{count}} more activity",
-    "show_more_activities_other": "Show {{count}} more activities"
+    "show_more_activities_other": "Show {{count}} more activities",
+    "duplicate_marked": "marked this issue as a duplicate of {{identifier}}",
+    "duplicate_unmarked": "unmarked this issue as a duplicate of {{identifier}}",
+    "duplicate_unmarked_to": "unmarked this issue as a duplicate of {{identifier}} and moved it to {{status}}",
+    "duplicate_unmarked_original_deleted": "removed the duplicate mark, {{identifier}} was deleted",
+    "duplicate_added": "marked {{identifier}} as a duplicate of this issue",
+    "duplicate_removed": "unmarked {{identifier}} as a duplicate of this issue"
   },
   "comment": {
     "add_reaction": "Add reaction",
@@ -820,7 +847,8 @@
       "create_failed": "Failed to create label"
     },
     "status": {
-      "mark_duplicate": "Mark as duplicate..."
+      "mark_duplicate": "Mark as duplicate",
+      "change_original": "Change original"
     }
   },
   "labels_panel": {
@@ -1076,7 +1104,8 @@
   },
   "duplicates": {
     "banner_prefix": "Duplicate of",
-    "unmark": "Unmark and move to Todo",
-    "section_title": "Duplicates"
+    "unmark": "Not a duplicate",
+    "section_title": "Duplicates",
+    "unmark_toast": "Reopened as Todo"
   }
 }

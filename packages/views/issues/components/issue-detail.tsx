@@ -12,7 +12,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type React
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink, useBackOrReplace } from "../../navigation";
-import { IssueDuplicateBanner, IssueDuplicatesSection } from "./issue-duplicates";
+import { IssueDuplicateBanner, IssueDuplicatesSection, isDuplicateIssue } from "./issue-duplicates";
 import {
   Archive,
   Calendar,
@@ -344,6 +344,33 @@ function formatActivity(
       });
     case "description_updated":
       return t(($) => $.activity.description_updated);
+    case "duplicate_marked":
+      return t(($) => $.activity.duplicate_marked, {
+        identifier: details.original_identifier || "?",
+      });
+    case "duplicate_unmarked": {
+      const identifier = details.original_identifier || "?";
+      if (details.reason === "original_deleted") {
+        return t(($) => $.activity.duplicate_unmarked_original_deleted, { identifier });
+      }
+      // The row stands in for the status row of the reopen, so it says where
+      // the status went.
+      if (details.to) {
+        return t(($) => $.activity.duplicate_unmarked_to, {
+          identifier,
+          status: statusLabel(details.to, t, resolveStatusLabel),
+        });
+      }
+      return t(($) => $.activity.duplicate_unmarked, { identifier });
+    }
+    case "duplicate_added":
+      return t(($) => $.activity.duplicate_added, {
+        identifier: details.duplicate_identifier || "?",
+      });
+    case "duplicate_removed":
+      return t(($) => $.activity.duplicate_removed, {
+        identifier: details.duplicate_identifier || "?",
+      });
     case "task_completed":
       return t(($) => $.activity.task_completed, { count: entry.coalesced_count ?? 1 });
     case "task_failed":
@@ -372,6 +399,50 @@ function formatActivity(
   }
 }
 
+/**
+ * The issue a duplicate-mark activity (MUL-7349) names, when it can still be
+ * opened. A mark removed because its original was deleted has nowhere to
+ * link, so it renders as plain text.
+ */
+function duplicateActivityLink(entry: TimelineEntry): { id: string; identifier: string } | null {
+  const details = (entry.details ?? {}) as Record<string, string>;
+  switch (entry.action) {
+    case "duplicate_marked":
+    case "duplicate_unmarked":
+      if (details.reason === "original_deleted") return null;
+      return details.original_id && details.original_identifier
+        ? { id: details.original_id, identifier: details.original_identifier }
+        : null;
+    case "duplicate_added":
+    case "duplicate_removed":
+      return details.duplicate_id && details.duplicate_identifier
+        ? { id: details.duplicate_id, identifier: details.duplicate_identifier }
+        : null;
+    default:
+      return null;
+  }
+}
+
+/** Activity copy with the issue it names turned into a link. */
+function ActivityText({ entry, text }: { entry: TimelineEntry; text: string }) {
+  const paths = useWorkspacePaths();
+  const link = duplicateActivityLink(entry);
+  const at = link ? text.indexOf(link.identifier) : -1;
+  if (!link || at < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, at)}
+      <AppLink
+        href={paths.issueDetail(link.id)}
+        newTabTitle={link.identifier}
+        className="font-medium text-foreground underline-offset-4 hover:underline"
+      >
+        {link.identifier}
+      </AppLink>
+      {text.slice(at + link.identifier.length)}
+    </>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -620,19 +691,24 @@ function ActivityBlock({
       )}
       {visibleEntries.map((entry) => {
         const details = (entry.details ?? {}) as Record<string, string>;
+        // Duplicate rows replace the status rows of the same write, so they
+        // carry the status glyph those rows would have had.
         const isStatusChange = entry.action === "status_changed";
+        const markedDuplicate = entry.action === "duplicate_marked";
+        const unmarkedDuplicate = entry.action === "duplicate_unmarked" && !!details.to;
         const isPriorityChange = entry.action === "priority_changed";
         const isStartDateChange = entry.action === "start_date_changed";
         const isDueDateChange = entry.action === "due_date_changed";
 
         let leadIcon: React.ReactNode;
-        if (isStatusChange && details.to) {
+        if ((isStatusChange && details.to) || markedDuplicate || unmarkedDuplicate) {
+          const to = markedDuplicate ? "cancelled" : details.to;
           leadIcon = (
             <StatusIcon
-              status={details.to as IssueStatus}
-              category={resolveStatusCategory(details.to ?? "")}
-              color={resolveStatusColor(details.to ?? "")}
-              icon={resolveStatusIcon(details.to ?? "")}
+              status={to as IssueStatus}
+              category={resolveStatusCategory(to ?? "")}
+              color={resolveStatusColor(to ?? "")}
+              icon={resolveStatusIcon(to ?? "")}
               className="h-4 w-4 shrink-0"
             />
           );
@@ -664,7 +740,12 @@ function ActivityBlock({
               <span className="shrink-0 font-medium">
                 {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
               </span>
-              <span className="truncate">{formatActivity(entry, t, locale, getActorName, resolveStatusLabel)}</span>
+              <span className="truncate">
+                <ActivityText
+                  entry={entry}
+                  text={formatActivity(entry, t, locale, getActorName, resolveStatusLabel)}
+                />
+              </span>
               {(entry.coalesced_count ?? 1) > 1 &&
                 entry.action !== "task_completed" &&
                 entry.action !== "task_failed" && (
@@ -1532,7 +1613,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // - squad_leader_evaluated: never coalesce; outcome/reason are audit data
     const COALESCE_MS = 2 * 60 * 1000;
     const NO_TIME_LIMIT_ACTIONS = new Set(["task_completed", "task_failed"]);
-    const NEVER_COALESCE_ACTIONS = new Set(["squad_leader_evaluated"]);
+    // Duplicate marks name a different issue on every row.
+    const NEVER_COALESCE_ACTIONS = new Set([
+      "squad_leader_evaluated",
+      "duplicate_marked",
+      "duplicate_unmarked",
+      "duplicate_added",
+      "duplicate_removed",
+    ]);
     // Unanchored runs join the timeline at the time their card shows: a
     // published reply's own time, the live end while still working.
     const entryById = new Map(displayTimeline.map((entry) => [entry.id, entry]));
@@ -2329,6 +2417,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               onUpdate={handleUpdateField}
               align="start"
               onMarkDuplicate={actions.openMarkDuplicate}
+              isDuplicate={isDuplicateIssue(issue)}
             />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_assignee)}>
@@ -2909,7 +2998,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         <div className="mx-auto w-full max-w-4xl px-3 py-6 max-md:pb-chat-launcher md:px-8 md:py-8">
           <IssueDuplicateBanner
             issue={issue}
-            onUnmark={() => handleUpdateField({ status: "todo" })}
+            onUnmark={() =>
+              handleUpdateField(
+                { status: "todo" },
+                { onSuccess: () => toast.success(t(($) => $.duplicates.unmark_toast)) },
+              )
+            }
           />
           {titleLazy.active && (
             <div className={titleLazy.ready ? undefined : "hidden"}>

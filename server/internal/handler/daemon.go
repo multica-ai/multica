@@ -4037,7 +4037,6 @@ func (h *Handler) ListPendingTasksByRuntime(w http.ResponseWriter, r *http.Reque
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t, workspaceID)
 	}
-
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -4085,8 +4084,9 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		RuntimeID    string `json:"runtime_id"`
-		DispatchedAt string `json:"dispatched_at"`
+		Capabilities []string `json:"capabilities"`
+		RuntimeID    string   `json:"runtime_id"`
+		DispatchedAt string   `json:"dispatched_at"`
 	}
 	if r.ContentLength != 0 {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -4094,13 +4094,14 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	enableTaskSupplement := slices.Contains(req.Capabilities, protocol.DaemonCapabilityTaskSupplementV1)
 	var task *db.AgentTaskQueue
 	var err error
 	legacy := req.RuntimeID == "" && req.DispatchedAt == ""
 	if legacy {
 		// Older daemons send {}. Keep their single-winner behavior; in
 		// particular, they cannot acknowledge an already-running task.
-		task, err = h.TaskService.StartTask(r.Context(), parseUUID(taskID))
+		task, err = h.TaskService.StartTask(r.Context(), parseUUID(taskID), enableTaskSupplement)
 	} else {
 		runtimeID, ok := parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
 		if !ok {
@@ -4114,7 +4115,7 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 		task, err = h.TaskService.StartTaskForClaim(r.Context(), db.LockAgentTaskStartClaimParams{
 			ID: parseUUID(taskID), RuntimeID: runtimeID,
 			DispatchedAt: pgtype.Timestamptz{Time: generation, Valid: true},
-		})
+		}, enableTaskSupplement)
 	}
 	if err != nil {
 		slog.Warn("start task failed", "task_id", taskID, "error", err)
@@ -4131,7 +4132,19 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("task started", "task_id", taskID, "agent_id", uuidToString(task.AgentID))
-	writeJSON(w, http.StatusOK, taskToResponse(*task, workspaceID))
+	resp := taskToResponse(*task, workspaceID)
+	// Echo the capability the server actually committed for this exact run.
+	// A daemon must use this response rather than its own offer: an old server
+	// ignores the offer and omits the field, which keeps daemon-first rollouts
+	// fail closed without requiring synchronized deployment.
+	if task.IssueID.Valid {
+		if capability, capabilityErr := h.Queries.GetTaskSupplementCapability(r.Context(), task.ID); capabilityErr == nil {
+			resp.SupplementCapability = capability.Capability
+		} else if !errors.Is(capabilityErr, pgx.ErrNoRows) {
+			slog.Warn("start task: failed to load negotiated supplement capability", "task_id", taskID, "error", capabilityErr)
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // TaskWaitLocalDirectoryRequest is the body the daemon POSTs when it parks
@@ -5657,6 +5670,7 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t, workspaceID)
 	}
+	h.hydrateTaskSupplementMetadata(r.Context(), r, issue.WorkspaceID, tasks, resp)
 	// Execution-log rows render the "on behalf of <member>" badge, so this
 	// issue-facing surface must resolve initiator/originator names (departed-safe,
 	// one batch) — otherwise the badge falls back to "someone" on issue detail.

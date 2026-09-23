@@ -82,7 +82,11 @@ type CommentResponse struct {
 	// was blocked (no invoke permission, target unavailable, runtime offline) now
 	// reports that here instead of silently dropping the trigger, so the client
 	// can show "comment posted, but N targets were not triggered".
-	TriggerOutcomes []CommentTriggerOutcome `json:"trigger_outcomes,omitempty"`
+	TriggerOutcomes         []CommentTriggerOutcome `json:"trigger_outcomes,omitempty"`
+	SupplementTaskID        string                  `json:"supplement_task_id,omitempty"`
+	SupplementStatus        string                  `json:"supplement_status,omitempty"`
+	SupplementFailureReason *string                 `json:"supplement_failure_reason,omitempty"`
+	SupplementDeliveredAt   *string                 `json:"supplement_delivered_at,omitempty"`
 }
 
 // CommentTriggerOutcome is the per-target result of an explicit @agent / @squad
@@ -125,6 +129,9 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 		Attachments:    attachments,
 	}
 }
+
+// Shared bound for plugin comments and input sent to a running agent.
+const maxCommentContentBytes = 64 * 1024
 
 // summaryContentRunes bounds comment content under summary=true. 200 runes is
 // enough to tell what a comment is about (its opening) while cutting the bulk
@@ -3346,6 +3353,15 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "comment not found")
 		return
 	}
+	if _, err := h.Queries.GetTaskSupplementByComment(r.Context(), db.GetTaskSupplementByCommentParams{
+		CommentID: existing.ID, WorkspaceID: wsUUID,
+	}); err == nil {
+		writeError(w, http.StatusConflict, "additional messages cannot be edited")
+		return
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to verify additional message")
+		return
+	}
 
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
@@ -3665,7 +3681,9 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		if hasIssue {
 			h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, pgtype.UUID{})
 		}
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, errTaskSupplementInFlight) {
+			writeError(w, http.StatusConflict, "additional message is still being delivered")
+		} else if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "comment not found")
 		} else {
 			writeError(w, http.StatusInternalServerError, "failed to delete comment")
@@ -3773,6 +3791,8 @@ func (h *Handler) withLiveCommentLock(ctx context.Context, commentID, workspaceI
 // matching the depth bound of the ancestor path queries.
 const commentTombstonePruneDepth = 256
 
+var errTaskSupplementInFlight = errors.New("additional message is still being delivered")
+
 // deleteComment deletes exactly one comment (#8296). A comment that still has
 // replies becomes a tombstone — content, attachments, reactions and resolution
 // cleared, row kept — so each reply stays attached to its direct parent. A
@@ -3795,6 +3815,23 @@ func (h *Handler) deleteComment(ctx context.Context, commentID, workspaceID pgty
 	})
 	if err != nil {
 		return out, err
+	}
+	// Keep receipt admission locked through deletion so a concurrent retry
+	// cannot resurrect or deliver the content being removed.
+	receipt, receiptErr := qtx.LockTaskSupplementByComment(ctx, db.LockTaskSupplementByCommentParams{
+		CommentID: commentID, WorkspaceID: workspaceID,
+	})
+	if receiptErr == nil {
+		if receipt.Status == "pending" || receipt.Status == "delivering" {
+			return out, errTaskSupplementInFlight
+		}
+		if err := qtx.DeleteTaskSupplementByComment(ctx, db.DeleteTaskSupplementByCommentParams{
+			CommentID: commentID, WorkspaceID: workspaceID,
+		}); err != nil {
+			return out, err
+		}
+	} else if !errors.Is(receiptErr, pgx.ErrNoRows) {
+		return out, receiptErr
 	}
 	// Separate statement on purpose: its snapshot postdates the locks above,
 	// so it sees every committed reply, and none can be added while they are
