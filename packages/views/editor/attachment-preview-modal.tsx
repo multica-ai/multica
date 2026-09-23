@@ -65,7 +65,10 @@ import {
   FileText,
   FileVideo,
   ImageIcon,
+  LayoutGrid,
   Loader2,
+  MessageSquareText,
+  PanelRight,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -209,6 +212,19 @@ export interface PreviewSequence {
   onNext?: () => void;
 }
 
+/** "Show where this was posted" — labelled by the host, which knows where. */
+export interface PreviewLocateAction {
+  label: string;
+  onSelect: () => void;
+}
+
+/** The info panel beside the stage (MUL-7649). Its open state outlives the file. */
+export interface PreviewInfoPanel {
+  content: ReactNode;
+  open: boolean;
+  onToggle: () => void;
+}
+
 interface AttachmentPreviewModalProps {
   source: PreviewSource;
   open: boolean;
@@ -216,6 +232,14 @@ interface AttachmentPreviewModalProps {
   sequence?: PreviewSequence;
   /** Fired when the image kind fails to load — lets a gallery skip the frame. */
   onImageError?: () => void;
+  /** Rendered after the file name, e.g. a version switcher. */
+  titleAccessory?: ReactNode;
+  /** Adds the info button and `I`. */
+  info?: PreviewInfoPanel;
+  /** Adds "show where this was posted": the caller closes the viewer and scrolls. */
+  locate?: PreviewLocateAction;
+  /** Adds the overview button and `G`. */
+  onOpenOverview?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -379,6 +403,13 @@ function ownsArrowKeys(target: EventTarget | null): boolean {
   return target.closest("input, textarea, select, video, audio") !== null;
 }
 
+// Letter shortcuts stand down only where the reader could be typing.
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  return target.closest("input, textarea, select") !== null;
+}
+
 export function AttachmentPreviewModal({
   source,
   open,
@@ -386,6 +417,10 @@ export function AttachmentPreviewModal({
   onExitComplete,
   sequence,
   onImageError,
+  titleAccessory,
+  info,
+  locate,
+  onOpenOverview,
 }: AttachmentPreviewModalProps & { onExitComplete?: () => void }) {
   const download = useDownloadAttachment();
   const shouldReduceMotion = useReducedMotion() ?? false;
@@ -397,6 +432,7 @@ export function AttachmentPreviewModal({
 
   const onPrev = sequence?.onPrev;
   const onNext = sequence?.onNext;
+  const onToggleInfo = info?.onToggle;
 
   // macOS desktop: hide the traffic lights while the viewer is up — its top
   // bar starts at the window's top-left corner, where they would sit on the
@@ -406,6 +442,9 @@ export function AttachmentPreviewModal({
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
+      // A menu opened from the chrome (the version switcher) owns its keys:
+      // Escape closes the menu, not the viewer, and arrows move its focus.
+      if (e.target instanceof Element && e.target.closest('[role="menu"]')) return;
       if (e.key === "Escape") {
         onClose();
         return;
@@ -415,6 +454,21 @@ export function AttachmentPreviewModal({
       // `horizontalArrowPan` below), so exactly one of the two responds.
       // Modified presses stay with the browser / OS.
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (!e.repeat && !isTypingTarget(e.target)) {
+        // Claimed with preventDefault so the app's own single-key shortcuts
+        // (which skip handled events) don't also fire behind the viewer.
+        const letter = e.key.toLowerCase();
+        if (letter === "g" && onOpenOverview) {
+          e.preventDefault();
+          onOpenOverview();
+          return;
+        }
+        if (letter === "i" && onToggleInfo) {
+          e.preventDefault();
+          onToggleInfo();
+          return;
+        }
+      }
       if (ownsArrowKeys(e.target)) return;
       if (e.key === "ArrowLeft" && onPrev) {
         e.preventDefault();
@@ -426,7 +480,7 @@ export function AttachmentPreviewModal({
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [open, onClose, onPrev, onNext]);
+  }, [open, onClose, onPrev, onNext, onOpenOverview, onToggleInfo]);
 
   const kind = state.kind;
 
@@ -518,6 +572,10 @@ export function AttachmentPreviewModal({
             sequence={sequence}
             onImageError={onImageError}
             reduceMotion={shouldReduceMotion}
+            titleAccessory={titleAccessory}
+            info={info}
+            locate={locate}
+            onOpenOverview={onOpenOverview}
           />
         </motion.div>
       )}
@@ -553,6 +611,10 @@ function PreviewPanel({
   sequence,
   onImageError,
   reduceMotion,
+  titleAccessory,
+  info,
+  locate,
+  onOpenOverview,
 }: {
   kind: PreviewKind | null;
   source: PreviewSource;
@@ -563,6 +625,10 @@ function PreviewPanel({
   sequence?: PreviewSequence;
   onImageError?: () => void;
   reduceMotion: boolean;
+  titleAccessory?: ReactNode;
+  info?: PreviewInfoPanel;
+  locate?: PreviewLocateAction;
+  onOpenOverview?: () => void;
 }) {
   const { t } = useT("editor");
 
@@ -647,7 +713,10 @@ function PreviewPanel({
             <KindIcon className="size-4" />
           </span>
           <div className="min-w-0">
-            <p className="truncate text-body font-medium">{state.filename}</p>
+            <div className="flex min-w-0 items-center gap-2" style={titleAccessory ? NO_DRAG : undefined}>
+              <p className="truncate text-body font-medium">{state.filename}</p>
+              {titleAccessory}
+            </div>
             {meta.length > 0 && (
               <p className="truncate text-caption text-muted-foreground tabular-nums">
                 {meta.join(" · ")}
@@ -682,6 +751,11 @@ function PreviewPanel({
               <ChromeDivider />
             </>
           )}
+          {locate && (
+            <ChromeButton label={locate.label} onClick={locate.onSelect}>
+              <MessageSquareText className="size-4" />
+            </ChromeButton>
+          )}
           {onOpenInNewTab && (
             <ChromeButton
               label={t(($) => $.attachment.open_in_new_tab)}
@@ -693,63 +767,95 @@ function PreviewPanel({
           <ChromeButton label={t(($) => $.image.download)} onClick={onDownload}>
             <Download className="size-4" />
           </ChromeButton>
+          {(onOpenOverview || info) && <ChromeDivider />}
+          {onOpenOverview && (
+            <ChromeButton
+              label={t(($) => $.attachment.overview)}
+              shortcut="G"
+              onClick={onOpenOverview}
+            >
+              <LayoutGrid className="size-4" />
+            </ChromeButton>
+          )}
+          {info && (
+            <ChromeButton
+              label={t(($) => $.attachment.info)}
+              shortcut="I"
+              pressed={info.open}
+              onClick={info.onToggle}
+            >
+              <PanelRight className="size-4" />
+            </ChromeButton>
+          )}
           <ChromeDivider />
           <ChromeButton label={t(($) => $.attachment.close)} onClick={onClose}>
             <X className="size-4" />
           </ChromeButton>
         </div>
       </header>
-      {/* The stage. In a sequence its sides are 64px gutters holding the
-          prev / next buttons, so a fitted image or a page never runs under
-          them. */}
-      <motion.div
-        className={cn(
-          "relative min-h-0 flex-1",
-          sequence ? "px-16" : "px-4",
-        )}
-        onClick={closeOnBackdrop}
-        initial={{ transform: reduceMotion ? "scale(1)" : "scale(0.97)" }}
-        animate={{
-          transform: "scale(1)",
-          transition: {
-            duration: UI_MOTION_DURATION.standard,
-            ease: UI_EASE_OUT,
-          },
-        }}
-      >
-        {kind === "image" ? (
-          <ImagePreview
-            state={state}
-            mediaUrl={mediaUrl}
-            canvas={canvas}
-            natural={natural}
-            onNaturalSize={handleNaturalSize}
-            onError={imageLoadError}
-          />
-        ) : (
-          <PreviewContent
-            kind={kind}
-            source={source}
-            state={state}
-            onDownload={onDownload}
-            onBackdropClick={closeOnBackdrop}
-          />
-        )}
-        {sequence && (
-          <>
-            <SequenceButton
-              side="prev"
-              label={t(($) => $.attachment.previous)}
-              onClick={sequence.onPrev}
+      <div className="flex min-h-0 flex-1">
+        {/* The stage. In a sequence its sides are 64px gutters holding the
+            prev / next buttons, so a fitted image or a page never runs under
+            them. */}
+        <motion.div
+          className={cn(
+            "relative min-h-0 min-w-0 flex-1",
+            sequence ? "px-16" : "px-4",
+          )}
+          onClick={closeOnBackdrop}
+          initial={{ transform: reduceMotion ? "scale(1)" : "scale(0.97)" }}
+          animate={{
+            transform: "scale(1)",
+            transition: {
+              duration: UI_MOTION_DURATION.standard,
+              ease: UI_EASE_OUT,
+            },
+          }}
+        >
+          {kind === "image" ? (
+            <ImagePreview
+              state={state}
+              mediaUrl={mediaUrl}
+              canvas={canvas}
+              natural={natural}
+              onNaturalSize={handleNaturalSize}
+              onError={imageLoadError}
             />
-            <SequenceButton
-              side="next"
-              label={t(($) => $.attachment.next)}
-              onClick={sequence.onNext}
+          ) : (
+            <PreviewContent
+              kind={kind}
+              source={source}
+              state={state}
+              onDownload={onDownload}
+              onBackdropClick={closeOnBackdrop}
             />
-          </>
+          )}
+          {sequence && (
+            <>
+              <SequenceButton
+                side="prev"
+                label={t(($) => $.attachment.previous)}
+                onClick={sequence.onPrev}
+              />
+              <SequenceButton
+                side="next"
+                label={t(($) => $.attachment.next)}
+                onClick={sequence.onNext}
+              />
+            </>
+          )}
+        </motion.div>
+        {info?.open && (
+          // A column beside the stage rather than a layer over it: the file
+          // re-fits into what is left instead of hiding under the panel.
+          <aside
+            className="dark w-80 max-w-[45vw] shrink-0 overflow-y-auto border-l border-border bg-background/40 text-foreground"
+            aria-label={t(($) => $.attachment.info)}
+          >
+            {info.content}
+          </aside>
         )}
-      </motion.div>
+      </div>
     </>
   );
 }
@@ -762,19 +868,30 @@ function PreviewPanel({
 // resolve to the dark set whatever the app theme is.
 function ChromeButton({
   label,
+  shortcut,
+  pressed,
   onClick,
   children,
 }: {
   label: string;
+  /** Single-key shortcut, shown in the tooltip and announced to AT. */
+  shortcut?: string;
+  /** Toggle buttons pass their state; plain actions leave it unset. */
+  pressed?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
   return (
     <button
       type="button"
-      className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-      title={label}
+      className={cn(
+        "flex size-8 items-center justify-center rounded-md transition-colors hover:bg-secondary hover:text-foreground",
+        pressed ? "bg-secondary text-foreground" : "text-muted-foreground",
+      )}
+      title={shortcut ? `${label} (${shortcut})` : label}
       aria-label={label}
+      aria-keyshortcuts={shortcut}
+      aria-pressed={pressed}
       onClick={onClick}
     >
       {children}

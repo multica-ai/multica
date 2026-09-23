@@ -61,7 +61,9 @@
     "remove": "Remove attachment",
     "previous": "Previous",
     "next": "Next",
-    "sequence_position": "{{index}} / {{total}}"
+    "sequence_position": "{{index}} / {{total}}",
+    "overview": "All deliverables",
+    "info": "Info"
   },
   "link_hover": {
     "copy_link": "Copy link",

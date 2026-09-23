@@ -144,6 +144,30 @@ export function clampTransform(
 }
 
 /**
+ * The transform after the viewport resizes under the content. Content still
+ * sitting at the old viewport's fit follows the resize and re-fits — the
+ * reader never zoomed, so the fit IS their view (e.g. an info panel opening
+ * beside the stage). Anything the reader zoomed or panned only gets clamped,
+ * so their place survives.
+ */
+export function resizeTransform(
+  transform: ZoomTransform,
+  content: Size,
+  previousViewport: Size,
+  viewport: Size,
+): ZoomTransform {
+  if (hasArea(content) && hasArea(previousViewport)) {
+    const previousFit = computeFitTransform(content, previousViewport);
+    const atFit =
+      Math.abs(transform.scale - previousFit.scale) < 0.001 &&
+      Math.abs(transform.x - previousFit.x) < 0.5 &&
+      Math.abs(transform.y - previousFit.y) < 0.5;
+    if (atFit && hasArea(viewport)) return computeFitTransform(content, viewport);
+  }
+  return clampTransform(transform, content, viewport);
+}
+
+/**
  * Zooms to `nextScale` while pinning the content point under `anchor` (in
  * viewport coordinates) to that same spot. This is what makes wheel and pinch
  * zoom track the cursor/fingers instead of drifting toward a corner.
