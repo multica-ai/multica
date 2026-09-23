@@ -1,6 +1,6 @@
 ---
 title: Interactive issue conversations
-description: Join a Pi or Codex issue worker while it runs, or attach to it from an ACP editor.
+description: Join a Pi, Codex, or Claude Code issue worker while it runs, or attach to it from an ACP editor.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -9,11 +9,11 @@ An issue can have a live conversation with the agent doing its work. You see the
 
 ## Enable it for an agent
 
-1. Configure a **Pi** or **Codex** agent with an online local runtime.
+1. Configure a **Pi**, **Codex**, or **Claude Code** agent with an online local runtime.
 2. Open the agent's **Custom args** tab, enable **Interactive task sessions**, and save.
 3. Start a new issue run by assigning or invoking that agent.
 
-The setting is off by default and affects new issue runs only. Other providers and standalone chats keep their existing execution behavior. A custom Pi command or sandbox wrapper must forward Pi's RPC arguments and keep its standard input open; Codex uses the existing app-server connection and its configured sandbox and approval behavior.
+The setting is off by default and affects new issue runs only. Other providers and standalone chats keep their existing execution behavior. A custom Pi command or sandbox wrapper must forward Pi's RPC arguments and keep its standard input open; Codex uses the existing app-server connection and its configured sandbox and approval behavior. Claude Code uses its CLI's bidirectional stream-json mode and keeps that CLI process alive until the run ends. Its current runtime still uses `--permission-mode bypassPermissions` and does not provide an approval prompt in the conversation UI; configure its execution environment accordingly.
 
 <Callout type="info">
 The server, worker daemon, CLI, and web or desktop app must all run compatible versions. Updating only the web UI or editor bridge does not change a worker that is already running.
@@ -29,7 +29,7 @@ The conversation stays inside the issue detail pane. Select an agent when severa
 
 | Control | What happens |
 | --- | --- |
-| **Send** | Delivers input to the current worker. While it is working, this steers the active native turn; while awaiting input, it continues the same run. |
+| **Send** | Delivers input to the current worker. Pi and Codex steer the active native turn while working. Claude Code queues input for a following turn while busy; use Interrupt first if you need it to stop immediately. While awaiting input, all three continue the same run. |
 | **Interrupt** | Aborts the current native turn. The run, provider process, and session remain open so you can send a correction. |
 | **Finish run** | Successfully closes a run that is awaiting input. It does not change the issue's status. |
 | **Cancel run** | Cancels the run; it does not merely pause the current turn. |
@@ -41,7 +41,7 @@ An idle interactive run still occupies its execution slot and counts toward elap
 
 ## Join from an ACP editor
 
-The `multica acp` command exposes existing issue-worker conversations to ACP clients such as Zed. It is a bridge to Multica's recorded run and live controls; it does not launch another Pi or Codex process. Build or install a CLI version that matches your server, sign in with a **human** CLI profile, and select a workspace. Do not pass a task-scoped agent token or provider credentials to the editor.
+The `multica acp` command exposes existing issue-worker conversations to ACP clients such as Zed. It is a bridge to Multica's recorded run and live controls; it does not launch another provider process. Build or install a CLI version that matches your server, sign in with a **human** CLI profile, and select a workspace. Do not pass a task-scoped agent token or provider credentials to the editor.
 
 For example, add a custom agent server to Zed's settings, replacing the command path and profile with values from your installation:
 
@@ -67,6 +67,6 @@ The editor bridge accepts text only. It does not provide a separate approval UI,
 
 ## If controls are unavailable
 
-Check that the selected run was started **after** enabling Interactive task sessions, that its agent uses Pi or Codex, and that the matching worker daemon is online. A finished run is read-only until you explicitly start a follow-up. A paused run can also reach its deadline. If the ACP editor cannot connect, verify the CLI profile is signed in as a human, the workspace ID is correct, and the command path points to the updated CLI binary.
+Check that the selected run was started **after** enabling Interactive task sessions, that its agent uses Pi, Codex, or Claude Code, and that the matching worker daemon is online. A finished run is read-only until you explicitly start a follow-up. A paused run can also reach its deadline. If the ACP editor cannot connect, verify the CLI profile is signed in as a human, the workspace ID is correct, and the command path points to the updated CLI binary.
 
 See [Runs](/tasks) for the general run lifecycle and [AI coding tools comparison](/providers) for provider sessions.

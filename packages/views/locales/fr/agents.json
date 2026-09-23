@@ -30,7 +30,7 @@
     "uncertain": "L’envoi n’a pas pu être confirmé. Réessayez avec la même requête.",
     "cleared": "Instruction en attente retirée par l’interruption",
     "setting": "Sessions de tâche interactives",
-    "setting_help": "Les nouvelles exécutions Pi/Codex acceptent vos instructions en direct. Interrompre conserve le processus et l’exécution ; annuler termine les deux."
+    "setting_help": "Les nouvelles exécutions Pi, Codex et Claude Code acceptent vos instructions en direct. Interrompre conserve le processus et l’exécution ; annuler termine les deux."
   },
   "page": {
     "title": "Agents",

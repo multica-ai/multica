@@ -30,7 +30,7 @@
     "uncertain": "Delivery could not be confirmed. Retry with the same request.",
     "cleared": "Queued input cleared by Interrupt",
     "setting": "Interactive task sessions",
-    "setting_help": "New Pi/Codex issue runs accept live input. Interrupt keeps the process and run open; Cancel run ends both."
+    "setting_help": "New Pi, Codex, and Claude Code issue runs accept live input. Interrupt keeps the process and run open; Cancel run ends both."
   },
   "page": {
     "title": "Agents",

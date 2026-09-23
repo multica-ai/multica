@@ -79,6 +79,11 @@ describe("CustomArgsTab", () => {
     expect(onSave).toHaveBeenCalledWith({ custom_args: baseAgent.custom_args, runtime_config: { keep: "value", interactive_task_sessions: true } });
   });
 
+  it("offers interactive issue sessions for Claude Code", () => {
+    renderTab({}, vi.fn(), { ...runtimeDevice, provider: "claude" });
+    expect(screen.getByRole("switch", { name: "Interactive task sessions" })).toBeInTheDocument();
+  });
+
   it("renders configured arguments as a list, not persistent inputs", () => {
     renderTab();
 

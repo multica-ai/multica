@@ -30,7 +30,7 @@
     "uncertain": "无法确认是否送达。请重试同一请求。",
     "cleared": "中断时清除的排队指令",
     "setting": "交互式任务会话",
-    "setting_help": "新的 Pi/Codex 任务运行接受实时指令。中断保留进程和运行；取消运行会结束两者。"
+    "setting_help": "新的 Pi、Codex 和 Claude Code 任务运行接受实时指令。中断保留进程和运行；取消运行会结束两者。"
   },
   "page": {
     "title": "智能体",

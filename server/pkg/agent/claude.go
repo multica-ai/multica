@@ -574,6 +574,7 @@ type claudeSDKMessage struct {
 	// control request fields
 	RequestID string          `json:"request_id,omitempty"`
 	Request   json.RawMessage `json:"request,omitempty"`
+	Response  json.RawMessage `json:"response,omitempty"`
 }
 
 type claudeLogEntry struct {

@@ -178,7 +178,7 @@ export function CustomArgsTab({
 
   return (
     <div className="space-y-6">
-      {(runtimeDevice?.provider === "pi" || runtimeDevice?.provider === "codex") && (
+      {(runtimeDevice?.provider === "pi" || runtimeDevice?.provider === "codex" || runtimeDevice?.provider === "claude") && (
         <Field orientation="horizontal">
           <div className="flex flex-col gap-1">
             <FieldLabel htmlFor="interactive-task-sessions">{t(($) => $.interaction.setting)}</FieldLabel>

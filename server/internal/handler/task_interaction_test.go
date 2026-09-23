@@ -67,6 +67,13 @@ func TestTaskInteractionInboxAndFinishBarrier(t *testing.T) {
 	}
 }
 
+func TestTaskInteractionAcceptsClaudeRuntime(t *testing.T) {
+	runtime, _, _, task := interactiveFixture(t)
+	dbfx.Exec(t, "UPDATE agent_runtime SET provider='claude' WHERE id=$1", runtime)
+	sync := interaction.Sync{Owner: "claude-process", Register: true, Deadline: time.Now().Add(time.Hour), State: agent.InteractionSnapshot{State: agent.InteractionWorking, Activity: 1}}
+	testutil.Call(t, testHandler.SyncTaskInteraction, interactionRequest(t, task, runtime, "POST", sync)).Want(http.StatusOK)
+}
+
 func TestTaskInteractionRejectsWrongOwnerRuntimeAndActor(t *testing.T) {
 	runtime, _, _, task := interactiveFixture(t)
 	sync := interaction.Sync{Owner: "process", Register: true, Deadline: time.Now().Add(time.Hour), State: agent.InteractionSnapshot{State: agent.InteractionWorking, Activity: 1}}

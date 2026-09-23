@@ -174,7 +174,7 @@ func TestInteractiveModeIsIssueAndProviderScoped(t *testing.T) {
 		{"pi", "pi", "issue", `{"interactive_task_sessions":true}`, true},
 		{"codex", "codex", "child-issue", `{"interactive_task_sessions":true}`, true},
 		{"standalone", "pi", "", `{"interactive_task_sessions":true}`, false},
-		{"unsupported", "claude", "issue", `{"interactive_task_sessions":true}`, false},
+		{"claude", "claude", "issue", `{"interactive_task_sessions":true}`, true},
 		{"disabled", "pi", "issue", `{}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

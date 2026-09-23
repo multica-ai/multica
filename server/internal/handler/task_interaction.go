@@ -159,7 +159,7 @@ func (h *Handler) SyncTaskInteraction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "runtime does not own this issue run")
 		return
 	}
-	if runtime.Provider != "pi" && runtime.Provider != "codex" {
+	if runtime.Provider != "pi" && runtime.Provider != "codex" && runtime.Provider != "claude" {
 		writeError(w, http.StatusConflict, "runtime does not support interactive runs")
 		return
 	}

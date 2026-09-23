@@ -22,7 +22,7 @@ func withInteractiveIssueRun(ctx context.Context, task Task, provider string) co
 }
 
 func interactiveIssueEnabled(task Task, provider string) bool {
-	if task.IssueID == "" || task.Agent == nil || (provider != "pi" && provider != "codex") {
+	if task.IssueID == "" || task.Agent == nil || (provider != "pi" && provider != "codex" && provider != "claude") {
 		return false
 	}
 	var config struct {

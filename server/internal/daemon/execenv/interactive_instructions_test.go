@@ -9,7 +9,7 @@ func TestInteractiveIssueInstructionsUseLiveConversation(t *testing.T) {
 	for _, leader := range []bool{false, true} {
 		ctx := TaskContextForEnv{IssueID: "issue", InteractiveIssue: true, IsSquadLeader: leader}
 		content := buildMetaSkillContentSlim("pi", ctx)
-		for _, want := range []string{"Reply directly here", "not on every live message", "assistant output is visible directly", "A normal reply ends only your current turn", "multica issue finish-run"} {
+		for _, want := range []string{"Reply directly here", "not on every live message", "assistant output is visible directly", "A normal reply ends only your current turn", "multica issue finish-run", "only your current run", "even if another agent is assigned to the issue", "does not finish other agents' runs or change the issue status"} {
 			if !strings.Contains(content, want) {
 				t.Errorf("missing %q", want)
 			}
