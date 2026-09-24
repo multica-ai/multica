@@ -175,7 +175,7 @@ func taskScopedAuthToken(task Task) (string, error) {
 }
 
 func taskMulticaEnvironment(task Task, agentName, token, configRoot, workspacesRoot, serverURL string, healthPort, slot int, tempDir string) map[string]string {
-	return map[string]string{
+	env := map[string]string{
 		"MULTICA_TOKEN":        token,
 		cli.TaskConfigRootEnv:  configRoot,
 		TaskWorkspacesRootEnv:  workspacesRoot,
@@ -190,6 +190,41 @@ func taskMulticaEnvironment(task Task, agentName, token, configRoot, workspacesR
 		"TMP":                  tempDir,
 		"TEMP":                 tempDir,
 	}
+	layerTaskGitAttribution(env, task, agentName)
+	return env
+}
+
+const multicaAgentGitEmail = "github@multica.ai"
+
+// layerTaskGitAttribution makes agent-created commits attributable to the
+// accountable human while retaining the agent as committer. Git's GIT_* env
+// variables take precedence over repository/global config and command-scoped
+// `git -c user.*=...` fallbacks, so provider sandboxes cannot accidentally
+// replace the author with an unverified synthetic identity.
+//
+// Agent custom_env is layered later and may deliberately override these
+// defaults for workspaces that require a dedicated bot or signing identity.
+func layerTaskGitAttribution(env map[string]string, task Task, agentName string) {
+	if task.Attribution == nil || task.Attribution.Initiator == nil {
+		return
+	}
+	accountable := task.Attribution.Initiator
+	authorName := strings.TrimSpace(accountable.Name)
+	authorEmail := strings.TrimSpace(accountable.Email)
+	if authorName == "" || authorEmail == "" {
+		return
+	}
+	committerName := strings.TrimSpace(agentName)
+	if committerName == "" {
+		committerName = "Multica Agent"
+	}
+
+	env["GIT_AUTHOR_NAME"] = authorName
+	env["GIT_AUTHOR_EMAIL"] = authorEmail
+	env["GIT_COMMITTER_NAME"] = committerName
+	env["GIT_COMMITTER_EMAIL"] = multicaAgentGitEmail
+	env["MULTICA_ON_BEHALF_OF_NAME"] = authorName
+	env["MULTICA_ON_BEHALF_OF_EMAIL"] = authorEmail
 }
 
 // taskRunner executes a single agent task and returns the result.
