@@ -2,12 +2,16 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestLocalStorage_Upload(t *testing.T) {
@@ -516,5 +520,153 @@ func TestLocalStorage_GetReader_MissingKey(t *testing.T) {
 	if rc, err := store.GetReader(context.Background(), "nonexistent.txt"); err == nil {
 		rc.Close()
 		t.Fatal("GetReader should error on missing key")
+	}
+}
+
+// endlessReader never reaches EOF: every Read hands back another byte, and
+// the first one signals that a copy is genuinely in flight so the test can
+// cancel mid-stream rather than racing the goroutine's start.
+//
+// A source that ends on its own would let a broken implementation look
+// correct — it would simply finish. Cancellation has to be the only thing
+// that can stop this one. It never blocks, so nothing here can deadlock if
+// the implementation regresses; readCap turns that case into a failed
+// assertion instead of an out-of-memory test binary.
+type endlessReader struct {
+	started   chan struct{}
+	startOnce sync.Once
+	reads     atomic.Int64
+}
+
+const endlessReaderCap = 1 << 20
+
+func newEndlessReader() *endlessReader {
+	return &endlessReader{started: make(chan struct{})}
+}
+
+func (r *endlessReader) Read(p []byte) (int, error) {
+	r.startOnce.Do(func() { close(r.started) })
+	if r.reads.Add(1) > endlessReaderCap {
+		return 0, errors.New("reader exhausted: cancellation never stopped the copy")
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+	p[0] = 'x'
+	return 1, nil
+}
+
+func newTestLocalStorage(t *testing.T) (*LocalStorage, string) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", dir)
+	t.Setenv("LOCAL_UPLOAD_BASE_URL", "")
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+	return store, dir
+}
+
+// A cancelled caller must not start writing at all. Without the check the
+// upload ran to completion and reported success, so a request the client had
+// already abandoned still produced an object.
+func TestLocalStorage_UploadRejectsCancelledContext(t *testing.T) {
+	store, dir := newTestLocalStorage(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := store.Upload(ctx, "cancelled.txt", []byte("data"), "text/plain", ""); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Upload error = %v, want context.Canceled", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("a cancelled upload left files behind: %v", entries)
+	}
+}
+
+// Cancelling mid-copy has to stop the copy, drop the staging file, and leave
+// any previously stored object at that key untouched — the whole reason
+// writeAtomic stages through a temp file.
+func TestLocalStorage_UploadStreamCancelMidCopyKeepsExistingObject(t *testing.T) {
+	store, dir := newTestLocalStorage(t)
+	key := "doc.txt"
+	if _, err := store.Upload(context.Background(), key, []byte("original"), "text/plain", ""); err != nil {
+		t.Fatalf("seed upload: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	reader := newEndlessReader()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := store.UploadStream(ctx, key, reader, 0, "text/plain", "")
+		errCh <- err
+	}()
+
+	// Wait for the first Read so the cancellation lands mid-copy rather than
+	// before the copy starts — that is a different code path with its own test.
+	<-reader.started
+	cancel()
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("UploadStream error = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("UploadStream ignored cancellation and is still copying")
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, key))
+	if err != nil {
+		t.Fatalf("existing object went missing: %v", err)
+	}
+	if string(got) != "original" {
+		t.Fatalf("existing object = %q, want it untouched (%q)", got, "original")
+	}
+	if _, err := os.Stat(tempPath(filepath.Join(dir, key))); !os.IsNotExist(err) {
+		t.Fatalf("staging file survived a cancelled copy (stat err = %v)", err)
+	}
+}
+
+// UploadFromReader buffers its source before handing it to Upload, so without
+// a context-aware read it drains a stalled reader in full before anyone looks
+// at ctx.
+func TestLocalStorage_UploadFromReaderStopsReadingOnCancel(t *testing.T) {
+	store, _ := newTestLocalStorage(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	reader := newEndlessReader()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := store.UploadFromReader(ctx, "stream.txt", reader, "text/plain", "")
+		errCh <- err
+	}()
+
+	<-reader.started
+	cancel()
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("UploadFromReader error = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("UploadFromReader ignored cancellation and is still reading")
+	}
+}
+
+// A deadline is the other half of the contract: callers use errors.Is on
+// DeadlineExceeded to tell a timeout from a storage failure.
+func TestLocalStorage_UploadPreservesDeadlineExceeded(t *testing.T) {
+	store, _ := newTestLocalStorage(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	time.Sleep(time.Millisecond)
+
+	if _, err := store.Upload(ctx, "late.txt", []byte("data"), "text/plain", ""); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Upload error = %v, want context.DeadlineExceeded", err)
 	}
 }
