@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -2667,6 +2668,13 @@ func (h *Handler) CancelAgentTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, cancelAgentTasksResponse{Cancelled: len(cancelled)})
 }
 
+// HeaderAgentTasksNextCursor preserves the array response used by installed clients.
+// An absent header means this is the last page.
+const HeaderAgentTasksNextCursor = "X-Agent-Tasks-Next-Cursor"
+
+const defaultAgentTasksLimit = 200
+const maxAgentTasksLimit = 200
+
 func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	agent, ok := h.loadAgentForUser(w, r, id)
@@ -2692,13 +2700,41 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tasks, err := h.Queries.ListAgentTasks(r.Context(), agent.ID)
+	limit := defaultAgentTasksLimit
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			writeError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+		limit = min(n, maxAgentTasksLimit)
+	}
+	// An infinite upper bound gives both first and subsequent pages an indexed
+	// tuple comparison, without an optional-cursor OR in the query plan.
+	beforeCreatedAt := pgtype.Timestamptz{InfinityModifier: pgtype.Infinity, Valid: true}
+	beforeID := agent.ID
+	if raw := r.URL.Query().Get("before"); raw != "" {
+		beforeCreatedAt, beforeID = parseTranscriptCursor(raw)
+		if !beforeCreatedAt.Valid || !beforeID.Valid {
+			writeError(w, http.StatusBadRequest, "invalid before cursor")
+			return
+		}
+	}
+	tasks, err := h.Queries.ListAgentTasks(r.Context(), db.ListAgentTasksParams{
+		AgentID: agent.ID, BeforeCreatedAt: beforeCreatedAt, BeforeID: beforeID,
+		PageLimit: int32(limit + 1),
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent tasks")
 		return
 	}
 
-	tasks = visibleTaskHistory(tasks)
+	nextCursor := ""
+	if len(tasks) > limit {
+		tasks = tasks[:limit]
+		last := tasks[len(tasks)-1]
+		nextCursor = transcriptCursor(last.CreatedAt.Time, last.ID)
+	}
 	resp := make([]AgentTaskResponse, len(tasks))
 	var taskIDs []pgtype.UUID
 	if includeUsage {
@@ -2720,18 +2756,23 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if nextCursor != "" {
+		w.Header().Set(HeaderAgentTasksNextCursor, nextCursor)
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
 // AgentActivityBucket is one day-bucketed throughput sample for the
 // Agents-list ACTIVITY sparkline. bucket_at is midnight UTC of the day.
 type AgentActivityBucket struct {
-	AgentID        string `json:"agent_id"`
-	BucketAt       string `json:"bucket_at"`
-	TaskCount      int32  `json:"task_count"`
-	FailedCount    int32  `json:"failed_count"`
-	CompletedCount int32  `json:"completed_count"`
-	CancelledCount int32  `json:"cancelled_count"`
+	AgentID        string  `json:"agent_id"`
+	BucketAt       string  `json:"bucket_at"`
+	TaskCount      int32   `json:"task_count"`
+	FailedCount    int32   `json:"failed_count"`
+	CompletedCount int32   `json:"completed_count"`
+	CancelledCount int32   `json:"cancelled_count"`
+	DurationMs     float64 `json:"duration_ms"`
+	DurationCount  int32   `json:"duration_count"`
 }
 
 // AgentRunCount is the trailing-30-day total task run count per agent,
@@ -2953,6 +2994,8 @@ func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Re
 			FailedCount:    row.FailedCount,
 			CompletedCount: row.CompletedCount,
 			CancelledCount: row.CancelledCount,
+			DurationMs:     row.DurationMs,
+			DurationCount:  row.DurationCount,
 		})
 	}
 

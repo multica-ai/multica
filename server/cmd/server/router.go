@@ -97,6 +97,7 @@ var corsExposedHeaders = []string{
 	handler.HeaderCommentsTruncated,
 	handler.HeaderTimelineTruncated,
 	handler.HeaderActiveRunsTruncated,
+	handler.HeaderAgentTasksNextCursor,
 }
 
 func registerPluginActionRoutes(r chi.Router, h *handler.Handler) {

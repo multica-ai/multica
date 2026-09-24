@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent, AgentActivityBucket } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -23,7 +23,7 @@ vi.mock("@multica/core/api", () => ({ api: {} }));
 
 // Keep "Now" empty while varying activity outcomes and task-list loading.
 const agentTasksRef = vi.hoisted(() => ({
-  current: () => new Promise<unknown>(() => {}),
+  current: (_before?: string) => new Promise<unknown>(() => {}),
 }));
 const activityRef = vi.hoisted(() => ({ current: [] as AgentActivityBucket[] }));
 vi.mock("@multica/core/agents", async (importOriginal) => {
@@ -36,7 +36,9 @@ vi.mock("@multica/core/agents", async (importOriginal) => {
     }),
     agentTasksOptions: () => ({
       queryKey: ["agent-tasks"],
-      queryFn: () => agentTasksRef.current(),
+      initialPageParam: undefined,
+      getNextPageParam: (page: { nextCursor: string | null }) => page.nextCursor ?? undefined,
+      queryFn: ({ pageParam }: { pageParam?: string }) => agentTasksRef.current(pageParam),
     }),
     useWorkspaceActivityMap: () => ({
       byAgent: new Map([[
@@ -132,11 +134,51 @@ describe("ActivityTab Recent work loading state", () => {
   });
 
   it("shows the empty state once the task list resolves to no runs", async () => {
-    agentTasksRef.current = () => Promise.resolve([]);
+    agentTasksRef.current = () => Promise.resolve({ tasks: [], nextCursor: null });
     renderTab();
     expect(await screen.findByText(EMPTY_RECENT)).toBeInTheDocument();
     expect(
       document.querySelectorAll('[data-slot="skeleton"]').length,
     ).toBe(0);
+  });
+});
+
+
+describe("ActivityTab server pagination", () => {
+  it("requests older history only on demand, disables duplicate fetches, and retries failures", async () => {
+    let finish: (value: unknown) => void = () => {};
+    const query = vi.fn()
+      .mockResolvedValueOnce({ tasks: [], nextCursor: "older" })
+      .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }))
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ tasks: [], nextCursor: null });
+    agentTasksRef.current = query;
+    renderTab();
+    const more = await screen.findByRole("button", { name: /Show more/ });
+    expect(query).toHaveBeenCalledTimes(1);
+    fireEvent.click(more);
+    await waitFor(() => expect(more).toBeDisabled());
+    fireEvent.click(more);
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(query.mock.calls[1]?.[0]).toBe("older");
+    finish({ tasks: [], nextCursor: "oldest" });
+    await waitFor(() => expect(more).toBeEnabled());
+    fireEvent.click(more);
+    const retry = await screen.findByRole("button", { name: "Try again" });
+    fireEvent.click(retry);
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Show more/ })).not.toBeInTheDocument());
+    expect(query.mock.calls[3]?.[0]).toBe("oldest");
+  });
+
+  it("renders aggregate duration without fetching task history for the performance summary", () => {
+    const query = vi.fn();
+    agentTasksRef.current = query;
+    activityRef.current = [{ agent_id: "agent-1", bucket_at: new Date().toISOString(), task_count: 201,
+      completed_count: 201, failed_count: 0, cancelled_count: 0, duration_ms: 24120000, duration_count: 201 }];
+    render(<I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <QueryClientProvider client={new QueryClient()}><AgentPerformanceSummary agent={baseAgent} /></QueryClientProvider>
+    </I18nProvider>);
+    expect(screen.getByText("2m 00s")).toBeInTheDocument();
+    expect(query).not.toHaveBeenCalled();
   });
 });

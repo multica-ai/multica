@@ -1152,8 +1152,35 @@ describe("ApiClient", () => {
     expect(tasks.map((task) => task.id)).toEqual(["task-1", "task-2"]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "https://api.example.test/api/agents/agent-1/tasks",
+      "https://api.example.test/api/agents/agent-1/tasks?limit=200",
     );
+  });
+
+  it("reads a lossless task cursor and passes it to the next bounded request", async () => {
+    const cursor = "2026-09-24T01:02:03.123456Z|00000000-0000-0000-0000-000000000001";
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(
+      JSON.stringify([{ id: "task-1", status: "completed" }]),
+      { headers: { "X-Agent-Tasks-Next-Cursor": cursor } },
+    )));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    const page = await client.listAgentTasksPage("agent-1", { limit: 7 });
+    expect(page.nextCursor).toBe(cursor);
+    const controller = new AbortController();
+    await client.listAgentTasksPage("agent-1", { limit: 7, before: page.nextCursor!, signal: controller.signal });
+    const request = new URL(fetchMock.mock.calls[1]![0]);
+    expect(request.searchParams.get("limit")).toBe("7");
+    expect(request.searchParams.get("before")).toBe(cursor);
+    expect(fetchMock.mock.calls[1]![1].signal).toBe(controller.signal);
+  });
+
+  it("drops the continuation when the task page is malformed", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ tasks: "not-an-array" }),
+      { headers: { "X-Agent-Tasks-Next-Cursor": "cursor" } },
+    )));
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.listAgentTasksPage("agent-1")).resolves.toEqual({ tasks: [], nextCursor: null });
   });
 
   it("falls back to an empty agent task history for a malformed response", async () => {

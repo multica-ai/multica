@@ -287,8 +287,13 @@ RETURNING *;
 
 -- name: ListAgentTasks :many
 SELECT * FROM agent_task_queue
-WHERE agent_id = $1
-ORDER BY created_at DESC;
+WHERE agent_id = @agent_id
+  -- Apply visibility before LIMIT so hidden fallbacks cannot end a page early.
+  AND NOT (escalation_for_task_id IS NOT NULL AND started_at IS NULL
+           AND status IN ('deferred', 'cancelled'))
+  AND (created_at, id) < (@before_created_at::timestamptz, @before_id::uuid)
+ORDER BY created_at DESC, id DESC
+LIMIT @page_limit;
 
 -- name: CreateAgentTask :one
 -- Fenced against workspace teardown: lock_task_owner_rows (migration 284)
@@ -2598,7 +2603,10 @@ SELECT
     COUNT(*)::int AS task_count,
     COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count,
     COUNT(*) FILTER (WHERE atq.status = 'completed')::int AS completed_count,
-    COUNT(*) FILTER (WHERE atq.status = 'cancelled')::int AS cancelled_count
+    COUNT(*) FILTER (WHERE atq.status = 'cancelled')::int AS cancelled_count,
+    COALESCE(SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)) * 1000)
+        FILTER (WHERE atq.completed_at > atq.started_at), 0)::float8 AS duration_ms,
+    COUNT(*) FILTER (WHERE atq.completed_at > atq.started_at)::int AS duration_count
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
