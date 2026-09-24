@@ -20,6 +20,7 @@ func TestBuildCursorArgs(t *testing.T) {
 		"-p",
 		"--output-format", "stream-json",
 		"--yolo",
+		"--trust",
 		"--workspace", "/tmp/work",
 		"--model", "composer-1.5",
 	}
@@ -56,10 +57,40 @@ func TestBuildCursorArgsMinimal(t *testing.T) {
 	t.Parallel()
 
 	args := buildCursorArgs(ExecOptions{}, slog.Default())
-	expected := []string{"-p", "--output-format", "stream-json", "--yolo"}
+	expected := []string{"-p", "--output-format", "stream-json", "--yolo", "--trust"}
 
 	if len(args) != len(expected) {
 		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
+	}
+}
+
+// A workspace cursor-agent has not seen raises an interactive trust prompt,
+// which a daemon-launched run has no TTY to answer: it hangs to its deadline
+// rather than failing. --yolo does not cover it — that governs command
+// approval, not workspace trust — so --trust has to be in every argv.
+func TestBuildCursorArgsAlwaysTrustsTheWorkspace(t *testing.T) {
+	t.Parallel()
+
+	for name, opts := range map[string]ExecOptions{
+		"minimal":  {},
+		"with cwd": {Cwd: "/tmp/work"},
+		"resume":   {ResumeSessionID: "ses_1"},
+		// A user cannot opt out of it either: dropping --trust from a headless
+		// run brings back the hang this flag exists to prevent.
+		"custom args try to drop it": {CustomArgs: []string{"--trust"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			args := buildCursorArgs(opts, slog.Default())
+			seen := 0
+			for _, a := range args {
+				if a == "--trust" {
+					seen++
+				}
+			}
+			if seen != 1 {
+				t.Fatalf("expected exactly one --trust in %v, got %d", args, seen)
+			}
+		})
 	}
 }
 
