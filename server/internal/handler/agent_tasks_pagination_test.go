@@ -145,3 +145,129 @@ func TestAgentActivityDurationUsesAllRuns(t *testing.T) {
 		t.Fatalf("duration/count = %v/%d, want %d/201", duration, count, 210*60000)
 	}
 }
+
+func TestListAgentTasksPageBoundaries(t *testing.T) {
+	runtimeID := dbfx.Runtime(t, "history boundaries runtime")
+	for _, count := range []int{0, 1, 2, 3, 4, 6} {
+		t.Run(fmt.Sprintf("%d_tasks_limit_3", count), func(t *testing.T) {
+			agentID := dbfx.Agent(t, "history boundary agent", runtimeID)
+			now := time.Now().UTC().Truncate(time.Microsecond)
+			// Deliberately reverse UUID and time order: created_at must be the
+			// primary sort key, not UUID order or insertion order.
+			expected := make([]string, count)
+			for i := 0; i < count; i++ {
+				expected[i] = dbfx.Task(t, agentID, testutil.Cols{
+					"id":         fmt.Sprintf("00000000-0000-0000-0000-%012d", i+1),
+					"runtime_id": runtimeID, "status": "completed",
+					"created_at": now.Add(-time.Duration(i) * time.Microsecond),
+				})
+			}
+			var got []string
+			before := ""
+			for page := 0; page < 3; page++ {
+				req := withURLParam(newRequest(http.MethodGet, "/api/agents/"+agentID+"/tasks?limit=3&before="+url.QueryEscape(before), nil), "id", agentID)
+				var tasks []AgentTaskResponse
+				response := testutil.Call(t, testHandler.ListAgentTasks, req).Want(http.StatusOK).JSON(&tasks)
+				for _, task := range tasks {
+					got = append(got, task.ID)
+				}
+				before = response.Header().Get(HeaderAgentTasksNextCursor)
+				wantMore := len(got) < count
+				if (before != "") != wantMore {
+					t.Fatalf("after %d/%d tasks: cursor=%q", len(got), count, before)
+				}
+				if !wantMore {
+					break
+				}
+			}
+			if len(got) != len(expected) {
+				t.Fatalf("got %v, want %v", got, expected)
+			}
+			for i := range got {
+				if got[i] != expected[i] {
+					t.Fatalf("got %v, want timestamp order %v", got, expected)
+				}
+			}
+			// A valid cursor older than every row is an empty, terminal page.
+			before = transcriptCursor(now.Add(-time.Hour), parseUUID(agentID))
+			req := withURLParam(newRequest(http.MethodGet, "/api/agents/"+agentID+"/tasks?before="+url.QueryEscape(before), nil), "id", agentID)
+			response := testutil.Call(t, testHandler.ListAgentTasks, req).Want(http.StatusOK)
+			if response.Body.String() != "[]\n" || response.Header().Get(HeaderAgentTasksNextCursor) != "" {
+				t.Fatalf("past the end: %s, cursor=%q", response.Body.String(), response.Header().Get(HeaderAgentTasksNextCursor))
+			}
+		})
+	}
+}
+
+func TestListAgentTasksCursorDoesNotGrantPrivateAccess(t *testing.T) {
+	agentID, ownerID, memberID := privateAgentTestFixture(t)
+	now := time.Now().UTC()
+	for i := 0; i < 2; i++ {
+		dbfx.Task(t, agentID, testutil.Cols{"status": "completed", "completed_at": now, "created_at": now.Add(-time.Duration(i) * time.Minute)})
+	}
+	var first []AgentTaskResponse
+	req := withURLParam(newRequestAs(ownerID, http.MethodGet, "/api/agents/"+agentID+"/tasks?limit=1", nil), "id", agentID)
+	response := testutil.Call(t, testHandler.ListAgentTasks, req).Want(http.StatusOK).JSON(&first)
+	cursor := response.Header().Get(HeaderAgentTasksNextCursor)
+	if len(first) != 1 || cursor == "" {
+		t.Fatal("expected a first page and cursor")
+	}
+	for _, userID := range []string{memberID, ownerID} {
+		status := http.StatusForbidden
+		if userID == ownerID {
+			status = http.StatusOK
+		}
+		req := withURLParam(newRequestAs(userID, http.MethodGet, "/api/agents/"+agentID+"/tasks?limit=1&include_usage=true&before="+url.QueryEscape(cursor), nil), "id", agentID)
+		response := testutil.Call(t, testHandler.ListAgentTasks, req).Want(status)
+		if userID == memberID && response.Header().Get(HeaderAgentTasksNextCursor) != "" {
+			t.Fatal("forbidden response leaked a continuation")
+		}
+		if userID == ownerID {
+			var second []AgentTaskResponse
+			response.JSON(&second)
+			if len(second) != 1 || second[0].ID == first[0].ID {
+				t.Fatalf("bad owner continuation: %+v", second)
+			}
+		}
+	}
+}
+
+func TestListAgentTasksUsageAndAgentScopeAcrossPages(t *testing.T) {
+	runtimeID := dbfx.Runtime(t, "paged usage runtime")
+	agentID := dbfx.Agent(t, "paged usage agent", runtimeID)
+	otherID := dbfx.Agent(t, "other paged usage agent", runtimeID)
+	now := time.Now().UTC()
+	ids := make([]string, 3)
+	for i := range ids {
+		ids[i] = dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "status": "completed", "created_at": now.Add(-time.Duration(i) * time.Minute)})
+		dbfx.Insert(t, "task_usage", testutil.Cols{"task_id": ids[i], "provider": "openai", "model": "test-model", "input_tokens": i + 10})
+	}
+	otherTask := dbfx.Task(t, otherID, testutil.Cols{"runtime_id": runtimeID, "created_at": now.Add(-time.Minute)})
+	dbfx.Insert(t, "task_usage", testutil.Cols{"task_id": otherTask, "provider": "openai", "model": "private-other-model", "input_tokens": 999})
+	cursor := ""
+	for i, id := range ids {
+		req := withURLParam(newRequest(http.MethodGet, "/api/agents/"+agentID+"/tasks?limit=1&include_usage=true&before="+url.QueryEscape(cursor), nil), "id", agentID)
+		var tasks []AgentTaskResponse
+		response := testutil.Call(t, testHandler.ListAgentTasks, req).Want(http.StatusOK).JSON(&tasks)
+		if len(tasks) != 1 || tasks[0].ID != id {
+			t.Fatalf("page %d: %+v", i, tasks)
+		}
+		usage := tasks[0].Usage
+		if len(usage) != 1 || usage[0].InputTokens != int64(i+10) || usage[0].Model != "test-model" {
+			t.Fatalf("page %d usage: %+v", i, usage)
+		}
+		cursor = response.Header().Get(HeaderAgentTasksNextCursor)
+	}
+	if cursor != "" {
+		t.Fatal("last usage page still has continuation")
+	}
+	// A cursor minted for a different agent is only a position, never a way
+	// to read that agent's rows or its usage.
+	cursor = transcriptCursor(now, parseUUID(ids[0]))
+	req := withURLParam(newRequest(http.MethodGet, "/api/agents/"+otherID+"/tasks?limit=1&include_usage=true&before="+url.QueryEscape(cursor), nil), "id", otherID)
+	var tasks []AgentTaskResponse
+	testutil.Call(t, testHandler.ListAgentTasks, req).Want(http.StatusOK).JSON(&tasks)
+	if len(tasks) != 1 || tasks[0].ID != otherTask || len(tasks[0].Usage) != 1 || tasks[0].Usage[0].Model != "private-other-model" {
+		t.Fatalf("cross-agent cursor changed ownership scope: %+v", tasks)
+	}
+}

@@ -3,7 +3,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Agent, AgentActivityBucket } from "@multica/core/types";
+import type { Agent, AgentActivityBucket, AgentTask } from "@multica/core/types";
+import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
 import enAgents from "../../../locales/en/agents.json";
@@ -18,8 +19,14 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
-// TaskRow never mounts in these aggregate/loading/empty-state tests.
+// History fixtures have no issue links, so they need no issue-detail requests.
 vi.mock("@multica/core/api", () => ({ api: {} }));
+
+// Keep transcript internals out of history pagination tests while exposing
+// the identity of each rendered task row.
+vi.mock("../../../common/task-transcript", () => ({
+  TranscriptButton: ({ task }: { task: AgentTask }) => <span data-testid={`task-${task.id}`} />,
+}));
 
 // Keep "Now" empty while varying activity outcomes and task-list loading.
 const agentTasksRef = vi.hoisted(() => ({
@@ -75,8 +82,10 @@ function renderTab(performance = false) {
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <NavigationProvider value={navigation}>
         <QueryClientProvider client={queryClient}>
-          {performance && <AgentPerformanceSummary agent={baseAgent} />}
-          <ActivityTab agent={baseAgent} showPerformance={performance} />
+          <WorkspaceSlugProvider slug="acme">
+            {performance && <AgentPerformanceSummary agent={baseAgent} />}
+            <ActivityTab agent={baseAgent} showPerformance={performance} />
+          </WorkspaceSlugProvider>
         </QueryClientProvider>
       </NavigationProvider>
     </I18nProvider>,
@@ -180,5 +189,61 @@ describe("ActivityTab server pagination", () => {
     </I18nProvider>);
     expect(screen.getByText("2m 00s")).toBeInTheDocument();
     expect(query).not.toHaveBeenCalled();
+  });
+});
+
+
+function historyTask(index: number): AgentTask {
+  return {
+    id: String(index), agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "",
+    status: "completed", priority: 0, dispatched_at: null, started_at: null,
+    completed_at: new Date(Date.now() - index * 60000).toISOString(),
+    created_at: new Date(Date.now() - index * 60000).toISOString(),
+    result: null, error: null,
+  };
+}
+
+describe("ActivityTab loaded history rows", () => {
+  it("reveals cached rows before requesting older history and deduplicates overlapping pages", async () => {
+    const tasks = Array.from({ length: 31 }, (_, i) => historyTask(i));
+    const query = vi.fn()
+      .mockResolvedValueOnce({ tasks, nextCursor: "older" })
+      .mockResolvedValueOnce({ tasks: [tasks[30], historyTask(31)], nextCursor: null });
+    agentTasksRef.current = query;
+    renderTab();
+    await screen.findByTestId("task-0");
+    expect(screen.getAllByTestId(/^task-/)).toHaveLength(10);
+    expect(screen.queryByTestId("task-10")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Show more/ }));
+    expect(screen.getAllByTestId(/^task-/)).toHaveLength(30);
+    expect(query).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: /Show more/ }));
+    expect(screen.getAllByTestId(/^task-/)).toHaveLength(31);
+    expect(query).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: /Show more/ }));
+    await screen.findByTestId("task-31");
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(query.mock.calls[1]?.[0]).toBe("older");
+    expect(screen.getAllByTestId(/^task-/)).toHaveLength(32);
+    expect(screen.getAllByTestId("task-30")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /Show more/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps loaded rows visible when an older page fails and retries the same cursor", async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({ tasks: [historyTask(0)], nextCursor: "older" })
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ tasks: [historyTask(1)], nextCursor: null });
+    agentTasksRef.current = query;
+    renderTab();
+    await screen.findByTestId("task-0");
+    fireEvent.click(screen.getByRole("button", { name: /Show more/ }));
+    const retry = await screen.findByRole("button", { name: "Try again" });
+    expect(screen.getByTestId("task-0")).toBeInTheDocument();
+    expect(screen.queryByText(EMPTY_RECENT)).not.toBeInTheDocument();
+    fireEvent.click(retry);
+    await screen.findByTestId("task-1");
+    expect(screen.getAllByTestId(/^task-/)).toHaveLength(2);
+    expect(query.mock.calls.slice(1).map(([before]) => before)).toEqual(["older", "older"]);
   });
 });
