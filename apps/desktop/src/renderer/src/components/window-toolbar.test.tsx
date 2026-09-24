@@ -1,4 +1,4 @@
-import type { ComponentProps } from "react";
+import type { ComponentProps, CSSProperties } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -157,14 +157,41 @@ describe("WindowToolbar history controls", () => {
     expect(toolbar).not.toHaveClass("transition-[width]");
   });
 
-  it("keeps the controls clear of the traffic lights after toggling the sidebar", () => {
-    const { rerender } = render(<WindowToolbar />);
+  it("keeps controls fixed at a custom sidebar width while toggling", () => {
+    const customSidebarWidth = {
+      "--sidebar-width": "320px",
+    } as CSSProperties;
+    const { rerender } = render(
+      <div style={customSidebarWidth}>
+        <WindowToolbar />
+      </div>,
+    );
+    const expandedWidth = document.querySelector<HTMLElement>(
+      '[data-slot="window-toolbar"]',
+    )?.style.width;
+
     sidebarState.state = "collapsed";
-    rerender(<WindowToolbar />);
+    rerender(
+      <div style={customSidebarWidth}>
+        <WindowToolbar />
+      </div>,
+    );
 
     const toolbar = document.querySelector('[data-slot="window-toolbar"]');
     expect(WINDOW_TOOLBAR_CLEARANCE).toBe(256);
     expect(toolbar).toHaveClass("justify-end");
+    expect(toolbar).toHaveStyle({
+      width:
+        "max(var(--sidebar-live-width, var(--sidebar-width)), 256px)",
+    });
+    expect((toolbar as HTMLElement).style.width).toBe(expandedWidth);
+  });
+
+  it("keeps the traffic-light clearance in compact overlay mode", () => {
+    sidebarState.isCompact = true;
+    render(<WindowToolbar />);
+
+    const toolbar = document.querySelector('[data-slot="window-toolbar"]');
     expect(toolbar).toHaveStyle({ width: "256px" });
   });
 
