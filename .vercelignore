@@ -23,7 +23,6 @@ _features
 /*.md
 /docker-compose*.yml
 /playwright.config.ts
-/skills-lock.json
 
 /.github/
 /docker/
