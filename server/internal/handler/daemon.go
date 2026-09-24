@@ -2052,7 +2052,11 @@ func (h *Handler) finalizeClaimDelivery(
 		return nil
 	}
 
-	receipt, err = h.TaskService.FinalizeTaskClaim(ctx, *task, token, deliveredCommentIDs, recordCommentReceipt, authorize, issueSnapshot, daemonTokens...)
+	var selectedSkillIDs []pgtype.UUID
+	if response != nil {
+		selectedSkillIDs = response.selectedSkillIDs
+	}
+	receipt, err = h.TaskService.FinalizeTaskClaimWithSelectedSkills(ctx, *task, token, deliveredCommentIDs, recordCommentReceipt, authorize, issueSnapshot, selectedSkillIDs, daemonTokens...)
 	if err == nil {
 		return receipt, nil, nil
 	}
@@ -2343,6 +2347,7 @@ func claimResponseAgentIdentityMatches(resp AgentTaskResponse) bool {
 func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQueue, runtime db.AgentRuntime, runtimeID, runtimeWorkspaceID string) (resp AgentTaskResponse, deliveredCommentIDs []pgtype.UUID, issueSnapshot []byte, agentSkillCount, builtinSkillCount int, failure *claimBuildFailure) {
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp = taskToResponse(*task, runtimeWorkspaceID)
+	var selectedClaimInputIDs []string
 	if err := (&service.IssueWakeupService{Tasks: h.TaskService}).CheckClaim(r.Context(), *task); err != nil {
 		if !errors.Is(err, service.ErrWakeupForbidden) {
 			return resp, nil, nil, 0, 0, h.rejectClaimSourceLoad(r.Context(), task, err, "wakeup", resp.WakeupID)
@@ -2906,6 +2911,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 
+		// Grant only from the exact typed comments admitted for delivery, before
+		// legacy presentation combines bodies with different author types.
+		for _, comment := range deliveredComments {
+			if comment.AuthorType == "member" {
+				selectedClaimInputIDs = mergeSelectedSkillIDs(selectedClaimInputIDs, selectedSlashSkillIDs(comment.Content))
+			}
+		}
 		if !supportsCoalescedComments {
 			// Legacy daemons ignore the structured coalesced fields. Fold every
 			// successfully loaded comment into the one trigger field they already
@@ -3305,6 +3317,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 		resp.ChatMessage = strings.Join(parts, "\n\n")
+		selectedClaimInputIDs = mergeSelectedSkillIDs(selectedClaimInputIDs, selectedSlashSkillIDsForClaim(*task, resp))
 
 		// Fail closed: a task-owned direct task that resolves to no user text
 		// (and is not the agent's proactive intro) must never dispatch an
@@ -3400,6 +3413,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		if json.Unmarshal(task.Context, &qc) == nil && qc.Type == service.QuickCreateContextType {
 			hasQuickCreate = true
 			resp.QuickCreatePrompt = qc.Prompt
+			selectedClaimInputIDs = mergeSelectedSkillIDs(selectedClaimInputIDs, selectedSlashSkillIDsForClaim(*task, resp))
 			resp.QuickCreatePriority = qc.Priority
 			resp.QuickCreateDueDate = qc.DueDate
 			resp.QuickCreateAttachmentIDs = append([]string(nil), qc.AttachmentIDs...)
@@ -3665,6 +3679,14 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 	}
 
+	// Resolve slash-selected workspace Skills only after all typed claim inputs
+	// have been admitted. Legacy daemons may fold comments into one field, so
+	// selectedClaimInputIDs is captured before that presentation rewrite.
+	addedSkillCount, failure := h.applyClaimTaskSkills(r.Context(), *task, &resp, useSkillRefs, selectedClaimInputIDs)
+	if failure != nil {
+		return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, failure
+	}
+	agentSkillCount += addedSkillCount
 	return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, nil
 }
 
@@ -3967,6 +3989,15 @@ func (h *Handler) ResolveTaskSkillBundles(w http.ResponseWriter, r *http.Request
 			"task_id", uuidToString(task.ID), "agent_id", uuidToString(task.AgentID), "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to load skill bundles")
 		return
+	}
+	selected, err := h.requestedSelectedTaskSkillBundles(r.Context(), task, runtime.WorkspaceID, wanted)
+	if err != nil {
+		slog.Error("resolve skill bundles: load selected task skills failed", "task_id", uuidToString(task.ID), "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load skill bundles")
+		return
+	}
+	for _, bundle := range selected {
+		allowed[service.AgentSkillBundleKey(bundle.Source, bundle.ID)] = bundle
 	}
 
 	resolved := make([]service.AgentSkillData, 0, len(req.Skills))

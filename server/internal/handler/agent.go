@@ -360,6 +360,9 @@ type AgentTaskResponse struct {
 	StartClaimSupported      bool                   `json:"start_claim_supported,omitempty"`
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
 	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`
+	// selectedSkillIDs is the validated, same-workspace grant for this claim.
+	// It stays server-side and is persisted with the task claim.
+	selectedSkillIDs []pgtype.UUID
 
 	ID                   string                 `json:"id"`
 	AgentID              string                 `json:"agent_id"`

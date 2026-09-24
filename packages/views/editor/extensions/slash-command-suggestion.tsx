@@ -11,13 +11,13 @@ import {
 import type { QueryClient } from "@tanstack/react-query";
 import type { SuggestionOptions } from "@tiptap/suggestion";
 import { PluginKey } from "@tiptap/pm/state";
-import { useAuthStore } from "@multica/core/auth";
-import { useChatStore } from "@multica/core/chat";
 import { getCurrentWsId } from "@multica/core/platform";
-import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { isImeComposing } from "@multica/core/utils";
-import { workspaceKeys } from "@multica/core/workspace/queries";
-import type { Agent, MemberWithUser } from "@multica/core/types";
+import {
+  skillListOptions,
+  workspaceKeys,
+} from "@multica/core/workspace/queries";
+import type { SkillSummary } from "@multica/core/types";
 import { useT } from "../../i18n";
 import {
   createSuggestionPopupRender,
@@ -36,6 +36,8 @@ export type BuiltinCommandKey = "note";
 export interface SlashCommandItem {
   id: string;
   label: string;
+  /** Present only for a workspace Skill. The item id remains its stable UUID. */
+  skillId?: string;
   /** Raw description (skill picker). Built-in commands use descriptionKey. */
   description?: string;
   /**
@@ -192,33 +194,65 @@ function rankSkillMatches<T extends { name: string; description?: string }>(
     .map((entry) => entry.skill);
 }
 
-function buildItems(qc: QueryClient, query: string): SlashCommandItem[] {
+function workspaceSkillItems(
+  skills: SkillSummary[],
+  query: string,
+): SlashCommandItem[] {
+  const q = query.toLowerCase();
+  return rankSkillMatches(skills, q)
+    .slice(0, MAX_ITEMS)
+    .map((skill) => ({
+      id: skill.id,
+      skillId: skill.id,
+      label: skill.name,
+      description: skill.description ?? "",
+    }));
+}
+
+function buildItems(
+  qc: QueryClient,
+  query: string,
+): SlashCommandItem[] | Promise<SlashCommandItem[]> {
   const wsId = getCurrentWsId();
   if (!wsId) return [];
 
-  const agents: Agent[] = qc.getQueryData(workspaceKeys.agents(wsId)) ?? [];
-  const members: MemberWithUser[] =
-    qc.getQueryData(workspaceKeys.members(wsId)) ?? [];
-  // Tiptap calls suggestion items outside React render, so direct store reads
-  // are intentional here.
-  const { selectedAgentId } = useChatStore.getState();
-  const userId = useAuthStore.getState().user?.id ?? null;
-  const memberRole = members.find((m) => m.user_id === userId)?.role ?? null;
+  // Prefer the cache so every keystroke stays synchronous after the first
+  // open. A cold picker fetches the workspace library lazily; Suggestion
+  // accepts a Promise and discards stale query results for us.
+  const cached = qc.getQueryData<SkillSummary[]>(workspaceKeys.skills(wsId));
+  if (cached) return workspaceSkillItems(cached, query);
+  return qc
+    .fetchQuery(skillListOptions(wsId))
+    .then((skills) => workspaceSkillItems(skills, query))
+    .catch(() => []);
+}
 
-  const availableAgents = agents.filter(
-    (a) =>
-      !a.archived_at &&
-      canAssignAgentToIssue(a, { userId, role: memberRole }).allowed,
-  );
-  const activeAgent =
-    availableAgents.find((a) => a.id === selectedAgentId) ??
-    availableAgents[0] ??
-    null;
+function insertSlashSkill(
+  editor: Parameters<NonNullable<SuggestionOptions<SlashCommandItem>["command"]>>[0]["editor"],
+  range: { from: number; to: number },
+  item: SlashCommandItem,
+) {
+  const nodeAfter = editor.view.state.selection.$to.nodeAfter;
+  const overrideSpace = nodeAfter?.text?.startsWith(" ");
+  if (overrideSpace) range.to += 1;
 
-  const q = query.toLowerCase();
-  return rankSkillMatches(activeAgent?.skills ?? [], q)
-    .slice(0, MAX_ITEMS)
-    .map((s) => ({ id: s.id, label: s.name, description: s.description ?? "" }));
+  editor
+    .chain()
+    .focus()
+    .insertContentAt(range, [
+      {
+        type: "slashCommand",
+        attrs: {
+          id: item.skillId ?? item.id,
+          label: item.label,
+          mentionSuggestionChar: "/",
+        },
+      },
+      { type: "text", text: " " },
+    ])
+    .run();
+
+  window.getSelection()?.collapseToEnd();
 }
 
 export function createSlashCommandSuggestion(qc: QueryClient): Omit<
@@ -235,29 +269,7 @@ export function createSlashCommandSuggestion(qc: QueryClient): Omit<
     shouldShow: ({ editor, range }) => isTriggerArmedAt(editor, range.from),
     items: ({ query }) => buildItems(qc, query),
     command: ({ editor, range, props }) => {
-      const nodeAfter = editor.view.state.selection.$to.nodeAfter;
-      const overrideSpace = nodeAfter?.text?.startsWith(" ");
-      if (overrideSpace) {
-        range.to += 1;
-      }
-
-      editor
-        .chain()
-        .focus()
-        .insertContentAt(range, [
-          {
-            type: "slashCommand",
-            attrs: {
-              id: props.id,
-              label: props.label,
-              mentionSuggestionChar: "/",
-            },
-          },
-          { type: "text", text: " " },
-        ])
-        .run();
-
-      window.getSelection()?.collapseToEnd();
+      insertSlashSkill(editor, range, props);
     },
     render: createSuggestionPopupRender<SlashCommandItem, SlashCommandItem, SlashCommandListRef, SlashCommandListProps>({
       pluginKey,
@@ -277,9 +289,8 @@ export function createSlashCommandSuggestion(qc: QueryClient): Omit<
 // ---------------------------------------------------------------------------
 
 /**
- * Built-in slash commands offered in the issue comment composer. Unlike the
- * chat `/` picker (which lists the active agent's skills), these are a fixed,
- * hand-curated set. Currently only `/note`, which marks a comment as a
+ * Built-in slash commands offered alongside Workspace Skills in the issue
+ * comment composer. Currently only `/note`, which marks a comment as a
  * human-only note that won't trigger the assigned agent — mirrors the backend
  * `noteCommentPrefix` in server/internal/handler/comment.go.
  */
@@ -304,6 +315,7 @@ export function quickActionIdFromItem(item: SlashCommandItem): string {
 export function buildBuiltinCommandItems(
   query: string,
   quickActions: { id: string; name: string; description?: string }[] = [],
+  skills: SkillSummary[] = [],
 ): SlashCommandItem[] {
   const q = query.toLowerCase();
   // Quick actions lead: on an issue they are the reason a user reaches for
@@ -313,9 +325,26 @@ export function buildBuiltinCommandItems(
     label: a.name,
     description: a.description || undefined,
   }));
-  return [...actionItems, ...BUILTIN_COMMANDS]
-    .filter((c) => c.label.toLowerCase().startsWith(q))
-    .slice(0, MAX_ITEMS);
+  const matchingActions = actionItems.filter((item) =>
+    item.label.toLowerCase().startsWith(q),
+  );
+  const matchingSkills = workspaceSkillItems(skills, query);
+  const matchingBuiltins = BUILTIN_COMMANDS.filter((item) =>
+    item.label.toLowerCase().startsWith(q),
+  );
+  // Keep built-ins reachable even in Skill-heavy workspaces. Quick Actions
+  // retain their leading position; Skills use only the remaining budget.
+  const actionBudget = Math.max(0, MAX_ITEMS - matchingBuiltins.length);
+  const visibleActions = matchingActions.slice(0, actionBudget);
+  const skillBudget = Math.max(
+    0,
+    MAX_ITEMS - visibleActions.length - matchingBuiltins.length,
+  );
+  return [
+    ...visibleActions,
+    ...matchingSkills.slice(0, skillBudget),
+    ...matchingBuiltins,
+  ];
 }
 
 export interface BuiltinCommandSuggestionOptions {
@@ -342,6 +371,7 @@ export interface BuiltinCommandSuggestionOptions {
 
 export function createBuiltinCommandSuggestion(
   options: BuiltinCommandSuggestionOptions = {},
+  qc?: QueryClient,
 ): Omit<SuggestionOptions<SlashCommandItem>, "editor"> {
   const pluginKey = new PluginKey("builtinCommandSuggestion");
 
@@ -351,8 +381,22 @@ export function createBuiltinCommandSuggestion(
     // Only open over a `/` the user actually typed, so a pasted path
     // (`/usr/local/bin`) never opens the command menu (MUL-5429).
     shouldShow: ({ editor, range }) => isTriggerArmedAt(editor, range.from),
-    items: ({ query }) => buildBuiltinCommandItems(query, options.getQuickActions?.() ?? []),
+    items: ({ query }) => {
+      const quickActions = options.getQuickActions?.() ?? [];
+      const wsId = getCurrentWsId();
+      if (!qc || !wsId) return buildBuiltinCommandItems(query, quickActions);
+      const cached = qc.getQueryData<SkillSummary[]>(workspaceKeys.skills(wsId));
+      if (cached) return buildBuiltinCommandItems(query, quickActions, cached);
+      return qc
+        .fetchQuery(skillListOptions(wsId))
+        .then((skills) => buildBuiltinCommandItems(query, quickActions, skills))
+        .catch(() => buildBuiltinCommandItems(query, quickActions));
+    },
     command: ({ editor, range, props }) => {
+      if (props.skillId) {
+        insertSlashSkill(editor, range, props);
+        return;
+      }
       if (isQuickActionItem(props)) {
         const render = options.renderQuickAction;
         if (!render) return;

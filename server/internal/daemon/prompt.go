@@ -29,6 +29,51 @@ func sessionContinuityNoticeFor(task Task) string {
 	return execenv.SessionContinuityNoticeUnrecoverable
 }
 
+func writeExplicitlySelectedSkills(b *strings.Builder, agent *AgentData, markdowns ...string) {
+	if agent == nil || len(agent.Skills) == 0 {
+		return
+	}
+	available := make(map[string]string, len(agent.Skills))
+	for _, skill := range agent.Skills {
+		available[skill.ID] = skill.Name
+	}
+	seen := make(map[string]struct{})
+	selected := make([]string, 0)
+	for _, markdown := range markdowns {
+		for _, ref := range ExtractSlashSkills(markdown) {
+			name, ok := available[ref.ID]
+			if !ok {
+				continue
+			}
+			if _, ok := seen[ref.ID]; ok {
+				continue
+			}
+			seen[ref.ID] = struct{}{}
+			selected = append(selected, name)
+		}
+	}
+	if len(selected) == 0 {
+		return
+	}
+	b.WriteString("Explicitly selected skills:\n")
+	for _, name := range selected {
+		fmt.Fprintf(b, "- %s\n", name)
+	}
+	b.WriteString("\n")
+}
+
+func coalescedCommentMarkdown(comments ...CoalescedCommentData) string {
+	var b strings.Builder
+	for _, comment := range comments {
+		if comment.AuthorType != "member" {
+			continue
+		}
+		b.WriteString(comment.Content)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 // backendResumeContinuityNotice returns the notice the BACKEND should inject if
 // it lands on a fresh thread, or "" when the prompt already carries one.
 //
@@ -447,6 +492,11 @@ func buildCommentPrompt(task Task, provider string) string {
 				task.IssueID)
 		}
 	}
+	triggerMarkdown := ""
+	if task.TriggerAuthorType == "member" {
+		triggerMarkdown = task.TriggerCommentContent
+	}
+	writeExplicitlySelectedSkills(&b, task.Agent, triggerMarkdown, coalescedCommentMarkdown(task.CoalescedComments...))
 	// Issue-reading pointer (MUL-7344). Same gate as the comment hint below —
 	// `resumed` is computed once for both, so one turn can never claim the
 	// session is warm enough to skip the issue read while treating it as cold

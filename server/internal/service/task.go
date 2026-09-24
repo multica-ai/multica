@@ -1141,15 +1141,26 @@ func (s *TaskService) EnqueueDeferredChannelIssueTask(ctx context.Context, issue
 	return task, nil
 }
 
+// EnqueueDeferredChannelIssueTaskWithSelectedSkills freezes member-selected
+// workspace Skills before the deferred task becomes claimable.
+func (s *TaskService) EnqueueDeferredChannelIssueTaskWithSelectedSkills(ctx context.Context, issue db.Issue, fireAt time.Time, selectedSkillIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
+	task, err := s.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{Time: fireAt, Valid: true}, OriginDerived, selectedSkillIDs)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
+	return task, nil
+}
+
 // createDeferredChannelIssueTaskWithQueries inserts the inert media-gated task
 // through the caller's query handle. IssueService passes its transaction-bound
 // Queries so the issue and task become visible atomically. Composio is
 // intentionally absent from the transaction-scoped service: the task cannot be
 // claimed while deferred, so the optional external overlay is hydrated after
 // commit without holding database locks across a network call.
-func (s *TaskService) createDeferredChannelIssueTaskWithQueries(ctx context.Context, q *db.Queries, issue db.Issue, fireAt time.Time) (db.AgentTaskQueue, error) {
+func (s *TaskService) createDeferredChannelIssueTaskWithQueries(ctx context.Context, q *db.Queries, issue db.Issue, fireAt time.Time, selected ...[]pgtype.UUID) (db.AgentTaskQueue, error) {
 	txService := &TaskService{Queries: q}
-	return txService.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{Time: fireAt, Valid: true}, OriginDerived)
+	return txService.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{Time: fireAt, Valid: true}, OriginDerived, selected...)
 }
 
 // hydrateDeferredChannelIssueTaskOverlay fills the optional Composio overlay
@@ -1245,11 +1256,17 @@ func (s *TaskService) ResolveIssueReviewSHAParam(ctx context.Context, issueID pg
 	return headShaText(s.ResolveIssueReviewSHA(ctx, issueID))
 }
 
-func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin) (db.AgentTaskQueue, error) {
-	return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, nil, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, fireAt, origin)
+func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin, selected ...[]pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, nil, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, fireAt, origin, selected...)
 }
 
-func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin) (db.AgentTaskQueue, error) {
+// EnqueueTaskForIssueWithSelectedSkills freezes the member-selected workspace
+// Skill IDs into the server-owned task context at creation time.
+func (s *TaskService) EnqueueTaskForIssueWithSelectedSkills(ctx context.Context, issue db.Issue, selectedSkillIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{}, OriginDerived, selectedSkillIDs)
+}
+
+func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin, selected ...[]pgtype.UUID) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -1289,26 +1306,27 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	createParams := db.CreateAgentTaskParams{
-		ID:                   dbid.NewV7(),
-		AgentID:              issue.AssigneeID,
-		RuntimeID:            agent.RuntimeID,
-		IssueID:              issue.ID,
-		Priority:             priorityToInt(issue.Priority),
-		TriggerCommentID:     triggerCommentID,
-		CoalescedCommentIds:  coalescedCommentIDs,
-		TriggerSummary:       s.buildCommentTriggerSummary(ctx, issue.WorkspaceID, triggerCommentID),
-		ForceFreshSession:    pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
-		HandoffNote:          pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
-		OriginatorUserID:     originatorUserID,
-		AccountableUserID:    attr.AccountableUserID,
-		RuleVersionID:        attr.RuleVersionID,
-		RerunOfTaskID:        rerunOfTaskID,
-		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
-		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
-		OriginatorSource:     attrSource,
-		DelegatedFromTaskID:  attrDelegatedFrom,
-		TriggerEvidenceKind:  attrEvidenceKind,
-		TriggerEvidenceRefID: attrEvidenceRef,
+		ID:                      dbid.NewV7(),
+		AgentID:                 issue.AssigneeID,
+		RuntimeID:               agent.RuntimeID,
+		IssueID:                 issue.ID,
+		Priority:                priorityToInt(issue.Priority),
+		TriggerCommentID:        triggerCommentID,
+		CoalescedCommentIds:     coalescedCommentIDs,
+		TriggerSummary:          s.buildCommentTriggerSummary(ctx, issue.WorkspaceID, triggerCommentID),
+		ForceFreshSession:       pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
+		HandoffNote:             pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
+		OriginatorUserID:        originatorUserID,
+		AccountableUserID:       attr.AccountableUserID,
+		RuleVersionID:           attr.RuleVersionID,
+		RerunOfTaskID:           rerunOfTaskID,
+		RuntimeMcpOverlay:       runtimeMCPOverlay.Overlay,
+		RuntimeConnectedApps:    runtimeMCPOverlay.ConnectedApps,
+		OriginatorSource:        attrSource,
+		InitialSelectedSkillIds: firstSelectedSkillIDs(selected),
+		DelegatedFromTaskID:     attrDelegatedFrom,
+		TriggerEvidenceKind:     attrEvidenceKind,
+		TriggerEvidenceRefID:    attrEvidenceRef,
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
@@ -1316,30 +1334,31 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	var task db.AgentTaskQueue
 	if fireAt.Valid {
 		task, err = s.Queries.CreateDeferredChannelIssueTask(ctx, db.CreateDeferredChannelIssueTaskParams{
-			ID:                   dbid.NewV7(),
-			AgentID:              createParams.AgentID,
-			RuntimeID:            createParams.RuntimeID,
-			IssueID:              createParams.IssueID,
-			Priority:             createParams.Priority,
-			TriggerCommentID:     createParams.TriggerCommentID,
-			CoalescedCommentIds:  createParams.CoalescedCommentIds,
-			TriggerSummary:       createParams.TriggerSummary,
-			ForceFreshSession:    createParams.ForceFreshSession,
-			IsLeaderTask:         createParams.IsLeaderTask,
-			HandoffNote:          createParams.HandoffNote,
-			SquadID:              createParams.SquadID,
-			HeadSha:              createParams.HeadSha,
-			OriginatorUserID:     createParams.OriginatorUserID,
-			AccountableUserID:    createParams.AccountableUserID,
-			RuntimeMcpOverlay:    createParams.RuntimeMcpOverlay,
-			RuntimeConnectedApps: createParams.RuntimeConnectedApps,
-			OriginatorSource:     createParams.OriginatorSource,
-			DelegatedFromTaskID:  createParams.DelegatedFromTaskID,
-			RuleVersionID:        createParams.RuleVersionID,
-			RerunOfTaskID:        createParams.RerunOfTaskID,
-			TriggerEvidenceKind:  createParams.TriggerEvidenceKind,
-			TriggerEvidenceRefID: createParams.TriggerEvidenceRefID,
-			FireAt:               fireAt,
+			ID:                      dbid.NewV7(),
+			AgentID:                 createParams.AgentID,
+			RuntimeID:               createParams.RuntimeID,
+			IssueID:                 createParams.IssueID,
+			Priority:                createParams.Priority,
+			TriggerCommentID:        createParams.TriggerCommentID,
+			CoalescedCommentIds:     createParams.CoalescedCommentIds,
+			TriggerSummary:          createParams.TriggerSummary,
+			ForceFreshSession:       createParams.ForceFreshSession,
+			IsLeaderTask:            createParams.IsLeaderTask,
+			HandoffNote:             createParams.HandoffNote,
+			SquadID:                 createParams.SquadID,
+			HeadSha:                 createParams.HeadSha,
+			OriginatorUserID:        createParams.OriginatorUserID,
+			AccountableUserID:       createParams.AccountableUserID,
+			RuntimeMcpOverlay:       createParams.RuntimeMcpOverlay,
+			RuntimeConnectedApps:    createParams.RuntimeConnectedApps,
+			OriginatorSource:        createParams.OriginatorSource,
+			DelegatedFromTaskID:     createParams.DelegatedFromTaskID,
+			RuleVersionID:           createParams.RuleVersionID,
+			InitialSelectedSkillIds: createParams.InitialSelectedSkillIds,
+			RerunOfTaskID:           createParams.RerunOfTaskID,
+			TriggerEvidenceKind:     createParams.TriggerEvidenceKind,
+			TriggerEvidenceRefID:    createParams.TriggerEvidenceRefID,
+			FireAt:                  fireAt,
 		})
 	} else {
 		task, err = s.Queries.CreateAgentTask(ctx, createParams)
@@ -1422,11 +1441,15 @@ func (s *TaskService) EnqueueTaskForSquadLeaderWithHandoff(ctx context.Context, 
 	return s.enqueueMentionTask(ctx, issue, leaderID, pgtype.UUID{}, true, squadID, false, handoffNote, actorUserID, pgtype.UUID{}, OriginDerived)
 }
 
-func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, nil, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, origin)
+func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin, selected ...[]pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, nil, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, origin, selected...)
 }
 
-func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
+func (s *TaskService) EnqueueTaskForSquadLeaderWithSelectedSkills(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, triggerCommentID pgtype.UUID, selectedSkillIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, false, "", pgtype.UUID{}, pgtype.UUID{}, OriginDerived, selectedSkillIDs)
+}
+
+func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin, selected ...[]pgtype.UUID) (db.AgentTaskQueue, error) {
 	if err := guardIssueNotInTriage(ctx, s.Queries, issue.ID, origin); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
@@ -1460,28 +1483,29 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
-		ID:                   dbid.NewV7(),
-		AgentID:              agentID,
-		RuntimeID:            agent.RuntimeID,
-		IssueID:              issue.ID,
-		Priority:             priorityToInt(issue.Priority),
-		TriggerCommentID:     triggerCommentID,
-		CoalescedCommentIds:  coalescedCommentIDs,
-		TriggerSummary:       s.buildCommentTriggerSummary(ctx, issue.WorkspaceID, triggerCommentID),
-		IsLeaderTask:         pgtype.Bool{Bool: isLeader, Valid: isLeader},
-		ForceFreshSession:    pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
-		HandoffNote:          pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
-		SquadID:              squadID,
-		OriginatorUserID:     originatorUserID,
-		AccountableUserID:    attr.AccountableUserID,
-		RuleVersionID:        attr.RuleVersionID,
-		RerunOfTaskID:        rerunOfTaskID,
-		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
-		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
-		OriginatorSource:     attrSource,
-		DelegatedFromTaskID:  attrDelegatedFrom,
-		TriggerEvidenceKind:  attrEvidenceKind,
-		TriggerEvidenceRefID: attrEvidenceRef,
+		ID:                      dbid.NewV7(),
+		AgentID:                 agentID,
+		RuntimeID:               agent.RuntimeID,
+		IssueID:                 issue.ID,
+		Priority:                priorityToInt(issue.Priority),
+		TriggerCommentID:        triggerCommentID,
+		CoalescedCommentIds:     coalescedCommentIDs,
+		TriggerSummary:          s.buildCommentTriggerSummary(ctx, issue.WorkspaceID, triggerCommentID),
+		IsLeaderTask:            pgtype.Bool{Bool: isLeader, Valid: isLeader},
+		ForceFreshSession:       pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
+		HandoffNote:             pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
+		SquadID:                 squadID,
+		OriginatorUserID:        originatorUserID,
+		AccountableUserID:       attr.AccountableUserID,
+		RuleVersionID:           attr.RuleVersionID,
+		RerunOfTaskID:           rerunOfTaskID,
+		RuntimeMcpOverlay:       runtimeMCPOverlay.Overlay,
+		RuntimeConnectedApps:    runtimeMCPOverlay.ConnectedApps,
+		OriginatorSource:        attrSource,
+		InitialSelectedSkillIds: firstSelectedSkillIDs(selected),
+		DelegatedFromTaskID:     attrDelegatedFrom,
+		TriggerEvidenceKind:     attrEvidenceKind,
+		TriggerEvidenceRefID:    attrEvidenceRef,
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
@@ -3783,6 +3807,36 @@ func (s *TaskService) FinalizeTaskClaim(
 	issueSnapshot []byte,
 	daemonTokens ...db.CreateDaemonTokenParams,
 ) ([]pgtype.UUID, error) {
+	return s.finalizeTaskClaim(ctx, task, token, deliveredCommentIDs, recordCommentReceipt, authorize, issueSnapshot, nil, daemonTokens...)
+}
+
+// FinalizeTaskClaimWithSelectedSkills atomically freezes payload-scoped Skill
+// grants alongside the claim token and comment receipt.
+func (s *TaskService) FinalizeTaskClaimWithSelectedSkills(
+	ctx context.Context,
+	task db.AgentTaskQueue,
+	token db.CreateTaskTokenParams,
+	deliveredCommentIDs []pgtype.UUID,
+	recordCommentReceipt bool,
+	authorize func(qtx *db.Queries, token *db.CreateTaskTokenParams) error,
+	issueSnapshot []byte,
+	selectedSkillIDs []pgtype.UUID,
+	daemonTokens ...db.CreateDaemonTokenParams,
+) ([]pgtype.UUID, error) {
+	return s.finalizeTaskClaim(ctx, task, token, deliveredCommentIDs, recordCommentReceipt, authorize, issueSnapshot, selectedSkillIDs, daemonTokens...)
+}
+
+func (s *TaskService) finalizeTaskClaim(
+	ctx context.Context,
+	task db.AgentTaskQueue,
+	token db.CreateTaskTokenParams,
+	deliveredCommentIDs []pgtype.UUID,
+	recordCommentReceipt bool,
+	authorize func(qtx *db.Queries, token *db.CreateTaskTokenParams) error,
+	issueSnapshot []byte,
+	selectedSkillIDs []pgtype.UUID,
+	daemonTokens ...db.CreateDaemonTokenParams,
+) ([]pgtype.UUID, error) {
 	if len(daemonTokens) > 1 {
 		return nil, fmt.Errorf("finalize task claim: expected at most one daemon token, got %d", len(daemonTokens))
 	}
@@ -3819,6 +3873,19 @@ func (s *TaskService) FinalizeTaskClaim(
 				DispatchedAt:  task.DispatchedAt,
 			}); err != nil {
 				return fmt.Errorf("set task issue snapshot: %w", err)
+			}
+		}
+		if len(selectedSkillIDs) > 0 || taskContextHasSelectedSkillGrant(task.Context) {
+			if selectedSkillIDs == nil {
+				selectedSkillIDs = []pgtype.UUID{}
+			}
+			if _, err := qtx.SetTaskClaimSelectedSkillIDs(ctx, db.SetTaskClaimSelectedSkillIDsParams{
+				SelectedSkillIds: selectedSkillIDs,
+				TaskID:           task.ID,
+				RuntimeID:        task.RuntimeID,
+				DispatchedAt:     task.DispatchedAt,
+			}); err != nil {
+				return fmt.Errorf("set selected skill ids: %w", err)
 			}
 		}
 		if !recordCommentReceipt {
@@ -6839,6 +6906,66 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 		return nil, nil
 	}
 	return s.skillsWithFiles(ctx, skills)
+}
+
+func taskContextHasSelectedSkillGrant(raw []byte) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var v struct {
+		SelectedSkillIDs []string `json:"selected_skill_ids"`
+	}
+	return json.Unmarshal(raw, &v) == nil && v.SelectedSkillIDs != nil
+}
+
+func firstSelectedSkillIDs(groups [][]pgtype.UUID) []pgtype.UUID {
+	if len(groups) == 0 {
+		return nil
+	}
+	return groups[0]
+}
+
+// LoadWorkspaceSkillsByIDs resolves explicitly selected workspace Skills while
+// enforcing the workspace boundary. Missing or cross-workspace IDs are omitted;
+// storage failures remain errors so claim handling can retry rather than silently
+// dropping a user selection.
+func (s *TaskService) LoadWorkspaceSkillsByIDs(ctx context.Context, workspaceID pgtype.UUID, skillIDs []string) ([]AgentSkillData, error) {
+	if !workspaceID.Valid || len(skillIDs) == 0 {
+		return nil, nil
+	}
+	ids := make([]pgtype.UUID, 0, len(skillIDs))
+	seen := make(map[string]struct{}, len(skillIDs))
+	for _, raw := range skillIDs {
+		id, err := util.ParseUUID(raw)
+		if err != nil {
+			continue
+		}
+		key := util.UUIDToString(id)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	result := make([]AgentSkillData, 0, len(ids))
+	for _, id := range ids {
+		skill, err := s.Queries.GetSkillInWorkspace(ctx, db.GetSkillInWorkspaceParams{ID: id, WorkspaceID: workspaceID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("load selected workspace skill %s: %w", util.UUIDToString(id), err)
+		}
+		loaded, err := s.skillsWithFiles(ctx, []db.Skill{skill})
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, loaded...)
+	}
+	return result, nil
 }
 
 // skillsWithFiles loads the files of every given skill in ONE round trip

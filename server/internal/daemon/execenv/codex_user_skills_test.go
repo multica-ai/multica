@@ -187,6 +187,28 @@ func TestHydrateCodexSkillsWipeKeepsUserSkillContent(t *testing.T) {
 	}
 }
 
+func TestHydrateCodexSkillsRemovesPriorOneRunGrant(t *testing.T) {
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+	codexHome := t.TempDir()
+
+	granted := []SkillContextForEnv{{Name: "One Run", Content: "available once"}}
+	if err := hydrateCodexSkills(codexHome, granted, nil, testLogger()); err != nil {
+		t.Fatalf("hydrate selected Skill: %v", err)
+	}
+	grantedPath := filepath.Join(codexHome, "skills", "one-run", "SKILL.md")
+	if _, err := os.Stat(grantedPath); err != nil {
+		t.Fatalf("selected Skill was not materialized: %v", err)
+	}
+
+	if err := hydrateCodexSkills(codexHome, nil, nil, testLogger()); err != nil {
+		t.Fatalf("hydrate next task without selected Skill: %v", err)
+	}
+	if _, err := os.Stat(grantedPath); !os.IsNotExist(err) {
+		t.Fatalf("one-run Skill survived into the next task: %v", err)
+	}
+}
+
 // A workspace skill whose name only collides after directory naming — the
 // sanitized-name pre-filter does not catch it — must land in a sibling
 // directory instead of being written through the user's link.

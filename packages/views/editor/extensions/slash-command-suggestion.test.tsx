@@ -3,7 +3,7 @@ import { createRef, type ReactNode } from "react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { workspaceKeys } from "@multica/core/workspace/queries";
-import type { Agent, MemberWithUser } from "@multica/core/types";
+import type { SkillSummary } from "@multica/core/types";
 import type { QueryClient } from "@tanstack/react-query";
 import enEditor from "../../locales/en/editor.json";
 
@@ -27,16 +27,6 @@ vi.mock("@multica/core/platform", () => ({
   getCurrentWsId: () => "ws-1",
 }));
 
-const authState = { user: { id: "u1" } as { id: string } | null };
-vi.mock("@multica/core/auth", () => ({
-  useAuthStore: { getState: () => authState },
-}));
-
-const chatState = { selectedAgentId: "agent-1" as string | null };
-vi.mock("@multica/core/chat", () => ({
-  useChatStore: { getState: () => chatState },
-}));
-
 import {
   SlashCommandList,
   type SlashCommandListRef,
@@ -48,300 +38,112 @@ import {
   QUICK_ACTION_ITEM_PREFIX,
 } from "./slash-command-suggestion";
 
-function agent(overrides: Partial<Agent>): Agent {
+function skill(overrides: Partial<SkillSummary>): SkillSummary {
   return {
-    id: "agent-1",
+    id: "skill-1",
     workspace_id: "ws-1",
-    runtime_id: "runtime-1",
-    name: "Agent",
+    name: "deploy",
     description: "",
-    instructions: "",
-    avatar_url: null,
-    runtime_mode: "local",
-    runtime_config: {},
-    custom_args: [],
-    visibility: "workspace",
-    permission_mode: "public_to",
-    invocation_targets: [{ target_type: "workspace", target_id: null }],
-    status: "idle",
-    max_concurrent_tasks: 1,
-    model: "",
-    owner_id: null,
-    skills: [],
+    config: {},
+    created_by: "u1",
     created_at: "",
     updated_at: "",
-    archived_at: null,
-    archived_by: null,
     ...overrides,
   };
 }
 
 function fakeQc(data: {
-  members?: Array<Pick<MemberWithUser, "user_id" | "name" | "role">>;
-  agents?: Agent[];
+  skills?: SkillSummary[];
+  fetchedSkills?: SkillSummary[];
 }): QueryClient {
   const map = new Map<string, unknown>();
-  map.set(JSON.stringify(workspaceKeys.members("ws-1")), data.members ?? []);
-  map.set(JSON.stringify(workspaceKeys.agents("ws-1")), data.agents ?? []);
+  if (data.skills) {
+    map.set(JSON.stringify(workspaceKeys.skills("ws-1")), data.skills);
+  }
   return {
     getQueryData: (key: readonly unknown[]) => map.get(JSON.stringify(key)),
+    fetchQuery: () => Promise.resolve(data.fetchedSkills ?? []),
   } as unknown as QueryClient;
 }
 
-function items(qc: QueryClient, query = ""): SlashCommandItem[] {
+function itemResult(
+  qc: QueryClient,
+  query = "",
+): SlashCommandItem[] | Promise<SlashCommandItem[]> {
   const config = createSlashCommandSuggestion(qc);
   return config.items!({
     query,
     editor: {} as never,
     signal: new AbortController().signal,
-  }) as SlashCommandItem[];
+  });
+}
+
+function items(qc: QueryClient, query = ""): SlashCommandItem[] {
+  return itemResult(qc, query) as SlashCommandItem[];
 }
 
 describe("slash command suggestion items", () => {
-  it("returns all active agent skills when query is empty", () => {
-    chatState.selectedAgentId = "agent-1";
+  it("returns the Workspace Skill library without requiring Agent assignments", () => {
     const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "deploy", description: "Ship changes" },
-            { id: "s2", name: "review", description: "Review code" },
-          ],
-        }),
+      skills: [
+        skill({ id: "s1", name: "deploy", description: "Ship changes" }),
+        skill({ id: "s2", name: "review", description: "Review code" }),
       ],
     });
 
-    expect(items(qc).map((i) => i.label)).toEqual(["deploy", "review"]);
-  });
-
-  it("filters skills by name case-insensitively", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "Deploy", description: "" },
-            { id: "s2", name: "Review", description: "" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc, "dep").map((i) => i.id)).toEqual(["s1"]);
-  });
-
-  it("filters skills by description", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "deploy", description: "Ship changes" },
-            { id: "s2", name: "review", description: "Read a pull request" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc, "pull").map((i) => i.id)).toEqual(["s2"]);
-  });
-
-  it("ranks name prefix matches above description-only matches", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "grilling", description: "Grill the user about a plan" },
-            { id: "s2", name: "prototype", description: "Build a throwaway prototype" },
-            { id: "s3", name: "wayfinder", description: "Plan a huge chunk of work" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc, "wa").map((i) => i.id)).toEqual(["s3", "s2"]);
-  });
-
-  it("ranks an exact name match ahead of a longer prefix match", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "reviewer", description: "" },
-            { id: "s2", name: "review", description: "" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc, "review").map((i) => i.id)).toEqual(["s2", "s1"]);
-  });
-
-  it("ranks a name prefix above a mid-name match", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "pr-review", description: "" },
-            { id: "s2", name: "review", description: "" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc, "rev").map((i) => i.id)).toEqual(["s2", "s1"]);
-  });
-
-  it("keeps the configured skill order within a match tier", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "deploy-web", description: "" },
-            { id: "s2", name: "deploy-api", description: "" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc, "deploy").map((i) => i.id)).toEqual(["s1", "s2"]);
-  });
-
-  it("keeps a name match inside the 20-item cap when description hits fill it", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            ...Array.from({ length: 25 }, (_, i) => ({
-              id: `d${i}`,
-              name: `skill-${i}`,
-              description: "Build a throwaway prototype",
-            })),
-            { id: "s-named", name: "wayfinder", description: "" },
-          ],
-        }),
-      ],
-    });
-
-    const result = items(qc, "wa");
-    expect(result).toHaveLength(20);
-    expect(result[0]?.id).toBe("s-named");
-  });
-
-  it("tolerates skills with missing descriptions from cached API data", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "deploy" } as Agent["skills"][number],
-          ],
-        }),
-      ],
-    });
-
-    expect(() => items(qc, "dep")).not.toThrow();
-    expect(items(qc, "dep")).toEqual([
-      { id: "s1", label: "deploy", description: "" },
+    expect(items(qc)).toEqual([
+      { id: "s1", skillId: "s1", label: "deploy", description: "Ship changes" },
+      { id: "s2", skillId: "s2", label: "review", description: "Review code" },
     ]);
   });
 
-  it("returns empty when the active agent has no skills", () => {
-    chatState.selectedAgentId = "agent-1";
+  it("filters by name or description and ranks exact/prefix matches first", () => {
     const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [agent({ id: "agent-1", skills: [] })],
-    });
-
-    expect(items(qc)).toEqual([]);
-  });
-
-  it("caps results at 20", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: Array.from({ length: 25 }, (_, i) => ({
-            id: `s${i}`,
-            name: `skill-${i}`,
-            description: "",
-          })),
-        }),
+      skills: [
+        skill({ id: "s1", name: "reviewer", description: "" }),
+        skill({ id: "s2", name: "review", description: "" }),
+        skill({ id: "s3", name: "prototype", description: "Review a pull request" }),
       ],
     });
 
-    expect(items(qc)).toHaveLength(20);
+    expect(items(qc, "review").map((item) => item.id)).toEqual(["s2", "s1", "s3"]);
+    expect(items(qc, "pull").map((item) => item.id)).toEqual(["s3"]);
   });
 
-  it("falls back to the first available agent when selectedAgentId is stale", () => {
-    chatState.selectedAgentId = "missing";
+  it("keeps a name match inside the 20-item cap", () => {
     const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [{ id: "s1", name: "deploy", description: "" }],
-        }),
+      skills: [
+        ...Array.from({ length: 25 }, (_, i) =>
+          skill({ id: `d${i}`, name: `skill-${i}`, description: "wayfinder helper" }),
+        ),
+        skill({ id: "named", name: "wayfinder" }),
       ],
     });
 
-    expect(items(qc).map((i) => i.id)).toEqual(["s1"]);
+    const result = items(qc, "way");
+    expect(result).toHaveLength(20);
+    expect(result[0]?.id).toBe("named");
   });
 
-  it("returns empty when no agents exist", () => {
+  it("tolerates a missing description from stale cached API data", () => {
     const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [],
+      skills: [skill({ id: "s1", name: "deploy", description: undefined as never })],
     });
 
-    expect(items(qc)).toEqual([]);
+    expect(items(qc, "dep")).toEqual([
+      { id: "s1", skillId: "s1", label: "deploy", description: "" },
+    ]);
   });
 
-  it("excludes skills from private agents the user cannot access", () => {
-    chatState.selectedAgentId = "private-agent";
-    const qc = fakeQc({
-      members: [
-        { user_id: "u1", name: "Alice", role: "member" },
-        { user_id: "u2", name: "Bob", role: "member" },
-      ],
-      agents: [
-        agent({
-          id: "private-agent",
-          visibility: "private",
-          permission_mode: "private",
-          invocation_targets: [],
-          owner_id: "u2",
-          skills: [{ id: "private-skill", name: "secret", description: "" }],
-        }),
-      ],
-    });
+  it("fetches a cold Workspace Skill cache lazily", async () => {
+    const qc = fakeQc({ fetchedSkills: [skill({ id: "s1", name: "deploy" })] });
+    await expect(itemResult(qc)).resolves.toEqual([
+      { id: "s1", skillId: "s1", label: "deploy", description: "" },
+    ]);
+  });
 
-    expect(items(qc)).toEqual([]);
+  it("returns an empty picker for an empty Workspace Skill library", () => {
+    expect(items(fakeQc({ skills: [] }))).toEqual([]);
   });
 });
 
@@ -570,6 +372,35 @@ describe("buildBuiltinCommandItems", () => {
   it("returns nothing for a query that matches no command", () => {
     expect(buildBuiltinCommandItems("deploy")).toEqual([]);
   });
+
+  it("merges Quick Actions, Workspace Skills, and built-ins", () => {
+    const result = buildBuiltinCommandItems(
+      "",
+      [{ id: "qa-1", name: "summarize", description: "Summarize the issue" }],
+      [skill({ id: "skill-1", name: "architecture-sweep", description: "Audit structure" })],
+    );
+
+    expect(result.map((item) => item.id)).toEqual([
+      `${QUICK_ACTION_ITEM_PREFIX}qa-1`,
+      "skill-1",
+      "note",
+    ]);
+    expect(result[1]).toMatchObject({ skillId: "skill-1", label: "architecture-sweep" });
+  });
+
+  it("reserves a slot for /note when 20 or more Workspace Skills match", () => {
+    const result = buildBuiltinCommandItems(
+      "",
+      [{ id: "qa-1", name: "summarize" }],
+      Array.from({ length: 25 }, (_, index) =>
+        skill({ id: `skill-${index}`, name: `skill-${index}` }),
+      ),
+    );
+
+    expect(result).toHaveLength(20);
+    expect(result[0]?.id).toBe(`${QUICK_ACTION_ITEM_PREFIX}qa-1`);
+    expect(result.at(-1)?.id).toBe("note");
+  });
 });
 
 describe("SlashCommandList built-in command rendering", () => {
@@ -589,6 +420,73 @@ describe("SlashCommandList built-in command rendering", () => {
     expect(
       getByText("Add a note — won't trigger any agents"),
     ).toBeInTheDocument();
+  });
+});
+
+describe("issue comment `/` menu — Workspace Skills", () => {
+  it("loads Workspace Skills through the same Query cache as Chat", () => {
+    const qc = fakeQc({ skills: [skill({ id: "skill-1", name: "architecture-sweep" })] });
+    const suggestion = createBuiltinCommandSuggestion({}, qc);
+    const result = suggestion.items!({
+      query: "arch",
+      editor: {} as never,
+      signal: new AbortController().signal,
+    }) as SlashCommandItem[];
+
+    expect(result).toEqual([
+      {
+        id: "skill-1",
+        skillId: "skill-1",
+        label: "architecture-sweep",
+        description: "",
+      },
+    ]);
+  });
+
+  it("inserts a selected Skill as the durable rich Markdown marker", () => {
+    const getSelection = vi
+      .spyOn(window, "getSelection")
+      .mockReturnValue({ collapseToEnd: vi.fn() } as unknown as Selection);
+    const inserts: unknown[] = [];
+    const chain = {
+      focus: () => chain,
+      insertContentAt: (_range: unknown, content: unknown) => {
+        inserts.push(content);
+        return chain;
+      },
+      run: () => true,
+    };
+    const editor = {
+      chain: () => chain,
+      view: { state: { selection: { $to: { nodeAfter: null } } } },
+    };
+    const suggestion = createBuiltinCommandSuggestion();
+
+    suggestion.command!({
+      editor,
+      range: { from: 0, to: 5 },
+      props: {
+        id: "skill-1",
+        skillId: "skill-1",
+        label: "review",
+        description: "Review code",
+      },
+    } as never);
+
+    expect(inserts).toEqual([
+      [
+        {
+          type: "slashCommand",
+          attrs: {
+            id: "skill-1",
+            label: "review",
+            mentionSuggestionChar: "/",
+          },
+        },
+        { type: "text", text: " " },
+      ],
+    ]);
+    getSelection.mockRestore();
   });
 });
 

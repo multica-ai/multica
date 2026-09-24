@@ -170,8 +170,9 @@ export interface EditorExtensionsOptions {
   enableSlashCommands?: boolean;
   /**
    * Which `/` menu to attach when enableSlashCommands is true:
-   * - "skill" (default) — the chat picker listing the active agent's skills.
-   * - "command" — the fixed built-in command menu (issue comments), e.g. /note.
+   * - "skill" (default) — the chat picker listing Workspace Skills.
+   * - "command" — Workspace Skills plus Quick Actions and built-ins (issue
+   *   comments), e.g. /note.
    */
   slashCommandMode?: "skill" | "command";
   /**
@@ -283,7 +284,7 @@ export function createEditorExtensions(
       suggestion: !options.enableSlashCommands
         ? { char: "/", allow: () => false }
         : options.slashCommandMode === "command"
-          ? createBuiltinCommandSuggestion(options.quickActionMenu)
+          ? createBuiltinCommandSuggestion(options.quickActionMenu, options.queryClient)
           : options.queryClient
             ? createSlashCommandSuggestion(options.queryClient)
             : { char: "/", allow: () => false },
