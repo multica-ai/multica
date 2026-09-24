@@ -443,6 +443,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		LLMMaxRetries:            opts.LLMMaxRetries,
 		LLMDisableThinking:       opts.LLMDisableThinking,
 		ServerVersion:            normalizeServerVersion(version),
+		GovernanceRoot:           strings.TrimSpace(os.Getenv("MULTICA_GOVERNANCE_ROOT")),
+		GovernanceHookTimeout:    envDuration("MULTICA_GOVERNANCE_HOOK_TIMEOUT", 30*time.Second),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	invitationRateLimits := handler.DefaultInvitationRateLimits()
