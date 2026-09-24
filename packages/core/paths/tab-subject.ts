@@ -61,6 +61,14 @@ function splitUrl(url: string): { segments: string[]; query: URLSearchParams } {
   };
 }
 
+function inboxSubject(query: URLSearchParams): TabSubject {
+  return {
+    kind: "inbox",
+    selectedKey: query.get("issue") || null,
+    archived: query.get("view") === "archived",
+  };
+}
+
 /**
  * Resolve a workspace tab URL into a {@link TabSubject}.
  *
@@ -98,12 +106,13 @@ export function parseTabSubject(url: string): TabSubject {
         : { kind: "page", page: "squads" };
     case "usage":
       return { kind: "page", page: "usage" };
+    case "home":
+      // `/home/activity` is the former Inbox container, selection included.
+      if (id === "activity") return inboxSubject(query);
+      return { kind: "page", page: "home" };
     case "inbox":
-      return {
-        kind: "inbox",
-        selectedKey: query.get("issue") || null,
-        archived: query.get("view") === "archived",
-      };
+      // Legacy URL, redirected to `/home/activity` before it renders.
+      return inboxSubject(query);
     case "chat":
       return { kind: "chat", sessionId: query.get("session") || null };
     case "runtimes":

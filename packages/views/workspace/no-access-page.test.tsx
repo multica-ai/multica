@@ -69,7 +69,7 @@ describe("NoAccessPage", () => {
   it("navigates to the first accessible workspace on 'Go to my workspaces'", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: /go to my workspaces/i }));
-    expect(navigate).toHaveBeenCalledWith("/valid-team/issues");
+    expect(navigate).toHaveBeenCalledWith("/valid-team/home");
   });
 
   it("clears last_workspace_slug cookie on mount so the proxy stops looping us back", () => {

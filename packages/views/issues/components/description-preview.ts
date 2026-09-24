@@ -38,7 +38,10 @@ export function descriptionPreview(markdown: string): string {
       .replace(/!file\[[^\]]*\]\((?:[^()]|\([^()]*\))*\)/g, "")
       .replace(/!\[[^\]]*\]\((?:[^()]|\([^()]*\))*\)/g, "")
       .replace(/\[([^\]]+)\]\((?:[^()]|\([^()]*\))*\)/g, "$1")
-      .replace(/[*_`~]+/g, "")
+      .replace(/[*`~]+/g, "")
+      // `_` is emphasis only at a word edge; inside a word it is part of an
+      // identifier (`mentions_assignments`) and must survive.
+      .replace(/(?<![\p{L}\p{N}])_+|_+(?![\p{L}\p{N}])/gu, "")
       .replace(/^[\s>#]+/gm, "")
       .replace(/\s+/g, " ")
       .trim()

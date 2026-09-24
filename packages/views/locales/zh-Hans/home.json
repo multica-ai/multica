@@ -1,0 +1,107 @@
+{
+  "page": {
+    "title": "主页"
+  },
+  "duration": {
+    "minutes": "{{count}} 分钟",
+    "hours": "{{count}} 小时",
+    "days": "{{count}} 天"
+  },
+  "needs_me": {
+    "title": "等我",
+    "sort_hint": "先按任务自己的优先级和截止日期排，同等条件下再看是否有人被你卡住、等了多久。",
+    "empty": "当前没有待你处理的请求",
+    "suggested": "建议先看",
+    "kind": {
+      "mentioned": "提到你",
+      "action_required": "需要处理"
+    },
+    "sentence": {
+      "in_review_by": "请验收 {{name}} 的交付：{{title}}",
+      "in_review": "请验收：{{title}}",
+      "blocked_by": "请回复 {{name}}：{{title}}",
+      "blocked": "请解卡：{{title}}",
+      "mentioned_by": "请回复 {{name}}：{{title}}",
+      "mentioned": "请回复：{{title}}",
+      "issue_assigned": "分派给你：{{title}}",
+      "task_failed": "运行失败：{{title}}",
+      "action_required": "请查看：{{title}}"
+    },
+    "action": {
+      "in_review": "验收",
+      "blocked": "去回复",
+      "mentioned": "回复",
+      "action_required": "查看"
+    },
+    "reason": {
+      "overdue": "已逾期",
+      "due_today": "今天到期",
+      "due_tomorrow": "明天到期",
+      "waiting": "等了 {{duration}}",
+      "stopped": "{{name}} 停了 {{duration}}"
+    },
+    "replied": "已回复，等待 {{name}}",
+    "replied_anonymous": "已回复，等待对方继续"
+  },
+  "changes": {
+    "title_since": "自 {{time}} 以来",
+    "issue_count_other": "{{count}} 个任务有变化",
+    "view_by_issue": "按任务",
+    "view_all": "全部活动",
+    "empty": "自上次查看以来没有新变化",
+    "updates_other": "{{count}} 条更新",
+    "open_all": "在全部活动中筛选和归档",
+    "show_more": "在全部活动中查看全部"
+  },
+  "plate": {
+    "title": "我手上",
+    "my_issues": "我的任务",
+    "due_today": "今天到期",
+    "this_week": "本周到期",
+    "in_progress": "进行中",
+    "empty_today": "今天没有到期的任务",
+    "overdue": "逾期",
+    "today": "今天"
+  },
+  "queue": {
+    "title": "等我",
+    "progress": "已处理 {{done}} / {{total}}",
+    "shortcut_hint": "J / K 切换",
+    "new_items_other": "有 {{count}} 条新请求",
+    "all_done": "等你处理的请求都处理完了",
+    "back_home": "回到主页",
+    "open_issue": "打开任务",
+    "next": "下一条",
+    "card": {
+      "delivery": "{{name}} 的交付",
+      "blocked": "{{name}} 的评论",
+      "mention": "{{name}} 提到了你",
+      "none": "没有可显示的评论，打开任务查看完整上下文。",
+      "notice": "通知"
+    },
+    "reply_to": "回复 {{name}}",
+    "reply": "回复",
+    "request_changes_hint": "写清楚要改什么。发送后任务回到 in_progress。",
+    "action": {
+      "approve": "通过",
+      "request_changes": "要求修改",
+      "cancel_request_changes": "取消",
+      "back_to_todo": "打回 todo",
+      "reassign": "改派给别人",
+      "cancel_issue": "取消任务",
+      "dismiss": "标记已处理",
+      "open": "打开任务"
+    },
+    "toast": {
+      "approved": "已通过 {{identifier}}，状态改为 done",
+      "back_to_todo": "已把 {{identifier}} 打回 todo",
+      "cancelled": "已取消 {{identifier}}",
+      "changes_requested": "已对 {{identifier}} 要求修改",
+      "replied": "已回复到 {{identifier}}",
+      "reassigned": "已改派 {{identifier}}",
+      "dismissed": "已标记为已处理",
+      "undo": "撤销",
+      "failed": "没能更新任务"
+    }
+  }
+}

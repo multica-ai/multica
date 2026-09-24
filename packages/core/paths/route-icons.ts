@@ -20,6 +20,7 @@
 
 /** Every icon name a nav page or a tab type-icon can resolve to. */
 export type RouteIconName =
+  | "House"
   | "Inbox"
   | "MessageSquare"
   | "CircleUser"
@@ -44,6 +45,7 @@ export type RouteIconName =
 
 /** i18n label key (under the `layout.nav` namespace) for a page. */
 export type NavLabelKey =
+  | "home"
   | "inbox"
   | "chat"
   | "my_issues"
@@ -59,6 +61,7 @@ export type NavLabelKey =
 
 /** Stable identifier for each workspace navigation page. */
 export type WorkspacePageKey =
+  | "home"
   | "inbox"
   | "chat"
   | "myIssues"
@@ -86,6 +89,10 @@ export interface WorkspacePage {
  * destinations in paths.ts and the sidebar nav groups.
  */
 export const WORKSPACE_PAGES: Record<WorkspacePageKey, WorkspacePage> = {
+  home: { segment: "home", icon: "House", navKey: "home" },
+  // Home's all-activity view. Kept as a page so the command palette still
+  // finds it by name; its destination is `paths.inbox()` under /home, and the
+  // bare "inbox" segment only survives as a redirected legacy URL.
   inbox: { segment: "inbox", icon: "Inbox", navKey: "inbox" },
   chat: { segment: "chat", icon: "MessageSquare", navKey: "chat" },
   myIssues: { segment: "my-issues", icon: "CircleUser", navKey: "my_issues" },

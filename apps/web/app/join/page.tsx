@@ -61,7 +61,7 @@ function JoinInner() {
         const list = await api.listWorkspaces().catch(() => [] as Workspace[]);
         queryClient.setQueryData(workspaceKeys.list(), list);
         setTimeout(() => {
-          router.push(`/${result.workspace_slug || result.workspace_id}/issues`);
+          router.push(`/${result.workspace_slug || result.workspace_id}/home`);
         }, 1200);
       })
       .catch(async (e) => {
@@ -71,7 +71,7 @@ function JoinInner() {
           // Already joined: go straight to the workspace this invite points at
           // rather than the account's first workspace.
           if (info?.workspace_slug) {
-            router.push(`/${info.workspace_slug}/issues`);
+            router.push(`/${info.workspace_slug}/home`);
             return;
           }
           try {
@@ -79,7 +79,7 @@ function JoinInner() {
             queryClient.setQueryData(workspaceKeys.list(), workspaces as any);
             const first = workspaces[0];
             if (first) {
-              router.push(`/${first.slug}/issues`);
+              router.push(`/${first.slug}/home`);
               return;
             }
           } catch {

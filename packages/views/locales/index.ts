@@ -12,6 +12,7 @@ import enMembers from "./en/members.json";
 import enMyIssues from "./en/my-issues.json";
 import enSearch from "./en/search.json";
 import enInbox from "./en/inbox.json";
+import enHome from "./en/home.json";
 import enWorkspace from "./en/workspace.json";
 import enProjects from "./en/projects.json";
 import enAutopilots from "./en/autopilots.json";
@@ -37,6 +38,7 @@ import zhHansMembers from "./zh-Hans/members.json";
 import zhHansMyIssues from "./zh-Hans/my-issues.json";
 import zhHansSearch from "./zh-Hans/search.json";
 import zhHansInbox from "./zh-Hans/inbox.json";
+import zhHansHome from "./zh-Hans/home.json";
 import zhHansWorkspace from "./zh-Hans/workspace.json";
 import zhHansProjects from "./zh-Hans/projects.json";
 import zhHansAutopilots from "./zh-Hans/autopilots.json";
@@ -62,6 +64,7 @@ import koMembers from "./ko/members.json";
 import koMyIssues from "./ko/my-issues.json";
 import koSearch from "./ko/search.json";
 import koInbox from "./ko/inbox.json";
+import koHome from "./ko/home.json";
 import koWorkspace from "./ko/workspace.json";
 import koProjects from "./ko/projects.json";
 import koAutopilots from "./ko/autopilots.json";
@@ -87,6 +90,7 @@ import jaMembers from "./ja/members.json";
 import jaMyIssues from "./ja/my-issues.json";
 import jaSearch from "./ja/search.json";
 import jaInbox from "./ja/inbox.json";
+import jaHome from "./ja/home.json";
 import jaWorkspace from "./ja/workspace.json";
 import jaProjects from "./ja/projects.json";
 import jaAutopilots from "./ja/autopilots.json";
@@ -112,6 +116,7 @@ import frMembers from "./fr/members.json";
 import frMyIssues from "./fr/my-issues.json";
 import frSearch from "./fr/search.json";
 import frInbox from "./fr/inbox.json";
+import frHome from "./fr/home.json";
 import frWorkspace from "./fr/workspace.json";
 import frProjects from "./fr/projects.json";
 import frAutopilots from "./fr/autopilots.json";
@@ -143,6 +148,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     "my-issues": enMyIssues,
     search: enSearch,
     inbox: enInbox,
+    home: enHome,
     workspace: enWorkspace,
     projects: enProjects,
     autopilots: enAutopilots,
@@ -170,6 +176,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     "my-issues": zhHansMyIssues,
     search: zhHansSearch,
     inbox: zhHansInbox,
+    home: zhHansHome,
     workspace: zhHansWorkspace,
     projects: zhHansProjects,
     autopilots: zhHansAutopilots,
@@ -197,6 +204,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     "my-issues": koMyIssues,
     search: koSearch,
     inbox: koInbox,
+    home: koHome,
     workspace: koWorkspace,
     projects: koProjects,
     autopilots: koAutopilots,
@@ -224,6 +232,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     "my-issues": jaMyIssues,
     search: jaSearch,
     inbox: jaInbox,
+    home: jaHome,
     workspace: jaWorkspace,
     projects: jaProjects,
     autopilots: jaAutopilots,
@@ -251,6 +260,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     "my-issues": frMyIssues,
     search: frSearch,
     inbox: frInbox,
+    home: frHome,
     workspace: frWorkspace,
     projects: frProjects,
     autopilots: frAutopilots,

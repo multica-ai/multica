@@ -28,6 +28,7 @@ import {
 } from "@multica/views/agents";
 import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
 import { InboxPage } from "@multica/views/inbox";
+import { HomePage, QueuePage } from "@multica/views/home";
 import { ChatPage } from "@multica/views/chat";
 import { SettingsPage } from "@multica/views/settings";
 import { useT } from "@multica/views/i18n";
@@ -121,12 +122,17 @@ export const appRoutes: RouteObject[] = [
         path: ":workspaceSlug",
         element: <WorkspaceRouteLayout />,
         children: [
-          // A bare `/{slug}` URL is normalized to `/{slug}/issues` by
+          // A bare `/{slug}` URL is normalized to `/{slug}/home` by
           // sanitizeTabPath before it ever becomes a session, so the index
           // route is unreachable in practice; null keeps it a harmless
           // safety net instead of an in-router <Navigate> (MUL-4741
           // invariant 1: the router never self-navigates).
           { index: true, element: null },
+          { path: "home", element: <HomePage />, handle: { title: "Home" } },
+          { path: "home/queue", element: <QueuePage />, handle: { title: "Home" } },
+          // The former Inbox page. Legacy `/{slug}/inbox` URLs are rewritten
+          // here by sanitizeTabPath before they become sessions.
+          { path: "home/activity", element: <InboxPage />, handle: { title: "Inbox" } },
           {
             path: "issues",
             element: <IssuesPage />,
@@ -220,7 +226,6 @@ export const appRoutes: RouteObject[] = [
             element: <SquadDetailPageView />,
             handle: { title: "Squad" },
           },
-          { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
           { path: "chat", element: <ChatPage />, handle: { title: "Chat" } },
           {
             path: "attachments/:id/preview",

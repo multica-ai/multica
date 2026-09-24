@@ -1,0 +1,107 @@
+{
+  "page": {
+    "title": "ホーム"
+  },
+  "duration": {
+    "minutes": "{{count}}分",
+    "hours": "{{count}}時間",
+    "days": "{{count}}日"
+  },
+  "needs_me": {
+    "title": "あなた待ち",
+    "sort_hint": "まずタスク自体の優先度と期限で並べ、同じ条件なら、あなたが止めている人がいるか、どれだけ待っているかで並べます。",
+    "empty": "いま対応待ちのリクエストはありません",
+    "suggested": "まずはこれ",
+    "kind": {
+      "mentioned": "メンション",
+      "action_required": "要対応"
+    },
+    "sentence": {
+      "in_review_by": "{{name}} の成果物を確認：{{title}}",
+      "in_review": "確認してください：{{title}}",
+      "blocked_by": "{{name}} に返信：{{title}}",
+      "blocked": "ブロックを解除：{{title}}",
+      "mentioned_by": "{{name}} に返信：{{title}}",
+      "mentioned": "返信してください：{{title}}",
+      "issue_assigned": "あなたに割り当て：{{title}}",
+      "task_failed": "実行に失敗：{{title}}",
+      "action_required": "確認してください：{{title}}"
+    },
+    "action": {
+      "in_review": "確認",
+      "blocked": "返信",
+      "mentioned": "返信",
+      "action_required": "表示"
+    },
+    "reason": {
+      "overdue": "期限切れ",
+      "due_today": "今日が期限",
+      "due_tomorrow": "明日が期限",
+      "waiting": "{{duration}}待ち",
+      "stopped": "{{name}} が{{duration}}停止中"
+    },
+    "replied": "返信済み、{{name}} を待っています",
+    "replied_anonymous": "返信済み、相手の対応待ち"
+  },
+  "changes": {
+    "title_since": "{{time}} 以降",
+    "issue_count_other": "{{count}} 件のタスクに変化",
+    "view_by_issue": "タスク別",
+    "view_all": "すべてのアクティビティ",
+    "empty": "前回の確認以降、新しい変化はありません",
+    "updates_other": "{{count}} 件の更新",
+    "open_all": "すべてのアクティビティで絞り込み・アーカイブ",
+    "show_more": "すべてのアクティビティですべて表示"
+  },
+  "plate": {
+    "title": "手元のタスク",
+    "my_issues": "マイタスク",
+    "due_today": "今日が期限",
+    "this_week": "今週が期限",
+    "in_progress": "進行中",
+    "empty_today": "今日が期限のタスクはありません",
+    "overdue": "期限切れ",
+    "today": "今日"
+  },
+  "queue": {
+    "title": "あなた待ち",
+    "progress": "{{done}} / {{total}} 件対応済み",
+    "shortcut_hint": "J / K で移動",
+    "new_items_other": "新しいリクエストが {{count}} 件",
+    "all_done": "あなた待ちのリクエストはすべて対応済みです",
+    "back_home": "ホームに戻る",
+    "open_issue": "タスクを開く",
+    "next": "次へ",
+    "card": {
+      "delivery": "{{name}} の成果物",
+      "blocked": "{{name}} のコメント",
+      "mention": "{{name}} があなたをメンション",
+      "none": "表示できるコメントがありません。全体の文脈はタスクを開いて確認してください。",
+      "notice": "通知"
+    },
+    "reply_to": "{{name}} に返信",
+    "reply": "返信",
+    "request_changes_hint": "変更してほしい点を書いてください。送信するとタスクは in_progress に戻ります。",
+    "action": {
+      "approve": "承認",
+      "request_changes": "修正を依頼",
+      "cancel_request_changes": "キャンセル",
+      "back_to_todo": "todo に戻す",
+      "reassign": "別の担当者に割り当て",
+      "cancel_issue": "タスクをキャンセル",
+      "dismiss": "対応済みにする",
+      "open": "タスクを開く"
+    },
+    "toast": {
+      "approved": "{{identifier}} を承認し、done にしました",
+      "back_to_todo": "{{identifier}} を todo に戻しました",
+      "cancelled": "{{identifier}} をキャンセルしました",
+      "changes_requested": "{{identifier}} に修正を依頼しました",
+      "replied": "{{identifier}} に返信しました",
+      "reassigned": "{{identifier}} の担当者を変更しました",
+      "dismissed": "対応済みにしました",
+      "undo": "元に戻す",
+      "failed": "タスクを更新できませんでした"
+    }
+  }
+}

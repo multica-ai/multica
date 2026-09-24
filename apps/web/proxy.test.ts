@@ -57,11 +57,12 @@ describe("proxy legacy workspace route redirects", () => {
   };
 
   it.each([
+    ["home", "/acme/home"],
     ["issues", "/acme/issues"],
     ["projects", "/acme/projects"],
     ["agents", "/acme/agents"],
     ["squads", "/acme/squads"],
-    ["inbox", "/acme/inbox"],
+    ["inbox", "/acme/home/activity"],
     ["my-issues", "/acme/my-issues"],
     ["autopilots", "/acme/autopilots"],
     ["runtimes", "/acme/runtimes"],
@@ -115,8 +116,26 @@ describe("proxy legacy workspace route redirects", () => {
 
   it("redirects app-host root URLs to the last workspace", () => {
     expect(redirectLocation("/", sessionCookies)).toBe(
-      "https://app.multica.test/acme/issues",
+      "https://app.multica.test/acme/home",
     );
+  });
+
+  it("permanently redirects a workspace inbox link to Home's activity view, keeping the selection", () => {
+    const response = proxy(makeRequest("/acme/inbox?issue=MUL-9&view=archived", sessionCookies));
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe(
+      "https://app.multica.test/acme/home/activity?issue=MUL-9&view=archived",
+    );
+  });
+
+  it("does not treat a workspace route that only contains inbox deeper down as the alias", () => {
+    expect(redirectLocation("/acme/issues/inbox", sessionCookies)).toBeNull();
+  });
+
+  it("leaves the inbox API alone", () => {
+    withoutRuntimeUpstreams(() => {
+      expect(redirectLocation("/api/inbox", sessionCookies)).toBeNull();
+    });
   });
 
   it.each(["multica.ai", "www.multica.ai"])(
@@ -274,7 +293,7 @@ describe("proxy root and locale handling", () => {
 
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe(
-      "https://app.multica.test/acme/issues",
+      "https://app.multica.test/acme/home",
     );
   });
 

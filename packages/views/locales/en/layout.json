@@ -1,6 +1,7 @@
 {
   "nav": {
-    "inbox": "Inbox",
+    "home": "Home",
+    "inbox": "All activity",
     "chat": "Chat",
     "my_issues": "My Issues",
     "issues": "Issues",

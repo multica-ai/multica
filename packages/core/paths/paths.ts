@@ -25,7 +25,13 @@ export const AGENT_FOCUS_CONVERSATION_STARTERS = "conversation_starters";
 function workspaceScoped(slug: string) {
   const ws = `/${encode(slug)}`;
   return {
-    root: () => `${ws}/issues`,
+    // The workspace landing page. Callers that mean "enter this workspace"
+    // use root(); callers that mean the issues list use issues().
+    root: () => `${ws}/home`,
+    home: () => `${ws}/home`,
+    // The "needs me" queue. `item` selects an entry by its queue key.
+    homeQueue: (item?: string) =>
+      item ? `${ws}/home/queue?item=${encode(item)}` : `${ws}/home/queue`,
     usage: () => `${ws}/usage`,
     issues: () => `${ws}/issues`,
     issueDetail: (id: string) => `${ws}/issues/${encode(id)}`,
@@ -53,7 +59,9 @@ function workspaceScoped(slug: string) {
     memberDetail: (id: string) => `${ws}/members/${encode(id)}`,
     squads: () => `${ws}/squads`,
     squadDetail: (id: string) => `${ws}/squads/${encode(id)}`,
-    inbox: () => `${ws}/inbox`,
+    // The former Inbox page is Home's all-activity view. `/inbox` stays a
+    // permanent redirect here so links already sent in notifications resolve.
+    inbox: () => `${ws}/home/activity`,
     chat: () => `${ws}/chat`,
     chatWithAgent: (agentId: string) =>
       `${ws}/chat?agent=${encode(agentId)}`,

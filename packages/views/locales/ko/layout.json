@@ -1,6 +1,7 @@
 {
   "nav": {
-    "inbox": "인박스",
+    "home": "홈",
+    "inbox": "전체 활동",
     "chat": "채팅",
     "my_issues": "내 태스크",
     "issues": "태스크",

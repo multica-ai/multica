@@ -68,7 +68,8 @@ import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/pat
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { inboxUnreadSummaryOptions, useInboxUnreadCount, hasOtherWorkspaceUnread, unreadWorkspaceIds } from "@multica/core/inbox/queries";
+import { inboxUnreadSummaryOptions, hasOtherWorkspaceUnread, unreadWorkspaceIds } from "@multica/core/inbox/queries";
+import { useNeedsMe } from "@multica/core/home";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useChatStore } from "@multica/core/chat";
@@ -112,6 +113,7 @@ const PINNED_PREVIEW_LIMIT = 5;
 // against the current workspace slug at render time (see AppSidebar body).
 // Only parameterless paths are valid nav destinations.
 type NavKey =
+  | "home"
   | "inbox"
   | "chat"
   | "myIssues"
@@ -128,6 +130,7 @@ type NavKey =
 // Static schema (key only) — labels resolved at render via useT("layout"),
 // icons derived from the destination path via routeIconForPath.
 type NavLabelKey =
+  | "home"
   | "inbox"
   | "chat"
   | "my_issues"
@@ -144,8 +147,9 @@ type NavLabelKey =
 // Nav icons are NOT declared here: they are derived from each item's
 // destination path at render time, so the sidebar and the desktop tab bar
 // always agree. See route-icon-components.tsx.
+// Inbox is not a nav item: it lives inside Home as the all-activity view.
 const personalNav: { key: NavKey; labelKey: NavLabelKey }[] = [
-  { key: "inbox", labelKey: "inbox" },
+  { key: "home", labelKey: "home" },
   { key: "myIssues", labelKey: "my_issues" },
   { key: "chat", labelKey: "chat" },
 ];
@@ -457,10 +461,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   }, [pathname, setOpenMobile]);
 
   const wsId = workspace?.id;
-  // Nav badge. Reads the cross-workspace unread summary fetched just below
-  // for the switcher dot, so the count costs no request of its own — it used
-  // to download the whole inbox list here just to count it (MUL-6967).
-  const unreadCount = useInboxUnreadCount(wsId);
+  // Home badge: requests waiting on the viewer, not unread notifications.
+  // Shares its queries with the Home page (the default landing surface), so an
+  // open app pays for them once.
+  const { actionableCount: needsMeCount } = useNeedsMe(wsId);
   // Chat tab unread badge: IM-style total of unread *messages* across chat
   // threads (countUnreadChatMessages is the shared definition — mobile's tab
   // badge derives from the same function, keeping the platforms in agreement).
@@ -586,7 +590,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         ? list.find((w) => w.id === invitation.workspace_id)
         : null;
       if (joined) {
-        push(paths.workspace(joined.slug).issues());
+        push(paths.workspace(joined.slug).root());
       }
     },
     onError: () => {
@@ -624,8 +628,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         <WorkspaceAvatar name={workspace?.name ?? "M"} avatarUrl={workspace?.avatar_url} size="sm" />
                         {/* Shared brand dot: a pending invitation OR another
                             workspace with unread inbox items. The active
-                            workspace's own unread stays on the Inbox nav count
-                            (below), so it is deliberately excluded here. */}
+                            workspace is covered by its own Home page and
+                            nav count (below), so it is deliberately excluded here. */}
                         {(myInvitations.length > 0 || otherWorkspaceUnread) && (
                           <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
                         )}
@@ -668,7 +672,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <DropdownMenuItem
                         key={ws.id}
                         render={
-                          <AppLink href={paths.workspace(ws.slug).issues()} />
+                          <AppLink href={paths.workspace(ws.slug).root()} />
                         }
                       >
                         <WorkspaceAvatar name={ws.name} avatarUrl={ws.avatar_url} size="sm" />
@@ -676,8 +680,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         {/* Points at the specific workspace holding unread
                             inbox items. Sits in the same right-edge slot as the
                             active-workspace check; the active workspace is
-                            excluded (its unread is the Inbox nav count), so dot
-                            and check never collide on one row. */}
+                            excluded (Home covers it), so dot and check never
+                            collide on one row. */}
                         {ws.id !== workspace?.id && unreadWsIds.has(ws.id) && (
                           <span className="size-2 rounded-full bg-brand" />
                         )}
@@ -786,9 +790,9 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       >
                         <Icon />
                         <span>{t(($) => $.nav[item.labelKey])}</span>
-                        {item.key === "inbox" && unreadCount > 0 && (
+                        {item.key === "home" && needsMeCount > 0 && (
                           <CappedNumberFlow
-                            value={unreadCount}
+                            value={needsMeCount}
                             animated={false}
                             className="ml-auto text-caption"
                           />

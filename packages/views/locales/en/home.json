@@ -1,0 +1,110 @@
+{
+  "page": {
+    "title": "Home"
+  },
+  "duration": {
+    "minutes": "{{count}}m",
+    "hours": "{{count}}h",
+    "days": "{{count}}d"
+  },
+  "needs_me": {
+    "title": "Needs you",
+    "sort_hint": "Ordered by the issue's own priority and due date first, then by whether someone is stopped on you, then by how long they have waited.",
+    "empty": "Nothing is waiting on you right now",
+    "suggested": "Suggested first",
+    "kind": {
+      "mentioned": "Mentioned you",
+      "action_required": "Action needed"
+    },
+    "sentence": {
+      "in_review_by": "Review {{name}}'s delivery: {{title}}",
+      "in_review": "Review: {{title}}",
+      "blocked_by": "Reply to {{name}}: {{title}}",
+      "blocked": "Unblock: {{title}}",
+      "mentioned_by": "Reply to {{name}}: {{title}}",
+      "mentioned": "Reply: {{title}}",
+      "issue_assigned": "Assigned to you: {{title}}",
+      "task_failed": "Run failed: {{title}}",
+      "action_required": "Take a look: {{title}}"
+    },
+    "action": {
+      "in_review": "Review",
+      "blocked": "Reply",
+      "mentioned": "Reply",
+      "action_required": "View"
+    },
+    "reason": {
+      "overdue": "Overdue",
+      "due_today": "Due today",
+      "due_tomorrow": "Due tomorrow",
+      "waiting": "Waiting {{duration}}",
+      "stopped": "{{name}} stopped {{duration}} ago"
+    },
+    "replied": "Replied, waiting for {{name}}",
+    "replied_anonymous": "Replied, waiting for a response"
+  },
+  "changes": {
+    "title_since": "Since {{time}}",
+    "issue_count_one": "{{count}} issue changed",
+    "issue_count_other": "{{count}} issues changed",
+    "view_by_issue": "By issue",
+    "view_all": "All activity",
+    "empty": "Nothing new since your last visit",
+    "updates_one": "{{count}} update",
+    "updates_other": "{{count}} updates",
+    "open_all": "Filter and archive in All activity",
+    "show_more": "Show all in All activity"
+  },
+  "plate": {
+    "title": "On my plate",
+    "my_issues": "My Issues",
+    "due_today": "Due today",
+    "this_week": "Due this week",
+    "in_progress": "In progress",
+    "empty_today": "Nothing due today",
+    "overdue": "Overdue",
+    "today": "Today"
+  },
+  "queue": {
+    "title": "Needs you",
+    "progress": "{{done}} / {{total}} handled",
+    "shortcut_hint": "J / K to move",
+    "new_items_one": "{{count}} new request",
+    "new_items_other": "{{count}} new requests",
+    "all_done": "Everything that needed you is handled",
+    "back_home": "Back to Home",
+    "open_issue": "Open issue",
+    "next": "Next",
+    "card": {
+      "delivery": "{{name}}'s delivery",
+      "blocked": "{{name}}'s comment",
+      "mention": "{{name}} mentioned you",
+      "none": "No comment to show. Open the issue for the full context.",
+      "notice": "Notification"
+    },
+    "reply_to": "Reply to {{name}}",
+    "reply": "Reply",
+    "request_changes_hint": "Say what to change. Sending moves the issue back to In Progress.",
+    "action": {
+      "approve": "Approve",
+      "request_changes": "Request changes",
+      "cancel_request_changes": "Cancel",
+      "back_to_todo": "Back to Todo",
+      "reassign": "Reassign",
+      "cancel_issue": "Cancel issue",
+      "dismiss": "Dismiss",
+      "open": "Open issue"
+    },
+    "toast": {
+      "approved": "{{identifier}} approved and moved to Done",
+      "back_to_todo": "{{identifier}} moved back to Todo",
+      "cancelled": "{{identifier}} cancelled",
+      "changes_requested": "Changes requested on {{identifier}}",
+      "replied": "Reply posted to {{identifier}}",
+      "reassigned": "{{identifier}} reassigned",
+      "dismissed": "Dismissed",
+      "undo": "Undo",
+      "failed": "Could not update the issue"
+    }
+  }
+}

@@ -43,7 +43,7 @@ describe("resolveDashboardCtaHref", () => {
   // the click did nothing. It must resolve to a real workspace route.
   it("sends an onboarded visitor to their workspace, never back to the landing page", () => {
     const href = resolveDashboardCtaHref(fetched([makeWs("acme")]));
-    expect(href).toBe(paths.workspace("acme").issues());
+    expect(href).toBe(paths.workspace("acme").home());
     expect(href).not.toBe("/");
   });
 

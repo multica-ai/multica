@@ -90,7 +90,8 @@ import { useSearchStore } from "./search-store";
 // total Record so adding a workspace page is a compile error until its
 // keywords are filled in.
 const PAGE_KEYWORDS: Record<WorkspacePageKey, string[]> = {
-  inbox: ["inbox", "notifications", "收件箱", "通知"],
+  home: ["home", "needs me", "review", "queue", "主页", "等我", "验收"],
+  inbox: ["inbox", "activity", "notifications", "收件箱", "活动", "通知"],
   chat: ["chat", "messages", "conversation", "聊天", "消息", "对话"],
   myIssues: ["my", "issues", "assigned", "mine", "我的", "任务"],
   issues: ["issues", "tasks", "bugs", "任务"],

@@ -112,7 +112,7 @@ export function InvitationsPage() {
       // wsList[0]: that could teleport the user into an unrelated old
       // workspace they happen to also belong to.
       push(
-        targetWs ? paths.workspace(targetWs.slug).issues() : paths.newWorkspace(),
+        targetWs ? paths.workspace(targetWs.slug).root() : paths.newWorkspace(),
       );
     } catch (e) {
       setError(

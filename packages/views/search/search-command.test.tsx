@@ -211,7 +211,8 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
   // derive each nav page's icon from its href) stay intact.
   ...(await importOriginal<typeof import("@multica/core/paths")>()),
   useWorkspacePaths: () => ({
-    inbox: () => "/ws-test/inbox",
+    home: () => "/ws-test/home",
+    inbox: () => "/ws-test/home/activity",
     chat: () => "/ws-test/chat",
     myIssues: () => "/ws-test/my-issues",
     issues: () => "/ws-test/issues",

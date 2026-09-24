@@ -73,7 +73,7 @@ export function parseCurrentContextRoute(pathname: string, searchParams: URLSear
   const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
   if (projectMatch?.[1]) return { type: "project", id: decodeURIComponent(projectMatch[1]) };
 
-  const inboxMatch = pathname.match(/^\/[^/]+\/inbox$/);
+  const inboxMatch = pathname.match(/^\/[^/]+\/home\/activity$/);
   const inboxIssueId = searchParams.get("issue");
   if (inboxMatch && inboxIssueId) return { type: "issue", id: inboxIssueId };
 

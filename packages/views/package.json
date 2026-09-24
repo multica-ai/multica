@@ -32,6 +32,7 @@
     "./agents/choose-create-method-page": "./agents/create/choose-create-method-page.tsx",
     "./agents/manual-create-agent-page": "./agents/create/manual-create-agent-page.tsx",
     "./members": "./members/index.ts",
+    "./home": "./home/index.ts",
     "./inbox": "./inbox/index.ts",
     "./runtimes": "./runtimes/index.ts",
     "./billing": "./billing/index.ts",

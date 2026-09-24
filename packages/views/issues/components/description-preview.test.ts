@@ -89,4 +89,9 @@ describe("descriptionPreview", () => {
   it("leaves a description at the boundary untouched", () => {
     expect(descriptionPreview("a".repeat(300))).toBe("a".repeat(300));
   });
+  it("keeps underscores inside identifiers while dropping emphasis underscores", () => {
+    expect(descriptionPreview("Default is `mentions_assignments`, _not_ __all__")).toBe(
+      "Default is mentions_assignments, not all",
+    );
+  });
 });

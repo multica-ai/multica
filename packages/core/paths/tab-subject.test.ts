@@ -44,7 +44,16 @@ describe("parseTabSubject", () => {
       "/acme/runtimes/machine-1/runtime/rt-2",
       { kind: "runtime", machineId: "machine-1", runtimeId: "rt-2" },
     ],
+    // Home and its sub-routes
+    ["/acme/home", { kind: "page", page: "home" }],
+    ["/acme/home/queue?item=issue%3Ai1", { kind: "page", page: "home" }],
     // Containers — selection (and archived sub-list) live in the query string
+    ["/acme/home/activity", { kind: "inbox", selectedKey: null, archived: false }],
+    [
+      "/acme/home/activity?view=archived&issue=MUL-9",
+      { kind: "inbox", selectedKey: "MUL-9", archived: true },
+    ],
+    // Legacy Inbox URL (redirected before it renders)
     ["/acme/inbox", { kind: "inbox", selectedKey: null, archived: false }],
     ["/acme/inbox?issue=MUL-9", { kind: "inbox", selectedKey: "MUL-9", archived: false }],
     ["/acme/inbox?view=archived", { kind: "inbox", selectedKey: null, archived: true }],

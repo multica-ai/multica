@@ -55,7 +55,7 @@ export default function Page() {
               paths.workspace(ws.slug).issueDetail(destination.issueId),
             );
           } else if (ws) {
-            router.push(paths.workspace(ws.slug).issues());
+            router.push(paths.workspace(ws.slug).root());
           } else {
             router.push(paths.root());
           }

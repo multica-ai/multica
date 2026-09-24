@@ -27,7 +27,7 @@ export function NoAccessPage() {
   const { data: workspaces = [] } = useQuery(workspaceListOptions());
 
   // Clear stale `last_workspace_slug` cookie. The web proxy redirects `/` to
-  // `/<lastSlug>/issues` based on this cookie alone (no access check). When the
+  // `/<lastSlug>/home` based on this cookie alone (no access check). When the
   // cookie points at a workspace the user has just lost access to, any hit on
   // `/` — manual navigation, a browser Back into `/`, or a fresh page load —
   // bounces the user straight back to the bad slug and re-traps them on

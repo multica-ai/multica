@@ -1,0 +1,110 @@
+{
+  "page": {
+    "title": "Accueil"
+  },
+  "duration": {
+    "minutes": "{{count}} min",
+    "hours": "{{count}} h",
+    "days": "{{count}} j"
+  },
+  "needs_me": {
+    "title": "En attente de vous",
+    "sort_hint": "Trié d’abord par la priorité et l’échéance de la tâche, puis, à égalité, selon que quelqu’un est bloqué par vous et depuis combien de temps il attend.",
+    "empty": "Rien ne vous attend pour le moment",
+    "suggested": "À voir en premier",
+    "kind": {
+      "mentioned": "Vous a mentionné",
+      "action_required": "Action requise"
+    },
+    "sentence": {
+      "in_review_by": "Validez la livraison de {{name}} : {{title}}",
+      "in_review": "À valider : {{title}}",
+      "blocked_by": "Répondez à {{name}} : {{title}}",
+      "blocked": "À débloquer : {{title}}",
+      "mentioned_by": "Répondez à {{name}} : {{title}}",
+      "mentioned": "À répondre : {{title}}",
+      "issue_assigned": "Assignée à vous : {{title}}",
+      "task_failed": "Exécution échouée : {{title}}",
+      "action_required": "À consulter : {{title}}"
+    },
+    "action": {
+      "in_review": "Valider",
+      "blocked": "Répondre",
+      "mentioned": "Répondre",
+      "action_required": "Voir"
+    },
+    "reason": {
+      "overdue": "En retard",
+      "due_today": "Échéance aujourd’hui",
+      "due_tomorrow": "Échéance demain",
+      "waiting": "En attente depuis {{duration}}",
+      "stopped": "{{name}} est à l’arrêt depuis {{duration}}"
+    },
+    "replied": "Répondu, en attente de {{name}}",
+    "replied_anonymous": "Répondu, en attente d’une suite"
+  },
+  "changes": {
+    "title_since": "Depuis le {{time}}",
+    "issue_count_one": "{{count}} tâche a changé",
+    "issue_count_other": "{{count}} tâches ont changé",
+    "view_by_issue": "Par tâche",
+    "view_all": "Toute l’activité",
+    "empty": "Rien de nouveau depuis votre dernière visite",
+    "updates_one": "{{count}} mise à jour",
+    "updates_other": "{{count}} mises à jour",
+    "open_all": "Filtrer et archiver dans Toute l’activité",
+    "show_more": "Tout voir dans Toute l’activité"
+  },
+  "plate": {
+    "title": "Sur mon bureau",
+    "my_issues": "Mes tâches",
+    "due_today": "Échéance aujourd’hui",
+    "this_week": "Échéance cette semaine",
+    "in_progress": "En cours",
+    "empty_today": "Aucune tâche à rendre aujourd’hui",
+    "overdue": "En retard",
+    "today": "Aujourd’hui"
+  },
+  "queue": {
+    "title": "En attente de vous",
+    "progress": "{{done}} / {{total}} traitées",
+    "shortcut_hint": "J / K pour naviguer",
+    "new_items_one": "{{count}} nouvelle demande",
+    "new_items_other": "{{count}} nouvelles demandes",
+    "all_done": "Tout ce qui vous attendait est traité",
+    "back_home": "Retour à l’accueil",
+    "open_issue": "Ouvrir la tâche",
+    "next": "Suivante",
+    "card": {
+      "delivery": "Livraison de {{name}}",
+      "blocked": "Commentaire de {{name}}",
+      "mention": "{{name}} vous a mentionné",
+      "none": "Aucun commentaire à afficher. Ouvrez la tâche pour le contexte complet.",
+      "notice": "Notification"
+    },
+    "reply_to": "Répondre à {{name}}",
+    "reply": "Répondre",
+    "request_changes_hint": "Précisez ce qu’il faut changer. L’envoi repasse la tâche en in_progress.",
+    "action": {
+      "approve": "Valider",
+      "request_changes": "Demander des modifications",
+      "cancel_request_changes": "Annuler",
+      "back_to_todo": "Renvoyer en todo",
+      "reassign": "Réassigner",
+      "cancel_issue": "Annuler la tâche",
+      "dismiss": "Marquer comme traité",
+      "open": "Ouvrir la tâche"
+    },
+    "toast": {
+      "approved": "{{identifier}} validée et passée en done",
+      "back_to_todo": "{{identifier}} renvoyée en todo",
+      "cancelled": "{{identifier}} annulée",
+      "changes_requested": "Modifications demandées sur {{identifier}}",
+      "replied": "Réponse publiée sur {{identifier}}",
+      "reassigned": "{{identifier}} réassignée",
+      "dismissed": "Marqué comme traité",
+      "undo": "Annuler",
+      "failed": "Impossible de mettre à jour la tâche"
+    }
+  }
+}

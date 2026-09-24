@@ -53,7 +53,7 @@ import {
 import { IssueDetail, issueHighlightMementoKey } from "../../issues/components/issue-detail";
 import { useViewStateWriter } from "../../platform";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
-import { useNavigation, useReportNavigating } from "../../navigation";
+import { AppLink, useNavigation, useReportNavigating } from "../../navigation";
 import { toast } from "sonner";
 import {
   MoreHorizontal,
@@ -107,6 +107,7 @@ const INBOX_LIST_MAX_SIZE = 400;
 
 export function InboxPage() {
   const { t } = useT("inbox");
+  const { t: tLayout } = useT("layout");
   const showIssueLimitUpgradePrompt = useIssueLimitUpgradePrompt();
   const showAutopilotQuotaRecoveryPrompt = useIssueLimitUpgradePrompt(
     "autopilot_quota",
@@ -498,8 +499,16 @@ export function InboxPage() {
 
   const listHeader = (
     <PageHeader>
-      <div className="flex flex-1 items-center gap-2">
-        <h1 className="text-body font-semibold">{t(($) => $.page.title)}</h1>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        {/* The activity list lives under Home; the crumb is the way back. */}
+        <AppLink
+          href={wsPaths.home()}
+          className="shrink-0 rounded-sm text-body text-muted-foreground outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          {tLayout(($) => $.nav.home)}
+        </AppLink>
+        <span className="text-muted-foreground">/</span>
+        <h1 className="truncate text-body font-semibold">{t(($) => $.page.title)}</h1>
         {unreadCount > 0 && (
           <NumberFlow
             value={unreadCount}

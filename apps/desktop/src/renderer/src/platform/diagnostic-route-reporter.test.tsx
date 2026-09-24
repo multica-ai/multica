@@ -120,14 +120,14 @@ describe("DiagnosticRouteReporter", () => {
 
   it("re-reports when the tab navigates to another page", () => {
     const { rerender } = render(<DiagnosticRouteReporter />);
-    tabState.url = "/acme/inbox";
+    tabState.url = "/acme/home/activity";
 
     rerender(<DiagnosticRouteReporter />);
 
     expect(setRendererRouteContext).toHaveBeenLastCalledWith({
       surface: "tab",
-      path: "/:slug/inbox",
+      path: "/:slug/home/activity",
     });
-    expect(getDiagnosticRoute()).toBe("/:slug/inbox");
+    expect(getDiagnosticRoute()).toBe("/:slug/home/activity");
   });
 });

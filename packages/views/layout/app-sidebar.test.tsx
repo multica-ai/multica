@@ -9,8 +9,10 @@ import { ApiError } from "@multica/core/api";
 import { renderWithI18n } from "../test/i18n";
 import { AppSidebar } from "./app-sidebar";
 
-const { appForeground, chatSessions, chatStore, detail, deletePin, invitationApi, navigation, pins, sidebarState, summary, workspaces } = vi.hoisted(() => ({
+const { appForeground, chatSessions, chatStore, detail, deletePin, invitationApi, navigation, needsMe, pins, sidebarState, summary, workspaces } = vi.hoisted(() => ({
   appForeground: { current: true },
+  // Requests waiting on the viewer — what the Home nav badge counts.
+  needsMe: { current: 0 },
   sidebarState: { setOpenMobile: vi.fn() },
   chatSessions: { current: [] as { id?: string; unread_count?: number }[] },
   chatStore: { current: { activeSessionId: null as string | null, isOpen: false } },
@@ -133,10 +135,16 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
   // nav to derive each item's icon from its href) stay intact; only the
   // workspace/context hooks below are stubbed to control routes in tests.
   ...(await importOriginal<typeof import("@multica/core/paths")>()),
-  paths: { workspace: (slug: string) => ({ issues: () => `/${slug}/issues` }) },
+  paths: {
+    workspace: (slug: string) => ({
+      root: () => `/${slug}/home`,
+      issues: () => `/${slug}/issues`,
+    }),
+  },
   useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme", slug: "acme" }),
   useWorkspacePaths: () => ({
-    inbox: () => "/acme/inbox",
+    home: () => "/acme/home",
+    inbox: () => "/acme/home/activity",
     chat: () => "/acme/chat",
     myIssues: () => "/acme/my-issues",
     issues: () => "/acme/issues",
@@ -176,6 +184,9 @@ vi.mock("@multica/core/inbox/queries", () => ({
   ) => entries.some((s) => s.workspace_id !== currentWsId && s.count > 0),
   unreadWorkspaceIds: (entries: { workspace_id: string; count: number }[]) =>
     new Set(entries.filter((s) => s.count > 0).map((s) => s.workspace_id)),
+}));
+vi.mock("@multica/core/home", () => ({
+  useNeedsMe: () => ({ actionableCount: needsMe.current }),
 }));
 vi.mock("@multica/core/issues/queries", () => ({ issueDetailOptions: () => ({ queryKey: ["issue"] }) }));
 vi.mock("@multica/core/issues/stores/create-mode-store", () => ({
@@ -304,7 +315,7 @@ describe("mobile sheet dismissal", () => {
     const { rerender } = render(<AppSidebar />);
     sidebarState.setOpenMobile.mockClear();
 
-    navigation.current = { pathname: "/acme/inbox" };
+    navigation.current = { pathname: "/acme/home" };
     rerender(<AppSidebar />);
 
     expect(sidebarState.setOpenMobile).toHaveBeenCalledWith(false);
@@ -422,17 +433,33 @@ describe("personal nav — Chat", () => {
   const chatBadge = (container: HTMLElement) =>
     chatNav(container)?.querySelector("number-flow-react") ?? null;
 
-  it("keeps persistent Inbox and Chat counters static", () => {
-    summary.current = [{ workspace_id: "ws-1", count: 1 }];
+  it("keeps persistent Home and Chat counters static", () => {
+    needsMe.current = 1;
     chatSessions.current = [{ id: "chat-1", unread_count: 2 }];
     const { container } = render(<AppSidebar />);
-    const inboxBadge = container
-      .querySelector<HTMLElement>('button[data-href="/acme/inbox"]')
+    const homeBadge = container
+      .querySelector<HTMLElement>('button[data-href="/acme/home"]')
       ?.querySelector("number-flow-react") as (HTMLElement & { animated?: boolean }) | null;
     const currentChatBadge = chatBadge(container) as (HTMLElement & { animated?: boolean }) | null;
 
-    expect(inboxBadge?.animated).toBe(false);
+    expect(homeBadge?.animated).toBe(false);
     expect(currentChatBadge?.animated).toBe(false);
+  });
+
+  it("puts Home first, drops the Inbox item, and badges Home with what needs you", () => {
+    needsMe.current = 3;
+    summary.current = [{ workspace_id: "ws-1", count: 9 }];
+    const { container } = render(<AppSidebar />);
+    const hrefs = [...container.querySelectorAll<HTMLElement>("button[data-href]")].map(
+      (el) => el.dataset.href,
+    );
+    expect(hrefs.slice(0, 3)).toEqual(["/acme/home", "/acme/my-issues", "/acme/chat"]);
+    expect(hrefs).not.toContain("/acme/home/activity");
+    const homeBadge = container
+      .querySelector<HTMLElement>('button[data-href="/acme/home"]')
+      ?.querySelector("number-flow-react");
+    // The count is the queue, not the 9 unread notifications.
+    expect(homeBadge).toHaveAttribute("aria-label", "3");
   });
 
   it("renders a Chat nav link to the workspace chat route", () => {

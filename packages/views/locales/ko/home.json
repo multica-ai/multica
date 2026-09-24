@@ -1,0 +1,107 @@
+{
+  "page": {
+    "title": "홈"
+  },
+  "duration": {
+    "minutes": "{{count}}분",
+    "hours": "{{count}}시간",
+    "days": "{{count}}일"
+  },
+  "needs_me": {
+    "title": "나를 기다리는 일",
+    "sort_hint": "먼저 태스크 자체의 우선순위와 마감일로 정렬하고, 같다면 나 때문에 멈춘 사람이 있는지, 얼마나 기다렸는지로 정렬합니다.",
+    "empty": "지금 처리할 요청이 없습니다",
+    "suggested": "먼저 볼 것",
+    "kind": {
+      "mentioned": "나를 멘션",
+      "action_required": "조치 필요"
+    },
+    "sentence": {
+      "in_review_by": "{{name}}의 결과물 검수: {{title}}",
+      "in_review": "검수해 주세요: {{title}}",
+      "blocked_by": "{{name}}에게 답장: {{title}}",
+      "blocked": "막힘 해제: {{title}}",
+      "mentioned_by": "{{name}}에게 답장: {{title}}",
+      "mentioned": "답장해 주세요: {{title}}",
+      "issue_assigned": "나에게 배정됨: {{title}}",
+      "task_failed": "실행 실패: {{title}}",
+      "action_required": "확인해 주세요: {{title}}"
+    },
+    "action": {
+      "in_review": "검수",
+      "blocked": "답장",
+      "mentioned": "답장",
+      "action_required": "보기"
+    },
+    "reason": {
+      "overdue": "기한 지남",
+      "due_today": "오늘 마감",
+      "due_tomorrow": "내일 마감",
+      "waiting": "{{duration}} 대기",
+      "stopped": "{{name}}이(가) {{duration}}째 멈춤"
+    },
+    "replied": "답장함, {{name}} 대기 중",
+    "replied_anonymous": "답장함, 상대방 대기 중"
+  },
+  "changes": {
+    "title_since": "{{time}} 이후",
+    "issue_count_other": "태스크 {{count}}개 변경",
+    "view_by_issue": "태스크별",
+    "view_all": "전체 활동",
+    "empty": "마지막 확인 이후 새로운 변경이 없습니다",
+    "updates_other": "업데이트 {{count}}개",
+    "open_all": "전체 활동에서 필터링 및 보관",
+    "show_more": "전체 활동에서 모두 보기"
+  },
+  "plate": {
+    "title": "내 손에 있는 일",
+    "my_issues": "내 태스크",
+    "due_today": "오늘 마감",
+    "this_week": "이번 주 마감",
+    "in_progress": "진행 중",
+    "empty_today": "오늘 마감인 태스크가 없습니다",
+    "overdue": "기한 지남",
+    "today": "오늘"
+  },
+  "queue": {
+    "title": "나를 기다리는 일",
+    "progress": "{{done}} / {{total}} 처리됨",
+    "shortcut_hint": "J / K로 이동",
+    "new_items_other": "새 요청 {{count}}개",
+    "all_done": "나를 기다리던 요청을 모두 처리했습니다",
+    "back_home": "홈으로 돌아가기",
+    "open_issue": "태스크 열기",
+    "next": "다음",
+    "card": {
+      "delivery": "{{name}}의 결과물",
+      "blocked": "{{name}}의 댓글",
+      "mention": "{{name}}이(가) 나를 멘션함",
+      "none": "표시할 댓글이 없습니다. 전체 맥락은 태스크를 열어 확인하세요.",
+      "notice": "알림"
+    },
+    "reply_to": "{{name}}에게 답장",
+    "reply": "답장",
+    "request_changes_hint": "무엇을 고쳐야 하는지 적어 주세요. 보내면 태스크가 in_progress로 돌아갑니다.",
+    "action": {
+      "approve": "승인",
+      "request_changes": "수정 요청",
+      "cancel_request_changes": "취소",
+      "back_to_todo": "todo로 되돌리기",
+      "reassign": "다른 담당자에게 배정",
+      "cancel_issue": "태스크 취소",
+      "dismiss": "처리됨으로 표시",
+      "open": "태스크 열기"
+    },
+    "toast": {
+      "approved": "{{identifier}}을(를) 승인하고 done으로 변경했습니다",
+      "back_to_todo": "{{identifier}}을(를) todo로 되돌렸습니다",
+      "cancelled": "{{identifier}}을(를) 취소했습니다",
+      "changes_requested": "{{identifier}}에 수정을 요청했습니다",
+      "replied": "{{identifier}}에 답장했습니다",
+      "reassigned": "{{identifier}}의 담당자를 변경했습니다",
+      "dismissed": "처리됨으로 표시했습니다",
+      "undo": "실행 취소",
+      "failed": "태스크를 업데이트하지 못했습니다"
+    }
+  }
+}

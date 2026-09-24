@@ -14,6 +14,7 @@ export default function robots(): MetadataRoute.Robots {
           "/auth/",
           "/issues",
           "/board",
+          "/home",
           "/inbox",
           "/agents",
           "/settings",

@@ -50,7 +50,8 @@ vi.mock("@multica/core/hooks", () => ({
 
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
-    inbox: () => "/acme/inbox",
+    home: () => "/acme/home",
+    inbox: () => "/acme/home/activity",
     issueDetail: (id: string) => `/acme/issues/${id}`,
   }),
 }));
@@ -129,6 +130,9 @@ const replace = vi.fn();
 let searchParams = new URLSearchParams();
 
 vi.mock("../../navigation", () => ({
+  AppLink: ({ href, children, ...props }: { href: string; children?: React.ReactNode }) => (
+    <a href={href} {...props}>{children}</a>
+  ),
   useNavigation: () => ({ searchParams, replace }),
   // Real hook: reports the detail-pane swap to the shell's progress bar.
   // Nothing here renders that bar, and the page reads nothing back from it.
@@ -559,7 +563,7 @@ describe("InboxPage", () => {
     render(<InboxPage />);
     fireEvent.click(screen.getByTestId("row"));
 
-    expect(replace).toHaveBeenCalledWith("/acme/inbox?view=archived&issue=issue-9");
+    expect(replace).toHaveBeenCalledWith("/acme/home/activity?view=archived&issue=issue-9");
   });
 
   it("writes a bare issue param when selecting in the main view", () => {
@@ -569,7 +573,7 @@ describe("InboxPage", () => {
     render(<InboxPage />);
     fireEvent.click(screen.getByTestId("row"));
 
-    expect(replace).toHaveBeenCalledWith("/acme/inbox?issue=issue-3");
+    expect(replace).toHaveBeenCalledWith("/acme/home/activity?issue=issue-3");
   });
 
   // `InboxItem.issue_id` is nullable: a quick-create outcome is a notification,
@@ -819,7 +823,7 @@ describe("InboxPage", () => {
       replace.mockClear();
       pressArchiveKey();
 
-      expect(replace).toHaveBeenCalledWith("/acme/inbox?issue=issue-b");
+      expect(replace).toHaveBeenCalledWith("/acme/home/activity?issue=issue-b");
     });
 
     it("does not fire while typing in an editable control", () => {
@@ -971,6 +975,6 @@ describe("InboxPage", () => {
     render(<InboxPage />);
 
     expect(replace).toHaveBeenCalledWith("/acme/issues/issue-404");
-    expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
+    expect(replace).not.toHaveBeenCalledWith("/acme/home/activity");
   });
 });

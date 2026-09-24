@@ -17,7 +17,11 @@ describe("paths.workspace(slug)", () => {
     expect(ws.newAgentAi()).toBe("/acme/agents/new/ai");
     expect(ws.newAgentAiSession("sess_1")).toBe("/acme/agents/new/ai/sess_1");
     expect(ws.memberDetail("u1")).toBe("/acme/members/u1");
-    expect(ws.inbox()).toBe("/acme/inbox");
+    expect(ws.root()).toBe("/acme/home");
+    expect(ws.home()).toBe("/acme/home");
+    expect(ws.homeQueue()).toBe("/acme/home/queue");
+    expect(ws.homeQueue("issue:a b")).toBe("/acme/home/queue?item=issue%3Aa%20b");
+    expect(ws.inbox()).toBe("/acme/home/activity");
     expect(ws.chatWithAgent("agent one")).toBe(
       "/acme/chat?agent=agent%20one",
     );

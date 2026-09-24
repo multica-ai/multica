@@ -263,10 +263,10 @@ describe("useTabPresentation — live from cache", () => {
   });
 
   it("uses the container label when nothing is selected, persisted title or not", () => {
-    // The fallback is for a PENDING identity only. An Inbox tab with no
-    // selection is fully resolved — it really is just "Inbox", and a stale
-    // persisted title must not override it.
-    expect(presentationOf("/acme/inbox", "MUL-9: Crash").title).toBe("Inbox");
+    // The fallback is for a PENDING identity only. An activity tab with no
+    // selection is fully resolved — it really is just "All activity", and a
+    // stale persisted title must not override it.
+    expect(presentationOf("/acme/home/activity", "MUL-9: Crash").title).toBe("All activity");
   });
 
   it("archived inbox: selected non-issue resolves against the archived list", () => {

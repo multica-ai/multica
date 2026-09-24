@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { LOCALE_COOKIE } from "@multica/core/i18n";
+import { isReservedSlug } from "@multica/core/paths";
 import {
   MULTICA_LOCALE_HEADER,
   resolveLocaleFromSignals,
@@ -12,6 +13,7 @@ import { isOfficialMarketingHost } from "./lib/public-host";
 // needs to be rewritten to /{slug}/{route}/... so old bookmarks, deep links,
 // and post-revert-and-reapply users don't hit 404.
 const LEGACY_ROUTE_SEGMENTS = new Set([
+  "home",
   "issues",
   "projects",
   "agents",
@@ -24,6 +26,17 @@ const LEGACY_ROUTE_SEGMENTS = new Set([
   "settings",
   "usage",
 ]);
+
+// The Inbox page moved under Home as its all-activity view. `/{slug}/inbox`
+// stays a permanent alias so links already out in the world — IM and desktop
+// notifications, bookmarks — keep resolving, `?issue=` selection included.
+// The first segment has to be a slug a workspace could own: `/api/inbox` is
+// the inbox API, not a workspace page.
+function inboxAliasPath(pathname: string): string | null {
+  const [, slug, segment, ...rest] = pathname.split("/");
+  if (!slug || segment !== "inbox" || isReservedSlug(slug.toLowerCase())) return null;
+  return ["", slug, "home", "activity", ...rest].join("/");
+}
 
 function resolveLocale(req: NextRequest): string {
   return resolveLocaleFromSignals({
@@ -72,7 +85,8 @@ export function proxy(req: NextRequest) {
 
     if (lastSlug) {
       // Preserve deep-link path + query: /issues/abc → /{lastSlug}/issues/abc
-      url.pathname = `/${lastSlug}${pathname}`;
+      const scoped = `/${lastSlug}${pathname}`;
+      url.pathname = inboxAliasPath(scoped) ?? scoped;
       return NextResponse.redirect(url);
     }
 
@@ -90,6 +104,13 @@ export function proxy(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  const inboxAlias = inboxAliasPath(pathname);
+  if (inboxAlias) {
+    const url = req.nextUrl.clone();
+    url.pathname = inboxAlias;
+    return NextResponse.redirect(url, 308);
+  }
+
   // --- Root path: redirect logged-in users to their last workspace ---
   // The official cloud host also serves the public marketing site. Visiting
   // https://multica.ai/ must remain a public-site navigation even when a local
@@ -102,7 +123,7 @@ export function proxy(req: NextRequest) {
     !isOfficialMarketingHost(req.nextUrl.hostname)
   ) {
     const url = req.nextUrl.clone();
-    url.pathname = `/${lastSlug}/issues`;
+    url.pathname = `/${lastSlug}/home`;
     return NextResponse.redirect(url);
   }
 

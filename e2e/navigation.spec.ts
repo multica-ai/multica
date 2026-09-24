@@ -10,11 +10,11 @@ test.describe("Navigation", () => {
   });
 
   test("sidebar navigation works", async ({ page }) => {
-    await page.getByRole("link", { name: "Inbox" }).click();
-    await expect(page).toHaveURL(/\/inbox/, { timeout: ROUTE_CHANGE_TIMEOUT });
-    await waitForPageText(page, "Inbox");
+    await page.getByRole("link", { name: "Home", exact: true }).click();
+    await expect(page).toHaveURL(/\/home$/, { timeout: ROUTE_CHANGE_TIMEOUT });
+    await waitForPageText(page, "Needs you");
     // Each destination renames the browser tab after itself (MUL-6222).
-    await expect(page).toHaveTitle("Inbox | Multica");
+    await expect(page).toHaveTitle("Home | Multica");
 
     await page.getByRole("link", { name: "Agents" }).click();
     await expect(page).toHaveURL(/\/agents/, { timeout: ROUTE_CHANGE_TIMEOUT });

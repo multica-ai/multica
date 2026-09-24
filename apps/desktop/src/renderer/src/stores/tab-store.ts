@@ -350,7 +350,7 @@ export function browsingHistoryKeyForUrl(url: string): string {
 function inboxSelectionKeyForUrl(url: string): string | null {
   const { pathname, suffix } = splitTabUrl(url);
   const segments = pathname.split("/").filter(Boolean);
-  if (segments.length !== 2 || segments[1] !== "inbox") return null;
+  if (segments.length !== 3 || segments[1] !== "home" || segments[2] !== "activity") return null;
   if (!suffix.startsWith("?")) return null;
 
   const hashIndex = suffix.indexOf("#");
@@ -374,10 +374,12 @@ function inboxSelectionKeyForUrl(url: string): string | null {
  *     was constructed without the workspace prefix. The router would
  *     interpret `issues` as a workspace slug → NoAccessPage.
  *
- * Normalizes: a bare `/{slug}` (no route segment) becomes `/{slug}/issues` —
+ * Normalizes: a bare `/{slug}` (no route segment) becomes `/{slug}/home` —
  * the workspace's default surface. This replaces the old in-router
  * `<Navigate to="issues">` index redirect (MUL-4741 invariant 1: the router
  * never self-navigates; URLs are normalized before they become sessions).
+ * A legacy `/{slug}/inbox` (persisted tabs, notification links) becomes Home's
+ * all-activity view, `/{slug}/home/activity`, keeping its query.
  *
  * Returns null for rejects (caller decides how to recover — usually by
  * dropping the tab or substituting a default).
@@ -400,7 +402,10 @@ export function sanitizeTabPath(path: string): string | null {
     return null;
   }
   if (segments.length === 1) {
-    return `/${firstSegment}/issues${suffix}`;
+    return `/${firstSegment}/home${suffix}`;
+  }
+  if (segments[1] === "inbox") {
+    return `/${[firstSegment, "home", "activity", ...segments.slice(2)].join("/")}${suffix}`;
   }
   return path;
 }
@@ -432,14 +437,14 @@ function pinnedBoundary(tabs: TabSession[]): number {
   return i;
 }
 
-/** Default entry point for a workspace — its issues list. */
+/** Default entry point for a workspace — its Home. */
 function defaultPathFor(slug: string): string {
-  return `/${slug}/issues`;
+  return `/${slug}/home`;
 }
 
 function defaultTabFor(slug: string): TabSession {
   const path = defaultPathFor(slug);
-  return makeSession(path, "Issues");
+  return makeSession(path, "Home");
 }
 
 const BROWSING_HISTORY_MAX_ENTRIES = 100;
@@ -595,10 +600,15 @@ function normalizeBrowsingHistoryTitles(
   browsingHistory: string[],
   tabs: TabSession[],
 ): Record<string, string> {
-  const persistedTitles =
-    value && typeof value === "object"
-      ? (value as Record<string, unknown>)
-      : {};
+  // Keys are history keys of the URLs as they were saved; re-derive them from
+  // the sanitized URL so a title survives a route rewrite (legacy /inbox).
+  const persistedTitles = new Map<string, unknown>();
+  if (value && typeof value === "object") {
+    for (const [key, title] of Object.entries(value as Record<string, unknown>)) {
+      const clean = sanitizeTabPath(key);
+      persistedTitles.set(clean ? browsingHistoryKeyForUrl(clean) : key, title);
+    }
+  }
   const tabTitles = new Map(
     tabs.flatMap((tab) => {
       const title = normalizedBrowsingHistoryTitle(tab.title);
@@ -611,7 +621,7 @@ function normalizeBrowsingHistoryTitles(
   for (const url of browsingHistory) {
     const historyKey = browsingHistoryKeyForUrl(url);
     const title =
-      normalizedBrowsingHistoryTitle(persistedTitles[historyKey]) ??
+      normalizedBrowsingHistoryTitle(persistedTitles.get(historyKey)) ??
       tabTitles.get(historyKey);
     if (title) result[historyKey] = title;
   }
@@ -737,7 +747,7 @@ export const useTabStore = create<TabStore>()(
           // First time entering this workspace — create the group.
           const cleanDesired = desiredPath ? sanitizeTabPath(desiredPath) : null;
           const seedPath = cleanDesired ?? defaultPathFor(slug);
-          const tab = makeSession(seedPath, "Issues");
+          const tab = makeSession(seedPath, "Home");
           const nextGroup = withBrowsingVisit(
             reconcileGroup(null, [tab], tab.id),
             slug,
@@ -1373,9 +1383,15 @@ export function mergePersistedTabs<T extends PersistedTabState>(
         );
         continue;
       }
+      // Back/Forward replay these entries verbatim, so they get the same
+      // rewrite as the tab url (a saved /inbox entry would otherwise step
+      // back onto a route that no longer exists). Entries that do not
+      // sanitize are kept as-is to keep the index aligned.
       const stack =
         Array.isArray(pTab.history?.stack) && pTab.history.stack.length > 0
-          ? pTab.history.stack
+          ? pTab.history.stack.map((entry) =>
+              typeof entry === "string" ? (sanitizeTabPath(entry) ?? entry) : entry,
+            )
           : [clean];
       const index = Math.min(
         Math.max(pTab.history?.index ?? stack.length - 1, 0),

@@ -27,7 +27,7 @@ describe("web app manifest", () => {
   it("launches into the last workspace for a signed-in session", () => {
     expect(
       launch({ multica_logged_in: "1", last_workspace_slug: "acme" }),
-    ).toContain("/acme/inbox");
+    ).toContain("/acme/home");
   });
 
   it("launches into login when there is no session", () => {

@@ -28,7 +28,7 @@ import type { MetadataRoute } from "next";
  */
 
 /** Launch path. Exported so manifest.test.ts can run it through the proxy. */
-export const PWA_START_URL = "/inbox";
+export const PWA_START_URL = "/home";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
@@ -70,7 +70,7 @@ export default function manifest(): MetadataRoute.Manifest {
     // segments, so they resolve to the last workspace the same way start_url
     // does instead of needing a slug the manifest cannot know.
     shortcuts: [
-      { name: "Inbox", url: "/inbox" },
+      { name: "Home", url: "/home" },
       { name: "My Issues", url: "/my-issues" },
     ],
   };

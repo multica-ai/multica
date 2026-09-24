@@ -117,16 +117,16 @@ describe("browsingHistoryForMenu", () => {
     expect(
       browsingHistoryForMenu(
         [
-          { url: "/acme/inbox?issue=issue-b", title: "Issue B" },
-          { url: "/acme/inbox?issue=issue-a", title: "Issue A" },
-          { url: "/acme/inbox", title: "Inbox" },
+          { url: "/acme/home/activity?issue=issue-b", title: "Issue B" },
+          { url: "/acme/home/activity?issue=issue-a", title: "Issue A" },
+          { url: "/acme/home/activity", title: "Inbox" },
           { url: "/acme/projects", title: "Projects" },
         ],
-        "/acme/inbox?view=archived&issue=issue-b",
+        "/acme/home/activity?view=archived&issue=issue-b",
       ),
     ).toEqual([
-      { url: "/acme/inbox?issue=issue-a", title: "Issue A" },
-      { url: "/acme/inbox", title: "Inbox" },
+      { url: "/acme/home/activity?issue=issue-a", title: "Issue A" },
+      { url: "/acme/home/activity", title: "Inbox" },
       { url: "/acme/projects", title: "Projects" },
     ]);
   });

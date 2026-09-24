@@ -1,6 +1,7 @@
 {
   "nav": {
-    "inbox": "Boîte de réception",
+    "home": "Accueil",
+    "inbox": "Toute l’activité",
     "chat": "Discussion",
     "my_issues": "Mes tâches",
     "issues": "Tâches",

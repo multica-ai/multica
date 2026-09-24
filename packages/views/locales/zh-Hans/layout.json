@@ -1,6 +1,7 @@
 {
   "nav": {
-    "inbox": "收件箱",
+    "home": "主页",
+    "inbox": "全部活动",
     "chat": "聊天",
     "my_issues": "我的任务",
     "issues": "任务",

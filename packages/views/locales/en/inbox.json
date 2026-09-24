@@ -1,7 +1,7 @@
 {
   "page": {
-    "title": "Inbox",
-    "back": "Inbox"
+    "title": "All activity",
+    "back": "All activity"
   },
   "menu": {
     "mark_all_read": "Mark all as read",
