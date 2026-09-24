@@ -379,7 +379,8 @@
       "quick_actions": "Quick Actions",
       "plugins": "Plugins",
       "mcp": "MCP",
-      "billing": "Billing"
+      "billing": "Billing",
+      "global_agents": "Global agents"
     },
     "groups": {
       "personal": "Personal",
@@ -1365,5 +1366,70 @@
     "status_loading": "Checking...",
     "status_unknown": "Status unavailable",
     "channel_hint": "Chat with agents and create issues from {{channel}}."
+  },
+  "global_agents": {
+    "title": "Global agents",
+    "description": "Define an agent once and enable it in any of your workspaces. Its name, avatar, description, instructions and conversation starters stay in sync; runtime, model, skills and access are set per workspace.",
+    "create": "New global agent",
+    "empty": "No global agents yet.",
+    "load_failed": "Could not load your global agents.",
+    "enabled_in": "Enabled in {{workspaces}}",
+    "not_enabled": "Not enabled in any workspace",
+    "manage_workspaces": "Workspaces",
+    "actions_aria": "Actions for {{name}}",
+    "edit": "Edit",
+    "delete": "Delete",
+    "form": {
+      "create_title": "New global agent",
+      "edit_title": "Edit global agent",
+      "avatar_aria": "Agent avatar",
+      "name_label": "Name",
+      "name_placeholder": "e.g. Code reviewer",
+      "description_label": "Description",
+      "description_placeholder": "What does this agent do?",
+      "instructions_label": "Instructions",
+      "instructions_placeholder": "How should this agent work?",
+      "sync_note": "Saving updates this agent in every workspace where it is enabled.",
+      "cancel": "Cancel",
+      "create": "Create",
+      "creating": "Creating…",
+      "save": "Save",
+      "saving": "Saving…",
+      "created_toast": "Global agent created",
+      "saved_toast": "Global agent saved",
+      "create_failed_toast": "Failed to create global agent",
+      "save_failed_toast": "Failed to save global agent"
+    },
+    "workspaces": {
+      "title": "Workspaces for {{name}}",
+      "description": "Enabling adds a linked copy of this agent to the workspace on the runtime you pick.",
+      "load_failed": "Could not load your workspaces.",
+      "empty": "You are not a member of any workspace.",
+      "status_enabled": "Enabled",
+      "status_disabled": "Disabled",
+      "status_not_added": "Not added",
+      "runtime_label": "Runtime for {{workspace}}",
+      "runtime_placeholder": "Choose a runtime",
+      "runtime_offline": "{{name}} (offline)",
+      "no_runtime": "No runtime you can use here yet.",
+      "enable": "Enable",
+      "disable": "Disable",
+      "enable_all": "Enable in all workspaces",
+      "close": "Close",
+      "enabled_toast": "Enabled in {{workspace}}",
+      "disabled_toast": "Disabled in {{workspace}}",
+      "enable_all_done_toast_one": "Enabled in {{count}} workspace",
+      "enable_all_done_toast_other": "Enabled in {{count}} workspaces",
+      "enable_failed_toast": "Could not enable in {{workspace}}: {{message}}",
+      "disable_failed_toast": "Could not disable in {{workspace}}: {{message}}"
+    },
+    "delete_dialog": {
+      "title": "Delete “{{name}}”?",
+      "description": "The agents it added to your workspaces are kept as regular agents and stop syncing.",
+      "cancel": "Cancel",
+      "confirm": "Delete",
+      "deleted_toast": "Global agent deleted",
+      "delete_failed_toast": "Failed to delete global agent"
+    }
   }
 }

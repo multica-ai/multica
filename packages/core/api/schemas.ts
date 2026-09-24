@@ -88,6 +88,8 @@ import type {
   User,
   WebhookDelivery,
   WorkspaceMcpServer,
+  GlobalAgent,
+  GlobalAgentWorkspaceTarget,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
@@ -3577,3 +3579,100 @@ export const RuntimeProfileSchema = z
     runtime_type: profile.runtime_type || profile.protocol_family,
   }));
 export const RuntimeProfileListSchema = z.array(RuntimeProfileSchema);
+
+// Global agents (#8775) — account-level agent definitions linked into
+// workspaces. Every field degrades on its own so one drifted field never
+// blanks the settings list; the list only falls back to [] when an entry
+// lacks its identity.
+const GlobalAgentConversationStarterSchema = z.object({
+  label: z.string().catch(""),
+  prompt: z.string().catch(""),
+});
+
+const GlobalAgentLinkSchema = z
+  .object({
+    workspace_id: z.string(),
+    workspace_name: z.string().catch(""),
+    workspace_slug: z.string().catch(""),
+    agent_id: z.string(),
+    archived: BooleanWithDefaultSchema(false),
+    runtime_bound: BooleanWithDefaultSchema(true),
+  })
+  .loose();
+
+export const GlobalAgentSchema = z
+  .object({
+    id: z.string(),
+    owner_id: z.string().catch(""),
+    name: z.string(),
+    description: z.string().catch(""),
+    instructions: z.string().catch(""),
+    avatar_url: z.string().nullable().catch(null),
+    conversation_starters: z
+      .array(GlobalAgentConversationStarterSchema)
+      .catch([]),
+    links: z.array(GlobalAgentLinkSchema).catch([]),
+    created_at: z.string().catch(""),
+    updated_at: z.string().catch(""),
+  })
+  .loose();
+
+export const GlobalAgentListSchema = z.array(GlobalAgentSchema);
+export const EMPTY_GLOBAL_AGENT_LIST: GlobalAgent[] = [];
+export const EMPTY_GLOBAL_AGENT: GlobalAgent = {
+  id: "",
+  owner_id: "",
+  name: "",
+  description: "",
+  instructions: "",
+  avatar_url: null,
+  conversation_starters: [],
+  links: [],
+  created_at: "",
+  updated_at: "",
+};
+
+const GlobalAgentRuntimeOptionSchema = z
+  .object({
+    id: z.string(),
+    name: z.string().catch(""),
+    provider: z.string().catch(""),
+    status: z.string().catch(""),
+    owned_by_me: BooleanWithDefaultSchema(false),
+  })
+  .loose();
+
+export const GlobalAgentWorkspaceTargetSchema = z
+  .object({
+    workspace_id: z.string(),
+    workspace_name: z.string().catch(""),
+    workspace_slug: z.string().catch(""),
+    agent: z
+      .object({
+        id: z.string(),
+        archived: BooleanWithDefaultSchema(false),
+        runtime_id: z.string().catch(""),
+      })
+      .nullable()
+      .catch(null),
+    runtimes: z.array(GlobalAgentRuntimeOptionSchema).catch([]),
+    suggested_runtime_id: z.string().catch(""),
+  })
+  .loose();
+
+export const GlobalAgentWorkspaceTargetListSchema = z.array(
+  GlobalAgentWorkspaceTargetSchema,
+);
+export const EMPTY_GLOBAL_AGENT_WORKSPACE_TARGETS: GlobalAgentWorkspaceTarget[] =
+  [];
+
+// Enable / disable answer with the linked workspace agent. Only its identity
+// is validated here: callers invalidate the workspace agent list rather than
+// render this payload, and the full Agent shape stays owned by the list
+// endpoint.
+export const GlobalAgentLinkedAgentSchema = z
+  .object({
+    id: z.string(),
+    workspace_id: z.string(),
+  })
+  .loose();

@@ -18,6 +18,7 @@ import {
   Blocks,
   CreditCard,
   Server,
+  Globe,
 } from "lucide-react";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureEnabled } from "@multica/core/config";
@@ -31,6 +32,7 @@ import { AppLink, useNavigation } from "../../navigation";
 import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
 import { TokensTab } from "./tokens-tab";
+import { GlobalAgentsTab } from "./global-agents-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
@@ -107,6 +109,12 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
           t(($) => $.page.tabs.shortcuts),
           Keyboard,
           <KeyboardShortcutsTab />,
+        ),
+        entry(
+          "global-agents",
+          t(($) => $.page.tabs.global_agents),
+          Globe,
+          <GlobalAgentsTab />,
         ),
         entry(
           "tokens",

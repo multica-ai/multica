@@ -146,6 +146,8 @@ var concurrentIndexCleanups = map[string]string{
 	"541_task_supplement_comment_index":                         "task_supplement_comment_uidx",
 	"546_issue_pr_automation_workspace_index":                   "idx_issue_pr_automation_workspace",
 	"547_issue_pull_request_exclusion_workspace_index":          "idx_issue_pull_request_exclusion_workspace",
+	"549_global_agent_owner_name_index":                         "global_agent_owner_name_uidx",
+	"550_agent_global_agent_workspace_index":                    "agent_global_agent_workspace_uidx",
 	"510_wakeup_id":                                             "issue_wakeup_id_idx",
 	"511_wakeup_issue":                                          "issue_wakeup_issue_idx",
 	"512_wakeup_due":                                            "issue_wakeup_due_idx",

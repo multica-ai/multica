@@ -125,7 +125,10 @@
     "archive_dialog_title": "\"{{name}}\"을(를) 보관할까요?",
     "archive_dialog_description": "이 에이전트는 할당하거나 멘션할 수 없고, 활성 실행은 모두 취소됩니다. 기록은 유지되며 나중에 복원할 수 있습니다.",
     "archive_dialog_cancel": "취소",
-    "archive_dialog_confirm": "보관"
+    "archive_dialog_confirm": "보관",
+    "make_global": "글로벌로 전환",
+    "made_global_toast": "“{{name}}”이(가) 글로벌 에이전트가 되었습니다",
+    "make_global_failed_toast": "글로벌 에이전트로 전환하지 못했습니다"
   },
   "detail": {
     "back_to_agents": "에이전트",
@@ -157,7 +160,11 @@
     "runtime_required_toast": "이 에이전트를 실행하기 전에 런타임을 연결하세요.",
     "assign_work": "작업 할당",
     "more_actions_aria": "에이전트 작업",
-    "updated": "{{when}} 업데이트됨"
+    "updated": "{{when}} 업데이트됨",
+    "global_badge": "글로벌 에이전트",
+    "global_banner_owner": "내 글로벌 에이전트에서 동기화됨: 이름, 아바타, 설명, 지침, 대화 시작 예시를 변경하면 활성화된 모든 워크스페이스에 반영됩니다.",
+    "global_banner_viewer": "글로벌 에이전트에서 동기화됨. 이름, 아바타, 설명, 지침, 대화 시작 예시는 소유자만 변경할 수 있습니다.",
+    "global_manage": "관리"
   },
   "inspector": {
     "section_profile": "프로필",

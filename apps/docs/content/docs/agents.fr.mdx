@@ -83,6 +83,22 @@ L'archivage annule toutes les exécutions non terminées de l'agent, y compris c
 
 Le propriétaire de l'agent ainsi que les `owner` et les `admin` de l'espace de travail peuvent archiver ou restaurer un agent.
 
+## Agents globaux
+
+Un agent global est défini une seule fois dans votre compte et peut être ajouté à n'importe quel espace de travail dont vous êtes membre. Gérez vos agents globaux dans **Paramètres → Agents globaux**, ou transformez un agent dont vous êtes propriétaire avec **Rendre global** dans le menu de sa ligne.
+
+Chaque espace de travail auquel vous ajoutez un agent global reçoit son propre agent, lié à la définition globale :
+
+| Synchronisé dans tous les espaces de travail | Défini par espace de travail |
+|---|---|
+| Nom, avatar, description, instructions et amorces de conversation | Runtime, modèle et niveau de réflexion, skills, accès et paramètres d'exécution |
+
+- Modifier un champ synchronisé, dans les paramètres ou sur l'agent dans n'importe quel espace de travail, met à jour tous les agents liés. Seul le propriétaire de l'agent global peut modifier les champs synchronisés ; les `owner` et les `admin` de l'espace de travail peuvent toujours modifier les paramètres propres à l'espace de travail.
+- Lorsque vous ajoutez un agent global à un espace de travail, vous choisissez l'un des runtimes que vous pouvez y utiliser. Multica présélectionne l'ordinateur et l'outil de codage IA que l'agent utilise déjà ailleurs.
+- Un agent nouvellement ajouté commence avec l'accès **Moi uniquement**.
+- Retirer un agent global d'un espace de travail archive l'agent de cet espace. L'ajouter à nouveau restaure le même agent avec son historique.
+- Supprimer un agent global conserve chaque agent lié comme agent ordinaire dans son espace de travail. Il en va de même dans un espace de travail que son propriétaire quitte ou dont il est retiré.
+
 ## Étapes suivantes
 
 - [Créer et configurer un agent](/agents-create) — partez de zéro, ou construisez-le avec l'IA.

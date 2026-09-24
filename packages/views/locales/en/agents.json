@@ -134,7 +134,10 @@
     "archive_dialog_title": "Archive \"{{name}}\"?",
     "archive_dialog_description": "The agent won't be assignable or mentionable, and any active runs will be cancelled. All history is preserved and you can restore it later.",
     "archive_dialog_cancel": "Cancel",
-    "archive_dialog_confirm": "Archive"
+    "archive_dialog_confirm": "Archive",
+    "make_global": "Make global",
+    "made_global_toast": "“{{name}}” is now a global agent",
+    "make_global_failed_toast": "Failed to make agent global"
   },
   "detail": {
     "back_to_agents": "Agents",
@@ -166,7 +169,11 @@
     "runtime_required_toast": "Bind a runtime before running this agent.",
     "assign_work": "Assign work",
     "more_actions_aria": "Agent actions",
-    "updated": "Updated {{when}}"
+    "updated": "Updated {{when}}",
+    "global_badge": "Global agent",
+    "global_banner_owner": "Synced from your global agent: changes to its name, avatar, description, instructions and conversation starters apply in every workspace where it is enabled.",
+    "global_banner_viewer": "Synced from a global agent. Only its owner can change its name, avatar, description, instructions and conversation starters.",
+    "global_manage": "Manage"
   },
   "inspector": {
     "section_profile": "Profile",

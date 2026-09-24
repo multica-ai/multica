@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS agent_global_agent_workspace_uidx;

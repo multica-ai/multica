@@ -83,6 +83,22 @@ Archiving cancels all of the agent's unfinished runs, including queued and runni
 
 The agent owner and workspace `owner`s and `admin`s can archive or restore an agent.
 
+## Global agents
+
+A global agent is defined once under your account and can be added to any workspace you belong to. Manage global agents in **Settings → Global agents**, or turn an agent you own into one with **Make global** in the agent's row menu.
+
+Each workspace you add a global agent to gets its own agent, linked to the global definition:
+
+| Synced to every workspace | Set per workspace |
+|---|---|
+| Name, avatar, description, instructions, and conversation starters | Runtime, model and thinking level, skills, Access, and execution settings |
+
+- Editing a synced field, in Settings or on the agent in any workspace, updates every linked agent. Only the global agent's owner can change synced fields; workspace `owner`s and `admin`s can still change the per-workspace settings.
+- When you add a global agent to a workspace, you choose one of the runtimes you can use there. Multica preselects the computer and AI coding tool the agent already runs on elsewhere.
+- A newly added agent starts with Access set to **Only me**.
+- Removing a global agent from a workspace archives the agent there. Adding it again restores the same agent with its history.
+- Deleting a global agent keeps every linked agent as a regular agent in its workspace. The same happens in a workspace its owner leaves or is removed from.
+
 ## Next steps
 
 - [Create and configure an agent](/agents-create) — start blank, or build with AI.

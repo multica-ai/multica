@@ -130,6 +130,18 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		}
 	}
 
+	// Global agents (#8775) follow their owner, not the workspace: once the
+	// owner is gone, edits to the definition must stop reaching this
+	// workspace, and its admins must be able to manage the copies again.
+	// Unlinking keeps each copy as a regular agent with its history.
+	result.UnlinkedAgents, err = qtx.UnlinkGlobalAgentCopiesInWorkspace(ctx, db.UnlinkGlobalAgentCopiesInWorkspaceParams{
+		WorkspaceID: workspaceID,
+		OwnerID:     userID,
+	})
+	if err != nil {
+		return empty, err
+	}
+
 	// channel_user_binding used to carry a member FK with ON DELETE CASCADE, so
 	// a removed member's IM bindings vanished automatically. MUL-3515 §4 dropped
 	// every channel_* foreign key, moving that integrity rule to the application
@@ -236,15 +248,18 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 // Publishing inside the transaction would let subscribers observe a state the
 // tx might still roll back (see TaskService.BroadcastCancelledTasks docstring).
 type revocationResult struct {
-	Runtimes           []db.AgentRuntime
-	ArchivedAgents     []db.Agent
+	Runtimes       []db.AgentRuntime
+	ArchivedAgents []db.Agent
+	// UnlinkedAgents are the leaving member's global agent copies in this
+	// workspace, now regular agents.
+	UnlinkedAgents     []db.Agent
 	CancelledTasks     []db.AgentTaskQueue
 	OfflineRuntimeIDs  []db.ForceOfflineRuntimesByIDsRow
 	RevokedTokenHashes []string
 }
 
 func (r revocationResult) isEmpty() bool {
-	return len(r.Runtimes) == 0
+	return len(r.Runtimes) == 0 && len(r.UnlinkedAgents) == 0
 }
 
 // publishRevocation runs all post-commit side effects: invalidate daemon token
@@ -276,6 +291,11 @@ func (h *Handler) publishRevocation(ctx context.Context, result revocationResult
 			"agent": h.agentToResponse(agent),
 		})
 	}
+	for _, agent := range result.UnlinkedAgents {
+		h.publish(protocol.EventAgentStatus, workspaceIDStr, actorType, actorIDStr, map[string]any{
+			"agent": broadcastAgentResponse(h.agentToResponse(agent)),
+		})
+	}
 
 	// Tell connected clients to refresh the runtime list. We piggyback on
 	// EventDaemonRegister with a "revoke" action — same channel the runtime
@@ -303,6 +323,7 @@ func logRevocation(result revocationResult, workspaceID, userID string, attrs ..
 		"tasks_cancelled", len(result.CancelledTasks),
 		"runtimes_taken_offline", len(result.OfflineRuntimeIDs),
 		"daemon_tokens_revoked", len(result.RevokedTokenHashes),
+		"global_agents_unlinked", len(result.UnlinkedAgents),
 	}
 	slog.Info("member runtimes revoked", append(base, attrs...)...)
 }

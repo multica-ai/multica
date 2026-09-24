@@ -112,6 +112,31 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
   `--runtime-config`), or with `agent env set` after the copy exists.
 - `--no-skills` skips copying the source's skill bindings.
 
+## Global agents
+
+A global agent is an agent definition owned by a user instead of a workspace.
+Each workspace its owner enables it in holds an ordinary agent row whose
+`global_agent_id` points at the definition; issues, chats, tasks and runtime
+binding all use that workspace row as usual.
+
+- Synced from the definition to every workspace copy: `name`, `description`,
+  `instructions`, `avatar_url`, `conversation_starters`.
+- Per workspace, never synced: runtime, `model`, `thinking_level`,
+  `service_tier`, `custom_env`, `mcp_config`, `custom_args`,
+  `max_concurrent_tasks`, skills and invocation permission. A new copy starts
+  private (owner only).
+- `agent update` on a copy (`global_agent_id` set) that changes a synced field
+  is applied to the definition and every copy — but only when the caller is
+  the global agent's owner acting as themselves. Anyone else, and every agent
+  actor, gets 403 for a synced field; per-workspace fields stay editable under
+  the normal rules.
+- When the owner leaves or is removed from a workspace, the copies there are
+  unlinked (`global_agent_id` → null) and stay as regular agents. Deleting a
+  global agent does the same in every workspace.
+- Global agents are managed by their owner in Settings → Global agents, via the
+  human-only `/api/global-agents` endpoints. Agents cannot create, edit, enable
+  or delete them, and there is no CLI command for them.
+
 ## Field contracts
 
 | Field | Stored as | Validated? | Consumed by |
@@ -373,5 +398,8 @@ State-changing (require an explicit instruction — do not run speculatively):
   update take `--conversation-starters`, but copy only carries the source value.
 - "An invalid `thinking_level`/`model` combo is caught at create." Only an
   unknown provider-level literal is — model-specific gaps fail at run time.
+- "Editing a copy only changes this workspace." When `global_agent_id` is
+  set, a synced field belongs to the global agent: the owner's edit reaches
+  every workspace, and nobody else — no agent included — may change it.
 - "`set` and `add` are interchangeable for skills." `set` replaces all
   bindings; using it when you meant `add` silently removes capabilities.

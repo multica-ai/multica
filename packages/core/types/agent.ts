@@ -611,6 +611,14 @@ export interface Agent {
    */
   service_tier?: string;
   owner_id: string | null;
+  /**
+   * Set when this workspace agent is a linked copy of one of its owner's
+   * global agents. Its name, description, instructions, avatar and
+   * conversation starters are then synced across every linked workspace, and
+   * only the owner may change them. Older backends omit it; treat
+   * `undefined` as `null` (not linked).
+   */
+  global_agent_id?: string | null;
   skills: AgentSkillSummary[];
   /** Runtime-local skills this agent must not inherit. Older servers omit it. */
   disabled_runtime_skills?: DisabledRuntimeSkill[];

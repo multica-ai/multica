@@ -19,6 +19,7 @@ vi.mock("./preferences-tab", stub("PreferencesTab"));
 vi.mock("./chat-tab", stub("ChatTab"));
 vi.mock("./issue-tab", stub("IssueTab"));
 vi.mock("./tokens-tab", stub("TokensTab"));
+vi.mock("./global-agents-tab", stub("GlobalAgentsTab"));
 vi.mock("./workspace-tab", stub("WorkspaceTab"));
 vi.mock("./members-tab", stub("MembersTab"));
 vi.mock("./repositories-tab", stub("RepositoriesTab"));
@@ -182,6 +183,17 @@ describe("SettingsPage information architecture", () => {
     expect(
       within(nav).queryByRole("link", { name: /^(Issue|Chat|GitHub|Labs)$/ }),
     ).not.toBeInTheDocument();
+  });
+
+  it("lists global agents with the personal, account-level pages", () => {
+    navigationState.search = "tab=global-agents";
+    renderWithI18n(<SettingsPage />);
+    const nav = screen.getByRole("navigation", { name: "Settings" });
+    const personal = within(nav).getByRole("region", { name: "Personal" });
+    expect(
+      within(personal).getByRole("link", { name: "Global agents" }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(screen.getByText("GlobalAgentsTab")).toBeInTheDocument();
   });
 
   it("opens old issue bookmarks in preferences", () => {
