@@ -1,0 +1,51 @@
+name: Temporary upstream merge audit
+
+on:
+  push:
+    branches: [sync/upstream-main-20260925]
+    paths: [.github/workflows/sync-audit.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.repository == 'zhls-ayl/multica'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Inspect pinned merge without changing any remote branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          upstream=ebbf1da41b214a60a6cf4c1a415c6044f2f56095
+          maintenance=0d4ff6ce7c121ca95bc9eb9f8d61ede6746d7712
+          git cat-file -e "$upstream^{commit}"
+          git cat-file -e "$maintenance^{commit}"
+          mkdir -p /tmp/sync-audit
+          set +e
+          git merge-tree --write-tree "$upstream" "$maintenance" > /tmp/sync-audit/merge-tree.txt
+          result=$?
+          set -e
+          if [ "$result" -gt 1 ]; then
+            cat /tmp/sync-audit/merge-tree.txt
+            exit "$result"
+          fi
+          cat /tmp/sync-audit/merge-tree.txt
+          base=$(git merge-base "$upstream" "$maintenance")
+          printf 'upstream=%s\nmaintenance=%s\nbase=%s\n' "$upstream" "$maintenance" "$base" > /tmp/sync-audit/refs.txt
+          git diff --name-status "$base" "$maintenance" > /tmp/sync-audit/maintenance-files.txt
+          git archive "$upstream" | gzip > /tmp/sync-audit/upstream.tar.gz
+          git archive "$maintenance" | gzip > /tmp/sync-audit/maintenance.tar.gz
+          git archive "$base" | gzip > /tmp/sync-audit/base.tar.gz
+          git diff "$base" "$maintenance" > /tmp/sync-audit/maintenance.patch
+          git diff "$base" "$upstream" > /tmp/sync-audit/upstream.patch
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pinned-sync-audit
+          path: /tmp/sync-audit/
+          retention-days: 1
