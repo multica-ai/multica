@@ -9,10 +9,61 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// Account-level attempt budget for codes checked against an enabled TOTP
+// secret. authVerifyRL is per IP and disabled without Redis, so it cannot
+// bound guesses against a six-digit code on its own.
+const (
+	totpMaxFailedAttempts = 5
+	totpLockDuration      = 15 * time.Minute
+)
+
+type totpCheck int
+
+const (
+	totpAccepted totpCheck = iota
+	totpRejected
+	totpLocked
+)
+
+// checkEnabledTOTPCode verifies a code for an enabled TOTP secret under the
+// account-level attempt budget and consumes its time step, so the same code
+// cannot be accepted twice. Wrong and replayed codes count as failures.
+func (h *Handler) checkEnabledTOTPCode(r *http.Request, userID pgtype.UUID, sealed []byte, lockedUntil pgtype.Timestamptz, code string) (totpCheck, error) {
+	now := time.Now()
+	if lockedUntil.Valid && lockedUntil.Time.After(now) {
+		return totpLocked, nil
+	}
+	secret, err := h.TOTPService.OpenSecret(sealed)
+	if err != nil {
+		return totpRejected, err
+	}
+	if step, ok := h.TOTPService.MatchCode(secret, code, now); ok {
+		consumed, err := h.Queries.ConsumeUserTOTPStep(r.Context(), db.ConsumeUserTOTPStepParams{
+			ID:   userID,
+			Step: step,
+		})
+		if err != nil {
+			return totpRejected, err
+		}
+		if consumed == 1 {
+			return totpAccepted, nil
+		}
+	}
+	if err := h.Queries.RecordUserTOTPFailure(r.Context(), db.RecordUserTOTPFailureParams{
+		ID:          userID,
+		MaxAttempts: totpMaxFailedAttempts,
+		LockUntil:   pgtype.Timestamptz{Time: now.Add(totpLockDuration), Valid: true},
+	}); err != nil {
+		return totpRejected, err
+	}
+	return totpRejected, nil
+}
 
 // POST /api/auth/totp/setup-init
 // Authenticated. Generates a fresh TOTP secret for the current user,
@@ -55,11 +106,17 @@ func (h *Handler) TOTPSetupInit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to encrypt secret")
 		return
 	}
-	if err := h.Queries.SetUserTOTPSecret(r.Context(), db.SetUserTOTPSecretParams{
+	stored, err := h.Queries.SetUserTOTPSecret(r.Context(), db.SetUserTOTPSecretParams{
 		ID:                  user.ID,
 		TotpSecretEncrypted: sealed,
-	}); err != nil {
+	})
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to persist secret")
+		return
+	}
+	if stored == 0 {
+		// TOTP was enabled between the check above and this write.
+		writeError(w, http.StatusConflict, "TOTP already enabled; disable it first (requires current code) before setting up a new authenticator")
 		return
 	}
 
@@ -103,17 +160,33 @@ func (h *Handler) TOTPSetupVerify(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "no setup in progress")
 		return
 	}
+	if row.TotpEnabledAt.Valid {
+		writeError(w, http.StatusConflict, "TOTP already enabled")
+		return
+	}
 	secret, err := h.TOTPService.OpenSecret(row.TotpSecretEncrypted)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to decrypt secret")
 		return
 	}
-	if !h.TOTPService.ValidateCode(secret, req.Code) {
+	step, ok := h.TOTPService.MatchCode(secret, req.Code, time.Now())
+	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid code")
 		return
 	}
-	if err := h.Queries.EnableUserTOTP(r.Context(), parseUUID(userID)); err != nil {
+	// Enable exactly the secret this code was checked against; a concurrent
+	// setup-init that replaced it leaves 0 rows and the user must start over.
+	enabled, err := h.Queries.EnableUserTOTP(r.Context(), db.EnableUserTOTPParams{
+		ID:                  parseUUID(userID),
+		TotpSecretEncrypted: row.TotpSecretEncrypted,
+		Step:                step,
+	})
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enable totp")
+		return
+	}
+	if enabled == 0 {
+		writeError(w, http.StatusConflict, "authenticator setup changed; start setup again")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": true})
@@ -149,14 +222,33 @@ func (h *Handler) TOTPDisable(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "totp not enabled")
 		return
 	}
-	secret, err := h.TOTPService.OpenSecret(row.TotpSecretEncrypted)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to decrypt secret")
-		return
-	}
-	if !h.TOTPService.ValidateCode(secret, req.Code) {
-		writeError(w, http.StatusBadRequest, "invalid code")
-		return
+	if row.TotpEnabledAt.Valid {
+		// The disable code is the guard against a hijacked session, so it
+		// gets the same attempt budget and replay protection as login.
+		result, err := h.checkEnabledTOTPCode(r, parseUUID(userID), row.TotpSecretEncrypted, row.TotpLockedUntil, req.Code)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to verify code")
+			return
+		}
+		switch result {
+		case totpLocked:
+			writeError(w, http.StatusTooManyRequests, "too many invalid codes; try again later")
+			return
+		case totpRejected:
+			writeError(w, http.StatusBadRequest, "invalid code")
+			return
+		}
+	} else {
+		// Pending setup: clearing an unverified secret needs only a valid code.
+		secret, err := h.TOTPService.OpenSecret(row.TotpSecretEncrypted)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to decrypt secret")
+			return
+		}
+		if !h.TOTPService.ValidateCode(secret, req.Code) {
+			writeError(w, http.StatusBadRequest, "invalid code")
+			return
+		}
 	}
 	if err := h.Queries.DisableUserTOTP(r.Context(), parseUUID(userID)); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to disable totp")
@@ -253,9 +345,10 @@ func (h *Handler) AdminResetMemberTOTP(w http.ResponseWriter, r *http.Request) {
 // user by email + checks the code against their decrypted TOTP secret.
 // On success: issues JWT + sets auth cookies (same as verify-code).
 //
-// All failure modes return 401 with the same generic message — never
-// disambiguate "user not found" vs "TOTP not set up" vs "wrong code",
-// otherwise the endpoint becomes an oracle for enumeration.
+// All failure modes return 400 with the same generic message — never
+// disambiguate "user not found" vs "TOTP not set up" vs "wrong code" vs
+// "locked", otherwise the endpoint becomes an oracle for enumeration.
+// 400 rather than 401: the web client treats any 401 as an expired session.
 func (h *Handler) TOTPLogin(w http.ResponseWriter, r *http.Request) {
 	if h.TOTPService == nil {
 		writeError(w, http.StatusServiceUnavailable, "totp not configured on this server")
@@ -282,12 +375,12 @@ func (h *Handler) TOTPLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid credentials")
 		return
 	}
-	secret, err := h.TOTPService.OpenSecret(row.TotpSecretEncrypted)
+	result, err := h.checkEnabledTOTPCode(r, row.ID, row.TotpSecretEncrypted, row.TotpLockedUntil, req.Code)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	if !h.TOTPService.ValidateCode(secret, req.Code) {
+	if result != totpAccepted {
 		writeError(w, http.StatusBadRequest, "invalid credentials")
 		return
 	}

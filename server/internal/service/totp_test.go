@@ -78,3 +78,37 @@ func TestTOTPService_SealOpen_Roundtrip(t *testing.T) {
 		t.Errorf("roundtrip mismatch: got %q, want %q", plain, secret)
 	}
 }
+
+func TestTOTPService_MatchCodeReturnsStep(t *testing.T) {
+	t.Setenv("MULTICA_USER_TOTP_KEY", makeTOTPKeyEnv(t))
+	svc, err := NewTOTPService()
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	secret, _, err := svc.GenerateSecret("alice@example.com")
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	now := time.Unix(1_700_000_010, 0)
+	current := now.Unix() / totpPeriod
+	for _, offset := range []int64{-1, 0, 1} {
+		step := current + offset
+		code, err := totp.GenerateCode(secret, time.Unix(step*totpPeriod, 0))
+		if err != nil {
+			t.Fatalf("generate code: %v", err)
+		}
+		got, ok := svc.MatchCode(secret, code, now)
+		if !ok || got != step {
+			t.Errorf("offset %d: MatchCode = (%d, %v), want (%d, true)", offset, got, ok, step)
+		}
+	}
+
+	stale, err := totp.GenerateCode(secret, time.Unix((current-2)*totpPeriod, 0))
+	if err != nil {
+		t.Fatalf("generate code: %v", err)
+	}
+	if _, ok := svc.MatchCode(secret, stale, now); ok {
+		t.Error("code two steps old was accepted")
+	}
+}

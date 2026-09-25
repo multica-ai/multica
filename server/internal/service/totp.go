@@ -4,8 +4,10 @@
 package service
 
 import (
+	"crypto/subtle"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
@@ -42,7 +44,7 @@ func (s *TOTPService) GenerateSecret(accountLabel string) (secret, otpauthURL st
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      "Multica",
 		AccountName: accountLabel,
-		Period:      30,
+		Period:      totpPeriod,
 		SecretSize:  20, // bytes; RFC 6238 default
 		Digits:      otp.DigitsSix,
 		Algorithm:   otp.AlgorithmSHA1, // universal authenticator-app support
@@ -53,10 +55,37 @@ func (s *TOTPService) GenerateSecret(accountLabel string) (secret, otpauthURL st
 	return key.Secret(), key.URL(), nil
 }
 
+// totpPeriod is the RFC 6238 time step in seconds; it must match
+// GenerateSecret, which is what authenticator apps are configured with.
+const totpPeriod = 30
+
 // ValidateCode checks a 6-digit code against the given base32 secret with
-// the default ±1 epoch (30s) skew window.
+// a ±1 step (30s) skew window.
 func (s *TOTPService) ValidateCode(secret, code string) bool {
-	return totp.Validate(code, secret)
+	_, ok := s.MatchCode(secret, code, time.Now())
+	return ok
+}
+
+// MatchCode checks a 6-digit code against the secret for the time steps
+// around now (±1, the same window as totp.Validate) and returns the step
+// the code belongs to. Callers persist the step so the same code cannot be
+// accepted twice (RFC 6238 §5.2).
+func (s *TOTPService) MatchCode(secret, code string, now time.Time) (step int64, ok bool) {
+	current := now.Unix() / totpPeriod
+	for _, candidate := range []int64{current - 1, current, current + 1} {
+		expected, err := totp.GenerateCodeCustom(secret, time.Unix(candidate*totpPeriod, 0).UTC(), totp.ValidateOpts{
+			Period:    totpPeriod,
+			Digits:    otp.DigitsSix,
+			Algorithm: otp.AlgorithmSHA1,
+		})
+		if err != nil {
+			return 0, false
+		}
+		if subtle.ConstantTimeCompare([]byte(expected), []byte(code)) == 1 {
+			return candidate, true
+		}
+	}
+	return 0, false
 }
 
 // SealSecret encrypts a base32 TOTP secret for at-rest storage.
@@ -75,4 +104,3 @@ func (s *TOTPService) OpenSecret(sealed []byte) (string, error) {
 	}
 	return string(plain), nil
 }
-

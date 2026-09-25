@@ -11,10 +11,40 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const consumeUserTOTPStep = `-- name: ConsumeUserTOTPStep :execrows
+UPDATE "user"
+SET totp_last_used_step  = $1::bigint,
+    totp_failed_attempts = 0,
+    totp_locked_until    = NULL
+WHERE id = $2
+  AND totp_enabled_at IS NOT NULL
+  AND (totp_last_used_step IS NULL OR totp_last_used_step < $1::bigint)
+  AND (totp_locked_until IS NULL OR totp_locked_until <= now())
+`
+
+type ConsumeUserTOTPStepParams struct {
+	Step int64       `json:"step"`
+	ID   pgtype.UUID `json:"id"`
+}
+
+// Accepts a verified code: succeeds only for a time step later than the last
+// accepted one and while the account is not locked. Concurrent submissions of
+// the same code race on this conditional write, so exactly one wins.
+func (q *Queries) ConsumeUserTOTPStep(ctx context.Context, arg ConsumeUserTOTPStepParams) (int64, error) {
+	result, err := q.db.Exec(ctx, consumeUserTOTPStep, arg.Step, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const disableUserTOTP = `-- name: DisableUserTOTP :exec
 UPDATE "user"
 SET totp_secret_encrypted = NULL,
-    totp_enabled_at       = NULL
+    totp_enabled_at       = NULL,
+    totp_last_used_step   = NULL,
+    totp_failed_attempts  = 0,
+    totp_locked_until     = NULL
 WHERE id = $1
 `
 
@@ -23,19 +53,35 @@ func (q *Queries) DisableUserTOTP(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
-const enableUserTOTP = `-- name: EnableUserTOTP :exec
+const enableUserTOTP = `-- name: EnableUserTOTP :execrows
 UPDATE "user"
-SET totp_enabled_at = now()
-WHERE id = $1 AND totp_secret_encrypted IS NOT NULL
+SET totp_enabled_at      = now(),
+    totp_last_used_step  = $1::bigint,
+    totp_failed_attempts = 0,
+    totp_locked_until    = NULL
+WHERE id = $2
+  AND totp_secret_encrypted = $3
+  AND totp_enabled_at IS NULL
 `
 
-func (q *Queries) EnableUserTOTP(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, enableUserTOTP, id)
-	return err
+type EnableUserTOTPParams struct {
+	Step                int64       `json:"step"`
+	ID                  pgtype.UUID `json:"id"`
+	TotpSecretEncrypted []byte      `json:"totp_secret_encrypted"`
+}
+
+// Enables exactly the secret that was verified: 0 rows when another
+// setup-init replaced the pending secret in the meantime.
+func (q *Queries) EnableUserTOTP(ctx context.Context, arg EnableUserTOTPParams) (int64, error) {
+	result, err := q.db.Exec(ctx, enableUserTOTP, arg.Step, arg.ID, arg.TotpSecretEncrypted)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getUserTOTPSecret = `-- name: GetUserTOTPSecret :one
-SELECT totp_secret_encrypted, totp_enabled_at
+SELECT totp_secret_encrypted, totp_enabled_at, totp_locked_until
 FROM "user"
 WHERE id = $1
 `
@@ -43,31 +89,33 @@ WHERE id = $1
 type GetUserTOTPSecretRow struct {
 	TotpSecretEncrypted []byte             `json:"totp_secret_encrypted"`
 	TotpEnabledAt       pgtype.Timestamptz `json:"totp_enabled_at"`
+	TotpLockedUntil     pgtype.Timestamptz `json:"totp_locked_until"`
 }
 
 func (q *Queries) GetUserTOTPSecret(ctx context.Context, id pgtype.UUID) (GetUserTOTPSecretRow, error) {
 	row := q.db.QueryRow(ctx, getUserTOTPSecret, id)
 	var i GetUserTOTPSecretRow
-	err := row.Scan(&i.TotpSecretEncrypted, &i.TotpEnabledAt)
+	err := row.Scan(&i.TotpSecretEncrypted, &i.TotpEnabledAt, &i.TotpLockedUntil)
 	return i, err
 }
 
 const getUserTOTPSecretByEmail = `-- name: GetUserTOTPSecretByEmail :one
-SELECT id, totp_secret_encrypted
+SELECT id, totp_secret_encrypted, totp_locked_until
 FROM "user"
 WHERE email = $1
   AND totp_enabled_at IS NOT NULL
 `
 
 type GetUserTOTPSecretByEmailRow struct {
-	ID                  pgtype.UUID `json:"id"`
-	TotpSecretEncrypted []byte      `json:"totp_secret_encrypted"`
+	ID                  pgtype.UUID        `json:"id"`
+	TotpSecretEncrypted []byte             `json:"totp_secret_encrypted"`
+	TotpLockedUntil     pgtype.Timestamptz `json:"totp_locked_until"`
 }
 
 func (q *Queries) GetUserTOTPSecretByEmail(ctx context.Context, email string) (GetUserTOTPSecretByEmailRow, error) {
 	row := q.db.QueryRow(ctx, getUserTOTPSecretByEmail, email)
 	var i GetUserTOTPSecretByEmailRow
-	err := row.Scan(&i.ID, &i.TotpSecretEncrypted)
+	err := row.Scan(&i.ID, &i.TotpSecretEncrypted, &i.TotpLockedUntil)
 	return i, err
 }
 
@@ -91,11 +139,39 @@ func (q *Queries) GetUserTOTPStatus(ctx context.Context, id pgtype.UUID) (GetUse
 	return i, err
 }
 
-const setUserTOTPSecret = `-- name: SetUserTOTPSecret :exec
+const recordUserTOTPFailure = `-- name: RecordUserTOTPFailure :exec
+UPDATE "user"
+SET totp_failed_attempts = totp_failed_attempts + 1,
+    totp_locked_until = CASE
+        WHEN totp_failed_attempts + 1 >= $1::int THEN $2::timestamptz
+        ELSE totp_locked_until
+    END
+WHERE id = $3
+`
+
+type RecordUserTOTPFailureParams struct {
+	MaxAttempts int32              `json:"max_attempts"`
+	LockUntil   pgtype.Timestamptz `json:"lock_until"`
+	ID          pgtype.UUID        `json:"id"`
+}
+
+// Counts a rejected code. Reaching max_attempts locks TOTP for the account
+// until lock_until; the counter only resets on an accepted code, so each
+// further failure after the budget re-locks immediately.
+func (q *Queries) RecordUserTOTPFailure(ctx context.Context, arg RecordUserTOTPFailureParams) error {
+	_, err := q.db.Exec(ctx, recordUserTOTPFailure, arg.MaxAttempts, arg.LockUntil, arg.ID)
+	return err
+}
+
+const setUserTOTPSecret = `-- name: SetUserTOTPSecret :execrows
 UPDATE "user"
 SET totp_secret_encrypted = $2,
-    totp_enabled_at       = NULL
+    totp_enabled_at       = NULL,
+    totp_last_used_step   = NULL,
+    totp_failed_attempts  = 0,
+    totp_locked_until     = NULL
 WHERE id = $1
+  AND totp_enabled_at IS NULL
 `
 
 type SetUserTOTPSecretParams struct {
@@ -103,7 +179,12 @@ type SetUserTOTPSecretParams struct {
 	TotpSecretEncrypted []byte      `json:"totp_secret_encrypted"`
 }
 
-func (q *Queries) SetUserTOTPSecret(ctx context.Context, arg SetUserTOTPSecretParams) error {
-	_, err := q.db.Exec(ctx, setUserTOTPSecret, arg.ID, arg.TotpSecretEncrypted)
-	return err
+// Stores a new pending secret. Refuses (0 rows) once TOTP is enabled, so a
+// setup-init racing with setup-verify cannot overwrite a verified secret.
+func (q *Queries) SetUserTOTPSecret(ctx context.Context, arg SetUserTOTPSecretParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setUserTOTPSecret, arg.ID, arg.TotpSecretEncrypted)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

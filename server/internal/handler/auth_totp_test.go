@@ -2,16 +2,23 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/pquerna/otp/totp"
+
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // withRealTOTPService swaps a freshly-constructed *service.TOTPService onto
@@ -350,5 +357,158 @@ func TestTOTPRoutes_RequireHumanActorWired(t *testing.T) {
 				t.Fatal("inner handler must run for human actor")
 			}
 		})
+	}
+}
+
+// enrollTOTPUser creates a dedicated user and enables TOTP for it through
+// setup-init + setup-verify, so tests do not share TOTP state with the
+// fixture user. It returns the user's id, email and base32 secret.
+func enrollTOTPUser(t *testing.T) (userID, email, secret string) {
+	t.Helper()
+	email = fmt.Sprintf("totp-%d@example.com", time.Now().UnixNano())
+	userID = dbfx.User(t, "TOTP User", email)
+
+	var init struct {
+		Secret string `json:"secret"`
+	}
+	req := newRequest(http.MethodPost, "/api/auth/totp/setup-init", nil)
+	req.Header.Set("X-User-ID", userID)
+	testutil.Call(t, testHandler.TOTPSetupInit, req).Want(http.StatusOK).JSON(&init)
+
+	req = newRequest(http.MethodPost, "/api/auth/totp/setup-verify", map[string]string{"code": totpCodeAt(t, init.Secret, time.Now())})
+	req.Header.Set("X-User-ID", userID)
+	testutil.Call(t, testHandler.TOTPSetupVerify, req).Want(http.StatusOK)
+	return userID, email, init.Secret
+}
+
+func totpCodeAt(t *testing.T, secret string, at time.Time) string {
+	t.Helper()
+	code, err := totp.GenerateCode(secret, at)
+	if err != nil {
+		t.Fatalf("generate code: %v", err)
+	}
+	return code
+}
+
+// wrongTOTPCode returns a six-digit code that is not valid for any step in
+// the current acceptance window.
+func wrongTOTPCode(t *testing.T, secret string) string {
+	t.Helper()
+	now := time.Now()
+	valid := map[string]bool{}
+	for _, offset := range []time.Duration{-30 * time.Second, 0, 30 * time.Second} {
+		valid[totpCodeAt(t, secret, now.Add(offset))] = true
+	}
+	for _, candidate := range []string{"000000", "111111", "222222", "333333"} {
+		if !valid[candidate] {
+			return candidate
+		}
+	}
+	t.Fatal("no invalid candidate code")
+	return ""
+}
+
+func totpLoginRequest(email, code string) *http.Request {
+	body, _ := json.Marshal(map[string]string{"email": email, "code": code})
+	return httptest.NewRequest(http.MethodPost, "/api/auth/login-totp", bytes.NewReader(body))
+}
+
+func TestTOTPLogin_RejectsReplayedCode(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no DB available")
+	}
+	withRealTOTPService(t)
+	_, email, secret := enrollTOTPUser(t)
+
+	// setup-verify consumed the current step; the next one is still inside
+	// the acceptance window.
+	next := totpCodeAt(t, secret, time.Now().Add(30*time.Second))
+	testutil.Call(t, testHandler.TOTPLogin, totpLoginRequest(email, next)).Want(http.StatusOK)
+	testutil.Call(t, testHandler.TOTPLogin, totpLoginRequest(email, next)).Want(http.StatusBadRequest)
+}
+
+func TestTOTPLogin_RejectsCodeAlreadyUsedForSetup(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no DB available")
+	}
+	withRealTOTPService(t)
+	_, email, secret := enrollTOTPUser(t)
+
+	testutil.Call(t, testHandler.TOTPLogin, totpLoginRequest(email, totpCodeAt(t, secret, time.Now()))).Want(http.StatusBadRequest)
+}
+
+func TestTOTPLogin_LocksAccountAfterRepeatedFailures(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no DB available")
+	}
+	withRealTOTPService(t)
+	userID, email, secret := enrollTOTPUser(t)
+
+	wrong := wrongTOTPCode(t, secret)
+	for range totpMaxFailedAttempts {
+		testutil.Call(t, testHandler.TOTPLogin, totpLoginRequest(email, wrong)).Want(http.StatusBadRequest)
+	}
+
+	// A correct, unused code is refused while the account is locked, with
+	// the same generic response as any other failure.
+	next := totpCodeAt(t, secret, time.Now().Add(30*time.Second))
+	testutil.Call(t, testHandler.TOTPLogin, totpLoginRequest(email, next)).Want(http.StatusBadRequest)
+
+	var locked bool
+	dbfx.QueryRow(t, `SELECT totp_locked_until > now() FROM "user" WHERE id = $1`, userID).Scan(&locked)
+	if !locked {
+		t.Fatal("account not locked after the attempt budget was spent")
+	}
+}
+
+func TestTOTPDisable_LockedAccountReturnsTooManyRequests(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no DB available")
+	}
+	withRealTOTPService(t)
+	userID, _, secret := enrollTOTPUser(t)
+
+	disable := func(code string) *http.Request {
+		req := newRequest(http.MethodPost, "/api/auth/totp/disable", map[string]string{"code": code})
+		req.Header.Set("X-User-ID", userID)
+		return req
+	}
+	wrong := wrongTOTPCode(t, secret)
+	for range totpMaxFailedAttempts {
+		testutil.Call(t, testHandler.TOTPDisable, disable(wrong)).Want(http.StatusBadRequest)
+	}
+	next := totpCodeAt(t, secret, time.Now().Add(30*time.Second))
+	testutil.Call(t, testHandler.TOTPDisable, disable(next)).Want(http.StatusTooManyRequests)
+}
+
+func TestEnableUserTOTP_OnlyEnablesTheVerifiedSecret(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no DB available")
+	}
+	withRealTOTPService(t)
+	userID := dbfx.User(t, "TOTP Race", fmt.Sprintf("totp-race-%d@example.com", time.Now().UnixNano()))
+
+	setupInit := func() {
+		req := newRequest(http.MethodPost, "/api/auth/totp/setup-init", nil)
+		req.Header.Set("X-User-ID", userID)
+		testutil.Call(t, testHandler.TOTPSetupInit, req).Want(http.StatusOK)
+	}
+	setupInit()
+	var verified []byte
+	dbfx.QueryRow(t, `SELECT totp_secret_encrypted FROM "user" WHERE id = $1`, userID).Scan(&verified)
+
+	// A second setup-init replaces the pending secret between the handler's
+	// read and its enable write.
+	setupInit()
+	rows, err := testHandler.Queries.EnableUserTOTP(context.Background(), db.EnableUserTOTPParams{
+		ID:                  parseUUID(userID),
+		TotpSecretEncrypted: verified,
+		Step:                1,
+	})
+	if err != nil {
+		t.Fatalf("EnableUserTOTP: %v", err)
+	}
+	if rows != 0 {
+		t.Fatalf("enabled a secret that was never verified (rows=%d)", rows)
 	}
 }
