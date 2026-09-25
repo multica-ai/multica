@@ -25,6 +25,11 @@ import (
 // So this asserts it off the REAL boot path: NewRouter, the same call main()
 // makes. What it reads is the warning NewOutboundReplier logs when the field is
 // nil, which is also what an operator would have to notice today.
+//
+// Two routers are built, one without the WeCom key and one with it, the same
+// way wecom_bubble_wiring_test.go does: chat:done has listeners outside WeCom
+// whenever another channel is configured, so only the difference between the
+// two says the WeCom block ran.
 func TestWecomReplierGetsItsLanguageLookupOnTheRealBootPath(t *testing.T) {
 	key := make([]byte, secretbox.KeySize)
 	if _, err := rand.Read(key); err != nil {
@@ -36,16 +41,20 @@ func TestWecomReplierGetsItsLanguageLookupOnTheRealBootPath(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	t.Cleanup(func() { slog.SetDefault(restore) })
 
+	t.Setenv("MULTICA_WECOM_SECRET_KEY", "")
+	withoutWecom := events.New()
+	NewRouter(nil, realtime.NewHub(), withoutWecom, analytics.NoopClient{}, nil)
+
 	t.Setenv("MULTICA_WECOM_SECRET_KEY", base64.StdEncoding.EncodeToString(key))
-	bus := events.New()
-	NewRouter(nil, realtime.NewHub(), bus, analytics.NoopClient{}, nil)
+	withWecom := events.New()
+	NewRouter(nil, realtime.NewHub(), withWecom, analytics.NoopClient{}, nil)
 
 	// Anti-vacuity: with no WeCom block entered, no replier is built and the
-	// warning cannot appear for the reason this test names. chat:done is the
-	// subscription that has been wired all along, so it marks the block ran.
-	if bus.SubscriberCount(protocol.EventChatDone) == 0 {
-		t.Fatal("the WeCom boot block did not run, so this test proves nothing. " +
-			"Re-point this guard at wherever WeCom is wired now")
+	// warning cannot appear for the reason this test names.
+	if got, base := withWecom.SubscriberCount(protocol.EventChatDone),
+		withoutWecom.SubscriberCount(protocol.EventChatDone); got <= base {
+		t.Fatalf("the WeCom boot block did not run: chat:done listeners %d with the key set vs %d without, "+
+			"so this test proves nothing. Re-point this guard at wherever WeCom is wired now", got, base)
 	}
 
 	if got := logged.String(); strings.Contains(got, "no language lookup wired") {
