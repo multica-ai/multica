@@ -146,6 +146,8 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	// would make the UI offer setup that always fails.
 	config.TOTPSupported = h.TOTPService != nil
 
+	// Re-read from env on every request so operators can rotate keys via
+	// secret refresh without a server restart.
 	if v := os.Getenv("ANALYTICS_DISABLED"); v != "true" && v != "1" {
 		config.PosthogKey = os.Getenv("POSTHOG_API_KEY")
 		config.PosthogHost = os.Getenv("POSTHOG_HOST")
