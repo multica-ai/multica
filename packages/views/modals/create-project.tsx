@@ -110,17 +110,25 @@ export function buildLocalDirectoryResourceRef({
 
 function RepoUrlText({
   url,
+  description,
   className,
 }: {
   url: string;
+  description?: string;
   className?: string;
 }) {
+  const label = description?.trim();
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <span className={cn("truncate flex-1 text-left", className)}>
-            {githubShortLabel(url)}
+          <span className={cn("min-w-0 flex-1 text-left", className)}>
+            <span className="block truncate">{githubShortLabel(url)}</span>
+            {label && (
+              <span className="block truncate text-micro text-muted-foreground">
+                {label}
+              </span>
+            )}
           </span>
         }
       />
@@ -830,7 +838,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                                 className="size-3.5"
                               />
                               <GithubIcon className="size-3.5" />
-                              <RepoUrlText url={repo.url} />
+                              <RepoUrlText url={repo.url} description={repo.description} />
                             </button>
                           );
                         })}
@@ -887,7 +895,10 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                         <div key={url} className="space-y-1">
                           <div className="flex items-center gap-2 text-caption">
                             <GithubIcon className="size-3 shrink-0 text-muted-foreground" />
-                            <RepoUrlText url={url} />
+                            <RepoUrlText
+                              url={url}
+                              description={workspaceRepos.find((repo) => repo.url === url)?.description}
+                            />
                             {/* The ref rides beside the repo it belongs to,
                                 not in one field for the whole list: each repo
                                 can start somewhere different. */}

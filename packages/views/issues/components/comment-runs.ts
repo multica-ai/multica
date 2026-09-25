@@ -1,5 +1,6 @@
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
 import { isDeletedComment } from "@multica/core/issues/comment-deletion";
+import { commentSupplementReceipts } from "@multica/core/issues/run-steering";
 
 export interface CommentRun {
   task: AgentTask;
@@ -21,6 +22,18 @@ export function commentRunOutput(task: AgentTask): string | null {
 
 export function isActiveCommentRun(task: AgentTask): boolean {
   return ["queued", "dispatched", "waiting_local_directory", "running"].includes(task.status);
+}
+
+/**
+ * The comment the platform posts for a run that ended in failure: the raw
+ * error, authored as the agent. It restates how the run ended, so the run
+ * block renders in its place instead of a second, differently worded copy
+ * (MUL-7692).
+ */
+export function isRunFailureNotice(entry: TimelineEntry, task: AgentTask): boolean {
+  return entry.actor_type === "agent" && entry.comment_type === "system"
+    && entry.source_task_id === task.id
+    && (task.status === "failed" || task.status === "cancelled");
 }
 
 /** Published replies own their log entry even while the agent finishes its run. */
@@ -47,10 +60,12 @@ export function buildCommentRunView(
   const comments = new Map(timeline.filter((entry) => entry.type === "comment").map((entry) => [entry.id, entry]));
   const supplementalByTask = new Map<string, string[]>();
   for (const entry of comments.values()) {
-    if (!entry.supplement_task_id) continue;
-    const ids = supplementalByTask.get(entry.supplement_task_id) ?? [];
-    ids.push(entry.id);
-    supplementalByTask.set(entry.supplement_task_id, ids);
+    // One message can steer several turns; it is input to each of them.
+    for (const receipt of commentSupplementReceipts(entry)) {
+      const ids = supplementalByTask.get(receipt.task_id) ?? [];
+      ids.push(entry.id);
+      supplementalByTask.set(receipt.task_id, ids);
+    }
   }
   const timelineOrder = new Map(timeline.map((entry, index) => [entry.id, index]));
   const threadRoot = (id: string): string | undefined => {
@@ -280,10 +295,21 @@ export function orderThreadWithRuns(
   const working = new Set(threadRuns.filter((run) => !run.hasReply && isActiveCommentRun(run.task)));
   const rows = orderTimelineWithRuns(replies, threadRuns.filter((run) => !working.has(run)), entryById);
   // `runs` arrive in enqueue order: each working run goes after the row that
-  // shows its input (none for the root) and after earlier runs on that input.
+  // shows its input (none for the root), after earlier runs on that input,
+  // and after anything that happened before it was enqueued. A retry answers
+  // the same input as the attempt it retries but starts after that attempt
+  // ended, so it reads below it (MUL-7692).
   for (const run of working) {
+    const enqueuedAt = Date.parse(run.task.created_at);
     let index = rows.findIndex((item) => ("task" in item ? publishedReply(item, entryById)?.id : item.id) === run.anchorCommentId) + 1;
-    while (working.has(rows[index] as CommentRun) && (rows[index] as CommentRun).anchorCommentId === run.anchorCommentId) index += 1;
+    while (index < rows.length) {
+      const row = rows[index]!;
+      const earlierRun = working.has(row as CommentRun) && (row as CommentRun).anchorCommentId === run.anchorCommentId;
+      const earlierRow = !working.has(row as CommentRun)
+        && ("task" in row ? runSortTime(row, entryById) : Date.parse(row.created_at)) <= enqueuedAt;
+      if (!earlierRun && !earlierRow) break;
+      index += 1;
+    }
     rows.splice(index, 0, run);
   }
   // The comment directly above a run, past the run's own earlier comments. A

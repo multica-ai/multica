@@ -523,6 +523,35 @@ export function createEnDict(
     },
     entries: [
       {
+        version: "0.5.3",
+        date: "2026-09-24",
+        title: "Telegram media, Simplified Chinese on mobile, Issue and PR auto-complete, and truer usage figures",
+        changes: [],
+        features: [
+          "Send photos, videos, audio, and files to an agent on Telegram.",
+          "Attachments an agent produces come back to you in Telegram.",
+          "Pick Simplified Chinese, English, or your system language in the mobile app.",
+          "See an Issue's linked pull requests, and let it complete itself once they are all merged.",
+          "Watch an Antigravity agent's tool steps as they happen.",
+          "Add new instructions to a Grok Build task while it is still running.",
+          "Browse every attachment on an Issue full-window and page through them.",
+          "Read the whole documentation site in French.",
+          "Find licensing answers, the privacy policy, and the team behind Multica on the site.",
+          "Self-hosted admins can make automatic titles and quick actions respond faster.",
+        ],
+        improvements: [
+          "Comment actions are grouped by what you came to do, with Edit and Resolve first.",
+        ],
+        fixes: [
+          "Usage for a resumed Claude session counts this run only.",
+          "Cache hit rates on Issues and runtimes no longer read higher than they are.",
+          "Agent replies in a thread appear in the order they were sent.",
+          "A task on Windows starts even when a file is briefly in use.",
+          "An Issue link in DingTalk shows up without stray characters.",
+          "A self-hosted server explains an untrusted certificate, and can trust your own CA.",
+        ],
+      },
+      {
         version: "0.5.2",
         date: "2026-09-23",
         title: "Steering running tasks, duplicate Issue marks, and steadier task runs",

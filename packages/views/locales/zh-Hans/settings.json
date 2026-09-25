@@ -168,6 +168,12 @@
     "sticky_comment_bar": {
       "title": "固定底部评论栏"
     },
+    "running_agent_reply": {
+      "title": "回复正在运行的智能体时",
+      "steer": "插话到当前运行",
+      "after_run": "本轮结束后开始",
+      "hint": "只决定默认选项，每条消息发送前仍可单独修改。"
+    },
     "issue_title": "任务创建",
     "comments_title": "评论",
     "device_hint": "保存在当前设备上。",

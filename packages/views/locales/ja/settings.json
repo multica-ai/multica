@@ -168,6 +168,12 @@
     "sticky_comment_bar": {
       "title": "コメント欄を下部に固定"
     },
+    "running_agent_reply": {
+      "title": "実行中のエージェントに返信するとき",
+      "steer": "現在の実行に追加",
+      "after_run": "この実行の後に開始",
+      "hint": "既定の動作だけを決めます。送信前にメッセージごとに変更できます。"
+    },
     "issue_title": "タスク作成",
     "comments_title": "コメント",
     "device_hint": "このデバイスに保存されます。",

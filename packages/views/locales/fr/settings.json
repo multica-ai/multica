@@ -168,6 +168,12 @@
     "sticky_comment_bar": {
       "title": "Épingler la barre de commentaire en bas"
     },
+    "running_agent_reply": {
+      "title": "En répondant à un agent en cours d'exécution",
+      "steer": "Ajouter à l'exécution en cours",
+      "after_run": "Démarrer après cette exécution",
+      "hint": "Définit seulement le choix par défaut. Vous pouvez le modifier pour chaque message avant l'envoi."
+    },
     "issue_title": "Création de tâches",
     "comments_title": "Commentaires",
     "device_hint": "Enregistré sur cet appareil.",

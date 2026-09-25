@@ -8,14 +8,16 @@ import { issueStatusKeys } from "@multica/core/issue-statuses";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { toast } from "sonner";
 import { useResolvedExpandStore } from "@multica/core/issues/stores/resolved-expand-store";
+import { useCommentCollapseStore } from "@multica/core/issues/stores";
 import {
   DEFAULT_SUB_ISSUE_ROW_PROPERTIES,
   useSubIssueDisplayStore,
 } from "@multica/core/issues/stores/sub-issue-display-store";
+import enAgents from "../../locales/en/agents.json";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 
-const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
+const TEST_RESOURCES = { en: { agents: enAgents, common: enCommon, issues: enIssues } };
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
 
@@ -380,14 +382,28 @@ vi.mock("@multica/core/issues/stores", async () => ({
     },
   ),
   selectRecentIssues: () => () => [],
-  useCommentCollapseStore: (selector?: any) => {
-    const state = {
-      collapsedByIssue: {},
-      isCollapsed: () => false,
-      toggle: () => {},
-    };
-    return selector ? selector(state) : state;
-  },
+  // Reactive in-memory stand-in: a quick-jump to a reply reopens a thread the
+  // reader collapsed, so the card has to re-render when `toggle` runs.
+  useCommentCollapseStore: (await vi.importActual<typeof import("zustand")>("zustand")).create<{
+    collapsedByIssue: Record<string, string[]>;
+    isCollapsed: (issueId: string, commentId: string) => boolean;
+    toggle: (issueId: string, commentId: string) => void;
+  }>()((set, get) => ({
+    collapsedByIssue: {},
+    isCollapsed: (issueId, commentId) => get().collapsedByIssue[issueId]?.includes(commentId) ?? false,
+    toggle: (issueId, commentId) =>
+      set((s) => {
+        const current = s.collapsedByIssue[issueId] ?? [];
+        return {
+          collapsedByIssue: {
+            ...s.collapsedByIssue,
+            [issueId]: current.includes(commentId)
+              ? current.filter((c) => c !== commentId)
+              : [...current, commentId],
+          },
+        };
+      }),
+  })),
   useCommentDraftStore: Object.assign(
     (selector?: any) => {
       const state = {
@@ -423,17 +439,13 @@ vi.mock("@multica/core/issues/stores", async () => ({
       }),
     },
   ),
-  useTaskSupplementDraftStore: (await import("zustand")).create(() => ({
-    drafts: {}, open: vi.fn(), setContent: vi.fn(), setRequestId: vi.fn(),
-    markEnded: vi.fn(), clear: vi.fn(),
-  })),
   useCommentComposerStore: Object.assign(
     (selector?: any) => {
-      const state = { sticky: true, toggleSticky: () => {} };
+      const state = { sticky: true, runningAgentReply: "steer", toggleSticky: () => {} };
       return selector ? selector(state) : state;
     },
     {
-      getState: () => ({ sticky: true, toggleSticky: () => {} }),
+      getState: () => ({ sticky: true, runningAgentReply: "steer", toggleSticky: () => {} }),
     },
   ),
 }));
@@ -493,6 +505,7 @@ beforeEach(() => {
   // The resolved-expand store is module-global (not per-mount like the old
   // useState); reset so one test's expansions can't leak into the next.
   useResolvedExpandStore.setState({ expandedByIssue: {} });
+  useCommentCollapseStore.setState({ collapsedByIssue: {} });
 });
 
 // Mock modals
@@ -1538,6 +1551,65 @@ describe("IssueDetail (shared)", () => {
     expect(container.querySelectorAll(`[data-run-id="${task.id}"]`)).toHaveLength(1);
   });
 
+  describe("a run's failure notice (MUL-7692)", () => {
+    const failedRun = (overrides: Partial<AgentTask> = {}): AgentTask => ({
+      id: "4a2e8d1c-7f9b-4e2a-9c1d-123456789abc", agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
+      status: "failed", failure_reason: "cancelled", error: "task cancelled by server", priority: 0,
+      created_at: "2026-01-18T00:00:00Z", dispatched_at: "2026-01-18T00:00:01Z", started_at: "2026-01-18T00:00:02Z",
+      completed_at: "2026-01-18T00:12:58Z", result: null, ...overrides,
+    });
+    const notice = (task: AgentTask, parent_id: string | null): TimelineEntry => ({
+      type: "comment", id: "failure-notice", actor_type: "agent", actor_id: "agent-1", content: "task cancelled by server",
+      parent_id, created_at: "2026-01-18T00:12:58Z", updated_at: "2026-01-18T00:12:58Z", comment_type: "system",
+      source_task_id: task.id,
+    });
+    const expectStatedOnce = (slot: HTMLElement) => {
+      expect(within(slot).getByText("Cancelled by the system")).toBeInTheDocument();
+      expect(within(slot).queryByText("task cancelled by server")).not.toBeInTheDocument();
+      expect(within(slot).queryByText("Failed")).not.toBeInTheDocument();
+      expect(screen.getAllByRole("button", { name: "Retry run" })).toHaveLength(1);
+    };
+
+    it("renders the run block in the notice's thread slot and retries that run", async () => {
+      const root = mockTimeline[0]!;
+      const trigger = { ...root, id: "user-reply", parent_id: root.id, content: "Please try this task" };
+      const task = failedRun({ trigger_comment_id: trigger.id, delivered_comment_ids: [trigger.id] });
+      mockApiObj.listTimeline.mockResolvedValue([root, trigger, notice(task, trigger.id)]);
+      mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+      const { container } = renderIssueDetail();
+
+      await waitFor(() => expect(container.querySelector("#comment-failure-notice [data-run-id]")).not.toBeNull());
+      const slot = container.querySelector("#comment-failure-notice") as HTMLElement;
+      expect(slot.getAttribute("data-run-comment-id")).toBe(task.id);
+      expectStatedOnce(slot);
+      fireEvent.click(within(slot).getByRole("button", { name: "Retry run" }));
+      await waitFor(() => expect(mockApiObj.rerunIssue).toHaveBeenCalledWith("issue-1", task.id));
+    });
+
+    it("renders a top-level notice as the run block", async () => {
+      const task = failedRun();
+      mockApiObj.listTimeline.mockResolvedValue([...mockTimeline, notice(task, null)]);
+      mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+      const { container } = renderIssueDetail();
+
+      await waitFor(() => expect(container.querySelector(`[data-run-comment-id="${task.id}"]`)).not.toBeNull());
+      expectStatedOnce(container.querySelector("#comment-failure-notice") as HTMLElement);
+    });
+
+    it("keeps a replied-to notice as its thread, without the raw body", async () => {
+      const task = failedRun();
+      const reply: TimelineEntry = { ...mockTimeline[0]!, id: "reply-to-notice", parent_id: "failure-notice",
+        content: "Retrying after the deploy", created_at: "2026-01-18T00:20:00Z", updated_at: "2026-01-18T00:20:00Z" };
+      mockApiObj.listTimeline.mockResolvedValue([...mockTimeline, notice(task, null), reply]);
+      mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+      const { container } = renderIssueDetail();
+
+      await screen.findByText("Retrying after the deploy");
+      await waitFor(() => expect(container.querySelector(`#comment-failure-notice [data-run-id="${task.id}"]`)).not.toBeNull());
+      expectStatedOnce(container.querySelector("#comment-failure-notice") as HTMLElement);
+    });
+  });
+
   // Details is creator + immutable timestamps, so it ranks below the
   // execution log, which is what people actually open the sidebar for.
   it("orders the Details section after the execution log", async () => {
@@ -2349,6 +2421,79 @@ describe("IssueDetail (shared)", () => {
       ).toBeInTheDocument();
     });
     expect(screen.getByRole("button", { name: "I can help with this" })).toBeInTheDocument();
+  });
+
+  describe("quick-jump rail replies", () => {
+    const highlightTint = "bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]";
+
+    it("unfolds a resolved thread and lands on the reply picked from the rail", async () => {
+      mockApiObj.listTimeline.mockResolvedValue([
+        ...mockTimeline,
+        {
+          type: "comment",
+          id: "comment-3",
+          actor_type: "member",
+          actor_id: "user-1",
+          content: "Resolved root",
+          parent_id: null,
+          created_at: "2026-01-18T00:00:00Z",
+          updated_at: "2026-01-18T00:00:00Z",
+          comment_type: "comment",
+          resolved_at: "2026-01-19T00:00:00Z",
+        } as TimelineEntry,
+        {
+          type: "comment",
+          id: "reply-1",
+          actor_type: "member",
+          actor_id: "user-1",
+          content: "Reply inside resolved thread",
+          parent_id: "comment-3",
+          created_at: "2026-01-18T01:00:00Z",
+          updated_at: "2026-01-18T01:00:00Z",
+          comment_type: "comment",
+        } as TimelineEntry,
+      ]);
+
+      renderIssueDetail();
+
+      const nav = await screen.findByRole("navigation", { name: "Jump to comment thread" });
+      expect(document.getElementById("comment-reply-1")).toBeNull();
+      fireEvent.click(within(nav).getByRole("button", { name: /: Reply inside resolved thread$/ }));
+
+      await waitFor(() => {
+        expect(document.getElementById("comment-reply-1")?.className).toContain(highlightTint);
+      });
+      expect(useResolvedExpandStore.getState().expandedByIssue["issue-1"]?.has("comment-3")).toBe(true);
+    });
+
+    it("reopens a thread the reader collapsed before landing on its reply", async () => {
+      useCommentCollapseStore.setState({ collapsedByIssue: { "issue-1": ["comment-1"] } });
+      mockApiObj.listTimeline.mockResolvedValue([
+        ...mockTimeline,
+        {
+          type: "comment",
+          id: "reply-2",
+          actor_type: "member",
+          actor_id: "user-1",
+          content: "Pushed a fix",
+          parent_id: "comment-1",
+          created_at: "2026-01-16T01:00:00Z",
+          updated_at: "2026-01-16T01:00:00Z",
+          comment_type: "comment",
+        } as TimelineEntry,
+      ]);
+
+      renderIssueDetail();
+
+      const nav = await screen.findByRole("navigation", { name: "Jump to comment thread" });
+      expect(document.getElementById("comment-reply-2")).toBeNull();
+      fireEvent.click(within(nav).getByRole("button", { name: /: Pushed a fix$/ }));
+
+      await waitFor(() => {
+        expect(document.getElementById("comment-reply-2")?.className).toContain(highlightTint);
+      });
+      expect(useCommentCollapseStore.getState().isCollapsed("issue-1", "comment-1")).toBe(false);
+    });
   });
 
   it("sends empty description when editor is cleared", async () => {

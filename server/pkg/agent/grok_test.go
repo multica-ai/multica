@@ -1192,27 +1192,20 @@ func TestGrokThinkingCatalogIsPerModel(t *testing.T) {
 	}
 }
 
-func TestGrokValidateThinkingLevelUsesPerModelCatalog(t *testing.T) {
-	for _, tc := range []struct {
-		model string
-		level string
-		want  bool
-	}{
-		{model: "grok-4.6", level: "high", want: true},
-		{model: "grok-4.6", level: "low", want: true},
-		{model: "grok-4.6", level: "xhigh", want: true},
-		{model: "grok-4.5", level: "low", want: true},
-		{model: "grok-4.5", level: "none", want: false},
-		{model: "grok-4.5", level: "xhigh", want: false},
-		{model: "grok-composer-2.5-fast", level: "low", want: false},
-		{model: "future-grok", level: "high", want: false},
+// The static Grok list only shapes the fallback picker. A saved level is never
+// judged against it — not even where it disagrees with the list — because a
+// stand-in cannot say what the installed CLI accepts (MUL-7691).
+func TestGrokFallbackCatalogPassesThinkingLevelThrough(t *testing.T) {
+	for _, tc := range []struct{ model, level string }{
+		{model: "grok-4.6", level: "high"},
+		{model: "grok-4.5", level: "xhigh"},
+		{model: "grok-composer-2.5-fast", level: "low"},
+		{model: "future-grok", level: "high"},
+		{model: "", level: "high"},
 	} {
 		got, err := ValidateThinkingLevel(context.Background(), "grok", Command{Path: "/nonexistent/grok"}, tc.model, tc.level)
-		if err != nil {
-			t.Fatalf("ValidateThinkingLevel(%q, %q): %v", tc.model, tc.level, err)
-		}
-		if got != tc.want {
-			t.Errorf("ValidateThinkingLevel(%q, %q) = %v, want %v", tc.model, tc.level, got, tc.want)
+		if got || !errors.Is(err, errUnverifiedCatalog) {
+			t.Errorf("ValidateThinkingLevel(%q, %q) = (%v, %v), want errUnverifiedCatalog", tc.model, tc.level, got, err)
 		}
 	}
 }

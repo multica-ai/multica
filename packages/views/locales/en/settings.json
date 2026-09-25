@@ -168,6 +168,12 @@
     "sticky_comment_bar": {
       "title": "Pin comment bar to bottom"
     },
+    "running_agent_reply": {
+      "title": "When replying to a running agent",
+      "steer": "Add to current run",
+      "after_run": "Start after this run",
+      "hint": "Sets the default only. You can still change it for any message before sending."
+    },
     "issue_title": "Issue creation",
     "comments_title": "Comments",
     "device_hint": "Saved on this device.",

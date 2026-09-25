@@ -579,9 +579,11 @@ Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assig
 ```bash
 multica issue update <id> --title "New title" --priority urgent
 multica issue update <id> --position 4.5
+multica issue update <id> --attachment revised.png
 ```
 
 `--position` sets the raw ordering value within the board column (lower sorts first). For relative moves, `issue reorder` is easier because it works out the value for you.
+`--attachment` uploads a local file and appends its Markdown reference to the end of the issue description. Repeat the flag to attach multiple files. To replace an existing image, also use `--description-file` to remove the old reference from the description.
 
 ### Reorder Issue
 

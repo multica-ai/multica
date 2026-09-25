@@ -18,6 +18,7 @@ import { constants } from "node:fs";
 import { execFileSync, execSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { deriveVersion } from "./package.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..", "..");
@@ -74,11 +75,7 @@ const srcBinary = join(serverDir, "bin", `${goos}-${goarch}`, binName);
 const destDir = join(repoRoot, "apps", "desktop", "resources", "bin");
 const destBinary = join(destDir, binName);
 
-// Hand git arguments straight to the binary (no shell). A match pattern like
-// `v[0-9]*` must reach git as one literal argument; routing it through a shell
-// string breaks on Windows, where cmd.exe keeps the POSIX single quotes and
-// git matches no tag — degrading the bundled CLI's version to the
-// 0.0.0-g<hash> fallback.
+// Hand git arguments straight to the binary (no shell) on every platform.
 function git(...args) {
   try {
     return execFileSync("git", args, { encoding: "utf-8" }).trim();
@@ -106,9 +103,7 @@ async function exists(p) {
 }
 
 if (hasGo()) {
-  const version =
-    git("describe", "--tags", "--match", "v[0-9]*", "--always", "--dirty") ||
-    "dev";
+  const version = deriveVersion() || "dev";
   const commit = git("rev-parse", "--short", "HEAD") || "unknown";
   const date = new Date().toISOString().replace(/\.\d+Z$/, "Z");
   const ldflags = `-X main.version=${version} -X main.commit=${commit} -X main.date=${date}`;

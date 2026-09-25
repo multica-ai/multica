@@ -168,6 +168,12 @@
     "sticky_comment_bar": {
       "title": "댓글 입력란을 하단에 고정"
     },
+    "running_agent_reply": {
+      "title": "실행 중인 에이전트에 답장할 때",
+      "steer": "현재 실행에 추가",
+      "after_run": "이번 실행 후 시작",
+      "hint": "기본값만 정합니다. 보내기 전에 메시지마다 바꿀 수 있습니다."
+    },
     "issue_title": "태스크 생성",
     "comments_title": "댓글",
     "device_hint": "현재 기기에 저장됩니다.",

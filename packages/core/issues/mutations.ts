@@ -37,7 +37,7 @@ import {
 } from "./delete-cache";
 import { useWorkspaceId } from "../hooks";
 import { useRecentContextStore } from "../chat/recent-context-store";
-import { useRecentIssuesStore, useTaskSupplementDraftStore } from "./stores";
+import { useRecentIssuesStore } from "./stores";
 import type { InboxItem, Issue, IssueReaction } from "../types";
 import type {
   CreateCommentSubIssueManualRequest,
@@ -832,13 +832,16 @@ export function useCreateComment(issueId: string) {
       parentId,
       attachmentIds,
       suppressAgentIds,
+      steerTaskIds,
     }: {
       content: string;
       type?: string;
       parentId?: string;
       attachmentIds?: string[];
       suppressAgentIds?: string[];
-    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds),
+      /** Running turns this comment goes into instead of a follow-up run. */
+      steerTaskIds?: string[];
+    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds, steerTaskIds),
     onSuccess: (comment) => {
       if (comment.issue_revision) {
         onIssueAuxiliaryRevision(qc, wsId, issueId, comment.issue_revision);
@@ -858,15 +861,24 @@ export function useCreateComment(issueId: string) {
         attachments: comment.attachments ?? [],
         created_at: comment.created_at,
         updated_at: comment.updated_at,
+        supplements: comment.supplements,
       };
+      const steered = !!comment.supplements?.length;
       // Dedupe by id: the `comment:created` WS event may have already added
       // this entry from the broadcast path before this onSuccess fires. Skip
-      // the append if the entry is already in the cache.
+      // the append if the entry is already in the cache — but keep the
+      // steering receipts, which that broadcast predates.
       qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
         if (!old) return [entry];
-        if (old.some((e) => e.id === entry.id)) return old;
+        if (old.some((e) => e.id === entry.id)) {
+          return steered
+            ? old.map((e) => (e.id === entry.id && !e.supplements?.length ? { ...e, supplements: entry.supplements } : e))
+            : old;
+        }
         return sortTimelineEntriesAsc([...old, entry]);
       });
+      // A steered turn now lists this comment among its inputs.
+      if (steered) qc.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
       // Posting a comment changes the trigger answer itself (the enqueued
       // task now dedupes follow-up triggers), so cached previews for this
       // issue are stale the moment the create lands.
@@ -1205,48 +1217,6 @@ export function useCancelIssueRun(issueId: string) {
   return useMutation({
     mutationFn: (taskId: string) => api.cancelTask(issueId, taskId),
     onSuccess: () => client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) }),
-  });
-}
-
-export function useCreateTaskSupplement(issueId: string) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ taskId, content, clientRequestId }: {
-      taskId: string;
-      content: string;
-      clientRequestId: string;
-    }) => api.createTaskSupplement(issueId, taskId, content, clientRequestId),
-    onSuccess: (comment, { taskId, clientRequestId }) => {
-      // Re-anchoring the run can unmount its composer before this response.
-      // Clear the submitted draft here, without discarding any newer edits.
-      const drafts = useTaskSupplementDraftStore.getState();
-      if (drafts.drafts[taskId]?.clientRequestId === clientRequestId) {
-        drafts.clear(taskId);
-      }
-      const entry: TimelineEntry = {
-        type: "comment",
-        id: comment.id,
-        actor_type: comment.author_type,
-        actor_id: comment.author_id,
-        content: comment.content,
-        parent_id: comment.parent_id,
-        comment_type: comment.type,
-        reactions: comment.reactions ?? [],
-        attachments: comment.attachments ?? [],
-        created_at: comment.created_at,
-        updated_at: comment.updated_at,
-        supplement_task_id: comment.supplement_task_id,
-        supplement_status: comment.supplement_status,
-        supplement_failure_reason: comment.supplement_failure_reason,
-        supplement_delivered_at: comment.supplement_delivered_at,
-      };
-      client.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
-        if (!old) return [entry];
-        if (old.some((item) => item.id === entry.id)) return old;
-        return sortTimelineEntriesAsc([...old, entry]);
-      });
-      client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
-    },
   });
 }
 
