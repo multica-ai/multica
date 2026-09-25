@@ -988,6 +988,7 @@ export class ApiClient {
     const raw = await this.fetch("/auth/totp/setup-init", { method: "POST" });
     return parseWithFallback(raw, TOTPSetupInitResponseSchema, EMPTY_TOTP_SETUP_INIT_RESPONSE, {
       endpoint: "/auth/totp/setup-init",
+      sensitive: true,
     });
   }
 
@@ -1025,6 +1026,7 @@ export class ApiClient {
     });
     const parsed = parseWithFallback<LoginResponse | null>(raw, TOTPLoginResponseSchema, null, {
       endpoint: "/auth/login-totp",
+      sensitive: true,
     });
     if (!parsed) throw new Error("Malformed login response");
     return parsed;
