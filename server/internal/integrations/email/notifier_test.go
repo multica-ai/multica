@@ -44,6 +44,8 @@ func (f *fakeSender) Calls() []sendCall {
 type fakeQueries struct {
 	emails        map[string]string            // uuidString → email
 	prefs         map[string]map[string]string // uuidString → prefs map
+	prefsRaw      []byte
+	prefsErr      error
 	workspaceSlug string
 }
 
@@ -56,6 +58,12 @@ func (f *fakeQueries) GetUserEmail(ctx context.Context, userID pgtype.UUID) (str
 }
 func (f *fakeQueries) GetNotificationPreference(ctx context.Context,
 	arg GetNotificationPreferenceParams) ([]byte, error) {
+	if f.prefsErr != nil {
+		return nil, f.prefsErr
+	}
+	if f.prefsRaw != nil {
+		return f.prefsRaw, nil
+	}
 	k := uuidString(arg.UserID)
 	if p, ok := f.prefs[k]; ok {
 		b, _ := json.Marshal(p)
@@ -166,6 +174,62 @@ func TestNotifier_SkipsWhenEmailMuted(t *testing.T) {
 	if got := len(sender.Calls()); got != 0 {
 		t.Errorf("expected 0 sends (muted), got %d", got)
 	}
+}
+
+func TestNotifier_SkipsWhenPreferenceLookupFails(t *testing.T) {
+	bus := events.New()
+	sender := &fakeSender{}
+	q := &fakeQueries{
+		emails: map[string]string{
+			`"11111111-1111-1111-1111-111111111111"`: "alice@example.com",
+		},
+		prefsErr: errors.New("database unavailable"),
+	}
+	n := NewNotifier(q, sender, NotifierConfig{Renderer: NewRenderer("")})
+	n.Register(bus)
+
+	publishMemberInboxEvent(bus)
+	n.WaitInflight()
+
+	if got := len(sender.Calls()); got != 0 {
+		t.Errorf("expected 0 sends when preferences cannot be read, got %d", got)
+	}
+}
+
+func TestNotifier_SkipsWhenPreferencesAreMalformed(t *testing.T) {
+	bus := events.New()
+	sender := &fakeSender{}
+	q := &fakeQueries{
+		emails: map[string]string{
+			`"11111111-1111-1111-1111-111111111111"`: "alice@example.com",
+		},
+		prefsRaw: []byte(`{"email_notifications":`),
+	}
+	n := NewNotifier(q, sender, NotifierConfig{Renderer: NewRenderer("")})
+	n.Register(bus)
+
+	publishMemberInboxEvent(bus)
+	n.WaitInflight()
+
+	if got := len(sender.Calls()); got != 0 {
+		t.Errorf("expected 0 sends for malformed preferences, got %d", got)
+	}
+}
+
+func publishMemberInboxEvent(bus *events.Bus) {
+	bus.Publish(events.Event{
+		Type:        protocol.EventInboxNew,
+		WorkspaceID: "22222222-2222-2222-2222-222222222222",
+		Payload: map[string]any{
+			"item": map[string]any{
+				"recipient_type": "member",
+				"recipient_id":   "11111111-1111-1111-1111-111111111111",
+				"type":           "mentioned",
+				"title":          "X",
+				"issue_id":       strPtr("33333333-3333-3333-3333-333333333333"),
+			},
+		},
+	})
 }
 
 func TestNotifier_SkipsNonMemberRecipients(t *testing.T) {

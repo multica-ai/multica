@@ -3,10 +3,12 @@ package email
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -160,11 +162,14 @@ func (n *Notifier) isEmailMuted(ctx context.Context, wsID, userID pgtype.UUID) b
 	raw, err := n.queries.GetNotificationPreference(ctx,
 		GetNotificationPreferenceParams{WorkspaceID: wsID, UserID: userID})
 	if err != nil {
-		return false // missing prefs row = default on
+		// A confirmed missing row means the user still has the default
+		// preferences (email enabled). Any other lookup failure must fail
+		// closed so a transient DB error cannot bypass an explicit opt-out.
+		return !errors.Is(err, pgx.ErrNoRows)
 	}
 	var prefs map[string]string
 	if err := json.Unmarshal(raw, &prefs); err != nil {
-		return false
+		return true
 	}
 	return prefs["email_notifications"] == "muted"
 }
