@@ -15,6 +15,10 @@ interface ConfigState {
   // must be hidden. Defaults to false so unknown / older servers behave like
   // the managed-cloud case.
   workspaceCreationDisabled: boolean;
+  // Email gate: when true, the server has SMTP/Resend configured and can
+  // deliver email notifications. Defaults to false; older servers that omit
+  // the field are treated as "email not configured".
+  emailConfigured: boolean;
   // Self-host-only gate for the Git provider integration (Forgejo / Gitea /
   // GitLab). When false the whole Settings → Integrations "Git providers"
   // section is hidden. Defaults to false so unknown / older servers and the
@@ -48,6 +52,7 @@ interface ConfigState {
     allowSignup: boolean;
     googleClientId?: string;
     workspaceCreationDisabled?: boolean;
+    emailConfigured?: boolean;
     vcsIntegrationAvailable?: boolean;
   }) => void;
   setDaemonConfig: (config: {
@@ -70,6 +75,7 @@ export const configStore = createStore<ConfigState>((set) => ({
   daemonServerUrl: "",
   daemonAppUrl: "",
   workspaceCreationDisabled: false,
+  emailConfigured: false,
   vcsIntegrationAvailable: false,
   featureFlags: {},
   serverVersion: "",
@@ -82,8 +88,16 @@ export const configStore = createStore<ConfigState>((set) => ({
     allowSignup,
     googleClientId = "",
     workspaceCreationDisabled = false,
+    emailConfigured = false,
     vcsIntegrationAvailable = false,
-  }) => set({ allowSignup, googleClientId, workspaceCreationDisabled, vcsIntegrationAvailable }),
+  }) =>
+    set({
+      allowSignup,
+      googleClientId,
+      workspaceCreationDisabled,
+      emailConfigured,
+      vcsIntegrationAvailable,
+    }),
   setDaemonConfig: ({ daemonServerUrl = "", daemonAppUrl = "" }) =>
     set({ daemonServerUrl, daemonAppUrl }),
   setFeatureFlags: (flags = {}) => set({ featureFlags: { ...flags } }),

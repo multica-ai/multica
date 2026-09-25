@@ -30,6 +30,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composiointeg "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
+	"github.com/multica-ai/multica/server/internal/integrations/email"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
@@ -402,6 +403,34 @@ func seatCapacityExecutor(cloudURL string) seatcapacity.Executor {
 func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb redis.UniversalClient, opts RouterOptions) (chi.Router, *handler.Handler) {
 	queries := db.New(pool)
 	emailSvc := service.NewEmailService()
+
+	// Email notification channel — strictly downstream of inbox.
+	// Deep-link base is the public app URL (MULTICA_APP_URL, falling back to
+	// FRONTEND_ORIGIN), where issue pages live — the same base the other
+	// outbound integrations link to. MULTICA_PUBLIC_URL is the API host and
+	// would 404 on issue links in split self-host setups.
+	//
+	// Gated on emailSvc.Configured(): with no transport configured the DEV
+	// stdout fallback would leak notification bodies (recipient + rendered
+	// HTML) to server logs on every inbox row. /api/config already reports
+	// email as unavailable in that case; matching here keeps the two
+	// behaviors consistent.
+	if emailSvc.Configured() {
+		emailNotifier := email.NewNotifier(
+			emailNotifierQueries{q: queries},
+			emailSvc,
+			email.NotifierConfig{
+				Renderer: email.NewRenderer(appURLFromEnv()),
+				Logger:   slog.Default(),
+				// Per-replica spacing between notification sends. Several
+				// replicas sharing one Resend key should scale this up so
+				// notifications leave room for login codes and invitations.
+				SendInterval: envDurationPositive("EMAIL_NOTIFICATION_SEND_INTERVAL", time.Second),
+			},
+		)
+		emailNotifier.Register(bus)
+	}
+
 	daemonHub := opts.DaemonHub
 	if daemonHub == nil {
 		daemonHub = daemonws.NewHub()

@@ -100,6 +100,12 @@ type AppConfig struct {
 	// which is continuously deployed so its users can't act on the version —
 	// and empty for dev builds that aren't stamped via -X main.version.
 	ServerVersion string `json:"server_version,omitempty"`
+
+	// EmailConfigured reports whether the server has an outbound email
+	// transport configured (SMTP_HOST or RESEND_API_KEY). The frontend
+	// Notifications settings page uses this to decide whether to render
+	// the email toggle or an "Unavailable" hint.
+	EmailConfigured bool `json:"email_configured,omitempty"`
 }
 
 // GetConfig is mounted on the public (unauthenticated) route group because
@@ -142,6 +148,9 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 			config.PosthogHost = "https://us.i.posthog.com"
 		}
 	}
+
+	config.EmailConfigured = strings.TrimSpace(os.Getenv("SMTP_HOST")) != "" ||
+		strings.TrimSpace(os.Getenv("RESEND_API_KEY")) != ""
 
 	writeJSON(w, http.StatusOK, config)
 }
