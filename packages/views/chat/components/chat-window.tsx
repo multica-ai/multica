@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "motion/react";
-import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Trash2, Pencil, Loader2, Square } from "lucide-react";
+import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Archive, Pencil, Loader2, Square } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -16,11 +16,22 @@ import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
-import { canAssignAgent } from "@multica/views/issues/components";
-import { api } from "@multica/core/api";
-import { useAgentPresenceDetail, useWorkspaceAgentAvailability } from "@multica/core/agents";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { projectListOptions } from "@multica/core/projects/queries";
+import { canAssignAgent } from "../../issues/components/pickers/assignee-picker";
+import { api, dispatchReasonCode } from "@multica/core/api";
+import {
+  isAgentRuntimeBound,
+  useAgentPresenceDetail,
+  useCustomizeConversationStartersHref,
+  useWorkspaceAgentAvailability,
+} from "@multica/core/agents";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { useAppForeground } from "../../common/use-app-foreground";
+import {
+  RowActionsMenu,
+  handleRowActivationKey,
+  type RowActionItem,
+} from "../../common/row-actions-menu";
 import {
   PickerEmpty,
   PickerItem,
@@ -30,6 +41,9 @@ import {
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { OfflineBanner } from "./offline-banner";
 import { NoAgentBanner } from "./no-agent-banner";
+import { ArchivedAgentBanner } from "./archived-agent-banner";
+import { AgentAccessRevokedBanner } from "./agent-access-revoked-banner";
+import { RuntimeRequiredBanner } from "./runtime-required-banner";
 import {
   chatSessionsOptions,
   chatMessagesPageOptions,
@@ -40,158 +54,79 @@ import {
 } from "@multica/core/chat/queries";
 import {
   useCreateChatSession,
-  useDeleteChatSession,
   useMarkChatSessionRead,
+  useRegenerateChatQuickActions,
+  useSetChatSessionArchived,
+  useSetChatSessionProject,
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
+import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
+import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
+import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
+import { useQuickActionsFailureToast } from "./use-quick-actions-failure-toast";
+import { hideQueuedChatMessages } from "@multica/core/chat/pending";
+import { removeChatMessageFromCaches } from "@multica/core/realtime";
+import { useChatDraftRestore } from "./use-chat-draft-restore";
+import { useChatTaskActions } from "./use-chat-task-actions";
+import { useChatInputFocus } from "./use-chat-input-focus";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
+import { ChatQueue } from "./chat-queue";
+import { EmptyState } from "./chat-empty-state";
+import { SessionRenameInput } from "./session-rename-input";
 import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatContextItems } from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
+import { useVisualViewportKeyboard } from "./use-visual-viewport-keyboard";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
+import {
+  hasInFlightPendingTask,
+  isStillOnComposeTarget,
+  planProjectContextChange,
+  seedAcceptedPendingTask,
+} from "./use-chat-controller";
+import { useChatProjectContextSupport } from "./use-chat-project-context-support";
 import { createLogger } from "@multica/core/logger";
-import type { Agent, ChatMessage, ChatMessagesPage, ChatPendingTask, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
-import { useT } from "../../i18n";
+import type { Agent, Attachment, ChatMessage, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
+import { useLocale, useT } from "../../i18n";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
 const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
 
-function seedChatMessagesPageCache(
-  qc: ReturnType<typeof useQueryClient>,
-  sessionId: string,
-  messages: ChatMessage[],
-) {
-  qc.setQueryData<InfiniteData<ChatMessagesPage>>(
-    chatKeys.messagesPage(sessionId),
-    (old) => old ?? {
-      pages: [{
-        messages,
-        limit: 50,
-        has_more: false,
-        next_cursor: null,
-      }],
-      pageParams: [null],
-    },
-  );
-}
-
-function appendChatMessageToLatestPageCache(
-  qc: ReturnType<typeof useQueryClient>,
-  sessionId: string,
-  message: ChatMessage,
-) {
-  qc.setQueryData<InfiniteData<ChatMessagesPage>>(
-    chatKeys.messagesPage(sessionId),
-    (old) => {
-      if (!old) {
-        return {
-          pages: [{
-            messages: [message],
-            limit: 50,
-            has_more: false,
-            next_cursor: null,
-          }],
-          pageParams: [null],
-        };
-      }
-      if (old.pages.some((page) => page.messages.some((m) => m.id === message.id))) {
-        return old;
-      }
-      return {
-        ...old,
-        pages: old.pages.map((page, index) =>
-          index === 0 ? { ...page, messages: [...page.messages, message] } : page,
-        ),
-      };
-    },
-  );
-}
-
-function removeChatMessageFromPageCache(
-  qc: ReturnType<typeof useQueryClient>,
-  sessionId: string,
-  messageId: string,
-) {
-  qc.setQueryData<InfiniteData<ChatMessagesPage> | undefined>(
-    chatKeys.messagesPage(sessionId),
-    (old) => {
-      if (!old) return old;
-      return {
-        ...old,
-        pages: old.pages.map((page) => ({
-          ...page,
-          messages: page.messages.filter((m) => m.id !== messageId),
-        })),
-      };
-    },
-  );
-}
-
-function removeChatMessageFromCaches(
-  qc: ReturnType<typeof useQueryClient>,
-  sessionId: string,
-  messageId: string,
-) {
-  qc.setQueryData<ChatMessage[]>(
-    chatKeys.messages(sessionId),
-    (old) => old?.filter((m) => m.id !== messageId) ?? old,
-  );
-  removeChatMessageFromPageCache(qc, sessionId, messageId);
-}
-
-function replaceOptimisticChatMessageId(
-  qc: ReturnType<typeof useQueryClient>,
-  sessionId: string,
-  optimisticId: string,
-  messageId: string,
-  taskId: string,
-) {
-  const replace = (messages: ChatMessage[] | undefined) => {
-    if (!messages) return messages;
-    if (messages.some((m) => m.id === messageId)) {
-      return messages.filter((m) => m.id !== optimisticId);
-    }
-    return messages.map((m) =>
-      m.id === optimisticId ? { ...m, id: messageId, task_id: taskId } : m,
-    );
-  };
-
-  qc.setQueryData<ChatMessage[]>(
-    chatKeys.messages(sessionId),
-    replace,
-  );
-  qc.setQueryData<InfiniteData<ChatMessagesPage> | undefined>(
-    chatKeys.messagesPage(sessionId),
-    (old) => {
-      if (!old) return old;
-      return {
-        ...old,
-        pages: old.pages.map((page) => ({
-          ...page,
-          messages: replace(page.messages) ?? page.messages,
-        })),
-      };
-    },
-  );
-}
 
 export function ChatWindow() {
   const { t } = useT("chat");
   const wsId = useWorkspaceId();
   const isOpen = useChatStore((s) => s.isOpen);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const { data: quickActionsPending = null } = useQuery(
+    chatQuickActionsPendingOptions(activeSessionId ?? ""),
+  );
+  // Drop a stuck pending marker (dead daemon / failed supplement) so the pill
+  // spinner stops and a later refresh starts clean (MUL-5149).
+  useQuickActionsPendingTimeout(activeSessionId ?? null, quickActionsPending);
+  // Toast when an accepted refresh later fails in the daemon (async half).
+  useQuickActionsFailureToast(activeSessionId ?? null);
+  const regenerateQuickActions = useRegenerateChatQuickActions();
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
+  const selectedProjectId = useChatStore((s) => s.selectedProjectId);
   const setOpen = useChatStore((s) => s.setOpen);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
+  const setSelectedProjectId = useChatStore((s) => s.setSelectedProjectId);
   const user = useAuthStore((s) => s.user);
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   // Single sessions cache — eliminates the separate active/all queries
   // that used to drift during the WS-invalidate window.
-  const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
+  const { data: sessions = [], isSuccess: sessionsLoaded } = useQuery(
+    chatSessionsOptions(wsId),
+  );
+  const { data: projects = [], isSuccess: projectsLoaded } = useQuery(
+    projectListOptions(wsId),
+  );
   const {
     data: rawMessagePages,
     isLoading: messagesLoading,
@@ -206,33 +141,73 @@ export function ChatWindow() {
   // it starts from a large stable base and only subtracts the count of loaded
   // prepended rows, so concurrent server inserts cannot drift the scroll anchor.
   const messagePages = activeSessionId ? rawMessagePages?.pages ?? [] : [];
-  const messages = [...messagePages].reverse().flatMap((page) => page.messages);
-  const olderMessageCount = messagePages.slice(1).reduce((sum, page) => sum + page.messages.length, 0);
-  const firstItemIndex = messages.length > 0
-    ? CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX - olderMessageCount
-    : 0;
+  const allMessages = [...messagePages].reverse().flatMap((page) => page.messages);
   // Skeleton only shows for an un-cached session fetch. Cached switches
   // return data synchronously — no flash. `enabled: false` (new chat)
-  // keeps isLoading false so the starter prompts aren't hidden.
-  const showSkeleton = !!activeSessionId && messagesLoading;
-
+  // keeps isLoading false so the conversation starters aren't hidden.
   // Server-authoritative pending task. Survives refresh / reopen / session
   // switch because it's keyed on sessionId in the Query cache; WS events
   // (chat:message / chat:done / task:*) keep it invalidated in real time.
   //
   // This is the SOLE source for pendingTaskId — no mirror in the store.
-  const { data: pendingTask } = useQuery(
+  const { data: pendingTask, isLoading: pendingTaskLoading } = useQuery(
     pendingChatTaskOptions(activeSessionId ?? ""),
   );
+  const showSkeleton =
+    !!activeSessionId && (messagesLoading || pendingTaskLoading);
+  const messages = hideQueuedChatMessages(allMessages, pendingTask);
+  const olderMessageCount = messagePages.slice(1).reduce(
+    (sum, page) => sum + page.messages.length,
+    0,
+  );
+  const firstItemIndex = messages.length > 0
+    ? CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX - olderMessageCount
+    : 0;
   const pendingTaskId = pendingTask?.task_id ?? null;
   const stopRequestedBeforeTaskRef = useRef(false);
-  const [restoreDraftRequest, setRestoreDraftRequest] = useState<{
-    id: string;
+  // Durable deferred-cancellation draft restores (#5219). Same hook as the chat
+  // page controller — the skip/apply/consume/reconcile state machine must not
+  // diverge between the two composers.
+  //
+  // Gated on isOpen AND app foreground: this window stays MOUNTED when closed
+  // (it is only hidden, see isVisible below), and isOpen alone is also true for a
+  // backgrounded browser tab. Its ChatInput would otherwise adopt and consume a
+  // restore with nobody looking at it — stealing the prompt from the composer the
+  // user is actually waiting on, possibly on another device. Only a composer the
+  // user can actually see claims; a re-foregrounded window recovers on its next
+  // fetch. (appForeground also gates auto mark-read below.)
+  const appForeground = useAppForeground();
+  const { restoreDraftRequest, enqueueLocalRestore, handleRestoreDraftApplied } =
+    useChatDraftRestore(activeSessionId, isOpen && appForeground);
+  const {
+    cancelChatTask,
+    handleEditQueuedTask,
+    handleRemoveQueuedTask,
+    handleClearQueuedTasks,
+    handleSendQueuedTaskNow,
+  } = useChatTaskActions(activeSessionId, enqueueLocalRestore);
+  // Nonce handed to ChatInput to pull focus into the compose box: when a new
+  // chat starts (⊕ or switching agent), and whenever the window itself opens.
+  const { focusRequest, requestInputFocus } = useChatInputFocus(isOpen);
+  const [conversationStarterRequest, setConversationStarterRequest] = useState<{
+    id: number;
     content: string;
   } | null>(null);
-  const handleRestoreDraftConsumed = useCallback(() => {
-    setRestoreDraftRequest(null);
-  }, []);
+  const nextConversationStarterRequestIdRef = useRef(0);
+  const prefillConversationStarter = useCallback(
+    (prompt: string) => {
+      setConversationStarterRequest({
+        id: ++nextConversationStarterRequestIdRef.current,
+        content: prompt,
+      });
+      requestInputFocus();
+    },
+    [requestInputFocus],
+  );
+  const handleConversationStarterApplied = useCallback(
+    () => setConversationStarterRequest(null),
+    [],
+  );
 
   // Legacy archived sessions (the old soft-archive feature was removed but
   // pre-existing rows with status='archived' may still exist) are excluded
@@ -242,10 +217,24 @@ export function ChatWindow() {
     ? sessions.find((s) => s.id === activeSessionId)
     : null;
   const isSessionArchived = currentSession?.status === "archived";
+  const candidateProjectId = currentSession
+    ? currentSession.project_id ?? null
+    : selectedProjectId;
+  const activeProjectId = candidateProjectId &&
+    (!projectsLoaded || projects.some((project) => project.id === candidateProjectId))
+    ? candidateProjectId
+    : null;
+
+  useEffect(() => {
+    if (!projectsLoaded || !selectedProjectId) return;
+    if (projects.some((project) => project.id === selectedProjectId)) return;
+    setSelectedProjectId(null);
+  }, [projectsLoaded, projects, selectedProjectId, setSelectedProjectId]);
 
   const qc = useQueryClient();
   const createSession = useCreateChatSession();
   const markRead = useMarkChatSessionRead();
+  const setSessionProject = useSetChatSessionProject();
 
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
@@ -253,11 +242,44 @@ export function ChatWindow() {
     (a) => !a.archived_at && canAssignAgent(a, user?.id, memberRole),
   );
 
-  // Resolve selected agent: stored preference → first available
+  // The agent bound to the OPEN session, resolved from the full agent list
+  // (archived included). An archived agent is filtered out of availableAgents,
+  // so resolving only from that list would make an archived-agent session
+  // render some *other* available agent — wrong avatar/name and a send that
+  // targets the wrong agent. Binding to the session's real agent keeps it
+  // honest; the archived state then makes the conversation read-only.
+  const sessionAgent = currentSession
+    ? agents.find((a) => a.id === currentSession.agent_id) ?? null
+    : null;
+  const isAgentArchived = !!sessionAgent?.archived_at;
+
+  // Resolve selected agent: open session's agent → stored preference → first
+  // available. New chats have no session, so they fall through to the picker.
   const activeAgent =
+    sessionAgent ??
     availableAgents.find((a) => a.id === selectedAgentId) ??
     availableAgents[0] ??
     null;
+  const activeAgentRuntimeBound =
+    !!activeAgent && isAgentRuntimeBound(activeAgent);
+
+  // A session outlives the permission that created it: the agent can be flipped
+  // to personal, change owner, or drop this member from its allow-list, and the
+  // server then refuses every send with `invocation_not_allowed` while still
+  // serving the transcript (MUL-4525). Judge the SESSION's agent, not just the
+  // picker list, so the composer goes read-only up front rather than after the
+  // user types (MUL-6380). Mirrors use-chat-controller.ts.
+  const isAgentAccessRevoked =
+    !!activeAgent && !canAssignAgent(activeAgent, user?.id, memberRole);
+
+  // "Customize" under the starter buttons — the only place the empty state
+  // admits that those buttons are configuration at all.
+  const customizeConversationStartersHref = useCustomizeConversationStartersHref(
+    activeAgent,
+    wsId,
+  );
+
+  const projectContextSupport = useChatProjectContextSupport(wsId, activeAgent);
 
   // Three-state availability — "loading" stays neutral (no banner, no
   // disable) so the input doesn't flash a fake "no agent" state in the
@@ -294,31 +316,45 @@ export function ChatWindow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
   }, []);
 
-  // Open intent is fully driven by `activeSessionId` in storage — no mount
-  // restore, no self-heal. Adding either reintroduces a "two signals
-  // describing one fact" race (the previous self-heal mis-cleared the
-  // freshly-created session because allSessions was still stale during the
-  // post-create invalidate-refetch window).
+  // Self-heal a dangling `activeSessionId` (persisted / restored from storage)
+  // that points at a session which was deleted or lost access: once the
+  // sessions list has loaded and doesn't contain it — with no in-flight
+  // pending task exempting a just-created session — clear it so the
+  // floating window shows the new-chat state instead of an editable empty chat
+  // whose send would POST into a nonexistent session. Same fix the shared
+  // controller applies for the tab (kept in sync via `hasInFlightPendingTask`).
+  // The earlier "no self-heal" note was about a naive version keyed on stale
+  // `allSessions`; the in-flight-pending-task signal here exempts the
+  // freshly-created session (handleSend seeds its pending task from the send
+  // response BEFORE setActiveSession), so it is never mistaken for stale.
+  useEffect(() => {
+    if (!activeSessionId || !sessionsLoaded) return;
+    if (sessions.some((s) => s.id === activeSessionId)) return;
+    if (hasInFlightPendingTask(qc, activeSessionId)) return;
+    uiLogger.info("clearing dangling activeSessionId (floating)", { sessionId: activeSessionId });
+    setActiveSession(null);
+  }, [activeSessionId, sessionsLoaded, sessions, qc, setActiveSession]);
 
   // WS events are handled globally in useRealtimeSync — the query cache
   // stays current even when this window is closed. See packages/core/realtime/.
 
   // Auto mark-as-read whenever the user is looking at a session with unread
-  // state: window open + a session active + has_unread → PATCH.
-  // has_unread comes from the list query; WS handlers invalidate it on
-  // chat:done so a reply arriving while the user watches triggers this
-  // effect again and is instantly cleared.
+  // state: window open + app in the foreground + a session active + has_unread
+  // → PATCH. has_unread comes from the list query; WS handlers invalidate it on
+  // chat:done so a reply arriving while the user watches triggers this effect
+  // again and is instantly cleared. `appForeground` gates the "is looking"
+  // assumption: a reply landing while the window is open but the app is
+  // backgrounded must stay unread so the sidebar badges it (MUL-4485), then
+  // clears when the user refocuses and this effect re-runs.
   const currentHasUnread =
     sessions.find((s) => s.id === activeSessionId)?.has_unread ?? false;
   useEffect(() => {
-    if (!isOpen || !activeSessionId) return;
+    if (!isOpen || !appForeground || !activeSessionId) return;
     if (!currentHasUnread) return;
     uiLogger.info("auto markRead", { sessionId: activeSessionId });
     markRead.mutate(activeSessionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- markRead ref stable
-  }, [isOpen, activeSessionId, currentHasUnread]);
-
-  const { uploadWithToast } = useFileUpload(api);
+  }, [isOpen, appForeground, activeSessionId, currentHasUnread]);
 
   // Lazy-creates a chat_session the first time the user needs an id —
   // either to send a message or to attach an uploaded file. Pulled out of
@@ -347,7 +383,18 @@ export function ChatWindow() {
   const sessionPromiseRef = useRef<Promise<string | null> | null>(null);
   const ensureSession = useCallback(
     async (titleSeed: string): Promise<string | null> => {
-      if (activeSessionId) return activeSessionId;
+      // Trust the current id only when it's real: in the loaded list, or a
+      // just-created one still awaiting the refetch (has an optimistic write).
+      // A dangling id (deleted / no access) must not be treated as an existing
+      // session — fall through and create a fresh one instead of POSTing 404.
+      if (
+        activeSessionId &&
+        (!sessionsLoaded ||
+          sessions.some((s) => s.id === activeSessionId) ||
+          hasInFlightPendingTask(qc, activeSessionId))
+      ) {
+        return activeSessionId;
+      }
       if (!activeAgent) return null;
       if (sessionPromiseRef.current) return sessionPromiseRef.current;
 
@@ -356,6 +403,7 @@ export function ChatWindow() {
           const session = await createSession.mutateAsync({
             agent_id: activeAgent.id,
             title: titleSeed.slice(0, 50),
+            project_id: activeProjectId,
           });
           return session.id;
         } finally {
@@ -365,79 +413,61 @@ export function ChatWindow() {
       sessionPromiseRef.current = promise;
       return promise;
     },
-    [activeSessionId, activeAgent, createSession],
+    [
+      activeSessionId,
+      activeAgent,
+      activeProjectId,
+      createSession,
+      sessions,
+      sessionsLoaded,
+      qc,
+    ],
   );
 
-  const handleUploadFile = useCallback(
-    async (file: File) => {
-      const sessionId = await ensureSession("");
-      if (!sessionId) return null;
-      // Prime the messages cache as empty before flipping activeSessionId so
-      // ChatMessageList mounts directly (no Skeleton frame). Skip the write
-      // when an entry already exists — a concurrent handleSend may have
-      // seeded an optimistic message we must not clobber.
-      seedChatMessagesPageCache(qc, sessionId, []);
-      qc.setQueryData<ChatMessage[]>(
-        chatKeys.messages(sessionId),
-        (old) => old ?? [],
-      );
-      setActiveSession(sessionId);
-      return uploadWithToast(file, { chatSessionId: sessionId });
-    },
-    [ensureSession, uploadWithToast, qc, setActiveSession],
-  );
-
-  const cancelChatTask = useCallback(
-    async (
-      taskId: string,
-      sessionId: string,
-      options: { restoreDraftToInput: boolean; source: string },
-    ) => {
-      apiLogger.info("cancelTask.start", {
-        taskId,
-        sessionId,
-        source: options.source,
-      });
-      qc.setQueryData(chatKeys.pendingTask(sessionId), {});
-
-      try {
-        const result = await api.cancelTaskById(taskId);
-        const restored = result.cancelled_chat_message;
-        if (restored?.restore_to_input) {
-          removeChatMessageFromCaches(qc, restored.chat_session_id, restored.message_id);
-          if (options.restoreDraftToInput && restored.chat_session_id === sessionId) {
-            setRestoreDraftRequest({
-              id: restored.message_id,
-              content: restored.content,
-            });
-          }
-        }
-        qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-        qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
-        apiLogger.info("cancelTask.success", {
-          taskId,
-          sessionId,
-          restoredToInput: !!restored?.restore_to_input && options.restoreDraftToInput,
-        });
-        return result;
-      } catch (err) {
-        apiLogger.warn("cancelTask.error (task may have already finished)", {
-          taskId,
-          sessionId,
-          err,
-        });
-        qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-        qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
-        return null;
-      }
-    },
-    [qc],
-  );
+  // Upload transport moved into the coordinated-upload engine inside ChatInput
+  // (MUL-5181 L2); the host only says whether the affordance exists. Uploads
+  // remain workspace-scoped drafts — sending is still the point where a
+  // session is created (if needed) and attachment_ids bind to the message.
 
   const handleSend = useCallback(
-    async (content: string, attachmentIds?: string[]): Promise<boolean> => {
+    async (
+      content: string,
+      attachmentIds?: string[],
+      commitInput?: (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => void,
+      draftAttachments: Attachment[] = [],
+    ): Promise<boolean> => {
       if (!activeAgent) {
         apiLogger.warn("sendChatMessage skipped: no active agent");
+        return false;
+      }
+      // Read-only conversation: the agent is retired and can no longer pick up
+      // work, so refuse to enqueue a task that would sit orphaned forever. The
+      // input is disabled in this state; this is the belt-and-braces guard.
+      if (isAgentArchived) {
+        apiLogger.warn("sendChatMessage skipped: agent is archived", {
+          sessionId: activeSessionId,
+          agentId: activeAgent.id,
+        });
+        return false;
+      }
+      // Invoke permission was revoked while this session was open — the server
+      // would refuse before persisting anything. Keep the draft, skip the
+      // roundtrip. The input is disabled here; belt-and-braces guard.
+      if (isAgentAccessRevoked) {
+        apiLogger.warn("sendChatMessage skipped: invoke permission revoked", {
+          sessionId: activeSessionId,
+          agentId: activeAgent.id,
+        });
+        return false;
+      }
+      if (pendingTaskId && pendingTask?.supports_queue !== true) {
+        apiLogger.warn("sendChatMessage skipped: server does not support follow-up queues", {
+          sessionId: activeSessionId,
+        });
+        return false;
+      }
+      if (!activeAgentRuntimeBound) {
+        toast.error(t(($) => $.input.runtime_required_toast));
         return false;
       }
 
@@ -458,7 +488,16 @@ export function ChatWindow() {
         sessionId = await ensureSession(finalContent);
       } catch (err) {
         apiLogger.error("sendChatMessage.ensureSession.error", err);
-        toast.error(t(($) => $.input.send_failed_toast));
+        const reason = dispatchReasonCode(err);
+        toast.error(
+          reason === "invocation_not_allowed"
+            ? t(($) => $.input.send_blocked_toast)
+            : reason === "agent_runtime_required"
+              ? t(($) => $.input.runtime_required_toast)
+              : reason === "runtime_access_denied"
+                ? t(($) => $.input.runtime_access_denied_toast)
+                : t(($) => $.input.send_failed_toast),
+        );
         return false;
       }
       if (!sessionId) {
@@ -466,55 +505,27 @@ export function ChatWindow() {
         return false;
       }
 
-      // Optimistic burst — everything that gives the user "I sent a message
-      // and the agent is now working" feedback fires BEFORE the HTTP roundtrip.
-      // Pre-#status-pill the pending-task seed lived after `await
-      // sendChatMessage` and the pill blinked in a few hundred ms after the
-      // user's message — small but visible "did it actually send?" gap.
-      const sentAt = new Date().toISOString();
-      const optimistic: ChatMessage = {
-        id: `optimistic-${Date.now()}`,
-        chat_session_id: sessionId,
-        role: "user",
-        content: finalContent,
-        task_id: null,
-        created_at: sentAt,
-      };
-      // Seed cache BEFORE flipping activeSessionId. If we set the active
-      // session first, useQuery's first subscription to the new key sees no
-      // cached data and renders ChatMessageSkeleton for one frame — the
-      // "new-chat first-message" white flash. Priming the cache first means
-      // the very first read after activeSessionId flips hits data
-      // synchronously and ChatMessageList mounts directly.
-      appendChatMessageToLatestPageCache(qc, sessionId, optimistic);
-      qc.setQueryData<ChatMessage[]>(
-        chatKeys.messages(sessionId),
-        (old) => (old ? [...old, optimistic] : [optimistic]),
-      );
-      // Seed the pending-task with a temporary id so the StatusPill mounts
-      // and starts ticking the instant the user clicks send. Real task_id
-      // and server-authoritative created_at land below; until then the pill
-      // is anchored to the local clock (drift is the request RTT, ~50–200ms,
-      // which doesn't change the rendered "Ns" value).
-      qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId), {
-        task_id: `optimistic-${optimistic.id}`,
-        status: "queued",
-        created_at: sentAt,
-      });
-      // Cache primed → safe to publish the new active session. Idempotent
-      // when the session was already active (existing-conversation send).
-      setActiveSession(sessionId);
-      apiLogger.debug("sendChatMessage.optimistic", { sessionId, optimisticId: optimistic.id });
-
+      // Await-then-render: the composer keeps the user's text and attachments
+      // in place (editor locked, button spinning via `submitting`) until the
+      // server accepts the send. Nothing is written into the caches, and the
+      // draft is never cleared, before the roundtrip settles — a slow send never
+      // reads as "posted but the box is still full", and a rejected one keeps
+      // the draft for retry (ChatInput never cleared it).
       let result;
       try {
         result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
       } catch (err) {
-        apiLogger.error("sendChatMessage.error.rollback", { sessionId, optimisticId: optimistic.id, err });
-        stopRequestedBeforeTaskRef.current = false;
-        removeChatMessageFromCaches(qc, sessionId, optimistic.id);
-        qc.setQueryData(chatKeys.pendingTask(sessionId), {});
-        toast.error(t(($) => $.input.send_failed_toast));
+        apiLogger.error("sendChatMessage.error", { sessionId, err });
+        const reason = dispatchReasonCode(err);
+        toast.error(
+          reason === "invocation_not_allowed"
+            ? t(($) => $.input.send_blocked_toast)
+            : reason === "agent_runtime_required"
+              ? t(($) => $.input.runtime_required_toast)
+              : reason === "runtime_access_denied"
+                ? t(($) => $.input.runtime_access_denied_toast)
+                : t(($) => $.input.send_failed_toast),
+        );
         return false;
       }
       apiLogger.info("sendChatMessage.success", {
@@ -522,15 +533,52 @@ export function ChatWindow() {
         messageId: result.message_id,
         taskId: result.task_id,
       });
-      replaceOptimisticChatMessageId(qc, sessionId, optimistic.id, result.message_id, result.task_id);
-      // Replace the temporary task_id with the server's real one (so the WS
-      // task: handlers can match against it) and snap the anchor to the
-      // server's created_at — keeping the elapsed-seconds reading stable.
-      qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId), {
+
+      // Render the accepted message from the server response. Seed the message
+      // caches BEFORE flipping activeSessionId: if we set the active session
+      // first, useQuery's first subscription to the new key sees no cached data
+      // and renders ChatMessageSkeleton for one frame — the "new-chat
+      // first-message" white flash. Priming the cache first means the very first
+      // read after activeSessionId flips hits data synchronously and
+      // ChatMessageList mounts directly. Seed the pending-task from the server's
+      // real id + created_at so the StatusPill mounts anchored to the true clock
+      // (no local-clock drift, no backwards snap) and the stale-session self-heal
+      // exempts this just-created session until the sessions-list refetch lands.
+      const sent: ChatMessage = {
+        id: result.message_id,
+        chat_session_id: sessionId,
+        role: "user",
+        content: finalContent,
         task_id: result.task_id,
-        status: "queued",
         created_at: result.created_at,
+        attachments: draftAttachments,
+      };
+      // Single door into the message caches (MUL-5711): idempotent by id, so
+      // this row and the chat:message echo of the same send converge in either
+      // arrival order, and this richer row (it carries the draft attachments)
+      // is never downgraded by the echo, which has no attachments field.
+      upsertChatMessageToCaches(qc, sessionId, sent, { seedIfMissing: true });
+      seedAcceptedPendingTask(qc, sessionId, {
+        task_id: result.task_id,
+        created_at: result.created_at,
+        message_id: result.message_id,
+        content: finalContent,
+        supports_queue: result.supports_queue,
+        queued: result.queued,
       });
+      // Cache primed → publish the new active session, but only if the user
+      // hasn't navigated away mid-send. Compare the live store against the
+      // closure-captured target; see isStillOnComposeTarget for the rule, which
+      // this floating window shares with the chat tab's controller. commitInput
+      // clears the sent draft, and scrubs the shared editor only when the user
+      // is still on the session they sent from.
+      const live = useChatStore.getState();
+      const stillOnSourceSession = isStillOnComposeTarget(live.activeSessionId, activeSessionId);
+      if (stillOnSourceSession) {
+        setActiveSession(sessionId);
+      }
+      commitInput?.({ extraDraftKeys: [sessionId], clearEditor: stillOnSourceSession });
+
       if (stopRequestedBeforeTaskRef.current) {
         stopRequestedBeforeTaskRef.current = false;
         await cancelChatTask(result.task_id, sessionId, {
@@ -539,6 +587,22 @@ export function ChatWindow() {
         });
         return false;
       }
+      // The server reports which attachment ids it actually bound. Diff
+      // against what we requested so a silent bind failure surfaces to the
+      // user — no extra fetch. Skip the check on servers that predate the
+      // field (attachment_ids undefined) rather than false-alarm.
+      if (attachmentIds && attachmentIds.length > 0 && result.attachment_ids) {
+        const boundIds = new Set(result.attachment_ids);
+        const missing = attachmentIds.filter((id) => !boundIds.has(id));
+        if (missing.length > 0) {
+          apiLogger.warn("sendChatMessage.attachments missing after send", {
+            sessionId,
+            messageId: result.message_id,
+            missing,
+          });
+          toast.error(t(($) => $.input.attachment_bind_failed_toast));
+        }
+      }
       qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
       qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
       return true;
@@ -546,6 +610,11 @@ export function ChatWindow() {
     [
       activeSessionId,
       activeAgent,
+      activeAgentRuntimeBound,
+      isAgentArchived,
+      isAgentAccessRevoked,
+      pendingTask,
+      pendingTaskId,
       ensureSession,
       cancelChatTask,
       qc,
@@ -586,10 +655,25 @@ export function ChatWindow() {
         previousSessionId: activeSessionId,
       });
       setSelectedAgentId(agent.id);
+      // Preserve an explicitly chosen project while composing an unsent chat,
+      // but never inherit project context from the historical session being
+      // left behind.
+      setSelectedProjectId(currentSession ? null : activeProjectId);
       // Reset session when switching agent
       setActiveSession(null);
+      requestInputFocus();
     },
-    [activeAgent, selectedAgentId, activeSessionId, setSelectedAgentId, setActiveSession],
+    [
+      activeAgent,
+      selectedAgentId,
+      activeSessionId,
+      activeProjectId,
+      currentSession,
+      setSelectedAgentId,
+      setSelectedProjectId,
+      setActiveSession,
+      requestInputFocus,
+    ],
   );
 
   const handleNewChat = useCallback(() => {
@@ -597,8 +681,16 @@ export function ChatWindow() {
       previousSessionId: activeSessionId,
       previousPendingTask: pendingTaskId,
     });
+    setSelectedProjectId(null);
     setActiveSession(null);
-  }, [activeSessionId, pendingTaskId, setActiveSession]);
+    requestInputFocus();
+  }, [
+    activeSessionId,
+    pendingTaskId,
+    setSelectedProjectId,
+    setActiveSession,
+    requestInputFocus,
+  ]);
 
   const handleSelectSession = useCallback(
     (session: ChatSession) => {
@@ -615,6 +707,47 @@ export function ChatWindow() {
       setActiveSession(session.id);
     },
     [activeAgent, setSelectedAgentId, setActiveSession],
+  );
+
+  const handleProjectChange = useCallback(
+    (projectId: string | null) => {
+      if (projectId === activeProjectId) return;
+      uiLogger.info("selectProjectContext", {
+        from: activeProjectId,
+        to: projectId,
+        previousSessionId: activeSessionId,
+      });
+      const plan = planProjectContextChange({
+        targetProjectId: projectId,
+        activeSessionId,
+        currentSession: currentSession ?? null,
+      });
+      switch (plan.kind) {
+        case "awaitSession":
+          return;
+        case "detachCurrent":
+          setSessionProject.mutate({ sessionId: plan.sessionId, projectId: null });
+          break;
+        case "startFreshChat":
+          setSelectedAgentId(plan.agentId);
+          setSelectedProjectId(plan.projectId);
+          setActiveSession(null);
+          break;
+        case "setDraftProject":
+          setSelectedProjectId(plan.projectId);
+          break;
+      }
+      requestInputFocus();
+    }, [
+      activeProjectId,
+      activeSessionId,
+      currentSession,
+      setSessionProject,
+      setSelectedAgentId,
+      setSelectedProjectId,
+      setActiveSession,
+      requestInputFocus,
+    ],
   );
 
   const handleMinimize = useCallback(() => {
@@ -636,25 +769,79 @@ export function ChatWindow() {
 
   const isVisible = isOpen && (isExpanded || boundsReady);
 
-  const containerClass = "absolute bottom-2 right-2 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden";
+  // Small screens drop the floating-card form entirely — a 90%-of-375px
+  // "window" is all chrome and no content, so the panel goes full-screen
+  // (Lark/IM-style) and the resize/expand affordances disappear with it.
+  const isMobile = useIsMobile();
+
+  // `@container`: the window is user-resizable from 360px to 90% of the
+  // viewport, so the chat body's gutter (CHAT_GUTTER) has to key off the
+  // window's own width, not the page behind it.
+  const containerClass = cn(
+    "absolute z-50 flex flex-col overflow-hidden bg-surface-raised @container",
+    isMobile
+      ? "inset-x-0"
+      : "right-2 rounded-xl shadow-[var(--floating-shadow)] ring-1 ring-surface-border",
+  );
+  // Soft keyboards shrink only the *visual* viewport — the layout viewport
+  // (and this panel's bottom-anchored parent) keeps its full height, so
+  // without correction the panel's lower half, composer included, sits
+  // behind the keyboard while iOS pans the page and chops the panel's top
+  // instead. While the keyboard is up, pin the panel to the visual
+  // viewport: bottom glued to its bottom edge (occludedBottom tracks any
+  // pan), height/maxHeight bounded by the visible strip, so the composer
+  // rides the keyboard's top edge.
+  //
+  // Every branch writes the SAME style keys with explicit values: motion.div
+  // applies styles imperatively and never unsets a key that merely
+  // disappears from the style prop, so a conditional spread here would
+  // leave the keyboard geometry stuck on the DOM after the keyboard closes.
+  const keyboard = useVisualViewportKeyboard();
   const containerStyle: React.CSSProperties = {
     transformOrigin: "bottom right",
     pointerEvents: isOpen ? "auto" : "none",
+    ...(isMobile
+      ? {
+          // Full-screen panel anchored to the visible bottom edge;
+          // width/height live in the motion animate below.
+          top: "auto",
+          bottom: keyboard ? keyboard.occludedBottom : 0,
+          maxHeight: "none",
+        }
+      : {
+          // Floating card; only the anchor and the height cap live here.
+          top: "auto",
+          bottom: keyboard ? keyboard.occludedBottom + 8 : 8,
+          maxHeight: keyboard ? keyboard.viewportHeight - 16 : "none",
+        }),
   };
 
+  // Width/height are ALWAYS owned by motion, in both modes: useIsMobile
+  // resolves after the first client render, and a key that merely vanishes
+  // from `animate` keeps its last DOM value — a phone's first frame would
+  // otherwise leave the desktop card's inline width stuck on the
+  // full-screen panel. Mixed units (px <-> "100%") skip interpolation and
+  // jump, which is the behavior we want for keyboard snaps anyway.
+  const motionSize = isMobile
+    ? {
+        width: "100%",
+        height: keyboard ? keyboard.viewportHeight : "100%",
+      }
+    : { width: renderWidth, height: renderHeight };
+
   const contextItems = useChatContextItems(wsId);
+  const queuedTasks = pendingTask?.queued_tasks ?? [];
 
   return (
     <motion.div
       ref={windowRef}
       className={containerClass}
       style={containerStyle}
-      initial={{ opacity: 0, scale: 0.95, width: renderWidth, height: renderHeight }}
+      initial={{ opacity: 0, scale: 0.95, ...motionSize }}
       animate={{
         opacity: isVisible ? 1 : 0,
         scale: isVisible ? 1 : 0.95,
-        width: renderWidth,
-        height: renderHeight,
+        ...motionSize,
       }}
       transition={{
         width: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
@@ -663,7 +850,7 @@ export function ChatWindow() {
         scale: { type: "spring", duration: 0.2, bounce: 0 },
       }}
     >
-      <ChatResizeHandles onDragStart={startDrag} />
+      {!isMobile && <ChatResizeHandles onDragStart={startDrag} />}
       {/* Header — ⊕ new + session dropdown | window tools */}
       <div className="flex items-center justify-between border-b px-4 py-2.5 gap-2">
         <div className="flex items-center gap-1 min-w-0">
@@ -692,23 +879,25 @@ export function ChatWindow() {
           />
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground"
-                  onClick={toggleExpand}
-                />
-              }
-            >
-              {isExpanded || isAtMax ? <Minimize2 /> : <Maximize2 />}
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {isExpanded || isAtMax ? t(($) => $.window.restore_tooltip) : t(($) => $.window.expand_tooltip)}
-            </TooltipContent>
-          </Tooltip>
+          {!isMobile && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    onClick={toggleExpand}
+                  />
+                }
+              >
+                {isExpanded || isAtMax ? <Minimize2 /> : <Maximize2 />}
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {isExpanded || isAtMax ? t(($) => $.window.restore_tooltip) : t(($) => $.window.expand_tooltip)}
+              </TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger
               render={
@@ -740,12 +929,31 @@ export function ChatWindow() {
           hasOlderMessages={!!hasOlderMessages}
           isFetchingOlderMessages={isFetchingOlderMessages}
           onLoadOlderMessages={() => void fetchOlderMessages()}
+          onQuickAction={(action) => handleSend(action.prompt)}
+          quickActionsDisabled={
+            !!pendingTaskId ||
+            isSessionArchived ||
+            isAgentArchived ||
+            isAgentAccessRevoked ||
+            !activeAgentRuntimeBound ||
+            noAgent
+          }
+          onRegenerateQuickActions={(message) =>
+            activeSessionId
+              ? regenerateQuickActions.mutateAsync({
+                  sessionId: activeSessionId,
+                  messageId: message.id,
+                })
+              : undefined
+          }
+          quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
         />
       ) : (
         <EmptyState
+          agent={activeAgent}
           hasSessions={sessions.length > 0}
-          agentName={activeAgent?.name}
-          onPickPrompt={(text) => handleSend(text)}
+          onPickPrompt={prefillConversationStarter}
+          customizeHref={customizeConversationStartersHref}
         />
       )}
 
@@ -760,22 +968,60 @@ export function ChatWindow() {
        *  first agent-list response stays banner-free. */}
       {noAgent ? (
         <NoAgentBanner />
+      ) : isAgentAccessRevoked ? (
+        <AgentAccessRevokedBanner agentName={activeAgent?.name} />
+      ) : isAgentArchived ? (
+        <ArchivedAgentBanner agentName={activeAgent?.name} />
+      ) : !activeAgentRuntimeBound && activeAgent ? (
+        <RuntimeRequiredBanner
+          agentId={activeAgent.id}
+          agentName={activeAgent.name}
+        />
       ) : (
         <OfflineBanner agentName={activeAgent?.name} availability={availability} />
       )}
 
-      {/* Input — disabled for legacy archived sessions; locked out entirely
-       *  when there's no agent (the EmptyState above carries the CTA). */}
+      <ChatQueue
+        tasks={queuedTasks}
+        headStatus={pendingTask?.status}
+        onSendNow={handleSendQueuedTaskNow}
+        sendNowDisabled={isAgentAccessRevoked}
+        onEdit={handleEditQueuedTask}
+        onRemove={handleRemoveQueuedTask}
+        onClear={handleClearQueuedTasks}
+      />
+
+      {/* Input — disabled for legacy archived sessions and for sessions whose
+       *  agent has been archived (read-only); locked out entirely when there's
+       *  no agent (the EmptyState above carries the CTA). */}
       <ChatInput
         onSend={handleSend}
         restoreDraftRequest={restoreDraftRequest}
-        onRestoreDraftConsumed={handleRestoreDraftConsumed}
-        onUploadFile={handleUploadFile}
+        conversationStarterRequest={conversationStarterRequest}
+        onConversationStarterApplied={handleConversationStarterApplied}
+        onRestoreDraftApplied={handleRestoreDraftApplied}
+        uploadEnabled={!!activeAgent && !isAgentAccessRevoked}
         onStop={handleStop}
         isRunning={!!pendingTaskId}
-        disabled={isSessionArchived}
+        allowSubmitWhileRunning={pendingTask?.supports_queue === true}
+        disabled={
+          isSessionArchived ||
+          isAgentArchived ||
+          isAgentAccessRevoked ||
+          !activeAgentRuntimeBound
+        }
         noAgent={noAgent}
+        agentArchived={isAgentArchived}
+        agentAccessRevoked={isAgentAccessRevoked}
+        agentRuntimeRequired={!activeAgentRuntimeBound}
         agentName={activeAgent?.name}
+        projects={projects}
+        projectId={activeProjectId}
+        onProjectChange={handleProjectChange}
+        projectContextUnsupported={projectContextSupport === false}
+        isProjectUpdating={
+          setSessionProject.isPending || (!!activeSessionId && !currentSession)
+        }
         leftAdornment={
           <AgentDropdown
             agents={availableAgents}
@@ -785,6 +1031,7 @@ export function ChatWindow() {
           />
         }
         contextItems={contextItems}
+        focusRequest={focusRequest}
       />
     </motion.div>
   );
@@ -833,7 +1080,7 @@ export function AgentDropdown({
   };
 
   if (!activeAgent) {
-    return <span className="text-xs text-muted-foreground">{t(($) => $.window.no_agents)}</span>;
+    return <span className="text-caption text-muted-foreground">{t(($) => $.window.no_agents)}</span>;
   }
 
   return (
@@ -857,11 +1104,11 @@ export function AgentDropdown({
           <ActorAvatar
             actorType="agent"
             actorId={activeAgent.id}
-            size={24}
+            size="md"
             enableHoverCard
             showStatusDot
           />
-          <span className="text-xs font-medium max-w-28 truncate">{activeAgent.name}</span>
+          <span className="text-caption font-medium max-w-28 truncate">{activeAgent.name}</span>
           <ChevronDown className="size-3 text-muted-foreground shrink-0" />
         </>
       }
@@ -909,21 +1156,37 @@ function AgentPickerItem({
   isCurrent: boolean;
   onSelect: (agent: Agent) => void;
 }) {
+  const { t } = useT("chat");
+  const runtimeBound = isAgentRuntimeBound(agent);
   return (
     <PickerItem
       selected={isCurrent}
+      disabled={!runtimeBound}
+      tooltip={
+        runtimeBound ? undefined : t(($) => $.window.agent_needs_runtime_hint)
+      }
       onClick={() => onSelect(agent)}
     >
       <ActorAvatar
         actorType="agent"
         actorId={agent.id}
-        size={24}
+        size="md"
         enableHoverCard
         showStatusDot
       />
       <span className="truncate flex-1">{agent.name}</span>
+      {!runtimeBound && (
+        <span className="shrink-0 text-micro text-amber-600 dark:text-amber-400">
+          {t(($) => $.window.agent_needs_runtime)}
+        </span>
+      )}
     </PickerItem>
   );
+}
+
+interface SessionRowAction extends RowActionItem {
+  /** Extra visible text in the hover strip (the stop button reads "Stop"). */
+  stripText?: string;
 }
 
 /**
@@ -959,7 +1222,6 @@ function SessionDropdown({
   );
 
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [confirmingStopId, setConfirmingStopId] = useState<string | null>(null);
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
   const [completedFlashIds, setCompletedFlashIds] = useState<Set<string>>(() => new Set());
@@ -969,7 +1231,7 @@ function SessionDropdown({
   // session id (not the full session) so a stale closure can't overwrite a
   // newer rename pulled in via WS.
   const [renamingId, setRenamingId] = useState<string | null>(null);
-  const deleteSession = useDeleteChatSession();
+  const setArchived = useSetChatSessionArchived();
   const updateSession = useUpdateChatSession();
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const queryClient = useQueryClient();
@@ -1042,19 +1304,24 @@ function SessionDropdown({
     (s) => s.id !== activeSessionId && s.has_unread,
   ).length;
 
-  const handleConfirmDelete = (session: ChatSession) => {
-    const sessionId = session.id;
-    const isDeletingCurrent = activeSessionId === sessionId;
-    // Eager local clear when the user is deleting the session they're
-    // currently looking at — otherwise messages / pendingTask queries
-    // keep rendering the now-deleted session until chat:session_deleted
-    // arrives over WS (~50–200ms gap).
-    if (isDeletingCurrent) {
-      setActiveSession(null);
+  // Archive (not hard-delete) is the reversible, one-click default here — the
+  // same safety model as ChatThreadList. The floating window offers NO
+  // hard-delete: unarchive / delete live only in the full Chat page's Archived
+  // view (reachable via the expand button), so a stale floating dropdown can't
+  // bypass the "archive first, delete only from Archived" semantics.
+  const handleArchive = (session: ChatSession) => {
+    if (activeSessionId === session.id) {
+      // Archiving the session in view: advance to the next chat (fall back to
+      // the previous, clear only when none remain) instead of stranding the
+      // composer on a now read-only session — mirrors the Chat tab and the
+      // Inbox list. Routing the non-null advance through onSelectSession keeps
+      // selectedAgentId in sync when the next chat belongs to another agent.
+      const idx = historySessions.findIndex((s) => s.id === session.id);
+      const next = historySessions[idx + 1] ?? historySessions[idx - 1] ?? null;
+      if (next) onSelectSession(next);
+      else setActiveSession(null);
     }
-    deleteSession.mutate(sessionId, {
-      onSettled: () => setConfirmingDeleteId(null),
-    });
+    setArchived.mutate({ sessionId: session.id, archived: true });
   };
 
   const handleSubmitRename = (sessionId: string, raw: string) => {
@@ -1123,9 +1390,8 @@ function SessionDropdown({
     const showCompleted = completedFlashIds.has(session.id) && !isCurrent;
     const showUnread = session.has_unread && !isCurrent;
     const isRenaming = renamingId === session.id;
-    const isConfirmingDelete = confirmingDeleteId === session.id;
     const isConfirmingStop = confirmingStopId === session.id && !!pendingTask;
-    const isConfirmingAction = isConfirmingDelete || isConfirmingStop;
+    const isConfirmingAction = isConfirmingStop;
     const titleText = session.title?.trim() || t(($) => $.window.untitled);
     const trailingStatus = isRunning
       ? t(($) => $.session_history.row_subtitle.working)
@@ -1134,6 +1400,34 @@ function SessionDropdown({
         : showUnread
           ? t(($) => $.session_history.row_subtitle.new_reply)
           : formatTimeAgo(session.updated_at);
+
+    // One list drives both action surfaces — the compact menu without hover
+    // and the hover strip with it — so they cannot drift.
+    const rowActions: SessionRowAction[] = isRunning
+      ? [
+          {
+            key: "stop",
+            icon: <Square className="size-2.5 fill-current" />,
+            label: t(($) => $.session_history.row_stop_aria),
+            stripText: t(($) => $.session_history.stop_action),
+            danger: true,
+            onSelect: () => setConfirmingStopId(session.id),
+          },
+        ]
+      : [
+          {
+            key: "rename",
+            icon: <Pencil className="size-3.5" />,
+            label: t(($) => $.session_history.row_rename_aria),
+            onSelect: () => setRenamingId(session.id),
+          },
+          {
+            key: "archive",
+            icon: <Archive className="size-3.5" />,
+            label: t(($) => $.list.archive),
+            onSelect: () => handleArchive(session),
+          },
+        ];
 
     return (
       <div
@@ -1146,9 +1440,7 @@ function SessionDropdown({
         }}
         onKeyDown={(e) => {
           if (isRenaming || isConfirmingAction) return;
-          if (e.key !== "Enter" && e.key !== " ") return;
-          e.preventDefault();
-          handleSelectSession(session);
+          handleRowActivationKey(e, () => handleSelectSession(session));
         }}
         className={cn(
           "group/history-row relative flex min-h-11 min-w-0 cursor-default items-center gap-2 overflow-hidden rounded-md py-1.5 pl-2 pr-2 outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-1 focus-visible:ring-ring",
@@ -1161,7 +1453,7 @@ function SessionDropdown({
           <ActorAvatar
             actorType="agent"
             actorId={agent.id}
-            size={24}
+            size="md"
             enableHoverCard
             showStatusDot
           />
@@ -1175,17 +1467,13 @@ function SessionDropdown({
               onSubmit={(value) => handleSubmitRename(session.id, value)}
               onCancel={() => setRenamingId(null)}
             />
-          ) : isConfirmingDelete ? (
-            <div className="truncate text-sm font-medium text-destructive">
-              {t(($) => $.session_history.delete_dialog.title)}
-            </div>
           ) : isConfirmingStop ? (
-            <div className="truncate text-sm font-medium text-destructive">
+            <div className="truncate text-body font-medium text-destructive">
               {t(($) => $.session_history.stop_dialog.title)}
             </div>
           ) : (
             <div
-              className={cn("truncate text-sm", (showUnread || showCompleted) && !isRunning && "font-medium")}
+              className={cn("truncate text-body", (showUnread || showCompleted) && !isRunning && "font-medium")}
               style={{
                 maskImage: "linear-gradient(to right, black calc(100% - 18px), transparent)",
                 WebkitMaskImage: "linear-gradient(to right, black calc(100% - 18px), transparent)",
@@ -1196,44 +1484,7 @@ function SessionDropdown({
           )}
         </div>
         {!isRenaming && (
-          isConfirmingDelete ? (
-            <div className="flex shrink-0 items-center gap-1">
-              <button
-                type="button"
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  setConfirmingDeleteId(null);
-                }}
-                disabled={deleteSession.isPending}
-                className="inline-flex h-7 items-center rounded px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-              >
-                {t(($) => $.session_history.delete_dialog.cancel)}
-              </button>
-              <button
-                type="button"
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  handleConfirmDelete(session);
-                }}
-                disabled={deleteSession.isPending}
-                className="inline-flex h-7 items-center rounded px-2 text-[11px] font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
-              >
-                {deleteSession.isPending
-                  ? t(($) => $.session_history.delete_dialog.confirming)
-                  : t(($) => $.session_history.delete_dialog.confirm)}
-              </button>
-            </div>
-          ) : isConfirmingStop && pendingTask ? (
+          isConfirmingStop && pendingTask ? (
             <div className="flex shrink-0 items-center gap-1">
               <button
                 type="button"
@@ -1247,7 +1498,7 @@ function SessionDropdown({
                   setConfirmingStopId(null);
                 }}
                 disabled={stoppingTaskId === pendingTask.task_id}
-                className="inline-flex h-7 items-center rounded px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                className="inline-flex h-7 items-center rounded-xs px-2 text-micro font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
               >
                 {t(($) => $.session_history.stop_dialog.cancel)}
               </button>
@@ -1263,7 +1514,7 @@ function SessionDropdown({
                   handleConfirmStop(session, pendingTask);
                 }}
                 disabled={stoppingTaskId === pendingTask.task_id}
-                className="inline-flex h-7 items-center rounded px-2 text-[11px] font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+                className="inline-flex h-7 items-center rounded-xs px-2 text-micro font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
               >
                 {stoppingTaskId === pendingTask.task_id
                   ? t(($) => $.session_history.stop_dialog.confirming)
@@ -1272,7 +1523,7 @@ function SessionDropdown({
             </div>
           ) : (
             <div className="flex shrink-0 items-center">
-              <div className="flex h-7 items-center justify-end gap-1.5 text-xs text-muted-foreground group-hover/history-row:hidden">
+              <div className="flex h-7 items-center justify-end gap-1.5 text-caption text-muted-foreground [@media(hover:hover)]:group-hover/history-row:hidden [@media(hover:hover)]:group-focus-within/history-row:hidden">
                 {isRunning && <Loader2 className="size-3 animate-spin" />}
                 {showCompleted && !isRunning && <Check className="size-3 text-emerald-500" />}
                 {showUnread && !isRunning && !showCompleted && (
@@ -1284,9 +1535,16 @@ function SessionDropdown({
                 )}
                 <span className={cn("truncate", (showUnread || showCompleted || isRunning) && "font-medium text-foreground")}>{trailingStatus}</span>
               </div>
-              <div className="hidden h-7 items-center gap-0.5 group-hover/history-row:flex">
-                {isRunning && pendingTask && (
+              {/* Touch has no hover: without it the status above stays put and
+                  these same actions move into the row's compact menu. */}
+              <RowActionsMenu
+                label={t(($) => $.session_history.row_actions_aria)}
+                groups={[rowActions]}
+              />
+              <div className="hidden h-7 items-center gap-0.5 [@media(hover:hover)]:group-hover/history-row:flex [@media(hover:hover)]:group-focus-within/history-row:flex">
+                {rowActions.map((action) => (
                   <button
+                    key={action.key}
                     type="button"
                     onPointerDown={(e) => {
                       e.preventDefault();
@@ -1295,54 +1553,20 @@ function SessionDropdown({
                     onClick={(e) => {
                       e.stopPropagation();
                       e.preventDefault();
-                      setConfirmingStopId(session.id);
+                      action.onSelect();
                     }}
-                    className="inline-flex h-7 items-center gap-1 rounded px-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive focus-visible:outline-none"
-                    aria-label={t(($) => $.session_history.row_stop_aria)}
-                    title={t(($) => $.session_history.row_stop_aria)}
+                    className={
+                      action.danger
+                        ? "inline-flex h-7 items-center gap-1 rounded-xs px-1.5 text-micro font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive focus-visible:outline-none"
+                        : "inline-flex size-7 items-center justify-center rounded-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
+                    }
+                    aria-label={action.label}
+                    title={action.label}
                   >
-                    <Square className="size-2.5 fill-current" />
-                    {t(($) => $.session_history.stop_action)}
+                    {action.icon}
+                    {action.stripText}
                   </button>
-                )}
-                {!isRunning && (
-                  <>
-                    <button
-                      type="button"
-                      onPointerDown={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        setRenamingId(session.id);
-                      }}
-                      className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
-                      aria-label={t(($) => $.session_history.row_rename_aria)}
-                      title={t(($) => $.session_history.row_rename_aria)}
-                    >
-                      <Pencil className="size-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onPointerDown={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        setConfirmingDeleteId(session.id);
-                      }}
-                      className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive focus-visible:outline-none"
-                      aria-label={t(($) => $.session_history.row_delete_aria)}
-                      title={t(($) => $.session_history.row_delete_aria)}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
-                  </>
-                )}
+                ))}
               </div>
             </div>
           )
@@ -1360,12 +1584,12 @@ function SessionDropdown({
               <ActorAvatar
                 actorType="agent"
                 actorId={triggerAgent.id}
-                size={24}
+                size="md"
                 enableHoverCard
                 showStatusDot
               />
             )}
-            <span className="min-w-0 truncate text-sm font-medium">{title}</span>
+            <span className="min-w-0 truncate text-body font-medium">{title}</span>
             {currentSessionRunning && (
               <Loader2
                 aria-label={t(($) => $.session_history.row_subtitle.working)}
@@ -1378,7 +1602,7 @@ function SessionDropdown({
             <span
               aria-label={t(($) => $.window.another_running)}
               title={t(($) => $.window.another_running)}
-              className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-muted-foreground"
+              className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-caption font-medium text-muted-foreground"
             >
               <Loader2 className="size-3 animate-spin" />
               {otherRunningCount > 1 && <span>{otherRunningCount}</span>}
@@ -1387,7 +1611,7 @@ function SessionDropdown({
             <span
               aria-label={t(($) => $.window.another_unread)}
               title={t(($) => $.window.another_unread)}
-              className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-muted-foreground"
+              className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-caption font-medium text-muted-foreground"
             >
               <span className="size-1.5 rounded-full bg-brand" />
               {otherUnreadCount > 1 && <span>{otherUnreadCount}</span>}
@@ -1400,12 +1624,12 @@ function SessionDropdown({
           onClick={(e) => e.stopPropagation()}
         >
           {historySessions.length === 0 ? (
-            <div className="px-2 py-1.5 text-xs text-muted-foreground">
+            <div className="px-2 py-1.5 text-caption text-muted-foreground">
               {t(($) => $.window.no_previous)}
             </div>
           ) : (
             <div role="group" aria-label={t(($) => $.window.history_group)}>
-              <div className="px-1.5 py-1 text-xs font-medium text-muted-foreground">
+              <div className="px-1.5 py-1 text-caption font-medium text-muted-foreground">
                 {t(($) => $.window.history_group)}
               </div>
               {historySessions.map(renderRow)}
@@ -1417,85 +1641,9 @@ function SessionDropdown({
   );
 }
 
-/**
- * Inline editor for a session title. Mounts focused with the existing
- * title pre-selected so the user can either replace it outright or arrow
- * into the existing text. Enter commits, Escape cancels, a real click
- * outside the input also commits.
- *
- * We do NOT commit on the input's `blur` event: the history popover can
- * move focus to sibling rows and nested actions while the user is still
- * interacting with the panel. Instead a document-level `pointerdown`
- * listener commits only when the user actually clicks outside the input.
- */
-function SessionRenameInput({
-  initialValue,
-  onSubmit,
-  onCancel,
-}: {
-  initialValue: string;
-  onSubmit: (value: string) => void;
-  onCancel: () => void;
-}) {
-  const { t } = useT("chat");
-  const [value, setValue] = useState(initialValue);
-  const inputRef = useRef<HTMLInputElement>(null);
-  // Hold the latest value + callback in refs so the mount-only effect's
-  // listener always sees fresh state without re-subscribing on every
-  // keystroke (which would briefly leave a window where pointerdown isn't
-  // observed).
-  const valueRef = useRef(value);
-  valueRef.current = value;
-  const onSubmitRef = useRef(onSubmit);
-  onSubmitRef.current = onSubmit;
-
-  useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
-
-    const handlePointerDown = (e: PointerEvent) => {
-      const input = inputRef.current;
-      if (!input) return;
-      if (input.contains(e.target as Node)) return;
-      onSubmitRef.current(valueRef.current);
-    };
-    // Capture phase — commit before outside-click handling can close the
-    // popover and unmount this component.
-    document.addEventListener("pointerdown", handlePointerDown, true);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown, true);
-    };
-  }, []);
-
-  return (
-    <input
-      ref={inputRef}
-      type="text"
-      value={value}
-      maxLength={200}
-      aria-label={t(($) => $.session_history.row_rename_aria)}
-      onChange={(e) => setValue(e.target.value)}
-      onClick={(e) => e.stopPropagation()}
-      onPointerDown={(e) => e.stopPropagation()}
-      onKeyDown={(e) => {
-        // Keep editing keys inside the input instead of letting the row
-        // selection keyboard handler consume them.
-        e.stopPropagation();
-        if (e.key === "Enter") {
-          e.preventDefault();
-          onSubmit(value);
-        } else if (e.key === "Escape") {
-          e.preventDefault();
-          onCancel();
-        }
-      }}
-      className="w-full rounded-sm bg-background px-1 py-0.5 text-sm outline-none ring-1 ring-border focus-visible:ring-brand"
-    />
-  );
-}
-
 function useFormatTimeAgo(): (dateStr: string) => string {
   const { t } = useT("chat");
+  const locale = useLocale();
   return (dateStr: string) => {
     const date = new Date(dateStr);
     const now = new Date();
@@ -1508,88 +1656,6 @@ function useFormatTimeAgo(): (dateStr: string) => string {
     if (diffMins < 60) return t(($) => $.session_history.time.minutes, { count: diffMins });
     if (diffHours < 24) return t(($) => $.session_history.time.hours, { count: diffHours });
     if (diffDays < 7) return t(($) => $.session_history.time.days, { count: diffDays });
-    return date.toLocaleDateString();
+    return date.toLocaleDateString(locale);
   };
-}
-
-// Three starter prompts shown on the empty state. Each is keyed into the
-// chat namespace so labels translate per locale; the icon stays raw since
-// emojis are locale-neutral.
-const STARTER_KEYS: ("list_open" | "summarize_today" | "plan_next")[] = [
-  "list_open",
-  "summarize_today",
-  "plan_next",
-];
-const STARTER_ICONS: Record<(typeof STARTER_KEYS)[number], string> = {
-  list_open: "📋",
-  summarize_today: "📝",
-  plan_next: "💡",
-};
-
-function EmptyState({
-  hasSessions,
-  agentName,
-  onPickPrompt,
-}: {
-  hasSessions: boolean;
-  agentName?: string;
-  onPickPrompt: (text: string) => void;
-}) {
-  const { t } = useT("chat");
-  // First-time experience: the user has never started a chat in this
-  // workspace. Educate before suggesting actions — starter prompts
-  // presume the user already knows what chat is for.
-  if (!hasSessions) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-8">
-        <div className="text-center space-y-3">
-          <h3 className="text-base font-semibold">
-            {t(($) => $.empty_state.first_time_title)}
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            {t(($) => $.empty_state.first_time_intro)}{" "}
-            <span className="font-medium text-foreground">
-              {t(($) => $.empty_state.first_time_pillars)}
-            </span>
-            {t(($) => $.empty_state.first_time_pillars_suffix)}
-          </p>
-          <p className="text-sm text-muted-foreground">
-            {t(($) => $.empty_state.first_time_actions)}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // Returning user: starter prompts are the fastest path back to action.
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-5 px-6 py-8">
-      <div className="text-center space-y-1">
-        <h3 className="text-base font-semibold">
-          {agentName
-            ? t(($) => $.empty_state.returning_title_named, { name: agentName })
-            : t(($) => $.empty_state.returning_title_default)}
-        </h3>
-        <p className="text-sm text-muted-foreground">
-          {t(($) => $.empty_state.returning_subtitle)}
-        </p>
-      </div>
-      <div className="w-full max-w-xs space-y-2">
-        {STARTER_KEYS.map((key) => {
-          const text = t(($) => $.starter_prompts[key]);
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => onPickPrompt(text)}
-              className="w-full rounded-lg border border-border bg-card px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-accent hover:border-brand/40"
-            >
-              <span className="mr-2">{STARTER_ICONS[key]}</span>
-              {text}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 // ErrLeaseLost is returned by heartbeat / terminal-update primitives
@@ -72,13 +73,15 @@ func tryClaim(
 			status, attempt, max_attempts,
 			runner_id, lease_token,
 			heartbeat_at, stale_after,
-			started_at, updated_at
+			started_at, updated_at,
+			id
 		) VALUES (
 			$1, $2, $3, $4,
 			'RUNNING', 1, $5,
 			$6, gen_random_uuid(),
 			$7::timestamptz, $7::timestamptz + make_interval(secs => $8),
-			$7::timestamptz, $7::timestamptz
+			$7::timestamptz, $7::timestamptz,
+			COALESCE($9::uuid, gen_random_uuid())
 		)
 		ON CONFLICT ON CONSTRAINT uq_sys_cron_execution DO NOTHING
 		RETURNING id, lease_token, attempt
@@ -94,6 +97,10 @@ func tryClaim(
 		job.MaxAttempts,
 		runnerID,
 		dbTime, staleSecs,
+		// Execution rows are append-only and high-churn, so the id is a v7 for
+		// primary-key locality. lease_token stays gen_random_uuid(): it is a
+		// claim token, and it must not carry a guessable timestamp.
+		dbid.NewV7(),
 	).Scan(&c.ID, &c.LeaseToken, &c.Attempt)
 	if err == nil {
 		c.Won = true
@@ -314,11 +321,16 @@ func encodeResult(in map[string]any) (string, error) {
 	return string(b), nil
 }
 
-// latestPlanInfo returns the latest known plan_time for (job, scope)
+// LatestPlanInfo returns the latest known plan_time for (job, scope)
 // plus the fields the catch-up planner needs to decide whether the row
 // is still claimable at the same plan_time (FAILED-with-retry) or
 // finished and the next plan_time should advance past it.
-type latestPlanInfo struct {
+//
+// Exported so a JobSpec.PlansForScope hook can inspect the same view
+// the built-in Cadence planner uses — in particular Found / PlanTime
+// to know where to resume plan enumeration, and RetryEligible to keep
+// the cursor on a FAILED-with-retry plan_time.
+type LatestPlanInfo struct {
 	Found       bool
 	PlanTime    time.Time
 	Status      string
@@ -336,7 +348,7 @@ type latestPlanInfo struct {
 // passed; the every_plan planner uses this to keep the cursor on the
 // retry-eligible bucket so tryClaim's retry-from-FAILED branch can
 // fire.
-func (i latestPlanInfo) RetryEligible(now time.Time) bool {
+func (i LatestPlanInfo) RetryEligible(now time.Time) bool {
 	if !i.Found {
 		return false
 	}
@@ -359,8 +371,8 @@ func latestPlan(
 	pool *pgxpool.Pool,
 	jobName string,
 	scope Scope,
-) (latestPlanInfo, error) {
-	var info latestPlanInfo
+) (LatestPlanInfo, error) {
+	var info LatestPlanInfo
 	var nextRetry pgtype.Timestamptz
 	err := pool.QueryRow(ctx, `
 		SELECT plan_time, status, attempt, max_attempts, next_retry_at

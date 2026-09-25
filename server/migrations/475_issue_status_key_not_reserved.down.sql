@@ -1,0 +1,2 @@
+-- Intentionally empty: the up migration is a no-op. Migration 490 owns dropping
+-- the constraint on any database that applied the original 475.

@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -40,6 +42,21 @@ func NewActiveDuplicateError(issue db.Issue, issuePrefix string) *ActiveDuplicat
 	}
 }
 
+// inactiveStatusKeys are the status keys the duplicate guards never count as an
+// active duplicate: the terminal categories.
+//
+// A Triage entry is also never an active duplicate — it has not been taken on,
+// so it must not block anyone filing the same work; a duplicate there is
+// resolved by merging it out of Triage. That is not expressible here because
+// Triage is not a status: the duplicate queries carry `triage_state IS NULL`
+// instead (MUL-7189 §2.6).
+func inactiveStatusKeys(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID) ([]string, error) {
+	return issuestatus.ExpandCategories(ctx, q, workspaceID, []string{
+		issuestatus.CategoryDone,
+		issuestatus.CategoryClosed,
+	})
+}
+
 func LockAndFindActiveDuplicate(
 	ctx context.Context,
 	q *db.Queries,
@@ -59,12 +76,55 @@ func LockAndFindActiveDuplicate(
 	if allowDuplicate {
 		return db.Issue{}, false, nil
 	}
+	inactiveKeys, err := inactiveStatusKeys(ctx, q, workspaceID)
+	if err != nil {
+		return db.Issue{}, false, err
+	}
 
 	duplicate, err := q.FindActiveDuplicateIssue(ctx, db.FindActiveDuplicateIssueParams{
-		WorkspaceID:     workspaceID,
-		ProjectID:       projectID,
-		ParentIssueID:   parentIssueID,
-		NormalizedTitle: normalizedTitle,
+		WorkspaceID:        workspaceID,
+		TerminalStatusKeys: inactiveKeys,
+		ProjectID:          projectID,
+		ParentIssueID:      parentIssueID,
+		NormalizedTitle:    normalizedTitle,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.Issue{}, false, nil
+		}
+		return db.Issue{}, false, err
+	}
+	return duplicate, true, nil
+}
+
+func LockAndFindRecentAutopilotDuplicate(
+	ctx context.Context,
+	q *db.Queries,
+	workspaceID pgtype.UUID,
+	autopilotID pgtype.UUID,
+	projectID pgtype.UUID,
+	title string,
+	window time.Duration,
+) (db.Issue, bool, error) {
+	normalizedTitle := NormalizeTitle(title)
+	if normalizedTitle == "" || !autopilotID.Valid || window <= 0 {
+		return db.Issue{}, false, nil
+	}
+	if err := q.LockIssueDuplicateKey(ctx, recentAutopilotLockKey(workspaceID, autopilotID, projectID, normalizedTitle)); err != nil {
+		return db.Issue{}, false, err
+	}
+	inactiveKeys, err := inactiveStatusKeys(ctx, q, workspaceID)
+	if err != nil {
+		return db.Issue{}, false, err
+	}
+
+	duplicate, err := q.FindRecentAutopilotDuplicateIssue(ctx, db.FindRecentAutopilotDuplicateIssueParams{
+		WorkspaceID:        workspaceID,
+		TerminalStatusKeys: inactiveKeys,
+		OriginID:           autopilotID,
+		ProjectID:          projectID,
+		NormalizedTitle:    normalizedTitle,
+		CreatedAfter:       pgtype.Timestamptz{Time: time.Now().UTC().Add(-window), Valid: true},
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -81,6 +141,16 @@ func lockKey(workspaceID, projectID, parentIssueID pgtype.UUID, normalizedTitle 
 		util.UUIDToString(workspaceID),
 		util.UUIDToString(projectID),
 		util.UUIDToString(parentIssueID),
+		normalizedTitle,
+	}, "|")
+}
+
+func recentAutopilotLockKey(workspaceID, autopilotID, projectID pgtype.UUID, normalizedTitle string) string {
+	return strings.Join([]string{
+		"autopilot-recent-duplicate",
+		util.UUIDToString(workspaceID),
+		util.UUIDToString(autopilotID),
+		util.UUIDToString(projectID),
 		normalizedTitle,
 	}, "|")
 }

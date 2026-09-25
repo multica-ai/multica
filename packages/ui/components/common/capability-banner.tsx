@@ -51,7 +51,7 @@ export function CapabilityBanner({
     <div
       role="status"
       className={cn(
-        "flex items-center gap-2 rounded-md border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground",
+        "flex items-center gap-2 rounded-md border border-dashed bg-muted/30 px-3 py-2 text-caption text-muted-foreground",
         className,
       )}
     >

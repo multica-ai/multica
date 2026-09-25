@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { createElectronReloadPrompt, installRendererRecoveryHandlers } from "./renderer-recovery";
 
@@ -173,5 +174,99 @@ describe("installRendererRecoveryHandlers", () => {
     expect(detail).toContain("what you were doing right before this message appeared");
     expect(detail).toContain("Activity Monitor sample");
     expect(detail).toContain("Diagnostic details:\nkind: unresponsive\ncontext: {}");
+  });
+});
+
+describe("freeze/crash breadcrumb state machine", () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.useRealTimers());
+
+  function install(fixture: ReturnType<typeof makeWindow>) {
+    const persistBreadcrumb = vi.fn();
+    const clearBreadcrumb = vi.fn();
+    installRendererRecoveryHandlers(fixture.window, {
+      isDev: false,
+      showReloadPrompt: vi.fn(async () => "dismiss" as const),
+      persistBreadcrumb,
+      clearBreadcrumb,
+      unresponsivePromptDelayMs: 100,
+    });
+    return { persistBreadcrumb, clearBreadcrumb };
+  }
+
+  it("a sustained hang writes exactly one unresponsive breadcrumb", async () => {
+    vi.useFakeTimers();
+    const fixture = makeWindow();
+    const { persistBreadcrumb, clearBreadcrumb } = install(fixture);
+
+    fixture.windowHandlers.get("unresponsive")?.();
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(persistBreadcrumb).toHaveBeenCalledTimes(1);
+    expect(persistBreadcrumb).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "unresponsive" }),
+    );
+    expect(clearBreadcrumb).not.toHaveBeenCalled();
+  });
+
+  it("recovering after a written breadcrumb clears it, so the in-thread watchdog is the only reporter", async () => {
+    vi.useFakeTimers();
+    const fixture = makeWindow();
+    const { persistBreadcrumb, clearBreadcrumb } = install(fixture);
+
+    fixture.windowHandlers.get("unresponsive")?.();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(persistBreadcrumb).toHaveBeenCalledTimes(1);
+
+    fixture.windowHandlers.get("responsive")?.();
+    expect(clearBreadcrumb).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovering before the delay never writes a breadcrumb, so nothing to clear", async () => {
+    vi.useFakeTimers();
+    const fixture = makeWindow();
+    const { persistBreadcrumb, clearBreadcrumb } = install(fixture);
+
+    fixture.windowHandlers.get("unresponsive")?.();
+    fixture.windowHandlers.get("responsive")?.();
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(persistBreadcrumb).not.toHaveBeenCalled();
+    expect(clearBreadcrumb).not.toHaveBeenCalled();
+  });
+
+  it("a hang that never recovers (force-quit) keeps its breadcrumb for next-boot reporting", async () => {
+    vi.useFakeTimers();
+    const fixture = makeWindow();
+    const { persistBreadcrumb, clearBreadcrumb } = install(fixture);
+
+    fixture.windowHandlers.get("unresponsive")?.();
+    await vi.advanceTimersByTimeAsync(100);
+
+    // No "responsive" ever fires — the breadcrumb must survive uncleared.
+    expect(persistBreadcrumb).toHaveBeenCalledTimes(1);
+    expect(clearBreadcrumb).not.toHaveBeenCalled();
+  });
+
+  it("a recoverable crash writes a breadcrumb and never clears it (a dead process never recovers)", () => {
+    const fixture = makeWindow();
+    const { persistBreadcrumb, clearBreadcrumb } = install(fixture);
+
+    fixture.webContentsHandlers.get("render-process-gone")?.({}, { reason: "crashed" });
+
+    expect(persistBreadcrumb).toHaveBeenCalledTimes(1);
+    expect(persistBreadcrumb).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "render-process-gone" }),
+    );
+    expect(clearBreadcrumb).not.toHaveBeenCalled();
+  });
+
+  it("a clean (non-crash) renderer exit writes no breadcrumb", () => {
+    const fixture = makeWindow();
+    const { persistBreadcrumb } = install(fixture);
+
+    fixture.webContentsHandlers.get("render-process-gone")?.({}, { reason: "clean-exit" });
+
+    expect(persistBreadcrumb).not.toHaveBeenCalled();
   });
 });

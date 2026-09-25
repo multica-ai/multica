@@ -51,7 +51,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@multica/ui/components/ui/card";
-import { useT } from "../i18n";
+import { useLocale, useT } from "../i18n";
 import { useNavigation } from "../navigation";
 
 // 1 credit = 1_000_000 micro-credit; cents → dollars factor for the
@@ -72,8 +72,8 @@ export function BillingTestPage() {
   return (
     <div className="space-y-6 p-6">
       <header>
-        <h1 className="text-xl font-semibold">{t(($) => $.title)}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <h1 className="text-title-lg font-semibold">{t(($) => $.title)}</h1>
+        <p className="mt-1 text-body text-muted-foreground">
           {t(($) => $.subtitle)}
         </p>
       </header>
@@ -116,6 +116,7 @@ function CheckoutSessionStatusBanner({
   onDismiss: () => void;
 }) {
   const { t } = useT("billing");
+  const locale = useLocale();
   const { data, isLoading, isError, error } = useQuery(
     billingCheckoutSessionOptions(sessionId),
   );
@@ -147,10 +148,10 @@ function CheckoutSessionStatusBanner({
   return (
     <Card className="border-primary/40 bg-primary/5">
       <CardHeader>
-        <CardTitle className="text-sm">
+        <CardTitle className="text-body">
           {t(($) => $.checkout.session_label, { prefix: sessionId.slice(0, 16) })}
         </CardTitle>
-        <CardDescription className="text-xs">
+        <CardDescription className="text-caption">
           {isLoading
             ? t(($) => $.checkout.loading)
             : isError
@@ -168,7 +169,7 @@ function CheckoutSessionStatusBanner({
         </CardDescription>
       </CardHeader>
       {data && (
-        <CardContent className="text-xs">
+        <CardContent className="text-caption">
           <dl className="grid grid-cols-[120px_1fr] gap-y-1">
             <dt className="text-muted-foreground">{t(($) => $.checkout.label_order)}</dt>
             <dd className="font-mono">{data.order_id}</dd>
@@ -178,13 +179,13 @@ function CheckoutSessionStatusBanner({
             <dd>
               {data.bonus_credits > 0
                 ? t(($) => $.checkout.charged_with_bonus, {
-                    money: formatMoney(data.amount_cents, data.currency),
-                    credits: data.credits.toLocaleString(),
-                    bonus: data.bonus_credits.toLocaleString(),
+                    money: formatMoney(data.amount_cents, data.currency, locale),
+                    credits: data.credits.toLocaleString(locale),
+                    bonus: data.bonus_credits.toLocaleString(locale),
                   })
                 : t(($) => $.checkout.charged_value, {
-                    money: formatMoney(data.amount_cents, data.currency),
-                    credits: data.credits.toLocaleString(),
+                    money: formatMoney(data.amount_cents, data.currency, locale),
+                    credits: data.credits.toLocaleString(locale),
                   })}
             </dd>
           </dl>
@@ -208,14 +209,15 @@ function CheckoutSessionStatusBanner({
 
 function BalanceCard() {
   const { t } = useT("billing");
+  const locale = useLocale();
   const balance = useQuery(billingBalanceOptions());
 
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle className="text-sm">{t(($) => $.balance.title)}</CardTitle>
-          <CardDescription className="text-xs">
+          <CardTitle className="text-body">{t(($) => $.balance.title)}</CardTitle>
+          <CardDescription className="text-caption">
             {t(($) => $.endpoints.balance)}
           </CardDescription>
         </div>
@@ -230,18 +232,18 @@ function BalanceCard() {
         ) : balance.isError ? (
           <ErrorText error={balance.error} />
         ) : (
-          <div className="space-y-1 text-sm">
-            <div className="text-2xl font-semibold tabular-nums">
-              {balance.data?.balance_credit.toLocaleString() ?? 0}
-              <span className="ml-1 text-sm font-normal text-muted-foreground">
+          <div className="space-y-1 text-body">
+            <div className="text-display-sm font-semibold tabular-nums">
+              {balance.data?.balance_credit.toLocaleString(locale) ?? 0}
+              <span className="ml-1 text-body font-normal text-muted-foreground">
                 {t(($) => $.balance.credits_suffix)}
               </span>
             </div>
-            <div className="text-xs text-muted-foreground">
+            <div className="text-caption text-muted-foreground">
               {t(($) => $.balance.meta, {
-                micro: balance.data?.balance_micro.toLocaleString() ?? 0,
+                micro: balance.data?.balance_micro.toLocaleString(locale) ?? 0,
                 owner: balance.data?.owner_id.slice(0, 8) ?? "",
-                updated: formatDate(balance.data?.updated_at, t),
+                updated: formatDate(balance.data?.updated_at, t, locale),
               })}
             </div>
           </div>
@@ -306,8 +308,8 @@ function BuyAndPortalSection() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm">{t(($) => $.buy.title)}</CardTitle>
-        <CardDescription className="text-xs">
+        <CardTitle className="text-body">{t(($) => $.buy.title)}</CardTitle>
+        <CardDescription className="text-caption">
           {t(($) => $.endpoints.buy)}
         </CardDescription>
       </CardHeader>
@@ -329,7 +331,7 @@ function BuyAndPortalSection() {
             ))}
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">{t(($) => $.buy.no_tiers)}</p>
+          <p className="text-caption text-muted-foreground">{t(($) => $.buy.no_tiers)}</p>
         )}
 
         <div className="border-t pt-4">
@@ -347,7 +349,7 @@ function BuyAndPortalSection() {
             )}
             {t(($) => $.buy.open_portal)}
           </Button>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-caption text-muted-foreground">
             {t(($) => $.buy.portal_hint)}
           </p>
         </div>
@@ -368,19 +370,20 @@ function TierButton({
   onClick: () => void;
 }) {
   const { t } = useT("billing");
+  const locale = useLocale();
   const display = tier.display_name || tier.id;
   const baseLine = t(($) => $.buy.tier_money_to_credits, {
-    money: formatMoney(tier.amount_cents, "usd"),
-    credits: tier.credits.toLocaleString(),
+    money: formatMoney(tier.amount_cents, "usd", locale),
+    credits: tier.credits.toLocaleString(locale),
   });
   const bonusLine = tier.bonus_credits
     ? tier.bonus_expires_in
       ? t(($) => $.buy.tier_bonus_with_expiry, {
-          credits: tier.bonus_credits.toLocaleString(),
+          credits: tier.bonus_credits.toLocaleString(locale),
           expiry: tier.bonus_expires_in,
         })
       : t(($) => $.buy.tier_bonus, {
-          credits: tier.bonus_credits.toLocaleString(),
+          credits: tier.bonus_credits.toLocaleString(locale),
         })
     : "";
   return (
@@ -391,14 +394,14 @@ function TierButton({
       className="rounded-md border bg-background p-3 text-left transition hover:border-primary disabled:cursor-not-allowed disabled:opacity-50"
     >
       <div className="flex items-center justify-between">
-        <div className="text-sm font-medium">{display}</div>
+        <div className="text-body font-medium">{display}</div>
         {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
       </div>
-      <div className="mt-1 text-xs text-muted-foreground">
+      <div className="mt-1 text-caption text-muted-foreground">
         {baseLine}
         {bonusLine}
       </div>
-      <div className="mt-1 font-mono text-[10px] text-muted-foreground/70">
+      <div className="mt-1 font-mono text-micro text-muted-foreground">
         {t(($) => $.buy.tier_id, { id: tier.id })}
       </div>
     </button>
@@ -414,8 +417,8 @@ function TransactionsCard() {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle className="text-sm">{t(($) => $.transactions.title)}</CardTitle>
-          <CardDescription className="text-xs">
+          <CardTitle className="text-body">{t(($) => $.transactions.title)}</CardTitle>
+          <CardDescription className="text-caption">
             {t(($) => $.endpoints.transactions)}
           </CardDescription>
         </div>
@@ -430,7 +433,7 @@ function TransactionsCard() {
         ) : txs.isError ? (
           <ErrorText error={txs.error} />
         ) : txs.data?.items.length ? (
-          <ul className="space-y-2 text-xs">
+          <ul className="space-y-2 text-caption">
             {txs.data.items.map((row) => (
               <TransactionRow key={row.id} row={row} />
             ))}
@@ -450,35 +453,36 @@ function TransactionsCard() {
 
 function TransactionRow({ row }: { row: BillingTransaction }) {
   const { t } = useT("billing");
+  const locale = useLocale();
   const credit = row.amount_micro / MICRO_PER_CREDIT;
   return (
     <li className="rounded-md border bg-background p-2.5">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium">
+        <span className="text-caption font-medium">
           {row.tx_type}
-          <span className="ml-1.5 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+          <span className="ml-1.5 rounded-xs bg-muted px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
             {row.source}
           </span>
         </span>
         <span
-          className={`text-sm tabular-nums ${
+          className={`text-body tabular-nums ${
             credit >= 0
               ? "text-green-700 dark:text-green-400"
               : "text-red-700 dark:text-red-400"
           }`}
         >
           {t(($) => $.transactions.credits_value, {
-            value: `${credit >= 0 ? "+" : ""}${credit.toLocaleString()}`,
+            value: `${credit >= 0 ? "+" : ""}${credit.toLocaleString(locale)}`,
           })}
         </span>
       </div>
       {row.description && (
-        <div className="mt-1 text-xs text-muted-foreground">{row.description}</div>
+        <div className="mt-1 text-caption text-muted-foreground">{row.description}</div>
       )}
-      <div className="mt-1 font-mono text-[10px] text-muted-foreground/70">
+      <div className="mt-1 font-mono text-micro text-muted-foreground">
         {t(($) => $.transactions.row_meta, {
-          date: formatDate(row.created_at, t),
-          balance: (row.balance_after / MICRO_PER_CREDIT).toLocaleString(),
+          date: formatDate(row.created_at, t, locale),
+          balance: (row.balance_after / MICRO_PER_CREDIT).toLocaleString(locale),
           ref: row.reference_id || t(($) => $.transactions.ref_empty),
         })}
       </div>
@@ -493,8 +497,8 @@ function BatchesCard() {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle className="text-sm">{t(($) => $.batches.title)}</CardTitle>
-          <CardDescription className="text-xs">
+          <CardTitle className="text-body">{t(($) => $.batches.title)}</CardTitle>
+          <CardDescription className="text-caption">
             {t(($) => $.endpoints.batches)}
           </CardDescription>
         </div>
@@ -509,7 +513,7 @@ function BatchesCard() {
         ) : batches.isError ? (
           <ErrorText error={batches.error} />
         ) : batches.data?.items.length ? (
-          <ul className="space-y-2 text-xs">
+          <ul className="space-y-2 text-caption">
             {batches.data.items.map((row) => (
               <BatchRow key={row.id} row={row} />
             ))}
@@ -529,29 +533,30 @@ function BatchesCard() {
 
 function BatchRow({ row }: { row: BillingBatch }) {
   const { t } = useT("billing");
+  const locale = useLocale();
   const total = row.total_micro / MICRO_PER_CREDIT;
   const remaining = row.remaining_micro / MICRO_PER_CREDIT;
   const consumed = total - remaining;
   return (
     <li className="rounded-md border bg-background p-2.5">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium">
+        <span className="text-caption font-medium">
           {row.source_type}
-          <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">
+          <span className="ml-1.5 font-mono text-micro text-muted-foreground">
             {t(($) => $.batches.id_suffix, { id: row.id.slice(0, 8) })}
           </span>
         </span>
-        <span className="text-sm tabular-nums">
+        <span className="text-body tabular-nums">
           {t(($) => $.batches.remaining_over_total, {
-            remaining: remaining.toLocaleString(),
-            total: total.toLocaleString(),
+            remaining: remaining.toLocaleString(locale),
+            total: total.toLocaleString(locale),
           })}
         </span>
       </div>
-      <div className="mt-1 text-xs text-muted-foreground">
-        {t(($) => $.batches.consumed, { value: consumed.toLocaleString() })}
+      <div className="mt-1 text-caption text-muted-foreground">
+        {t(($) => $.batches.consumed, { value: consumed.toLocaleString(locale) })}
         {row.expires_at
-          ? t(($) => $.batches.expires_suffix, { value: formatDate(row.expires_at, t) })
+          ? t(($) => $.batches.expires_suffix, { value: formatDate(row.expires_at, t, locale) })
           : t(($) => $.batches.never_expires_suffix)}
       </div>
     </li>
@@ -565,8 +570,8 @@ function TopupsCard() {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle className="text-sm">{t(($) => $.topups.title)}</CardTitle>
-          <CardDescription className="text-xs">
+          <CardTitle className="text-body">{t(($) => $.topups.title)}</CardTitle>
+          <CardDescription className="text-caption">
             {t(($) => $.endpoints.topups)}
           </CardDescription>
         </div>
@@ -581,7 +586,7 @@ function TopupsCard() {
         ) : topups.isError ? (
           <ErrorText error={topups.error} />
         ) : topups.data?.items.length ? (
-          <ul className="space-y-2 text-xs">
+          <ul className="space-y-2 text-caption">
             {topups.data.items.map((row) => (
               <TopupRow key={row.id} row={row} />
             ))}
@@ -601,13 +606,14 @@ function TopupsCard() {
 
 function TopupRow({ row }: { row: BillingTopup }) {
   const { t } = useT("billing");
+  const locale = useLocale();
   return (
     <li className="rounded-md border bg-background p-2.5">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium">
+        <span className="text-caption font-medium">
           {row.tier_id || row.id.slice(0, 8)}
           <span
-            className={`ml-1.5 rounded px-1.5 py-0.5 font-mono text-[10px] ${
+            className={`ml-1.5 rounded-xs px-1.5 py-0.5 font-mono text-micro ${
               row.status === "credited"
                 ? "bg-green-500/10 text-green-700 dark:text-green-400"
                 : row.status === "failed" || row.status === "canceled"
@@ -618,22 +624,22 @@ function TopupRow({ row }: { row: BillingTopup }) {
             {row.status}
           </span>
         </span>
-        <span className="text-sm tabular-nums">
+        <span className="text-body tabular-nums">
           {row.bonus_credits > 0
             ? t(($) => $.topups.amount_to_credits_with_bonus, {
-                money: formatMoney(row.amount_cents, row.currency),
-                credits: row.credits.toLocaleString(),
-                bonus: row.bonus_credits,
+                money: formatMoney(row.amount_cents, row.currency, locale),
+                credits: row.credits.toLocaleString(locale),
+                bonus: row.bonus_credits.toLocaleString(locale),
               })
             : t(($) => $.topups.amount_to_credits, {
-                money: formatMoney(row.amount_cents, row.currency),
-                credits: row.credits.toLocaleString(),
+                money: formatMoney(row.amount_cents, row.currency, locale),
+                credits: row.credits.toLocaleString(locale),
               })}
         </span>
       </div>
-      <div className="mt-1 font-mono text-[10px] text-muted-foreground/70">
+      <div className="mt-1 font-mono text-micro text-muted-foreground">
         {t(($) => $.topups.row_meta, {
-          date: formatDate(row.created_at, t),
+          date: formatDate(row.created_at, t, locale),
           checkout: row.stripe_checkout_id || t(($) => $.topups.stripe_empty),
         })}
       </div>
@@ -655,7 +661,7 @@ function PagingFooter({
   const { t } = useT("billing");
   if (total === 0) return null;
   return (
-    <div className="mt-3 text-[10px] text-muted-foreground">
+    <div className="mt-3 text-micro text-muted-foreground">
       {t(($) => $.shared.paging, {
         page,
         totalPages: Math.max(1, Math.ceil(total / pageSize)),
@@ -691,23 +697,25 @@ function RefreshButton({
 function ErrorText({ error }: { error: unknown }) {
   const { t } = useT("billing");
   return (
-    <p className="text-xs text-destructive">
+    <p className="text-caption text-destructive">
       {error instanceof Error ? error.message : t(($) => $.shared.request_failed)}
     </p>
   );
 }
 
 function EmptyText({ children }: { children: React.ReactNode }) {
-  return <p className="text-xs text-muted-foreground">{children}</p>;
+  return <p className="text-caption text-muted-foreground">{children}</p>;
 }
 
-function formatMoney(amountCents: number, currency: string): string {
-  // Intl is fine here — no currency conversion happening, just
-  // canonical display. Defaults to en-US to match the rest of the
-  // dev UI; the produced string is then passed into a t() interpolation
-  // so the surrounding sentence still gets translated.
+function formatMoney(
+  amountCents: number,
+  currency: string,
+  locale: string,
+): string {
+  // Intl is fine here — no currency conversion happening, just canonical
+  // display in the same locale as the surrounding translated sentence.
   try {
-    return new Intl.NumberFormat("en-US", {
+    return new Intl.NumberFormat(locale, {
       style: "currency",
       currency: currency.toUpperCase(),
     }).format(amountCents / CENTS_PER_DOLLAR);
@@ -725,9 +733,10 @@ function formatMoney(amountCents: number, currency: string): string {
 function formatDate(
   value: string | undefined,
   t: ReturnType<typeof useT<"billing">>["t"],
+  locale: string,
 ): string {
   if (!value) return t(($) => $.shared.date_dash);
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString();
+  return d.toLocaleString(locale);
 }

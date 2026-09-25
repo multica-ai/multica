@@ -1,8 +1,11 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { projectKeys } from "./queries";
+import { issueKeys } from "../issues/queries";
 import { useWorkspaceId } from "../hooks";
 import { useRecentContextStore } from "../chat/recent-context-store";
+import { clearIssueSurfaceViewState } from "../issues/stores/surface-view-store";
+import { issueScopeKey } from "../issues/surface/scope";
 import type { Project, CreateProjectRequest, UpdateProjectRequest, ListProjectsResponse } from "../types";
 
 export function useCreateProject() {
@@ -48,6 +51,13 @@ export function useUpdateProject() {
     onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({ queryKey: projectKeys.detail(wsId, vars.id) });
       qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+      // A project's status is a filter dimension of the issue table, so
+      // changing it moves issues in and out of a filtered window. Nothing
+      // in the issue payload changes, so only this invalidation can
+      // refresh it — the global staleTime is Infinity.
+      if ("status" in vars) {
+        qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
+      }
     },
   });
 }
@@ -71,9 +81,15 @@ export function useDeleteProject() {
     },
     onSuccess: (_data, id) => {
       useRecentContextStore.getState().forgetContext(wsId, { type: "project", id });
+      clearIssueSurfaceViewState(issueScopeKey({ type: "project", projectId: id }));
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+      // Deleting a project removes its status from the workspace, so a table
+      // window filtered on that status still holds its issues. The realtime
+      // event invalidates too, but a delivery gap must not leave the window
+      // wrong forever — the global staleTime is Infinity.
+      qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
     },
   });
 }

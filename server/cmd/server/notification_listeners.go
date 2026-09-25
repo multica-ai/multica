@@ -8,8 +8,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -18,7 +20,6 @@ type mention struct {
 	Type string // "member", "agent", "issue", or "all"
 	ID   string // user_id, agent_id, issue_id, or "all"
 }
-
 
 // statusLabels maps DB status values to human-readable labels for notifications.
 var statusLabels = map[string]string{
@@ -75,22 +76,115 @@ var parentBubbleNotifTypes = map[string]bool{
 	"status_changed": true,
 }
 
+// delegatedAlwaysNotifTypes are the events a DELEGATED subscriber (reason=
+// 'delegated' — an agent created this issue on their behalf, MUL-5483) receives
+// unconditionally: they are either addressed at the human directly, or they are
+// exceptions that stall the work until a human looks.
+var delegatedAlwaysNotifTypes = map[string]bool{
+	"mentioned":     true,
+	"task_failed":   true,
+	"agent_blocked": true,
+}
+
+// issueStatusIsHandoff reports whether ARRIVING on this status hands the issue
+// back to a human. It is the one predicate behind both the delegated-subscriber
+// tier and the stale task_failed dismissal, which used to be two hand-kept
+// allowlists that drifted apart (MUL-7379).
+//
+// It decides on LIFECYCLE plus one exact key, the split MUL-7364 established:
+//
+//   - done / closed are terminal, so arriving there always ends someone's wait;
+//   - started is a handoff EXCEPT on the fixed in_progress key. in_progress is
+//     the one status the platform itself writes to mean "an agent is working"
+//     — the brief tells agents to write it, and failure recovery, the sweeper
+//     and the webhook repair all key off it — so arriving there is routine
+//     forward progress, not a handoff;
+//   - unstarted is never a handoff: nobody is waiting on queued or parked work.
+//
+// That makes a CUSTOM started status a handoff. This is deliberate. A workspace
+// does not mint "Awaiting Response" or "Code Review" to describe an agent
+// typing; it mints one to mark the point where a person has to look. Before
+// MUL-7240 those statuses carried the in_review/blocked category and notified
+// for that reason; collapsing to four categories silently stopped them, which
+// is the regression this restores. A custom status that really is an
+// in_progress synonym now notifies where it did not — an accepted cost, since a
+// missed handoff strands the issue while a spare inbox row costs one dismissal.
+//
+// Triage never reaches this predicate: it is not a status but a column of its
+// own (MUL-7213), so an entry waiting in Triage carries whatever status the
+// triager has proposed and is answered on that. Suppressing notifications for
+// Triage entries is a separate rule and belongs to MUL-7219.
+//
+// The error is preserved rather than swallowed so each caller can choose its
+// own failure direction; built-ins answer without touching the catalog, so only
+// custom statuses can fail here at all.
+func issueStatusIsHandoff(
+	ctx context.Context,
+	queries *db.Queries,
+	workspaceID pgtype.UUID,
+	status string,
+) (bool, error) {
+	category, err := issuestatus.CategoryWithError(ctx, queries, workspaceID, status)
+	if err != nil {
+		return false, err
+	}
+	switch category {
+	case issuestatus.CategoryDone, issuestatus.CategoryClosed:
+		return true, nil
+	case issuestatus.CategoryStarted:
+		return status != issuestatus.InProgress, nil
+	default:
+		return false, nil
+	}
+}
+
+// deliverToSubscriber reports whether a subscriber row should receive this
+// notification type. Direct subscriptions (creator / assignee / commenter /
+// mentioned / manual / autopilot) are unchanged — they opted in to this issue,
+// explicitly or by acting on it. Only the delegated tier is narrowed, and only
+// to drop churn.
+//
+// A child finishing is NOT churn: "sub-issue X is ready for review" is exactly
+// the signal a delegated watcher needs, and there is one per piece of real work.
+// An earlier cut suppressed those and synthesized a single "the whole batch
+// finished" roll-up from sibling state instead. That was both the wrong shape
+// (see the MUL-5483 thread) and redundant: the human is subscribed to the PARENT
+// as well, so when the agent moves the parent to in_review/done that transition
+// delivers here — which is the natural "the tree is done" signal. Deriving it
+// from children was reinventing a notification the platform already sends.
+//
+// statusIsHandoff is the resolved issueStatusIsHandoff answer for the issue's
+// current status, so the catalog is read once per notification rather than once
+// per subscriber row.
+func deliverToSubscriber(reason, notifType string, statusIsHandoff bool) bool {
+	if reason != "delegated" {
+		return true
+	}
+	if delegatedAlwaysNotifTypes[notifType] {
+		return true
+	}
+	if notifType != "status_changed" {
+		return false
+	}
+	return statusIsHandoff
+}
+
 // notifTypeToGroup maps each InboxItemType to a user-configurable preference
 // group. Types not in this map are always delivered (not configurable).
 var notifTypeToGroup = map[string]string{
-	"issue_assigned":  "assignments",
-	"unassigned":      "assignments",
-	"assignee_changed": "assignments",
-	"status_changed":  "status_changes",
-	"new_comment":     "comments",
-	"mentioned":       "comments",
-	"priority_changed": "updates",
+	"issue_assigned":     "assignments",
+	"unassigned":         "assignments",
+	"assignee_changed":   "assignments",
+	"status_changed":     "status_changes",
+	"new_comment":        "comments",
+	"mentioned":          "mentions",
+	"priority_changed":   "updates",
 	"start_date_changed": "updates",
-	"due_date_changed": "updates",
-	"task_completed":  "agent_activity",
-	"task_failed":     "agent_activity",
-	"agent_blocked":   "agent_activity",
-	"agent_completed": "agent_activity",
+	"due_date_changed":   "updates",
+	"task_completed":     "agent_activity",
+	"task_failed":        "agent_activity",
+	"agent_blocked":      "agent_activity",
+	"agent_completed":    "agent_activity",
 }
 
 // isNotifMuted returns true if the given notification type is muted for a user
@@ -138,19 +232,6 @@ func loadUserPrefs(
 		result[util.UUIDToString(row.UserID)] = prefs
 	}
 	return result
-}
-
-// terminalStatusForTaskFailedDismiss is the set of issue statuses that mark
-// the issue as "the user no longer needs to triage past failures." When a
-// status change lands on one of these, any pre-existing task_failed inbox
-// rows for the issue are archived so the inbox stays a fresh-signal surface.
-// `in_review` is included because in Multica's agent flow that's the most
-// reliable "work delivered" handoff — and a status flip back to in_progress
-// will simply produce new task_failed rows that surface normally.
-var terminalStatusForTaskFailedDismiss = map[string]bool{
-	"in_review": true,
-	"done":      true,
-	"cancelled": true,
 }
 
 // archiveStaleTaskFailedInbox archives all task_failed inbox rows for the
@@ -230,7 +311,7 @@ func notifySubscribers(
 	body string,
 	details []byte,
 ) {
-	notified := notifyIssueSubscribers(ctx, queries, bus,
+	notified, tierSuppressed := notifyIssueSubscribers(ctx, queries, bus,
 		issueID, issueID, issueStatus, workspaceID, e, exclude,
 		notifType, severity, title, body, details)
 
@@ -251,11 +332,21 @@ func notifySubscribers(
 	}
 
 	// Merge already-notified IDs into exclude set for parent subscribers.
-	parentExclude := make(map[string]bool, len(exclude)+len(notified))
+	parentExclude := make(map[string]bool, len(exclude)+len(notified)+len(tierSuppressed))
 	for id := range exclude {
 		parentExclude[id] = true
 	}
 	for id := range notified {
+		parentExclude[id] = true
+	}
+	// Recipients the delegated tier just filtered out for THIS child must not
+	// get the same event smuggled back in through the parent's subscriber list.
+	// The common shape is exactly that: the human directly created the parent
+	// (reason='creator', full delivery) while their agent filed the children
+	// (reason='delegated', reduced). Without this the tier suppresses nothing
+	// in the one case it exists for — an agent-built tree under a parent the
+	// human is watching (MUL-5483).
+	for id := range tierSuppressed {
 		parentExclude[id] = true
 	}
 
@@ -271,7 +362,11 @@ func notifySubscribers(
 // subscriberIssueID, but creates inbox items pointing to targetIssueID.
 // This allows querying subscribers from a parent issue while the notification
 // links to the sub-issue where the change actually occurred.
-// Returns the set of member IDs that were notified.
+//
+// Returns two sets of member IDs: those that were notified, and those the
+// delegated delivery tier deliberately filtered out. The caller propagates the
+// second set into the parent bubble so a suppressed event cannot be
+// re-delivered through an ancestor subscription (see notifySubscribers).
 func notifyIssueSubscribers(
 	ctx context.Context,
 	queries *db.Queries,
@@ -287,14 +382,30 @@ func notifyIssueSubscribers(
 	title string,
 	body string,
 	details []byte,
-) map[string]bool {
+) (map[string]bool, map[string]bool) {
 	notified := map[string]bool{}
+	tierSuppressed := map[string]bool{}
+
+	// Resolve the handoff question once for the whole subscriber list, rather
+	// than per row. A built-in key answers without a query, so the common path
+	// still performs no I/O. (MUL-7379)
+	//
+	// FAIL OPEN. A catalog read can only fail for a CUSTOM status, and the two
+	// outcomes are not symmetric: a spare inbox row costs one dismissal, while
+	// a dropped one silently strands the issue on a status whose whole purpose
+	// is to be waited on, with no other signal to the delegated subscriber.
+	statusIsHandoff, err := issueStatusIsHandoff(ctx, queries, parseUUID(workspaceID), issueStatus)
+	if err != nil {
+		slog.Warn("resolve issue status handoff for delegated delivery; delivering",
+			"issue_id", subscriberIssueID, "status", issueStatus, "error", err)
+		statusIsHandoff = true
+	}
 
 	subs, err := queries.ListIssueSubscribers(ctx, parseUUID(subscriberIssueID))
 	if err != nil {
 		slog.Error("failed to list subscribers for notification",
 			"issue_id", subscriberIssueID, "error", err)
-		return notified
+		return notified, tierSuppressed
 	}
 
 	// Batch-load notification preferences for all member subscribers.
@@ -329,7 +440,15 @@ func notifyIssueSubscribers(
 			continue
 		}
 
+		// Delegated subscriptions deliver a narrower event set than direct
+		// ones — see deliverToSubscriber.
+		if !deliverToSubscriber(sub.Reason, notifType, statusIsHandoff) {
+			tierSuppressed[subID] = true
+			continue
+		}
+
 		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+			ID:            dbid.NewV7(),
 			WorkspaceID:   parseUUID(workspaceID),
 			RecipientType: "member",
 			RecipientID:   sub.UserID,
@@ -360,7 +479,7 @@ func notifyIssueSubscribers(
 		})
 	}
 
-	return notified
+	return notified, tierSuppressed
 }
 
 // notifyDirect creates an inbox item for a specific recipient. Skips if the
@@ -395,6 +514,7 @@ func notifyDirect(
 	}
 
 	item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		ID:            dbid.NewV7(),
 		WorkspaceID:   parseUUID(workspaceID),
 		RecipientType: recipientType,
 		RecipientID:   parseUUID(recipientID),
@@ -409,7 +529,7 @@ func notifyDirect(
 	})
 	if err != nil {
 		slog.Error("direct notification creation failed",
-			"recipient_id", recipientID, "type", notifType, "error", err)
+			"issue_id", issueID, "recipient_id", recipientID, "type", notifType, "error", err)
 		return
 	}
 
@@ -502,11 +622,14 @@ func notifyMentionedMembers(
 		if id == e.ActorID || skip[id] {
 			continue
 		}
-		// Skip if mentions/comments are muted by this user
+		// Skip if mentions are muted by this user. This is deliberately a
+		// different group from `comments`: muting comment volume must not
+		// silence someone asking for you by name.
 		if p, ok := mentionPrefs[id]; ok && isNotifMuted(p, "mentioned") {
 			continue
 		}
 		item, err := queries.CreateInboxItem(context.Background(), db.CreateInboxItemParams{
+			ID:            dbid.NewV7(),
 			WorkspaceID:   parseUUID(e.WorkspaceID),
 			RecipientType: "member",
 			RecipientID:   parseUUID(id),
@@ -558,8 +681,8 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		// Track who already got notified to avoid duplicates
 		skip := map[string]bool{e.ActorID: true}
 
-		// Direct notification to assignee
-		if issue.AssigneeType != nil && issue.AssigneeID != nil {
+		// Direct notification to assignees that own an inbox.
+		if issue.AssigneeType != nil && issue.AssigneeID != nil && isAssignmentRecipientType(*issue.AssigneeType) {
 			skip[*issue.AssigneeID] = true
 			notifyDirect(ctx, queries, bus,
 				*issue.AssigneeType, *issue.AssigneeID,
@@ -597,8 +720,16 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		prevDescription, _ := payload["prev_description"].(*string)
 
 		if assigneeChanged {
-			// Build structured details for assignee change
-			detailsMap := map[string]any{}
+			// Build structured details for assignee change.
+			//
+			// map[string]string, not map[string]any: every client parses inbox
+			// `details` as a string->string map, and because the inbox endpoint
+			// returns an ARRAY, one non-string value fails the whole parse and
+			// blanks the entire list rather than one row. `any` let that be a
+			// convention a reviewer had to notice; the concrete type makes it a
+			// compile error. This is the only details map in this file that was
+			// not already string-typed.
+			detailsMap := map[string]string{}
 			if prevAssigneeType != nil {
 				detailsMap["prev_assignee_type"] = *prevAssigneeType
 			}
@@ -613,8 +744,8 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			}
 			assigneeDetails, _ := json.Marshal(detailsMap)
 
-			// Direct: notify new assignee about assignment
-			if issue.AssigneeType != nil && issue.AssigneeID != nil {
+			// Direct: notify new assignee about assignment when it owns an inbox.
+			if issue.AssigneeType != nil && issue.AssigneeID != nil && isAssignmentRecipientType(*issue.AssigneeType) {
 				notifyDirect(ctx, queries, bus,
 					*issue.AssigneeType, *issue.AssigneeID,
 					e.WorkspaceID, e, issue.ID, issue.Status,
@@ -625,7 +756,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				)
 			}
 
-			// Direct: notify old assignee about unassignment
+			// Direct: notify only a previous member assignee about unassignment.
+			// This is intentionally narrower than isAssignmentRecipientType: agents
+			// do not receive unassigned notifications.
 			if prevAssigneeType != nil && prevAssigneeID != nil && *prevAssigneeType == "member" {
 				notifyDirect(ctx, queries, bus,
 					"member", *prevAssigneeID,
@@ -663,11 +796,25 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				issue.Title, "",
 				statusDetails)
 
-			// When the issue progresses past the failure (in_review / done /
-			// cancelled), retire any stale task_failed inbox rows so the
-			// inbox reflects the current state of the work, not its history.
-			// The activity log keeps the full failure history for audit.
-			if terminalStatusForTaskFailedDismiss[issue.Status] {
+			// When the issue progresses past the failure, retire any stale
+			// task_failed inbox rows so the inbox reflects the current state of
+			// the work, not its history. The activity log keeps the full
+			// failure history for audit.
+			//
+			// Same handoff predicate as the delegated tier, minus Blocked:
+			// blocked hands the issue to a human, but it hands over work that
+			// is still stuck, so the past failures remain worth triaging.
+			// Blocked is excluded by its exact key — a custom started status is
+			// a review gate, not a stall. (MUL-7379)
+			//
+			// FAIL CLOSED here, unlike delivery: hiding a failure notice on a
+			// guess is worse than leaving a stale one the user can dismiss.
+			handoff, handoffErr := issueStatusIsHandoff(ctx, queries, parseUUID(e.WorkspaceID), issue.Status)
+			switch {
+			case handoffErr != nil:
+				slog.Warn("resolve issue status handoff for task_failed dismissal; keeping rows",
+					"issue_id", issue.ID, "status", issue.Status, "error", handoffErr)
+			case handoff && issue.Status != issuestatus.Blocked:
 				archiveStaleTaskFailedInbox(ctx, queries, bus, e.WorkspaceID, issue.ID)
 			}
 		}

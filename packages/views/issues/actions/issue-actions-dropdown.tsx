@@ -19,15 +19,16 @@ interface IssueActionsDropdownProps {
   /** A single React element cloned by Base UI as the trigger (via `render` prop). */
   trigger: ReactElement;
   align?: "start" | "end" | "center";
-  /** If set, navigate here after the issue is deleted. */
-  onDeletedNavigateTo?: string;
+  /** If set, leave the page after the issue is deleted — back to wherever the
+   *  user came from, or to this path when there is no in-app history. */
+  onDeletedFallbackPath?: string;
 }
 
 export function IssueActionsDropdown({
   issue,
   trigger,
   align = "end",
-  onDeletedNavigateTo,
+  onDeletedFallbackPath,
 }: IssueActionsDropdownProps) {
   const actions = useIssueActions(issue);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
@@ -46,7 +47,7 @@ export function IssueActionsDropdown({
             actions={actions}
             primitives={dropdownPrimitives}
             onOpenAssignee={() => setAssigneeOpen(true)}
-            onDeletedNavigateTo={onDeletedNavigateTo}
+            onDeletedFallbackPath={onDeletedFallbackPath}
           />
         </DropdownMenuContent>
       </DropdownMenu>

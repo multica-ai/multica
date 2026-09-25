@@ -30,22 +30,28 @@ import {
 } from "react-native";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
+import { stripChannelMediaMarkers } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { DescriptionField } from "@/components/issue/description-field";
 import { MentionSuggestionBar } from "@/components/issue/mention-suggestion-bar";
 import { MOBILE_PLACEHOLDER_COLOR } from "@/components/ui/input-tokens";
 import { issueDetailOptions } from "@/data/queries/issues";
 import { useUpdateIssue } from "@/data/mutations/issues";
+import { buildIssueTextUpdate } from "@/data/issue-edit";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useT } from "@/lib/i18n";
 import { useMentionInput } from "@/lib/use-mention-input";
 
 export default function EditIssue() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const { t } = useT("issues");
   const detail = useQuery(issueDetailOptions(wsId, id));
   const update = useUpdateIssue(id);
 
   const [title, setTitle] = useState("");
+  const [initialTitle, setInitialTitle] = useState("");
+  const [initialDescription, setInitialDescription] = useState("");
   const description = useMentionInput();
   const [seeded, setSeeded] = useState(false);
   // `useMentionInput` returns `setText` from `useState`, which is a stable
@@ -58,20 +64,23 @@ export default function EditIssue() {
   useEffect(() => {
     if (!detail.data || seeded) return;
     setTitle(detail.data.title);
-    setDescriptionText(detail.data.description ?? "");
+    setInitialTitle(detail.data.title);
+    const initial = detail.data.description ?? "";
+    setDescriptionText(stripChannelMediaMarkers(initial));
+    setInitialDescription(initial);
     setSeeded(true);
   }, [detail.data, seeded, setDescriptionText]);
 
-  const initialDescription = detail.data?.description ?? "";
   const currentDescription = description.serialize();
 
   const dirty = useMemo(() => {
     if (!detail.data || !seeded) return false;
     return (
-      title.trim() !== detail.data.title ||
-      currentDescription.trim() !== initialDescription
+      title.trim() !== initialTitle ||
+      currentDescription.trim() !==
+        stripChannelMediaMarkers(initialDescription).trim()
     );
-  }, [detail.data, seeded, title, currentDescription, initialDescription]);
+  }, [detail.data, seeded, title, initialTitle, currentDescription, initialDescription]);
 
   const canSave =
     seeded && title.trim().length > 0 && dirty && !update.isPending;
@@ -82,46 +91,46 @@ export default function EditIssue() {
       return;
     }
     Alert.alert(
-      "Discard changes?",
-      "Your edits to this issue will be lost.",
+      t("form.discard_title"),
+      t("form.discard_message_issue"),
       [
-        { text: "Keep editing", style: "cancel" },
+        { text: t("form.keep_editing"), style: "cancel" },
         {
-          text: "Discard",
+          text: t("common:actions.discard"),
           style: "destructive",
           onPress: () => router.back(),
         },
       ],
     );
-  }, [dirty]);
+  }, [dirty, t]);
 
   const onSave = useCallback(() => {
     if (!canSave) return;
     // `UpdateIssueRequest.description` is `string | undefined` — server
     // treats empty string as "clear the description", which is what we
-    // want when the user wipes the field.
-    const patch = {
-      title: title.trim(),
-      description: currentDescription.trim(),
-    };
+    // want when the user wipes the field. Mobile deliberately omits strict
+    // text baselines until this screen has a conflict reconciliation flow;
+    // otherwise a real 409 would leave the draft in an unrecoverable retry
+    // loop. Web/desktop keep baseline protection with their compare UI.
+    const patch = buildIssueTextUpdate(title, currentDescription);
     update.mutate(patch, {
       onSuccess: () => router.back(),
       onError: (err) => {
         Alert.alert(
-          "Failed to save",
-          err instanceof Error ? err.message : "Unknown error",
+          t("form.save_failed"),
+          err instanceof Error ? err.message : t("common:states.error"),
         );
       },
     });
-  }, [canSave, title, currentDescription, update]);
+  }, [canSave, title, currentDescription, update, t]);
 
   const headerLeft = useCallback(
     () => (
       <Pressable onPress={onCancel} className="px-1 py-1">
-        <Text className="text-base text-brand">Cancel</Text>
+      <Text className="text-base text-brand">{t("common:actions.cancel")}</Text>
       </Pressable>
     ),
-    [onCancel],
+    [onCancel, t],
   );
 
   const headerRight = useCallback(
@@ -132,11 +141,11 @@ export default function EditIssue() {
         className={canSave ? "px-1 py-1" : "px-1 py-1 opacity-40"}
       >
         <Text className="text-base text-brand font-semibold">
-          {update.isPending ? "Saving…" : "Save"}
+          {update.isPending ? t("edit.saving") : t("edit.save")}
         </Text>
       </Pressable>
     ),
-    [canSave, onSave, update.isPending],
+    [canSave, onSave, update.isPending, t],
   );
 
   return (
@@ -152,14 +161,16 @@ export default function EditIssue() {
           keyboardShouldPersistTaps="handled"
         >
           {!detail.data ? (
-            <Text className="text-sm text-muted-foreground">Loading…</Text>
+            <Text className="text-sm text-muted-foreground">
+              {t("common:states.loading")}
+            </Text>
           ) : (
             <>
-              <Field label="Title">
+              <Field label={t("common:fields.title")}>
                 <TextInput
                   value={title}
                   onChangeText={setTitle}
-                  placeholder="Issue title"
+                  placeholder={t("new.title_placeholder")}
                   placeholderTextColor={MOBILE_PLACEHOLDER_COLOR}
                   className="text-base text-foreground bg-secondary/50 rounded-md px-3 py-2"
                   returnKeyType="next"
@@ -167,7 +178,7 @@ export default function EditIssue() {
                 />
               </Field>
 
-              <Field label="Description">
+              <Field label={t("common:fields.description")}>
                 <DescriptionField
                   description={description}
                   disabled={update.isPending}

@@ -27,6 +27,7 @@ vi.mock("../../navigation", () => ({
     back: vi.fn(),
     pathname: "/acme/issues",
     searchParams: new URLSearchParams(),
+    hash: "",
     openInNewTab: vi.fn(),
     getShareableUrl: (p: string) => `https://app.example${p}`,
   }),
@@ -94,6 +95,28 @@ describe("AttachmentList — inline attachment filtering", () => {
     const attachment = {
       id,
       url: "/uploads/report.pdf",
+      filename: "report.pdf",
+      content_type: "application/pdf",
+      size_bytes: 1024,
+    } as any;
+
+    const { container } = renderWithQuery(
+      <AttachmentList
+        attachments={[attachment]}
+        content={`!file[report.pdf](${href})`}
+      />,
+    );
+
+    expect(screen.queryByText("report.pdf")).toBeNull();
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("does not render a bottom attachment row when the body already has the response download_url", () => {
+    const href = "https://cdn.example.test/report.pdf?Signature=stale";
+    const attachment = {
+      id: "11111111-2222-3333-4444-555555555555",
+      url: "/uploads/report.pdf",
+      download_url: "https://cdn.example.test/report.pdf?Signature=fresh",
       filename: "report.pdf",
       content_type: "application/pdf",
       size_bytes: 1024,

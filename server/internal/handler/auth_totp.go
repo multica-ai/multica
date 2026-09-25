@@ -310,7 +310,7 @@ func (h *Handler) TOTPLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, LoginResponse{
 		Token: tokenString,
-		User:  userToResponse(user),
+		User:  h.userToResponse(user),
 	})
 }
 

@@ -27,3 +27,15 @@ export function deriveGitHubSettings(
     autoLinkPRs: enabled && s.github_auto_link_prs_enabled !== false,
   };
 }
+
+/**
+ * Workspace-wide PR auto-complete: when every PR linked to an issue is merged,
+ * the issue moves to Done. Absent means on. Not GitHub-specific — self-hosted
+ * providers follow the same setting — so it ignores the GitHub master switch.
+ */
+export function derivePRAutoCompleteEnabled(
+  workspace: Pick<Workspace, "settings"> | null | undefined,
+): boolean {
+  const s = (workspace?.settings ?? {}) as Record<string, unknown>;
+  return s.pr_auto_complete_enabled !== false;
+}

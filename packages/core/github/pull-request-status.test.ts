@@ -1,133 +1,157 @@
 import { describe, expect, it } from "vitest";
 import {
-  derivePullRequestStatusKind,
-  derivePullRequestProgressSegments,
+  deriveChecksStatus,
+  deriveMergeStatus,
   shouldShowPullRequestStats,
-  type PullRequestStatusInput,
 } from "./pull-request-status";
 
-const base: PullRequestStatusInput = { state: "open" };
-
-describe("derivePullRequestStatusKind", () => {
-  it("closed beats every other signal", () => {
+describe("deriveChecksStatus", () => {
+  it("maps a `failure` rollup to failed and carries counts + names", () => {
     expect(
-      derivePullRequestStatusKind({
-        state: "closed",
-        mergeable_state: "dirty",
-        checks_failed: 99,
-        checks_pending: 99,
-        checks_passed: 99,
+      deriveChecksStatus({
+        checks_rollup: "failure",
+        checks_total: 7,
+        checks_failed: 2,
+        failed_check_names: ["backend", "e2e"],
       }),
-    ).toBe("closed");
+    ).toEqual({ kind: "failed", failed: 2, total: 7, names: ["backend", "e2e"] });
   });
 
-  it("merged beats every other signal except closed", () => {
-    expect(
-      derivePullRequestStatusKind({
-        state: "merged",
-        mergeable_state: "dirty",
-        checks_failed: 5,
-      }),
-    ).toBe("merged");
+  it("maps an `error` rollup to failed", () => {
+    expect(deriveChecksStatus({ checks_rollup: "error", checks_total: 3 }).kind).toBe("failed");
   });
 
-  it("dirty conflicts wins over check signals", () => {
-    expect(
-      derivePullRequestStatusKind({
-        ...base,
-        mergeable_state: "dirty",
-        checks_passed: 3,
-      }),
-    ).toBe("conflicts");
+  it("treats any failed count as failed even when the rollup is absent", () => {
+    // Failure is trusted from the count so a known failure surfaces even if the
+    // rollup verdict lags.
+    expect(deriveChecksStatus({ checks_failed: 1 }).kind).toBe("failed");
   });
 
-  it("any failed check beats pending and passed", () => {
+  it("failure beats pending and passed", () => {
     expect(
-      derivePullRequestStatusKind({
-        ...base,
+      deriveChecksStatus({
+        checks_rollup: "failure",
         checks_failed: 1,
-        checks_pending: 3,
+        checks_running: 3,
         checks_passed: 5,
-      }),
-    ).toBe("checks_failed");
+      }).kind,
+    ).toBe("failed");
   });
 
-  it("pending beats passed when no failure", () => {
+  it("maps `pending` / `expected` rollups to pending with running count", () => {
     expect(
-      derivePullRequestStatusKind({
-        ...base,
+      deriveChecksStatus({
+        checks_rollup: "pending",
+        checks_total: 7,
+        checks_passed: 5,
+        checks_running: 2,
+      }),
+    ).toEqual({ kind: "pending", passed: 5, total: 7, running: 2 });
+    expect(deriveChecksStatus({ checks_rollup: "expected" }).kind).toBe("pending");
+  });
+
+  it("maps a `success` rollup to passed", () => {
+    expect(deriveChecksStatus({ checks_rollup: "success", checks_total: 7 })).toEqual({
+      kind: "passed",
+      total: 7,
+    });
+  });
+
+  it("renders `none` only for a current snapshot whose rollup is absent", () => {
+    expect(deriveChecksStatus({ snapshot_available: true }).kind).toBe("none");
+    expect(
+      deriveChecksStatus({
+        snapshot_available: true,
+        checks_rollup: null,
+        checks_passed: 5,
+        checks_total: 5,
+      }).kind,
+    ).toBe("none");
+  });
+
+  it("hides CI when the API snapshot is disabled or has not landed", () => {
+    expect(deriveChecksStatus({}).kind).toBe("unavailable");
+    expect(
+      deriveChecksStatus({
+        snapshot_available: false,
+        checks_rollup: "success",
+        checks_conclusion: "passed",
+        checks_total: 5,
+      }).kind,
+    ).toBe("unavailable");
+  });
+
+  it("preserves legacy provider passed, pending, and failed conclusions", () => {
+    expect(
+      deriveChecksStatus({ checks_conclusion: "passed", checks_total: 3 }),
+    ).toEqual({ kind: "passed", total: 3 });
+    expect(
+      deriveChecksStatus({
+        checks_conclusion: "pending",
+        checks_total: 3,
+        checks_passed: 2,
         checks_pending: 1,
-        checks_passed: 5,
       }),
-    ).toBe("checks_pending");
-  });
-
-  it("all-passed is checks_passed regardless of mergeable=clean", () => {
+    ).toEqual({ kind: "pending", passed: 2, total: 3, running: 1 });
     expect(
-      derivePullRequestStatusKind({
-        ...base,
-        mergeable_state: "clean",
-        checks_passed: 5,
-      }),
-    ).toBe("checks_passed");
-  });
-
-  it("clean + no suites is ready-to-merge", () => {
-    expect(
-      derivePullRequestStatusKind({ ...base, mergeable_state: "clean" }),
-    ).toBe("ready");
-  });
-
-  it("opaque mergeable values render as unknown", () => {
-    for (const m of ["blocked", "behind", "unstable", "has_hooks", "unknown", null, undefined]) {
-      expect(derivePullRequestStatusKind({ ...base, mergeable_state: m })).toBe("unknown");
-    }
+      deriveChecksStatus({
+        checks_conclusion: "failed",
+        checks_total: 3,
+        checks_failed: 1,
+      }).kind,
+    ).toBe("failed");
   });
 });
 
-describe("derivePullRequestProgressSegments", () => {
-  it("returns null for terminal PRs (merged / closed)", () => {
-    expect(derivePullRequestProgressSegments({ state: "merged", checks_passed: 5 })).toBeNull();
-    expect(derivePullRequestProgressSegments({ state: "closed", checks_failed: 3 })).toBeNull();
+describe("deriveMergeStatus", () => {
+  it("maps `conflicting` to conflicting", () => {
+    expect(deriveMergeStatus({ mergeable: "conflicting" }).kind).toBe("conflicting");
   });
 
-  it("returns null when no suite has been observed", () => {
-    expect(derivePullRequestProgressSegments({ ...base })).toBeNull();
+  it("folds a `dirty` merge state into conflicting", () => {
+    expect(deriveMergeStatus({ merge_state_status: "dirty" }).kind).toBe("conflicting");
+  });
+
+  it("asserts ready ONLY from a `clean` merge state", () => {
+    expect(deriveMergeStatus({ merge_state_status: "clean" }).kind).toBe("ready");
+  });
+
+  it("never infers ready from `mergeable === mergeable` alone", () => {
+    // "No conflict" is not "ready" — required checks / branch protection live in
+    // merge_state_status, so mergeable without a clean state renders nothing.
+    expect(deriveMergeStatus({ mergeable: "mergeable" }).kind).toBe("none");
+    expect(deriveMergeStatus({ mergeable: "mergeable", merge_state_status: null }).kind).toBe("none");
+  });
+
+  it("surfaces blocked / behind / unstable / has_hooks faithfully", () => {
+    expect(deriveMergeStatus({ merge_state_status: "blocked" }).kind).toBe("blocked");
+    expect(deriveMergeStatus({ merge_state_status: "behind" }).kind).toBe("behind");
+    expect(deriveMergeStatus({ merge_state_status: "unstable" }).kind).toBe("unstable");
+    expect(deriveMergeStatus({ merge_state_status: "has_hooks" }).kind).toBe("has_hooks");
+  });
+
+  it("renders nothing when GitHub has not decided", () => {
+    // unknown / null shows neither conflict nor ready.
+    expect(deriveMergeStatus({}).kind).toBe("none");
+    expect(deriveMergeStatus({ mergeable: "unknown" }).kind).toBe("none");
+    expect(deriveMergeStatus({ mergeable: null, merge_state_status: "unknown" }).kind).toBe("none");
+    expect(deriveMergeStatus({ merge_state_status: "draft" }).kind).toBe("none");
+  });
+
+  it("renders nothing when the API snapshot feature is unavailable", () => {
     expect(
-      derivePullRequestProgressSegments({ ...base, checks_failed: 0, checks_pending: 0, checks_passed: 0 }),
-    ).toBeNull();
+      deriveMergeStatus({
+        snapshot_available: false,
+        mergeable: "conflicting",
+        merge_state_status: "dirty",
+      }).kind,
+    ).toBe("none");
   });
 
-  it("orders segments failed → pending → passed (failure leftmost)", () => {
-    const segs = derivePullRequestProgressSegments({
-      ...base,
-      checks_failed: 1,
-      checks_pending: 2,
-      checks_passed: 3,
-    });
-    expect(segs).not.toBeNull();
-    expect(segs!.map((s) => s.kind)).toEqual(["failed", "pending", "passed"]);
-  });
-
-  it("emits a zero-width segment-free output (no entry with ratio 0)", () => {
-    const segs = derivePullRequestProgressSegments({
-      ...base,
-      checks_failed: 0,
-      checks_pending: 0,
-      checks_passed: 4,
-    });
-    expect(segs).toEqual([{ kind: "passed", ratio: 1 }]);
-  });
-
-  it("ratios sum to ~1 across segments", () => {
-    const segs = derivePullRequestProgressSegments({
-      ...base,
-      checks_failed: 1,
-      checks_pending: 1,
-      checks_passed: 2,
-    })!;
-    const total = segs.reduce((acc, s) => acc + s.ratio, 0);
-    expect(total).toBeCloseTo(1, 6);
+  it("conflict wins over an otherwise decisive merge state", () => {
+    expect(
+      deriveMergeStatus({ mergeable: "conflicting", merge_state_status: "blocked" }).kind,
+    ).toBe("conflicting");
   });
 });
 

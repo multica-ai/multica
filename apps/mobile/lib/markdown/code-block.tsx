@@ -38,6 +38,7 @@ import Svg, { Path, Rect } from "react-native-svg";
 import { Text } from "@/components/ui/text";
 import { THEME } from "@/lib/theme";
 import { useColorScheme } from "@/lib/use-color-scheme";
+import { useT } from "@/lib/i18n";
 import {
   CODE_BLOCK_CONTAINER_CLASS,
   CODE_BLOCK_LANG_LABEL_CLASS,
@@ -69,16 +70,26 @@ export function CodeBlock({ code, lang, selectable = true }: Props) {
   const { isDarkColorScheme } = useColorScheme();
   const theme = isDarkColorScheme ? SHIKI_THEME_DARK : SHIKI_THEME_LIGHT;
   const resolvedLang = resolveLang(lang);
-  const [lines, setLines] = useState<HighlightedLine[] | null>(null);
+  const [highlighted, setHighlighted] = useState<{
+    code: string;
+    lang: string;
+    theme: string;
+    lines: HighlightedLine[];
+  } | null>(null);
+  const lines =
+    highlighted?.code === code &&
+    highlighted.lang === resolvedLang &&
+    highlighted.theme === theme
+      ? highlighted.lines
+      : null;
 
   useEffect(() => {
-    if (!resolvedLang) {
-      setLines(null);
-      return;
-    }
+    if (!resolvedLang) return;
     let cancelled = false;
     void highlight(code, resolvedLang, theme).then((result) => {
-      if (!cancelled) setLines(result);
+      if (!cancelled && result) {
+        setHighlighted({ code, lang: resolvedLang, theme, lines: result });
+      }
     });
     return () => {
       cancelled = true;
@@ -88,7 +99,14 @@ export function CodeBlock({ code, lang, selectable = true }: Props) {
   return (
     <View className={CODE_BLOCK_CONTAINER_CLASS}>
       <CodeBlockHeader code={code} lang={lang} />
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+      {/* RN's horizontal ScrollView defaults to flexGrow: 1. In a recycled,
+          self-sized chat bubble that lets the child outgrow the FlashList
+          cell instead of sizing to its code. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ flexGrow: 0 }}
+      >
         {lines ? (
           <HighlightedCode lines={lines} selectable={selectable} />
         ) : (
@@ -149,9 +167,10 @@ function HighlightedCode({
 
 function CodeBlockHeader({ code, lang }: Props) {
   const { isDarkColorScheme } = useColorScheme();
-  const t = isDarkColorScheme ? THEME.dark : THEME.light;
+  const theme = isDarkColorScheme ? THEME.dark : THEME.light;
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { t } = useT("editor");
 
   // Cancel pending reset on unmount so an in-flight setTimeout doesn't fire
   // setState on a dead component.
@@ -192,12 +211,12 @@ function CodeBlockHeader({ code, lang }: Props) {
         onPress={onCopy}
         hitSlop={8}
         accessibilityRole="button"
-        accessibilityLabel={copied ? "Code copied" : "Copy code"}
+        accessibilityLabel={copied ? t("code.copied") : t("code.copy")}
       >
         {copied ? (
-          <CheckIcon color={t.success} />
+          <CheckIcon color={theme.success} />
         ) : (
-          <CopyIcon color={t.mutedForeground} />
+          <CopyIcon color={theme.mutedForeground} />
         )}
       </Pressable>
     </View>

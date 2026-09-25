@@ -85,7 +85,7 @@ test.describe("Chat attachments", () => {
 
     const userRow = await pgc.query(
       `SELECT id FROM "user" WHERE email = $1 LIMIT 1`,
-      ["e2e@multica.ai"],
+      [api.getEmail()],
     );
     if (userRow.rows.length === 0) throw new Error("e2e user missing");
     const userId = userRow.rows[0].id as string;

@@ -1,0 +1,40 @@
+---
+title: Community-maintained areas
+description: Which parts of Multica are maintained by community contributors, what that means for support, and how to report a problem in one of those areas.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Most of Multica is built and supported by the core team. A few areas were contributed by volunteers who stayed on as their maintainers. Those areas ship in every release, but they carry no official support SLA.
+
+This page is the authoritative list. It exists so you know what you are relying on before you build a workflow on top of it, and so the people who contributed that work are credited by name.
+
+## What community-maintained means
+
+**What we commit to.** The area ships in every release. The core team keeps it compiling and its tests green through shared-layer refactors, and routes issues in that area to its maintainers.
+
+**What we cannot promise.** We do not use these platforms day to day, so we cannot verify behavior against the real thing. A bug that needs real platform access depends on a volunteer's availability, which means no response-time guarantee.
+
+**How an area retires.** If an area breaks in a way we cannot fix without real access, and no fix appears for a few releases, we may deprecate it rather than leave it quietly broken. That rule protects the maintainers as much as it protects you: a volunteer who gets busy or moves on owes nobody a fix.
+
+## The areas
+
+| Area | Code | Maintainers | Since | Status |
+| --- | --- | --- | --- | --- |
+| [DingTalk chat integration](/dingtalk-bot-integration) | `server/internal/integrations/dingtalk` | [@yyclaw](https://github.com/yyclaw) | 2026-08 | Active |
+| [WeCom chat integration](/channels) | `server/internal/integrations/wecom` | [@leroy-chen](https://github.com/leroy-chen), [@seacen](https://github.com/seacen) | 2026-08 | Active |
+| [Telegram chat integration](/telegram-bot-integration) | `server/internal/integrations/telegram` | [@leonzone](https://github.com/leonzone) | 2026-08 | Active |
+
+This list changes only when ownership of an area does. Everything not listed here is maintained by the core team.
+
+## Reporting a problem in one of these areas
+
+<Callout type="warning">
+File a [GitHub issue](https://github.com/multica-ai/multica/issues). Please do not DM or @-mention a maintainer directly — they agreed to be the first stop for questions **we** route to them, not a support desk anyone can page.
+</Callout>
+
+The issue form has an **Area** field. Filling it in is what lets us route the report to the right maintainer, so it is worth the extra click.
+
+## Becoming a maintainer
+
+If you contribute a new integration or another substantial area, we will have this conversation with you before merging: what we commit to, what we would ask of you, and the retirement rule above. Declining is fine — it changes how the area is labelled, not whether the work merges.

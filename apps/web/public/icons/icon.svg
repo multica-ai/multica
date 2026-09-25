@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Multica">
+  <!--
+    Full-bleed source for the generated home-screen icons (apple-touch-icon.png,
+    icon-maskable-512.png). Full-bleed because both surfaces mask the artwork
+    themselves: iOS rounds the corners, Android crops to the launcher shape.
+    The mark is /favicon.svg's polygon, inverted to the dark app-icon treatment
+    the desktop and mobile builds already ship, and held at 52% of the canvas so
+    it stays inside the maskable safe zone (the centre circle of 80% diameter).
+    See app/manifest.ts for the regeneration commands.
+  -->
+  <rect width="512" height="512" fill="#111827"/>
+  <polygon
+    fill="#ffffff"
+    transform="translate(122.88 122.88) scale(2.6624)"
+    points="45,62.1 45,100 55,100 55,62.1 81.8,88.9 88.9,81.8 62.1,55 100,55 100,45 62.1,45 88.9,18.2 81.8,11.1 55,37.9 55,0 45,0 45,37.9 18.2,11.1 11.1,18.2 37.9,45 0,45 0,55 37.9,55 11.1,81.8 18.2,88.9"
+  />
+</svg>

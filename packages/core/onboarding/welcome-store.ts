@@ -1,37 +1,34 @@
 import { create } from "zustand";
 
 /**
- * Welcome signal — written by Step 3 of the onboarding flow when the user
- * clicks "Start exploring" or "Skip", consumed exactly once by the
- * `<WelcomeAfterOnboarding />` component mounted inside the workspace
- * shell.
+ * Welcome signal — written by the runtime step only when the user skips
+ * connecting a runtime, then consumed exactly once by the
+ * `<WelcomeAfterOnboarding />` component in the workspace shell.
  *
  * The signal is the bridge between the onboarding screen and the workspace
  * shell that succeeds it. `onboarded_at` is already true by the time we
- * land in the workspace — this carries the *transient* "I just finished
- * Step 3, here is what I chose" intent without persisting it on the user
+ * land in the workspace — this carries the transient no-runtime intent
+ * without persisting it on the user
  * row (the v2 design persisted it as fields and leaked complexity
  * everywhere).
  *
- * `choice` is "runtime" or "skip":
- *   - "runtime": user picked a runtime in Step 3. `runtimeId` is set. The
- *     workspace welcome hook creates a Multica Helper agent on that runtime
- *     and presents starter cards.
- *   - "skip": user explicitly skipped. `runtimeId` is undefined. The hook
- *     seeds two issues (install-runtime guide + create-agent guide) and
- *     shows them in a Modal.
+ * The signal is only needed when the user explicitly skips runtime setup.
+ * The workspace welcome hook seeds one install-runtime guide and shows it in
+ * a modal. Once a runtime appears, the Runtimes page offers the same Mika
+ * bootstrap used by the connected onboarding path. Runtime-connected
+ * onboarding creates Mika before reaching the workspace and does not use
+ * this signal.
  */
 export interface WelcomeSignal {
   workspaceId: string;
-  choice: "runtime" | "skip";
-  runtimeId?: string;
+  choice: "skip";
 }
 
 interface WelcomeStoreState {
   signal: WelcomeSignal | null;
   /**
    * True after the user has explicitly engaged with the Welcome surface —
-   * picked a starter card, opened a seeded issue, closed the Skip modal.
+   * opened the runtime guide or closed the Skip modal.
    * Components MUST treat `signal && !dismissed` as the render condition;
    * `dismiss()` is what removes the modal from view.
    */
@@ -56,7 +53,7 @@ interface WelcomeStoreState {
  * Zustand store, deliberately NOT persisted. Reloading the page drops the
  * signal — that's the correct behavior: the user already finished
  * onboarding (onboarded_at is set), and Welcome was a one-shot UI. We
- * never want a refresh to re-trigger Helper agent creation.
+ * never want a refresh to re-trigger setup-guide creation.
  *
  * Why subscription model instead of read-once-consume: React 18+ StrictMode
  * dev mode mounts components twice (mount → unmount → mount). If the

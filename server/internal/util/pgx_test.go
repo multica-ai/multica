@@ -114,3 +114,17 @@ func TestDateToPtr_StableAcrossTimezone(t *testing.T) {
 		t.Fatalf("got %v want 2026-03-01", got)
 	}
 }
+
+func TestTimestampToNanoPtrPreservesSubSecondPrecision(t *testing.T) {
+	value := pgtype.Timestamptz{
+		Time:  time.Date(2026, time.August, 19, 5, 4, 3, 123456000, time.UTC),
+		Valid: true,
+	}
+	got := TimestampToNanoPtr(value)
+	if got == nil || *got != "2026-08-19T05:04:03.123456Z" {
+		t.Fatalf("TimestampToNanoPtr = %v, want microsecond-precise RFC3339", got)
+	}
+	if got := TimestampToNanoPtr(pgtype.Timestamptz{}); got != nil {
+		t.Fatalf("TimestampToNanoPtr invalid = %v, want nil", got)
+	}
+}

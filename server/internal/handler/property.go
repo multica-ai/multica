@@ -1,0 +1,1302 @@
+package handler
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"math"
+	"net/http"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issueproperty"
+	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
+)
+
+// Custom issue properties (MUL-4463): workspace-level typed property
+// definitions plus a per-issue value bag.
+//
+// Contract highlights (decided on MUL-4463):
+//   - Definitions are managed by human owner/admin members only. Agent actors
+//     are rejected even when the runtime owner has the role — otherwise field
+//     sprawl becomes something agents can mass-produce.
+//   - Values are writable by every member and agent; validation is typed per
+//     definition, and errors enumerate legal values so agents can self-correct.
+//   - Value writes are single-key atomic (mirror of issue metadata): two
+//     agents writing different properties never clobber each other.
+//   - Definitions archive instead of delete; archived definitions reject new
+//     values but keep existing ones resolvable.
+const (
+	maxActivePropertiesPerWorkspace = 20
+	maxPropertySelectOptions        = 50
+	maxPropertyNameLen              = 32
+	maxPropertyIconLen              = 32
+	maxPropertyDescriptionLen       = 500
+	maxPropertyTextValueLen         = 2000
+	maxPropertyURLValueLen          = 2048
+	// multi_actor is capped well below the select cap: the whole properties
+	// bag shares one 16KB row budget, and a property holding hundreds of
+	// actors would crowd out every other property on the same issue.
+	maxPropertyActorValues = 20
+)
+
+var validPropertyTypes = []string{"text", "number", "select", "multi_select", "date", "checkbox", "url", "actor", "multi_actor"}
+
+// Property icons use stable catalog keys that the Web client maps to Lucide
+// glyphs. Keeping this allowlist at the API boundary prevents arbitrary text
+// (including emoji) from leaking into every issue surface that renders icons.
+var validPropertyIcons = map[string]struct{}{
+	"circle-dot": {}, "signal-high": {}, "user-round": {}, "folder-kanban": {},
+	"calendar-days": {}, "tag": {}, "milestone": {}, "flag": {}, "bookmark": {},
+	"star": {}, "target": {}, "shield": {}, "bug": {}, "zap": {}, "rocket": {},
+	"sparkles": {}, "lightbulb": {}, "globe-2": {}, "link": {}, "hash": {},
+	"list-checks": {}, "circle-check": {}, "clock-3": {}, "briefcase-business": {},
+	"layers-3": {}, "gauge": {}, "database": {}, "code-2": {}, "palette": {},
+	"megaphone": {}, "map-pin": {}, "package": {}, "wrench": {}, "heart": {},
+	"circle-alert": {}, "lock-keyhole": {},
+}
+
+// errClientRejected marks lock-closure failures already translated to an
+// HTTP status by the caller-side fail() capture.
+var errClientRejected = errors.New("client rejected")
+
+// reservedPropertyNames blocks definitions that would collide with built-in
+// issue fields ("system properties"). Comparison happens on the normalized
+// form: lowercased, spaces collapsed to underscores — so "Due Date", "due
+// date", and "due_date" are all rejected.
+var reservedPropertyNames = map[string]struct{}{
+	"status": {}, "priority": {}, "assignee": {}, "project": {}, "parent": {},
+	"stage": {}, "label": {}, "labels": {}, "start_date": {}, "due_date": {},
+	"title": {}, "description": {}, "creator": {}, "created_at": {}, "updated_at": {},
+	"metadata": {}, "properties": {},
+}
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+type PropertyOption struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
+}
+
+type PropertyConfig struct {
+	Options []PropertyOption `json:"options,omitempty"`
+}
+
+type PropertyResponse struct {
+	ID          string         `json:"id"`
+	WorkspaceID string         `json:"workspace_id"`
+	Name        string         `json:"name"`
+	Type        string         `json:"type"`
+	Description string         `json:"description"`
+	Icon        string         `json:"icon"`
+	Config      PropertyConfig `json:"config"`
+	Position    float64        `json:"position"`
+	Archived    bool           `json:"archived"`
+	ArchivedAt  *string        `json:"archived_at"`
+	UsageCount  int64          `json:"usage_count"`
+	CreatedAt   string         `json:"created_at"`
+	UpdatedAt   string         `json:"updated_at"`
+}
+
+func parsePropertyConfig(raw []byte) PropertyConfig {
+	var cfg PropertyConfig
+	if len(raw) == 0 {
+		return cfg
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return PropertyConfig{}
+	}
+	return cfg
+}
+
+func propertyToResponse(p db.IssueProperty, usageCount int64) PropertyResponse {
+	resp := PropertyResponse{
+		ID:          uuidToString(p.ID),
+		WorkspaceID: uuidToString(p.WorkspaceID),
+		Name:        p.Name,
+		Type:        p.Type,
+		Description: p.Description,
+		Icon:        p.Icon,
+		Config:      parsePropertyConfig(p.Config),
+		Position:    p.Position,
+		Archived:    p.ArchivedAt.Valid,
+		UsageCount:  usageCount,
+		CreatedAt:   timestampToString(p.CreatedAt),
+		UpdatedAt:   timestampToString(p.UpdatedAt),
+	}
+	if p.ArchivedAt.Valid {
+		s := timestampToString(p.ArchivedAt)
+		resp.ArchivedAt = &s
+	}
+	return resp
+}
+
+func propertyListRowToResponse(row db.ListIssuePropertiesRow) PropertyResponse {
+	return propertyToResponse(db.IssueProperty{
+		ID:          row.ID,
+		WorkspaceID: row.WorkspaceID,
+		Name:        row.Name,
+		Type:        row.Type,
+		Description: row.Description,
+		Icon:        row.Icon,
+		Config:      row.Config,
+		Position:    row.Position,
+		ArchivedAt:  row.ArchivedAt,
+		CreatedAt:   row.CreatedAt,
+		UpdatedAt:   row.UpdatedAt,
+	}, row.UsageCount)
+}
+
+type CreatePropertyRequest struct {
+	Name        string          `json:"name"`
+	Type        string          `json:"type"`
+	Description string          `json:"description"`
+	Icon        string          `json:"icon"`
+	Config      *PropertyConfig `json:"config"`
+}
+
+type UpdatePropertyRequest struct {
+	Name        *string         `json:"name"`
+	Description *string         `json:"description"`
+	Icon        *string         `json:"icon"`
+	Config      *PropertyConfig `json:"config"`
+	Archived    *bool           `json:"archived"`
+}
+
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+func normalizePropertyName(name string) string {
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(name)), " ", "_")
+}
+
+func validatePropertyName(raw string) (string, error) {
+	for _, r := range raw {
+		if unicode.IsControl(r) {
+			return "", errors.New("name cannot contain tabs, newlines, or control characters")
+		}
+	}
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		return "", errors.New("name is required")
+	}
+	if utf8.RuneCountInString(name) > maxPropertyNameLen {
+		return "", fmt.Errorf("name must be %d characters or fewer", maxPropertyNameLen)
+	}
+	if _, reserved := reservedPropertyNames[normalizePropertyName(name)]; reserved {
+		return "", fmt.Errorf("%q is reserved for a built-in issue field", name)
+	}
+	return name, nil
+}
+
+func validatePropertyIcon(raw string) (string, error) {
+	for _, r := range raw {
+		if unicode.IsControl(r) {
+			return "", errors.New("icon cannot contain tabs, newlines, or control characters")
+		}
+	}
+	icon := strings.TrimSpace(raw)
+	if utf8.RuneCountInString(icon) > maxPropertyIconLen {
+		return "", fmt.Errorf("icon must be %d characters or fewer", maxPropertyIconLen)
+	}
+	if icon == "" {
+		return "", nil
+	}
+	if _, ok := validPropertyIcons[icon]; !ok {
+		return "", errors.New("icon must be a supported icon key")
+	}
+	return icon, nil
+}
+
+func validatePropertyType(t string) error {
+	for _, v := range validPropertyTypes {
+		if t == v {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid type %q; valid types: %s", t, strings.Join(validPropertyTypes, ", "))
+}
+
+func propertyTypeHasOptions(t string) bool {
+	return t == "select" || t == "multi_select"
+}
+
+// validatePropertyConfig canonicalizes the config for storage. Select-type
+// properties require 1..50 options; each option gets a stable server-assigned
+// UUID if the caller didn't provide one (values reference option IDs, so
+// option renames never touch issue rows). Non-select types must not carry
+// options and are stored as {}.
+func validatePropertyConfig(propType string, cfg *PropertyConfig) ([]byte, error) {
+	if !propertyTypeHasOptions(propType) {
+		if cfg != nil && len(cfg.Options) > 0 {
+			return nil, fmt.Errorf("type %q does not accept options", propType)
+		}
+		return []byte(`{}`), nil
+	}
+	if cfg == nil || len(cfg.Options) == 0 {
+		return nil, errors.New("select properties require at least one option")
+	}
+	if len(cfg.Options) > maxPropertySelectOptions {
+		return nil, fmt.Errorf("a property cannot have more than %d options", maxPropertySelectOptions)
+	}
+	seenIDs := make(map[string]struct{}, len(cfg.Options))
+	seenNames := make(map[string]struct{}, len(cfg.Options))
+	out := PropertyConfig{Options: make([]PropertyOption, 0, len(cfg.Options))}
+	for _, opt := range cfg.Options {
+		name, err := validateLabelName(opt.Name)
+		if err != nil {
+			return nil, fmt.Errorf("option %w", err)
+		}
+		lower := strings.ToLower(name)
+		if _, dup := seenNames[lower]; dup {
+			return nil, fmt.Errorf("duplicate option name %q", name)
+		}
+		seenNames[lower] = struct{}{}
+		color, err := normalizeColor(opt.Color)
+		if err != nil {
+			return nil, fmt.Errorf("option %q: %w", name, err)
+		}
+		id := strings.TrimSpace(opt.ID)
+		if id == "" {
+			id = uuid.NewString()
+		} else if _, err := uuid.Parse(id); err != nil {
+			return nil, fmt.Errorf("option %q: id must be a UUID", name)
+		}
+		if _, dup := seenIDs[id]; dup {
+			return nil, fmt.Errorf("duplicate option id %q", id)
+		}
+		seenIDs[id] = struct{}{}
+		out.Options = append(out.Options, PropertyOption{ID: id, Name: name, Color: color})
+	}
+	return json.Marshal(out)
+}
+
+func propertyOptionIDs(cfg PropertyConfig) map[string]int {
+	ids := make(map[string]int, len(cfg.Options))
+	for i, opt := range cfg.Options {
+		ids[opt.ID] = i
+	}
+	return ids
+}
+
+func selectOptionsHint(cfg PropertyConfig) string {
+	parts := make([]string, len(cfg.Options))
+	for i, opt := range cfg.Options {
+		parts[i] = fmt.Sprintf("%s (%s)", opt.ID, opt.Name)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// ---------------------------------------------------------------------------
+// Actor values (MUL-6286)
+// ---------------------------------------------------------------------------
+
+// Compatibility aliases keep the focused handler tests on the same helper
+// names while the implementation is shared with IssueService.Create.
+type actorRef = issueproperty.ActorRef
+
+func propertyTypeIsActor(t string) bool { return issueproperty.IsActor(t) }
+func actorKindsHint() string            { return issueproperty.ActorKindsHint() }
+func parseActorRef(s string) (actorRef, error) {
+	return issueproperty.ParseActorRef(s)
+}
+func parseActorRefList(items []any) ([]actorRef, error) {
+	return issueproperty.ParseActorRefList(items)
+}
+func actorRefsInValue(propType string, stored []byte) ([]actorRef, error) {
+	return issueproperty.ActorRefsInValue(propType, stored)
+}
+
+// resolveActorRefs checks that every reference points at a real member of this
+// workspace. No visibility gate is needed while members are the only kind:
+// workspace membership is already visible to every member. Adding a kind that
+// is not (an agent) means adding that gate back — see actorPropertyKinds.
+func (h *Handler) resolveActorRefs(r *http.Request, workspaceID string, refs []actorRef) (int, string) {
+	ctx := r.Context()
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return http.StatusBadRequest, "invalid workspace_id"
+	}
+	for _, ref := range refs {
+		refUUID, err := util.ParseUUID(ref.ID)
+		if err != nil {
+			return http.StatusBadRequest, fmt.Sprintf("actor id in %q must be a UUID", ref)
+		}
+		if _, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+			UserID:      refUUID,
+			WorkspaceID: wsUUID,
+		}); err != nil {
+			return http.StatusBadRequest, fmt.Sprintf("%q does not refer to a member of this workspace", ref)
+		}
+	}
+	return 0, ""
+}
+
+// validatePropertyValue checks a raw JSON value against the definition's type
+// and returns the canonical JSON to store. Error strings enumerate the legal
+// values where possible — agents consume these directly to self-correct.
+func validatePropertyValue(def db.IssueProperty, raw json.RawMessage) ([]byte, error) {
+	return issueproperty.ValidateValue(def, raw)
+}
+
+// removedOptionIDs returns option ids present in the stored config but
+// absent from the incoming replacement.
+func removedOptionIDs(existingConfig, nextConfig []byte) []string {
+	next := propertyOptionIDs(parsePropertyConfig(nextConfig))
+	var removed []string
+	for _, opt := range parsePropertyConfig(existingConfig).Options {
+		if _, kept := next[opt.ID]; !kept {
+			removed = append(removed, opt.ID)
+		}
+	}
+	return removed
+}
+
+// describeOptionsInUse renders the 409 body for in-use option removal, e.g.
+// `cannot remove options still in use: "Critical" (3 issues); clear or
+// change those values first`.
+func describeOptionsInUse(existingConfig []byte, rows []db.CountIssuesUsingPropertyOptionsRow) string {
+	names := make(map[string]string)
+	for _, opt := range parsePropertyConfig(existingConfig).Options {
+		names[opt.ID] = opt.Name
+	}
+	parts := make([]string, len(rows))
+	for i, row := range rows {
+		name := names[row.OptionID]
+		if name == "" {
+			name = row.OptionID
+		}
+		parts[i] = fmt.Sprintf("%q (%d issues)", name, row.UsageCount)
+	}
+	sort.Strings(parts)
+	return "cannot remove options still in use: " + strings.Join(parts, ", ") + "; clear or change those values first"
+}
+
+// parseIssueProperties mirrors parseIssueMetadata for the properties bag.
+func parseIssueProperties(raw []byte) map[string]any {
+	return util.JSONObjectOrEmpty(raw)
+}
+
+// ---------------------------------------------------------------------------
+// Definition handlers
+// ---------------------------------------------------------------------------
+
+// requirePropertyAdmin gates definition writes: human owner/admin members
+// only. Agent actors are rejected before the role check — an agent inherits
+// its runtime owner's credentials, and without this check an admin's agent
+// could mass-create definitions (MUL-4463 decision: agents propose via
+// comments, humans confirm).
+func (h *Handler) requirePropertyAdmin(w http.ResponseWriter, r *http.Request) (workspaceID, userID string, ok bool) {
+	workspaceID = h.resolveWorkspaceID(r)
+	userID, ok = requireUserID(w, r)
+	if !ok {
+		return "", "", false
+	}
+	if actorType, _ := h.resolveActor(r, userID, workspaceID); actorType == "agent" {
+		writeError(w, http.StatusForbidden, "agents cannot manage property definitions")
+		return "", "", false
+	}
+	if _, roleOK := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !roleOK {
+		return "", "", false
+	}
+	return workspaceID, userID, true
+}
+
+func (h *Handler) ListProperties(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	includeArchived := r.URL.Query().Get("include_archived") == "true"
+	rows, err := h.Queries.ListIssueProperties(r.Context(), db.ListIssuePropertiesParams{
+		WorkspaceID:     wsUUID,
+		IncludeArchived: includeArchived,
+	})
+	if err != nil {
+		slog.Warn("ListIssueProperties failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to list properties")
+		return
+	}
+	resp := make([]PropertyResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = propertyListRowToResponse(row)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"properties": resp, "total": len(resp)})
+}
+
+func (h *Handler) GetProperty(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	idUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "property id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	property, err := h.Queries.GetIssueProperty(r.Context(), db.GetIssuePropertyParams{ID: idUUID, WorkspaceID: wsUUID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "property not found")
+			return
+		}
+		slog.Warn("GetIssueProperty failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to get property")
+		return
+	}
+	writeJSON(w, http.StatusOK, propertyToResponse(property, 0))
+}
+
+func (h *Handler) CreateProperty(w http.ResponseWriter, r *http.Request) {
+	workspaceID, userID, ok := h.requirePropertyAdmin(w, r)
+	if !ok {
+		return
+	}
+	var req CreatePropertyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	name, err := validatePropertyName(req.Name)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := validatePropertyType(req.Type); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if utf8.RuneCountInString(req.Description) > maxPropertyDescriptionLen {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("description must be %d characters or fewer", maxPropertyDescriptionLen))
+		return
+	}
+	icon, err := validatePropertyIcon(req.Icon)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	configJSON, err := validatePropertyConfig(req.Type, req.Config)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	var property db.IssueProperty
+	var capErr error
+	err = h.withPropertyLock(r, []string{"props:" + workspaceID}, func(q *db.Queries) error {
+		active, err := q.CountActiveIssueProperties(r.Context(), wsUUID)
+		if err != nil {
+			return err
+		}
+		if active >= maxActivePropertiesPerWorkspace {
+			capErr = fmt.Errorf("a workspace cannot have more than %d active properties; archive unused ones first", maxActivePropertiesPerWorkspace)
+			return capErr
+		}
+		property, err = q.CreateIssueProperty(r.Context(), db.CreateIssuePropertyParams{
+			WorkspaceID: wsUUID,
+			Name:        name,
+			Type:        req.Type,
+			Description: sanitizeNullBytes(strings.TrimSpace(req.Description)),
+			Icon:        icon,
+			Config:      configJSON,
+		})
+		return err
+	})
+	if capErr != nil {
+		writeError(w, http.StatusBadRequest, capErr.Error())
+		return
+	}
+	if err != nil {
+		if isUniqueViolation(err) {
+			writeError(w, http.StatusConflict, "a property with that name already exists")
+			return
+		}
+		slog.Warn("CreateIssueProperty failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to create property")
+		return
+	}
+	resp := propertyToResponse(property, 0)
+	h.publish(protocol.EventPropertyCreated, workspaceID, "member", userID, map[string]any{"property": resp})
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+func (h *Handler) UpdateProperty(w http.ResponseWriter, r *http.Request) {
+	workspaceID, userID, ok := h.requirePropertyAdmin(w, r)
+	if !ok {
+		return
+	}
+	idUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "property id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	var req UpdatePropertyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// The whole read → validate → census → write flow runs under advisory
+	// locks (workspace, then property): a concurrent value write on this
+	// property serializes behind the property lock, so the in-use census
+	// cannot race a value that would reference a removed option (TOCTOU,
+	// clean-room review F1); the workspace lock makes the unarchive cap
+	// check atomic against creates (F5).
+	var property db.IssueProperty
+	var httpStatus int
+	var httpMsg string
+	fail := func(status int, msg string) error {
+		httpStatus, httpMsg = status, msg
+		return errClientRejected
+	}
+	err := h.withPropertyLock(r, []string{"props:" + workspaceID, "prop:" + uuidToString(idUUID)}, func(q *db.Queries) error {
+		existing, err := q.GetIssueProperty(r.Context(), db.GetIssuePropertyParams{ID: idUUID, WorkspaceID: wsUUID})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fail(http.StatusNotFound, "property not found")
+			}
+			return err
+		}
+
+		params := db.UpdateIssuePropertyParams{ID: idUUID, WorkspaceID: wsUUID}
+		if req.Name != nil {
+			name, err := validatePropertyName(*req.Name)
+			if err != nil {
+				return fail(http.StatusBadRequest, err.Error())
+			}
+			params.Name = pgtype.Text{String: name, Valid: true}
+		}
+		if req.Description != nil {
+			if utf8.RuneCountInString(*req.Description) > maxPropertyDescriptionLen {
+				return fail(http.StatusBadRequest, fmt.Sprintf("description must be %d characters or fewer", maxPropertyDescriptionLen))
+			}
+			params.Description = pgtype.Text{String: sanitizeNullBytes(strings.TrimSpace(*req.Description)), Valid: true}
+		}
+		if req.Icon != nil {
+			icon, err := validatePropertyIcon(*req.Icon)
+			if err != nil {
+				return fail(http.StatusBadRequest, err.Error())
+			}
+			params.Icon = pgtype.Text{String: icon, Valid: true}
+		}
+		if req.Config != nil {
+			configJSON, err := validatePropertyConfig(existing.Type, req.Config)
+			if err != nil {
+				return fail(http.StatusBadRequest, err.Error())
+			}
+			if removed := removedOptionIDs(existing.Config, configJSON); len(removed) > 0 {
+				rows, err := q.CountIssuesUsingPropertyOptions(r.Context(), db.CountIssuesUsingPropertyOptionsParams{
+					OptionIds:   removed,
+					WorkspaceID: wsUUID,
+					PropertyKey: uuidToString(existing.ID),
+				})
+				if err != nil {
+					return err
+				}
+				if len(rows) > 0 {
+					return fail(http.StatusConflict, describeOptionsInUse(existing.Config, rows))
+				}
+			}
+			params.Config = configJSON
+		}
+		if req.Archived != nil {
+			params.ArchivedSet = true
+			if *req.Archived {
+				params.ArchivedAt = pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+			} else if existing.ArchivedAt.Valid {
+				active, err := q.CountActiveIssueProperties(r.Context(), wsUUID)
+				if err != nil {
+					return err
+				}
+				if active >= maxActivePropertiesPerWorkspace {
+					return fail(http.StatusBadRequest, fmt.Sprintf("a workspace cannot have more than %d active properties; archive unused ones first", maxActivePropertiesPerWorkspace))
+				}
+			}
+		}
+
+		property, err = q.UpdateIssueProperty(r.Context(), params)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fail(http.StatusNotFound, "property not found")
+			}
+			if isUniqueViolation(err) {
+				return fail(http.StatusConflict, "a property with that name already exists")
+			}
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, errClientRejected) {
+			writeError(w, httpStatus, httpMsg)
+			return
+		}
+		slog.Warn("UpdateProperty failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to update property")
+		return
+	}
+	resp := propertyToResponse(property, 0)
+	h.publish(protocol.EventPropertyUpdated, workspaceID, "member", userID, map[string]any{"property": resp})
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ---------------------------------------------------------------------------
+// Issue value handlers
+// ---------------------------------------------------------------------------
+
+type SetIssuePropertyRequest struct {
+	Value json.RawMessage `json:"value"`
+}
+
+func (h *Handler) SetIssueProperty(w http.ResponseWriter, r *http.Request) {
+	r = h.withWakeupActor(r)
+	issueID := chi.URLParam(r, "id")
+	propertyID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "propertyId"), "property id")
+	if !ok {
+		return
+	}
+	var req SetIssuePropertyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	issue, ok := h.loadIssueForUser(w, r, issueID)
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	// Validation and write share the property advisory lock with definition
+	// updates: the value written is guaranteed to reference the definition
+	// state that a concurrent config edit's usage census will see (TOCTOU,
+	// clean-room review F1).
+	var updated db.Issue
+	var httpStatus int
+	var httpMsg string
+	fail := func(status int, msg string) error {
+		httpStatus, httpMsg = status, msg
+		return errClientRejected
+	}
+	err := h.withPropertyLock(r, []string{"prop:" + uuidToString(propertyID)}, func(q *db.Queries) error {
+		def, err := q.GetIssueProperty(r.Context(), db.GetIssuePropertyParams{ID: propertyID, WorkspaceID: issue.WorkspaceID})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fail(http.StatusNotFound, "property not found")
+			}
+			return err
+		}
+		if def.ArchivedAt.Valid {
+			return fail(http.StatusBadRequest, fmt.Sprintf("property %q is archived and cannot receive new values", def.Name))
+		}
+		value, err := validatePropertyValue(def, req.Value)
+		if err != nil {
+			return fail(http.StatusBadRequest, err.Error())
+		}
+		// Actor values point at another entity, so shape validation isn't
+		// enough: resolve each reference against this workspace before the
+		// write, and reject references the caller isn't allowed to see.
+		if propertyTypeIsActor(def.Type) {
+			refs, err := actorRefsInValue(def.Type, value)
+			if err != nil {
+				return fail(http.StatusBadRequest, err.Error())
+			}
+			if status, msg := h.resolveActorRefs(r, uuidToString(issue.WorkspaceID), refs); status != 0 {
+				return fail(status, msg)
+			}
+		}
+		updated, err = q.SetIssuePropertyValue(r.Context(), db.SetIssuePropertyValueParams{
+			ID:          issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+			Key:         uuidToString(def.ID),
+			Value:       value,
+		})
+		if err != nil {
+			if isCheckViolation(err) {
+				return fail(http.StatusBadRequest, "issue properties exceed the 16KB size limit")
+			}
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, errClientRejected) {
+			writeError(w, httpStatus, httpMsg)
+			return
+		}
+		slog.Warn("SetIssueProperty failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
+		writeError(w, http.StatusInternalServerError, "failed to set property")
+		return
+	}
+
+	workspaceID := uuidToString(updated.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	properties := parseIssueProperties(updated.Properties)
+	h.publish(protocol.EventIssuePropertiesChanged, workspaceID, actorType, actorID, map[string]any{
+		"issue_id":       uuidToString(updated.ID),
+		"properties":     properties,
+		"issue_revision": updated.Revision,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"properties": properties, "issue_revision": updated.Revision})
+}
+
+func (h *Handler) DeleteIssueProperty(w http.ResponseWriter, r *http.Request) {
+	r = h.withWakeupActor(r)
+	issueID := chi.URLParam(r, "id")
+	propertyID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "propertyId"), "property id")
+	if !ok {
+		return
+	}
+
+	issue, ok := h.loadIssueForUser(w, r, issueID)
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	// Deleting a value is allowed even for archived definitions — cleanup
+	// must never be blocked. Unknown property ids only need to belong to the
+	// workspace; `properties - key` is a no-op when the key is absent.
+	if _, err := h.Queries.GetIssueProperty(r.Context(), db.GetIssuePropertyParams{ID: propertyID, WorkspaceID: issue.WorkspaceID}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "property not found")
+			return
+		}
+		slog.Warn("GetIssueProperty in DeleteIssueProperty failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to unset property")
+		return
+	}
+
+	updated, err := wakeupWrite(h, r, func(q *db.Queries) (db.Issue, error) {
+		return q.DeleteIssuePropertyValue(r.Context(), db.DeleteIssuePropertyValueParams{
+			ID:          issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+			Key:         uuidToString(propertyID),
+		})
+	})
+	if err != nil {
+		slog.Warn("DeleteIssuePropertyValue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
+		writeError(w, http.StatusInternalServerError, "failed to unset property")
+		return
+	}
+
+	workspaceID := uuidToString(updated.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	properties := parseIssueProperties(updated.Properties)
+	h.publish(protocol.EventIssuePropertiesChanged, workspaceID, actorType, actorID, map[string]any{
+		"issue_id":       uuidToString(updated.ID),
+		"properties":     properties,
+		"issue_revision": updated.Revision,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"properties": properties, "issue_revision": updated.Revision})
+}
+
+// withPropertyLock runs fn inside a transaction holding the advisory lock
+// for the given key, serializing definition mutations against value writes
+// (TOCTOU: a config update's usage census and a concurrent value write could
+// otherwise interleave into a permanently orphaned option reference) and
+// definition creates/unarchives against each other (the 20-active cap and
+// MAX(position)+1 are read-then-write). Locks are transaction-scoped.
+func (h *Handler) withPropertyLock(r *http.Request, lockKeys []string, fn func(q *db.Queries) error) error {
+	tx, err := h.beginWakeupWrite(r.Context())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(r.Context())
+	// Callers pass keys in a fixed global order (workspace before property)
+	// so overlapping lock sets cannot deadlock.
+	for _, key := range lockKeys {
+		if _, err := tx.Exec(r.Context(), "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", key); err != nil {
+			return err
+		}
+	}
+	if err := fn(h.Queries.WithTx(tx)); err != nil {
+		return err
+	}
+	return tx.Commit(r.Context())
+}
+
+// ---------------------------------------------------------------------------
+// List-endpoint support: properties filter + property sort expressions
+// ---------------------------------------------------------------------------
+
+const (
+	maxPropertiesFilterDefinitions = 20
+	maxPropertiesFilterValues      = 50
+	// noPropertyValue is the filter value that means "unset" — it compiles to a
+	// key-absence predicate instead of a jsonb containment pattern. The string
+	// cannot collide with a real option id (select option ids are UUIDs and
+	// checkbox uses "true"/"false").
+	noPropertyValue = "__none__"
+	// operatorPatternKey marks a compiled operator alternative (see
+	// parsePropertiesFilterParam). Neither this nor the sibling keys spell a
+	// UUID, so the marker can never collide with a containment pattern, whose
+	// single key is the definition id.
+	operatorPatternKey = "__op__"
+)
+
+// propertyFilterOperator is a structured member of a properties filter —
+// {"op": "contains", "value": "foo"} — alongside plain string members, which
+// keep meaning exact equality. Op semantics:
+//
+//   - contains: case-insensitive substring over the value's text form
+//     (text / url).
+//   - gt / gte / lt / lte: numeric comparison, matched only against stored
+//     jsonb numbers (number).
+//   - before / after: lexicographic comparison against stored strings, which
+//     is chronological for the "YYYY-MM-DD" date-only strings date
+//     properties store (date).
+type propertyFilterOperator struct {
+	Op    string `json:"op"`
+	Value string `json:"value"`
+}
+
+// propertyOperatorPattern is the compiled operator alternative: the JSON
+// object {"__op__": "<op>", "def": "<definitionId>", "value": "<value>"} that
+// both propertiesFilterPredicate and the static ListOpenIssues unroll
+// recognize. For `contains` the value is stored already ILIKE-escaped so both
+// consumers can concatenate it into the pattern directly.
+type propertyOperatorPattern struct {
+	Op    string `json:"__op__"`
+	Def   string `json:"def"`
+	Value string `json:"value"`
+	// Prefilter repeats Value for the `contains` needles worth pre-screening
+	// against LOWER(properties::text) (see prefilterableContainsNeedle). It is
+	// absent — never empty — for the rest, so the static unroll can test for
+	// the key.
+	Prefilter string `json:"prefilter,omitempty"`
+}
+
+var propertyFilterOps = map[string]string{
+	"contains": "",
+	"gt":       ">",
+	"gte":      ">=",
+	"lt":       "<",
+	"lte":      "<=",
+	"before":   "<",
+	"after":    ">",
+}
+
+// escapeLikePattern escapes SQL LIKE wildcards for a literal substring match
+// under the default backslash escape character.
+func escapeLikePattern(s string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return replacer.Replace(s)
+}
+
+// prefilterableContainsNeedle reports whether a raw `contains` needle may be
+// pre-screened against LOWER(properties::text), the expression
+// idx_issue_properties_bigm indexes (migration 446). A needle that cannot falls
+// back to today's per-key-only filtering: slower on a large workspace, never
+// wrong.
+//
+// The one disqualifier is JSON escaping. Postgres writes jsonb strings through
+// escape_json, which escapes `"`, `\` and every character below U+0020; a
+// needle containing one of those has no literal occurrence in properties::text,
+// so pre-screening on it would drop rows the per-key ILIKE does match.
+//
+// Everything else matches literally and is prefiltered, however short. CJK and
+// other non-ASCII text is passed through by escape_json in every server
+// encoding, and pg_bigm indexes 1- and 2-character keywords — the capability it
+// exists for over pg_trgm, and the length at which a CJK needle is already a
+// real word. Length is deliberately not a condition here: excluding short
+// needles would exclude exactly the searches this index was chosen to serve.
+func prefilterableContainsNeedle(needle string) bool {
+	return !strings.ContainsFunc(needle, func(r rune) bool {
+		return r == '"' || r == '\\' || r < 0x20
+	})
+}
+
+// validatePropertyFilterOperator checks one operator member and returns the
+// compiled pattern. The value rules mirror the legacy string rules: non-empty,
+// bounded, and only comparable shapes (a float for numeric ops, a real
+// date-only string for before/after).
+func validatePropertyFilterOperator(definitionID string, op propertyFilterOperator) (propertyOperatorPattern, error) {
+	if _, known := propertyFilterOps[op.Op]; !known {
+		return propertyOperatorPattern{}, fmt.Errorf("properties filter op %q is not supported", op.Op)
+	}
+	if op.Value == "" {
+		return propertyOperatorPattern{}, errors.New("properties filter operator values cannot be empty")
+	}
+	pattern := propertyOperatorPattern{Op: op.Op, Def: definitionID, Value: op.Value}
+	switch op.Op {
+	case "contains":
+		if utf8.RuneCountInString(op.Value) > maxPropertyTextValueLen {
+			return propertyOperatorPattern{}, fmt.Errorf("properties filter value must be %d characters or fewer", maxPropertyTextValueLen)
+		}
+		pattern.Value = escapeLikePattern(op.Value)
+		if prefilterableContainsNeedle(op.Value) {
+			pattern.Prefilter = pattern.Value
+		}
+	case "gt", "gte", "lt", "lte":
+		num, err := strconv.ParseFloat(op.Value, 64)
+		if err != nil || math.IsNaN(num) || math.IsInf(num, 0) {
+			return propertyOperatorPattern{}, fmt.Errorf("properties filter op %q requires a finite number", op.Op)
+		}
+		// Canonicalize to plain decimal before storing: ParseFloat accepts forms
+		// Postgres ::numeric rejects ("0x1p4" hex-float, "1_000" underscores on
+		// older PG), and the static open_only unroll casts this exact string
+		// inside SQL — an uncanonicalized value would 500 that path while the
+		// dynamic path (which binds the parsed float) succeeds.
+		pattern.Value = strconv.FormatFloat(num, 'f', -1, 64)
+	case "before", "after":
+		if _, err := time.Parse("2006-01-02", op.Value); err != nil {
+			return propertyOperatorPattern{}, fmt.Errorf("properties filter op %q requires a YYYY-MM-DD date", op.Op)
+		}
+	}
+	return pattern, nil
+}
+
+// parsePropertiesFilterParam reads the `properties` query parameter — a JSON
+// object of {<definitionId>: [<value>, ...]} — and compiles it into OR-groups
+// of alternatives: OR within a definition, AND across definitions.
+//
+// A plain string member means equality; it expands to every containment form
+// it could match (option id string, array element, boolean, jsonb number),
+// and the forms that can't match are simply never satisfied. Values are
+// option ids for select/multi_select and "true"/"false" for checkbox.
+//
+// An object member {"op", "value"} is a scalar operator (see
+// propertyFilterOperator) and compiles to one operator pattern.
+//
+// The special value noPropertyValue ("__none__") means "unset": it emits the
+// marker object {"__none__": "<definitionId>"} that parseNoPropertyValuePattern
+// and the static ListOpenIssues unroll both recognize as a key-absence check.
+//
+// Returns (nil, true) when the parameter is empty.
+func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.RawMessage, bool) {
+	if raw == "" {
+		return nil, true
+	}
+	var parsed map[string][]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		writeError(w, http.StatusBadRequest, "properties filter must be a JSON object of {definitionId: [values]}")
+		return nil, false
+	}
+	if len(parsed) > maxPropertiesFilterDefinitions {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("properties filter cannot cover more than %d definitions", maxPropertiesFilterDefinitions))
+		return nil, false
+	}
+	groups := make([][]json.RawMessage, 0, len(parsed))
+	totalAlternatives := 0
+	for definitionID, values := range parsed {
+		if _, err := uuid.Parse(definitionID); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("properties filter key %q is not a definition id", definitionID))
+			return nil, false
+		}
+		if len(values) == 0 {
+			continue
+		}
+		if len(values) > maxPropertiesFilterValues {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("properties filter for %s cannot list more than %d values", definitionID, maxPropertiesFilterValues))
+			return nil, false
+		}
+		alternatives := make([]json.RawMessage, 0, len(values)*3)
+		appendAlt := func(v any) bool {
+			buf, err := json.Marshal(map[string]any{definitionID: v})
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "properties filter is invalid")
+				return false
+			}
+			alternatives = append(alternatives, buf)
+			return true
+		}
+		hasNoValue := false
+		for _, rawValue := range values {
+			// A plain string member keeps the legacy equality semantics.
+			var stringValue string
+			if err := json.Unmarshal(rawValue, &stringValue); err == nil {
+				value := stringValue
+				if value == "" {
+					writeError(w, http.StatusBadRequest, "properties filter values cannot be empty")
+					return nil, false
+				}
+				if value == noPropertyValue {
+					if hasNoValue {
+						continue
+					}
+					marker, err := json.Marshal(map[string]string{noPropertyValue: definitionID})
+					if err != nil {
+						writeError(w, http.StatusBadRequest, "properties filter is invalid")
+						return nil, false
+					}
+					alternatives = append(alternatives, marker)
+					hasNoValue = true
+					continue
+				}
+				if !appendAlt(value) || !appendAlt([]string{value}) { // select string / multi_select element
+					return nil, false
+				}
+				if value == "true" || value == "false" {
+					if !appendAlt(value == "true") { // checkbox boolean
+						return nil, false
+					}
+				}
+				if num, err := strconv.ParseFloat(value, 64); err == nil &&
+					!math.IsNaN(num) && !math.IsInf(num, 0) {
+					// number property scalar: a numeric filter value must match the
+					// stored jsonb number, not the string form appended above. NaN /
+					// Infinity are skipped: they are not representable as JSON, so
+					// marshaling them would 400 the whole filter.
+					if !appendAlt(num) {
+						return nil, false
+					}
+				}
+				continue
+			}
+			// An object member is a scalar operator.
+			var op propertyFilterOperator
+			if err := json.Unmarshal(rawValue, &op); err != nil || op.Op == "" {
+				writeError(w, http.StatusBadRequest, "properties filter values must be strings or {op, value} objects")
+				return nil, false
+			}
+			pattern, err := validatePropertyFilterOperator(definitionID, op)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return nil, false
+			}
+			buf, marshalErr := json.Marshal(pattern)
+			if marshalErr != nil {
+				writeError(w, http.StatusBadRequest, "properties filter is invalid")
+				return nil, false
+			}
+			alternatives = append(alternatives, buf)
+		}
+		totalAlternatives += len(alternatives)
+		groups = append(groups, alternatives)
+	}
+	if len(groups) == 0 {
+		return nil, true
+	}
+	// Bound the OR fan-out: each alternative becomes one bind parameter in
+	// the SQL below, and a runaway filter would bloat the statement.
+	if totalAlternatives > 256 {
+		writeError(w, http.StatusBadRequest, "properties filter is too large")
+		return nil, false
+	}
+	return groups, true
+}
+
+// parseNoPropertyValuePattern reports whether an alternative is the synthesized
+// "no value" marker — the jsonb object {"__none__": "<definitionId>"} — and
+// returns the definition id whose key-absence the predicate must test.
+func parseNoPropertyValuePattern(alt json.RawMessage) (string, bool) {
+	var marker map[string]string
+	if err := json.Unmarshal(alt, &marker); err != nil {
+		return "", false
+	}
+	defID, ok := marker[noPropertyValue]
+	return defID, ok
+}
+
+// parseOperatorPattern reports whether an alternative is a compiled scalar
+// operator (see parsePropertiesFilterParam) and returns its parts. Containment
+// patterns never carry the "__op__" key, so the two shapes cannot be confused.
+func parseOperatorPattern(alt json.RawMessage) (propertyOperatorPattern, bool) {
+	var marker map[string]string
+	if err := json.Unmarshal(alt, &marker); err != nil {
+		return propertyOperatorPattern{}, false
+	}
+	op, hasOp := marker[operatorPatternKey]
+	def, hasDef := marker["def"]
+	if !hasOp || !hasDef {
+		return propertyOperatorPattern{}, false
+	}
+	return propertyOperatorPattern{Op: op, Def: def, Value: marker["value"], Prefilter: marker["prefilter"]}, true
+}
+
+// operatorPatternPredicate renders one operator alternative as SQL. Ops were
+// validated at parse time, so the re-parses below cannot fail for compiled
+// input; a malformed pattern degrades to FALSE rather than matching.
+func operatorPatternPredicate(pattern propertyOperatorPattern, addArg func(any) string) string {
+	defArg := addArg(pattern.Def)
+	switch pattern.Op {
+	case "contains":
+		// Value is ILIKE-escaped at parse time. Restrict substring matching to
+		// stored strings: ->> also serializes numbers, booleans, and arrays, while
+		// the client matcher intentionally treats contains as a text/url operator.
+		match := fmt.Sprintf("(jsonb_typeof(i.properties -> %s) = 'string' AND (i.properties ->> %s) ILIKE '%%' || %s || '%%')",
+			defArg, defArg, addArg(pattern.Value))
+		if pattern.Prefilter == "" {
+			return match
+		}
+		// Redundant prefilter over the whole object's text form, which
+		// idx_issue_properties_bigm indexes (migration 446). The per-key check
+		// above still decides the result — this one only narrows the candidate
+		// set from "every issue in the workspace" to what the bigram index
+		// returns, and by construction (prefilterableContainsNeedle) never
+		// drops a row the per-key check would keep.
+		//
+		// LOWER(...) LIKE LOWER(...) rather than a second ILIKE: pg_bigm 1.2 has
+		// no ILIKE index scan (migration 036), and lowering both sides in SQL is
+		// exactly how ILIKE folds case, so the two cannot disagree.
+		return fmt.Sprintf("(LOWER(i.properties::text) LIKE LOWER('%%' || %s || '%%') AND %s)",
+			addArg(pattern.Prefilter), match)
+	case "gt", "gte", "lt", "lte":
+		// Bind the canonical decimal as numeric on every serving path. CASE makes
+		// the jsonb type guard structural instead of relying on SQL qualifier
+		// evaluation order before the cast.
+		num, err := strconv.ParseFloat(pattern.Value, 64)
+		if err != nil || math.IsNaN(num) || math.IsInf(num, 0) {
+			return "FALSE"
+		}
+		canonical := strconv.FormatFloat(num, 'f', -1, 64)
+		return fmt.Sprintf("(CASE WHEN jsonb_typeof(i.properties -> %s) = 'number' THEN (i.properties ->> %s)::numeric END %s %s::numeric)",
+			defArg, defArg, propertyFilterOps[pattern.Op], addArg(canonical))
+	case "before", "after":
+		return fmt.Sprintf("(jsonb_typeof(i.properties -> %s) = 'string' AND i.properties ->> %s %s %s)",
+			defArg, defArg, propertyFilterOps[pattern.Op], addArg(pattern.Value))
+	default:
+		return "FALSE"
+	}
+}
+
+// propertiesFilterPredicate renders the AND-of-ORs filter check with one bind
+// parameter per alternative. Equality alternatives are plain
+// `i.properties @> $n` containment disjunctions — constant operands are what
+// lets the planner drive the jsonb_path_ops GIN index (a correlated
+// jsonb_array_elements form defeats it — verified via EXPLAIN in review).
+//
+// A "no value" marker alternative renders as a key-absence disjunction —
+// `NOT (i.properties ? $m)` — which cannot use the GIN index but is exact for
+// the unset state (property values are never null; DELETE unsets). An operator
+// alternative renders as its typed comparison (ILIKE / numeric / date string):
+// scalar ranges fundamentally cannot use a containment index, and only
+// `contains` gets an indexable prefilter in front of it (see
+// operatorPatternPredicate).
+func propertiesFilterPredicate(groups [][]json.RawMessage, addArg func(any) string) string {
+	groupSQL := make([]string, 0, len(groups))
+	for _, alternatives := range groups {
+		ors := make([]string, 0, len(alternatives))
+		for _, alt := range alternatives {
+			if defID, ok := parseNoPropertyValuePattern(alt); ok {
+				ors = append(ors, fmt.Sprintf("NOT (i.properties ? %s)", addArg(defID)))
+				continue
+			}
+			if pattern, ok := parseOperatorPattern(alt); ok {
+				ors = append(ors, operatorPatternPredicate(pattern, addArg))
+				continue
+			}
+			ors = append(ors, fmt.Sprintf("i.properties @> %s::jsonb", addArg(string(alt))))
+		}
+		groupSQL = append(groupSQL, "("+strings.Join(ors, " OR ")+")")
+	}
+	return "(" + strings.Join(groupSQL, " AND ") + ")"
+}
+
+// propertySortExpr resolves a `property:<definitionId>` sort value into a SQL
+// ORDER BY expression. Returns handled=false when sortValue is not
+// property-shaped (caller falls through to its static whitelist). A malformed
+// id writes a 400 (ok=false). An unknown/archived definition or a type that
+// has no meaningful order degrades to empty expr — callers keep position
+// order, mirroring the frontend's stale-persisted-sort fallback rather than
+// breaking installed clients with a 400.
+func (h *Handler) propertySortExpr(r *http.Request, workspaceID string, sortValue string) (expr string, handled bool, err error) {
+	const prefix = "property:"
+	if !strings.HasPrefix(sortValue, prefix) {
+		return "", false, nil
+	}
+	rawID := strings.TrimPrefix(sortValue, prefix)
+	parsedID, parseErr := uuid.Parse(rawID)
+	if parseErr != nil {
+		return "", true, errors.New("invalid sort value")
+	}
+	wsUUID, wsErr := util.ParseUUID(workspaceID)
+	if wsErr != nil {
+		return "", true, errors.New("invalid workspace id")
+	}
+	var defUUID pgtype.UUID
+	copy(defUUID.Bytes[:], parsedID[:])
+	defUUID.Valid = true
+	def, dbErr := h.Queries.GetIssueProperty(r.Context(), db.GetIssuePropertyParams{ID: defUUID, WorkspaceID: wsUUID})
+	if dbErr != nil {
+		if errors.Is(dbErr, pgx.ErrNoRows) {
+			return "", true, nil // stale sort → position order
+		}
+		return "", true, fmt.Errorf("resolve sort property: %w", dbErr)
+	}
+	// Archived definitions degrade to position order like unknown ones —
+	// their values are hidden from the UI, so sorting by them would order
+	// the list by invisible data.
+	if def.ArchivedAt.Valid {
+		return "", true, nil
+	}
+	// uuidToString re-serializes the parsed UUID: hex and dashes only, safe
+	// to embed in the ORDER BY string.
+	//
+	// The literal token "::numeric" in the number and select branches is a
+	// contract, not a formatting choice: issueTableOrderBy sniffs it
+	// (strings.Contains) to give the keyset cursor a numeric cast instead of
+	// text. Writing e.g. "::integer" would silently break table pagination.
+	id := uuidToString(def.ID)
+	switch def.Type {
+	case "number":
+		return fmt.Sprintf("CASE WHEN jsonb_typeof(i.properties->'%s') = 'number' THEN (i.properties->>'%s')::numeric END", id, id), true, nil
+	case "select":
+		return selectPropertySortExpr(id, parsePropertyConfig(def.Config)), true, nil
+	case "date", "text", "url":
+		return fmt.Sprintf("NULLIF(i.properties->>'%s', '')", id), true, nil
+	default: // multi_select, checkbox, future types: no meaningful order
+		return "", true, nil
+	}
+}
+
+// selectPropertySortExpr ranks a select property's stored value by its
+// position in the definition's option list, so an ordinal scale (Low < Medium
+// < High) sorts by meaning rather than by the option-id string. A stored value
+// no longer in the config — and an issue without the property — yields NULL,
+// which the callers order last.
+//
+// Each CASE arm embeds the option id's ORIGINAL config spelling: explicit ids
+// are stored as supplied (validatePropertyConfig trims but does not
+// re-serialize), and issue values must equal that spelling exactly, so a
+// canonicalized form would never match. Embedding is inert because uuid.Parse
+// gates every arm and its accepted grammar (hex, dashes, braces, urn:uuid:
+// prefix) admits no quote or backslash. An empty or malformed config — the API
+// enforces at least one option, so only a corrupt row — degrades to "" and the
+// caller keeps position order, like an unknown definition.
+func selectPropertySortExpr(defID string, cfg PropertyConfig) string {
+	var b strings.Builder
+	rank := 0
+	for _, opt := range cfg.Options {
+		if _, err := uuid.Parse(opt.ID); err != nil {
+			continue
+		}
+		fmt.Fprintf(&b, " WHEN '%s' THEN %d", opt.ID, rank)
+		rank++
+	}
+	if rank == 0 {
+		return ""
+	}
+	return fmt.Sprintf("(CASE i.properties->>'%s'%s END)::numeric", defID, b.String())
+}

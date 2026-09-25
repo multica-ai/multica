@@ -160,6 +160,33 @@ type JobSpec struct {
 	// use the helper StaticScopes(ScopeGlobal).
 	Scopes ScopeProvider
 
+	// PlansForScope, if non-nil, REPLACES the Cadence-based planner for
+	// this job. The hook receives the most recent stored plan for the
+	// (job, scope) pair and the current DB-derived `now`; it returns
+	// the list of plan_times (canonical UTC) to attempt this tick.
+	// Returning an empty slice means "nothing due this tick".
+	//
+	// When PlansForScope is set, Cadence / CatchUpMode / CatchUpWindow
+	// have no effect on planning — the hook is in full control of
+	// which plan_times exist. The remaining timing fields (RunTimeout,
+	// StaleTimeout, HeartbeatInterval, MaxAttempts, RetryBackoff,
+	// AllowStaleReentry) still govern lease and retry behaviour, and
+	// MaxPlansPerTick still acts as a safety cap on the slice returned
+	// by the hook (the manager truncates anything beyond it).
+	//
+	// Designed for jobs whose plan_times do not form a uniform Cadence
+	// grid — e.g. Autopilot schedule triggers driven by arbitrary cron
+	// expressions, where each trigger is its own scope and the
+	// occurrence times are computed per-trigger from cron + timezone.
+	//
+	// The hook is invoked once per (job, scope) per tick. Plan_times
+	// returned by the hook are passed unchanged to tryClaim, so the
+	// hook is responsible for returning canonical UTC timestamps. A
+	// plan_time that is already finalised is safe to return: tryClaim
+	// treats it as a conflict and the row is not re-run.
+	PlansForScope func(ctx context.Context, scope Scope, now time.Time,
+		latest LatestPlanInfo) ([]time.Time, error)
+
 	// Handler is the per-execution business logic.
 	Handler Handler
 }
@@ -179,8 +206,8 @@ func (j *JobSpec) validate() error {
 	if strings.TrimSpace(j.Name) == "" {
 		return fmt.Errorf("scheduler: job name is required")
 	}
-	if j.Cadence <= 0 {
-		return fmt.Errorf("scheduler: job %q: cadence must be > 0", j.Name)
+	if j.PlansForScope == nil && j.Cadence <= 0 {
+		return fmt.Errorf("scheduler: job %q: cadence must be > 0 (or set PlansForScope)", j.Name)
 	}
 	if j.RunTimeout <= 0 {
 		return fmt.Errorf("scheduler: job %q: run_timeout must be > 0", j.Name)
@@ -201,7 +228,7 @@ func (j *JobSpec) validate() error {
 	if j.Handler == nil {
 		return fmt.Errorf("scheduler: job %q: handler is required", j.Name)
 	}
-	if j.CatchUpMode == CatchUpEveryPlan && j.MaxPlansPerTick <= 0 {
+	if j.PlansForScope == nil && j.CatchUpMode == CatchUpEveryPlan && j.MaxPlansPerTick <= 0 {
 		return fmt.Errorf("scheduler: job %q: max_plans_per_tick must be > 0 for every_plan catch-up", j.Name)
 	}
 	return nil

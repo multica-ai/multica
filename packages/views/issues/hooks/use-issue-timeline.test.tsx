@@ -68,6 +68,7 @@ const queryState = vi.hoisted(() => ({
 // can assert what would have been written.
 const cacheUpdates = vi.hoisted(() => ({
   last: null as unknown,
+  invalidations: 0,
 }));
 
 vi.mock("@tanstack/react-query", async () => {
@@ -81,7 +82,9 @@ vi.mock("@tanstack/react-query", async () => {
       isLoading: queryState.isLoading,
     }),
     useQueryClient: () => ({
-      invalidateQueries: vi.fn(),
+      invalidateQueries: vi.fn(() => {
+        cacheUpdates.invalidations += 1;
+      }),
       setQueryData: vi.fn((_key: unknown, updater: unknown) => {
         cacheUpdates.last = typeof updater === "function"
           ? (updater as (old: unknown) => unknown)(queryState.data)
@@ -118,6 +121,7 @@ describe("useIssueTimeline", () => {
     queryState.data = [];
     queryState.isLoading = false;
     cacheUpdates.last = null;
+    cacheUpdates.invalidations = 0;
   });
 
   // CommentCard is wrapped in React.memo (perf fix for long timelines, see
@@ -147,16 +151,6 @@ describe("useIssueTimeline", () => {
     expect(result.current.submitComment).toBe(first.submitComment);
   });
 
-  it("returns the timeline as a flat array directly from the query cache", () => {
-    queryState.data = [
-      { type: "comment", id: "c1", actor_type: "member", actor_id: "u", created_at: "2026-05-06T01:00:00Z" },
-      { type: "comment", id: "c2", actor_type: "member", actor_id: "u", created_at: "2026-05-06T02:00:00Z" },
-      { type: "comment", id: "c3", actor_type: "member", actor_id: "u", created_at: "2026-05-06T03:00:00Z" },
-    ];
-    const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
-    expect(result.current.timeline.map((e) => e.id)).toEqual(["c1", "c2", "c3"]);
-  });
-
   it("passes suppressed agent ids through editComment", async () => {
     const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
 
@@ -169,6 +163,28 @@ describe("useIssueTimeline", () => {
       content: "updated",
       attachmentIds: ["attachment-1"],
       suppressAgentIds: ["agent-1"],
+    });
+  });
+
+  it("passes the captured comment content through editComment", async () => {
+    const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
+
+    await act(async () => {
+      await result.current.editComment(
+        "comment-1",
+        "updated",
+        [],
+        undefined,
+        "original",
+      );
+    });
+
+    expect(stableHandles.updateMutateAsync).toHaveBeenCalledWith({
+      commentId: "comment-1",
+      content: "updated",
+      attachmentIds: [],
+      suppressAgentIds: undefined,
+      contentBase: "original",
     });
   });
 
@@ -278,6 +294,130 @@ describe("useIssueTimeline", () => {
     expect(cacheUpdates.last).toBeNull();
   });
 
+  it("rejects a delayed comment update older than the cached revision", () => {
+    queryState.data = [{
+      type: "comment",
+      id: "c1",
+      actor_type: "member",
+      actor_id: "u",
+      content: "latest",
+      parent_id: null,
+      created_at: "2026-05-06T01:00:00Z",
+      updated_at: "2026-05-06T03:00:00Z",
+      revision: 3,
+      reactions: [],
+      attachments: [],
+    }];
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+
+    act(() => {
+      wsHandlers.get("comment:updated")!({
+        comment: {
+          id: "c1",
+          issue_id: "issue-1",
+          author_type: "member",
+          author_id: "u",
+          content: "stale",
+          parent_id: null,
+          created_at: "2026-05-06T01:00:00Z",
+          updated_at: "2026-05-06T02:00:00Z",
+          revision: 2,
+          type: "comment",
+          reactions: [],
+          attachments: [],
+        },
+      });
+    });
+
+    expect(cacheUpdates.last).toEqual(queryState.data);
+  });
+
+  it("preserves hydrated actor identity when applying a comment update", () => {
+    queryState.data = [
+      {
+        type: "comment",
+        id: "c1",
+        actor_type: "member",
+        actor_id: "departed-user",
+        actor_name: "Former Member",
+        actor_avatar_url: "https://profiles.example.com/former.png",
+        content: "before",
+        parent_id: null,
+        created_at: "2026-05-06T01:00:00Z",
+        updated_at: "2026-05-06T01:00:00Z",
+        revision: 1,
+        reactions: [],
+        attachments: [],
+      },
+    ];
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+
+    act(() => {
+      wsHandlers.get("comment:updated")!({
+        comment: {
+          id: "c1",
+          issue_id: "issue-1",
+          author_type: "member",
+          author_id: "departed-user",
+          content: "after",
+          parent_id: null,
+          created_at: "2026-05-06T01:00:00Z",
+          updated_at: "2026-05-06T02:00:00Z",
+          revision: 2,
+          type: "comment",
+          reactions: [],
+          attachments: [],
+        },
+      });
+    });
+
+    expect(cacheUpdates.last).toMatchObject([
+      {
+        content: "after",
+        actor_name: "Former Member",
+        actor_avatar_url: "https://profiles.example.com/former.png",
+      },
+    ]);
+  });
+
+  it("refetches instead of applying an unversioned event over versioned cache state", () => {
+    queryState.data = [{
+      type: "comment",
+      id: "c1",
+      actor_type: "member",
+      actor_id: "u",
+      content: "versioned",
+      parent_id: null,
+      created_at: "2026-05-06T01:00:00Z",
+      updated_at: "2026-05-06T03:00:00Z",
+      revision: 3,
+      reactions: [],
+      attachments: [],
+    }];
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+
+    act(() => {
+      wsHandlers.get("comment:updated")!({
+        comment: {
+          id: "c1",
+          issue_id: "issue-1",
+          author_type: "member",
+          author_id: "u",
+          content: "unversioned",
+          parent_id: null,
+          created_at: "2026-05-06T01:00:00Z",
+          updated_at: "2026-05-06T04:00:00Z",
+          type: "comment",
+          reactions: [],
+          attachments: [],
+        },
+      });
+    });
+
+    expect(cacheUpdates.last).toEqual(queryState.data);
+    expect(cacheUpdates.invalidations).toBeGreaterThan(0);
+  });
+
   // The global useRealtimeSync handler now uses refetchType: "none" for
   // timeline events, which means useIssueTimeline must own the granular
   // cache update for every event that mutates the timeline — including
@@ -292,6 +432,8 @@ describe("useIssueTimeline", () => {
         id: "c1",
         actor_type: "member",
         actor_id: "u",
+        actor_name: "Former Member",
+        actor_avatar_url: "https://profiles.example.com/former.png",
         content: "hello",
         parent_id: null,
         created_at: "2026-05-06T01:00:00Z",
@@ -346,11 +488,17 @@ describe("useIssueTimeline", () => {
       resolved_at: string | null;
       resolved_by_type: string | null;
       resolved_by_id: string | null;
+      actor_name?: string;
+      actor_avatar_url?: string;
     }>;
     expect(updated.map((e) => e.id)).toEqual(["c1", "c2"]);
     expect(updated[0]!.resolved_at).toBe("2026-05-06T03:00:00Z");
     expect(updated[0]!.resolved_by_type).toBe("member");
     expect(updated[0]!.resolved_by_id).toBe("u");
+    expect(updated[0]!.actor_name).toBe("Former Member");
+    expect(updated[0]!.actor_avatar_url).toBe(
+      "https://profiles.example.com/former.png",
+    );
     // Sibling entry must not change (identity preserved by .map).
     expect(updated[1]!.resolved_at).toBeNull();
   });

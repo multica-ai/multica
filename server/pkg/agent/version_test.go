@@ -5,6 +5,22 @@ import (
 	"testing"
 )
 
+func TestTaskSupplementVersionGate(t *testing.T) {
+	for _, tc := range []struct {
+		provider, version string
+		want              bool
+	}{
+		{"codex", "codex-cli 0.100.0", true}, {"codex", "0.99.0", false},
+		{"claude", "2.1.110 (Claude Code)", true}, {"claude", "2.1.109", false},
+		{"grok", "1.0.14", true}, {"grok", "1.0.13", false}, {"grok", "0.2.120", false},
+		{"codex", "", false}, {"claude", "dev", false}, {"kimi", "9.0.0", false},
+	} {
+		if got := SupportsTaskSupplement(tc.provider, tc.version); got != tc.want {
+			t.Errorf("%s %q: supported=%v, want %v", tc.provider, tc.version, got, tc.want)
+		}
+	}
+}
+
 func TestParseSemver(t *testing.T) {
 	tests := []struct {
 		input   string
@@ -79,60 +95,98 @@ func TestCheckMinCLIVersion(t *testing.T) {
 	}
 }
 
+func TestCheckMinCLIVersionForQuickCreateFields(t *testing.T) {
+	if err := CheckMinCLIVersionFor("0.4.2", MinQuickCreateFieldsCLIVersion); !errors.Is(err, ErrCLIVersionTooOld) {
+		t.Fatalf("0.4.2 error = %v, want ErrCLIVersionTooOld", err)
+	}
+	if err := CheckMinCLIVersionFor("0.4.3", MinQuickCreateFieldsCLIVersion); err != nil {
+		t.Fatalf("0.4.3 error = %v, want nil", err)
+	}
+	if err := CheckMinCLIVersionFor("v0.4.2-7-gabc1234", MinQuickCreateFieldsCLIVersion); err != nil {
+		t.Fatalf("dev build error = %v, want nil", err)
+	}
+}
+
 func TestExtractVersionLine(t *testing.T) {
 	tests := []struct {
 		name string
 		raw  string
 		want string
+		// wantRecognised is whether the semver scan matched, as opposed to the
+		// trimmed-raw fallback answering. Pinned per case because
+		// salvageProbeAnswer treats the two differently: only a recognised
+		// version is evidence that an incomplete read already holds the answer.
+		wantRecognised bool
 	}{
 		{
-			name: "bare semver",
-			raw:  "0.42.0\n",
-			want: "0.42.0",
+			name:           "bare semver",
+			raw:            "0.42.0\n",
+			want:           "0.42.0",
+			wantRecognised: true,
 		},
 		{
-			name: "claude full string preserved",
-			raw:  "2.1.5 (Claude Code)\n",
-			want: "2.1.5 (Claude Code)",
+			name:           "claude full string preserved",
+			raw:            "2.1.5 (Claude Code)\n",
+			want:           "2.1.5 (Claude Code)",
+			wantRecognised: true,
 		},
 		{
-			name: "codex prefix preserved",
-			raw:  "codex-cli 0.118.0\n",
-			want: "codex-cli 0.118.0",
+			name:           "codex prefix preserved",
+			raw:            "codex-cli 0.118.0\n",
+			want:           "codex-cli 0.118.0",
+			wantRecognised: true,
 		},
 		// Reproduces #2516: gemini's Windows shim emits `chcp` output to stdout
 		// before the real version. The chcp line has no dotted-number form,
 		// so the semver scan skips it and picks up "0.42.0" from the next line.
 		{
-			name: "windows chcp prefix before version",
-			raw:  "Active code page: 65001\n0.42.0\n",
-			want: "0.42.0",
+			name:           "windows chcp prefix before version",
+			raw:            "Active code page: 65001\n0.42.0\n",
+			want:           "0.42.0",
+			wantRecognised: true,
 		},
 		{
-			name: "windows chcp prefix CRLF",
-			raw:  "Active code page: 65001\r\n0.42.0\r\n",
-			want: "0.42.0",
+			name:           "windows chcp prefix CRLF",
+			raw:            "Active code page: 65001\r\n0.42.0\r\n",
+			want:           "0.42.0",
+			wantRecognised: true,
 		},
 		{
-			name: "leading blank lines",
-			raw:  "\n\n  0.42.0\n",
-			want: "0.42.0",
+			name:           "leading blank lines",
+			raw:            "\n\n  0.42.0\n",
+			want:           "0.42.0",
+			wantRecognised: true,
 		},
 		{
-			name: "non-semver output falls back to trimmed raw",
-			raw:  "  some-build-id  \n",
-			want: "some-build-id",
+			name:           "non-semver output falls back to trimmed raw",
+			raw:            "  some-build-id  \n",
+			want:           "some-build-id",
+			wantRecognised: false,
+		},
+		// The shape the salvage gate turns on: a wrapper's progress line
+		// satisfies the fallback, so "non-empty" cannot mean "the version
+		// arrived". See TestDetectCLIVersionDoesNotSalvageABannerAsTheVersion.
+		{
+			name:           "wrapper banner is not a recognised version",
+			raw:            "initializing plugins\n",
+			want:           "initializing plugins",
+			wantRecognised: false,
 		},
 		{
-			name: "empty input",
-			raw:  "",
-			want: "",
+			name:           "empty input",
+			raw:            "",
+			want:           "",
+			wantRecognised: false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := extractVersionLine(tt.raw); got != tt.want {
+			got, recognised := extractVersionLine(tt.raw)
+			if got != tt.want {
 				t.Errorf("extractVersionLine(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+			if recognised != tt.wantRecognised {
+				t.Errorf("extractVersionLine(%q) recognised = %v, want %v", tt.raw, recognised, tt.wantRecognised)
 			}
 		})
 	}
@@ -150,11 +204,43 @@ func TestCheckMinVersion(t *testing.T) {
 		{"claude", "v2.0.0", false},
 		{"claude", "1.0.128", true},
 		{"claude", "1.9.99", true},
+		{"antigravity", "agy version 1.1.10", false},
+		{"antigravity", "1.1.9", true},
 		{"claude", "invalid", true},
 		{"codex", "codex-cli 0.118.0", false},
 		{"codex", "codex-cli 0.100.0", false},
 		{"codex", "codex-cli 0.99.0", true},
 		{"codex", "codex-cli 0.50.0", true},
+		{"grok", "grok 0.2.93 (f00f96316d4b) [stable]", false},
+		{"grok", "0.2.89", false},
+		{"grok", "0.2.0", true},
+		{"grok", "0.1.9", true},
+		{"qoderclicn", "unverified-version-format", false},
+		{"qwen", "0.20.0", false},
+		{"qwen", "qwen 0.20.1", false},
+		{"qwen", "0.19.9", true},
+		{"dim", "0.3.10", false},
+		{"dim", "0.3.11", false},
+		{"dim", "0.4.0", false},
+		{"dim", "0.3.9", true},
+		{"mcode", "0.1.2", false},
+		{"mcode", "mcode 0.1.1", true},
+		{"zeroclaw", "zeroclaw 0.8.4", false},
+		{"zeroclaw", "0.8.0", false},
+		{"zeroclaw", "0.7.5", true},
+		{"zeroclaw", "invalid", true},
+		{"dim", "0.2.99", true},
+		{"dim", "invalid", true},
+		// opencode: 1.1.54 is the first build that honors TMPDIR/TMP/TEMP for
+		// Bun native-module extraction. 1.1.53 and 1.1.49 are the versions
+		// actually measured leaking into the shared temp dir (#8392); the CLI
+		// prints a bare semver, so there is no prefix to strip.
+		{"opencode", "1.1.54", false},
+		{"opencode", "1.1.55", false},
+		{"opencode", "1.18.30", false},
+		{"opencode", "1.1.53", true},
+		{"opencode", "1.1.49", true},
+		{"opencode", "0.15.0", true},
 		{"unknown", "1.0.0", false},
 	}
 	for _, tt := range tests {

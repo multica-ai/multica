@@ -1,22 +1,40 @@
 {
   "nav": {
     "inbox": "Inbox",
+    "chat": "Chat",
     "my_issues": "My Issues",
     "issues": "Issues",
     "projects": "Projects",
     "autopilots": "Autopilot",
     "agents": "Agents",
     "squads": "Squads",
-    "usage": "Usage",
+    "usage": "Analytics",
     "runtimes": "Runtimes",
     "skills": "Skills",
     "settings": "Settings"
   },
+  "tab": {
+    "issue": "Issue",
+    "project": "Project",
+    "autopilot": "Autopilot",
+    "agent": "Agent",
+    "member": "Member",
+    "squad": "Squad",
+    "skill": "Skill",
+    "machine": "Machine",
+    "runtime": "Runtime",
+    "attachment": "Attachment",
+    "create_agent": "Create Agent",
+    "unknown": "Unknown page"
+  },
   "help": {
     "trigger": "Help",
+    "download_desktop": "Desktop app",
     "docs": "Docs",
     "changelog": "Change log",
-    "feedback": "Feedback"
+    "discord": "Discord",
+    "feedback": "Feedback",
+    "server_version": "Server version {{version}}"
   },
   "workspace_loader": {
     "loading_workspace": "Loading workspace…",
@@ -34,8 +52,14 @@
     "new_issue": "New Issue",
     "new_issue_shortcut": "C",
     "pinned_label": "Pinned",
-    "workspace_group": "Workspace",
-    "configure_group": "Configure",
-    "unread_overflow": "99+"
+    "work_group": "Work",
+    "ai_team_group": "AI Team",
+    "show_more_pins": "Show {{count}} more…",
+    "show_fewer_pins": "Show fewer",
+    "unread_overflow": "99+",
+    "discord_card": {
+      "title": "Join our Discord",
+      "dismiss": "Dismiss"
+    }
   }
 }

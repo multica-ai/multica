@@ -3,11 +3,13 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import type { GanttZoom } from "@multica/core/issues/stores/view-store";
 import { projectListOptions } from "@multica/core/projects/queries";
-import type { Issue, IssueStatus } from "@multica/core/types";
+import type { Issue, IssueStatusCategory } from "@multica/core/types";
+import { issueStatusCategory, statusColumnKeys } from "@multica/core/issues";
 import { dateOnlyToUTCDate } from "@multica/core/issues/date";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -23,7 +25,7 @@ import { StatusIcon } from "./status-icon";
 import { PriorityIcon } from "./priority-icon";
 import { IssueActionsContextMenu } from "../actions";
 import { sortIssues } from "../utils/sort";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 
 // ---------------------------------------------------------------------------
 // Date utilities — everything is UTC-day-aligned so a `due_date` ISO string
@@ -123,7 +125,7 @@ function GanttAxis({
   todayOffsetDays: number;
   width: number;
 }) {
-  const locale = typeof navigator !== "undefined" ? navigator.language : "en";
+  const locale = useLocale();
   const totalDays = daysBetween(range.start, range.end);
 
   const monthBlocks = useMemo(() => {
@@ -160,7 +162,7 @@ function GanttAxis({
         {monthBlocks.map((b, i) => (
           <div
             key={i}
-            className="absolute top-0 bottom-0 flex items-center px-2 text-xs font-medium text-foreground/80"
+            className="absolute top-0 bottom-0 flex items-center px-2 text-caption font-medium text-foreground"
             style={{ left: b.left, width: b.width }}
           >
             {b.width > 40 && <span className="truncate">{b.label}</span>}
@@ -181,7 +183,7 @@ function GanttAxis({
             <div
               key={i}
               className={cn(
-                "absolute top-0 bottom-0 flex items-center justify-center text-[10px] text-muted-foreground border-l",
+                "absolute top-0 bottom-0 flex items-center justify-center text-micro text-muted-foreground border-l",
                 isMonth
                   ? "border-foreground/15"
                   : isWeek
@@ -195,7 +197,7 @@ function GanttAxis({
                   {zoom === "day" && (
                     <>
                       <span className="tabular-nums">{date.getUTCDate()}</span>
-                      <span className="text-[9px] opacity-70">
+                      <span className="text-micro">
                         {date.toLocaleDateString(locale, {
                           weekday: "short",
                           timeZone: "UTC",
@@ -290,14 +292,15 @@ function BackgroundLayer({
 // Bar color by status (uses semantic Tailwind tokens, not hardcoded colors).
 // ---------------------------------------------------------------------------
 
-const STATUS_BAR_BG: Record<IssueStatus, string> = {
-  backlog: "bg-muted-foreground/60",
-  todo: "bg-muted-foreground/70",
-  in_progress: "bg-warning",
-  in_review: "bg-success",
+// Keyed by CATEGORY, not by status key: an issue on a custom status draws in
+// the color of the category it behaves as. Keying this by IssueStatus made the
+// lookup `undefined` for every custom key, so the bar lost its color entirely.
+// (MUL-6243)
+const STATUS_BAR_BG: Record<IssueStatusCategory, string> = {
+  unstarted: "bg-muted-foreground/70",
+  started: "bg-warning",
   done: "bg-info",
-  blocked: "bg-destructive",
-  cancelled: "bg-muted-foreground/40",
+  closed: "bg-muted-foreground/40",
 };
 
 // ---------------------------------------------------------------------------
@@ -316,8 +319,10 @@ function ScheduledRow({
   totalDays: number;
 }) {
   const { t } = useT("issues");
+  const locale = useLocale();
   const p = useWorkspacePaths();
   const wsId = useWorkspaceId();
+  const { colorOf, iconOf } = useIssueStatuses(wsId);
   const { data: projects = [] } = useQuery({
     ...projectListOptions(wsId),
     enabled: !!issue.project_id,
@@ -349,7 +354,6 @@ function ScheduledRow({
     }
   }
 
-  const locale = typeof navigator !== "undefined" ? navigator.language : "en";
   const fmt = (d: Date) =>
     d.toLocaleDateString(locale, {
       month: "short",
@@ -367,12 +371,19 @@ function ScheduledRow({
         {/* Sticky label cell */}
         <AppLink
           href={p.issueDetail(issue.id)}
-          className="sticky left-0 z-[1] flex shrink-0 items-center gap-2 border-r bg-background px-3 text-sm min-w-0"
+          newTabTitle={issue.identifier}
+          className="sticky left-0 z-[1] flex shrink-0 items-center gap-2 border-r bg-background px-3 text-body min-w-0"
           style={{ width: LEFT_COL_WIDTH }}
         >
-          <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
+          <StatusIcon
+            status={issue.status}
+            color={colorOf(issue.status)}
+            icon={iconOf(issue.status)}
+            category={issueStatusCategory(issue) ?? undefined}
+            className="h-3.5 w-3.5"
+          />
           <PriorityIcon priority={issue.priority} />
-          <span className="w-14 shrink-0 text-xs text-muted-foreground tabular-nums truncate">
+          <span className="w-14 shrink-0 text-caption text-muted-foreground tabular-nums truncate">
             {issue.identifier}
           </span>
           <span className="truncate flex-1">{issue.title}</span>
@@ -381,7 +392,7 @@ function ScheduledRow({
             <ActorAvatar
               actorType={issue.assignee_type}
               actorId={issue.assignee_id}
-              size={18}
+              size="sm"
               enableHoverCard
             />
           )}
@@ -397,18 +408,19 @@ function ScheduledRow({
                 render={
                   <AppLink
                     href={p.issueDetail(issue.id)}
+                    newTabTitle={issue.identifier}
                     className={cn(
                       "absolute top-1/2 -translate-y-1/2 transition-opacity hover:opacity-90",
                       bar.isMarker
                         ? "h-3 w-3 rotate-45 rounded-[2px]"
                         : "h-5 rounded-md",
-                      STATUS_BAR_BG[issue.status],
+                      STATUS_BAR_BG[issueStatusCategory(issue) ?? "unstarted"],
                       inverted && "ring-2 ring-destructive ring-offset-1 ring-offset-background",
                     )}
                     style={{ left: bar.left, width: bar.width }}
                   >
                     {!bar.isMarker && bar.width > 60 && (
-                      <span className="block truncate px-2 py-[2px] text-[11px] leading-4 text-white/95">
+                      <span className="block truncate px-2 py-[2px] text-micro leading-4 text-white">
                         {issue.title}
                       </span>
                     )}
@@ -416,7 +428,7 @@ function ScheduledRow({
                 }
               />
               <TooltipContent side="top">
-                <div className="flex flex-col gap-0.5 text-xs">
+                <div className="flex flex-col gap-0.5 text-caption">
                   <span className="font-medium">{issue.title}</span>
                   <span className="text-muted-foreground">
                     {start ? fmt(start) : "—"} → {due ? fmt(due) : "—"}
@@ -447,25 +459,26 @@ export function GanttView({ issues }: { issues: Issue[] }) {
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const act = useViewStoreApi().getState();
+  // Board order for `sort=status`, archived included: an issue can still sit on
+  // an archived status and has to rank with the rest (MUL-7379).
+  const statusCatalog = useIssueStatuses(useWorkspaceId());
+  const statusOrder = useMemo(() => statusColumnKeys(statusCatalog, true), [statusCatalog]);
 
   const today = useMemo(() => startOfDayUTC(new Date()), []);
   const dayPx = DAY_PX_BY_ZOOM[zoom];
 
-  // The data source only delivers scheduled issues (server-side
-  // `scheduled=true`), but a row can still arrive here without a date — for
-  // example, a WS-driven optimistic patch that just cleared start_date /
-  // due_date and is waiting for the cache to refetch. Filter defensively so
-  // the timeline never renders a blank lane in that brief window.
+  // `issues` is already the canvas set: the surface applies the shared
+  // filters, drops undated rows, and honours `ganttShowCompleted` before
+  // handing it over (see `ganttCanvasRows` in use-issue-surface-data.ts).
+  // Those rules used to live here, which meant the header chip could count
+  // rows this canvas would never draw (MUL-4884). Keep this view a renderer:
+  // it orders rows, it does not decide which ones exist.
   const scheduled = useMemo(() => {
-    const dated = issues.filter((i) => i.start_date || i.due_date);
-    const filtered = showCompleted
-      ? dated
-      : dated.filter((i) => i.status !== "done" && i.status !== "cancelled");
     // "position" makes no sense on a gantt — default to start_date asc when
     // the user hasn't picked a more specific sort.
     const sortField = sortBy === "position" ? "start_date" : sortBy;
-    return sortIssues(filtered, sortField, sortDirection);
-  }, [issues, showCompleted, sortBy, sortDirection]);
+    return sortIssues(issues, sortField, sortDirection, statusOrder);
+  }, [issues, sortBy, sortDirection, statusOrder]);
 
   const range = useMemo(
     () => computeRange(scheduled, today, zoom),
@@ -485,7 +498,7 @@ export function GanttView({ issues }: { issues: Issue[] }) {
 
   if (scheduled.length === 0) {
     return (
-      <div className="flex-1 min-h-0 flex items-center justify-center text-sm text-muted-foreground">
+      <div className="flex-1 min-h-0 flex items-center justify-center text-body text-muted-foreground">
         {t(($) => $.gantt.empty)}
       </div>
     );
@@ -506,7 +519,7 @@ export function GanttView({ issues }: { issues: Issue[] }) {
               size="sm"
               variant={zoom === opt.value ? "secondary" : "ghost"}
               className={cn(
-                "h-6 px-2 text-xs",
+                "h-6 px-2 text-caption",
                 zoom !== opt.value && "text-muted-foreground",
               )}
               onClick={() => act.setGanttZoom(opt.value)}
@@ -520,7 +533,7 @@ export function GanttView({ issues }: { issues: Issue[] }) {
           size="sm"
           variant={showCompleted ? "secondary" : "outline"}
           className={cn(
-            "h-7 text-xs",
+            "h-7 text-caption",
             !showCompleted && "text-muted-foreground",
           )}
           onClick={act.toggleGanttShowCompleted}
@@ -538,7 +551,7 @@ export function GanttView({ issues }: { issues: Issue[] }) {
               className="sticky left-0 z-30 shrink-0 border-b border-r bg-background"
               style={{ width: LEFT_COL_WIDTH, height: HEADER_HEIGHT }}
             >
-              <div className="flex h-full items-end px-3 pb-1.5 text-[11px] font-medium text-muted-foreground">
+              <div className="flex h-full items-end px-3 pb-1.5 text-micro font-medium text-muted-foreground">
                 {t(($) => $.gantt.header_issue)}
               </div>
             </div>

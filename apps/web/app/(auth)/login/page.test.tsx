@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "@multica/views/locales/en/common.json";
@@ -22,29 +21,34 @@ function createWrapper() {
 }
 
 const {
-  mockSendCode,
-  mockVerifyCode,
   mockIssueCliToken,
+  mockListWorkspaces,
+  mockListMyInvitations,
+  mockPush,
+  mockReplace,
   searchParamsState,
   authStateRef,
 } = vi.hoisted(() => ({
-  mockSendCode: vi.fn(),
-  mockVerifyCode: vi.fn(),
   mockIssueCliToken: vi.fn(),
+  mockListWorkspaces: vi.fn(),
+  mockListMyInvitations: vi.fn(),
+  mockPush: vi.fn(),
+  mockReplace: vi.fn(),
   searchParamsState: { params: new URLSearchParams() },
   authStateRef: {
     state: {
       sendCode: vi.fn(),
       verifyCode: vi.fn(),
-      user: null as null | { id: string; email: string },
+      user: null as null | { id: string; email: string; onboarded_at?: string | null },
       isLoading: false,
     },
   },
 }));
 
-// Mock next/navigation
+// Mock next/navigation — router spies are hoisted so tests can assert
+// which navigation (if any) the page issued.
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => ({ push: mockPush, replace: mockReplace }),
   usePathname: () => "/login",
   useSearchParams: () => searchParamsState.params,
 }));
@@ -58,8 +62,6 @@ vi.mock("@multica/core/auth", async () => {
     await vi.importActual<typeof import("@multica/core/auth")>(
       "@multica/core/auth",
     );
-  authStateRef.state.sendCode = mockSendCode;
-  authStateRef.state.verifyCode = mockVerifyCode;
   const useAuthStore = Object.assign(
     (selector: (s: typeof authStateRef.state) => unknown) =>
       selector(authStateRef.state),
@@ -76,7 +78,8 @@ vi.mock("@/features/auth/auth-cookie", () => ({
 // Mock api
 vi.mock("@multica/core/api", () => ({
   api: {
-    listWorkspaces: vi.fn().mockResolvedValue([]),
+    listWorkspaces: mockListWorkspaces,
+    listMyInvitations: mockListMyInvitations,
     verifyCode: vi.fn(),
     setToken: vi.fn(),
     getMe: vi.fn(),
@@ -92,78 +95,13 @@ describe("LoginPage", () => {
     searchParamsState.params = new URLSearchParams();
     authStateRef.state.user = null;
     authStateRef.state.isLoading = false;
+    mockListWorkspaces.mockResolvedValue([]);
+    mockListMyInvitations.mockResolvedValue([]);
   });
 
-  it("renders login form with email input and continue button", () => {
-    render(<LoginPage />, { wrapper: createWrapper() });
-
-    expect(screen.getByText("Sign in to Multica")).toBeInTheDocument();
-    expect(screen.getByText("Enter your email to get a login code")).toBeInTheDocument();
-    expect(screen.getByLabelText("Email")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Continue" })
-    ).toBeInTheDocument();
-  });
-
-  it("does not call sendCode when email is empty", async () => {
-    const user = userEvent.setup();
-    render(<LoginPage />, { wrapper: createWrapper() });
-
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-    expect(mockSendCode).not.toHaveBeenCalled();
-  });
-
-  it("calls sendCode with email on submit", async () => {
-    mockSendCode.mockResolvedValueOnce(undefined);
-    const user = userEvent.setup();
-    render(<LoginPage />, { wrapper: createWrapper() });
-
-    await user.type(screen.getByLabelText("Email"), "test@multica.ai");
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-
-    await waitFor(() => {
-      expect(mockSendCode).toHaveBeenCalledWith("test@multica.ai");
-    });
-  });
-
-  it("shows 'Sending code...' while submitting", async () => {
-    mockSendCode.mockReturnValueOnce(new Promise(() => {}));
-    const user = userEvent.setup();
-    render(<LoginPage />, { wrapper: createWrapper() });
-
-    await user.type(screen.getByLabelText("Email"), "test@multica.ai");
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Sending code...")).toBeInTheDocument();
-    });
-  });
-
-  it("shows verification code step after sending code", async () => {
-    mockSendCode.mockResolvedValueOnce(undefined);
-    const user = userEvent.setup();
-    render(<LoginPage />, { wrapper: createWrapper() });
-
-    await user.type(screen.getByLabelText("Email"), "test@multica.ai");
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Check your email")).toBeInTheDocument();
-    });
-  });
-
-  it("shows error when sendCode fails", async () => {
-    mockSendCode.mockRejectedValueOnce(new Error("Network error"));
-    const user = userEvent.setup();
-    render(<LoginPage />, { wrapper: createWrapper() });
-
-    await user.type(screen.getByLabelText("Email"), "test@multica.ai");
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Network error")).toBeInTheDocument();
-    });
-  });
+  // Shared LoginPage behavior is canonical in
+  // packages/views/auth/login-page.test.tsx. This wrapper suite only owns web
+  // platform handoff and redirect behavior.
 
   // Regression: MUL-1080 — if the user is already authenticated on the web
   // and the Desktop app redirects them to /login?platform=desktop, the web
@@ -203,5 +141,64 @@ describe("LoginPage", () => {
         value: originalLocation,
       });
     }
+  });
+
+  // Regression: #5009 — the "already authenticated on arrival" effect used to
+  // fire for fresh form logins too. verifyCode writes `user` while handleVerify
+  // is still fetching the workspace list, so the effect read an empty cache and
+  // raced handleSuccess with replace("/workspaces/new"); depending on the
+  // interleaving the user could end up stuck on the create-workspace page
+  // despite having workspaces.
+  describe("post-login redirect ownership (#5009)", () => {
+    const onboardedUser = {
+      id: "u1",
+      email: "test@multica.ai",
+      onboarded_at: "2026-01-01T00:00:00Z",
+    };
+
+    it("does not redirect from the arrival effect when the user logs in via the form", async () => {
+      // Auth settles as logged-out first — the page latches "any user from
+      // now on came from the form".
+      const wrapper = createWrapper();
+      const { rerender } = render(<LoginPage />, { wrapper });
+      // verifyCode set the user; the workspace list fetch is still in flight
+      // (cache cold). The arrival effect must stay silent — handleSuccess
+      // owns this navigation.
+      authStateRef.state.user = onboardedUser;
+      rerender(<LoginPage />);
+
+      await act(async () => {});
+      expect(mockReplace).not.toHaveBeenCalled();
+      expect(mockPush).not.toHaveBeenCalled();
+      expect(mockListWorkspaces).not.toHaveBeenCalled();
+    });
+
+    it("fetches the workspace list before redirecting a visitor who arrived authenticated", async () => {
+      // Cold Query cache on a fresh page load: reading it would say "no
+      // workspaces" and misroute to /workspaces/new. The effect must fetch.
+      authStateRef.state.user = onboardedUser;
+      mockListWorkspaces.mockResolvedValue([{ id: "ws-1", slug: "acme" }]);
+
+      render(<LoginPage />, { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        expect(mockReplace).toHaveBeenCalledWith("/acme/issues");
+      });
+      expect(mockListWorkspaces).toHaveBeenCalledTimes(1);
+    });
+
+    it("still honors ?next= for a visitor who arrived authenticated", async () => {
+      searchParamsState.params = new URLSearchParams({
+        next: "/invite/abc",
+      });
+      authStateRef.state.user = onboardedUser;
+
+      render(<LoginPage />, { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        expect(mockReplace).toHaveBeenCalledWith("/invite/abc");
+      });
+      expect(mockListWorkspaces).not.toHaveBeenCalled();
+    });
   });
 });

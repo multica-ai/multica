@@ -1,27 +1,37 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Cpu, Loader2, Plus, Check, Info } from "lucide-react";
-import { runtimeModelsOptions } from "@multica/core/runtimes";
+import {
+  refreshRuntimeModels,
+  runtimeModelsOptions,
+} from "@multica/core/runtimes";
 import type { RuntimeModel } from "@multica/core/types";
 import {
   Popover,
   PopoverTrigger,
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
-import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { useT } from "../../i18n";
+import { UnavailableModelsNote } from "./unavailable-models-note";
+import { ModelSearchHeader } from "./model-search-header";
 
 // ModelDropdown renders a searchable, creatable model picker for an agent.
 // It fetches the supported-model catalog from the selected runtime — the
 // daemon enumerates models on demand via heartbeat piggyback. Providers
 // whose runtime ignores per-agent model selection return supported=false,
 // and the dropdown renders disabled with an explanation instead of silently
-// accepting a value the backend would ignore. No built-in provider does so
-// today — Antigravity gained `--model` in agy 1.0.6 — but the path stays for
-// any future model-less runtime.
+// accepting a value the backend would ignore. Today that is qwenpaw and mcode
+// (agent.ModelSelectionSupported is the single source of truth for the set);
+// Antigravity left it when agy 1.0.6 added `--model`.
+//
+// supported=false is a different state from discovery failing, and the two must
+// not be conflated. A failed discovery throws out of resolveRuntimeModels, so
+// modelsQuery.isError renders the discovery-failed notice and keeps the
+// creatable manual-entry input below — which is exactly the fallback a user
+// needs when their runtime could not enumerate anything (MUL-6606).
 export function ModelDropdown({
   runtimeId,
   runtimeOnline,
@@ -36,6 +46,7 @@ export function ModelDropdown({
   disabled?: boolean;
 }) {
   const { t } = useT("agents");
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -51,6 +62,18 @@ export function ModelDropdown({
     [modelsQuery.data],
   );
   const grouped = useMemo(() => groupByProvider(models), [models]);
+  // Advisory only — never merged into `models`, so nothing below can select one.
+  const unavailableModels = useMemo(
+    () => modelsQuery.data?.unavailableModels ?? [],
+    [modelsQuery.data],
+  );
+  // resolveRuntimeModels throws the daemon's reported error text, so this is
+  // the runtime's own message (plus any hint the daemon appended). It is only
+  // ever read while isError is true.
+  const discoveryError =
+    modelsQuery.error instanceof Error
+      ? modelsQuery.error.message.trim() || null
+      : null;
 
   // When the selected runtime reports it doesn't support per-agent
   // model selection, clear any previously-saved value so we don't
@@ -88,6 +111,14 @@ export function ModelDropdown({
     setSearch("");
   };
 
+  const refresh = () => {
+    if (!runtimeId || !runtimeOnline) return;
+    void refreshRuntimeModels(queryClient, runtimeId).catch(() => {
+      // React Query owns the error state rendered below. Swallow the returned
+      // promise rejection so a failed manual refresh is not also unhandled.
+    });
+  };
+
   const triggerLabel =
     value ||
     (disabled
@@ -100,13 +131,13 @@ export function ModelDropdown({
     return (
       <div className="flex flex-col min-w-0">
         <div className="flex h-6 items-center">
-          <Label className="text-xs text-muted-foreground">{t(($) => $.model_dropdown.label)}</Label>
+          <Label className="text-caption text-muted-foreground">{t(($) => $.model_dropdown.label)}</Label>
         </div>
-        <div className="mt-1.5 flex items-start gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground">
+        <div className="mt-1.5 flex items-start gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2.5 text-body text-muted-foreground">
           <Info className="mt-0.5 h-4 w-4 shrink-0" />
           <div className="min-w-0">
             <div>{t(($) => $.model_dropdown.managed_by_runtime_title)}</div>
-            <div className="mt-0.5 text-xs">
+            <div className="mt-0.5 text-caption">
               {t(($) => $.model_dropdown.managed_by_runtime_hint)}
             </div>
           </div>
@@ -118,15 +149,20 @@ export function ModelDropdown({
   return (
     <div className="flex flex-col min-w-0">
       <div className="flex h-6 items-center justify-between">
-        <Label className="text-xs text-muted-foreground">{t(($) => $.model_dropdown.label)}</Label>
+        <Label className="text-caption text-muted-foreground">{t(($) => $.model_dropdown.label)}</Label>
         {modelsQuery.isError && (
-          <span className="text-xs text-muted-foreground">{t(($) => $.model_dropdown.discovery_failed)}</span>
+          <span
+            className="text-caption text-muted-foreground"
+            title={discoveryError ?? undefined}
+          >
+            {t(($) => $.model_dropdown.discovery_failed)}
+          </span>
         )}
       </div>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           disabled={disabled}
-          className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-sm transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+          className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-body transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
         >
           <Cpu className="h-4 w-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
@@ -137,7 +173,7 @@ export function ModelDropdown({
               <span className="truncate font-medium">{triggerLabel}</span>
             </div>
             {value && (
-              <div className="truncate text-xs text-muted-foreground">
+              <div className="truncate text-caption text-muted-foreground">
                 {modelLabel(models, value)}
               </div>
             )}
@@ -150,18 +186,18 @@ export function ModelDropdown({
           align="start"
           className="w-[var(--anchor-width)] p-0 overflow-hidden"
         >
-          <div className="border-b border-border p-2">
-            <Input
-              autoFocus
-              placeholder={t(($) => $.pickers.model_search_placeholder)}
+          <div className="border-b border-border">
+            <ModelSearchHeader
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="h-8"
+              onChange={setSearch}
+              onRefresh={refresh}
+              refreshing={modelsQuery.isFetching}
+              refreshDisabled={!runtimeOnline || !runtimeId}
             />
           </div>
           <div className="max-h-72 overflow-y-auto p-1">
             {modelsQuery.isLoading && (
-              <div className="flex items-center gap-2 px-3 py-6 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 px-3 py-6 text-body text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 {t(($) => $.pickers.model_discovering)}
               </div>
@@ -171,7 +207,7 @@ export function ModelDropdown({
               Object.entries(filtered).map(([provider, list]) => (
                 <div key={provider} className="mb-1">
                   {provider && (
-                    <div className="px-2 pt-1.5 pb-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    <div className="px-2 pt-1.5 pb-0.5 text-caption font-medium uppercase tracking-wide text-muted-foreground">
                       {provider}
                     </div>
                   )}
@@ -180,14 +216,14 @@ export function ModelDropdown({
                       type="button"
                       key={m.id}
                       onClick={() => select(m.id)}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-body transition-colors ${
                         m.id === value ? "bg-accent" : "hover:bg-accent/50"
                       }`}
                     >
                       <div className="min-w-0 flex-1">
                         <div className="truncate font-medium">{m.label}</div>
                         {m.label !== m.id && (
-                          <div className="truncate text-xs text-muted-foreground">
+                          <div className="truncate text-caption text-muted-foreground">
                             {m.id}
                           </div>
                         )}
@@ -200,10 +236,45 @@ export function ModelDropdown({
                 </div>
               ))}
 
+            {/* A failed discovery reports WHY here rather than in the label
+                row's caption, which has no room for a sentence. The runtime's
+                own words are the actionable part — hermes, for one, names the
+                exact command to run — so they are rendered verbatim and left
+                selectable. Paired with the manual-entry prompt, because a
+                reason with no way forward is just a nicer dead end. */}
+            {!modelsQuery.isLoading && modelsQuery.isError && (
+              <div className="px-3 py-4 text-body text-muted-foreground">
+                <div className="flex items-start gap-2">
+                  <Info className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="font-medium text-foreground">
+                      {t(($) => $.pickers.model_discovery_failed_title)}
+                    </div>
+                    {discoveryError && (
+                      <div className="mt-1 whitespace-pre-wrap break-words text-caption select-text">
+                        {discoveryError}
+                      </div>
+                    )}
+                    <div className="mt-1.5 text-caption">
+                      {t(($) => $.pickers.model_discovery_failed_hint)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!modelsQuery.isLoading && !modelsQuery.isError && (
+              <UnavailableModelsNote
+                models={unavailableModels}
+                title={t(($) => $.pickers.model_unavailable_heading)}
+              />
+            )}
+
             {!modelsQuery.isLoading &&
+              !modelsQuery.isError &&
               Object.keys(filtered).length === 0 &&
               !canCreate && (
-                <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                <div className="px-3 py-6 text-center text-body text-muted-foreground">
                   {t(($) => $.pickers.model_empty_with_dot)}
                 </div>
               )}
@@ -212,7 +283,7 @@ export function ModelDropdown({
               <button
                 type="button"
                 onClick={() => select(trimmedSearch)}
-                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-primary transition-colors hover:bg-accent/50"
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-body text-primary transition-colors hover:bg-accent/50"
               >
                 <Plus className="h-4 w-4 shrink-0" />
                 <span className="truncate">
@@ -225,7 +296,7 @@ export function ModelDropdown({
               <button
                 type="button"
                 onClick={() => select("")}
-                className="mt-1 flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/50"
+                className="mt-1 flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50"
               >
                 {t(($) => $.model_dropdown.clear_full)}
               </button>

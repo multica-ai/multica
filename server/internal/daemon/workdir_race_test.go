@@ -2,13 +2,16 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -41,7 +44,7 @@ func TestHandleTask_DoesNotCallStartTaskItself(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/start"):
 			startCalls.Add(1)
 		}
-		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -91,13 +94,13 @@ func TestRunTask_StartTaskCalledAfterWorkdirOnDisk(t *testing.T) {
 	workspacesRoot := t.TempDir()
 	workspaceID := "ws-runtask"
 	taskID := "task-runtask-after-mkdir"
-	expectedEnvRoot := execenv.PredictRootDir(workspacesRoot, workspaceID, taskID)
+	expectedEnvRoot := execenv.PredictRootDir(execenv.RootDirParams{WorkspacesRoot: workspacesRoot, WorkspaceID: workspaceID, TaskID: taskID})
 	expectedWorkDir := filepath.Join(expectedEnvRoot, "workdir")
 
 	var (
-		startCalled    atomic.Bool
-		workdirOnDisk  atomic.Bool
-		envRootOnDisk  atomic.Bool
+		startCalled   atomic.Bool
+		workdirOnDisk atomic.Bool
+		envRootOnDisk atomic.Bool
 	)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -110,7 +113,7 @@ func TestRunTask_StartTaskCalledAfterWorkdirOnDisk(t *testing.T) {
 				envRootOnDisk.Store(true)
 			}
 		}
-		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -138,7 +141,8 @@ func TestRunTask_StartTaskCalledAfterWorkdirOnDisk(t *testing.T) {
 		WorkspaceID: workspaceID,
 		RuntimeID:   "rt-1",
 		IssueID:     "issue-runtask",
-		Agent:       &AgentData{Name: "test-agent"},
+		AgentID:     "agent-runtask",
+		Agent:       &AgentData{ID: "agent-runtask", Name: "test-agent"},
 	}
 
 	taskLog := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -154,6 +158,638 @@ func TestRunTask_StartTaskCalledAfterWorkdirOnDisk(t *testing.T) {
 	if !workdirOnDisk.Load() {
 		t.Fatal("envRoot/workdir did not exist on disk when /start was called — os.MkdirAll must complete before StartTask (issue #3999 race A)")
 	}
+}
+
+func TestRunTask_InjectsPrivateTaskTempDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script agent fixture is POSIX-only")
+	}
+
+	workspacesRoot := filepath.Join(t.TempDir(), strings.Repeat("long-workspaces-root-", 3))
+	workspaceID := "ws-private-temp"
+	taskID := "task-private-temp-with-long-id-that-would-overflow-socket-paths"
+	envRoot := execenv.PredictRootDir(execenv.RootDirParams{WorkspacesRoot: workspacesRoot, WorkspaceID: workspaceID, TaskID: taskID})
+
+	captureFile := filepath.Join(t.TempDir(), "agent-env.txt")
+	fakeBin := filepath.Join(t.TempDir(), "claude")
+	script := `#!/bin/sh
+if [ -d "$TMPDIR" ]; then
+  tmpdir_exists=yes
+else
+  tmpdir_exists=no
+fi
+printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\nTMPDIR_EXISTS=%s\n' "$TMPDIR" "$TMP" "$TEMP" "$tmpdir_exists" > "$CAPTURE_FILE"
+IFS= read -r _
+printf '%s\n' '{"type":"system","session_id":"sess-private-temp"}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-private-temp","result":"done"}'
+`
+	writeTestExecutable(t, fakeBin, []byte(script))
+	if err := os.Chmod(fakeBin, 0o755); err != nil {
+		t.Fatalf("chmod fake agent: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:         NewClient(srv.URL),
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:     make(map[string]*workspaceState),
+		runtimeIndex:   map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		activeEnvRoots: make(map[string]int),
+		cfg: Config{
+			WorkspacesRoot: workspacesRoot,
+			AgentTimeout:   5 * time.Second,
+			ServerBaseURL:  srv.URL,
+			Agents: map[string]AgentEntry{
+				"claude": {Path: fakeBin, Model: ""},
+			},
+		},
+	}
+
+	task := Task{
+		ID:          taskID,
+		WorkspaceID: workspaceID,
+		RuntimeID:   "rt-1",
+		IssueID:     "issue-private-temp",
+		AgentID:     "agent-private-temp",
+		AuthToken:   "mat_private_temp",
+		Agent: &AgentData{
+			ID:   "agent-private-temp",
+			Name: "test-agent",
+			CustomEnv: map[string]string{
+				"CAPTURE_FILE": captureFile,
+				"TMPDIR":       "/shared/tmp",
+				"TMP":          "/shared/tmp",
+				"TEMP":         "/shared/tmp",
+			},
+		},
+	}
+
+	taskLog := slog.New(slog.NewTextHandler(io.Discard, nil))
+	result, err := d.runTask(context.Background(), task, "claude", 0, taskLog)
+	if err != nil {
+		t.Fatalf("runTask(): %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("runTask status = %q, want completed (comment=%q)", result.Status, result.Comment)
+	}
+
+	raw, err := os.ReadFile(captureFile)
+	if err != nil {
+		t.Fatalf("read captured agent env: %v", err)
+	}
+	got := make(map[string]string)
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			t.Fatalf("malformed captured env line %q", line)
+		}
+		got[key] = value
+	}
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		if got[key] == "" {
+			t.Fatalf("%s was not captured", key)
+		}
+		if got[key] != got["TMPDIR"] {
+			t.Fatalf("%s = %q, want same private task temp dir %q", key, got[key], got["TMPDIR"])
+		}
+	}
+	if got["TMPDIR_EXISTS"] != "yes" {
+		t.Fatalf("fake agent saw TMPDIR_EXISTS=%q, want yes", got["TMPDIR_EXISTS"])
+	}
+	taskTempDir := got["TMPDIR"]
+	if strings.HasPrefix(taskTempDir, envRoot) {
+		t.Fatalf("task temp dir %q must not live under long env root %q", taskTempDir, envRoot)
+	}
+	if len(taskTempDir) > 80 {
+		t.Fatalf("task temp dir %q length = %d, want <= 80 for Unix-socket headroom", taskTempDir, len(taskTempDir))
+	}
+	if _, err := os.Stat(taskTempDir); !os.IsNotExist(err) {
+		t.Fatalf("expected task temp dir %q to be cleaned after run, stat err=%v", taskTempDir, err)
+	}
+}
+
+// TestTaskTempBaseDir covers the MULTICA_AGENT_TEMP_BASE validation contract:
+// Windows ignores it, while Unix honors a valid absolute directory and reports
+// unusable configured bases from the real task-directory creation instead of
+// silently falling back to /tmp.
+func TestTaskTempBaseDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Setenv("MULTICA_AGENT_TEMP_BASE", `C:\configured-but-ignored`)
+		got, configured, err := taskTempBaseDir()
+		if err != nil {
+			t.Fatalf("taskTempBaseDir(): %v", err)
+		}
+		if configured {
+			t.Fatal("taskTempBaseDir() marked Windows override as configured")
+		}
+		if got != socketSafeTempBaseDir() {
+			t.Fatalf("taskTempBaseDir() = %q, want platform default %q", got, socketSafeTempBaseDir())
+		}
+		return
+	}
+
+	validBase := t.TempDir()
+	cases := []struct {
+		name           string
+		value          string
+		set            bool
+		want           string
+		wantConfigured bool
+		wantErr        bool
+	}{
+		{name: "unset keeps platform default", set: false, want: socketSafeTempBaseDir()},
+		{name: "empty keeps platform default", set: true, value: "  ", want: socketSafeTempBaseDir()},
+		{name: "valid absolute dir is honored", set: true, value: validBase, want: validBase, wantConfigured: true},
+		{name: "relative path rejected", set: true, value: "relative/base", wantConfigured: true, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Register the restore hook in both branches: t.Setenv remembers
+			// whether the variable was originally set and undoes either case.
+			t.Setenv("MULTICA_AGENT_TEMP_BASE", tc.value)
+			if !tc.set {
+				if err := os.Unsetenv("MULTICA_AGENT_TEMP_BASE"); err != nil {
+					t.Fatalf("unset MULTICA_AGENT_TEMP_BASE: %v", err)
+				}
+			}
+			got, configured, err := taskTempBaseDir()
+			if configured != tc.wantConfigured {
+				t.Fatalf("taskTempBaseDir() configured = %v, want %v", configured, tc.wantConfigured)
+			}
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("taskTempBaseDir() = %q, want error", got)
+				}
+				// The message must name the variable the operator set, so the
+				// failure is actionable rather than a bare mkdir/stat error.
+				if !strings.Contains(err.Error(), "MULTICA_AGENT_TEMP_BASE") {
+					t.Fatalf("error %q does not mention MULTICA_AGENT_TEMP_BASE", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("taskTempBaseDir(): %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("taskTempBaseDir() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	t.Run("configured base creates private 0700 task dir", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_TEMP_BASE", validBase)
+		dir, lock, err := ensureTaskTempDir("root", "ws", "task")
+		if err != nil {
+			t.Fatalf("ensureTaskTempDir(): %v", err)
+		}
+		t.Cleanup(func() {
+			execenv.ReleaseTaskTempLock(lock)
+			_ = os.RemoveAll(dir)
+		})
+		info, err := os.Stat(dir)
+		if err != nil {
+			t.Fatalf("stat task temp dir: %v", err)
+		}
+		if info.Mode().Perm() != 0o700 {
+			t.Fatalf("task temp dir mode = %o, want 0700", info.Mode().Perm())
+		}
+	})
+
+	notDir := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(notDir, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write notDir fixture: %v", err)
+	}
+	readOnlyBase := filepath.Join(t.TempDir(), "read-only")
+	if err := os.Mkdir(readOnlyBase, 0o500); err != nil {
+		t.Fatalf("mkdir readOnlyBase fixture: %v", err)
+	}
+	// t.TempDir cleanup needs to descend into it again.
+	t.Cleanup(func() { _ = os.Chmod(readOnlyBase, 0o700) })
+
+	for _, tc := range []struct {
+		name string
+		base string
+	}{
+		{name: "missing dir rejected", base: filepath.Join(validBase, "missing")},
+		{name: "non-directory rejected", base: notDir},
+		{name: "non-writable dir rejected", base: readOnlyBase},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MULTICA_AGENT_TEMP_BASE", tc.base)
+			dir, lock, err := ensureTaskTempDir("root", "ws", "task")
+			if err == nil {
+				execenv.ReleaseTaskTempLock(lock)
+				_ = os.RemoveAll(dir)
+				if tc.base == readOnlyBase {
+					t.Skip("process can write to the read-only fixture")
+				}
+				t.Fatalf("ensureTaskTempDir() = %q with unusable MULTICA_AGENT_TEMP_BASE, want error", dir)
+			}
+			if !strings.Contains(err.Error(), "MULTICA_AGENT_TEMP_BASE") {
+				t.Fatalf("error %q does not mention MULTICA_AGENT_TEMP_BASE", err)
+			}
+		})
+	}
+}
+
+// TestRunTask_TaskTempBaseOverride is the MULTICA_AGENT_TEMP_BASE counterpart
+// of TestRunTask_InjectsPrivateTaskTempDir: with the variable set, all three
+// temp vars point at one fresh private dir under the configured base, agent
+// custom_env still cannot override them, and the dir is removed on task exit.
+func TestRunTask_TaskTempBaseOverride(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script agent fixture is POSIX-only")
+	}
+
+	tempBase := t.TempDir()
+	t.Setenv("MULTICA_AGENT_TEMP_BASE", tempBase)
+
+	workspacesRoot := t.TempDir()
+	workspaceID := "ws-temp-base"
+	taskID := "task-temp-base"
+
+	captureFile := filepath.Join(t.TempDir(), "agent-env.txt")
+	fakeBin := filepath.Join(t.TempDir(), "claude")
+	script := `#!/bin/sh
+printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\n' "$TMPDIR" "$TMP" "$TEMP" > "$CAPTURE_FILE"
+IFS= read -r _
+printf '%s\n' '{"type":"system","session_id":"sess-temp-base"}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-temp-base","result":"done"}'
+`
+	writeTestExecutable(t, fakeBin, []byte(script))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:         NewClient(srv.URL),
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:     make(map[string]*workspaceState),
+		runtimeIndex:   map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		activeEnvRoots: make(map[string]int),
+		cfg: Config{
+			WorkspacesRoot: workspacesRoot,
+			AgentTimeout:   5 * time.Second,
+			ServerBaseURL:  srv.URL,
+			Agents: map[string]AgentEntry{
+				"claude": {Path: fakeBin, Model: ""},
+			},
+		},
+	}
+
+	task := Task{
+		ID:          taskID,
+		WorkspaceID: workspaceID,
+		RuntimeID:   "rt-1",
+		IssueID:     "issue-temp-base",
+		AgentID:     "agent-temp-base",
+		AuthToken:   "mat_temp_base",
+		Agent: &AgentData{
+			ID:   "agent-temp-base",
+			Name: "test-agent",
+			CustomEnv: map[string]string{
+				"CAPTURE_FILE": captureFile,
+				"TMPDIR":       "/shared/tmp",
+				"TMP":          "/shared/tmp",
+				"TEMP":         "/shared/tmp",
+			},
+		},
+	}
+
+	taskLog := slog.New(slog.NewTextHandler(io.Discard, nil))
+	result, err := d.runTask(context.Background(), task, "claude", 0, taskLog)
+	if err != nil {
+		t.Fatalf("runTask(): %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("runTask status = %q, want completed (comment=%q)", result.Status, result.Comment)
+	}
+
+	raw, err := os.ReadFile(captureFile)
+	if err != nil {
+		t.Fatalf("read captured agent env: %v", err)
+	}
+	got := make(map[string]string)
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			t.Fatalf("malformed captured env line %q", line)
+		}
+		got[key] = value
+	}
+	taskTempDir := got["TMPDIR"]
+	if taskTempDir == "" {
+		t.Fatal("TMPDIR was not captured")
+	}
+	for _, key := range []string{"TMP", "TEMP"} {
+		if got[key] != taskTempDir {
+			t.Fatalf("%s = %q, want same private task temp dir %q", key, got[key], taskTempDir)
+		}
+	}
+	if filepath.Dir(taskTempDir) != tempBase {
+		t.Fatalf("task temp dir %q is not directly under configured base %q", taskTempDir, tempBase)
+	}
+	if _, err := os.Stat(taskTempDir); !os.IsNotExist(err) {
+		t.Fatalf("expected task temp dir %q to be cleaned after run, stat err=%v", taskTempDir, err)
+	}
+}
+
+// TestRunTask_TaskTempBaseInvalidFailsStartup pins the "no silent fallback"
+// half of the contract at the level operators experience it: an unusable
+// MULTICA_AGENT_TEMP_BASE fails the task with a message naming the variable,
+// and the agent never starts against a /tmp dir it did not ask for.
+func TestRunTask_TaskTempBaseInvalidFailsStartup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script agent fixture is POSIX-only")
+	}
+
+	missingBase := filepath.Join(t.TempDir(), "does-not-exist")
+	t.Setenv("MULTICA_AGENT_TEMP_BASE", missingBase)
+
+	workspacesRoot := t.TempDir()
+	captureFile := filepath.Join(t.TempDir(), "agent-env.txt")
+	fakeBin := filepath.Join(t.TempDir(), "claude")
+	script := `#!/bin/sh
+printf 'ran\n' > "$CAPTURE_FILE"
+`
+	writeTestExecutable(t, fakeBin, []byte(script))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:         NewClient(srv.URL),
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:     make(map[string]*workspaceState),
+		runtimeIndex:   map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		activeEnvRoots: make(map[string]int),
+		cfg: Config{
+			WorkspacesRoot: workspacesRoot,
+			AgentTimeout:   5 * time.Second,
+			ServerBaseURL:  srv.URL,
+			Agents: map[string]AgentEntry{
+				"claude": {Path: fakeBin, Model: ""},
+			},
+		},
+	}
+
+	task := Task{
+		ID:          "task-temp-base-invalid",
+		WorkspaceID: "ws-temp-base-invalid",
+		RuntimeID:   "rt-1",
+		IssueID:     "issue-temp-base-invalid",
+		AgentID:     "agent-temp-base-invalid",
+		AuthToken:   "mat_temp_base_invalid",
+		Agent: &AgentData{
+			ID:        "agent-temp-base-invalid",
+			Name:      "test-agent",
+			CustomEnv: map[string]string{"CAPTURE_FILE": captureFile},
+		},
+	}
+
+	taskLog := slog.New(slog.NewTextHandler(io.Discard, nil))
+	_, err := d.runTask(context.Background(), task, "claude", 0, taskLog)
+	if err == nil {
+		t.Fatal("runTask() succeeded with an unusable MULTICA_AGENT_TEMP_BASE, want failure")
+	}
+	if !strings.Contains(err.Error(), "MULTICA_AGENT_TEMP_BASE") {
+		t.Fatalf("runTask() error = %v, want it to name MULTICA_AGENT_TEMP_BASE", err)
+	}
+	if _, statErr := os.Stat(captureFile); !os.IsNotExist(statErr) {
+		t.Fatalf("agent ran despite the temp-base failure, stat err=%v", statErr)
+	}
+}
+
+func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
+	t.Parallel()
+
+	workspacesRoot := t.TempDir()
+	workspaceID := "ws-runtask-start-lease"
+	taskID := "task-runtask-start-lease"
+	var (
+		startEntered     atomic.Bool
+		leaseDuringStart atomic.Bool
+		closeLeaseOnce   sync.Once
+	)
+	leaseSeenDuringStart := make(chan struct{})
+	var startAttempts atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/prepare-lease"):
+			if startEntered.Load() {
+				leaseDuringStart.Store(true)
+				closeLeaseOnce.Do(func() { close(leaseSeenDuringStart) })
+			}
+			_, _ = w.Write([]byte(`{}`))
+		case strings.HasSuffix(r.URL.Path, "/start"):
+			attempt := startAttempts.Add(1)
+			startEntered.Store(true)
+			select {
+			case <-leaseSeenDuringStart:
+			case <-time.After(2 * time.Second):
+			}
+			if attempt == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	missingBin := filepath.Join(t.TempDir(), "definitely-not-claude")
+	d := &Daemon{
+		client:              NewClient(srv.URL),
+		logger:              slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:          make(map[string]*workspaceState),
+		runtimeIndex:        map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		activeEnvRoots:      make(map[string]int),
+		prepareLeaseRefresh: 10 * time.Millisecond,
+		cfg: Config{
+			WorkspacesRoot: workspacesRoot,
+			Agents: map[string]AgentEntry{
+				"claude": {Path: missingBin, Model: ""},
+			},
+		},
+	}
+
+	task := Task{
+		ID:                  taskID,
+		WorkspaceID:         workspaceID,
+		RuntimeID:           "rt-1",
+		IssueID:             "issue-runtask-start-lease",
+		StartClaimSupported: true,
+		DispatchedAt:        "2026-09-17T09:00:00.123456Z",
+		AgentID:             "agent-runtask-start-lease",
+		Agent:               &AgentData{ID: "agent-runtask-start-lease", Name: "test-agent"},
+	}
+
+	taskLog := slog.New(slog.NewTextHandler(io.Discard, nil))
+	_, _ = d.runTask(context.Background(), task, "claude", 0, taskLog)
+
+	if !startEntered.Load() {
+		t.Fatal("runTask did not call /start")
+	}
+	if !leaseDuringStart.Load() {
+		t.Fatal("prepare lease was not extended while /start was still in flight")
+	}
+	if startAttempts.Load() != 2 {
+		t.Fatalf("start attempts = %d, want transient failure then success", startAttempts.Load())
+	}
+}
+
+// prepareRequestCountingTransport counts requests where the client starts
+// them. A cancelled RoundTrip can return before httptest schedules its handler,
+// so counting in the handler can make an already-in-flight request look like
+// post-timeout activity, or a /start the deadline cancelled look like one that
+// was never sent.
+type prepareRequestCountingTransport struct {
+	base   http.RoundTripper
+	leases *atomic.Int64
+	// starts counts only /start requests issued while their context was still
+	// live, i.e. before the prepare deadline fired.
+	starts *atomic.Int64
+}
+
+func (t *prepareRequestCountingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	switch {
+	case strings.HasSuffix(req.URL.Path, "/prepare-lease"):
+		t.leases.Add(1)
+	case strings.HasSuffix(req.URL.Path, "/start") && req.Context().Err() == nil:
+		t.starts.Add(1)
+	}
+	return t.base.RoundTrip(req)
+}
+
+// The blocked-/start test's prepare deadline has to outlast everything runTask
+// does before it calls /start — the isolated execution environment, its
+// sidecars, and the task temp dir are all real filesystem work — because a
+// deadline that expires during preparation never reaches the /start the test is
+// about. That preparation costs ~15ms on an idle developer machine but an order
+// of magnitude more on a loaded CI runner under -race, which is why a fixed
+// 150ms budget turned main red (MUL-7244). Rather than pay a worst-case budget
+// on every run, the test starts small and doubles the budget whenever the
+// deadline fired before /start was sent.
+const (
+	minPrepareBudgetForBlockedStart = 250 * time.Millisecond
+	maxPrepareBudgetForBlockedStart = 4 * time.Second
+)
+
+func TestRunTask_PrepareTimeoutStopsLeaseDuringBlockedStartTask(t *testing.T) {
+	t.Parallel()
+
+	for budget := minPrepareBudgetForBlockedStart; ; budget *= 2 {
+		if prepareTimeoutStopsLeaseDuringBlockedStart(t, budget) {
+			return
+		}
+		if budget >= maxPrepareBudgetForBlockedStart {
+			t.Fatalf("runTask never reached /start: even a %s prepare budget expired during preparation", budget)
+		}
+	}
+}
+
+// prepareTimeoutStopsLeaseDuringBlockedStart runs one blocked-/start attempt
+// under the given prepare budget. It returns false, having asserted nothing,
+// when the budget expired before runTask sent /start.
+func prepareTimeoutStopsLeaseDuringBlockedStart(t *testing.T, budget time.Duration) bool {
+	t.Helper()
+
+	const leaseRefresh = 10 * time.Millisecond
+	releaseStart := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/start") {
+			<-releaseStart
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	// LIFO: unblock /start before Close waits for its handler.
+	defer close(releaseStart)
+
+	var leaseCalls, startCalls atomic.Int64
+	client := NewClient(srv.URL)
+	client.client.Transport = &prepareRequestCountingTransport{
+		base:   client.client.Transport,
+		leases: &leaseCalls,
+		starts: &startCalls,
+	}
+
+	workspacesRoot := t.TempDir()
+	fakeBin := filepath.Join(t.TempDir(), "claude")
+	writeTestExecutable(t, fakeBin, []byte("#!/bin/sh\nexit 0\n"))
+	d := &Daemon{
+		client:              client,
+		logger:              slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:          make(map[string]*workspaceState),
+		runtimeIndex:        map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		activeEnvRoots:      make(map[string]int),
+		taskPrepareTimeout:  budget,
+		prepareLeaseRefresh: leaseRefresh,
+		cfg: Config{
+			WorkspacesRoot: workspacesRoot,
+			Agents: map[string]AgentEntry{
+				"claude": {Path: fakeBin},
+			},
+		},
+	}
+
+	task := Task{
+		ID:                  "task-runtask-start-timeout",
+		StartClaimSupported: true,
+		DispatchedAt:        "2026-09-17T09:00:00.123456Z",
+		WorkspaceID:         "ws-runtask-start-timeout",
+		RuntimeID:           "rt-1",
+		IssueID:             "issue-runtask-start-timeout",
+		AgentID:             "agent-runtask-start-timeout",
+		Agent:               &AgentData{ID: "agent-runtask-start-timeout", Name: "test-agent"},
+	}
+	taskLog := slog.New(slog.NewTextHandler(io.Discard, nil))
+	startedAt := time.Now()
+	_, err := d.runTask(context.Background(), task, "claude", 0, taskLog)
+	if !errors.Is(err, errTaskPrepareTimeout) {
+		t.Fatalf("runTask error = %v, want task prepare timeout", err)
+	}
+	if startCalls.Load() == 0 {
+		return false
+	}
+	if elapsed := time.Since(startedAt); elapsed > budget+time.Second {
+		t.Fatalf("runTask took %s, want prepare deadline to stop blocked /start", elapsed)
+	}
+	if got := leaseCalls.Load(); got == 0 {
+		t.Fatal("prepare lease request was never started while /start was blocked")
+	}
+	leaseCallsAtReturn := leaseCalls.Load()
+	lastLeaseCalls := leaseCallsAtReturn
+	stableReads := 0
+	deadline := time.Now().Add(12 * leaseRefresh)
+	for stableReads < 3 && time.Now().Before(deadline) {
+		time.Sleep(leaseRefresh)
+		got := leaseCalls.Load()
+		if got == lastLeaseCalls {
+			stableReads++
+			continue
+		}
+		lastLeaseCalls = got
+		stableReads = 0
+	}
+	if stableReads < 3 {
+		t.Fatalf("prepare lease kept extending after timeout: calls %d -> %d", leaseCallsAtReturn, leaseCalls.Load())
+	}
+	if got := taskRunFailureReason(err); got != "timeout" {
+		t.Fatalf("taskRunFailureReason = %q, want retryable platform timeout", got)
+	}
+	return true
 }
 
 // TestHandleTask_KeepsEnvRootActiveAcrossCompletion is the regression guard
@@ -175,10 +811,10 @@ func TestHandleTask_KeepsEnvRootActiveAcrossCompletion(t *testing.T) {
 	workspacesRoot := t.TempDir()
 	workspaceID := "ws-active-during-complete"
 	taskID := "task-active-during-complete"
-	expectedEnvRoot := execenv.PredictRootDir(workspacesRoot, workspaceID, taskID)
+	expectedEnvRoot := execenv.PredictRootDir(execenv.RootDirParams{WorkspacesRoot: workspacesRoot, WorkspaceID: workspaceID, TaskID: taskID})
 
 	var (
-		completeCalled atomic.Bool
+		completeCalled   atomic.Bool
 		activeAtComplete atomic.Bool
 	)
 
@@ -202,7 +838,7 @@ func TestHandleTask_KeepsEnvRootActiveAcrossCompletion(t *testing.T) {
 				activeAtComplete.Store(true)
 			}
 		}
-		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	t.Cleanup(srv.Close)
 	d.client = NewClient(srv.URL)
@@ -211,7 +847,7 @@ func TestHandleTask_KeepsEnvRootActiveAcrossCompletion(t *testing.T) {
 	// the outer guard added in handleTask, the deferred unmark would bring
 	// isActiveEnvRoot back to false before reportTaskResult fires.
 	d.runner = taskRunnerFunc(func(_ context.Context, tk Task, _ string, _ int, _ *slog.Logger) (TaskResult, error) {
-		predicted := execenv.PredictRootDir(d.cfg.WorkspacesRoot, tk.WorkspaceID, tk.ID)
+		predicted := execenv.PredictRootDir(taskRootDirParams(d.cfg.WorkspacesRoot, tk))
 		d.markActiveEnvRoot(predicted)
 		defer d.unmarkActiveEnvRoot(predicted)
 		return TaskResult{

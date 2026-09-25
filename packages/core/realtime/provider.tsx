@@ -87,6 +87,10 @@ export function WSProvider({
     const ws = new WSClient(wsUrl, {
       logger: createLogger("ws"),
       cookieAuth,
+      // Re-read on every (re)connect instead of pinning the token captured
+      // below: a session renewed since this effect ran would otherwise keep
+      // reconnecting with a credential that is on its way to expiring.
+      getToken: cookieAuth ? undefined : () => storage.getItem("multica_token"),
       identity:
         identityPlatform || identityVersion || identityOS
           ? {

@@ -1,6 +1,6 @@
 -- name: CreateTaskToken :one
-INSERT INTO task_token (token_hash, task_id, agent_id, workspace_id, user_id, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO task_token (token_hash, task_id, agent_id, workspace_id, user_id, expires_at, id)
+VALUES ($1, $2, $3, $4, $5, $6, COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()))
 RETURNING *;
 
 -- name: GetTaskTokenByHash :one

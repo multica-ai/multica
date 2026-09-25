@@ -47,7 +47,7 @@ export function SkillMultiSelect({
   if (!expanded) {
     return (
       <div>
-        <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        <div className="text-caption font-medium uppercase tracking-wider text-muted-foreground">
           {label}
         </div>
         <button
@@ -56,14 +56,14 @@ export function SkillMultiSelect({
           className="mt-1.5 flex w-full items-center gap-2.5 rounded-lg border bg-card px-3 py-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/40"
         >
           <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+          <div className="min-w-0 flex-1 truncate text-body text-muted-foreground">
             {selectedIds.size > 0
               ? t(($) => $.create_dialog.skills_section.selected, {
                   count: selectedIds.size,
                 })
               : t(($) => $.create_dialog.skills_section.placeholder)}
           </div>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-faint-foreground" />
         </button>
       </div>
     );
@@ -72,10 +72,10 @@ export function SkillMultiSelect({
   return (
     <div>
       <div className="flex items-center justify-between">
-        <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        <div className="text-caption font-medium uppercase tracking-wider text-muted-foreground">
           {label}
           {selectedIds.size > 0 ? (
-            <span className="ml-2 text-foreground/60">({selectedIds.size})</span>
+            <span className="ml-2 text-muted-foreground">({selectedIds.size})</span>
           ) : null}
         </div>
         <Button
@@ -83,7 +83,7 @@ export function SkillMultiSelect({
           variant="ghost"
           size="sm"
           onClick={() => setExpanded(false)}
-          className="h-6 gap-1 px-2 text-xs"
+          className="h-6 gap-1 px-2 text-caption"
         >
           <X className="h-3 w-3" />
           {t(($) => $.create_dialog.skills_section.collapse)}

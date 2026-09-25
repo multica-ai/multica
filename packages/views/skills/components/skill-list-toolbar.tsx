@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -11,7 +12,10 @@ import {
   Search,
   X,
 } from "lucide-react";
-import type { Agent, MemberWithUser } from "@multica/core/types";
+import { useQuery } from "@tanstack/react-query";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { labelListOptions } from "@multica/core/labels/queries";
+import type { Agent, Label, MemberWithUser } from "@multica/core/types";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -46,8 +50,10 @@ import {
   type SkillSortDirection,
   type SkillSortField,
 } from "@multica/core/skills/stores";
+import { LabelChip } from "../../labels/label-chip";
 import { useT } from "../../i18n";
-import type { SkillRow } from "./skills-page";
+import type { SkillRow } from "./skill-list-filter";
+import { PAGE_TOOLBAR } from "../../layout/page-header";
 
 export type OriginType = SkillOriginType;
 
@@ -69,6 +75,7 @@ export function countActiveFilterDimensions(
   if (filters.origins.length > 0) count++;
   if (filters.agents.length > 0) count++;
   if (filters.creators.length > 0) count++;
+  if (filters.labels.length > 0) count++;
   return count;
 }
 
@@ -118,6 +125,9 @@ export function SkillListToolbar({
   visibleCount: number;
 }) {
   const { t } = useT("skills");
+  const [labelSearch, setLabelSearch] = useState("");
+  const wsId = useWorkspaceId();
+  const { data: catalogLabels = [] } = useQuery(labelListOptions(wsId, "skill"));
 
   const activeCount = countActiveFilterDimensions(filters);
   const hasActiveFilters = activeCount > 0;
@@ -133,6 +143,7 @@ export function SkillListToolbar({
     string,
     { member: MemberWithUser; count: number }
   >();
+  const labelCounts = new Map<string, number>();
   for (const row of allRows) {
     originCounts.set(row.originType, (originCounts.get(row.originType) ?? 0) + 1);
     for (const agent of row.agents) {
@@ -145,7 +156,15 @@ export function SkillListToolbar({
       if (entry) entry.count += 1;
       else creatorOptions.set(row.creator.user_id, { member: row.creator, count: 1 });
     }
+    for (const label of row.skill.labels ?? []) {
+      labelCounts.set(label.id, (labelCounts.get(label.id) ?? 0) + 1);
+    }
   }
+
+  const labelQuery = labelSearch.trim().toLowerCase();
+  const filteredLabels = catalogLabels.filter((label: Label) =>
+    label.name.toLowerCase().includes(labelQuery),
+  );
 
   const ORIGIN_LABELS: Record<OriginType, string> = {
     manual: t(($) => $.table.source_manual),
@@ -172,11 +191,11 @@ export function SkillListToolbar({
   const sortLabel = SORT_LABELS[sortField];
 
   const countBadge = (n: number) => (
-    <span className="ml-auto pl-3 text-xs text-muted-foreground">{n}</span>
+    <span className="ml-auto pl-3 text-caption text-muted-foreground">{n}</span>
   );
 
   return (
-    <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-5">
+    <div className={PAGE_TOOLBAR}>
       {/* Left: name search + result count. The count only appears while
           search/filters narrow the list — in the idle state it would just
           duplicate the total already shown in the page header. Below md the
@@ -188,14 +207,15 @@ export function SkillListToolbar({
           <Input
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
+            aria-label={t(($) => $.page.search_placeholder)}
             placeholder={t(($) => $.page.search_placeholder)}
-            className="h-8 w-64 pl-8 text-sm"
+            className="h-8 w-64 pl-8 text-body"
           />
         </div>
         {(hasActiveFilters || search.trim().length > 0) && (
           <span
             title={t(($) => $.toolbar.result_count_title)}
-            className="hidden shrink-0 text-xs tabular-nums text-muted-foreground md:inline"
+            className="hidden shrink-0 text-caption tabular-nums text-muted-foreground md:inline"
           >
             {visibleCount} / {allRows.length}
           </span>
@@ -260,7 +280,7 @@ export function SkillListToolbar({
                   {t(($) => $.toolbar.section_usage)}
                 </span>
                 {filters.usage.length > 0 && (
-                  <span className="text-xs font-medium text-primary">
+                  <span className="text-caption font-medium text-primary">
                     {filters.usage.length}
                   </span>
                 )}
@@ -288,7 +308,7 @@ export function SkillListToolbar({
               <DropdownMenuSubTrigger>
                 <span className="flex-1">{t(($) => $.table.source)}</span>
                 {filters.origins.length > 0 && (
-                  <span className="text-xs font-medium text-primary">
+                  <span className="text-caption font-medium text-primary">
                     {filters.origins.length}
                   </span>
                 )}
@@ -317,7 +337,7 @@ export function SkillListToolbar({
               <DropdownMenuSubTrigger>
                 <span className="flex-1">{t(($) => $.table.used_by)}</span>
                 {filters.agents.length > 0 && (
-                  <span className="text-xs font-medium text-primary">
+                  <span className="text-caption font-medium text-primary">
                     {filters.agents.length}
                   </span>
                 )}
@@ -336,7 +356,7 @@ export function SkillListToolbar({
                       initials={agent.name.slice(0, 2).toUpperCase()}
                       avatarUrl={resolvePublicFileUrl(agent.avatar_url)}
                       isAgent
-                      size={16}
+                      size="sm"
                     />
                     <span className="min-w-0 truncate">{agent.name}</span>
                     {countBadge(count)}
@@ -350,7 +370,7 @@ export function SkillListToolbar({
               <DropdownMenuSubTrigger>
                 <span className="flex-1">{t(($) => $.table.created_by)}</span>
                 {filters.creators.length > 0 && (
-                  <span className="text-xs font-medium text-primary">
+                  <span className="text-caption font-medium text-primary">
                     {filters.creators.length}
                   </span>
                 )}
@@ -372,12 +392,65 @@ export function SkillListToolbar({
                       name={member.name}
                       initials={member.name.slice(0, 2).toUpperCase()}
                       avatarUrl={resolvePublicFileUrl(member.avatar_url)}
-                      size={16}
+                      size="sm"
                     />
                     <span className="min-w-0 truncate">{member.name}</span>
                     {countBadge(count)}
                   </DropdownMenuCheckboxItem>
                 ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+
+            {/* Labels — Skill-scoped catalog, OR-within-labels like Issues. */}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <span className="flex-1">
+                  {t(($) => $.toolbar.section_labels)}
+                </span>
+                {filters.labels.length > 0 && (
+                  <span className="text-caption font-medium text-primary">
+                    {filters.labels.length}
+                  </span>
+                )}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-auto min-w-52 p-0">
+                <div className="border-b border-foreground/5 px-2 py-1.5">
+                  <input
+                    type="text"
+                    value={labelSearch}
+                    onChange={(e) => setLabelSearch(e.target.value)}
+                    placeholder={t(($) => $.toolbar.filter_search_placeholder)}
+                    className="w-full bg-transparent text-body outline-none placeholder:text-muted-foreground"
+                    autoFocus
+                  />
+                </div>
+                <div className="max-h-64 overflow-y-auto p-1">
+                  {filteredLabels.map((label) => {
+                    const checked = filters.labels.includes(label.id);
+                    const count = labelCounts.get(label.id) ?? 0;
+                    return (
+                      <DropdownMenuCheckboxItem
+                        key={label.id}
+                        checked={checked}
+                        onCheckedChange={() =>
+                          onToggleFilter("labels", label.id)
+                        }
+                        className={FILTER_ITEM_CLASS}
+                      >
+                        <HoverCheck checked={checked} />
+                        <LabelChip label={label} />
+                        {count > 0 && countBadge(count)}
+                      </DropdownMenuCheckboxItem>
+                    );
+                  })}
+                  {filteredLabels.length === 0 && (
+                    <div className="px-2 py-3 text-center text-body text-muted-foreground">
+                      {labelSearch
+                        ? t(($) => $.toolbar.no_results)
+                        : t(($) => $.toolbar.no_labels)}
+                    </div>
+                  )}
+                </div>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
           </DropdownMenuContent>
@@ -416,7 +489,7 @@ export function SkillListToolbar({
           </Tooltip>
           <PopoverContent align="end" className="w-64 p-0">
             <div className="border-b px-3 py-2.5">
-              <span className="text-xs font-medium text-muted-foreground">
+              <span className="text-caption font-medium text-muted-foreground">
                 {t(($) => $.toolbar.sort_by)}
               </span>
               <div className="mt-2 flex items-center gap-1.5">
@@ -426,7 +499,7 @@ export function SkillListToolbar({
                       <Button
                         variant="outline"
                         size="sm"
-                        className="flex-1 justify-between text-xs"
+                        className="flex-1 justify-between text-caption"
                       >
                         {sortLabel}
                         <ChevronDown className="size-3 text-muted-foreground" />
@@ -472,7 +545,7 @@ export function SkillListToolbar({
             </div>
 
             <div className="px-3 py-2.5">
-              <span className="text-xs font-medium text-muted-foreground">
+              <span className="text-caption font-medium text-muted-foreground">
                 {t(($) => $.toolbar.section_columns)}
               </span>
               <div className="mt-2 space-y-2">
@@ -481,7 +554,7 @@ export function SkillListToolbar({
                     key={key}
                     className="flex cursor-pointer items-center justify-between"
                   >
-                    <span className="text-sm">{COLUMN_LABELS[key]}</span>
+                    <span className="text-body">{COLUMN_LABELS[key]}</span>
                     <Switch
                       size="sm"
                       checked={!hiddenColumns.includes(key)}

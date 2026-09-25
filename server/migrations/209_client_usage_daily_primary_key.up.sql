@@ -1,0 +1,1 @@
+ALTER TABLE client_usage_daily ADD CONSTRAINT client_usage_daily_pkey PRIMARY KEY USING INDEX client_usage_daily_identity_date_uidx;

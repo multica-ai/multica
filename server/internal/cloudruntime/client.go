@@ -18,8 +18,8 @@ const (
 )
 
 var (
-	ErrDisabled       = errors.New("cloud runtime fleet URL is not configured")
-	ErrInvalidBaseURL = errors.New("cloud runtime fleet URL is invalid")
+	ErrDisabled       = errors.New("multica-cloud URL is not configured")
+	ErrInvalidBaseURL = errors.New("multica-cloud URL is invalid")
 )
 
 // RequestRecorder is the small interface the client uses to instrument every

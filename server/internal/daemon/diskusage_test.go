@@ -1,7 +1,11 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -193,6 +197,7 @@ func TestScanDiskUsage_AggregatesAndCategorizes(t *testing.T) {
 		`"workspace_id"`,
 		`"task_short"`,
 		`"artifact_ratio"`,
+		`"managed_artifact_subpaths"`,
 		`"total_task_count"`,
 		`"total_workspace_count"`,
 		`"total_artifact_ratio"`,
@@ -200,6 +205,160 @@ func TestScanDiskUsage_AggregatesAndCategorizes(t *testing.T) {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("JSON missing required field %s: %s", want, raw)
 		}
+	}
+}
+
+func TestScanDiskUsage_MixedLayoutsUseMetadataIdentity(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspaceID := "a05b0e10-ee7a-4603-a72d-a548b2390cb2"
+	readableTaskID := "22222222-ee7a-4603-a72d-b659c34a1dc3"
+	legacyTaskSegment := "a548b2390cb2"
+	readableTaskSegment := "mul-6063-b659c34a1dc3"
+
+	legacyDir := filepath.Join(root, workspaceID, legacyTaskSegment)
+	writeFile(t, filepath.Join(legacyDir, "workdir", "legacy.txt"), 10)
+	mustWriteMeta(t, legacyDir, execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     "issue-legacy",
+		WorkspaceID: workspaceID,
+		CompletedAt: time.Now().Add(-time.Hour),
+	})
+
+	readableDir := filepath.Join(root, "asset-feed-a548b2390cb2", readableTaskSegment)
+	writeFile(t, filepath.Join(readableDir, "workdir", "readable.txt"), 20)
+	mustWriteMeta(t, readableDir, execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     "issue-readable",
+		TaskID:      readableTaskID,
+		WorkspaceID: workspaceID,
+		CompletedAt: time.Now().Add(-time.Hour),
+	})
+
+	report, err := ScanDiskUsage(root, nil)
+	if err != nil {
+		t.Fatalf("ScanDiskUsage: %v", err)
+	}
+	if report.TotalTaskCount != 2 || report.TotalWorkspaceCount != 1 {
+		t.Fatalf("totals = tasks:%d workspaces:%d, want 2/1", report.TotalTaskCount, report.TotalWorkspaceCount)
+	}
+	for _, task := range report.Tasks {
+		if task.WorkspaceID != workspaceID {
+			t.Errorf("task %q workspace_id = %q, want metadata id %q", task.Path, task.WorkspaceID, workspaceID)
+		}
+	}
+	byShort := map[string]TaskDiskUsage{}
+	for _, task := range report.Tasks {
+		byShort[task.TaskShort] = task
+	}
+	if _, ok := byShort[legacyTaskSegment]; !ok {
+		t.Errorf("legacy task was not reported under physical directory segment %q", legacyTaskSegment)
+	}
+	if _, ok := byShort[readableTaskSegment]; !ok {
+		t.Errorf("readable task was not reported under physical directory segment %q", readableTaskSegment)
+	}
+}
+
+func TestScanDiskUsage_ReadableActiveRootUsesOwnerIdentityWithoutGCMeta(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspaceID := "a05b0e10-ee7a-4603-a72d-a548b2390cb2"
+	taskID := "22222222-ee7a-4603-a72d-b659c34a1dc3"
+	env, err := execenv.Prepare(execenv.PrepareParams{
+		WorkspacesRoot:  root,
+		WorkspaceID:     workspaceID,
+		WorkspaceSlug:   "Asset Feed",
+		TaskID:          taskID,
+		IssueIdentifier: "MUL-6063",
+		AgentName:       "Active Task",
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	defer env.Cleanup(true)
+	if _, err := os.Stat(filepath.Join(env.RootDir, ".gc_meta.json")); !os.IsNotExist(err) {
+		t.Fatalf("fixture must represent an active root without completion metadata; stat err = %v", err)
+	}
+
+	report, err := ScanDiskUsage(root, nil)
+	if err != nil {
+		t.Fatalf("ScanDiskUsage: %v", err)
+	}
+	if len(report.Tasks) != 1 {
+		t.Fatalf("tasks = %d, want 1", len(report.Tasks))
+	}
+	usage := report.Tasks[0]
+	if usage.WorkspaceID != workspaceID {
+		t.Fatalf("workspace_id = %q, want owner identity %q", usage.WorkspaceID, workspaceID)
+	}
+	wantTaskSegment := filepath.Base(env.RootDir)
+	if usage.TaskShort != wantTaskSegment {
+		t.Fatalf("task_short = %q, want physical directory segment %q", usage.TaskShort, wantTaskSegment)
+	}
+	if len(report.Workspaces) != 1 || report.Workspaces[0].WorkspaceID != workspaceID {
+		t.Fatalf("workspace aggregate = %+v, want authoritative workspace %q", report.Workspaces, workspaceID)
+	}
+}
+
+func TestScanDiskUsage_ManagedCodexSandboxIsExactAndDeduplicated(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	wsID := "mmmmmmmm-mmmm-mmmm-mmmm-mmmmmmmmmmmm"
+	taskDir := filepath.Join(root, wsID, "tttttttt")
+	writeFile(t, filepath.Join(taskDir, "codex-home/.sandbox-bin/codex.exe"), 300)
+	writeFile(t, filepath.Join(taskDir, "workdir/repo/.sandbox-bin/cache"), 400)
+
+	report, err := ScanDiskUsage(root, nil)
+	if err != nil {
+		t.Fatalf("ScanDiskUsage managed-only: %v", err)
+	}
+	if got := report.Tasks[0].SizeBytes; got != 700 {
+		t.Fatalf("size_bytes=%d, want 700", got)
+	}
+	if got := report.Tasks[0].ArtifactSizeBytes; got != 300 {
+		t.Fatalf("artifact_size_bytes=%d, want exact managed 300", got)
+	}
+	if got := strings.Join(report.ManagedArtifactSubpaths, ","); got != "codex-home/.sandbox-bin" {
+		t.Fatalf("managed artifact paths=%q, want codex-home/.sandbox-bin", got)
+	}
+
+	report, err = ScanDiskUsage(root, []string{".sandbox-bin"})
+	if err != nil {
+		t.Fatalf("ScanDiskUsage broad basename: %v", err)
+	}
+	if got := report.Tasks[0].ArtifactSizeBytes; got != 700 {
+		t.Fatalf("artifact_size_bytes=%d, want 700 without double counting", got)
+	}
+}
+
+func TestScanDiskUsage_LegacyMetaAgeUsesMetaFileMTime(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	wsID := "llllllll-llll-llll-llll-llllllllllll"
+	taskDir := filepath.Join(root, wsID, "tttttttt")
+	writeFile(t, filepath.Join(taskDir, "workdir/main.go"), 10)
+	mustWriteMeta(t, taskDir, execenv.GCMeta{
+		Kind: execenv.GCKindIssue, IssueID: "issue-legacy", WorkspaceID: wsID,
+	})
+	oldRoot := time.Now().Add(-30 * 24 * time.Hour)
+	if err := os.Chtimes(taskDir, oldRoot, oldRoot); err != nil {
+		t.Fatal(err)
+	}
+	recentMeta := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(filepath.Join(taskDir, ".gc_meta.json"), recentMeta, recentMeta); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := ScanDiskUsage(root, nil)
+	if err != nil {
+		t.Fatalf("ScanDiskUsage: %v", err)
+	}
+	if got := report.Tasks[0].AgeSeconds; got < int64(time.Hour.Seconds()) || got > int64((3*time.Hour).Seconds()) {
+		t.Fatalf("age_seconds=%d, want metadata age near 2h instead of stale task root age", got)
 	}
 }
 
@@ -232,11 +391,12 @@ func TestScanDiskUsage_EmptyWorkspaceArtifactRatio(t *testing.T) {
 	}
 }
 
-// TestScanDiskUsage_DoesNotEnterGit guards the GC safety contract: anything
-// inside a .git directory must not be counted, even if it would otherwise
-// match an artifact basename. Reflects the same constraint cleanTaskArtifacts
-// enforces so the disk-usage report stays in sync with what GC reclaims.
-func TestScanDiskUsage_DoesNotEnterGit(t *testing.T) {
+// TestScanDiskUsage_CountsGitButNeverAsArtifact pins the two halves of the
+// .git rule. A .git subtree IS real footprint, so it counts toward size_bytes
+// (a full task-dir reclaim frees it, and dirSize reports it that way). But it
+// must never count as an artifact, even when something inside it matches an
+// artifact basename, because cleanTaskArtifacts refuses to reclaim in there.
+func TestScanDiskUsage_CountsGitButNeverAsArtifact(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -256,11 +416,12 @@ func TestScanDiskUsage_DoesNotEnterGit(t *testing.T) {
 		t.Fatalf("expected 1 task, got %d", len(report.Tasks))
 	}
 	got := report.Tasks[0]
-	if got.SizeBytes != 100 {
-		t.Errorf("size_bytes = %d, want 100 (only main.go; .git tree skipped)", got.SizeBytes)
+	const wantSize = 100 + 9999 + 5555
+	if got.SizeBytes != wantSize {
+		t.Errorf("size_bytes = %d, want %d (main.go plus the whole .git tree)", got.SizeBytes, wantSize)
 	}
 	if got.ArtifactSizeBytes != 0 {
-		t.Errorf("artifact_size_bytes = %d, want 0 (node_modules under .git is invisible)", got.ArtifactSizeBytes)
+		t.Errorf("artifact_size_bytes = %d, want 0 (node_modules under .git is not reclaimable)", got.ArtifactSizeBytes)
 	}
 }
 
@@ -343,6 +504,54 @@ func TestScanDiskUsage_RejectsPatternsWithSeparators(t *testing.T) {
 	}
 }
 
+// TestScanDiskUsageRoots_SumsAcrossRoots verifies the cross-root aggregate:
+// each root keeps its own labeled report and the grand totals are the sum of
+// every root's full scan. A missing root contributes an empty report, not an
+// error, so a never-used profile root doesn't break the aggregate.
+func TestScanDiskUsageRoots_SumsAcrossRoots(t *testing.T) {
+	t.Parallel()
+
+	rootA := t.TempDir()
+	writeFile(t, filepath.Join(rootA, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "t1", "workdir/main.go"), 100)
+
+	rootB := t.TempDir()
+	writeFile(t, filepath.Join(rootB, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "t1", "workdir/big"), 300)
+	writeFile(t, filepath.Join(rootB, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "t2", "workdir/main.go"), 50)
+
+	missing := filepath.Join(t.TempDir(), "never-ran")
+
+	agg, err := ScanDiskUsageRoots([]DiskUsageRoot{
+		{Profile: "", Root: rootA},
+		{Profile: "desktop-host", Root: rootB},
+		{Profile: "never-ran", Root: missing},
+	}, []string{"node_modules"})
+	if err != nil {
+		t.Fatalf("ScanDiskUsageRoots: %v", err)
+	}
+
+	if len(agg.Roots) != 3 {
+		t.Fatalf("Roots len = %d, want 3 (missing root still listed, empty)", len(agg.Roots))
+	}
+	if agg.Roots[0].Profile != "" || agg.Roots[1].Profile != "desktop-host" {
+		t.Fatalf("root profiles not preserved in order: %+v", agg.Roots)
+	}
+	if agg.Roots[2].Report.TotalTaskCount != 0 {
+		t.Fatalf("missing root TotalTaskCount = %d, want 0", agg.Roots[2].Report.TotalTaskCount)
+	}
+	if agg.TotalTaskCount != 3 {
+		t.Fatalf("TotalTaskCount = %d, want 3 across roots", agg.TotalTaskCount)
+	}
+	if agg.TotalSizeBytes != 450 {
+		t.Fatalf("TotalSizeBytes = %d, want 450 (100 + 300 + 50)", agg.TotalSizeBytes)
+	}
+	if agg.TotalWorkspaceCount != 2 {
+		t.Fatalf("TotalWorkspaceCount = %d, want 2", agg.TotalWorkspaceCount)
+	}
+	if got := strings.Join(agg.ManagedArtifactSubpaths, ","); got != "codex-home/.sandbox-bin" {
+		t.Fatalf("managed artifact paths=%q, want codex-home/.sandbox-bin", got)
+	}
+}
+
 func mustWriteMeta(t *testing.T, taskDir string, meta execenv.GCMeta) {
 	t.Helper()
 	data, err := json.Marshal(meta)
@@ -354,5 +563,256 @@ func mustWriteMeta(t *testing.T, taskDir string, meta execenv.GCMeta) {
 	}
 	if err := os.WriteFile(filepath.Join(taskDir, ".gc_meta.json"), data, 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// issueTask builds a minimal issue-kind task row for ResolveParentStatuses.
+func issueTask(wsID, taskShort, issueID string) TaskDiskUsage {
+	return TaskDiskUsage{
+		WorkspaceID: wsID,
+		TaskShort:   taskShort,
+		Kind:        string(execenv.GCKindIssue),
+		ParentID:    issueID,
+	}
+}
+
+// TestResolveParentStatuses_FillsIssueTasks covers the main path: statuses land
+// on the right rows, ids shared by several task dirs are asked for once, each
+// workspace is queried separately, and non-issue kinds are left alone.
+func TestResolveParentStatuses_FillsIssueTasks(t *testing.T) {
+	t.Parallel()
+
+	wsA := "11111111-1111-1111-1111-111111111111"
+	wsB := "22222222-2222-2222-2222-222222222222"
+	report := &DiskUsageReport{Tasks: []TaskDiskUsage{
+		issueTask(wsA, "aaaa1111", "issue-1"),
+		// Same issue, second workdir — must resolve without a second ask.
+		issueTask(wsA, "aaaa2222", "issue-1"),
+		issueTask(wsA, "aaaa3333", "issue-2"),
+		issueTask(wsB, "bbbb1111", "issue-3"),
+		{WorkspaceID: wsA, TaskShort: "cccc1111", Kind: string(execenv.GCKindChat), ParentID: "chat-1"},
+		{WorkspaceID: wsA, TaskShort: "dddd1111", Kind: DiskUsageKindUnknown},
+	}}
+
+	asked := map[string][]string{}
+	fetch := func(_ context.Context, workspaceID string, issueIDs []string) (map[string]string, error) {
+		asked[workspaceID] = append(asked[workspaceID], issueIDs...)
+		out := map[string]string{}
+		for _, id := range issueIDs {
+			switch id {
+			case "issue-1":
+				out[id] = "done"
+			case "issue-2":
+				out[id] = "in_progress"
+			case "issue-3":
+				out[id] = "cancelled"
+			}
+		}
+		return out, nil
+	}
+
+	if err := ResolveParentStatuses(context.Background(), report, fetch); err != nil {
+		t.Fatalf("ResolveParentStatuses: %v", err)
+	}
+
+	want := []string{"done", "done", "in_progress", "cancelled", "", ""}
+	for i, wantStatus := range want {
+		if got := report.Tasks[i].ParentStatus; got != wantStatus {
+			t.Errorf("task[%d] (%s) parent_status = %q, want %q",
+				i, report.Tasks[i].TaskShort, got, wantStatus)
+		}
+	}
+
+	if len(asked[wsA]) != 2 {
+		t.Errorf("workspace A asked for %v, want exactly 2 de-duplicated ids", asked[wsA])
+	}
+	if len(asked[wsB]) != 1 {
+		t.Errorf("workspace B asked for %v, want exactly 1 id", asked[wsB])
+	}
+}
+
+// TestResolveParentStatuses_UnresolvedStaysBlank ensures an id the server does
+// not return (deleted issue, or one this token cannot see) reads as unknown
+// rather than being filled with a placeholder that looks like a real status.
+func TestResolveParentStatuses_UnresolvedStaysBlank(t *testing.T) {
+	t.Parallel()
+
+	wsID := "11111111-1111-1111-1111-111111111111"
+	report := &DiskUsageReport{Tasks: []TaskDiskUsage{
+		issueTask(wsID, "aaaa1111", "issue-known"),
+		issueTask(wsID, "aaaa2222", "issue-missing"),
+	}}
+
+	fetch := func(_ context.Context, _ string, _ []string) (map[string]string, error) {
+		return map[string]string{"issue-known": "todo"}, nil
+	}
+
+	if err := ResolveParentStatuses(context.Background(), report, fetch); err != nil {
+		t.Fatalf("ResolveParentStatuses: %v", err)
+	}
+	if report.Tasks[0].ParentStatus != "todo" {
+		t.Errorf("known issue status = %q, want todo", report.Tasks[0].ParentStatus)
+	}
+	if report.Tasks[1].ParentStatus != "" {
+		t.Errorf("missing issue status = %q, want empty", report.Tasks[1].ParentStatus)
+	}
+}
+
+// TestResolveParentStatuses_ChunksLargeWorkspaces verifies a root with more
+// issues than the server's batch cap is split the same way the GC loop splits
+// it, instead of being sent as one oversized request.
+func TestResolveParentStatuses_ChunksLargeWorkspaces(t *testing.T) {
+	t.Parallel()
+
+	wsID := "11111111-1111-1111-1111-111111111111"
+	total := issueGCBatchSize + 1
+	tasks := make([]TaskDiskUsage, 0, total)
+	for i := range total {
+		tasks = append(tasks, issueTask(wsID, fmt.Sprintf("task%04d", i), fmt.Sprintf("issue-%04d", i)))
+	}
+	report := &DiskUsageReport{Tasks: tasks}
+
+	var chunkSizes []int
+	fetch := func(_ context.Context, _ string, issueIDs []string) (map[string]string, error) {
+		chunkSizes = append(chunkSizes, len(issueIDs))
+		out := make(map[string]string, len(issueIDs))
+		for _, id := range issueIDs {
+			out[id] = "done"
+		}
+		return out, nil
+	}
+
+	if err := ResolveParentStatuses(context.Background(), report, fetch); err != nil {
+		t.Fatalf("ResolveParentStatuses: %v", err)
+	}
+
+	if len(chunkSizes) != 2 {
+		t.Fatalf("chunk sizes = %v, want 2 chunks", chunkSizes)
+	}
+	if chunkSizes[0] != issueGCBatchSize || chunkSizes[1] != 1 {
+		t.Errorf("chunk sizes = %v, want [%d 1]", chunkSizes, issueGCBatchSize)
+	}
+	for i := range report.Tasks {
+		if report.Tasks[i].ParentStatus != "done" {
+			t.Fatalf("task[%d] parent_status = %q, want done", i, report.Tasks[i].ParentStatus)
+		}
+	}
+}
+
+// TestResolveParentStatuses_PartialFailureKeepsOtherWorkspaces pins the
+// best-effort contract: one workspace failing must not blank out the rest, and
+// the error still surfaces so the CLI can warn.
+func TestResolveParentStatuses_PartialFailureKeepsOtherWorkspaces(t *testing.T) {
+	t.Parallel()
+
+	wsGood := "11111111-1111-1111-1111-111111111111"
+	wsBad := "22222222-2222-2222-2222-222222222222"
+	report := &DiskUsageReport{Tasks: []TaskDiskUsage{
+		issueTask(wsGood, "aaaa1111", "issue-good"),
+		issueTask(wsBad, "bbbb1111", "issue-bad"),
+	}}
+
+	fetch := func(_ context.Context, workspaceID string, _ []string) (map[string]string, error) {
+		if workspaceID == wsBad {
+			return nil, errors.New("boom")
+		}
+		return map[string]string{"issue-good": "done"}, nil
+	}
+
+	err := ResolveParentStatuses(context.Background(), report, fetch)
+	if err == nil {
+		t.Fatal("expected the failing workspace's error to surface")
+	}
+	if report.Tasks[0].ParentStatus != "done" {
+		t.Errorf("healthy workspace status = %q, want done", report.Tasks[0].ParentStatus)
+	}
+	if report.Tasks[1].ParentStatus != "" {
+		t.Errorf("failed workspace status = %q, want empty", report.Tasks[1].ParentStatus)
+	}
+}
+
+// TestResolveParentStatuses_NoFetcherIsNoOp keeps `disk-usage` usable offline
+// or logged out: with no way to resolve, the scan result passes through
+// untouched instead of erroring.
+func TestResolveParentStatuses_NoFetcherIsNoOp(t *testing.T) {
+	t.Parallel()
+
+	report := &DiskUsageReport{Tasks: []TaskDiskUsage{
+		issueTask("11111111-1111-1111-1111-111111111111", "aaaa1111", "issue-1"),
+	}}
+	if err := ResolveParentStatuses(context.Background(), report, nil); err != nil {
+		t.Fatalf("nil fetcher should be a no-op, got %v", err)
+	}
+	if report.Tasks[0].ParentStatus != "" {
+		t.Errorf("parent_status = %q, want empty", report.Tasks[0].ParentStatus)
+	}
+	if err := ResolveParentStatuses(context.Background(), nil, func(context.Context, string, []string) (map[string]string, error) {
+		t.Fatal("fetcher must not run for a nil report")
+		return nil, nil
+	}); err != nil {
+		t.Fatalf("nil report should be a no-op, got %v", err)
+	}
+}
+
+// TestScanDiskUsage_ReportsRepoCacheSeparately pins the accounting split: the
+// bare-repo cache is measured (it used to be invisible, which made the reported
+// total silently disagree with the user's file manager) but kept out of the
+// task totals, since every task checks out from it and none contains it.
+func TestScanDiskUsage_ReportsRepoCacheSeparately(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	wsID := "11111111-1111-1111-1111-111111111111"
+	writeFile(t, filepath.Join(root, wsID, "aaaaaaaa", "workdir/main.go"), 1000)
+
+	// .repos/<workspace>/<repo>/... — the repo dir is the unit the GC evicts.
+	writeFile(t, filepath.Join(root, ".repos", wsID, "widgets.git", "objects/pack/x"), 4000)
+	writeFile(t, filepath.Join(root, ".repos", wsID, "gadgets.git", "objects/pack/y"), 2000)
+
+	report, err := ScanDiskUsage(root, nil)
+	if err != nil {
+		t.Fatalf("ScanDiskUsage: %v", err)
+	}
+
+	if report.RepoCacheSizeBytes != 6000 {
+		t.Errorf("repo_cache_size_bytes = %d, want 6000", report.RepoCacheSizeBytes)
+	}
+	if report.RepoCacheCount != 2 {
+		t.Errorf("repo_cache_count = %d, want 2", report.RepoCacheCount)
+	}
+	if report.TotalSizeBytes != 1000 {
+		t.Errorf("total_size_bytes = %d, want 1000 (task dirs only, cache excluded)", report.TotalSizeBytes)
+	}
+	if report.TotalWorkspaceCount != 1 {
+		t.Errorf("total_workspace_count = %d, want 1 (.repos is not a workspace)", report.TotalWorkspaceCount)
+	}
+}
+
+// TestScanDiskUsage_SkipsDaemonInternalDotDirs keeps caches like .skill-cache
+// out of the per-workspace table, where they used to surface as bogus
+// workspace rows alongside the real ones.
+func TestScanDiskUsage_SkipsDaemonInternalDotDirs(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	wsID := "11111111-1111-1111-1111-111111111111"
+	writeFile(t, filepath.Join(root, wsID, "aaaaaaaa", "workdir/main.go"), 1000)
+	writeFile(t, filepath.Join(root, ".skill-cache", "v1", "bundle", "skill.md"), 500)
+
+	report, err := ScanDiskUsage(root, nil)
+	if err != nil {
+		t.Fatalf("ScanDiskUsage: %v", err)
+	}
+
+	if report.TotalWorkspaceCount != 1 {
+		t.Fatalf("total_workspace_count = %d, want 1", report.TotalWorkspaceCount)
+	}
+	for _, ws := range report.Workspaces {
+		if strings.HasPrefix(ws.WorkspaceID, ".") {
+			t.Errorf("dot-directory %q reported as a workspace", ws.WorkspaceID)
+		}
+	}
+	if report.TotalSizeBytes != 1000 {
+		t.Errorf("total_size_bytes = %d, want 1000 (skill cache excluded)", report.TotalSizeBytes)
 	}
 }

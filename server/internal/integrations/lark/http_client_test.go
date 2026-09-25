@@ -3,9 +3,11 @@ package lark
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -101,6 +103,34 @@ func (f *larkFakeServer) stubSend(resp map[string]any, verify func(r *http.Reque
 		}
 		if verify != nil {
 			verify(r, body)
+		}
+		writeJSON(w, resp)
+	})
+}
+
+// stubReply installs the IM-reply endpoint
+// (POST /open-apis/im/v1/messages/<id>/reply), used by the thread-reply
+// path. Body is decoded as map[string]any because reply_in_thread is a
+// bool. Register stubToken + stubReply (and not stubSend / stubPatch) in
+// a reply test, since they share the /messages/ prefix.
+func (f *larkFakeServer) stubReply(resp map[string]any, verify func(r *http.Request, id string, body map[string]any)) {
+	const prefix = "/open-apis/im/v1/messages/"
+	f.mux.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/reply") {
+			f.t.Errorf("reply: want POST .../reply, got %s %s", r.Method, r.URL.Path)
+			return
+		}
+		f.sendN.Add(1)
+		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, prefix), "/reply")
+		if id == "" {
+			f.t.Errorf("reply: missing message id")
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			f.t.Errorf("reply: decode body: %v", err)
+		}
+		if verify != nil {
+			verify(r, id, body)
 		}
 		writeJSON(w, resp)
 	})
@@ -208,6 +238,201 @@ func TestHTTPClient_IsConfigured(t *testing.T) {
 	c := NewHTTPAPIClient(HTTPClientConfig{})
 	if !c.IsConfigured() {
 		t.Fatalf("real client must report IsConfigured()=true")
+	}
+}
+
+func TestHTTPClient_DownloadMessageResource(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_resource", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/om_1/resources/img_1", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("resource: method = %s, want GET", r.Method)
+		}
+		if got := r.URL.Query().Get("type"); got != "image" {
+			t.Errorf("resource type = %q, want image", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer tok_resource" {
+			t.Errorf("auth = %q", got)
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Content-Disposition", `attachment; filename="shot.png"`)
+		_, _ = w.Write([]byte{1, 2, 3})
+	})
+	c := newTestClient(fake, time.Now)
+	got, err := c.DownloadMessageResource(context.Background(), testCreds(), DownloadResourceParams{
+		MessageID: "om_1",
+		FileKey:   "img_1",
+		Type:      "image",
+	})
+	if err != nil {
+		t.Fatalf("DownloadMessageResource: %v", err)
+	}
+	if string(got.Data) != string([]byte{1, 2, 3}) || got.ContentType != "image/png" ||
+		got.Filename != "shot.png" || got.SizeBytes != 3 {
+		t.Fatalf("downloaded resource wrong: %+v", got)
+	}
+}
+
+func TestHTTPClient_DownloadMessageResourceUsesResourceTimeout(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_resource", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/om_video/resources/file_video", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("type"); got != "file" {
+			t.Errorf("resource type = %q, want file", got)
+		}
+		time.Sleep(80 * time.Millisecond)
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Disposition", `attachment; filename="clip.mp4"`)
+		_, _ = w.Write([]byte("slow-video"))
+	})
+	c := NewHTTPAPIClient(HTTPClientConfig{
+		BaseURL:                 fake.URL(),
+		HTTPClient:              &http.Client{Timeout: 20 * time.Millisecond},
+		ResourceDownloadTimeout: 500 * time.Millisecond,
+		Now:                     time.Now,
+	}).(*httpAPIClient)
+	got, err := c.DownloadMessageResource(context.Background(), testCreds(), DownloadResourceParams{
+		MessageID: "om_video",
+		FileKey:   "file_video",
+		Type:      "file",
+	})
+	if err != nil {
+		t.Fatalf("DownloadMessageResource slow video: %v", err)
+	}
+	if string(got.Data) != "slow-video" || got.ContentType != "video/mp4" || got.Filename != "clip.mp4" {
+		t.Fatalf("downloaded slow video wrong: %+v", got)
+	}
+}
+
+func TestHTTPClient_DownloadMessageResourceExceedingTimeoutIsCancelled(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_resource", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/om_timeout/resources/file_timeout", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(500 * time.Millisecond):
+			_, _ = w.Write([]byte("too late"))
+		}
+	})
+	c := NewHTTPAPIClient(HTTPClientConfig{
+		BaseURL:                 fake.URL(),
+		ResourceDownloadTimeout: 20 * time.Millisecond,
+		Now:                     time.Now,
+	}).(*httpAPIClient)
+
+	_, err := c.DownloadMessageResource(context.Background(), testCreds(), DownloadResourceParams{
+		MessageID: "om_timeout",
+		FileKey:   "file_timeout",
+		Type:      "file",
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("timeout error = %v, want context deadline exceeded", err)
+	}
+}
+
+func TestHTTPClient_DownloadMessageResourceRejectsDeclaredOversize(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_resource", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/om_large/resources/file_large", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Length", strconv.FormatInt(maxMessageResourceBytes+1, 10))
+		w.WriteHeader(http.StatusOK)
+	})
+	c := newTestClient(fake, time.Now)
+
+	_, err := c.DownloadMessageResourceStream(context.Background(), testCreds(), DownloadResourceParams{
+		MessageID: "om_large",
+		FileKey:   "file_large",
+		Type:      "file",
+	})
+	if err == nil || !strings.Contains(err.Error(), "resource exceeds") {
+		t.Fatalf("declared oversize error = %v", err)
+	}
+}
+
+func TestHTTPClient_DownloadMessageResourceAllowsDeclaredFeishuLimit(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_resource", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/om_limit/resources/file_limit", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Length", strconv.FormatInt(maxMessageResourceBytes, 10))
+		w.WriteHeader(http.StatusOK)
+	})
+	c := newTestClient(fake, time.Now)
+
+	got, err := c.DownloadMessageResourceStream(context.Background(), testCreds(), DownloadResourceParams{
+		MessageID: "om_limit",
+		FileKey:   "file_limit",
+		Type:      "file",
+	})
+	if err != nil {
+		t.Fatalf("declared Feishu-limit resource should be accepted: %v", err)
+	}
+	got.Body.Close()
+	if got.SizeBytes != maxMessageResourceBytes {
+		t.Fatalf("SizeBytes = %d, want %d", got.SizeBytes, maxMessageResourceBytes)
+	}
+}
+
+func TestHTTPClient_DownloadMessageResourceAllowsAbovePreviousLocalLimit(t *testing.T) {
+	const previousLocalLimit = 20 << 20
+	fake := newLarkFake(t)
+	fake.stubToken("tok_resource", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/om_above_previous/resources/file_above_previous", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Length", strconv.FormatInt(previousLocalLimit+1, 10))
+		w.WriteHeader(http.StatusOK)
+	})
+	c := newTestClient(fake, time.Now)
+
+	got, err := c.DownloadMessageResourceStream(context.Background(), testCreds(), DownloadResourceParams{
+		MessageID: "om_above_previous",
+		FileKey:   "file_above_previous",
+		Type:      "file",
+	})
+	if err != nil {
+		t.Fatalf("resource above previous 20MiB local limit should be accepted: %v", err)
+	}
+	got.Body.Close()
+	if got.SizeBytes != previousLocalLimit+1 {
+		t.Fatalf("SizeBytes = %d, want %d", got.SizeBytes, previousLocalLimit+1)
+	}
+}
+
+func TestMaxBytesReadCloserEnforcesUnknownLengthBoundary(t *testing.T) {
+	t.Run("exact limit", func(t *testing.T) {
+		body := &maxBytesReadCloser{r: io.NopCloser(strings.NewReader("abc")), remaining: 3}
+		got, err := io.ReadAll(body)
+		if err != nil || string(got) != "abc" {
+			t.Fatalf("exact limit: body=%q err=%v", got, err)
+		}
+	})
+
+	t.Run("one byte over", func(t *testing.T) {
+		body := &maxBytesReadCloser{r: io.NopCloser(strings.NewReader("abcd")), remaining: 3}
+		got, err := io.ReadAll(body)
+		if err == nil || !strings.Contains(err.Error(), "resource exceeds") || string(got) != "abc" {
+			t.Fatalf("overflow: body=%q err=%v", got, err)
+		}
+	})
+}
+
+func TestHTTPClient_DownloadMessageResourceBusinessError(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_resource", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/om_1/resources/img_1", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		writeJSON(w, map[string]any{"code": 234003, "msg": "File not in msg"})
+	})
+	c := newTestClient(fake, time.Now)
+	_, err := c.DownloadMessageResource(context.Background(), testCreds(), DownloadResourceParams{
+		MessageID: "om_1",
+		FileKey:   "img_1",
+		Type:      "image",
+	})
+	if err == nil || !strings.Contains(err.Error(), "234003") {
+		t.Fatalf("expected APIError with code, got %v", err)
 	}
 }
 
@@ -407,6 +632,62 @@ func TestHTTPClient_SendTextMessage_HappyPath(t *testing.T) {
 	}
 	if got := fake.lastAuth(); got != "Bearer tok_text" {
 		t.Errorf("Authorization header: got %q want Bearer tok_text", got)
+	}
+}
+
+// TestHTTPClient_SendTextMessage_ReplyInThread pins the wire shape of a
+// threaded reply: when ReplyTarget is set the client must POST to the
+// reply endpoint (/messages/<id>/reply), carry reply_in_thread=true, and
+// NOT include a chat-level receive_id — that's what lands the agent's
+// reply inside the originating 话题 (thread) instead of the group.
+func TestHTTPClient_SendTextMessage_ReplyInThread(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_reply", 7200)
+	fake.stubReply(
+		map[string]any{
+			"code": 0,
+			"msg":  "ok",
+			"data": map[string]string{"message_id": "om_reply_1"},
+		},
+		func(r *http.Request, id string, body map[string]any) {
+			if id != "om_trigger" {
+				t.Errorf("reply target id: got %q want om_trigger", id)
+			}
+			if body["msg_type"] != "text" {
+				t.Errorf("msg_type: got %v want text", body["msg_type"])
+			}
+			if v, _ := body["reply_in_thread"].(bool); !v {
+				t.Errorf("reply_in_thread: got %v want true", body["reply_in_thread"])
+			}
+			if _, hasRecv := body["receive_id"]; hasRecv {
+				t.Errorf("reply endpoint body must NOT carry receive_id; got %v", body)
+			}
+			content, ok := body["content"].(string)
+			if !ok {
+				t.Fatalf("content missing or not a string: %v", body["content"])
+			}
+			var inner map[string]string
+			if err := json.Unmarshal([]byte(content), &inner); err != nil {
+				t.Fatalf("content inner JSON: %v (raw=%q)", err, content)
+			}
+			if inner["text"] != "threaded hi" {
+				t.Errorf("inner content.text: got %q want threaded hi", inner["text"])
+			}
+		},
+	)
+
+	c := newTestClient(fake, time.Now)
+	msgID, err := c.SendTextMessage(context.Background(), SendTextParams{
+		InstallationID: testCreds(),
+		ChatID:         ChatID("oc_chat_42"),
+		Text:           "threaded hi",
+		ReplyTarget:    ReplyTarget{MessageID: "om_trigger", InThread: true},
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if msgID != "om_reply_1" {
+		t.Errorf("message id: got %q want om_reply_1", msgID)
 	}
 }
 
@@ -639,6 +920,70 @@ func TestHTTPClient_SendInteractiveCard_LarkErrorCode(t *testing.T) {
 	}
 }
 
+// TestHTTPClient_SendMethods_ReturnTypedAPIError pins that the three
+// send methods used for threaded replies surface a non-zero Lark code
+// as a structured *APIError, so the outbound fallback can classify
+// "topic cannot receive this reply" codes without string matching.
+func TestHTTPClient_SendMethods_ReturnTypedAPIError(t *testing.T) {
+	cases := []struct {
+		name string
+		call func(c *httpAPIClient) error
+	}{
+		{"interactive", func(c *httpAPIClient) error {
+			_, err := c.SendInteractiveCard(context.Background(), SendCardParams{InstallationID: testCreds(), ChatID: "oc", CardJSON: `{}`})
+			return err
+		}},
+		{"text", func(c *httpAPIClient) error {
+			_, err := c.SendTextMessage(context.Background(), SendTextParams{InstallationID: testCreds(), ChatID: "oc", Text: "hi"})
+			return err
+		}},
+		{"markdown", func(c *httpAPIClient) error {
+			_, err := c.SendMarkdownCard(context.Background(), SendMarkdownCardParams{InstallationID: testCreds(), ChatID: "oc", Markdown: "**hi**"})
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newLarkFake(t)
+			fake.stubToken("tok_e", 7200)
+			fake.stubSend(map[string]any{"code": 230071, "msg": "group does not support reply in thread"}, nil)
+			c := newTestClient(fake, time.Now)
+			err := tc.call(c)
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("want *APIError, got %T (%v)", err, err)
+			}
+			if apiErr.Code != 230071 {
+				t.Errorf("APIError.Code = %d; want 230071", apiErr.Code)
+			}
+			if !isThreadReplyUnsupported(err) {
+				t.Errorf("230071 should classify as thread-reply-unsupported")
+			}
+			if !strings.Contains(err.Error(), "code=230071") {
+				t.Errorf("error string should preserve code=230071: %v", err)
+			}
+		})
+	}
+}
+
+// TestIsThreadReplyUnsupported_ExcludesAmbiguous guards that ambiguous
+// and rate-limit failures are NOT treated as classified thread errors,
+// so they never trigger a chat-level fallback.
+func TestIsThreadReplyUnsupported_ExcludesAmbiguous(t *testing.T) {
+	if isThreadReplyUnsupported(errors.New("transport failure")) {
+		t.Error("plain transport error must not classify as thread-reply-unsupported")
+	}
+	if isThreadReplyUnsupported(&APIError{Code: 230020, Msg: "rate limit"}) {
+		t.Error("rate limit (230020) must not classify as thread-reply-unsupported")
+	}
+	if isThreadReplyUnsupported(&APIError{Code: 230049, Msg: "message is being sent"}) {
+		t.Error("ambiguous 'being sent' (230049) must not classify as thread-reply-unsupported")
+	}
+	if !isThreadReplyUnsupported(&APIError{Code: 230072, Msg: "aggregated"}) {
+		t.Error("aggregated message (230072) should classify as thread-reply-unsupported")
+	}
+}
+
 func TestHTTPClient_SendInteractiveCard_TokenExpired_InvalidatesCache(t *testing.T) {
 	fake := newLarkFake(t)
 	fake.stubToken("tok_first", 7200)
@@ -654,7 +999,7 @@ func TestHTTPClient_SendInteractiveCard_TokenExpired_InvalidatesCache(t *testing
 		fake.sendN.Add(1)
 		n := sendCalls.Add(1)
 		if n == 1 {
-			writeJSON(w, map[string]any{"code": codeTokenExpired, "msg": "expired"})
+			writeJSON(w, map[string]any{"code": codeTenantTokenInvalid, "msg": "expired"})
 			return
 		}
 		writeJSON(w, map[string]any{"code": 0, "data": map[string]string{"message_id": "om_ok"}})
@@ -759,6 +1104,36 @@ func TestHTTPClient_SendBindingPromptCard_HappyPath(t *testing.T) {
 	}
 	if !strings.Contains(capturedBody["content"], "去绑定") {
 		t.Errorf("binding card should carry the localized CTA: %q", capturedBody["content"])
+	}
+}
+
+func TestHTTPClient_SendBindingPromptCard_NoAvailabilityReturnsAPIError(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_bind_no_avail", 7200)
+
+	fake.mux.HandleFunc("/open-apis/im/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		fake.bindN.Add(1)
+		writeJSON(w, map[string]any{"code": 230013, "msg": "Bot has NO availability to this user.", "data": map[string]any{}})
+	})
+
+	c := newTestClient(fake, time.Now)
+	err := c.SendBindingPromptCard(context.Background(), BindingPromptParams{
+		InstallationID: testCreds(),
+		OpenID:         OpenID("ou_user_1"),
+		BindURL:        "https://multica.test/lark/bind?token=abc",
+	})
+	if err == nil {
+		t.Fatal("expected SendBindingPromptCard to fail")
+	}
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.Code != 230013 {
+		t.Fatalf("expected code=230013, got %d", apiErr.Code)
+	}
+	if apiErr.Msg != "Bot has NO availability to this user." {
+		t.Fatalf("unexpected msg: %q", apiErr.Msg)
 	}
 }
 
@@ -960,8 +1335,8 @@ func TestHTTPClient_GetBotInfo_HappyPath(t *testing.T) {
 			"code": 0,
 			"msg":  "ok",
 			"bot": map[string]any{
-				"open_id":   "ou_bot_42",
-				"app_name":  "PersonalAgent",
+				"open_id":    "ou_bot_42",
+				"app_name":   "PersonalAgent",
 				"avatar_url": "https://example/avatar.png",
 			},
 		})

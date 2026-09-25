@@ -6,6 +6,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -30,8 +31,15 @@ func registerAutopilotListeners(bus *events.Bus, svc *service.AutopilotService) 
 		if !ok {
 			return
 		}
-		// Only handle statuses that finalize an autopilot run.
-		if issue.Status != "done" && issue.Status != "in_review" && issue.Status != "cancelled" && issue.Status != "blocked" {
+		// Only handle statuses that finalize an autopilot run. This gate exists
+		// to skip the issue load for routine forward progress, so it stays a
+		// literal comparison for built-in keys. A custom status carries the
+		// behavior of the canonical status it inherits, but resolving that
+		// needs a catalog read — so let non-built-in keys through and let
+		// SyncRunFromIssue normalize once it has the issue. (MUL-6243)
+		if issuestatus.IsBuiltIn(issue.Status) &&
+			issue.Status != "done" && issue.Status != "in_review" &&
+			issue.Status != "cancelled" && issue.Status != "blocked" {
 			return
 		}
 		// Load the full issue from DB to check origin_type.

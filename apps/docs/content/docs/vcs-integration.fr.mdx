@@ -1,0 +1,95 @@
+---
+title: Fournisseurs Git auto-hébergés
+description: Connectez une instance Forgejo, Gitea ou GitLab auto-hébergée par espace de travail, afin que les pull/merge requests portant un identifiant de tâche dans leur nom de branche ou leur titre, ou après un mot-clé de clôture dans leur description, soient automatiquement associées à cette tâche, la fassent passer à Terminé à la fusion et affichent le statut CI.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+<Callout type="warn">
+**Multica auto-hébergé uniquement.** Cette intégration n'est disponible que si vous
+exécutez Multica vous-même ; elle n'est pas proposée sur Multica Cloud. « Auto-hébergé »
+signifie ici que c'est **Multica** qui est auto-hébergé — généralement pour pouvoir joindre
+une instance Git sur votre propre réseau. Un opérateur du serveur doit l'activer
+(`MULTICA_VCS_INTEGRATION_ENABLED=true`) et définir `MULTICA_VCS_SECRET_KEY` ; d'ici là,
+la section n'apparaît pas dans Paramètres → Intégrations.
+</Callout>
+
+Multica se connecte à un fournisseur Git auto-hébergé par espace de travail : **Forgejo**, **Gitea** ou **GitLab**. Une fois la connexion établie, toute pull request (GitLab : merge request) dont le nom de branche ou le titre contient un identifiant de tâche (par exemple `MUL-123`), ou dont la description en cite un après un mot-clé de clôture (`Closes MUL-123`), est **associée automatiquement** à cette [tâche](/issues), apparaît sous **Pull requests** dans la barre latérale de la tâche et — lorsqu'elle est fusionnée avec un mot-clé de clôture — fait passer la tâche à **Terminé**. La CI du commit de tête s'affiche sous forme de barre de vérifications sur la carte.
+
+Ces fournisseurs fonctionnent en parallèle de GitHub : un espace de travail peut les combiner librement.
+
+<Callout type="info">
+Contrairement à GitHub, ces fournisseurs n'ont pas de modèle « App ». Chaque espace de travail stocke sa propre URL d'instance et un jeton d'accès, et enregistre un webhook sur son dépôt ou son organisation. Le jeton et le secret du webhook sont chiffrés au repos.
+</Callout>
+
+## Prérequis (serveur)
+
+Activez l'intégration pour ce déploiement. Elle est désactivée par défaut : la section reste masquée tant que vous n'avez pas défini :
+
+```sh
+MULTICA_VCS_INTEGRATION_ENABLED=true
+```
+
+Le fichier `docker compose` officiel d'auto-hébergement (`docker-compose.selfhost.yml`) la définit pour vous.
+
+Définissez ensuite une clé de 32 octets encodée en base64 pour que le serveur puisse chiffrer les identifiants stockés. Sans elle, le formulaire de connexion est désactivé.
+
+```sh
+openssl rand -base64 32
+```
+
+```sh
+MULTICA_VCS_SECRET_KEY=<base64 32-byte key>
+```
+
+Les deux sont requises : l'interrupteur détermine si la fonctionnalité est proposée, et la clé chiffre le jeton et le secret du webhook stockés. La connexion, le webhook et la régénération exigent ces deux réglages.
+
+Définissez `MULTICA_PUBLIC_URL` sur l'URL de base publique du serveur pour que Multica puisse afficher une URL de webhook prête à coller. Sans elle, l'interface n'affiche que le chemin du webhook et vous devez y ajouter vous-même votre origine.
+
+## Connecter un espace de travail
+
+1. Chez votre fournisseur, créez un jeton d'accès disposant d'un accès en lecture aux dépôts que vous voulez refléter :
+   - **Forgejo / Gitea** : Settings → Applications.
+   - **GitLab** : un jeton d'accès personnel (ou de groupe/projet) avec la portée `read_api`.
+2. Dans Multica, ouvrez **Paramètres → Intégrations → Fournisseurs git (auto-hébergés)**.
+3. Choisissez le **Fournisseur**, saisissez l'URL de l'instance (par exemple `https://forgejo.example.com`) et le jeton d'accès, puis cliquez sur **Connecter**. Multica valide le jeton auprès de l'instance avant d'enregistrer.
+4. Copiez l'**URL du webhook** et le **Secret du webhook** affichés après la connexion.
+
+<Callout type="warn">
+Le secret du webhook n'est affiché qu'une seule fois. Copiez-le avant de quitter la page. Reconnecter la même instance régénère le jeton et le secret.
+</Callout>
+
+### Instance avec une autorité de certification privée
+
+Si **Connecter** indique que le certificat du fournisseur « is signed by a certificate authority this server does not trust », le certificat HTTPS de l'instance est émis par une autorité de certification (CA) interne, ou auto-signé, à laquelle le serveur Multica ne fait pas confiance. Un administrateur du serveur doit ajouter cette CA au magasin de confiance du backend : avec Helm, définissez `backend.extraCACerts.configMap` ; avec Docker Compose, montez la CA et définissez `SSL_CERT_DIR`. Les étapes sont décrites dans [Private CA certificates](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#private-ca-certificates-optional).
+
+Multica ne propose pas d'option pour ignorer la vérification du certificat, car la requête de connexion transporte votre jeton d'accès. Si le message indique que le certificat ne correspond pas au nom d'hôte, ou que sa vérification a échoué (par exemple, il a expiré), corrigez le certificat lui-même ; faire confiance à la CA n'y changera rien.
+
+## Enregistrer le webhook
+
+Sur le dépôt (ou sur l'organisation/le groupe, pour couvrir tous les dépôts) :
+
+**Forgejo / Gitea** — Settings → Webhooks → Add Webhook → Forgejo/Gitea :
+
+- **Target URL** : l'URL du webhook obtenue à l'étape précédente.
+- **HTTP method** `POST`, **content type** `application/json`.
+- **Secret** : le secret du webhook (utilisé pour vérifier le HMAC `X-Gitea-Signature`).
+- **Trigger events** : sélectionnez **Pull Request**, ainsi que **Commit Status** pour refléter la CI.
+
+**GitLab** — Settings → Webhooks :
+
+- **URL** : l'URL du webhook.
+- **Secret token** : le secret du webhook (envoyé dans `X-Gitlab-Token` et comparé tel quel).
+- **Triggers** : activez **Merge request events**, ainsi que **Pipeline events** pour refléter la CI.
+
+Multica authentifie chaque livraison à l'aide du secret stocké : un webhook qui n'a pas le secret correspondant est rejeté.
+
+## Ce qui est reflété
+
+- **Pull requests / merge requests** — état ouvert, fermé, fusionné et brouillon, auteur, branche et (lorsque le fournisseur les fournit) statistiques de diff.
+- **Liens vers les tâches** — un identifiant dans le titre ou la branche associe la PR à la tâche, tout comme un identifiant placé après un mot-clé de clôture dans la description ; une simple mention dans la description n'associe rien. Un mot-clé de clôture (`Closes`/`Fixes`/`Resolves MUL-123`) sur une PR fusionnée fait passer la tâche à **Terminé** dès qu'aucune PR associée n'est encore ouverte.
+- **CI** — les statuts de commit Forgejo/Gitea et les pipelines GitLab sont agrégés dans une barre de vérifications réussie/en échec/en attente pour le commit de tête.
+
+## Agents qui ouvrent des pull requests
+
+La création de PR ne nécessite aucune configuration de fournisseur dans Multica. Les agents récupèrent les dépôts dans le runtime, puis poussent leurs branches et ouvrent les PR avec les identifiants Git propres à la machine du runtime. Pour permettre aux agents de travailler avec un fournisseur, assurez-vous que la machine du daemon peut s'y authentifier — par exemple avec une clé de déploiement SSH, ou un jeton dans le gestionnaire d'identifiants Git (credential helper) de la machine — et ajoutez l'URL du dépôt comme d'habitude. La récupération des dépôts fonctionne avec n'importe quelle URL Git : aucun câblage propre au fournisseur n'est nécessaire.

@@ -28,10 +28,11 @@ func TestParseSkillFrontmatter(t *testing.T) {
 			wantDesc: "hello world",
 		},
 		{
-			name:     "literal block scalar keeps newlines",
+			// Interior newlines survive; only the chomped trailing one is dropped.
+			name:     "literal block scalar keeps interior newlines",
 			content:  "---\nname: foo\ndescription: |\n  line1\n  line2\n---\nbody",
 			wantName: "foo",
-			wantDesc: "line1\nline2\n",
+			wantDesc: "line1\nline2",
 		},
 		{
 			name:     "literal strip chomping drops trailing newline",
@@ -43,7 +44,7 @@ func TestParseSkillFrontmatter(t *testing.T) {
 			name:     "folded block scalar joins with spaces",
 			content:  "---\nname: foo\ndescription: >\n  line1\n  line2\n---\nbody",
 			wantName: "foo",
-			wantDesc: "line1 line2\n",
+			wantDesc: "line1 line2",
 		},
 		{
 			name:     "CRLF line endings",
@@ -119,6 +120,14 @@ func TestParseSkillFrontmatter(t *testing.T) {
 			wantDesc: `{"a":1,"b":2}`,
 		},
 		{
+			// MUL-5645: padding never reaches storage, so an imported skill can
+			// never differ from its own trimmed form in the editor.
+			name:     "surrounding whitespace is trimmed off both fields",
+			content:  "---\nname: \"  foo  \"\ndescription: \"  hello world\\n\"\n---\nbody",
+			wantName: "foo",
+			wantDesc: "hello world",
+		},
+		{
 			// Reproduction for issue #3495: Chinese block scalar.
 			name: "issue 3495 chinese literal block scalar",
 			content: "---\n" +
@@ -131,7 +140,7 @@ func TestParseSkillFrontmatter(t *testing.T) {
 			wantName: "requirements-workshop",
 			wantDesc: "当用户想要开发新功能、讨论需求、梳理业务逻辑时触发。通过多轮对话将模糊的想法转化为结构化的需求文档，为后续技术方案设计提供输入。\n" +
 				"适用场景：用户说\"我想实现XX功能\"、\"讨论一下这个需求\"、\"帮我分析一下怎么做\"、\"这个需求该怎么设计\"、\"写个需求文档\"等。\n" +
-				"本skill只负责产出需求文档，不进入技术设计或代码实现阶段。\n",
+				"本skill只负责产出需求文档，不进入技术设计或代码实现阶段。",
 		},
 	}
 

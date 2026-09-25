@@ -6,5 +6,5 @@
 export type RuntimeHealth =
   | "online" // green — within heartbeat threshold
   | "recently_lost" // amber — offline < 5 minutes (likely transient)
-  | "offline" // grey — offline 5 minutes ~ 7 days
-  | "about_to_gc"; // dim — within 1 day of the 7-day GC threshold
+  | "offline" // grey — offline 5 minutes ~ 6 days
+  | "long_offline"; // destructive — offline beyond 6 days

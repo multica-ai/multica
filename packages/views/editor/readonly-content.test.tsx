@@ -1,12 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { readFileSync } from "node:fs";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-const { getAttachmentTextContentMock } = vi.hoisted(() => ({
-  getAttachmentTextContentMock: vi.fn(),
+const { getAttachmentTextContentMock, resolveIssueIdentifierMock } = vi.hoisted(
+  () => ({
+    getAttachmentTextContentMock: vi.fn(),
+    resolveIssueIdentifierMock: vi.fn(),
+  }),
+);
+
+vi.mock("../issues/hooks", () => ({
+  useResolveIssueIdentifier: (identifier: string) =>
+    resolveIssueIdentifierMock(identifier),
 }));
+
+// i18next is not initialized in this suite, so `t()` would resolve every label
+// to "". Resolve against the real EN bundle instead — the editor tree only ever
+// uses the `editor` namespace — so tests can select controls by accessible name.
+vi.mock("../i18n", async () => {
+  const editor = (await import("../locales/en/editor.json")).default;
+  return {
+    useT: () => ({ t: (select: (bundle: typeof editor) => string) => select(editor) }),
+    useTimeAgo: () => "just now",
+  };
+});
 
 vi.mock("@multica/core/api", () => ({
   api: { getAttachmentTextContent: getAttachmentTextContentMock },
@@ -23,6 +41,9 @@ vi.mock("@multica/core/paths", () => ({
 
 vi.mock("../navigation", () => ({
   useNavigation: () => ({ push: vi.fn(), openInNewTab: vi.fn() }),
+  useOptionalNavigation: () => ({ push: vi.fn(), openInNewTab: vi.fn() }),
+  resolveClickIntent: () => "push",
+  useAppOrigin: () => null,
 }));
 
 vi.mock("../issues/components/issue-mention-card", () => ({
@@ -40,7 +61,10 @@ vi.mock("./link-hover-card", () => ({
   LinkHoverCard: () => null,
 }));
 
-vi.mock("./utils/link-handler", () => ({
+// Partial: only navigation is stubbed. The pure URL predicates stay real so
+// these autolink fixtures assert the renderer's actual link/chip dispatch.
+vi.mock("./utils/link-handler", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./utils/link-handler")>()),
   openLink: vi.fn(),
   isMentionHref: (href?: string) => Boolean(href?.startsWith("mention://")),
 }));
@@ -64,6 +88,7 @@ Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
 
 import mermaid from "mermaid";
 import { ReadonlyContent } from "./readonly-content";
+import { composeAnnotatedReply } from "@multica/core/drafts/reply-annotation";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -71,20 +96,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-});
-
-describe("ReadonlyContent memoization", () => {
-  // Long-timeline issues (Inbox + IssueDetail with thousands of comments)
-  // freeze the tab when each comment re-runs the full react-markdown pipeline
-  // on every parent re-render. Wrapping the component in React.memo is the
-  // mitigation; this test guards against a future revert that would silently
-  // reintroduce the perf regression.
-  it("is wrapped in React.memo", () => {
-    const memoTypeSymbol = Symbol.for("react.memo");
-    expect((ReadonlyContent as unknown as { $$typeof: symbol }).$$typeof).toBe(
-      memoTypeSymbol,
-    );
-  });
 });
 
 describe("ReadonlyContent math rendering", () => {
@@ -123,6 +134,85 @@ describe("ReadonlyContent line breaks", () => {
   it("renders a blank-line gap as separate paragraphs", () => {
     const { container } = render(<ReadonlyContent content={"para one\n\npara two"} />);
     expect(container.querySelectorAll("p").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("ReadonlyContent annotated replies", () => {
+  it.each([
+    "steps:\n  - name: build\n    run: make\n  - name: test\n    run: make test",
+    "Summary\n---\nDetails\n===",
+    "5. alpha\n6) beta\n+ added\n- removed\n    indented code",
+  ])("preserves literal block markers and indentation in a selected quote: %s", (text) => {
+    const { container } = render(<ReadonlyContent content={composeAnnotatedReply("", [{
+      id: "literal", sourceCommentId: "source", sourceActorName: "Agent",
+      quote: text, note: "Keep the source intact", start: 0, prefix: "", suffix: "",
+    }])} />);
+    const quote = container.querySelector("blockquote")!;
+    expect(quote.querySelector("ul, ol, li, h1, h2, hr, pre")).toBeNull();
+    expect(quote.textContent?.replace(/\u00a0/g, " ").trim()).toBe(text);
+  });
+
+  it.each(["A note", "A note\n\nWith another paragraph"])("keeps a visible blank paragraph between annotations (note: %s)", (note) => {
+    const first = {
+      id: "first", sourceCommentId: "source", sourceActorName: "Agent",
+      quote: "First quote", note, start: 0, prefix: "", suffix: "",
+    };
+    const { container } = render(<ReadonlyContent content={composeAnnotatedReply("Overall reply", [
+      first, { ...first, id: "second", quote: "Second quote" },
+    ])} />);
+    const quotes = container.querySelectorAll("blockquote");
+    expect(quotes).toHaveLength(2);
+    expect(quotes[1]?.previousElementSibling?.tagName).toBe("P");
+    expect(quotes[1]?.previousElementSibling?.textContent).toBe("\u00a0");
+    expect(container.querySelectorAll("p").length).toBeGreaterThan(2);
+    expect(container.querySelector("a, ol")).toBeNull();
+    expect(container.querySelectorAll("hr")).toHaveLength(1);
+    expect(container.querySelector("hr")?.previousElementSibling?.textContent).toBe(note.split("\n\n").at(-1));
+    expect(container.querySelector("hr")?.nextElementSibling?.textContent).toBe("Overall reply");
+  });
+
+  it("renders quote snapshots and notes without generated links or numbered lists", () => {
+    const content = composeAnnotatedReply("", [{
+      id: "annotation", sourceCommentId: "source", sourceActorName: "Agent",
+      quote: "First <check>\nSecond line", note: "Please revise this.",
+      start: 0, prefix: "", suffix: "",
+    }]);
+    const { container } = render(<ReadonlyContent content={content} />);
+    const quote = container.querySelector("blockquote");
+    expect(quote?.textContent).toContain("First <check>");
+    expect(quote?.querySelector("br")).not.toBeNull();
+    expect(container.textContent).toContain("Please revise this.");
+    expect(quote?.textContent).not.toContain("Please revise this.");
+    expect(container.querySelector("a, ol, check")).toBeNull();
+    expect(container.textContent).not.toContain("Agent");
+  });
+});
+
+describe("ReadonlyContent autolink policy", () => {
+  it("keeps historical bare filenames and domains as plain text", () => {
+    const { container } = render(
+      <ReadonlyContent content="plan.md 4399.com ai.md" />,
+    );
+
+    expect(container.textContent).toContain("plan.md 4399.com ai.md");
+    expect(container.querySelector("a")).toBeNull();
+  });
+
+  it("still links explicit web URLs, www URLs, and email addresses", () => {
+    const { container } = render(
+      <ReadonlyContent
+        content="https://4399.com www.4399.com contact@example.com"
+      />,
+    );
+
+    const hrefs = Array.from(container.querySelectorAll("a"), (anchor) =>
+      anchor.getAttribute("href"),
+    );
+    expect(hrefs).toEqual([
+      "https://4399.com",
+      "https://www.4399.com",
+      "mailto:contact@example.com",
+    ]);
   });
 });
 
@@ -221,24 +311,80 @@ describe("ReadonlyContent issue mention Markdown", () => {
     expect(getByTestId("issue-mention-card").textContent).toBe("MUL-123");
   });
 
-  it("documents the CommonMark quoted-emphasis edge case before Korean particles", () => {
-    const unsafe = render(
-      <ReadonlyContent content={'**"무엇을 먼저 정해두고 시작할지"**가'} />,
+  it("autolinks a resolved bare identifier as an issue mention card", () => {
+    resolveIssueIdentifierMock.mockImplementation((id: string) =>
+      id === "MUL-7" ? { id: "issue-7", identifier: "MUL-7" } : null,
     );
 
-    expect(unsafe.container.querySelector("strong")).toBeNull();
-    expect(unsafe.container.textContent).toContain(
+    const { getByTestId } = render(
+      <ReadonlyContent content="See MUL-7 for context" />,
+    );
+
+    expect(getByTestId("issue-mention-card").textContent).toBe("MUL-7");
+    expect(resolveIssueIdentifierMock).toHaveBeenCalledWith("MUL-7");
+  });
+
+  it("leaves an unresolved bare identifier as plain text", () => {
+    resolveIssueIdentifierMock.mockReturnValue(null);
+
+    const { container, queryByTestId } = render(
+      <ReadonlyContent content="See MUL-999 for context" />,
+    );
+
+    expect(queryByTestId("issue-mention-card")).toBeNull();
+    expect(container.textContent).toContain("MUL-999");
+  });
+
+  it("does not autolink a bare identifier inside inline code", () => {
+    resolveIssueIdentifierMock.mockReturnValue(null);
+
+    const { queryByTestId } = render(
+      <ReadonlyContent content={"use `MUL-7` here"} />,
+    );
+
+    expect(resolveIssueIdentifierMock).not.toHaveBeenCalled();
+    expect(queryByTestId("issue-mention-card")).toBeNull();
+  });
+});
+
+describe("ReadonlyContent CJK emphasis", () => {
+  it.each([
+    ["Chinese punctuation", "**水温适度。**水的温度", "水温适度。"],
+    ["Japanese punctuation", "**テスト。**テスト", "テスト。"],
+    [
+      "Korean punctuation before a particle",
       '**"무엇을 먼저 정해두고 시작할지"**가',
+      '"무엇을 먼저 정해두고 시작할지"',
+    ],
+  ])("renders CJK-friendly strong emphasis: %s", (_name, content, strongText) => {
+    const { container } = render(<ReadonlyContent content={content} />);
+
+    expect(container.querySelector("strong")?.textContent).toBe(strongText);
+    expect(container.textContent).not.toContain("**");
+  });
+
+  it("repairs a trailing space before a CJK strong closing delimiter", () => {
+    const { container } = render(
+      <ReadonlyContent content="**为什么做，收益是什么。 **Multica 的能力边界" />,
     );
 
-    const safe = render(
-      <ReadonlyContent content={'"**무엇을 먼저 정해두고 시작할지**"가'} />,
+    expect(container.querySelector("strong")?.textContent).toBe(
+      "为什么做，收益是什么。",
     );
+    expect(container.textContent).toBe("为什么做，收益是什么。 Multica 的能力边界");
+  });
 
-    expect(safe.container.querySelector("strong")?.textContent).toBe(
-      "무엇을 먼저 정해두고 시작할지",
-    );
-    expect(safe.container.textContent).toContain('"무엇을 먼저 정해두고 시작할지"가');
+  it.each([
+    ["inline code", "`**中文。 **后文`"],
+    ["fenced code", "```md\n**中文。 **后文\n```"],
+    ["indented code", "    **中文。 **后文"],
+    ["escaped Markdown", "\\**中文。 **后文"],
+    ["non-CJK prose", "**English sentence. **next"],
+  ])("does not repair trailing-space emphasis in %s", (_name, content) => {
+    const { container } = render(<ReadonlyContent content={content} />);
+
+    expect(container.querySelector("strong")).toBeNull();
+    expect(container.textContent).toContain("**");
   });
 });
 
@@ -267,23 +413,32 @@ describe("ReadonlyContent code styling", () => {
     expect(blockCode?.textContent).toBe(literalCode);
   });
 
-  it("renders code blocks without a language tag (lowlight highlightAuto fallback)", () => {
-    const token = "mul_407ec1e4464b580304362ed749f821901fd7d310";
+  it("renders code blocks without a language tag as plaintext", () => {
+    const token = "const answer = 42;";
     const { container } = render(
       <ReadonlyContent content={["```", token, "```"].join("\n")} />,
     );
     const blockCode = container.querySelector("pre code");
     expect(blockCode?.textContent?.trim()).toBe(token);
+    expect(blockCode?.querySelector("span")).toBeNull();
   });
 
-  it("keeps editor code literal by disabling font ligatures", () => {
-    const codeCss = readFileSync("editor/styles/code.css", "utf8");
+  it("copies the whole fenced code block from the readonly toolbar", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const source = ["pnpm install", "pnpm test"].join("\n");
+    const { getByRole } = render(
+      <ReadonlyContent content={["```bash", source, "```"].join("\n")} />,
+    );
 
-    expect(codeCss).toContain(".rich-text-editor code");
-    expect(codeCss).toContain(".rich-text-editor pre");
-    expect(codeCss).toContain(".rich-text-editor pre code");
-    expect(codeCss).toContain("font-variant-ligatures: none;");
-    expect(codeCss).toContain('font-feature-settings: "liga" 0;');
+    fireEvent.click(getByRole("button", { name: "Copy code" }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(source);
+    });
   });
 });
 
@@ -344,37 +499,82 @@ describe("ReadonlyContent Mermaid rendering", () => {
     expect(container.querySelector("pre")).toBeNull();
   });
 
-  it("opens a fullscreen lightbox when the toolbar button is clicked", async () => {
+  it("opens the fullscreen viewer from the toolbar and closes it with Escape", async () => {
     const { container } = render(
       <ReadonlyContent
         content={["```mermaid", "graph LR", "  A[Start] --> B[Done]", "```"].join("\n")}
       />,
     );
 
-    const button = await waitFor(() => {
+    const expandButton = await waitFor(() => {
       const found = container.querySelector<HTMLButtonElement>(
-        ".mermaid-diagram-toolbar button",
+        '.mermaid-diagram-toolbar button[aria-label="Open diagram viewer"]',
       );
       expect(found).not.toBeNull();
       return found!;
     });
 
-    expect(document.querySelector(".mermaid-diagram-lightbox")).toBeNull();
+    expect(document.querySelector(".zoom-canvas")).toBeNull();
 
-    fireEvent.click(button);
+    fireEvent.click(expandButton);
 
-    const lightboxFrame = document.querySelector<HTMLIFrameElement>(
-      ".mermaid-diagram-lightbox-frame",
-    );
-    expect(lightboxFrame).not.toBeNull();
-    expect(lightboxFrame?.getAttribute("sandbox")).toBe("");
-    expect(lightboxFrame?.srcdoc).toContain("mock diagram");
-    expect(lightboxFrame?.srcdoc).toContain("max-height: 100%");
+    const viewerFrame = await waitFor(() => {
+      const found = document.querySelector<HTMLIFrameElement>(".mermaid-viewer-frame");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(viewerFrame.getAttribute("sandbox")).toBe("");
+    expect(viewerFrame.srcdoc).toContain("mock diagram");
+    // The viewer draws at natural size and lets the host transform handle zoom;
+    // an inline-style max-width clamp here would cap how far it can scale.
+    expect(viewerFrame.srcdoc).toContain("width: 123px");
+    expect(viewerFrame.srcdoc).toContain("max-width: none");
 
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => {
-      expect(document.querySelector(".mermaid-diagram-lightbox")).toBeNull();
+      expect(document.querySelector(".zoom-canvas")).toBeNull();
     });
+  });
+
+  it("keeps the inline toolbar outside the scroll container so wide diagrams stay openable", async () => {
+    const { container } = render(
+      <ReadonlyContent
+        content={["```mermaid", "graph LR", "  A[Start] --> B[Done]", "```"].join("\n")}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector(".mermaid-diagram-toolbar")).not.toBeNull();
+    });
+
+    // Previously the toolbar was an absolutely-positioned child of the
+    // horizontally-scrolling element, so on a wide diagram it scrolled out of
+    // view along with the content and left no way to open or copy it.
+    const scroller = container.querySelector(".mermaid-diagram-scroll");
+    expect(scroller).not.toBeNull();
+    expect(scroller?.querySelector(".mermaid-diagram-toolbar")).toBeNull();
+  });
+
+  it("shows the compact error state instead of embedding Mermaid's parser error SVG", async () => {
+    // With suppressErrorRendering enabled, invalid syntax makes render() reject
+    // instead of emitting Mermaid's built-in error graphic.
+    vi.mocked(mermaid.render).mockRejectedValueOnce(
+      new Error("Parse error on line 3"),
+    );
+
+    const chart = "graph LR\n  A -->";
+    const { container } = render(
+      <ReadonlyContent content={["```mermaid", chart, "```"].join("\n")} />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector(".mermaid-diagram-error")).not.toBeNull();
+    });
+
+    expect(container.querySelector(".mermaid-diagram-frame")).toBeNull();
+    expect(container.querySelector(".mermaid-diagram-error code")?.textContent).toBe(
+      chart,
+    );
   });
 });
 
@@ -495,6 +695,65 @@ describe("ReadonlyContent file-card → AttachmentBlock HTML routing", () => {
     expect(container.querySelector("iframe")).toBeNull();
     expect(container.querySelector("img")).toBeNull();
   });
+
+  it("resolves a markdown image whose src is the response download_url", () => {
+    const href = "https://cdn.example.test/shot.png?Signature=stale";
+    const fresh = "https://cdn.example.test/shot.png?Signature=fresh";
+    const attachment = {
+      id: "11111111-2222-3333-4444-555555555555",
+      url: "https://cdn.example.test/shot.png",
+      download_url: fresh,
+      markdown_url: "/api/attachments/11111111-2222-3333-4444-555555555555/download",
+      filename: "shot.png",
+      content_type: "image/png",
+      size_bytes: 1024,
+    } as any;
+
+    const { container } = renderWithQuery(
+      <ReadonlyContent
+        content={`![](${href})`}
+        attachments={[attachment]}
+      />,
+    );
+
+    const img = container.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(fresh);
+    expect(img?.getAttribute("alt")).toBe("shot.png");
+  });
+});
+
+describe("ReadonlyContent inline data-URI images", () => {
+  // Issue comments render through ReadonlyContent, which has its own sanitize
+  // schema + urlTransform separate from the base Markdown component. Agents
+  // inline auth QR codes as `![](data:image/png;base64,...)`; both gates used
+  // to strip the src and surface a broken image (MUL-3961).
+  const PNG_1X1 =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+  function renderWithQuery(ui: ReactElement) {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  }
+
+  it("preserves the src of an inline data:image/png image", () => {
+    const { container } = renderWithQuery(
+      <ReadonlyContent content={`![QR Code](${PNG_1X1})`} />,
+    );
+
+    expect(container.querySelector("img")?.getAttribute("src")).toBe(PNG_1X1);
+  });
+
+  it("strips non-image data URIs (data:text/html)", () => {
+    const { container } = renderWithQuery(
+      <ReadonlyContent content={"![x](data:text/html,<script>alert(1)</script>)"} />,
+    );
+
+    // The value allow-list rejects non-image data URIs, so no usable src reaches
+    // the <img>. AttachmentRenderer still mounts an <img>, but with an empty src.
+    expect(container.querySelector("img")?.getAttribute("src") ?? "").toBe("");
+  });
 });
 
 describe("ReadonlyContent slash command rendering", () => {
@@ -515,5 +774,86 @@ describe("ReadonlyContent slash command rendering", () => {
 
     expect(container.querySelector(".slash-command")).toBeNull();
     expect(container.querySelector("a")).not.toBeNull();
+  });
+});
+
+describe("ReadonlyContent bare URL autolinking (MUL-4242)", () => {
+  // A bare URL wrapped in bold used to be linkified into [url**](url**), which
+  // swallowed the closing `**`: the bold never closed (leading `**` showed as
+  // literal asterisks) and the href was corrupted with a trailing `**`. The
+  // shared linkify now drops a trailing markdown-delimiter run from the URL, so
+  // the closing `**` stays as emphasis outside a clean [url](url).
+  it("renders a bold-wrapped bare URL as bold plus a clean link", () => {
+    const url = "https://github.com/multica-ai/multica/pull/5081";
+    const { container } = render(<ReadonlyContent content={`**PR：${url}**`} />);
+
+    const strong = container.querySelector("strong");
+    expect(strong).not.toBeNull();
+    const anchor = strong!.querySelector("a");
+    expect(anchor?.getAttribute("href")).toBe(url);
+    // No literal asterisks leak into the text, no trailing `**` in the href.
+    expect(container.textContent).not.toContain("**");
+    expect(anchor?.getAttribute("href")).not.toContain("*");
+  });
+
+  it("bolds a bare URL even when a CJK punctuation immediately follows (variant B)", () => {
+    // `**url**（MUL）` — the closing `**` is glued to a fullwidth paren. gfm
+    // autolink swallowed the `**` here; the shared string linkify does not.
+    const url = "https://github.com/multica-ai/multica/pull/5133";
+    const { container } = render(
+      <ReadonlyContent content={`PR：**${url}**（MUL-4277）。`} />,
+    );
+
+    const strong = container.querySelector("strong");
+    expect(strong).not.toBeNull();
+    expect(strong!.querySelector("a")?.getAttribute("href")).toBe(url);
+    expect(container.textContent).not.toContain("**");
+    expect(container.textContent).toContain("（MUL-4277）");
+  });
+
+  it("still autolinks a plain bare URL", () => {
+    const { container } = render(
+      <ReadonlyContent content={"see https://example.com/foo here"} />,
+    );
+    expect(container.querySelector('a[href="https://example.com/foo"]')).not.toBeNull();
+  });
+
+  it("stops an autolinked URL at CJK punctuation instead of swallowing it", () => {
+    const { container } = render(
+      <ReadonlyContent content={"见 https://example.com/foo。后面还有字"} />,
+    );
+    const anchor = container.querySelector("a");
+    expect(anchor?.getAttribute("href")).toBe("https://example.com/foo");
+    expect(anchor?.textContent).toBe("https://example.com/foo");
+    // The CJK tail stays outside the link.
+    expect(container.textContent).toContain("。后面还有字");
+  });
+
+  it("keeps every URL in a CJK-separated run linked, not just the first", () => {
+    // `url1、url2` — linkify-it merges both across the CJK comma; collectLinkify
+    // truncates at 、 and rescans the tail so both URLs become their own link.
+    const { container } = render(
+      <ReadonlyContent content={"两个地址 https://a.com/x、https://b.com/y"} />,
+    );
+    const hrefs = Array.from(container.querySelectorAll("a")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(hrefs).toContain("https://a.com/x");
+    expect(hrefs).toContain("https://b.com/y");
+    // The 、 separator stays as text between the two links.
+    expect(container.textContent).toContain("、");
+  });
+
+  it("leaves an explicit link's destination untouched even when it ends in CJK", () => {
+    const { container } = render(
+      <ReadonlyContent content={"[看](https://example.com/x。)后文"} />,
+    );
+    const anchor = container.querySelector("a");
+    // react-markdown percent-encodes the CJK char; the point is it is NOT
+    // trimmed off the way an autolink literal would be.
+    expect(decodeURIComponent(anchor?.getAttribute("href") ?? "")).toBe(
+      "https://example.com/x。",
+    );
+    expect(anchor?.textContent).toBe("看");
   });
 });

@@ -9,6 +9,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -67,6 +72,9 @@ func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) 
 		return body, true, nil
 	}
 	if filePath != "" {
+		if err := ensureFileFlagWithinWorkdir(cmd, fileFlag, flagName, filePath); err != nil {
+			return "", false, err
+		}
 		data, err := os.ReadFile(filePath)
 		if err != nil {
 			return "", false, fmt.Errorf("read file for --%s: %w", fileFlag, err)
@@ -81,6 +89,133 @@ func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) 
 		return "", false, nil
 	}
 	return util.UnescapeBackslashEscapes(inline), true, nil
+}
+
+// ensureFileFlagWithinWorkdir fails closed when a --<name>-file path resolves
+// outside the current working directory, unless --allow-external-file is set.
+//
+// Agent task workdirs are isolated per profile and per task; machine-shared
+// scratch paths like /tmp are not. MUL-4252 traced a cross-environment context
+// leak to exactly this gap: a quick-create run wrote its description to a fixed
+// /tmp/desc.md, the write silently failed because a *different* environment's
+// run had left a stale file there minutes earlier, and --description-file then
+// fed that stale content into the new issue. Requiring the file to live under
+// the workdir turns "silently read another run's file" into a loud command
+// failure — an "incorrect content" bug becomes a "command errored" bug.
+func ensureFileFlagWithinWorkdir(cmd *cobra.Command, fileFlag, flagName, filePath string) error {
+	if allow, _ := cmd.Flags().GetBool("allow-external-file"); allow {
+		return nil
+	}
+	within, err := fileWithinWorkingDir(filePath)
+	if err != nil {
+		return fmt.Errorf("resolve --%s path %q: %w", fileFlag, filePath, err)
+	}
+	if !within {
+		if !pathExists(filePath) {
+			return fmt.Errorf(
+				"--%s path %q does not exist; it also resolves outside the current working directory, "+
+					"so --allow-external-file would not make this read succeed. Write the file inside the "+
+					"task workdir (e.g. ./%s.md) and pass that path.",
+				fileFlag, filePath, flagName)
+		}
+		return fmt.Errorf(
+			"--%s path %q resolves outside the current working directory; "+
+				"write agent temp files inside the run workdir (e.g. ./%s.md) rather than machine-shared "+
+				"paths like /tmp, where another run's stale file can be read by mistake. "+
+				"Pass --allow-external-file to override.",
+			fileFlag, filePath, flagName)
+	}
+	return nil
+}
+
+// pathExists reports whether filePath names something on disk. It exists to
+// separate the two facts the containment guard used to merge: a rejected path
+// that is ALSO missing has no stale file behind it for anyone to read by
+// mistake, so leading with --allow-external-file sends the caller to disable
+// the guard and hit an unrelated not-found error on the retry. Any stat error
+// other than "not exists" (a permission wall, a broken mount) is treated as
+// "exists" so the guard keeps its own wording and stays fail-closed.
+func pathExists(filePath string) bool {
+	_, err := os.Stat(filePath)
+	return !errors.Is(err, os.ErrNotExist)
+}
+
+// fileWithinWorkingDir reports whether filePath resolves to a location inside
+// the process working directory. Both sides are canonicalized the same way, so
+// aliased roots (e.g. macOS /tmp -> /private/tmp), symlinks planted inside the
+// workdir, and directory junctions pointing out of it all fail closed. A path
+// that does not exist yet is resolved as far as it exists, so the caller's
+// os.ReadFile still surfaces the real not-found error afterwards.
+//
+// Windows relative paths are handed over for what they are, not for what they
+// look like: `\tmp\desc.md` resolves against the workdir's volume ROOT and
+// `C:tmp\desc.md` against the current directory on C:, so prefixing the
+// workdir onto either would judge a shadow file while os.ReadFile opens the
+// real one. util.ResolveSymlinksBestEffort preserves those kinds, for link
+// targets as well as for the input itself.
+func fileWithinWorkingDir(filePath string) (bool, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return false, err
+	}
+	base, err := util.ResolveSymlinksBestEffort(cwd)
+	if err != nil {
+		// The workdir's own resolution cannot be determined (an unobservable
+		// drive, a reparse point no query can name). Comparing a candidate
+		// against a root that cannot be named judges whatever string the
+		// resolver would have guessed, so fail closed.
+		return false, nil
+	}
+	// Canonicalize the candidate exactly the way the base was, and hand it over
+	// as typed: util.ResolveSymlinksBestEffort makes it absolute itself, because
+	// pre-joining it here would clean the string first and collapse a ".."
+	// across a symlink — judging a different path than the one os.ReadFile then
+	// opens.
+	//
+	// os.Getwd() returns the LOGICAL working directory when $PWD names it (a
+	// shell's `cd`, and the PWD the daemon exports to agent processes, both
+	// carry unresolved symlinks), so the two sides only agree once both are
+	// resolved. Resolving best-effort is what makes that possible for a
+	// candidate that does not exist yet — a typo, or an artifact a build step
+	// never produced — and every cheaper approximation gets one direction wrong:
+	//
+	//   - Leaving the candidate unresolved (filepath.Clean) reads a path inside
+	//     the workdir as outside it, which reports a missing file as a
+	//     guardrail violation and points the caller at --allow-external-file
+	//     instead of at the real error.
+	//   - Resolving only one level up (filepath.Dir) still breaks once an
+	//     intermediate directory is missing, and worse: with an already-
+	//     canonical cwd it reads `escape/sub/x.md` — under a symlink pointing
+	//     out of the workdir — as INSIDE it, because the unresolvable tail
+	//     falls back to a lexical clean that never sees the symlink.
+	abs, err := util.ResolveSymlinksBestEffort(filePath)
+	if err != nil {
+		// ErrUnresolvablePath: the kernel may open this path somewhere this
+		// process cannot name — a reparse point that redirects but survives
+		// both os.Readlink and a handle query, or a drive-relative path on a
+		// drive whose current directory is unobservable. The string the input
+		// spells is not evidence of where the kernel would read, so fail
+		// closed; the caller's own os.ReadFile would surface a plain error
+		// for the same path.
+		return false, nil
+	}
+	rel, err := filepath.Rel(base, abs)
+	if err != nil {
+		// Two absolute paths that filepath.Rel cannot relate are on different
+		// volumes, which is as far outside the workdir as a path can get. Only
+		// Windows produces this: with a workdir on C:, `--content-file
+		// Z:\report.md` used to surface `Rel: can't make Z:\report.md relative
+		// to C:\...` as an internal resolve failure instead of the guardrail's
+		// own explanation — the same misleading-diagnosis shape this guard is
+		// being fixed for. Measured on 10.0.19045 / go1.26.6. There is no Unix
+		// input that reaches this branch, so the windows-tagged test in this
+		// package is the only thing that covers it.
+		return false, nil
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false, nil
+	}
+	return true, nil
 }
 
 var issueCmd = &cobra.Command{
@@ -109,6 +244,14 @@ var issuePullRequestsCmd = &cobra.Command{
 	RunE:    runIssuePullRequests,
 }
 
+var issueChildrenCmd = &cobra.Command{
+	Use:     "children <id>",
+	Aliases: []string{"subissues"},
+	Short:   "List an issue's sub-issues grouped by stage",
+	Args:    exactArgs(1),
+	RunE:    runIssueChildren,
+}
+
 var issueCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new issue",
@@ -132,10 +275,30 @@ var issueAssignCmd = &cobra.Command{
 var issueStatusCmd = &cobra.Command{
 	Use:   "status <id> <status>",
 	Short: "Change issue status",
-	Long: "Change an issue's status. Valid statuses: " +
-		"backlog, todo, in_progress, in_review, done, blocked, cancelled.",
+	Long: "Change an issue's status. The argument is a status KEY, not its display name.\n" +
+		"Built-in keys: backlog, todo, in_progress, in_review, done, blocked, cancelled.\n" +
+		"A workspace may define custom statuses on top of these; their keys are shown in\n" +
+		"Workspace Settings > Issue Statuses, and an unknown value errors with the full list.",
 	Args: exactArgs(2),
 	RunE: runIssueStatus,
+}
+
+var issueReorderCmd = &cobra.Command{
+	Use:   "reorder <id>",
+	Short: "Move an issue within its status column",
+	Long: "Reposition an issue inside its current status column by computing a new\n" +
+		"ordering position, the same value the board's drag-and-drop sets.\n\n" +
+		"Pick exactly one target:\n" +
+		"  --before <id>  place it directly above another issue in the same column\n" +
+		"  --after  <id>  place it directly below another issue in the same column\n" +
+		"  --top          move it to the top of its column\n" +
+		"  --bottom       move it to the bottom of its column\n\n" +
+		"Reorder stays inside the issue's current column. To move an issue to a\n" +
+		"different column, change its status first with `multica issue status`,\n" +
+		"which lands it at the top of the destination column — no follow-up\n" +
+		"reorder needed.",
+	Args: exactArgs(1),
+	RunE: runIssueReorder,
 }
 
 // Comment subcommands.
@@ -159,11 +322,42 @@ var issueCommentAddCmd = &cobra.Command{
 	RunE:  runIssueCommentAdd,
 }
 
+var issueCommentUpdateCmd = &cobra.Command{
+	Use:   "update <comment-id>",
+	Short: "Update a comment",
+	Long: "Update a comment you authored. Workspace owners and admins can update any comment.\n\n" +
+		"Pass the revision returned by `multica issue comment list <issue-id> --output json`; " +
+		"the update is rejected if another editor changed the comment first. On that rejection, " +
+		"read the latest body and merge your change into it before retrying. Do not just resend " +
+		"with the newer revision: that overwrites the other edit.\n\n" +
+		"Changing the content is a new trigger, not a silent fix: the server cancels runs this " +
+		"comment triggered that are still in flight and re-enqueues every agent the new body " +
+		"mentions. Attachments are left as they are.",
+	Args: exactArgs(1),
+	RunE: runIssueCommentUpdate,
+}
+
 var issueCommentDeleteCmd = &cobra.Command{
 	Use:   "delete <comment-id>",
 	Short: "Delete a comment",
+	Long: "Delete a single comment. Its replies are kept: a comment that has replies stays in the thread " +
+		"as an empty placeholder (deleted_at set) so they keep their place.",
+	Args: exactArgs(1),
+	RunE: runIssueCommentDelete,
+}
+
+var issueCommentResolveCmd = &cobra.Command{
+	Use:   "resolve <comment-id>",
+	Short: "Resolve a comment thread",
 	Args:  exactArgs(1),
-	RunE:  runIssueCommentDelete,
+	RunE:  runIssueCommentResolve,
+}
+
+var issueCommentUnresolveCmd = &cobra.Command{
+	Use:   "unresolve <comment-id>",
+	Short: "Unresolve a comment thread",
+	Args:  exactArgs(1),
+	RunE:  runIssueCommentUnresolve,
 }
 
 // Subscriber subcommands.
@@ -196,31 +390,52 @@ var issueSubscriberRemoveCmd = &cobra.Command{
 
 // Execution history subcommands.
 
+// headerActiveRunsTruncated mirrors handler.HeaderActiveRunsTruncated. Declared
+// as a literal rather than imported because the CLI does not depend on the
+// handler package (same convention as headerTimelineTruncated in
+// `issue timeline`).
+const headerActiveRunsTruncated = "X-Active-Runs-Truncated"
+
 var issueRunsCmd = &cobra.Command{
 	Use:   "runs <issue-id>",
 	Short: "List execution history for an issue",
-	Args:  exactArgs(1),
-	RunE:  runIssueRuns,
+	Long: "List agent runs for an issue.\n\n" +
+		"Defaults to this issue's full execution history, newest first. Narrow it to " +
+		"work in flight with --active, or widen it across the sub-issue family with " +
+		"--siblings when you need to know whether another agent is already working " +
+		"next to you.",
+	Args: exactArgs(1),
+	RunE: runIssueRuns,
 }
 
 var issueRunMessagesCmd = &cobra.Command{
-	Use:   "run-messages <task-id>",
+	Use:   "run-messages <run-id>",
 	Short: "List messages for an execution",
 	Args:  exactArgs(1),
 	RunE:  runIssueRunMessages,
 }
 
+var issueUsageCmd = &cobra.Command{
+	Use:   "usage <issue-id>",
+	Short: "Show aggregated token usage for an issue",
+	Long: "Show aggregated token usage for an issue.\n\n" +
+		"In table output, RUNS counts terminal runs. Token totals prefixed with >= " +
+		"are lower bounds because one or more terminal runs did not report usage.",
+	Args: exactArgs(1),
+	RunE: runIssueUsage,
+}
+
 var issueRerunCmd = &cobra.Command{
 	Use:   "rerun <id>",
-	Short: "Re-enqueue an issue's current agent assignment as a fresh task",
+	Short: "Re-enqueue an issue's current agent assignment as a fresh run",
 	Args:  exactArgs(1),
 	RunE:  runIssueRerun,
 }
 
 var issueCancelTaskCmd = &cobra.Command{
-	Use:   "cancel-task <task-id>",
-	Short: "Cancel a running or queued task (interrupts in-flight agent)",
-	Long: "Cancel a single task by its ID. Accepts the short ID prefix shown by `issue runs`. " +
+	Use:   "cancel-task <run-id>",
+	Short: "Cancel an in-progress or queued run (interrupts in-flight agent)",
+	Long: "Cancel a single run by its ID. Accepts the short ID prefix shown by `issue runs`. " +
 		"Use --issue to scope short-ID resolution to a specific issue when ambiguous. " +
 		"Triggers daemon-side interrupt of any in-flight agent so it stops emitting tool calls promptly.",
 	Args: exactArgs(1),
@@ -229,34 +444,139 @@ var issueCancelTaskCmd = &cobra.Command{
 
 var issueSearchCmd = &cobra.Command{
 	Use:   "search <query>",
-	Short: "Search issues by title or description",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runIssueSearch,
+	Short: "Search issues by title, description, or comments",
+	Long: "Search issues in the current workspace. The query matches issue titles,\n" +
+		"descriptions, and comment bodies, so a conclusion that only lives in a\n" +
+		"comment thread is still findable.\n\n" +
+		"A bare number or an identifier-shaped query (\"412\", \"AGE-412\") matches\n" +
+		"the issue with that number. The prefix is not validated, and number\n" +
+		"matches rank first, so pasting an identifier from another tracker can\n" +
+		"put an unrelated local issue at the top of the results.\n\n" +
+		"The MATCH column (match_source in --output json) reports the strongest\n" +
+		"field that matched — title, description, or comment — and falls back to\n" +
+		"\"comment\" for a number-only hit. Treat it as a display hint, not a\n" +
+		"filter.",
+	Args: cobra.ExactArgs(1),
+	RunE: runIssueSearch,
 }
 
+// validIssueStatuses are the 7 BUILT-IN status keys, present in every
+// workspace. Since MUL-6243 a workspace may define additional custom statuses,
+// so this is the list shown in help text and error messages, not the set of
+// accepted values — see validateIssueStatus.
 var validIssueStatuses = []string{
 	"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled",
+}
+
+var validIssuePriorities = []string{
+	"urgent", "high", "medium", "low", "none",
+}
+
+// issueListMaxPageSize mirrors the page clamp in the server's ListIssues
+// handler; the two must move together.
+const issueListMaxPageSize = 100
+
+// validIssueSortColumns are the sort keys `issue list --sort` accepts. They
+// mirror the server's ListIssues handler. "position" is the default and is
+// always sorted ascending (the board's manual drag order), so --direction is
+// only meaningful for the other columns.
+var validIssueSortColumns = []string{
+	"position", "title", "created_at", "start_date", "due_date", "priority",
+}
+
+// validIssueFields are the top-level keys /api/issues actually emits for
+// `issue list` — i.e. the JSON tags of handler.IssueResponse
+// (server/internal/handler/issue.go), minus reactions/attachments/
+// source_context, which are omitempty and never set by the list endpoint
+// (detail-only). TestValidIssueFieldsMatchListEndpointShape guards this
+// against drifting from that struct. There is no plain "assignee" field —
+// it is split into assignee_type/assignee_id — so that name is rejected
+// rather than silently ignored.
+var validIssueFields = []string{
+	"id", "workspace_id", "number", "identifier", "title", "description",
+	"status", "status_category", "status_name", "priority", "assignee_type",
+	"assignee_id", "creator_type", "creator_id", "parent_issue_id",
+	"duplicate_of", "project_id", "position", "stage", "start_date", "due_date", "created_at",
+	"updated_at", "revision", "last_activity_at", "metadata", "properties",
+	"labels",
+}
+
+// directionalIssueSortColumns are the sort keys for which --direction is
+// meaningful: every valid column except "position". Derived from
+// validIssueSortColumns so the two stay in sync.
+var directionalIssueSortColumns = func() []string {
+	cols := make([]string, 0, len(validIssueSortColumns)-1)
+	for _, c := range validIssueSortColumns {
+		if c != "position" {
+			cols = append(cols, c)
+		}
+	}
+	return cols
+}()
+
+// validateIssueStatus checks the shape of a status key, not its membership.
+//
+// Since MUL-6243 a workspace can define custom statuses, so the CLI cannot know
+// the valid set without a round trip. It validates the format locally — that
+// still catches the common typo classes instantly and offline — and lets the
+// server reject an unknown key, which it does with a 400 listing that
+// workspace's actual statuses. Keeping a hard-coded list here would reject the
+// custom statuses the feature exists to enable.
+func validateIssueStatus(status string) error {
+	trimmed := strings.ToLower(strings.TrimSpace(status))
+	if trimmed == "" {
+		return fmt.Errorf("invalid status %q; valid values: %s",
+			status, strings.Join(validIssueStatuses, ", "))
+	}
+	if !issueStatusKeyPattern.MatchString(trimmed) {
+		return fmt.Errorf(
+			"invalid status %q; a status key is 1-32 characters of lowercase letters, digits or underscore. Built-in values: %s",
+			status, strings.Join(validIssueStatuses, ", "))
+	}
+	return nil
+}
+
+// issueStatusKeyPattern mirrors the issue_status.key storage constraint.
+var issueStatusKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{0,31}$`)
+
+func validateIssuePriority(priority string) error {
+	return validateIssueEnum("priority", priority, validIssuePriorities)
+}
+
+func validateIssueEnum(field, value string, allowed []string) error {
+	for _, a := range allowed {
+		if value == a {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid %s %q; valid values: %s", field, value, strings.Join(allowed, ", "))
 }
 
 func init() {
 	issueCmd.AddCommand(issueListCmd)
 	issueCmd.AddCommand(issueGetCmd)
 	issueCmd.AddCommand(issuePullRequestsCmd)
+	issueCmd.AddCommand(issueChildrenCmd)
 	issueCmd.AddCommand(issueCreateCmd)
 	issueCmd.AddCommand(issueUpdateCmd)
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
+	issueCmd.AddCommand(issueReorderCmd)
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueSubscriberCmd)
 	issueCmd.AddCommand(issueRunsCmd)
 	issueCmd.AddCommand(issueRunMessagesCmd)
+	issueCmd.AddCommand(issueUsageCmd)
 	issueCmd.AddCommand(issueRerunCmd)
 	issueCmd.AddCommand(issueCancelTaskCmd)
 	issueCmd.AddCommand(issueSearchCmd)
 
 	issueCommentCmd.AddCommand(issueCommentListCmd)
 	issueCommentCmd.AddCommand(issueCommentAddCmd)
+	issueCommentCmd.AddCommand(issueCommentUpdateCmd)
 	issueCommentCmd.AddCommand(issueCommentDeleteCmd)
+	issueCommentCmd.AddCommand(issueCommentResolveCmd)
+	issueCommentCmd.AddCommand(issueCommentUnresolveCmd)
 
 	issueSubscriberCmd.AddCommand(issueSubscriberListCmd)
 	issueSubscriberCmd.AddCommand(issueSubscriberAddCmd)
@@ -271,38 +591,52 @@ func init() {
 	issueListCmd.Flags().String("assignee-id", "", "Filter by assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueListCmd.Flags().String("project", "", "Filter by project ID")
 	issueListCmd.Flags().StringSlice("metadata", nil, "Filter by metadata key=value (repeatable; combined with AND). Value is JSON-parsed: 'true'/'false' → bool, numbers → number, otherwise string. Wrap as '\"42\"' to force a string when the value would otherwise sniff as a number.")
-	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return")
-	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination)")
+	issueListCmd.Flags().StringArray("property", nil, `Filter by custom property, written as "Name=Value" (repeatable, one value per flag). Name is a property name (case-insensitive) or its UUID. Value depends on the type: an option name or id for select and multi_select, true or false for checkbox, a member name, email, or id for actor types, and the value itself for text, url, number, and date (YYYY-MM-DD). Use __none__ to match issues where the property is unset; it works for every type, so an option or member actually named __none__ has to be given by id, as does a property whose name contains "=" or ends in <, > or ! (the >=, <=, and != spellings are reserved for comparison filters). Repeating a property matches ANY of its values; different properties must ALL match.`)
+	issueListCmd.Flags().Int("limit", 50, fmt.Sprintf("Page size, 1 to %d (the server returns at most %d issues per request; use --offset to page through more)", issueListMaxPageSize, issueListMaxPageSize))
+	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination; while --output json reports has_more, advance it by the number of issues in that same response)")
+	issueListCmd.Flags().String("sort", "", "Sort column: position (default, manual board order), title, created_at, start_date, due_date, priority, or property:<name-or-id> to sort by a custom property (select properties sort by option order)")
+	issueListCmd.Flags().String("direction", "", "Sort direction (asc or desc); requires --sort to be a non-position column or a property sort (position is always ascending)")
+	issueListCmd.Flags().String("fields", "", "JSON output only: comma-separated list of issue fields to include (e.g. id,title,status,priority). Filtering happens client-side after the full response is fetched, so this shrinks CLI output size and agent context cost, not network/server-side cost. Omit for the full issue object (default, unchanged). Valid fields: "+strings.Join(validIssueFields, ", "))
+	issueListCmd.Flags().Bool("resolve-properties", false, resolvePropertiesHelp)
 
 	// issue get
 	issueGetCmd.Flags().String("output", "json", "Output format: table or json")
+	issueGetCmd.Flags().Bool("resolve-properties", false, resolvePropertiesHelp)
 
 	// issue pull-requests
 	issuePullRequestsCmd.Flags().String("output", "table", "Output format: table or json")
+
+	issueChildrenCmd.Flags().String("output", "table", "Output format: table or json")
+	issueChildrenCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 
 	// issue create
 	issueCreateCmd.Flags().String("title", "", "Issue title (required)")
 	issueCreateCmd.Flags().String("description", "", "Issue description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
 	issueCreateCmd.Flags().Bool("description-stdin", false, "Read issue description from stdin (preserves multi-line content verbatim)")
-	issueCreateCmd.Flags().String("description-file", "", "Read issue description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
+	issueCreateCmd.Flags().String("description-file", "", "Read issue description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
+	issueCreateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
 	issueCreateCmd.Flags().String("status", "", "Issue status")
 	issueCreateCmd.Flags().String("priority", "", "Issue priority")
 	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member, agent, or squad; fuzzy match)")
 	issueCreateCmd.Flags().String("assignee-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueCreateCmd.Flags().String("parent", "", "Parent issue ID")
+	issueCreateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) grouping this sub-issue into an ordered barrier group under its parent; omit for unstaged. The parent assignee is woken only when every sub-issue in a stage finishes.")
 	issueCreateCmd.Flags().String("project", "", "Project ID")
 	issueCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
-	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
+	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times). Each file is uploaded and its markdown reference is appended to the description, which is what makes it render on the issue page")
 	issueCreateCmd.Flags().StringSlice("attachment-id", nil, "Existing attachment UUID(s) to bind to the created issue (can be specified multiple times)")
+	issueCreateCmd.Flags().StringArray("property", nil, `Set a custom property atomically with creation as "Name=Value" (repeatable, one distinct property per flag). Multi-value properties use comma-separated values inside one flag. Property and option/member names are case-insensitive; UUIDs are accepted. Filter-only __none__, >=, <=, and != forms are rejected.`)
 
 	// issue update
 	issueUpdateCmd.Flags().String("title", "", "New title")
 	issueUpdateCmd.Flags().String("description", "", "New description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
 	issueUpdateCmd.Flags().Bool("description-stdin", false, "Read new description from stdin (preserves multi-line content verbatim)")
-	issueUpdateCmd.Flags().String("description-file", "", "Read new description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
+	issueUpdateCmd.Flags().String("description-file", "", "Read new description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
+	issueUpdateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file / --attachment to read a path outside the current working directory. Off by default so a stale temp file from another run/environment can't be picked up (MUL-4252).")
+	issueUpdateCmd.Flags().StringSlice("attachment", nil, "Local file path(s) to attach to the issue description (repeatable); references are appended to the end of the description")
 	issueUpdateCmd.Flags().String("status", "", "New status")
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member, agent, or squad; fuzzy match)")
@@ -311,15 +645,23 @@ func init() {
 	issueUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
+	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
+	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
+	issueUpdateCmd.Flags().Bool("no-start", false, "Apply the update without starting an agent run")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
+	issueStatusCmd.Flags().Bool("no-start", false, "Change status without starting an agent run")
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// issue reorder
+	registerIssueReorderFlags(issueReorderCmd)
 
 	// issue assign
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member, agent, or squad; fuzzy match)")
 	issueAssignCmd.Flags().String("to-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --to)")
 	issueAssignCmd.Flags().Bool("unassign", false, "Remove current assignee")
+	issueAssignCmd.Flags().Bool("no-start", false, "Assign ownership without starting an agent run")
 	issueAssignCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue comment list
@@ -327,33 +669,53 @@ func init() {
 	issueCommentListCmd.Flags().String("since", "", "Only return comments created after this timestamp (RFC3339)")
 	issueCommentListCmd.Flags().String("thread", "", "Comment UUID — return the thread containing this comment (root + every descendant). May be a root or a reply id.")
 	issueCommentListCmd.Flags().Int("tail", 0, "Only valid with --thread. Cap reply count to the N most recent replies; the thread root is always included (even with --tail 0). Use --before/--before-id to scroll to older replies.")
-	issueCommentListCmd.Flags().Int("recent", 0, "Return the N most recently active threads (root + descendants per thread). Use --before/--before-id from the previous response to scroll to older threads.")
+	issueCommentListCmd.Flags().Int("recent", 0, "Return the N most recently active threads. N caps THREADS, not comments: every thread carries its root plus EVERY descendant with no per-thread cap, so on an issue with fewer than N root threads this returns the entire history (minus folded resolved threads). Prefer two bounded reads: scan with --roots-only --summary, then open selected threads with --thread <id> --tail N. Use --before/--before-id from the previous response to scroll to older threads.")
 	issueCommentListCmd.Flags().Bool("roots-only", false, "Only return top-level comments (parent_id is null). Each root also carries reply_count + last_activity_at so you can triage which thread to open.")
+	issueCommentListCmd.Flags().Bool("compact", false, "JSON output only: drop response fields that carry no information for a reader — the issue_id echoed from the request path, source_task_id, updated_at when identical to created_at, null-valued fields, and empty arrays. Content and identity fields pass through untouched. Recommended for agent reads; composes with any mode.")
 	issueCommentListCmd.Flags().Bool("summary", false, "Clip each comment's content to a short preview (sets content_truncated) so you can scan a list without pulling full bodies. Composes with any mode.")
-	issueCommentListCmd.Flags().String("before", "", "Cursor (RFC3339Nano timestamp). With --recent: thread cursor (last_activity_at). With --thread + --tail: reply cursor (reply created_at). Read from the X-Multica-Next-Before response header; must be paired with --before-id.")
+	issueCommentListCmd.Flags().Bool("full", false, "Escape hatch: return every comment in resolved threads verbatim. By default the complete-thread reads (default list, --recent, --thread without --tail) are folded — a resolved thread collapses to its root + conclusion, with the dropped count reported on the root — so you do not pay tokens for settled discussion. Pass --full when you need the folded discussion. No effect on --since/--tail/--roots-only reads, which are never folded.")
+	issueCommentListCmd.Flags().String("before", "", "Cursor (RFC3339Nano timestamp). With --recent: thread cursor (last_activity_at). With --thread + --tail: reply cursor (reply created_at). Read from the X-Multica-Next-Before response header, printed on stderr as \"Next thread cursor\" / \"Next reply cursor\"; must be paired with --before-id.")
 	issueCommentListCmd.Flags().String("before-id", "", "Cursor UUID. With --recent: thread root UUID. With --thread + --tail: oldest reply UUID. Read from the X-Multica-Next-Before-Id response header; must be paired with --before.")
 
 	// issue runs
 	issueRunsCmd.Flags().String("output", "table", "Output format: table or json")
-	issueRunsCmd.Flags().Bool("full-id", false, "Show full task UUIDs in table output")
+	issueRunsCmd.Flags().Bool("full-id", false, "Show full run UUIDs in table output")
+	issueRunsCmd.Flags().Bool("active", false, "Only in-flight runs (queued, dispatched, running, waiting_local_directory) instead of the full execution history. Answers \"is an agent working on this right now\" without pulling every past run.")
+	issueRunsCmd.Flags().Bool("siblings", false, "Widen to this issue's sub-issue family — its parent (or itself, when it has no parent) plus every child of that parent — so you can see whether another run is already working alongside you before starting overlapping code or PR work. Implies --active. Returns a compact per-run row (run, issue, agent, status, started) rather than the full execution-log record. Ordered running-first, newest-first within a status, and capped at 20 rows; when the cap truncates the answer the CLI says so on stderr, so a short list is never mistaken for a complete one. Advisory only: it reports work in flight, it does not reserve or serialise anything.")
+
+	// issue usage
+	issueUsageCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue rerun
 	issueRerunCmd.Flags().String("output", "json", "Output format: table or json")
 	// issue cancel-task
 	issueCancelTaskCmd.Flags().String("output", "json", "Output format: table or json")
-	issueCancelTaskCmd.Flags().String("issue", "", "Issue ID/key to scope short task ID prefix resolution")
+	issueCancelTaskCmd.Flags().String("issue", "", "Issue ID/key to scope short run ID prefix resolution")
 	// issue run-messages
 	issueRunMessagesCmd.Flags().String("output", "json", "Output format: table or json")
 	issueRunMessagesCmd.Flags().Int("since", 0, "Only return messages after this sequence number")
-	issueRunMessagesCmd.Flags().String("issue", "", "Issue ID/key to scope short task ID prefix resolution")
+	issueRunMessagesCmd.Flags().String("issue", "", "Issue ID/key to scope short run ID prefix resolution")
 
 	// issue comment add
 	issueCommentAddCmd.Flags().String("content", "", "Comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
 	issueCommentAddCmd.Flags().Bool("content-stdin", false, "Read comment content from stdin (preserves multi-line content verbatim)")
-	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
-	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID (reply to a specific comment)")
+	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
+	issueCommentAddCmd.Flags().Bool("allow-external-file", false, "Allow --content-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
+	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID to reply under. A comment-triggered agent run must reply under its trigger comment; omitting --parent to post a top-level comment is rejected")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// issue comment update
+	issueCommentUpdateCmd.Flags().String("content", "", "New comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
+	issueCommentUpdateCmd.Flags().Bool("content-stdin", false, "Read new comment content from stdin (preserves multi-line content verbatim)")
+	issueCommentUpdateCmd.Flags().String("content-file", "", "Read new comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
+	issueCommentUpdateCmd.Flags().Bool("allow-external-file", false, "Allow --content-file to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
+	issueCommentUpdateCmd.Flags().Int64("expected-revision", 0, "Current positive comment revision from issue comment list --output json (required; prevents overwriting a concurrent edit)")
+	issueCommentUpdateCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// issue comment resolve/unresolve
+	issueCommentResolveCmd.Flags().String("output", "json", "Output format: table or json")
+	issueCommentUnresolveCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue search
 	issueSearchCmd.Flags().Int("limit", 20, "Maximum number of results to return")
@@ -393,6 +755,19 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	// The server clamps limit and applies its own default when the flag is
+	// missing, so reject a value it cannot honour up front (before any
+	// request) rather than report a page that was never returned. Same
+	// reasoning as the --direction guard below.
+	limit, _ := cmd.Flags().GetInt("limit")
+	if limit < 1 || limit > issueListMaxPageSize {
+		return fmt.Errorf("--limit must be between 1 and %d (the server returns at most %d issues per request); use --offset to page through more", issueListMaxPageSize, issueListMaxPageSize)
+	}
+	offset, _ := cmd.Flags().GetInt("offset")
+	if offset < 0 {
+		return fmt.Errorf("--offset must be zero or greater")
+	}
+
 	params := url.Values{}
 	params.Set("workspace_id", client.WorkspaceID)
 	if v, _ := cmd.Flags().GetString("status"); v != "" {
@@ -401,8 +776,9 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("priority"); v != "" {
 		params.Set("priority", v)
 	}
-	if v, _ := cmd.Flags().GetInt("limit"); v > 0 {
-		params.Set("limit", fmt.Sprintf("%d", v))
+	params.Set("limit", fmt.Sprintf("%d", limit))
+	if offset > 0 {
+		params.Set("offset", fmt.Sprintf("%d", offset))
 	}
 	_, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id", issueAssigneeKinds)
 	if resolveErr != nil {
@@ -410,9 +786,6 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	}
 	if hasAssignee {
 		params.Set("assignee_id", aID)
-	}
-	if v, _ := cmd.Flags().GetInt("offset"); v > 0 {
-		params.Set("offset", fmt.Sprintf("%d", v))
 	}
 	if v, _ := cmd.Flags().GetString("project"); v != "" {
 		project, err := resolveProjectID(ctx, client, v)
@@ -428,6 +801,94 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		}
 		params.Set("metadata", filter)
 	}
+	// --property filtering and property:<ref> sorting both address definitions
+	// by name or UUID, so they share a single catalog fetch. An actor filter
+	// and --resolve-properties share one member request the same way.
+	const propertySortPrefix = "property:"
+	propertyFlags, _ := cmd.Flags().GetStringArray("property")
+	sortVal, _ := cmd.Flags().GetString("sort")
+	var properties []propertyDTO
+	var members memberDirectory
+	if len(propertyFlags) > 0 || strings.HasPrefix(sortVal, propertySortPrefix) {
+		var err error
+		if properties, err = fetchProperties(ctx, client); err != nil {
+			return err
+		}
+	}
+	if len(propertyFlags) > 0 {
+		filter, err := buildPropertiesFilterQueryParam(ctx, client, &members, properties, propertyFlags)
+		if err != nil {
+			return err
+		}
+		params.Set("properties", filter)
+	}
+	if strings.HasPrefix(sortVal, propertySortPrefix) {
+		property, err := resolveSortableProperty(properties, strings.TrimPrefix(sortVal, propertySortPrefix))
+		if err != nil {
+			return err
+		}
+		params.Set("sort", propertySortPrefix+property.ID)
+	} else if sortVal != "" {
+		valid := false
+		for _, c := range validIssueSortColumns {
+			if c == sortVal {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("invalid --sort %q; valid values: %s, or property:<name-or-id> for a custom property", sortVal, strings.Join(validIssueSortColumns, ", "))
+		}
+		params.Set("sort", sortVal)
+	}
+	if v, _ := cmd.Flags().GetString("direction"); v != "" {
+		d := strings.ToLower(v)
+		if d != "asc" && d != "desc" {
+			return fmt.Errorf("invalid --direction %q; valid values: asc, desc", v)
+		}
+		// position (the manual board order) is always ascending, so the server
+		// ignores --direction for it. Reject the combination up front rather
+		// than silently dropping the flag — a passed-but-ignored flag is a
+		// footgun, especially in scripts.
+		if sortVal == "" || sortVal == "position" {
+			return fmt.Errorf("--direction requires --sort to be one of %s, or a property:<name-or-id> sort; position (the default manual board order) is always ascending", strings.Join(directionalIssueSortColumns, ", "))
+		}
+		params.Set("direction", d)
+	}
+
+	var fields []string
+	if v, _ := cmd.Flags().GetString("fields"); v != "" {
+		valid := make(map[string]bool, len(validIssueFields))
+		for _, f := range validIssueFields {
+			valid[f] = true
+		}
+		keepsProperties := false
+		for _, f := range strings.Split(v, ",") {
+			f = strings.TrimSpace(f)
+			if !valid[f] {
+				return fmt.Errorf("invalid --fields value %q; valid values: %s", f, strings.Join(validIssueFields, ", "))
+			}
+			if f == "properties" {
+				keepsProperties = true
+			}
+			fields = append(fields, f)
+		}
+		// --fields without `properties` deletes the very key
+		// --resolve-properties rewrites, so the pair would either cost two
+		// requests for output nobody sees or leave the flag silently doing
+		// nothing. A passed-but-ignored flag is a footgun in scripts (the
+		// same reason --fields rejects "assignee" instead of dropping it),
+		// so say so instead of picking one of those.
+		//
+		// Only in JSON mode, though: both flags document themselves as having
+		// no effect on --output table, so a table reader who leaves them on
+		// the command line must still get their table.
+		outputFormat, _ := cmd.Flags().GetString("output")
+		resolve, _ := cmd.Flags().GetBool("resolve-properties")
+		if outputFormat == "json" && resolve && !keepsProperties {
+			return fmt.Errorf("--resolve-properties needs the properties field, but --fields does not include it; add properties to --fields or drop --resolve-properties")
+		}
+	}
 
 	path := "/api/issues"
 	if len(params) > 0 {
@@ -440,13 +901,41 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	}
 
 	issuesRaw, _ := result["issues"].([]any)
+	total, totalOK := result["total"].(float64)
+	returned := len(issuesRaw)
+	// total cannot end a walk on its own. The server answers with the row
+	// count it just returned when its count query fails, and a newer backend
+	// may drop the field; either one reports has_more false beside a full page
+	// and truncates the walk in silence. So total is trusted only when it is
+	// larger than this page, which a failed count never is; otherwise the page
+	// decides. The one cost is a first page that fills exactly: it cannot tell
+	// a genuine total from a failed count, so it probes onward and the next
+	// request comes back empty.
+	totalTrusted := totalOK && int(total) > returned
+	hasMore := false
+	switch {
+	case returned == 0:
+		// An empty page ends a walk whatever total says.
+	case totalTrusted:
+		hasMore = offset+returned < int(total)
+	default:
+		hasMore = returned == limit
+	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
-		total, _ := result["total"].(float64)
-		limit, _ := cmd.Flags().GetInt("limit")
-		offset, _ := cmd.Flags().GetInt("offset")
-		hasMore := offset+len(issuesRaw) < int(total)
+		// --fields runs first so a page that drops `properties` never pays for
+		// the catalog and member requests resolving it would need. Combining
+		// the two with `properties` filtered out is rejected above, so nothing
+		// resolvable is deleted before it is resolved.
+		if len(fields) > 0 {
+			filterIssueFields(issuesRaw, fields)
+		}
+		if resolve, _ := cmd.Flags().GetBool("resolve-properties"); resolve {
+			if err := resolveIssueProperties(ctx, client, properties, &members, issuesRaw); err != nil {
+				return err
+			}
+		}
 		wrapped := map[string]any{
 			"issues":   issuesRaw,
 			"total":    int(total),
@@ -502,6 +991,27 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		rows = append(rows, row)
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
+	// Page footer on stderr so stdout stays a plain table. It speaks whenever
+	// there is more or the page was offset, and stays silent for a short
+	// first page. "of N" appears only while total is trusted, so the line
+	// never claims a page is the whole list beside a pointer to the next one.
+	switch {
+	case returned == 0 && offset > 0:
+		if totalTrusted {
+			fmt.Fprintf(os.Stderr, "No issues at --offset %d (%d total).\n", offset, int(total))
+		} else {
+			fmt.Fprintf(os.Stderr, "No issues at --offset %d.\n", offset)
+		}
+	case hasMore || offset > 0:
+		line := fmt.Sprintf("Showing issues %d-%d.", offset+1, offset+returned)
+		if totalTrusted {
+			line = fmt.Sprintf("Showing %d-%d of %d issues.", offset+1, offset+returned, int(total))
+		}
+		if hasMore {
+			line += fmt.Sprintf(" Next page: --offset %d", offset+returned)
+		}
+		fmt.Fprintln(os.Stderr, line)
+	}
 	return nil
 }
 
@@ -613,7 +1123,142 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	if resolve, _ := cmd.Flags().GetBool("resolve-properties"); resolve {
+		if err := resolveIssueProperties(ctx, client, nil, &memberDirectory{}, []any{issue}); err != nil {
+			return err
+		}
+	}
 	return cli.PrintJSON(os.Stdout, issue)
+}
+
+// childStage extracts the integer stage from a child issue response map.
+// Returns ok=false when the child is unstaged (stage null/absent).
+func childStage(m map[string]any) (int, bool) {
+	v, ok := m["stage"]
+	if !ok || v == nil {
+		return 0, false
+	}
+	switch n := v.(type) {
+	case float64:
+		return int(n), true
+	case int:
+		return n, true
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil {
+			return 0, false
+		}
+		return int(i), true
+	}
+	return 0, false
+}
+
+func runIssueChildren(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	var resp struct {
+		Issues []map[string]any `json:"issues"`
+	}
+	if err := client.GetJSON(ctx, "/api/issues/"+issueRef.ID+"/children", &resp); err != nil {
+		return fmt.Errorf("list child issues: %w", err)
+	}
+	children := resp.Issues
+
+	// Order by stage ascending (unstaged last), preserving the API's
+	// within-stage order (position, then created_at desc).
+	sort.SliceStable(children, func(i, j int) bool {
+		si, oki := childStage(children[i])
+		sj, okj := childStage(children[j])
+		if oki != okj {
+			return oki // staged before unstaged
+		}
+		return si < sj
+	})
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		actors := loadActorDisplayLookup(ctx, client)
+		headers := []string{"STAGE", "KEY", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE"}
+		rows := make([][]string, 0, len(children))
+		for _, c := range children {
+			stageCell := "-"
+			if s, ok := childStage(c); ok {
+				stageCell = strconv.Itoa(s)
+			}
+			rows = append(rows, []string{
+				stageCell,
+				issueDisplayKey(c),
+				strVal(c, "title"),
+				strVal(c, "status"),
+				strVal(c, "priority"),
+				formatAssignee(c, actors),
+			})
+		}
+		cli.PrintTable(os.Stdout, headers, rows)
+		return nil
+	}
+
+	// JSON: group by stage so an agent can see, at a glance, how many
+	// sub-issues there are and which stage each belongs to.
+	type stageGroup struct {
+		Stage  int              `json:"stage"`
+		Total  int              `json:"total"`
+		Done   int              `json:"done"`
+		Issues []map[string]any `json:"issues"`
+	}
+	stages := []stageGroup{}
+	unstaged := []map[string]any{}
+	idxByStage := map[int]int{}
+	for _, c := range children {
+		s, ok := childStage(c)
+		if !ok {
+			unstaged = append(unstaged, c)
+			continue
+		}
+		gi, seen := idxByStage[s]
+		if !seen {
+			stages = append(stages, stageGroup{Stage: s})
+			gi = len(stages) - 1
+			idxByStage[s] = gi
+		}
+		stages[gi].Issues = append(stages[gi].Issues, c)
+		stages[gi].Total++
+		if isTerminalChildIssue(c) {
+			stages[gi].Done++
+		}
+	}
+	return cli.PrintJSON(os.Stdout, map[string]any{
+		"total":    len(children),
+		"stages":   stages,
+		"unstaged": unstaged,
+	})
+}
+
+// isTerminalChildIssue reports whether a child issue counts as finished for
+// stage progress.
+//
+// Prefers `status_category`, which the server resolves for custom statuses: a
+// workspace can define its own statuses, and one in the `done` category must
+// count as done here or an agent reads the wrong progress. Falls back to the
+// raw status when the field is absent, so an older backend still reports the
+// built-in statuses correctly. (MUL-6243)
+func isTerminalChildIssue(c map[string]any) bool {
+	status := strVal(c, "status_category")
+	if status == "" {
+		status = strVal(c, "status")
+	}
+	return status == "done" || status == "cancelled"
 }
 
 // isHTTPURL reports whether path is an http:// or https:// URL.
@@ -623,6 +1268,117 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 func isHTTPURL(path string) bool {
 	p := strings.TrimSpace(path)
 	return strings.HasPrefix(p, "http://") || strings.HasPrefix(p, "https://")
+}
+
+// ensureAttachmentWithinWorkdir applies the same workdir containment guard as
+// --description-file / --content-file (MUL-4252) to a local --attachment path.
+// An agent that writes a chart/report to a machine-shared path like /tmp and
+// then attaches it could otherwise pick up another run's — possibly another
+// workspace's — stale file (the image version of the /tmp/desc.md leak). URL
+// values are filtered by the caller and never reach here. --allow-external-file
+// overrides, mirroring the text-flag escape hatch.
+func ensureAttachmentWithinWorkdir(cmd *cobra.Command, filePath string) error {
+	if allow, _ := cmd.Flags().GetBool("allow-external-file"); allow {
+		return nil
+	}
+	within, err := fileWithinWorkingDir(filePath)
+	if err != nil {
+		return fmt.Errorf("resolve --attachment path %q: %w", filePath, err)
+	}
+	if !within {
+		if !pathExists(filePath) {
+			return fmt.Errorf(
+				"--attachment path %q does not exist; it also resolves outside the current working "+
+					"directory, so --allow-external-file would not make this upload succeed. Generate the "+
+					"file inside the task workdir and attach that path.",
+				filePath)
+		}
+		return fmt.Errorf(
+			"--attachment path %q resolves outside the current working directory; "+
+				"attach files generated inside the run workdir rather than machine-shared "+
+				"paths like /tmp, where another run's stale file can be attached by mistake. "+
+				"Pass --allow-external-file to override.",
+			filePath)
+	}
+	return nil
+}
+
+// pendingAttachment is a local --attachment file that passed URL filtering and
+// the workdir guard and has been read into memory, ready to upload.
+type pendingAttachment struct {
+	path string
+	data []byte
+}
+
+// collectLocalAttachments validates and reads ALL local --attachment paths up
+// front, before any upload. URL-shaped values are warned and skipped (the API
+// only accepts local paths). Each remaining path is run through the MUL-4252
+// workdir guard and read into memory; the first invalid or unreadable path
+// returns an error with nothing uploaded. Both `issue create` and
+// `comment add` share this so an invalid attachment can never leave an earlier
+// one uploaded as an orphaned issue attachment while the issue/comment is never
+// created (which would duplicate on retry). `issue update` also uses this
+// preflight so an invalid later path cannot leave earlier files uploaded.
+func collectLocalAttachments(cmd *cobra.Command, attachments []string) ([]pendingAttachment, error) {
+	pending := make([]pendingAttachment, 0, len(attachments))
+	for _, filePath := range attachments {
+		if isHTTPURL(filePath) {
+			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
+			continue
+		}
+		if err := ensureAttachmentWithinWorkdir(cmd, filePath); err != nil {
+			return nil, err
+		}
+		data, readErr := os.ReadFile(filePath)
+		if readErr != nil {
+			return nil, fmt.Errorf("read attachment %s: %w", filePath, readErr)
+		}
+		pending = append(pending, pendingAttachment{path: filePath, data: data})
+	}
+	return pending, nil
+}
+
+// appendAttachmentReferences appends the markdown snippet of every uploaded
+// attachment to an issue description, so the file renders on the issue page
+// instead of only existing as a stored row. Each snippet goes in its own
+// paragraph because file cards are block-level. An attachment the description
+// already references is skipped — a caller may have composed the markdown
+// itself (quick-create keeps the user's pasted image inline), and appending it
+// again would render the same file twice.
+func appendAttachmentReferences(description string, attachments []cli.AttachmentResponse) string {
+	snippets := make([]string, 0, len(attachments))
+	for _, att := range attachments {
+		if descriptionReferencesAttachment(description, att) {
+			continue
+		}
+		snippets = append(snippets, attachmentMarkdown(filepath.Base(att.Filename), att.ContentType, att.MarkdownURL))
+	}
+	if len(snippets) == 0 {
+		return description
+	}
+	appended := strings.Join(snippets, "\n\n")
+	if strings.TrimSpace(description) == "" {
+		return appended
+	}
+	return strings.TrimRight(description, "\n") + "\n\n" + appended
+}
+
+// descriptionReferencesAttachment reports whether a description body already
+// points at this attachment. It matches the durable `markdown_url` and the
+// `/api/attachments/<id>` path it is built from rather than the raw storage
+// `url`, which bodies never carry — the same rule the web composers use
+// (`contentReferencesAttachment`).
+func descriptionReferencesAttachment(description string, att cli.AttachmentResponse) bool {
+	if description == "" {
+		return false
+	}
+	if att.MarkdownURL != "" && strings.Contains(description, att.MarkdownURL) {
+		return true
+	}
+	if att.ID != "" && strings.Contains(description, "/api/attachments/"+att.ID) {
+		return true
+	}
+	return false
 }
 
 func appendUniqueStrings(dst []string, values ...string) []string {
@@ -659,6 +1415,18 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if title == "" {
 		return fmt.Errorf("--title is required")
 	}
+	statusFlag, _ := cmd.Flags().GetString("status")
+	if statusFlag != "" {
+		if err := validateIssueStatus(statusFlag); err != nil {
+			return err
+		}
+	}
+	priorityFlag, _ := cmd.Flags().GetString("priority")
+	if priorityFlag != "" {
+		if err := validateIssuePriority(priorityFlag); err != nil {
+			return err
+		}
+	}
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -675,18 +1443,39 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	body := map[string]any{"title": title}
+	propertyFlags, _ := cmd.Flags().GetStringArray("property")
+	var createProperties map[string]json.RawMessage
+	if len(propertyFlags) > 0 {
+		var config struct {
+			IssueCreatePropertiesSupported bool `json:"issue_create_properties_supported"`
+		}
+		if err := client.GetJSON(ctx, "/api/config", &config); err != nil {
+			return fmt.Errorf("check issue-create property support: %w", err)
+		}
+		if !config.IssueCreatePropertiesSupported {
+			return errors.New("this server version does not support atomic custom properties on issue creation; update the server before using --property")
+		}
+		createProperties, err = buildIssueCreateProperties(ctx, client, propertyFlags)
+		if err != nil {
+			return err
+		}
+		body["properties"] = createProperties
+	}
 	desc, hasDesc, err := resolveTextFlag(cmd, "description")
 	if err != nil {
 		return err
 	}
 	if hasDesc {
-		body["description"] = desc
+		if err := guardLocalPathLinks(desc, "issue description",
+			"Deliver the file itself with `multica issue create --attachment <path>` (repeatable) and drop the link."); err != nil {
+			return err
+		}
 	}
-	if v, _ := cmd.Flags().GetString("status"); v != "" {
-		body["status"] = v
+	if statusFlag != "" {
+		body["status"] = statusFlag
 	}
-	if v, _ := cmd.Flags().GetString("priority"); v != "" {
-		body["priority"] = v
+	if priorityFlag != "" {
+		body["priority"] = priorityFlag
 	}
 	if v, _ := cmd.Flags().GetString("parent"); v != "" {
 		parent, err := resolveIssueRef(ctx, client, v)
@@ -701,6 +1490,13 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("resolve project: %w", err)
 		}
 		body["project_id"] = project.ID
+	}
+	if cmd.Flags().Changed("stage") {
+		stage, _ := cmd.Flags().GetInt("stage")
+		if stage < 1 {
+			return fmt.Errorf("--stage must be >= 1")
+		}
+		body["stage"] = stage
 	}
 	if v, _ := cmd.Flags().GetString("start-date"); v != "" {
 		body["start_date"] = v
@@ -737,38 +1533,43 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	attachmentIDs = appendUniqueStrings(attachmentIDs, envAttachmentIDs...)
-	if len(attachmentIDs) > 0 {
-		body["attachment_ids"] = attachmentIDs
+
+	// Pre-validate attachments BEFORE creating the issue so a bad path can
+	// never produce a half-created issue (which would otherwise trigger
+	// callers — especially the agent doing quick-create — to retry the whole
+	// `issue create` and end up with duplicates). URLs are warned+skipped, the
+	// workdir guard is applied, and every local path is read upfront; a failure
+	// here surfaces pre-create so the issue never lands.
+	pending, err := collectLocalAttachments(cmd, attachments)
+	if err != nil {
+		return err
 	}
 
-	// Pre-validate attachments BEFORE creating the issue so a bad path
-	// can never produce a half-created issue (which would otherwise
-	// trigger callers — especially the agent doing quick-create — to
-	// retry the whole `issue create` and end up with duplicates).
-	//
-	//   - http(s) URLs are not local files; the API only accepts local
-	//     paths here. Warn and skip rather than fail — a markdown image
-	//     URL embedded in the prompt should never be re-attached, and
-	//     skipping is the safest outcome for that case.
-	//   - Anything else is treated as a local path and read upfront.
-	//     A read failure here is a real user/agent mistake (typo,
-	//     missing file) and we surface it pre-create so the issue
-	//     never lands.
-	type pendingAttachment struct {
-		path string
-		data []byte
+	// Upload BEFORE creating the issue, and append each file's markdown to the
+	// description. A file is visible on an issue only when the description
+	// references it — every other writer honors that (the web create dialog and
+	// the description editor bind exactly what the body references). Uploading
+	// after the create, as this used to, stored the file with an `issue_id` and
+	// left the description untouched, so it rendered nowhere on web, desktop or
+	// mobile (MUL-7600 / #8692). Uploading first also removes the old
+	// partial-success state: a failure here means no issue was created, so the
+	// retry is safe and cannot duplicate.
+	uploaded := make([]cli.AttachmentResponse, 0, len(pending))
+	for _, att := range pending {
+		result, uploadErr := client.UploadIssueAttachment(ctx, att.data, att.path, "")
+		if uploadErr != nil {
+			return fmt.Errorf("upload attachment %s (no issue created): %w", att.path, uploadErr)
+		}
+		uploaded = append(uploaded, result)
+		attachmentIDs = appendUniqueStrings(attachmentIDs, result.ID)
+		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
-	pending := make([]pendingAttachment, 0, len(attachments))
-	for _, filePath := range attachments {
-		if isHTTPURL(filePath) {
-			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
-			continue
-		}
-		data, readErr := os.ReadFile(filePath)
-		if readErr != nil {
-			return fmt.Errorf("read attachment %s: %w", filePath, readErr)
-		}
-		pending = append(pending, pendingAttachment{path: filePath, data: data})
+	desc = appendAttachmentReferences(desc, uploaded)
+	if hasDesc || len(uploaded) > 0 {
+		body["description"] = desc
+	}
+	if len(attachmentIDs) > 0 {
+		body["attachment_ids"] = attachmentIDs
 	}
 
 	var result map[string]any
@@ -778,19 +1579,8 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		}
 		return fmt.Errorf("create issue: %w", err)
 	}
-
-	// Upload attachments and link them to the newly created issue.
-	// Failures here are partial-success: the issue exists already, so
-	// turning a non-zero exit on the caller would invite a retry that
-	// duplicates the issue. Warn on stderr and continue.
-	issueID := strVal(result, "id")
-	for _, att := range pending {
-		if _, uploadErr := client.UploadFile(ctx, att.data, att.path, issueID); uploadErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: upload attachment %s failed (issue already created, %s): %v\n",
-				att.path, strVal(result, "identifier"), uploadErr)
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
+	if err := verifyIssueCreateProperties(createProperties, result); err != nil {
+		return fmt.Errorf("issue %s was created, but the server did not confirm its custom properties; review it before retrying: %w", issueDisplayKey(result), err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -807,6 +1597,30 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	}
 
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+func verifyIssueCreateProperties(expected map[string]json.RawMessage, issue map[string]any) error {
+	if len(expected) == 0 {
+		return nil
+	}
+	bag, ok := issue["properties"].(map[string]any)
+	if !ok {
+		return errors.New("response omitted the properties snapshot")
+	}
+	for propertyID, encoded := range expected {
+		actual, exists := bag[propertyID]
+		if !exists {
+			return fmt.Errorf("response omitted property %s", propertyID)
+		}
+		var want any
+		if err := json.Unmarshal(encoded, &want); err != nil {
+			return fmt.Errorf("decode expected property %s: %w", propertyID, err)
+		}
+		if !reflect.DeepEqual(actual, want) {
+			return fmt.Errorf("response property %s does not match the canonical value", propertyID)
+		}
+	}
+	return nil
 }
 
 func activeDuplicateIssueCreateMessage(err error) (string, bool) {
@@ -828,12 +1642,33 @@ func activeDuplicateIssueCreateMessage(err error) (string, bool) {
 }
 
 func runIssueUpdate(cmd *cobra.Command, args []string) error {
+	attachmentPaths, _ := cmd.Flags().GetStringSlice("attachment")
+	noStart, _ := cmd.Flags().GetBool("no-start")
+	statusChanged := cmd.Flags().Changed("status")
+	statusFlag, _ := cmd.Flags().GetString("status")
+	if statusChanged {
+		if err := validateIssueStatus(statusFlag); err != nil {
+			return err
+		}
+	}
+	priorityChanged := cmd.Flags().Changed("priority")
+	priorityFlag, _ := cmd.Flags().GetString("priority")
+	if priorityChanged {
+		if err := validateIssuePriority(priorityFlag); err != nil {
+			return err
+		}
+	}
+
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
 	}
 
-	ctx, cancel := cli.APIContext(context.Background())
+	timeout := cli.APITimeout()
+	if len(attachmentPaths) > 0 {
+		timeout = cli.AtLeastAPITimeout(60 * time.Second)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
@@ -851,15 +1686,17 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		if err := guardLocalPathLinks(desc, "issue description",
+			"Attach the file with `multica issue update <issue-id> --attachment <path>` and drop the local-path link."); err != nil {
+			return err
+		}
 		body["description"] = desc
 	}
-	if cmd.Flags().Changed("status") {
-		v, _ := cmd.Flags().GetString("status")
-		body["status"] = v
+	if statusChanged {
+		body["status"] = statusFlag
 	}
-	if cmd.Flags().Changed("priority") {
-		v, _ := cmd.Flags().GetString("priority")
-		body["priority"] = v
+	if priorityChanged {
+		body["priority"] = priorityFlag
 	}
 	if cmd.Flags().Changed("project") {
 		v, _ := cmd.Flags().GetString("project")
@@ -903,13 +1740,66 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 			body["parent_issue_id"] = parent.ID
 		}
 	}
+	if cmd.Flags().Changed("stage") {
+		stage, _ := cmd.Flags().GetInt("stage")
+		if stage < 1 {
+			return fmt.Errorf("--stage must be >= 1")
+		}
+		body["stage"] = stage
+	}
+	if cmd.Flags().Changed("position") {
+		v, _ := cmd.Flags().GetFloat64("position")
+		body["position"] = v
+	}
 
-	if len(body) == 0 {
+	if len(body) == 0 && len(attachmentPaths) == 0 {
 		return fmt.Errorf("no fields to update; use flags like --title, --status, --priority, --assignee, etc.")
+	}
+	// Validate every path before any upload so an invalid later path cannot
+	// leave earlier files uploaded and unbound.
+	pending, err := collectLocalAttachments(cmd, attachmentPaths)
+	if err != nil {
+		return err
+	}
+	if len(body) == 0 && len(pending) == 0 {
+		return fmt.Errorf("no local attachments to update; --attachment accepts file paths, not URLs")
+	}
+	desc, changed := body["description"].(string)
+	if len(pending) > 0 && !changed {
+		var issue struct {
+			Description *string `json:"description"`
+		}
+		if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID), &issue); err != nil {
+			return fmt.Errorf("get issue description before binding attachments: %w", err)
+		}
+		if issue.Description != nil {
+			desc = *issue.Description
+		}
+	}
+	attachmentIDs := make([]string, 0, len(pending))
+	attachmentRefs := make([]cli.AttachmentResponse, 0, len(pending))
+	for _, att := range pending {
+		uploaded, uploadErr := client.UploadIssueAttachment(ctx, att.data, att.path, "")
+		if uploadErr != nil {
+			return fmt.Errorf("upload attachment %s: %w; already uploaded IDs: %v", att.path, uploadErr, attachmentIDs)
+		}
+		attachmentIDs = append(attachmentIDs, uploaded.ID)
+		attachmentRefs = append(attachmentRefs, uploaded)
+		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
+	}
+	if len(attachmentRefs) > 0 {
+		body["description"] = appendAttachmentReferences(desc, attachmentRefs)
+		body["attachment_ids"] = attachmentIDs
+	}
+	if noStart {
+		body["suppress_run"] = true
 	}
 
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
+		if len(attachmentIDs) > 0 {
+			return fmt.Errorf("update issue (uploaded IDs: %v): %w", attachmentIDs, err)
+		}
 		return fmt.Errorf("update issue: %w", err)
 	}
 
@@ -932,6 +1822,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 func runIssueAssign(cmd *cobra.Command, args []string) error {
 	toName, _ := cmd.Flags().GetString("to")
 	unassign, _ := cmd.Flags().GetBool("unassign")
+	noStart, _ := cmd.Flags().GetBool("no-start")
 	toNameSet := cmd.Flags().Changed("to")
 	toIDSet := cmd.Flags().Changed("to-id")
 
@@ -940,6 +1831,9 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 	}
 	if (toNameSet || toIDSet) && unassign {
 		return fmt.Errorf("--to/--to-id and --unassign are mutually exclusive")
+	}
+	if noStart && unassign {
+		return fmt.Errorf("--no-start cannot be used with --unassign")
 	}
 
 	client, err := newAPIClient(cmd)
@@ -970,6 +1864,9 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 		if displayTarget == "" {
 			displayTarget = loadActorDisplayLookup(ctx, client).actor(aType, aID)
 		}
+		if noStart {
+			body["suppress_run"] = true
+		}
 	}
 
 	var result map[string]any
@@ -993,16 +1890,10 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 func runIssueStatus(cmd *cobra.Command, args []string) error {
 	id := args[0]
 	status := args[1]
+	noStart, _ := cmd.Flags().GetBool("no-start")
 
-	valid := false
-	for _, s := range validIssueStatuses {
-		if s == status {
-			valid = true
-			break
-		}
-	}
-	if !valid {
-		return fmt.Errorf("invalid status %q; valid values: %s", status, strings.Join(validIssueStatuses, ", "))
+	if err := validateIssueStatus(status); err != nil {
+		return err
 	}
 
 	client, err := newAPIClient(cmd)
@@ -1019,6 +1910,9 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{"status": status}
+	if noStart {
+		body["suppress_run"] = true
+	}
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
 		return fmt.Errorf("update status: %w", err)
@@ -1031,6 +1925,319 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Reorder command
+// ---------------------------------------------------------------------------
+
+// registerIssueReorderFlags wires the reorder command's flags and declares its
+// target selector as a cobra flag group: mutually exclusive so at most one of
+// --before/--after/--top/--bottom is accepted, and one-required so at least one
+// must be given. Declaring the rule (instead of counting the flags by hand in
+// runIssueReorder) lets cobra reject zero-target and multi-target invocations
+// before RunE with a canonical message, and makes shell completion group-aware
+// — it hides the sibling target flags once one of them is set. It is shared with
+// the command's tests so they exercise the exact flag-group wiring that ships.
+func registerIssueReorderFlags(cmd *cobra.Command) {
+	cmd.Flags().String("before", "", "Place the issue directly above this issue (same column)")
+	cmd.Flags().String("after", "", "Place the issue directly below this issue (same column)")
+	cmd.Flags().Bool("top", false, "Move the issue to the top of its status column")
+	cmd.Flags().Bool("bottom", false, "Move the issue to the bottom of its status column")
+	cmd.Flags().String("output", "json", "Output format: table or json")
+	cmd.MarkFlagsMutuallyExclusive("before", "after", "top", "bottom")
+	cmd.MarkFlagsOneRequired("before", "after", "top", "bottom")
+}
+
+// runIssueReorder repositions an issue inside its current status column. The
+// new position is computed client-side by computeReorderPosition, which mirrors
+// the board/list drag-and-drop math (computePosition in
+// packages/views/issues/utils/drag-utils.ts) so the CLI and UI agree on where
+// an issue lands. Only the issue's own position changes; its column membership
+// (status) is left untouched, so cross-column moves still go through
+// `issue status`.
+func runIssueReorder(cmd *cobra.Command, args []string) error {
+	before, _ := cmd.Flags().GetString("before")
+	after, _ := cmd.Flags().GetString("after")
+	top, _ := cmd.Flags().GetBool("top")
+	bottom, _ := cmd.Flags().GetBool("bottom")
+
+	// "Exactly one of --before/--after/--top/--bottom" is enforced declaratively
+	// by the command's mutually-exclusive, one-required flag group (see
+	// registerIssueReorderFlags), so cobra rejects zero-target and multi-target
+	// invocations before RunE runs. Cobra keys off flag *presence* (Changed),
+	// not value, so guard the cases it cannot see: a --before/--after passed
+	// empty (e.g. an unset shell variable), or a --top/--bottom explicitly set
+	// to false (e.g. `--top=false` from a generated command). Each counts as
+	// "set" for the group yet selects no real target, and would otherwise fall
+	// through to a confusing "not found in column" error.
+	if cmd.Flags().Changed("before") && before == "" {
+		return fmt.Errorf("--before requires an issue ID or key")
+	}
+	if cmd.Flags().Changed("after") && after == "" {
+		return fmt.Errorf("--after requires an issue ID or key")
+	}
+	if cmd.Flags().Changed("top") && !top {
+		return fmt.Errorf("--top cannot be set to false; pass it on its own to move the issue to the top of its column")
+	}
+	if cmd.Flags().Changed("bottom") && !bottom {
+		return fmt.Errorf("--bottom cannot be set to false; pass it on its own to move the issue to the bottom of its column")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	wsID := client.WorkspaceID
+	if wsID == "" {
+		wsID, err = requireWorkspaceID(cmd)
+		if err != nil {
+			return err
+		}
+	}
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+	target, err := fetchIssue(ctx, client, issueRef.ID)
+	if err != nil {
+		return fmt.Errorf("get issue: %w", err)
+	}
+	targetDisplay := issueDisplayKey(target)
+	status := strVal(target, "status")
+	if status == "" {
+		return fmt.Errorf("issue %s has no status, cannot determine its column", targetDisplay)
+	}
+
+	// Resolve the relative target up front, before any no-op shortcut, so a bad
+	// --before/--after value (typo, self-reference) always errors instead of
+	// being swallowed by the single-issue-column fast path below.
+	relative := before != "" || after != ""
+	var otherRef resolvedID
+	if relative {
+		otherInput := before
+		if after != "" {
+			otherInput = after
+		}
+		otherRef, err = resolveIssueRef(ctx, client, otherInput)
+		if err != nil {
+			return fmt.Errorf("resolve target issue: %w", err)
+		}
+		if otherRef.ID == issueRef.ID {
+			return fmt.Errorf("cannot reorder issue %s relative to itself", targetDisplay)
+		}
+	}
+
+	// Scope the column to the issue's own project (when it has one) so the
+	// computed position lands relative to the project board the issue lives on,
+	// not a blend of every project's issues in this status.
+	projectID := strVal(target, "project_id")
+	column, err := fetchIssueColumn(ctx, client, wsID, projectID, status)
+	if err != nil {
+		return fmt.Errorf("list %s column: %w", status, err)
+	}
+
+	// Build the column order with the target removed, plus a lookup of every
+	// position in the column (the target's own included, for the no-op check).
+	positions := make(map[string]float64, len(column))
+	ordered := make([]string, 0, len(column))
+	for _, raw := range column {
+		id := strVal(raw, "id")
+		if id == "" {
+			continue
+		}
+		positions[id] = floatVal(raw, "position")
+		if id != issueRef.ID {
+			ordered = append(ordered, id)
+		}
+	}
+	if len(ordered) == 0 {
+		// The active issue is alone in its column. A relative move cannot
+		// succeed here (its target is necessarily in another column), so report
+		// that rather than a misleading "nothing to reorder".
+		if relative {
+			return reorderTargetNotInColumnError(ctx, client, otherRef, targetDisplay, status)
+		}
+		fmt.Fprintf(os.Stderr, "Issue %s is the only issue in the %s column; nothing to reorder.\n", targetDisplay, status)
+		return issueReorderOutput(cmd, target)
+	}
+
+	insertIdx := 0
+	switch {
+	case top:
+		insertIdx = 0
+	case bottom:
+		insertIdx = len(ordered)
+	default:
+		idx := indexOfString(ordered, otherRef.ID)
+		if idx == -1 {
+			return reorderTargetNotInColumnError(ctx, client, otherRef, targetDisplay, status)
+		}
+		if before != "" {
+			insertIdx = idx
+		} else {
+			insertIdx = idx + 1
+		}
+	}
+
+	reordered := make([]string, 0, len(ordered)+1)
+	reordered = append(reordered, ordered[:insertIdx]...)
+	reordered = append(reordered, issueRef.ID)
+	reordered = append(reordered, ordered[insertIdx:]...)
+
+	currentPos := positions[issueRef.ID]
+	newPos := computeReorderPosition(reordered, issueRef.ID, positions, currentPos)
+	if newPos == currentPos {
+		fmt.Fprintf(os.Stderr, "Issue %s is already in that position.\n", targetDisplay)
+		return issueReorderOutput(cmd, target)
+	}
+
+	var result map[string]any
+	if err := client.PutJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID), map[string]any{"position": newPos}, &result); err != nil {
+		return fmt.Errorf("reorder issue: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "Issue %s reordered.\n", issueDisplayKey(result))
+	return issueReorderOutput(cmd, result)
+}
+
+// issueReorderOutput prints an issue map as a table or JSON, matching the
+// update command's output contract.
+func issueReorderOutput(cmd *cobra.Command, issue map[string]any) error {
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		headers := []string{"KEY", "TITLE", "STATUS", "PRIORITY"}
+		rows := [][]string{{
+			issueDisplayKey(issue),
+			strVal(issue, "title"),
+			strVal(issue, "status"),
+			strVal(issue, "priority"),
+		}}
+		cli.PrintTable(os.Stdout, headers, rows)
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, issue)
+}
+
+// reorderTargetNotInColumnError explains why a --before/--after target could
+// not be used. It fetches the target only to report its actual column in the
+// message, so the common mistake (target lives in a different column) gets a
+// precise, actionable error instead of a bare "not found".
+func reorderTargetNotInColumnError(ctx context.Context, client *cli.APIClient, otherRef resolvedID, issueDisplay, status string) error {
+	otherDisplay := otherRef.Display
+	if other, err := fetchIssue(ctx, client, otherRef.ID); err == nil {
+		otherDisplay = issueDisplayKey(other)
+		if otherStatus := strVal(other, "status"); otherStatus != "" && otherStatus != status {
+			return fmt.Errorf("issue %s is in the %q column but %s is in %q; move one with `multica issue status` first, or pick a target in the same column", otherDisplay, otherStatus, issueDisplay, status)
+		}
+	}
+	return fmt.Errorf("issue %s was not found in the %q column", otherDisplay, status)
+}
+
+// fetchIssue retrieves a single issue by canonical ID.
+func fetchIssue(ctx context.Context, client *cli.APIClient, id string) (map[string]any, error) {
+	var issue map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(id), &issue); err != nil {
+		return nil, err
+	}
+	return issue, nil
+}
+
+// fetchIssueColumn returns every issue in a status column ordered by position
+// ascending, paginating through the list endpoint so columns larger than one
+// page (the server caps a page at issueListMaxPageSize) still produce a
+// complete, correctly ordered set. A non-empty projectID scopes the column to
+// that project, matching a project board; an empty projectID lists the whole
+// workspace column.
+func fetchIssueColumn(ctx context.Context, client *cli.APIClient, workspaceID, projectID, status string) ([]map[string]any, error) {
+	var all []map[string]any
+	seen := make(map[string]struct{})
+	offset := 0
+	for {
+		params := url.Values{}
+		params.Set("workspace_id", workspaceID)
+		params.Set("status", status)
+		if projectID != "" {
+			params.Set("project_id", projectID)
+		}
+		params.Set("sort", "position")
+		params.Set("limit", fmt.Sprintf("%d", issueListMaxPageSize))
+		params.Set("offset", fmt.Sprintf("%d", offset))
+
+		var result map[string]any
+		if err := client.GetJSON(ctx, "/api/issues?"+params.Encode(), &result); err != nil {
+			return nil, err
+		}
+		page, ok := result["issues"].([]any)
+		if !ok {
+			return nil, fmt.Errorf("invalid issue column response: expected an issues array")
+		}
+		for _, raw := range page {
+			m, ok := raw.(map[string]any)
+			if !ok || strVal(m, "id") == "" {
+				return nil, fmt.Errorf("invalid issue in column response")
+			}
+			id := strVal(m, "id")
+			if _, exists := seen[id]; exists {
+				return nil, fmt.Errorf("issue column returned duplicate issue %s; retry the reorder", id)
+			}
+			seen[id] = struct{}{}
+			all = append(all, m)
+		}
+		total, totalOK := result["total"].(float64)
+		offset += len(page)
+		// Older servers substitute the page length when COUNT fails. Such a
+		// total cannot prove the column is complete. Without a usable count,
+		// read through the empty page, including when the server uses smaller
+		// pages; a short page does not establish its applied limit. Duplicate
+		// IDs above reject a repeated page before any position is written.
+		totalTrusted := totalOK && total > float64(len(page))
+		if len(page) == 0 || (totalTrusted && float64(offset) >= total) {
+			break
+		}
+	}
+	return all, nil
+}
+
+// computeReorderPosition computes the position that places activeID at its
+// index in ids. It mirrors computePosition in
+// packages/views/issues/utils/drag-utils.ts: the top of a column is one less
+// than the next item, the bottom is one more than the previous, and any
+// interior slot is the midpoint of its neighbours. fallback is returned when
+// activeID is alone in (or absent from) the column, leaving its position
+// unchanged.
+func computeReorderPosition(ids []string, activeID string, positions map[string]float64, fallback float64) float64 {
+	idx := indexOfString(ids, activeID)
+	if idx == -1 || len(ids) == 1 {
+		return fallback
+	}
+	if idx == 0 {
+		return positions[ids[1]] - 1
+	}
+	if idx == len(ids)-1 {
+		return positions[ids[idx-1]] + 1
+	}
+	return (positions[ids[idx-1]] + positions[ids[idx+1]]) / 2
+}
+
+func indexOfString(s []string, target string) int {
+	for i, v := range s {
+		if v == target {
+			return i
+		}
+	}
+	return -1
+}
+
+func floatVal(m map[string]any, key string) float64 {
+	if v, ok := m[key].(float64); ok {
+		return v
+	}
+	return 0
 }
 
 // ---------------------------------------------------------------------------
@@ -1057,6 +2264,7 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	tail, _ := cmd.Flags().GetInt("tail")
 	rootsOnly, _ := cmd.Flags().GetBool("roots-only")
 	summary, _ := cmd.Flags().GetBool("summary")
+	full, _ := cmd.Flags().GetBool("full")
 	// Flags().Changed distinguishes "user did not pass --recent" from
 	// "user explicitly passed --recent 0" (or a negative value). The
 	// GetInt zero-value collapses both cases, which would otherwise
@@ -1113,6 +2321,18 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	if summary {
 		params.Set("summary", "true")
 	}
+	// Resolve-aware folding is the default on the complete-thread reads (default
+	// list, --recent, --thread without --tail): a resolved thread collapses to
+	// root + conclusion so an agent does not pay tokens for settled discussion.
+	// --full opts out. The partial-thread reads (--since / --tail) and
+	// --roots-only cannot be folded safely (server rejects fold there), so we
+	// never send fold for them and --full is a harmless no-op. Sending fold only
+	// when eligible keeps every existing read command — including the prompt's
+	// `--thread <id> --tail 30` cold path — working unchanged.
+	foldEligible := !rootsOnly && since == "" && !tailSet
+	if foldEligible && !full {
+		params.Set("fold", "true")
+	}
 	if thread != "" {
 		params.Set("thread", thread)
 	}
@@ -1155,6 +2375,9 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
+		if compact, _ := cmd.Flags().GetBool("compact"); compact {
+			compactComments(comments)
+		}
 		return cli.PrintJSON(os.Stdout, comments)
 	}
 
@@ -1163,6 +2386,10 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	rows := make([][]string, 0, len(comments))
 	for _, c := range comments {
 		content := strVal(c, "content")
+		if strVal(c, "deleted_at") != "" {
+			// A deleted comment kept only so its replies stay attached.
+			content = "(deleted)"
+		}
 		if utf8.RuneCountInString(content) > 80 {
 			runes := []rune(content)
 			content = string(runes[:77]) + "..."
@@ -1196,6 +2423,10 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	if !hasContent {
 		return fmt.Errorf("--content, --content-stdin, or --content-file is required")
 	}
+	if err := guardLocalPathLinks(content, "comment body",
+		"Deliver the file itself with `multica issue comment add <issue-id> --attachment <path>` (repeatable) and drop the link."); err != nil {
+		return err
+	}
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -1217,28 +2448,24 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 	issueID := issueRef.ID
 
-	// Upload attachments and collect their IDs. URLs are skipped with a
-	// warning — `--attachment` only accepts local file paths, and a
-	// markdown image URL embedded in agent-supplied content should never
-	// be re-uploaded as if it were a file. Unlike `issue create`, this
-	// path uploads BEFORE posting the comment, so a hard failure on a
-	// real (local) attachment correctly aborts the whole call.
+	// Validate and read ALL attachments before uploading any. URLs are skipped
+	// with a warning — `--attachment` only accepts local file paths. Reading
+	// everything up front means a later invalid path (external / symlink escape
+	// caught by the workdir guard) aborts the call with ZERO uploads, instead
+	// of leaving an earlier file uploaded as an orphaned issue attachment while
+	// the comment is never posted (which would duplicate on retry — MUL-4252).
+	pending, err := collectLocalAttachments(cmd, attachments)
+	if err != nil {
+		return err
+	}
 	var attachmentIDs []string
-	for _, filePath := range attachments {
-		if isHTTPURL(filePath) {
-			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
-			continue
-		}
-		data, readErr := os.ReadFile(filePath)
-		if readErr != nil {
-			return fmt.Errorf("read attachment %s: %w", filePath, readErr)
-		}
-		id, uploadErr := client.UploadFile(ctx, data, filePath, issueID)
+	for _, att := range pending {
+		id, uploadErr := client.UploadFile(ctx, att.data, att.path, issueID)
 		if uploadErr != nil {
-			return fmt.Errorf("upload attachment %s: %w", filePath, uploadErr)
+			return fmt.Errorf("upload attachment %s: %w", att.path, uploadErr)
 		}
 		attachmentIDs = append(attachmentIDs, id)
-		fmt.Fprintf(os.Stderr, "Uploaded %s\n", filePath)
+		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
 
 	body := map[string]any{"content": content}
@@ -1262,6 +2489,49 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	return cli.PrintJSON(os.Stdout, result)
 }
 
+func runIssueCommentUpdate(cmd *cobra.Command, args []string) error {
+	expectedRevision, _ := cmd.Flags().GetInt64("expected-revision")
+	if !cmd.Flags().Changed("expected-revision") || expectedRevision < 1 {
+		return fmt.Errorf("--expected-revision is required and must be a positive integer; read the current revision with `multica issue comment list <issue-id> --output json`")
+	}
+
+	content, hasContent, err := resolveTextFlag(cmd, "content")
+	if err != nil {
+		return err
+	}
+	if !hasContent {
+		return fmt.Errorf("--content, --content-stdin, or --content-file is required")
+	}
+	if err := guardLocalPathLinks(content, "comment body",
+		"Comment updates cannot attach files; deliver the file in a new comment with `multica issue comment add <issue-id> --attachment <path>` and drop the link."); err != nil {
+		return err
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	commentID := args[0]
+	var result map[string]any
+	if err := client.PutJSON(ctx, "/api/comments/"+url.PathEscape(commentID), map[string]any{
+		"content":           content,
+		"expected_revision": expectedRevision,
+	}, &result); err != nil {
+		return fmt.Errorf("update comment: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Comment %s updated.\n", commentID)
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+
 func runIssueCommentDelete(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -1271,12 +2541,59 @@ func runIssueCommentDelete(cmd *cobra.Command, args []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
-	if err := client.DeleteJSON(ctx, "/api/comments/"+args[0]); err != nil {
+	// The keep-replies route exists only on servers that keep a deleted
+	// comment's replies. An older server does not route it — a plain-text 404,
+	// unlike the JSON "comment not found" — and would delete the replies too,
+	// so refuse there rather than fall back.
+	err = client.DeleteJSON(ctx, "/api/comments/"+args[0]+"/keep-replies")
+	var httpErr *cli.HTTPError
+	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound && !strings.HasPrefix(httpErr.Body, "{") {
+		return fmt.Errorf("delete comment: this server would delete the comment's replies too; upgrade the server first")
+	}
+	if err != nil {
 		return fmt.Errorf("delete comment: %w", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "Comment %s deleted.\n", args[0])
 	return nil
+}
+
+func runIssueCommentResolve(cmd *cobra.Command, args []string) error {
+	return runIssueCommentResolution(cmd, args[0], true)
+}
+
+func runIssueCommentUnresolve(cmd *cobra.Command, args []string) error {
+	return runIssueCommentResolution(cmd, args[0], false)
+}
+
+func runIssueCommentResolution(cmd *cobra.Command, commentID string, resolve bool) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	path := "/api/comments/" + url.PathEscape(commentID) + "/resolve"
+	var result map[string]any
+	if resolve {
+		if err := client.PostJSON(ctx, path, nil, &result); err != nil {
+			return fmt.Errorf("resolve comment: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Comment %s resolved.\n", commentID)
+	} else {
+		if err := client.DeleteJSONResponse(ctx, path, &result); err != nil {
+			return fmt.Errorf("unresolve comment: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Comment %s unresolved.\n", commentID)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
 }
 
 // ---------------------------------------------------------------------------
@@ -1297,9 +2614,37 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
 
+	activeOnly, _ := cmd.Flags().GetBool("active")
+	siblings, _ := cmd.Flags().GetBool("siblings")
+
+	params := url.Values{}
+	if siblings {
+		// The server implies active for a family read, so --siblings alone is
+		// enough; sending both keeps the request self-describing.
+		params.Set("scope", "family")
+		params.Set("active", "true")
+	} else if activeOnly {
+		params.Set("active", "true")
+	}
+
+	path := "/api/issues/" + issueRef.ID + "/task-runs"
+	if len(params) > 0 {
+		path += "?" + params.Encode()
+	}
+
 	var runs []map[string]any
-	if err := client.GetJSON(ctx, "/api/issues/"+issueRef.ID+"/task-runs", &runs); err != nil {
+	respHeaders, err := client.GetJSONWithHeaders(ctx, path, &runs)
+	if err != nil {
 		return fmt.Errorf("list runs: %w", err)
+	}
+	// A truncated coordination read and a complete one look identical in the
+	// body, and reading the first as the second is exactly the wrong
+	// conclusion: "no run on that sibling" when the answer was simply cut off.
+	// Same stderr convention as the comment-list paging cursors.
+	if respHeaders.Get(headerActiveRunsTruncated) == "true" {
+		fmt.Fprintln(os.Stderr,
+			"warning: active runs truncated by the server cap: more runs are in flight than this read returns. "+
+				"\"No run on that issue\" cannot be concluded from this read.")
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -1309,6 +2654,32 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 
 	actors := loadActorDisplayLookup(ctx, client)
 	fullID, _ := cmd.Flags().GetBool("full-id")
+
+	// The family read returns a different, deliberately smaller row than the
+	// execution log — no completed_at or error, because every row in it is
+	// still in flight — and it spans issues, so it needs a column saying which.
+	// On a single-issue read that column would repeat the argument on every
+	// line, so it stays off there.
+	if siblings {
+		headers := []string{"RUN", "ISSUE", "AGENT", "STATUS", "STARTED"}
+		rows := make([][]string, 0, len(runs))
+		for _, r := range runs {
+			started := strVal(r, "started_at")
+			if len(started) >= 16 {
+				started = started[:16]
+			}
+			rows = append(rows, []string{
+				displayID(strVal(r, "task_id"), fullID),
+				strVal(r, "issue_identifier"),
+				actors.agent(strVal(r, "agent_id")),
+				strVal(r, "status"),
+				started,
+			})
+		}
+		cli.PrintTable(os.Stdout, headers, rows)
+		return nil
+	}
+
 	headers := []string{"ID", "AGENT", "STATUS", "STARTED", "COMPLETED", "ERROR"}
 	rows := make([][]string, 0, len(runs))
 	for _, r := range runs {
@@ -1338,6 +2709,77 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runIssueUsage(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	var result map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID)+"/usage", &result); err != nil {
+		return fmt.Errorf("get issue usage: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	terminal, hasTerminal := result["terminal_task_count"]
+	metered, hasMetered := result["metered_task_count"]
+	unreported, hasUnreported := result["unreported_task_count"]
+	if !hasTerminal {
+		terminal = result["task_count"]
+	}
+	if !hasMetered {
+		metered = result["task_count"]
+	}
+	if !hasUnreported {
+		unreported = "—"
+	}
+	usageRows := result["task_count"]
+
+	// JSON numbers decode to float64; formatIssueUsageTokens and
+	// formatMetadataValue render them as clean integers (no scientific
+	// notation for large cache-token counts).
+	headers := []string{"INPUT_TOKENS", "OUTPUT_TOKENS", "CACHE_READ", "CACHE_WRITE", "RUNS", "METERED_RUNS", "UNREPORTED"}
+	rows := [][]string{{
+		formatIssueUsageTokens(result["total_input_tokens"], terminal, metered, usageRows, hasTerminal && hasMetered),
+		formatIssueUsageTokens(result["total_output_tokens"], terminal, metered, usageRows, hasTerminal && hasMetered),
+		formatIssueUsageTokens(result["total_cache_read_tokens"], terminal, metered, usageRows, hasTerminal && hasMetered),
+		formatIssueUsageTokens(result["total_cache_write_tokens"], terminal, metered, usageRows, hasTerminal && hasMetered),
+		formatMetadataValue(terminal),
+		formatMetadataValue(metered),
+		formatMetadataValue(unreported),
+	}}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func formatIssueUsageTokens(value, terminal, metered, usageRows any, coverageKnown bool) string {
+	if !coverageKnown {
+		return formatMetadataValue(value)
+	}
+	terminalCount, terminalOK := terminal.(float64)
+	meteredCount, meteredOK := metered.(float64)
+	if !terminalOK || !meteredOK || terminalCount <= meteredCount {
+		return formatMetadataValue(value)
+	}
+	usageRowCount, usageRowsOK := usageRows.(float64)
+	if meteredCount == 0 && usageRowsOK && usageRowCount == 0 {
+		return "—"
+	}
+	return ">=" + formatMetadataValue(value)
+}
+
 func runIssueRunMessages(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -1357,7 +2799,7 @@ func runIssueRunMessages(cmd *cobra.Command, args []string) error {
 	}
 	taskRef, err := resolveTaskRunID(ctx, client, issueID, args[0])
 	if err != nil {
-		return fmt.Errorf("resolve task run: %w", err)
+		return fmt.Errorf("resolve run: %w", err)
 	}
 
 	path := "/api/tasks/" + url.PathEscape(taskRef.ID) + "/messages"
@@ -1429,7 +2871,7 @@ func runIssueRerun(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, task)
 	}
 	agent := loadActorDisplayLookup(ctx, client).agent(strVal(task, "agent_id"))
-	fmt.Fprintf(os.Stdout, "Re-enqueued task %s on agent %s\n", strVal(task, "id"), agent)
+	fmt.Fprintf(os.Stdout, "Re-enqueued run %s on agent %s\n", strVal(task, "id"), agent)
 	return nil
 }
 
@@ -1457,13 +2899,13 @@ func runIssueCancelTask(cmd *cobra.Command, args []string) error {
 	}
 	taskRef, err := resolveTaskRunID(ctx, client, issueScope, args[0])
 	if err != nil {
-		return fmt.Errorf("resolve task run: %w", err)
+		return fmt.Errorf("resolve run: %w", err)
 	}
 
 	var result map[string]any
 	path := "/api/tasks/" + url.PathEscape(taskRef.ID) + "/cancel"
 	if err := client.PostJSON(ctx, path, map[string]any{}, &result); err != nil {
-		return fmt.Errorf("cancel task: %w", err)
+		return fmt.Errorf("cancel run: %w", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -1474,7 +2916,7 @@ func runIssueCancelTask(cmd *cobra.Command, args []string) error {
 	if status == "" {
 		status = "cancelled"
 	}
-	fmt.Fprintf(os.Stdout, "Task %s -> status=%s\n", taskRef.ID, status)
+	fmt.Fprintf(os.Stdout, "Run %s -> status=%s\n", taskRef.ID, status)
 	return nil
 }
 
@@ -1666,7 +3108,40 @@ type assigneeKinds struct {
 var (
 	issueAssigneeKinds = assigneeKinds{member: true, agent: true, squad: true}
 	memberOrAgentKinds = assigneeKinds{member: true, agent: true}
+	// Actor property values are members only (MUL-6286).
+	memberOnlyKinds = assigneeKinds{member: true}
 )
+
+var assigneeResolveRetrySleep = func(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return true
+	case <-timer.C:
+		return false
+	}
+}
+
+func getAssigneeJSON(ctx context.Context, client *cli.APIClient, path string, out any) error {
+	delays := []time.Duration{100 * time.Millisecond, 250 * time.Millisecond}
+	var err error
+	for attempt := 0; attempt <= len(delays); attempt++ {
+		err = client.GetJSON(ctx, path, out)
+		if err == nil || !isRetryableAssigneeResolveError(err) || attempt == len(delays) {
+			return err
+		}
+		if assigneeResolveRetrySleep(ctx, delays[attempt]) {
+			return ctx.Err()
+		}
+	}
+	return err
+}
+
+func isRetryableAssigneeResolveError(err error) bool {
+	var netErr *cli.NetworkError
+	return errors.As(err, &netErr)
+}
 
 func (k assigneeKinds) describe() string {
 	parts := make([]string, 0, 3)
@@ -1691,52 +3166,56 @@ func (k assigneeKinds) describe() string {
 	}
 }
 
+// assigneeCandidate is one directory entry matchAssignee ranks. aliases are
+// additional unique identifiers that select a candidate outright, ranked with
+// id matches rather than name matches — a member's email is as unambiguous as
+// their id, and is what people actually have to hand. Without it,
+// `--value bohan@example.com` fails to resolve.
+type assigneeCandidate struct {
+	assigneeMatch
+	aliases []string
+}
+
+func (c assigneeCandidate) matchesAlias(input string) bool {
+	for _, alias := range c.aliases {
+		if alias != "" && strings.EqualFold(alias, input) {
+			return true
+		}
+	}
+	return false
+}
+
+func memberCandidates(members []map[string]any) []assigneeCandidate {
+	candidates := make([]assigneeCandidate, 0, len(members))
+	for _, m := range members {
+		candidates = append(candidates, assigneeCandidate{
+			assigneeMatch: assigneeMatch{Type: "member", ID: strVal(m, "user_id"), Name: strVal(m, "name")},
+			aliases:       []string{strVal(m, "email")},
+		})
+	}
+	return candidates
+}
+
 func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, kinds assigneeKinds) (string, string, error) {
 	if client.WorkspaceID == "" {
 		return "", "", fmt.Errorf("workspace ID is required to resolve assignees; use --workspace-id or set MULTICA_WORKSPACE_ID")
 	}
-
-	input := normalizeAssigneeLookupInput(name)
-	if input == "" {
+	if normalizeAssigneeLookupInput(name) == "" {
 		return "", "", fmt.Errorf("no %s found matching %q", kinds.describe(), name)
 	}
-	inputLower := strings.ToLower(input)
 
-	// Matches are collected into three priority buckets. Higher-priority buckets
-	// short-circuit lower-priority matching so that, e.g., an exact name match
-	// always wins over a substring collision with another candidate.
-	//   1. idMatches        — full UUID or 8-char ShortID (as shown by `truncateID`).
-	//   2. exactMatches     — case-insensitive full name equality.
-	//   3. substringMatches — preserves the existing partial-name UX.
-	var idMatches, exactMatches, substringMatches []assigneeMatch
+	var candidates []assigneeCandidate
 	var errs []error
 	var fetchAttempts int
-
-	classify := func(entityType, id, displayName string) {
-		match := assigneeMatch{Type: entityType, ID: id, Name: displayName}
-		if id != "" && (strings.EqualFold(id, input) || strings.EqualFold(truncateID(id), input)) {
-			idMatches = append(idMatches, match)
-			return
-		}
-		if strings.EqualFold(displayName, input) {
-			exactMatches = append(exactMatches, match)
-			return
-		}
-		if strings.Contains(strings.ToLower(displayName), inputLower) {
-			substringMatches = append(substringMatches, match)
-		}
-	}
 
 	// Search members.
 	if kinds.member {
 		fetchAttempts++
 		var members []map[string]any
-		if err := client.GetJSON(ctx, "/api/workspaces/"+client.WorkspaceID+"/members", &members); err != nil {
+		if err := getAssigneeJSON(ctx, client, "/api/workspaces/"+client.WorkspaceID+"/members", &members); err != nil {
 			errs = append(errs, fmt.Errorf("fetch members: %w", err))
 		} else {
-			for _, m := range members {
-				classify("member", strVal(m, "user_id"), strVal(m, "name"))
-			}
+			candidates = append(candidates, memberCandidates(members)...)
 		}
 	}
 
@@ -1745,11 +3224,11 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 		fetchAttempts++
 		var agents []map[string]any
 		agentPath := "/api/agents?" + url.Values{"workspace_id": {client.WorkspaceID}}.Encode()
-		if err := client.GetJSON(ctx, agentPath, &agents); err != nil {
+		if err := getAssigneeJSON(ctx, client, agentPath, &agents); err != nil {
 			errs = append(errs, fmt.Errorf("fetch agents: %w", err))
 		} else {
 			for _, a := range agents {
-				classify("agent", strVal(a, "id"), strVal(a, "name"))
+				candidates = append(candidates, assigneeCandidate{assigneeMatch: assigneeMatch{Type: "agent", ID: strVal(a, "id"), Name: strVal(a, "name")}})
 			}
 		}
 	}
@@ -1764,14 +3243,14 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 	if kinds.squad {
 		fetchAttempts++
 		var squads []map[string]any
-		if err := client.GetJSON(ctx, "/api/squads", &squads); err != nil {
+		if err := getAssigneeJSON(ctx, client, "/api/squads", &squads); err != nil {
 			errs = append(errs, fmt.Errorf("fetch squads: %w", err))
 		} else {
 			for _, s := range squads {
 				if strVal(s, "archived_at") != "" {
 					continue
 				}
-				classify("squad", strVal(s, "id"), strVal(s, "name"))
+				candidates = append(candidates, assigneeCandidate{assigneeMatch: assigneeMatch{Type: "squad", ID: strVal(s, "id"), Name: strVal(s, "name")}})
 			}
 		}
 	}
@@ -1783,6 +3262,37 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 			msgs[i] = e.Error()
 		}
 		return "", "", fmt.Errorf("failed to resolve assignee: %s", strings.Join(msgs, "; "))
+	}
+
+	return matchAssignee(name, kinds, candidates)
+}
+
+// matchAssignee resolves name against candidates a caller already fetched.
+// Matches are collected into three priority buckets. Higher-priority buckets
+// short-circuit lower-priority matching so that, e.g., an exact name match
+// always wins over a substring collision with another candidate.
+//  1. idMatches        — full UUID or 8-char ShortID (as shown by `truncateID`), or an alias.
+//  2. exactMatches     — case-insensitive full name equality.
+//  3. substringMatches — preserves the existing partial-name UX.
+func matchAssignee(name string, kinds assigneeKinds, candidates []assigneeCandidate) (string, string, error) {
+	input := normalizeAssigneeLookupInput(name)
+	if input == "" {
+		return "", "", fmt.Errorf("no %s found matching %q", kinds.describe(), name)
+	}
+	inputLower := strings.ToLower(input)
+
+	var idMatches, exactMatches, substringMatches []assigneeMatch
+	for _, c := range candidates {
+		switch {
+		case c.ID != "" && (strings.EqualFold(c.ID, input) || strings.EqualFold(truncateID(c.ID), input)):
+			idMatches = append(idMatches, c.assigneeMatch)
+		case c.matchesAlias(input):
+			idMatches = append(idMatches, c.assigneeMatch)
+		case strings.EqualFold(c.Name, input):
+			exactMatches = append(exactMatches, c.assigneeMatch)
+		case strings.Contains(strings.ToLower(c.Name), inputLower):
+			substringMatches = append(substringMatches, c.assigneeMatch)
+		}
 	}
 
 	for _, bucket := range [][]assigneeMatch{idMatches, exactMatches, substringMatches} {
@@ -1839,20 +3349,20 @@ func resolveAssigneeByID(ctx context.Context, client *cli.APIClient, id string, 
 	var members []map[string]any
 	var memberErr error
 	if kinds.member {
-		memberErr = client.GetJSON(ctx, "/api/workspaces/"+client.WorkspaceID+"/members", &members)
+		memberErr = getAssigneeJSON(ctx, client, "/api/workspaces/"+client.WorkspaceID+"/members", &members)
 	}
 
 	var agents []map[string]any
 	var agentErr error
 	if kinds.agent {
 		agentPath := "/api/agents?" + url.Values{"workspace_id": {client.WorkspaceID}}.Encode()
-		agentErr = client.GetJSON(ctx, agentPath, &agents)
+		agentErr = getAssigneeJSON(ctx, client, agentPath, &agents)
 	}
 
 	var squads []map[string]any
 	var squadErr error
 	if kinds.squad {
-		squadErr = client.GetJSON(ctx, "/api/squads", &squads)
+		squadErr = getAssigneeJSON(ctx, client, "/api/squads", &squads)
 	}
 
 	allFailed := true
@@ -1939,10 +3449,61 @@ func formatAssignee(issue map[string]any, actors actorDisplayLookup) string {
 	return actors.actor(aType, aID)
 }
 
+// filterIssueFields keeps only the requested top-level keys on each issue,
+// dropping everything else — including description, which makes up most of
+// a typical issue payload. Opt-in via --fields on JSON output only.
+func filterIssueFields(issuesRaw []any, fields []string) {
+	keep := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		keep[f] = true
+	}
+	for _, raw := range issuesRaw {
+		issue, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		for k := range issue {
+			if !keep[k] {
+				delete(issue, k)
+			}
+		}
+	}
+}
+
 func truncateID(id string) string {
 	if utf8.RuneCountInString(id) > 8 {
 		runes := []rune(id)
 		return string(runes[:8])
 	}
 	return id
+}
+
+// compactComments strips response fields that carry no information for a
+// reader: the issue_id echoed from the request path, per-run bookkeeping
+// (source_task_id), updated_at when identical to created_at, null-valued
+// keys, and empty arrays. Everything else — content, identity, thread
+// summary fields — passes through untouched. Opt-in via --compact and
+// applied to JSON output only: the two bounded reads the agent workflow
+// prescribes are dominated by exactly this metadata (56% of a
+// --roots-only --summary scan, 21% of a --thread --tail read, measured on
+// a production issue), and it compounds through the prompt-cache prefix
+// (#5999 follow-up, MUL-5442).
+func compactComments(comments []map[string]any) {
+	for _, c := range comments {
+		delete(c, "issue_id")
+		delete(c, "source_task_id")
+		if ua, ok := c["updated_at"]; ok && ua == c["created_at"] {
+			delete(c, "updated_at")
+		}
+		for k, v := range c {
+			switch vv := v.(type) {
+			case nil:
+				delete(c, k)
+			case []any:
+				if len(vv) == 0 {
+					delete(c, k)
+				}
+			}
+		}
+	}
 }

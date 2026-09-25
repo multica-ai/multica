@@ -1,0 +1,53 @@
+-- Human Attribution, Phase 1 — split the accountable human off originator_user_id
+-- (MUL-4302, decided by Bohan on the MUL-4302 thread).
+--
+-- Migration 184 stamped provenance (originator_source, evidence, lineage) ONTO
+-- originator_user_id, treating that one column as both "who authorized this run"
+-- and "who is accountable for it". Those are two different questions with two
+-- different lifetimes, and collapsing them onto one column is a latent hazard:
+--
+--   * originator_user_id is an AUTHORIZATION input. canInvokeAgent (the A2A gate)
+--     and the Composio overlay read it to decide "whose permission is this run
+--     acting under". It is legitimately NULL when no human lent their authority
+--     (autopilot schedule/webhook, or a chain that resolves to no human). NULL is
+--     the authorization system's only way to say "this run carries no human
+--     permission" — the owner-can-invoke-own-agent branch in canInvokeAgent means
+--     that forging a non-NULL owner here would turn every unresolved run into a
+--     fully-privileged one (fail-open). So this column must stay unforgeable.
+--
+--   * accountable_user_id is an AUDIT / visibility / cost output. The design axiom
+--     (MUL-4302 §1) requires it to be resolvable for every run, degrading to the
+--     rule publisher (rule_owner) or agent owner (owner_fallback) when no human is
+--     in the trigger chain. Its "never NULL for a precise attribution" property is
+--     descriptive (a best-effort label), never a grant of permission.
+--
+-- This migration adds the dedicated audit column. Authorization continues to read
+-- ONLY originator_user_id; audit / UI / usage read accountable_user_id + source +
+-- evidence. The one-way invariant the resolver enforces and §11 tests:
+--
+--     originator_user_id IS NOT NULL  ⟹  accountable_user_id = originator_user_id
+--
+-- Divergence happens only when originator_user_id IS NULL (no human authorized the
+-- run) — there the audit side may still name a degraded accountable human while
+-- authorization correctly says "no one". Wiring the divergent sources (rule_owner,
+-- owner_fallback) is a later Phase 1 increment; this migration lands the column and
+-- the mirror-write so that split has a home without ever touching the authz path.
+--
+-- Constraints (MUL-4302 §7 + workspace DB rules): NO foreign key, NO cascade
+-- (integrity is resolved in the application layer). Nullable with no default so the
+-- ALTER is a fast metadata-only change on the hot queue table (no rewrite, no long
+-- lock).
+--
+-- NULL does NOT mean "pre-migration row" here. Unlike originator_source (which
+-- every new enqueue path now stamps non-NULL, migration 184), accountable_user_id
+-- is legitimately NULL on NEW rows too, whenever the row's audit source resolved
+-- no human yet: run_only autopilot writes originator_source='unattributed' with a
+-- NULL accountable until rule_owner lands, and any classified-unattributed path is
+-- the same. So NULL means "no accountable human resolved" — a pre-migration row OR
+-- a new not-yet-resolved / unattributed audit source — and readers must NOT treat
+-- NULL as pre-migration-only when reasoning about the invariant.
+ALTER TABLE agent_task_queue
+    ADD COLUMN accountable_user_id UUID NULL;
+
+COMMENT ON COLUMN agent_task_queue.accountable_user_id IS
+    'The one human accountable for this run, for audit / visibility / cost only — NEVER consulted for authorization (that is originator_user_id). Invariant: when originator_user_id IS NOT NULL, this equals it; the two diverge only when originator_user_id IS NULL (autopilot rule_owner / degraded owner_fallback name an accountable human while authorization carries none). No FK, no cascade (MUL-4302 §1/§7). NULL means no accountable human was resolved: a pre-migration row, OR a NEW row whose audit source is not-yet-resolved / unattributed (e.g. run_only autopilot until rule_owner lands) — NOT pre-migration only.';

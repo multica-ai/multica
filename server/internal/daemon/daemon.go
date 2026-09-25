@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,18 +9,32 @@ import (
 	"hash/fnv"
 	"log/slog"
 	"math/rand"
+	"net"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
+
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/redact"
+	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -28,10 +43,125 @@ import (
 // server refresh.
 var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace")
 
+// ErrNoRuntimesToRegister is returned by registerRuntimesForWorkspace when
+// the daemon has nothing to host on a workspace — typically a custom-only
+// daemon whose only enabled custom runtime profile was just disabled, leaving
+// zero built-in agents and zero resolvable profiles. Callers must
+// differentiate by intent: initial registration (syncWorkspacesFromAPI's
+// new-workspace branch) treats this as a config error and skips the
+// workspace until something changes; the profile-drift refresh path
+// (refreshWorkspaceRuntimeProfiles) treats it as a legitimate converged
+// state and explicitly deregisters the now-stale local runtime IDs so the
+// server marks them offline immediately instead of waiting on the 150 s
+// stale-heartbeat sweep.
+var ErrNoRuntimesToRegister = errors.New("no agent runtimes could be registered")
+
+// errNoWorkspaceRuntimesRegistered is returned by syncWorkspacesFromAPI when a
+// round left every workspace without a runtime. At startup that is normally
+// fatal — a daemon hosting nothing has nothing to do, and failing loudly beats
+// idling — which is why it is a sentinel rather than a bare string: exactly one
+// caller is allowed to make an exception to it, and only for the one situation
+// where the daemon knows the answer is on its way. See
+// startupMayProceedWithoutRuntimes.
+var errNoWorkspaceRuntimesRegistered = errors.New("failed to register runtimes")
+
+// errTaskPrepareTimeout distinguishes the daemon's dispatched -> running
+// startup deadline from provider execution timeouts. handleTask maps it to the
+// platform-side timeout failure reason so the server's existing retry path can
+// recover the task on a fresh attempt.
+var errTaskPrepareTimeout = errors.New("task preparation timed out")
+
+// errSkillBundleUnavailable marks a task that died in preparation because the
+// daemon could not download one of the agent's skill bundles. Carrying it as a
+// sentinel — rather than leaving handleTask to pattern-match the wrapped
+// transport error — is what lets the failure land on the platform-side
+// skill_bundle_unavailable reason instead of agent_error.unknown, which is not
+// on the server's retry allowlist. (MUL-5370)
+var errSkillBundleUnavailable = errors.New("skill bundle unavailable")
+
 const (
-	taskSlotWaitTimeout     = 2 * time.Second
-	taskSlotCapacityBackoff = 5 * time.Second
+	taskSlotWaitTimeout      = 2 * time.Second
+	taskSlotCapacityBackoff  = 5 * time.Second
+	repoCheckoutModeEnv      = "MULTICA_REPO_CHECKOUT_MODE"
+	repoCheckoutModeIsolated = "isolated"
+	// defaultTaskPrepareTimeout is a hard liveness bound for everything after
+	// claim and before StartTask succeeds: runtime resolution, skill bundles,
+	// execution-environment setup, and the StartTask request itself. It is
+	// intentionally independent from AgentTimeout, which only governs the
+	// provider process after the task reaches running.
+	defaultTaskPrepareTimeout = 5 * time.Minute
+	// pendingWorkHeartbeatTimeout bounds the out-of-band heartbeat a
+	// server-pushed daemon:pending_work hint triggers (MUL-5444). Short on
+	// purpose: the hint is only a latency optimisation, and the scheduled
+	// heartbeat still picks the request up if this attempt fails.
+	pendingWorkHeartbeatTimeout = 15 * time.Second
+	// pendingWorkHintBookkeepingTTL is how long a runtime's last-hint timestamp
+	// is retained before it is swept — purely to keep the map bounded.
+	pendingWorkHintBookkeepingTTL = 10 * time.Minute
+	// idleWatchdogMaxTick caps the idle watchdog's polling interval. At the
+	// base rate of window/2 the overshoot scales with the budget: a 2h window
+	// would only be checked hourly, so a genuinely stuck run could hold its
+	// slot for 3h. The cap makes worst-case detection window + 5m no matter how
+	// large an operator sets the budget.
+	//
+	// 5m is chosen as the largest overshoot worth tolerating on top of a budget
+	// already measured in hours, not for its polling cost — a tick is an atomic
+	// load and a channel length check, so it is free at any interval anyone
+	// would pick.
+	idleWatchdogMaxTick = 5 * time.Minute
 )
+
+// pendingWorkHintMinInterval is the floor between two hint-driven heartbeats
+// for the same runtime. Keeps an interactive first open instant while stopping a
+// caller-triggered hint from becoming a heartbeat amplifier. A var so tests can
+// shrink it, same as the other timing knobs in this package.
+var pendingWorkHintMinInterval = time.Second
+
+// repoCheckoutModeFor picks the Git metadata layout for a task's
+// `multica repo checkout`. Under Codex's workspace-write sandbox a linked
+// worktree's gitdir resolves into the shared cache and stays read-only even
+// when the task workdir is an explicit writable root, so `git add` /
+// `git commit` fail from inside the checkout — Linux hit this in
+// multica-ai/multica#2925, Codex's native Windows sandbox in
+// multica-ai/multica#6449.
+//
+// Both platforms now default to danger-full-access (execenv's
+// codexSandboxPolicyFor), so in practice only a user who opted into
+// windows.sandbox still trips the Windows case. The layout stays a per-platform
+// choice rather than a per-policy one: it is decided before a task's resolved
+// sandbox config is known, one workdir is reused across tasks whose policies
+// can differ, and task-local metadata is correct under either policy.
+func repoCheckoutModeFor(provider, goos string) string {
+	if provider != "codex" {
+		return ""
+	}
+	switch goos {
+	case "linux", "windows":
+		return repoCheckoutModeIsolated
+	default:
+		return ""
+	}
+}
+
+const (
+	taskPrepareLeaseRefresh = 15 * time.Second
+	taskPrepareLeaseTimeout = 10 * time.Second
+)
+
+var errInvalidTaskIdentity = errors.New("invalid task identity")
+
+func validateTaskIdentity(task Task) error {
+	if strings.TrimSpace(task.AgentID) == "" {
+		return fmt.Errorf("%w: task %s has no authoritative agent_id", errInvalidTaskIdentity, task.ID)
+	}
+	if task.Agent == nil {
+		return fmt.Errorf("%w: task %s has no agent payload (agent_id=%s)", errInvalidTaskIdentity, task.ID, task.AgentID)
+	}
+	if task.Agent.ID != task.AgentID {
+		return fmt.Errorf("%w: task %s agent_id=%s but agent.id=%s", errInvalidTaskIdentity, task.ID, task.AgentID, task.Agent.ID)
+	}
+	return nil
+}
 
 func taskScopedAuthToken(task Task) (string, error) {
 	token := strings.TrimSpace(task.AuthToken)
@@ -42,6 +172,24 @@ func taskScopedAuthToken(task Task) (string, error) {
 		return "", errors.New("server provided non-task-scoped auth token")
 	}
 	return token, nil
+}
+
+func taskMulticaEnvironment(task Task, agentName, token, configRoot, workspacesRoot, serverURL string, healthPort, slot int, tempDir string) map[string]string {
+	return map[string]string{
+		"MULTICA_TOKEN":        token,
+		cli.TaskConfigRootEnv:  configRoot,
+		TaskWorkspacesRootEnv:  workspacesRoot,
+		"MULTICA_SERVER_URL":   serverURL,
+		"MULTICA_DAEMON_PORT":  strconv.Itoa(healthPort),
+		"MULTICA_WORKSPACE_ID": task.WorkspaceID,
+		"MULTICA_AGENT_NAME":   agentName,
+		"MULTICA_AGENT_ID":     task.AgentID,
+		"MULTICA_TASK_ID":      task.ID,
+		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
+		"TMPDIR":               tempDir,
+		"TMP":                  tempDir,
+		"TEMP":                 tempDir,
+	}
 }
 
 // taskRunner executes a single agent task and returns the result.
@@ -58,10 +206,63 @@ func (f taskRunnerFunc) run(ctx context.Context, task Task, provider string, slo
 	return f(ctx, task, provider, slot, log)
 }
 
+type terminalTaskReportKind uint8
+
+const (
+	terminalTaskReportComplete terminalTaskReportKind = iota + 1
+	terminalTaskReportFail
+
+	// CompleteTask and FailTask can make six 30-second HTTP attempts around
+	// the five backoffs in defaultTerminalRetrySchedule (124 seconds total).
+	// Keep the detached callback's own deadline above that worst-case budget
+	// so it does not silently shorten the client's existing retry contract.
+	// During daemon restart pollLoop still imposes its separate 30-second
+	// process drain boundary.
+	terminalTaskReportTimeout = 6 * time.Minute
+)
+
+// terminalTaskReport is the single daemon-side representation of a terminal
+// callback. Keeping every complete/fail path behind this value and
+// reportTerminalTask gives the durable outbox one insertion point without
+// revisiting every task exit when it is added.
+type terminalTaskReport struct {
+	kind           terminalTaskReportKind
+	taskID         string
+	output         string
+	branchName     string
+	errorMessage   string
+	sessionID      string
+	workDir        string
+	durableWorkDir string
+	failureReason  string
+	// sessionRolloutMissing is true when the daemon withheld this task's Codex
+	// session because its rollout was not in the store (MUL-5305). The server
+	// clears the resume pointer and flags the continuity gap for the next claim.
+	sessionRolloutMissing bool
+	// retiredSessionID names a session this run was told to resume and then
+	// abandoned as unresumable (GH #6066). The server records it so no later
+	// run on the issue or chat can select it again, however many clean rows
+	// still reference it.
+	retiredSessionID string
+}
+
+type terminalReportSendFunc func(context.Context, terminalTaskReport, []time.Duration) error
+
+type executionEnvironmentCommand func() ([]string, error)
+
+func defaultExecutionEnvironmentCommand() ([]string, error) {
+	executable, err := resolveSelfExecutable()
+	if err != nil {
+		return nil, fmt.Errorf("resolve execution-environment helper: %w", err)
+	}
+	return []string{executable, execenv.PreparationHelperArg}, nil
+}
+
 var (
-	isBrewInstall        = cli.IsBrewInstall
-	getBrewPrefix        = cli.GetBrewPrefix
-	matchKnownBrewPrefix = cli.MatchKnownBrewPrefix
+	isBrewInstall         = cli.IsBrewInstall
+	getBrewPrefix         = cli.GetBrewPrefix
+	matchKnownBrewPrefix  = cli.MatchKnownBrewPrefix
+	resolveSelfExecutable = selfexec.Resolve
 
 	// detectAgentVersion / checkAgentMinVersion are indirections over the
 	// real agent helpers so tests can run the registration path without
@@ -69,6 +270,26 @@ var (
 	// helpers above.
 	detectAgentVersion   = agent.DetectVersion
 	checkAgentMinVersion = agent.CheckMinVersion
+
+	// listModels is an indirection over agent.ListModels so model-discovery
+	// tests can assert which executable path the daemon enumerates without
+	// shelling out to a real CLI. Mirrors the detectAgentVersion hook above.
+	listModels = agent.ListModels
+
+	// lookPath is an indirection over exec.LookPath so registration tests can
+	// resolve custom runtime-profile commands without manipulating the
+	// process PATH. Mirrors the detectAgentVersion hook above.
+	lookPath = exec.LookPath
+
+	// resolveProfileOverridePath is what appendProfileRuntimes uses before
+	// trusting a per-machine command path override (MUL-3284). It must be the
+	// same contract agent launches use — resolveAgentExecutablePath /
+	// exec.LookPath — so Windows PATHEXT completion (.cmd shims, extension-less
+	// pins) and unix exec-bit checks stay in one place. A stale or mistyped
+	// override must fall back to PATH rather than register a runtime that
+	// can't launch. Indirected as a package var so override-preference tests
+	// can decide which paths resolve without staging real files on disk.
+	resolveProfileOverridePath = resolveAgentExecutablePath
 )
 
 // workspaceState tracks registered runtimes for a single workspace.
@@ -78,19 +299,83 @@ var (
 // surfaced through a per-task claim (project github_repo resources today,
 // possibly other typed sources later) — those don't show up in
 // GetWorkspaceRepos, so they would be wiped on refresh if we shared one map.
+// taskRepoRefs tracks optional checkout refs for the specific task that
+// surfaced each project repo so two projects using the same URL don't leak refs
+// into each other.
 type workspaceState struct {
 	workspaceID     string
 	runtimeIDs      []string
 	reposVersion    string // stored for future use: skip refresh when version unchanged
 	allowedRepoURLs map[string]struct{}
 	taskRepoURLs    map[string]struct{}
-	settings        json.RawMessage // workspace settings (JSONB)
+	taskRepoRefs    map[string]map[string]string // taskID -> repo URL -> checkout ref
+	settings        json.RawMessage              // workspace settings (JSONB)
 	lastRepoSyncErr string
-	repoRefreshMu   sync.Mutex
+	repoRefreshMu   contextLock
+	// coAuthorPublishMu serializes publication of the Co-authored-by verdict
+	// for this workspace. Unlike the fields above it is NOT guarded by
+	// Daemon.mu: it exists precisely so the verdict can be read and written as
+	// one step without holding the daemon's central lock across file I/O.
+	coAuthorPublishMu sync.Mutex
+	// profileSetSig is a content hash of the workspace's custom runtime
+	// profile list (MUL-3332) as last seen from the server. An on-demand
+	// refresh compares the live signature with this cached value; any drift
+	// triggers a re-register so newly-added (or edited / disabled) custom
+	// runtimes appear without a daemon restart. Empty before the first
+	// successful profile fetch (older server / network blip); guarded by
+	// Daemon.mu like every other field on this struct.
+	profileSetSig string
+	// builtinVersions records, per built-in provider, the version carried by
+	// the last register call the server ACCEPTED for this workspace. This is
+	// the daemon's per-workspace record of what the server knows — which the
+	// shared agentVersions cache deliberately is not: every probing path
+	// writes that cache, but each register call covers only the workspaces it
+	// was invoked for. refreshAgentVersions compares this record against the
+	// current probe round and re-registers exactly the workspaces that are
+	// behind. Scoping the acknowledgement to the workspace is what makes a
+	// concurrent older-generation registration safe: a register that probed
+	// before an upgrade and lands after everyone else was refreshed simply
+	// re-creates the mismatch for its own workspace, and the next round
+	// revisits it. A failed register records nothing, so the workspace stays
+	// behind and is retried. Guarded by Daemon.mu.
+	builtinVersions map[string]string
+}
+
+// contextLock is a zero-value-ready mutex whose wait can be cancelled. Repo
+// checkout requests use it for workspace refresh coalescing so disconnecting a
+// client never leaves the handler stuck behind another cold-cache refresh.
+type contextLock struct {
+	once  sync.Once
+	token chan struct{}
+}
+
+func (l *contextLock) Lock(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	l.once.Do(func() {
+		l.token = make(chan struct{}, 1)
+		l.token <- struct{}{}
+	})
+	select {
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	case <-l.token:
+		if err := ctx.Err(); err != nil {
+			l.token <- struct{}{}
+			return context.Cause(ctx)
+		}
+		return nil
+	}
+}
+
+func (l *contextLock) Unlock() {
+	l.token <- struct{}{}
 }
 
 type repoCacheBackend interface {
 	Lookup(workspaceID, url string) string
+	BarePath(workspaceID, url string) string
 	Sync(workspaceID string, repos []repocache.RepoInfo) error
 	WithRepoLock(barePath string, fn func() error) error
 	CreateWorktree(params repocache.WorktreeParams) (*repocache.WorktreeResult, error)
@@ -98,22 +383,184 @@ type repoCacheBackend interface {
 
 // Daemon is the local agent runtime that polls for and executes tasks.
 type Daemon struct {
-	cfg       Config
-	client    *Client
-	repoCache repoCacheBackend
-	logger    *slog.Logger
+	cfg        Config
+	client     *Client
+	repoCache  repoCacheBackend
+	skillCache *SkillBundleCache
+	logger     *slog.Logger
+
+	// terminalReports is the durable outbox for complete/fail callbacks. The
+	// sender hook is production-wired through Client and overridable in focused
+	// tests; terminalReportWakeup coalesces new-report and reconnect nudges.
+	terminalReports      *terminalReportStore
+	terminalReportSend   terminalReportSendFunc
+	terminalReportWakeup chan struct{}
+	terminalReportNow    func() time.Time
+	terminalReportMu     sync.Mutex
+	terminalReportFlight map[string]struct{}
 
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
-	reloading    sync.Mutex         // prevents concurrent workspace syncs
-	runtimeSet   *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
+	// profileLaunchSpecs maps a custom runtime profile_id -> the absolute
+	// executable path plus fixed launch args resolved for that profile
+	// (MUL-3284). Populated in registerRuntimesForWorkspace when a profile's
+	// command resolves; read by runTask to launch the custom command for a
+	// claimed task. Guarded by mu.
+	profileLaunchSpecs map[string]profileLaunchSpec
+	reloading          sync.Mutex         // prevents concurrent workspace syncs
+	runtimeSet         *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
+
+	// lifecycleCtx is the context Run was handed, kept so background work that
+	// must outlive a single probe round — the DSH profile install — is tied to
+	// the daemon's lifetime instead of to whichever round happened to notice the
+	// missing profile. Guarded by d.mu: it is written once in Run and read from
+	// the install goroutine, and "the write happens before every reader starts"
+	// is a property of statement order in Run that a later edit can quietly
+	// break. Read it through daemonLifecycleCtx.
+	lifecycleCtx context.Context
+
+	// dshInstallInFlight is true while an automatic DSH profile install is
+	// running. Read when a verdict becomes an offline reason, so the server can
+	// tell "wait, this resolves itself" from "a human has to act".
+	dshInstallInFlight atomic.Bool
+
+	// dshInstallWaits are the runtime rows taken offline while an automatic
+	// profile install was still running, so their stated cause claims the wait
+	// resolves itself. An install that ends without a profile has to withdraw
+	// that claim (withdrawDshInstallWait): the demotion already removed these
+	// runtimes from the index, so no later round condemns them again and no
+	// later deregistration would correct the row on its own. Guarded by d.mu.
+	dshInstallWaits []dshInstallWait
+
+	// dshProvisionOnce makes the automatic DSH runtime-profile install
+	// once-per-daemon: it is a network install that writes into the user's DSH
+	// home, so a failing registry must not be retried every discovery round.
+	// See startDshProfileProvision.
+	dshProvisionOnce sync.Once
+
+	// agentDiscoveryKick asks agentDiscoveryLoop for an immediate convergence
+	// round. Buffered and written non-blockingly (kickAgentDiscovery), so a
+	// producer never waits on the loop and a burst collapses into one round.
+	// Needed because the loop's scheduled retry can be
+	// agentConvergeMaxBackoff away, which is far too long to wait after a
+	// local state change that makes a provider registrable again.
+	agentDiscoveryKick chan struct{}
 
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
 
+	// registerSerial holds one mutex per workspace (workspace_id ->
+	// *sync.Mutex), serializing the "send Register, record what it carried"
+	// critical section (workspaceRegisterLock). Entries are never deleted — a
+	// daemon tracks a handful of workspaces, and a mutex for a workspace that
+	// went away is a few bytes, not a leak worth a lifecycle.
+	registerSerial sync.Map
+
+	// agentsAvailable holds the current built-in agent CLI availability set —
+	// the same shape as cfg.Agents, which it supersedes as the read path.
+	//
+	// It is copy-on-write, NOT a mutable map: refreshAgentAvailability swaps in
+	// a whole new map, and readers (agents()) take the pointer once and then
+	// only read. cfg.Agents used to be read unlocked from task-execution paths
+	// (resolveAgentEntry, runTask), so making the discovery set refreshable at
+	// runtime (MUL-5439) would otherwise be a data race.
+	agentsAvailable atomic.Pointer[map[string]AgentEntry]
+
+	// skippedAgents records why a discovered provider did not make it into the
+	// last registration round (version undetectable, below minimum). Purely
+	// diagnostic: surfaced on /health so the UI can tell "not installed" apart
+	// from "installed but dropped", instead of silently showing nothing
+	// (MUL-5439). Guarded by skippedAgentsMu.
+	skippedAgentsMu sync.RWMutex
+	skippedAgents   map[string]string // provider -> human-readable reason
+
+	// demotedProviders remembers the built-in providers whose version was
+	// CONFIRMED below the minimum supported one and whose runtimes
+	// demoteBelowMinimumRuntimes has already taken offline.
+	//
+	// Removing the rows is not enough on its own: a register call that was
+	// already in flight when the demotion landed still carries the pre-demotion
+	// payload, and its response arrives afterwards. Every apply path treats a
+	// response as fresh truth, so it re-indexes the provider locally while the
+	// server's upsert puts the row back online — reviving a CLI the daemon has
+	// already proven it cannot run, until the next refresh tick notices.
+	// Remembering the verdict lets the apply paths reject that late response.
+	//
+	// Machine-level, because the verdict is a property of the binary on this
+	// host rather than of any one workspace: a stale register for workspace A
+	// must not revive the provider for workspace B either. Cleared by the next
+	// probe round that finds the provider acceptable again, which is also the
+	// round that lets converge register it.
+	//
+	// Guarded by d.mu — deliberately the same lock every register-response
+	// apply takes, which is what totally orders "record the verdict" against
+	// "apply a response" instead of merely narrowing the window between them.
+	demotedProviders map[string]demotionRecord // provider -> the evidence that condemned it and when
+
+	// condemnedSince is when each provider was FIRST observed to be in a
+	// condemnable state, keyed "<verdict>:<provider>" by condemnedKey, for the
+	// confirmation window in confirmCondemned. Entries are cleared by the round
+	// that finds the provider healthy again. Guarded by d.mu.
+	condemnedSince map[string]time.Time
+
+	// demotionSeq is a monotonic counter stamped onto each demotion record so a
+	// probe round can tell whether its evidence predates a verdict.
+	//
+	// Ordering the map writes is not enough on its own: version sampling
+	// happens outside d.mu, so a round that started earlier, sampled an
+	// acceptable version, and returned late could otherwise clear a hold
+	// established by a NEWER below-minimum verdict — and once the hold is gone,
+	// a stale register response walks through every guard above. A round
+	// snapshots this counter before it samples anything and may only clear
+	// holds recorded at or before that snapshot, which makes "my evidence is
+	// newer than that verdict" a fact rather than a hope. Guarded by d.mu.
+	demotionSeq uint64
+
+	// resolvedPathsMu guards concrete executable paths paired with the version
+	// detected for each. On POSIX these are self-heals cached after a pinned path
+	// vanishes (MUL-4486). On Windows they are launch targets resolved from a
+	// stable installer junction; that junction is followed on every launch so a
+	// retarget takes effect even while the old release remains installed. Path
+	// and version are stored together so no reader can launch a new binary under
+	// stale version policy. Keyed by provider.
+	resolvedPathsMu sync.RWMutex
+	resolvedPaths   map[string]healedAgent
+	// healGroup coalesces concurrent self-heal re-resolutions per provider so a
+	// just-upgraded agent seen by many queued tasks at once pays for a single
+	// login-shell probe + version detection instead of one per task (MUL-4486).
+	healGroup singleflight.Group
+
 	wsHBMu      sync.RWMutex         // guards wsHBLastAck
 	wsHBLastAck map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
+
+	// reconcile fans out a "re-check server state now" signal to subscribers
+	// (watchTaskCancellation, workspaceSyncLoop) so the WS connect/reconnect
+	// path can shrink coarse fallback reconciliation gaps to sub-second. See
+	// reconcile.go and runTaskWakeupConnection.
+	reconcile *reconcileBroadcaster
+	// workspaceChanges is the account-scoped server hint for membership-set
+	// changes. It stays separate from reconcile because a membership hint only
+	// needs the minimal workspace list, while a WS reconnect also reconciles
+	// runtime profiles that may have changed during the gap.
+	workspaceChanges *workspaceChangeSignal
+
+	// wsRPC carries generic request/response RPCs (e.g. tasks.claim, MUL-4257)
+	// over the task-wakeup WS connection. It is attached to the live
+	// connection in runTaskWakeupConnection and detached on disconnect; when
+	// detached, callers fall back to HTTP.
+	wsRPC *wsRPCClient
+
+	// batchClaimUnsupported is set once a batch claim gets a 404 from the
+	// server (no /api/daemon/tasks/claim route — an un-upgraded server), so
+	// subsequent polls skip WS+batch and use the legacy per-runtime claim
+	// directly. Reset when the WS (re)connects, so a server upgrade that
+	// bounces the connection re-probes the batch route (MUL-4257).
+	batchClaimUnsupported atomic.Bool
+	// wsClaimHTTPFallbackAfter is set after an uncertain WS claim outcome. Once
+	// the safety delay elapses, the next claim bypasses WS once and uses HTTP so
+	// a flaky reconnecting WS cannot starve queued tasks indefinitely.
+	wsClaimHTTPFallbackAfter atomic.Int64
 
 	// runtimeGoneMu guards runtimeGoneInflight, reregisterNextAttempt, and
 	// reregisterLastCompletedAt. The state lets heartbeat / poller / WS-ack
@@ -125,12 +572,48 @@ type Daemon struct {
 	reregisterNextAttempt     map[string]time.Time // workspace_id -> earliest time the next re-register attempt may run
 	reregisterLastCompletedAt map[string]time.Time // workspace_id -> wall-clock at which the last SUCCESSFUL re-register call returned (failures intentionally not stamped — see recordRegisterCompletion)
 
-	cancelFunc    context.CancelFunc // set by Run(); called by triggerRestart
-	rootCtx       context.Context    // set by Run(); used by long-running recoveries that must survive per-runtime ctx cancellation
-	restartBinary string             // non-empty after a successful update; path to the new binary
-	updating      atomic.Bool        // prevents concurrent update attempts
-	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
-	ready         atomic.Bool        // false until preflight completes; gates /health status (starting -> running)
+	// pendingWorkMu guards pendingWorkInflight and pendingWorkLastRun, which
+	// coalesce and rate-limit server-pushed "heartbeat now" hints (MUL-5444).
+	// Several UI surfaces can request the same runtime's model list within
+	// milliseconds; without the guard each hint would fire its own out-of-band
+	// heartbeat, and an authenticated caller looping the list-models endpoint
+	// could turn that into a heartbeat amplifier.
+	pendingWorkMu       sync.Mutex
+	pendingWorkInflight map[string]struct{}  // runtime_id -> hint-driven heartbeat in flight
+	pendingWorkLastRun  map[string]time.Time // runtime_id -> when the last hint-driven heartbeat started
+
+	cancelFunc context.CancelFunc // set by Run(); called by triggerRestart
+	rootCtx    context.Context    // set by Run(); used by long-running recoveries that must survive per-runtime ctx cancellation
+	// restartMu guards restartBinary. Two goroutines can reach triggerRestart —
+	// the server-triggered handleUpdate and the autoUpdateLoop — and
+	// trySelfReload reads RestartBinary() from the latter to avoid racing the
+	// former into a second handoff.
+	restartMu     sync.Mutex
+	restartBinary string // non-empty after a successful update; path to the new binary
+	// brewTargetOnce caches the brew half of restartTargetBinary. The install
+	// method and brew prefix cannot change for the lifetime of the process, and
+	// trySelfReload now calls restartTargetBinary every check tick — without
+	// the cache that is up to two uncached `brew --prefix` forks per tick.
+	brewTargetOnce sync.Once
+	brewInstall    bool        // resolved once: was this binary installed via brew?
+	brewTarget     string      // "<prefix>/bin/multica" when brewInstall and the prefix resolved
+	updating       atomic.Bool // prevents concurrent update attempts
+	// activeTasks is the ownership-safe count of tasks currently in handleTask.
+	// It deliberately includes preparation and local-directory waiters because
+	// restart/update barriers must not kill any claimed task.
+	activeTasks atomic.Int64
+	// runningTasks counts live provider execution sessions, beginning only after
+	// backend.Execute returns. It can briefly lag the server-side running state,
+	// which starts during preparation before provider launch. resourceWaitTasks
+	// counts tasks blocked on a local_directory path mutex. Both are diagnostic
+	// /health dimensions and must never replace activeTasks in safety barriers.
+	runningTasks      atomic.Int64
+	resourceWaitTasks atomic.Int64
+	ready             atomic.Bool // false until preflight completes; gates /health status (starting -> running)
+	// reloadPendingReason explains why a confirmed multica version change hasn't
+	// restarted the daemon yet (a task was running at the barrier check). Set
+	// and cleared by trySelfReload, read by /health. Diagnostic only.
+	reloadPendingReason atomic.Pointer[string]
 
 	// claimMu guards pauseClaims and claimsInFlight. It is held only for the
 	// microseconds it takes to make a decision; ClaimTask itself runs without
@@ -145,11 +628,25 @@ type Daemon struct {
 	// race where a new task slipping in during the release-metadata fetch
 	// would be cancelled by triggerRestart's root-ctx cancel.
 	claimMu        sync.Mutex
-	pauseClaims    bool // when true, runRuntimePoller skips ClaimTask
+	pauseClaims    bool // when true, the batch poller skips claiming
 	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
 
-	activeEnvRootsMu sync.Mutex
-	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
+	activeEnvRootsMu   sync.Mutex
+	activeEnvRootsCond *sync.Cond      // signalled when an in-flight env-root GC mutation finishes
+	activeEnvRoots     map[string]int  // env root path -> reference count (handles reuse paths marked twice)
+	deletingEnvRoots   map[string]bool // env roots reserved by GC; new tasks wait until the mutation finishes
+
+	activeStoresMu   sync.Mutex
+	activeStoresCond *sync.Cond      // signalled when an in-flight store deletion finishes, so a blocked markActive can proceed
+	activeStores     map[string]int  // persistent store path (per-conversation Codex sessions, per-agent Hermes memories) -> live-task refcount; guards the store from GC mid-task (MUL-4424)
+	deletingStores   map[string]bool // store paths a GC delete has reserved; markActive waits these out so a task never mounts a store mid-removal
+
+	// repoCheckoutTasks binds the localhost /repo/checkout endpoint to the
+	// task-scoped bearer token of a currently running agent. The request body is
+	// never an identity source: workspace, task, agent, and allowed workdir all
+	// come from this registry.
+	repoCheckoutTasksMu sync.RWMutex
+	repoCheckoutTasks   map[string]activeRepoCheckoutTask
 
 	// localPathLocks serialises agent tasks whose project resource is a
 	// local_directory pinned to this daemon. Two tasks targeting the same
@@ -167,36 +664,102 @@ type Daemon struct {
 
 	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
 	cancelPollInterval time.Duration // how often handleTask polls for server-side cancellation; overridable in tests
+	// taskSlotWait is the brief semaphore wait before the capacity backoff.
+	// New sets the production default; tests shorten it to reach that branch.
+	taskSlotWait time.Duration
+	// taskSupplementSignals carries content-free server hints to the exact
+	// negotiated task. The two intervals are production defaults in New and
+	// independently overridable by focused tests.
+	taskSupplementSignals       taskSupplementSignals
+	taskSupplementPollInterval  time.Duration
+	taskSupplementReadyInterval time.Duration
+	// envRootBusyWait is how long a task that is entitled to a prior env root
+	// waits for the previous run to let go of it before giving up and preparing
+	// a fresh one. New() sets it; the zero value means "do not wait", which is
+	// what focused unit tests want. See lockReusablePriorEnvRoot (MUL-6880).
+	envRootBusyWait time.Duration
+	// executionEnvironmentCommand resolves the killable helper used for
+	// Prepare/Reuse. New always sets it; nil keeps focused unit tests in-process.
+	executionEnvironmentCommand executionEnvironmentCommand
+	// taskPrepareTimeout is the dispatched -> running hard deadline. New sets
+	// the production default; zero-valued test daemons fall back to the same
+	// default in effectiveTaskPrepareTimeout.
+	taskPrepareTimeout time.Duration
+	// prepareLeaseRefresh is how often a preparing task extends its prepare
+	// lease. New sets the production default; zero-valued test daemons fall
+	// back to the same default in startTaskPrepareLeaseExtender.
+	prepareLeaseRefresh time.Duration
 	// runUpdateFn executes the brew-or-download upgrade. Set to d.runUpdate by
 	// New() and overridable in tests so the auto-update poller can be exercised
 	// without touching the real network or the brew CLI.
 	runUpdateFn func(targetVersion string) (string, error)
 }
 
+type profileLaunchSpec struct {
+	path      string
+	version   string
+	fixedArgs []string
+}
+
 // New creates a new Daemon instance.
 func New(cfg Config, logger *slog.Logger) *Daemon {
 	cacheRoot := filepath.Join(cfg.WorkspacesRoot, ".repos")
+	skillCacheRoot := filepath.Join(cfg.WorkspacesRoot, ".skill-cache", "v1")
 	client := NewClient(cfg.ServerBaseURL)
 	// Tag every daemon HTTP request with the daemon's CLI version so the
 	// server can split logs/metrics by client version (parallel to the CLI).
 	client.SetVersion(cfg.CLIVersion)
 	d := &Daemon{
-		cfg:                       cfg,
-		client:                    client,
-		repoCache:                 repocache.New(cacheRoot, logger),
-		logger:                    logger,
-		workspaces:                make(map[string]*workspaceState),
-		runtimeIndex:              make(map[string]Runtime),
-		runtimeSet:                newRuntimeSetWatcher(),
-		agentVersions:             make(map[string]string),
-		wsHBLastAck:               make(map[string]time.Time),
-		activeEnvRoots:            make(map[string]int),
-		localPathLocks:            NewLocalPathLocker(),
-		runtimeGoneInflight:       make(map[string]struct{}),
-		reregisterNextAttempt:     make(map[string]time.Time),
-		reregisterLastCompletedAt: make(map[string]time.Time),
-		cancelPollInterval:        5 * time.Second,
+		cfg:                         cfg,
+		client:                      client,
+		repoCache:                   repocache.New(cacheRoot, logger),
+		skillCache:                  NewSkillBundleCache(skillCacheRoot),
+		logger:                      logger,
+		terminalReports:             newTerminalReportStore(cfg),
+		terminalReportWakeup:        make(chan struct{}, 1),
+		terminalReportNow:           time.Now,
+		terminalReportFlight:        make(map[string]struct{}),
+		workspaces:                  make(map[string]*workspaceState),
+		runtimeIndex:                make(map[string]Runtime),
+		profileLaunchSpecs:          make(map[string]profileLaunchSpec),
+		runtimeSet:                  newRuntimeSetWatcher(),
+		agentDiscoveryKick:          make(chan struct{}, 1),
+		agentVersions:               make(map[string]string),
+		skippedAgents:               make(map[string]string),
+		resolvedPaths:               make(map[string]healedAgent),
+		wsHBLastAck:                 make(map[string]time.Time),
+		activeEnvRoots:              make(map[string]int),
+		deletingEnvRoots:            make(map[string]bool),
+		activeStores:                make(map[string]int),
+		deletingStores:              make(map[string]bool),
+		localPathLocks:              NewLocalPathLocker(),
+		runtimeGoneInflight:         make(map[string]struct{}),
+		pendingWorkInflight:         make(map[string]struct{}),
+		pendingWorkLastRun:          make(map[string]time.Time),
+		reregisterNextAttempt:       make(map[string]time.Time),
+		reregisterLastCompletedAt:   make(map[string]time.Time),
+		cancelPollInterval:          5 * time.Second,
+		taskSlotWait:                taskSlotWaitTimeout,
+		taskSupplementPollInterval:  defaultTaskSupplementPollInterval,
+		taskSupplementReadyInterval: defaultTaskSupplementReadyInterval,
+		envRootBusyWait:             15 * time.Second,
+		taskPrepareTimeout:          defaultTaskPrepareTimeout,
+		prepareLeaseRefresh:         taskPrepareLeaseRefresh,
+		reconcile:                   newReconcileBroadcaster(),
+		workspaceChanges:            newWorkspaceChangeSignal(),
+		wsRPC:                       newWSRPCClient(wsRPCResponseGrace),
 	}
+	d.activeEnvRootsCond = sync.NewCond(&d.activeEnvRootsMu)
+	d.activeStoresCond = sync.NewCond(&d.activeStoresMu)
+	// Seed the copy-on-write availability set from the startup probe. Callers
+	// must go through d.agents() from here on; cfg.Agents is the initial value
+	// only and does not track later refreshes.
+	initialAgents := make(map[string]AgentEntry, len(cfg.Agents))
+	for name, entry := range cfg.Agents {
+		initialAgents[name] = entry
+	}
+	d.agentsAvailable.Store(&initialAgents)
+	d.executionEnvironmentCommand = defaultExecutionEnvironmentCommand
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
 	return d
@@ -204,10 +767,31 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 
 // setAgentVersion records the detected CLI version for an agent provider so
 // later task-dispatch code (e.g. Codex sandbox policy) can read it.
+//
+// A blank detection never replaces a version we already know. checkAgentMinVersion
+// returns nil for any provider with no MinVersions entry, so a CLI whose
+// `--version` exits 0 without printing anything parseable reaches here with an
+// empty string — and overwriting the cache with it would strip the input every
+// version-keyed policy reads, on a provider that was working a moment ago.
+// "Couldn't read it" is not a version.
+//
+// This cache is the daemon's LOCAL knowledge only — it is not a record of
+// what the server has been told. Every path that probes writes through here
+// (the converge round, the workspace sync, a self-heal at task launch), while
+// each register call covers only the workspaces it was invoked for. What the
+// server accepted is therefore tracked per workspace, in
+// workspaceState.builtinVersions; refreshAgentVersions compares the two.
 func (d *Daemon) setAgentVersion(provider, version string) {
 	d.versionsMu.Lock()
-	defer d.versionsMu.Unlock()
+	prev := d.agentVersions[provider]
+	if version == "" && prev != "" {
+		d.versionsMu.Unlock()
+		d.logger.Warn("agent CLI reported no version; keeping the previous one",
+			"provider", provider, "previous", prev)
+		return
+	}
 	d.agentVersions[provider] = version
+	d.versionsMu.Unlock()
 }
 
 // agentVersion returns the last-detected CLI version for an agent provider,
@@ -216,6 +800,437 @@ func (d *Daemon) agentVersion(provider string) string {
 	d.versionsMu.RLock()
 	defer d.versionsMu.RUnlock()
 	return d.agentVersions[provider]
+}
+
+// builtinVersionsFromPayload extracts provider -> version from a registration
+// payload's BUILT-IN entries. Custom profile entries (profile_id set) are not
+// version-tracked — the drift path owns their lifecycle.
+func builtinVersionsFromPayload(runtimes []map[string]string) map[string]string {
+	out := make(map[string]string, len(runtimes))
+	for _, rt := range runtimes {
+		if rt["profile_id"] != "" {
+			continue
+		}
+		out[rt["type"]] = rt["version"]
+	}
+	return out
+}
+
+// workspaceRegisterLock returns the mutex serializing one workspace's whole
+// registration sequence: send Register, apply or reject the response, then
+// deregister the rows that apply refused or dropped.
+//
+// The per-workspace version record (workspaceState.builtinVersions) must
+// reflect the order the SERVER processed the register calls in, because the
+// server's upsert order decides which payload's versions its rows end up
+// holding. Registration entry points are concurrent (refresh, sync, a
+// runtime_gone recovery, profile drift), and without this lock two calls for
+// the same workspace could complete their HTTP responses in the opposite
+// order from the server's processing — recording the NEWER payload locally
+// while the server kept the OLDER one. The refresh round would then see the
+// record agreeing with disk and never re-register: the mismatch is invisible
+// precisely because the record is wrong, so it persists until the next
+// version change or restart. Holding the lock across the request AND the
+// record makes lock order = server order = record order.
+//
+// The section extends past the send because the cleanup has the same problem in
+// a nastier form. A deregistration is decided under d.mu and issued after
+// releasing it, so a recovery register completing in that gap re-creates the
+// same row — usually under the same runtime ID — and the older Deregister lands
+// on top of it. The daemon then tracks and heartbeats a runtime the server has
+// marked offline, which is the direction that silently strands work: the server
+// will not route to it, and neither side notices the disagreement. A
+// point-in-time tracking re-check cannot close that, because the gap is between
+// the check and the request; only putting the request itself inside the order
+// can. Every apply and every cleanup on a workspace therefore runs under this
+// lock, via withWorkspaceRegisterLock.
+func (d *Daemon) workspaceRegisterLock(workspaceID string) *sync.Mutex {
+	mu, _ := d.registerSerial.LoadOrStore(workspaceID, &sync.Mutex{})
+	return mu.(*sync.Mutex)
+}
+
+// withWorkspaceRegisterLock runs one workspace's registration sequence as a
+// single ordered step. Everything that sends a Register for a workspace, folds
+// the response into local state, or deregisters rows that response cost, must
+// run inside fn — see workspaceRegisterLock for why the boundary sits after the
+// cleanup rather than after the send.
+//
+// The lock is per workspace, so sequences for different workspaces still run
+// concurrently and nothing here is ever held across two of them.
+func (d *Daemon) withWorkspaceRegisterLock(workspaceID string, fn func() error) error {
+	mu := d.workspaceRegisterLock(workspaceID)
+	mu.Lock()
+	defer mu.Unlock()
+	return fn()
+}
+
+// recordBuiltinVersionsSent stores, per provider, the version a SUCCESSFUL
+// register call carried for a workspace (see workspaceState.builtinVersions).
+// Merged per provider rather than replaced: a provider absent from this
+// payload (its probe failed this round) was not re-sent, so the server still
+// holds whatever the previous call carried and the record must keep saying so.
+// Callers invoke this only after client.Register succeeds — a failed call
+// records nothing, which is what keeps the workspace behind for the next
+// refresh round — and while holding the workspace's register lock, so the
+// record's write order matches the server's processing order
+// (workspaceRegisterLock). A workspace not yet tracked records nothing here;
+// the sync path seeds the record when it creates the workspaceState.
+func (d *Daemon) recordBuiltinVersionsSent(workspaceID string, runtimes []map[string]string) {
+	sent := builtinVersionsFromPayload(runtimes)
+	if len(sent) == 0 {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok {
+		return
+	}
+	if ws.builtinVersions == nil {
+		ws.builtinVersions = make(map[string]string, len(sent))
+	}
+	for provider, version := range sent {
+		// Demoted while this register was in flight: its rows are being
+		// deregistered, so recording what the payload carried would tell the
+		// refresh path the server holds a version for a provider that is on its
+		// way offline — and demoteBelowMinimumRuntimes just deleted that entry.
+		if d.providerDemotedLocked(provider) {
+			continue
+		}
+		ws.builtinVersions[provider] = version
+	}
+}
+
+// refreshHealedVersion keeps a self-healed {path, version} pair honest when the
+// healed binary is later replaced in place.
+//
+// resolveAgentEntry deliberately returns healed.version rather than the shared
+// agentVersions cache whenever a previous self-heal is still live, so that a
+// reader which observes the healed path necessarily observes the version
+// detected for it. Nothing refreshed that pair when the SAME path was
+// subsequently overwritten, so the daemon kept keying version-sensitive policy
+// — the Codex sandbox in runTask — off the version captured at heal time. A
+// re-probe would update agentVersions and the version reported to the server
+// while tasks silently kept running under the old policy.
+//
+// Only touches the entry when the path still matches the one just probed: a
+// heal that has since moved the provider elsewhere owns its own pairing.
+func (d *Daemon) refreshHealedVersion(provider, path, version string) {
+	if version == "" {
+		return
+	}
+	d.resolvedPathsMu.Lock()
+	defer d.resolvedPathsMu.Unlock()
+	healed, ok := d.resolvedPaths[provider]
+	if !ok || healed.path != path || healed.version == version {
+		return
+	}
+	d.resolvedPaths[provider] = healedAgent{path: path, version: version}
+}
+
+// hasDetectedAgentVersions reports whether any CLI version has ever been
+// detected. refreshAgentVersions uses it as the "has anything ever registered"
+// guard.
+func (d *Daemon) hasDetectedAgentVersions() bool {
+	d.versionsMu.RLock()
+	defer d.versionsMu.RUnlock()
+	return len(d.agentVersions) > 0
+}
+
+// healedAgent bundles a self-healed executable path with the CLI version
+// detected for it. The two are published together under resolvedPathsMu and
+// returned together from resolveAgentEntry, so a caller that observes the new
+// path necessarily observes the matching version — closing the window where a
+// just-upgraded binary would run under the daemon's previous version policy
+// (MUL-4486 review).
+type healedAgent struct {
+	path    string
+	version string
+}
+
+// resolveAgentEntry returns entry with a usable executable path plus the CLI
+// version that corresponds to that path. It resolves retargetable Windows
+// installer junctions per launch and self-heals vanished pinned paths on other
+// platforms (MUL-4486).
+//
+// The daemon pins each agent's discovered entry point at startup so a later
+// PATH change cannot redirect a task launch. POSIX discovery also resolves
+// symlinks to a concrete path. But a version manager
+// (Homebrew Cask, nvm/fnm) upgrading in place deletes the old versioned
+// directory that pinned path points into and repoints the stable command name
+// at the new version — leaving the daemon holding a path that no longer exists
+// until it restarts. Every consumer of entry.Path (task launch, model listing,
+// version detection at registration) then hard-fails with "executable not
+// found".
+//
+// The returned version always matches the returned path, so callers key
+// version-sensitive policy (e.g. the Codex sandbox) off it directly rather than
+// re-reading the shared version cache, which a concurrent heal could still be
+// updating.
+//
+// Behaviour:
+//   - A Windows stable entry point -> its final target is verified and returned
+//     with the detected version; a retarget publishes the new pair atomically.
+//   - A previous self-heal that is still live -> returned with its paired
+//     version. This is checked first so that once we've re-resolved to a new
+//     binary, a reappearing stale path (a downgrade / reinstall recreating the
+//     old versioned directory) cannot re-pair that old binary with the healed
+//     version — a mismatched {old path, new version} (MUL-4486 review).
+//   - Otherwise, pinned Path still present -> returned unchanged, paired with
+//     its registration-detected version. The anti-redirect guarantee holds for
+//     the normal (never-healed) case: a live pinned binary is never
+//     second-guessed even if PATH now points elsewhere.
+//   - Pinned Path gone and no live heal -> re-resolve entry.Command once
+//     (preserving the ~/.multica/hooks exclusion and the login-shell fallback).
+//     Before adopting the re-resolved binary it is version-detected and run
+//     through the same minimum-version gate registration applies. This
+//     reproduces exactly what a daemon restart would resolve, so it is no less
+//     safe than the documented restart workaround — only automatic.
+//   - Re-resolution fails, the candidate can't be version-detected, or it is
+//     below the minimum supported version -> entry is returned unchanged so the
+//     candidate is never launched and the downstream error still surfaces.
+func (d *Daemon) resolveAgentEntry(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string) {
+	resolved, version, _ := d.resolveAgentEntryWithHeal(ctx, provider, entry)
+	return resolved, version
+}
+
+// resolveAgentEntryForLaunch is the strict task-launch boundary. Windows
+// installer junctions must yield a verified final target before the first
+// launch; otherwise the stable entry could retarget after registration and run
+// a binary whose version and minimum-version policy were never checked.
+func (d *Daemon) resolveAgentEntryForLaunch(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string, error) {
+	resolved, version, outcome := d.resolveAgentEntryWithHeal(ctx, provider, entry)
+	if outcome.rejected != nil {
+		return entry, d.agentVersion(provider), outcome.rejected
+	}
+	if outcome.failure != nil {
+		return entry, d.agentVersion(provider), fmt.Errorf("resolve agent executable %q for launch: %w", entry.Path, outcome.failure)
+	}
+	if outcome.adopted.path != "" {
+		return resolved, version, nil
+	}
+	return resolved, version, nil
+}
+
+// healOutcome is what one self-heal attempt concluded. At most one half is
+// meaningful: adopted names a binary that cleared the same gates registration
+// applies, while rejected carries the typed verdict for a candidate that was
+// found and version-detected but refused for being below the minimum supported
+// version. rejected is nil unless the verdict is genuine — it is only ever set
+// from a *agent.BelowMinimumError, which by construction carries a version
+// that parsed.
+type healOutcome struct {
+	adopted  healedAgent
+	rejected *agent.BelowMinimumError
+	failure  error
+}
+
+// resolveAgentEntryWithHeal is resolveAgentEntry plus what the self-heal
+// concluded, for the one caller that must act on a refusal rather than just
+// decline to launch it.
+//
+// A refusal is a verdict about disk, not a transient failure: the pinned path
+// is gone AND the binary its command now resolves to is too old. Registration
+// needs to hear that, because otherwise it goes on to probe the vanished path,
+// fails, and reports "version detection failed" — which by design leaves the
+// runtime online, claiming tasks for a CLI that cannot launch.
+func (d *Daemon) resolveAgentEntryWithHeal(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string, healOutcome) {
+	// Windows installer entry points are stable junctions whose final target can
+	// change while the old release remains installed. Resolve the final path on
+	// every launch and adopt a changed target only after pairing it with a freshly
+	// detected, supported version. Other platforms return handled=false and keep
+	// the existing pinned-path self-heal semantics below.
+	var launchOutcome healOutcome
+	if launchPath, handled, err := executablePathForLaunch(entry.Path); handled {
+		if err != nil {
+			d.logger.Warn("resolve agent executable for launch failed; keeping discovered path",
+				"provider", provider, "path", entry.Path, "error", err)
+			launchOutcome.failure = err
+		} else if outcome, ok := d.resolveAgentLaunchTarget(ctx, provider, entry, launchPath); ok {
+			entry.Path = outcome.adopted.path
+			return entry, outcome.adopted.version, outcome
+		} else {
+			launchOutcome = outcome
+		}
+	}
+
+	// A prior self-heal wins over the original pinned path: it carries a
+	// {path, version} pair we already verified together, so it can never regress
+	// to the mismatched pairing a reappearing stale path would produce.
+	d.resolvedPathsMu.RLock()
+	healed, ok := d.resolvedPaths[provider]
+	d.resolvedPathsMu.RUnlock()
+	if ok && agentExecutablePresent(healed.path) {
+		entry.Path = healed.path
+		launchOutcome.adopted = healed
+		return entry, healed.version, launchOutcome
+	}
+
+	if agentExecutablePresent(entry.Path) {
+		return entry, d.agentVersion(provider), launchOutcome
+	}
+
+	if entry.Command == "" {
+		return entry, d.agentVersion(provider), healOutcome{}
+	}
+
+	// Coalesce concurrent heals for the same provider: the first task through
+	// pays for the re-resolve + version detection, the rest share its result
+	// instead of each spawning their own login shell and `--version` probe.
+	command := entry.Command
+	v, _, _ := d.healGroup.Do(provider, func() (any, error) {
+		return d.healAgentPath(ctx, provider, command), nil
+	})
+	outcome, _ := v.(healOutcome)
+	if outcome.adopted.path == "" {
+		return entry, d.agentVersion(provider), outcome
+	}
+	entry.Path = outcome.adopted.path
+	return entry, outcome.adopted.version, outcome
+}
+
+// resolveAgentLaunchTarget handles platforms whose stable discovered entry
+// point can retarget a different still-live executable. It returns ok only
+// when a verified {path, version} pair is available; a rejected or transiently
+// unreadable target falls through to the existing path handling so it is never
+// published under a stale version.
+func (d *Daemon) resolveAgentLaunchTarget(ctx context.Context, provider string, entry AgentEntry, launchPath string) (healOutcome, bool) {
+	const maxRetargetAttempts = 4
+	for attempt := 0; attempt < maxRetargetAttempts; attempt++ {
+		d.resolvedPathsMu.RLock()
+		cached, cachedOK := d.resolvedPaths[provider]
+		d.resolvedPathsMu.RUnlock()
+		if cachedOK && cached.path == launchPath && agentExecutablePresent(cached.path) {
+			return healOutcome{adopted: cached}, true
+		}
+
+		// Coalesce only callers that observed the same concrete release. A
+		// provider-only key can make a post-retarget caller inherit the previous
+		// release's result even though both files remain present.
+		key := provider + "\x00" + launchPath
+		v, _, _ := d.healGroup.Do(key, func() (any, error) {
+			d.resolvedPathsMu.RLock()
+			current, ok := d.resolvedPaths[provider]
+			d.resolvedPathsMu.RUnlock()
+			if ok && current.path == launchPath && agentExecutablePresent(current.path) {
+				return healOutcome{adopted: current}, nil
+			}
+			return d.adoptAgentPath(ctx, provider, entry.Command, launchPath, "resolved stable entry point for launch"), nil
+		})
+		outcome, _ := v.(healOutcome)
+
+		// The installer may retarget while version detection is running. Resolve
+		// again before returning and retry against the target visible now.
+		currentPath, _, err := executablePathForLaunch(entry.Path)
+		if err != nil {
+			if outcome.adopted.path != "" {
+				return outcome, true
+			}
+			outcome.failure = err
+			return outcome, false
+		}
+		if currentPath != launchPath {
+			launchPath = currentPath
+			continue
+		}
+		if outcome.adopted.path != "" {
+			return outcome, true
+		}
+		if cachedOK && agentExecutablePresent(cached.path) {
+			outcome.adopted = cached
+			return outcome, true
+		}
+		return outcome, false
+	}
+
+	return healOutcome{failure: errors.New("installer entry point changed repeatedly while resolving it")}, false
+}
+
+// healAgentPath re-resolves command for provider and, if a usable binary is
+// found, records it and returns it. "Usable" means: it resolves, its version
+// can be detected, and that version meets the same minimum-version gate
+// registration enforces. Path and version are published together under
+// resolvedPathsMu so any observer of the path also sees the matching version;
+// the shared d.agentVersion cache is refreshed too, for registration hygiene.
+// It returns a zero adopted pair when nothing usable was found, so the caller
+// keeps the (stale) pinned entry and the candidate is never launched. Runs
+// under healGroup, one invocation at a time per provider.
+//
+// A candidate refused by the minimum-version gate is reported back rather than
+// swallowed: not launching it is right, but it is also the whole verdict a
+// registration round needs to take the provider's runtimes offline.
+func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) healOutcome {
+	// Re-check the cache: a predecessor under the same singleflight key may have
+	// already populated it, or a prior heal completed between the read above and
+	// entering here.
+	d.resolvedPathsMu.RLock()
+	cached, ok := d.resolvedPaths[provider]
+	d.resolvedPathsMu.RUnlock()
+	if ok && agentExecutablePresent(cached.path) {
+		return healOutcome{adopted: cached}
+	}
+
+	newPath, found := reresolveAgentCommand(command)
+	if !found {
+		return healOutcome{}
+	}
+	if launchPath, handled, err := executablePathForLaunch(newPath); handled {
+		if err != nil {
+			d.logger.Warn("resolve re-discovered agent executable for launch failed; keeping discovered path",
+				"provider", provider, "path", newPath, "error", err)
+			return healOutcome{failure: err}
+		} else {
+			newPath = launchPath
+		}
+	}
+	return d.adoptAgentPath(ctx, provider, command, newPath, "re-resolved after pinned path vanished")
+}
+
+func (d *Daemon) adoptAgentPath(ctx context.Context, provider, command, newPath, reason string) healOutcome {
+	// Verify before adopting. An in-place "upgrade" that actually repoints at an
+	// older or broken install must not be launched under the daemon's stale
+	// version policy, and must not slip past the minimum-version gate that the
+	// registration path applies (MUL-4486 review).
+	version, err := detectAgentVersion(ctx, agent.Command{Path: newPath})
+	if err != nil {
+		d.logger.Warn("re-resolved agent executable failed version detection; keeping pinned path",
+			"provider", provider, "command", command, "new_path", newPath, "error", err)
+		return healOutcome{failure: err}
+	}
+	if err := checkAgentMinVersion(provider, version); err != nil {
+		var tooOld *agent.BelowMinimumError
+		if !errors.As(err, &tooOld) {
+			// Read something, understood nothing: not a verdict. Refusing to
+			// adopt is still right, but reporting a rejection would let the
+			// caller demote a runtime on an unreadable version — the exact
+			// transient case the below-minimum machinery must never act on.
+			d.logger.Warn("re-resolved agent executable version could not be validated; keeping pinned path",
+				"provider", provider, "command", command, "new_path", newPath, "version", version, "error", err)
+			return healOutcome{failure: err}
+		}
+		d.logger.Warn("re-resolved agent executable is below the minimum supported version; not adopting it",
+			"provider", provider, "command", command, "new_path", newPath, "version", version, "error", err)
+		return healOutcome{rejected: tooOld}
+	}
+
+	adopted := healedAgent{path: newPath, version: version}
+	// Publish path + version atomically: any reader that sees the new path in
+	// resolveAgentEntry gets the matching version out of the same struct value.
+	d.resolvedPathsMu.Lock()
+	if d.resolvedPaths == nil {
+		d.resolvedPaths = make(map[string]healedAgent)
+	}
+	d.resolvedPaths[provider] = adopted
+	d.resolvedPathsMu.Unlock()
+	// Keep the registration version cache fresh too. The task path reads the
+	// version returned alongside the resolved path (above), not this map, so its
+	// staleness can never gate a launch — this is hygiene for the registration
+	// report and any future d.agentVersion reader.
+	d.setAgentVersion(provider, version)
+
+	d.logger.Info("adopted resolved agent executable",
+		"provider", provider, "command", command, "new_path", newPath, "version", version, "reason", reason)
+	return healOutcome{adopted: adopted}
 }
 
 func (d *Daemon) notifyRuntimeSetChanged() {
@@ -447,41 +1462,110 @@ func (d *Daemon) workspaceNeedsRuntimeRecovery(workspaceID string) bool {
 //
 // The workspaceState pointer is NEVER replaced (see syncWorkspacesFromAPI's
 // invariant about repoRefreshMu). Only fields are mutated.
-func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, workspaceID string) error {
-	resp, err := d.registerRuntimesForWorkspace(ctx, workspaceID)
-	if err != nil {
-		return fmt.Errorf("register runtimes: %w", err)
+// applyRegisterResponseInPlace folds a fresh /api/daemon/register response
+// back into the workspaceState and runtimeIndex without replacing the
+// workspaceState pointer (see syncWorkspacesFromAPI's invariant about
+// repoRefreshMu). It is the shared converger used by both the runtime_gone
+// recovery and the profile-drift refresh; the two callers differ only in
+// follow-up side effects (RecoverOrphans / Deregister), so those stay at the
+// call site.
+//
+// Returns:
+//   - newIDs:     the runtime IDs the server returned in this response, in
+//     the order they were returned. These are the daemon's authoritative
+//     current runtime set after the call.
+//   - droppedIDs: runtime IDs that were tracked before this call but did
+//     NOT survive the response. Callers Deregister these so the server marks
+//     them offline immediately instead of waiting on the 150 s
+//     stale-heartbeat sweep. On the runtime_gone path the triggering row was
+//     already deleted server-side (and pruned locally before the register),
+//     but a SIBLING dropped here — e.g. a provider removed from the daemon's
+//     config, or a disabled profile — still has a live server row that must be
+//     deregistered.
+//   - ok:         false when the workspace was forgotten between the
+//     register call and this apply (e.g. the user left the workspace and
+//     syncWorkspacesFromAPI removed it). The caller must abort silently in
+//     that case — there is no state left to update.
+//
+// profileSig is the digest captured during the register; an empty value is
+// the explicit "fetch failed, keep the previous signature" sentinel from
+// appendProfileRuntimes.
+//
+// preserveProviders lists the built-in providers this response is not
+// authoritative about, keyed by provider — see preserveProvidersFromProbe. Their
+// entries are absent from the payload, and therefore from the response, either
+// because the probe failed (transient) or because they were confirmed
+// below-minimum by a path with no authority to demote. Either way, dropping
+// their rows here would take a runtime offline outside the one path that does it
+// safely, so their existing built-in runtime rows are kept instead.
+//
+// A provider already under a demotion hold is a different case and is still
+// rejected below: that verdict was reached by demoteBelowMinimumRuntimes, which
+// removed the rows under the claim barrier, and this response merely predates
+// it.
+func (d *Daemon) applyRegisterResponseInPlace(workspaceID string, resp *RegisterResponse, profileSig string, preserveProviders map[string]string) (newIDs, droppedIDs []string, ok bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ws, exists := d.workspaces[workspaceID]
+	if !exists {
+		return nil, nil, false
 	}
-
-	newIDs := make([]string, 0, len(resp.Runtimes))
+	// Reject entries for providers demoted since this register was sent. The
+	// payload predates the verdict, so the response carries the provider as if
+	// it were healthy; indexing it here would undo demoteBelowMinimumRuntimes.
+	// Both sides do this under d.mu, which gives the two a total order: either
+	// the demotion runs first and this rejects the late response, or the apply
+	// runs first and the demotion removes the row it just added. Either way the
+	// provider ends up offline. Rejected IDs join droppedIDs so the caller
+	// deregisters the row the server upserted back into existence.
+	newIDs = make([]string, 0, len(resp.Runtimes))
 	newIDSet := make(map[string]struct{}, len(resp.Runtimes))
+	rejected := make(map[string]struct{})
 	for _, rt := range resp.Runtimes {
+		if rt.ProfileID == "" && d.providerDemotedLocked(rt.Provider) {
+			rejected[rt.ID] = struct{}{}
+			droppedIDs = append(droppedIDs, rt.ID)
+			continue
+		}
 		newIDs = append(newIDs, rt.ID)
 		newIDSet[rt.ID] = struct{}{}
 	}
-
-	d.mu.Lock()
-	ws, ok := d.workspaces[workspaceID]
-	if !ok {
-		d.mu.Unlock()
-		return fmt.Errorf("workspace %s no longer tracked", workspaceID)
-	}
 	// Drop runtimeIndex entries for prior runtime IDs that the server did not
 	// return — typically there are none for upsert-on-existing-provider, but
-	// a daemon config change (provider removed) would leak entries otherwise.
+	// a daemon config change (provider removed) or a profile disable would
+	// leak entries otherwise.
+	kept := newIDs
 	for _, oldID := range ws.runtimeIDs {
-		if _, kept := newIDSet[oldID]; !kept {
-			delete(d.runtimeIndex, oldID)
+		if _, stillThere := newIDSet[oldID]; stillThere {
+			continue
 		}
+		if _, alreadyRejected := rejected[oldID]; alreadyRejected {
+			// The server returned this ID for a demoted provider and it is
+			// already in droppedIDs; drop the index entry without recording it
+			// a second time.
+			delete(d.runtimeIndex, oldID)
+			continue
+		}
+		if rt, tracked := d.runtimeIndex[oldID]; tracked && rt.ProfileID == "" {
+			if _, preserve := preserveProviders[rt.Provider]; preserve {
+				kept = append(kept, oldID)
+				continue
+			}
+		}
+		delete(d.runtimeIndex, oldID)
+		droppedIDs = append(droppedIDs, oldID)
 	}
 	for _, rt := range resp.Runtimes {
+		if _, skip := rejected[rt.ID]; skip {
+			continue
+		}
 		d.runtimeIndex[rt.ID] = rt
 	}
 	// Response is authoritative — replace, do not append. Replacing also
 	// catches the rare case where UpsertAgentRuntime returns a different ID
 	// for a surviving provider (e.g. schema change); the daemon converges on
 	// what the server says without leaving stale heartbeat goroutines.
-	ws.runtimeIDs = newIDs
+	ws.runtimeIDs = kept
 	if resp.ReposVersion != "" {
 		ws.reposVersion = resp.ReposVersion
 		ws.allowedRepoURLs = repoAllowlist(resp.Repos)
@@ -489,16 +1573,405 @@ func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, worksp
 	if len(resp.Settings) > 0 {
 		ws.settings = resp.Settings
 	}
-	d.mu.Unlock()
+	// Refresh the cached profile signature only when the fetch succeeded;
+	// an empty sig means the GetRuntimeProfiles call failed and we must
+	// preserve the previous signature so the next sync tick can still
+	// detect a real drift instead of falsely thinking everything is in sync.
+	if profileSig != "" {
+		ws.profileSetSig = profileSig
+	}
+	return newIDs, droppedIDs, true
+}
 
-	for _, rid := range newIDs {
-		d.logger.Info("re-registered runtime after server-side deletion",
-			"workspace_id", workspaceID, "runtime_id", rid)
+// mergeBuiltinRegisterResponse applies a builtins-only register response
+// ADDITIVELY: returned built-in runtimes are indexed and appended, and a prior
+// runtime ID that the response did not mention is left alone.
+//
+// applyRegisterResponseInPlace treats the response as authoritative and drops
+// unmentioned IDs, which is right for the convergence paths that deliberately
+// re-derive a workspace's whole runtime set. It is wrong for CLI discovery
+// (MUL-5439): that payload carries built-in runtimes only, so under the
+// authoritative rule it would evict the workspace's custom profile runtimes from
+// runtimeIndex and stop their heartbeats, possibly mid-task. The server's
+// register endpoint is a pure per-entry upsert and prunes nothing, so omitted
+// runtimes still exist server-side and must be kept locally.
+//
+// Two deliberate omissions keep this path out of custom-profile business:
+//
+//   - Entries with a ProfileID are ignored. Discovery registers built-ins only,
+//     so this is an invariant guard: a custom runtime must never enter the set
+//     through here.
+//   - profileSetSig is neither read nor written. Caching a signature observed
+//     during discovery would tell refreshWorkspaceRuntimeProfiles that the
+//     profile set was already converged, and a profile disabled at that moment
+//     would keep its runtime alive forever.
+//
+// ID rotation is still handled: when the response returns a different ID for a
+// built-in provider the workspace already had, that specific old ID is replaced
+// rather than accumulating a duplicate heartbeat.
+func (d *Daemon) mergeBuiltinRegisterResponse(workspaceID string, resp *RegisterResponse) (newIDs []string, revived revivedRuntimes, ok bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ws, exists := d.workspaces[workspaceID]
+	if !exists {
+		return nil, revivedRuntimes{}, false
+	}
+
+	// Index the workspace's current built-in runtimes by provider so a rotated
+	// ID replaces its predecessor instead of doubling it.
+	existingByProvider := make(map[string]string, len(ws.runtimeIDs))
+	kept := make([]string, 0, len(ws.runtimeIDs)+len(resp.Runtimes))
+	present := make(map[string]struct{}, len(ws.runtimeIDs))
+	for _, id := range ws.runtimeIDs {
+		if rt, found := d.runtimeIndex[id]; found && rt.ProfileID == "" {
+			existingByProvider[rt.Provider] = id
+		}
+		kept = append(kept, id)
+		present[id] = struct{}{}
+	}
+
+	for _, rt := range resp.Runtimes {
+		if rt.ProfileID != "" {
+			// Not ours to manage; the drift path owns custom profiles.
+			continue
+		}
+		// Demoted since this register was sent: the response predates the
+		// verdict, so bringing the provider back here would undo the demotion.
+		// Both run under d.mu, so the two are totally ordered — see the same
+		// guard in applyRegisterResponseInPlace. The caller deregisters the row
+		// the server upserted back.
+		if d.providerDemotedLocked(rt.Provider) {
+			revived.add(d, rt.ID, rt.Provider)
+			continue
+		}
+		d.runtimeIndex[rt.ID] = rt
+		if _, already := present[rt.ID]; already {
+			continue
+		}
+		if oldID, rotated := existingByProvider[rt.Provider]; rotated && oldID != rt.ID {
+			// Same runtime, new ID: swap in place and retire the old entry.
+			for i, id := range kept {
+				if id == oldID {
+					kept[i] = rt.ID
+					break
+				}
+			}
+			delete(d.runtimeIndex, oldID)
+			delete(present, oldID)
+		} else {
+			kept = append(kept, rt.ID)
+		}
+		present[rt.ID] = struct{}{}
+		existingByProvider[rt.Provider] = rt.ID
+		newIDs = append(newIDs, rt.ID)
+	}
+	ws.runtimeIDs = kept
+
+	if resp.ReposVersion != "" {
+		ws.reposVersion = resp.ReposVersion
+		ws.allowedRepoURLs = repoAllowlist(resp.Repos)
+	}
+	if len(resp.Settings) > 0 {
+		ws.settings = resp.Settings
+	}
+	return newIDs, revived, true
+}
+
+// providerDemotedLocked reports whether provider is currently held below the
+// minimum supported version. Callers must hold d.mu — the demotion record and
+// every register-response apply share that lock precisely so a late response
+// can never slip between the two.
+func (d *Daemon) providerDemotedLocked(provider string) bool {
+	_, demoted := d.demotedProviders[provider]
+	return demoted
+}
+
+// demotedOfflineReasonLocked returns the structured cause recorded for a
+// demoted provider, or nil when the verdict carries none (below-minimum) or the
+// provider is not demoted. Callers must hold d.mu.
+func (d *Daemon) demotedOfflineReasonLocked(provider string) *RuntimeOfflineReason {
+	record, demoted := d.demotedProviders[provider]
+	if !demoted {
+		return nil
+	}
+	return record.offline
+}
+
+// revivedRuntimes are the rows a register response brought back for a provider
+// the daemon has already condemned: the ids to take offline again, and the
+// cause to re-attach per row because that register's upsert just overwrote it.
+type revivedRuntimes struct {
+	ids     []string
+	reasons map[string]RuntimeOfflineReason
+}
+
+// reasonsFor narrows the causes to the rows actually being deregistered. The
+// caller re-checks tracking first — a row that came back legitimately in the
+// meantime is dropped from the list — and sending a cause for a row we are no
+// longer taking offline would attach it to a healthy runtime.
+func (r revivedRuntimes) reasonsFor(runtimeIDs []string) map[string]RuntimeOfflineReason {
+	if len(r.reasons) == 0 {
+		return nil
+	}
+	out := make(map[string]RuntimeOfflineReason, len(runtimeIDs))
+	for _, id := range runtimeIDs {
+		if reason, ok := r.reasons[id]; ok {
+			out[id] = reason
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// add records one revived row. Callers must hold d.mu (it reads the demotion
+// record), and it is a no-op for a provider with no structured cause — those
+// rows still need deregistering, they just have nothing to re-attach.
+func (r *revivedRuntimes) add(d *Daemon, runtimeID, provider string) {
+	r.ids = append(r.ids, runtimeID)
+	reason := d.demotedOfflineReasonLocked(provider)
+	if reason == nil {
+		return
+	}
+	if r.reasons == nil {
+		r.reasons = make(map[string]RuntimeOfflineReason, 1)
+	}
+	r.reasons[runtimeID] = *reason
+}
+
+// demotionRecord is a confirmed verdict about the binary on disk: the evidence
+// that produced it (the rejected version, or why the CLI could not be run),
+// plus the demotionSeq tick that establishes when it was reached.
+//
+// offline is the structured half, kept because the server can lose it. A
+// register sent before the verdict still upserts the runtime row, and that
+// upsert overwrites metadata wholesale — so the reason this daemon just stored
+// is gone, and the cleanup that takes the revived row offline again has to
+// re-attach it. Without that the server ends up "offline, no reason", which
+// downgrades the refusal back to "wait for the machine" (MUL-6164).
+type demotionRecord struct {
+	evidence string
+	offline  *RuntimeOfflineReason
+	seq      uint64
+}
+
+// setLifecycleCtx records the context Run was handed.
+func (d *Daemon) setLifecycleCtx(ctx context.Context) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.lifecycleCtx = ctx
+}
+
+// daemonLifecycleCtx returns the context that bounds background work outliving
+// a single round. Falls back to Background so a zero-value Daemon (tests, and
+// any path reached before Run) still works.
+func (d *Daemon) daemonLifecycleCtx() context.Context {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.lifecycleCtx == nil {
+		return context.Background()
+	}
+	return d.lifecycleCtx
+}
+
+// markProvidersDemoted records a CONFIRMED verdict so a register response still
+// in flight cannot revive the provider. Callers must hold d.mu.
+func (d *Daemon) markProvidersDemotedLocked(providers map[string]runtimeVerdict) {
+	if len(providers) == 0 {
+		return
+	}
+	if d.demotedProviders == nil {
+		d.demotedProviders = make(map[string]demotionRecord, len(providers))
+	}
+	// One tick per verdict batch: every record written here is newer than any
+	// probe round that snapshotted the counter before this call.
+	d.demotionSeq++
+	for provider, verdict := range providers {
+		d.demotedProviders[provider] = demotionRecord{
+			evidence: verdict.reason,
+			offline:  verdict.offline,
+			seq:      d.demotionSeq,
+		}
+	}
+}
+
+// condemnedConfirmWindow is how long a condemnable verdict must keep reproducing
+// before the daemon acts on it.
+//
+// The verdict itself is deterministic, but the observation behind it is not. The
+// repair we tell users to run for a not-executable file overwrites the bin entry
+// in place, and a probe that lands mid-copy sees a truncated file; the DSH
+// profile probe boots a whole process, and a DSH upgrade replaces the CLI
+// underneath it. Requiring a second sighting this far apart makes those windows
+// impossible to mistake for a real verdict, and costs a genuinely broken
+// provider only one extra probe round.
+//
+// This gates every condemnable verdict, not just the exec-format one: the
+// profile verdicts rest on a single observation too, and demotion is what routes
+// live work away from a machine.
+// A var so tests can collapse the wait.
+var condemnedConfirmWindow = time.Minute
+
+// condemnedKey namespaces a confirmation clock per verdict, so a provider that
+// moves between condemnable states starts a fresh window instead of inheriting
+// the time earned by a different problem.
+func condemnedKey(verdict builtinProbeVerdict, provider string) string {
+	return strconv.Itoa(int(verdict)) + ":" + provider
+}
+
+// confirmCondemned records that this round found provider in the given
+// condemnable state and reports whether the verdict is now old enough to act on.
+//
+// The first sighting only starts the clock. Two sightings are required no matter
+// how the window is configured, so concurrent probe rounds — four callers reach
+// detectBuiltinRuntimes — cannot combine into an instant demotion.
+func (d *Daemon) confirmCondemned(verdict builtinProbeVerdict, provider string, now time.Time) bool {
+	key := condemnedKey(verdict, provider)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	first, seen := d.condemnedSince[key]
+	if !seen {
+		if d.condemnedSince == nil {
+			d.condemnedSince = make(map[string]time.Time, 1)
+		}
+		d.condemnedSince[key] = now
+		return false
+	}
+	return now.Sub(first) >= condemnedConfirmWindow
+}
+
+// clearCondemned forgets every pending verdict for a provider that probed OK, so
+// a later unrelated failure starts its own confirmation window instead of
+// inheriting a stale one.
+func (d *Daemon) clearCondemned(provider string) {
+	suffix := ":" + provider
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for key := range d.condemnedSince {
+		if strings.HasSuffix(key, suffix) {
+			delete(d.condemnedSince, key)
+		}
+	}
+}
+
+// demotionSeqSnapshot returns the current demotion counter. A probe round takes
+// this BEFORE it samples any version, so a later clearProviderDemotions call can
+// prove its evidence postdates a verdict rather than merely arriving after it.
+func (d *Daemon) demotionSeqSnapshot() uint64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.demotionSeq
+}
+
+// clearProviderDemotions drops the verdict for providers whose version probed
+// acceptable again, which is what lets converge register them back.
+//
+// sampledAfter is the counter the calling round snapshotted before it probed. A
+// hold recorded after that snapshot is NEWER evidence than anything this round
+// saw, so it survives: four callers probe concurrently and sampling happens off
+// the lock, which means "returned last" says nothing about "looked last". The
+// round that overlapped a demotion simply declines to clear it and the next one
+// — which starts after the verdict exists, so its sample cannot predate it —
+// does the release. Recovery is at worst one round late; clearing on stale
+// evidence would let a stale register response through every other guard.
+func (d *Daemon) clearProviderDemotions(providers []string, sampledAfter uint64) {
+	if len(providers) == 0 {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.demotedProviders) == 0 {
+		return
+	}
+	for _, provider := range providers {
+		record, was := d.demotedProviders[provider]
+		if !was {
+			continue
+		}
+		if record.seq > sampledAfter {
+			d.logger.Info("keeping demotion hold: this probe round started before the verdict",
+				"provider", provider, "verdict", record.evidence)
+			continue
+		}
+		delete(d.demotedProviders, provider)
+		d.logger.Info("agent CLI is usable again",
+			"provider", provider, "previous_verdict", record.evidence)
+	}
+}
+
+// untrackedRuntimeIDs filters ids down to those the daemon does not currently
+// track, so a deregistration decided a moment ago cannot take a row offline that
+// a NEWER legitimate registration has since brought back.
+//
+// Every deregistration is decided under d.mu and issued after releasing it —
+// the HTTP call must not hold the daemon lock. A recovery register completing in
+// that gap re-creates the same server-side row, usually under the same runtime
+// ID, and the older cleanup would then knock out the row that just recovered.
+//
+// This filter is only half the guarantee, and on its own it is a TOCTOU: the
+// recovery can just as easily complete between the filter and the request.
+// Callers must therefore run both inside the workspace's register lock, which is
+// what makes the check and the Deregister one ordered step against every other
+// registration for that workspace.
+func (d *Daemon) untrackedRuntimeIDs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, tracked := d.runtimeIndex[id]; tracked {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
+func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, workspaceID string) error {
+	var newIDs []string
+	// Send, apply and clean up as one ordered step — see workspaceRegisterLock.
+	err := d.withWorkspaceRegisterLock(workspaceID, func() error {
+		resp, profileSig, preserve, err := d.registerRuntimesForWorkspaceLocked(ctx, workspaceID)
+		if err != nil {
+			return fmt.Errorf("register runtimes: %w", err)
+		}
+
+		ids, droppedIDs, ok := d.applyRegisterResponseInPlace(workspaceID, resp, profileSig, preserve)
+		if !ok {
+			return fmt.Errorf("workspace %s no longer tracked", workspaceID)
+		}
+		newIDs = ids
+
+		for _, rid := range newIDs {
+			d.logger.Info("re-registered runtime after server-side deletion",
+				"workspace_id", workspaceID, "runtime_id", rid)
+		}
+
+		// A sibling runtime dropped by this recovery (a provider removed from the
+		// daemon's config, a disabled profile) still has a live server row — the
+		// runtime_gone trigger only deleted its own. Eagerly mark those offline,
+		// matching the drift path, instead of leaving them claimable until the
+		// stale-heartbeat sweep.
+		d.deregisterDroppedRuntimes(ctx, workspaceID, droppedIDs, "runtime_gone recovery", nil)
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	d.notifyRuntimeSetChanged()
 
 	// Tell the server about any tasks the previous (now-deleted) runtime
 	// was working on, mirroring the registration path's recover-orphans call.
+	// This is intentionally scoped to the runtime_gone recovery: the
+	// runtimes were truly gone server-side, so anything still in
+	// dispatched/running/waiting_local_directory on those rows is an orphan
+	// that needs to be failed-and-retried. The drift-refresh path (which
+	// also feeds applyRegisterResponseInPlace) deliberately skips this step
+	// because its surviving runtime IDs may still be actively executing
+	// tasks for the user (MUL-3332).
 	for _, rid := range newIDs {
 		if err := d.client.RecoverOrphans(ctx, rid); err != nil {
 			d.logger.Warn("recover-orphans after re-register failed",
@@ -602,6 +2075,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Wrap context so handleUpdate can cancel the daemon for restart.
 	ctx, cancel := context.WithCancel(ctx)
 	d.cancelFunc = cancel
+	d.setLifecycleCtx(ctx)
 	d.rootCtx = ctx
 
 	// Bind health port early to detect another running daemon.
@@ -610,8 +2084,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return err
 	}
 
-	agentNames := make([]string, 0, len(d.cfg.Agents))
-	for name := range d.cfg.Agents {
+	agentNames := make([]string, 0, len(d.agents()))
+	for name := range d.agents() {
 		agentNames = append(agentNames, name)
 	}
 	logFields := []any{"version", d.cfg.CLIVersion, "agents", agentNames, "server", d.cfg.ServerBaseURL}
@@ -625,14 +2099,33 @@ func (d *Daemon) Run(ctx context.Context) error {
 		"workspaces_root", d.cfg.WorkspacesRoot,
 		"health_port", d.cfg.HealthPort,
 		"poll_interval", d.cfg.PollInterval,
+		"ws_claim_poll_interval", d.cfg.WSClaimPollInterval,
 		"heartbeat_interval", d.cfg.HeartbeatInterval,
 		"agent_timeout", d.cfg.AgentTimeout,
 		"idle_watchdog", d.cfg.AgentIdleWatchdog,
+		// Logged explicitly because it is normally derived from idle_watchdog:
+		// without it an operator cannot read the tool budget actually in effect.
+		"tool_watchdog", d.cfg.AgentToolWatchdog,
+		"opencode_idle_watchdog", d.cfg.OpenCodeIdleWatchdog,
+		// Derived from the watchdog budget too (Codex's own timer is not
+		// tool-aware), so it needs the same treatment as tool_watchdog: without
+		// it the effective Codex budget is invisible until a timeout fires.
+		"codex_semantic_inactivity", d.cfg.CodexSemanticInactivityTimeout,
 		"max_concurrent_tasks", d.cfg.MaxConcurrentTasks,
 		"gc_enabled", d.cfg.GCEnabled,
 		"auto_update", d.cfg.AutoUpdateEnabled,
 		"launched_by", d.cfg.LaunchedBy,
 	)
+
+	// Mark the daemon-owned workspaces tree before any task runs. A sandbox
+	// fault can strip every MULTICA_* env var from an agent subprocess; the
+	// per-workdir marker then only protects cwds inside the workdir, and a
+	// subprocess that escaped to the workdir's parent would fall back to the
+	// user's config PAT. The root marker makes the CLI fail closed anywhere
+	// under the tree. Non-fatal: Prepare re-ensures it per task.
+	if err := execenv.EnsureWorkspacesRootMarker(d.cfg.WorkspacesRoot); err != nil {
+		d.logger.Warn("workspaces root marker not written; CLI fail-closed guard limited to task workdirs", "error", err)
+	}
 
 	// Load auth token from CLI config.
 	if err := d.resolveAuth(); err != nil {
@@ -664,6 +2157,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Start workspace sync loop to discover newly created workspaces.
 	go d.workspaceSyncLoop(ctx)
+	go d.terminalReportReplayLoop(ctx)
+
+	// Discover agent CLIs installed after startup (MUL-5439). Separate from the
+	// workspace sync loop because that one runs on a thirty-minute consistency
+	// interval — far too slow for "install a CLI, see it under Runtimes".
+	go d.agentDiscoveryLoop(ctx)
 
 	taskWakeups := make(chan taskWakeup, 256)
 	go d.taskWakeupLoop(ctx, taskWakeups)
@@ -678,7 +2177,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// readiness wait blocks on, so success is reported only after startup
 	// actually completed, not merely because the health port came up.
 	d.ready.Store(true)
-	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, token-renewal); health now reporting ready")
+	d.logger.Debug("background loops launched (workspace-sync, terminal-report-replay, task-wakeup, heartbeat, gc, auto-update, token-renewal); health now reporting ready")
 	err = d.pollLoop(ctx, taskWakeups)
 	d.logger.Debug("daemon main loop returning", "error", err)
 	return err
@@ -687,6 +2186,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 // RestartBinary returns the path to the new binary if the daemon needs to restart
 // after a successful update, or empty string if no restart is needed.
 func (d *Daemon) RestartBinary() string {
+	d.restartMu.Lock()
+	defer d.restartMu.Unlock()
 	return d.restartBinary
 }
 
@@ -702,7 +2203,7 @@ func (d *Daemon) deregisterRuntimes() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := d.client.Deregister(ctx, runtimeIDs); err != nil {
+	if err := d.client.Deregister(ctx, runtimeIDs, nil); err != nil {
 		d.logger.Warn("failed to deregister runtimes on shutdown", "error", err)
 	} else {
 		d.logger.Info("deregistered runtimes", "count", len(runtimeIDs))
@@ -750,34 +2251,723 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 	return nil
 }
 
-func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, error) {
-	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
-	var runtimes []map[string]string
-	for name, entry := range d.cfg.Agents {
-		version, err := detectAgentVersion(ctx, entry.Path)
+// recordProfileLaunch remembers the absolute executable path and fixed launch
+// args resolved for a custom runtime profile. Called from
+// registerRuntimesForWorkspace. Lazily initializes the map so test fixtures
+// that build a Daemon literal without seeding every map don't panic.
+func (d *Daemon) recordProfileLaunch(profileID, path, version string, fixedArgs []string) {
+	if profileID == "" || path == "" {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.profileLaunchSpecs == nil {
+		d.profileLaunchSpecs = make(map[string]profileLaunchSpec)
+	}
+	d.profileLaunchSpecs[profileID] = profileLaunchSpec{
+		path:      path,
+		version:   version,
+		fixedArgs: append([]string(nil), fixedArgs...),
+	}
+}
+
+// customProfileLaunchForRuntime returns the resolved custom executable path and
+// fixed args for a claimed task's RuntimeID, and whether the runtime is a
+// custom-profile runtime. It returns false for built-in runtimes (no profile)
+// and for runtimes whose profile command was never resolved on this host.
+func (d *Daemon) customProfileLaunchForRuntime(runtimeID string) (profileLaunchSpec, bool) {
+	if runtimeID == "" {
+		return profileLaunchSpec{}, false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	rt, ok := d.runtimeIndex[runtimeID]
+	if !ok || rt.ProfileID == "" {
+		return profileLaunchSpec{}, false
+	}
+	spec, ok := d.profileLaunchSpecs[rt.ProfileID]
+	if !ok || spec.path == "" {
+		return profileLaunchSpec{}, false
+	}
+	spec.fixedArgs = append([]string(nil), spec.fixedArgs...)
+	return spec, true
+}
+
+// runtimeVersionProbeConcurrency bounds how many `<cli> --version` probes run
+// at once during registration. Version detection is process-spawn bound rather
+// than CPU bound, and each probe already carries its own timeout, so a modest
+// fan-out is safe even when a host has many agent CLIs installed.
+const runtimeVersionProbeConcurrency = 8
+
+// runtimeVersionProbeAttempts bounds how many times one provider's `<cli>
+// --version` probe runs inside a single probe round before that provider is
+// dropped from the registration payload.
+//
+// A round now serves a whole batch of workspace registrations (MUL-5225), so a
+// single failed attempt no longer costs one workspace its runtime — it costs
+// every workspace registered in that batch, and nothing re-probes until a
+// daemon restart or a standalone re-registration. That amplification is worth
+// one retry because the failure is usually transient: cfg.Agents only holds
+// CLIs that resolved when the daemon started, so a probe failing later is
+// typically a version manager swapping the binary in place (vanished path,
+// ETXTBSY) or fork/exec briefly failing under a startup burst. Retrying only
+// the failed providers keeps the round O(M) — it never reintroduces
+// per-workspace probing.
+const runtimeVersionProbeAttempts = 2
+
+// runtimeVersionProbeRetryDelay spaces a retry so an in-flight binary swap or a
+// momentary fork/exec failure has time to settle. Providers are probed
+// concurrently, so a round pays this once, not once per failed provider.
+// Overridable for tests.
+var runtimeVersionProbeRetryDelay = 500 * time.Millisecond
+
+// runtimeVersionProbeRetryWindow gates the retry on how quickly the failure
+// came back. A probe that burned its full timeout is a hung CLI, not a hiccup,
+// and retrying it would double the worst case for the whole round — the same
+// latency that used to push the desktop runtime step into its empty "no runtime
+// found" state before probes were parallelized (MUL-5119). Only fast failures,
+// which are the transient ones, are retried.
+//
+// The window is measured over the WHOLE attempt, self-heal included: a vanished
+// pinned path sends resolveAgentEntry through its own version probe of the
+// re-resolved candidate, so an attempt can spend its entire budget there and
+// still fail instantly on the outer probe of the stale path.
+//
+// A self-heal candidate rejected by the minimum-version gate is also retried
+// within this window, deliberately: the rejection is a verdict about whatever
+// PATH resolved to during the upgrade window the heal exists for, and the
+// retry gives the upgrade a beat to publish the new binary before the verdict
+// demotes runtimes (see probeBuiltinRuntime).
+//
+// Overridable for tests.
+var runtimeVersionProbeRetryWindow = time.Second
+
+// builtinProbeVerdict distinguishes the ways a provider can fail its probe,
+// which callers must treat differently.
+//
+// "Could not read a version" is transient by construction — the CLI was busy,
+// mid-upgrade, or fork/exec hiccuped — so the right response is to leave
+// whatever is registered alone and try again. The other two are confirmed
+// verdicts about a binary that is on disk right now, and leaving either
+// registered means the daemon keeps handing work to a CLI it has already proven
+// it cannot use: "read a version and it is below the minimum supported one",
+// and "the OS refuses to execute the file at all". Collapsing these into one
+// bool made a confirmed verdict indistinguishable from a hiccup, which is what
+// let a downgraded CLI keep claiming tasks.
+type builtinProbeVerdict int
+
+const (
+	builtinProbeOK builtinProbeVerdict = iota
+	builtinProbeUnavailable
+	builtinProbeBelowMinimum
+	// builtinProbeNotExecutable: the file resolved, but the OS rejected it as
+	// not a runnable program (an npm placeholder stub whose postinstall was
+	// blocked is the case in the field — MUL-6164). Deterministic in the same
+	// sense as below-minimum: the same bytes will be refused every time until
+	// someone reinstalls, so retrying is not what fixes it.
+	builtinProbeNotExecutable
+	// builtinProbeMissingProfile: the CLI resolved and runs, but the runtime
+	// profile its backend speaks through is not installed for it. DSH is the
+	// case in the field: the Multica profile is what gives `dsh` its --stdio
+	// protocol, so a bare binary answers `--version` and `--probe` refuses.
+	// Deterministic like the two above — the same binary keeps refusing until
+	// someone installs the profile — and the reason carries that repair.
+	builtinProbeMissingProfile
+	// builtinProbeIncompatibleProfile: something answered `--probe`, with a
+	// protocol version this daemon does not drive — a bundle older than the
+	// check, or a newer one this build has yet to catch up with. Reported, and
+	// deliberately neither installable NOR demotable: the profile is there on
+	// purpose, so installing over it would replace a considered configuration,
+	// and this daemon can equally be the stale side of the skew, so taking a
+	// live runtime offline over it is a destructive answer to a version
+	// question. It stops a fresh registration and nothing more.
+	builtinProbeIncompatibleProfile
+)
+
+// demotableBuiltinProbeVerdict reports whether a verdict may take a LIVE
+// runtime offline, as opposed to merely keeping an unregistered provider
+// unregistered.
+//
+// The distinction is the whole safety property: demotion routes work away from
+// a machine, so it belongs only to verdicts that say the CLI definitely cannot
+// serve work AND that this daemon is in a position to judge.
+//
+// builtinProbeIncompatibleProfile fails the second half and is deliberately
+// absent. A protocol version this daemon does not drive can equally mean the
+// daemon is the stale side of the skew, and tearing down a live runtime because
+// THIS build is behind is a destructive answer to a version question. It still
+// blocks a fresh registration and is reported on /health; what it must not do is
+// take work away from a runtime already serving it.
+//
+// builtinProbeUnavailable is absent for the plainer reason: it means nothing was
+// learned this round.
+func demotableBuiltinProbeVerdict(verdict builtinProbeVerdict) bool {
+	switch verdict {
+	case builtinProbeBelowMinimum, builtinProbeNotExecutable, builtinProbeMissingProfile:
+		return true
+	}
+	return false
+}
+
+// builtinProbeNeedsConfirmation reports whether a demotable verdict must
+// reproduce across two probe rounds (confirmCondemned) before it is acted on.
+//
+// Only builtinProbeBelowMinimum does not: it is a pure function of a version
+// string this round already parsed, so a second look reaches the same
+// conclusion. The other two are deterministic about the state they describe but
+// rest on an observation that is not — an installer overwriting the bin entry in
+// place (the very repair we tell users to run) or a DSH upgrade moving the
+// profile under a probe. Requiring a second sighting a window later makes those
+// windows impossible to mistake for a verdict, and costs a genuinely broken
+// provider one extra round.
+func builtinProbeNeedsConfirmation(verdict builtinProbeVerdict) bool {
+	return verdict != builtinProbeBelowMinimum
+}
+
+// dshMissingProfileReason is the user-facing explanation for a
+// builtinProbeMissingProfile drop. It names the repair because nothing else in
+// the daemon's output would: the CLI itself is installed, resolvable and
+// answers `--version`, so "not installed" is true only of the profile.
+const dshMissingProfileReason = "the Multica runtime profile is not installed; add the Multica DSH runtime bundle to the `multica` profile with `dsh plugin`, or set MULTICA_DSH_PROFILE_BUNDLE so the daemon installs it"
+
+// dshProfileInstallStartedReason replaces it when the operator configured a
+// bundle for the daemon to install (MULTICA_DSH_PROFILE_BUNDLE), so /health
+// separates "wait for the install" from "nothing is going to happen".
+const dshProfileInstallStartedReason = "the Multica runtime profile is not installed; installing the configured bundle now and re-probing when it finishes"
+
+// dshInstallGaveUpReason replaces the "installing now" detail once the
+// automatic install has stopped without producing a profile. It says the
+// attempt happened and ended, because a reader who saw the earlier "installing"
+// reason needs to know which of the two states they are looking at.
+const dshInstallGaveUpReason = "the Multica runtime profile is not installed; the automatic install failed, so it has to be installed by hand"
+
+// dshIncompatibleProfileReason is the /health reason for a profile that answers
+// with a protocol this daemon does not drive. It names both sides because
+// either can be the stale one.
+const dshIncompatibleProfileReason = "the Multica runtime profile answers with a protocol version this daemon does not drive; update the profile bundle or the daemon"
+
+// dshProbeFailedReason is the transient reason: the probe did not answer with a
+// probe frame at all — a timeout, a failed exec, or unparseable output. It is
+// deliberately not phrased as a version problem, which would send a reader
+// looking in the wrong place.
+const dshProbeFailedReason = "the DSH runtime profile probe returned no usable answer"
+
+// runtimeVerdict is one provider's confirmed verdict: the human reason that
+// goes to /health and the daemon log, plus — when the cause is one the user has
+// to act on — the structured record the server stores on the runtime row.
+//
+// The two halves are deliberately separate. The reason is prose for an operator
+// reading logs; offline is a stable code plus a repair command for clients,
+// which localize their own sentence around it. dispatch/reason.go's rule is
+// that a reason code is decided at its source and never reverse-engineered from
+// a human-readable string, and this is that source.
+type runtimeVerdict struct {
+	reason  string
+	offline *RuntimeOfflineReason
+}
+
+// newRuntimeVerdict pairs a probe verdict with what the server needs to know
+// about it. Only a verdict the user must repair carries an offline reason: a
+// below-minimum CLI keeps today's behaviour (the runtime goes offline and work
+// queues) because changing when THAT blocks a trigger is a separate product
+// decision from this one.
+//
+// execPath is the pinned entry point, which is the right path for this verdict:
+// a file the OS refuses to execute is present, so the self-heal that would have
+// re-resolved a vanished path never runs, and the probe failed on this exact
+// file.
+func newRuntimeVerdict(verdict builtinProbeVerdict, reason, execPath string, installing bool) runtimeVerdict {
+	switch verdict {
+	case builtinProbeNotExecutable:
+		offline := &RuntimeOfflineReason{Code: RuntimeOfflineCodeNotExecutable, Detail: reason}
+		if repair, ok := agent.ExecFormatRepairFor(execPath); ok {
+			offline.Repair = &repair
+		}
+		return runtimeVerdict{reason: reason, offline: offline}
+	case builtinProbeMissingProfile:
+		// The same class of finding as an unrunnable file: the machine is
+		// reachable and the CLI cannot serve work, so the server must refuse
+		// the trigger and say what is missing rather than queue behind a wait
+		// that never ends. The one exception is an install the daemon is
+		// running right now, which is stated explicitly instead of being
+		// implied by an absent reason — and withdrawn by
+		// withdrawDshInstallWait if that install gives up.
+		offline := &RuntimeOfflineReason{
+			Code:       RuntimeOfflineCodeDshProfile,
+			Detail:     reason,
+			Installing: installing,
+		}
+		repair := dshProfileRepair()
+		offline.Repair = &repair
+		return runtimeVerdict{reason: reason, offline: offline}
+	}
+	return runtimeVerdict{reason: reason}
+}
+
+// probeBuiltinRuntime resolves and version-detects one built-in provider,
+// retrying a fast failure up to runtimeVersionProbeAttempts times. The verdict
+// tells the caller how to treat a drop: builtinProbeUnavailable means the
+// version could not be read (or not understood) — transient, leave whatever is
+// registered alone — while builtinProbeBelowMinimum is a confirmed too-old
+// verdict the caller may demote on. builtinProbeMissingProfile is confirmed in
+// the same way, for a CLI that runs but whose backend has no runtime profile
+// installed. See builtinProbeVerdict.
+//
+// The second return value is a short human-readable reason when the verdict is
+// not OK. It is surfaced on /health as skipped_agents so a user can tell "CLI
+// not installed" apart from "CLI installed but dropped at registration", which
+// was previously only visible in the daemon log (MUL-5439).
+func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry AgentEntry) (string, string, builtinProbeVerdict) {
+	var (
+		lastErr  error
+		attempts int
+		// transientReason lets a provider whose probe is not a version probe
+		// name its own failure. The generic tail would otherwise report "version
+		// detection failed" for a dsh that answered --version perfectly well,
+		// which sends a reader looking for the wrong problem.
+		transientReason string
+	)
+probeLoop:
+	for attempts < runtimeVersionProbeAttempts {
+		if attempts > 0 {
+			select {
+			case <-ctx.Done():
+			case <-time.After(runtimeVersionProbeRetryDelay):
+			}
+			// A cancelled round is shutting down or already past its deadline;
+			// keep lastErr pointing at the real probe failure rather than the
+			// cancellation that stopped us from retrying it.
+			if ctx.Err() != nil {
+				break
+			}
+		}
+		attempts++
+		// Cleared per attempt: this names the DSH profile probe's own failure,
+		// and only for a round that ENDED there. An attempt that gets past the
+		// probe and then fails version detection has a more specific reason,
+		// and a stale value from an earlier attempt would overwrite it at the
+		// tail — reporting "the probe returned no usable answer" for a probe
+		// that answered fine.
+		transientReason = ""
+		// The attempt is timed from here, not from the detect call below:
+		// resolveAgentEntry runs a version probe of its own on the re-resolved
+		// candidate, and that probe can burn the whole timeout by itself. Timing
+		// only the outer call would read "slow self-heal, then an instant
+		// failure on the stale path" as a fast failure and retry it, paying the
+		// slow half twice.
+		startedAt := time.Now()
+		// Self-heal a pinned executable path an in-place upgrade deleted
+		// (MUL-4486) so version detection — and thus staying registered/online —
+		// recovers without a daemon restart. resolveAgentEntry already
+		// version-gates the healed binary; the detect + min-version check below
+		// still runs to produce the version string this registration reports.
+		// It is re-run per attempt because the heal itself can be what a retry
+		// fixes: the upgrade that removed the old path may not have published
+		// the new one yet on the first attempt.
+		resolved, _, heal := d.resolveAgentEntryWithHeal(ctx, name, entry)
+		// The pinned path is gone and the binary its command resolves to now is
+		// too old. Unlike the direct case below, this verdict is about whatever
+		// PATH resolves to at this instant — and the pinned path vanishing is
+		// exactly the mid-upgrade window the per-attempt heal exists for, where
+		// a stale sibling install can shadow the not-yet-published new binary.
+		// Give it the same bounded fast-failure retry as every other outcome
+		// before returning the demotable verdict; a retry that finds the
+		// upgraded binary adopts it instead. It is still the only way this
+		// shape reaches the caller: probing the vanished path can only produce
+		// "version detection failed", which by design leaves the runtime online
+		// and claiming tasks for a CLI that cannot launch.
+		if heal.rejected != nil {
+			if attempts < runtimeVersionProbeAttempts && time.Since(startedAt) < runtimeVersionProbeRetryWindow {
+				d.logger.Debug("re-resolved agent version too old; retrying probe",
+					"name", name, "attempt", attempts, "version", heal.rejected.Detected)
+				continue
+			}
+			d.logger.Warn("skip registering runtime: re-resolved version too old",
+				"name", name, "version", heal.rejected.Detected, "error", heal.rejected.Error())
+			return heal.rejected.Detected, heal.rejected.Error(), builtinProbeBelowMinimum
+		}
+		version, err := detectAgentVersion(ctx, agent.Command{Path: resolved.Path})
 		if err != nil {
-			d.logger.Warn("skip registering runtime", "name", name, "error", err)
+			lastErr = err
+			if time.Since(startedAt) >= runtimeVersionProbeRetryWindow {
+				break
+			}
+			if attempts < runtimeVersionProbeAttempts {
+				d.logger.Debug("agent version probe failed; retrying", "name", name, "attempt", attempts, "error", err)
+			}
 			continue
 		}
 		if err := checkAgentMinVersion(name, version); err != nil {
-			d.logger.Warn("skip registering runtime: version too old", "name", name, "version", version, "error", err)
+			var tooOld *agent.BelowMinimumError
+			if errors.As(err, &tooOld) {
+				// The verdict is a pure function of a version that PARSED, so a
+				// retry would reach the same conclusion — drop the provider now.
+				d.logger.Warn("skip registering runtime: version too old", "name", name, "version", version, "error", err)
+				// The version is returned even though the provider is dropped: the
+				// caller needs it to report what it demoted.
+				return version, err.Error(), builtinProbeBelowMinimum
+			}
+			// The CLI ran but printed something (or nothing) the gate could not
+			// parse. That is "we didn't learn a version", not "we verified it is
+			// too old" — the same transient rule as a failed exec, because the
+			// below-minimum verdict tears runtimes down and must never fire on
+			// evidence this thin.
+			lastErr = err
+			if time.Since(startedAt) >= runtimeVersionProbeRetryWindow {
+				break
+			}
+			if attempts < runtimeVersionProbeAttempts {
+				d.logger.Debug("agent version unparseable; retrying", "name", name, "attempt", attempts, "error", err)
+			}
 			continue
 		}
+		// DSH is the one built-in whose binary being present, and runnable, and
+		// new enough still does not make it usable: the Multica runtime profile
+		// supplies the --stdio protocol the backend drives, so a `dsh` without
+		// it resolves, answers `--version`, clears the minimum, and then cannot
+		// run a single task. Checked here rather than in probeAgentCLIs so the
+		// drop produces a verdict: without it the provider disappeared from the
+		// availability set silently, which is indistinguishable to a user from
+		// "Multica cannot see my dsh at all".
+		//
+		// LAST, after version detection has succeeded, and that order is the
+		// point. probeDshMulticaProfile cannot tell "the profile refused" from
+		// "the thing I ran is not a working CLI", and exec.LookPath is far too
+		// weak a proxy for the second: on Windows the CLI is a .cmd shim that
+		// LookPath happily resolves and that exits 9009 — cmd.exe's "command
+		// not found" — when what it forwards to is missing. Probing the profile
+		// first reported that machine as "the Multica runtime profile is not
+		// installed", which is a repair for a problem it did not have, and with
+		// a bundle configured would have started installing into a DSH that
+		// cannot execute. A CLI that cannot answer `--version` is not one this
+		// daemon has any business holding an opinion about the profile of, so
+		// its failure is reported as what it is by the version-probe path
+		// above.
+		if name == "dsh" {
+			// What the probe said decides what may happen next. Only a
+			// confirmed-absent profile may install a bundle or condemn the
+			// runtime. An incompatible one is reported and neither installed
+			// over nor demoted — the profile is deliberately there, and this
+			// daemon may be the stale side of the skew. A probe that merely
+			// failed is transient, on the same rule every other provider's
+			// version probe gets.
+			switch probeDshMulticaProfile(ctx, resolved.Path) {
+			case dshProbeOK:
+			case dshProbeMissingProfile:
+				d.logger.Warn("skip registering runtime: DSH Multica runtime profile is not installed",
+					"name", name, "path", resolved.Path)
+				reason := dshMissingProfileReason
+				if d.startDshProfileProvision(resolved.Path) {
+					reason = dshProfileInstallStartedReason
+				}
+				return "", reason, builtinProbeMissingProfile
+			case dshProbeIncompatible:
+				d.logger.Warn("skip registering runtime: DSH Multica runtime profile speaks another protocol",
+					"name", name, "path", resolved.Path)
+				return "", dshIncompatibleProfileReason, builtinProbeIncompatibleProfile
+			default:
+				// Transient. Retry inside this round's budget, then leave the
+				// loop for the tail, which reports it as the transient drop it
+				// is. The labelled break matters: a bare one would leave only
+				// the switch and fall through to registering a runtime whose
+				// profile answered nothing.
+				lastErr = errors.New(dshProbeFailedReason)
+				transientReason = dshProbeFailedReason
+				if time.Since(startedAt) >= runtimeVersionProbeRetryWindow {
+					break probeLoop
+				}
+				if attempts < runtimeVersionProbeAttempts {
+					d.logger.Debug("dsh profile probe failed; retrying", "name", name, "attempt", attempts)
+				}
+				continue
+			}
+		}
 		d.setAgentVersion(name, version)
-		d.logger.Debug("agent version detected", "name", name, "version", version, "path", entry.Path)
-		displayName := strings.ToUpper(name[:1]) + name[1:]
+		d.refreshHealedVersion(name, resolved.Path, version)
+		if version == "" {
+			// A provider with no minimum-version floor reaches here with a blank
+			// when its `--version` exits 0 printing nothing. setAgentVersion just
+			// refused to let it overwrite the cache; the payload needs the same
+			// protection, because a whole-set re-registration triggered by a
+			// NEIGHBOUR's upgrade would otherwise send the blank and wipe a
+			// version the server already knows. Reuse the last known one; a
+			// provider that never had a version stays blank, as before.
+			version = d.agentVersion(name)
+		}
+		d.logger.Debug("agent version detected", "name", name, "version", version, "path", resolved.Path)
+		return version, "", builtinProbeOK
+	}
+	// The OS refusing to execute the file is not a failed probe, it is a
+	// finding: the CLI is installed, resolvable, and unrunnable. Report it as
+	// its own verdict so the caller can take the runtime offline instead of
+	// keeping it online for a binary that cannot start (MUL-6164). The
+	// diagnosis attached in pkg/agent rides along as the reason, so /health
+	// carries the repair command and not just the errno.
+	if agent.IsExecFormatError(lastErr) {
+		d.logger.Warn("skip registering runtime: agent CLI is not executable on this machine",
+			"name", name, "attempts", attempts, "error", lastErr)
+		return "", fmt.Sprintf("agent CLI is not executable: %v", lastErr), builtinProbeNotExecutable
+	}
+
+	d.logger.Warn("skip registering runtime", "name", name, "attempts", attempts, "error", lastErr)
+	reason := "version detection failed"
+	if lastErr != nil {
+		reason = fmt.Sprintf("version detection failed: %v", lastErr)
+	}
+	if transientReason != "" {
+		reason = transientReason
+	}
+	return "", reason, builtinProbeUnavailable
+}
+
+// detectBuiltinRuntimes version-detects every configured built-in agent CLI and
+// returns a registration entry for each one that resolves and clears the
+// minimum-version gate. Probes run concurrently, bounded by
+// runtimeVersionProbeConcurrency.
+//
+// The previous implementation probed serially, so total latency was the SUM of
+// every CLI's `--version` call. On an onboarding host with several coding tools
+// installed that stacked into many seconds of dead time before the daemon could
+// register — long enough that the desktop runtime step timed out into its empty
+// "no runtime found" state while the probes were still running (MUL-5119).
+// Fanning the probes out makes total latency track the SLOWEST single probe
+// instead of their sum, so a freshly-created workspace lights up its runtimes
+// well inside the UI's scanning window.
+//
+// Each probe still self-heals a vanished pinned path (MUL-4486) and re-detects
+// the live version — nothing is cached on the Daemon, so an in-place CLI
+// upgrade is still reported with its current version. A provider whose version
+// stays undetectable across probeBuiltinRuntime's bounded attempts, or which is
+// below the minimum supported version, is logged and skipped, exactly as the
+// serial loop did.
+//
+// The result describes the machine, not a workspace, so a caller registering a
+// batch of workspaces at once calls this ONCE and passes the payload to
+// registerRuntimesForWorkspaceBatch for each workspace (MUL-5225).
+//
+// The second return value is THIS round's confirmed verdicts, provider to the
+// evidence against it. It is returned rather than read back
+// out of skippedAgents because that pair is a diagnostic snapshot of whichever
+// round published last: four different goroutines call this (the discovery
+// loop, the workspace sync, a runtime_gone re-register, a profile drift
+// refresh), so a caller acting on the shared copy can act on someone else's
+// probe — and demoting a runtime is not a decision to make on another round's
+// evidence.
+//
+// The third return value is THIS round's unavailable providers (version could
+// not be read), provider to reason. Callers that treat a register response as
+// AUTHORITATIVE for a workspace's whole runtime set (the runtime_gone recovery
+// and the profile drift refresh, via applyRegisterResponseInPlace) must
+// preserve these providers' existing runtimes: they are absent from the
+// payload because the probe failed, which is transient — tearing a working
+// runtime down over it is exactly what the unavailable/below-minimum verdict
+// split exists to prevent. demotableBuiltinProbeVerdict is the list of verdicts
+// that may demote.
+func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string, map[string]runtimeVerdict, map[string]string) {
+	type detected struct {
+		name    string
+		version string
+	}
+	// Snapshot before any probe runs: everything sampled below is at least as
+	// new as every verdict recorded up to this point, which is exactly the
+	// claim clearProviderDemotions needs and cannot make from timing alone.
+	sampledAfter := d.demotionSeqSnapshot()
+	var (
+		mu          sync.Mutex
+		results     []detected
+		skipped     = map[string]string{}
+		demotable   = map[string]runtimeVerdict{}
+		unavailable = map[string]string{}
+		g           errgroup.Group
+	)
+	g.SetLimit(runtimeVersionProbeConcurrency)
+	for name, entry := range d.agents() {
+		name, entry := name, entry
+		g.Go(func() error {
+			version, reason, verdict := d.probeBuiltinRuntime(ctx, name, entry)
+			if verdict != builtinProbeOK {
+				demote := demotableBuiltinProbeVerdict(verdict) &&
+					(!builtinProbeNeedsConfirmation(verdict) ||
+						d.confirmCondemned(verdict, name, time.Now()))
+				mu.Lock()
+				skipped[name] = reason
+				if demote {
+					demotable[name] = newRuntimeVerdict(verdict, reason, entry.Path, d.dshInstallInFlight.Load())
+				} else {
+					unavailable[name] = reason
+				}
+				mu.Unlock()
+				return nil
+			}
+			d.clearCondemned(name)
+			mu.Lock()
+			results = append(results, detected{name: name, version: version})
+			mu.Unlock()
+			return nil
+		})
+	}
+	// No probe returns a non-nil error — failures are logged and skipped above —
+	// so Wait only blocks for the in-flight probes to finish.
+	_ = g.Wait()
+
+	// Publish this round's drops for /health. Replacing (not merging) keeps the
+	// diagnostic honest: a provider that registered successfully this round must
+	// not stay listed as skipped.
+	d.setSkippedAgents(skipped)
+
+	// Source iteration (a map) and parallel completion order are both
+	// nondeterministic; sort by provider so the registration payload is stable
+	// across runs and order-sensitive tests stay deterministic.
+	sort.Slice(results, func(i, j int) bool { return results[i].name < results[j].name })
+
+	// A provider that probes OK is no longer below the minimum, so release any
+	// demotion held against it — otherwise the register that converge is about
+	// to make would be rejected by the very guard that protects the demotion.
+	// Only holds that already existed when this round started sampling are
+	// released; see clearProviderDemotions for why "returned last" is not the
+	// same as "sampled last".
+	recovered := make([]string, 0, len(results))
+	for _, r := range results {
+		recovered = append(recovered, r.name)
+	}
+	d.clearProviderDemotions(recovered, sampledAfter)
+
+	runtimes := make([]map[string]string, 0, len(results))
+	for _, r := range results {
+		displayName := providerDisplayName(r.name)
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
 		runtimes = append(runtimes, map[string]string{
 			"name":    displayName,
-			"type":    name,
-			"version": version,
+			"type":    r.name,
+			"version": r.version,
 			"status":  "online",
 		})
 	}
-	if len(runtimes) == 0 {
-		return nil, fmt.Errorf("no agent runtimes could be registered")
+	return runtimes, demotable, unavailable
+}
+
+// cloneRuntimeEntries deep-copies a registration runtime payload. Callers that
+// receive a shared built-in payload (see registerRuntimesForWorkspaceBatch) use
+// this before appending their own workspace's custom runtime profiles, so one
+// workspace's profiles can never leak into another's registration.
+func cloneRuntimeEntries(in []map[string]string) []map[string]string {
+	out := make([]map[string]string, 0, len(in))
+	for _, entry := range in {
+		cp := make(map[string]string, len(entry))
+		for k, v := range entry {
+			cp[k] = v
+		}
+		out = append(out, cp)
+	}
+	return out
+}
+
+// registerRuntimesForWorkspace registers this host's runtimes for one
+// workspace, probing the built-in agent CLIs itself. This is the entry point
+// for every standalone registration — a runtime_gone re-register, a profile
+// drift refresh, a recovery retry — so each of those still re-detects versions
+// and picks up an in-place CLI upgrade.
+//
+// Registering a batch of workspaces at once (daemon startup) goes through
+// registerRuntimesForWorkspaceBatch instead, which shares one probe round
+// across the batch.
+//
+// The third return value is the set of providers this round's response must not
+// be treated as authoritative about, provider to reason — see
+// preserveProvidersFromProbe. Callers that apply the response as AUTHORITATIVE
+// must pass it to applyRegisterResponseInPlace.
+//
+// The caller must hold the workspace's register lock (withWorkspaceRegisterLock)
+// for this call, the apply, and the cleanup that follows it.
+func (d *Daemon) registerRuntimesForWorkspaceLocked(ctx context.Context, workspaceID string) (*RegisterResponse, string, map[string]string, error) {
+	builtins, belowMinimum, unavailable := d.detectBuiltinRuntimes(ctx)
+	resp, profileSig, err := d.registerRuntimesForWorkspaceBatchLocked(ctx, workspaceID, builtins)
+	return resp, profileSig, preserveProvidersFromProbe(unavailable, belowMinimum), err
+}
+
+// preserveProvidersFromProbe returns the providers whose absence from a
+// registration payload must NOT be read as "this workspace should stop hosting
+// them", keyed by provider.
+//
+// Unavailable is the obvious half: the version could not be read, which is
+// transient, so dropping the rows would tear a working runtime down over one
+// failed probe.
+//
+// Demotable is the half that is easy to get wrong, because the verdict IS
+// confirmed — a version was read and rejected, or the OS refused to run the
+// file. What is missing on these paths is not the evidence but the authority to
+// act on it. Taking a runtime offline requires two things neither the
+// runtime_gone recovery nor the profile-drift refresh has: the claim barrier, so
+// the rows are never pulled out from under a task that is still executing, and a
+// seq-stamped hold, so a register sent before the verdict cannot revive the
+// provider when it lands. demoteUnusableRuntimes has both and is the single
+// owner of the demotion. A path that drops the rows without them reaches the
+// same verdict and leaves no record that it did, so the next in-flight response
+// quietly undoes it.
+//
+// Preserving here costs at most one refresh tick of an unusable CLI staying
+// online, which is the pre-demotion status quo rather than a new exposure.
+func preserveProvidersFromProbe(unavailable map[string]string, demotable map[string]runtimeVerdict) map[string]string {
+	if len(demotable) == 0 {
+		return unavailable
+	}
+	preserve := make(map[string]string, len(unavailable)+len(demotable))
+	for provider, reason := range unavailable {
+		preserve[provider] = reason
+	}
+	for provider, verdict := range demotable {
+		preserve[provider] = verdict.reason
+	}
+	return preserve
+}
+
+// registerRuntimesForWorkspaceBatch registers one workspace against an already
+// detected built-in runtime payload.
+//
+// Built-in CLIs are a machine-level fact, not a per-workspace one, but
+// registration is per-workspace — so probing inside every registration made a
+// daemon serving N workspaces spawn N×M `<cli> --version` processes at startup
+// (24 workspaces × 5 agents = 120 instead of 5, MUL-5225 / #5837). Beyond the
+// wasted startup time, some CLI wrappers have visible side effects when
+// executed, and a single slow probe gets multiplied by the workspace count.
+//
+// Taking the payload as a parameter lets one probe round serve a whole
+// registration batch while keeping the refresh semantics: nothing is cached on
+// the Daemon, so the next standalone registration re-probes.
+//
+// builtins is treated as read-only and is copied before this workspace's custom
+// runtime profiles are appended.
+//
+// The caller must hold the workspace's register lock (withWorkspaceRegisterLock)
+// for this call, the apply, and the cleanup that follows it.
+func (d *Daemon) registerRuntimesForWorkspaceBatchLocked(ctx context.Context, workspaceID string, builtins []map[string]string) (*RegisterResponse, string, error) {
+	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.agents()))
+	runtimes := cloneRuntimeEntries(builtins)
+	var failedProfiles []map[string]string
+
+	// Append any workspace custom runtime profiles whose command resolves on
+	// this host (MUL-3284). This is best-effort: a fetch error (e.g. an older
+	// server returning 404) must never fail registration — the daemon simply
+	// continues with the built-in runtimes it already collected. A profile
+	// whose command_name is neither on PATH nor already discovered for the same
+	// protocol family is skipped (the host doesn't have it).
+	//
+	// profileSig is a content hash of the workspace's profile list captured
+	// here so an on-demand server notification can skip re-registration when
+	// the effective profile set is already current (MUL-3332). An empty string
+	// means the fetch failed and the caller must keep whatever signature was
+	// previously cached on the workspaceState.
+	profileSig := d.appendProfileRuntimes(ctx, workspaceID, &runtimes, &failedProfiles)
+
+	if len(runtimes) == 0 && len(failedProfiles) == 0 {
+		// profileSig is still meaningful even when nothing resolves: the
+		// refresh path uses it to remember "we already converged on the
+		// disabled-everywhere state" so duplicate change notifications are a
+		// no-op instead of a re-empty-register loop. Initial-registration
+		// callers that don't care about the sig discard it via _.
+		return nil, profileSig, ErrNoRuntimesToRegister
 	}
 
 	req := map[string]any{
@@ -788,17 +2978,248 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		"cli_version":       d.cfg.CLIVersion,
 		"launched_by":       d.cfg.LaunchedBy,
 		"runtimes":          runtimes,
+		"failed_profiles":   failedProfiles,
 	}
 
 	resp, err := d.client.Register(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("register runtimes: %w", err)
+		return nil, "", fmt.Errorf("register runtimes: %w", err)
 	}
-	if len(resp.Runtimes) == 0 {
-		return nil, fmt.Errorf("register runtimes: empty response")
+	if len(resp.Runtimes) == 0 && len(failedProfiles) == 0 {
+		return nil, "", fmt.Errorf("register runtimes: empty response")
 	}
 	d.logger.Debug("register response", "workspace_id", workspaceID, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos), "repos_version", resp.ReposVersion)
+	d.recordBuiltinVersionsSent(workspaceID, runtimes)
+	return resp, profileSig, nil
+}
+
+// registerBuiltinRuntimesForWorkspace registers ONLY the built-in runtimes for a
+// workspace: no custom runtime profiles are fetched or sent, and no profile
+// signature is produced.
+//
+// This exists for the CLI-discovery path (MUL-5439), which must not participate
+// in custom-profile convergence at all. Going through the profile-appending
+// registration made discovery observe the profile set as a side effect, and
+// caching that observation told the drift path "already converged" — so a
+// profile disabled at the same moment a new CLI was discovered would keep its
+// runtime alive forever (refreshWorkspaceRuntimeProfiles short-circuits on a
+// matching signature). Custom profile add/edit/disable stays exclusively with
+// the existing drift path.
+//
+// builtins is treated as read-only.
+//
+// The caller must hold the workspace's register lock (withWorkspaceRegisterLock)
+// for this call, the merge, and the cleanup that follows it.
+func (d *Daemon) registerBuiltinRuntimesForWorkspaceLocked(ctx context.Context, workspaceID string, builtins []map[string]string) (*RegisterResponse, error) {
+	runtimes := cloneRuntimeEntries(builtins)
+	if len(runtimes) == 0 {
+		return nil, ErrNoRuntimesToRegister
+	}
+	req := map[string]any{
+		"workspace_id":      workspaceID,
+		"daemon_id":         d.cfg.DaemonID,
+		"legacy_daemon_ids": d.cfg.LegacyDaemonIDs,
+		"device_name":       d.cfg.DeviceName,
+		"cli_version":       d.cfg.CLIVersion,
+		"launched_by":       d.cfg.LaunchedBy,
+		"runtimes":          runtimes,
+		// Deliberately empty: this call carries no profiles, so it must not
+		// report profile failures either.
+		"failed_profiles": []map[string]string{},
+	}
+	resp, err := d.client.Register(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("register builtin runtimes: %w", err)
+	}
+	if len(resp.Runtimes) == 0 {
+		return nil, fmt.Errorf("register builtin runtimes: empty response")
+	}
+	d.logger.Debug("builtin register response", "workspace_id", workspaceID, "runtimes", len(resp.Runtimes))
+	d.recordBuiltinVersionsSent(workspaceID, runtimes)
 	return resp, nil
+}
+
+// appendProfileRuntimes fetches the workspace's enabled custom runtime
+// profiles (MUL-3284) and appends a runtime registration entry for each one
+// whose command_name resolves on this host. For each resolved profile
+// it records the absolute command path and fixed args keyed by profile_id (via
+// recordProfileLaunch) so runTask can later launch the custom executable for a
+// claimed task.
+//
+// Best-effort by contract: any error fetching profiles (older server, network
+// blip) is logged and swallowed — registration proceeds with the built-in
+// runtimes already collected. A profile whose command cannot be resolved is
+// skipped with an Info log (this host simply doesn't have that command).
+//
+// The registration entry mirrors the built-in shape: name = display_name
+// (suffixed with the device name like the built-in path), type =
+// runtime_type (the compatibility target), version = best-effort detected
+// version, status = "online", plus the profile_id the server validates.
+//
+// Returns a content signature of the fetched profile list (MUL-3332). The
+// signature is used by on-demand profile refreshes to ignore duplicate change
+// notifications while still triggering a re-register without a daemon
+// restart. Returns the empty string when the fetch failed — callers must treat
+// that as "unknown, do not overwrite a previously-stored signature" (otherwise
+// a transient 5xx would silently flip the daemon into thinking the workspace
+// has zero profiles).
+func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, runtimes *[]map[string]string, failedProfiles *[]map[string]string) string {
+	resp, err := d.client.GetRuntimeProfiles(ctx, workspaceID)
+	if err != nil {
+		// Best-effort: never fail registration because profiles couldn't be
+		// fetched. An older server with no profiles route returns 404.
+		d.logger.Info("skip custom runtime profiles: fetch failed (continuing with built-in runtimes)",
+			"workspace_id", workspaceID, "error", err)
+		return ""
+	}
+	if resp == nil {
+		// Empty payload — same shape as "server has zero profiles". Return
+		// the digest of an empty list so the sync loop can still detect a
+		// later transition (zero → first profile added).
+		return profileSetSignature(nil)
+	}
+	for _, profile := range resp.RuntimeProfiles {
+		runtimeType := agent.ProfileRuntimeType(profile.RuntimeType, profile.ProtocolFamily)
+		if profile.CommandName == "" || profile.ProtocolFamily == "" {
+			d.logger.Warn("skip custom runtime profile: missing command_name or protocol_family",
+				"workspace_id", workspaceID, "profile_id", profile.ID, "display_name", profile.DisplayName)
+			continue
+		}
+		if _, supported := agent.RuntimeProtocolFamily(runtimeType); !supported {
+			reason := "unsupported runtime_type: " + runtimeType
+			d.logger.Warn("skip custom runtime profile: unsupported runtime_type",
+				"workspace_id", workspaceID, "profile_id", profile.ID,
+				"display_name", profile.DisplayName, "protocol_family", profile.ProtocolFamily)
+			*failedProfiles = append(*failedProfiles, map[string]string{
+				"profile_id":   profile.ID,
+				"command_name": profile.CommandName,
+				"reason":       reason,
+			})
+			continue
+		}
+		// Resolve the executable to launch for this profile. A per-machine
+		// path override (MUL-3284, `multica runtime profile set-path`) wins
+		// over the PATH lookup when it is set AND points at a real
+		// executable — this is how an operator pins a profile to a binary
+		// that isn't on the daemon's PATH, or selects between multiple
+		// installs on the same host. A configured-but-unusable override
+		// (deleted/moved/non-executable) is logged and falls back to PATH
+		// and then to the matching provider command already discovered at
+		// daemon startup. The latter matters for GUI-launched daemons whose
+		// environment cannot resolve a CLI directly even though built-in
+		// discovery found it through a login shell or provider install path.
+		// When none of those sources resolves, the profile is skipped.
+		var resolved string
+		var failureReason string
+		if override := strings.TrimSpace(d.cfg.ProfileCommandOverrides[profile.ID]); override != "" {
+			if path, err := resolveProfileOverridePath(override); err == nil {
+				resolved = path
+				d.logger.Info("custom runtime profile: using per-machine command path override",
+					"workspace_id", workspaceID, "profile_id", profile.ID, "command_path", resolved)
+			} else {
+				failureReason = "Configured path override is not executable: " + override
+				d.logger.Warn("custom runtime profile: command path override not executable; falling back to PATH",
+					"workspace_id", workspaceID, "profile_id", profile.ID,
+					"override_path", override, "command_name", profile.CommandName)
+			}
+		}
+		if resolved == "" {
+			r, err := lookPath(profile.CommandName)
+			if err != nil {
+				if discovered, ok := d.agents()[runtimeType]; ok && discovered.Command == profile.CommandName && discovered.Path != "" {
+					resolved = discovered.Path
+					d.logger.Info("custom runtime profile: using discovered provider command path",
+						"workspace_id", workspaceID, "profile_id", profile.ID,
+						"protocol_family", profile.ProtocolFamily, "command_path", resolved)
+				} else {
+					// Host doesn't have this command — expected on hosts that aren't
+					// provisioned for this profile. Skip without failing.
+					d.logger.Info("skip custom runtime profile: command not found on PATH or provider discovery",
+						"workspace_id", workspaceID, "profile_id", profile.ID,
+						"command_name", profile.CommandName, "error", err)
+					if failureReason != "" {
+						failureReason += "; "
+					}
+					failureReason += "command not found on PATH or provider discovery: " + profile.CommandName
+					*failedProfiles = append(*failedProfiles, map[string]string{
+						"profile_id":   profile.ID,
+						"command_name": profile.CommandName,
+						"reason":       failureReason,
+					})
+					continue
+				}
+			} else {
+				resolved = r
+			}
+		}
+		// Best-effort version detection; an empty version is acceptable. The
+		// probe carries the profile's fixed_args so a wrapper reports the
+		// version of the CLI it execs rather than its own: `ccms start q36
+		// --version` is Claude Code's version, `ccms --version` is the
+		// wrapper's, and only the former means anything to the min-version
+		// gate (GH #7046).
+		version, verErr := detectAgentVersion(ctx, agent.NewCommand(resolved,
+			agent.FilterLaunchPrefix(runtimeType, profile.FixedArgs, d.logger)))
+		if verErr != nil {
+			d.logger.Debug("custom runtime profile: version probe failed (registering with empty version)",
+				"workspace_id", workspaceID, "profile_id", profile.ID, "path", resolved, "error", verErr)
+			version = ""
+		}
+		displayName := profile.DisplayName
+		if d.cfg.DeviceName != "" {
+			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
+		}
+		d.recordProfileLaunch(profile.ID, resolved, version, profile.FixedArgs)
+		d.logger.Info("registering custom runtime profile",
+			"workspace_id", workspaceID, "profile_id", profile.ID,
+			"protocol_family", profile.ProtocolFamily, "command_path", resolved)
+		*runtimes = append(*runtimes, map[string]string{
+			"name":       displayName,
+			"type":       runtimeType,
+			"version":    version,
+			"status":     "online",
+			"profile_id": profile.ID,
+		})
+	}
+	return profileSetSignature(resp.RuntimeProfiles)
+}
+
+// profileSetSignature is a stable content hash of the workspace's custom
+// runtime profile list (MUL-3332). An on-demand refresh diffs this against the
+// cached value after the server reports a create, edit, disable, or delete; a
+// mismatch makes the daemon re-register so the new runtime instance appears
+// without a restart.
+//
+// The hashed projection covers exactly the fields that affect what the
+// daemon sends in a Register call: ID, Enabled, runtime identity, CommandName,
+// FixedArgs (the launch args every agent on this runtime inherits) and
+// Visibility (so a hypothetical future per-creator filter still triggers
+// drift). Profiles are sorted by ID first so the digest is order-independent
+// (the server is allowed to return them in any order).
+func profileSetSignature(profiles []RuntimeProfile) string {
+	if len(profiles) == 0 {
+		return "0"
+	}
+	sorted := append([]RuntimeProfile(nil), profiles...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
+	h := fnv.New64a()
+	// Field separator chosen to never appear in a UUID, slug, or arg.
+	const sep = "\x1f"
+	for _, p := range sorted {
+		fmt.Fprintf(h, "%s%s%t%s%s%s%s%s%s%s",
+			p.ID, sep,
+			p.Enabled, sep,
+			agent.ProfileRuntimeType(p.RuntimeType, p.ProtocolFamily), sep,
+			p.CommandName, sep,
+			p.Visibility, sep,
+		)
+		for _, a := range p.FixedArgs {
+			fmt.Fprintf(h, "%s%s", a, sep)
+		}
+		// Record list end so [a,b] and [ab] hash differently.
+		h.Write([]byte("\x1e"))
+	}
+	return strconv.FormatUint(h.Sum64(), 16)
 }
 
 func newWorkspaceState(workspaceID string, runtimeIDs []string, reposVersion string, repos []RepoData, settings json.RawMessage) *workspaceState {
@@ -842,6 +3263,45 @@ func (d *Daemon) workspaceRepoAllowed(workspaceID, repoURL string) bool {
 	}
 	if _, allowed := ws.taskRepoURLs[repoURL]; allowed {
 		return true
+	}
+	return false
+}
+
+// repoBarePathIsLive reports whether some watched workspace still claims the
+// repo cached at barePath, so the GC can refuse to evict it.
+//
+// Answering per-path rather than materializing the whole set lets the GC ask
+// again immediately before it deletes. A snapshot taken once per cycle goes
+// stale while the caller runs git and filesystem work on each repo in turn,
+// which is exactly the window in which a workspace can re-attach one.
+//
+// It mirrors workspaceRepoAllowed by unioning both sources: allowedRepoURLs
+// (workspace-level bindings) and taskRepoURLs (project repos the server
+// surfaced through a task claim, which never appear in GetWorkspaceRepos).
+// Missing the second set would make the GC evict repos that tasks actively
+// check out.
+//
+// Read from in-memory state on purpose. The alternative — asking the server
+// for each workspace's repo list during GC — would make a transient API
+// failure look like "nothing is attached", and this set is what protects
+// caches from deletion.
+func (d *Daemon) repoBarePathIsLive(barePath string) bool {
+	if d.repoCache == nil || barePath == "" {
+		return false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for workspaceID, ws := range d.workspaces {
+		for url := range ws.allowedRepoURLs {
+			if d.repoCache.BarePath(workspaceID, url) == barePath {
+				return true
+			}
+		}
+		for url := range ws.taskRepoURLs {
+			if d.repoCache.BarePath(workspaceID, url) == barePath {
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -895,7 +3355,7 @@ func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
 // idempotent. Called from runTask before the agent spawns so
 // `multica repo checkout` accepts project-only URLs without an extra round
 // trip back to GetWorkspaceRepos (which doesn't carry project resources).
-func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
+func (d *Daemon) registerTaskRepos(workspaceID, taskID string, repos []RepoData) {
 	if len(repos) == 0 {
 		return
 	}
@@ -914,6 +3374,9 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 	if ws.taskRepoURLs == nil {
 		ws.taskRepoURLs = make(map[string]struct{}, len(repos))
 	}
+	if taskID != "" && ws.taskRepoRefs == nil {
+		ws.taskRepoRefs = make(map[string]map[string]string)
+	}
 	candidates := make([]repoCandidate, 0, len(repos))
 	for _, repo := range repos {
 		url := strings.TrimSpace(repo.URL)
@@ -925,6 +3388,14 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 		_, inWorkspace := ws.allowedRepoURLs[url]
 		_, inTask := ws.taskRepoURLs[url]
 		ws.taskRepoURLs[url] = struct{}{}
+		if taskID != "" {
+			if ws.taskRepoRefs[taskID] == nil {
+				ws.taskRepoRefs[taskID] = make(map[string]string, len(repos))
+			}
+			if _, exists := ws.taskRepoRefs[taskID][url]; !exists {
+				ws.taskRepoRefs[taskID][url] = strings.TrimSpace(repo.Ref)
+			}
+		}
 		candidates = append(candidates, repoCandidate{
 			url:     url,
 			tracked: inWorkspace || inTask,
@@ -953,6 +3424,33 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 	}
 }
 
+func (d *Daemon) taskRepoDefaultRef(workspaceID, taskID, repoURL string) string {
+	taskID = strings.TrimSpace(taskID)
+	repoURL = strings.TrimSpace(repoURL)
+	if taskID == "" || repoURL == "" {
+		return ""
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok || ws.taskRepoRefs == nil {
+		return ""
+	}
+	return strings.TrimSpace(ws.taskRepoRefs[taskID][repoURL])
+}
+
+func (d *Daemon) clearTaskRepoRefs(workspaceID, taskID string) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if ws, ok := d.workspaces[workspaceID]; ok && ws.taskRepoRefs != nil {
+		delete(ws.taskRepoRefs, taskID)
+	}
+}
+
 // waitBackgroundSyncs blocks until every background sync started by
 // registerTaskRepos has finished. Intended for test teardown: tests that
 // hand the daemon a t.TempDir-backed repo cache must call this before
@@ -963,10 +3461,22 @@ func (d *Daemon) waitBackgroundSyncs() {
 }
 
 func (d *Daemon) syncWorkspaceRepos(workspaceID string, repos []RepoData) {
+	d.syncWorkspaceReposContext(context.Background(), workspaceID, repos)
+}
+
+func (d *Daemon) syncWorkspaceReposContext(ctx context.Context, workspaceID string, repos []RepoData) {
 	if d.repoCache == nil {
 		return
 	}
-	if err := d.repoCache.Sync(workspaceID, repoDataToInfo(repos)); err != nil {
+	var err error
+	if cache, ok := d.repoCache.(interface {
+		SyncContext(context.Context, string, []repocache.RepoInfo) error
+	}); ok {
+		err = cache.SyncContext(ctx, workspaceID, repoDataToInfo(repos))
+	} else {
+		err = d.repoCache.Sync(workspaceID, repoDataToInfo(repos))
+	}
+	if err != nil {
 		d.setWorkspaceRepoSyncError(workspaceID, err.Error())
 		d.logger.Warn("repo cache sync failed", "workspace_id", workspaceID, "error", err)
 		return
@@ -996,7 +3506,425 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 	}
 	d.mu.Unlock()
 
+	// Publish the refreshed Co-authored-by verdict to the repo cache. Hooks
+	// installed by earlier checkouts read that file at commit time, so this is
+	// what makes a toggled-off setting apply to checkouts that already exist
+	// instead of only to the next one (MUL-6921).
+	d.persistCoAuthoredByState(workspaceID)
+
 	return resp, nil
+}
+
+// coAuthoredByPublisher is the repo cache's half of the Co-authored-by wiring:
+// the state file every installed hook reads at commit time, and the hooks
+// themselves in the workspace's bare caches. Optional so test daemons can run
+// with a minimal repoCacheBackend.
+type coAuthoredByPublisher interface {
+	WriteCoAuthoredByState(workspaceID string, enabled bool) error
+	ReconcileCoAuthoredByHooks(workspaceID string, enabled bool) error
+	ReconcileCoAuthoredByHookInCheckout(checkoutPath, workspaceID string, enabled bool) error
+}
+
+// persistCoAuthoredByState records the workspace's current Co-authored-by
+// verdict where the installed prepare-commit-msg hooks can see it, and brings
+// hooks written by earlier daemon releases — which read no state at all — in
+// line with it. Called after every settings refresh and on every workspace
+// sync; best-effort, since a failed write only leaves the previous value in
+// place.
+//
+// The daemon is the only writer of this state, and publishes under a
+// per-workspace lock with the verdict read INSIDE that lock. Two publishers
+// racing (a settings refresh and a sync tick, say) therefore serialize, and the
+// one that writes last is the one that read last — a publisher that started
+// before a settings update can never overwrite the value that update produced.
+func (d *Daemon) persistCoAuthoredByState(workspaceID string) {
+	d.publishCoAuthoredByState(workspaceID, d.workspaceCoAuthoredByEnabled)
+}
+
+// publishCoAuthoredByState is persistCoAuthoredByState with the verdict read
+// injected. Production always passes workspaceCoAuthoredByEnabled; tests pass a
+// wrapper that parks a publisher between taking the lock and reading, which is
+// the one ordering the lock exists to guarantee and cannot be observed
+// otherwise.
+func (d *Daemon) publishCoAuthoredByState(workspaceID string, verdict func(string) bool) {
+	if d.repoCache == nil || workspaceID == "" {
+		return
+	}
+	cache, ok := d.repoCache.(coAuthoredByPublisher)
+	if !ok {
+		return
+	}
+
+	d.mu.Lock()
+	ws := d.workspaces[workspaceID]
+	d.mu.Unlock()
+	if ws == nil {
+		return
+	}
+
+	ws.coAuthorPublishMu.Lock()
+	defer ws.coAuthorPublishMu.Unlock()
+
+	enabled := verdict(workspaceID)
+	if err := cache.WriteCoAuthoredByState(workspaceID, enabled); err != nil {
+		d.logger.Warn("record co-authored-by state failed", "workspace_id", workspaceID, "error", err)
+	}
+	if err := cache.ReconcileCoAuthoredByHooks(workspaceID, enabled); err != nil {
+		d.logger.Warn("reconcile co-authored-by hooks failed", "workspace_id", workspaceID, "error", err)
+	}
+	d.reconcileIsolatedCoAuthoredByHooks(cache, workspaceID, enabled)
+}
+
+// isolatedCheckoutScanDepth bounds how far below an env root the sweep looks
+// for a checkout. Repos land at <env root>/<workdir>/<repo>, so two levels
+// covers the layout with one to spare and keeps the walk from wandering into
+// the checked-out source tree.
+const isolatedCheckoutScanDepth = 2
+
+// reconcileIsolatedCoAuthoredByHooks applies the workspace setting to hooks
+// that live inside task workdirs rather than in the shared bare cache.
+//
+// Codex on Linux and the Windows sandbox check out with isolated git metadata,
+// so their hook sits in <checkout>/.git/hooks and the repo cache cannot see it.
+// Left alone, a workdir prepared by an earlier release keeps its unconditional
+// hook — and its next commit keeps adding the trailer — until that repo happens
+// to be checked out again. Env roots are attributed by their owner record, so a
+// workspace never rewrites hooks belonging to another one.
+func (d *Daemon) reconcileIsolatedCoAuthoredByHooks(cache coAuthoredByPublisher, workspaceID string, enabled bool) {
+	root := d.cfg.WorkspacesRoot
+	if root == "" || workspaceID == "" {
+		return
+	}
+	wsEntries, err := os.ReadDir(root)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			d.logger.Debug("co-authored-by sweep: read workspaces root failed", "error", err)
+		}
+		return
+	}
+
+	for _, wsEntry := range wsEntries {
+		// Dot directories are daemon-internal caches (.repos, .skill-cache),
+		// never workspace directories — the same rule runGC walks by.
+		if !wsEntry.IsDir() || strings.HasPrefix(wsEntry.Name(), ".") {
+			continue
+		}
+		wsDir := filepath.Join(root, wsEntry.Name())
+		envRoots, err := os.ReadDir(wsDir)
+		if err != nil {
+			continue
+		}
+		for _, envEntry := range envRoots {
+			if !envEntry.IsDir() || strings.HasPrefix(envEntry.Name(), ".") {
+				continue
+			}
+			envRoot := filepath.Join(wsDir, envEntry.Name())
+			if !d.envRootBelongsToWorkspace(wsEntry.Name(), envRoot, workspaceID) {
+				continue
+			}
+			for _, checkout := range isolatedCheckoutCandidates(envRoot, isolatedCheckoutScanDepth) {
+				if err := cache.ReconcileCoAuthoredByHookInCheckout(checkout, workspaceID, enabled); err != nil {
+					d.logger.Warn("reconcile co-authored-by hook in checkout failed",
+						"workspace_id", workspaceID, "path", checkout, "error", err)
+				}
+			}
+		}
+	}
+}
+
+// envRootBelongsToWorkspace reports whether an env root is this workspace's, by
+// the strongest evidence the release that created it left behind.
+//
+// Since v0.4.35 the owner record carries the workspace ID, and an exact match
+// is required. Env roots prepared before that recorded only a task ID — or, on
+// older releases still, no marker at all — and they live under the layout that
+// release used: <workspaces root>/<workspace ID>/<task key>. So for an owner
+// record that names no workspace, the directory name is the evidence, and it
+// has to BE the workspace ID. The readable layout that replaced it always
+// appends a suffix (`<slug>-<id tail>`), so a bare workspace UUID can only be
+// one of those older roots and this can never alias a modern one.
+//
+// An unreadable marker attributes nothing: skipping costs a stale hook in one
+// workdir, guessing would rewrite hooks in another workspace's.
+func (d *Daemon) envRootBelongsToWorkspace(wsDirName, envRoot, workspaceID string) bool {
+	owner, err := execenv.ReadEnvRootOwner(envRoot)
+	if err != nil || owner == nil {
+		return false
+	}
+	if owner.WorkspaceID != "" {
+		return owner.WorkspaceID == workspaceID
+	}
+	return wsDirName == workspaceID
+}
+
+// isolatedCheckoutCandidates returns directories at or below dir that hold
+// their own git metadata. A linked worktree's .git is a file, so only isolated
+// checkouts match, and matching stops descending: nothing nested inside a
+// checkout is one.
+func isolatedCheckoutCandidates(dir string, depth int) []string {
+	if depth <= 0 {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var found []string
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		child := filepath.Join(dir, entry.Name())
+		if info, err := os.Stat(filepath.Join(child, ".git")); err == nil && info.IsDir() {
+			found = append(found, child)
+			continue
+		}
+		found = append(found, isolatedCheckoutCandidates(child, depth-1)...)
+	}
+	return found
+}
+
+// publishTrackedCoAuthoredByState writes the current verdict for every tracked
+// workspace and reconciles the hooks in their bare caches. Purely local — no
+// request — and both halves skip the write when what is on disk already
+// matches, so a sync tick on a converged host costs a handful of small reads.
+func (d *Daemon) publishTrackedCoAuthoredByState() {
+	d.mu.Lock()
+	ids := make([]string, 0, len(d.workspaces))
+	for id := range d.workspaces {
+		ids = append(ids, id)
+	}
+	d.mu.Unlock()
+
+	for _, id := range ids {
+		d.persistCoAuthoredByState(id)
+	}
+}
+
+// trackedSettingsRefreshTimeout bounds one refreshTrackedWorkspaceSettings
+// pass. A workspace it does not reach keeps its cached settings and picks the
+// change up on its next repo checkout.
+const trackedSettingsRefreshTimeout = 30 * time.Second
+
+// refreshTrackedWorkspaceSettings re-reads repos and settings for workspaces
+// this daemon already tracks. Only the server's workspaces-changed hint calls
+// it: the periodic sync deliberately makes no repos request for a tracked
+// workspace (see syncWorkspacesFromAPI), so without this a settings edit —
+// the GitHub master switch, the Co-authored-by toggle — would sit unseen
+// until the workspace's next repo checkout.
+func (d *Daemon) refreshTrackedWorkspaceSettings(ctx context.Context) {
+	// The sync loop is single-threaded and still owes the hint its membership
+	// reconcile, so bound the whole pass rather than letting one slow
+	// workspace hold every other signal behind it.
+	ctx, cancel := context.WithTimeout(ctx, trackedSettingsRefreshTimeout)
+	defer cancel()
+
+	d.mu.Lock()
+	tracked := make(map[string]*workspaceState, len(d.workspaces))
+	for id, ws := range d.workspaces {
+		tracked[id] = ws
+	}
+	d.mu.Unlock()
+
+	for id, ws := range tracked {
+		if ctx.Err() != nil {
+			return
+		}
+		// Share ensureRepoReady's lock so a checkout in flight and this
+		// refresh cannot interleave their writes to the same workspace.
+		if err := ws.repoRefreshMu.Lock(ctx); err != nil {
+			return
+		}
+		_, err := d.refreshWorkspaceRepos(ctx, id)
+		ws.repoRefreshMu.Unlock()
+		if err != nil {
+			d.logger.Debug("workspace settings refresh failed", "workspace_id", id, "error", err)
+		}
+	}
+}
+
+// refreshWorkspaceRuntimeProfiles fetches the workspace's enabled custom
+// runtime profile list (MUL-3332), compares its content signature against
+// the value cached on the workspaceState, and triggers a re-register when
+// the signature has drifted. This is the entry point used by the daemon
+// WebSocket change notification so profiles added / edited / disabled via the
+// web UI or CLI become visible without a daemon restart.
+//
+// Best-effort: a fetch error (older server, network blip) preserves the cached
+// signature. A successfully-fetched-but-unchanged signature can result from a
+// duplicate notification and short-circuits without any further work.
+//
+// On drift the function takes a path that deliberately differs from
+// reregisterWorkspaceAfterRuntimeGone in two ways:
+//
+//  1. It does NOT call RecoverOrphans for the returned runtime IDs. The
+//     server's RecoverOrphanedTasksForRuntime hard-fails every
+//     dispatched/running/waiting_local_directory task on a runtime, which is
+//     the correct response when a runtime row was actually deleted server-
+//     side, but a catastrophic false positive on profile drift: a built-in
+//     runtime still actively executing tasks would have its work killed
+//     just because the user added a sibling custom profile.
+//
+//  2. It tolerates ErrNoRuntimesToRegister (custom-only daemon disables its
+//     only profile) by Deregistering the now-stale local runtime IDs and
+//     clearing local tracking. Without this, registerRuntimesForWorkspace
+//     would short-circuit on the empty list, the daemon would keep polling
+//     and heartbeating runtimes that should be offline, and the server
+//     would leave them online for the full 150 s stale-heartbeat window.
+//
+// The workspaceState pointer is never replaced (matches the invariant
+// documented on syncWorkspacesFromAPI and reregisterWorkspaceAfterRuntimeGone).
+func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceID string) error {
+	refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	resp, err := d.client.GetRuntimeProfiles(refreshCtx, workspaceID)
+	if err != nil {
+		// Older server (no profiles route) returns 404; let the on-demand caller
+		// log the failure at debug level.
+		return err
+	}
+	var profiles []RuntimeProfile
+	if resp != nil {
+		profiles = resp.RuntimeProfiles
+	}
+	live := profileSetSignature(profiles)
+
+	d.mu.Lock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok {
+		d.mu.Unlock()
+		// Workspace was removed while the refresh was in flight — nothing to do.
+		return nil
+	}
+	cached := ws.profileSetSig
+	d.mu.Unlock()
+
+	if cached == live {
+		return nil
+	}
+
+	d.logger.Info("custom runtime profile set changed; refreshing workspace runtimes",
+		"workspace_id", workspaceID, "previous_sig", cached, "current_sig", live,
+		"profile_count", len(profiles))
+
+	// Send, apply and clean up as one ordered step — see workspaceRegisterLock.
+	return d.withWorkspaceRegisterLock(workspaceID, func() error {
+		return d.applyProfileDriftRegistration(ctx, workspaceID)
+	})
+}
+
+// applyProfileDriftRegistration is refreshWorkspaceRuntimeProfiles' registration
+// half. The caller must hold the workspace's register lock.
+func (d *Daemon) applyProfileDriftRegistration(ctx context.Context, workspaceID string) error {
+	regResp, profileSig, preserve, err := d.registerRuntimesForWorkspaceLocked(ctx, workspaceID)
+	if err != nil {
+		if errors.Is(err, ErrNoRuntimesToRegister) {
+			// Convergence-to-zero: a custom-only daemon's only enabled
+			// profile was just disabled / deleted, and there are no built-in
+			// agents to fall back on. Drop the daemon's local tracking and
+			// proactively Deregister the orphaned server-side rows so the
+			// runtime list converges to empty without waiting on the 150 s
+			// stale-heartbeat sweep.
+			//
+			// An empty payload only proves "nothing to host" for the providers
+			// whose probe actually concluded, and only for the verdicts this path
+			// is allowed to act on. A provider dropped as UNAVAILABLE or confirmed
+			// below-minimum is absent for a reason this path must not treat as
+			// authoritative (see preserveProvidersFromProbe), so its existing
+			// built-in rows are preserved — the same rule
+			// applyRegisterResponseInPlace applies — while the profile runtimes
+			// the drift is actually about still converge. Skipping the whole
+			// convergence instead would let one permanently unprobeable CLI
+			// keep a disabled profile's runtime online forever.
+			return d.convergeWorkspaceRuntimesToZero(ctx, workspaceID, profileSig, preserve)
+		}
+		return err
+	}
+
+	newIDs, droppedIDs, ok := d.applyRegisterResponseInPlace(workspaceID, regResp, profileSig, preserve)
+	if !ok {
+		return fmt.Errorf("workspace %s no longer tracked", workspaceID)
+	}
+
+	for _, rid := range newIDs {
+		d.logger.Info("re-registered runtime after profile drift",
+			"workspace_id", workspaceID, "runtime_id", rid)
+	}
+	d.notifyRuntimeSetChanged()
+
+	// Drift may have shrunk the runtime set (a profile got disabled while
+	// other runtimes survive). Eagerly mark those server-side rows offline
+	// so the runtime list reflects reality immediately; a 5xx blip here is
+	// fine because the server's stale-heartbeat sweep will pick them up
+	// within ~150 s as a backstop.
+	d.deregisterDroppedRuntimes(ctx, workspaceID, droppedIDs, "profile drift", nil)
+
+	// Intentionally NO RecoverOrphans here: see method doc.
+	return nil
+}
+
+// convergeWorkspaceRuntimesToZero handles the drift-refresh case where
+// registerRuntimesForWorkspaceLocked would have short-circuited because the
+// daemon has nothing to host on this workspace anymore. It Deregisters the
+// previously-tracked runtime IDs (best-effort) and clears the daemon's local
+// tracking so taskWakeup / heartbeat / poll loops stop attempting work
+// against runtimes that should now be offline.
+//
+// The caller must hold the workspace's register lock — this is a cleanup, and it
+// has the same ordering requirement as every other one (workspaceRegisterLock).
+//
+// preserveProviders lists the built-in providers this round's absence from the
+// payload says nothing authoritative about (see preserveProvidersFromProbe), so
+// their existing built-in rows survive — the same preserve rule
+// applyRegisterResponseInPlace applies. Everything else (the disabled/deleted
+// profiles' runtimes, and any builtin whose probe concluded) converges away.
+//
+// The workspaceState pointer is preserved: the workspace itself is still a
+// valid workspace the user belongs to, just one with no agents on this
+// daemon for the moment. If the user re-enables a profile or installs a
+// built-in agent, the profile-change notification or the next daemon WS
+// reconnect will register it again.
+func (d *Daemon) convergeWorkspaceRuntimesToZero(ctx context.Context, workspaceID, profileSig string, preserveProviders map[string]string) error {
+	d.mu.Lock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok {
+		d.mu.Unlock()
+		return nil
+	}
+	// A fresh array, not ws.runtimeIDs[:0]: the health handler copies this
+	// slice header under d.mu and serializes it after releasing the lock
+	// (removeStaleRuntime keeps the same rule).
+	kept := ws.runtimeIDs[:0:0]
+	var dropped []string
+	for _, rid := range ws.runtimeIDs {
+		if rt, tracked := d.runtimeIndex[rid]; tracked && rt.ProfileID == "" {
+			if _, preserve := preserveProviders[rt.Provider]; preserve {
+				kept = append(kept, rid)
+				continue
+			}
+			// A builtin row converging away here was confirmed gone this
+			// round; drop its version record too, mirroring the demote path.
+			delete(ws.builtinVersions, rt.Provider)
+		}
+		delete(d.runtimeIndex, rid)
+		dropped = append(dropped, rid)
+	}
+	ws.runtimeIDs = kept
+	if profileSig != "" {
+		// Cache the converged signature so we don't loop into re-converging
+		// on every subsequent sync tick.
+		ws.profileSetSig = profileSig
+	}
+	d.mu.Unlock()
+
+	d.logger.Info("custom runtime profile drift converged to zero; clearing local tracking",
+		"workspace_id", workspaceID, "deregistered_runtime_ids", dropped,
+		"preserved_providers", preserveProviders)
+
+	d.deregisterDroppedRuntimes(ctx, workspaceID, dropped, "zero-runtime convergence", nil)
+	d.notifyRuntimeSetChanged()
+	return nil
 }
 
 func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL string) error {
@@ -1018,10 +3946,10 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 	//
 	//   - cacheHitOnEntry=true: the repo is already cloned; we still must
 	//     refresh `workspaceState.settings` because the /repo/checkout
-	//     handler reads workspaceCoAuthoredByEnabled right after this and
-	//     the 30s workspaceSyncLoop tick is too slow for a freshly-flipped
-	//     GitHub master switch / `co_authored_by_enabled` toggle to feel
-	//     live (RFC MUL-2414 §4.8; PR #2847 review by Emacs).
+	//     handler reads workspaceCoAuthoredByEnabled right after this. The
+	//     periodic workspace sync deliberately does not refresh repos or
+	//     settings, so this is the point at which a freshly-flipped GitHub
+	//     master switch / `co_authored_by_enabled` toggle becomes live.
 	//
 	//   - cacheHitOnEntry=false but cache hit *after* we acquire the mutex:
 	//     a sibling goroutine on a concurrent cold-miss already refreshed
@@ -1029,7 +3957,9 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 	//     sibling's refresh is fresh enough for our gate read.
 	cacheHitOnEntry := d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != ""
 
-	ws.repoRefreshMu.Lock()
+	if err := ws.repoRefreshMu.Lock(ctx); err != nil {
+		return err
+	}
 	defer ws.repoRefreshMu.Unlock()
 
 	if !cacheHitOnEntry && d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
@@ -1049,7 +3979,10 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return nil
 	}
 
-	d.syncWorkspaceRepos(workspaceID, resp.Repos)
+	d.syncWorkspaceReposContext(ctx, workspaceID, resp.Repos)
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
 
 	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
 		return nil
@@ -1088,7 +4021,59 @@ const DefaultTokenRenewalInterval = 3 * 24 * time.Hour
 // register runtimes once one appears.
 func (d *Daemon) preflightAuth(ctx context.Context) error {
 	d.tryRenewToken(ctx)
-	return d.syncWorkspacesFromAPI(ctx)
+	err := d.syncWorkspacesFromAPI(ctx, false)
+	if d.startupMayProceedWithoutRuntimes(err) {
+		d.logger.Warn("starting with no runtimes registered: an automatic DSH runtime profile install is still running; " +
+			"the runtime registers when it finishes")
+		return nil
+	}
+	return err
+}
+
+// startupMayProceedWithoutRuntimes reports whether a startup that registered
+// nothing may continue anyway.
+//
+// Exactly one situation qualifies: the daemon has just started installing the
+// DSH runtime profile itself. On a host whose only provider is a dsh without
+// that profile, failing here is a deadlock rather than a fail-fast — the probe
+// starts the install, this error kills the process milliseconds later, the
+// install's process tree dies with it, and the next start repeats all of it.
+// The feature exists precisely for that host, so on it the feature could never
+// once complete.
+//
+// Nothing else is forgiven. An unreachable server, a rejected token, and a
+// genuinely empty machine all still fail startup, because for those the daemon
+// has no reason to believe the answer is coming.
+func (d *Daemon) startupMayProceedWithoutRuntimes(err error) bool {
+	return errors.Is(err, errNoWorkspaceRuntimesRegistered) && d.dshInstallInFlight.Load()
+}
+
+// trackedWorkspaceCount reports how many workspaces the daemon currently hosts.
+func (d *Daemon) trackedWorkspaceCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.workspaces)
+}
+
+// registerAfterDshProfileInstall brings a newly usable dsh online without
+// waiting for a scheduled round.
+//
+// A converge round is enough in the ordinary case, but not after the bootstrap
+// startupMayProceedWithoutRuntimes allows: a daemon that registered nothing
+// tracks no workspace, and every converge path iterates the workspaces it
+// tracks, so there would be nothing for the round to look at. The workspace has
+// to be picked up first, and waiting for the periodic consistency sync to do it
+// would leave the runtime offline for its full interval after an install the
+// user watched succeed.
+func (d *Daemon) registerAfterDshProfileInstall(ctx context.Context) {
+	if d.trackedWorkspaceCount() > 0 {
+		d.kickAgentDiscovery()
+		return
+	}
+	if err := d.syncWorkspacesFromAPI(ctx, false); err != nil {
+		d.logger.Warn("workspace sync after the DSH runtime profile install failed; "+
+			"the periodic sync is the backstop", "error", err)
+	}
 }
 
 // tokenRenewalLoop keeps the daemon's PAT alive by periodically asking the
@@ -1145,28 +4130,110 @@ func (d *Daemon) tryRenewToken(ctx context.Context) {
 	}
 }
 
-// workspaceSyncLoop periodically fetches the user's workspaces from the API
-// and registers runtimes for any new ones.
+// workspaceSyncLoop reconciles the user's workspace membership set. Daemons
+// with runtimes and account-scoped WS support use a thirty-minute jittered
+// consistency check; daemons talking to older servers retain a five-minute
+// fallback. Bootstrap daemons without runtimes keep the shorter interval needed
+// to discover their first workspace. Account-scoped WS hints trigger an
+// immediate minimal sync, while a WS reconnect also reconciles runtime profiles
+// changed during the connection gap.
 func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
-	ticker := time.NewTicker(DefaultWorkspaceSyncInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(jitterDuration(d.workspaceSyncBaseInterval()))
+	defer timer.Stop()
+
+	var reconcileCh <-chan struct{}
+	if d.reconcile != nil {
+		reconcileCh = d.reconcile.notify()
+	}
+	var workspaceChangesCh <-chan struct{}
+	if d.workspaceChanges != nil {
+		workspaceChangesCh = d.workspaceChanges.notify()
+	}
+
+	var consecutiveFailures int
+	resetTimer := func() {
+		interval := workspaceSyncBackoff(d.workspaceSyncBaseInterval(), consecutiveFailures)
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(jitterDuration(interval))
+	}
+
+	syncNow := func(reconcileProfiles bool) {
+		if err := d.syncWorkspacesFromAPI(ctx, reconcileProfiles); err != nil {
+			consecutiveFailures++
+			d.logger.Debug("workspace sync failed", "error", err)
+		} else {
+			consecutiveFailures = 0
+		}
+		resetTimer()
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			if err := d.syncWorkspacesFromAPI(ctx); err != nil {
-				d.logger.Debug("workspace sync failed", "error", err)
+		case <-reconcileCh:
+			if d.reconcile != nil {
+				reconcileCh = d.reconcile.notify()
 			}
+			// A settings edit made while the websocket was down produced a
+			// workspaces-changed hint nobody received. Reconnecting is the
+			// daemon's chance to catch up on it: without this the stale
+			// verdict would just get republished by the sync below.
+			d.refreshTrackedWorkspaceSettings(ctx)
+			syncNow(true)
+		case <-workspaceChangesCh:
+			// The hint fires for membership changes AND for workspace edits,
+			// including settings. Refresh cached settings for the workspaces
+			// we already track before reconciling the membership set.
+			d.refreshTrackedWorkspaceSettings(ctx)
+			syncNow(false)
+		case <-timer.C:
+			syncNow(false)
 		}
 	}
 }
 
+func (d *Daemon) workspaceSyncBaseInterval() time.Duration {
+	if len(d.allRuntimeIDs()) == 0 {
+		return DefaultWorkspaceBootstrapSyncInterval
+	}
+	if d.client.usesLegacyWorkspaceEndpoint() {
+		return DefaultWorkspaceLegacySyncInterval
+	}
+	return DefaultWorkspaceSyncInterval
+}
+
+func workspaceSyncBackoff(base time.Duration, consecutiveFailures int) time.Duration {
+	maxInterval := DefaultWorkspaceSyncMaxBackoff
+	if base == DefaultWorkspaceBootstrapSyncInterval {
+		maxInterval = DefaultWorkspaceLegacySyncInterval
+	}
+	interval := base
+	for i := 0; i < consecutiveFailures; i++ {
+		if interval >= maxInterval/2 {
+			return maxInterval
+		}
+		interval *= 2
+	}
+	if interval > maxInterval {
+		return maxInterval
+	}
+	return interval
+}
+
 // syncWorkspacesFromAPI fetches all workspaces the user belongs to and
-// registers runtimes for any that aren't already tracked. Workspaces the user
-// has left are cleaned up.
-func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
+// registers runtimes for any that aren't already tracked. When
+// reconcileProfiles is true (after a daemon WS connect/reconnect), tracked
+// workspaces reconcile custom runtime profiles once so a change made while the
+// WS was unavailable is not lost. Normal timers and workspace-change hints
+// pass false and make no runtime-profile requests. Workspaces the user has
+// left are cleaned up.
+func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bool) error {
 	d.reloading.Lock()
 	defer d.reloading.Unlock()
 
@@ -1191,17 +4258,31 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	}
 	d.mu.Unlock()
 
+	// Built-in agent CLIs are installed per machine, so one probe round serves
+	// every workspace this sync has to register (MUL-5225). Probing is lazy —
+	// a sync that finds nothing new to register never shells out at all, which
+	// is the common case for the periodic sync — and scoped to this call, so
+	// the next sync re-detects and an in-place CLI upgrade is still reported.
+	var (
+		builtins       []map[string]string
+		builtinsProbed bool
+	)
+	probeBuiltins := func() []map[string]string {
+		if !builtinsProbed {
+			builtins, _, _ = d.detectBuiltinRuntimes(ctx)
+			builtinsProbed = true
+		}
+		return builtins
+	}
+
 	var registered int
 	var removed int
 	for id, name := range apiIDs {
 		if currentIDs[id] {
-			// Already tracked: refresh the cached workspace settings so
-			// feature toggles flipped in the web UI take effect on the next
-			// gated operation without a daemon restart (see RFC MUL-2414 §4.8;
-			// reviewed in PR #2847). refreshWorkspaceRepos covers settings +
-			// repos in a single round trip.
-			if _, err := d.refreshWorkspaceRepos(ctx, id); err != nil {
-				d.logger.Debug("workspace sync: refresh settings failed", "workspace_id", id, "error", err)
+			if reconcileProfiles {
+				if err := d.refreshWorkspaceRuntimeProfiles(ctx, id); err != nil {
+					d.logger.Debug("workspace reconcile: profile refresh failed", "workspace_id", id, "error", err)
+				}
 			}
 			// Only intervene further if the workspace lost all of its
 			// runtimes (most commonly because handleRuntimeGone pruned them
@@ -1219,22 +4300,77 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 			registered++
 			continue
 		}
-		resp, err := d.registerRuntimesForWorkspace(ctx, id)
+		payload := probeBuiltins()
+		var (
+			resp       *RegisterResponse
+			runtimeIDs []string
+		)
+		// Send, publish and clean up as one ordered step — see
+		// workspaceRegisterLock.
+		err := d.withWorkspaceRegisterLock(id, func() error {
+			var profileSig string
+			var err error
+			resp, profileSig, err = d.registerRuntimesForWorkspaceBatchLocked(ctx, id, payload)
+			if err != nil {
+				return err
+			}
+			// First registration is the third path a response reaches local state
+			// through — it builds the workspaceState directly instead of going via
+			// applyRegisterResponseInPlace / mergeBuiltinRegisterResponse — so it
+			// needs the same demotion guard, taken in the same d.mu section that
+			// publishes the state. A workspace joining while a provider is held
+			// below-minimum must not be the way that provider comes back.
+			d.mu.Lock()
+			runtimeIDs = make([]string, 0, len(resp.Runtimes))
+			var revived revivedRuntimes
+			for _, rt := range resp.Runtimes {
+				if rt.ProfileID == "" && d.providerDemotedLocked(rt.Provider) {
+					revived.add(d, rt.ID, rt.Provider)
+					continue
+				}
+				runtimeIDs = append(runtimeIDs, rt.ID)
+				d.logger.Info("registered runtime", "workspace_id", id, "runtime_id", rt.ID, "provider", rt.Provider)
+			}
+			ws := newWorkspaceState(id, runtimeIDs, resp.ReposVersion, resp.Repos, resp.Settings)
+			// Seed the profile signature so later on-demand change notifications can
+			// detect drift without re-registering on duplicates (empty sig is the
+			// explicit "unknown — keep the previous value" sentinel from
+			// appendProfileRuntimes; on first registration there is no previous
+			// value, so empty stays empty).
+			ws.profileSetSig = profileSig
+			// Seed the per-workspace record of what the server was told (the
+			// register call above ran before this workspaceState existed, so
+			// recordBuiltinVersionsSent inside it had nowhere to write).
+			ws.builtinVersions = builtinVersionsFromPayload(payload)
+			for provider := range ws.builtinVersions {
+				// Same reason recordBuiltinVersionsSent skips these: a version
+				// record for a provider whose rows are being refused reads as
+				// "this workspace is current" to the next refresh round.
+				if d.providerDemotedLocked(provider) {
+					delete(ws.builtinVersions, provider)
+				}
+			}
+			d.workspaces[id] = ws
+			for _, rt := range resp.Runtimes {
+				if rt.ProfileID == "" && d.providerDemotedLocked(rt.Provider) {
+					continue
+				}
+				d.runtimeIndex[rt.ID] = rt
+			}
+			d.mu.Unlock()
+
+			// The server upserted the refused rows into existence, so it alone
+			// would believe they are online and keep routing work to them. Take
+			// them offline before anything else touches this workspace — and never
+			// RecoverOrphans them below: that reports tasks for a runtime the
+			// daemon does not track and will never claim for.
+			d.deregisterRevivedRuntimes(ctx, id, revived)
+			return nil
+		})
 		if err != nil {
 			d.logger.Error("failed to register runtimes", "workspace_id", id, "name", name, "error", err)
 			continue
 		}
-		runtimeIDs := make([]string, len(resp.Runtimes))
-		for i, rt := range resp.Runtimes {
-			runtimeIDs[i] = rt.ID
-			d.logger.Info("registered runtime", "workspace_id", id, "runtime_id", rt.ID, "provider", rt.Provider)
-		}
-		d.mu.Lock()
-		d.workspaces[id] = newWorkspaceState(id, runtimeIDs, resp.ReposVersion, resp.Repos, resp.Settings)
-		for _, rt := range resp.Runtimes {
-			d.runtimeIndex[rt.ID] = rt
-		}
-		d.mu.Unlock()
 
 		if d.repoCache != nil && len(resp.Repos) > 0 {
 			go d.syncWorkspaceRepos(id, resp.Repos)
@@ -1250,7 +4386,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 			}
 		}
 
-		d.logger.Info("watching workspace", "workspace_id", id, "name", name, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos))
+		d.logger.Info("watching workspace", "workspace_id", id, "name", name, "runtimes", len(runtimeIDs), "repos", len(resp.Repos))
 		registered++
 	}
 
@@ -1273,8 +4409,16 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 		d.notifyRuntimeSetChanged()
 	}
 
+	// Republish each tracked workspace's Co-authored-by verdict. This costs no
+	// request — it writes the daemon's cached verdict where prepare-commit-msg
+	// hooks read it, and migrates hooks left by earlier releases — and is what
+	// covers the cases no refresh reaches: a toggle flipped while the daemon
+	// was down (settings arrive with the register response above), a host that
+	// just upgraded, and a state file removed by repo cache GC.
+	d.publishTrackedCoAuthoredByState()
+
 	if len(d.allRuntimeIDs()) == 0 && registered == 0 && len(workspaces) > 0 {
-		return fmt.Errorf("failed to register runtimes for any of the %d workspace(s)", len(workspaces))
+		return fmt.Errorf("%w for any of the %d workspace(s)", errNoWorkspaceRuntimesRegistered, len(workspaces))
 	}
 	if registered > 0 || removed > 0 {
 		d.logger.Debug("workspace sync done", "registered", registered, "removed", removed, "tracked", len(apiIDs))
@@ -1348,7 +4492,19 @@ func (d *Daemon) runRuntimeHeartbeat(ctx context.Context, rid string) {
 		}
 	}
 
-	d.runHeartbeatTick(ctx, rid)
+	consecutiveTransientFailures := 0
+	tick := func() {
+		if d.runHeartbeatTick(ctx, rid) {
+			consecutiveTransientFailures++
+			if consecutiveTransientFailures == 2 {
+				d.client.CloseIdleConnections()
+			}
+			return
+		}
+		consecutiveTransientFailures = 0
+	}
+
+	tick()
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -1357,12 +4513,14 @@ func (d *Daemon) runRuntimeHeartbeat(ctx context.Context, rid string) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			d.runHeartbeatTick(ctx, rid)
+			tick()
 		}
 	}
 }
 
-func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
+// runHeartbeatTick returns true when the HTTP heartbeat hit a transient
+// failure that should count toward stale idle-connection cleanup.
+func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 	// Skip HTTP heartbeat for runtimes that successfully acked a recent
 	// WebSocket heartbeat. The WS path keeps last_seen_at fresh and delivers
 	// actions, so the HTTP write would be a duplicate DB update. If the WS
@@ -1371,7 +4529,7 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 	// relies on.
 	if d.wsHeartbeatRecentlyAcked(rid) {
 		d.logger.Debug("heartbeat: skipping HTTP tick, WS recently acked", "runtime_id", rid)
-		return
+		return false
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
 	resp, err := d.client.SendHeartbeat(ctx, rid)
@@ -1384,20 +4542,21 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 				// the daemon root context so notifyRuntimeSetChanged
 				// tearing down this heartbeat goroutine cannot abort it.
 				go d.handleRuntimeGone(rid)
-				return
+				return false
 			}
 			d.logger.Warn("heartbeat failed", "runtime_id", rid, "error", err)
 		}
-		return
+		return ctx.Err() == nil && isTransientError(err)
 	}
 	if resp != nil && resp.RuntimeGone {
 		// The WS path returns a successful ack with RuntimeGone=true for the
 		// same scenario; treat it the same way here in case HTTP starts
 		// surfacing this signal too.
 		go d.handleRuntimeGone(rid)
-		return
+		return false
 	}
 	d.handleHeartbeatActions(ctx, rid, resp)
+	return false
 }
 
 // handleHeartbeatActions dispatches the pending-action set returned by either
@@ -1444,16 +4603,139 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	}
 }
 
+// handlePendingWorkHint reacts to a server-pushed daemon:pending_work frame by
+// sending ONE immediate heartbeat for the runtime, then dispatching whatever
+// that heartbeat claimed (MUL-5444).
+//
+// Why a heartbeat and not the work itself: the hint deliberately carries no
+// request payload, so the server never has to un-claim anything when delivery
+// fails, and a duplicated or replayed hint cannot duplicate work — the claim
+// stays atomic inside the store's PopPending. A hint that never arrives (daemon
+// offline, WS gap, relay drop) costs nothing but the pre-existing wait for the
+// next scheduled heartbeat.
+//
+// The HTTP heartbeat is used on purpose rather than queueing a WS frame: the
+// hint arrives on the read pump, the WS write path may be backed up or tearing
+// down, and this is a human-interactive, low-frequency path where one extra
+// request is cheaper than a missed wakeup. Note it intentionally bypasses the
+// wsHeartbeatRecentlyAcked suppression that the scheduled HTTP tick honours —
+// that suppression exists to avoid duplicate periodic writes, not to block an
+// explicitly requested pull.
+func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
+	if runtimeID == "" {
+		return
+	}
+	if d.findRuntime(runtimeID) == nil {
+		// Not one of ours (stale relay fanout, or the runtime was just pruned).
+		return
+	}
+
+	d.pendingWorkMu.Lock()
+	if d.pendingWorkInflight == nil {
+		d.pendingWorkInflight = make(map[string]struct{})
+	}
+	if d.pendingWorkLastRun == nil {
+		d.pendingWorkLastRun = make(map[string]time.Time)
+	}
+	// Drop long-idle bookkeeping so the map can't grow with every runtime this
+	// process has ever seen.
+	for id, at := range d.pendingWorkLastRun {
+		if time.Since(at) > pendingWorkHintBookkeepingTTL {
+			delete(d.pendingWorkLastRun, id)
+		}
+	}
+	if _, inflight := d.pendingWorkInflight[runtimeID]; inflight {
+		d.pendingWorkMu.Unlock()
+		return
+	}
+	// Rate limit per runtime. The hint is caller-triggered by interactive model
+	// or capability endpoints, so without a floor a request loop would become a
+	// heartbeat amplifier. A suppressed hint costs nothing but the pre-existing
+	// wait for the scheduled heartbeat.
+	if last, ok := d.pendingWorkLastRun[runtimeID]; ok && time.Since(last) < pendingWorkHintMinInterval {
+		d.pendingWorkMu.Unlock()
+		d.logger.Debug("pending work hint throttled", "runtime_id", runtimeID, "kind", kind)
+		return
+	}
+	d.pendingWorkInflight[runtimeID] = struct{}{}
+	d.pendingWorkLastRun[runtimeID] = time.Now()
+	d.pendingWorkMu.Unlock()
+	defer func() {
+		d.pendingWorkMu.Lock()
+		delete(d.pendingWorkInflight, runtimeID)
+		d.pendingWorkMu.Unlock()
+	}()
+
+	// Root context: handleHeartbeatActions hands this ctx to the actual work, so
+	// it must outlive this function. Capability discovery and local-skill imports
+	// are normally quick filesystem operations, while model discovery may shell
+	// out to a CLI for up to ~40s on the slowest provider (see
+	// agent.hermesDiscoveryTimeout). Only the heartbeat request itself is
+	// time-bounded.
+	ctx := d.recoveryContext()
+	if ctx.Err() != nil {
+		return
+	}
+	hbCtx, cancel := context.WithTimeout(ctx, pendingWorkHeartbeatTimeout)
+	resp, err := d.client.SendHeartbeat(hbCtx, runtimeID)
+	cancel()
+	if err != nil {
+		if isRuntimeNotFoundError(err) {
+			go d.handleRuntimeGone(runtimeID)
+			return
+		}
+		d.logger.Debug("pending work hint heartbeat failed", "runtime_id", runtimeID, "kind", kind, "error", err)
+		return
+	}
+	if resp == nil {
+		return
+	}
+	if resp.RuntimeGone {
+		go d.handleRuntimeGone(runtimeID)
+		return
+	}
+	d.logger.Debug("pending work hint served", "runtime_id", runtimeID, "kind", kind)
+	d.handleHeartbeatActions(ctx, runtimeID, resp)
+}
+
 // handleModelList resolves the provider's supported models (via static
 // catalog or by shelling out to the agent CLI) and reports the result
-// back to the server. Model discovery failures are reported as empty
-// lists rather than errors so the UI can still render a creatable
-// dropdown.
+// back to the server.
+//
+// How a discovery failure is reported is the provider's decision, not this
+// function's. Providers with a safe static catalog swallow the error and return
+// the stand-in (marked Fallback); providers without one — hermes — return the
+// error, and it is forwarded as status=failed so the picker can show the reason
+// and keep manual entry (MUL-6606). Both outcomes leave the creatable dropdown
+// usable; only the second one tells the user why it is empty.
 func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID string) {
 	d.logger.Info("model list requested", "runtime_id", rt.ID, "request_id", requestID, "provider", rt.Provider)
 
-	entry, ok := d.cfg.Agents[rt.Provider]
-	if !ok {
+	// Discovery must enumerate the binary this runtime will actually execute,
+	// otherwise the picker advertises a catalog the launched CLI never agreed
+	// to (MUL-5789). Mirror runTask's resolution order: a custom runtime
+	// profile (MUL-3284) owns the executable path, and such a runtime can live
+	// on a host with NO built-in agent of the same protocol family installed —
+	// so a custom runtime must never fail on the built-in lookup. A custom
+	// path is also never re-resolved: like runTask, we don't second-guess a
+	// path the profile pinned.
+	var execPath string
+	// fixedArgs mirrors the launch prefix runTask would use. Discovery has to
+	// enumerate the CLI the profile actually runs, so a subcommand wrapper is
+	// probed as `ccms start q36 models`, not `ccms models` (GH #7046).
+	var fixedArgs []string
+	if customSpec, isCustom := d.customProfileLaunchForRuntime(rt.ID); isCustom {
+		execPath = customSpec.path
+		fixedArgs = agent.FilterLaunchPrefix(rt.Provider, customSpec.fixedArgs, d.logger)
+		d.logger.Info("model list uses custom runtime profile command",
+			"runtime_id", rt.ID, "provider", rt.Provider, "command_path", execPath,
+			"fixed_args", len(fixedArgs))
+	} else if entry, ok := d.agents()[rt.Provider]; ok {
+		// Built-in provider: self-heal a pinned executable path an in-place
+		// upgrade deleted (MUL-4486).
+		entry, _ = d.resolveAgentEntry(ctx, rt.Provider, entry)
+		execPath = entry.Path
+	} else {
 		d.reportModelListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",
 			"error":  fmt.Sprintf("no agent configured for provider %q", rt.Provider),
@@ -1461,13 +4743,31 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		return
 	}
 
-	models, err := agent.ListModels(ctx, rt.Provider, entry.Path)
+	catalog, err := listModels(ctx, rt.Provider, agent.NewCommand(execPath, fixedArgs))
 	if err != nil {
 		d.reportModelListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",
 			"error":  err.Error(),
 		})
 		return
+	}
+	models := catalog.Models
+	if catalog.Fallback {
+		d.logger.Warn("model discovery fell back to a static catalog; reporting it as non-authoritative",
+			"runtime_id", rt.ID, "provider", rt.Provider, "path", execPath, "count", len(models))
+	}
+	if rt.Provider == "codearts" && len(models) == 0 {
+		if home, homeErr := os.UserHomeDir(); homeErr == nil {
+			configuredModels, configErr := loadCodeArtsConfiguredModels(home)
+			if configErr != nil {
+				d.logger.Warn("CodeArts custom model discovery failed",
+					"runtime_id", rt.ID, "path", codeArtsUserConfigPath(home), "error", configErr)
+			} else if len(configuredModels) > 0 {
+				models = configuredModels
+				d.logger.Info("CodeArts model discovery used user-configured providers",
+					"runtime_id", rt.ID, "path", codeArtsUserConfigPath(home), "count", len(models))
+			}
+		}
 	}
 
 	// Wire format matches handler.ModelEntry. Use a struct (not
@@ -1484,20 +4784,38 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		SupportedLevels []thinkingLevelWire `json:"supported_levels"`
 		DefaultLevel    string              `json:"default_level,omitempty"`
 	}
+	type modelServiceTierWire struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Description string `json:"description,omitempty"`
+	}
 	type modelWire struct {
-		ID       string             `json:"id"`
-		Label    string             `json:"label"`
-		Provider string             `json:"provider,omitempty"`
-		Default  bool               `json:"default,omitempty"`
-		Thinking *modelThinkingWire `json:"thinking,omitempty"`
+		ID                                  string                 `json:"id"`
+		Label                               string                 `json:"label"`
+		Provider                            string                 `json:"provider,omitempty"`
+		Default                             bool                   `json:"default,omitempty"`
+		Thinking                            *modelThinkingWire     `json:"thinking,omitempty"`
+		ServiceTiers                        []modelServiceTierWire `json:"service_tiers,omitempty"`
+		SupportsExplicitStandardServiceTier bool                   `json:"supports_explicit_standard_service_tier,omitempty"`
+	}
+	// Models the runtime named but will not run here (Claude Code reporting one
+	// that needs a newer CLI). Reported in their own list, never inside
+	// `models`: a client that does not know this field — an installed desktop
+	// build predating it — then cannot offer one as a real model, which a flag
+	// on the model itself could not guarantee (MUL-6961).
+	type unavailableModelWire struct {
+		ID     string `json:"id"`
+		Label  string `json:"label"`
+		Reason string `json:"reason,omitempty"`
 	}
 	wire := make([]modelWire, 0, len(models))
 	for _, m := range models {
 		entry := modelWire{
-			ID:       m.ID,
-			Label:    m.Label,
-			Provider: m.Provider,
-			Default:  m.Default,
+			ID:                                  m.ID,
+			Label:                               m.Label,
+			Provider:                            m.Provider,
+			Default:                             m.Default,
+			SupportsExplicitStandardServiceTier: m.SupportsExplicitStandardServiceTier,
 		}
 		if m.Thinking != nil {
 			levels := make([]thinkingLevelWire, 0, len(m.Thinking.SupportedLevels))
@@ -1513,12 +4831,34 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 				DefaultLevel:    m.Thinking.DefaultLevel,
 			}
 		}
+		for _, tier := range m.ServiceTiers {
+			entry.ServiceTiers = append(entry.ServiceTiers, modelServiceTierWire{
+				ID:          tier.ID,
+				Name:        tier.Name,
+				Description: tier.Description,
+			})
+		}
 		wire = append(wire, entry)
+	}
+	unavailableWire := make([]unavailableModelWire, 0, len(catalog.Unavailable))
+	for _, m := range catalog.Unavailable {
+		unavailableWire = append(unavailableWire, unavailableModelWire{
+			ID:     m.ID,
+			Label:  m.Label,
+			Reason: m.Reason,
+		})
 	}
 	d.reportModelListResult(ctx, rt, requestID, map[string]any{
 		"status":    "completed",
 		"models":    wire,
 		"supported": agent.ModelSelectionSupported(rt.Provider),
+		// Additive: an older server drops the key and the picker simply shows
+		// no unavailable section, which is the pre-MUL-6961 behaviour.
+		"unavailable_models": unavailableWire,
+		// Additive field: the models are still worth rendering, but the server
+		// must not persist them as this runtime's real catalog (MUL-5549).
+		// Older servers ignore it and keep the previous behaviour.
+		"fallback": catalog.Fallback,
 	})
 }
 
@@ -1533,11 +4873,19 @@ func (d *Daemon) handleLocalSkillList(ctx context.Context, rt Runtime, requestID
 		})
 		return
 	}
+	mcpServers, mcpSupported, err := listRuntimeLocalMcpServers(rt.Provider)
+	if err != nil {
+		d.logger.Warn("runtime local MCP discovery failed", "runtime_id", rt.ID, "provider", rt.Provider, "error", err)
+		mcpServers = []runtimeLocalMcpServerSummary{}
+		mcpSupported = false
+	}
 
 	d.reportLocalSkillListResult(ctx, rt, requestID, map[string]any{
-		"status":    "completed",
-		"skills":    skills,
-		"supported": supported,
+		"status":        "completed",
+		"skills":        skills,
+		"supported":     supported,
+		"mcp_servers":   mcpServers,
+		"mcp_supported": mcpSupported,
 	})
 }
 
@@ -1569,9 +4917,9 @@ func (d *Daemon) handleLocalSkillImport(ctx context.Context, rt Runtime, pending
 // runtimeReportBackoffs defines the retry schedule for delivering any
 // daemon→server async result (model list, local-skill list, local-skill
 // import). First attempt runs immediately, then we back off. The sum
-// (≈6.5s) stays well under the server-side running timeout (60s) so a
-// report that eventually lands still updates the request instead of
-// racing a timeout transition.
+// (≈6.5s) leaves most of the server-side running timeout (60s) available for
+// discovery and report attempts. Each HTTP attempt has its own client timeout,
+// so this schedule alone is not an end-to-end delivery deadline.
 //
 // Overridable for tests to avoid real sleeps.
 var runtimeReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
@@ -1670,12 +5018,29 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		return
 	}
 
-	// Prevent concurrent update attempts.
-	if !d.updating.CompareAndSwap(false, true) {
-		d.logger.Warn("update already in progress, ignoring", "runtime_id", runtimeID, "update_id", update.ID)
+	switch d.tryBeginServerUpdate(ctx) {
+	case serverUpdateAlreadyRunning:
+		d.logger.Warn("update deferred: another update is already in progress", "runtime_id", runtimeID, "update_id", update.ID)
+		d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+			"status": "failed",
+			"error":  "another runtime update is already in progress on this machine",
+		})
+		return
+	case serverUpdateRuntimeBusy:
+		d.logger.Info("update deferred: task or claim in progress", "runtime_id", runtimeID, "update_id", update.ID)
+		d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+			"status": "failed",
+			"error":  "runtime update deferred because agent work is starting or still active; retry when the machine is idle",
+		})
 		return
 	}
-	defer d.updating.Store(false)
+	restarting := false
+	defer func() {
+		if !restarting {
+			d.releaseClaimBarrier()
+			d.updating.Store(false)
+		}
+	}()
 
 	d.logger.Info("CLI update requested", "runtime_id", runtimeID, "update_id", update.ID, "target_version", update.TargetVersion)
 
@@ -1702,6 +5067,59 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 
 	// Trigger daemon restart with the new binary.
 	d.triggerRestart()
+	restarting = d.RestartBinary() != ""
+}
+
+type serverUpdateAcquireResult uint8
+
+const (
+	serverUpdateAcquired serverUpdateAcquireResult = iota
+	serverUpdateAlreadyRunning
+	serverUpdateRuntimeBusy
+)
+
+// tryBeginServerUpdate atomically claims update ownership, pauses new claims,
+// and lets any claim already in flight finish its handoff. An empty claim can
+// therefore never starve an update; a claim that returns work increments
+// activeTasks before exitClaim, so the final check still defers safely.
+func (d *Daemon) tryBeginServerUpdate(ctx context.Context) serverUpdateAcquireResult {
+	if !d.updating.CompareAndSwap(false, true) {
+		return serverUpdateAlreadyRunning
+	}
+
+	d.claimMu.Lock()
+	if d.pauseClaims || d.activeTasks.Load() > 0 {
+		d.claimMu.Unlock()
+		d.updating.Store(false)
+		return serverUpdateRuntimeBusy
+	}
+	d.pauseClaims = true
+	d.claimMu.Unlock()
+
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		d.claimMu.Lock()
+		if d.claimsInFlight == 0 {
+			if d.activeTasks.Load() == 0 {
+				d.claimMu.Unlock()
+				return serverUpdateAcquired
+			}
+			d.pauseClaims = false
+			d.claimMu.Unlock()
+			d.updating.Store(false)
+			return serverUpdateRuntimeBusy
+		}
+		d.claimMu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			d.releaseClaimBarrier()
+			d.updating.Store(false)
+			return serverUpdateRuntimeBusy
+		case <-ticker.C:
+		}
+	}
 }
 
 // runUpdate executes the brew-or-download upgrade against targetVersion and
@@ -1815,7 +5233,11 @@ func (d *Daemon) exitClaim() {
 func (d *Daemon) trySetClaimBarrier() bool {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	if d.claimsInFlight > 0 || d.activeTasks.Load() > 0 {
+	// Refuse when the barrier is already held. Without this the function silently
+	// double-acquires: two holders both believe they own it, and whichever
+	// finishes first releases it out from under the other. tryBeginServerUpdate
+	// makes the same check for the same reason.
+	if d.pauseClaims || d.claimsInFlight > 0 || d.activeTasks.Load() > 0 {
 		return false
 	}
 	d.pauseClaims = true
@@ -1832,33 +5254,27 @@ func (d *Daemon) releaseClaimBarrier() {
 	d.pauseClaims = false
 }
 
-// triggerRestart initiates a graceful daemon restart after a successful CLI update.
-// For brew installs, it keeps the symlink path (e.g. /opt/homebrew/bin/multica)
-// so the restarted daemon picks up the new Cellar version automatically.
-// For non-brew installs, it resolves to the absolute path of the replaced binary.
-// The caller (cmd_daemon.go) checks RestartBinary() and launches the new process.
-func (d *Daemon) triggerRestart() {
-	newBin, err := os.Executable()
+// triggerRestart initiates a graceful daemon restart into the binary at
+// restartTargetBinary(). The caller (cmd_daemon.go) checks RestartBinary() and
+// launches the new process.
+//
+// Returns false when the target path could not be resolved, so a caller holding
+// the claim barrier can release it instead of leaving the daemon paused for a
+// restart that will never happen. A restart already scheduled counts as success:
+// the process is going down either way.
+func (d *Daemon) triggerRestart() bool {
+	d.restartMu.Lock()
+	defer d.restartMu.Unlock()
+
+	if d.restartBinary != "" {
+		d.logger.Debug("daemon restart already scheduled", "new_binary", d.restartBinary)
+		return true
+	}
+
+	newBin, err := d.restartTargetBinary()
 	if err != nil {
 		d.logger.Error("could not resolve executable path for restart", "error", err)
-		return
-	}
-	// On Linux, os.Executable() reads /proc/self/exe, which the kernel resolves
-	// to the Cellar path. brew cleanup deletes that path after upgrade, so we
-	// must use the stable <brew-prefix>/bin/multica symlink instead.
-	if isBrewInstall() {
-		if brewPrefix := getBrewPrefix(); brewPrefix != "" {
-			newBin = filepath.Join(brewPrefix, "bin", "multica")
-		} else if prefix := matchKnownBrewPrefix(newBin); prefix != "" {
-			newBin = filepath.Join(prefix, "bin", "multica")
-		} else {
-			d.logger.Warn("brew install detected but prefix could not be resolved; restart may fail",
-				"executable", newBin)
-		}
-	} else {
-		if resolved, err := filepath.EvalSymlinks(newBin); err == nil {
-			newBin = resolved
-		}
+		return false
 	}
 
 	d.logger.Info("scheduling daemon restart", "new_binary", newBin)
@@ -1868,69 +5284,94 @@ func (d *Daemon) triggerRestart() {
 	if d.cancelFunc != nil {
 		d.cancelFunc()
 	}
+	return true
 }
 
-// pollLoop supervises one runtimePoller goroutine per registered runtime,
-// fans wake-up signals out to all of them, and waits for in-flight tasks to
-// drain on shutdown. Per-runtime workers replace the previous round-robin
-// loop so that a slow ClaimTask call (HTTP 30s timeout) for one runtime no
-// longer delays claims on every other runtime — that was the cross-workspace
-// stall mode reported in MUL-1744.
+// restartTargetBinary resolves the path a restart would re-exec.
+//
+// For brew installs it keeps the stable symlink path (e.g.
+// /opt/homebrew/bin/multica) so the restarted daemon picks up the new Cellar
+// version automatically: on Linux os.Executable() reads /proc/self/exe, which
+// the kernel resolves to the Cellar path, and brew cleanup deletes that path
+// after an upgrade. For non-brew installs it resolves to the absolute path of
+// the replaced binary.
+//
+// Shared with trySelfReload, which must version-probe the same binary the
+// restart would run — probing os.Executable() directly would read the old
+// Cellar path under brew and miss the upgrade entirely.
+func (d *Daemon) restartTargetBinary() (string, error) {
+	newBin, err := resolveSelfExecutable()
+	if err != nil {
+		return "", err
+	}
+	// The install method and brew prefix are fixed for the process lifetime;
+	// resolve them once so the per-tick reload probe doesn't fork
+	// `brew --prefix` every 5 minutes.
+	d.brewTargetOnce.Do(func() {
+		d.brewInstall = isBrewInstall()
+		if !d.brewInstall {
+			return
+		}
+		if brewPrefix := getBrewPrefix(); brewPrefix != "" {
+			d.brewTarget = filepath.Join(brewPrefix, "bin", "multica")
+		} else if prefix := matchKnownBrewPrefix(newBin); prefix != "" {
+			d.brewTarget = filepath.Join(prefix, "bin", "multica")
+		}
+	})
+	if d.brewInstall {
+		if d.brewTarget != "" {
+			return d.brewTarget, nil
+		}
+		d.logger.Warn("brew install detected but prefix could not be resolved; restart may fail",
+			"executable", newBin)
+		return newBin, nil
+	}
+	if resolved, err := filepath.EvalSymlinks(newBin); err == nil {
+		newBin = resolved
+	}
+	return newBin, nil
+}
+
+// pollLoop runs the machine-level batch claim poller (MUL-4257): a single
+// goroutine claims across ALL of the daemon's runtimes per cycle via
+// ClaimTasksWSFirst (WS-first, HTTP fallback), replacing the previous
+// one-HTTP-poller-per-runtime model. Wake-up signals — a WS task_available /
+// catch-up nudge or a runtime-set change — all collapse to one nudge because a
+// batch claim already covers every runtime. On shutdown it stops the poller,
+// then drains in-flight tasks.
+//
+// This trades the per-runtime isolation the old model gave (MUL-1744) for a
+// single request; the head-of-line risk is bounded by ClaimTasksWSFirst's short
+// per-request timeout (WS) / the client's timeout (HTTP fallback), and the
+// server-side batch claim is index-backed + short.
 func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) error {
 	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
-	var taskWG sync.WaitGroup   // tracks in-flight handleTask goroutines
-	var pollerWG sync.WaitGroup // tracks runRuntimePoller goroutines
+	var taskWG sync.WaitGroup // tracks in-flight handleTask goroutines
 
 	runtimeSetCh, unsub := d.runtimeSet.Subscribe()
 	defer unsub()
 
-	type pollerHandle struct {
-		cancel context.CancelFunc
-		wakeup chan struct{}
-	}
-	pollers := make(map[string]*pollerHandle)
-
-	syncPollers := func() {
-		want := make(map[string]struct{})
-		for _, rid := range d.allRuntimeIDs() {
-			want[rid] = struct{}{}
-		}
-		for rid, h := range pollers {
-			if _, ok := want[rid]; !ok {
-				h.cancel()
-				delete(pollers, rid)
-			}
-		}
-		for rid := range want {
-			if _, ok := pollers[rid]; ok {
-				continue
-			}
-			pctx, pcancel := context.WithCancel(ctx)
-			wakeup := make(chan struct{}, 1)
-			pollers[rid] = &pollerHandle{cancel: pcancel, wakeup: wakeup}
-			pollerWG.Add(1)
-			go func(rid string, pctx context.Context, wakeup <-chan struct{}) {
-				defer pollerWG.Done()
-				d.runRuntimePoller(pctx, ctx, rid, sem, wakeup, &taskWG)
-			}(rid, pctx, wakeup)
-		}
+	wakeup := make(chan struct{}, 1)
+	nudge := func() {
+		signalPollerWakeup(wakeup)
 	}
 
-	syncPollers()
+	pollerCtx, pollerCancel := context.WithCancel(ctx)
+	pollerDone := make(chan struct{})
+	go func() {
+		defer close(pollerDone)
+		d.runBatchPoller(pollerCtx, ctx, sem, wakeup, &taskWG)
+	}()
 
 	for {
 		select {
 		case <-ctx.Done():
 			d.logger.Info("poll loop stopping, waiting for in-flight tasks", "max_wait", "30s")
-			for _, h := range pollers {
-				h.cancel()
-			}
-			// Wait for all pollers to fully return before waiting on taskWG.
-			// Otherwise a poller that's between ClaimTask and taskWG.Add(1)
-			// could race with taskWG.Wait when the counter is zero, which
-			// is an undefined sync.WaitGroup misuse.
-			pollerWG.Wait()
-
+			pollerCancel()
+			// Wait for the poller to fully return before waiting on taskWG so a
+			// poller between ClaimTasksWSFirst and taskWG.Add(1) cannot race
+			// taskWG.Wait at a zero counter.
+			<-pollerDone
 			waitDone := make(chan struct{})
 			go func() { taskWG.Wait(); close(waitDone) }()
 			select {
@@ -1940,69 +5381,31 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 			}
 			return ctx.Err()
 		case <-runtimeSetCh:
-			syncPollers()
-		case wakeup := <-taskWakeups:
-			if wakeup.runtimeID != "" {
-				if h, ok := pollers[wakeup.runtimeID]; ok {
-					d.logger.Debug("task wakeup: signaling runtime poller", "runtime_id", wakeup.runtimeID)
-					select {
-					case h.wakeup <- struct{}{}:
-					default:
-					}
-				} else {
-					d.logger.Debug("task wakeup: runtime poller not found", "runtime_id", wakeup.runtimeID, "pollers", len(pollers))
-				}
-				continue
-			}
-
-			// A wakeup without a runtime_id is a catch-up signal (for example,
-			// immediately after the websocket connects). Fan it out so queued
-			// work that existed before the connection is still discovered.
-			d.logger.Debug("task wakeup: fanning out to pollers", "pollers", len(pollers))
-			for _, h := range pollers {
-				select {
-				case h.wakeup <- struct{}{}:
-				default:
-				}
-			}
+			// The batch poller re-derives allRuntimeIDs() each cycle; nudge it to
+			// pick up a registered/removed runtime promptly.
+			nudge()
+		case <-taskWakeups:
+			// Targeted-runtime and catch-up wakeups both trigger one batch claim
+			// across the whole runtime set.
+			nudge()
 		}
 	}
 }
 
-// runRuntimePoller is the per-runtime claim+dispatch loop. It owns its own
-// poll cadence and wakeup channel so that a slow HTTP claim for this runtime
-// cannot delay any other runtime's claims.
+// runBatchPoller is the single machine-level claim+dispatch loop. Each cycle it
+// acquires whatever execution slots are free (slot-before-claim, so a claimed
+// task never sits server-side `dispatched` without local capacity to run it and
+// race the dispatch-timeout sweeper), asks the server for up to that many tasks
+// across all of the daemon's runtimes in one call, and dispatches each returned
+// task — routed to its runtime by handleTask — into a slot.
 //
-// The execution slot is acquired BEFORE ClaimTask. The alternative —
-// claiming first and then waiting for a slot — would let claimed tasks pile
-// up in the server-side `dispatched` state without a corresponding
-// StartTask, and the server's sweeper would fail them as `failed/timeout`
-// after dispatchTimeoutSeconds=300s (runtime_sweeper.go:25). That is the
-// exact user-visible failure this issue is fixing, so we cannot risk
-// recreating it under load.
-//
-// Slot-before-claim does mean a slow claim holds a slot during its HTTP
-// roundtrip; the upper bound is `client.Timeout = 30s` (client.go:59), well
-// below the 300s dispatch timeout, so other runtimes' tasks stay in
-// server-side `queued` state (which has no timeout) rather than entering
-// `dispatched` and racing the sweeper.
-//
-// pollerCtx is cancelled when this runtime is removed from the watched set
-// (e.g. workspace de-registered). parentCtx is the daemon's root ctx and is
-// passed to handleTask so an in-flight task is not killed just because the
-// runtime set changed mid-flight — the task continues to run until the
-// daemon itself shuts down (or the server cancels it).
-func (d *Daemon) runRuntimePoller(
-	pollerCtx, parentCtx context.Context,
-	rid string,
-	sem chan int,
-	wakeup <-chan struct{},
-	taskWG *sync.WaitGroup,
-) {
-	if offset := runtimePollOffset(rid, d.cfg.PollInterval); offset > 0 {
-		d.logger.Debug("poll: initial offset", "runtime_id", rid, "offset", offset)
-		if err := sleepWithContextOrWakeup(pollerCtx, offset, wakeup); err != nil {
-			return
+// pollerCtx is cancelled on shutdown. parentCtx is the daemon root ctx passed to
+// handleTask so an in-flight task is not killed just because the poll loop is
+// stopping mid-flight.
+func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan int, wakeup chan struct{}, taskWG *sync.WaitGroup) {
+	releaseSlots := func(slots []int) {
+		for _, sl := range slots {
+			sem <- sl
 		}
 	}
 
@@ -2011,15 +5414,25 @@ func (d *Daemon) runRuntimePoller(
 			return
 		}
 
-		// Acquire an execution slot before claiming. If at capacity, sleep
-		// without claiming so we don't push a task into `dispatched` and
-		// then race the 5-min server-side dispatch timeout while waiting.
-		slot, acquired, woke, err := waitForTaskSlot(pollerCtx, sem, wakeup, taskSlotWaitTimeout)
+		runtimeIDs := d.allRuntimeIDs()
+		if len(runtimeIDs) == 0 {
+			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+				return
+			}
+			continue
+		}
+
+		// Acquire at least one slot (blocking briefly), then grab any other free
+		// slots so a single batch claim can fill them all.
+		slotWait := d.taskSlotWait
+		if slotWait <= 0 {
+			slotWait = taskSlotWaitTimeout
+		}
+		slot, acquired, woke, err := waitForTaskSlot(pollerCtx, sem, wakeup, slotWait)
 		if err != nil {
 			return
 		}
 		if !acquired {
-			d.logger.Debug("poll: at capacity", "runtime_id", rid, "running", d.cfg.MaxConcurrentTasks)
 			if woke {
 				continue
 			}
@@ -2028,75 +5441,151 @@ func (d *Daemon) runRuntimePoller(
 			}
 			continue
 		}
+		slots := append([]int{slot}, drainAvailableSlots(sem, d.cfg.MaxConcurrentTasks-1)...)
 
-		// Refuse new claims while an auto-update is preparing to roll the
-		// process. The barrier is paired with a re-check of claimsInFlight +
-		// activeTasks inside tryAutoUpdate, so once we get past tryEnterClaim
-		// the auto-update path is guaranteed to defer until this poller has
-		// handed the task off (or given up).
+		// Auto-update barrier: refuse to claim while an update prepares to roll
+		// the process (paired with the re-check in tryAutoUpdate).
 		if !d.tryEnterClaim() {
-			sem <- slot
+			releaseSlots(slots)
 			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
 				return
 			}
 			continue
 		}
 
-		task, err := d.client.ClaimTask(pollerCtx, rid)
+		claimResult, err := d.claimTasksWSFirst(pollerCtx, d.cfg.DaemonID, runtimeIDs, len(slots))
 		if err != nil {
 			d.exitClaim()
-			sem <- slot
+			releaseSlots(slots)
 			if pollerCtx.Err() == nil {
-				if isRuntimeNotFoundError(err) {
-					// Server says this runtime is gone — recover and exit
-					// the poller; the runtime-set watcher will tear this
-					// goroutine down via pollerCtx once the workspace is
-					// re-registered with a new runtime ID.
-					go d.handleRuntimeGone(rid)
-					return
-				}
-				d.logger.Warn("claim task failed", "runtime_id", rid, "error", err)
+				d.logger.Warn("batch claim failed", "error", err)
 			}
 			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
 				return
 			}
 			continue
 		}
+		tasks := claimResult.Tasks
 
-		if task == nil {
-			d.exitClaim()
-			sem <- slot
-			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
-				return
+		// Dispatch each claimed task into a slot. activeTasks is incremented for
+		// every dispatched task BEFORE exitClaim so the auto-update barrier never
+		// sees a zero-claims / zero-active window between claim and dispatch.
+		dispatched := 0
+		for i := range tasks {
+			if i >= len(slots) || tasks[i] == nil {
+				break
 			}
+			t := *tasks[i]
+			slot := slots[i]
+			taskTarget := t.IssueID
+			if taskTarget == "" && t.ChatSessionID != "" {
+				taskTarget = "chat:" + t.ChatSessionID
+			}
+			d.logger.Info("task received", "task", t.ID, "target", taskTarget)
+			taskWG.Add(1)
+			d.activeTasks.Add(1)
+			if cache, ok := d.repoCache.(interface{ CancelMaintenance() }); ok {
+				// A task can reuse an existing worktree and never enter the
+				// checkout path that normally preempts repository maintenance.
+				// Cancel all low-priority maintenance before the agent starts so
+				// direct Git operations cannot overlap it.
+				cache.CancelMaintenance()
+			}
+			go func(t Task, slot int) {
+				defer taskWG.Done()
+				defer d.activeTasks.Add(-1)
+				defer func() {
+					// Release local capacity before waking the poller. The task's
+					// terminal callback and local cleanup have both finished at this
+					// point, so a successor that was previously blocked by agent
+					// capacity or per-(issue, agent) serialization can be claimed
+					// immediately instead of waiting for PollInterval.
+					sem <- slot
+					signalPollerWakeup(wakeup)
+				}()
+				d.handleTask(parentCtx, t, slot)
+			}(t, slot)
+			dispatched++
+		}
+		d.exitClaim()
+		if dispatched < len(slots) {
+			releaseSlots(slots[dispatched:])
+		}
+
+		// If we filled every slot, more work may be queued — loop immediately.
+		// Otherwise wait for the next wakeup / poll interval. A connection that
+		// negotiated WS RPC receives task-available pushes, so this poll is only
+		// a missed-event safety net and can run less often. Claim errors retain
+		// the configured fallback cadence above.
+		if dispatched > 0 && dispatched == len(slots) {
 			continue
 		}
-
-		taskTarget := task.IssueID
-		if taskTarget == "" && task.ChatSessionID != "" {
-			taskTarget = "chat:" + shortID(task.ChatSessionID)
+		if err := sleepWithContextOrWakeup(pollerCtx, d.taskClaimPollInterval(claimResult), wakeup); err != nil {
+			return
 		}
-		d.logger.Info("task received", "task", shortID(task.ID), "target", taskTarget)
-		taskWG.Add(1)
-		d.activeTasks.Add(1)
-		go func(t Task, slot int) {
-			defer taskWG.Done()
-			defer d.exitClaim()
-			defer d.activeTasks.Add(-1)
-			defer func() { sem <- slot }()
-			d.handleTask(parentCtx, t, slot)
-		}(*task, slot)
-		// Loop immediately: more tasks may already be queued for this runtime.
 	}
 }
 
-func runtimePollOffset(runtimeID string, interval time.Duration) time.Duration {
-	if interval <= 0 || runtimeID == "" {
-		return 0
+// taskClaimPollInterval returns the next missed-event safety poll. The longer
+// cadence is only safe when this exact claim response came from a server that
+// opted into scheduling hints; a missing hint covers old servers and uncertain
+// WS claims, both of which retain the normal fallback cadence. Downward-only
+// jitter keeps the default below the server's 3-minute empty-claim cache TTL
+// while preventing an idle fleet from polling in lockstep.
+func (d *Daemon) taskClaimPollInterval(result claimTasksResult) time.Duration {
+	if !d.wsRPC.supportsRPCV1() || !result.ClaimedOverWS || !result.ClaimPollHintSupported {
+		if d.cfg.PollInterval > 0 {
+			return d.cfg.PollInterval
+		}
+		return DefaultPollInterval
 	}
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(runtimeID))
-	return time.Duration(h.Sum64() % uint64(interval))
+	upperBound := d.cfg.WSClaimPollInterval
+	if upperBound <= 0 {
+		upperBound = DefaultWSClaimPollInterval
+	}
+	interval := downwardJitterDuration(upperBound)
+	if result.NextDeferredTaskAfterMillis > 0 {
+		untilDeferred := time.Duration(result.NextDeferredTaskAfterMillis) * time.Millisecond
+		if untilDeferred < interval {
+			interval = untilDeferred
+		}
+	}
+	return interval
+}
+
+func downwardJitterDuration(interval time.Duration) time.Duration {
+	minReduction := interval / 12
+	maxReduction := interval / 6
+	if minReduction <= 0 || maxReduction <= minReduction {
+		return interval
+	}
+	reduction := minReduction + time.Duration(rand.Int63n(int64(maxReduction-minReduction)+1))
+	return interval - reduction
+}
+
+func signalPollerWakeup(wakeup chan<- struct{}) {
+	select {
+	case wakeup <- struct{}{}:
+	default:
+	}
+}
+
+// drainAvailableSlots non-blockingly pulls up to max additional slots from the
+// semaphore, returning immediately when none are free.
+func drainAvailableSlots(sem chan int, max int) []int {
+	if max <= 0 {
+		return nil
+	}
+	var slots []int
+	for len(slots) < max {
+		select {
+		case s := <-sem:
+			slots = append(slots, s)
+		default:
+			return slots
+		}
+	}
+	return slots
 }
 
 func capacityBackoff(pollInterval time.Duration) time.Duration {
@@ -2180,25 +5669,48 @@ func shouldInterruptAgent(status string, err error) bool {
 // so callers should pass the runCtx that was set up around the agent run.
 func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollInterval time.Duration, taskLog *slog.Logger) <-chan struct{} {
 	cancelled := make(chan struct{})
+	// Subscribe to the reconcile broadcaster before launching the inner
+	// goroutine. A WS reconnect that fires between the goroutine starting
+	// and its first notify() call would otherwise be dropped; the ticker
+	// still bounds the worst case, but the whole point of the broadcast is
+	// to avoid waiting on that ticker.
+	var reconcileCh <-chan struct{}
+	if d.reconcile != nil {
+		reconcileCh = d.reconcile.notify()
+	}
 	go func() {
 		ticker := time.NewTicker(pollInterval)
 		defer ticker.Stop()
+		check := func() bool {
+			status, err := d.client.GetTaskStatus(ctx, taskID)
+			if !shouldInterruptAgent(status, err) {
+				return false
+			}
+			if err != nil {
+				taskLog.Info("task gone server-side, interrupting agent", "error", err)
+			} else {
+				taskLog.Info("task reached terminal state server-side, interrupting agent", "status", status)
+			}
+			close(cancelled)
+			return true
+		}
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case <-reconcileCh:
+				// Refresh the subscription before issuing the request so a
+				// second broadcast that overlaps GetTaskStatus is not lost.
+				if d.reconcile != nil {
+					reconcileCh = d.reconcile.notify()
+				}
+				if check() {
+					return
+				}
 			case <-ticker.C:
-				status, err := d.client.GetTaskStatus(ctx, taskID)
-				if !shouldInterruptAgent(status, err) {
-					continue
+				if check() {
+					return
 				}
-				if err != nil {
-					taskLog.Info("task gone server-side, interrupting agent", "error", err)
-				} else {
-					taskLog.Info("task reached terminal state server-side, interrupting agent", "status", status)
-				}
-				close(cancelled)
-				return
 			}
 		}
 	}()
@@ -2207,18 +5719,47 @@ func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollI
 
 func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	d.mu.Lock()
-	rt := d.runtimeIndex[task.RuntimeID]
+	rt, tracked := d.runtimeIndex[task.RuntimeID]
 	d.mu.Unlock()
+	// The runtime can go offline between the batch claim leaving with its ID and
+	// the claimed task arriving here — a below-minimum demotion or a drift
+	// convergence to zero both drop rows while a claim is in flight. Reporting it
+	// as runtime_offline is what the server already retries on; without this the
+	// zero-value Runtime carries an empty provider and the task dies several
+	// hundred lines later as `no agent configured for provider ""`, which reads
+	// like a misconfigured host and is not retried.
+	if !tracked {
+		d.logger.Warn("claimed task targets a runtime this daemon no longer hosts; failing it back for retry",
+			"task", task.ID, "runtime_id", task.RuntimeID)
+		if err := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:          terminalTaskReportFail,
+			taskID:        task.ID,
+			errorMessage:  "runtime went offline before the run started",
+			failureReason: taskfailure.ReasonRuntimeOffline.String(),
+		}); err != nil {
+			d.logger.Error("fail task callback failed", "task", task.ID, "error", err)
+		}
+		return
+	}
 	provider := rt.Provider
 
-	// Task-scoped logger with short ID for readable concurrent logs.
-	taskLog := d.logger.With("task", shortID(task.ID))
+	// Task-scoped logger. The task id goes in whole: it is the key every
+	// other surface prints (task JSON, env-root ownership manifest, server
+	// logs), so a full id is what lets a log line be joined to them. An
+	// 8-char prefix cannot — task ids are UUIDv7, whose leading 32 bits are
+	// a millisecond timestamp that only advances every ~65s, so concurrent
+	// tasks routinely share one (#7326).
+	taskLog := d.logger.With("task", task.ID)
+	phaseRecorder := newTaskPhaseRecorder(taskLog.With("task_id", task.ID, "runtime_id", task.RuntimeID), time.Now)
+	ctx = withTaskPhaseRecorder(ctx, phaseRecorder)
+	phaseRecorder.Mark(taskPhaseClaimed)
+	defer phaseRecorder.Mark(taskPhaseFinished)
 	agentName := "agent"
 	if task.Agent != nil {
 		agentName = task.Agent.Name
 	}
 	if task.ChatSessionID != "" {
-		taskLog.Info("picked chat task", "chat_session", shortID(task.ChatSessionID), "agent", agentName, "provider", provider)
+		taskLog.Info("picked chat task", "chat_session", task.ChatSessionID, "agent", agentName, "provider", provider)
 	} else {
 		taskLog.Info("picked task", "issue", task.IssueID, "agent", agentName, "provider", provider)
 	}
@@ -2262,13 +5803,16 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// reportTaskResult and execenv.WriteGCMeta below. markActiveEnvRoot
 	// is reference-counted, so the duplicate marks runTask installs are
 	// correctly nested within these.
-	predictedEnvRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
-	if predictedEnvRoot != "" {
-		d.markActiveEnvRoot(predictedEnvRoot)
-		defer d.unmarkActiveEnvRoot(predictedEnvRoot)
+	resolvedEnvRoot, resolveRootErr := execenv.ResolveRootDir(taskRootDirParams(d.cfg.WorkspacesRoot, task))
+	if resolveRootErr != nil {
+		taskLog.Error("resolve stable task env root", "error", resolveRootErr)
+	}
+	if resolvedEnvRoot != "" {
+		d.markActiveEnvRoot(resolvedEnvRoot)
+		defer d.unmarkActiveEnvRoot(resolvedEnvRoot)
 	}
 	if task.PriorWorkDir != "" {
-		if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != predictedEnvRoot {
+		if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != resolvedEnvRoot {
 			d.markActiveEnvRoot(priorRoot)
 			defer d.unmarkActiveEnvRoot(priorRoot)
 		}
@@ -2298,6 +5842,12 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	}()
 
 	result, err := d.runner.run(runCtx, task, provider, slot, taskLog)
+	if errors.Is(err, errStartClaimRejected) {
+		// The row belongs to another claim (or is terminal). A task-id-only
+		// failure callback from this stale delivery could kill its new owner.
+		taskLog.Info("discarding rejected start claim", "error", err)
+		return
+	}
 
 	// Report usage before any early return — the agent accumulates tokens
 	// whether the task completes, errors, or is cancelled mid-run by the poll
@@ -2313,20 +5863,49 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// Check if we were cancelled by the polling goroutine.
 	select {
 	case <-cancelledByPoll:
-		taskLog.Info("task cancelled during execution, discarding result")
+		taskLog.Info("task cancelled during execution, discarding result",
+			"branch_name", result.BranchName, "error", err)
+		// runner.run has returned, so the transcript flush is complete —
+		// tell the server it can settle its deferred chat finalization
+		// (#5219). The sweeper grace period covers a lost ack's chat settle,
+		// but NOT the payload: the branch rides along because the worktree was
+		// already finalized before this check, and when Finalize instead
+		// ABORTED, the preserved-worktree error is the only pointer left to
+		// the agent's work — everything else on this path is discarded. Other
+		// run errors stay discarded: on a cancelled run they are expected
+		// noise (context canceled, killed process), and persisting them would
+		// stamp a bogus reason on every ordinary mid-run cancel.
+		ack := TaskCancelAck{BranchName: result.BranchName, DurableWorkDir: result.DurableWorkDir}
+		var preserved *worktreePreservedError
+		if errors.As(err, &preserved) {
+			ack.ErrorMessage = preserved.Error()
+			ack.FailureReason = "local_directory_error"
+		}
+		if ackErr := d.client.AckTaskCancelled(ctx, task.ID, ack); ackErr != nil {
+			taskLog.Warn("cancel ack failed; server sweeper will finalize", "error", ackErr)
+		}
 		return
 	default:
 	}
 
 	if err != nil {
 		taskLog.Error("task failed", "error", err)
-		// runTask returned without a TaskResult, so we don't have a SessionID
-		// to forward — best we can do is record the failure.
+		// runTask may have reached worktree finalization before returning the
+		// error. Preserve any delivery metadata that defer attached to the named
+		// result, especially the actual/preserved workdir and delivered branch.
 		// MUL-2946: route the bare error string through the canonical
 		// classifier so the failure_reason column reflects the actual
 		// shape of the failure (provider 5xx, network, process crash,
 		// …) rather than the coarse legacy "agent_error" bucket.
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", taskfailure.Classify(err.Error()).String()); failErr != nil {
+		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:           terminalTaskReportFail,
+			taskID:         task.ID,
+			errorMessage:   err.Error(),
+			branchName:     result.BranchName,
+			workDir:        result.WorkDir,
+			durableWorkDir: result.DurableWorkDir,
+			failureReason:  taskRunFailureReason(err),
+		}); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		}
 		return
@@ -2340,7 +5919,20 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// anyway. Reuse shouldInterruptAgent so this guard honors the same
 	// signals as the in-flight watcher.
 	if status, err := d.client.GetTaskStatus(ctx, task.ID); shouldInterruptAgent(status, err) {
-		taskLog.Info("task cancelled during execution, discarding result", "status", status, "error", err)
+		taskLog.Info("task cancelled during execution, discarding result",
+			"status", status, "error", err, "branch_name", result.BranchName)
+		// Same contract as the poll-cancelled path above: the transcript is
+		// flushed, so let the server settle its deferred chat finalization, and
+		// carry the finalized branch so cancelled work stays discoverable. No
+		// error to carry here — this branch is only reached with err == nil.
+		// This fires for ANY observed terminal status; the server applies the
+		// payload only to a cancelled row (status CAS), because for
+		// completed/failed rows the complete/fail callback is the
+		// authoritative channel and a stale run's late ack must not touch
+		// them.
+		if ackErr := d.client.AckTaskCancelled(ctx, task.ID, TaskCancelAck{BranchName: result.BranchName, DurableWorkDir: result.DurableWorkDir}); ackErr != nil {
+			taskLog.Warn("cancel ack failed; server sweeper will finalize", "error", ackErr)
+		}
 		return
 	}
 
@@ -2358,7 +5950,15 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			// sibling workdir (which is the user's path) or the envRoot
 			// itself (we want output/ and logs/ to linger for forensic
 			// access).
-			if assignment, _ := findLocalDirectoryAssignment(task.ProjectResources, d.cfg.DaemonID); assignment != nil {
+			//
+			// Worktree mode is excluded: its workdir is a disposable
+			// worktree INSIDE envRoot, already removed by Finalize, and
+			// the deliverable lives on as a branch in the user's repo.
+			// Stamping it would hand every worktree task a permanently
+			// exempt env root, so the directory would accumulate one env
+			// root per task forever — the exact cost the exemption was
+			// meant to trade away for a user's own files.
+			if assignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID); assignment != nil && !assignment.UsesWorktree() {
 				meta.LocalDirectory = true
 			}
 			if err := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); err != nil {
@@ -2366,6 +5966,81 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			}
 		}
 	}
+}
+
+// worktreePreservedError marks a task error that must survive the cancel path:
+// its message names the preserved worktree holding the agent's uncommitted
+// work. Every other error on a cancelled run is expected noise (context
+// canceled, killed process) and stays discarded; this one is the only pointer
+// to real work and rides the cancel ack to the server.
+type worktreePreservedError struct{ err error }
+
+func (e *worktreePreservedError) Error() string { return e.err.Error() }
+func (e *worktreePreservedError) Unwrap() error { return e.err }
+
+// environmentSetupError marks a failure to build or re-open the task's
+// execution environment: everything execenv.Prepare / execenv.Reuse does on
+// this host before the agent process exists — the workspace directory and its
+// overlay homes, plus the per-provider local config written or validated
+// inside it. Its causes are local, and not only filesystem ones: a full
+// volume, a read-only or permission-denied workspaces root, a directory
+// another process still holds open, an I/O error on the disk underneath, or a
+// local runtime config the daemon refuses to boot past.
+//
+// It carries the wrapped error's message unchanged and exists purely so
+// taskRunFailureReason can recognise the phase structurally. Without it the
+// OS error text falls through to taskfailure.Classify, a classifier written
+// to read agent and provider output, and lands in agent_error.* — today the
+// catchall, historically provider_server_error, which pointed one bug report
+// at an LLM vendor for hours (#7913). The task never reached an agent, so no
+// reason in that namespace can be right.
+type environmentSetupError struct{ err error }
+
+func (e *environmentSetupError) Error() string { return e.err.Error() }
+func (e *environmentSetupError) Unwrap() error { return e.err }
+
+// asEnvironmentSetupFailure tags err as an execution-environment setup
+// failure. The message is untouched, so the wrapper is invisible to everything
+// except taskRunFailureReason.
+func asEnvironmentSetupFailure(err error) error { return &environmentSetupError{err: err} }
+
+func taskRunFailureReason(err error) string {
+	if errors.Is(err, errInvalidTaskIdentity) {
+		return taskfailure.ReasonInvalidTaskIdentity.String()
+	}
+	if errors.Is(err, errTaskPrepareTimeout) {
+		return taskfailure.ReasonTimeout.String()
+	}
+	// Checked after the prepare deadline: when the whole prepare budget ran
+	// out, runTask has already collapsed the error into errTaskPrepareTimeout
+	// and that classification is the more accurate one. This branch is for the
+	// per-skill download deadline firing inside a prepare budget that still had
+	// room (MUL-5370).
+	if errors.Is(err, errSkillBundleUnavailable) {
+		return taskfailure.ReasonSkillBundleUnavailable.String()
+	}
+	// Structural, not textual: the message ends in "context deadline exceeded",
+	// which Classify routes to agent_error.provider_network — "the connection to
+	// the model provider dropped, check your network" for a stall that is purely
+	// local, plus an auto-retry of a failure that is deterministic on the host.
+	// The sentinel survives the preparation helper boundary via
+	// preparationErrorKind (#7112).
+	if errors.Is(err, execenv.ErrOpenclawCLITimeout) {
+		return taskfailure.ReasonRuntimeCLITimeout.String()
+	}
+	// Everything else that failed while building or re-opening the execution
+	// environment. Last of the structural branches: the four sentinels above
+	// each name a cause the daemon already recognises on its own (task
+	// identity, the prepare budget, skill downloads, the local runtime CLI)
+	// and stay the better label. What is left is the rest of preparation on
+	// this host — filesystem faults, and the per-provider local config
+	// Prepare writes or validates — whose text Classify can only read as
+	// agent output (#7913).
+	var envSetupErr *environmentSetupError
+	if errors.As(err, &envSetupErr) {
+		return taskfailure.ReasonEnvironmentPrepareFailed.String()
+	}
+	return taskfailure.Classify(err.Error()).String()
 }
 
 // acquireLocalDirectoryLockIfNeeded inspects the task's project resources for
@@ -2389,10 +6064,15 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	if len(task.ProjectResources) == 0 || d.cfg.DaemonID == "" {
 		return nil, false
 	}
-	assignment, err := findLocalDirectoryAssignment(task.ProjectResources, d.cfg.DaemonID)
+	assignment, err := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
 	if err != nil {
 		taskLog.Error("local_directory: resolve resource failed", "error", err)
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "local_directory_error"); failErr != nil {
+		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:          terminalTaskReportFail,
+			taskID:        task.ID,
+			errorMessage:  err.Error(),
+			failureReason: "local_directory_error",
+		}); failErr != nil {
 			taskLog.Error("fail task after local_directory resolve error", "error", failErr)
 		}
 		return nil, true
@@ -2401,12 +6081,55 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		return nil, false
 	}
 	taskLog = taskLog.With("local_directory", assignment.AbsPath)
+	// Check the mode before the path: a mode this daemon can't honour is a
+	// version-skew problem the user fixes by upgrading, and reporting a path
+	// complaint first would send them looking in the wrong place.
+	if err := assignment.ValidateExecutionMode(); err != nil {
+		taskLog.Error("local_directory: unsupported execution mode", "error", err)
+		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:          terminalTaskReportFail,
+			taskID:        task.ID,
+			errorMessage:  err.Error(),
+			failureReason: "local_directory_error",
+		}); failErr != nil {
+			taskLog.Error("fail task after local_directory mode check", "error", failErr)
+		}
+		return nil, true
+	}
 	if err := validateLocalPath(assignment.AbsPath); err != nil {
 		taskLog.Error("local_directory: path validation failed", "error", err)
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "local_directory_error"); failErr != nil {
+		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:          terminalTaskReportFail,
+			taskID:        task.ID,
+			errorMessage:  err.Error(),
+			failureReason: "local_directory_error",
+		}); failErr != nil {
 			taskLog.Error("fail task after local_directory validation error", "error", failErr)
 		}
 		return nil, true
+	}
+
+	// Worktree mode is the whole point of not serialising: each task gets its
+	// own checkout of the repo inside its env root, so there is no shared
+	// mutable state on the user's path to protect. Skipping the mutex here is
+	// what lets sibling tasks on one directory run concurrently. Path
+	// validation above still applies — git needs to write worktree
+	// registrations into the user's repo.
+	if assignment.UsesWorktree() {
+		taskLog.Info("local_directory: worktree mode, skipping path mutex")
+		return nil, false
+	}
+
+	// A conversation is not a second writer. Everything above still applied —
+	// the mode was checked, the path was validated, and the assignment stands,
+	// so this task keeps the user's directory as its working directory. Only
+	// the queueing is skipped, which is what stops a chat turn from sitting
+	// behind a 20-minute build with nothing to contribute to it (issue #7344).
+	// See localDirectoryLockExempt for why the mutex does not owe this task a
+	// slot.
+	if localDirectoryLockExempt(task) {
+		taskLog.Info("local_directory: chat task, skipping path mutex")
+		return nil, false
 	}
 
 	// While the lock is contended the daemon would otherwise sit blocked on
@@ -2423,22 +6146,52 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		pollInterval = 5 * time.Second
 	}
 	var (
-		watcherOnce     sync.Once
-		cancelledByPoll <-chan struct{}
+		watcherOnce      sync.Once
+		prepareLeaseOnce sync.Once
+		cancelledByPoll  <-chan struct{}
+		stopPrepareLease func()
+		waitCounted      bool
 	)
+	defer func() {
+		if waitCounted {
+			d.resourceWaitTasks.Add(-1)
+		}
+	}()
+	defer func() {
+		if stopPrepareLease != nil {
+			stopPrepareLease()
+		}
+	}()
 
 	onWait := func(holder string) {
-		reason := fmt.Sprintf("local_directory %s", assignment.AbsPath)
+		// LocalPathLocker invokes onWait synchronously and at most once for an
+		// Acquire call. Count the actual mutex wait even if the best-effort
+		// server status update below fails.
+		d.resourceWaitTasks.Add(1)
+		waitCounted = true
+		// Rendered to the user, so it names the directory rather than its path
+		// (see localDirectoryAssignment.DisplayName). The absolute path stays in
+		// the daemon's own logs, which is where an operator debugging a wedged
+		// lock looks for it.
+		reason := assignment.DisplayName()
 		if holder != "" {
+			// Known rough edge: this clause is English and the client renders it
+			// inside a localized "Waiting for {reason}" label, so a zh/ja/ko user
+			// sees mixed script. Fixing it properly means sending the directory
+			// and the holder as separate fields and localizing the join on the
+			// client — worth doing if this hint grows, not for one parenthetical.
 			reason = fmt.Sprintf("%s (held by task %s)", reason, shortID(holder))
 		}
-		taskLog.Info("local_directory: waiting on path mutex", "holder", shortID(holder))
+		taskLog.Info("local_directory: waiting on path mutex", "holder", holder)
 		if waitErr := d.client.MarkTaskWaitingLocalDirectory(ctx, task.ID, reason); waitErr != nil {
 			// Non-fatal: even if the server-side flag fails to update,
 			// we still want to block on the lock and proceed when free.
 			// The UI just won't see the explicit "waiting" badge.
 			taskLog.Warn("local_directory: mark waiting status failed", "error", waitErr)
 		}
+		prepareLeaseOnce.Do(func() {
+			stopPrepareLease = d.startTaskPrepareLeaseExtender(waitCtx, task, taskLog)
+		})
 		// Start polling once we actually park. shouldInterruptAgent inside
 		// watchTaskCancellation already handles both server-side terminal
 		// states (completed/failed/cancelled) and the row-deleted
@@ -2475,7 +6228,12 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			failureReason = "cancelled"
 		}
-		if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("local_directory wait cancelled: %s", err.Error()), "", "", failureReason); failErr != nil {
+		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:          terminalTaskReportFail,
+			taskID:        task.ID,
+			errorMessage:  fmt.Sprintf("local_directory wait cancelled: %s", err.Error()),
+			failureReason: failureReason,
+		}); failErr != nil {
 			taskLog.Error("fail task after local_directory lock cancel", "error", failErr)
 		}
 		return nil, true
@@ -2498,38 +6256,25 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 	switch result.Status {
 	case "completed":
 		taskLog.Info("task completed", "status", result.Status)
-		err := d.client.CompleteTask(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir)
+		err := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:                  terminalTaskReportComplete,
+			taskID:                taskID,
+			output:                result.Comment,
+			branchName:            result.BranchName,
+			sessionID:             result.SessionID,
+			workDir:               result.WorkDir,
+			durableWorkDir:        result.DurableWorkDir,
+			sessionRolloutMissing: result.SessionRolloutMissing,
+			retiredSessionID:      result.RetiredSessionID,
+		})
 		if err == nil {
 			return
 		}
-		// CompleteTask retries transient errors internally. A transient
-		// error reaching us here means the schedule was exhausted while
-		// the upstream was still 5xx / unreachable. Converting that into
-		// a fail would lose the agent's actual result and surface a
-		// misleading red badge in the UI — leave the task in running
-		// instead so a future fix (server-side stuck-task reaper, or a
-		// daemon-side persistent pending queue) can recover it. Only
-		// permanent server-side rejections (4xx other than 408/429)
-		// warrant the legacy fallback, because at that point the server
-		// has already refused this task and the only useful UI signal
-		// left is a concrete failure.
-		if isTransientError(err) {
-			taskLog.Error("complete task failed after retries; leaving task in running rather than falling back to fail", "error", err)
-			return
-		}
-		taskLog.Error("complete task rejected by server, falling back to fail", "error", err)
-		// MUL-2946: this fallback fires when a server-side complete
-		// callback was permanently rejected (4xx other than 408/429)
-		// — the agent itself succeeded, so the err here describes the
-		// server response rather than an agent failure. The classifier
-		// is unlikely to match anything in the server's error text and
-		// will land at ReasonAgentUnknown ("agent_error.unknown"),
-		// which is the canonical replacement for the legacy
-		// "agent_error" coarse bucket.
-		fallbackErrMsg := fmt.Sprintf("complete task failed: %s", err.Error())
-		if failErr := d.client.FailTask(ctx, taskID, fallbackErrMsg, result.SessionID, result.WorkDir, taskfailure.Classify(fallbackErrMsg).String()); failErr != nil {
-			taskLog.Error("fail task fallback also failed", "error", failErr)
-		}
+		// The original completion is already durable. Never overwrite it with a
+		// synthetic failure: a temporary auth/config skew can make a 4xx recover
+		// after restart just as a transport outage can make a 5xx recover, and the
+		// user's successful output must remain authoritative in both cases.
+		taskLog.Error("complete task callback not acknowledged; durable report remains queued", "error", err)
 	default:
 		failureReason := result.FailureReason
 		if failureReason == "" {
@@ -2550,9 +6295,125 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			}
 		}
 		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", failureReason)
-		if err := d.client.FailTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
+		if err := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:           terminalTaskReportFail,
+			taskID:         taskID,
+			errorMessage:   result.Comment,
+			sessionID:      result.SessionID,
+			workDir:        result.WorkDir,
+			durableWorkDir: result.DurableWorkDir,
+			// Worktree mode commits the agent's leftovers before tearing the
+			// worktree down, so a failed run routinely still has a branch. This
+			// is the case where the user most needs it: the task went wrong and
+			// they want to see how far it got.
+			branchName:            result.BranchName,
+			failureReason:         failureReason,
+			sessionRolloutMissing: result.SessionRolloutMissing,
+			retiredSessionID:      result.RetiredSessionID,
+		}); err != nil {
 			taskLog.Error("report failed task failed", "error", err)
 		}
+	}
+}
+
+// reportTerminalTask is the only path that sends complete/fail callbacks. It
+// attempts to persist the exact report before the first network request and
+// removes a persisted copy only after a successful response. A crash after the
+// server commit but before local acknowledgement merely replays the same
+// idempotent terminal request. If persistence itself fails, the direct request
+// still runs so a healthy server is not held hostage by the local disk.
+//
+// It deliberately preserves context values while discarding cancellation and
+// parent deadlines: daemon shutdown cancels the root context before pollLoop's
+// 30-second drain, but terminal callbacks must still use that remaining window.
+// The explicit timeout keeps this detached work bounded during normal runs.
+func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTaskReport) error {
+	if _, err := persistedTerminalReport(report, time.Now()); err != nil {
+		return err
+	}
+	release, ok := d.beginTerminalReportDelivery(report.taskID)
+	if !ok {
+		return fmt.Errorf("terminal task report for %s is already being delivered", report.taskID)
+	}
+	defer release()
+
+	persisted := false
+	if d.terminalReports != nil {
+		if err := d.terminalReports.enqueue(report); err != nil {
+			// Durability is an availability improvement, not a prerequisite for
+			// the online callback. A read-only/full disk must not turn a request
+			// that the server could accept right now into a stuck task.
+			d.logger.Error("persist terminal task report; continuing with direct delivery",
+				"task", report.taskID,
+				"kind", report.kind,
+				"error", err,
+			)
+		} else {
+			persisted = true
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parentCtx), terminalTaskReportTimeout)
+	defer cancel()
+	err := d.sendTerminalTaskReport(ctx, report, defaultTerminalRetrySchedule)
+	if err != nil {
+		quarantined := false
+		if persisted {
+			item := pendingTerminalTaskReport{fileName: terminalReportFileName(report.taskID), report: report}
+			quarantined = d.handleTerminalReportDeliveryError(ctx, item, err)
+		}
+		if persisted && !quarantined {
+			d.signalTerminalReportReplay()
+		}
+		return err
+	}
+	if !persisted {
+		return nil
+	}
+	item := pendingTerminalTaskReport{fileName: terminalReportFileName(report.taskID), report: report}
+	if err := d.terminalReports.acknowledge(item); err != nil {
+		d.signalTerminalReportReplay()
+		return fmt.Errorf("acknowledge terminal task report: %w", err)
+	}
+	return nil
+}
+
+func (d *Daemon) beginTerminalReportDelivery(taskID string) (func(), bool) {
+	d.terminalReportMu.Lock()
+	if d.terminalReportFlight == nil {
+		d.terminalReportFlight = make(map[string]struct{})
+	}
+	if _, exists := d.terminalReportFlight[taskID]; exists {
+		d.terminalReportMu.Unlock()
+		return nil, false
+	}
+	d.terminalReportFlight[taskID] = struct{}{}
+	d.terminalReportMu.Unlock()
+	return func() {
+		d.terminalReportMu.Lock()
+		delete(d.terminalReportFlight, taskID)
+		d.terminalReportMu.Unlock()
+	}, true
+}
+
+func (d *Daemon) terminalReportClock() time.Time {
+	if d.terminalReportNow != nil {
+		return d.terminalReportNow()
+	}
+	return time.Now()
+}
+
+func (d *Daemon) sendTerminalTaskReport(ctx context.Context, report terminalTaskReport, schedule []time.Duration) error {
+	if d.terminalReportSend != nil {
+		return d.terminalReportSend(ctx, report, schedule)
+	}
+	switch report.kind {
+	case terminalTaskReportComplete:
+		return d.client.completeTaskWithRetrySchedule(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, schedule)
+	case terminalTaskReportFail:
+		return d.client.failTaskWithRetrySchedule(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, schedule)
+	default:
+		return fmt.Errorf("unsupported terminal task report kind %d", report.kind)
 	}
 }
 
@@ -2565,7 +6426,7 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 // internal task with no IDs at all). The caller skips writing a meta file
 // in that case so the directory falls back to mtime-based orphan cleanup.
 func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
-	meta := execenv.GCMeta{WorkspaceID: task.WorkspaceID}
+	meta := execenv.GCMeta{WorkspaceID: task.WorkspaceID, TaskID: task.ID}
 	switch {
 	case task.ChatSessionID != "":
 		meta.Kind = execenv.GCKindChat
@@ -2589,40 +6450,1219 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 	return meta, true
 }
 
+func taskRootDirParams(workspacesRoot string, task Task) execenv.RootDirParams {
+	return execenv.RootDirParams{
+		WorkspacesRoot:  workspacesRoot,
+		WorkspaceID:     task.WorkspaceID,
+		WorkspaceSlug:   task.WorkspaceSlug,
+		TaskID:          task.ID,
+		IssueIdentifier: task.IssueIdentifier,
+	}
+}
+
+// runtimeDisplayNameOverrides maps a provider key to the human-facing runtime
+// name when simple title-casing would read awkwardly. Providers not listed
+// here fall back to capitalizing the key (claude → "Claude", codex → "Codex").
+// Built-in runtime identities (from agent.BuiltinRuntimes) are seeded into
+// this map at init so their display names stay in lockstep with the
+// descriptor.
+var runtimeDisplayNameOverrides = map[string]string{
+	"codearts":   "CodeArts",
+	"dsh":        "DeepSeek Harness",
+	"traecli":    "Trae",
+	"grok":       "Grok",
+	"qoderclicn": "Qoder CN",
+	"qwen":       "Qwen Code",
+	"qwenpaw":    "QwenPaw",
+	"mcode":      "MiniMax Code",
+	"zeroclaw":   "ZeroClaw",
+}
+
+func init() {
+	// Seed built-in runtime identity display names from the descriptor so
+	// adding a new fork doesn't require editing this map by hand.
+	for _, desc := range agent.BuiltinRuntimes {
+		runtimeDisplayNameOverrides[desc.ID] = desc.DisplayName
+	}
+}
+
+// providerDisplayName returns the human-facing runtime name for a provider key.
+func providerDisplayName(name string) string {
+	if name == "" {
+		return name
+	}
+	if friendly, ok := runtimeDisplayNameOverrides[name]; ok {
+		return friendly
+	}
+	return strings.ToUpper(name[:1]) + name[1:]
+}
+
+// providerNeedsInlineSystemPrompt reports whether the runtime brief must ride
+// along in the turn itself (agent.ExecOptions.SystemPrompt) because the CLI
+// will not pick up the per-task context file execenv writes into the workdir.
+// This is the ONLY place that decides it, and it is the reason every other
+// backend sees an empty SystemPrompt.
+//
+// Adding a provider here is a real fix only when that CLI genuinely ignores its
+// context file — traecli was added because it reads .trae/rules/ and not
+// AGENTS.md, so its agents were silently missing the workflow section and left
+// issues stuck in `todo` with no comment and no error. Adding one that DOES
+// read the file just duplicates the brief on every turn.
+//
+// Confirmed to load their context file, so deliberately absent here. MUL-5392
+// probed each one over its real launch path with a canary in the context file
+// and no inline delivery: claude 2.1.220 (CLAUDE.md), codex 0.144.6 driving the
+// app-server (AGENTS.md), opencode 1.17.7 (AGENTS.md), pi 0.67.2 (AGENTS.md),
+// hermes 0.18.2 over ACP (AGENTS.md). MCode 0.1.2 also loads AGENTS.md by its
+// native runtime contract. kiro was confirmed earlier by a kiro-cli
+// 2.13.0 ACP smoke — see the call site. Still unprobed: grok, qoder, codebuddy.
 func providerNeedsInlineSystemPrompt(provider string) bool {
 	switch provider {
-	case "openclaw", "kiro", "kimi":
+	case "openclaw", "kimi", "traecli", "qwenpaw":
 		return true
 	default:
 		return false
 	}
 }
 
-// gateResumeToReusedWorkdir clears the task's prior session unless the task
-// runs in the exact workdir the session was recorded against, and reports
-// whether that workdir was reused. CLI backends key their session stores to
-// the cwd (Claude Code looks sessions up under ~/.claude/projects/<encoded-cwd>/),
-// so a session id from a different workdir can never resolve: the CLI exits
-// within a second and the run fails before doing any work — permanently,
-// because the failed run records no session and the next claim serves the
-// same stale pointer again. This fires whenever the prior workdir no longer
-// exists (GC'd after the issue went done, daemon reinstall, manual cleanup)
-// and execenv.Reuse fell back to a fresh Prepare (GitHub #3854).
-func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, envWorkDir string, taskLog *slog.Logger) bool {
-	reused := task.PriorWorkDir != "" && envWorkDir == task.PriorWorkDir
-	if !reused && task.PriorSessionID != "" {
-		taskLog.Info("dropping prior session: workdir not reused, per-cwd session cannot resolve",
+// gateResumeToReachableSession clears the task's prior session unless this run
+// can actually reach the store the session lives in, and reports whether that
+// held. Most CLI backends key their session stores to the cwd (Claude Code
+// looks sessions up under ~/.claude/projects/<encoded-cwd>/), so a session id
+// from a different workdir can never resolve: the CLI exits within a second
+// and the run fails before doing any work — permanently, because the failed
+// run records no session and the next claim serves the same stale pointer
+// again. This fires whenever the prior workdir no longer exists (GC'd after
+// the issue went done, daemon reinstall, manual cleanup) and execenv.Reuse fell
+// back to a fresh Prepare (GitHub #3854).
+//
+// Pi and OMP are the exception. Their opaque session id is an absolute JSONL
+// path under ~/.multica/pi-sessions, and the backend passes that path directly
+// to --session. The transcript remains resumable when only the task workdir
+// changes, so binding it to workdir reuse discards healthy conversation history
+// and forces the model to reconstruct it through `multica chat history`.
+//
+// A matching workdir is not sufficient on its own. Hermes keys its sessions to
+// HERMES_HOME — the per-task overlay under envRoot — not to the cwd, and the
+// two keys come apart precisely in the local_directory flow: reuse is disabled
+// there (shouldReusePriorWorkdir), so every task builds a fresh overlay with an
+// empty state.db, while envWorkDir stays the user's own directory and therefore
+// still equals PriorWorkDir. The gate read "reused" and forwarded a session id
+// that could not possibly resolve, and Hermes answers an unresolvable resume by
+// silently starting over (GH #6806). sessionHomeReachable is the provider's own
+// answer to "can a prior session still be found here?" — for Hermes, whether
+// the conversation's session store got mounted (execenv.Environment
+// HermesSessionStore) — and false drops the resume with the same disclosure as
+// a workdir mismatch.
+// sameExistingDir reports whether two paths name the same existing directory.
+// False when either cannot be stat'd, which is the safe answer for cwd-keyed
+// providers: an absent prior workdir means there is nothing to resume from.
+func sameExistingDir(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(ai, bi)
+}
+
+func gateResumeToReachableSession(task *Task, taskCtx *execenv.TaskContextForEnv, provider, envWorkDir string, sessionHomeReachable, refusesMissingSessionCwd bool, taskLog *slog.Logger) bool {
+	var reachable bool
+	if providerUsesPiSessionFile(provider) {
+		reachable = piSessionResumable(task.PriorSessionID, refusesMissingSessionCwd)
+	} else {
+		// Compare the directories, not the spelling. Reuse runs in the canonical
+		// path it validated and locked, which need not be character-identical to
+		// the PriorWorkDir the server sent — a symlinked workspaces root is enough
+		// to make them differ. A string compare would then silently drop the prior
+		// session on every follow-up task in that installation.
+		reachable = task.PriorWorkDir != "" && sameExistingDir(envWorkDir, task.PriorWorkDir) && sessionHomeReachable
+	}
+	if !reachable && task.PriorSessionID != "" {
+		taskLog.Info("dropping prior session: session store not reachable from this run",
+			"provider", provider,
 			"session_id", task.PriorSessionID,
 			"prior_workdir", task.PriorWorkDir,
 			"workdir", envWorkDir,
+			"session_home_reachable", sessionHomeReachable,
 		)
 		task.PriorSessionID = ""
 		taskCtx.PriorSessionResumed = false
+		// The user expected this run to continue the prior conversation; surface
+		// the loss instead of silently restarting (MUL-4424). Set it on BOTH
+		// carriers: the notice is rendered from `task` by BuildPrompt (MUL-5377
+		// moved it out of the brief), while taskCtx still drives execenv.
+		taskCtx.PriorSessionResumeUnavailable = true
+		task.PriorSessionResumeUnavailable = true
 	}
-	return reused
+	return reachable
 }
 
-func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
+func providerUsesPiSessionFile(provider string) bool {
+	if provider == "pi" {
+		return true
+	}
+	desc, ok := agent.BuiltinRuntimeByID(provider)
+	return ok && desc.ProtocolFamily == "pi"
+}
+
+// piSessionResumable reports whether the backend can actually START from this
+// session. The transcript file always has to be there; whether its recorded
+// working directory also has to be there depends on the runtime, which is what
+// refusesMissingCwd carries (providerRefusesMissingSessionCwd).
+//
+// Checking only the file is what produced GH #8082: after the prior task's
+// worktree was reclaimed the file survived, the gate reported the session
+// reachable, and Pi exited 1 in under 200ms with no tool call and no output —
+// permanently, because the failed run records the same session id again and the
+// next claim serves the same stale pointer. That is the exact failure shape the
+// gate above exists to prevent; #7760 removed the protection for the Pi family
+// without replacing it with the key Pi actually validates.
+func piSessionResumable(sessionID string, refusesMissingCwd bool) bool {
+	if !piSessionFilePresent(sessionID) {
+		return false
+	}
+	return !refusesMissingCwd || piSessionCwdPresent(sessionID)
+}
+
+// providerRefusesMissingSessionCwd reports whether a runtime refuses to start
+// when the working directory recorded in the transcript no longer exists.
+//
+// This is deliberately NOT the same question as providerUsesPiSessionFile.
+// That one asks where the session lives — an independently addressed JSONL path
+// rather than a cwd-keyed store — and it is true for the whole Pi protocol
+// family. This one asks what the runtime does with the cwd it finds inside that
+// file, and the family does not agree:
+//
+//   - pi re-anchors a resumed run to the recorded cwd and hard-refuses when it
+//     is gone (GH #8082).
+//   - omp opens the transcript from an explicit --session path and falls back to
+//     the launch cwd instead; verified on v17.2.12, where the same transcript
+//     whose recorded cwd had been deleted resumed with exit 0 and ran in the
+//     launch directory.
+//
+// So the check must not be applied family-wide: doing that drops omp sessions
+// omp would have resumed cleanly, which is exactly the continuity loss #7760
+// set out to fix.
+//
+// builtinRuntime is why the provider name alone cannot answer this. A custom
+// runtime profile keeps its protocol family as the provider, so
+// `protocol_family: pi` with `command_name: <anything>` also arrives here as
+// "pi" while being an unrelated implementation — the same trap agent.Config's
+// BuiltinRuntime field documents. Only the provider's own discovered binary is
+// the CLI whose refusal was actually verified, so a custom command answers
+// false and keeps its session.
+//
+// False is the safe default in both directions — unknown Pi-family runtime,
+// and custom command. A runtime that refuses in the words the backend matches
+// (piResumeRefusedMarker) is still recovered by Result.ResumeRejected: one
+// wasted run and a fresh session, not the permanent loop this issue reported.
+// That backstop is a single phrase match and does not generalise to a refusal
+// worded differently — but it does cover the case this default is most likely
+// to be wrong about, a Pi-family runtime behaving like Pi. Guessing the other
+// way has no backstop at all: it silently discards history that was never in
+// danger, with nothing downstream to notice.
+func providerRefusesMissingSessionCwd(provider string, builtinRuntime bool) bool {
+	return builtinRuntime && provider == "pi"
+}
+
+// piSessionFilePresent proves there is persisted history to resume. It does
+// not claim the transcript is idle: the Pi backend takes an exclusive lock for
+// the complete child-process lifetime and reports a busy resume as rejected so
+// runTask falls back to its existing one-shot fresh-session path.
+func piSessionFilePresent(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	info, err := os.Stat(sessionID)
+	return err == nil && info.Mode().IsRegular() && info.Size() > 0
+}
+
+// piSessionCwdPresent mirrors Pi's own startup check, deliberately condition
+// for condition, so the two cannot disagree about what "resumable" means a
+// second time. Pi refuses to start if and only if the transcript carries a
+// session header whose `cwd` is non-empty and does not exist on disk; with no
+// header, or an empty cwd, it falls back to the launch directory and starts
+// normally. Anything this predicate cannot read is therefore NOT evidence of a
+// refusal, and returns true: a false negative here silently discards healthy
+// conversation history, which is the regression #7760 set out to fix.
+//
+// Existence is the whole test — not "is a directory". Pi uses existsSync, which
+// is true for a plain file too, so demanding a directory would drop sessions Pi
+// would have accepted and re-open the same divergence from the other side.
+//
+// Note this says nothing about WHICH directory the resumed run will use. Pi
+// adopts the recorded cwd, so a session whose recorded cwd still exists but is
+// not this task's workdir resumes into the older directory. That is a separate
+// defect with a separate fix; this predicate deliberately keeps the existing
+// behaviour there rather than widening a crash fix into a semantic change.
+func piSessionCwdPresent(sessionID string) bool {
+	cwd, ok := piSessionRecordedCwd(sessionID)
+	if !ok || cwd == "" {
+		return true
+	}
+	_, err := os.Stat(cwd)
+	return err == nil
+}
+
+// piSessionHeaderScanLines bounds how far into a transcript we look for the
+// session header. Pi writes it as the first line at session creation, so the
+// answer is always line 1 in practice; the bound only stops a pathological or
+// hand-edited file from turning a cheap predicate into a full read of a
+// multi-megabyte transcript.
+const piSessionHeaderScanLines = 64
+
+// piSessionMaxHeaderLine caps a single scanned line. A transcript's later lines
+// carry whole assistant turns and can be far larger than bufio's 64KB default;
+// without this the scan would stop early with an error on a perfectly healthy
+// file.
+const piSessionMaxHeaderLine = 1 << 20
+
+// piSessionRecordedCwd returns the cwd recorded in the transcript's session
+// header. The bool reports whether a header was found at all — callers must
+// distinguish "no header" (Pi starts fine) from "header with an empty cwd"
+// (also fine), and neither from a real recorded directory.
+func piSessionRecordedCwd(path string) (string, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer func() { _ = f.Close() }()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), piSessionMaxHeaderLine)
+	for i := 0; i < piSessionHeaderScanLines && scanner.Scan(); i++ {
+		var entry struct {
+			Type string `json:"type"`
+			Cwd  string `json:"cwd"`
+		}
+		// A malformed line is skipped rather than failing the scan: Pi itself
+		// tolerates unparseable entries when loading a transcript.
+		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+			continue
+		}
+		if entry.Type == "session" {
+			return entry.Cwd, true
+		}
+	}
+	return "", false
+}
+
+// sessionHomeReachable reports whether a session recorded by a prior task on
+// this conversation can still be found from THIS run's environment, for
+// providers that key their sessions somewhere other than the cwd.
+//
+// Only Hermes does today: its transcripts live in `<HERMES_HOME>/state.db`,
+// which is the per-task overlay under envRoot. Forwarding a session id into a
+// database that does not hold it is what produced a conversation restarting
+// from zero every turn (GH #6806), so the question has to be about the
+// database, not about the plumbing:
+//
+//   - With the conversation's session store mounted, the answer is whether that
+//     store actually holds a transcript. A mount onto an empty store is the
+//     normal shape of a first turn — and also of a store the GC reclaimed
+//     between turns, a switched Hermes profile, or a dangling link left by an
+//     older overlay. Reading "mounted" as "resumable" would forward a dead id
+//     into every one of those.
+//   - With no store, the transcript is the overlay's own task-local file, which
+//     survives exactly when this run reused the prior task's env root.
+//
+// Every other provider is keyed by cwd or handles its independently addressed
+// store in gateResumeToReachableSession, so this predicate returns true.
+func sessionHomeReachable(provider string, env *execenv.Environment, envReused bool) bool {
+	if provider != "hermes" {
+		return true
+	}
+	if env.HermesSessionStore != "" {
+		return env.HermesSessionHistoryPresent
+	}
+	return envReused
+}
+
+// shouldReusePriorWorkdir keeps the local_directory lock and cross-agent
+// isolation invariants without forcing managed follow-ups onto a fresh
+// provider session. Every managed issue or chat task may reuse only directories
+// that resolve to the two-segment managed root shape, carry Prepare-time
+// managed-env provenance for the same workspace/scope/agent, and carry a
+// matching daemon task-context marker. Other task kinds have no durable scope
+// with which to prove ownership and therefore start fresh.
+//
+// Reuse eligibility is deliberately keyed off .managed_env.json (written by
+// execenv.Prepare) and NOT .gc_meta.json (written only after the task reaches
+// terminal state). The server's task-complete handler reconciles a follow-up
+// and wakes the runtime before the prior task's daemon handler writes the GC
+// file, so a successor can be claimed inside that window; keying off the
+// terminal file raced and dropped the session (MUL-4886). Both proofs this
+// function reads — the env-root provenance and the workdir task-context marker
+// — are written at Prepare time, so neither depends on completion ordering.
+func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignment, workspacesRoot string) (string, bool) {
+	if task.PriorWorkDir == "" || localAssignment != nil {
+		return "", false
+	}
+
+	root, err := filepath.EvalSymlinks(workspacesRoot)
+	if err != nil {
+		return "", false
+	}
+	workdir, err := filepath.EvalSymlinks(task.PriorWorkDir)
+	if err != nil {
+		return "", false
+	}
+	info, err := os.Stat(workdir)
+	if err != nil || !info.IsDir() {
+		return "", false
+	}
+	rel, err := filepath.Rel(root, workdir)
+	if err != nil || !filepath.IsLocal(rel) {
+		return "", false
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] != "workdir" {
+		return "", false
+	}
+	if task.AgentID == "" || (task.IssueID == "" && task.ChatSessionID == "") {
+		return "", false
+	}
+	// Managed-env provenance is written only for non-local resumable envs, so
+	// its presence (plus the workspace/scope/agent match) proves this is a
+	// safe daemon-managed reuse target and not a residual local_directory path.
+	prov, err := execenv.ReadManagedEnvProvenance(filepath.Dir(workdir))
+	if err != nil || prov.ManagedBy != execenv.ManagedEnvProvenanceManagedBy ||
+		prov.WorkspaceID != task.WorkspaceID ||
+		prov.AgentID != task.AgentID {
+		return "", false
+	}
+
+	data, err := os.ReadFile(filepath.Join(workdir, execenv.TaskContextMarkerRelPath))
+	if err != nil {
+		return "", false
+	}
+	var marker struct {
+		ManagedBy     string `json:"managed_by"`
+		AgentID       string `json:"agent_id"`
+		IssueID       string `json:"issue_id"`
+		ChatSessionID string `json:"chat_session_id"`
+	}
+	if json.Unmarshal(data, &marker) != nil {
+		return "", false
+	}
+	if marker.ManagedBy != execenv.TaskContextMarkerManagedBy || marker.AgentID != task.AgentID {
+		return "", false
+	}
+	if task.IssueID != "" {
+		if prov.IssueID != task.IssueID || marker.IssueID != task.IssueID {
+			return "", false
+		}
+		return workdir, true
+	}
+	if prov.ChatSessionID != task.ChatSessionID || marker.ChatSessionID != task.ChatSessionID {
+		return "", false
+	}
+	return workdir, true
+}
+
+// gateCodexResumeToRolloutPresence drops the prior Codex session when its
+// rollout is not actually present in the task's CODEX_HOME sessions. A reused
+// workdir keeps PriorSessionID (gateResumeToReachableSession), but Codex session
+// isolation (MUL-4424) means the rollout may be missing: a migrated legacy home
+// that could not locate it, or a local_directory task whose shared history was
+// pruned. Codex would then silently thread/start from scratch, so we clear the
+// resume claim from both the backend (PriorSessionID) and the brief
+// (PriorSessionResumed) instead of pretending the conversation continues.
+// No-op for non-Codex providers or when there is nothing to resume.
+func gateCodexResumeToRolloutPresence(task *Task, taskCtx *execenv.TaskContextForEnv, provider, codexHome string, taskLog *slog.Logger) {
+	if provider != "codex" || task.PriorSessionID == "" || codexHome == "" {
+		return
+	}
+	if execenv.CodexResumeRolloutPresent(codexHome, task.PriorSessionID) {
+		return
+	}
+	taskLog.Warn("dropping prior codex session: rollout not present in task CODEX_HOME; starting a fresh thread",
+		"session_id", task.PriorSessionID, "codex_home", codexHome)
+	task.PriorSessionID = ""
+	taskCtx.PriorSessionResumed = false
+	// The user expected this run to continue the prior conversation; surface the
+	// loss instead of silently restarting (MUL-4424). Set it on BOTH carriers:
+	// the notice is rendered from `task` by BuildPrompt (MUL-5377 moved it out
+	// of the brief), while taskCtx still drives execenv.
+	taskCtx.PriorSessionResumeUnavailable = true
+	task.PriorSessionResumeUnavailable = true
+}
+
+const (
+	// codexRolloutFlushWait bounds how long the daemon waits for Codex to finish
+	// writing a session's rollout into the per-task store before treating that
+	// session as unrecoverable. Codex streams the rollout as the thread runs, so
+	// in the common case the file already exists and the check returns at once;
+	// the wait only adds latency on the rare path where the rollout never lands
+	// (an early crash/error) — which is exactly the pointer we must not persist.
+	codexRolloutFlushWait    = 2 * time.Second
+	codexRolloutPollInterval = 50 * time.Millisecond
+)
+
+// codexSessionResumable reports whether a Codex session's rollout is present in
+// the task's per-issue session store, so the daemon never records a session
+// pointer the next follow-up would only discover is unresumable — and then drop
+// via gateCodexResumeToRolloutPresence, losing the conversation (MUL-5305). It
+// mirrors, at write time, the presence gate the daemon already applies at resume
+// time: only a session whose rollout is on disk is worth persisting as the
+// resumable pointer.
+//
+// Non-Codex providers have no rollout store to check (codexHome == "") and are
+// always treated as resumable, preserving their existing behavior. Codex is
+// given a brief bounded window to finish flushing before we give up, so ordinary
+// flush lag is not mistaken for a lost rollout.
+func codexSessionResumable(codexHome, sessionID string, wait time.Duration) bool {
+	if codexHome == "" || sessionID == "" {
+		return true
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		if execenv.CodexResumeRolloutPresent(codexHome, sessionID) {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(codexRolloutPollInterval)
+	}
+}
+
+// waitCodexRolloutPresent blocks until sessionID's rollout appears in codexHome's
+// per-issue store or ctx is done, returning whether it became present. It backs
+// the mid-flight pin: Codex reveals the session id on a single task_started
+// status, so a fixed one-shot check would miss a rollout that flushes a beat
+// later; polling for the life of the run (bounded by ctx) catches it while never
+// outliving the task. Non-Codex providers (codexHome == "") have no rollout to
+// verify and return immediately (MUL-5305).
+func waitCodexRolloutPresent(ctx context.Context, codexHome, sessionID string) bool {
+	if codexHome == "" || sessionID == "" {
+		return true
+	}
+	if execenv.CodexResumeRolloutPresent(codexHome, sessionID) {
+		return true
+	}
+	ticker := time.NewTicker(codexRolloutPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			// The rollout may have landed just as the run ended — check once more.
+			return execenv.CodexResumeRolloutPresent(codexHome, sessionID)
+		case <-ticker.C:
+			if execenv.CodexResumeRolloutPresent(codexHome, sessionID) {
+				return true
+			}
+		}
+	}
+}
+
+func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
+	if task == nil || task.Agent == nil || len(task.Agent.SkillRefs) == 0 {
+		return nil
+	}
+	resolved := make(map[string]SkillData, len(task.Agent.SkillRefs))
+	misses := make([]SkillRefData, 0)
+	for _, ref := range task.Agent.SkillRefs {
+		ref := ref
+		var bundle SkillData
+		if err := d.skillCache.WithRefLock(task.WorkspaceID, ref, func() error {
+			if cached, ok := d.skillCache.Load(task.WorkspaceID, ref); ok {
+				bundle = cached
+				return nil
+			}
+			misses = append(misses, ref)
+			return nil
+		}); err != nil {
+			return fmt.Errorf("load skill bundle cache: %w", err)
+		}
+		if bundle.ID != "" {
+			resolved[skillRefKey(ref.Source, ref.ID)] = bundle
+		}
+	}
+
+	// Resolve each missing bundle in its own request, caching it the moment it
+	// arrives. The download is the slow part on jittery links, so fetching the
+	// whole set in one atomic body read meant a single timeout discarded all
+	// progress and the cache never converged — every dispatch re-downloaded
+	// everything and timed out again. Per-skill, each download fits its own
+	// size-scaled deadline and is persisted independently, so even a dispatch
+	// that ultimately fails leaves the skills it did fetch cached for the next
+	// one. (GitHub #4505 / MUL-3650)
+	for _, ref := range misses {
+		started := time.Now()
+		bundle, stats, err := d.resolveSkillBundle(ctx, task, ref)
+		if err != nil {
+			if isSkillBundleTransferFailure(err) {
+				// Only transport failures and incomplete 2xx bodies get the
+				// network diagnosis. HTTP error responses and invalid complete
+				// payloads retain their server semantics instead of being
+				// relabelled as connectivity problems (GitHub #7386).
+				return fmt.Errorf("%w: %s: %w",
+					errSkillBundleUnavailable,
+					describeSkillBundleFailure(ref, stats, time.Since(started)),
+					err)
+			}
+			return fmt.Errorf("%w: %w", errSkillBundleUnavailable, err)
+		}
+		resolved[skillRefKey(bundle.Source, bundle.ID)] = bundle
+	}
+
+	skills := make([]SkillData, 0, len(task.Agent.SkillRefs))
+	for _, ref := range task.Agent.SkillRefs {
+		bundle, ok := resolved[skillRefKey(ref.Source, ref.ID)]
+		if !ok {
+			return fmt.Errorf("skill bundle missing after resolve: skill_id=%s source=%s hash=%s", ref.ID, ref.Source, ref.Hash)
+		}
+		skills = append(skills, bundle)
+	}
+	task.Agent.Skills = skills
+	return nil
+}
+
+// resolveSkillBundle downloads one skill bundle and writes it to the on-disk
+// cache before returning. The request runs under its own deadline, scaled to
+// the bundle's declared size rather than the daemon's fixed 30s control-plane
+// timeout, so a large bundle on a slow link is given room to finish instead of
+// being cut off mid-body. Caching on success is what lets the resolve converge
+// across dispatches. (GitHub #4505 / MUL-3650)
+func (d *Daemon) resolveSkillBundle(ctx context.Context, task *Task, ref SkillRefData) (SkillData, TransferStats, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, skillBundleResolveTimeout(ref.SizeBytes))
+	defer cancel()
+
+	bundle, stats, err := d.client.ResolveSkillBundle(reqCtx, task.RuntimeID, task.ID, ref)
+	if err != nil {
+		return SkillData{}, stats, err
+	}
+	// The resolve endpoint serves the agent's *current* bundle and hash, which
+	// may differ from the claim-time ref when the skill was edited between
+	// claim and prepare (see ResolveTaskSkillBundles). So confirm only that the
+	// server returned the skill we asked for (source/id), then validate the
+	// bundle for self-consistency against a ref derived from itself — pinning
+	// it to the possibly-stale requested hash would reject a legitimate update.
+	if bundle.Source != ref.Source || bundle.ID != ref.ID {
+		return SkillData{}, stats, fmt.Errorf("resolve skill bundle returned wrong skill: requested source=%s id=%s, got source=%s id=%s", ref.Source, ref.ID, bundle.Source, bundle.ID)
+	}
+	bundleRef := skillRefFromBundle(bundle)
+	validationRef := bundleRef
+	if ref.Source == skillbundle.SourcePlugin {
+		validationRef = ref
+	}
+	if !validateSkillBundle(validationRef, bundle) {
+		return SkillData{}, stats, fmt.Errorf("resolve skill bundle returned invalid bundle: skill_id=%s source=%s hash=%s", bundle.ID, bundle.Source, bundle.Hash)
+	}
+	if err := d.skillCache.WithRefLock(task.WorkspaceID, validationRef, func() error {
+		return d.skillCache.Store(task.WorkspaceID, bundle)
+	}); err != nil {
+		if d.logger != nil {
+			d.logger.Warn("skill bundle cache store failed; continuing with downloaded bundle",
+				"workspace_id", task.WorkspaceID,
+				"skill_id", bundle.ID,
+				"source", bundle.Source,
+				"hash", bundle.Hash,
+				"error", err,
+			)
+		}
+	}
+	return bundle, stats, nil
+}
+
+// isSkillBundleTransferFailure identifies errors for which byte-level network
+// diagnostics are meaningful. A requestError is an explicit server response;
+// malformed but complete JSON and bundle-validation errors are server payload
+// problems. Neither should be presented as a slow or dead network link. In
+// particular, json.Decoder can synthesize io.ErrUnexpectedEOF after its source
+// ended with a clean EOF, so that decoder error alone is not transport proof.
+func isSkillBundleTransferFailure(err error) bool {
+	var reqErr *requestError
+	if errors.As(err, &reqErr) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
+}
+
+// describeSkillBundleFailure renders the diagnostic half of a failed bundle
+// download: what was being fetched, how many HTTP response-body bytes arrived,
+// the separately declared decoded content size, and whether this host has a
+// proxy at all.
+//
+// The three facts answer the three wrong turns the old text invited. "network
+// error downloading skill X" instead of "skill X unavailable" stops the reader
+// blaming the skill. The response byte count distinguishes a dead link from a
+// partial response without pretending JSON wire bytes and decoded skill-content
+// bytes form one progress ratio. The proxy note catches the case behind GitHub
+// #7386, where a daemon that inherited no proxy on a cross-border link never got
+// a byte through while the same host succeeded through a local proxy.
+func describeSkillBundleFailure(ref SkillRefData, stats TransferStats, elapsed time.Duration) string {
+	elapsed = elapsed.Round(time.Millisecond)
+	var transfer string
+	switch {
+	case !stats.ResponseStarted:
+		transfer = fmt.Sprintf("no successful response from server after %s overall", elapsed)
+	case stats.BytesRead == 0:
+		transfer = fmt.Sprintf("a successful response started but delivered no body bytes before failing after %s overall", elapsed)
+	default:
+		// BytesRead is a single-attempt high-water mark, while elapsed covers
+		// the logical call including retries and backoff. State both scopes
+		// rather than deriving a rate from mismatched measurements.
+		transfer = fmt.Sprintf("received up to %s of response body data in one attempt; failed after %s overall",
+			formatBytes(stats.BytesRead), elapsed)
+	}
+	return fmt.Sprintf("network error downloading skill %q (id=%s): %s; declared skill content size %s; %s; the skill content is not at fault",
+		ref.Name, ref.ID, transfer, formatBytes(ref.SizeBytes), proxyEnvSummary())
+}
+
+// proxyEnvSummary reports whether the daemon inherited any proxy setting. It
+// names the variable but never its value: proxy URLs routinely embed
+// credentials, and this string lands in task failure text the whole workspace
+// can read.
+//
+// Go's transport only consults these variables — it does not read the Windows
+// system proxy — and it reads them at process start, so a daemon that was
+// already running when they were set still shows none (GitHub #7386).
+func proxyEnvSummary() string {
+	for _, key := range []string{"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"} {
+		if strings.TrimSpace(os.Getenv(key)) != "" {
+			return fmt.Sprintf("proxy configured (%s)", key)
+		}
+	}
+	return "no proxy configured (HTTPS_PROXY unset)"
+}
+
+// formatBytes renders a byte count for humans reading a failure message.
+func formatBytes(n int64) string {
+	switch {
+	case n < 0:
+		return "unknown size"
+	case n < 1024:
+		return fmt.Sprintf("%d B", n)
+	case n < 1024*1024:
+		return fmt.Sprintf("%.0f KB", float64(n)/1024)
+	default:
+		return fmt.Sprintf("%.2f MB", float64(n)/(1024*1024))
+	}
+}
+
+const (
+	// skillBundleResolveMinTimeout floors the per-skill resolve deadline so a
+	// tiny bundle still tolerates connection setup and round-trip latency.
+	skillBundleResolveMinTimeout = 30 * time.Second
+	// skillBundleResolveMaxTimeout caps it so a wedged download cannot pin a
+	// task in prepare indefinitely.
+	skillBundleResolveMaxTimeout = 5 * time.Minute
+	// skillBundleResolveMinThroughput is the pessimistic floor throughput
+	// (bytes/sec) used to scale the deadline to bundle size — deliberately low
+	// to cover slow, jittery links rather than ideal bandwidth.
+	skillBundleResolveMinThroughput = 50 * 1024
+)
+
+// skillBundleResolveTimeout returns the deadline budget for downloading a
+// bundle of the given size: at least skillBundleResolveMinTimeout, scaled up at
+// skillBundleResolveMinThroughput, and capped at skillBundleResolveMaxTimeout.
+func skillBundleResolveTimeout(sizeBytes int64) time.Duration {
+	if sizeBytes <= 0 {
+		return skillBundleResolveMinTimeout
+	}
+	scaled := time.Duration(sizeBytes/skillBundleResolveMinThroughput) * time.Second
+	if scaled < skillBundleResolveMinTimeout {
+		return skillBundleResolveMinTimeout
+	}
+	if scaled > skillBundleResolveMaxTimeout {
+		return skillBundleResolveMaxTimeout
+	}
+	return scaled
+}
+
+func (d *Daemon) startTaskPrepareLeaseExtender(ctx context.Context, task Task, taskLog *slog.Logger) func() {
+	refresh := d.prepareLeaseRefresh
+	if refresh <= 0 {
+		refresh = taskPrepareLeaseRefresh
+	}
+	leaseCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(refresh)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-leaseCtx.Done():
+				return
+			case <-ticker.C:
+				reqCtx, reqCancel := context.WithTimeout(leaseCtx, taskPrepareLeaseTimeout)
+				err := d.client.ExtendTaskPrepareLease(reqCtx, task.RuntimeID, task.ID)
+				reqCancel()
+				if err != nil {
+					taskLog.Warn("extend task prepare lease failed", "error", err)
+				}
+			}
+		}
+	}()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			cancel()
+			<-done
+		})
+	}
+}
+
+// lockReusablePriorEnvRoot decides whether this task may continue in a prior
+// task's env root and, if so, takes the exclusion lock on it.
+//
+// Order matters and is the point of this function. The lock WRITES a file into
+// the directory, so eligibility has to be proven first:
+// shouldReusePriorWorkdir resolves symlinks, checks the
+// {workspace}/{task}/workdir shape and verifies managed provenance, and only
+// the canonical path it returns is ever opened. Locking on
+// filepath.Dir(task.PriorWorkDir) before that would drop .task_lock into
+// whatever the path happened to point at — a symlink target outside the
+// workspaces root, or a user's own local_directory.
+//
+// The re-check under the lock closes the gap between proving eligibility and
+// acting on it. Declining is always safe: the caller falls back to a fresh
+// Prepare, which costs session continuity, not correctness.
+//
+// The error return is the one outcome that is NOT "decline and carry on": it is
+// non-nil only when the run was cancelled while waiting for the prior env root,
+// and it carries the context's cause so the caller can end the task instead of
+// preparing an environment for work that no longer exists.
+func (d *Daemon) lockReusablePriorEnvRoot(ctx context.Context, task Task, localAssignment *localDirectoryAssignment, heldRoot string) (*execenv.EnvRootClaim, string, os.FileInfo, bool, error) {
+	// Pin the workspaces root BEFORE validating anything. Opening it after,
+	// from a name validation just approved, would re-resolve that name: rename
+	// the root aside, leave a symlink to a look-alike tree, and os.Root
+	// faithfully pins the replacement. Root promises you cannot escape the tree
+	// it opened — not that it opened the tree you meant. Holding the handle
+	// first makes that ordering impossible.
+	wsRoot, err := os.OpenRoot(d.cfg.WorkspacesRoot)
+	if err != nil {
+		return nil, "", nil, false, nil
+	}
+	defer wsRoot.Close()
+
+	workDir, ok := shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot)
+	if !ok {
+		return nil, "", nil, false, nil
+	}
+	priorRoot := filepath.Dir(workDir)
+	// workDir came back through EvalSymlinks, so the root it is measured
+	// against has to be resolved the same way — otherwise a symlinked
+	// workspaces root (macOS /tmp -> /private/tmp, a home on a linked volume)
+	// makes the two look unrelated and every reuse is refused.
+	canonicalWorkspacesRoot, err := filepath.EvalSymlinks(d.cfg.WorkspacesRoot)
+	if err != nil {
+		return nil, "", nil, false, nil
+	}
+	rel, err := filepath.Rel(canonicalWorkspacesRoot, priorRoot)
+	if err != nil || !filepath.IsLocal(rel) {
+		return nil, "", nil, false, nil
+	}
+	// Already covered by this run's own claim (a task re-dispatched onto its
+	// own directory); taking a second lock on it would only deadlock against
+	// ourselves.
+	if priorRoot == heldRoot {
+		return nil, workDir, nil, true, nil
+	}
+
+	// Pin the identity of the directory that just passed validation. Every
+	// later step is checked against THIS, not against whatever the name
+	// resolves to next: a path string cannot tell "the directory I validated"
+	// apart from "a different directory now answering to that name".
+	validatedInfo, err := os.Stat(priorRoot)
+	if err != nil {
+		return nil, "", nil, false, nil
+	}
+
+	// Deterministic seam for the TOCTOU regressions: tests swap the validated
+	// directory here, between proving eligibility and taking the lock.
+	if reuseLockTestHook != nil {
+		reuseLockTestHook()
+	}
+
+	lockStartedAt := time.Now()
+	claim, lockedInfo, err := d.lockEnvRootForReuseWaitingOutTheBusyWindow(ctx, wsRoot, rel, priorRoot, task)
+	switch {
+	case errors.Is(err, errPriorEnvRootWaitAborted):
+		// The run is over. Declining reuse would hand the caller on to a fresh
+		// Prepare, which is the one thing that must not happen here.
+		return nil, "", nil, false, context.Cause(ctx)
+	case errors.Is(err, execenv.ErrEnvRootBusy):
+		d.logger.Info("prior workdir is still in use after waiting for it; starting a fresh environment",
+			"task", task.ID, "prior_root", filepath.Base(priorRoot),
+			"waited", time.Since(lockStartedAt).Round(time.Millisecond), "budget", d.envRootBusyWait)
+		return nil, "", nil, false, nil
+	case err != nil:
+		d.logger.Warn("could not lock prior workdir; starting a fresh environment",
+			"task", task.ID, "error", err)
+		return nil, "", nil, false, nil
+	case claim == nil:
+		return nil, "", nil, false, nil
+	}
+	// The lock has to have landed on the directory validation approved.
+	if !os.SameFile(validatedInfo, lockedInfo) {
+		d.logger.Info("prior workdir changed identity before it could be claimed; starting a fresh environment",
+			"task", task.ID)
+		claim.Release()
+		return nil, "", nil, false, nil
+	}
+
+	// Re-validate while holding the lock, and require the answer to be the SAME
+	// directory. Equality of the canonical path is not enough on its own: the
+	// tree can be rearranged so a different-but-equally-valid env root now
+	// answers to that name, which would leave us holding a lock on one
+	// directory while handing another to Reuse. os.SameFile compares identity,
+	// not spelling.
+	recheckedWorkDir, stillOK := shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot)
+	if !stillOK || recheckedWorkDir != workDir {
+		claim.Release()
+		return nil, "", nil, false, nil
+	}
+	// ...and the directory we are about to hand to Reuse has to be that same
+	// one, so the object locked and the object used cannot diverge.
+	currentInfo, err := os.Stat(filepath.Dir(recheckedWorkDir))
+	if err != nil || !os.SameFile(lockedInfo, currentInfo) {
+		d.logger.Info("prior workdir changed identity while being claimed; starting a fresh environment",
+			"task", task.ID)
+		claim.Release()
+		return nil, "", nil, false, nil
+	}
+	return claim, workDir, lockedInfo, true, nil
+}
+
+// envRootBusyRetryInterval is how often the wait below re-tries the lock. The
+// window it is covering is seconds long, so this only has to be small relative
+// to that, not tight.
+const envRootBusyRetryInterval = 250 * time.Millisecond
+
+// errPriorEnvRootWaitAborted marks the wait as ended by the run itself rather
+// than by the lock. It wraps the context's cause so the task can be failed with
+// the real reason.
+var errPriorEnvRootWaitAborted = errors.New("waiting for the prior env root was aborted")
+
+// lockEnvRootForReuseWaitingOutTheBusyWindow takes the reuse lock, waiting out
+// a lock the PREVIOUS run of this (issue, agent) has not let go of yet.
+//
+// A busy lock here has one cause in a healthy system: the server hands a task
+// to a daemon only when no other task for the same (issue, agent) is dispatched
+// or running (ClaimAgentTask's serialization), so by the time this task exists
+// its predecessor is already finished as far as the server is concerned. The
+// process is not: it learns of its cancellation from its own poll tick and
+// takes a few seconds to exit, and it holds .task_lock until it does. That is
+// the whole of the gap — a machine-local fact, visible right here.
+//
+// Giving up immediately costs the workdir, and with it the provider session
+// living in it: the agent restarts with no memory of the conversation the user
+// was in the middle of editing (MUL-6880). Waiting costs a few seconds of one
+// task slot, which is far less than the fresh Prepare — including a repo
+// checkout — that declining forces instead.
+//
+// The wait is bounded and gives up into exactly the old behaviour, so a
+// predecessor that is genuinely wedged, or a lock held by something else on a
+// shared workspaces root, still ends in a fresh environment rather than a
+// stuck task.
+func (d *Daemon) lockEnvRootForReuseWaitingOutTheBusyWindow(
+	ctx context.Context,
+	wsRoot *os.Root,
+	rel, priorRoot string,
+	task Task,
+) (*execenv.EnvRootClaim, os.FileInfo, error) {
+	start := time.Now()
+	deadline := start.Add(d.envRootBusyWait)
+	waited := false
+	for {
+		claim, info, err := execenv.LockEnvRootForReuse(wsRoot, rel, priorRoot)
+		if !errors.Is(err, execenv.ErrEnvRootBusy) || !time.Now().Before(deadline) {
+			// The wait's real duration is logged, not the budget: 15s is a
+			// reasoned guess (one cancel-poll interval plus the agent's exit),
+			// and these lines are how it gets checked against production
+			// instead of staying a guess.
+			if waited && err == nil {
+				d.logger.Info("prior workdir freed while waiting for the previous run to exit",
+					"task", task.ID, "prior_root", filepath.Base(priorRoot),
+					"waited", time.Since(start).Round(time.Millisecond))
+			}
+			return claim, info, err
+		}
+		if !waited {
+			waited = true
+			d.logger.Info("prior workdir is still held by the previous run; waiting for it",
+				"task", task.ID, "prior_root", filepath.Base(priorRoot),
+				"budget", d.envRootBusyWait)
+		}
+		select {
+		case <-ctx.Done():
+			d.logger.Info("stopped waiting for the prior workdir: the run was cancelled",
+				"task", task.ID, "prior_root", filepath.Base(priorRoot),
+				"waited", time.Since(start).Round(time.Millisecond))
+			// NOT the busy error the loop was carrying. A cancelled run is a
+			// third outcome, and collapsing it into "still busy" would send the
+			// caller on to a fresh Prepare for work nobody is waiting for, and
+			// would file one cancellation under both "cancelled" and "budget
+			// exhausted" in the very logs the budget is meant to be judged by.
+			return nil, nil, fmt.Errorf("%w: %w", errPriorEnvRootWaitAborted, context.Cause(ctx))
+		case <-time.After(envRootBusyRetryInterval):
+		}
+	}
+}
+
+// reuseLockTestHook runs between reuse eligibility validation and taking the
+// prior-root lock. Nil outside tests; the TOCTOU regressions use it to make the
+// swap deterministic instead of racing it.
+var reuseLockTestHook func()
+
+// reuseBeforeUseTestHook runs after the prior-root claim is settled and before
+// Reuse resolves that path by name. Nil outside tests.
+var reuseBeforeUseTestHook func()
+
+func (d *Daemon) prepareExecutionEnvironment(ctx context.Context, params execenv.PrepareParams) (*execenv.Environment, error) {
+	if d.executionEnvironmentCommand == nil {
+		// Focused runTask tests construct a zero-valued Daemon and keep setup
+		// in-process. Production Daemons created by New always use isolation.
+		return execenv.Prepare(params, d.logger)
+	}
+	command, err := d.executionEnvironmentCommand()
+	if err != nil {
+		return nil, err
+	}
+	return execenv.PrepareIsolated(ctx, command, params, d.logger)
+}
+
+func (d *Daemon) reuseExecutionEnvironment(ctx context.Context, params execenv.ReuseParams) (*execenv.Environment, error) {
+	if d.executionEnvironmentCommand == nil {
+		return execenv.Reuse(params, d.logger), nil
+	}
+	command, err := d.executionEnvironmentCommand()
+	if err != nil {
+		return nil, err
+	}
+	return execenv.ReuseIsolated(ctx, command, params, d.logger)
+}
+
+func (d *Daemon) effectiveTaskPrepareTimeout() time.Duration {
+	if d.taskPrepareTimeout > 0 {
+		return d.taskPrepareTimeout
+	}
+	return defaultTaskPrepareTimeout
+}
+
+func skillRefKey(source, id string) string {
+	return source + "\x00" + id
+}
+
+func skillRefFromBundle(bundle SkillData) SkillRefData {
+	files := make([]skillbundle.File, 0, len(bundle.Files))
+	for _, file := range bundle.Files {
+		files = append(files, skillbundle.File{Path: file.Path, Content: file.Content})
+	}
+	manifest := skillbundle.BuildManifest(skillbundle.Skill{
+		ID:          bundle.ID,
+		Source:      bundle.Source,
+		Name:        bundle.Name,
+		Description: bundle.Description,
+		Content:     bundle.Content,
+		Files:       files,
+	})
+	fileRefs := make([]SkillFileRefData, 0, len(manifest.Files))
+	for _, file := range manifest.Files {
+		fileRefs = append(fileRefs, SkillFileRefData{Path: file.Path, SHA256: file.SHA256, SizeBytes: file.SizeBytes})
+	}
+	return SkillRefData{
+		ID:        bundle.ID,
+		Source:    bundle.Source,
+		Hash:      manifest.Hash,
+		SizeBytes: manifest.SizeBytes,
+		FileCount: manifest.FileCount,
+		Files:     fileRefs,
+	}
+}
+
+// taskModelSelection is what a task actually launches with: the model
+// selector plus the capability overrides that survived validation.
+type taskModelSelection struct {
+	Model         string
+	ThinkingLevel string
+	ServiceTier   string
+}
+
+// resolveTaskModelSelection settles the model selector and its capability
+// overrides against the runtime's own model catalog, reading that catalog at
+// most once per task — and not at all when nothing needs it.
+//
+// The single read is the point. Discovery is a CLI subprocess with a 15-30s
+// ceiling, and cachedDiscovery deliberately does not memoize a result that
+// came back empty or as a fallback (#3729, MUL-5549) so a transient failure
+// can retry immediately. A logged-out or timing-out runtime therefore pays
+// that ceiling in full on every read, and a task that read the catalog once to
+// qualify its model and again to validate thinking_level would pay it twice
+// before the agent even starts (MUL-6471 review).
+//
+// Who asks for the catalog:
+//   - opencode and its DevEco fork cannot execute an unqualified selector, so
+//     a pinned model has to be resolved against the catalog before launch.
+//   - thinking_level / service_tier are catalog-owned and keyed on the
+//     catalog's own model id, so they need it whenever they are set.
+//
+// A pi task with no capability override asks for neither: pi's own resolver
+// accepts the persisted id in every shape it can take, so the daemon has
+// nothing to add and skips discovery entirely. Same for claude, codex, and any
+// task that pins no model.
+//
+// Qualification runs first because both checks below match on the catalog's
+// canonical id: an unqualified id silently fails every lookup and drops a
+// perfectly valid level (GH #7300).
+func resolveTaskModelSelection(
+	ctx context.Context,
+	provider string,
+	runtimeCmd agent.Command,
+	sel taskModelSelection,
+	taskLog *slog.Logger,
+) taskModelSelection {
+	capabilityChecksPending := sel.ThinkingLevel != "" || sel.ServiceTier != ""
+
+	read := false
+	var (
+		catalog    agent.Catalog
+		catalogErr error
+	)
+	loadCatalog := func() (agent.Catalog, error) {
+		if !read {
+			read = true
+			catalog, catalogErr = listModels(ctx, provider, runtimeCmd)
+		}
+		return catalog, catalogErr
+	}
+
+	sel.Model = qualifyTaskModel(provider, sel.Model, capabilityChecksPending, loadCatalog, taskLog)
+
+	// service_tier is catalog-owned and currently Codex-only. As with
+	// thinking_level, stale or incompatible persisted values degrade to the
+	// runtime default instead of failing the task. Catalog lookup errors pass
+	// through so a transient discovery failure does not silently disable a
+	// previously valid user choice.
+	if sel.ServiceTier != "" {
+		ok, err := agent.ValidateServiceTierWith(loadCatalog, provider, sel.Model, sel.ServiceTier)
+		if err != nil {
+			taskLog.Warn("service_tier: catalog lookup failed; passing through",
+				"provider", provider,
+				"model", sel.Model,
+				"service_tier", sel.ServiceTier,
+				"error", err,
+			)
+		} else if !ok {
+			taskLog.Warn("service_tier: not valid for this (provider, model); skipping injection",
+				"provider", provider,
+				"model", sel.Model,
+				"service_tier", sel.ServiceTier,
+			)
+			sel.ServiceTier = ""
+		}
+	}
+	// Per-model guard: the server validates the literal token against the
+	// provider's enum, but per-model gaps (Claude's `xhigh` on a non-Opus
+	// model, Codex's per-model `supported_reasoning_levels`) only resolve
+	// here, against the daemon's local CLI catalog. Invalid combinations
+	// log a warning and drop the level rather than failing the task, so a
+	// stale persisted value never blocks execution. An empty model is
+	// resolved by ValidateThinkingLevelWith to the provider's default model so
+	// default-model tasks aren't misjudged — except for codex, whose empty
+	// model follows config.toml (any model) and so fails closed, dropping the
+	// level here without a catalog read at all. Discovery errors fail open for
+	// resolved models: if we can't list models, we keep the persisted level
+	// and let the CLI object.
+	if sel.ThinkingLevel != "" {
+		ok, err := agent.ValidateThinkingLevelWith(loadCatalog, provider, sel.Model, sel.ThinkingLevel)
+		if err != nil {
+			taskLog.Warn("thinking_level: catalog lookup failed; passing through",
+				"provider", provider,
+				"model", sel.Model,
+				"thinking_level", sel.ThinkingLevel,
+				"error", err,
+			)
+		} else if !ok {
+			taskLog.Warn("thinking_level: not valid for this (provider, model); skipping injection",
+				"provider", provider,
+				"model", sel.Model,
+				"thinking_level", sel.ThinkingLevel,
+			)
+			sel.ThinkingLevel = ""
+		}
+	}
+
+	return sel
+}
+
+// qualifyTaskModel promotes a persisted model id to the canonical
+// `<provider>/<id>` selector its runtime catalog advertises, and returns the
+// model to actually launch with.
+//
+// agent.model holds whatever was persisted, and for gateway-style providers a
+// bare model id is itself slash-shaped (`claude/claude-opus-5` under provider
+// `multica-anthropic`), so the delimiter cannot tell a missing provider from a
+// present one — only the catalog knows (GH #7300).
+//
+// It reads the catalog for two distinct reasons, and neither is "because we
+// can": either the runtime refuses to launch without a qualified selector, or
+// a capability check is about to read the catalog anyway and will match
+// nothing unless the id is canonical first. When neither holds, the persisted
+// value goes to the CLI untouched and no subprocess is spawned.
+func qualifyTaskModel(
+	provider, model string,
+	capabilityChecksPending bool,
+	loadCatalog func() (agent.Catalog, error),
+	taskLog *slog.Logger,
+) string {
+	if model == "" {
+		return model
+	}
+	if !agent.ModelSelectorMustBeProviderQualified(provider) && !capabilityChecksPending {
+		return model
+	}
+	catalog, err := loadCatalog()
+	if err != nil {
+		// Same fail-open posture as the capability checks: an unreachable
+		// catalog must not stop a task whose model may well be exactly what
+		// the CLI expects.
+		taskLog.Warn("model: catalog lookup failed; using the configured model as-is",
+			"provider", provider,
+			"model", model,
+			"error", err,
+		)
+		return model
+	}
+	qualified, rewritten := agent.QualifyModelID(catalog, model)
+	if !rewritten {
+		return model
+	}
+	taskLog.Info("model: qualified against the runtime catalog",
+		"provider", provider,
+		"configured_model", model,
+		"model", qualified,
+	)
+	return qualified
+}
+
+func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (taskResult TaskResult, returnErr error) {
+	phaseRecorder := taskPhaseRecorderFromContext(ctx)
+	phaseRecorder.Mark(taskPhasePrepareStarted)
+	// A claim carries the task-row agent id both at the top level and inside
+	// the expanded agent configuration. The top-level id is authoritative
+	// because it is also bound into the task-scoped token. Never prepare or
+	// reuse a workdir when the two identities disagree.
+	if err := validateTaskIdentity(task); err != nil {
+		return TaskResult{}, err
+	}
+
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
 	// CLI would otherwise silently fall back to the user-global config — a
@@ -2632,49 +7672,121 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("refusing to spawn agent: task has no workspace_id (task_id=%s)", task.ID)
 	}
 
+	prepareTimeout := d.effectiveTaskPrepareTimeout()
+	prepareCtx, cancelPrepare := context.WithTimeoutCause(ctx, prepareTimeout, errTaskPrepareTimeout)
+	prepareComplete := false
+	defer func() {
+		cancelPrepare()
+		if prepareComplete || returnErr == nil || errors.Is(returnErr, errStartClaimRejected) || !errors.Is(context.Cause(prepareCtx), errTaskPrepareTimeout) {
+			return
+		}
+		// Collapse every deadline shape (context deadline, HTTP cancellation,
+		// or the explicit waitForExecutionEnvironment cause) into one sentinel
+		// that handleTask can classify as a retryable platform timeout.
+		taskResult = TaskResult{}
+		returnErr = fmt.Errorf("%w after %s", errTaskPrepareTimeout, prepareTimeout)
+	}()
+
 	// task.Repos is the authoritative repo list for this task — when the
 	// claimed task belongs to a project with github_repo resources the server
 	// has already narrowed it to project repos only. Make sure those URLs are
 	// in the per-workspace allowlist and the local cache, otherwise
 	// `multica repo checkout` would reject project-only URLs that aren't also
 	// bound at the workspace level.
-	d.registerTaskRepos(task.WorkspaceID, task.Repos)
+	d.registerTaskRepos(task.WorkspaceID, task.ID, task.Repos)
+	defer d.clearTaskRepoRefs(task.WorkspaceID, task.ID)
 
-	entry, ok := d.cfg.Agents[provider]
+	entry, ok := d.agents()[provider]
+	// A custom runtime profile (MUL-3284) overrides the executable path: the
+	// runtime identity is the provider (so ResolveBackend applies its descriptor),
+	// but the actual binary on PATH is the profile's
+	// command_name, resolved at registration time and keyed by RuntimeID here.
+	// Critically, a custom runtime can live on a host that has NO built-in
+	// agent of the same provider installed, so when the runtime is custom we
+	// synthesize an AgentEntry instead of hard-failing on the !ok lookup.
+	var profileFixedArgs []string
+	// resolvedVersion is the CLI version of the built-in binary entry.Path
+	// resolves to, paired with the path by resolveAgentEntry so a just-upgraded
+	// codex is never launched under the previous version's policy (MUL-4486).
+	var resolvedVersion string
+	// usesCustomProfileCommand distinguishes "this provider's own binary" from
+	// "some other binary speaking this provider's protocol". Backends need it
+	// for compatibility exceptions verified against a specific vendor's CLI,
+	// which must not extend to arbitrary commands sharing a protocol family.
+	var usesCustomProfileCommand bool
+	if customSpec, isCustom := d.customProfileLaunchForRuntime(task.RuntimeID); isCustom {
+		usesCustomProfileCommand = true
+		entry.Path = customSpec.path
+		resolvedVersion = customSpec.version
+		// Filter here rather than relying on agent.New doing it, so that the
+		// launch and the catalog lookups below agree on one prefix. They share
+		// a discovery memo keyed on the command, and two spellings of the same
+		// runtime would key two entries.
+		profileFixedArgs = agent.FilterLaunchPrefix(provider, customSpec.fixedArgs, d.logger)
+		ok = true
+		d.logger.Info("task uses custom runtime profile command",
+			"task_id", task.ID, "runtime_id", task.RuntimeID,
+			"provider", provider, "command_path", customSpec.path,
+			"fixed_args", len(profileFixedArgs))
+	} else if ok {
+		// Built-in provider: self-heal a pinned executable path that an in-place
+		// upgrade deleted (MUL-4486). Only reached when no custom profile owns
+		// the launch, so a custom runtime's path is never second-guessed and a
+		// custom-only host pays no wasted re-resolution.
+		var resolveErr error
+		entry, resolvedVersion, resolveErr = d.resolveAgentEntryForLaunch(prepareCtx, provider, entry)
+		if resolveErr != nil {
+			return TaskResult{}, resolveErr
+		}
+	}
 	if !ok {
 		return TaskResult{}, fmt.Errorf("no agent configured for provider %q", provider)
 	}
 
+	stopPrepareLease := d.startTaskPrepareLeaseExtender(prepareCtx, task, taskLog)
+	defer stopPrepareLease()
+
+	if err := d.ensureTaskSkillBundles(prepareCtx, &task); err != nil {
+		return TaskResult{}, err
+	}
+	phaseRecorder.Mark(taskPhaseSkillsReady)
+
 	agentName := "agent"
-	var agentID string
 	var skills []SkillData
 	var instructions string
-	if task.Agent != nil {
-		agentID = task.Agent.ID
-		agentName = task.Agent.Name
-		skills = task.Agent.Skills
-		instructions = task.Agent.Instructions
-	}
+	agentName = task.Agent.Name
+	skills = task.Agent.Skills
+	instructions = task.Agent.Instructions
 
 	// Prepare isolated execution environment.
 	// Repos are passed as metadata only — the agent checks them out on demand
 	// via `multica repo checkout <url>`.
 	taskCtx := execenv.TaskContextForEnv{
-		IssueID:                          task.IssueID,
-		TriggerCommentID:                 task.TriggerCommentID,
-		TriggerThreadID:                  task.TriggerThreadID,
-		NewCommentCount:                  task.NewCommentCount,
-		NewCommentsSince:                 task.NewCommentsSince,
-		PriorSessionResumed:              task.PriorSessionID != "",
-		AgentID:                          agentID,
+		IssueID:             task.IssueID,
+		TriggerCommentID:    task.TriggerCommentID,
+		TriggerThreadID:     task.TriggerThreadID,
+		CommentReplyTargets: commentReplyThreads(task),
+		NewCommentCount:     task.NewCommentCount,
+		NewCommentsSince:    task.NewCommentsSince,
+		PriorSessionResumed: task.PriorSessionID != "",
+		// MUL-5305: the server sets this when a more recent Codex session was
+		// withheld (rollout missing) and PriorSessionID is an older fallback (or
+		// absent). Seed the brief's continuity disclosure from it; the local
+		// resume gates below only ever OR it to true, so the signal is monotonic.
+		PriorSessionResumeUnavailable:    task.PriorSessionResumeUnavailable,
+		AgentID:                          task.AgentID,
 		AgentName:                        agentName,
 		AgentInstructions:                instructions,
 		AgentSkills:                      convertSkillsForEnv(skills),
+		DisabledRuntimeSkills:            convertDisabledRuntimeSkillsForEnv(task.Agent, task.RuntimeID, provider),
 		Repos:                            convertReposForEnv(task.Repos),
 		ProjectID:                        task.ProjectID,
 		ProjectTitle:                     task.ProjectTitle,
+		ProjectDescription:               task.ProjectDescription,
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
 		ChatSessionID:                    task.ChatSessionID,
+		ChatChannelType:                  task.ChatChannelType,
+		ChatChannelDeliversFiles:         task.ChatChannelDeliversFiles,
 		AutopilotRunID:                   task.AutopilotRunID,
 		AutopilotID:                      task.AutopilotID,
 		AutopilotTitle:                   task.AutopilotTitle,
@@ -2682,7 +7794,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AutopilotSource:                  task.AutopilotSource,
 		AutopilotTriggerPayload:          strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 		QuickCreatePrompt:                task.QuickCreatePrompt,
-		IsSquadLeader:                    strings.Contains(instructions, "## Squad Operating Protocol"),
+		IsSquadLeader:                    taskIsSquadLeader(task),
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
 		InitiatorType:                    task.InitiatorType,
@@ -2690,41 +7802,139 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		InitiatorName:                    task.InitiatorName,
 		InitiatorEmail:                   task.InitiatorEmail,
 		WorkspaceContext:                 task.WorkspaceContext,
+		IssueStatuses:                    convertIssueStatusesForEnv(task.IssueStatuses),
+		IssueStatusesOmitted:             task.IssueStatusesOmitted,
+		ConnectedApps:                    task.ConnectedApps,
 	}
 
 	// Mark candidate env roots as active before any env work so the GC loop
 	// can't reclaim artifacts inside them mid-execution. We mark both the
-	// predicted root for a fresh Prepare and the prior root for Reuse — they
+	// stable root for a fresh Prepare and the prior root for Reuse — they
 	// usually differ (Reuse keeps the original task's directory).
-	predictedRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
-	d.markActiveEnvRoot(predictedRoot)
-	defer d.unmarkActiveEnvRoot(predictedRoot)
+	resolvedRoot, err := execenv.ResolveRootDir(taskRootDirParams(d.cfg.WorkspacesRoot, task))
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("resolve stable task env root: %w", err)
+	}
+	d.markActiveEnvRoot(resolvedRoot)
+	defer d.unmarkActiveEnvRoot(resolvedRoot)
 	if task.PriorWorkDir != "" {
 		priorRoot := filepath.Dir(task.PriorWorkDir)
-		if priorRoot != predictedRoot {
+		if priorRoot != resolvedRoot {
 			d.markActiveEnvRoot(priorRoot)
 			defer d.unmarkActiveEnvRoot(priorRoot)
 		}
 	}
 
+	// Claim the env root HERE, in the daemon parent, and hold it for the whole
+	// task run — the same lifetime as unmarkActiveEnvRoot above.
+	//
+	// It cannot be claimed inside preparation: production preparation runs in a
+	// short-lived helper process (prepareExecutionEnvironment ->
+	// PrepareIsolated), so a lock taken there dies with the helper and the
+	// *os.File cannot cross its JSON response back to us. Claiming there would
+	// leave the agent running with no protection at all — which is exactly the
+	// re-dispatch window this guards.
+	envClaim, err := execenv.ClaimEnvRoot(taskRootDirParams(d.cfg.WorkspacesRoot, task))
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("claim execution environment: %w", err)
+	}
+	defer envClaim.Release()
+
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
 	var env *execenv.Environment
+	// For a built-in codex task, use the version paired with the resolved path
+	// so an in-place upgrade can't leave the sandbox policy on the old version
+	// (MUL-4486). A custom codex runtime skips the self-heal, so resolvedVersion
+	// is empty and it keeps the existing cached-version fallback — its binary is
+	// the profile's own command, which the daemon never pins or version-detects.
+	// Non-codex providers carry the value through without consuming it.
 	codexVersion := d.agentVersion("codex")
+	if provider == "codex" && resolvedVersion != "" {
+		codexVersion = resolvedVersion
+	}
 	openclawBin := ""
 	if provider == "openclaw" {
 		openclawBin = entry.Path
 	}
 	// Resolve any local_directory assignment again here so runTask can plumb
 	// LocalWorkDir into execenv. handleTask already validated + locked the
-	// path; this call is a pure JSON parse over the same task payload.
-	localAssignment, _ := findLocalDirectoryAssignment(task.ProjectResources, d.cfg.DaemonID)
+	// path for worker tasks; leader tasks intentionally skip the assignment.
+	localAssignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
 	// Reuse intentionally skipped for local_directory tasks: the prior
 	// WorkDir is the user's own path (always present) but the reuse path
 	// loses the envRoot association the GC loop needs, and re-running
 	// Prepare against a stable user path is cheap (no clone, no copy).
+	// Leader tasks have no localAssignment; shouldReusePriorWorkdir separately
+	// requires Prepare-time managed-env provenance and a daemon-owned marker
+	// before allowing reuse, so a pre-fix leader session recorded against
+	// local_directory still fails closed.
 	var agentMcpConfig json.RawMessage
+	var effectiveMcpConfig json.RawMessage
+	var cursorMcpAuthSource string
+	remoteMCPConfig, remoteMCPDiagnostics, remoteMCPBrokers, remoteMCPErr := startTaskRemoteMCPBrokers(
+		prepareCtx, ctx, task.ID, provider, task.RemoteMCPConnections,
+		func(resolveCtx context.Context, contributionID string) (http.Header, error) {
+			return d.client.ResolveRemoteMCPCredential(resolveCtx, task.RemoteMCPDaemonToken, task.ID, contributionID)
+		},
+		taskLog,
+	)
+	if remoteMCPErr != nil {
+		return TaskResult{}, fmt.Errorf("prepare Remote MCP broker: %w", remoteMCPErr)
+	}
+	if remoteMCPBrokers != nil {
+		defer remoteMCPBrokers.Close()
+	}
+	for _, diagnostic := range remoteMCPDiagnostics {
+		taskLog.Warn("Remote MCP degraded", "reason", diagnostic)
+	}
+
+	// Agent-trigger plugin hooks, as a second local MCP server beside the
+	// broker. A failure to start it degrades to no plugin tools rather than
+	// failing the task: an agent that cannot reach a plugin should still work
+	// on the issue, which is the same rule that makes a failing tool call a
+	// tool error rather than a task error.
+	pluginHookConfig, pluginHookServer, pluginHookErr := startTaskPluginHookMCP(
+		ctx, task.ID, task.PluginHookTools,
+		func(callCtx context.Context, taskID, installationID, hookKey string, input json.RawMessage) (json.RawMessage, error) {
+			return d.client.InvokeAgentPluginHook(callCtx, task.RemoteMCPDaemonToken, taskID, installationID, hookKey, input)
+		},
+		taskLog,
+	)
+	if pluginHookErr != nil {
+		taskLog.Warn("plugin hook tools unavailable", "error", pluginHookErr)
+	}
+	if pluginHookServer != nil {
+		defer pluginHookServer.Close()
+	}
+	if len(pluginHookConfig) > 0 {
+		merged, mergeErr := mergeTaskRemoteMCPConfig(remoteMCPConfig, pluginHookConfig)
+		if mergeErr != nil {
+			taskLog.Warn("could not merge plugin hook MCP config", "error", mergeErr)
+		} else {
+			remoteMCPConfig = merged
+		}
+	}
 	if task.Agent != nil {
 		agentMcpConfig = task.Agent.McpConfig
+		effectiveMcpConfig = agentMcpConfig
+		if merged, mergeErr := mergeRuntimeAndAgentMcpConfig(provider, agentMcpConfig); mergeErr != nil {
+			taskLog.Warn("mcp_config: runtime merge failed; using agent configuration only",
+				"provider", provider,
+				"error", mergeErr,
+			)
+		} else {
+			effectiveMcpConfig = merged
+		}
+		if len(remoteMCPConfig) > 0 {
+			merged, mergeErr := mergeTaskRemoteMCPConfig(effectiveMcpConfig, remoteMCPConfig)
+			if mergeErr != nil {
+				return TaskResult{}, fmt.Errorf("merge Remote MCP broker configuration: %w", mergeErr)
+			}
+			effectiveMcpConfig = merged
+		}
+		if provider == "cursor" {
+			cursorMcpAuthSource = strings.TrimSpace(task.Agent.CustomEnv[execenv.CursorMcpAuthSourceEnv])
+		}
 	}
 	// Decode openclaw-specific runtime_config knobs once so reuse / prepare /
 	// ExecOptions all see the same mode + gateway pin (issue #3260). Parse
@@ -2735,68 +7945,347 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil && provider == "openclaw" {
 		openclawMode, openclawGateway = decodeOpenclawRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
 	}
-	if task.PriorWorkDir != "" && localAssignment == nil {
-		env = execenv.Reuse(execenv.ReuseParams{
-			WorkDir:         task.PriorWorkDir,
-			Provider:        provider,
-			CodexVersion:    codexVersion,
-			OpenclawBin:     openclawBin,
-			McpConfig:       agentMcpConfig,
-			OpenclawGateway: openclawGateway,
-			Task:            taskCtx,
-		}, d.logger)
+	var agentEnvOverrides map[string]string
+	var agentCustomArgs []string
+	if task.Agent != nil {
+		agentEnvOverrides = task.Agent.CustomEnv
+		agentCustomArgs = task.Agent.CustomArgs
+	}
+	// Effective Codex CLI args the task will launch with, normalized through the
+	// same agent.NormalizeCodexLaunchArgs pipeline buildCodexArgs uses (shell
+	// unquoting + blocked-flag filtering), preserving its ExtraArgs
+	// (profile-fixed + daemon defaults) vs CustomArgs (per-agent custom_args)
+	// split so the filtering matches launch exactly. Threaded into execenv so
+	// the Windows sandbox decision can honor a `-c windows.sandbox=...` override
+	// that never lands in config.toml — even when it arrives shell-quoted —
+	// instead of silently downgrading a user's isolation opt-in (MUL-4957).
+	var codexSandboxArgs []string
+	if provider == "codex" {
+		// profileFixedArgs still belongs in this reconstruction even though it
+		// no longer travels via ExtraArgs: it is a launch prefix now, so it is
+		// still on codex's argv, and a `-c windows.sandbox=...` written there
+		// must still be visible to the sandbox decision.
+		extraArgs := append(append([]string{}, profileFixedArgs...), defaultArgsForProvider(d.cfg, provider)...)
+		codexSandboxArgs = agent.NormalizeCodexLaunchArgs(extraArgs, agentCustomArgs, effectiveMcpConfig, d.logger)
+	}
+	// Hermes: resolve the overlay source home through one resolver contract —
+	// the selection parsed from custom_args (agent.ParseHermesProfileArgs) plus
+	// the agent's custom_env HERMES_HOME feed execenv.ResolveHermesProfile, which
+	// reproduces Hermes' own profile semantics (root derivation, explicit vs.
+	// sticky selection, reserved/invalid failure). A reserved/invalid selection
+	// fails the task closed, matching Hermes' sys.exit(1). The selected source
+	// home is exported to hermesEnv["HERMES_HOME"] so ${HERMES_HOME} in a
+	// profile's skills.external_dirs expands against the selected profile home,
+	// as native Hermes does before loading config.yaml. The parsed occurrence is
+	// stripped from the acp argv at launch (only when the overlay is built) so
+	// the flag can't re-point HERMES_HOME past the overlay.
+	var hermesSourceHome string
+	var hermesSourceMustExist bool
+	var hermesEnv map[string]string
+	var hermesMemoryStore string
+	var hermesSessionStore string
+	if provider == "hermes" {
+		// Resolve from the argv hermes will actually parse — launch prefix,
+		// `acp`, then the filtered custom args — which agent.HermesLaunchArgv
+		// assembles the same way the backend does. A custom runtime profile's
+		// fixed_args are the launch prefix now, so they are scanned before
+		// custom_args, and the backend's own `acp` token sits between them and
+		// participates in the scan. Approximating that argv reads a different
+		// profile than the process does, and the overlay ends up seeded from
+		// the wrong home (GH #7046).
+		sel := agent.ParseHermesProfileArgs(agent.HermesLaunchArgv(profileFixedArgs, agentCustomArgs, d.logger))
+		res := execenv.ResolveHermesProfile(agentEnvOverrides["HERMES_HOME"], sel.Name, sel.Found, sel.Inline)
+		if res.Err != nil {
+			return TaskResult{}, fmt.Errorf("resolve hermes profile: %w", res.Err)
+		}
+		hermesSourceHome = res.SourceHome
+		hermesSourceMustExist = res.MustExist
+		// Which home the overlay is seeded from decides whether the task sees
+		// the user's provider config at all, and it is derived from the daemon
+		// PROCESS environment — invisible from the shell the user tests
+		// `hermes acp` in, which is why a mismatch reads as "works by hand,
+		// fails under Multica" (GH #6872). One line, at Info, so the answer is
+		// in the daemon log before anything fails rather than reconstructed
+		// afterwards.
+		taskLog.Info("hermes home resolved",
+			"source_home", hermesSourceHome,
+			"from_custom_env", strings.TrimSpace(agentEnvOverrides["HERMES_HOME"]) != "",
+			"must_exist", hermesSourceMustExist,
+		)
+		hermesEnv = sanitizeAgentEnv(agentEnvOverrides)
+		if hermesEnv == nil {
+			hermesEnv = map[string]string{}
+		}
+		hermesEnv["HERMES_HOME"] = res.SourceHome
+		// The overlay links memories/ here so the agent's long-term memory
+		// survives the task instead of being reset by every run (#6638). Keyed on
+		// the resolved source home so switching an agent's profile switches its
+		// memory line, matching Hermes' own "a profile is an isolated instance"
+		// model. Guarded from the GC for the whole task, as the Codex store below.
+		if store := execenv.HermesMemoryStorePath(d.cfg.Profile, task.AgentID, res.SourceHome); store != "" {
+			hermesMemoryStore = store
+			d.markActiveStore(store)
+			defer d.unmarkActiveStore(store)
+		}
+		// The overlay links state.db here so the conversation transcript
+		// survives the task and a follow-up turn can actually resume it
+		// (GH #6806). Keyed on (agent, resolved source home, conversation):
+		// tasks of one conversation are serial, so the shard has a single
+		// writer, while two issues never share a database. Guarded from the GC
+		// for the whole task, as the stores above and below.
+		if store := execenv.HermesSessionStorePath(d.cfg.Profile, task.AgentID, res.SourceHome, taskCtx); store != "" {
+			hermesSessionStore = store
+			d.markActiveStore(store)
+			defer d.unmarkActiveStore(store)
+		}
+	}
+	// Reasonix locates its user config from the environment (REASONIX_HOME, and
+	// the platform config dirs behind it), which an agent's custom_env may
+	// re-point or clear. The per-task reasonix.toml has to restate the
+	// permissions from whichever config the child ends up loading, so the deny
+	// rules the runtime owner set there survive the task-scoped config that
+	// overrides them — hence the same sanitized env the child is launched with.
+	var reasonixEnv map[string]string
+	if provider == "reasonix" {
+		reasonixEnv = sanitizeAgentEnv(agentEnvOverrides)
+	}
+	// Guard this task's per-issue Codex session store from the GC for the whole
+	// task, starting before Prepare/Reuse mounts it — so a prune that samples the
+	// store's stale (pre-remount) mtime cannot reclaim it out from under a resume
+	// of a long-idle issue (MUL-4424). No-op for non-Codex tasks / no stable key.
+	if provider == "codex" {
+		if store := execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx); store != "" {
+			d.markActiveStore(store)
+			defer d.unmarkActiveStore(store)
+		}
+	}
+	envReused := false
+	priorClaim, priorWorkDir, lockedPriorInfo, reusable, reuseErr := d.lockReusablePriorEnvRoot(ctx, task, localAssignment, envClaim.RootDir())
+	if reuseErr != nil {
+		// Cancelled while waiting for the previous run to let go of its
+		// directory. Ending here IS the behaviour: falling through would
+		// prepare a whole environment — repo checkout included — for a task
+		// nobody is waiting for any more.
+		return TaskResult{}, reuseErr
+	}
+	if reusable {
+		defer priorClaim.Release()
+		// Deterministic seam for the last-window regression: tests swap the
+		// directory here, after the claim is settled and before Reuse resolves
+		// the path by name.
+		if reuseBeforeUseTestHook != nil {
+			reuseBeforeUseTestHook()
+		}
+		var err error
+		env, err = d.reuseExecutionEnvironment(prepareCtx, execenv.ReuseParams{
+			WorkspacesRoot: d.cfg.WorkspacesRoot,
+			Profile:        d.cfg.Profile,
+			// The canonical path the lock was taken on. Handing Reuse the raw
+			// PriorWorkDir instead would re-resolve it, so the directory we
+			// locked and the directory we use could differ.
+			WorkDir:               priorWorkDir,
+			Provider:              provider,
+			CodexVersion:          codexVersion,
+			ResumeSessionID:       task.PriorSessionID,
+			OpenclawBin:           openclawBin,
+			McpConfig:             effectiveMcpConfig,
+			CursorMcpAuthSource:   cursorMcpAuthSource,
+			OpenclawGateway:       openclawGateway,
+			HermesSourceHome:      hermesSourceHome,
+			HermesSourceMustExist: hermesSourceMustExist,
+			HermesEnv:             hermesEnv,
+			HermesMemoryStore:     hermesMemoryStore,
+			HermesSessionStore:    hermesSessionStore,
+			ReasonixEnv:           reasonixEnv,
+			CodexCustomArgs:       codexSandboxArgs,
+			Task:                  taskCtx,
+		})
+		if err != nil {
+			return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("reuse execution environment: %w", err))
+		}
+		// Reuse resolves priorWorkDir by name, so confirm what it actually
+		// opened is still the directory we hold the lock on. An fd cannot cross
+		// into the preparation helper process, so the name is the only thing
+		// that can be handed over; this turns "silently ran somewhere else"
+		// into "declined and started clean". See lockReusablePriorEnvRoot for
+		// what remains uncovered.
+		if env != nil && lockedPriorInfo != nil {
+			usedInfo, statErr := os.Stat(filepath.Dir(env.WorkDir))
+			if statErr != nil || !os.SameFile(lockedPriorInfo, usedInfo) {
+				// No "task" field here: taskLog already carries the full id.
+				taskLog.Info("reused workdir is not the directory that was claimed; starting a fresh environment")
+				env = nil
+			}
+		}
+		// Reuse can decline (nil) and fall through to a fresh Prepare below.
+		// Whether it did decides whether an env-root-scoped session store — the
+		// Hermes overlay's task-local state.db — carried over from the prior task.
+		envReused = env != nil
 	}
 	if env == nil {
 		var err error
 		prepParams := execenv.PrepareParams{
 			WorkspacesRoot:  d.cfg.WorkspacesRoot,
+			Profile:         d.cfg.Profile,
 			WorkspaceID:     task.WorkspaceID,
+			WorkspaceSlug:   task.WorkspaceSlug,
 			TaskID:          task.ID,
+			IssueIdentifier: task.IssueIdentifier,
 			AgentName:       agentName,
-			Provider:        provider,
-			CodexVersion:    codexVersion,
-			OpenclawBin:     openclawBin,
-			McpConfig:       agentMcpConfig,
-			OpenclawGateway: openclawGateway,
-			Task:            taskCtx,
+			// This run already holds the claim (envClaim above) and the reset
+			// it implies; preparation must not try to take it again.
+			EnvRootPreclaimed:     true,
+			Provider:              provider,
+			CodexVersion:          codexVersion,
+			OpenclawBin:           openclawBin,
+			McpConfig:             effectiveMcpConfig,
+			CursorMcpAuthSource:   cursorMcpAuthSource,
+			OpenclawGateway:       openclawGateway,
+			HermesSourceHome:      hermesSourceHome,
+			HermesSourceMustExist: hermesSourceMustExist,
+			HermesEnv:             hermesEnv,
+			HermesMemoryStore:     hermesMemoryStore,
+			HermesSessionStore:    hermesSessionStore,
+			ReasonixEnv:           reasonixEnv,
+			CodexCustomArgs:       codexSandboxArgs,
+			Task:                  taskCtx,
 		}
-		if localAssignment != nil {
-			prepParams.LocalWorkDir = localAssignment.AbsPath
-		}
-		env, err = execenv.Prepare(prepParams, d.logger)
-		if err != nil {
-			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
+		if localAssignment.UsesWorktree() {
+			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{LocalPath: localAssignment.AbsPath}
+			// Take the per-path mutex for the snapshot alone, then hand it
+			// straight back — long enough to read a consistent tree, short
+			// enough that worktree tasks still overlap for the run itself.
+			//
+			// A worktree task skips this lock for its execution, but the
+			// snapshot is the one moment it READS the user's directory, and the
+			// same real path can be attached to another project as an in_place
+			// resource (each project may attach it once, so several can).
+			// Snapshotting underneath a running in_place task would capture a
+			// half-written tree plus that task's in-flight sidecars.
+			//
+			// The wait gets the same visibility plumbing as the in-place
+			// acquire in acquireLocalDirectoryLockIfNeeded, because the holder
+			// can be an in-place task that runs for hours: without the status
+			// update the user sees a bare "preparing" with no hint the task is
+			// queued behind the directory, and without the poller a task the
+			// user cancels keeps its daemon slot pinned until the prepare
+			// timeout — the run-phase cancellation watcher only starts after
+			// launch. The prepare-lease extender is already running for this
+			// whole phase, so only status, accounting, and cancellation are
+			// mirrored here.
+			waitCtx, waitCancel := context.WithCancel(prepareCtx)
+			defer waitCancel()
+			pollInterval := d.cancelPollInterval
+			if pollInterval == 0 {
+				pollInterval = 5 * time.Second
+			}
+			// LocalPathLocker invokes onWait synchronously, in this goroutine,
+			// at most once per Acquire — see the in-place call site.
+			waitCounted := false
+			release, lockErr := d.localPathLocks.Acquire(waitCtx, localAssignment.RealPath, task.ID, func(holder string) {
+				d.resourceWaitTasks.Add(1)
+				waitCounted = true
+				reason := fmt.Sprintf("local_directory %s", localAssignment.AbsPath)
+				if holder != "" {
+					reason = fmt.Sprintf("%s (held by task %s)", reason, shortID(holder))
+				}
+				taskLog.Info("local_directory: worktree snapshot waiting for holder",
+					"holder", holder)
+				if waitErr := d.client.MarkTaskWaitingLocalDirectory(waitCtx, task.ID, reason); waitErr != nil {
+					// Non-fatal: the wait still happens, the UI just won't
+					// show the explicit "waiting" badge.
+					taskLog.Warn("local_directory: mark waiting status failed", "error", waitErr)
+				}
+				cancelled := d.watchTaskCancellation(waitCtx, task.ID, pollInterval, taskLog)
+				go func() {
+					select {
+					case <-cancelled:
+						waitCancel()
+					case <-waitCtx.Done():
+					}
+				}()
+			})
+			if waitCounted {
+				d.resourceWaitTasks.Add(-1)
+			}
+			if lockErr != nil {
+				return TaskResult{}, fmt.Errorf("local_directory worktree: wait for a consistent snapshot of %s: %w",
+					localAssignment.AbsPath, lockErr)
+			}
+			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
+			release()
+			if err != nil {
+				return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: %w", err))
+			}
+		} else {
+			if localAssignment != nil {
+				prepParams.LocalWorkDir = localAssignment.AbsPath
+			}
+			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
+			if err != nil {
+				return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: %w", err))
+			}
 		}
 	}
+	phaseRecorder.Mark(taskPhaseEnvironmentReady)
 	// Belt-and-suspenders: also mark whatever root we ended up with, in case
-	// future changes diverge from PredictRootDir.
-	if env.RootDir != predictedRoot && env.RootDir != "" {
+	// future changes diverge from ResolveRootDir.
+	if env.RootDir != resolvedRoot && env.RootDir != "" {
 		d.markActiveEnvRoot(env.RootDir)
 		defer d.unmarkActiveEnvRoot(env.RootDir)
 	}
-
-	// Issue #3999 race A: now that env.WorkDir is on disk, transition the
-	// server-side state machine dispatched (or waiting_local_directory) →
-	// running. Calling StartTask before Prepare/Reuse let any consumer
-	// that read status==running and resolved
-	// /multica_workspaces/{ws}/{short-id}/workdir hit FileNotFoundError in
-	// the microsecond window before os.MkdirAll ran.
+	// Finalize the worktree on EVERY exit path, success or failure: commit
+	// whatever the agent left uncommitted, then unregister the worktree from
+	// the user's repo. Deferred against the named return so a task that fails
+	// mid-run still hands back the branch holding its partial work instead of
+	// letting `git worktree remove --force` delete it. A failing task is
+	// exactly when the user most wants to see how far the agent got.
 	//
-	// On error we return early so handleTask's existing FailTask +
-	// taskfailure.Classify path records the failure with the same
-	// "start task failed: <…>" string and the same failure_reason
-	// taxonomy as before — see MUL-2946 for the classifier contract.
-	if err := d.client.StartTask(ctx, task.ID); err != nil {
-		return TaskResult{}, fmt.Errorf("start task failed: %w", err)
-	}
-	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
-
-	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, taskLog)
-
-	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
-	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
-	if err != nil {
-		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
+	// In-place local_directory runs never enter this block: their WorkDir is
+	// already durable, so DurableWorkDir deliberately stays absent instead of
+	// duplicating the same path under two lifecycle meanings.
+	if env.LocalWorktree != nil {
+		defer func() {
+			if taskResult.WorkDir == "" {
+				taskResult.WorkDir = env.WorkDir
+			}
+			if taskResult.EnvRoot == "" {
+				taskResult.EnvRoot = env.RootDir
+			}
+			outcome, finalizeErr := env.LocalWorktree.Finalize(taskLog)
+			if outcome.Branch != "" {
+				taskResult.BranchName = outcome.Branch
+			}
+			if finalizeErr == nil {
+				// The configured local_directory becomes authoritative only after
+				// Finalize confirms the disposable task worktree is actually gone.
+				if localAssignment != nil {
+					taskResult.DurableWorkDir = localAssignment.AbsPath
+				}
+				return
+			}
+			// Finalize could not complete its delivery contract, so the task
+			// worktree remains authoritative. This covers both an uncommitted
+			// change set and a committed branch whose worktree removal could not
+			// be confirmed. Fail the task: reporting success or a durable project
+			// directory here would hide the path that still needs attention.
+			//
+			// Wrapped in worktreePreservedError so the cancel path can
+			// recognise it: a cancelled task discards its result and error, but
+			// THIS error names the preserved worktree holding the agent's work
+			// and must ride the cancel ack instead of vanishing into a log.
+			// Joined rather than replacing an earlier failure — that one is
+			// usually the more useful primary cause, but the preserved path
+			// must not be displaced by it.
+			taskLog.Error("local_directory: worktree finalize incomplete; keeping the task worktree authoritative",
+				"error", finalizeErr, "preserved_path", outcome.PreservedPath)
+			wrapped := &worktreePreservedError{err: fmt.Errorf("local_directory worktree: %w", finalizeErr)}
+			if returnErr == nil {
+				returnErr = wrapped
+			} else {
+				returnErr = errors.Join(returnErr, wrapped)
+			}
+		}()
 	}
 	// Workdir is preserved for reuse by future tasks on the same (agent,
 	// issue) pair in cloud mode; the work_dir path is stored in DB on task
@@ -2806,30 +8295,158 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// In local_directory mode the workdir is the user's own repo, reuse is
 	// already disabled above (see localAssignment == nil), and the brief
 	// would otherwise live on inside the user's repository — a subsequent
-	// manual `claude` / `codex` / `gemini` run in that directory would pick
+	// manual `claude` / `codex` run in that directory would pick
 	// up stale Multica instructions (issue id, trigger comment id, reply
 	// rules) and start acting on the previous task's context. Excise the
 	// marker block on the way out instead.
-	if env.LocalDirectory {
+	//
+	// Worktree mode runs the same pass for a different reason: the worktree is
+	// disposable, but its branch is the deliverable, and Finalize commits
+	// whatever is still on disk. Without this the sidecars would land in every
+	// task's diff. The .git/info/exclude trick repocache uses for github_repo
+	// worktrees is not available here — a linked worktree resolves info/exclude
+	// to the user's own common git dir, so using it would silently change what
+	// `git status` hides in the user's checkout. Removing the files we wrote is
+	// both narrower and exact; it also leaves a genuine agent edit to a tracked
+	// CLAUDE.md intact, since CleanupRuntimeConfig only excises our marker block.
+	//
+	// Ordering: registered immediately after the Finalize defer above, so LIFO
+	// runs cleanup first and Finalize commits an already-clean worktree. It must
+	// also precede every early return between here and provider launch
+	// (temp-dir setup, StartTask): those paths still run Finalize, and without
+	// this pass Finalize would auto-commit the sidecars Prepare just wrote and
+	// deliver a branch whose only content is Multica's own runtime files — or,
+	// in place, leave them behind in the user's tree.
+	if env.LocalDirectory || env.LocalWorktree != nil {
 		defer func() {
+			var cleanupErr error
 			if cerr := execenv.CleanupRuntimeConfig(env.WorkDir, provider); cerr != nil {
-				d.logger.Warn("execenv: cleanup runtime config failed (non-fatal)", "error", cerr)
+				cleanupErr = cerr
+				d.logger.Warn("execenv: cleanup runtime config failed", "error", cerr)
 			}
 			// Excise the sidecar tree (.agent_context/, .multica/,
 			// provider-specific .claude/skills/ etc.) that Prepare wrote
 			// into the user's repo. Without this pass the user's tree
 			// accumulates one directory layer per task — see MUL-2784.
 			// CleanupRuntimeConfig handles the runtime brief inside
-			// CLAUDE.md / AGENTS.md / GEMINI.md; CleanupSidecars handles
+			// CLAUDE.md / AGENTS.md; CleanupSidecars handles
 			// every other file Prepare placed under WorkDir. Together
 			// they round-trip the workdir to its exact pre-task bytes.
 			if cerr := execenv.CleanupSidecars(env.RootDir); cerr != nil {
-				d.logger.Warn("execenv: cleanup sidecars failed (non-fatal)", "error", cerr)
+				if cleanupErr == nil {
+					cleanupErr = cerr
+				}
+				d.logger.Warn("execenv: cleanup sidecars failed", "error", cerr)
+			}
+			// In worktree mode a failed cleanup is NOT survivable: Finalize is
+			// about to `git add -A`, so whatever the cleanup could not remove
+			// gets committed and delivered as the task's branch — a diff whose
+			// content is Multica's own runtime files, which is precisely what
+			// this mode promises never to produce. Tell Finalize to abort
+			// instead, so nothing is committed and the worktree is kept for
+			// inspection. (In place there is no commit and no branch, so a
+			// cleanup failure stays a warning: the leftover files are visible
+			// in the user's own tree and removable by hand.)
+			if cleanupErr != nil && env.LocalWorktree != nil {
+				env.LocalWorktree.AbortWithReason(fmt.Errorf(
+					"could not remove the runtime's own files from the worktree before committing: %w", cleanupErr))
 			}
 		}()
 	}
+	taskTempDir, taskTempLock, err := ensureTaskTempDir(env.RootDir, task.WorkspaceID, task.ID)
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("prepare task temp dir: %w", err)
+	}
+	defer func() {
+		// Drop the execution lock before removing the directory: while it is
+		// held the GC sweep correctly refuses to touch this directory, so a
+		// removal that fails here (a file inside still open — the Windows case
+		// in #7364) would otherwise leave the directory pinned until the daemon
+		// exits. Released first, the next GC cycle acquires the lock, sees the
+		// owner is gone and reclaims it. Nothing waits on the task path.
+		//
+		// RemoveTaskTempDir rather than os.RemoveAll so that a cleanup which
+		// fails here leaves the .task_lock marker intact — without it the next
+		// sweep could not tell this directory from a pre-lock leftover.
+		execenv.ReleaseTaskTempLock(taskTempLock)
+		if cerr := execenv.RemoveTaskTempDir(taskTempDir); cerr != nil {
+			taskLog.Warn("task temp dir cleanup failed", "path", taskTempDir, "error", cerr)
+		}
+	}()
 
-	prompt := BuildPrompt(task, provider)
+	// Issue #3999 race A: now that env.WorkDir is on disk, transition the
+	// server-side state machine dispatched (or waiting_local_directory) →
+	// running. Calling StartTask before Prepare/Reuse let any consumer
+	// that read status==running and resolved
+	// /multica_workspaces/{ws}/{short-id}/workdir hit FileNotFoundError in
+	// the microsecond window before os.MkdirAll ran.
+	//
+	// On error we return early. A rejected claim is discarded by handleTask;
+	// other errors use its existing FailTask + taskfailure.Classify path with the same
+	// "start task failed: <…>" string and the same failure_reason
+	// taxonomy as before — see MUL-2946 for the classifier contract.
+	var taskCapabilities []string
+	if agent.SupportsTaskSupplement(provider, resolvedVersion) && task.IssueID != "" {
+		taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilityTaskSupplementV1)
+	}
+	taskSupplementNegotiated, err := d.client.StartTask(prepareCtx, task, taskCapabilities...)
+	if err != nil {
+		stopPrepareLease()
+		return TaskResult{}, fmt.Errorf("start task failed: %w", err)
+	}
+	if taskSupplementNegotiated {
+		// Register before provider launch so a hint cannot arrive in the gap
+		// between the committed server transition and turn/started. The row is
+		// durable, so a coalesced hint is sufficient; the five-second fallback
+		// covers a notification sent before this start response arrived.
+		_, unsubscribeSupplements := d.taskSupplementSignals.subscribe(task.ID)
+		defer unsubscribeSupplements()
+	}
+	stopPrepareLease()
+	prepareComplete = true
+	cancelPrepare()
+	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
+
+	// usesCustomProfileCommand is the same provenance the backend receives as
+	// agent.Config.BuiltinRuntime: it separates the provider's own discovered
+	// binary from an arbitrary command speaking its protocol. Reused here so
+	// the gate and the backend cannot disagree about which one is running.
+	resumeReachable := gateResumeToReachableSession(
+		&task, &taskCtx, provider, env.WorkDir,
+		sessionHomeReachable(provider, env, envReused),
+		providerRefusesMissingSessionCwd(provider, !usesCustomProfileCommand),
+		taskLog,
+	)
+	// A reused workdir is necessary but not sufficient for a Codex resume: the
+	// prior thread's rollout must actually be present in this task's CODEX_HOME
+	// sessions (MUL-4424 isolates them). Drop the resume before the brief is
+	// generated below if it isn't, so we never tell the agent it is continuing a
+	// conversation Codex will silently restart from scratch.
+	if resumeReachable {
+		gateCodexResumeToRolloutPresence(&task, &taskCtx, provider, env.CodexHome, taskLog)
+	}
+
+	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
+	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+	if err != nil {
+		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
+	}
+	// An exempt turn runs in the user's directory without having queued for it,
+	// so a sibling coding task may be writing to the same tree right now. That
+	// is the one thing it cannot work out from its own context — tell it.
+	// Worktree mode is excluded: there the tree is this task's private checkout.
+	var promptOptions []PromptOption
+	if localAssignment != nil && !localAssignment.UsesWorktree() && localDirectoryLockExempt(task) {
+		promptOptions = append(promptOptions, WithSharedLocalDirectory())
+	}
+	// Worktree mode hands this turn a tree that is mid-merge when the user's
+	// edits since the previous turn collided with the branch's own work. The
+	// conflict is deliberately left in place for the agent to resolve, so the
+	// prompt has to be the thing that tells it (MUL-6881).
+	if env.LocalWorktree != nil && len(env.LocalWorktree.ReplayConflicts) > 0 {
+		promptOptions = append(promptOptions, WithWorktreeReplayConflicts(env.LocalWorktree.ReplayConflicts))
+	}
+	prompt := BuildPrompt(task, provider, promptOptions...)
 
 	// Pass task-scoped auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
@@ -2844,15 +8461,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskLog.Error("task auth token invalid; refusing to start agent", "error", err)
 		return TaskResult{}, err
 	}
-	agentEnv := map[string]string{
-		"MULTICA_TOKEN":        agentToken,
-		"MULTICA_SERVER_URL":   d.cfg.ServerBaseURL,
-		"MULTICA_DAEMON_PORT":  fmt.Sprintf("%d", d.cfg.HealthPort),
-		"MULTICA_WORKSPACE_ID": task.WorkspaceID,
-		"MULTICA_AGENT_NAME":   agentName,
-		"MULTICA_AGENT_ID":     task.AgentID,
-		"MULTICA_TASK_ID":      task.ID,
-		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
+	agentEnv := taskMulticaEnvironment(task, agentName, agentToken, env.MulticaConfigRoot, d.cfg.WorkspacesRoot, d.cfg.ServerBaseURL, d.cfg.HealthPort, slot, taskTempDir)
+	if checkoutMode := repoCheckoutModeFor(provider, runtime.GOOS); checkoutMode != "" {
+		agentEnv[repoCheckoutModeEnv] = checkoutMode
 	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
@@ -2878,7 +8489,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
 	// inherit the daemon's PATH. Prepend the directory of the running
 	// multica binary so that `multica` commands in the agent always resolve.
-	if selfBin, err := os.Executable(); err == nil {
+	if selfBin, err := resolveSelfExecutable(); err == nil {
 		binDir := filepath.Dir(selfBin)
 		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
 	}
@@ -2887,6 +8498,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
 	}
+	// HOME and the XDG base dirs are deliberately not touched here: provider
+	// tools such as gh, aws, kubectl, and npm continue resolving the daemon
+	// user's existing state (MUL-5578). The Multica CLI is the exception:
+	// MULTICA_TASK_CONFIG_ROOT above redirects its implicit profile lookup to
+	// private task-local state and prevents Owner-profile fallback.
+	// (Hermes HERMES_HOME is applied after custom_env below so the per-task
+	// overlay can win over a user-set HERMES_HOME; see
+	// layerCustomEnvAndHermesHome.)
 	// Point Cursor at per-task project state when managed MCP is present.
 	// The workdir .cursor/mcp.json carries the managed server list, while
 	// CURSOR_DATA_DIR isolates the matching project approvals from the user's
@@ -2915,43 +8534,65 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Bedrock). These are set per-agent via the agent settings UI.
 	// Critical internal variables are blocklisted to prevent accidental or
 	// malicious override of daemon-set values.
+	var agentCustomEnv map[string]string
 	if task.Agent != nil {
-		for k, v := range task.Agent.CustomEnv {
-			if isBlockedEnvKey(k) {
-				d.logger.Warn("custom_env: blocked key skipped", "key", k)
-				continue
-			}
-			agentEnv[k] = v
-		}
+		agentCustomEnv = task.Agent.CustomEnv
 	}
-	backend, err := agent.New(provider, agent.Config{
+	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	if provider == "reasonix" {
+		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("prepare reasonix state home: %w", err)
+		}
+		agentEnv["REASONIX_STATE_HOME"] = reasonixStateHome
+	}
+	if provider == "dsh" {
+		dshSessionRoot, err := prepareDshTaskSessionRoot(d.cfg.Profile, task.RuntimeID, task.AgentID)
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("prepare dsh session root: %w", err)
+		}
+		agentEnv["MULTICA_DSH_SESSION_ROOT"] = dshSessionRoot
+		agentEnv["DSH_TELEMETRY_DISABLED"] = "1"
+	}
+	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, d.logger); err != nil {
+		return TaskResult{}, err
+	}
+	// The overlay is authoritative once built, so nothing on the command line
+	// may re-point HERMES_HOME out of it. Both argv regions are stripped
+	// together, against the same assembled argv the resolver read: a selection
+	// can straddle them (a prefix ending in a bare `-p` captures the backend's
+	// `acp`), which per-region stripping cannot see.
+	var hermesOverlayCustomArgs []string
+	hermesOverlayActive := provider == "hermes" && env != nil && env.HermesHome != ""
+	if hermesOverlayActive {
+		var rawCustomArgs []string
+		if task.Agent != nil {
+			rawCustomArgs = task.Agent.CustomArgs
+		}
+		profileFixedArgs, hermesOverlayCustomArgs = agent.StripHermesProfileSelectors(
+			profileFixedArgs, rawCustomArgs, d.logger)
+	}
+	// Resolve the backend through the unified runtime resolver: built-in
+	// runtime identities (e.g. "omp") dispatch through NewRuntime, protocol
+	// families go through New. This is the single production boundary — the
+	// daemon never calls agent.New or agent.NewRuntime directly, so the two
+	// factories stay meaning exactly one thing each.
+	backend, err := agent.ResolveBackend(provider, agent.Config{
 		ExecutablePath: entry.Path,
+		LaunchPrefix:   profileFixedArgs,
+		CLIVersion:     resolvedVersion,
 		Env:            agentEnv,
 		Logger:         d.logger,
+		TaskID:         task.ID,
+		RuntimeID:      task.RuntimeID,
+		DaemonVersion:  d.cfg.CLIVersion,
+		CodexVersion:   codexVersion,
+		BuiltinRuntime: !usesCustomProfileCommand,
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
 	}
 
-	taskLog.Info("starting agent",
-		"provider", provider,
-		"workdir", env.WorkDir,
-		"model", entry.Model,
-		"reused", reused,
-	)
-	if task.PriorSessionID != "" {
-		taskLog.Info("resuming session", "session_id", task.PriorSessionID)
-	}
-
-	taskStart := time.Now()
-
-	var customArgs []string
-	extraArgs := defaultArgsForProvider(d.cfg, provider)
-	var mcpConfig json.RawMessage
-	if task.Agent != nil {
-		customArgs = task.Agent.CustomArgs
-		mcpConfig = task.Agent.McpConfig
-	}
 	// Two-tier model resolution: an explicit agent.model wins,
 	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
 	// both are empty we deliberately pass "" through — each
@@ -2961,6 +8602,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Baking a Go-side "recommended default" here is how the
 	// cursor regression happened — static guesses drift from
 	// whatever the upstream CLI actually accepts.
+	//
+	// Resolved before the start log rather than at first use: logging
+	// entry.Model there reported the env-var tier alone, so every task whose
+	// model came from agent.model — the common case — announced itself with an
+	// empty model and looked like the selection had been dropped (GH #7300).
 	model := ""
 	if task.Agent != nil && task.Agent.Model != "" {
 		model = task.Agent.Model
@@ -2968,50 +8614,84 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if model == "" {
 		model = entry.Model
 	}
+
+	taskLog.Info("starting agent",
+		"provider", provider,
+		"workdir", env.WorkDir,
+		"model", model,
+		"resume_reachable", resumeReachable,
+	)
+	if task.PriorSessionID != "" {
+		taskLog.Info("resuming session", "session_id", task.PriorSessionID)
+	}
+
+	taskStart := time.Now()
+
+	var customArgs []string
+	// profileFixedArgs deliberately does NOT go here. It travels as
+	// agent.Config.LaunchPrefix instead, because ExtraArgs is honoured by only
+	// six of the twenty-one backends and lands *after* the protocol flags in
+	// the ones that do — so a wrapper's subcommand was either dropped on the
+	// floor or spliced in behind `-p` (GH #7046).
+	extraArgs := defaultArgsForProvider(d.cfg, provider)
+	var mcpConfig json.RawMessage
+	if task.Agent != nil {
+		customArgs = task.Agent.CustomArgs
+		mcpConfig = effectiveMcpConfig
+	}
+	if hermesOverlayActive {
+		// Stripped above, alongside the launch prefix. A skill-less hermes task
+		// has no overlay to protect and keeps its flags untouched.
+		customArgs = hermesOverlayCustomArgs
+	}
 	thinkingLevel := ""
+	serviceTier := ""
 	if task.Agent != nil {
 		thinkingLevel = task.Agent.ThinkingLevel
+		serviceTier = task.Agent.ServiceTier
 	}
-	// Per-model guard: the server validates the literal token against the
-	// provider's enum, but per-model gaps (Claude's `xhigh` on a non-Opus
-	// model, Codex's per-model `supported_reasoning_levels`) only resolve
-	// here, against the daemon's local CLI catalog. Invalid combinations
-	// log a warning and drop the level rather than failing the task, so a
-	// stale persisted value never blocks execution. Empty model is passed
-	// through unchanged — ValidateThinkingLevel resolves it to the
-	// provider's default model internally so default-model tasks aren't
-	// misjudged. Discovery errors fail open: if we can't list models, we
-	// keep the persisted level and let the CLI surface any objection.
-	if thinkingLevel != "" {
-		ok, err := agent.ValidateThinkingLevel(ctx, provider, entry.Path, model, thinkingLevel)
-		if err != nil {
-			taskLog.Warn("thinking_level: catalog lookup failed; passing through",
-				"provider", provider,
-				"model", model,
-				"thinking_level", thinkingLevel,
-				"error", err,
-			)
-		} else if !ok {
-			taskLog.Warn("thinking_level: not valid for this (provider, model); skipping injection",
-				"provider", provider,
-				"model", model,
-				"thinking_level", thinkingLevel,
-			)
-			thinkingLevel = ""
-		}
+	selection := resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),
+		taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
+	model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
+
+	var idleWatchdogTimeout time.Duration
+	if provider == "opencode" || provider == "codearts" {
+		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
 	}
 	execOpts := agent.ExecOptions{
-		Cwd:                       env.WorkDir,
-		Model:                     model,
-		ThreadName:                deriveTaskThreadName(task),
-		Timeout:                   d.cfg.AgentTimeout,
-		SemanticInactivityTimeout: d.cfg.CodexSemanticInactivityTimeout,
-		ResumeSessionID:           task.PriorSessionID,
-		ExtraArgs:                 extraArgs,
-		CustomArgs:                customArgs,
-		McpConfig:                 mcpConfig,
-		ThinkingLevel:             thinkingLevel,
-		OpenclawMode:              openclawMode,
+		EnableTaskSupplement:       taskSupplementNegotiated,
+		Cwd:                        env.WorkDir,
+		Model:                      model,
+		ThreadName:                 deriveTaskThreadName(task),
+		Timeout:                    d.cfg.AgentTimeout,
+		SemanticInactivityTimeout:  d.cfg.CodexSemanticInactivityTimeout,
+		FirstTurnNoProgressTimeout: d.cfg.CodexFirstTurnNoProgressTimeout,
+		IdleWatchdogTimeout:        idleWatchdogTimeout,
+		HandshakeTimeout:           d.cfg.CodexHandshakeTimeout,
+		TurnInterruptTimeout:       d.cfg.CodexTurnInterruptTimeout,
+		ThreadHandshakeTimeout:     d.cfg.CodexThreadHandshakeTimeout,
+		ResumeSessionID:            task.PriorSessionID,
+		// Post-gate intent: PriorSessionID here already reflects the pre-flight
+		// resume gates (a dropped resume is surfaced via the prompt instead). If it
+		// survived to here, the backend must disclose the loss when the live
+		// resume still fails — even across the fresh-session retry below, which
+		// clears ResumeSessionID but not this (MUL-4424).
+		//
+		// What that disclosure SAYS, and whether it addresses the user at all,
+		// depends on whether this surface's conversation is still readable, which
+		// only the daemon knows — hence handing the backend finished text rather
+		// than a flag. Empty when the prompt already carries the notice, so a turn
+		// can never pay for it twice (MUL-5722).
+		ResumeExpected:         task.PriorSessionID != "",
+		ResumeContinuityNotice: backendResumeContinuityNotice(task),
+		ExtraArgs:              extraArgs,
+		CustomArgs:             customArgs,
+		McpConfig:              mcpConfig,
+		ThinkingLevel:          thinkingLevel,
+		ServiceTier:            serviceTier,
+		OpenclawMode:           openclawMode,
+		ClaudeSettingsPath:     env.ClaudeSettingsPath,
+		QwenpawWorkspace:       env.QwenpawWorkspace,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -3021,8 +8701,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	//     as a belt-and-suspenders for older openclaw releases until that load
 	//     path stabilises in production; remove this once a release tracks the
 	//     workdir bootstrap reliably end-to-end.
-	//   - kiro and kimi are wrapped through their own CLIs whose cwd handling
-	//     is opaque enough that we can't trust the file-based path either.
+	//   - kimi is wrapped through its own CLI whose cwd handling is opaque
+	//     enough that we can't trust the file-based path either.
 	// Pass the full runtime brief inline (CLI catalog + workflow steps + agent
 	// identity/persona + skills + project context) so the backend prepends the
 	// same payload that file-based runtimes pick up from disk. Without this,
@@ -3030,13 +8710,43 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// `multica issue status` / `multica issue comment add`, leaving issues
 	// stuck in `todo`.
 	//
-	// Hermes is intentionally excluded: ACP sessions start in the task cwd and
-	// Hermes loads AGENTS.md / .agent_context itself. Prepending the full runtime
-	// brief into the ACP user prompt duplicates that context, bloats every turn,
-	// and has triggered upstream safety filters on harmless tasks.
+	// Hermes and Kiro are intentionally excluded: their ACP sessions start in
+	// the task cwd and load AGENTS.md themselves. Kiro documents root AGENTS.md
+	// as always included, and a real kiro-cli 2.13.0 ACP smoke confirms it.
+	// Prepending the full runtime brief into the ACP user prompt duplicates that
+	// context and bloats every turn.
 	if providerNeedsInlineSystemPrompt(provider) {
 		execOpts.SystemPrompt = runtimeBrief
 	}
+
+	// A quick-actions refresh task from a server that predates server-side
+	// generation (MUL-5573). This daemon no longer has a suggestion pass to run
+	// it with, and it must NOT fall through to the ordinary chat path below:
+	// the task carries no user message, so the agent would answer a prompt
+	// nobody wrote and that server would persist the result as a real assistant
+	// reply. Complete it empty instead — the same shape the retired pass
+	// produced on this task, which that server writes no row for. The user's
+	// refresh spinner resolves via the client's own timeout.
+	if task.RegenerateQuickActionsFor != "" {
+		taskLog.Warn("refusing quick-actions refresh task from an older server; complete the daemon upgrade by updating the server",
+			"target_task", task.RegenerateQuickActionsFor,
+		)
+		return TaskResult{Status: "completed", Comment: "", WorkDir: env.WorkDir, EnvRoot: env.RootDir}, nil
+	}
+
+	// Authenticate the localhost repo-checkout endpoint with the same
+	// task-scoped token the child receives. The endpoint derives identity and
+	// branch ownership from this in-memory record instead of trusting request
+	// fields or ambient process environment. Register only for the provider
+	// execution window and always remove the credential afterwards.
+	d.registerActiveRepoCheckoutTask(agentToken, activeRepoCheckoutTask{
+		WorkspaceID: task.WorkspaceID,
+		TaskID:      task.ID,
+		AgentID:     task.AgentID,
+		AgentName:   task.Agent.Name,
+		WorkDir:     env.WorkDir,
+	})
+	defer d.clearActiveRepoCheckoutTask(agentToken)
 
 	taskLog.Debug("invoking backend",
 		"provider", provider,
@@ -3048,29 +8758,86 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"inline_system_prompt", execOpts.SystemPrompt != "",
 		"resume_session", execOpts.ResumeSessionID != "",
 		"timeout", execOpts.Timeout,
+		"idle_watchdog", execOpts.IdleWatchdogTimeout,
 	)
 
-	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
+	// Shared across the resume-retry below so the retry's transcript rows
+	// keep ascending seq values for the same task.
+	var msgSeq atomic.Int32
+	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
 	if err != nil {
 		return TaskResult{}, err
 	}
 
-	// Fallback: if session resume failed before establishing a session, retry
-	// with a fresh session. We check SessionID == "" to distinguish a resume
-	// failure (no session established) from a failure during actual execution.
-	if result.Status == "failed" && task.PriorSessionID != "" && result.SessionID == "" {
+	// retiredSessionID is the session this run was told to resume and then
+	// abandoned. Captured before the retry clears task.PriorSessionID, and
+	// reported on EVERY terminal path — the retry succeeding is exactly when
+	// the abandoned id would otherwise survive, unreferenced by this task's
+	// row but still reachable through an older completed row on the issue or
+	// through the chat_session pointer (GH #6066).
+	var retiredSessionID string
+	defer func() { taskResult.RetiredSessionID = retiredSessionID }()
+
+	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
+		firstResult := result
 		firstUsage := result.Usage
-		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
-		execOpts.ResumeSessionID = ""
-		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
-		if retryErr != nil {
-			taskLog.Error("fresh session also failed to start", "error", retryErr)
-		} else {
-			result = retryResult
-			result.Usage = mergeUsage(firstUsage, result.Usage)
-			tools = retryTools
+		firstTools := tools
+		if !result.ResumeRejectedTransient {
+			retiredSessionID = task.PriorSessionID
 		}
+		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
+
+		// Rebuild cold-session context before the single retry. The prior
+		// provider transcript is gone (missing, account-mismatched, or —
+		// GH #5975 — carrying history the provider now refuses), so the
+		// fresh process must NOT be told it is resuming a conversation:
+		//   - taskCtx.PriorSessionResumed=false + re-injecting the runtime
+		//     brief rewrites the on-disk AGENTS.md so it no longer claims
+		//     "You're resuming the prior session" (which file-based backends
+		//     like Kiro load themselves).
+		//   - clearing task.PriorSessionID rebuilds the prompt on the cold
+		//     comment-reading path instead of the warm resumed one.
+		//   - PriorSessionResumeUnavailable=true makes BuildPrompt append the
+		//     continuity notice for this surface, so the agent knows not to
+		//     assume continuity it no longer has. This is now the ONLY injector
+		//     on the retry path: the backend's own copy is suppressed below,
+		//     because before MUL-5722 both fired and the turn carried the same
+		//     paragraph twice.
+		// task and taskCtx are local (runTask takes task by value), so these
+		// mutations only affect the retry.
+		execOpts.ResumeSessionID = ""
+		task.PriorSessionID = ""
+		task.PriorSessionResumeUnavailable = true
+		execOpts.ResumeContinuityNotice = ""
+		taskCtx.PriorSessionResumed = false
+		if freshBrief, briefErr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); briefErr != nil {
+			taskLog.Warn("execenv: re-inject cold runtime config for fresh retry failed (non-fatal)", "error", briefErr)
+		} else {
+			runtimeBrief = freshBrief
+			if providerNeedsInlineSystemPrompt(provider) {
+				execOpts.SystemPrompt = runtimeBrief
+			}
+		}
+		freshPrompt := BuildPrompt(task, provider, promptOptions...)
+
+		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, freshPrompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
+		if retryErr != nil {
+			taskLog.Error("fresh session also failed to start; keeping the original poisoned result", "error", retryErr)
+		} else if retryResult.Status != "completed" && retryResult.SessionID == "" {
+			taskLog.Warn("fresh session retry also failed without establishing a new session; keeping the original poisoned result",
+				"retry_status", retryResult.Status,
+				"retry_error", retryResult.Error,
+			)
+		}
+		// The poisoned prior session id lives ONLY on firstResult (classified
+		// unrecoverable, so GetLastTaskSession excludes it). reconcile never
+		// grafts it onto the retry result: a retry that establishes a new
+		// session wins with its own id; a retry that fails without a new
+		// session keeps firstResult so the bad session stays excluded rather
+		// than being relabeled resumable by a benign-looking second error.
+		result, tools = reconcileFreshRetryResult(firstResult, firstUsage, firstTools, retryResult, retryTools, retryErr)
 	}
+	phaseRecorder.Mark(taskPhaseTurnCompleted)
 
 	elapsed := time.Since(taskStart).Round(time.Second)
 	taskLog.Info("agent finished",
@@ -3089,7 +8856,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Convert agent usage map to task usage entries.
 	var usageEntries []TaskUsageEntry
 	for model, u := range result.Usage {
-		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
+		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 && u.CostUSDTicks <= 0 {
 			continue
 		}
 		usageEntries = append(usageEntries, TaskUsageEntry{
@@ -3099,8 +8866,31 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			OutputTokens:     u.OutputTokens,
 			CacheReadTokens:  u.CacheReadTokens,
 			CacheWriteTokens: u.CacheWriteTokens,
+			CostUSDTicks:     u.CostUSDTicks,
 		})
 	}
+
+	// MUL-5305: withhold a Codex session whose rollout never reached the per-issue
+	// store, for ANY terminal state — including `completed`, since a completed
+	// turn whose rollout is missing is exactly the #5934 case and must not be
+	// recorded as a resume pointer the next follow-up would only drop. Blanking
+	// the id keeps GetLastTaskSession falling back to the last session whose
+	// rollout is real; SessionRolloutMissing tells the server to clear the row's
+	// session and record a continuity gap, so the next claim still discloses the
+	// loss (PriorSessionResumeUnavailable, MUL-4424 transparency) even while
+	// resuming that older good session. No-op for non-Codex providers
+	// (env.CodexHome == "") and when there is no session.
+	var sessionRolloutMissing bool
+	if result.SessionID != "" && !codexSessionResumable(env.CodexHome, result.SessionID, codexRolloutFlushWait) {
+		taskLog.Warn("codex session rollout not present in task CODEX_HOME; withholding resume pointer and flagging continuity gap",
+			"session_id", result.SessionID, "codex_home", env.CodexHome, "status", result.Status)
+		result.SessionID = ""
+		sessionRolloutMissing = true
+	}
+	// Stamp the withhold flag onto whichever TaskResult the status switch below
+	// returns (SessionID is already blanked above); reportTaskResult forwards it
+	// as session_rollout_missing on the terminal callback (MUL-5305).
+	defer func() { taskResult.SessionRolloutMissing = sessionRolloutMissing }()
 
 	switch result.Status {
 	case "completed":
@@ -3140,14 +8930,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				FailureReason: reason,
 			}, nil
 		}
-		return TaskResult{
+		taskResult = TaskResult{
 			Status:    "completed",
 			Comment:   result.Output,
 			SessionID: result.SessionID,
 			WorkDir:   env.WorkDir,
 			EnvRoot:   env.RootDir,
 			Usage:     usageEntries,
-		}, nil
+		}
+		return taskResult, nil
 	case "timeout":
 		// Surface session_id/work_dir so the chat resume pointer is kept
 		// in sync even when the agent times out after building a session.
@@ -3224,8 +9015,35 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// conversation permanently blocks the issue: every follow-up
 		// task resumes the same poisoned session and hits the same 400.
 		failureReason, _ := classifyPoisonedError(errMsg)
+		if failureReason == "" {
+			// A resume we could not read back leaves the same oversized thread
+			// recorded as this issue's resume pointer. Reaching here means the
+			// in-turn fresh-session retry did not save the run (it is gated on
+			// tools == 0, and can fail on its own), so classify it to keep the
+			// NEXT task off that thread rather than replaying the overflow
+			// forever (MUL-5722).
+			failureReason, _ = classifyResumeUnsafeTransport(provider, errMsg)
+			if failureReason != "" && retiredSessionID == "" && task.PriorSessionID != "" {
+				// Name the thread explicitly. The failure happens before the
+				// turn starts, so the backend has no session id to report and
+				// this row lands with session_id NULL — which means neither
+				// the reason above nor any error-text filter on this row can
+				// identify WHICH session to avoid. retired_session_id is the
+				// one channel that does not depend on the failed row carrying
+				// the session, and it is what the resume lookups and the chat
+				// pointer cleanup both key off.
+				//
+				// Belt-and-braces, not the live path: an overflowed resume
+				// fails before any tool runs, so shouldRetryWithFreshSession's
+				// tools == 0 gate is always satisfied and the retry above has
+				// already recorded the same id. This covers the case where a
+				// future condition stops the retry from firing, so the session
+				// is still retired rather than silently kept.
+				retiredSessionID = task.PriorSessionID
+			}
+		}
 		if failureReason != "" {
-			taskLog.Warn("agent failed with poisoned API error, classifying as blocked",
+			taskLog.Warn("agent failed with a resume-unsafe error, retiring the session",
 				"failure_reason", failureReason,
 			)
 		} else {
@@ -3241,6 +9059,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// fact.
 			failureReason = taskfailure.Classify(errMsg).String()
 		}
+		// After the classifiers above have read errMsg. Each hint is fixed
+		// prose chosen to match none of the resume guards (see its const), so
+		// ordering is not what makes it safe — but it keeps the machine
+		// decisions reading exactly what the runtime reported, and leaves the
+		// annotations on the outside where a future edit is visibly a change
+		// to human-facing text rather than to classifier input. They are
+		// mutually exclusive by provider, so they cannot stack.
+		errMsg = annotateHermesProviderUnconfigured(errMsg, provider, env.HermesHome != "")
+		errMsg = annotateCodexRetiredCompaction(errMsg, provider)
 		return TaskResult{
 			Status:        "blocked",
 			Comment:       errMsg,
@@ -3253,9 +9080,203 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 }
 
+// shouldRetryWithFreshSession reports whether a failed run that requested
+// --resume should be retried once from a fresh session.
+//
+// Two independent questions have to both answer yes, and conflating them is
+// how this went wrong before:
+//
+//  1. Would a fresh session even fix this? Only if the resume itself was
+//     refused — permanently because the transcript is gone or belongs to
+//     another provider account, or transiently because another live run owns
+//     it. result.ResumeRejected and result.ResumeRejectedTransient are the
+//     backend's positive evidence of those two cases. Both allow a fresh retry,
+//     but only the permanent signal retires the prior session from later
+//     lookups.
+//     Answering by exclusion alone would invert the burden of proof: the
+//     failures a new session cures are a small enumerable set, while the
+//     ones it cannot are open-ended. A network drop, a 429, a quota trip or
+//     a provider 5xx has nothing to do with the session, so resetting it
+//     discards the one recoverable thing — the conversation pointer — and
+//     re-runs the task for nothing. provider_network in particular is
+//     documented resume-safe in internal/service/task.go (retryableReasons,
+//     MUL-4910): the platform's own retry is supposed to inherit the session
+//     and continue the truncated conversation.
+//
+//     Not every backend can answer, though, and a false ResumeRejected means
+//     different things depending on who produced it: "checked, not a
+//     rejection" from a capable backend, "could not tell" from one of the
+//     backends in agent.ResumeRejectionUndetectable. That is why provider is a
+//     parameter — without it the compatibility branch below would silently
+//     apply to every backend, second-guessing capable ones by exclusion.
+//
+//  2. Is re-running safe? Only if the agent executed no tool. tools == 0 does
+//     not prove the run mutated nothing — it proves we observed no tool use,
+//     which is the strongest signal available here — but it is what stands
+//     between a retry and a duplicated side effect. Comment creation has no
+//     idempotency key and a duplicate re-fires its @mention triggers; the
+//     retry also reuses the same workdir, which is never reset between
+//     attempts, so a retry after real work re-plans on top of its own
+//     half-finished commits.
+func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, tools int32, provider string) bool {
+	if result.Status != "failed" || priorSessionID == "" || tools > 0 {
+		return false
+	}
+	// Positive evidence: the backend proved the resume was refused.
+	if result.ResumeRejected || result.ResumeRejectedTransient {
+		return true
+	}
+	// Positive evidence of a different kind: the resume was NOT refused —
+	// the transcript loaded fine — and the provider then refused to replay
+	// it because a message in it is empty. ResumeRejected is false for every
+	// backend here precisely because nothing rejected the resume, which is
+	// why this needs its own branch rather than a phrase added to the
+	// rejection list.
+	//
+	// It applies to all 18 backends, not the ResumeRejectionUndetectable
+	// subset below, and that is deliberate: this is the one failure class
+	// where dropping the session is provably the fix without the backend
+	// having to detect anything. The evidence is in the provider's own error
+	// text, which the common layer already has. Leaving it to each adapter
+	// is how the same bug got fixed three times for Kiro, Kimi and Anthropic
+	// while every other backend stayed broken.
+	//
+	// The tools == 0 gate above still applies unchanged — a run that already
+	// used a tool is never re-run, poisoned history or not. Such a task still
+	// gets its session retired, just by classifyPoisonedError at report time
+	// rather than by an in-turn retry.
+	if taskfailure.UnresumableHistory(result.Error) {
+		return true
+	}
+	// Third form of positive evidence, and the same shape of argument: the
+	// resume was not refused — the runtime happily rebuilt the session — but
+	// the provider identity it rebuilt can no longer resolve its own
+	// credentials, so the turn dies with "Could not resolve authentication
+	// method" (GH #6777). The credentials are fine; only the session's copy of
+	// the provider is broken, which is precisely what a fresh session
+	// re-resolves from current config.
+	//
+	// This is the exception the Result.ResumeRejected doc calls out: adapters
+	// must NOT flag auth errors, because a genuine credential failure keeps the
+	// session so the platform's own retry can continue the conversation. The
+	// distinction is resume-vs-fresh, not the error text — and priorSessionID
+	// above already establishes that this run WAS a resume. On a cold run the
+	// same error means the config really is wrong and this gate never sees it.
+	//
+	// Deciding here rather than in each ACP adapter is what makes it correct
+	// for every step of the ACP lifecycle: the failure surfaces at
+	// session/resume, at session/set_model (a resumed session whose persisted
+	// provider was normalised gets a redundant set_model that re-routes to the
+	// wrong provider — MUL-5029) or at session/prompt, and only two of those
+	// three carry any resume-failure signal today. The final error text carries
+	// the phrase on all three.
+	//
+	// Worst case, the config genuinely is broken: the fresh attempt fails the
+	// same way, the user sees the same error once, and the single-retry budget
+	// bounds the cost. That is the same trade the branch above already makes.
+	if taskfailure.AuthMethodUnresolved(result.Error) {
+		return true
+	}
+	// Everything below is a bounded compatibility path for the backends that
+	// cannot answer question 1 at all. For every other backend a false
+	// ResumeRejected is a real answer — it checked and this was not a
+	// rejection — so the gate stops here rather than second-guessing it by
+	// exclusion.
+	if !agent.ResumeRejectionUndetectable(provider) {
+		return false
+	}
+	// antigravity, codearts, copilot, cursor, deveco and opencode scrape SessionID out
+	// of stream output and have no rejection string captured anywhere, so an
+	// empty SessionID is the only thing they can offer. It proves no session
+	// was established this run, which is exactly what the gate relied on for
+	// every backend before ResumeRejected existed; keeping it preserves their
+	// recovery instead of silently removing it.
+	//
+	// Inventing rejection phrases for these backends would be the alternative,
+	// and it is worse: no real output has been captured for any of them, and
+	// a false positive discards a recoverable session pointer.
+	return result.SessionID == "" && freshSessionMayHelp(result.Error)
+}
+
+// reconcileFreshRetryResult picks the authoritative result after the single
+// fresh-session retry (see the retry block in runTask). Its one hard invariant:
+// the poisoned prior session id — carried only on `first`, whose failure is
+// classified unrecoverable so GetLastTaskSession excludes it — must NEVER be
+// grafted onto the retry's result, or a later task would resume the bad
+// session again and re-form the loop this fix exists to break (GH #5975 review).
+//
+//   - retryErr != nil: the fresh attempt never produced a result. Keep `first`
+//     so the poisoned session stays recorded as unrecoverable.
+//   - retry established a new session id: it fully wins, carrying its OWN id.
+//     A benign retry failure on a real new session is fine to record — it is
+//     not the poisoned one.
+//   - retry completed without a session id (e.g. all work via tools): take it,
+//     but keep the id EMPTY. Never resurrect the poisoned id as a resumable
+//     success.
+//   - retry failed AND established no new session: keep `first`. Adopting the
+//     second result here is exactly the bug — a second error lacking the
+//     oversized-image markers would be classified resume-safe and the poisoned
+//     id (were it attached) would be re-selected. We keep the unrecoverable
+//     first result and only merge usage.
+//
+// Usage is merged across both attempts in every branch so billing is complete.
+func reconcileFreshRetryResult(first agent.Result, firstUsage map[string]agent.TokenUsage, firstTools int32, retry agent.Result, retryTools int32, retryErr error) (agent.Result, int32) {
+	switch {
+	case retryErr != nil:
+		first.Usage = firstUsage
+		return first, firstTools
+	case retry.SessionID != "":
+		retry.Usage = mergeUsage(firstUsage, retry.Usage)
+		return retry, retryTools
+	case retry.Status == "completed":
+		retry.Usage = mergeUsage(firstUsage, retry.Usage)
+		return retry, retryTools
+	default:
+		first.Usage = mergeUsage(firstUsage, retry.Usage)
+		return first, firstTools
+	}
+}
+
+// freshSessionMayHelp reports whether restarting the conversation could
+// plausibly fix errText. It answers "is this failure about the session at
+// all?", so every reason with a defined non-session remedy — wait, back off,
+// top up, re-auth, fix the config, install the binary — is excluded. Those
+// keep the session pointer so the platform's own retry can resume the
+// truncated conversation.
+//
+// What is left through is deliberately narrow: unknown, process failure and
+// unparseable output. A real resume rejection from one of these backends most
+// likely surfaces as exactly that — a non-zero exit or output we cannot
+// parse — since none of them reports one explicitly. Context overflow is also
+// allowed through, as starting over genuinely can clear it.
+func freshSessionMayHelp(errText string) bool {
+	switch taskfailure.Classify(errText) {
+	case taskfailure.ReasonAgentProviderNetwork,
+		taskfailure.ReasonAgentProviderCapacityOrRateLimit,
+		taskfailure.ReasonAgentProviderQuotaLimit,
+		taskfailure.ReasonAgentProviderServerError,
+		taskfailure.ReasonAgentProviderAuthOrAccess,
+		taskfailure.ReasonAgentMissingConfig,
+		taskfailure.ReasonAgentModelNotFoundOrUnavailable,
+		taskfailure.ReasonAgentRuntimeMissingExecutable,
+		taskfailure.ReasonAgentRuntimeVersionUnsupported,
+		// Defensive: a timeout normally carries its own terminal status and
+		// never reaches this gate, but if one is ever classified out of a
+		// "failed" result, re-running the whole task is not the answer.
+		taskfailure.ReasonAgentTimeout:
+		return false
+	default:
+		return true
+	}
+}
+
 // executeAndDrain runs a backend, drains its message stream (forwarding to the
-// server), and waits for the final result.
-func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID string) (agent.Result, int32, error) {
+// server), and waits for the final result. msgSeq numbers the reported task
+// messages and is owned by the caller so a same-task retry continues the
+// sequence instead of restarting at 1 — the server orders the transcript by
+// seq alone, and duplicate seqs would interleave the two attempts' rows.
+func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID, codexHome string, msgSeq *atomic.Int32) (agent.Result, int32, error) {
+	phaseRecorder := taskPhaseRecorderFromContext(ctx)
 	// Wrap the caller's ctx so the idle watchdog (below) can interrupt both
 	// the agent subprocess (via the ctx passed to backend.Execute) AND the
 	// drain loop with a single cancel. Without this layer the backend would
@@ -3266,10 +9287,37 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 
 	session, err := backend.Execute(agentCtx, prompt, opts)
 	if err != nil {
+		// One provider-agnostic boundary for launches: every backend's
+		// cmd.Start() failure arrives here, so diagnosing ENOEXEC at this point
+		// covers claude, opencode and any CLI added later without a wrap in
+		// each backend (MUL-6164).
+		err = agent.ExplainExecError(err)
 		taskLog.Debug("backend execute returned error", "error", err)
 		return agent.Result{}, 0, err
 	}
+	// This counter intentionally starts at the narrower provider-session
+	// boundary, not at the earlier server-side StartTask transition.
+	d.runningTasks.Add(1)
+	defer d.runningTasks.Add(-1)
+	phaseRecorder.Mark(taskPhaseRuntimeStarted)
 	taskLog.Debug("backend started, draining messages")
+
+	// Only negotiated sessions may claim additions. Stop and join delivery
+	// before the caller reports the task's terminal state to the server.
+	if opts.EnableTaskSupplement && session.Supplement != nil && session.SupplementReady != nil {
+		supplementCtx, cancelSupplements := context.WithCancel(agentCtx)
+		supplementsDone := make(chan struct{})
+		wakeup, unsubscribe := d.taskSupplementSignals.subscribe(taskID)
+		go func() {
+			defer unsubscribe()
+			defer close(supplementsDone)
+			d.runTaskSupplementLoop(supplementCtx, session, taskID, wakeup, taskLog)
+		}()
+		defer func() {
+			cancelSupplements()
+			<-supplementsDone
+		}()
+	}
 
 	// Bound the drain loop only when there is a wall-clock cap. With a positive
 	// opts.Timeout, give the drain a slightly longer deadline than the backend
@@ -3307,41 +9355,114 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	// idleWatchdogThreshold records (as nanos) which silence budget actually
 	// tripped the watchdog — the idle window or the larger in-flight-tool
 	// window — so the failure message reports the real duration.
-	var idleWatchdogThreshold atomic.Int64
-	idleWatchdogThreshold.Store(int64(d.cfg.AgentIdleWatchdog))
 	idleWindow := d.cfg.AgentIdleWatchdog
+	// A provider may opt into a shorter per-run no-message budget. The global
+	// zero remains authoritative so MULTICA_AGENT_IDLE_WATCHDOG=0 still disables
+	// the entire watchdog suite. Tool calls continue to use AgentToolWatchdog.
+	if idleWindow > 0 && opts.IdleWatchdogTimeout > 0 && opts.IdleWatchdogTimeout < idleWindow {
+		idleWindow = opts.IdleWatchdogTimeout
+	}
+	var idleWatchdogThreshold atomic.Int64
+	idleWatchdogThreshold.Store(int64(idleWindow))
+	watchdogToolCount := inFlightTools.Load
+	if session.ToolActivity != nil {
+		watchdogToolCount = func() int32 {
+			count, at := session.ToolActivity()
+			for {
+				previous := lastActivityAt.Load()
+				if at.UnixNano() <= previous || lastActivityAt.CompareAndSwap(previous, at.UnixNano()) {
+					break
+				}
+			}
+			return count
+		}
+	}
+	// A backend that can prove its outcome is already decided outranks every
+	// liveness policy below: a run whose terminal result has been read is not a
+	// hang, no matter how long its cleanup then takes.
+	// Nil is meaningful and kept distinguishable: a backend that offers no
+	// terminal boundary is one whose result cannot outrank a force stop, so it
+	// must not be given a hand-off window it can never use. Every such backend
+	// keeps the previous behaviour, including a wedged one, which is force
+	// stopped and classified without waiting for anything.
+	handsOverTerminal := session.TerminalObserved != nil
+	terminalObserved := session.TerminalObserved
+	if terminalObserved == nil {
+		terminalObserved = func() bool { return false }
+	}
+	watchdogCtx, stopWatchdog := context.WithCancel(agentCtx)
+	defer stopWatchdog()
 	if idleWindow > 0 {
-		go d.runIdleWatchdog(agentCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, &inFlightTools, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, taskLog, taskID)
+		go d.runIdleWatchdog(watchdogCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, watchdogToolCount, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, session.InterruptBackgroundTools, terminalObserved, taskLog)
 	}
 
+	// drainFinished closes after the drain goroutine has flushed the last
+	// message batch, so the result hand-off below can wait for the transcript
+	// tail to be persisted.
+	drainFinished := make(chan struct{})
 	go func() {
-		var seq atomic.Int32
+		defer close(drainFinished)
 		var mu sync.Mutex
-		var pendingText strings.Builder
-		var pendingThinking strings.Builder
+		var pendingContent strings.Builder
+		var pendingType string
+		var pendingAt time.Time
 		var batch []TaskMessageData
 		callIDToTool := map[string]string{}
+		// Provider IDs can restart on a same-task retry (for example item_0).
+		// Allocate opaque transcript IDs per execution, including orphan results,
+		// so neither a retry nor a missing call can steal another call's result.
+		transcriptCallIDs := map[string]string{}
+		transcriptCallID := func(providerID string) string {
+			if providerID == "" {
+				return ""
+			}
+			if id, ok := transcriptCallIDs[providerID]; ok {
+				return id
+			}
+			id := uuid.NewString()
+			transcriptCallIDs[providerID] = id
+			return id
+		}
+
+		// sealPendingLocked turns the current contiguous text/thinking frame
+		// into a sequenced row. Callers hold mu so a ticker flush cannot assign
+		// a later seq between sealing the frame and appending the event that
+		// followed it.
+		sealPendingLocked := func() {
+			if pendingContent.Len() == 0 {
+				return
+			}
+			s := msgSeq.Add(1)
+			batch = append(batch, TaskMessageData{
+				Seq:       int(s),
+				Type:      pendingType,
+				Content:   pendingContent.String(),
+				CreatedAt: pendingAt,
+			})
+			pendingContent.Reset()
+			pendingType = ""
+			pendingAt = time.Time{}
+		}
+
+		appendPending := func(messageType, content string, observedAt time.Time) {
+			if content == "" {
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if pendingType != "" && pendingType != messageType {
+				sealPendingLocked()
+			}
+			if pendingContent.Len() == 0 {
+				pendingType = messageType
+				pendingAt = observedAt
+			}
+			pendingContent.WriteString(content)
+		}
 
 		flush := func() {
 			mu.Lock()
-			if pendingThinking.Len() > 0 {
-				s := seq.Add(1)
-				batch = append(batch, TaskMessageData{
-					Seq:     int(s),
-					Type:    "thinking",
-					Content: pendingThinking.String(),
-				})
-				pendingThinking.Reset()
-			}
-			if pendingText.Len() > 0 {
-				s := seq.Add(1)
-				batch = append(batch, TaskMessageData{
-					Seq:     int(s),
-					Type:    "text",
-					Content: pendingText.String(),
-				})
-				pendingText.Reset()
-			}
+			sealPendingLocked()
 			toSend := batch
 			batch = nil
 			mu.Unlock()
@@ -3361,16 +9482,31 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		defer ticker.Stop()
 
 		done := make(chan struct{})
+		tickerDone := make(chan struct{})
+		firstVisible := make(chan struct{}, 1)
 		go func() {
+			defer close(tickerDone)
 			for {
 				select {
 				case <-ticker.C:
+					flush()
+				case <-firstVisible:
 					flush()
 				case <-done:
 					return
 				}
 			}
 		}()
+		// The periodic flush bounds request rate for the rest of the transcript,
+		// but making the first visible event wait for its next 500 ms edge adds
+		// pure presentation latency. Signal at most once per execution; a buffered
+		// channel keeps the drain loop non-blocking while the reporter is busy.
+		var firstVisibleOnce sync.Once
+		flushFirstVisible := func() {
+			firstVisibleOnce.Do(func() {
+				firstVisible <- struct{}{}
+			})
+		}
 
 		var sessionPinned atomic.Bool
 		for {
@@ -3379,22 +9515,46 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				if !ok {
 					goto drainDone
 				}
+				if isTaskOutputReceived(msg) {
+					phaseRecorder.Mark(taskPhaseFirstOutputReceived)
+				}
+				if isTaskToolUse(msg) {
+					phaseRecorder.Mark(taskPhaseFirstToolUse)
+				}
 				// Stamp activity as soon as a message lands. The idle
 				// watchdog reads this to decide whether the backend has
 				// gone silent — stamping before processing makes sure a
 				// slow downstream call (mu.Lock contention, batch resize)
 				// can't be misattributed to backend silence.
-				lastActivityAt.Store(time.Now().UnixNano())
+				observedAt := time.Now().UTC()
+				lastActivityAt.Store(observedAt.UnixNano())
 				switch msg.Type {
 				case agent.MessageStatus:
 					// Persist the session/work_dir as soon as the backend
 					// reveals them. Without this, a daemon crash mid-run
 					// loses the resume pointer and the auto-retry fires
 					// without context.
+					// MUL-5305: pin the resume pointer only once the session's
+					// rollout is actually in the store, so a crash-recovery pointer
+					// the daemon cannot resume never poisons the next follow-up
+					// (FailAgentTask keeps the pinned session_id via COALESCE, so a
+					// bad mid-flight pin survives a later terminal failure). Codex
+					// reveals the session id on a single task_started status, so a
+					// background waiter polls for the rollout for the life of the
+					// run and pins the moment it lands — a rollout that flushes
+					// after this status is still pinned in-flight (crash recovery
+					// preserved), while a session whose rollout never lands is never
+					// pinned. The terminal report is the authoritative writer.
+					// Non-Codex providers (codexHome == "") pin immediately.
 					if msg.SessionID != "" && !sessionPinned.Swap(true) {
 						sid := msg.SessionID
 						wd := opts.Cwd
 						go func() {
+							if !waitCodexRolloutPresent(drainCtx, codexHome, sid) {
+								taskLog.Debug("skip pinning codex session: rollout not present before run ended",
+									"session_id", sid, "codex_home", codexHome)
+								return
+							}
 							pinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 							defer cancel()
 							if err := d.client.PinTaskSession(pinCtx, taskID, sid, wd); err != nil {
@@ -3406,20 +9566,31 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					n := toolCount.Add(1)
 					inFlightTools.Add(1)
 					taskLog.Info(fmt.Sprintf("tool #%d: %s", n, msg.Tool))
-					if msg.CallID != "" {
-						mu.Lock()
-						callIDToTool[msg.CallID] = msg.Tool
-						mu.Unlock()
-					}
-					s := seq.Add(1)
 					mu.Lock()
+					sealPendingLocked()
+					if msg.CallID != "" {
+						callIDToTool[msg.CallID] = msg.Tool
+					}
+					s := msgSeq.Add(1)
 					batch = append(batch, TaskMessageData{
-						Seq:   int(s),
-						Type:  "tool_use",
-						Tool:  msg.Tool,
-						Input: msg.Input,
+						Seq:       int(s),
+						Type:      "tool_use",
+						CallID:    transcriptCallID(msg.CallID),
+						Tool:      msg.Tool,
+						CreatedAt: observedAt,
+						// Redact before the payload leaves this process, not
+						// only on arrival. The server redacts again in its
+						// ingest handler, but that is the *remote* side: a
+						// daemon that self-updated ahead of the server — or one
+						// talking to a server mid-rollout — would otherwise ship
+						// whole-file edit contents (a deleted .env, a patched
+						// credential) to a peer that does not scrub nested
+						// values yet. Deployment order is not a control we
+						// have, so this side has to be safe on its own.
+						Input: redact.InputMap(msg.Input),
 					})
 					mu.Unlock()
+					flushFirstVisible()
 				case agent.MessageToolResult:
 					// Decrement only when the count would stay >= 0. A stray
 					// tool_result with no matching tool_use (backend bug or
@@ -3435,49 +9606,56 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 							break
 						}
 					}
-					s := seq.Add(1)
-					output := msg.Output
-					if len(output) > 8192 {
-						output = output[:8192]
-					}
+					output, outputTruncated := toolOutputPreview(msg.Output)
+					mu.Lock()
+					sealPendingLocked()
 					toolName := msg.Tool
 					if toolName == "" && msg.CallID != "" {
-						mu.Lock()
 						toolName = callIDToTool[msg.CallID]
-						mu.Unlock()
 					}
+					s := msgSeq.Add(1)
 					taskLog.Info("tool_result observed", "seq", s, "tool", toolName, "call_id", msg.CallID)
-					mu.Lock()
 					batch = append(batch, TaskMessageData{
-						Seq:    int(s),
-						Type:   "tool_result",
-						Tool:   toolName,
-						Output: output,
+						Seq:       int(s),
+						Type:      "tool_result",
+						CallID:    transcriptCallID(msg.CallID),
+						Tool:      toolName,
+						Output:    output,
+						CreatedAt: observedAt,
+						// Always sent, including false: the reader has to be
+						// able to tell "this record is complete" from "this
+						// record predates the flag", and only a daemon that
+						// measured the output can say the former.
+						OutputTruncated: &outputTruncated,
 					})
 					mu.Unlock()
+					flushFirstVisible()
 				case agent.MessageThinking:
+					appendPending("thinking", msg.Content, observedAt)
 					if msg.Content != "" {
-						mu.Lock()
-						pendingThinking.WriteString(msg.Content)
-						mu.Unlock()
+						flushFirstVisible()
 					}
 				case agent.MessageText:
 					if msg.Content != "" {
 						taskLog.Debug("agent", "text", truncateLog(msg.Content, 200))
-						mu.Lock()
-						pendingText.WriteString(msg.Content)
-						mu.Unlock()
+					}
+					appendPending("text", msg.Content, observedAt)
+					if msg.Content != "" {
+						flushFirstVisible()
 					}
 				case agent.MessageError:
 					taskLog.Error("agent error", "content", msg.Content)
-					s := seq.Add(1)
 					mu.Lock()
+					sealPendingLocked()
+					s := msgSeq.Add(1)
 					batch = append(batch, TaskMessageData{
-						Seq:     int(s),
-						Type:    "error",
-						Content: msg.Content,
+						Seq:       int(s),
+						Type:      "error",
+						Content:   msg.Content,
+						CreatedAt: observedAt,
 					})
 					mu.Unlock()
+					flushFirstVisible()
 				}
 			case <-drainCtx.Done():
 				goto drainDone
@@ -3485,12 +9663,86 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		}
 	drainDone:
 		close(done)
+		// Let any tick-driven flush finish before the final one: a flush still
+		// in flight would otherwise keep posting batches after this goroutine
+		// signalled that the transcript tail was persisted.
+		<-tickerDone
 		flush()
 	}()
 
+	// waitForDrain blocks until the drain goroutine has flushed the transcript
+	// tail, so every terminal return below hands control back only after the
+	// task's reported messages are persisted — a consumer reading them at the
+	// terminal transition would otherwise see a transcript that is non-empty
+	// but truncated, indistinguishable from a complete one. Bounded so a
+	// backend that never closes its message channel cannot stall the terminal
+	// transition: after 10s the drain loop is cancelled and given a window
+	// wide enough for its worst-case exit — an in-flight tick flush plus the
+	// final one, each capped by the 5s ReportTaskMessages timeout and neither
+	// interruptible by the cancel (they post on context.Background()).
+	waitForDrain := func() {
+		select {
+		case <-drainFinished:
+		case <-time.After(10 * time.Second):
+			drainCancel()
+			select {
+			case <-drainFinished:
+			case <-time.After(12 * time.Second):
+				taskLog.Warn("transcript drain did not stop after cancel; completing anyway")
+			}
+		}
+	}
+	// awaitTerminalResult gives a backend that advertises an authoritative
+	// terminal boundary one bounded chance to hand over its result after a
+	// cancellation won the outer select. Result delivery is the linearization
+	// point: TerminalObserved must be published before that send, so checking it
+	// afterwards preserves a provider outcome without racing a flag read. A
+	// delivered non-authoritative result is still returned to the idle-watchdog
+	// caller for re-tagging; ordinary upstream cancellation deliberately ignores
+	// it and keeps the existing generic cancelled disposition.
+	awaitTerminalResult := func(trigger string) (result agent.Result, delivered, authoritative bool) {
+		if !handsOverTerminal {
+			return agent.Result{}, false, false
+		}
+		if trigger == "idle_watchdog" {
+			// Keep this event stable: besides operator diagnostics, the terminal
+			// race regression uses it as the hand-off linearization probe.
+			taskLog.Info("idle watchdog fired; waiting for the backend to hand over its result",
+				"budget", terminalResultHandoffBudget.String())
+		} else {
+			taskLog.Info("waiting for the backend to hand over its result after cancellation",
+				"trigger", trigger,
+				"budget", terminalResultHandoffBudget.String())
+		}
+		timer := time.NewTimer(terminalResultHandoffBudget)
+		defer timer.Stop()
+		select {
+		case result, ok := <-session.Result:
+			if !ok {
+				return agent.Result{}, false, false
+			}
+			return result, true, terminalObserved()
+		case <-timer.C:
+			if trigger == "idle_watchdog" {
+				taskLog.Warn("backend did not hand over a result within the budget; classifying by liveness",
+					"budget", terminalResultHandoffBudget.String())
+			} else {
+				taskLog.Warn("backend did not hand over a result within the budget; classifying by cancellation trigger",
+					"trigger", trigger,
+					"budget", terminalResultHandoffBudget.String())
+			}
+			return agent.Result{}, false, false
+		}
+	}
+
 	select {
 	case result := <-session.Result:
-		if idleWatchdogFired.Load() {
+		stopWatchdog()
+		waitForDrain()
+		// terminalObserved outranks a watchdog that fired anyway: if the backend
+		// had already read its authoritative result, this is the real outcome and
+		// re-tagging it would report a completed run as a hang.
+		if idleWatchdogFired.Load() && !terminalObserved() {
 			// The backend's wait goroutine (e.g. claude.go) translates the
 			// SIGKILL we delivered via agentCancel into Status="aborted".
 			// Re-tag it as "idle_watchdog" so runTask routes the
@@ -3503,11 +9755,43 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		}
 		return result, toolCount.Load(), nil
 	case <-drainCtx.Done():
+		// The drain loop is exiting on this same Done signal; wait for its
+		// final flush so the timeout/watchdog/cancel terminals below cannot
+		// hand back (and let runTask fail-and-broadcast) a still-flushing
+		// transcript either.
+		waitForDrain()
 		// Idle watchdog cancels via agentCancel(), which propagates here as
 		// context.Canceled. Check this BEFORE the generic cancelled/timeout
 		// classifiers so a watchdog-induced stop isn't misreported as
 		// "task cancelled by server".
 		if idleWatchdogFired.Load() {
+			// For a backend that publishes a terminal boundary, enter the
+			// hand-off without asking terminalObserved first. Reading a flag and
+			// then acting on it is exactly the window this branch kept losing:
+			// the backend can publish between the read and the classifier below.
+			// Waiting for the result instead makes its delivery the
+			// linearization point, and the backend contract — publish the
+			// observation before sending Result — is what makes the check after
+			// delivery reliable rather than lucky.
+			//
+			// Such a backend always closes Result, so a wedged one still ends
+			// this wait promptly through the closed channel rather than the
+			// budget.
+			if result, delivered, authoritative := awaitTerminalResult("idle_watchdog"); authoritative {
+				// The backend had already read its authoritative result, so
+				// this is the real outcome, not a hang.
+				return result, toolCount.Load(), nil
+			} else if delivered {
+				// The backend's wait goroutine (e.g. claude.go) translates the
+				// SIGKILL we delivered via agentCancel into Status="aborted".
+				// Re-tag it so runTask routes the disposition through the
+				// dedicated liveness failure_reason.
+				result.Status = "idle_watchdog"
+				if result.Error == "" {
+					result.Error = idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load()))
+				}
+				return result, toolCount.Load(), nil
+			}
 			return agent.Result{
 				Status: "idle_watchdog",
 				Error:  idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load())),
@@ -3519,6 +9803,9 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		// upstream runCtx fired runCancel(); context.DeadlineExceeded is the
 		// drain deadline expiring on its own.
 		if errors.Is(drainCtx.Err(), context.Canceled) {
+			if result, _, authoritative := awaitTerminalResult("upstream_context"); authoritative {
+				return result, toolCount.Load(), nil
+			}
 			return agent.Result{
 				Status: "cancelled",
 				Error:  "task cancelled by upstream context (server cancel or daemon shutdown)",
@@ -3531,11 +9818,52 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	}
 }
 
+// terminalResultHandoffBudget is how long executeAndDrain waits, after force-
+// stopping a run, for the backend to hand over whatever result it has. It only
+// decides how long we believe a backend before falling back to the liveness
+// verdict; the backend caps its own finalization, so in practice the wait ends
+// far sooner.
+//
+// The value is derived from the slowest finalization this daemon drives today,
+// Cursor's, rather than picked: a concurrent background-cleanup pass we may have
+// to wait behind (cursorCloseBudget, 10s), the closing pass itself (another
+// 10s), one already-started process termination per pass overshooting its
+// budget by that termination's own bound (~1s each), and the process WaitDelay
+// after cancellation (0.5s) — about 22.5s. 30s leaves margin without letting a
+// wedged backend hold a runtime slot indefinitely.
+//
+// Deliberately not a term: the background reaper's tick. Closing its stop
+// channel wakes it immediately rather than at the next tick, so it adds
+// nothing to this ceiling.
+const terminalResultHandoffBudget = 30 * time.Second
+
 // idleWatchdogReason formats the human-facing explanation surfaced on
 // idle_watchdog dispositions. Centralised so the result-arrival branch and the
 // drain-timeout branch in executeAndDrain emit identical wording.
 func idleWatchdogReason(window time.Duration) string {
 	return fmt.Sprintf("agent produced no new messages for %s and message queue was empty; force-stopped by idle watchdog", window)
+}
+
+// idleWatchdogTickInterval picks how often the idle watchdog re-checks the
+// silence budget. Half the window is the base rate, capped at
+// idleWatchdogMaxTick so a run is force-stopped within window + tick rather
+// than window * 1.5. Sub-nanosecond halves fall back to the window itself so
+// tests can pass tiny budgets and still get a valid ticker.
+//
+// There used to be a `window >= time.Minute && interval < 30*time.Second` floor
+// here, meant to keep production polling no faster than 30 s. It was
+// unreachable — window >= 1 min implies window/2 >= 30 s — and its only effect
+// was to make the tests around it read as if a floor were being exercised.
+// Production windows are minutes or hours, so window/2 already clears 30 s.
+func idleWatchdogTickInterval(window time.Duration) time.Duration {
+	interval := window / 2
+	if interval > idleWatchdogMaxTick {
+		interval = idleWatchdogMaxTick
+	}
+	if interval <= 0 {
+		interval = window
+	}
+	return interval
 }
 
 // runIdleWatchdog ticks until either agentCtx is cancelled or the backend has
@@ -3545,30 +9873,28 @@ func idleWatchdogReason(window time.Duration) string {
 // silence budget depends on whether a tool call is in flight:
 //
 //  1. No tool in flight — a silent backend is a hang after `window`.
-//  2. A tool in flight (tool_use with no matching tool_result yet) — a real
-//     tool (e.g. `npm install`, `docker build`) legitimately runs silently for
-//     many minutes, so the larger `toolWindow` applies instead. toolWindow <= 0
-//     keeps the historical behavior of never force-stopping while a tool is in
-//     flight. Without this in-flight budget a backend that emits tool_use and
-//     never the matching tool_result would run forever now that there is no
-//     wall-clock cap (MUL-3064).
+//  2. A tool in flight (tool_use with no matching tool_result yet) —
+//     `toolWindow` applies instead. It defaults to `window`, so the two are
+//     normally identical and this branch only changes which duration the
+//     failure message reports; an operator who deliberately sets
+//     MULTICA_AGENT_TOOL_WATCHDOG higher buys long tools extra room, and
+//     toolWindow <= 0 keeps the historical behavior of never force-stopping
+//     while a tool is in flight. Without this in-flight budget a backend that
+//     emits tool_use and never the matching tool_result would run forever now
+//     that there is no wall-clock cap (MUL-3064).
 //
 // In both cases the watchdog also requires the session.Messages buffer to be
 // empty — a buffered-but-undrained message means the drain loop is behind, not
 // the backend.
 //
-// Tick interval is window/2 (floored at 30 s in production, but the floor only
-// kicks in for windows >= 1 min so tests can pass tiny windows like 50 ms and
-// see the watchdog fire within a few ticks).
-func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools *atomic.Int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, taskLog *slog.Logger, taskID string) {
-	interval := window / 2
-	if window >= time.Minute && interval < 30*time.Second {
-		interval = 30 * time.Second
+// Polling rate comes from idleWatchdogTickInterval, so a run is force-stopped
+// somewhere between its budget and budget + tick, never earlier.
+func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools func() int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, interruptBackground func() bool, terminalObserved func() bool, taskLog *slog.Logger) {
+	tickWindow := window
+	if toolWindow > 0 && toolWindow < tickWindow {
+		tickWindow = toolWindow
 	}
-	if interval <= 0 {
-		interval = window
-	}
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(idleWatchdogTickInterval(tickWindow))
 	defer ticker.Stop()
 	for {
 		select {
@@ -3580,7 +9906,7 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow ti
 			// tool_use and tool_result), so it gets the larger toolWindow;
 			// toolWindow <= 0 disables the in-flight bound entirely.
 			threshold := window
-			toolInFlight := inFlightTools.Load() > 0
+			toolInFlight := inFlightTools() > 0
 			if toolInFlight {
 				if toolWindow <= 0 {
 					continue
@@ -3598,8 +9924,43 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow ti
 			if len(messages) > 0 {
 				continue
 			}
+			// Cursor can stop its owned background tools without aborting the
+			// agent. The same watchdog owns both the budget and this recovery,
+			// so no competing timer can cancel Cursor while it reports a result.
+			if agentCtx.Err() != nil {
+				return
+			}
+			if terminalObserved != nil && terminalObserved() {
+				return
+			}
+			if toolInFlight && interruptBackground != nil && interruptBackground() {
+				lastActivityAt.Store(time.Now().UnixNano())
+				taskLog.Info("tool watchdog stopped background tools; waiting for agent result")
+				continue
+			}
+			// A natural tool completion may race the callback or the tick.
+			if agentCtx.Err() != nil {
+				return
+			}
+			// Refresh native tool activity BEFORE reading its timestamp. The
+			// callback may publish newer activity without changing the count.
+			currentToolInFlight := inFlightTools() > 0
+			currentActivity := lastActivityAt.Load()
+			if currentActivity != last.UnixNano() ||
+				currentToolInFlight != toolInFlight || len(messages) > 0 {
+				continue
+			}
+			if agentCtx.Err() != nil {
+				return
+			}
+			// Last gate before force-stopping. The terminal result can land while
+			// this tick is deciding — including while it is blocked inside the
+			// interrupt callback above — and a decided outcome is never a hang.
+			if terminalObserved != nil && terminalObserved() {
+				return
+			}
+			// No "task" field here: taskLog already carries the full id.
 			taskLog.Warn("idle watchdog firing: no agent activity, force-stopping run",
-				"task", shortID(taskID),
 				"idle_for", idleFor.Round(time.Second).String(),
 				"threshold", threshold.String(),
 				"tool_in_flight", toolInFlight,
@@ -3629,6 +9990,7 @@ func mergeUsage(a, b map[string]agent.TokenUsage) map[string]agent.TokenUsage {
 		existing.OutputTokens += u.OutputTokens
 		existing.CacheReadTokens += u.CacheReadTokens
 		existing.CacheWriteTokens += u.CacheWriteTokens
+		existing.CostUSDTicks += u.CostUSDTicks
 		merged[model] = existing
 	}
 	return merged
@@ -3643,13 +10005,24 @@ func repoDataToInfo(repos []RepoData) []repocache.RepoInfo {
 	return info
 }
 
+func convertIssueStatusesForEnv(statuses []IssueStatusData) []execenv.IssueStatusForEnv {
+	if len(statuses) == 0 {
+		return nil
+	}
+	result := make([]execenv.IssueStatusForEnv, len(statuses))
+	for i, s := range statuses {
+		result[i] = execenv.IssueStatusForEnv{Key: s.Key, Name: s.Name, Category: s.Category, Description: s.Description}
+	}
+	return result
+}
+
 func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 	if len(repos) == 0 {
 		return nil
 	}
 	result := make([]execenv.RepoContextForEnv, len(repos))
 	for i, r := range repos {
-		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description}
+		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description, Ref: r.Ref}
 	}
 	return result
 }
@@ -3680,6 +10053,10 @@ func (d *Daemon) markActiveEnvRoot(envRoot string) {
 	}
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
+	d.ensureActiveEnvRootStateLocked()
+	for d.deletingEnvRoots[envRoot] {
+		d.activeEnvRootsCond.Wait()
+	}
 	d.activeEnvRoots[envRoot]++
 }
 
@@ -3689,6 +10066,7 @@ func (d *Daemon) unmarkActiveEnvRoot(envRoot string) {
 	}
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
+	d.ensureActiveEnvRootStateLocked()
 	if d.activeEnvRoots[envRoot] <= 1 {
 		delete(d.activeEnvRoots, envRoot)
 		return
@@ -3699,10 +10077,107 @@ func (d *Daemon) unmarkActiveEnvRoot(envRoot string) {
 func (d *Daemon) isActiveEnvRoot(envRoot string) bool {
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
+	d.ensureActiveEnvRootStateLocked()
 	return d.activeEnvRoots[envRoot] > 0
 }
 
-// shortID returns the first 8 characters of an ID for readable logs.
+func (d *Daemon) ensureActiveEnvRootStateLocked() {
+	if d.activeEnvRoots == nil {
+		d.activeEnvRoots = make(map[string]int)
+	}
+	if d.deletingEnvRoots == nil {
+		d.deletingEnvRoots = make(map[string]bool)
+	}
+	if d.activeEnvRootsCond == nil {
+		d.activeEnvRootsCond = sync.NewCond(&d.activeEnvRootsMu)
+	}
+}
+
+// reserveEnvRootForGC atomically confirms that no live task is using envRoot
+// and prevents a new task from entering until release runs. This closes the
+// check-then-remove race between the GC loop and task startup: either GC sees
+// the active task and skips, or task startup waits for the mutation to finish
+// and recreates/uses the post-GC environment.
+func (d *Daemon) reserveEnvRootForGC(envRoot string) (release func(), ok bool) {
+	if envRoot == "" {
+		return nil, false
+	}
+	d.activeEnvRootsMu.Lock()
+	defer d.activeEnvRootsMu.Unlock()
+	d.ensureActiveEnvRootStateLocked()
+	if d.activeEnvRoots[envRoot] > 0 || d.deletingEnvRoots[envRoot] {
+		return nil, false
+	}
+	d.deletingEnvRoots[envRoot] = true
+	return func() {
+		d.activeEnvRootsMu.Lock()
+		delete(d.deletingEnvRoots, envRoot)
+		d.activeEnvRootsCond.Broadcast()
+		d.activeEnvRootsMu.Unlock()
+	}, true
+}
+
+// markActiveStore records that a task is about to use the given persistent
+// store — a per-issue Codex session store or a per-agent Hermes memory store —
+// so the GC never reclaims it mid-task. These stores live outside the env root,
+// so isActiveEnvRoot does not cover them (MUL-4424). If a GC
+// delete has already reserved this store, we wait for that removal to finish
+// before claiming it, so a task never mounts a store mid-removal; the store is
+// then recreated fresh by Prepare. Reference-counted like the env-root guard.
+func (d *Daemon) markActiveStore(store string) {
+	if store == "" {
+		return
+	}
+	d.activeStoresMu.Lock()
+	defer d.activeStoresMu.Unlock()
+	for d.deletingStores[store] {
+		d.activeStoresCond.Wait()
+	}
+	d.activeStores[store]++
+}
+
+func (d *Daemon) unmarkActiveStore(store string) {
+	if store == "" {
+		return
+	}
+	d.activeStoresMu.Lock()
+	defer d.activeStoresMu.Unlock()
+	if d.activeStores[store] <= 1 {
+		delete(d.activeStores, store)
+		return
+	}
+	d.activeStores[store]--
+}
+
+// reserveStoreForDeletion atomically checks that no live task holds store
+// and, if so, marks it reserved so no task can claim it until the caller runs
+// the returned commit (after the actual removal). ok=false means a task holds it
+// — do not delete. This is the exclusive protocol the store pruners
+// (PruneCodexSessionStores, PruneHermesMemoryStores) need:
+// the "confirm inactive" and the mark happen under one lock acquisition, so a
+// markActiveStore either loses the check (store stays) or blocks on the
+// reservation, closing the stat->remove race (MUL-4424).
+func (d *Daemon) reserveStoreForDeletion(store string) (commit func(), ok bool) {
+	d.activeStoresMu.Lock()
+	defer d.activeStoresMu.Unlock()
+	if d.activeStores[store] > 0 || d.deletingStores[store] {
+		return nil, false
+	}
+	d.deletingStores[store] = true
+	return func() {
+		d.activeStoresMu.Lock()
+		delete(d.deletingStores, store)
+		d.activeStoresCond.Broadcast()
+		d.activeStoresMu.Unlock()
+	}, true
+}
+
+// shortID returns the first 8 characters of an ID for a human-facing label.
+//
+// Display only, and only where the label is read rather than joined: the
+// waiting-reason string the UI renders as "Waiting for {reason}" is the one
+// caller left. Structured log fields must carry the FULL id — see the
+// task-scoped logger in handleTask for why a prefix cannot identify a task.
 func shortID(id string) string {
 	if len(id) <= 8 {
 		return id
@@ -3742,6 +10217,25 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 	return result
 }
 
+func convertDisabledRuntimeSkillsForEnv(agentData *AgentData, runtimeID, provider string) []execenv.RuntimeSkillRefForEnv {
+	if agentData == nil || len(agentData.DisabledRuntimeSkills) == 0 {
+		return nil
+	}
+	result := make([]execenv.RuntimeSkillRefForEnv, 0, len(agentData.DisabledRuntimeSkills))
+	for _, skill := range agentData.DisabledRuntimeSkills {
+		if skill.RuntimeID != runtimeID || skill.Provider != provider {
+			continue
+		}
+		result = append(result, execenv.RuntimeSkillRefForEnv{
+			Root:   skill.Root,
+			Key:    skill.Key,
+			Name:   skill.Name,
+			Plugin: skill.Plugin,
+		})
+	}
+	return result
+}
+
 // composeOpenclawIncludeRoots returns the value the daemon should set for
 // OPENCLAW_INCLUDE_ROOTS on the child openclaw process so its `$include`
 // loader will follow the wrapper's reference out of envRoot into the
@@ -3776,6 +10270,77 @@ func composeOpenclawIncludeRoots(addRoot, userValue string) (string, bool) {
 	return strings.Join(parts, string(os.PathListSeparator)), true
 }
 
+// ensureTaskTempDir creates this task's private temp directory and returns it
+// with its execution lock held. The caller owns the lock for the lifetime of
+// the run and must release it before removing the directory — see the cleanup
+// defer in runTask, and execenv.PruneTaskTempDirs for what the lock buys.
+func ensureTaskTempDir(envRoot string, workspaceID string, taskID string) (string, *os.File, error) {
+	envRoot = strings.TrimSpace(envRoot)
+	if envRoot == "" {
+		return "", nil, errors.New("env root is empty")
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return "", nil, errors.New("workspace id is empty")
+	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return "", nil, errors.New("task id is empty")
+	}
+	base, overrideConfigured, err := taskTempBaseDir()
+	if err != nil {
+		return "", nil, err
+	}
+	dir, err := os.MkdirTemp(base, execenv.TaskTempDirPrefix)
+	if err != nil {
+		if overrideConfigured {
+			return "", nil, fmt.Errorf("MULTICA_AGENT_TEMP_BASE: create task temp dir: %w", err)
+		}
+		return "", nil, err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", nil, err
+	}
+	lock, err := execenv.LockTaskTempDir(dir)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return "", nil, err
+	}
+	return dir, lock, nil
+}
+
+// taskTempBaseDir resolves the parent directory for private per-task temp
+// dirs on Linux and macOS. The daemon operator can relocate it with
+// MULTICA_AGENT_TEMP_BASE, which must be an absolute path to an existing,
+// writable directory; an invalid value fails task startup instead of silently
+// falling back. Windows ignores the variable. Unset keeps the platform default
+// exactly as before, down to the syscalls made.
+// Operators should pick a short path: child tools may bind AF_UNIX sockets
+// under $TMPDIR (sun_path is 108 bytes on Linux, 104 on macOS).
+func taskTempBaseDir() (string, bool, error) {
+	if runtime.GOOS == "windows" {
+		return socketSafeTempBaseDir(), false, nil
+	}
+	base := strings.TrimSpace(os.Getenv("MULTICA_AGENT_TEMP_BASE"))
+	if base == "" {
+		return socketSafeTempBaseDir(), false, nil
+	}
+	if !filepath.IsAbs(base) {
+		return "", true, fmt.Errorf("MULTICA_AGENT_TEMP_BASE must be an absolute path, got %q", base)
+	}
+	return base, true, nil
+}
+
+func socketSafeTempBaseDir() string {
+	if os.PathSeparator == '/' {
+		if info, err := os.Stat("/tmp"); err == nil && info.IsDir() {
+			return "/tmp"
+		}
+	}
+	return os.TempDir()
+}
+
 // isBlockedEnvKey returns true if the key must not be overridden by user-
 // configured custom_env. This prevents accidental or malicious override of
 // daemon-internal variables and critical system paths.
@@ -3785,10 +10350,263 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME", "CURSOR_DATA_DIR", "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "REASONIX_STATE_HOME", "CURSOR_DATA_DIR", execenv.CursorMcpAuthSourceEnv, "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
 		return true
 	}
 	return false
+}
+
+// layerCustomEnvAndHermesHome applies the agent's custom_env onto the child env
+// (skipping daemon-internal blocklisted keys), then overrides HERMES_HOME with
+// the per-task overlay when one was built. HERMES_HOME is intentionally NOT
+// blocklisted: with skills bound the overlay is built FROM the user's
+// HERMES_HOME and must win here; with no skills bound (overlayHome empty) the
+// user's own HERMES_HOME passes through unchanged, so a skill-less Hermes task
+// keeps its original behavior.
+// sanitizeAgentEnv returns the agent custom_env with daemon-blocklisted keys
+// removed — the effective env the Hermes child actually sees, used to expand
+// ${VAR} in external_dirs consistently (blocked keys like HOME resolve to the
+// daemon process value, not the dropped custom one). Uses the same
+// isBlockedEnvKey rule as layerCustomEnvAndHermesHome so the two agree.
+func sanitizeAgentEnv(customEnv map[string]string) map[string]string {
+	if len(customEnv) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(customEnv))
+	for k, v := range customEnv {
+		if isBlockedEnvKey(k) {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// hermesProviderUnconfiguredHint is appended verbatim to a "no LLM provider
+// configured" failure. It is a CONSTANT, and that is a correctness property,
+// not a style choice — see annotateHermesProviderUnconfigured.
+//
+// It must stay clear of every phrase the resume guards match, because this text
+// is persisted in agent_task_queue.error and re-scanned there indefinitely:
+// service.ResumeUnsafeFailure, taskfailure.Classify, and the ILIKE/regex guards
+// in pkg/db/queries/agent.sql (GetLastTaskSession / GetLastChatTaskSession).
+// TestAnnotationCannotChangeMachineDecisions pins that.
+const hermesProviderUnconfiguredHint = " [multica] hermes did not read the HERMES_HOME your shell uses: " +
+	"this task ran against a per-task overlay, seeded from the home the daemon process resolved. " +
+	"The daemon log line \"hermes home resolved\" for this task names that source home — if your hermes " +
+	"config lives somewhere else, set HERMES_HOME in the agent's custom_env to point at it."
+
+// annotateHermesProviderUnconfigured explains a "no LLM provider configured"
+// failure that Hermes itself cannot explain.
+//
+// Hermes reports it against whichever HERMES_HOME it was started with and tells
+// the user to run `hermes model` — but under Multica it was started with a
+// per-task overlay, seeded from a source home the daemon resolved from ITS OWN
+// process environment. When that disagrees with where the user keeps their
+// config, the remedy Hermes names edits a file the task will never read, and
+// every attempt fails identically. That is GH #6872: eight documented
+// workarounds, none of which could have worked.
+//
+// The two paths themselves are deliberately NOT interpolated here. They are
+// user-controlled (HERMES_HOME comes from the agent's custom_env, the overlay
+// root from MULTICA_WORKSPACES_ROOT), and this string is persisted as the
+// task's error text, which the resume guards keep matching against for the life
+// of the row. A source home under /srv/400-invalid_request_error/ would trip
+// ResumeUnsafeFailure and the SQL guard, dropping a healthy session pointer —
+// a directory name must never decide whether a session can be resumed. So the
+// hint is fixed prose and names the log line that does carry the paths.
+//
+// Text only: the caller has already classified the failure, and this changes no
+// reason, status, or control flow.
+func annotateHermesProviderUnconfigured(errMsg, provider string, overlayActive bool) string {
+	if provider != "hermes" || !overlayActive || !taskfailure.ProviderUnconfigured(errMsg) {
+		return errMsg
+	}
+	return errMsg + hermesProviderUnconfiguredHint
+}
+
+// codexRetiredCompactionHint is appended verbatim to a Codex compaction
+// failure against the retired route. Like hermesProviderUnconfiguredHint
+// above it is a CONSTANT, for the same correctness reason — see
+// annotateCodexRetiredCompaction — and is worded to stay clear of every
+// phrase the resume guards and taskfailure.Classify match, since it is
+// persisted in agent_task_queue.error and re-scanned there indefinitely.
+// TestCodexCompactionAnnotationCannotChangeMachineDecisions pins that.
+//
+// It names every place the setting can be off, because being a constant means
+// it cannot know which one applied. The shared config is the common case and
+// the only one the upstream reports mention, but the launch arguments reach
+// the same state: nothing strips `--disable remote_compaction_v2` or
+// `-c features.remote_compaction_v2=false` out of an agent's custom args, a
+// daemon's extra args, or a custom runtime profile's launch prefix — only
+// fast_mode gets that treatment, and only when a service tier is selected.
+// Naming just the file would send anyone in that case to edit a line that is
+// not there, which is the failure mode this hint exists to prevent.
+//
+// For the same reason the closing line excludes only the generated per-task
+// copy, rather than claiming nothing on the Multica side needs changing. Once
+// the hint sends people to look at custom_args, a daemon's extra args, or a
+// profile's fixed args, "nothing to change here" contradicts the instruction
+// directly above it and strands exactly the users the argument half was added
+// for. The per-task copy is the one target that is genuinely wrong to edit: it
+// is rebuilt from the shared config every run, so an edit there is discarded.
+const codexRetiredCompactionHint = " [multica] codex could not compact this conversation: it called a " +
+	"compaction endpoint OpenAI has retired. That route is selected by turning `remote_compaction_v2` " +
+	"off, so look in both places it can be off: `[features]` in the codex config this agent uses " +
+	"(~/.codex/config.toml by default), and the codex launch arguments on the agent, the daemon, or a " +
+	"custom runtime profile (`--disable remote_compaction_v2`, `-c features.remote_compaction_v2=false`). " +
+	"Remove it wherever it appears — or set it to true — and run this task again; both sources are re-read " +
+	"on the next run. The one place not to edit is the per-task codex config this run used: it is " +
+	"regenerated from your shared one every run, so a change there is lost. A thread stuck this way " +
+	"continues where it left off once compaction works."
+
+// annotateCodexRetiredCompaction explains a retired-route compaction failure
+// that Codex itself cannot explain.
+//
+// Codex reports the failing URL and status and stops there. The setting that
+// chose that URL — `remote_compaction_v2` — appears nowhere in the text, so the
+// error names no file, no key and no remedy; the reporter in GH #8000 had to
+// open an issue to learn the fix was deleting one line. Nor does the failure
+// resolve on its own: the conversation stays above the auto-compact threshold,
+// so every following turn retries the same retired call.
+//
+// Text only. This changes no reason, status, or control flow — in particular
+// it does NOT retire the session. That is a deliberate choice, not an
+// omission: unlike the resume-unsafe failures classified above, this thread is
+// recoverable, and it recovers by itself once the setting is right. Dropping
+// the session pointer would discard the conversation the fix brings back.
+//
+// Scoped to the codex provider, which is exactly the set of runs that can
+// produce this text (only "codex" resolves to codexBackend), so the check
+// costs nothing and keeps a lookalike string from another runtime out.
+func annotateCodexRetiredCompaction(errMsg, provider string) string {
+	if strings.ToLower(strings.TrimSpace(provider)) != "codex" ||
+		!agent.CodexRetiredCompactionError(errMsg) {
+		return errMsg
+	}
+	return errMsg + codexRetiredCompactionHint
+}
+
+func layerCustomEnvAndHermesHome(agentEnv, customEnv map[string]string, overlayHome string, logger *slog.Logger) {
+	for k, v := range customEnv {
+		if isBlockedEnvKey(k) {
+			if logger != nil {
+				logger.Warn("custom_env: blocked key skipped", "key", k)
+			}
+			continue
+		}
+		agentEnv[k] = v
+	}
+	if overlayHome != "" {
+		agentEnv["HERMES_HOME"] = overlayHome
+	}
+}
+
+// prepareReasonixTaskStateHome isolates persisted transcripts and leases per
+// (runtime, agent) while leaving REASONIX_HOME untouched. Current Reasonix
+// reads credentials/config from REASONIX_HOME and state from
+// REASONIX_STATE_HOME, so `reasonix setup` remains the sole credential owner
+// and Multica never copies API keys into task-managed files.
+func prepareReasonixTaskStateHome(profile, runtimeID, agentID string) (string, error) {
+	profileDir, err := cli.ProfileDir(profile)
+	if err != nil {
+		return "", err
+	}
+	runtimeSegment, err := validateReasonixStateSegment("runtime", runtimeID)
+	if err != nil {
+		return "", err
+	}
+	agentSegment, err := validateReasonixStateSegment("agent", agentID)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(profileDir, "reasonix-state", runtimeSegment, agentSegment)
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(path, 0o700); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// prepareDshTaskSessionRoot keeps DSH transcripts private to one Multica
+// runtime/agent pair. Credentials and the user's DSH profile remain in the
+// ordinary DSH_HOME; only session persistence is redirected.
+func prepareDshTaskSessionRoot(profile, runtimeID, agentID string) (string, error) {
+	profileDir, err := cli.ProfileDir(profile)
+	if err != nil {
+		return "", err
+	}
+	runtimeSegment, err := validateReasonixStateSegment("runtime", runtimeID)
+	if err != nil {
+		return "", err
+	}
+	agentSegment, err := validateReasonixStateSegment("agent", agentID)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(profileDir, "dsh-sessions", runtimeSegment, agentSegment)
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(path, 0o700); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func validateReasonixStateSegment(name, value string) (string, error) {
+	if value == "" {
+		return "", fmt.Errorf("%s ID is required", name)
+	}
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			continue
+		default:
+			return "", fmt.Errorf("%s ID contains an unsafe path character", name)
+		}
+	}
+	return value, nil
+}
+
+// codexShellAuthorizedCustomEnvNames returns names from the current agent's
+// custom_env that pass the same daemon blocklist used when assembling the child
+// environment. Returning names only keeps credential values out of the managed
+// Codex config path.
+func codexShellAuthorizedCustomEnvNames(customEnv map[string]string) []string {
+	names := make([]string, 0, len(customEnv))
+	for key := range customEnv {
+		if key == "" || isBlockedEnvKey(key) {
+			continue
+		}
+		names = append(names, key)
+	}
+	return names
+}
+
+// configureCodexTaskShellEnvironment writes the managed shell policy only
+// after the task and agent custom environment are fully assembled. This makes
+// the allowlist reflect the child environment that will actually be launched,
+// including platform-specific essentials and blocklist-checked custom_env
+// credentials.
+// Failure is fatal: launching with an unowned or malformed policy could either
+// drop the task-scoped token again or expose inherited daemon credentials.
+func configureCodexTaskShellEnvironment(provider, codexHome string, inherited []string, agentEnv, agentCustomEnv map[string]string, logger *slog.Logger) error {
+	if provider != "codex" {
+		return nil
+	}
+	if strings.TrimSpace(codexHome) == "" {
+		return errors.New("configure Codex shell environment: task CODEX_HOME is missing")
+	}
+	authorizedExplicit := codexShellAuthorizedCustomEnvNames(agentCustomEnv)
+	includeOnly := execenv.CodexShellEnvAllowlist(inherited, agentEnv, authorizedExplicit)
+	configPath := filepath.Join(codexHome, "config.toml")
+	if err := execenv.EnsureCodexShellEnvPolicyConfig(configPath, includeOnly, logger); err != nil {
+		return fmt.Errorf("configure Codex shell environment: %w", err)
+	}
+	return nil
 }
 
 func defaultArgsForProvider(cfg Config, provider string) []string {
@@ -3800,6 +10618,10 @@ func defaultArgsForProvider(cfg Config, provider string) []string {
 		args = cfg.CodexArgs
 	case "codebuddy":
 		args = cfg.CodebuddyArgs
+	case "qwen":
+		args = cfg.QwenArgs
+	case "qwenpaw":
+		args = cfg.QwenpawArgs
 	default:
 		return nil
 	}

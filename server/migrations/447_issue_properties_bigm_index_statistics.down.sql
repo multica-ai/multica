@@ -1,0 +1,3 @@
+-- No-op: 447 refreshes planner statistics, which are not schema. Discarding
+-- them would only make the planner worse, and 446's rollback drops the
+-- expression whose statistics this generated.

@@ -10,7 +10,8 @@ export function AutopilotDetailPage() {
   const wsId = useWorkspaceId();
   const { data } = useQuery(autopilotDetailOptions(wsId, id!));
 
-  useDocumentTitle(data ? `⚡ ${data.autopilot.title}` : "Autopilot");
+  // Plain text only — no leading ⚡ glyph in the title (MUL-4370).
+  useDocumentTitle(data ? data.autopilot.title : "Autopilot");
 
   if (!id) return null;
   return <AutopilotDetail autopilotId={id} />;

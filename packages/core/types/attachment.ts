@@ -11,6 +11,14 @@ export interface Attachment {
   url: string;
   download_url: string;
   /**
+   * Forced-attachment ("download button") URL: credential-free and, unlike
+   * `download_url` (load-intent, serves media inline for preview), always
+   * Content-Disposition: attachment across every storage mode. Short-lived —
+   * never persist it. Optional: a server older than this field omits it, and
+   * download callers fall back to `download_url` / the stable endpoint.
+   */
+  attachment_download_url?: string;
+  /**
    * Durable URL the client persists into markdown bodies.
    *
    * The server (`buildMarkdownURL` in server/internal/handler/file.go)

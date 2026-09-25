@@ -26,6 +26,7 @@ import type {
   CreateProjectRequest,
   CreateProjectResourceRequest,
   InboxItem,
+  InboxWorkspaceUnread,
   Issue,
   IssueLabelsResponse,
   Label,
@@ -45,6 +46,7 @@ import type {
   RuntimeDevice,
   SearchIssuesResponse,
   SearchProjectsResponse,
+  ListIssueStatusesResponse,
   SendChatMessageResponse,
   Squad,
   NotificationPreferenceResponse,
@@ -56,13 +58,25 @@ import type {
   UpdateProjectRequest,
   User,
   Workspace,
+  WorkspaceSubscriptionSummary,
 } from "@multica/core/types";
 import {
+  AppConfigSchema,
+  EMPTY_APP_CONFIG,
+  EMPTY_REFRESH_SESSION_RESPONSE,
+  RefreshSessionResponseSchema,
+  EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_TIMELINE_ENTRIES,
   IssueSchema,
   ListIssuesResponseSchema,
+  ListIssueStatusesResponseSchema,
   TimelineEntriesSchema,
+  WorkspaceSubscriptionSummarySchema,
+} from "@multica/core/api/schemas";
+import type {
+  AppConfigResponse,
+  RefreshSessionResponse,
 } from "@multica/core/api/schemas";
 import {
   ActiveTasksResponseSchema,
@@ -84,6 +98,7 @@ import {
   EMPTY_CHAT_SESSION_LIST,
   EMPTY_COMMENT,
   EMPTY_INBOX_LIST,
+  EMPTY_INBOX_UNREAD_SUMMARY,
   EMPTY_ISSUE_FALLBACK,
   EMPTY_LIST_LABELS_RESPONSE,
   EMPTY_LIST_PROJECT_RESOURCES_RESPONSE,
@@ -99,6 +114,7 @@ import {
   EMPTY_USER,
   EMPTY_WORKSPACE_LIST,
   InboxListSchema,
+  InboxUnreadSummarySchema,
   NotificationPreferenceResponseSchema,
   ListLabelsResponseSchema,
   ListProjectResourcesResponseSchema,
@@ -121,13 +137,14 @@ import type { ZodType } from "zod";
 import { getCurrentSlug } from "./workspace-store";
 import { parseWithFallback } from "@/lib/parse-response";
 import { createRequestId } from "@/lib/request-id";
+import { buildCommentUpdateBody } from "./revision";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
 if (!API_URL) {
   throw new Error(
-    "EXPO_PUBLIC_API_URL is not set. Add it to apps/mobile/.env.development.local " +
-      "(see apps/mobile/.env.staging for an example).",
+    "EXPO_PUBLIC_API_URL is not set. Add it to the apps/mobile env file for " +
+      "the variant you are running (see apps/mobile/README.md).",
   );
 }
 
@@ -185,6 +202,13 @@ class ApiClient {
     this.token = token;
   }
 
+  /** The bearer token in use, or null when signed out. Session renewal reads
+   *  it to confirm the session it started from is still the live one, and the
+   *  WS client reads it so a reconnect uses the current credential. */
+  getToken(): string | null {
+    return this.token;
+  }
+
   setOptions(options: ApiClientOptions) {
     this.options = { ...this.options, ...options };
   }
@@ -211,7 +235,7 @@ class ApiClient {
     // Backend middleware (server/internal/middleware/workspace.go) resolves
     // slug → ws UUID and gates membership. Mirrors packages/core/api/client.ts.
     const slug = getCurrentSlug();
-    if (slug) {
+    if (slug && !headers["X-Workspace-Slug"]) {
       headers["X-Workspace-Slug"] = slug;
     }
 
@@ -376,12 +400,47 @@ class ApiClient {
     });
   }
 
+  /**
+   * Ask the server to extend this session if it has entered its renewal
+   * window (MUL-7436). The server owns that decision — the app never reads
+   * `exp`, so a device with a skewed clock behaves exactly like one without.
+   */
+  async refreshSession(): Promise<RefreshSessionResponse> {
+    return this.fetchValidatedWith(
+      "/api/auth/refresh",
+      RefreshSessionResponseSchema,
+      EMPTY_REFRESH_SESSION_RESPONSE,
+      { method: "POST" },
+      { endpoint: "refreshSession" },
+    );
+  }
+
   async getMe(opts?: { signal?: AbortSignal }): Promise<User> {
     return this.fetchValidated(
       "/api/me",
       UserSchema,
       EMPTY_USER,
       { ...opts, endpoint: "getMe" },
+    );
+  }
+
+  async getConfig(opts?: { signal?: AbortSignal }): Promise<AppConfigResponse> {
+    return this.fetchValidated<AppConfigResponse>(
+      "/api/config",
+      AppConfigSchema,
+      EMPTY_APP_CONFIG,
+      { ...opts, endpoint: "getConfig" },
+    );
+  }
+
+  async getWorkspaceSubscriptionSummary(opts?: {
+    signal?: AbortSignal;
+  }): Promise<WorkspaceSubscriptionSummary | null> {
+    return this.fetchValidated<WorkspaceSubscriptionSummary | null>(
+      "/api/cloud-subscriptions/summary",
+      WorkspaceSubscriptionSummarySchema,
+      null,
+      { ...opts, endpoint: "getWorkspaceSubscriptionSummary" },
     );
   }
 
@@ -411,12 +470,19 @@ class ApiClient {
 
   async updateNotificationPreferences(
     preferences: NotificationPreferences,
+    workspaceSlug?: string,
   ): Promise<NotificationPreferenceResponse> {
     return this.fetchValidatedWith(
       "/api/notification-preferences",
       NotificationPreferenceResponseSchema,
       EMPTY_NOTIFICATION_PREFERENCES,
-      { method: "PUT", body: JSON.stringify({ preferences }) },
+      {
+        method: "PATCH",
+        headers: workspaceSlug
+          ? { "X-Workspace-Slug": workspaceSlug }
+          : undefined,
+        body: JSON.stringify({ preferences }),
+      },
       { endpoint: "updateNotificationPreferences" },
     );
   }
@@ -441,6 +507,25 @@ class ApiClient {
     return parseWithFallback(raw, InboxListSchema, EMPTY_INBOX_LIST, {
       endpoint: "listInbox",
     });
+  }
+
+  /**
+   * Cross-workspace unread inbox counts, one entry per workspace with unread
+   * items. Backs the inbox tab badge — see lib/unread-counts.ts for why the
+   * badge reads this instead of counting `listInbox()` locally.
+   */
+  async getInboxUnreadSummary(opts?: {
+    signal?: AbortSignal;
+  }): Promise<InboxWorkspaceUnread[]> {
+    const raw = await this.fetch<unknown>("/api/inbox/unread-summary", {
+      signal: opts?.signal,
+    });
+    return parseWithFallback(
+      raw,
+      InboxUnreadSummarySchema,
+      EMPTY_INBOX_UNREAD_SUMMARY,
+      { endpoint: "getInboxUnreadSummary" },
+    );
   }
 
   async markInboxRead(id: string): Promise<InboxItem> {
@@ -711,6 +796,7 @@ class ApiClient {
     commentId: string,
     content: string,
     attachmentIds?: string[],
+    contentBase?: string,
   ): Promise<Comment> {
     return this.fetchValidatedWith(
       `/api/comments/${commentId}`,
@@ -718,19 +804,28 @@ class ApiClient {
       EMPTY_COMMENT,
       {
         method: "PUT",
-        body: JSON.stringify({
-          content,
-          ...(attachmentIds ? { attachment_ids: attachmentIds } : {}),
-        }),
+        body: JSON.stringify(
+          buildCommentUpdateBody(content, attachmentIds, contentBase),
+        ),
       },
       { endpoint: "updateComment" },
     );
   }
 
   // DELETE /api/comments/:id — 204 No Content on success; this.fetch
-  // already short-circuits 204 → undefined.
-  async deleteComment(commentId: string): Promise<void> {
-    await this.fetch<void>(`/api/comments/${commentId}`, { method: "DELETE" });
+  // already short-circuits 204 → undefined. `keepReplies` calls the route
+  // only servers that keep a deleted comment's replies expose (#8296): if the
+  // request reaches an older server it fails instead of deleting the replies
+  // too. Pass it only when the server declared
+  // `comment_delete_keep_replies_supported`. Mirrors packages/core/api/client.ts.
+  async deleteComment(
+    commentId: string,
+    opts: { keepReplies?: boolean } = {},
+  ): Promise<void> {
+    const path = opts.keepReplies === true
+      ? `/api/comments/${commentId}/keep-replies`
+      : `/api/comments/${commentId}`;
+    await this.fetch<void>(path, { method: "DELETE" });
   }
 
   // POST /api/comments/:id/resolve — marks the thread root resolved; only
@@ -856,6 +951,32 @@ class ApiClient {
     return this.fetch<IssueLabelsResponse>(
       `/api/issues/${issueId}/labels/${labelId}`,
       { method: "DELETE" },
+    );
+  }
+
+  // --- Issue status catalog (MUL-6243) ---
+  /**
+   * The workspace's issue statuses — the 7 built-ins plus any custom ones an
+   * admin defined. Reads are open to every workspace member; the catalog
+   * mutations are owner/admin only and live on web's settings screen, which is
+   * why mobile ships the read alone.
+   *
+   * `include_archived` is on by design. Archiving retires a status from FUTURE
+   * assignment but leaves the issues already on it, and those issues must keep
+   * their real name, colour and category — dropping archived rows here would
+   * degrade them to a raw key with a guessed category. Pickers filter them out
+   * via `IssueStatusCatalog.activeStatuses` instead.
+   */
+  async listIssueStatuses(
+    includeArchived = false,
+    opts?: { signal?: AbortSignal },
+  ): Promise<ListIssueStatusesResponse> {
+    const query = includeArchived ? "?include_archived=true" : "";
+    return this.fetchValidated(
+      `/api/issue-statuses${query}`,
+      ListIssueStatusesResponseSchema,
+      EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
+      { ...opts, endpoint: "GET /api/issue-statuses" },
     );
   }
 

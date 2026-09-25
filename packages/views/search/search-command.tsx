@@ -1,5 +1,6 @@
 "use client";
 
+import { issueStatusCategory } from "@multica/core/issues";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
@@ -11,20 +12,15 @@ import {
   MessageSquare,
   Plus,
   SearchIcon,
-  Inbox,
-  CircleUser,
-  ListTodo,
-  FolderKanban,
-  Bot,
+  ListChevronsDownUp,
+  ListChevronsUpDown,
   Monitor,
   Moon,
   Sun,
-  BookOpenText,
-  Settings,
   type LucideIcon,
 } from "lucide-react";
 import { Command as CommandPrimitive } from "cmdk";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type {
   MemberWithUser,
@@ -32,23 +28,32 @@ import type {
   SearchProjectResult,
 } from "@multica/core/types";
 import { api } from "@multica/core/api";
+import { partitionAggregatedSearchResults } from "@multica/core/search/cancelled-rank";
 import {
   openCreateIssueWithPreference,
   selectRecentIssues,
+  useCommentCollapseStore,
   useRecentIssuesStore,
+  useResolvedExpandStore,
 } from "@multica/core/issues/stores";
-import { issueDetailOptions } from "@multica/core/issues/queries";
+import { issueDetailOptions, issueTimelineOptions } from "@multica/core/issues/queries";
 import { useWorkspaceId } from "@multica/core";
-import { useWorkspacePaths } from "@multica/core/paths";
-import type { WorkspacePaths } from "@multica/core/paths";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useWorkspacePaths, WORKSPACE_PAGES } from "@multica/core/paths";
+import type { WorkspacePageKey, WorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
+import { createShortcutChord } from "@multica/core/shortcuts";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { StatusIcon } from "../issues/components";
+import { resolvedThreadRootIds, rootCommentIds } from "../issues/components/thread-utils";
 import { ProjectIcon } from "../projects/components/project-icon";
+import { useProjectStatusLabels } from "../projects/components/labels";
+import { routeIconForPath } from "../layout/route-icon-components";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import type { ProjectStatus } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import {
   Dialog,
@@ -59,29 +64,54 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { copyText } from "@multica/ui/lib/clipboard";
-import { useNavigation } from "../navigation";
+import {
+  resolveClickIntent,
+  useIntentNavigate,
+  useNavigation,
+  type LinkClickIntent,
+} from "../navigation";
 import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import { HighlightText } from "./highlight-text";
 import { useSearchStore } from "./search-store";
 
-// Nav items reference WorkspacePaths method names so they can be resolved
-// against the current workspace slug at render time (see SearchCommand body).
-// Only parameterless paths are valid nav destinations.
-type NavKey =
-  | "inbox"
-  | "myIssues"
-  | "issues"
-  | "projects"
-  | "agents"
-  | "runtimes"
-  | "skills"
-  | "settings";
+// The palette's Pages group is generated from WORKSPACE_PAGES, the same
+// registry the sidebar nav and the desktop tab bar read. It used to be a
+// hand-written list, which silently went stale every time a page was added:
+// Chat, Autopilot, Squads and Analytics shipped in the sidebar but were
+// unreachable from the palette (MUL-6272). Deriving the list means a new
+// workspace page is in the palette the moment it is in the registry.
+//
+// Page keys double as WorkspacePaths method names, so `p[key]()` resolves the
+// destination against the current workspace slug at render time. Every
+// WorkspacePageKey must therefore stay a parameterless path builder.
 
+// Extra query aliases per page, on top of the localized label. Declared as a
+// total Record so adding a workspace page is a compile error until its
+// keywords are filled in.
+const PAGE_KEYWORDS: Record<WorkspacePageKey, string[]> = {
+  inbox: ["inbox", "notifications", "收件箱", "通知"],
+  chat: ["chat", "messages", "conversation", "聊天", "消息", "对话"],
+  myIssues: ["my", "issues", "assigned", "mine", "我的", "任务"],
+  issues: ["issues", "tasks", "bugs", "任务"],
+  projects: ["projects", "kanban", "项目"],
+  autopilots: ["autopilot", "autopilots", "automation", "schedule", "cron", "webhook", "自动化", "定时"],
+  agents: ["agents", "bots", "ai", "智能体"],
+  squads: ["squads", "teams", "小队", "团队"],
+  usage: ["usage", "analytics", "stats", "metrics", "统计", "分析", "用量"],
+  runtimes: ["runtimes", "environments", "machines", "运行时"],
+  skills: ["skills", "library", "技能"],
+  settings: ["settings", "config", "preferences", "设置", "配置"],
+};
+
+const NAV_PAGE_KEYS = Object.keys(WORKSPACE_PAGES) as WorkspacePageKey[];
+
+// No `icon` field: like the sidebar nav, a page's icon is derived from its
+// destination path via routeIconForPath, so all navigation surfaces show the
+// same icon for the same route.
 interface NavPage {
-  key: NavKey;
+  key: WorkspacePageKey;
   label: string;
-  icon: LucideIcon;
   keywords: string[];
 }
 
@@ -94,6 +124,24 @@ function memberInitials(name: string) {
     .join("")
     .toUpperCase()
     .slice(0, 2);
+}
+
+// Row matcher shared by the Pages and Commands groups.
+//
+// Keywords match by prefix, not substring. They are invisible synonyms, so a
+// substring hit reads as a bug from the outside: "s" used to surface Inbox
+// (via "notifications") and "i" surfaced nearly every page. The visible label
+// still matches anywhere, because there the user can see what they hit.
+//
+// Pinyin is included for the same reason member search has it: under a Chinese
+// UI the localized label is the only thing the user can aim at, so typing
+// "renwu" has to reach "任务".
+function matchesRow(label: string, keywords: string[], query: string) {
+  return (
+    label.toLowerCase().includes(query) ||
+    keywords.some((kw) => kw.startsWith(query)) ||
+    matchesPinyin(label, query)
+  );
 }
 
 function matchesMember(member: MemberWithUser, query: string) {
@@ -117,10 +165,119 @@ function IssueAssigneeAvatar({
     <ActorAvatar
       actorType={assigneeType}
       actorId={assigneeId}
-      size={20}
+      size="sm"
       profileLink={false}
       className="shrink-0"
     />
+  );
+}
+
+// Project / issue rows are rendered from three groups (Projects, Issues,
+// Cancelled — see the partition note on the results list), so the row markup
+// lives in one component each instead of being duplicated per group.
+function ProjectResultRow({
+  project,
+  query,
+  disabled,
+  onSelect,
+}: {
+  project: SearchProjectResult;
+  query: string;
+  disabled?: boolean;
+  onSelect: (value: string) => void;
+}) {
+  const projectStatusLabels = useProjectStatusLabels();
+  const status = project.status as ProjectStatus;
+
+  return (
+    <CommandPrimitive.Item
+      key={`project:${project.id}`}
+      value={`project:${project.id}`}
+      disabled={disabled}
+      onSelect={onSelect}
+      className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+    >
+      <div className="flex items-center gap-2.5">
+        <ProjectIcon project={project} size="md" />
+        <span className="truncate">
+          <HighlightText text={project.title} query={query} />
+        </span>
+        <span
+          className={`ml-auto text-caption shrink-0 ${PROJECT_STATUS_CONFIG[status]?.color ?? "text-muted-foreground"}`}
+        >
+          {projectStatusLabels[status] ?? project.status}
+        </span>
+      </div>
+      {project.match_source === "description" && project.matched_snippet && (
+        <div className="flex items-start gap-2 pl-[26px]">
+          <span className="text-caption text-muted-foreground truncate">
+            <HighlightText text={project.matched_snippet} query={query} />
+          </span>
+        </div>
+      )}
+    </CommandPrimitive.Item>
+  );
+}
+
+function IssueResultRow({
+  issue,
+  query,
+  disabled,
+  onSelect,
+}: {
+  issue: SearchIssueResult;
+  query: string;
+  disabled?: boolean;
+  onSelect: (value: string) => void;
+}) {
+  const { colorOf, iconOf } = useIssueStatuses(useWorkspaceId());
+  return (
+    <CommandPrimitive.Item
+      key={issue.id}
+      value={issue.id}
+      disabled={disabled}
+      onSelect={onSelect}
+      className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+    >
+      <div className="flex items-center gap-2.5">
+        <StatusIcon
+          status={issue.status}
+          color={colorOf(issue.status)}
+          icon={iconOf(issue.status)}
+          category={issueStatusCategory(issue) ?? undefined}
+          className="size-4 shrink-0"
+        />
+        <span className="text-caption text-muted-foreground shrink-0">
+          {issue.identifier}
+        </span>
+        <span className="min-w-0 flex-1 truncate">
+          <HighlightText text={issue.title} query={query} />
+        </span>
+        <IssueAssigneeAvatar
+          assigneeType={issue.assignee_type}
+          assigneeId={issue.assignee_id}
+        />
+      </div>
+      {issue.matched_description_snippet && (
+        <div className="flex items-start gap-2 pl-[26px]">
+          <FileText className="size-3 shrink-0 text-muted-foreground mt-0.5" />
+          <span className="text-caption text-muted-foreground truncate">
+            <HighlightText
+              text={issue.matched_description_snippet}
+              query={query}
+            />
+          </span>
+        </div>
+      )}
+      {issue.matched_comment_snippet && (
+        <div className="flex items-start gap-2 pl-[26px]">
+          <MessageSquare className="size-3 shrink-0 text-muted-foreground mt-0.5" />
+          <span className="text-caption text-muted-foreground truncate">
+            <HighlightText text={issue.matched_comment_snippet} query={query} />
+          </span>
+        </div>
+      )}
+    </CommandPrimitive.Item>
   );
 }
 
@@ -134,26 +291,64 @@ interface CommandItem {
 }
 
 interface SearchResults {
+  /**
+   * The trimmed query these rows answer. Rows outlive the query that fetched
+   * them — they stay painted while the next request is in flight — so every
+   * result set carries the question it is the answer to, and anything that can
+   * act on a row checks that it still matches what the user typed.
+   */
+  query: string;
   issues: SearchIssueResult[];
   projects: SearchProjectResult[];
 }
 
+const NO_RESULTS: SearchResults = { query: "", issues: [], projects: [] };
+
+// One heading treatment for every group. Headings go through cmdk's `heading`
+// prop rather than a hand-rolled div: cmdk renders it into a
+// [cmdk-group-heading] node and points the group's aria-labelledby at it, so a
+// screen reader announces which group a row belongs to.
+const GROUP_CLASS =
+  "p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-caption [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground";
+
 export function SearchCommand() {
   const { t } = useT("search");
-  const navPages: NavPage[] = [
-    { key: "inbox", label: t(($) => $.pages.inbox), icon: Inbox, keywords: ["inbox", "notifications", "收件箱"] },
-    { key: "myIssues", label: t(($) => $.pages.my_issues), icon: CircleUser, keywords: ["my", "issues", "assigned", "我的"] },
-    { key: "issues", label: t(($) => $.pages.issues), icon: ListTodo, keywords: ["issues", "tasks", "bugs"] },
-    { key: "projects", label: t(($) => $.pages.projects), icon: FolderKanban, keywords: ["projects", "kanban", "项目"] },
-    { key: "agents", label: t(($) => $.pages.agents), icon: Bot, keywords: ["agents", "bots", "ai"] },
-    { key: "runtimes", label: t(($) => $.pages.runtimes), icon: Monitor, keywords: ["runtimes", "environments"] },
-    { key: "skills", label: t(($) => $.pages.skills), icon: BookOpenText, keywords: ["skills", "library"] },
-    { key: "settings", label: t(($) => $.pages.settings), icon: Settings, keywords: ["settings", "config", "preferences", "设置"] },
-  ];
-  const { push, pathname, getShareableUrl } = useNavigation();
+  // Page names come from the sidebar's own namespace rather than a private
+  // copy under `search.pages`: one translated string per page, so the palette
+  // can never disagree with the sidebar about what a page is called.
+  const { t: tNav } = useT("layout");
+  const navPages = useMemo<NavPage[]>(
+    () =>
+      NAV_PAGE_KEYS.map((key) => ({
+        key,
+        label: tNav(($) => $.nav[WORKSPACE_PAGES[key].navKey]),
+        keywords: PAGE_KEYWORDS[key],
+      })),
+    [tNav],
+  );
+  const { pathname, getShareableUrl } = useNavigation();
+  const intentNavigate = useIntentNavigate();
   const open = useSearchStore((s) => s.open);
   const setOpen = useSearchStore((s) => s.setOpen);
+
+  // cmdk's onSelect carries no event, so the activating gesture's modifiers
+  // are recorded on the capture phase (click on a result, Enter in the input)
+  // and consumed by the select handlers below: cmd+click / cmd+Enter opens a
+  // result in a new tab instead of navigating in place.
+  const pendingIntentRef = useRef<LinkClickIntent>("push");
+  const recordIntent = useCallback(
+    (e: Pick<MouseEvent, "button" | "metaKey" | "ctrlKey" | "shiftKey">) => {
+      pendingIntentRef.current = resolveClickIntent(e);
+    },
+    [],
+  );
+  const consumeIntent = useCallback(() => {
+    const intent = pendingIntentRef.current;
+    pendingIntentRef.current = "push";
+    return intent;
+  }, []);
   const wsId = useWorkspaceId();
+  const { colorOf, iconOf } = useIssueStatuses(wsId);
   const recentItems = useRecentIssuesStore(selectRecentIssues(wsId));
   const p: WorkspacePaths = useWorkspacePaths();
   const { theme, setTheme } = useTheme();
@@ -163,8 +358,13 @@ export function SearchCommand() {
   // typically already in the detail cache because the user has opened them;
   // if not, this triggers a lookup per id so Recent never depends on whether
   // the issue falls inside the paginated list cache.
+  //
+  // Gated on `open`: the palette is mounted for the whole session, and the
+  // store keeps up to 20 recent ids, so an ungated list fired up to 20 issue
+  // detail requests on every cold app load for a surface the user may never
+  // open.
   const recentDetailQueries = useQueries({
-    queries: recentItems.map((item) => issueDetailOptions(wsId, item.id)),
+    queries: open ? recentItems.map((item) => issueDetailOptions(wsId, item.id)) : [],
   });
   const recentIssues = useMemo(
     () =>
@@ -173,7 +373,7 @@ export function SearchCommand() {
   );
 
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResults>({ issues: [], projects: [] });
+  const [results, setResults] = useState<SearchResults>(NO_RESULTS);
   const [isLoading, setIsLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -181,12 +381,8 @@ export function SearchCommand() {
   const filteredPages = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [];
-    return navPages.filter(
-      (page) =>
-        page.label.toLowerCase().includes(q) ||
-        page.keywords.some((kw) => kw.includes(q)),
-    );
-  }, [query]);
+    return navPages.filter((page) => matchesRow(page.label, page.keywords, q));
+  }, [navPages, query]);
 
   // Detect if current route is an issue detail page — /{slug}/issues/{id}.
   // Falls back to null on any other route; used to gate issue-specific commands.
@@ -199,6 +395,7 @@ export function SearchCommand() {
     ...issueDetailOptions(wsId, currentIssueId ?? ""),
     enabled: !!currentIssueId,
   });
+  const queryClient = useQueryClient();
 
   const commands = useMemo<CommandItem[]>(() => {
     const activeThemeCheck = (value: ThemeValue) =>
@@ -232,7 +429,7 @@ export function SearchCommand() {
       },
     ];
 
-    if (currentIssue) {
+    if (currentIssueId && currentIssue) {
       const identifier = currentIssue.identifier;
       items.push(
         {
@@ -256,6 +453,46 @@ export function SearchCommand() {
             void copyText(identifier).then((ok) => {
               if (ok) toast.success(t(($) => $.toast.copied_identifier, { identifier }));
             });
+            setOpen(false);
+          },
+        },
+        {
+          key: "fold-all-comments",
+          label: t(($) => $.commands.fold_all_comments),
+          icon: ListChevronsDownUp,
+          keywords: ["fold", "collapse", "comments", "收起", "折叠", "评论"],
+          onSelect: () => {
+            // The timeline is already cached whenever the issue page has
+            // rendered; ensureQueryData only fetches on a cold cache. If it
+            // still can't load, no comments are on screen — dropping the
+            // action matches the visible state.
+            void queryClient
+              .ensureQueryData(issueTimelineOptions(currentIssueId))
+              .then((entries) => {
+                useCommentCollapseStore
+                  .getState()
+                  .collapseAll(currentIssueId, rootCommentIds(entries));
+                useResolvedExpandStore.getState().collapseAll(currentIssueId);
+              })
+              .catch(() => {});
+            setOpen(false);
+          },
+        },
+        {
+          key: "unfold-all-comments",
+          label: t(($) => $.commands.unfold_all_comments),
+          icon: ListChevronsUpDown,
+          keywords: ["unfold", "expand", "comments", "展开", "评论"],
+          onSelect: () => {
+            void queryClient
+              .ensureQueryData(issueTimelineOptions(currentIssueId))
+              .then((entries) => {
+                useCommentCollapseStore.getState().expandAll(currentIssueId);
+                useResolvedExpandStore
+                  .getState()
+                  .expandAll(currentIssueId, resolvedThreadRootIds(entries));
+              })
+              .catch(() => {});
             setOpen(false);
           },
         },
@@ -299,7 +536,7 @@ export function SearchCommand() {
     );
 
     return items;
-  }, [currentIssue, getShareableUrl, pathname, setOpen, setTheme, theme, t]);
+  }, [currentIssue, currentIssueId, getShareableUrl, pathname, queryClient, setOpen, setTheme, theme, t]);
 
   const filteredCommands = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -307,11 +544,7 @@ export function SearchCommand() {
     // (theme switches, copy actions, New Project) are revealed as the user
     // types, leaving the empty-state space to Recent.
     if (!q) return commands.filter((c) => c.key === "new-issue");
-    return commands.filter(
-      (c) =>
-        c.label.toLowerCase().includes(q) ||
-        c.keywords.some((kw) => kw.includes(q)),
-    );
+    return commands.filter((c) => matchesRow(c.label, c.keywords, q));
   }, [commands, query]);
 
   const filteredMembers = useMemo(() => {
@@ -333,17 +566,27 @@ export function SearchCommand() {
     results.projects.length > 0 ||
     filteredMembers.length > 0;
 
-  // Global Cmd+K / Ctrl+K shortcut
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        useSearchStore.getState().toggle();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  // Rows answering an earlier query are still painted while the next request
+  // is in flight — that is what keeps the list from strobing on every
+  // keystroke — but they must not be actionable: cmdk re-selects the first
+  // valid item whenever the input changes, so a live stale row turns the next
+  // Enter into a jump to a result the user has already typed past.
+  const resultsAreStale = results.query !== query.trim();
+
+  // Cross-type cancelled demotion (MUL-5824). The two searches are ranked
+  // independently server-side, so the partition has to happen here, where they
+  // are aggregated for display. See the render note on the results list.
+  const partitionedResults = useMemo(
+    () =>
+      partitionAggregatedSearchResults({
+        issues: results.issues,
+        projects: results.projects,
+        // The partition describes these rows, so it keys off the query they
+        // answer — not what the user has typed since.
+        query: results.query,
+      }),
+    [results],
+  );
 
   // Close on single ESC — capture phase fires before base-ui Dialog's handlers
   useEffect(() => {
@@ -371,7 +614,7 @@ export function SearchCommand() {
   useEffect(() => {
     if (!open) {
       setQuery("");
-      setResults({ issues: [], projects: [] });
+      setResults(NO_RESULTS);
       setIsLoading(false);
     }
   }, [open]);
@@ -381,7 +624,7 @@ export function SearchCommand() {
     if (abortRef.current) abortRef.current.abort();
 
     if (!q.trim()) {
-      setResults({ issues: [], projects: [] });
+      setResults(NO_RESULTS);
       setIsLoading(false);
       return;
     }
@@ -407,6 +650,7 @@ export function SearchCommand() {
         ]);
         if (!controller.signal.aborted) {
           setResults({
+            query: q.trim(),
             issues: issueRes.issues,
             projects: projectRes.projects,
           });
@@ -414,6 +658,10 @@ export function SearchCommand() {
         }
       } catch {
         if (!controller.signal.aborted) {
+          // Drop the previous query's rows rather than leaving them on screen
+          // permanently greyed out: the request that would have replaced them
+          // is never coming. The list falls through to the empty state.
+          setResults({ query: q.trim(), issues: [], projects: [] });
           setIsLoading(false);
         }
       }
@@ -431,30 +679,29 @@ export function SearchCommand() {
   const handleSelect = useCallback(
     (value: string) => {
       setOpen(false);
-      if (value.startsWith("project:")) {
-        // value is "project:<id>" — slice off the 8-char prefix to extract the id.
-        push(p.projectDetail(value.slice(8)));
-      } else {
-        push(p.issueDetail(value));
-      }
+      const href = value.startsWith("project:")
+        ? // value is "project:<id>" — slice off the 8-char prefix to extract the id.
+          p.projectDetail(value.slice(8))
+        : p.issueDetail(value);
+      intentNavigate(href, consumeIntent());
     },
-    [push, setOpen, p],
+    [intentNavigate, consumeIntent, setOpen, p],
   );
 
   const handlePageSelect = useCallback(
-    (key: NavKey) => {
+    (key: WorkspacePageKey) => {
       setOpen(false);
-      push(p[key]());
+      intentNavigate(p[key](), consumeIntent());
     },
-    [push, setOpen, p],
+    [intentNavigate, consumeIntent, setOpen, p],
   );
 
   const handleMemberSelect = useCallback(
     (userId: string) => {
-      push(p.memberDetail(userId));
+      intentNavigate(p.memberDetail(userId), consumeIntent());
       setOpen(false);
     },
-    [push, setOpen, p],
+    [intentNavigate, consumeIntent, setOpen, p],
   );
 
   return (
@@ -472,6 +719,18 @@ export function SearchCommand() {
         </DialogHeader>
         <CommandPrimitive
           shouldFilter={false}
+          onPointerDownCapture={recordIntent}
+          onClickCapture={recordIntent}
+          onKeyDownCapture={(e) => {
+            if (e.key === "Enter") {
+              recordIntent({
+                button: 0,
+                metaKey: e.metaKey,
+                ctrlKey: e.ctrlKey,
+                shiftKey: e.shiftKey,
+              });
+            }
+          }}
           className="flex size-full flex-col overflow-hidden rounded-xl bg-popover text-popover-foreground"
         >
           {/* Search input */}
@@ -481,49 +740,60 @@ export function SearchCommand() {
               placeholder={t(($) => $.placeholder)}
               value={query}
               onValueChange={handleValueChange}
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              onKeyDown={(e) => {
+                // cmdk's root handler intercepts Home/End for list navigation;
+                // stop propagation so the browser moves the text caret instead.
+                if (e.key === "Home" || e.key === "End") {
+                  e.stopPropagation();
+                }
+              }}
+              className="flex-1 bg-transparent text-body outline-none placeholder:text-muted-foreground"
             />
-            <kbd className="hidden shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline">
-              ESC
-            </kbd>
+            <ShortcutKeycaps
+              shortcut={createShortcutChord("Escape")}
+              className="hidden shrink-0 sm:inline-flex"
+            />
           </div>
 
           {/* Results list */}
           <CommandPrimitive.List className="max-h-[min(400px,50vh)] overflow-y-auto overflow-x-hidden">
             {/* Pages section — only shown when query matches */}
             {filteredPages.length > 0 && (
-              <CommandPrimitive.Group className="p-2">
-                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  {t(($) => $.groups.pages)}
-                </div>
-                {filteredPages.map((page) => (
+              <CommandPrimitive.Group
+                heading={t(($) => $.groups.pages)}
+                className={GROUP_CLASS}
+              >
+                {filteredPages.map((page) => {
+                  const PageIcon = routeIconForPath(p[page.key]());
+                  return (
                   <CommandPrimitive.Item
                     key={page.key}
                     value={`page:${page.key}`}
                     onSelect={() => handlePageSelect(page.key)}
-                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
                   >
-                    <page.icon className="size-4 shrink-0 text-muted-foreground" />
+                    <PageIcon className="size-4 shrink-0 text-muted-foreground" />
                     <span className="truncate">
                       <HighlightText text={page.label} query={query} />
                     </span>
                   </CommandPrimitive.Item>
-                ))}
+                  );
+                })}
               </CommandPrimitive.Group>
             )}
 
             {/* Commands section — New Issue / New Project / Copy link / Theme, only shown when query matches */}
             {filteredCommands.length > 0 && (
-              <CommandPrimitive.Group className="p-2">
-                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  {t(($) => $.groups.commands)}
-                </div>
+              <CommandPrimitive.Group
+                heading={t(($) => $.groups.commands)}
+                className={GROUP_CLASS}
+              >
                 {filteredCommands.map((cmd) => (
                   <CommandPrimitive.Item
                     key={cmd.key}
                     value={`command:${cmd.key}`}
                     onSelect={cmd.onSelect}
-                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
                   >
                     <cmd.icon className="size-4 shrink-0 text-muted-foreground" />
                     <span className="truncate">
@@ -536,28 +806,28 @@ export function SearchCommand() {
             )}
 
             {filteredMembers.length > 0 && (
-              <CommandPrimitive.Group className="p-2">
-                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  {t(($) => $.groups.members)}
-                </div>
+              <CommandPrimitive.Group
+                heading={t(($) => $.groups.members)}
+                className={GROUP_CLASS}
+              >
                 {filteredMembers.map((member) => (
                   <CommandPrimitive.Item
                     key={member.user_id}
                     value={`member:${member.user_id}`}
                     onSelect={() => handleMemberSelect(member.user_id)}
-                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
                   >
                     <ActorAvatarBase
                       name={member.name}
                       initials={memberInitials(member.name)}
                       avatarUrl={resolvePublicFileUrl(member.avatar_url)}
-                      size={22}
+                      size="md"
                     />
                     <div className="min-w-0 flex-1">
                       <div className="truncate">
                         <HighlightText text={member.name} query={query} />
                       </div>
-                      <div className="truncate text-xs text-muted-foreground">
+                      <div className="truncate text-caption text-muted-foreground">
                         <HighlightText text={member.email} query={query} />
                       </div>
                     </div>
@@ -566,7 +836,15 @@ export function SearchCommand() {
               </CommandPrimitive.Group>
             )}
 
-            {isLoading && (
+            {/*
+              Spinner only while there is nothing to look at. isLoading flips
+              on the keystroke, before the 300ms debounce even fires, so
+              swapping the whole result list for a spinner on every character
+              made the list strobe while typing. Keeping the previous query's
+              rows until the next response lands is the standard trade: they
+              are one keystroke stale for a moment, instead of gone.
+            */}
+            {isLoading && !hasResults && (
               <div className="flex items-center justify-center py-10">
                 <Loader2 className="size-5 animate-spin text-muted-foreground" />
               </div>
@@ -577,123 +855,108 @@ export function SearchCommand() {
               !hasResults &&
               filteredPages.length === 0 &&
               filteredCommands.length === 0 && (
-                <CommandPrimitive.Empty className="py-10 text-center text-sm text-muted-foreground">
+                <CommandPrimitive.Empty className="py-10 text-center text-body text-muted-foreground">
                   {t(($) => $.empty.no_results)}
                 </CommandPrimitive.Empty>
               )}
 
-            {!isLoading && results.projects.length > 0 && (
+            {/*
+              Render order is the cross-type cancelled partition (MUL-5824):
+              live projects → live issues → one trailing Cancelled section
+              holding cancelled projects then cancelled issues. Projects and
+              issues arrive as two independently ranked responses, so per-type
+              ordering is not enough — the whole Projects group used to render
+              above the whole Issues group, letting one cancelled project be the
+              first row of the list. Keeping cancelled rows in a single trailing
+              section is the only arrangement where no cancelled row of either
+              type can precede a live row of the other. Direct hits stay in
+              their live section (see partitionAggregatedSearchResults).
+            */}
+            {partitionedResults.liveProjects.length > 0 && (
               <CommandPrimitive.Group
                 heading={t(($) => $.groups.projects)}
-                className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
+                className={GROUP_CLASS}
               >
-                {results.projects.map((project) => (
-                  <CommandPrimitive.Item
+                {partitionedResults.liveProjects.map((project) => (
+                  <ProjectResultRow
                     key={`project:${project.id}`}
-                    value={`project:${project.id}`}
+                    project={project}
+                    query={results.query}
+                    disabled={resultsAreStale}
                     onSelect={handleSelect}
-                    className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <ProjectIcon project={project} size="md" />
-                      <span className="truncate">
-                        <HighlightText text={project.title} query={query} />
-                      </span>
-                      <span
-                        className={`ml-auto text-xs shrink-0 ${PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.color ?? "text-muted-foreground"}`}
-                      >
-                        {PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.label ?? project.status}
-                      </span>
-                    </div>
-                    {project.match_source === "description" &&
-                      project.matched_snippet && (
-                        <div className="flex items-start gap-2 pl-[26px]">
-                          <span className="text-xs text-muted-foreground truncate">
-                            <HighlightText
-                              text={project.matched_snippet}
-                              query={query}
-                            />
-                          </span>
-                        </div>
-                      )}
-                  </CommandPrimitive.Item>
+                  />
                 ))}
               </CommandPrimitive.Group>
             )}
 
-            {!isLoading && results.issues.length > 0 && (
+            {partitionedResults.liveIssues.length > 0 && (
               <CommandPrimitive.Group
                 heading={t(($) => $.groups.issues)}
-                className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
+                className={GROUP_CLASS}
               >
-                {results.issues.map((issue) => (
-                  <CommandPrimitive.Item
+                {partitionedResults.liveIssues.map((issue) => (
+                  <IssueResultRow
                     key={issue.id}
-                    value={issue.id}
+                    issue={issue}
+                    query={results.query}
+                    disabled={resultsAreStale}
                     onSelect={handleSelect}
-                    className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <StatusIcon
-                        status={issue.status}
-                        className="size-4 shrink-0"
-                      />
-                      <span className="text-xs text-muted-foreground shrink-0">
-                        {issue.identifier}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate">
-                        <HighlightText text={issue.title} query={query} />
-                      </span>
-                      <IssueAssigneeAvatar
-                        assigneeType={issue.assignee_type}
-                        assigneeId={issue.assignee_id}
-                      />
-                    </div>
-                    {issue.matched_description_snippet && (
-                      <div className="flex items-start gap-2 pl-[26px]">
-                        <FileText className="size-3 shrink-0 text-muted-foreground mt-0.5" />
-                        <span className="text-xs text-muted-foreground truncate">
-                          <HighlightText
-                            text={issue.matched_description_snippet}
-                            query={query}
-                          />
-                        </span>
-                      </div>
-                    )}
-                    {issue.matched_comment_snippet && (
-                      <div className="flex items-start gap-2 pl-[26px]">
-                        <MessageSquare className="size-3 shrink-0 text-muted-foreground mt-0.5" />
-                        <span className="text-xs text-muted-foreground truncate">
-                          <HighlightText
-                            text={issue.matched_comment_snippet}
-                            query={query}
-                          />
-                        </span>
-                      </div>
-                    )}
-                  </CommandPrimitive.Item>
+                  />
                 ))}
               </CommandPrimitive.Group>
             )}
 
-            {!isLoading && !query.trim() && recentIssues.length > 0 && (
-              <CommandPrimitive.Group className="p-2">
-                <div className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  <Clock className="size-3" />
-                  <span>{t(($) => $.groups.recent)}</span>
-                </div>
+            {partitionedResults.hasCancelled && (
+              <CommandPrimitive.Group
+                heading={t(($) => $.groups.cancelled)}
+                className={GROUP_CLASS}
+              >
+                {partitionedResults.cancelledProjects.map((project) => (
+                  <ProjectResultRow
+                    key={`project:${project.id}`}
+                    project={project}
+                    query={results.query}
+                    disabled={resultsAreStale}
+                    onSelect={handleSelect}
+                  />
+                ))}
+                {partitionedResults.cancelledIssues.map((issue) => (
+                  <IssueResultRow
+                    key={issue.id}
+                    issue={issue}
+                    query={results.query}
+                    disabled={resultsAreStale}
+                    onSelect={handleSelect}
+                  />
+                ))}
+              </CommandPrimitive.Group>
+            )}
+
+            {!query.trim() && recentIssues.length > 0 && (
+              <CommandPrimitive.Group
+                heading={
+                  <>
+                    <Clock className="size-3" />
+                    <span>{t(($) => $.groups.recent)}</span>
+                  </>
+                }
+                className={`${GROUP_CLASS} [&_[cmdk-group-heading]]:flex [&_[cmdk-group-heading]]:items-center [&_[cmdk-group-heading]]:gap-2`}
+              >
                 {recentIssues.map((item) => (
                   <CommandPrimitive.Item
                     key={item.id}
                     value={item.id}
                     onSelect={handleSelect}
-                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
                   >
                     <StatusIcon
                       status={item.status}
+                      color={colorOf(item.status)}
+                      icon={iconOf(item.status)}
+                      category={issueStatusCategory(item) ?? undefined}
                       className="size-4 shrink-0"
                     />
-                    <span className="text-xs text-muted-foreground shrink-0">
+                    <span className="text-caption text-muted-foreground shrink-0">
                       {item.identifier}
                     </span>
                     <span className="min-w-0 flex-1 truncate">{item.title}</span>
@@ -707,7 +970,7 @@ export function SearchCommand() {
             )}
 
             {!isLoading && !query.trim() && recentIssues.length === 0 && (
-              <div className="px-5 py-4 text-center text-xs text-muted-foreground">
+              <div className="px-5 py-4 text-center text-caption text-muted-foreground">
                 {t(($) => $.empty.type_to_search)}
               </div>
             )}

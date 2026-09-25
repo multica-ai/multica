@@ -5,10 +5,8 @@
  * (`involves_user_id`, MUL-2397) surfaces both the user's owned agents and
  * squads they're involved in (member / leader / has an owned agent inside).
  *
- * Issues are grouped by status using SectionList in `BOARD_STATUSES` order;
- * empty status sections are filtered out so the screen doesn't fill with
- * "(0)" headers. Section grouping uses `BOARD_STATUSES` (cancelled excluded)
- * to match web — same source `packages/views/my-issues/components/my-issues-page.tsx:117-125`.
+ * Issues are grouped by concrete status key; empty sections are omitted.
+ * Category controls lifecycle behavior and ordering, not section identity.
  *
  * Status + Priority filters mirror web's MyIssuesHeader filter sub-menus.
  * Filter state lives in `useMyIssuesViewStore` and is cleared on workspace
@@ -17,9 +15,13 @@
 import { useMemo } from "react";
 import { Pressable, SectionList, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
+import { useIsFocused } from "@react-navigation/native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import type { Issue, IssuePriority, IssueStatus } from "@multica/core/types";
+import type {
+  IssuePriority,
+  IssueStatus,
+} from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/ui/header";
@@ -36,11 +38,10 @@ import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useMyIssuesViewStore } from "@/data/stores/my-issues-view-store";
 import { useClearFiltersOnWorkspaceChange } from "@/lib/use-clear-filters-on-workspace-change";
-import {
-  BOARD_STATUSES,
-  PRIORITY_LABEL,
-  STATUS_LABEL,
-} from "@/lib/issue-status";
+import { PRIORITY_LABEL } from "@/lib/issue-status";
+import { useT } from "@/lib/i18n";
+import { useIssueStatuses } from "@/lib/use-issue-statuses";
+import { groupIssuesByStatus } from "@/lib/group-issues-by-status";
 import { filterIssues } from "@/lib/filter-issues";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
@@ -51,18 +52,14 @@ import { THEME } from "@/lib/theme";
 // under Dynamic Type. Semantics unchanged: same backend predicate
 // (`involves_user_id`, MUL-2397) covers owned agents + related squads; the
 // empty state copy still says "agents or squads".
-const SCOPES: { value: MyIssuesScope; label: string }[] = [
-  { value: "assigned", label: "Assigned" },
-  { value: "created", label: "Created" },
-  { value: "agents", label: "Agents" },
-];
-
-type IssueSection = { status: IssueStatus; data: Issue[] };
+const SCOPES: MyIssuesScope[] = ["assigned", "created", "agents"];
 
 export default function MyIssues() {
+  const isFocused = useIsFocused();
   const userId = useAuthStore((s) => s.user?.id ?? null);
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
+  const { t } = useT("issues");
 
   const scope = useMyIssuesViewStore((s) => s.scope);
   const setScope = useMyIssuesViewStore((s) => s.setScope);
@@ -92,6 +89,9 @@ export default function MyIssues() {
     enabled: !!wsId && !!userId,
   });
 
+  // Catalog labels and ordering enhance exact-key sections without blocking rows.
+  const catalog = useIssueStatuses();
+
   // Apply client-side status + priority filter. Mirrors the predicate at
   // packages/views/issues/utils/filter.ts:30-34 via filterIssues().
   const filtered = useMemo(
@@ -99,36 +99,23 @@ export default function MyIssues() {
     [data, statusFilters, priorityFilters],
   );
 
-  // When statusFilters is non-empty, intersect visible status order with it
-  // so hidden statuses don't render an empty section header. Uses
-  // BOARD_STATUSES (cancelled excluded) to match web.
-  const sections = useMemo<IssueSection[]>(() => {
-    if (filtered.length === 0) return [];
-    const byStatus = new Map<IssueStatus, Issue[]>();
-    for (const issue of filtered) {
-      const list = byStatus.get(issue.status);
-      if (list) list.push(issue);
-      else byStatus.set(issue.status, [issue]);
-    }
-    const visibleStatuses = statusFilters.length > 0
-      ? BOARD_STATUSES.filter((s) => statusFilters.includes(s))
-      : BOARD_STATUSES;
-    return visibleStatuses
-      .map((status) => ({ status, data: byStatus.get(status) ?? [] }))
-      .filter((s) => s.data.length > 0);
-  }, [filtered, statusFilters]);
+  const sections = useMemo(() => groupIssuesByStatus(filtered, catalog.statuses), [filtered, catalog.statuses]);
 
   const hasActiveFilters =
     statusFilters.length > 0 || priorityFilters.length > 0;
+  const scopeItems = SCOPES.map((value) => ({
+    value,
+    label: t(`tabs.${value}`),
+  }));
 
   const showEmptyState =
     !isLoading && !error && filtered.length === 0;
 
   return (
     <View className="flex-1 bg-background">
-      <Header title="My Issues" right={<HeaderActions />} />
+      <Header title={t("navigation:tabs.my_issues")} right={<HeaderActions />} />
       <ScopeToolbar
-        scopes={SCOPES}
+        scopes={scopeItems}
         scope={scope}
         onChange={(v) => setScope(v)}
         onOpenFilter={openFilter}
@@ -138,6 +125,7 @@ export default function MyIssues() {
         <ActiveFilterChips
           statusFilters={statusFilters}
           priorityFilters={priorityFilters}
+          statusLabelOf={catalog.labelOf}
           onClearStatus={(s) =>
             useMyIssuesViewStore.getState().toggleStatusFilter(s)
           }
@@ -151,19 +139,20 @@ export default function MyIssues() {
       ) : error ? (
         <View className="px-4 gap-3 pt-4">
           <Text className="text-sm text-destructive">
-            Failed to load issues:{" "}
-            {error instanceof Error ? error.message : "unknown error"}
+            {t("errors.load_failed", {
+              message: error instanceof Error ? error.message : "unknown",
+            })}
           </Text>
           <Button variant="outline" onPress={() => refetch()}>
-            <Text>Retry</Text>
+            <Text>{t("common:actions.retry")}</Text>
           </Button>
         </View>
       ) : showEmptyState ? (
         <EmptyState
           message={
             hasActiveFilters
-              ? "No issues match the current filters."
-              : emptyMessageForScope(scope)
+              ? t("empty.filtered")
+              : t(`empty.${scope}`)
           }
         />
       ) : (
@@ -189,7 +178,7 @@ export default function MyIssues() {
               }}
             />
           )}
-          refreshing={isRefetching}
+          refreshing={isFocused && isRefetching}
           onRefresh={refetch}
         />
       )}
@@ -213,6 +202,7 @@ function FilterButton({
   onPress: () => void;
   hasActiveFilters: boolean;
 }) {
+  const { t } = useT("issues");
   const { colorScheme } = useColorScheme();
   return (
     <View style={{ position: "relative" }} className="ml-2">
@@ -220,7 +210,7 @@ function FilterButton({
         variant="outline"
         size="sm"
         onPress={onPress}
-        accessibilityLabel="Filter"
+        accessibilityLabel={t("header_filter")}
         className="w-9 px-0"
       >
         <Ionicons
@@ -295,21 +285,25 @@ function ScopeToolbar<S extends string>({
 function ActiveFilterChips({
   statusFilters,
   priorityFilters,
+  statusLabelOf,
   onClearStatus,
   onClearPriority,
 }: {
   statusFilters: IssueStatus[];
   priorityFilters: IssuePriority[];
+  /** Resolves a status KEY — which can be a custom one — to its label. */
+  statusLabelOf: (statusKey: string) => string;
   onClearStatus: (s: IssueStatus) => void;
   onClearPriority: (p: IssuePriority) => void;
 }) {
+  const { t } = useT("issues");
   return (
     <View className="flex-row flex-wrap gap-1.5 px-4 pb-2">
       {statusFilters.map((s) => (
-        <Chip key={`s-${s}`} label={STATUS_LABEL[s]} onClear={() => onClearStatus(s)} />
+        <Chip key={`s-${s}`} label={statusLabelOf(s)} onClear={() => onClearStatus(s)} />
       ))}
       {priorityFilters.map((p) => (
-        <Chip key={`p-${p}`} label={PRIORITY_LABEL[p]} onClear={() => onClearPriority(p)} />
+        <Chip key={`p-${p}`} label={t(PRIORITY_LABEL[p])} onClear={() => onClearPriority(p)} />
       ))}
     </View>
   );
@@ -332,6 +326,7 @@ function Chip({ label, onClear }: { label: string; onClear: () => void }) {
   );
 }
 
+// The section header names its concrete built-in or custom status.
 function SectionHeader({
   status,
   count,
@@ -339,11 +334,13 @@ function SectionHeader({
   status: IssueStatus;
   count: number;
 }) {
+  const catalog = useIssueStatuses();
   return (
     <View className="flex-row items-center gap-2 px-4 py-2 bg-background">
-      <StatusIcon status={status} size={14} />
+      {/* Category keys resolve to their canonical lifecycle glyph. */}
+      <StatusIcon status={status} category={catalog.categoryOf(status)} icon={catalog.iconOf(status)} color={catalog.colorOf(status)} size={14} />
       <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-        {STATUS_LABEL[status]}
+        {catalog.labelOf(status)}
       </Text>
       <Text className="text-xs text-muted-foreground/60">{count}</Text>
     </View>
@@ -359,15 +356,3 @@ function EmptyState({ message }: { message: string }) {
     </View>
   );
 }
-
-function emptyMessageForScope(scope: MyIssuesScope): string {
-  switch (scope) {
-    case "assigned":
-      return "No issues assigned to you.";
-    case "created":
-      return "You haven't created any issues.";
-    case "agents":
-      return "No issues assigned to your agents or squads yet.";
-  }
-}
-

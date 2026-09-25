@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { redactSecrets } from "./redact";
 
@@ -23,6 +24,27 @@ describe("redactSecrets", () => {
   it("redacts GitHub tokens", () => {
     const result = redactSecrets("GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn");
     expect(result).not.toContain("ghp_");
+  });
+
+  it("redacts GitHub fine-grained PATs (github_pat_)", () => {
+    const key = ["github_", "pat_", "11ABCDEFG0aBcDeFgHiJkL_mNoPqRsTuVwXyZ0123456789AbCdEfGhIjKlMnOpQrSt"].join("");
+    const result = redactSecrets(`the build left ${key} in the log`);
+    expect(result).not.toContain("github_pat_");
+    expect(result).toContain("[REDACTED GITHUB TOKEN]");
+  });
+
+  it("redacts Google API keys (AIza...)", () => {
+    const key = ["AIza", "SyD1234567890abcdefghijklmnopqrstuv"].join("");
+    const result = redactSecrets(`the config still had ${key} in it`);
+    expect(result).not.toContain("AIzaSy");
+    expect(result).toContain("[REDACTED GOOGLE API KEY]");
+  });
+
+  it("redacts Google API keys ending with dash", () => {
+    const key = ["AIza", "SyB1cD3fGhIjKlMnOpQrStUvWxYz012345-"].join("");
+    const result = redactSecrets(`the config still had "${key}" in it`);
+    expect(result).not.toContain("AIzaSy");
+    expect(result).toContain('"[REDACTED GOOGLE API KEY]" in it');
   });
 
   it("redacts GitLab tokens", () => {

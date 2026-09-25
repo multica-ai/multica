@@ -1,17 +1,26 @@
 // @vitest-environment jsdom
 
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { api } from "@multica/core/api";
+import { chatKeys } from "@multica/core/chat/queries";
 import type { AgentTask } from "@multica/core/types";
+import type { TaskMessagePayload } from "@multica/core/types/events";
 import { renderWithI18n } from "../../test/i18n";
 
 const mockState = vi.hoisted(() => ({
-  snapshot: [] as unknown[],
+  tasks: [] as unknown[],
   taskMessagesOptions: vi.fn(),
+  // Captures the props the chip passes to PopoverTrigger so a test can assert
+  // the card is wired to open on hover, not only on click.
+  triggerProps: undefined as Record<string, unknown> | undefined,
 }));
 
-vi.mock("@multica/core/hooks", () => ({
-  useWorkspaceId: () => "ws-1",
+vi.mock("@multica/core/api", () => ({
+  api: {
+    listTaskMessages: vi.fn(),
+  },
 }));
 
 vi.mock("@multica/core/workspace/hooks", () => ({
@@ -30,9 +39,18 @@ vi.mock("@multica/core/workspace/hooks", () => ({
   }),
 }));
 
-vi.mock("@multica/core/chat/queries", () => ({
-  taskMessagesOptions: mockState.taskMessagesOptions,
-}));
+vi.mock("@multica/core/chat/queries", async () => {
+  const actual = await vi.importActual<typeof import("@multica/core/chat/queries")>(
+    "@multica/core/chat/queries",
+  );
+  return {
+    ...actual,
+    taskMessagesOptions: (...args: Parameters<typeof actual.taskMessagesOptions>) => {
+      mockState.taskMessagesOptions(...args);
+      return actual.taskMessagesOptions(...args);
+    },
+  };
+});
 
 vi.mock("@multica/ui/components/ui/popover", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
@@ -43,10 +61,14 @@ vi.mock("@multica/ui/components/ui/popover", async () => {
     PopoverTrigger: ({
       render,
       children,
+      ...props
     }: {
       render: React.ReactElement;
       children: React.ReactNode;
-    }) => React.cloneElement(render, undefined, children),
+    } & Record<string, unknown>) => {
+      mockState.triggerProps = props;
+      return React.cloneElement(render, undefined, children);
+    },
     PopoverContent: ({ children }: { children: React.ReactNode }) => (
       <div data-testid="agent-popover-content">{children}</div>
     ),
@@ -54,9 +76,42 @@ vi.mock("@multica/ui/components/ui/popover", async () => {
 });
 
 vi.mock("./execution-log-section", () => ({
-  ActiveTaskRow: ({ task }: { task: AgentTask }) => (
-    <div data-testid="active-task-row">{task.id}</div>
+  ActiveTaskRow: ({
+    task,
+    onTranscriptOpenChange,
+  }: {
+    task: AgentTask;
+    transcriptOpen?: boolean;
+    onTranscriptOpenChange?: (open: boolean) => void;
+  }) => (
+    <div data-testid="active-task-row">
+      <span>{task.id}</span>
+      <button
+        type="button"
+        aria-label={`open transcript ${task.id}`}
+        onClick={() => onTranscriptOpenChange?.(true)}
+      >
+        Open transcript
+      </button>
+    </div>
   ),
+}));
+
+vi.mock("../../common/task-transcript/agent-transcript-dialog", () => ({
+  AgentTranscriptDialog: ({
+    open,
+    items,
+  }: {
+    open: boolean;
+    items: Array<{ seq: number }>;
+  }) =>
+    open ? (
+      <div role="dialog">
+        {items.map((item) => (
+          <div key={item.seq} data-testid="event" data-seq={item.seq} />
+        ))}
+      </div>
+    ) : null,
 }));
 
 vi.mock("@tanstack/react-query", async () => {
@@ -68,19 +123,47 @@ vi.mock("@tanstack/react-query", async () => {
   return {
     ...actual,
     useQuery: (opts: { queryKey?: readonly unknown[] }) => {
-      if (opts.queryKey?.[2] === "agent-task-snapshot") {
-        return { data: mockState.snapshot };
+      // Per-issue task list: issueKeys.tasks(issueId) === ["issues","tasks",id]
+      if (opts.queryKey?.[0] === "issues" && opts.queryKey?.[1] === "tasks") {
+        return { data: mockState.tasks };
       }
-      return { data: undefined };
+      return actual.useQuery(opts as Parameters<typeof actual.useQuery>[0]);
     },
   };
 });
 
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 
+const listTaskMessages = vi.mocked(api.listTaskMessages);
+
+const LIVE_TASK_ID = "4a2e8d1c-7f9b-4e2a-9c1d-123456789abc";
+
+const msg = (seq: number): TaskMessagePayload => ({
+  task_id: LIVE_TASK_ID,
+  issue_id: "issue-1",
+  seq,
+  type: "tool_use",
+  tool: `Tool ${seq}`,
+  input: { i: String(seq) },
+});
+
+function newClient() {
+  return new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+}
+
+function renderChip(qc: QueryClient, issueId = "issue-1") {
+  return renderWithI18n(
+    <QueryClientProvider client={qc}>
+      <IssueAgentHeaderChip issueId={issueId} />
+    </QueryClientProvider>,
+  );
+}
+
 function makeTask(overrides: Partial<AgentTask>): AgentTask {
   return {
-    id: "task-1",
+    id: LIVE_TASK_ID,
     agent_id: "agent-1",
     runtime_id: "runtime-1",
     issue_id: "issue-1",
@@ -99,12 +182,27 @@ function makeTask(overrides: Partial<AgentTask>): AgentTask {
 beforeEach(() => {
   cleanup();
   vi.clearAllMocks();
-  mockState.snapshot = [];
+  mockState.tasks = [];
+  mockState.triggerProps = undefined;
+  listTaskMessages.mockReset();
+  listTaskMessages.mockResolvedValue([]);
 });
 
 describe("IssueAgentHeaderChip", () => {
+  it("lists pending threads oldest first after the running task, even after coalescing", () => {
+    // ListTasksByIssue returns newest first, as in DEV-24.
+    mockState.tasks = [
+      makeTask({ id: "dlc", status: "queued", created_at: "2026-09-08T11:44:52+08:00" }),
+      makeTask({ id: "beginner", status: "queued", created_at: "2026-09-08T11:44:34+08:00", trigger_comment_id: "new-supplement", coalesced_comment_ids: ["original"] }),
+      makeTask({ id: "running", created_at: "2026-09-08T11:44:26+08:00" }),
+    ];
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+    expect(screen.getAllByTestId("active-task-row").map((row) => row.querySelector("span")?.textContent))
+      .toEqual(["running", "beginner", "dlc"]);
+  });
+
   it("shows the active agent name without event count or elapsed time", () => {
-    mockState.snapshot = [makeTask({})];
+    mockState.tasks = [makeTask({})];
 
     renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
 
@@ -117,8 +215,26 @@ describe("IssueAgentHeaderChip", () => {
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
   });
 
+  it("wears the decorative border beam only while an agent is running", () => {
+    mockState.tasks = [makeTask({})];
+    const { unmount } = renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    const running = screen.getByRole("button", { name: "Walt is working" });
+    const ring = running.querySelector(".border-beam-ring");
+    expect(running).toHaveClass("relative");
+    expect(ring).toHaveAttribute("aria-hidden", "true");
+    expect(ring?.querySelector(".border-beam-light")).not.toBeNull();
+    unmount();
+
+    mockState.tasks = [makeTask({ status: "queued" })];
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    const queued = screen.getByRole("button", { name: "Walt is queued" });
+    expect(queued.querySelector(".border-beam-ring")).toBeNull();
+  });
+
   it("keeps the header popover card with active task rows", () => {
-    mockState.snapshot = [makeTask({ id: "task-running" })];
+    mockState.tasks = [makeTask({ id: "task-running" })];
 
     renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
 
@@ -129,8 +245,85 @@ describe("IssueAgentHeaderChip", () => {
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
   });
 
+  it("keeps the live transcript open after the clicked task row disappears from the active list", async () => {
+    const qc = newClient();
+    mockState.tasks = [makeTask({ id: LIVE_TASK_ID })];
+    qc.setQueryData(chatKeys.taskMessages(LIVE_TASK_ID), [msg(1)]);
+    listTaskMessages.mockResolvedValue([msg(1)]);
+
+    const { rerender } = renderChip(qc);
+
+    fireEvent.click(screen.getByRole("button", { name: `open transcript ${LIVE_TASK_ID}` }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getAllByTestId("event")).toHaveLength(1);
+    });
+    expect(screen.getByTestId("active-task-row")).toHaveTextContent(LIVE_TASK_ID);
+    expect(listTaskMessages).toHaveBeenCalledWith(LIVE_TASK_ID);
+
+    mockState.tasks = [];
+    rerender(
+      <QueryClientProvider client={qc}>
+        <IssueAgentHeaderChip issueId="issue-2" />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByTestId("active-task-row")).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getAllByTestId("event")).toHaveLength(1);
+  });
+
+  it("refreshes the transcript when the opened task completes", async () => {
+    const qc = newClient();
+    mockState.tasks = [makeTask({ id: LIVE_TASK_ID, status: "running" })];
+    qc.setQueryData(chatKeys.taskMessages(LIVE_TASK_ID), [msg(1)]);
+    listTaskMessages.mockResolvedValue([msg(1)]);
+
+    const { rerender } = renderChip(qc);
+
+    fireEvent.click(screen.getByRole("button", { name: `open transcript ${LIVE_TASK_ID}` }));
+
+    await waitFor(() => {
+      expect(listTaskMessages).toHaveBeenCalledTimes(1);
+    });
+
+    mockState.tasks = [
+      makeTask({
+        id: LIVE_TASK_ID,
+        status: "completed",
+        completed_at: "2026-06-08T08:05:00Z",
+      }),
+    ];
+    rerender(
+      <QueryClientProvider client={qc}>
+        <IssueAgentHeaderChip issueId="issue-2" />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(listTaskMessages).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("opens the activity card on hover, not only on click", () => {
+    mockState.tasks = [makeTask({})];
+
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    // Base UI gates hover-to-open on `openOnHover` on the trigger. Without it
+    // the chip would be click-only, which is the behavior MUL-3507 replaces.
+    // The trigger stays a real <button>, so click/keyboard access is retained.
+    expect(mockState.triggerProps?.openOnHover).toBe(true);
+    expect(
+      screen.getByRole("button", { name: "Walt is working" }),
+    ).toBeInTheDocument();
+  });
+
   it("uses the concise multi-agent working label", () => {
-    mockState.snapshot = [
+    mockState.tasks = [
       makeTask({ id: "task-1", agent_id: "agent-1" }),
       makeTask({ id: "task-2", agent_id: "agent-2" }),
     ];
@@ -138,15 +331,15 @@ describe("IssueAgentHeaderChip", () => {
     renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
 
     expect(
-      screen.getByRole("button", { name: "2 agents working" }),
+      screen.getByRole("button", { name: "2 active agents" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("2 agents working")).toHaveLength(2);
+    expect(screen.getAllByText("2 active agents")).toHaveLength(2);
     expect(screen.getAllByTestId("active-task-row")).toHaveLength(2);
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
   });
 
   it("uses the requested Chinese single-agent copy", () => {
-    mockState.snapshot = [makeTask({})];
+    mockState.tasks = [makeTask({})];
 
     renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />, {
       locale: "zh-Hans",
@@ -155,14 +348,34 @@ describe("IssueAgentHeaderChip", () => {
     expect(screen.getByText("Walt 在工作")).toBeInTheDocument();
   });
 
-  it("does not render for inactive or unrelated tasks", () => {
-    mockState.snapshot = [
+  it("hides the visible label on mobile while preserving a larger tap target and accessible name", () => {
+    mockState.tasks = [makeTask({ status: "queued" })];
+
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    const trigger = screen.getByRole("button", { name: "Walt is queued" });
+    expect(trigger.querySelector("[data-slot='avatar']")).not.toBeNull();
+    expect(trigger.className).toContain("h-9 min-w-9");
+    expect(trigger.className).toContain("md:h-7 md:min-w-0");
+    const label = screen.getByText("Walt is queued");
+    expect(label.className).toContain("hidden");
+    expect(label.className).toContain("md:inline");
+  });
+
+  it("does not render when the issue has only terminal tasks", () => {
+    // The list is issue-scoped by the endpoint, so the chip's only job is to
+    // ignore terminal statuses (those are the execution log's story).
+    mockState.tasks = [
       makeTask({
         id: "task-done",
         status: "completed",
         completed_at: "2026-06-08T08:05:00Z",
       }),
-      makeTask({ id: "task-other", issue_id: "issue-2" }),
+      makeTask({
+        id: "task-cancelled",
+        status: "cancelled",
+        completed_at: "2026-06-08T08:06:00Z",
+      }),
     ];
 
     renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);

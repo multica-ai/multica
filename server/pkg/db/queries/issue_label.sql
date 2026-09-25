@@ -1,6 +1,14 @@
 -- name: ListLabels :many
-SELECT * FROM issue_label
-WHERE workspace_id = $1
+SELECT l.*,
+    CASE l.resource_type
+        WHEN 'issue' THEN (SELECT COUNT(*) FROM issue_to_label x WHERE x.label_id = l.id)
+        WHEN 'agent' THEN (SELECT COUNT(*) FROM agent_to_label x WHERE x.label_id = l.id)
+        WHEN 'skill' THEN (SELECT COUNT(*) FROM skill_to_label x WHERE x.label_id = l.id)
+        ELSE 0
+    END::bigint AS usage_count
+FROM issue_label l
+WHERE l.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND l.resource_type = sqlc.arg('resource_type')::text
 ORDER BY LOWER(name) ASC;
 
 -- name: GetLabel :one
@@ -8,13 +16,14 @@ SELECT * FROM issue_label
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateLabel :one
-INSERT INTO issue_label (workspace_id, name, color)
-VALUES ($1, $2, $3)
+INSERT INTO issue_label (workspace_id, resource_type, name, description, color)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: UpdateLabel :one
 UPDATE issue_label SET
     name = COALESCE(sqlc.narg('name'), name),
+    description = COALESCE(sqlc.narg('description'), description),
     color = COALESCE(sqlc.narg('color'), color),
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
@@ -27,35 +36,115 @@ DELETE FROM issue_label
 WHERE id = $1 AND workspace_id = $2
 RETURNING id;
 
--- name: AttachLabelToIssue :exec
+-- The resource-label junctions deliberately have no foreign keys. Keeping
+-- their cleanup in the same application transaction as the owner deletion
+-- avoids database-level cascades with unreviewed locking and audit behavior.
+
+-- name: DeleteIssueLabelAssignmentsByLabel :exec
+DELETE FROM issue_to_label WHERE label_id = $1;
+
+-- name: DeleteAgentLabelAssignmentsByLabel :exec
+DELETE FROM agent_to_label WHERE label_id = $1;
+
+-- name: DeleteSkillLabelAssignmentsByLabel :exec
+DELETE FROM skill_to_label WHERE label_id = $1;
+
+-- name: DeleteAgentLabelAssignmentsByAgent :exec
+DELETE FROM agent_to_label WHERE agent_id = $1;
+
+-- name: DeleteSkillLabelAssignmentsBySkill :exec
+DELETE FROM skill_to_label WHERE skill_id = $1;
+
+-- The single-entity cleanups above cover one agent/skill at a time. The runtime
+-- variant below covers runtime and runtime-profile bulk hard deletes, where the
+-- owning agents disappear without passing through a per-entity delete.
+-- Workspace-wide cleanup lives in DeleteWorkspace so it is atomic with that
+-- workspace's existing multi-table teardown.
+
+-- name: DeleteAgentLabelAssignmentsBySystemRuntimeAgents :exec
+-- Runtime teardown hard-deletes the system agents bound to the runtime (user
+-- agents are unbound and kept since MUL-5559). Clear only those agents' label
+-- links so none survive the agent hard-delete — a surviving unbound agent must
+-- keep its labels.
+DELETE FROM agent_to_label
+WHERE agent_id IN (SELECT id FROM agent WHERE runtime_id = $1 AND kind = 'system');
+
+-- name: AttachLabelToIssueOnCreate :exec
 -- Workspace-guarded INSERT: the WHERE EXISTS clauses ensure both the issue
 -- and the label belong to the given workspace. A future caller that forgets
 -- handler-level prechecks still cannot attach labels across workspaces.
+WITH touched_issue AS (
+    UPDATE issue
+    SET last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
+    WHERE issue.id = sqlc.arg('issue_id')::uuid
+      AND issue.workspace_id = sqlc.arg('workspace_id')::uuid
+      AND NOT EXISTS (
+          SELECT 1 FROM issue_to_label
+          WHERE issue_to_label.issue_id = sqlc.arg('issue_id')::uuid
+            AND issue_to_label.label_id = sqlc.arg('label_id')::uuid
+      )
+      AND EXISTS (
+          SELECT 1 FROM issue_label
+          WHERE issue_label.id = sqlc.arg('label_id')::uuid
+            AND issue_label.workspace_id = sqlc.arg('workspace_id')::uuid
+            AND issue_label.resource_type = 'issue'
+      )
+    RETURNING issue.id
+)
 INSERT INTO issue_to_label (issue_id, label_id)
 SELECT sqlc.arg('issue_id')::uuid, sqlc.arg('label_id')::uuid
-WHERE EXISTS (
-    SELECT 1 FROM issue i
-    WHERE i.id = sqlc.arg('issue_id')::uuid
-      AND i.workspace_id = sqlc.arg('workspace_id')::uuid
-)
-AND EXISTS (
-    SELECT 1 FROM issue_label l
-    WHERE l.id = sqlc.arg('label_id')::uuid
-      AND l.workspace_id = sqlc.arg('workspace_id')::uuid
-)
+WHERE EXISTS (SELECT 1 FROM touched_issue)
 ON CONFLICT DO NOTHING;
 
--- name: DetachLabelFromIssue :exec
+-- name: AttachLabelToIssue :one
+WITH inserted AS (
+    INSERT INTO issue_to_label (issue_id, label_id)
+    SELECT sqlc.arg('issue_id')::uuid, sqlc.arg('label_id')::uuid
+    WHERE EXISTS (
+        SELECT 1 FROM issue i
+        WHERE i.id = sqlc.arg('issue_id')::uuid
+          AND i.workspace_id = sqlc.arg('workspace_id')::uuid
+    )
+      AND EXISTS (
+        SELECT 1 FROM issue_label l
+        WHERE l.id = sqlc.arg('label_id')::uuid
+          AND l.workspace_id = sqlc.arg('workspace_id')::uuid
+          AND l.resource_type = 'issue'
+    )
+    ON CONFLICT DO NOTHING
+    RETURNING issue_id
+), bumped AS (
+    UPDATE issue
+    SET revision = revision + 1,
+        last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
+    WHERE id IN (SELECT issue_id FROM inserted)
+    RETURNING revision
+)
+SELECT EXISTS(SELECT 1 FROM inserted) AS changed,
+       COALESCE((SELECT revision FROM bumped), 0)::bigint AS issue_revision;
+
+-- name: DetachLabelFromIssue :one
 -- Workspace-guarded DELETE: only deletes if the issue is in the given
 -- workspace. Mirror of the attach query.
-DELETE FROM issue_to_label
-WHERE issue_id = sqlc.arg('issue_id')::uuid
-  AND label_id = sqlc.arg('label_id')::uuid
-  AND EXISTS (
-      SELECT 1 FROM issue i
-      WHERE i.id = sqlc.arg('issue_id')::uuid
-        AND i.workspace_id = sqlc.arg('workspace_id')::uuid
-  );
+WITH deleted AS (
+    DELETE FROM issue_to_label
+    WHERE issue_id = sqlc.arg('issue_id')::uuid
+      AND label_id = sqlc.arg('label_id')::uuid
+      AND EXISTS (
+          SELECT 1 FROM issue i
+          WHERE i.id = sqlc.arg('issue_id')::uuid
+            AND i.workspace_id = sqlc.arg('workspace_id')::uuid
+      )
+    RETURNING issue_id
+), bumped AS (
+    UPDATE issue
+    SET revision = revision + 1,
+        last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
+    WHERE id IN (SELECT issue_id FROM deleted)
+    RETURNING revision
+)
+SELECT EXISTS(SELECT 1 FROM deleted) AS changed,
+       COALESCE((SELECT revision FROM bumped), 0)::bigint AS issue_revision;
 
 -- name: ListLabelsByIssue :many
 -- Workspace filter at the SQL layer (mirrors GetProjectInWorkspace). Any caller
@@ -65,6 +154,7 @@ FROM issue_label l
 JOIN issue_to_label il ON il.label_id = l.id
 WHERE il.issue_id = sqlc.arg('issue_id')::uuid
   AND l.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND l.resource_type = 'issue'
 ORDER BY LOWER(l.name) ASC;
 
 -- name: ListLabelsForIssues :many
@@ -76,4 +166,93 @@ FROM issue_label l
 JOIN issue_to_label il ON il.label_id = l.id
 WHERE il.issue_id = ANY(sqlc.arg('issue_ids')::uuid[])
   AND l.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND l.resource_type = 'issue'
 ORDER BY il.issue_id, LOWER(l.name) ASC;
+
+-- name: ListLabelsByAgent :many
+SELECT l.*
+FROM issue_label l
+JOIN agent_to_label atl ON atl.label_id = l.id
+WHERE atl.agent_id = sqlc.arg('agent_id')::uuid
+  AND l.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND l.resource_type = 'agent'
+ORDER BY LOWER(l.name) ASC;
+
+-- name: ListLabelsForAgents :many
+SELECT atl.agent_id, l.*
+FROM issue_label l
+JOIN agent_to_label atl ON atl.label_id = l.id
+WHERE atl.agent_id = ANY(sqlc.arg('agent_ids')::uuid[])
+  AND l.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND l.resource_type = 'agent'
+ORDER BY atl.agent_id, LOWER(l.name) ASC;
+
+-- name: AttachLabelToAgent :exec
+INSERT INTO agent_to_label (agent_id, label_id)
+SELECT sqlc.arg('agent_id')::uuid, sqlc.arg('label_id')::uuid
+WHERE EXISTS (
+    SELECT 1 FROM agent a
+    WHERE a.id = sqlc.arg('agent_id')::uuid
+      AND a.workspace_id = sqlc.arg('workspace_id')::uuid
+)
+AND EXISTS (
+    SELECT 1 FROM issue_label l
+    WHERE l.id = sqlc.arg('label_id')::uuid
+      AND l.workspace_id = sqlc.arg('workspace_id')::uuid
+      AND l.resource_type = 'agent'
+)
+ON CONFLICT DO NOTHING;
+
+-- name: DetachLabelFromAgent :exec
+DELETE FROM agent_to_label
+WHERE agent_id = sqlc.arg('agent_id')::uuid
+  AND label_id = sqlc.arg('label_id')::uuid
+  AND EXISTS (
+      SELECT 1 FROM agent a
+      WHERE a.id = sqlc.arg('agent_id')::uuid
+        AND a.workspace_id = sqlc.arg('workspace_id')::uuid
+  );
+
+-- name: ListLabelsBySkill :many
+SELECT l.*
+FROM issue_label l
+JOIN skill_to_label stl ON stl.label_id = l.id
+WHERE stl.skill_id = sqlc.arg('skill_id')::uuid
+  AND l.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND l.resource_type = 'skill'
+ORDER BY LOWER(l.name) ASC;
+
+-- name: ListLabelsForSkills :many
+SELECT stl.skill_id, l.*
+FROM issue_label l
+JOIN skill_to_label stl ON stl.label_id = l.id
+WHERE stl.skill_id = ANY(sqlc.arg('skill_ids')::uuid[])
+  AND l.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND l.resource_type = 'skill'
+ORDER BY stl.skill_id, LOWER(l.name) ASC;
+
+-- name: AttachLabelToSkill :exec
+INSERT INTO skill_to_label (skill_id, label_id)
+SELECT sqlc.arg('skill_id')::uuid, sqlc.arg('label_id')::uuid
+WHERE EXISTS (
+    SELECT 1 FROM skill s
+    WHERE s.id = sqlc.arg('skill_id')::uuid
+      AND s.workspace_id = sqlc.arg('workspace_id')::uuid
+)
+AND EXISTS (
+    SELECT 1 FROM issue_label l
+    WHERE l.id = sqlc.arg('label_id')::uuid
+      AND l.workspace_id = sqlc.arg('workspace_id')::uuid
+      AND l.resource_type = 'skill'
+)
+ON CONFLICT DO NOTHING;
+
+-- name: DetachLabelFromSkill :exec
+DELETE FROM skill_to_label
+WHERE skill_id = sqlc.arg('skill_id')::uuid
+  AND label_id = sqlc.arg('label_id')::uuid
+  AND EXISTS (
+      SELECT 1 FROM skill s
+      WHERE s.id = sqlc.arg('skill_id')::uuid
+        AND s.workspace_id = sqlc.arg('workspace_id')::uuid
+  );

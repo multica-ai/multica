@@ -1,0 +1,256 @@
+---
+title: Dépannage
+description: Diagnostiquez les problèmes courants de connexion, d'exécution, de mises à jour en temps réel, d'e-mail et de services auto-hébergés.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Commencez par déterminer à quelle couche appartient le problème : le service Multica, le daemon, le runtime ou l'outil de codage IA. Ces commandes suffisent généralement à faire apparaître la première erreur significative :
+
+```bash
+multica version
+multica auth status
+multica daemon status --output json
+multica daemon logs --lines 100
+```
+
+Les instances auto-hébergées peuvent aussi vérifier directement le service :
+
+```bash
+curl -i https://api.example.com/health
+curl -i https://api.example.com/readyz
+```
+
+`/health` indique seulement que le processus API répond ; `/readyz` vérifie aussi la base de données et les migrations. Lorsque vous signalez un problème, incluez l'erreur, les journaux pertinents, la version du CLI et le système d'exploitation ; retirez les jetons, les adresses e-mail et les autres informations sensibles avant l'envoi.
+
+## Le daemon ne parvient pas à se connecter
+
+Exécutez d'abord :
+
+```bash
+multica auth status
+multica daemon status --output json
+multica daemon logs --lines 100
+```
+
+Causes fréquentes :
+
+- Le CLI ne s'est pas connecté, ou le jeton stocké sur cette machine a expiré.
+- Le daemon est connecté au mauvais service Multica.
+- L'ordinateur d'exécution ne peut pas joindre l'API, ou le DNS, TLS ou un pare-feu bloque la connexion.
+- Le compte actuel n'est plus membre de l'espace de travail cible.
+- Aucun outil de codage IA pris en charge n'est installé sur cette machine ; le daemon ne peut donc pas démarrer.
+
+Reconnectez-vous et redémarrez le daemon :
+
+```bash
+multica login
+multica daemon restart
+```
+
+Les déploiements auto-hébergés doivent aussi interroger le `/health` de l'API depuis l'**ordinateur d'exécution** — un test effectué sur le serveur lui-même ne peut pas révéler les problèmes de DNS, de TLS ou de pare-feu du côté de l'ordinateur d'exécution. Pour changer l'adresse, relancez `multica setup self-host`, ou vérifiez le `server_url` du profil actuel :
+
+```bash
+multica config show
+```
+
+## L'exécution de la tâche ne démarre pas
+
+Ouvrez le **Journal d'exécution** de la tâche et vérifiez le statut actuel de l'exécution ainsi que ce qu'elle attend.
+
+### Statut `queued`
+
+`queued` (affiché « En file d'attente ») signifie que l'exécution attend toujours qu'un runtime la prenne en charge. Vérifiez dans l'ordre :
+
+1. Le runtime auquel l'agent est associé est-il en ligne ?
+2. Le runtime a-t-il détecté l'outil de codage IA configuré pour l'agent ?
+3. L'agent dispose-t-il encore d'une marge de parallélisme ?
+4. Le daemon dispose-t-il encore d'une capacité d'exécution globale ?
+
+Par défaut, un agent traite au plus 6 exécutions simultanément ; un même daemon en traite au plus 20. Une fois la limite atteinte, les nouvelles exécutions restent dans la file d'attente jusqu'à ce qu'une exécution active se termine. Les exécutions restent également en file d'attente tant que le runtime est hors ligne ; elles n'échouent qu'une fois que ce runtime a cessé d'envoyer des signaux de vie pendant plus longtemps que le délai de grâce de reconnexion et que l'exécution elle-même a attendu aussi longtemps. Ainsi, une longue file d'attente derrière un runtime occupé n'expire jamais du seul fait de l'attente, et assigner du travail à une machine déjà hors ligne laisse toujours un délai de grâce complet pour la remettre en service.
+
+```bash
+multica daemon status --output json
+multica agent get <agent-id>
+multica issue runs <issue-id>
+```
+
+Si la liste des runtimes ne contient pas un outil attendu, vérifiez d'abord que l'outil s'exécute et est connecté sous le même compte système et avec le même `PATH`, puis exécutez `multica daemon restart`.
+
+### Statut `waiting_local_directory`
+
+Ce statut (affiché « En attente du répertoire local ») signifie qu'une autre exécution en cours utilise le même répertoire local. Multica attend que le verrou du répertoire soit libéré, afin que deux agents ne modifient jamais les mêmes fichiers en même temps.
+
+Cette attente n'existe qu'en mode `in_place` (« Direct ») du répertoire. Si le répertoire est un dépôt git, passer la ressource en `worktree` (« Parallèle ») supprime complètement la file d'attente : chaque exécution obtient son propre worktree et rend son travail sous forme de branche, si bien que rien n'attend quoi que ce soit. Consultez [Ressources de projet](/project-resources#comment-les-exécutions-partagent-le-répertoire).
+
+Sinon, il suffit d'attendre la fin de l'exécution précédente. Si elle est bloquée, arrêtez-la depuis son journal d'exécution (**Annuler l'exécution**), ou choisissez un autre répertoire local pour l'agent actuel. Ce verrou d'exclusion mutuelle du répertoire réside dans la mémoire du daemon — aucun fichier de verrou n'est écrit sur le disque. Si vous soupçonnez un état de verrou obsolète, `multica daemon restart` le libère ; il n'y a rien à supprimer manuellement.
+
+## L'outil de codage IA ne démarre pas
+
+Un daemon en ligne ne signifie pas que l'outil lui-même fonctionne. Ouvrez l'enregistrement détaillé de l'exécution et vérifiez en priorité :
+
+- Si l'outil a terminé sa connexion.
+- Si la clé d'API, le quota ou les autorisations sur le modèle sont disponibles.
+- Si le modèle et le niveau de réflexion choisis pour l'agent sont pris en charge par l'outil.
+- Si le répertoire de travail local existe et est accessible en écriture.
+- Si les arguments personnalisés ou les variables d'environnement de l'agent sont valides.
+
+Exécutez d'abord ce même outil directement dans un terminal sur l'ordinateur d'exécution. Si l'outil ne démarre pas seul, corrigez sa connexion ou sa configuration, puis relancez l'exécution depuis le journal d'exécution.
+
+## Les mises à jour en temps réel ne fonctionnent plus
+
+Si les exécutions se déroulent toujours mais que les commentaires et les changements de statut n'apparaissent plus en direct, c'est généralement que le WebSocket n'est pas connecté.
+
+Vérifiez la connexion `/ws` sous **Network → WS** (Réseau) dans les outils de développement du navigateur. Pour les déploiements auto-hébergés, vérifiez en priorité :
+
+- Si `FRONTEND_ORIGIN` correspond à l'adresse que le navigateur ouvre réellement.
+- Si une page HTTPS se connecte via `wss://`.
+- Si le proxy inverse transmet la requête WebSocket Upgrade.
+- Si la connexion du navigateur a expiré.
+
+Qu'un simple `curl` sur `/ws` renvoie HTTP 400 est normal : le point de terminaison exige des paramètres de requête propres à l'espace de travail et rejette une poignée de main nue avant toute mise à niveau WebSocket. Un 400/401 enregistré dans les journaux du backend prouve donc seulement que le routage HTTP ordinaire atteint le backend — il ne prouve pas que le proxy préserve les en-têtes WebSocket `Upgrade`. Pour vérifier la connexion réelle, ouvrez les DevTools du navigateur → onglet Network → WS (ou utilisez un client compatible WebSocket) et recherchez une poignée de main `101`.
+
+Remarque pour l'auto-hébergement : les daemons se connectent à `/api/daemon/ws` pour leur connexion longue durée (et non à `/ws`) — routez ce chemin vers le backend de la même façon. Si la poignée de main WebSocket y échoue, le daemon se rabat silencieusement sur l'interrogation périodique (polling) ; des lignes `status=400` répétées sur ce chemin dans le journal du backend en sont le symptôme.
+
+Les conteneurs ne lisent `.env` qu'au moment de leur création ; recréez-les après une modification :
+
+```bash
+docker compose -f docker-compose.selfhost.yml up -d
+```
+
+Pour un exemple complet de proxy inverse, consultez le [démarrage rapide de l'auto-hébergement](/self-host-quickstart#3-choisir-le-mode-daccès).
+
+## `multica setup` signale que le serveur est injoignable
+
+La sonde d'accessibilité du CLI envoie une requête GET à `<server-url>/health` et attend un 200. C'est le backend qui sert ce chemin. Les versions actuelles de l'application web transmettent `/health` au backend, mais pas les plus anciennes — un proxy inverse qui transmet tout à un tel frontend ancien renvoie 404, et le CLI en conclut que le serveur est hors service alors que la pile fonctionne correctement.
+
+Router explicitement `/health` vers le backend (port 8080) dans votre proxy fonctionne avec toutes les versions — les deux exemples Caddy du [démarrage rapide de l'auto-hébergement](/self-host-quickstart#3-choisir-le-mode-daccès) le font. Vérifiez avec :
+
+```bash
+curl -fsS <server-url>/health
+```
+
+## `multica login` échoue avec un dépassement de délai de la poignée de main TLS
+
+`multica login` ouvre le navigateur et la connexion web aboutit, mais le CLI échoue quand même avec « Sign-in did not complete » ou « TLS handshake timed out ». `multica --debug login` affiche `net/http: TLS handshake timeout` sur `POST /api/tokens`, alors que `curl.exe -I https://api.multica.ai` ou un navigateur sur la même machine se connecte sans problème.
+
+La connexion TCP s'ouvre, mais la poignée de main TLS n'aboutit jamais. Les clients Go, dont le CLI et le daemon Multica, envoient par défaut un partage de clé post-quantique dans le ClientHello TLS, ce qui porte sa taille à environ 1,5 Ko et le répartit sur deux paquets. Certains logiciels de sécurité, VPN, routeurs et pare-feu abandonnent ces poignées de main ; curl envoie un ClientHello beaucoup plus petit et passe.
+
+Confirmez la cause en réessayant avec le partage de clé post-quantique désactivé :
+
+```powershell
+$env:GODEBUG = 'tlsmlkem=0'
+multica --debug login
+```
+
+```bash
+GODEBUG=tlsmlkem=0 multica --debug login
+```
+
+Si cela fonctionne, définissez `GODEBUG=tlsmlkem=0` de façon permanente pour l'utilisateur qui exécute le CLI et le daemon — sous Windows, exécutez `[Environment]::SetEnvironmentVariable('GODEBUG', 'tlsmlkem=0', 'User')` et ouvrez un nouveau terminal —, puis redémarrez le daemon ou l'application de bureau. Augmenter `MULTICA_HTTP_TIMEOUT` n'aide pas : cette variable ne régit pas la poignée de main. La correction durable se fait côté réseau : mettez à jour ou reconfigurez l'appareil ou le logiciel qui abandonne les poignées de main TLS fragmentées.
+
+## Les e-mails de code de vérification et d'invitation ne sont pas reçus
+
+Consultez d'abord le journal de démarrage du backend. Il indique si le serveur utilise `SMTP relay`, `Resend API` ou `DEV mode` :
+
+```bash
+docker compose -f docker-compose.selfhost.yml logs backend \
+  | grep "EmailService:"
+```
+
+- **DEV mode** : aucun e-mail n'est envoyé ; les codes de vérification et les liens d'invitation sont uniquement écrits dans le journal du backend.
+- **Resend** : vérifiez que la clé d'API est valide et que le domaine de l'adresse de l'expéditeur est vérifié.
+- **SMTP** : vérifiez l'hôte, le port, les identifiants et l'adresse de l'expéditeur, et utilisez le journal d'erreurs pour déterminer si l'échec est survenu à l'étape de la connexion, de TLS, de l'authentification ou de la remise.
+
+Lorsque `SMTP_HOST` et Resend sont tous deux configurés, Multica privilégie SMTP. Pour la configuration, consultez [Connexion et inscription](/auth-setup#codes-de-vérification-par-e-mail).
+
+<Callout type="warning">
+En production, ne vous fiez pas aux codes écrits dans le journal et n'activez pas le code de test local fixe.
+</Callout>
+
+## L'envoi ou le téléchargement de pièces jointes échoue
+
+Consultez d'abord le journal du backend et le code de statut de la réponse. Causes fréquentes :
+
+- Le proxy inverse limite la taille du corps des requêtes.
+- Le répertoire local d'envoi n'est pas accessible en écriture ou aucun volume persistant n'y est monté.
+- Le bucket S3, la région, le point de terminaison ou les identifiants ne correspondent pas.
+- L'URL de téléchargement utilise un domaine public ou un protocole incorrect après son passage par un proxy.
+
+Avec Docker Compose, le volume `backend_uploads` par défaut stocke les pièces jointes locales. La recréation des conteneurs ne le supprime pas, mais `docker compose down -v` supprime le volume de données. Pour la configuration S3, consultez [Variables d'environnement](/environment-variables#stockage-des-pièces-jointes).
+
+## La consommation affiche zéro
+
+La page **Statistiques** (onglet **Consommation**) lit des agrégats horaires, et non la consommation brute de chaque exécution. Vérifiez d'abord les données brutes et la table d'agrégats :
+
+```sql
+SELECT count(*) FROM task_usage;
+SELECT count(*) FROM task_usage_hourly;
+
+SELECT plan_time, status, error_code, error_msg
+FROM sys_cron_executions
+WHERE job_name = 'rollup_task_usage_hourly'
+ORDER BY plan_time DESC
+LIMIT 20;
+```
+
+Si `task_usage` contient des lignes, que la table d'agrégats est vide et que les enregistrements du planificateur montrent des échecs, vérifiez d'abord que toutes les migrations ont été appliquées ; si la migration 103 a refusé la mise à niveau, consultez la section suivante. Vous pouvez aussi lancer une agrégation manuellement pour distinguer les problèmes SQL des problèmes de planification :
+
+```sql
+SELECT rollup_task_usage_hourly();
+```
+
+Si les chiffres semblent corrects après un lancement manuel, la fonction d'agrégation fonctionne et le problème vient de la planification intégrée du backend ; le SQL manuel ne produit qu'une seule agrégation et ne rétablit pas la planification. Les agrégats horaires sont calculés par le planificateur intégré du backend — vous n'avez pas besoin de configurer pg_cron vous-même.
+
+## La migration 103 bloque une mise à niveau
+
+Une mise à niveau normale ne nécessite aucune action pour la 103 : `migrate up` remplit automatiquement et rétroactivement les données historiques de consommation avant de l'appliquer — une base de données vide passe directement, et les instances qui ont un historique sont complétées mois par mois avant de poursuivre.
+
+Si le backend ne démarre toujours pas et affiche `refusing to drop legacy daily rollups`, le remplissage rétroactif automatique n'a pas abouti (par exemple, il a échoué en cours de route, ou le SQL a été appliqué directement au lieu de passer par `migrate up`). Lancez manuellement la commande de remplissage rétroactif, puis redémarrez le backend :
+
+```bash
+cd server
+DATABASE_URL='postgres://...' go run ./cmd/backfill_task_usage_hourly
+```
+
+Options utiles : `--dry-run` affiche un aperçu sans rien écrire ; `--sleep-between-slices` ajoute une pause entre les tranches pour réduire la pression en lecture sur une instance chargée. La commande travaille par tranches mensuelles et est idempotente — relancez-la directement après une interruption. Elle détient un verrou consultatif (advisory lock) et s'exclut mutuellement avec l'agrégation planifiée du serveur ; elle ne peut donc pas produire de données d'agrégation dupliquées ou incohérentes. Une fois terminée, redémarrez le backend et vérifiez que `migrations` vaut `ok` sur `/readyz`.
+
+## Port déjà utilisé
+
+Les ports locaux courants sont `8080` pour l'API, `3000` pour l'application web, et le port de vérification d'état du daemon. Identifiez d'abord le processus qui occupe le port :
+
+```bash
+lsof -nP -iTCP:8080 -sTCP:LISTEN   # macOS / Linux
+netstat -ano | findstr :8080       # Windows
+```
+
+S'il s'agit d'une autre copie de travail (checkout) de Multica, exécutez d'abord `make stop` dans ce répertoire. Sinon, arrêtez normalement le programme en cause, ou changez le port du service actuel. Les ports publics 80/443 sont écoutés par un proxy inverse tel que Caddy ou Nginx.
+
+## Emplacement des journaux
+
+| Composant | Comment consulter |
+| --- | --- |
+| Daemon en arrière-plan | `multica daemon logs --lines 100` |
+| Suivre les journaux du daemon en direct | `multica daemon logs --follow` |
+| Fichier journal du profil par défaut | `~/.multica/daemon.log` |
+| Journal de démarrage ou de plantage du profil par défaut | `~/.multica/daemon.err.log` |
+| Profils nommés | les journaux correspondants sous `~/.multica/profiles/<name>/` |
+| Backend Docker | `docker compose -f docker-compose.selfhost.yml logs -f backend` |
+| Navigateur | Onglets Console et Network (Réseau) des outils de développement |
+
+Le fichier actif parmi ceux-ci dépend du profil avec lequel le daemon a été démarré, et un journal obsolète laissé par un daemon précédent reste parfaitement lisible — c'est le moyen le plus simple de déboguer le mauvais fichier. N'en ouvrez pas un au hasard : `multica daemon logs` affiche le chemin absolu qu'il a résolu avant d'en diffuser le contenu. Ajoutez `--profile <name>` pour lire le journal d'un profil nommé.
+
+Pour observer directement le démarrage du daemon, exécutez-le plutôt au premier plan :
+
+```bash
+multica daemon stop
+multica daemon start --foreground
+```
+
+Si vous ne parvenez toujours pas à cerner le problème, recherchez parmi les issues existantes ou ouvrez-en une nouvelle sur [GitHub Issues](https://github.com/multica-ai/multica/issues).
+
+## Étapes suivantes
+
+- [Daemon et runtimes](/daemon-runtimes) — comment les runtimes s'enregistrent et signalent leur statut en ligne.
+- [Exécutions](/tasks) — référence des statuts, des délais d'expiration et des échecs.
+- [Variables d'environnement](/environment-variables) — la référence complète de configuration de l'auto-hébergement.

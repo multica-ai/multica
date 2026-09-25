@@ -7,13 +7,20 @@ import LinkifyIt from 'linkify-it'
  * plus custom regex for local file paths.
  */
 
-// Initialize linkify-it with default settings (fuzzy URLs, emails enabled)
+// Keep fuzzy detection enabled so linkify-it can recognize `www.` URLs.
+// collectLinkifyMatches applies the stricter shared product policy below.
 const linkify = new LinkifyIt()
+
+// Common source/config file extensions used by the file-path detector.
+const FILE_EXTENSIONS =
+  'ts|tsx|js|jsx|mjs|cjs|md|json|yaml|yml|py|go|rs|css|scss|less|html|htm|txt|log|sh|bash|zsh|swift|kt|java|c|cpp|h|hpp|rb|php|xml|toml|ini|cfg|conf|env|sql|graphql|vue|svelte|astro|prisma|dockerfile|makefile|gitignore'
 
 // File path regex - detects /path, ~/path, ./path with common extensions
 // Matches paths that start with /, ~/, or ./ followed by path chars and a file extension
-const FILE_PATH_REGEX =
-  /(?:^|[\s([{<])((\/|~\/|\.\/)[\w\-./@]+\.(?:ts|tsx|js|jsx|mjs|cjs|md|json|yaml|yml|py|go|rs|css|scss|less|html|htm|txt|log|sh|bash|zsh|swift|kt|java|c|cpp|h|hpp|rb|php|xml|toml|ini|cfg|conf|env|sql|graphql|vue|svelte|astro|prisma|dockerfile|makefile|gitignore))(?=[\s)\]}.,;:!?>]|$)/gi
+const FILE_PATH_REGEX = new RegExp(
+  `(?:^|[\\s([{<])((\\/|~\\/|\\.\\/)[\\w\\-./@]+\\.(?:${FILE_EXTENSIONS}))(?=[\\s)\\]}.,;:!?>]|$)`,
+  'gi'
+)
 
 // CJK full-width punctuation that should terminate a URL.
 // linkify-it only treats ASCII punctuation as URL boundaries, so in Chinese /
@@ -24,6 +31,15 @@ const FILE_PATH_REGEX =
 const CJK_URL_TERMINATOR_REGEX =
   /[！-／：-＠［-｀｛-～、。「-】]/
 
+// Markdown inline-formatting delimiters that linkify-it counts as URL characters
+// but which, at the very end of a bare URL, are almost always the author closing
+// an emphasis / strikethrough span (`**url**`, `*url*`, `~~url~~`) rather than
+// part of the URL. We drop a trailing run of them so the surrounding markdown
+// still parses — mirroring GFM's own autolink trailing-punctuation trim. A URL
+// that genuinely ends in `*` / `~` loses that character from the link, exactly
+// as it does on GitHub (MUL-4242).
+const TRAILING_MD_DELIMITER = /[*~]+$/
+
 interface DetectedLink {
   type: 'url' | 'email' | 'file'
   text: string
@@ -32,16 +48,36 @@ interface DetectedLink {
   end: number
 }
 
-interface CodeRange {
+export interface CodeRange {
   start: number
   end: number
+}
+
+/**
+ * Product policy for automatic external links.
+ *
+ * Detectors call this only after validating a candidate. This function decides
+ * which validated text forms are safe to turn into a link without an explicit
+ * user action: HTTP(S) URLs, `www.` URLs, and email addresses. In particular,
+ * all other scheme-less domains stay plain text, which also prevents filenames
+ * such as `plan.md` from being mistaken for websites.
+ *
+ * Keep this predicate shared by the editor and markdown renderer so typing,
+ * paste, and read-only display cannot drift again.
+ */
+export function shouldAutoLink(value: string): boolean {
+  return (
+    /^https?:\/\//i.test(value) ||
+    /^www\./i.test(value) ||
+    /^[^\s@/:]+@[^\s@/:]+\.[^\s@/:]+$/.test(value)
+  )
 }
 
 /**
  * Find all code block and inline code ranges in text
  * These ranges should be excluded from link detection
  */
-function findCodeRanges(text: string): CodeRange[] {
+export function findCodeRanges(text: string): CodeRange[] {
   const ranges: CodeRange[] = []
 
   // Find fenced code blocks (```...```)
@@ -89,7 +125,7 @@ function findCodeRanges(text: string): CodeRange[] {
 /**
  * Check if a position is inside any code range
  */
-function isInsideCode(pos: number, ranges: CodeRange[]): boolean {
+export function isInsideCode(pos: number, ranges: CodeRange[]): boolean {
   return ranges.some((r) => pos >= r.start && pos < r.end)
 }
 
@@ -141,7 +177,7 @@ function findInlineLinkEnd(text: string, openParenIndex: number): number {
  * Find existing markdown link/image spans so auto-linkification does not create
  * nested links inside their labels or destinations.
  */
-function findMarkdownLinkRanges(text: string): CodeRange[] {
+export function findMarkdownLinkRanges(text: string): CodeRange[] {
   const ranges: CodeRange[] = []
 
   for (let i = 0; i < text.length; i++) {
@@ -200,7 +236,7 @@ function isAlreadyLinked(text: string, linkStart: number, linkEnd: number): bool
 /**
  * Check if ranges overlap
  */
-function rangesOverlap(
+export function rangesOverlap(
   a: { start: number; end: number },
   b: { start: number; end: number }
 ): boolean {
@@ -209,9 +245,11 @@ function rangesOverlap(
 
 /**
  * Run linkify-it on `text` and push normalized link records into `out`,
- * shifted by `offset`. When linkify-it merges multiple URLs into one match
- * because they are separated only by CJK punctuation (which it doesn't treat
- * as a URL boundary), we truncate at that punctuation and re-scan the tail.
+ * shifted by `offset`. Two boundary corrections linkify-it doesn't make itself:
+ * - CJK punctuation ends a URL (linkify-it only breaks on ASCII); when it merged
+ *   several URLs across CJK punctuation we truncate and re-scan the tail; and
+ * - a trailing run of markdown delimiters (`*`, `~`) is dropped from the URL so
+ *   `**url**` keeps its closing emphasis marker outside the link.
  */
 function collectLinkifyMatches(text: string, offset: number, out: DetectedLink[]): void {
   const matches = linkify.match(text)
@@ -222,25 +260,40 @@ function collectLinkifyMatches(text: string, offset: number, out: DetectedLink[]
     if (cjkIdx === 0) continue // match starts with CJK punct — skip
 
     const truncate = cjkIdx > 0
-    const matchText = truncate ? match.text.slice(0, cjkIdx) : match.text
-    // linkify-it may prepend a scheme (e.g. "http://" or "mailto:") to url
-    // while leaving text as the raw substring. Preserve that prefix.
-    const schemePrefix = match.url.slice(0, match.url.length - match.text.length)
-    const matchUrl = truncate ? schemePrefix + matchText : match.url
-    const matchEnd = truncate ? match.index + cjkIdx : match.lastIndex
+    // URL text up to the first CJK terminator, then minus a trailing markdown
+    // delimiter run (e.g. the closing `**` of `**url**`). matchText stays a
+    // prefix of match.text, so the link end is just its length past match.index.
+    const matchText = (truncate ? match.text.slice(0, cjkIdx) : match.text).replace(
+      TRAILING_MD_DELIMITER,
+      ''
+    )
 
-    out.push({
-      type: match.schema === 'mailto:' ? 'email' : 'url',
-      text: matchText,
-      url: matchUrl,
-      start: match.index + offset,
-      end: matchEnd + offset
-    })
+    if (matchText.length > 0 && shouldAutoLink(matchText)) {
+      // When we trimmed the raw match, rebuild the href from the scheme prefix
+      // linkify-it added (e.g. "http://" / "mailto:") plus the trimmed text;
+      // otherwise keep linkify-it's normalized url as-is.
+      const trimmed = matchText.length !== match.text.length
+      const schemePrefix = match.url.slice(0, match.url.length - match.text.length)
+      const matchUrl =
+        match.schema === '' && /^www\./i.test(matchText)
+          ? `https://${matchText}`
+          : trimmed
+            ? schemePrefix + matchText
+            : match.url
+
+      out.push({
+        type: match.schema === 'mailto:' ? 'email' : 'url',
+        text: matchText,
+        url: matchUrl,
+        start: match.index + offset,
+        end: match.index + matchText.length + offset
+      })
+    }
 
     if (truncate) {
       // Rescan the tail after the CJK punct — linkify-it had greedily swallowed
       // it, so any additional URLs after the punct were never emitted.
-      const tailStart = matchEnd + 1
+      const tailStart = match.index + cjkIdx + 1
       collectLinkifyMatches(text.slice(tailStart), offset + tailStart, out)
       return
     }
@@ -248,12 +301,12 @@ function collectLinkifyMatches(text: string, offset: number, out: DetectedLink[]
 }
 
 /**
- * Detect all links (URLs, emails, file paths) in text
+ * Detect all links (URLs, emails, file paths) in text.
  */
 export function detectLinks(text: string): DetectedLink[] {
   const links: DetectedLink[] = []
 
-  // 1. Detect URLs and emails with linkify-it, applying CJK boundary handling.
+  // 1. Detect URLs and emails with linkify-it, applying boundary corrections.
   collectLinkifyMatches(text, 0, links)
 
   // 2. Detect file paths with custom regex
@@ -288,8 +341,13 @@ export function detectLinks(text: string): DetectedLink[] {
 }
 
 /**
- * Preprocess text to convert raw URLs and file paths into markdown links
- * Skips code blocks and already-linked content
+ * Preprocess text to convert raw URLs and file paths into markdown links.
+ * Skips code blocks and already-linked content.
+ *
+ * Shared by the Tiptap editor and the read-only react-markdown renderers, so
+ * both surfaces linkify identically. Trailing markdown delimiters are excluded
+ * from the URL (see collectLinkifyMatches), which keeps `**url**` bold and its
+ * link clean (MUL-4242).
  */
 export function preprocessLinks(text: string): string {
   // Quick check - if no potential links, return early

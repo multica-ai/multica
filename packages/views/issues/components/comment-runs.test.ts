@@ -1,0 +1,539 @@
+// @vitest-environment node
+import { describe, expect, it } from "vitest";
+import type { AgentTask, TimelineEntry } from "@multica/core/types";
+import { commentRunOutput, buildCommentRunView, isRunFailureNotice, orderThreadWithRuns, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
+import { collectThreadReplies } from "./thread-utils";
+
+const groupCommentRuns = (...args: Parameters<typeof buildCommentRunView>) => buildCommentRunView(...args).runs;
+
+function task(id: string, overrides: Partial<AgentTask> = {}): AgentTask {
+  return { id, agent_id: "agent", runtime_id: "runtime", issue_id: "issue", status: "running", priority: 0,
+    created_at: "2026-09-07T00:00:00Z", started_at: null, dispatched_at: null, completed_at: null, result: null, error: null, ...overrides };
+}
+function comment(id: string, overrides: Partial<TimelineEntry> = {}): TimelineEntry {
+  return { id, type: "comment", actor_type: "member", actor_id: "user", created_at: "2026-09-07T00:00:00Z", ...overrides };
+}
+
+describe("groupCommentRuns", () => {
+  it("moves one run after each accepted supplement and keeps the final answer in that block", () => {
+    const root = comment("root");
+    const supplement = comment("supplement", {
+      parent_id: root.id,
+      created_at: "2026-09-07T00:01:00Z",
+      supplement_task_id: "run",
+      supplement_status: "delivered",
+    });
+    const answer = comment("answer", {
+      actor_type: "agent",
+      source_task_id: "run",
+      created_at: "2026-09-07T00:02:00Z",
+    });
+    const run = task("run", { trigger_comment_id: root.id, delivered_comment_ids: [root.id] });
+    const view = buildCommentRunView([run], [root, supplement, answer]);
+    expect(view.runs.get(root.id)?.[0]).toMatchObject({
+      anchorCommentId: supplement.id,
+      commentId: answer.id,
+      hasReply: true,
+    });
+    expect(view.timeline.find((entry) => entry.id === answer.id)?.parent_id).toBe(supplement.id);
+  });
+
+  it.each(["queued", "dispatched", "running", "completed"] as const)("waits for a missing trigger before placing a %s run and its reply", (status) => {
+    const run = task("run", { status, trigger_comment_id: "trigger",
+      delivered_comment_ids: status === "queued" || status === "dispatched" ? [] : ["trigger"] });
+    const root = comment("root");
+    const trigger = comment("trigger", { parent_id: root.id });
+    const before = buildCommentRunView([run], [root]);
+    expect(before.standaloneRuns).toEqual([]);
+    expect(before.runs.size).toBe(0);
+    const reply = comment("answer", { actor_type: "agent", source_task_id: run.id });
+    const earlyReply = buildCommentRunView([run], [root, reply]);
+    expect(earlyReply.standaloneRuns).toEqual([]);
+    expect(earlyReply.timeline.find((entry) => entry.id === reply.id)?.parent_id).toBe(trigger.id);
+    const after = buildCommentRunView([run], [root, trigger, reply]);
+    expect(after.standaloneRuns).toEqual([]);
+    expect(after.runs.get(root.id)).toEqual([{ task: run, anchorCommentId: trigger.id, commentId: reply.id, hasReply: true }]);
+  });
+
+  it("waits for the intended merged trigger and preserves retry ancestry", () => {
+    const original = task("original", { status: "queued", trigger_comment_id: "new", coalesced_comment_ids: ["old"], delivered_comment_ids: [] });
+    const retry = task("retry", { status: "queued", parent_task_id: original.id, delivered_comment_ids: [] });
+    const old = comment("old");
+    const next = comment("new", { parent_id: old.id });
+    const before = buildCommentRunView([original, retry], [old]);
+    expect(before.standaloneRuns).toEqual([]);
+    expect(before.runs.size).toBe(0);
+    const after = buildCommentRunView([original, retry], [old, next]);
+    expect(after.runs.get(old.id)?.map((run) => run.anchorCommentId)).toEqual([next.id, next.id]);
+    expect(after.standaloneRuns).toEqual([]);
+  });
+
+  it("moves a queued run after the latest instruction and keeps the answer there", () => {
+    const root = comment("root");
+    const first = comment("first", { parent_id: root.id });
+    const other = comment("other-thread");
+    const second = comment("second", { parent_id: root.id, created_at: "2026-09-07T00:01:00Z" });
+    const run = task("run", { status: "queued", trigger_comment_id: first.id });
+    const before = buildCommentRunView([run], [root, first, other]);
+    const merged = { ...run, trigger_comment_id: second.id, coalesced_comment_ids: [first.id] };
+    const awaitingComment = buildCommentRunView([merged], [root, first, other], before.runs);
+    expect(awaitingComment.runs.get(root.id)?.[0]?.anchorCommentId).toBe(first.id);
+    const after = buildCommentRunView([merged], [root, first, other, second], before.runs);
+    expect(after.runs.get(root.id)?.[0]?.anchorCommentId).toBe(second.id);
+    expect(after.runs.has(other.id)).toBe(false);
+    const answer = comment("answer", { actor_type: "agent", source_task_id: run.id });
+    const complete = buildCommentRunView([{ ...merged, status: "completed", delivered_comment_ids: [first.id, second.id] }], [root, first, other, second, answer]);
+    expect(complete.runs.get(root.id)?.[0]).toMatchObject({ anchorCommentId: second.id, commentId: answer.id, hasReply: true });
+  });
+
+  it.each([
+    { status: "queued" as const, deliveredCommentIds: [] },
+    { status: "running" as const, deliveredCommentIds: ["first", "latest"] },
+  ])("falls back to the latest remaining input when a $status batch anchor is deleted", ({ status, deliveredCommentIds }) => {
+    const first = comment("first");
+    const latest = comment("latest", { parent_id: first.id, created_at: "2026-09-07T00:01:00Z" });
+    const run = task("run", {
+      status,
+      trigger_comment_id: latest.id,
+      coalesced_comment_ids: [first.id],
+      delivered_comment_ids: deliveredCommentIds,
+    });
+    const beforeDelete = buildCommentRunView([run], [first, latest]);
+    expect(beforeDelete.runs.get(first.id)?.[0]?.anchorCommentId).toBe(latest.id);
+
+    const afterDelete = buildCommentRunView([run], [first], beforeDelete.runs);
+    expect(afterDelete.runs.get(first.id)?.[0])
+      .toMatchObject({ anchorCommentId: first.id, commentId: first.id });
+    expect(afterDelete.standaloneRuns).toEqual([]);
+  });
+
+  it("projects a run reply onto the latest remaining input when its deleted anchor disappears", () => {
+    const first = comment("first");
+    const latest = comment("latest", { parent_id: first.id, created_at: "2026-09-07T00:01:00Z" });
+    const run = task("run", {
+      trigger_comment_id: latest.id,
+      coalesced_comment_ids: [first.id],
+      delivered_comment_ids: [first.id, latest.id],
+    });
+    const beforeDelete = buildCommentRunView([run], [first, latest]);
+    const answer = comment("answer", { actor_type: "agent", source_task_id: run.id });
+
+    const afterDelete = buildCommentRunView([run], [first, answer], beforeDelete.runs);
+    expect(afterDelete.runs.get(first.id)?.[0])
+      .toMatchObject({ anchorCommentId: first.id, commentId: answer.id, hasReply: true });
+    expect(afterDelete.timeline.find((entry) => entry.id === answer.id)?.parent_id).toBe(first.id);
+  });
+
+  it("uses timeline order to break ties between same-time inputs", () => {
+    const root = comment("root");
+    const first = comment("first", { parent_id: root.id });
+    const latest = comment("latest", { parent_id: root.id });
+    const run = task("run", {
+      status: "queued",
+      trigger_comment_id: latest.id,
+      coalesced_comment_ids: [first.id],
+      delivered_comment_ids: [],
+    });
+
+    expect(buildCommentRunView([run], [root, first, latest]).runs.get(root.id)?.[0]?.anchorCommentId)
+      .toBe(latest.id);
+  });
+
+  it("projects chained answers and assignment subtrees before finding run roots", () => {
+    const first = task("first", { trigger_comment_id: "root" });
+    const second = task("second", { trigger_comment_id: "answer-a" });
+    const assigned = task("assigned");
+    const followup = task("followup", { trigger_comment_id: "nested" });
+    const timeline = [comment("root"),
+      comment("answer-a", { actor_type: "agent", source_task_id: first.id }),
+      comment("answer-b", { actor_type: "agent", source_task_id: second.id }),
+      comment("assigned-answer", { parent_id: "root", actor_type: "agent", source_task_id: assigned.id }),
+      comment("nested", { parent_id: "assigned-answer" })];
+    const view = buildCommentRunView([followup, second, assigned, first], timeline);
+    expect(view.runs.get("root")?.map((run) => run.task.id)).toEqual(["first", "second"]);
+    expect(view.runs.get("assigned-answer")?.map((run) => run.task.id)).toEqual(["assigned", "followup"]);
+    expect(view.timeline.find((entry) => entry.id === "answer-a")?.parent_id).toBe("root");
+    expect(view.timeline.find((entry) => entry.id === "answer-b")?.parent_id).toBe("answer-a");
+    expect(view.timeline.find((entry) => entry.id === "assigned-answer")?.parent_id).toBeUndefined();
+    expect(timeline.find((entry) => entry.id === "assigned-answer")?.parent_id).toBe("root");
+  });
+
+  it("moves a run's earlier top-level comments into the thread with its reply", () => {
+    // MUL-7548: only the latest comment used to move under the trigger, so it
+    // rendered above the run's earlier top-level comments.
+    const run = task("run", { trigger_comment_id: "confirm", delivered_comment_ids: ["confirm"] });
+    const timeline = [comment("confirm"),
+      comment("other-thread"),
+      comment("step2", { actor_type: "agent", source_task_id: run.id, created_at: "2026-09-07T00:01:00Z" }),
+      comment("fan-out", { parent_id: "other-thread", actor_type: "agent", source_task_id: run.id, created_at: "2026-09-07T00:02:00Z" }),
+      comment("step3", { actor_type: "agent", source_task_id: run.id, created_at: "2026-09-07T00:03:00Z" })];
+    const view = buildCommentRunView([run], timeline);
+    const parentOf = (id: string) => view.timeline.find((entry) => entry.id === id)?.parent_id;
+    expect(parentOf("step2")).toBe("confirm");
+    expect(parentOf("step3")).toBe("confirm");
+    expect(parentOf("fan-out")).toBe("other-thread");
+    expect(view.runs.get("confirm")).toEqual([{ task: run, commentId: "step3", anchorCommentId: "confirm", hasReply: true }]);
+  });
+
+  it("does not project reply relationships that would create a comment cycle", () => {
+    const first = task("first", { trigger_comment_id: "b" });
+    const second = task("second", { trigger_comment_id: "a" });
+    const timeline = [comment("a", { actor_type: "agent", source_task_id: first.id }),
+      comment("b", { actor_type: "agent", source_task_id: second.id })];
+    expect(buildCommentRunView([first, second], timeline).timeline).toEqual(timeline);
+  });
+  it("replaces invalidated queued runs without adding cancelled comment blocks", () => {
+    const old = task("old", { status: "cancelled", trigger_comment_id: "root", cancelled_by_comment_change: true });
+    const next = task("new", { status: "queued", trigger_comment_id: "root" });
+    const later = task("later", { status: "queued", trigger_comment_id: "followup" });
+    const tasks = [old, { ...old, id: "second-edit" }, next, later];
+    const timeline = [comment("root"), comment("followup", { parent_id: "root" })];
+    const grouped = groupCommentRuns(tasks, timeline);
+    expect(grouped.get("root")?.map((run) => run.task.id)).toEqual(["later", "new"]);
+    expect(buildCommentRunView(tasks, timeline).standaloneRuns).toEqual([]);
+    expect(tasks).toHaveLength(4); // Full execution history remains intact.
+    const reply = comment("answer", { actor_type: "agent", source_task_id: next.id });
+    expect(groupCommentRuns(tasks, [...timeline, reply]).get("root")?.find((run) => run.task.id === next.id))
+      .toMatchObject({ anchorCommentId: "root", commentId: "answer", hasReply: true });
+  });
+
+  it.each([
+    { cancelled_by_comment_change: undefined },
+    { cancelled_by_comment_change: false },
+    { dispatched_at: "2026-09-07T00:00:01Z" },
+    { started_at: "2026-09-07T00:00:01Z" },
+    { delivered_comment_ids: ["root"] },
+    { status: "failed" as const },
+  ])("retains manual cancellation and actual execution: %j", (overrides) => {
+    const run = task("old", { status: "cancelled", trigger_comment_id: "root", cancelled_by_comment_change: true, ...overrides });
+    expect(groupCommentRuns([run], [comment("root")]).get("root")?.[0]?.task.id).toBe(run.id);
+  });
+
+  it("keeps actual replies even when cancellation metadata says the input changed", () => {
+    const run = task("old", { status: "cancelled", cancelled_by_comment_change: true });
+    const reply = comment("answer", { actor_type: "agent", source_task_id: run.id });
+    expect(buildCommentRunView([run], [reply]).standaloneRuns).toHaveLength(1);
+    expect(buildCommentRunView([run], []).standaloneRuns).toEqual([]);
+  });
+  it("keeps merged runs after their latest delivered input, including nested replies", () => {
+    const timeline = [comment("root"), comment("reply", { parent_id: "root" }), comment("nested", { parent_id: "reply" })];
+    const run = task("run", { trigger_comment_id: "nested", coalesced_comment_ids: ["root", "reply"], delivered_comment_ids: ["root", "reply", "nested"] });
+    expect([...groupCommentRuns([run], timeline)]).toEqual([["root", [{ task: run, commentId: "nested", anchorCommentId: "nested", hasReply: false }]]]);
+  });
+
+  it("freezes a claimed run after the latest comment in its delivery receipt", () => {
+    const timeline = [
+      comment("root"),
+      comment("first", { parent_id: "root", created_at: "2026-09-07T00:01:00Z" }),
+      comment("second", { parent_id: "root", created_at: "2026-09-07T00:02:00Z" }),
+      comment("next-run", { parent_id: "root", created_at: "2026-09-07T00:03:00Z" }),
+    ];
+    const run = task("run", {
+      status: "running",
+      trigger_comment_id: "next-run",
+      coalesced_comment_ids: ["first", "second"],
+      delivered_comment_ids: ["first", "second"],
+    });
+    expect(groupCommentRuns([run], timeline).get("root")?.[0])
+      .toMatchObject({ anchorCommentId: "second", commentId: "second" });
+  });
+
+  it.each([{ receipt: [] }, { receipt: ["old"] }])("uses planned comment coverage while queued, even with a delivery receipt of $receipt", ({ receipt }) => {
+    const run = task("queued", {
+      status: "queued", trigger_comment_id: "new", coalesced_comment_ids: ["old"],
+      delivered_comment_ids: receipt,
+    });
+    const timeline = [comment("old"), comment("new")];
+    expect(groupCommentRuns([run], timeline).get("new")).toEqual([
+      { task: run, commentId: "new", anchorCommentId: "new", hasReply: false },
+    ]);
+  });
+
+  it("keeps the trigger position while binding the latest persisted reply", () => {
+    const run = task("run", { status: "completed", trigger_comment_id: "root" });
+    const timeline = [comment("root"),
+      comment("progress", { parent_id: "root", actor_type: "agent", source_task_id: run.id }),
+      comment("final", { parent_id: "root", actor_type: "agent", source_task_id: run.id, created_at: "2026-09-07T00:01:00Z" }),
+      comment("unrelated", { actor_type: "agent", source_task_id: "other" })];
+    const map = groupCommentRuns([run], timeline);
+    expect(map.get("root")).toEqual([{ task: run, commentId: "final", anchorCommentId: "root", hasReply: true }]);
+    expect(map.size).toBe(1);
+  });
+
+  it.each(["cancelled", "failed"] as const)("preserves the planned anchor after a queued run is %s before dispatch", (status) => {
+    const run = task("stopped", {
+      status, trigger_comment_id: "new", coalesced_comment_ids: ["old"],
+      delivered_comment_ids: [], completed_at: "2026-09-07T00:01:00Z",
+    });
+    const retry = task("retry", { status: "queued", parent_task_id: run.id, delivered_comment_ids: [] });
+    expect(groupCommentRuns([run, retry], [comment("old"), comment("new")]).get("new")?.map((row) => row.task.id))
+      .toEqual(["retry", "stopped"]);
+    expect(groupCommentRuns([{ ...run, dispatched_at: "2026-09-07T00:00:30Z" }], [comment("new")]).size).toBe(0);
+  });
+
+  it("uses authoritative delivered comments when the newest trigger was not delivered", () => {
+    const run = task("run", { trigger_comment_id: "new", coalesced_comment_ids: ["old"], delivered_comment_ids: ["old"] });
+    expect(groupCommentRuns([run], [comment("old"), comment("new")]).get("old")?.[0]?.commentId).toBe("old");
+    expect(groupCommentRuns([{ ...run, delivered_comment_ids: [] }], [comment("old"), comment("new")]).size).toBe(0);
+  });
+
+  it("keeps retries on their original trigger and ignores missing or cyclic ancestry", () => {
+    const original = task("original", { trigger_comment_id: "root" });
+    const retry = task("retry", { parent_task_id: original.id });
+    expect(groupCommentRuns([retry, original], [comment("root")]).get("root")?.map((row) => row.task.id)).toEqual(["original", "retry"]);
+    expect(groupCommentRuns([task("a", { parent_task_id: "b" }), task("b", { parent_task_id: "a" })], []).size).toBe(0);
+    expect(groupCommentRuns([task("deleted", { trigger_comment_id: "missing" })], []).size).toBe(0);
+  });
+
+  it("associates assignment runs with their own replies and preserves unrelated thread references", () => {
+    const run = task("assigned");
+    const timeline = [comment("delivery", { actor_type: "agent", source_task_id: run.id })];
+    const before = groupCommentRuns([run], timeline);
+    const after = groupCommentRuns([run, task("other", { trigger_comment_id: "other" })], [...timeline, comment("other")], before);
+    expect(after.get("delivery")).toBe(before.get("delivery"));
+  });
+});
+
+describe("commentRunOutput", () => {
+  it("only exposes the completed daemon deliverable and tolerates response drift", () => {
+    expect(commentRunOutput(task("r", { status: "completed", result: { comment: "Done" } }))).toBe("Done");
+    for (const result of [null, "Done", {}, { comment: 1 }, { comment: " " }]) {
+      expect(commentRunOutput(task("r", { status: "completed", result }))).toBeNull();
+    }
+    expect(commentRunOutput(task("r", { result: { comment: "Still working" } }))).toBeNull();
+  });
+});
+
+describe("isRunFailureNotice", () => {
+  const notice = comment("notice", { actor_type: "agent", comment_type: "system", source_task_id: "run", content: "task cancelled by server" });
+  it("matches the platform's failure comment for its own ended run", () => {
+    expect(isRunFailureNotice(notice, task("run", { status: "failed" }))).toBe(true);
+    expect(isRunFailureNotice(notice, task("run", { status: "cancelled" }))).toBe(true);
+  });
+  it("leaves authored replies, other runs, and live runs alone", () => {
+    expect(isRunFailureNotice({ ...notice, comment_type: "comment" }, task("run", { status: "failed" }))).toBe(false);
+    expect(isRunFailureNotice({ ...notice, actor_type: "system" }, task("run", { status: "failed" }))).toBe(false);
+    expect(isRunFailureNotice(notice, task("other", { status: "failed" }))).toBe(false);
+    expect(isRunFailureNotice(notice, task("run", { status: "running" }))).toBe(false);
+  });
+});
+
+describe("standaloneCommentRuns", () => {
+  it.each(["queued", "dispatched", "running", "failed", "cancelled", "completed"] as const)("keeps an unanchored %s run visible", (status) => {
+    const run = task("assignment", { status, delivered_comment_ids: [] });
+    expect(buildCommentRunView([run], []).standaloneRuns)
+      .toEqual([{ task: run, hasReply: false }]);
+  });
+
+  it("omits the issue-producing quick-create run from Activity", () => {
+    const quickCreate = task("quick-create", { kind: "quick_create", status: "completed" });
+    const assignment = task("assignment", { kind: "direct", status: "completed" });
+    expect(buildCommentRunView([quickCreate, assignment], []).standaloneRuns)
+      .toEqual([{ task: assignment, hasReply: false }]);
+  });
+
+  it("keeps assignment slots after replies arrive and excludes comment-triggered slots", () => {
+    const assigned = task("assignment");
+    const triggered = task("comment-run", { trigger_comment_id: "trigger" });
+    const tasks = [assigned, triggered];
+    const timeline = [comment("trigger")];
+    expect(buildCommentRunView(tasks, timeline).standaloneRuns.map((run) => run.task.id)).toEqual([assigned.id]);
+    const reply = comment("answer", { actor_type: "agent", source_task_id: assigned.id });
+    expect(buildCommentRunView(tasks, [...timeline, reply]).standaloneRuns)
+      .toEqual([{ task: assigned, commentId: reply.id, anchorCommentId: undefined, hasReply: true }]);
+  });
+});
+
+describe("orderTimelineWithRuns", () => {
+  const order = (topLevel: TimelineEntry[], runs: CommentRun[]) =>
+    orderTimelineWithRuns(topLevel, runs, new Map(topLevel.map((entry) => [entry.id, entry])))
+      .map((item) => ("task" in item ? item.task.id : item.id));
+
+  // MUL-7211: the reply, not the enqueue, owns the slot. A run enqueued at
+  // 10:00 that replies at 10:40 must not sit above a comment written at 10:20.
+  it("places a published reply at its own time, not the run's", () => {
+    const run = task("run", { status: "completed", created_at: "2026-09-07T10:00:00Z", completed_at: "2026-09-07T10:40:00Z" });
+    const midway = comment("midway", { created_at: "2026-09-07T10:20:00Z" });
+    const reply = comment("reply", { actor_type: "agent", source_task_id: run.id, created_at: "2026-09-07T10:40:00Z" });
+    expect(order([midway, reply], [{ task: run, commentId: reply.id, hasReply: true }]))
+      .toEqual(["midway", "run"]);
+  });
+
+  it("keeps a queue wait from dragging the reply above earlier comments", () => {
+    // Enqueued at 10:00, but the agent's previous run held the slot until
+    // 11:00 — every comment in between still reads before this reply.
+    const run = task("run", { status: "completed", created_at: "2026-09-07T10:00:00Z",
+      started_at: "2026-09-07T11:00:00Z", completed_at: "2026-09-07T11:05:00Z" });
+    const first = comment("first", { created_at: "2026-09-07T10:30:00Z" });
+    const second = comment("second", { created_at: "2026-09-07T10:45:00Z" });
+    const reply = comment("reply", { actor_type: "agent", source_task_id: run.id, created_at: "2026-09-07T11:05:00Z" });
+    expect(order([first, second, reply], [{ task: run, commentId: reply.id, hasReply: true }]))
+      .toEqual(["first", "second", "run"]);
+  });
+
+  it.each(["queued", "dispatched", "waiting_local_directory", "running"] as const)("keeps a %s run before later comments in enqueue order", (status) => {
+    const earlier = task("earlier", { status, created_at: "2026-09-07T10:00:00Z" });
+    const later = task("later", { status: "queued", created_at: "2026-09-07T10:30:00Z" });
+    const before = comment("before", { created_at: "2026-09-07T09:45:00Z" });
+    const between = comment("between", { created_at: "2026-09-07T10:15:00Z" });
+    const posted = comment("posted", { created_at: "2026-09-07T10:45:00Z" });
+    expect(order([before, between, posted], [{ task: later, hasReply: false }, { task: earlier, hasReply: false }]))
+      .toEqual(["before", "earlier", "between", "later", "posted"]);
+  });
+
+  it("settles a run that ended without a reply at the time it ended", () => {
+    const failed = task("failed", { status: "failed", created_at: "2026-09-07T10:00:00Z", completed_at: "2026-09-07T10:10:00Z" });
+    const before = comment("before", { created_at: "2026-09-07T10:05:00Z" });
+    const after = comment("after", { created_at: "2026-09-07T10:20:00Z" });
+    expect(order([before, after], [{ task: failed, hasReply: false }])).toEqual(["before", "failed", "after"]);
+  });
+
+  it("replaces the reply's own slot so the comment is not rendered twice", () => {
+    const run = task("run", { status: "completed", created_at: "2026-09-07T10:00:00Z", completed_at: "2026-09-07T10:40:00Z" });
+    const reply = comment("reply", { actor_type: "agent", source_task_id: run.id, created_at: "2026-09-07T10:40:00Z" });
+    expect(order([reply], [{ task: run, commentId: reply.id, hasReply: true }])).toEqual(["run"]);
+  });
+
+  it("breaks equal timestamps with the server's created_at then id order", () => {
+    const same = "2026-09-07T10:00:00Z";
+    expect(order([comment("b", { created_at: same }), comment("a", { created_at: same })], []))
+      .toEqual(["a", "b"]);
+  });
+
+  // The API serializes timestamps to whole seconds, so a reply sharing one
+  // with a neighbouring comment is routine. The run block must tie-break on
+  // its reply's id — the row that owns the slot — not on the task behind it,
+  // which carries an unrelated enqueue time and id.
+  it("breaks a tie between a reply and a comment on the reply's own row", () => {
+    const same = "2026-09-07T10:40:00Z";
+    const run = task("zzz-task", { status: "completed", created_at: "2026-09-07T10:00:00Z", completed_at: same });
+    const reply = comment("bbb-reply", { actor_type: "agent", source_task_id: run.id, created_at: same });
+    const neighbour = comment("aaa-comment", { created_at: same });
+    const placed: CommentRun = { task: run, commentId: reply.id, hasReply: true };
+    expect(order([neighbour, reply], [placed])).toEqual(["aaa-comment", "zzz-task"]);
+    expect(order([comment("ccc-comment", { created_at: same }), reply], [placed]))
+      .toEqual(["zzz-task", "ccc-comment"]);
+  });
+});
+
+describe("orderThreadWithRuns", () => {
+  const at = (time: string) => `2026-09-23T${time}Z`;
+  // Build the thread the way IssueDetail does, then label each row: a reply
+  // by id, a run slot by what it renders (its latest comment or its
+  // activity), followed by the input it quotes.
+  const thread = (tasks: AgentTask[], timeline: TimelineEntry[]) => {
+    const view = buildCommentRunView(tasks, timeline);
+    const byParent = new Map<string, TimelineEntry[]>();
+    for (const entry of view.timeline) {
+      if (entry.parent_id) byParent.set(entry.parent_id, [...(byParent.get(entry.parent_id) ?? []), entry]);
+    }
+    const root = view.timeline.find((entry) => !entry.parent_id)!;
+    return orderThreadWithRuns(root, collectThreadReplies(root.id, byParent), view.runs.get(root.id) ?? [])
+      .map((row) => !("run" in row) ? row.id
+        : (row.reply?.id ?? `run:${row.run.task.id}`) + (row.replyTo ? ` ↩ ${row.replyTo.id}` : ""));
+  };
+  const answer = (id: string, run: AgentTask, created_at: string, parent_id?: string) =>
+    comment(id, { actor_type: "agent", source_task_id: run.id, created_at, parent_id });
+  const asked = (id: string, trigger: TimelineEntry, overrides: Partial<AgentTask> = {}) =>
+    task(id, { status: "completed", created_at: trigger.created_at, trigger_comment_id: trigger.id,
+      delivered_comment_ids: [trigger.id], ...overrides });
+
+  // The MUL-7349 thread: Elon was asked first but replied last, and his
+  // review used to render right under the request, above everything after it.
+  it("orders agent replies by when they were sent and quotes an input that is not directly above", () => {
+    const root = comment("design", { created_at: at("08:00:00") });
+    const askElon = comment("ask-elon", { parent_id: root.id, created_at: at("08:15:32") });
+    const askSteve = comment("ask-steve", { parent_id: root.id, created_at: at("08:15:41") });
+    const elon = asked("elon", askElon);
+    const steve = asked("steve", askSteve);
+    const timeline = [root, askElon, askSteve, answer("fixed", steve, at("08:23:41"), root.id),
+      answer("review", elon, at("08:32:29"), root.id), comment("follow-up", { parent_id: root.id, created_at: at("08:35:05") })];
+    expect(thread([elon, steve], timeline))
+      .toEqual(["ask-elon", "ask-steve", "fixed", "review ↩ ask-elon", "follow-up"]);
+  });
+
+  it("reads as before when one agent answers the comment directly above", () => {
+    const root = comment("root", { created_at: at("10:00:00") });
+    const ask = comment("ask", { parent_id: root.id, created_at: at("10:01:00") });
+    const run = asked("run", ask);
+    expect(thread([run], [root, ask, answer("answer", run, at("10:05:00"))])).toEqual(["ask", "answer"]);
+    const rootRun = asked("root-run", root);
+    expect(thread([rootRun], [root, answer("root-answer", rootRun, at("10:05:00"))])).toEqual(["root-answer"]);
+  });
+
+  it("keeps a working run after its input until it replies", () => {
+    const root = comment("root", { created_at: at("10:00:00") });
+    const later = comment("later", { parent_id: root.id, created_at: at("10:02:00") });
+    const run = asked("run", root, { status: "running", started_at: at("10:00:05") });
+    expect(thread([run], [root, later])).toEqual(["run:run", "later"]);
+    expect(thread([run], [root, later, answer("answer", run, at("10:04:00"))])).toEqual(["later", "answer ↩ root"]);
+  });
+
+  it("keeps parallel working runs with their inputs until each replies", () => {
+    const root = comment("root", { created_at: at("10:00:00") });
+    const askA = comment("ask-a", { parent_id: root.id, created_at: at("10:01:00") });
+    const askB = comment("ask-b", { parent_id: root.id, created_at: at("10:02:00") });
+    const a = asked("a", askA, { status: "running" });
+    const b = asked("b", askB, { status: "running" });
+    expect(thread([a, b], [root, askA, askB])).toEqual(["ask-a", "run:a", "ask-b", "run:b"]);
+    const answerB = answer("answer-b", b, at("10:05:00"));
+    expect(thread([a, b], [root, askA, askB, answerB])).toEqual(["ask-a", "run:a", "ask-b", "answer-b"]);
+    expect(thread([a, b], [root, askA, askB, answerB, answer("answer-a", a, at("10:06:00"))]))
+      .toEqual(["ask-a", "ask-b", "answer-b", "answer-a ↩ ask-a"]);
+  });
+
+  it("keeps working runs on one input in enqueue order, after that input's other runs", () => {
+    const root = comment("root", { created_at: at("10:00:00") });
+    const ask = comment("ask", { parent_id: root.id, created_at: at("10:01:00") });
+    const first = asked("first", ask, { status: "running" });
+    const second = asked("second", ask, { status: "queued", delivered_comment_ids: [] });
+    expect(thread([first, second], [root, ask, comment("later", { parent_id: root.id, created_at: at("10:02:00") })]))
+      .toEqual(["ask", "run:first", "run:second ↩ ask", "later"]);
+  });
+
+  // MUL-7548 kept one run's comments together at its latest one; each now
+  // reads at its own time, so a comment written in between stays between.
+  it("places each comment a run posts at its own time", () => {
+    const root = comment("root", { created_at: at("10:00:00") });
+    const run = asked("run", root);
+    const progress = answer("progress", run, at("10:01:00"));
+    const final = answer("final", run, at("10:03:00"));
+    expect(thread([run], [root, progress, final])).toEqual(["progress", "final"]);
+    const aside = comment("aside", { parent_id: root.id, created_at: at("10:02:00") });
+    expect(thread([run], [root, progress, aside, final])).toEqual(["progress", "aside", "final ↩ root"]);
+  });
+
+  // A retry answers the same input as the attempt it retries, but it starts
+  // after that attempt ended; it reads below it, not above (MUL-7692).
+  it("keeps a retry below the attempt it retries", () => {
+    const root = comment("root", { created_at: at("10:00:00") });
+    const ask = comment("ask", { parent_id: root.id, created_at: at("10:01:00") });
+    const failed = asked("failed", ask, { status: "failed", started_at: at("10:01:05"), completed_at: at("10:14:00") });
+    const notice = comment("notice", { actor_type: "agent", comment_type: "system", source_task_id: failed.id,
+      parent_id: ask.id, created_at: at("10:14:00") });
+    const retry = asked("retry", ask, { status: "running", created_at: at("10:20:00"), parent_task_id: failed.id });
+    const later = comment("later", { parent_id: root.id, created_at: at("10:25:00") });
+    expect(thread([failed, retry], [root, ask, notice])).toEqual(["ask", "notice", "run:retry ↩ ask"]);
+    expect(thread([failed, retry], [root, ask, notice, later])).toEqual(["ask", "notice", "run:retry ↩ ask", "later"]);
+    const unanswered = asked("unanswered", ask, { status: "failed", completed_at: at("10:14:00") });
+    const again = asked("again", ask, { status: "queued", delivered_comment_ids: [], created_at: at("10:20:00"),
+      parent_task_id: unanswered.id });
+    expect(thread([unanswered, again], [root, ask])).toEqual(["ask", "run:unanswered", "run:again ↩ ask"]);
+  });
+
+  it("settles a run that ended without replying at the time it ended", () => {
+    const root = comment("root", { created_at: at("10:00:00") });
+    const failed = asked("failed", root, { status: "failed", started_at: at("10:00:10"), completed_at: at("10:05:00") });
+    const timeline = [root, comment("before", { parent_id: root.id, created_at: at("10:01:00") }),
+      comment("after", { parent_id: root.id, created_at: at("10:10:00") })];
+    expect(thread([failed], timeline)).toEqual(["before", "run:failed ↩ root", "after"]);
+  });
+
+  it("does not quote a deleted input", () => {
+    const root = comment("root", { created_at: at("10:00:00") });
+    const ask = comment("ask", { parent_id: root.id, created_at: at("10:01:00"), content: "", deleted_at: at("10:03:00") });
+    const run = asked("run", ask);
+    const timeline = [root, ask, comment("kept", { parent_id: ask.id, created_at: at("10:02:00") }), answer("answer", run, at("10:05:00"))];
+    expect(thread([run], timeline)).toEqual(["ask", "kept", "answer"]);
+  });
+});

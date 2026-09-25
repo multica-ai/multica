@@ -18,7 +18,7 @@
     "last_run_empty": "--",
     "empty": {
       "title": "まだオートパイロットがありません",
-      "hint": "AI エージェントの繰り返しタスクをスケジュールしましょう。テンプレートを選ぶか、ゼロから始められます。"
+      "hint": "AI エージェントの繰り返し作業をスケジュールしましょう。テンプレートを選ぶか、ゼロから始められます。"
     },
     "scope_all": "すべて",
     "no_matches": "該当する自動化はありません",
@@ -27,10 +27,11 @@
   "status": {
     "active": "アクティブ",
     "paused": "一時停止中",
+    "paused_runtime_required": "一時停止中 — 担当エージェントのランタイムが必要です",
     "archived": "アーカイブ済み"
   },
   "execution_mode": {
-    "create_issue": "イシューを作成",
+    "create_issue": "タスクを作成",
     "run_only": "実行のみ"
   },
   "relative_date": {
@@ -69,11 +70,23 @@
     "not_found": "オートパイロットが見つかりません",
     "pause_aria": "オートパイロットを一時停止",
     "activate_aria": "オートパイロットを有効化",
+    "paused_runtime_required": "担当エージェントのランタイムが失われたため一時停止しました。ランタイムを設定してから再度有効にしてください。",
+    "bind_runtime": "ランタイムを設定",
     "edit": "編集",
     "run_now": "今すぐ実行",
     "running": "実行中...",
     "toast_triggered": "オートパイロットを実行しました",
     "toast_trigger_failed": "オートパイロットを実行できませんでした",
+    "run_blocked_invocation_not_allowed": "実行されませんでした — このオートパイロットのエージェントを使用する権限がありません",
+    "run_blocked_runtime_offline": "実行されませんでした — エージェントのランタイムがオフラインです",
+    "run_blocked_agent_runtime_required": "実行されませんでした — エージェントにランタイムがありません。実行するにはバインドしてください",
+    "run_blocked_runtime_access_denied": "実行されませんでした — エージェントはプライベートランタイムで実行できません。ランタイムを公開にするか、エージェントを再設定/コピーしてください",
+    "run_blocked_target_unavailable": "実行されませんでした — エージェントを利用できません",
+    "run_blocked_attribution": "実行されませんでした — 実行の責任者を特定できませんでした",
+    "run_blocked_already_active": "実行されませんでした — 直近の実行が本件をカバーしています",
+    "run_blocked_quota_exceeded": "実行されませんでした — この期間の実行上限に達しました",
+    "run_blocked_issue_limit_reached": "実行されませんでした — ワークスペースのタスク数上限に達しました",
+    "run_blocked_generic": "実行されませんでした — 実行がブロックされました",
     "section_properties": "プロパティ",
     "section_triggers": "トリガー",
     "section_run_history": "実行履歴",
@@ -85,6 +98,8 @@
     "no_project": "プロジェクトなし",
     "project_unavailable": "プロジェクトを利用できません",
     "field_prompt": "プロンプト",
+    "field_subscribers": "購読者",
+    "field_subscribers_none": "なし",
     "add_trigger": "トリガーを追加",
     "no_triggers": "設定されたトリガーがありません。自動で実行するスケジュールを追加してください。",
     "no_runs": "まだ実行履歴がありません。手動で実行するには「今すぐ実行」をクリックしてください。",
@@ -99,8 +114,22 @@
       "deleting": "削除中..."
     }
   },
+  "access": {
+    "title": "アクセス管理",
+    "description": "追加したメンバーは、このオートパイロットの編集・実行や、トリガー・Webhook の管理ができます。",
+    "current_label": "アクセス権あり",
+    "add": "メンバーを追加",
+    "search_placeholder": "メンバーを検索…",
+    "no_results": "メンバーが見つかりません",
+    "remove_tooltip": "アクセス権を削除",
+    "empty": "まだ誰にもアクセス権が付与されていません。",
+    "toast_granted": "アクセス権を付与しました",
+    "toast_revoked": "アクセス権を削除しました",
+    "toast_failed": "アクセス権を更新できませんでした",
+    "owner_note": "作成者とワークスペース管理者は常にアクセスできます。"
+  },
   "run_status": {
-    "issue_created": "イシュー作成済み",
+    "issue_created": "タスク作成済み",
     "running": "実行中",
     "completed": "完了",
     "failed": "失敗",
@@ -113,7 +142,7 @@
     "api": "API"
   },
   "run": {
-    "issue_linked": "イシューをリンク済み",
+    "issue_linked": "タスクをリンク済み",
     "view_log": "実行ログを表示",
     "skipped_group": {
       "label": "スキップ済み",
@@ -141,9 +170,13 @@
     "deprecated_badge": "非推奨",
     "next_label": "次回: {{date}}",
     "webhook_url_label": "Webhook URL",
+    "show_url": "URL を表示",
+    "hide_url": "URL を非表示",
+    "hidden_url_aria": "Webhook URL は非表示です — クリックして表示",
     "copy_url": "URL をコピー",
     "url_copied": "Webhook URL をコピーしました",
     "url_copy_failed": "URL をコピーできませんでした",
+    "edit_schedule": "スケジュールを編集",
     "rotate_url": "URL を再生成",
     "rotate_confirm_title": "Webhook URL を再生成",
     "rotate_confirm_description": "現在の URL は直ちに動作を停止します。この URL を呼び出している外部システムは新しい URL に更新する必要があります。続けますか?",
@@ -187,6 +220,8 @@
       "received_at": "受信",
       "last_attempt_at": "最終試行",
       "attempt_count": "試行回数",
+      "dispatch_attempts": "ディスパッチ試行回数",
+      "available_at": "次回ディスパッチ",
       "response_status": "レスポンス",
       "dedupe_key": "重複排除キー",
       "dedupe_source": "重複排除ソース",
@@ -221,12 +256,22 @@
     "toast_added_webhook": "Webhook トリガーを追加しました",
     "toast_add_failed": "トリガーを追加できませんでした"
   },
+  "edit_trigger_dialog": {
+    "title": "スケジュールを編集",
+    "label_field": "ラベル(任意)",
+    "label_placeholder": "例: 平日の朝",
+    "enabled_label": "有効",
+    "submit": "保存",
+    "submitting": "保存中...",
+    "toast_updated": "スケジュールを更新しました",
+    "toast_update_failed": "スケジュールの更新に失敗しました"
+  },
   "dialog": {
     "sr_create": "新規オートパイロット",
     "sr_edit": "オートパイロットを編集",
     "header_create": "新規オートパイロット",
     "header_edit": "オートパイロットを編集",
-    "subtitle": "繰り返し実行される AI タスク",
+    "subtitle": "繰り返し実行される AI 作業",
     "expand": "展開",
     "collapse": "折りたたむ",
     "close": "閉じる",
@@ -253,7 +298,15 @@
     "select_agent": "エージェントを選択",
     "select_assignee": "エージェントまたはスクワッドを選択",
     "section_project": "プロジェクト",
+    "project_hint": "実行環境も決まります — このプロジェクトのリポジトリまたはローカルディレクトリ",
     "no_project": "プロジェクトなし",
+    "section_subscribers": "購読者",
+    "subscribers_hint": "このオートパイロットが作成するすべてのタスクを自動で購読します",
+    "subscribers_empty": "購読者はいません。チームメイトを追加すると、毎回通知されます",
+    "subscribers_add": "購読者を追加",
+    "subscribers_search_placeholder": "名前でメンバーを検索…",
+    "subscribers_no_results": "一致するメンバーはいません",
+    "subscribers_remove_tooltip": "削除",
     "section_output_mode": "出力モード",
     "section_schedule": "スケジュール",
     "section_trigger_kind": "トリガー",
@@ -270,44 +323,37 @@
     "event_filter_docs_link_label": "イベントフィルターの仕組みを学ぶ",
     "event_filter_event_placeholder": "例: workflow_run",
     "event_filter_actions_placeholder": "completed, failed",
+    "event_filter_add": "追加",
+    "event_filter_remove_label": "フィルターを削除",
     "event_filter_hint": "これらのイベントに一致する Webhook のみを処理します。空にするとすべて許可します。",
-    "schedule_disabled_reason": "このオートパイロットには複数のスケジュールがあります。詳細ページで編集してください。",
-    "next_run_label": "次回実行:",
+    "schedule_multiple_notice": "このオートパイロットにはスケジュールが {{count}} 件あります。このダイアログを閉じて、下の「トリガー」から個別に編集してください。",
+    "schedule_empty": "スケジュールはありません。このオートパイロットは手動で実行したときだけ動きます。",
+    "schedule_add": "スケジュールを追加",
+    "error_title_required": "オートパイロット名を入力してください。",
+    "error_assignee_required": "実行するエージェントまたはスクワッドを選択してください。",
     "output_modes": {
       "create_issue": {
-        "label": "イシューを作成",
-        "description": "実行のたびに追跡可能なイシューを作成します"
+        "label": "タスクを作成",
+        "description": "実行のたびに追跡可能なタスクを作成します"
       },
       "run_only": {
         "label": "実行のみ",
-        "description": "イシューを作成せず、静かに実行します"
+        "description": "タスクを作成せず、静かに実行します"
       }
-    },
-    "frequency_long": {
-      "hourly": "毎時",
-      "daily": "毎日",
-      "weekdays": "平日ごと",
-      "weekly": "毎週",
-      "custom": "カスタム cron"
-    },
-    "days": {
-      "sunday": "日曜日",
-      "monday": "月曜日",
-      "tuesday": "火曜日",
-      "wednesday": "水曜日",
-      "thursday": "木曜日",
-      "friday": "金曜日",
-      "saturday": "土曜日"
     }
   },
-  "trigger_config": {
-    "frequencies": {
-      "hourly": "毎時",
-      "daily": "毎日",
-      "weekdays": "平日",
-      "weekly": "曜日",
-      "custom": "カスタム"
-    },
+  "schedule_editor": {
+    "time_label": "時刻",
+    "time_at": "時刻指定",
+    "time_every": "間隔指定",
+    "every_prefix": "毎",
+    "unit_hours": "時間",
+    "unit_minutes": "分",
+    "days_label": "日",
+    "days_every": "毎日",
+    "days_weekly": "曜日指定",
+    "days_monthly": "日付指定",
+    "monthly_short_month_hint": "{{day}} 日が存在しない月はスキップされます。",
     "days_short": {
       "sun": "日",
       "mon": "月",
@@ -317,32 +363,69 @@
       "fri": "金",
       "sat": "土"
     },
-    "cron_label": "Cron 式",
-    "cron_hint": "標準の 5 フィールド cron(分 時 日 月 曜日)",
-    "minute_label": "分",
-    "time_label": "時刻",
     "timezone_label": "タイムゾーン",
-    "days_label": "曜日",
-    "summary": {
-      "hourly": "毎時 · :{{min}}",
-      "daily": "毎日 {{time}}",
-      "weekdays": "平日 {{time}}",
-      "weekly": "{{days}} {{time}}",
-      "custom": "カスタム cron",
-      "no_days": "—"
-    },
+    "cron_toggle": "Cron",
+    "cron_click_to_edit": "クリックして編集",
+    "cron_hint": "標準 5 フィールド cron（分 時 日 月 曜日）",
+    "cron_invalid": "この cron 式は無効です。",
+    "timezone_invalid": "このタイムゾーンはサーバーで認識できません。",
+    "advanced_hint": "この式にはビジュアルエディタで表現できない機能が含まれています。cron テキストを直接編集するか、式を簡略化してください。",
+    "advanced_unverified": "サーバーに接続できず、この式を検証できませんでした。コントロールは無効のままです。保存する前に cron テキストを確認してください。",
+    "advanced_checking": "この式をサーバーで検証しています。結果が返るまでコントロールは無効のままです。",
+    "next_runs_label": "次回以降の実行",
+    "next_in": "{{countdown}}後",
+    "preview_unavailable": "次回実行時刻を取得できません。",
+    "no_upcoming_runs": "この式に該当する今後の実行はありません。",
     "describe": {
-      "hourly": "毎時 :{{min}} に実行",
-      "daily": "毎日 {{time}} {{offset}} に実行",
-      "weekdays": "平日 {{time}} {{offset}} に実行",
-      "weekly": "毎週 {{days}} {{time}} {{offset}} に実行",
-      "custom": "カスタムスケジュール: {{cron}}"
+      "days_every": "毎日",
+      "days_monthly": "毎月 {{day}} 日",
+      "days_long": {
+        "sun": "日曜",
+        "mon": "月曜",
+        "tue": "火曜",
+        "wed": "水曜",
+        "thu": "木曜",
+        "fri": "金曜",
+        "sat": "土曜"
+      },
+      "days_range": "{{from}}〜{{to}}",
+      "days_join": "、",
+      "time_at": "{{time}}",
+      "time_every_hour": "毎時 {{minute}} 分",
+      "time_every_hours": "{{interval}} 時間ごと（毎時 {{minute}} 分）",
+      "time_every_hour_window": "毎時",
+      "time_every_hours_window": "{{interval}} 時間ごと",
+      "time_every_minute": "毎分",
+      "time_every_minutes": "{{interval}} 分ごと",
+      "window": "{{from}}–{{to}}"
     },
     "countdown": {
-      "days_hours": "{{days}} 日 {{hours}} 時間",
-      "hours_minutes": "{{hours}} 時間 {{minutes}} 分",
-      "minutes": "{{minutes}} 分",
-      "less_than_minute": "1 分未満"
+      "days_hours": "{{days}}日 {{hours}}時間 {{minutes}}分",
+      "hours_minutes": "{{hours}}時間 {{minutes}}分",
+      "minutes": "{{minutes}}分",
+      "less_than_minute": "1分未満"
+    },
+    "a11y": {
+      "fixed_hour": "時",
+      "fixed_minute": "分",
+      "interval": "間隔",
+      "interval_unit": "間隔の単位",
+      "window_start_hour": "時間帯の開始（時）",
+      "window_start_minute": "時間帯の開始（分）",
+      "window_end_hour": "時間帯の終了（時）",
+      "window_end_minute": "時間帯の終了（分）",
+      "day_pattern": "日付の指定方法",
+      "day_of_month": "毎月の日",
+      "timezone": "タイムゾーン",
+      "days_full": {
+        "sun": "日曜日",
+        "mon": "月曜日",
+        "tue": "火曜日",
+        "wed": "水曜日",
+        "thu": "木曜日",
+        "fri": "金曜日",
+        "sat": "土曜日"
+      }
     }
   },
   "agent_picker": {
@@ -350,7 +433,9 @@
     "select_agent": "エージェントを選択",
     "select_assignee": "エージェントまたはスクワッドを選択",
     "agents_group": "エージェント",
-    "squads_group": "スクワッド"
+    "squads_group": "スクワッド",
+    "agent_runtime_required": "このエージェントを選択する前にランタイムをバインドしてください",
+    "squad_runtime_required": "選択する前に、このスクワッドのリーダーにランタイムをバインドしてください"
   },
   "timezone_picker": {
     "search_placeholder": "タイムゾーンを検索..."
@@ -358,7 +443,6 @@
   "toolbar": {
     "result_count_title": "該当する自動化 / すべての自動化",
     "filter_label": "フィルター",
-    "filter_active_count_one": "{{count}} 件のフィルター",
     "filter_active_count_other": "{{count}} 件のフィルター",
     "clear_filters": "フィルターをクリア",
     "section_assignee": "担当",
@@ -376,17 +460,63 @@
     "pause": "一時停止",
     "resume": "再開",
     "delete": "削除",
-    "selected_one": "{{count}} 件選択中",
     "selected_other": "{{count}} 件選択中",
     "clear_selection": "選択を解除",
     "delete_dialog": {
       "title": "自動化を削除しますか？",
-      "description_one": "「{{name}}」とその実行履歴を完全に削除します。",
       "description_other": "{{count}} 件の自動化とその実行履歴を完全に削除します。",
       "warning": "この操作は取り消せません。",
       "cancel": "キャンセル",
       "confirm": "完全に削除",
       "deleting": "削除中…"
     }
+  },
+  "wakeups": {
+    "title": "タスクのウェイクアップ",
+    "scope": "範囲",
+    "issue": "タスク",
+    "trigger": "トリガー",
+    "next": "ウェイクアップ状態",
+    "enabled": "有効",
+    "all_triggers": "すべてのトリガー",
+    "event": "イベント",
+    "at": "一回限り",
+    "recurring": "繰り返し",
+    "all_agents": "すべてのエージェント",
+    "search": "タスク・エージェントを検索",
+    "search_action": "検索",
+    "running": "実行中",
+    "active_runs": "{{count}} 件の実行が進行中",
+    "issue_closed": "タスクは終了済み",
+    "read_only": "作成者またはワークスペース管理者のみが管理できます",
+    "select_row": "{{issue}}、{{agent}} を選択",
+    "select_page": "このページの有効な項目を選択",
+    "load_error": "読み込めませんでした",
+    "loading": "読み込み中…",
+    "empty": "ルールはまだありません",
+    "selected": "{{count}} 件選択中",
+    "disable_selected": "選択項目を無効化",
+    "clear": "選択を解除",
+    "results": "{{page}} ページ · {{count}} 件",
+    "previous": "前へ",
+    "next_page": "次へ",
+    "confirm_title": "{{count}} 件を無効にしますか？",
+    "confirm_body": "今後の起動を停止し、エージェントに渡されていない待機中の実行を取り消します。割り当て済みの実行は継続します。実行ログから停止できます。",
+    "cancel": "キャンセル",
+    "confirm": "無効にする",
+    "disabling": "無効化中…",
+    "batch_result": "無効化：{{succeeded}} 件。失敗：{{failed}} 件。",
+    "scopes": {
+      "active": "起動待ち・実行中",
+      "all": "すべて",
+      "disabled": "無効",
+      "ended": "終了"
+    },
+    "target_agent": "起動するエージェント",
+    "wakeup_run": "起動後の実行",
+    "empty_filtered": "一致するルールがありません",
+    "clear_filters": "フィルターを解除",
+    "batch_success": "{{count}} 件のルールを無効化しました",
+    "batch_partial": "{{succeeded}} 件を無効化、{{failed}} 件が失敗しました。失敗した項目を選択したまま再試行できます。"
   }
 }

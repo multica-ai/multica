@@ -1,9 +1,12 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -13,6 +16,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
+
+	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 func newTestCodexClient(t *testing.T) (*codexClient, *fakeStdin, []Message) {
@@ -22,9 +28,10 @@ func newTestCodexClient(t *testing.T) (*codexClient, *fakeStdin, []Message) {
 	var messages []Message
 
 	c := &codexClient{
-		cfg:     Config{Logger: slog.Default()},
-		stdin:   fs,
-		pending: make(map[int]*pendingRPC),
+		cfg:         Config{Logger: slog.Default()},
+		stdin:       fs,
+		pending:     make(map[int]*pendingRPC),
+		processDone: make(chan struct{}),
 		onMessage: func(msg Message) {
 			mu.Lock()
 			messages = append(messages, msg)
@@ -33,6 +40,56 @@ func newTestCodexClient(t *testing.T) (*codexClient, *fakeStdin, []Message) {
 		onTurnDone: func(aborted bool) {},
 	}
 	return c, fs, messages
+}
+
+func TestSupplementCodexTurnTargetsExactActiveTurn(t *testing.T) {
+	c, _, _ := newTestCodexClient(t)
+	c.threadID = "thread-current"
+	c.setActiveTurnID("turn-current")
+	stdin := &fakeStdinWithHook{}
+	stdin.afterWrite = func() {
+		c.handleLine(`{"jsonrpc":"2.0","id":1,"result":{}}`)
+	}
+	c.stdin = stdin
+
+	if err := supplementCodexTurn(context.Background(), c, "keep the original goal and add this"); err != nil {
+		t.Fatalf("supplementCodexTurn: %v", err)
+	}
+	lines := stdin.Lines()
+	if len(lines) != 1 {
+		t.Fatalf("request lines = %d, want 1", len(lines))
+	}
+	var request struct {
+		Method string `json:"method"`
+		Params struct {
+			ThreadID       string `json:"threadId"`
+			ExpectedTurnID string `json:"expectedTurnId"`
+			Input          []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"input"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Method != "turn/steer" || request.Params.ThreadID != "thread-current" || request.Params.ExpectedTurnID != "turn-current" {
+		t.Fatalf("steer target = %#v", request)
+	}
+	if len(request.Params.Input) != 1 || request.Params.Input[0].Type != "text" || request.Params.Input[0].Text != "keep the original goal and add this" {
+		t.Fatalf("steer input = %#v", request.Params.Input)
+	}
+}
+
+func TestSupplementCodexTurnFailsClosedWithoutActiveTurn(t *testing.T) {
+	c, stdin, _ := newTestCodexClient(t)
+	c.threadID = "thread-current"
+	if err := supplementCodexTurn(context.Background(), c, "extra"); err == nil {
+		t.Fatal("supplementCodexTurn succeeded without an active turn")
+	}
+	if len(stdin.Lines()) != 0 {
+		t.Fatalf("wrote a steer request without an active turn: %v", stdin.Lines())
+	}
 }
 
 type fakeStdin struct {
@@ -57,6 +114,19 @@ func (f *fakeStdin) Lines() []string {
 		}
 	}
 	return lines
+}
+
+type fakeStdinWithHook struct {
+	fakeStdin
+	afterWrite func()
+}
+
+func (f *fakeStdinWithHook) Write(p []byte) (int, error) {
+	n, err := f.fakeStdin.Write(p)
+	if f.afterWrite != nil {
+		f.afterWrite()
+	}
+	return n, err
 }
 
 func splitLines(s string) []string {
@@ -201,6 +271,101 @@ func TestCodexHandleServerRequestMCPElicitation(t *testing.T) {
 	}
 }
 
+func TestCodexHandleServerRequestPermissionsApproval(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	c.handleLine(`{"jsonrpc":"2.0","id":14,"method":"item/permissions/requestApproval","params":{"permissions":{"network":{"enabled":true},"fileSystem":{"read":["/tmp/repo"],"write":["/tmp/repo"]}}}}`)
+
+	lines := fs.Lines()
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(lines))
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["id"] != float64(14) {
+		t.Fatalf("expected id=14, got %v", resp["id"])
+	}
+	result, ok := resp["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result object, got response: %v", resp)
+	}
+	if result["scope"] != "turn" {
+		t.Fatalf("expected scope=turn, got %v", result["scope"])
+	}
+	permissions, ok := result["permissions"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected permissions object, got %v", result["permissions"])
+	}
+	network, ok := permissions["network"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected network permissions object, got %v", permissions["network"])
+	}
+	if network["enabled"] != true {
+		t.Fatalf("expected network.enabled=true, got %v", network["enabled"])
+	}
+	fileSystem, ok := permissions["fileSystem"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected fileSystem permissions object, got %v", permissions["fileSystem"])
+	}
+	if got := fileSystem["read"].([]any)[0]; got != "/tmp/repo" {
+		t.Fatalf("expected fileSystem.read to round-trip, got %v", got)
+	}
+}
+
+func TestCodexPermissionsApprovalResponseDropsUnknownKeysAndLogs(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+	resp := codexPermissionsApprovalResponse(
+		json.RawMessage(`{"permissions":{"network":{"enabled":true},"gpu":{"enabled":true}}}`),
+		logger,
+	)
+
+	if resp["scope"] != "turn" {
+		t.Fatalf("expected scope=turn, got %v", resp["scope"])
+	}
+	perms, ok := resp["permissions"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected permissions object, got %v", resp["permissions"])
+	}
+	if _, ok := perms["network"]; !ok {
+		t.Fatalf("expected network permission to be granted, got %v", perms)
+	}
+	if _, ok := perms["gpu"]; ok {
+		t.Fatalf("expected unrecognized key gpu to be dropped, got %v", perms)
+	}
+	if !strings.Contains(buf.String(), "gpu") {
+		t.Fatalf("expected dropped key to be logged, got %q", buf.String())
+	}
+}
+
+func TestCodexPermissionsApprovalResponseMalformedParamsLogs(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+	resp := codexPermissionsApprovalResponse(json.RawMessage(`{"permissions":"not-an-object"}`), logger)
+
+	if resp["scope"] != "turn" {
+		t.Fatalf("expected scope=turn, got %v", resp["scope"])
+	}
+	perms, ok := resp["permissions"].(map[string]any)
+	if !ok || len(perms) != 0 {
+		t.Fatalf("expected empty permissions on malformed params, got %v", resp["permissions"])
+	}
+	if !strings.Contains(buf.String(), "failed to parse") {
+		t.Fatalf("expected parse failure to be logged, got %q", buf.String())
+	}
+}
+
 func TestCodexHandleServerRequestUnknownReturnsError(t *testing.T) {
 	t.Parallel()
 
@@ -230,6 +395,9 @@ func TestCodexHandleServerRequestUnknownReturnsError(t *testing.T) {
 	if errObj["code"] != float64(-32601) {
 		t.Fatalf("expected error code -32601, got %v", errObj["code"])
 	}
+	if got := c.getTurnError(); !strings.Contains(got, "some/unknown/method") {
+		t.Fatalf("expected turn error to include unsupported request method, got %q", got)
+	}
 }
 
 func TestCodexLegacyEventTaskStarted(t *testing.T) {
@@ -247,9 +415,6 @@ func TestCodexLegacyEventTaskStarted(t *testing.T) {
 
 	if !gotStatus {
 		t.Fatal("expected status=running message")
-	}
-	if !c.turnStarted {
-		t.Fatal("expected turnStarted=true")
 	}
 	if c.notificationProtocol != "legacy" {
 		t.Fatalf("expected protocol=legacy, got %q", c.notificationProtocol)
@@ -355,8 +520,8 @@ func TestCodexRawTurnStarted(t *testing.T) {
 	if c.notificationProtocol != "raw" {
 		t.Fatalf("expected protocol=raw, got %q", c.notificationProtocol)
 	}
-	if c.turnID != "turn-1" {
-		t.Fatalf("expected turnID=turn-1, got %q", c.turnID)
+	if turnID := c.activeTurnID(); turnID != "turn-1" {
+		t.Fatalf("expected turnID=turn-1, got %q", turnID)
 	}
 }
 
@@ -378,6 +543,67 @@ func TestCodexRawTurnCompleted(t *testing.T) {
 
 	if doneCount != 1 {
 		t.Fatalf("expected onTurnDone called once, got %d", doneCount)
+	}
+}
+
+func TestCodexTurnNotificationGateDropsResumeReplayAndOtherTurns(t *testing.T) {
+	t.Parallel()
+
+	gate := &codexTurnNotificationGate{}
+	previousCompleted := map[string]any{
+		"threadId": "thr-resumed",
+		"turn": map[string]any{
+			"id":     "turn-previous",
+			"status": "completed",
+		},
+	}
+	if gate.accept("turn/completed", previousCompleted) {
+		t.Fatal("resume replay must stay blocked before the current turn is armed")
+	}
+
+	gate.arm()
+	if !gate.accept("turn/completed", previousCompleted) {
+		t.Fatal("armed gate must preserve older streams that omit turn/started")
+	}
+	if !gate.accept("turn/started", map[string]any{
+		"threadId": "thr-resumed",
+		"turn":     map[string]any{"id": "turn-current"},
+	}) {
+		t.Fatal("current turn/started should open the lifecycle gate")
+	}
+	if gate.accept("turn/completed", previousCompleted) {
+		t.Fatal("completion from another turn must not finish the current turn")
+	}
+	if !gate.accept("item/completed", map[string]any{
+		"threadId": "thr-resumed",
+		"turnId":   "turn-current",
+	}) {
+		t.Fatal("current-turn item should pass the gate")
+	}
+	if !gate.accept("turn/completed", map[string]any{
+		"threadId": "thr-resumed",
+		"turn": map[string]any{
+			"id":     "turn-current",
+			"status": "completed",
+		},
+	}) {
+		t.Fatal("current turn completion should pass the gate")
+	}
+
+	legacy := &codexTurnNotificationGate{}
+	legacyComplete := map[string]any{"msg": map[string]any{"type": "task_complete"}}
+	if legacy.accept("codex/event", legacyComplete) {
+		t.Fatal("legacy resume replay must stay blocked before the current turn is armed")
+	}
+	legacy.arm()
+	if !legacy.accept("codex/event", legacyComplete) {
+		t.Fatal("armed gate must preserve legacy streams that omit task_started")
+	}
+	if !legacy.accept("codex/event", map[string]any{"msg": map[string]any{"type": "task_started"}}) {
+		t.Fatal("legacy current task_started should open the lifecycle gate")
+	}
+	if !legacy.accept("codex/event", legacyComplete) {
+		t.Fatal("legacy current task completion should pass the gate")
 	}
 }
 
@@ -414,11 +640,91 @@ func TestCodexRawTurnCompletedDeduplication(t *testing.T) {
 		doneCount++
 	}
 
-	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed"}}}`)
-	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed"}}}`)
+	line := `{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed","usage":{"input_tokens":100,"output_tokens":10}}}}`
+	c.handleLine(line)
+	c.handleLine(line)
 
 	if doneCount != 1 {
 		t.Fatalf("expected deduplication, but onTurnDone called %d times", doneCount)
+	}
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	if c.usage.InputTokens != 100 || c.usage.OutputTokens != 10 {
+		t.Fatalf("duplicate completion double-counted usage: %+v", c.usage)
+	}
+}
+
+func TestCodexRawTurnCompletedWithoutIDDeduplicatesLifecycleAndUsage(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+
+	var doneCount int
+	c.onTurnDone = func(aborted bool) { doneCount++ }
+	line := `{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"status":"completed","usage":{"input_tokens":100,"output_tokens":10}}}}`
+	c.handleLine(line)
+	// An empty-ID start cannot prove that a new turn began, so it must not
+	// reopen an already completed turn.
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"turn":{}}}`)
+	c.handleLine(line)
+
+	if doneCount != 1 {
+		t.Fatalf("completion count = %d, want 1", doneCount)
+	}
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	if c.usage.InputTokens != 100 || c.usage.OutputTokens != 10 {
+		t.Fatalf("duplicate empty-id completion double-counted usage: %+v", c.usage)
+	}
+}
+
+func TestCodexRawTurnCompletedReplayDoesNotReopenSameTurn(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+
+	var doneCount int
+	c.onTurnDone = func(aborted bool) { doneCount++ }
+	started := `{"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-1"}}}`
+	completed := `{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed","usage":{"input_tokens":100,"output_tokens":10}}}}`
+	c.handleLine(started)
+	c.handleLine(completed)
+	c.handleLine(started)
+	c.handleLine(completed)
+
+	if doneCount != 1 {
+		t.Fatalf("completion count = %d, want 1 after replay", doneCount)
+	}
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	if c.usage.InputTokens != 100 || c.usage.OutputTokens != 10 {
+		t.Fatalf("replayed turn double-counted usage: %+v", c.usage)
+	}
+}
+
+func TestCodexRawLateCompletionWithoutIDCannotReopenClient(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+
+	var doneCount int
+	c.onTurnDone = func(aborted bool) { doneCount++ }
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-1"}}}`)
+	completedWithoutID := `{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"status":"completed","usage":{"input_tokens":100,"output_tokens":10}}}}`
+	c.handleLine(completedWithoutID)
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-2"}}}`)
+	c.handleLine(completedWithoutID)
+
+	if doneCount != 1 {
+		t.Fatalf("completion count = %d, want 1 after late no-ID replay", doneCount)
+	}
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	if c.usage.InputTokens != 100 || c.usage.OutputTokens != 10 {
+		t.Fatalf("late no-ID completion double-counted usage: %+v", c.usage)
 	}
 }
 
@@ -479,16 +785,13 @@ func TestCodexRawErrorNotificationTerminal(t *testing.T) {
 	t.Parallel()
 
 	c, _, _ := newTestCodexClient(t)
-	c.notificationProtocol = "raw"
+	c.notificationProtocol = "unknown"
 	done := false
 	var activities []string
 	c.onSemanticActivity = func(activity string) {
 		activities = append(activities, activity)
 	}
 	c.onTurnDone = func(aborted bool) {
-		if aborted {
-			t.Fatal("terminal error should not mark the turn aborted")
-		}
 		done = true
 	}
 
@@ -497,11 +800,16 @@ func TestCodexRawErrorNotificationTerminal(t *testing.T) {
 	if got := c.getTurnError(); got != "boom" {
 		t.Fatalf("expected terminal error captured, got %q", got)
 	}
-	if !done {
-		t.Fatal("terminal error should finish the turn")
+	if done {
+		t.Fatal("terminal error must wait for turn/completed")
 	}
 	if got, want := strings.Join(activities, ","), "error:terminal"; got != want {
 		t.Fatalf("semantic activity = %q, want %q", got, want)
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-error","status":"failed","error":{"message":"boom"}}}}`)
+	if !done {
+		t.Fatal("turn/completed should finish the failed turn")
 	}
 }
 
@@ -557,6 +865,74 @@ func TestCodexFirstTurnProgressActivity(t *testing.T) {
 	}
 }
 
+// TestCodexFirstTurnNoProgressTimeoutClamp pins both halves of the first-turn
+// window: the 60s ceiling that a healthy gpt-5.5 turn has to fit under
+// (MUL-5542), and the fact that the configured semantic inactivity timeout can
+// only ever shrink it, never raise it. The second half is easy to misread as a
+// knob for the ceiling — it is not, and GH #5959 proposed removing the ceiling
+// entirely on that reading.
+func TestCodexFirstTurnNoProgressTimeoutClamp(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		semantic time.Duration
+		want     time.Duration
+	}{
+		{name: "unset falls back to the ceiling", semantic: 0, want: 60 * time.Second},
+		{name: "negative falls back to the ceiling", semantic: -1 * time.Second, want: 60 * time.Second},
+		{name: "default 10m is capped at the ceiling", semantic: 10 * time.Minute, want: 60 * time.Second},
+		{name: "raising semantic cannot raise the ceiling", semantic: 2 * time.Minute, want: 60 * time.Second},
+		{name: "equal to the ceiling scales to 4/5", semantic: 60 * time.Second, want: 48 * time.Second},
+		{name: "below the ceiling scales to 4/5", semantic: 30 * time.Second, want: 24 * time.Second},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := codexFirstTurnNoProgressTimeout(tc.semantic, 0); got != tc.want {
+				t.Fatalf("codexFirstTurnNoProgressTimeout(%s, 0) = %s, want %s", tc.semantic, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCodexFirstTurnNoProgressTimeoutExplicitOverride covers the
+// MULTICA_CODEX_FIRST_TURN_TIMEOUT path added for GH #3262 / #5959: a positive
+// configured value is honored as-is for the first-turn watchdog ceiling,
+// including upward past the default that the semantic inactivity timeout alone
+// can never raise. This resolver only sets that one timer's duration; the
+// effective first-item wait is still min(ceiling, semantic, execution) because
+// the semantic timer runs concurrently — see
+// TestCodexExecuteFirstTurnOverrideAboveSemanticIsTruncated for that runtime
+// interaction. A non-positive override changes nothing — the function falls back
+// to the pinned default/scaling behaviour asserted by
+// TestCodexFirstTurnNoProgressTimeoutClamp.
+func TestCodexFirstTurnNoProgressTimeoutExplicitOverride(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		semantic   time.Duration
+		configured time.Duration
+		want       time.Duration
+	}{
+		{name: "override above the ceiling is honored in full", semantic: 0, configured: 5 * time.Minute, want: 5 * time.Minute},
+		{name: "override wins over the default 10m semantic", semantic: 10 * time.Minute, configured: 2 * time.Minute, want: 2 * time.Minute},
+		{name: "override wins over a value that would otherwise scale down", semantic: 30 * time.Second, configured: 90 * time.Second, want: 90 * time.Second},
+		{name: "override raises the resolver ceiling above the default", semantic: 0, configured: 30 * time.Minute, want: 30 * time.Minute},
+		{name: "zero override keeps the default ceiling", semantic: 0, configured: 0, want: 60 * time.Second},
+		{name: "negative override is ignored and falls back to the ceiling", semantic: 10 * time.Minute, configured: -1 * time.Second, want: 60 * time.Second},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := codexFirstTurnNoProgressTimeout(tc.semantic, tc.configured); got != tc.want {
+				t.Fatalf("codexFirstTurnNoProgressTimeout(%s, %s) = %s, want %s", tc.semantic, tc.configured, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCodexSetTurnErrorFirstWins(t *testing.T) {
 	t.Parallel()
 
@@ -596,8 +972,374 @@ func TestParseCodexSessionFileSubtractsCachedInput(t *testing.T) {
 	if got.usage.CacheReadTokens != 300 {
 		t.Fatalf("cache read tokens = %d, want 300", got.usage.CacheReadTokens)
 	}
-	if got.usage.OutputTokens != 50 {
-		t.Fatalf("output tokens = %d, want 50", got.usage.OutputTokens)
+	if got.usage.OutputTokens != 40 {
+		t.Fatalf("output tokens = %d, want 40 (including reasoning)", got.usage.OutputTokens)
+	}
+}
+
+// The per-task CODEX_HOME must win over the ambient env / global home so usage
+// is read from the same task-local sessions Codex actually wrote to (MUL-4424).
+func TestCodexSessionRootPrefersExplicitTaskHome(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+	envHome := t.TempDir()
+	taskHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(envHome, "sessions"), 0o755); err != nil {
+		t.Fatalf("mkdir env sessions: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(taskHome, "sessions"), 0o755); err != nil {
+		t.Fatalf("mkdir task sessions: %v", err)
+	}
+	t.Setenv("CODEX_HOME", envHome)
+
+	if got, want := codexSessionRoot(taskHome), filepath.Join(taskHome, "sessions"); got != want {
+		t.Errorf("explicit task home ignored: got %q, want %q", got, want)
+	}
+	if got, want := codexSessionRoot(""), filepath.Join(envHome, "sessions"); got != want {
+		t.Errorf("empty task home should fall back to ambient CODEX_HOME: got %q, want %q", got, want)
+	}
+}
+
+func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	threadID := "task-thread"
+	startTime := time.Now().Add(-time.Minute)
+	dateDir := filepath.Join(taskHome, "sessions",
+		fmt.Sprintf("%04d", startTime.Year()),
+		fmt.Sprintf("%02d", int(startTime.Month())),
+		fmt.Sprintf("%02d", startTime.Day()),
+	)
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+	content := strings.Join([]string{
+		fmt.Sprintf(`{"timestamp":%q,"type":"turn_context","payload":{"model":"gpt-5.6-sol"}}`, startTime.Add(time.Second).UTC().Format(time.RFC3339Nano)),
+		fmt.Sprintf(`{"timestamp":%q,"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500,"output_tokens":20},"model":"gpt-5.6-sol"}}}`, startTime.Add(2*time.Second).UTC().Format(time.RFC3339Nano)),
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, false)
+	if got == nil {
+		t.Fatal("expected usage scanned from the per-task home")
+	}
+	if got.usage.InputTokens != 500 || got.usage.OutputTokens != 20 {
+		t.Errorf("usage = %+v, want input=500 output=20", got.usage)
+	}
+	if got.model != "gpt-5.6-sol" {
+		t.Errorf("model = %q, want gpt-5.6-sol", got.model)
+	}
+}
+
+func TestScanCodexSessionUsageSubtractsResumeBaseline(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	threadID := "resumed-thread"
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(taskHome, "sessions", "2026", "07", "13")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+	content := strings.Join([]string{
+		`{"timestamp":"2026-07-13T00:00:00.000Z","type":"turn_context","payload":{"model":"gpt-5.6-sol"}}`,
+		`{"timestamp":"2026-07-13T00:00:05.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":700,"output_tokens":50,"reasoning_output_tokens":10},"model":"gpt-5.6-sol"}}}`,
+		`{"timestamp":"2026-07-13T00:00:11.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1300,"cached_input_tokens":900,"output_tokens":70,"reasoning_output_tokens":15},"model":"gpt-5.6-sol"}}}`,
+		`{"timestamp":"2026-07-13T00:00:12.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1800,"cached_input_tokens":1400,"output_tokens":100,"reasoning_output_tokens":25},"model":"gpt-5.6-sol"}}}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, true)
+	if got == nil {
+		t.Fatal("expected usage")
+	}
+	// total_token_usage is cumulative for the resumed Codex session. This task
+	// should report only the delta after startTime, not the whole session total.
+	want := TokenUsage{InputTokens: 100, OutputTokens: 50, CacheReadTokens: 700}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want resumed-task delta %+v", got.usage, want)
+	}
+}
+
+func TestParseCodexSessionFileSinceResumeEdgeCases(t *testing.T) {
+	t.Parallel()
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	tests := []struct {
+		name  string
+		lines []string
+		want  TokenUsage
+	}{
+		{
+			name: "final last usage wins over earlier total",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":20}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":7,"output_tokens":3}}}}`,
+			},
+			want: TokenUsage{InputTokens: 7, OutputTokens: 3},
+		},
+		{
+			name: "final total wins over earlier last usage",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":7,"output_tokens":3}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":20}}}}`,
+			},
+			want: TokenUsage{InputTokens: 60, OutputTokens: 10},
+		},
+		{
+			name: "cache alias changes from cache read to cached input",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cache_read_input_tokens":700}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1800,"cached_input_tokens":1400}}}}`,
+			},
+			want: TokenUsage{InputTokens: 100, CacheReadTokens: 700},
+		},
+		{
+			name: "cache alias changes from cached input to cache read",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":700}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1800,"cache_read_input_tokens":1400}}}}`,
+			},
+			want: TokenUsage{InputTokens: 100, CacheReadTokens: 700},
+		},
+		{
+			name: "cache write remains separate from plain input",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":300,"cache_write_input_tokens":100}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1250,"cached_input_tokens":380,"cache_write_input_tokens":110}}}}`,
+			},
+			want: TokenUsage{InputTokens: 160, CacheReadTokens: 80, CacheWriteTokens: 10},
+		},
+		{
+			name: "counter reset accumulates every segment",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":50}}}}`,
+				`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":120,"output_tokens":60}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":5}}}}`,
+				`{"timestamp":"2026-07-13T00:00:13Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"output_tokens":70}}}}`,
+			},
+			want: TokenUsage{InputTokens: 170, OutputTokens: 80},
+		},
+		{
+			name: "one counter reset does not reset monotonic fields",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":50}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":120,"output_tokens":5}}}}`,
+			},
+			want: TokenUsage{InputTokens: 20, OutputTokens: 5},
+		},
+		{
+			name: "missing timestamp before boundary is baseline only",
+			lines: []string{
+				`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":25}}}}`,
+			},
+			want: TokenUsage{InputTokens: 60, OutputTokens: 15},
+		},
+		{
+			name: "missing timestamp after boundary remains in delta",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":25}}}}`,
+				`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":180,"output_tokens":30}}}}`,
+			},
+			want: TokenUsage{InputTokens: 80, OutputTokens: 20},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "session.jsonl")
+			content := strings.Join(append(tc.lines, ""), "\n")
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			got := parseCodexSessionFileSince(path, startTime, true)
+			if got == nil {
+				t.Fatal("expected usage")
+			}
+			if got.usage != tc.want {
+				t.Fatalf("usage = %+v, want %+v", got.usage, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseCodexSessionFileSinceAllMissingTimestamps(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	content := `{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+
+	if got := parseCodexSessionFileSince(path, startTime, true); got != nil {
+		t.Fatalf("ambiguous resumed usage = %+v, want nil", got.usage)
+	}
+	got := parseCodexSessionFileSince(path, startTime, false)
+	if got == nil {
+		t.Fatal("fresh rollout should retain timestamp-less usage")
+	}
+	want := TokenUsage{InputTokens: 100, OutputTokens: 10}
+	if got.usage != want {
+		t.Fatalf("fresh usage = %+v, want %+v", got.usage, want)
+	}
+}
+
+func TestScanCodexSessionUsageFindsCrossDayResumeWithCacheOnlyDelta(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	threadID := "cross-day-thread"
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	previousDateDir := filepath.Join(taskHome, "sessions", "2026", "07", "12")
+	if err := os.MkdirAll(previousDateDir, 0o755); err != nil {
+		t.Fatalf("mkdir previous date dir: %v", err)
+	}
+	content := strings.Join([]string{
+		`{"timestamp":"2026-07-12T23:59:59Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":100}}}}`,
+		`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"cached_input_tokens":150}}}}`,
+		"",
+	}, "\n")
+	path := filepath.Join(previousDateDir, "rollout-2026-07-12T23-59-59-"+threadID+".jsonl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+	if err := os.Chtimes(path, startTime.Add(time.Second), startTime.Add(time.Second)); err != nil {
+		t.Fatalf("set session mtime: %v", err)
+	}
+
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, true)
+	if got == nil {
+		t.Fatal("expected cross-day cache-only usage")
+	}
+	want := TokenUsage{CacheReadTokens: 50}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want %+v", got.usage, want)
+	}
+}
+
+func TestScanCodexSessionUsageFollowsLinkedSessionsRoot(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("directory symlink setup requires Windows developer mode")
+	}
+
+	root := t.TempDir()
+	taskHome := filepath.Join(root, "task-home")
+	store := filepath.Join(root, "session-store")
+	threadID := "linked-thread"
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(store, "2026", "07", "12")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir store date dir: %v", err)
+	}
+	if err := os.MkdirAll(taskHome, 0o755); err != nil {
+		t.Fatalf("mkdir task home: %v", err)
+	}
+	if err := os.Symlink(store, filepath.Join(taskHome, "sessions")); err != nil {
+		t.Fatalf("link sessions root: %v", err)
+	}
+
+	content := strings.Join([]string{
+		`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+		`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":25}}}}`,
+		"",
+	}, "\n")
+	path := filepath.Join(dateDir, "rollout-2026-07-12T23-59-59-"+threadID+".jsonl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write linked rollout: %v", err)
+	}
+	if err := os.Chtimes(path, startTime.Add(time.Second), startTime.Add(time.Second)); err != nil {
+		t.Fatalf("set rollout mtime: %v", err)
+	}
+
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, true)
+	if got == nil {
+		t.Fatal("expected usage through linked sessions root")
+	}
+	want := TokenUsage{InputTokens: 60, OutputTokens: 15}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want %+v", got.usage, want)
+	}
+}
+
+func TestScanCodexSessionUsageSelectsCurrentThread(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(taskHome, "sessions", "2026", "07", "13")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+
+	writeRollout := func(threadID string, input int, modTime time.Time) {
+		t.Helper()
+		content := fmt.Sprintf(`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d}}}}`+"\n", input)
+		path := filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl")
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s rollout: %v", threadID, err)
+		}
+		if err := os.Chtimes(path, modTime, modTime); err != nil {
+			t.Fatalf("set %s rollout mtime: %v", threadID, err)
+		}
+	}
+
+	writeRollout("current-thread", 60, startTime.Add(time.Second))
+	writeRollout("newer-subagent-thread", 900, startTime.Add(2*time.Second))
+
+	got := scanCodexSessionUsage(startTime, taskHome, "current-thread", false)
+	if got == nil {
+		t.Fatal("expected current thread usage")
+	}
+	want := TokenUsage{InputTokens: 60}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want current thread %+v", got.usage, want)
+	}
+}
+
+func TestScanCodexSessionUsageUsesSessionMetadataWhenFilenameDrifts(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(taskHome, "sessions", "2026", "07", "13")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+
+	writeRollout := func(filenameID, metadataID string, input int, modTime time.Time) {
+		t.Helper()
+		content := strings.Join([]string{
+			fmt.Sprintf(`{"timestamp":"2026-07-13T00:00:11Z","type":"session_meta","payload":{"id":%q}}`, metadataID),
+			fmt.Sprintf(`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d}}}}`, input),
+			"",
+		}, "\n")
+		path := filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+filenameID+".jsonl")
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s rollout: %v", filenameID, err)
+		}
+		if err := os.Chtimes(path, modTime, modTime); err != nil {
+			t.Fatalf("set %s rollout mtime: %v", filenameID, err)
+		}
+	}
+
+	// The apparent filename match belongs to another thread and must be rejected.
+	writeRollout("current-thread", "other-thread", 900, startTime.Add(2*time.Second))
+	// A future filename format can still be attributed by canonical session_meta.
+	writeRollout("future-filename", "current-thread", 60, startTime.Add(time.Second))
+
+	got := scanCodexSessionUsage(startTime, taskHome, "current-thread", false)
+	if got == nil {
+		t.Fatal("expected current thread usage from session metadata")
+	}
+	want := TokenUsage{InputTokens: 60}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want metadata-owned thread %+v", got.usage, want)
 	}
 }
 
@@ -626,12 +1368,76 @@ func TestCodexRawItemCommandExecution(t *testing.T) {
 	}
 }
 
-func TestCodexRawItemAgentMessageFinalAnswer(t *testing.T) {
+func TestCodexRawItemMCPToolCall(t *testing.T) {
 	t.Parallel()
 
 	c, _, _ := newTestCodexClient(t)
 	c.notificationProtocol = "raw"
-	c.turnStarted = true
+
+	var messages []Message
+	c.onMessage = func(msg Message) {
+		messages = append(messages, msg)
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"mcpToolCall","id":"mcp-1","server":"plugin-exa-search","tool":"web_search_exa","arguments":{"query":"latest Multica news","credentials":{"api_key":"sk-12345678901234567890"}},"status":"inProgress"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"mcpToolCall","id":"mcp-1","server":"plugin-exa-search","tool":"web_search_exa","arguments":{"query":"latest Multica news"},"status":"completed","durationMs":1429,"result":{"content":[{"type":"text","text":"private provider payload"}]}}}}`)
+
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(messages))
+	}
+
+	begin := messages[0]
+	if begin.Type != MessageToolUse || begin.Tool != "web_search_exa" || begin.CallID != "mcp-1" {
+		t.Fatalf("unexpected start message: %+v", begin)
+	}
+	if begin.Input["server"] != "plugin-exa-search" {
+		t.Fatalf("expected MCP server provenance, got %#v", begin.Input)
+	}
+	arguments, ok := begin.Input["arguments"].(map[string]any)
+	if !ok || arguments["query"] != "latest Multica news" {
+		t.Fatalf("expected MCP arguments, got %#v", begin.Input["arguments"])
+	}
+	credentials, ok := arguments["credentials"].(map[string]any)
+	if !ok || credentials["api_key"] != "[REDACTED API KEY]" {
+		t.Fatalf("expected nested MCP secret to be redacted, got %#v", arguments["credentials"])
+	}
+
+	end := messages[1]
+	if end.Type != MessageToolResult || end.Tool != "web_search_exa" || end.CallID != "mcp-1" || end.Status != "completed" {
+		t.Fatalf("unexpected complete message: %+v", end)
+	}
+	if end.Output != "completed\nduration: 1429 ms" {
+		t.Fatalf("unexpected MCP result summary: %q", end.Output)
+	}
+	if strings.Contains(end.Output, "private provider payload") {
+		t.Fatalf("MCP result content leaked into transcript summary: %q", end.Output)
+	}
+}
+
+func TestCodexRawItemMCPToolCallFailureIsSanitized(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"mcpToolCall","id":"mcp-2","server":"plugin-exa-search","tool":"web_search_exa","status":"failed","error":{"message":"Bearer secret-token-value"}}}}`)
+
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	if got := messages[0].Output; got != "failed\nerror: Bearer [REDACTED]" {
+		t.Fatalf("unexpected sanitized MCP failure summary: %q", got)
+	}
+}
+
+func TestCodexRawItemAgentMessageFinalAnswerWaitsForTurnCompleted(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
 
 	var gotText string
 	var turnDone bool
@@ -649,30 +1455,426 @@ func TestCodexRawItemAgentMessageFinalAnswer(t *testing.T) {
 	if gotText != "Done!" {
 		t.Fatalf("expected text 'Done!', got %q", gotText)
 	}
+	if turnDone {
+		t.Fatal("final_answer must not finish the turn")
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed"}}}`)
 	if !turnDone {
-		t.Fatal("expected onTurnDone for final_answer")
+		t.Fatal("turn/completed should finish the turn")
 	}
 }
 
-func TestCodexRawThreadStatusIdle(t *testing.T) {
+func TestCodexRawItemAgentMessageReconciliation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                 string
+		deltas               []string
+		completed            string
+		rejectFirstHandoff   bool
+		wantStream           string
+		wantAuthoritativeOut string
+	}{
+		{
+			name:                 "exact prefix is not duplicated",
+			deltas:               []string{"Hel", "lo"},
+			completed:            "Hello",
+			wantStream:           "Hello",
+			wantAuthoritativeOut: "Hello",
+		},
+		{
+			name:                 "completed fills a missing last delta",
+			deltas:               []string{"Hel"},
+			completed:            "Hello",
+			wantStream:           "Hello",
+			wantAuthoritativeOut: "Hello",
+		},
+		{
+			name:                 "unacknowledged delta is not counted as delivered",
+			deltas:               []string{"Hel"},
+			completed:            "Hello",
+			rejectFirstHandoff:   true,
+			wantStream:           "Hello",
+			wantAuthoritativeOut: "Hello",
+		},
+		{
+			name:                 "mismatch keeps append-only stream without duplicating snapshot",
+			deltas:               []string{"Hx", "llo"},
+			completed:            "Hello",
+			wantStream:           "Hxllo",
+			wantAuthoritativeOut: "Hello",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c, _, _ := newTestCodexClient(t)
+			c.notificationProtocol = "raw"
+
+			var chunks []string
+			var completed string
+			handoffs := 0
+			c.onAgentMessageChunk = func(text string) bool {
+				handoffs++
+				if tt.rejectFirstHandoff && handoffs == 1 {
+					return false
+				}
+				chunks = append(chunks, text)
+				return true
+			}
+			c.onAgentMessage = func(text string) { completed = text }
+
+			for _, delta := range tt.deltas {
+				c.handleLine(fmt.Sprintf(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-1","turnId":"turn-1","itemId":"msg-1","delta":%q}}`, delta))
+			}
+			// item/completed keeps its documented nested item; itemId is flat only
+			// on item/agentMessage/delta.
+			c.handleLine(fmt.Sprintf(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-1","turnId":"turn-1","item":{"type":"agentMessage","id":"msg-1","text":%q}}}`, tt.completed))
+
+			if got := strings.Join(chunks, ""); got != tt.wantStream {
+				t.Fatalf("streamed text = %q, want %q exactly once (chunks=%q)", got, tt.wantStream, chunks)
+			}
+			if completed != tt.wantAuthoritativeOut {
+				t.Fatalf("authoritative output = %q, want %q", completed, tt.wantAuthoritativeOut)
+			}
+		})
+	}
+}
+
+func TestCodexRawAgentMessageBelowAggregationThresholdDefersTailUntilCompleted(t *testing.T) {
 	t.Parallel()
 
 	c, _, _ := newTestCodexClient(t)
 	c.notificationProtocol = "raw"
-	c.turnStarted = true
+	var chunks []string
+	c.onAgentMessageChunk = func(text string) bool {
+		chunks = append(chunks, text)
+		return true
+	}
+	var authoritative string
+	c.onAgentMessage = func(text string) { authoritative = text }
 
-	var turnDone bool
-	c.onTurnDone = func(aborted bool) {
-		turnDone = true
-		if aborted {
-			t.Fatal("expected aborted=false for idle")
+	deltas := []string{"The ", "answer ", "is 42."}
+	completed := strings.Join(deltas, "")
+	if len(completed) >= codexAgentMessageAggregateBytes {
+		t.Fatalf("fixture is %d bytes, want below %d-byte aggregation threshold", len(completed), codexAgentMessageAggregateBytes)
+	}
+	for _, delta := range deltas {
+		c.handleLine(fmt.Sprintf(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-1","turnId":"turn-1","itemId":"msg-1","delta":%q}}`, delta))
+	}
+
+	if len(chunks) != 1 || chunks[0] != deltas[0] {
+		t.Fatalf("chunks before item/completed = %q, want only leading delta %q", chunks, deltas[0])
+	}
+
+	c.handleLine(fmt.Sprintf(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-1","turnId":"turn-1","item":{"type":"agentMessage","id":"msg-1","text":%q}}}`, completed))
+
+	wantTail := strings.Join(deltas[1:], "")
+	if len(chunks) != 2 || chunks[1] != wantTail {
+		t.Fatalf("chunks after item/completed = %q, want leading delta then tail %q exactly once", chunks, wantTail)
+	}
+	if got := strings.Join(chunks, ""); got != completed {
+		t.Fatalf("joined transcript = %q, want %q", got, completed)
+	}
+	if authoritative != completed {
+		t.Fatalf("authoritative output = %q, want %q", authoritative, completed)
+	}
+	c.flushAgentMessageDeltas()
+	if len(chunks) != 2 {
+		t.Fatalf("EOF flush duplicated tail: chunks=%q", chunks)
+	}
+}
+
+func TestCodexRawAgentMessageMismatchRetriesRejectedPendingAtTerminal(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	messages := make(chan Message, 2)
+	c.onAgentMessageChunk = func(text string) bool {
+		return trySend(messages, Message{Type: MessageText, Content: text})
+	}
+	var completed string
+	c.onAgentMessage = func(text string) { completed = text }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"itemId":"msg-1","delta":"Hx"}}`)
+	// Fill the remaining slot after Hx was accepted. The mismatch path's first
+	// attempt to hand off pending "llo" must fail without clearing it.
+	messages <- Message{Type: MessageStatus, Status: "filler"}
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"itemId":"msg-1","delta":"llo"}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg-1","text":"Hello"}}}`)
+
+	stream := c.agentMessageStreams["msg-1"]
+	if stream == nil {
+		t.Fatal("rejected mismatch pending stream was deleted")
+	}
+	if got := stream.pending.String(); got != "llo" {
+		t.Fatalf("rejected mismatch pending = %q, want retained llo", got)
+	}
+	first := <-messages
+	if first.Type != MessageText || first.Content != "Hx" {
+		t.Fatalf("first delivered message = %+v, want Hx", first)
+	}
+
+	// Consuming Hx frees one slot. The terminal flush must retry llo exactly
+	// once, then clear the stream without appending completed="Hello".
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed"}}}`)
+	var tail strings.Builder
+	for len(messages) > 0 {
+		msg := <-messages
+		if msg.Type == MessageText {
+			tail.WriteString(msg.Content)
 		}
 	}
+	c.flushAgentMessageDeltas()
+	if len(messages) != 0 {
+		t.Fatalf("second terminal/EOF flush duplicated text: %+v", <-messages)
+	}
+	if got := first.Content + tail.String(); got != "Hxllo" {
+		t.Fatalf("append-only mismatch transcript = %q, want Hxllo", got)
+	}
+	if completed != "Hello" {
+		t.Fatalf("authoritative completed output = %q, want Hello", completed)
+	}
+	if c.agentMessageStreams["msg-1"] != nil {
+		t.Fatal("mismatch stream remained after successful terminal retry")
+	}
+}
+
+func TestCodexRawAgentMessageBurstDoesNotLoseTextUnderChannelPressure(t *testing.T) {
+	t.Parallel()
+
+	for _, status := range []string{"completed", "interrupted"} {
+		status := status
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			c, _, _ := newTestCodexClient(t)
+			c.notificationProtocol = "raw"
+			messages := make(chan Message, 256)
+			c.onAgentMessageChunk = func(text string) bool {
+				return trySend(messages, Message{Type: MessageText, Content: text})
+			}
+
+			var want strings.Builder
+			for i := 0; i < 300; i++ {
+				delta := fmt.Sprintf("%03d", i)
+				want.WriteString(delta)
+				c.handleLine(fmt.Sprintf(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-1","turnId":"turn-1","itemId":"msg-1","delta":%q}}`, delta))
+			}
+			// There is deliberately no item/completed. A terminal turn must flush
+			// the coalesced tail for both normal and cancellation paths.
+			c.handleLine(fmt.Sprintf(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-1","turn":{"id":"turn-1","status":%q}}}`, status))
+
+			var got strings.Builder
+			for len(messages) > 0 {
+				got.WriteString((<-messages).Content)
+			}
+			if got.String() != want.String() {
+				t.Fatalf("delivered %d/%d bytes under pressure", got.Len(), want.Len())
+			}
+		})
+	}
+}
+
+func TestCodexRawAgentMessageDeltaFraming(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	text := make(chan string, 1)
+	c.onAgentMessageChunk = func(chunk string) bool {
+		text <- chunk
+		return true
+	}
+
+	reader, writer := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		scanner := newAgentStreamScanner(reader)
+		for scanner.Scan() {
+			c.handleLine(strings.TrimSpace(scanner.Text()))
+		}
+		c.flushAgentMessageDeltas()
+		done <- scanner.Err()
+	}()
+
+	first := `{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-1","turnId":"turn-1","itemId":"msg-1","delta":"Hel`
+	if _, err := writer.Write([]byte(first)); err != nil {
+		t.Fatalf("write first JSON fragment: %v", err)
+	}
+	select {
+	case leaked := <-text:
+		t.Fatalf("incomplete JSON bytes leaked as text: %q", leaked)
+	default:
+	}
+	if _, err := writer.Write([]byte("lo\"}}\n")); err != nil {
+		t.Fatalf("write final JSON fragment: %v", err)
+	}
+	if got := <-text; got != "Hello" {
+		t.Fatalf("complete JSON delta = %q, want Hello", got)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close pipe: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("scan split JSON: %v", err)
+	}
+}
+
+func TestCodexRawAgentMessageMalformedAndIncompleteEOFDoNotLeak(t *testing.T) {
+	t.Parallel()
+
+	for _, input := range []string{
+		"not-json\n",
+		`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"itemId":"msg-1","delta":"must not leak"}`,
+	} {
+		input := input
+		t.Run(input[:min(len(input), 8)], func(t *testing.T) {
+			t.Parallel()
+			c, _, _ := newTestCodexClient(t)
+			c.notificationProtocol = "raw"
+			var chunks []string
+			c.onAgentMessageChunk = func(chunk string) bool {
+				chunks = append(chunks, chunk)
+				return true
+			}
+			scanner := newAgentStreamScanner(strings.NewReader(input))
+			for scanner.Scan() {
+				c.handleLine(scanner.Text())
+			}
+			c.flushAgentMessageDeltas()
+			if err := scanner.Err(); err != nil {
+				t.Fatalf("scan malformed fixture: %v", err)
+			}
+			if len(chunks) != 0 {
+				t.Fatalf("malformed/incomplete JSON leaked text: %q", chunks)
+			}
+		})
+	}
+}
+
+func TestCodexRawAgentMessageAbnormalEOFFlushesCompleteDeltas(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	var chunks []string
+	c.onAgentMessageChunk = func(chunk string) bool {
+		chunks = append(chunks, chunk)
+		return true
+	}
+	input := "" +
+		`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"itemId":"msg-1","delta":"Hel"}}` + "\n" +
+		`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"itemId":"msg-1","delta":"lo"}}` + "\n"
+	scanner := newAgentStreamScanner(strings.NewReader(input))
+	for scanner.Scan() {
+		c.handleLine(scanner.Text())
+	}
+	c.flushAgentMessageDeltas()
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan EOF fixture: %v", err)
+	}
+	if got := strings.Join(chunks, ""); got != "Hello" {
+		t.Fatalf("abnormal EOF delivered %q, want Hello", got)
+	}
+}
+
+// TestCodexDeliverableOutputExcludesNarration pins Result.Output to the turn's
+// deliverable. Codex used to concatenate every agent message, so a tool-using
+// run shipped its intermediate narration to Slack and Lark along with the answer
+// (GH #6006). The wiring mirrors executeOnce: onAgentMessage tracks the last
+// authoritative completed message, onFinalAnswer captures the phase-labelled one, and
+// codexDeliverableOutput picks between them.
+func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
+	t.Parallel()
+
+	const (
+		rawNarration   = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m1","text":"Let me check the logs."}}}`
+		rawFinal       = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m2","text":"The retry loop is the cause.","phase":"final_answer"}}}`
+		legacyFirst    = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"Let me check the logs."}}}`
+		legacySecond   = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"The retry loop is the cause."}}}`
+		wantDeliverabl = "The retry loop is the cause."
+	)
+
+	cases := []struct {
+		name     string
+		protocol string
+		lines    []string
+		want     string
+	}{
+		{
+			name:     "raw protocol keeps only the labelled final answer",
+			protocol: "raw",
+			lines:    []string{rawNarration, rawFinal},
+			want:     wantDeliverabl,
+		},
+		{
+			name:     "raw protocol without a final_answer falls back to the last message",
+			protocol: "raw",
+			lines:    []string{rawNarration, `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m2","text":"The retry loop is the cause."}}}`},
+			want:     wantDeliverabl,
+		},
+		{
+			name:     "legacy protocol carries no phase and falls back to the last message",
+			protocol: "legacy",
+			lines:    []string{legacyFirst, legacySecond},
+			want:     wantDeliverabl,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			c, _, _ := newTestCodexClient(t)
+			c.notificationProtocol = tc.protocol
+
+			var finalAnswer, lastAgentMessage string
+			var streamed []string
+			c.onMessage = func(msg Message) {
+				if msg.Type == MessageText {
+					streamed = append(streamed, msg.Content)
+				}
+			}
+			c.onAgentMessage = func(text string) { lastAgentMessage = text }
+			c.onFinalAnswer = func(text string) { finalAnswer = text }
+
+			for _, line := range tc.lines {
+				c.handleLine(line)
+			}
+
+			if got := codexDeliverableOutput(finalAnswer, lastAgentMessage); got != tc.want {
+				t.Fatalf("Result.Output = %q, want %q", got, tc.want)
+			}
+			// Narrowing delivery must not narrow the transcript: both messages
+			// still stream to the timeline the Multica UI renders.
+			if len(streamed) != 2 || streamed[0] != "Let me check the logs." {
+				t.Fatalf("expected both agent messages streamed, got %q", streamed)
+			}
+		})
+	}
+}
+
+func TestCodexRawThreadStatusIdleWaitsForTurnCompleted(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+
+	var turnDone bool
+	c.onTurnDone = func(aborted bool) { turnDone = true }
 
 	c.handleLine(`{"jsonrpc":"2.0","method":"thread/status/changed","params":{"status":{"type":"idle"}}}`)
 
+	if turnDone {
+		t.Fatal("idle status must not finish the turn")
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed"}}}`)
 	if !turnDone {
-		t.Fatal("expected onTurnDone for idle status")
+		t.Fatal("turn/completed should finish the turn")
 	}
 }
 
@@ -704,6 +1906,58 @@ func TestCodexRawTurnCompletedFromSubagentIgnored(t *testing.T) {
 	}
 }
 
+func TestCodexTurnNotificationGateIgnoresSubagentTurnStarted(t *testing.T) {
+	t.Parallel()
+
+	gate := &codexTurnNotificationGate{}
+	gate.arm()
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.threadID = "thr_main"
+	c.acceptNotification = gate.accept
+
+	var (
+		gotText        string
+		doneCount      int
+		discardedCount int
+	)
+	c.onMessage = func(msg Message) {
+		if msg.Type == MessageText {
+			gotText = msg.Content
+		}
+	}
+	c.onTurnDone = func(aborted bool) {
+		doneCount++
+	}
+	c.onDiscardedNotification = func(string, map[string]any) {
+		discardedCount++
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr_main","turn":{"id":"turn-main"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr_subagent","turn":{"id":"turn-sub"}}}`)
+	if turnID := c.activeTurnID(); turnID != "turn-main" {
+		t.Fatalf("subagent turn/started replaced client turnID: got %q", turnID)
+	}
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr_main","turnId":"turn-main","item":{"type":"agentMessage","id":"msg-main","text":"Main answer"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr_main","turn":{"id":"turn-main","status":"completed"}}}`)
+
+	if gate.turnID != "turn-main" {
+		t.Fatalf("subagent turn/started replaced gate turnID: got %q", gate.turnID)
+	}
+	if turnID := c.activeTurnID(); turnID != "" {
+		t.Fatalf("completed main turn remained supplement-ready: active turn ID %q", turnID)
+	}
+	if gotText != "Main answer" {
+		t.Fatalf("main turn text was lost after subagent start: got %q", gotText)
+	}
+	if doneCount != 1 {
+		t.Fatalf("main turn completion count = %d, want 1", doneCount)
+	}
+	if discardedCount != 0 {
+		t.Fatalf("subagent notification should be filtered before the gate, discarded callback count = %d", discardedCount)
+	}
+}
+
 // Regression for #1181: subagent agentMessage/final_answer must not
 // trigger turn completion or leak text into the main output stream.
 func TestCodexRawItemAgentMessageFinalAnswerFromSubagentIgnored(t *testing.T) {
@@ -712,15 +1966,18 @@ func TestCodexRawItemAgentMessageFinalAnswerFromSubagentIgnored(t *testing.T) {
 	c, _, _ := newTestCodexClient(t)
 	c.notificationProtocol = "raw"
 	c.threadID = "thr_main"
-	c.turnStarted = true
 
 	var messages []Message
 	var doneCount int
+	var finalAnswer string
 	c.onMessage = func(msg Message) {
 		messages = append(messages, msg)
 	}
 	c.onTurnDone = func(aborted bool) {
 		doneCount++
+	}
+	c.onFinalAnswer = func(text string) {
+		finalAnswer = text
 	}
 
 	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr_subagent","item":{"type":"agentMessage","id":"sub-1","text":"subagent leakage","phase":"final_answer"}}}`)
@@ -730,6 +1987,12 @@ func TestCodexRawItemAgentMessageFinalAnswerFromSubagentIgnored(t *testing.T) {
 	}
 	if doneCount != 0 {
 		t.Fatalf("subagent final_answer must not trigger onTurnDone, got %d calls", doneCount)
+	}
+	// onFinalAnswer selects Result.Output, so a subagent reaching it would ship
+	// another thread's answer as this run's reply. It rides the same
+	// isNotificationFromOtherThread guard; pin that it stays behind it.
+	if finalAnswer != "" {
+		t.Fatalf("subagent final_answer must not become the deliverable, got %q", finalAnswer)
 	}
 }
 
@@ -760,6 +2023,80 @@ func TestCodexCloseAllPending(t *testing.T) {
 	defer c.mu.Unlock()
 	if len(c.pending) != 0 {
 		t.Fatalf("expected empty pending map, got %d", len(c.pending))
+	}
+}
+
+func TestCodexRequestFailsImmediatelyAfterProcessExit(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	c.markProcessExited(errCodexProcessExited)
+
+	_, err := c.request(context.Background(), "thread/start", map[string]any{})
+	if !errors.Is(err, errCodexProcessExited) {
+		t.Fatalf("request error = %v, want errCodexProcessExited", err)
+	}
+	if lines := fs.Lines(); len(lines) != 0 {
+		t.Fatalf("request should not write after process exit, wrote %d lines", len(lines))
+	}
+}
+
+func TestCodexRequestPrefersContextCancellationOverProcessExit(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	processExitMarked := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			if len(fs.Lines()) >= 1 {
+				cancel()
+				c.markProcessExited(errCodexProcessExited)
+				processExitMarked <- nil
+				return
+			}
+			if time.Now().After(deadline) {
+				processExitMarked <- fmt.Errorf("timed out waiting for request write")
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+
+	_, err := c.request(ctx, "thread/start", map[string]any{})
+	if markErr := <-processExitMarked; markErr != nil {
+		t.Fatal(markErr)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("request error = %v, want context.Canceled", err)
+	}
+}
+
+func TestCodexRequestPrefersReadyResponseOverProcessExit(t *testing.T) {
+	t.Parallel()
+
+	var c *codexClient
+	fs := &fakeStdinWithHook{}
+	fs.afterWrite = func() {
+		c.handleLine(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`)
+		c.markProcessExited(errCodexProcessExited)
+	}
+	c = &codexClient{
+		cfg:         Config{Logger: slog.Default()},
+		stdin:       fs,
+		pending:     make(map[int]*pendingRPC),
+		processDone: make(chan struct{}),
+	}
+
+	result, err := c.request(context.Background(), "thread/start", map[string]any{})
+	if err != nil {
+		t.Fatalf("request error = %v, want ready response", err)
+	}
+	if string(result) != `{"ok":true}` {
+		t.Fatalf("response = %s, want {\"ok\":true}", result)
 	}
 }
 
@@ -1046,6 +2383,74 @@ func TestCodexStartOrResumeThreadResumesPriorThread(t *testing.T) {
 	}
 }
 
+// codexRuntimeBriefCanary stands in for the Multica runtime brief the daemon
+// would inline if developerInstructions were ever wired back up.
+const codexRuntimeBriefCanary = "MULTICA-RUNTIME-BRIEF-CANARY"
+
+// assertNoDeveloperInstructions pins the MUL-5392 contract: Codex loads the
+// per-task AGENTS.md from the thread's cwd, so the daemon never inlines the
+// runtime brief here. The field must still be sent — the app-server treats a
+// missing key differently from an explicit null — but always as null.
+func assertNoDeveloperInstructions(t *testing.T, params map[string]any) {
+	t.Helper()
+	got, ok := params["developerInstructions"]
+	if !ok {
+		t.Error("developerInstructions must be sent explicitly, even when null")
+		return
+	}
+	if got != nil {
+		t.Errorf("developerInstructions = %v, want null: the runtime brief is delivered via the workdir AGENTS.md, not inline (MUL-5392)", got)
+	}
+}
+
+func TestCodexThreadStartNeverInlinesSystemPrompt(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method:   "thread/start",
+			result:   json.RawMessage(`{"thread":{"id":"thr_fresh"}}`),
+			assertFn: assertNoDeveloperInstructions,
+		},
+	})
+	defer wait()
+
+	// SystemPrompt is set deliberately; it must not reach the app-server.
+	if _, _, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{Cwd: "/work", SystemPrompt: codexRuntimeBriefCanary},
+		slog.Default(),
+	); err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+}
+
+func TestCodexThreadResumeNeverInlinesSystemPrompt(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method:   "thread/resume",
+			result:   json.RawMessage(`{"thread":{"id":"thr_prior"}}`),
+			assertFn: assertNoDeveloperInstructions,
+		},
+	})
+	defer wait()
+
+	// SystemPrompt is set deliberately; it must not reach the app-server.
+	if _, _, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_prior", SystemPrompt: codexRuntimeBriefCanary},
+		slog.Default(),
+	); err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+}
+
 func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
 	t.Parallel()
 
@@ -1077,6 +2482,124 @@ func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
 	}
 	if resumed {
 		t.Error("expected resumed=false after falling back to thread/start")
+	}
+}
+
+// codexTurnInput carries the user-visible disclosure when a resume was expected
+// but the backend landed on a fresh thread. Paired with
+// TestCodexStartOrResumeThreadFallsBackOnResumeError (which proves the live
+// thread/resume RPC returns resumed=false on a recoverable error), this proves
+// the real fallback surfaces the notice while a successful resume does not
+// (MUL-4424).
+func TestCodexTurnInput(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "do the task"
+	// Stands in for whatever the daemon computed for this surface; the backend
+	// only carries it, so the exact wording is the caller's business.
+	const chatNotice = "[System notice] the previous conversation context could not be restored.\n\n"
+	text := func(input []map[string]any) string {
+		if len(input) != 1 {
+			t.Fatalf("expected a single input block, got %d", len(input))
+		}
+		s, _ := input[0]["text"].(string)
+		return s
+	}
+
+	// Resume expected but the backend fell back to a fresh thread → disclose,
+	// and the original prompt must still be delivered.
+	fallback := text(codexTurnInput(prompt, true, false, chatNotice))
+	if !strings.Contains(fallback, "previous conversation context could not be restored") {
+		t.Errorf("expected continuity notice on resume fallback, got:\n%s", fallback)
+	}
+	if !strings.HasSuffix(fallback, prompt) {
+		t.Errorf("prompt must survive alongside the notice, got:\n%s", fallback)
+	}
+
+	// Successful resume, or an ordinary fresh start with no resume expected →
+	// no notice, prompt delivered verbatim.
+	if got := text(codexTurnInput(prompt, true, true, chatNotice)); got != prompt {
+		t.Errorf("successful resume must not add a notice, got:\n%s", got)
+	}
+	if got := text(codexTurnInput(prompt, false, false, chatNotice)); got != prompt {
+		t.Errorf("fresh start must not add a notice, got:\n%s", got)
+	}
+}
+
+// TestCodexTurnInputNoticeMatchesWhatTheSurfaceLost is the MUL-5722 half of the
+// continuity notice. An issue's discussion survives in its comments, which the
+// agent re-reads every turn, so ordering it to announce "the previous context
+// was lost" tells the user the discussion is gone when none of it is. The
+// notice still has to fire — the agent must not silently assume continuity —
+// but on that surface it informs the agent instead of scripting an apology.
+func TestCodexTurnInputSuppressesNoticeWhenCallerAlreadyDisclosed(t *testing.T) {
+	t.Parallel()
+
+	// An empty notice is how the caller says "the prompt already carries it".
+	// Honouring that is the backend's half of the no-duplicate guarantee: on
+	// the daemon's fresh-session retry the prompt already ends with the
+	// continuity notice, and before MUL-5722 this path prepended a second copy
+	// of the same paragraph into the same turn.
+	const prompt = "do the task"
+	input := codexTurnInput(prompt, true, false, "")
+	got, _ := input[0]["text"].(string)
+	if got != prompt {
+		t.Fatalf("empty notice must leave the prompt untouched, got:\n%s", got)
+	}
+}
+
+func TestCodexStartOrResumeThreadDoesNotFallBackAfterProcessExit(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	processExitMarked := make(chan error, 1)
+	go func() {
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			if len(fs.Lines()) >= 1 {
+				c.markProcessExited(errCodexProcessExited)
+				processExitMarked <- nil
+				return
+			}
+			if time.Now().After(deadline) {
+				processExitMarked <- fmt.Errorf("timed out waiting for thread/resume request")
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	threadID, resumed, err := c.startOrResumeThread(
+		ctx,
+		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_stale"},
+		slog.Default(),
+	)
+	if markErr := <-processExitMarked; markErr != nil {
+		t.Fatal(markErr)
+	}
+	if !errors.Is(err, errCodexProcessExited) {
+		t.Fatalf("startOrResumeThread error = %v, want errCodexProcessExited", err)
+	}
+	if threadID != "" {
+		t.Fatalf("threadID = %q, want empty", threadID)
+	}
+	if resumed {
+		t.Fatal("resumed should be false on process exit")
+	}
+	lines := fs.Lines()
+	if len(lines) != 1 {
+		t.Fatalf("expected only thread/resume request, got %d lines: %v", len(lines), lines)
+	}
+	var req struct {
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	if req.Method != "thread/resume" {
+		t.Fatalf("request method = %q, want thread/resume", req.Method)
 	}
 }
 
@@ -1205,6 +2728,56 @@ func TestStderrTailEmptyWhenNothingWritten(t *testing.T) {
 	}
 }
 
+func TestStderrTailReturnsValidUTF8(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input []byte
+		max   int
+		want  string
+	}{
+		{
+			name:  "leading rune split by tail bound",
+			input: []byte("aa界bc"),
+			max:   4,
+			want:  "bc",
+		},
+		{
+			name:  "trailing incomplete rune",
+			input: append([]byte("ok"), []byte("界")[:2]...),
+			max:   16,
+			want:  "ok",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var sink bytes.Buffer
+			s := newStderrTail(&sink, tt.max)
+			if _, err := s.Write(tt.input); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+
+			if !bytes.Equal(sink.Bytes(), tt.input) {
+				t.Errorf("inner sink: got %q, want raw bytes %q", sink.Bytes(), tt.input)
+			}
+			got := s.Tail()
+			if !utf8.ValidString(got) {
+				t.Errorf("tail is not valid UTF-8: %q", got)
+			}
+			if len(got) > tt.max {
+				t.Errorf("tail exceeds bound: got %d bytes (%q), max %d", len(got), got, tt.max)
+			}
+			if got != tt.want {
+				t.Errorf("tail: got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCodexExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -1259,45 +2832,353 @@ func TestCodexExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 	}
 }
 
-func TestCodexExecuteTimesOutWhenTurnStopsAfterToolResult(t *testing.T) {
-	t.Parallel()
+func TestResolveCodexHandshakeTimeouts(t *testing.T) {
+	tests := []struct {
+		name       string
+		opts       ExecOptions
+		wantBase   time.Duration
+		wantThread time.Duration
+	}{
+		{
+			name:       "separate defaults",
+			wantBase:   defaultCodexHandshakeTimeout,
+			wantThread: defaultCodexThreadHandshakeTimeout,
+		},
+		{
+			name:       "legacy global override remains global",
+			opts:       ExecOptions{HandshakeTimeout: 42 * time.Second},
+			wantBase:   42 * time.Second,
+			wantThread: 42 * time.Second,
+		},
+		{
+			name: "dedicated thread override wins",
+			opts: ExecOptions{
+				HandshakeTimeout:       30 * time.Second,
+				ThreadHandshakeTimeout: 75 * time.Second,
+			},
+			wantBase:   30 * time.Second,
+			wantThread: 75 * time.Second,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			base, thread := resolveCodexHandshakeTimeouts(tc.opts)
+			if base != tc.wantBase || thread != tc.wantThread {
+				t.Fatalf("timeouts = (%s, %s), want (%s, %s)", base, thread, tc.wantBase, tc.wantThread)
+			}
+		})
+	}
+}
+
+func TestCodexHandshakeTimeoutFor(t *testing.T) {
+	c := &codexClient{
+		handshakeTimeout:       30 * time.Second,
+		threadHandshakeTimeout: 60 * time.Second,
+	}
+	for _, method := range []string{"thread/start", "thread/resume"} {
+		if got := c.handshakeTimeoutFor(method); got != 60*time.Second {
+			t.Fatalf("handshakeTimeoutFor(%q) = %s, want 60s", method, got)
+		}
+	}
+	for _, method := range []string{"initialize", "thread/name/set", "turn/start"} {
+		if got := c.handshakeTimeoutFor(method); got != 30*time.Second {
+			t.Fatalf("handshakeTimeoutFor(%q) = %s, want 30s", method, got)
+		}
+	}
+	c.threadHandshakeTimeout = 0
+	for _, method := range []string{"thread/start", "thread/resume"} {
+		if got := c.handshakeTimeoutFor(method); got != 30*time.Second {
+			t.Fatalf("zero thread timeout handshakeTimeoutFor(%q) = %s, want base 30s fallback", method, got)
+		}
+	}
+}
+
+func TestCodexExecuteThreadStartResponseRequiresThreadID(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
-
 	fakePath := writeFakeCodexAppServer(t, ""+
 		`read line`+"\n"+
 		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
 		`read line`+"\n"+
 		`read line`+"\n"+
-		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-stale"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{}}}'`+"\n")
+
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: logger})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "failed" || !strings.Contains(result.Error, "returned no thread ID") {
+		t.Fatalf("expected missing thread ID failure, got %+v", result)
+	}
+
+	phaseCounts := map[string]int{}
+	for _, entry := range parseJSONLogEntries(t, logs.String()) {
+		if phase, ok := entry["phase"].(string); ok {
+			phaseCounts[phase]++
+		}
+	}
+	if phaseCounts["thread_start_sent"] != 1 || phaseCounts["thread_start_failure"] != 1 {
+		t.Fatalf("expected one sent and one failure phase, got %v", phaseCounts)
+	}
+	if phaseCounts["thread_start_response"] != 0 {
+		t.Fatalf("invalid thread/start response emitted success phase: %v", phaseCounts)
+	}
+}
+
+func parseJSONLogEntries(t *testing.T, raw string) []map[string]any {
+	t.Helper()
+	var entries []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		if line == "" {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("parse log entry: %v: %q", err, line)
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+func findCodexLifecyclePhase(t *testing.T, entries []map[string]any, phase string) map[string]any {
+	t.Helper()
+	for _, entry := range entries {
+		if entry["msg"] == "codex lifecycle" && entry["phase"] == phase {
+			return entry
+		}
+	}
+	t.Fatalf("missing codex lifecycle phase %q in %v", phase, entries)
+	return nil
+}
+
+func TestCodexExecuteDoesNotSerializeConcurrentLaunches(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`sleep 0.4`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-concurrent"}}}'`+"\n"+
 		`read line`+"\n"+
 		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
-		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-stale","turn":{"id":"turn-stale"}}}'`+"\n"+
-		`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-stale","item":{"type":"commandExecution","id":"cmd-1","command":"git status"}}}'`+"\n"+
-		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-stale","item":{"type":"commandExecution","id":"cmd-1","aggregatedOutput":"clean"}}}'`+"\n"+
-		`sleep 5`+"\n")
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-concurrent","turn":{"id":"turn-1","status":"completed"}}}'`+"\n")
 
-	result := executeFakeCodex(t, fakePath, ExecOptions{
-		Timeout:                   5 * time.Second,
-		SemanticInactivityTimeout: 100 * time.Millisecond,
-	})
-	if result.Status != "timeout" {
-		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	maxActiveCodexLaunchesObserved.Store(0)
+	results := make(chan Result, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			backend, _ := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+			session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+			if err != nil {
+				results <- Result{Status: "failed", Error: err.Error()}
+				return
+			}
+			go func() {
+				for range session.Messages {
+				}
+			}()
+			results <- <-session.Result
+		}()
 	}
-	if !strings.Contains(result.Error, "semantic inactivity") {
-		t.Fatalf("expected semantic inactivity error, got %q", result.Error)
+	for i := 0; i < 2; i++ {
+		if result := <-results; result.Status != "completed" {
+			t.Fatalf("concurrent result failed: %+v", result)
+		}
 	}
-	if result.SessionID != "thr-stale" {
-		t.Fatalf("expected session id to be preserved, got %q", result.SessionID)
+	if got := maxActiveCodexLaunchesObserved.Load(); got < 2 {
+		t.Fatalf("launches appear serialized: max active=%d", got)
+	}
+}
+
+func TestSanitizeCodexDiagnosticRedactsSecrets(t *testing.T) {
+	got := sanitizeCodexDiagnostic("Authorization: Bearer bearer-token\n" +
+		`{"token":"json-token","auth": "json-auth", "api_key":"json-key"}` +
+		"\npassword=plain-secret\x00")
+	for _, secret := range []string{"bearer-token", "json-token", "json-auth", "json-key", "plain-secret"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("sanitized diagnostic leaked %q: %q", secret, got)
+		}
+	}
+}
+
+func TestClassifyCodexStartupStderr(t *testing.T) {
+	tests := []struct {
+		name   string
+		stderr string
+		want   codexStderrClassification
+	}{
+		{
+			name:   "model refresh timeout",
+			stderr: "failed to refresh available models: timeout waiting for child process to exit",
+			want:   codexStderrClassification{modelRefreshFailure: 1, modelRefreshTimeout: 1},
+		},
+		{
+			name:   "model refresh non-timeout failure",
+			stderr: "failed to refresh available models: stream disconnected before completion",
+			want:   codexStderrClassification{modelRefreshFailure: 1},
+		},
+		{
+			name:   "mcp init transport",
+			stderr: "mcp_manager_init transport error: channel closed",
+			want:   codexStderrClassification{mcpInitTransport: 1},
+		},
+		{
+			name: "bare timeout",
+			want: codexStderrClassification{bareTimeout: 1},
+		},
+		{
+			name: "non-timeout error is not bare timeout",
+			want: codexStderrClassification{},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			timedOut := i != len(tests)-1
+			if got := classifyCodexStartupStderr(tc.stderr, timedOut); got != tc.want {
+				t.Fatalf("classification=%+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCodexExecuteRedactsStderrFromResultAndLogs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	const (
+		bearer     = "bearer-secret-value"
+		jsonToken  = "json-secret-value"
+		standalone = "sk-abcdefghijklmnopqrstuvwxyz123456"
+	)
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`echo 'Authorization: Bearer `+bearer+`' >&2`+"\n"+
+		`echo '{"token":"`+jsonToken+`"}' >&2`+"\n"+
+		`echo '`+standalone+`' >&2`+"\n"+
+		`exit 2`+"\n")
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: logger})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	combined := result.Error + "\n" + logs.String()
+	for _, secret := range []string{bearer, jsonToken, standalone} {
+		if strings.Contains(combined, secret) {
+			t.Fatalf("stderr secret leaked: %q in %q", secret, combined)
+		}
+	}
+}
+
+func TestCodexExecuteDoesNotProbeVersionBeforeInitialize(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-fast-init"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-fast-init","turn":{"id":"turn-1","status":"completed"}}}'`+"\n")
+	data, err := os.ReadFile(fakePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = bytes.Replace(data, []byte(`echo "codex-cli 0.0.0-test"; exit 0`), []byte(`sleep 2; echo "codex-cli 0.0.0-test"; exit 0`), 1)
+	writeTestExecutable(t, fakePath, data)
+
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default(), CodexVersion: "cached-test-version"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("Execute blocked on version probe before initialize: %s", elapsed)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	if result := <-session.Result; result.Status != "completed" {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestCodexExecuteRetriesAfterSignaledProcessIsReaped(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux signal/reap semantics regression")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	defer codexGracefulShutdownTimeoutNanos.Store(0)
+	countPath := filepath.Join(t.TempDir(), "launch-count")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`count=0; test -f `+countPath+` && count=$(cat `+countPath+`)`+"\n"+
+		`count=$((count + 1)); echo "$count" > `+countPath+"\n"+
+		`read line`+"\n"+
+		`if test "$count" -eq 1; then exec sleep 30; fi`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-signaled"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-signaled","turn":{"id":"turn-1","status":"completed"}}}'`+"\n")
+	// The handshake budget is spent twice here, and the two spends pull in
+	// opposite directions: the first attempt only reaches the signal/reap path
+	// by burning the whole budget, while the RETRY has to answer initialize
+	// inside the same budget from a cold `sh` spawn. Tens of milliseconds are
+	// enough for the second spend only on an idle machine. Under the
+	// contention this package sees in CI (`-race`, `-p 2`, neighbours spawning
+	// process trees) that cold spawn measured 100-309ms, so the old 50ms
+	// budget timed the retry out too and the test reported the retry as
+	// missing. Two seconds keeps the margin wide; the cost is one deliberate
+	// 2s wait on a Linux-only test. (MUL-7271 follow-up)
+	result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 10 * time.Second, HandshakeTimeout: 2 * time.Second})
+	if result.Status != "completed" {
+		t.Fatalf("signaled/reaped first attempt should retry: %+v", result)
 	}
 }
 
 func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
-	t.Parallel()
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	// The model catalog signal below makes both attempts retry safe, so this
+	// exercises the exhausted-retry path and pays two cleanup windows.
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
 
 	fakePath := writeFakeCodexAppServer(t, ""+
 		`read line`+"\n"+
@@ -1309,7 +3190,7 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-stuck","turn":{"id":"turn-stuck"}}}'`+"\n"+
 		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
-		`sleep 5`+"\n")
+		`sleep 2`+"\n")
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
 		Timeout:                   5 * time.Second,
@@ -1324,9 +3205,9 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 		"turn-stuck",
 		`model="default(empty)"`,
 		`codex_version="codex-cli 0.0.0-test"`,
-		"model catalog refresh timed out",
+		"Codex could not load its model catalog",
 		"codex stderr:",
-		codexModelCatalogRefreshTimeoutSignal,
+		codexModelCatalogRefreshFailureSignal,
 	} {
 		if !strings.Contains(result.Error, want) {
 			t.Fatalf("expected error to contain %q, got %q", want, result.Error)
@@ -1334,7 +3215,194 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 	}
 }
 
-func TestCodexExecuteFirstTurnRetryErrorDoesNotSatisfyProgress(t *testing.T) {
+// TestCodexExecuteFirstTurnOverrideAboveSemanticIsTruncated pins the competing-
+// timer contract for MULTICA_CODEX_FIRST_TURN_TIMEOUT (GH #3262 / #5959): the
+// first status:running arms the semantic-inactivity timer and the first-turn
+// timer together, so a first-turn override ABOVE the semantic timeout cannot
+// extend the first-item wait — the semantic timer fires first. That also
+// reclassifies the failure as semantic inactivity, so the model-catalog startup
+// retry (GH #3291) does NOT run even though the catalog-refresh-failure signal is
+// present in stderr. The resolver tests cannot observe this; this drives the real
+// run loop. It is the inverse of TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics,
+// where the first-turn timer is the smaller of the two and wins.
+func TestCodexExecuteFirstTurnOverrideAboveSemanticIsTruncated(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`STATE="$(dirname "$0")/attempts"`+"\n"+
+		`ATTEMPT=$(cat "$STATE" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$STATE"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-trunc"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-trunc","turn":{"id":"turn-trunc"}}}'`+"\n"+
+		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`sleep 2`+"\n")
+
+	// First-turn override (5s) sits far above the semantic timeout (100ms).
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                    5 * time.Second,
+		SemanticInactivityTimeout:  100 * time.Millisecond,
+		FirstTurnNoProgressTimeout: 5 * time.Second,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	// The semantic timer won the race: the failure must be classified as semantic
+	// inactivity, not first-turn no-progress. The override did not extend the wait.
+	if !strings.Contains(result.Error, CodexSemanticInactivityMarker) {
+		t.Fatalf("expected semantic-inactivity classification, got %q", result.Error)
+	}
+	if strings.Contains(result.Error, CodexFirstTurnNoProgressMarker) {
+		t.Fatalf("first-turn override above the semantic timeout must not win the race: %q", result.Error)
+	}
+	// The catalog-refresh-failure signal is present, but because the failure is
+	// classified as semantic (not first-turn) the #3291 startup retry is skipped:
+	// exactly one attempt runs.
+	assertCodexAttemptCount(t, fakePath, "1")
+}
+
+func TestCodexExecuteFirstItemWaitLifecycle(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+	// The helper budget owns the complete subtest, including a possible
+	// two-attempt retry chain, while ExecOptions.Timeout applies per attempt.
+	// Keep the helper deadline away from race-instrumented subprocess jitter.
+	const firstItemWaitTestBudget = 20 * time.Second
+
+	t.Run("successful progress emits a latency sample", func(t *testing.T) {
+		fakePath := writeFakeCodexAppServer(t, ""+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+			`read line`+"\n"+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-first-item-ok"}}}'`+"\n"+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+			`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-first-item-ok","turn":{"id":"turn-first-item-ok"}}}'`+"\n"+
+			`sleep 0.03`+"\n"+
+			`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-first-item-ok","item":{"type":"agentMessage","id":"msg-1","text":"Done"}}}'`+"\n"+
+			`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-first-item-ok","turn":{"id":"turn-first-item-ok","status":"completed"}}}'`+"\n")
+
+		var logs bytes.Buffer
+		result, _ := executeFakeCodexCollectingMessagesWithConfig(t, fakePath, Config{
+			Logger:        slog.New(slog.NewJSONHandler(&logs, nil)),
+			TaskID:        "task-first-item-ok",
+			RuntimeID:     "runtime-first-item-ok",
+			DaemonVersion: "daemon-test",
+			CodexVersion:  "codex-test",
+		}, ExecOptions{
+			Timeout:                   5 * time.Second,
+			SemanticInactivityTimeout: 5 * time.Second,
+		}, firstItemWaitTestBudget)
+		if result.Status != "completed" {
+			t.Fatalf("expected completed, got %+v", result)
+		}
+
+		entry := findCodexLifecyclePhase(t, parseJSONLogEntries(t, logs.String()), "first_item_wait")
+		for key, want := range map[string]any{
+			"task_id":                     "task-first-item-ok",
+			"runtime_id":                  "runtime-first-item-ok",
+			"attempt":                     float64(1),
+			"active_launches":             float64(1),
+			"method":                      "turn/start",
+			"thread_id":                   "thr-first-item-ok",
+			"turn_id":                     "turn-first-item-ok",
+			"outcome":                     "progress",
+			"timeout":                     "4s",
+			"semantic_inactivity_timeout": "5s",
+			"codex_version":               "codex-test",
+			"daemon_version":              "daemon-test",
+			"cleanup_confirmed":           true,
+			"reaped":                      true,
+			"retry_safe":                  false,
+		} {
+			if got := entry[key]; got != want {
+				t.Fatalf("entry[%s]=%v, want %v; entry=%v", key, got, want, entry)
+			}
+		}
+		if latency, ok := entry["latency_ms"].(float64); !ok || latency <= 0 {
+			t.Fatalf("missing/invalid latency_ms: %v", entry)
+		}
+		if entry["stderr_model_refresh_failure_count"] != float64(0) ||
+			entry["stderr_model_refresh_timeout_count"] != float64(0) ||
+			entry["stderr_mcp_init_transport_count"] != float64(0) ||
+			entry["stderr_bare_timeout_count"] != float64(0) {
+			t.Fatalf("successful wait has unexpected stderr classification: %v", entry)
+		}
+	})
+
+	t.Run("catalog failure is classified on every timed-out attempt", func(t *testing.T) {
+		fakePath := writeFakeCodexAppServer(t, ""+
+			`DIR="$(dirname "$0")"`+"\n"+
+			`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+			`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+			`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+			`read line`+"\n"+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-first-item-timeout"}}}'`+"\n"+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+			`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-first-item-timeout","turn":{"id":"turn-first-item-timeout"}}}'`+"\n"+
+			`echo 'ERROR codex_models_manager::manager: failed to refresh available models: stream disconnected before completion' >&2`+"\n"+
+			`sleep 2`+"\n")
+
+		var logs bytes.Buffer
+		result, _ := executeFakeCodexCollectingMessagesWithConfig(t, fakePath, Config{
+			Logger:        slog.New(slog.NewJSONHandler(&logs, nil)),
+			TaskID:        "task-first-item-timeout",
+			RuntimeID:     "runtime-first-item-timeout",
+			DaemonVersion: "daemon-test",
+			CodexVersion:  "codex-test",
+		}, ExecOptions{
+			Timeout:                   5 * time.Second,
+			SemanticInactivityTimeout: 100 * time.Millisecond,
+		}, firstItemWaitTestBudget)
+		if result.Status != "timeout" {
+			t.Fatalf("expected timeout after the bounded retry, got %+v", result)
+		}
+		assertCodexAttemptCount(t, fakePath, "2")
+
+		var waits []map[string]any
+		for _, entry := range parseJSONLogEntries(t, logs.String()) {
+			if entry["msg"] == "codex lifecycle" && entry["phase"] == "first_item_wait" {
+				waits = append(waits, entry)
+			}
+		}
+		if len(waits) != 2 {
+			t.Fatalf("expected one first-item sample per attempt, got %d: %v", len(waits), waits)
+		}
+		for i, entry := range waits {
+			if entry["attempt"] != float64(i+1) || entry["outcome"] != "no_progress_timeout" ||
+				entry["retry_safe"] != true || entry["cleanup_confirmed"] != true {
+				t.Fatalf("unexpected timeout lifecycle entry: %v", entry)
+			}
+			if entry["stderr_model_refresh_failure_count"] != float64(1) ||
+				entry["stderr_model_refresh_timeout_count"] != float64(0) ||
+				entry["stderr_mcp_init_transport_count"] != float64(0) ||
+				entry["stderr_bare_timeout_count"] != float64(0) {
+				t.Fatalf("catalog failure was misclassified: %v", entry)
+			}
+		}
+	})
+}
+
+func TestCodexExecuteFailsWhenProcessExitsDuringActiveTurn(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
@@ -1345,26 +3413,609 @@ func TestCodexExecuteFirstTurnRetryErrorDoesNotSatisfyProgress(t *testing.T) {
 		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
 		`read line`+"\n"+
 		`read line`+"\n"+
-		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-retry"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-crash"}}}'`+"\n"+
 		`read line`+"\n"+
 		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
-		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-retry","turn":{"id":"turn-retry"}}}'`+"\n"+
-		`echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"thr-retry","error":{"message":"temporary reconnect"},"willRetry":true}}'`+"\n"+
-		`sleep 5`+"\n")
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-crash","turn":{"id":"turn-crash"}}}'`+"\n"+
+		`echo 'fatal: app-server crashed after turn/start' >&2`+"\n"+
+		`exit 2`+"\n")
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
 		Timeout:                   5 * time.Second,
-		SemanticInactivityTimeout: 200 * time.Millisecond,
+		SemanticInactivityTimeout: 5 * time.Second,
 	})
-	if result.Status != "timeout" {
-		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	if result.Status != "failed" {
+		t.Fatalf("expected failed, got status=%q error=%q", result.Status, result.Error)
 	}
-	if !strings.Contains(result.Error, CodexFirstTurnNoProgressMarker) {
-		t.Fatalf("expected first-turn no-progress error, got %q", result.Error)
+	if !strings.Contains(result.Error, "codex process exited") {
+		t.Fatalf("expected process-exit error, got %q", result.Error)
 	}
-	if strings.Contains(result.Error, CodexSemanticInactivityMarker) {
-		t.Fatalf("retrying error should not demote first-turn timeout to semantic inactivity, got %q", result.Error)
+	if !strings.Contains(result.Error, "fatal: app-server crashed after turn/start") {
+		t.Fatalf("expected stderr tail in error, got %q", result.Error)
 	}
+	if strings.Contains(result.Error, "timeout") {
+		t.Fatalf("process exit should fail fast instead of timeout, got %q", result.Error)
+	}
+}
+func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos
+	// globally, so running concurrently with other codex Execute tests
+	// would shrink their grace window too and risk flakes.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Regression for GH#4520. On `thread/resume`, the fake codex emits a
+	// single stdout line larger than agentStreamMaxLineBytes, which trips
+	// "bufio.Scanner: token too long" in the reader goroutine.
+	// Pre-fix, drainAndWait then hung forever on cmd.Wait(): the reader had
+	// stopped consuming the pipe, codex was blocked writing into a full
+	// stdout buffer, stdin.Close never unblocked codex, and the deferred
+	// cancel() ran AFTER drainAndWait in the LIFO defer order. The failed
+	// Result therefore never reached the outer daemon and its
+	// fresh-session fallback never fired.
+	//
+	// Post-fix, drainAndWait does graceful-then-cancel in two bounded phases
+	// (see codex.go), and cmd.Cancel group-SIGKILLs the codex tree so the
+	// process exits even when stdin EOF isn't sufficient. We verify the
+	// failed Result reaches the caller within a small bound and carries an
+	// empty SessionID so the outer daemon's PriorSessionID-with-empty-
+	// SessionID fallback can retry a fresh session.
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		// Emit a single line past the cap with no embedded newline. printf
+		// avoids the trailing newline echo would add; head + tr generates
+		// the bulk payload in pure POSIX shell. The size is derived from
+		// the production constant so raising the cap cannot silently turn
+		// this regression test into a no-op.
+		`printf '{"jsonrpc":"2.0","id":2,"result":{"big":"'`+"\n"+
+		fmt.Sprintf(`head -c %d /dev/zero | tr '\0' 'x'`, agentStreamMaxLineBytes+1024*1024)+"\n"+
+		`printf '"}}\n'`+"\n"+
+		// Hold the process open without reading more stdin. Pre-fix this
+		// hangs cmd.Wait() because codex never sees stdin EOF (it isn't
+		// in a read syscall) and the stdout pipe stays full. Cleanup must
+		// fall back to the group-SIGKILL path to make progress.
+		`sleep 30`+"\n")
+
+	start := time.Now()
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Cwd:                       t.TempDir(),
+		ResumeSessionID:           "thr_prior",
+		Timeout:                   30 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+	elapsed := time.Since(start)
+
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed, got %q (error=%q, elapsed=%s)",
+			result.Status, result.Error, elapsed)
+	}
+	if !strings.Contains(result.Error, "token too long") {
+		t.Fatalf("expected error to surface scanner overflow cause, got %q",
+			result.Error)
+	}
+	// Empty SessionID is the contract the outer daemon fallback relies on
+	// (daemon.go: result.Status == "failed" && PriorSessionID != "" &&
+	// result.SessionID == "" → retry fresh). Verify thread/resume failure
+	// preserves that contract.
+	if result.SessionID != "" {
+		t.Fatalf("expected empty SessionID so outer fallback retries fresh, got %q",
+			result.SessionID)
+	}
+	// MUL-5722 layer 2: an unreadable resume response is a rejected resume,
+	// and this flag is the positive evidence shouldRetryWithFreshSession
+	// requires. Without it #5715's gate stops the retry dead (codex is in
+	// neither the ResumeRejected-capable nor the undetectable set), and the
+	// next turn resumes the same oversized thread forever.
+	if !result.ResumeRejected {
+		t.Fatalf("expected ResumeRejected=true so the daemon retries on a fresh session; error=%q",
+			result.Error)
+	}
+	// MUL-5722 layer 3: in-process the backend detects the overflow from the
+	// typed bufio.ErrTooLong, but the daemon classifies it at report time from
+	// the error STRING alone. If the wording produced by startOrResumeThread
+	// ever drifts from what the predicate matches, the resume pointer silently
+	// stops being retired and the permanent-stall bug returns.
+	if !CodexResumeOverflowError(result.Error) {
+		t.Fatalf("predicate missed the error the backend actually produced: %q", result.Error)
+	}
+	// With the shrunken 100 ms grace, pushing the oversized line plus two
+	// bounded phases and the SIGKILL round-trip should complete in ~1 s.
+	// Pre-fix this test would block until the executeFakeCodex 10 s outer
+	// timeout and fail with "timeout waiting for result". We assert a much
+	// tighter bound so a future regression cannot quietly slip back up to 10 s.
+	if elapsed > 5*time.Second {
+		t.Fatalf("cleanup took %s, expected < 5s with shrunken grace (bug regressed?)",
+			elapsed)
+	}
+}
+
+func TestCodexExecuteDoesNotClaimResumeRejectedWhenOverflowIsNotAResume(t *testing.T) {
+	// Not t.Parallel(): mutates codexGracefulShutdownTimeoutNanos globally,
+	// same as its sibling above.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// The overflow guard is scoped to resumes on purpose. A run with no prior
+	// session that overflows on the thread/start response is a different
+	// failure: there is no session pointer to drop, so reporting a resume
+	// rejection would send the daemon looking for a cure that does not apply
+	// — and ResumeRejected is documented as positive evidence, not a generic
+	// "something went wrong" flag.
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		// Same oversized single line, but answering thread/start rather than
+		// thread/resume because the caller passed no ResumeSessionID.
+		`printf '{"jsonrpc":"2.0","id":2,"result":{"big":"'`+"\n"+
+		fmt.Sprintf(`head -c %d /dev/zero | tr '\0' 'x'`, agentStreamMaxLineBytes+1024*1024)+"\n"+
+		`printf '"}}\n'`+"\n"+
+		`sleep 30`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Cwd:                       t.TempDir(),
+		Timeout:                   30 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "token too long") {
+		t.Fatalf("expected error to surface scanner overflow cause, got %q", result.Error)
+	}
+	if result.ResumeRejected {
+		t.Fatalf("expected ResumeRejected=false without a prior session, error=%q", result.Error)
+	}
+	if CodexResumeOverflowError(result.Error) {
+		t.Fatalf("predicate claimed a resume overflow for a thread/start overflow: %q", result.Error)
+	}
+}
+
+func TestCodexExecuteSurfacesUnsupportedServerRequestOnInterruptedTurn(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-request"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-request","turn":{"id":"turn-request"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":99,"method":"item/tool/call","params":{"threadId":"thr-request","turnId":"turn-request","callId":"call-1","namespace":null,"tool":"custom","arguments":{}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-request","turn":{"id":"turn-request","status":"interrupted"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+	if result.Status != "aborted" {
+		t.Fatalf("expected aborted, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "unsupported codex app-server request: item/tool/call") {
+		t.Fatalf("expected unsupported request error, got %q", result.Error)
+	}
+}
+
+func TestCodexExecuteCancellationInterruptsTurnAndPreservesUsage(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	tempDir := t.TempDir()
+	startedPath := filepath.Join(tempDir, "turn-started")
+	interruptPath := filepath.Join(tempDir, "interrupt-request")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-cancel-usage"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-cancel-usage","turn":{"id":"turn-cancel-usage"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-cancel-usage","turnId":"turn-cancel-usage","itemId":"msg-partial","delta":"partial before cancel"}}'`+"\n"+
+		`echo started > `+startedPath+"\n"+
+		`read line`+"\n"+
+		`printf '%s\n' "$line" > `+interruptPath+"\n"+
+		`echo '{"jsonrpc":"2.0","id":4,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"thr-cancel-usage","turnId":"turn-cancel-usage","tokenUsage":{"total":{"inputTokens":100,"cachedInputTokens":30,"outputTokens":10,"reasoningOutputTokens":0,"totalTokens":110},"last":{"inputTokens":100,"cachedInputTokens":30,"outputTokens":10,"reasoningOutputTokens":0,"totalTokens":110},"modelContextWindow":200000}}}'`+"\n"+
+		// Real Codex v2 turn/completed has no usage field; accounting arrives in
+		// the separate thread/tokenUsage/updated notification above.
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-cancel-usage","turn":{"id":"turn-cancel-usage","status":"interrupted"}}}'`+"\n")
+
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new codex backend: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{
+		Model:                     "gpt-test",
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var messagesMu sync.Mutex
+	var messages []Message
+	messagesDone := make(chan struct{})
+	go func() {
+		defer close(messagesDone)
+		for message := range session.Messages {
+			messagesMu.Lock()
+			messages = append(messages, message)
+			messagesMu.Unlock()
+		}
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(startedPath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timeout waiting for fake Codex turn to start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "aborted" {
+			t.Fatalf("status = %q, want aborted (error=%q)", result.Status, result.Error)
+		}
+		usage, ok := result.Usage["gpt-test"]
+		if !ok {
+			t.Fatalf("cancelled turn usage missing: %+v", result.Usage)
+		}
+		if usage.InputTokens != 70 || usage.CacheReadTokens != 30 || usage.OutputTokens != 10 {
+			t.Fatalf("cancelled turn usage = %+v, want input=70 cache_read=30 output=10", usage)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for cancelled Codex result")
+	}
+	<-messagesDone
+	messagesMu.Lock()
+	var partial string
+	for _, message := range messages {
+		if message.Type == MessageText {
+			partial += message.Content
+		}
+	}
+	messagesMu.Unlock()
+	if partial != "partial before cancel" {
+		t.Fatalf("cancelled turn streamed text = %q, want its pre-cancel delta preserved", partial)
+	}
+
+	rawInterrupt, err := os.ReadFile(interruptPath)
+	if err != nil {
+		t.Fatalf("read interrupt request: %v", err)
+	}
+	var interruptRequest map[string]any
+	if err := json.Unmarshal(rawInterrupt, &interruptRequest); err != nil {
+		t.Fatalf("parse interrupt request: %v: %q", err, rawInterrupt)
+	}
+	if interruptRequest["method"] != "turn/interrupt" {
+		t.Fatalf("method = %v, want turn/interrupt", interruptRequest["method"])
+	}
+	params, _ := interruptRequest["params"].(map[string]any)
+	if params["threadId"] != "thr-cancel-usage" || params["turnId"] != "turn-cancel-usage" {
+		t.Fatalf("interrupt params = %+v", params)
+	}
+}
+
+func TestCodexThreadTokenUsageUpdatedDropsResumeReplay(t *testing.T) {
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.threadID = "thread-resumed"
+	gate := &codexTurnNotificationGate{}
+	gate.arm()
+
+	// Codex deliberately emits the restored historical usage after the
+	// thread/resume response. The gate is armed by then, but no current turn ID
+	// exists yet, so this prior-turn snapshot must not be charged.
+	replay := codexThreadTokenUsageParams(
+		"thread-resumed", "turn-previous",
+		map[string]any{"inputTokens": float64(10_000), "outputTokens": float64(500)},
+		map[string]any{"inputTokens": float64(400), "outputTokens": float64(20)},
+	)
+	if !gate.accept("thread/tokenUsage/updated", replay) {
+		t.Fatal("armed notification gate should expose the resume replay to usage attribution")
+	}
+	c.handleRawNotification("thread/tokenUsage/updated", replay)
+	c.handleRawNotification("turn/started", map[string]any{
+		"threadId": "thread-resumed",
+		"turn":     map[string]any{"id": "turn-current"},
+	})
+	c.handleRawNotification("thread/tokenUsage/updated", codexThreadTokenUsageParams(
+		"thread-resumed", "turn-current",
+		map[string]any{"inputTokens": float64(10_100), "cachedInputTokens": float64(30), "outputTokens": float64(510)},
+		map[string]any{"inputTokens": float64(100), "cachedInputTokens": float64(30), "outputTokens": float64(10)},
+	))
+
+	c.usageMu.Lock()
+	got := c.usage
+	c.usageMu.Unlock()
+	want := (TokenUsage{InputTokens: 70, OutputTokens: 10, CacheReadTokens: 30})
+	if got != want {
+		t.Fatalf("usage after resume replay = %+v, want current turn only %+v", got, want)
+	}
+}
+
+func TestCodexThreadTokenUsageUpdatedDeduplicatesSnapshot(t *testing.T) {
+	c := &codexClient{}
+	c.setActiveTurnID("turn-current")
+	params := codexThreadTokenUsageParams(
+		"thread-1", "turn-current",
+		map[string]any{"inputTokens": float64(10_100), "cachedInputTokens": float64(30), "outputTokens": float64(510)},
+		map[string]any{"inputTokens": float64(100), "cachedInputTokens": float64(30), "outputTokens": float64(10)},
+	)
+	c.updateThreadTokenUsage(params)
+	c.updateThreadTokenUsage(params)
+
+	c.usageMu.Lock()
+	got := c.usage
+	c.usageMu.Unlock()
+	want := (TokenUsage{InputTokens: 70, OutputTokens: 10, CacheReadTokens: 30})
+	if got != want {
+		t.Fatalf("usage after duplicate snapshot = %+v, want %+v", got, want)
+	}
+}
+
+func TestCodexTokenUsageArrivingAfterTurnCompleted(t *testing.T) {
+	c, _, _ := newTestCodexClient(t)
+	c.threadID = "thread-1"
+	c.setActiveTurnID("turn-current")
+	c.handleRawNotification("turn/completed", map[string]any{
+		"threadId": "thread-1", "turn": map[string]any{"id": "turn-current", "status": "completed"},
+	})
+	if c.activeTurnID() != "" {
+		t.Fatal("completed turn still accepts supplements")
+	}
+	for _, turn := range []string{"turn-old", "turn-current", "turn-current"} {
+		c.handleRawNotification("thread/tokenUsage/updated", codexThreadTokenUsageParams(
+			"thread-1", turn, map[string]any{"inputTokens": float64(110)},
+			map[string]any{"inputTokens": float64(100), "cachedInputTokens": float64(30), "outputTokens": float64(10)},
+		))
+	}
+	if want := (TokenUsage{InputTokens: 70, CacheReadTokens: 30, OutputTokens: 10}); c.usage != want {
+		t.Fatalf("late usage = %+v, want %+v", c.usage, want)
+	}
+}
+
+func TestCodexThreadTokenUsageUpdatedAccumulatesCurrentTurnResponses(t *testing.T) {
+	c := &codexClient{}
+	c.setActiveTurnID("turn-current")
+	c.updateThreadTokenUsage(codexThreadTokenUsageParams(
+		"thread-1", "turn-current",
+		// The cumulative total includes resumed history and is deliberately much
+		// larger than the first response being charged to this task.
+		map[string]any{
+			"inputTokens": float64(10_000), "cachedInputTokens": float64(2_000),
+			"outputTokens": float64(100), "reasoningOutputTokens": float64(10),
+			"cacheWriteInputTokens": float64(20),
+		},
+		map[string]any{
+			"inputTokens": float64(100), "cachedInputTokens": float64(30),
+			"outputTokens": float64(10), "reasoningOutputTokens": float64(2),
+			"cacheWriteInputTokens": float64(4),
+		},
+	))
+	c.updateThreadTokenUsage(codexThreadTokenUsageParams(
+		"thread-1", "turn-current",
+		map[string]any{
+			"inputTokens": float64(10_150), "cachedInputTokens": float64(2_050),
+			"outputTokens": float64(120), "reasoningOutputTokens": float64(13),
+			"cacheWriteInputTokens": float64(26),
+		},
+		map[string]any{
+			"inputTokens": float64(150), "cachedInputTokens": float64(50),
+			"outputTokens": float64(20), "reasoningOutputTokens": float64(3),
+			"cacheWriteInputTokens": float64(6),
+		},
+	))
+
+	c.usageMu.Lock()
+	got := c.usage
+	c.usageMu.Unlock()
+	want := (TokenUsage{InputTokens: 160, OutputTokens: 30, CacheReadTokens: 80, CacheWriteTokens: 10})
+	if got != want {
+		t.Fatalf("multi-response usage = %+v, want %+v", got, want)
+	}
+}
+
+func codexThreadTokenUsageParams(threadID, turnID string, total, last map[string]any) map[string]any {
+	return map[string]any{
+		"threadId": threadID,
+		"turnId":   turnID,
+		"tokenUsage": map[string]any{
+			"total": total,
+			"last":  last,
+		},
+	}
+}
+
+func TestCodexCancellationDuringInitializeStopsProcessImmediately(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only; Windows ownership is covered in proc_windows_test.go")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(3 * time.Second))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	marker := filepath.Join(t.TempDir(), "initialize-read")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo ready > `+marker+"\n"+
+		`sleep 30`+"\n")
+
+	result, elapsed := cancelFakeCodexAfterMarker(t, fakePath, marker, ExecOptions{})
+	if result.Status != "failed" || !strings.Contains(result.Error, "initialize failed") {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("initialize cancellation took %s; process cleanup should be immediate", elapsed)
+	}
+}
+
+func TestCodexCancellationBeforeTurnStartedStopsProcessImmediately(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only; Windows ownership is covered in proc_windows_test.go")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(3 * time.Second))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	marker := filepath.Join(t.TempDir(), "turn-start-read")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-race"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo ready > `+marker+"\n"+
+		`sleep 30`+"\n")
+
+	result, elapsed := cancelFakeCodexAfterMarker(t, fakePath, marker, ExecOptions{})
+	if result.Status != "aborted" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("pre-turn/started cancellation took %s; process cleanup should be immediate", elapsed)
+	}
+}
+
+func TestCodexNonResponsiveInterruptStopsProcessAtConfiguredDeadline(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only; Windows ownership is covered in proc_windows_test.go")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(3 * time.Second))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	tempDir := t.TempDir()
+	marker := filepath.Join(tempDir, "turn-started")
+	interrupt := filepath.Join(tempDir, "interrupt-read")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-stuck"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-stuck","turn":{"id":"turn-stuck"}}}'`+"\n"+
+		`echo ready > `+marker+"\n"+
+		`read line`+"\n"+
+		`echo interrupt > `+interrupt+"\n"+
+		`sleep 30`+"\n")
+
+	result, elapsed := cancelFakeCodexAfterMarker(t, fakePath, marker, ExecOptions{TurnInterruptTimeout: 150 * time.Millisecond})
+	if result.Status != "aborted" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if _, err := os.Stat(interrupt); err != nil {
+		t.Fatalf("turn/interrupt was not sent: %v", err)
+	}
+	if elapsed < 100*time.Millisecond || elapsed > time.Second {
+		t.Fatalf("interrupt cleanup took %s; want configured wait followed by immediate process stop", elapsed)
+	}
+}
+
+func TestCodexInterruptCompletesNearConfiguredDeadline(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	marker := filepath.Join(t.TempDir(), "turn-started")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-near-deadline"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-near-deadline","turn":{"id":"turn-near-deadline"}}}'`+"\n"+
+		`echo ready > `+marker+"\n"+
+		`read line`+"\n"+
+		`sleep 0.12`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":4,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"thr-near-deadline","turnId":"turn-near-deadline","tokenUsage":{"total":{"inputTokens":12,"cachedInputTokens":2,"outputTokens":3,"reasoningOutputTokens":0,"totalTokens":15},"last":{"inputTokens":12,"cachedInputTokens":2,"outputTokens":3,"reasoningOutputTokens":0,"totalTokens":15},"modelContextWindow":200000}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-near-deadline","turn":{"id":"turn-near-deadline","status":"interrupted"}}}'`+"\n")
+
+	result, elapsed := cancelFakeCodexAfterMarker(t, fakePath, marker, ExecOptions{
+		Model:                "gpt-test",
+		TurnInterruptTimeout: 250 * time.Millisecond,
+	})
+	if result.Status != "aborted" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if elapsed < 100*time.Millisecond || elapsed >= 250*time.Millisecond {
+		t.Fatalf("interrupt completed in %s, want a near-deadline success below 250ms", elapsed)
+	}
+	if got := result.Usage["gpt-test"]; got.InputTokens != 10 || got.CacheReadTokens != 2 || got.OutputTokens != 3 {
+		t.Fatalf("near-deadline usage = %+v", got)
+	}
+}
+
+func cancelFakeCodexAfterMarker(t *testing.T, fakePath, marker string, opts ExecOptions) (Result, time.Duration) {
+	t.Helper()
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new codex backend: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	session, err := backend.Execute(ctx, "prompt", opts)
+	if err != nil {
+		cancel()
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	waitForCodexMarker(t, marker, 5*time.Second)
+	started := time.Now()
+	cancel()
+	select {
+	case result := <-session.Result:
+		return result, time.Since(started)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for cancelled Codex result")
+		return Result{}, 0
+	}
+}
+
+func waitForCodexMarker(t *testing.T, path string, within time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", path)
 }
 
 func TestCodexExecuteLegacyFirstTurnMessageSatisfiesProgress(t *testing.T) {
@@ -1450,7 +4101,7 @@ func TestCodexExecuteSemanticInactivityAllowsContinuousDeltaProgress(t *testing.
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-delta","turn":{"id":"turn-delta"}}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"item/commandExecution/outputDelta","params":{"threadId":"thr-delta","item":{"type":"commandExecution","id":"cmd-1"},"delta":"line 1\n"}}'`+"\n"+
 		`sleep 0.05`+"\n"+
-		`echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-delta","item":{"type":"agentMessage","id":"msg-1"},"delta":"thinking"}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-delta","turnId":"turn-delta","itemId":"msg-1","delta":"thinking"}}'`+"\n"+
 		`sleep 0.05`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"item/fileChange/outputDelta","params":{"threadId":"thr-delta","item":{"type":"fileChange","id":"patch-1"},"delta":"patched"}}'`+"\n"+
 		`sleep 0.05`+"\n"+
@@ -1464,6 +4115,108 @@ func TestCodexExecuteSemanticInactivityAllowsContinuousDeltaProgress(t *testing.
 	})
 	if result.Status != "completed" {
 		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+}
+
+// TestCodexExecuteStreamsCompleteJSONDeltaBeforeItemCompleted is the latency
+// regression for chat: app-server emits agent text as JSON-RPC delta events
+// before the authoritative item/completed snapshot. A JSON event may itself be
+// split across pipe writes, so no text is visible until its newline-delimited
+// frame is complete; once complete, however, the adapter must not wait for the
+// later item/completed event.
+func TestCodexExecuteStreamsCompleteJSONDeltaBeforeItemCompleted(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-stream"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-stream","turn":{"id":"turn-stream"}}}'`+"\n"+
+		`printf '%s' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-stream","turnId":"turn-stream","itemId":"msg-1","delta":"Hel'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`printf '%s\n' 'lo"}}'`+"\n"+
+		`sleep 0.8`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-stream","turnId":"turn-stream","item":{"type":"agentMessage","id":"msg-1","text":"Hello","phase":"final_answer"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-stream","turn":{"id":"turn-stream","status":"completed"}}}'`+"\n")
+
+	cfg := Config{ExecutablePath: fakePath, Logger: slog.Default()}
+	backend, err := New("codex", cfg)
+	if err != nil {
+		t.Fatalf("new codex backend: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	var started time.Time
+	for {
+		select {
+		case msg, ok := <-session.Messages:
+			if !ok {
+				t.Fatal("message stream closed before the delta became visible")
+			}
+			if msg.Type == MessageStatus && msg.Status == "running" {
+				started = time.Now()
+				continue
+			}
+			if msg.Type != MessageText {
+				continue
+			}
+			if started.IsZero() {
+				t.Fatal("text delta arrived before turn/started")
+			}
+			if msg.Content != "Hello" {
+				t.Fatalf("first streamed text = %q, want Hello", msg.Content)
+			}
+			elapsed := time.Since(started)
+			t.Logf("complete delta JSON became visible %s after turn/started", elapsed.Round(time.Millisecond))
+			if elapsed >= 500*time.Millisecond {
+				t.Fatalf("first streamed text arrived after %s; adapter waited for item/completed", elapsed.Round(time.Millisecond))
+			}
+			return
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for streamed text")
+		}
+	}
+}
+
+func TestCodexExecutePhaseLessCompletedMessageRemainsAuthoritative(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-output"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-output","turn":{"id":"turn-output"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-output","turnId":"turn-output","itemId":"msg-1","delta":"Hel"}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-output","turnId":"turn-output","item":{"type":"agentMessage","id":"msg-1","text":"Hello"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-output","turn":{"id":"turn-output","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed (error=%q)", result.Status, result.Error)
+	}
+	if result.Output != "Hello" {
+		t.Fatalf("phase-less Result.Output = %q, want authoritative Hello", result.Output)
 	}
 }
 
@@ -1497,6 +4250,337 @@ func TestCodexExecuteSemanticInactivityDoesNotAffectNormalTurnCompletion(t *test
 	}
 }
 
+// TestCodexExecuteRetriesAfterModelCatalogRefreshFailure covers the MUL-5110
+// hot path: Codex accepts the turn, fails to load its model catalog, and never
+// emits an item. The daemon must retry once and surface the second attempt.
+func TestCodexExecuteRetriesAfterModelCatalogRefreshFailure(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	// The fixture counts invocations next to itself so attempt 1 can stall and
+	// attempt 2 can succeed on a different thread.
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`STATE="$(dirname "$0")/attempts"`+"\n"+
+		`ATTEMPT=$(cat "$STATE" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$STATE"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`if [ "$ATTEMPT" = "1" ]; then`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-cold"}}}'`+"\n"+
+		`  read line`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-cold","turn":{"id":"turn-cold"}}}'`+"\n"+
+		`  echo 'ERROR codex_models_manager::manager: failed to refresh available models: stream disconnected before completion' >&2`+"\n"+
+		`  sleep 2`+"\n"+
+		`else`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-warm"}}}'`+"\n"+
+		`  read line`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-warm","turn":{"id":"turn-warm"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-warm","item":{"type":"agentMessage","id":"msg-1","text":"Recovered"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-warm","turn":{"id":"turn-warm","status":"completed"}}}'`+"\n"+
+		`fi`+"\n")
+
+	result, messages := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
+		Timeout:                   20 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	}, 20*time.Second)
+
+	if result.Status != "completed" {
+		t.Fatalf("expected the retry to complete, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "Recovered" {
+		t.Fatalf("expected output from the second attempt, got %q", result.Output)
+	}
+	if result.SessionID != "thr-warm" {
+		t.Fatalf("expected the surviving thread id, got %q", result.SessionID)
+	}
+	// The discarded attempt must not pin the resume pointer to a thread that
+	// never produced a turn.
+	for _, msg := range messages {
+		if msg.SessionID == "thr-cold" {
+			t.Fatalf("discarded attempt leaked a session pin for thr-cold: %+v", msg)
+		}
+	}
+}
+
+// TestCodexExecuteRetryAfterCatalogFailureStartsFreshThreadForResume covers the
+// resume case: the stalled attempt already reached turn/started on the prior
+// thread, so the retry must not resume it again. It starts a fresh thread and
+// keeps ResumeExpected so the lost context is disclosed to the agent.
+func TestCodexExecuteRetryAfterCatalogFailureStartsFreshThreadForResume(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	// Each invocation records the JSON-RPC lines it received so the test can
+	// assert which thread RPC the retry used.
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
+		`LOG="$DIR/rpc-$ATTEMPT.log"`+"\n"+
+		`read line; echo "$line" >> "$LOG"`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line; echo "$line" >> "$LOG"`+"\n"+
+		`read line; echo "$line" >> "$LOG"`+"\n"+
+		`if [ "$ATTEMPT" = "1" ]; then`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-prior"}}}'`+"\n"+
+		`  read line; echo "$line" >> "$LOG"`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-prior","turn":{"id":"turn-prior"}}}'`+"\n"+
+		`  echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`  sleep 2`+"\n"+
+		`else`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-fresh"}}}'`+"\n"+
+		`  read line; echo "$line" >> "$LOG"`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-fresh","turn":{"id":"turn-fresh"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-fresh","item":{"type":"agentMessage","id":"msg-1","text":"Fresh"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-fresh","turn":{"id":"turn-fresh","status":"completed"}}}'`+"\n"+
+		`fi`+"\n")
+
+	result, _ := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
+		ResumeSessionID: "thr-prior",
+		ResumeExpected:  true,
+		// Supplied by the daemon since MUL-5722: this package no longer holds
+		// the wording, because only the caller knows whether the surface's
+		// conversation can still be read.
+		ResumeContinuityNotice:    "[System notice] the previous conversation context could not be restored.\n\n",
+		Timeout:                   20 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	}, 20*time.Second)
+
+	if result.Status != "completed" {
+		t.Fatalf("expected the retry to complete, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.SessionID != "thr-fresh" {
+		t.Fatalf("expected the retry to land on a fresh thread, got %q", result.SessionID)
+	}
+	dir := filepath.Dir(fakePath)
+	first, err := os.ReadFile(filepath.Join(dir, "rpc-1.log"))
+	if err != nil {
+		t.Fatalf("read first attempt rpc log: %v", err)
+	}
+	if !strings.Contains(string(first), "thread/resume") {
+		t.Fatalf("expected the first attempt to resume the prior thread, got %s", first)
+	}
+	second, err := os.ReadFile(filepath.Join(dir, "rpc-2.log"))
+	if err != nil {
+		t.Fatalf("read second attempt rpc log: %v", err)
+	}
+	if strings.Contains(string(second), "thread/resume") {
+		t.Fatalf("retry must not resume the stalled thread, got %s", second)
+	}
+	if !strings.Contains(string(second), "thread/start") {
+		t.Fatalf("expected the retry to start a fresh thread, got %s", second)
+	}
+	// ResumeExpected survives the cleared pointer, so the caller's notice is
+	// still prepended and the agent is told the prior context is gone.
+	if !strings.Contains(string(second), "previous conversation context could not be restored") {
+		t.Fatalf("expected the retry input to carry the continuity notice, got %s", second)
+	}
+}
+
+// TestCodexExecuteDoesNotRetryCatalogFailureWhenCleanupUnconfirmed keeps the
+// retry gate tied to a reaped process tree: a surviving app-server would race
+// the second attempt, so an unconfirmed cleanup must not retry.
+func TestCodexExecuteDoesNotRetryCatalogFailureWhenCleanupUnconfirmed(t *testing.T) {
+	// Not t.Parallel(): this test mutates package-level Codex overrides.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+	codexCleanupConfirmationOverride.Store(-1)
+	t.Cleanup(func() { codexCleanupConfirmationOverride.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-unreaped"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-unreaped","turn":{"id":"turn-unreaped"}}}'`+"\n"+
+		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`sleep 2`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	assertCodexAttemptCount(t, fakePath, "1")
+}
+
+// TestCodexExecuteDoesNotRetryCatalogFailureAfterSemanticProgress is the core
+// no-duplicate-side-effects guard: once a turn has produced content or run a
+// tool, the catalog signal must not buy it a replay.
+func TestCodexExecuteDoesNotRetryCatalogFailureAfterSemanticProgress(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-worked"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-worked","turn":{"id":"turn-worked"}}}'`+"\n"+
+		// A tool ran: this turn has side effects and must never be replayed,
+		// even though the catalog signal is present in stderr.
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-worked","item":{"type":"commandExecution","id":"cmd-1","aggregatedOutput":"deployed"}}}'`+"\n"+
+		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`sleep 2`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	assertCodexAttemptCount(t, fakePath, "1")
+}
+
+func assertCodexAttemptCount(t *testing.T, fakePath, want string) {
+	t.Helper()
+	attempts, err := os.ReadFile(filepath.Join(filepath.Dir(fakePath), "attempts"))
+	if err != nil {
+		t.Fatalf("read attempt counter: %v", err)
+	}
+	if got := strings.TrimSpace(string(attempts)); got != want {
+		t.Fatalf("expected %s attempt(s), got %q", want, got)
+	}
+}
+
+// TestCodexExecuteDoesNotRetryFirstTurnNoProgressWithoutCatalogSignal keeps the
+// retry gate narrow: a stalled first turn with no model catalog evidence in
+// stderr is not known to be transient, so it must fail on the first attempt.
+func TestCodexExecuteDoesNotRetryFirstTurnNoProgressWithoutCatalogSignal(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`STATE="$(dirname "$0")/attempts"`+"\n"+
+		`ATTEMPT=$(cat "$STATE" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$STATE"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-quiet"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-quiet","turn":{"id":"turn-quiet"}}}'`+"\n"+
+		`echo 'ERROR something else entirely went wrong' >&2`+"\n"+
+		`sleep 2`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	assertCodexAttemptCount(t, fakePath, "1")
+}
+
+func TestCodexExecuteTurnCompletionCanPrecedeTurnStartResponse(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-reordered"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-reordered","turn":{"id":"turn-reordered"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-reordered","item":{"type":"agentMessage","id":"msg-1","text":"Done"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-reordered","turn":{"id":"turn-reordered","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "Done" {
+		t.Fatalf("expected output Done, got %q", result.Output)
+	}
+}
+
+func TestCodexExecuteResumeIgnoresPreviousTurnCompletion(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-resumed","turn":{"id":"turn-previous","status":"completed"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-resumed"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-resumed","turn":{"id":"turn-current"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-resumed","turnId":"turn-current","item":{"type":"agentMessage","id":"msg-current","text":"Current answer"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-resumed","turn":{"id":"turn-current","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		ResumeSessionID:           "thr-resumed",
+		ResumeExpected:            true,
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "Current answer" {
+		t.Fatalf("expected current-turn output, got %q", result.Output)
+	}
+}
+
 func writeFakeCodexAppServer(t *testing.T, body string) string {
 	t.Helper()
 	fakePath := filepath.Join(t.TempDir(), "codex")
@@ -1509,18 +4593,40 @@ func writeFakeCodexAppServer(t *testing.T, body string) string {
 
 func executeFakeCodex(t *testing.T, fakePath string, opts ExecOptions) Result {
 	t.Helper()
-	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	result, _ := executeFakeCodexCollectingMessages(t, fakePath, opts, 10*time.Second)
+	return result
+}
+
+// executeFakeCodexCollectingMessages runs the fixture and returns the streamed
+// messages alongside the result. budget bounds both the execution context and
+// the wait, so retry-exercising tests can ask for more than the default.
+func executeFakeCodexCollectingMessages(t *testing.T, fakePath string, opts ExecOptions, budget time.Duration) (Result, []Message) {
+	t.Helper()
+	return executeFakeCodexCollectingMessagesWithConfig(t, fakePath, Config{Logger: slog.Default()}, opts, budget)
+}
+
+func executeFakeCodexCollectingMessagesWithConfig(t *testing.T, fakePath string, cfg Config, opts ExecOptions, budget time.Duration) (Result, []Message) {
+	t.Helper()
+	cfg.ExecutablePath = fakePath
+	backend, err := New("codex", cfg)
 	if err != nil {
 		t.Fatalf("new codex backend: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	session, err := backend.Execute(ctx, "prompt", opts)
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
+	var (
+		mu       sync.Mutex
+		messages []Message
+	)
 	go func() {
-		for range session.Messages {
+		for msg := range session.Messages {
+			mu.Lock()
+			messages = append(messages, msg)
+			mu.Unlock()
 		}
 	}()
 	select {
@@ -1528,10 +4634,13 @@ func executeFakeCodex(t *testing.T, fakePath string, opts ExecOptions) Result {
 		if !ok {
 			t.Fatal("result channel closed without a value")
 		}
-		return result
-	case <-time.After(10 * time.Second):
+		mu.Lock()
+		collected := append([]Message(nil), messages...)
+		mu.Unlock()
+		return result, collected
+	case <-time.After(budget):
 		t.Fatal("timeout waiting for result")
-		return Result{}
+		return Result{}, nil
 	}
 }
 
@@ -1571,6 +4680,50 @@ func TestBuildCodexArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
 	}
 }
 
+func TestBuildCodexArgsExplicitFastOverridesLowerPriorityDisable(t *testing.T) {
+	t.Parallel()
+
+	args := buildCodexArgs(ExecOptions{
+		ServiceTier: codexFastServiceTier,
+		ExtraArgs: []string{
+			"--disable", codexFastModeFeature,
+			"--disable", "memory_tool",
+			"-c", "features.fast_mode=false",
+			"-c", "features.memory_tool=false",
+		},
+		CustomArgs: []string{
+			"'--disable=fast_mode'",
+			`--config=features.fast_mode="false"`,
+			"--enable", "multi_agent",
+		},
+	}, slog.Default())
+
+	want := []string{
+		"app-server", "--listen", "stdio://",
+		"--disable", "memory_tool",
+		"-c", "features.memory_tool=false",
+		"--enable", "multi_agent",
+		"--enable", codexFastModeFeature,
+	}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("buildCodexArgs explicit Fast = %v, want %v", args, want)
+	}
+}
+
+func TestBuildCodexArgsFutureServiceTierDoesNotForceFastMode(t *testing.T) {
+	t.Parallel()
+
+	args := buildCodexArgs(ExecOptions{
+		ServiceTier: "future-tier",
+		CustomArgs:  []string{"--disable", codexFastModeFeature},
+	}, slog.Default())
+
+	want := []string{"app-server", "--listen", "stdio://", "--disable", codexFastModeFeature}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("buildCodexArgs future tier = %v, want %v", args, want)
+	}
+}
+
 func TestBuildCodexArgsDoesNotLeakMcpToArgv(t *testing.T) {
 	t.Parallel()
 
@@ -1606,6 +4759,27 @@ func TestBuildCodexArgsDoesNotLeakMcpToArgv(t *testing.T) {
 	}
 	if !foundModel {
 		t.Fatalf("expected non-mcp -c override to be preserved, got %v", args)
+	}
+}
+
+// TestNormalizeCodexLaunchArgsStripsShellQuotes locks the normalization the
+// daemon reuses for the Windows sandbox decision (MUL-4957): a shell-quoted
+// `-c windows.sandbox=...` opt-in must come out as clean tokens, and
+// buildCodexArgs must be exactly the transport prefix followed by this result,
+// so the sandbox decision and the launch argv can never diverge.
+func TestNormalizeCodexLaunchArgsStripsShellQuotes(t *testing.T) {
+	t.Parallel()
+
+	got := NormalizeCodexLaunchArgs(nil, []string{"'-c'", "'windows.sandbox=unelevated'"}, nil, slog.Default())
+	want := []string{"-c", "windows.sandbox=unelevated"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("NormalizeCodexLaunchArgs = %v, want %v", got, want)
+	}
+
+	launch := buildCodexArgs(ExecOptions{CustomArgs: []string{"'-c'", "'windows.sandbox=unelevated'"}}, slog.Default())
+	wantLaunch := append([]string{"app-server", "--listen", "stdio://"}, want...)
+	if !reflect.DeepEqual(launch, wantLaunch) {
+		t.Fatalf("buildCodexArgs = %v, want %v", launch, wantLaunch)
 	}
 }
 
@@ -1782,6 +4956,46 @@ func TestFilterCodexCustomConfigOverridesDropsMcpServers(t *testing.T) {
 	}
 }
 
+func TestFilterCodexShellEnvConfigOverrides(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{
+			name: "root policy override",
+			in:   []string{"-c", `shell_environment_policy.include_only=["PATH"]`, "-c", `model="o3"`},
+			want: []string{"-c", `model="o3"`},
+		},
+		{
+			name: "profile policy override",
+			in:   []string{`--config=profiles.work.shell_environment_policy.ignore_default_excludes=false`, "--sandbox", "workspace-write"},
+			want: []string{"--sandbox", "workspace-write"},
+		},
+		{
+			name: "quoted policy key",
+			in:   []string{"--config", `profiles.work."shell_environment_policy".inherit="none"`},
+			want: []string{},
+		},
+		{
+			name: "unrelated override survives",
+			in:   []string{"-c", `model="o3"`, "-c", `profiles.work.model="gpt-5.6"`, "-c", `tools.shell_environment_policy="metadata"`},
+			want: []string{"-c", `model="o3"`, "-c", `profiles.work.model="gpt-5.6"`, "-c", `tools.shell_environment_policy="metadata"`},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := filterCodexShellEnvConfigOverrides(tc.in, slog.Default())
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("filterCodexShellEnvConfigOverrides(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestEnsureCodexMcpConfigEmptyClearsBlock(t *testing.T) {
 	t.Parallel()
 
@@ -1859,6 +5073,14 @@ func TestEnsureCodexMcpConfigWritesManagedBlock(t *testing.T) {
 			t.Fatalf("expected %q in:\n%s", want, got)
 		}
 	}
+	for _, unexpected := range []string{
+		`experimental_use_rmcp_client`,
+		`http_headers`,
+	} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("stdio servers should not get remote MCP key %q, got:\n%s", unexpected, got)
+		}
+	}
 
 	fi, err := os.Stat(tmp)
 	if err != nil {
@@ -1866,6 +5088,145 @@ func TestEnsureCodexMcpConfigWritesManagedBlock(t *testing.T) {
 	}
 	if mode := fi.Mode().Perm(); mode != 0o600 {
 		t.Fatalf("expected mode 0o600 for secret-bearing config, got %o", mode)
+	}
+}
+
+func TestEnsureCodexMcpConfigTranslatesRemoteHTTPServer(t *testing.T) {
+	t.Parallel()
+
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tmp, []byte("sandbox_mode = \"workspace-write\"\n"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	raw := json.RawMessage(`{"mcpServers":{"composio":{"type":"http","url":"https://mcp.example.test/notion","headers":{"Authorization":"Bearer test-token","x-api-key":"secret"}}}}`)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	got := string(data)
+
+	for _, want := range []string{
+		`[mcp_servers.composio]`,
+		`url = "https://mcp.example.test/notion"`,
+		`http_headers = { Authorization = "Bearer test-token", x-api-key = "secret" }`,
+		`experimental_use_rmcp_client = true`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in:\n%s", want, got)
+		}
+	}
+	for _, unexpected := range []string{
+		`type = "http"`,
+		"\nheaders = ",
+	} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("remote HTTP server should not render %q, got:\n%s", unexpected, got)
+		}
+	}
+}
+
+func TestEnsureCodexMcpConfigDropsInternalSelectors(t *testing.T) {
+	t.Parallel()
+
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	raw := json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"],"env":{"API_KEY":"secret"},"timeout":30,"tools":{"include":["kb_get"]},"prompts":{"include":["daily"]},"resources":{"include":["docs"]}}}}`)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	got := string(data)
+
+	for _, want := range []string{
+		`[mcp_servers.fetch]`,
+		`command = "uvx"`,
+		`args = ["mcp-server-fetch"]`,
+		`env = { API_KEY = "secret" }`,
+		`timeout = 30`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in:\n%s", want, got)
+		}
+	}
+	for _, unexpected := range []string{
+		"\ntools = ",
+		"\nprompts = ",
+		"\nresources = ",
+		"kb_get",
+		"daily",
+		"docs",
+	} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("internal MCP selector %q must not render into Codex config.toml:\n%s", unexpected, got)
+		}
+	}
+}
+
+func TestEnsureCodexMcpConfigDropsInternalSelectorsFromRemoteHTTPServer(t *testing.T) {
+	t.Parallel()
+
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	raw := json.RawMessage(`{"mcpServers":{"remote":{"type":"http","url":"https://mcp.example.test/session","headers":{"Authorization":"Bearer test-token"},"timeout":45,"tools":{"include":["kb_get"]},"prompts":{"include":["daily"]},"resources":{"include":["docs"]}}}}`)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	got := string(data)
+
+	for _, want := range []string{
+		`[mcp_servers.remote]`,
+		`url = "https://mcp.example.test/session"`,
+		`http_headers = { Authorization = "Bearer test-token" }`,
+		`timeout = 45`,
+		`experimental_use_rmcp_client = true`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in:\n%s", want, got)
+		}
+	}
+	for _, unexpected := range []string{
+		"\ntools = ",
+		"\nprompts = ",
+		"\nresources = ",
+		"kb_get",
+		"daily",
+		"docs",
+		`type = "http"`,
+		"\nheaders = ",
+	} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("internal or provider-incompatible key %q must not render into Codex config.toml:\n%s", unexpected, got)
+		}
+	}
+}
+
+func TestRenderCodexMcpServersBlockTreatsURLOnlyServerAsRemote(t *testing.T) {
+	t.Parallel()
+
+	block, hasServers, err := renderCodexMcpServersBlock(json.RawMessage(`{"mcpServers":{"remote":{"url":"https://mcp.example.test/session"}}}`))
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !hasServers {
+		t.Fatal("expected server to render")
+	}
+	for _, want := range []string{
+		`[mcp_servers.remote]`,
+		`url = "https://mcp.example.test/session"`,
+		`experimental_use_rmcp_client = true`,
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("expected %q in:\n%s", want, block)
+		}
 	}
 }
 
@@ -2096,6 +5457,765 @@ func TestHasManagedCodexMcpConfig(t *testing.T) {
 			t.Parallel()
 			if got := hasManagedCodexMcpConfig(tc.raw); got != tc.want {
 				t.Fatalf("hasManagedCodexMcpConfig(%q) = %v, want %v", string(tc.raw), got, tc.want)
+			}
+		})
+	}
+}
+
+// --- patch_apply payload capture (GH #6157) -------------------------------
+//
+// Both Codex protocols used to record a file edit as a bare call ID, leaving
+// the transcript with two unexpandable blank rows per edit. These tests pin the
+// payload on both paths, including the two shapes that differ between them:
+// legacy reports add/delete as whole-file content under a path-keyed map, while
+// v2 reports an ordered array whose `kind` is an object rather than a string.
+
+// codexTestChanges extracts the normalized change list from a tool_use input.
+func codexTestChanges(t *testing.T, msg Message) []map[string]any {
+	t.Helper()
+	if msg.Input == nil {
+		t.Fatalf("expected input on tool_use message, got nil: %+v", msg)
+	}
+	raw, ok := msg.Input["changes"].([]any)
+	if !ok {
+		t.Fatalf("expected changes slice, got %#v", msg.Input["changes"])
+	}
+	out := make([]map[string]any, 0, len(raw))
+	for _, entry := range raw {
+		m, ok := entry.(map[string]any)
+		if !ok {
+			t.Fatalf("expected change to be an object, got %#v", entry)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func TestCodexLegacyPatchApplyRecordsChanges(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_begin","call_id":"p1","auto_approved":true,"changes":{"src/b.go":{"type":"update","unified_diff":"@@ -1 +1 @@\n-old\n+new\n","move_path":"src/c.go"},"src/a.txt":{"type":"add","content":"hello"}}}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_end","call_id":"p1","stdout":"Success. Updated the following files:\nM src/b.go","stderr":"","success":true,"status":"completed","changes":{"src/b.go":{"type":"update","unified_diff":"@@ -1 +1 @@\n-old\n+new\n"},"src/a.txt":{"type":"add","content":"hello"}}}}}`)
+
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(messages))
+	}
+
+	begin := messages[0]
+	if begin.Type != MessageToolUse || begin.Tool != "patch_apply" || begin.CallID != "p1" {
+		t.Fatalf("unexpected begin message: %+v", begin)
+	}
+	changes := codexTestChanges(t, begin)
+	if len(changes) != 2 {
+		t.Fatalf("expected 2 changes, got %d: %#v", len(changes), changes)
+	}
+	// Sorted by path so a replayed event does not reshuffle the file list.
+	if changes[0]["path"] != "src/a.txt" || changes[1]["path"] != "src/b.go" {
+		t.Fatalf("changes not sorted by path: %#v", changes)
+	}
+	if changes[0]["kind"] != "add" || changes[0]["content"] != "hello" {
+		t.Fatalf("add change lost its whole-file content: %#v", changes[0])
+	}
+	if _, hasDiff := changes[0]["diff"]; hasDiff {
+		t.Fatalf("legacy add must not invent a diff: %#v", changes[0])
+	}
+	if changes[1]["kind"] != "update" {
+		t.Fatalf("expected update kind, got %#v", changes[1]["kind"])
+	}
+	if diff, _ := changes[1]["diff"].(string); !strings.Contains(diff, "-old") || !strings.Contains(diff, "+new") {
+		t.Fatalf("update change lost its unified diff: %#v", changes[1])
+	}
+	if changes[1]["move_path"] != "src/c.go" {
+		t.Fatalf("expected move_path to be preserved: %#v", changes[1])
+	}
+
+	end := messages[1]
+	if end.Type != MessageToolResult || end.CallID != "p1" {
+		t.Fatalf("unexpected end message: %+v", end)
+	}
+	if end.Output == "" {
+		t.Fatal("patch_apply_end output is empty, transcript row stays unexpandable")
+	}
+	if !strings.Contains(end.Output, "completed") {
+		t.Fatalf("expected status in output, got %q", end.Output)
+	}
+	if !strings.Contains(end.Output, "Success. Updated the following files:") {
+		t.Fatalf("expected apply_patch stdout in output, got %q", end.Output)
+	}
+}
+
+func TestCodexLegacyPatchApplyDeleteKeepsContent(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_begin","call_id":"p1","auto_approved":true,"changes":{"old.txt":{"type":"delete","content":"gone"}}}}}`)
+
+	changes := codexTestChanges(t, messages[0])
+	if len(changes) != 1 || changes[0]["kind"] != "delete" || changes[0]["content"] != "gone" {
+		t.Fatalf("delete change not captured: %#v", changes)
+	}
+}
+
+func TestCodexLegacyPatchApplyStatusFallsBackToSuccess(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		event   string
+		wantSub string
+	}{
+		{
+			name:    "success true without status",
+			event:   `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_end","call_id":"p1","stdout":"","stderr":"","success":true,"changes":{"a.txt":{"type":"add","content":"x"}}}}}`,
+			wantSub: "completed",
+		},
+		{
+			name:    "success false without status",
+			event:   `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_end","call_id":"p1","stdout":"","stderr":"parse error","success":false,"changes":{"a.txt":{"type":"add","content":"x"}}}}}`,
+			wantSub: "failed",
+		},
+		{
+			name:    "explicit declined status wins",
+			event:   `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_end","call_id":"p1","stdout":"","stderr":"","success":false,"status":"declined","changes":{}}}}`,
+			wantSub: "declined",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c, _, _ := newTestCodexClient(t)
+			var messages []Message
+			c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+			c.handleLine(tc.event)
+
+			if len(messages) != 1 {
+				t.Fatalf("expected 1 message, got %d", len(messages))
+			}
+			if !strings.Contains(messages[0].Output, tc.wantSub) {
+				t.Fatalf("expected output to contain %q, got %q", tc.wantSub, messages[0].Output)
+			}
+		})
+	}
+}
+
+func TestCodexLegacyPatchApplyStderrSurfaced(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_end","call_id":"p1","stdout":"","stderr":"apply_patch: could not parse hunk","success":false,"status":"failed","changes":{}}}}`)
+
+	if !strings.Contains(messages[0].Output, "could not parse hunk") {
+		t.Fatalf("expected stderr in output, got %q", messages[0].Output)
+	}
+}
+
+func TestCodexRawPatchApplyRecordsChanges(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	// Fixtures follow upstream convert_patch_changes: `diff` holds a unified
+	// diff only for `update`. For `add` it is the whole file's contents.
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"fileChange","id":"patch-1","status":"inProgress","changes":[{"path":"src/a.go","kind":{"type":"update","move_path":null},"diff":"@@ -1 +1 @@\n-a\n+b\n"},{"path":"src/new.go","kind":{"type":"add"},"diff":"package main\n"}]}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"fileChange","id":"patch-1","status":"completed","changes":[{"path":"src/a.go","kind":{"type":"update"},"diff":"@@ -1 +1 @@\n-a\n+b\n"},{"path":"src/new.go","kind":{"type":"add"},"diff":"package main\n"}]}}}`)
+
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(messages))
+	}
+
+	begin := messages[0]
+	if begin.Type != MessageToolUse || begin.Tool != "patch_apply" || begin.CallID != "patch-1" {
+		t.Fatalf("unexpected start message: %+v", begin)
+	}
+	changes := codexTestChanges(t, begin)
+	if len(changes) != 2 {
+		t.Fatalf("expected 2 changes, got %d: %#v", len(changes), changes)
+	}
+	if changes[0]["path"] != "src/a.go" || changes[1]["path"] != "src/new.go" {
+		t.Fatalf("v2 change order not preserved: %#v", changes)
+	}
+	// `kind` arrives as an object; reading it as a string yields "" and loses
+	// the add/delete/update distinction.
+	if changes[0]["kind"] != "update" {
+		t.Fatalf("expected kind flattened to \"update\", got %#v", changes[0]["kind"])
+	}
+	if diff, _ := changes[0]["diff"].(string); !strings.Contains(diff, "+b") {
+		t.Fatalf("v2 update diff not captured: %#v", changes[0])
+	}
+	// The add's payload is file content, so it must NOT be labelled a diff:
+	// a diff parser would mislabel every line and invert any line starting
+	// with '+' or '-'.
+	if changes[1]["kind"] != "add" {
+		t.Fatalf("expected kind flattened to \"add\", got %#v", changes[1]["kind"])
+	}
+	if _, isDiff := changes[1]["diff"]; isDiff {
+		t.Fatalf("v2 add must not be recorded as a diff: %#v", changes[1])
+	}
+	if changes[1]["content"] != "package main\n" {
+		t.Fatalf("v2 add content not captured: %#v", changes[1])
+	}
+
+	end := messages[1]
+	if end.Type != MessageToolResult || end.CallID != "patch-1" {
+		t.Fatalf("unexpected complete message: %+v", end)
+	}
+	if end.Output == "" {
+		t.Fatal("fileChange completion output is empty, transcript row stays unexpandable")
+	}
+	if !strings.Contains(end.Output, "completed") || !strings.Contains(end.Output, "2 files") {
+		t.Fatalf("expected status and file count, got %q", end.Output)
+	}
+}
+
+// Upstream format_file_change_diff returns whole-file contents for add and
+// delete under the `diff` field. Treating that as a unified diff renders plain
+// lines as context, and inverts any line that begins with '+' or '-'.
+func TestCodexRawPatchApplyContentKindsAreNotDiffs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		kind string
+		body string
+	}{
+		{name: "add", kind: "add", body: "package main\n"},
+		{name: "delete", kind: "delete", body: "goodbye\n"},
+		{
+			name: "add whose content looks like a diff",
+			kind: "add",
+			body: "--- not a header\n+++ also not\n-minus lead\n+plus lead\n",
+		},
+		{name: "empty add", kind: "add", body: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c, _, _ := newTestCodexClient(t)
+			c.notificationProtocol = "raw"
+			var messages []Message
+			c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+			event, err := json.Marshal(map[string]any{
+				"jsonrpc": "2.0",
+				"method":  "item/started",
+				"params": map[string]any{
+					"item": map[string]any{
+						"type": "fileChange", "id": "patch-1", "status": "inProgress",
+						"changes": []any{
+							map[string]any{
+								"path": "f.txt",
+								"kind": map[string]any{"type": tc.kind},
+								"diff": tc.body,
+							},
+						},
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("marshal event: %v", err)
+			}
+			c.handleLine(string(event))
+
+			changes := codexTestChanges(t, messages[0])
+			if len(changes) != 1 {
+				t.Fatalf("expected 1 change, got %#v", changes)
+			}
+			if _, isDiff := changes[0]["diff"]; isDiff {
+				t.Fatalf("%s must be recorded as content, not diff: %#v", tc.kind, changes[0])
+			}
+			content, ok := changes[0]["content"].(string)
+			if !ok {
+				// Presence, not non-emptiness: an empty added file still has a
+				// body, and dropping it would render as "no content reported".
+				t.Fatalf("expected content to be present for %s: %#v", tc.kind, changes[0])
+			}
+			if content != tc.body {
+				t.Fatalf("content altered: got %q want %q", content, tc.body)
+			}
+		})
+	}
+}
+
+// A moved update has "\n\nMoved to: <path>" appended to its diff upstream. The
+// destination is already carried as move_path, and leaving the sentence in
+// renders as two stray context rows at the end of the diff.
+func TestCodexRawPatchApplyStripsMovedToSuffix(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"fileChange","id":"patch-1","status":"inProgress","changes":[{"path":"old/name.go","kind":{"type":"update","move_path":"new/name.go"},"diff":"@@ -1 +1 @@\n-x\n+y\n\n\nMoved to: new/name.go"}]}}}`)
+
+	changes := codexTestChanges(t, messages[0])
+	if changes[0]["move_path"] != "new/name.go" {
+		t.Fatalf("expected move_path lifted out of kind, got %#v", changes[0])
+	}
+	diff, _ := changes[0]["diff"].(string)
+	if strings.Contains(diff, "Moved to:") {
+		t.Fatalf("Moved to: sentence should be stripped from the diff: %q", diff)
+	}
+	if !strings.Contains(diff, "+y") {
+		t.Fatalf("stripping removed real diff content: %q", diff)
+	}
+}
+
+func TestCodexRawPatchApplyMovePathFromKind(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"fileChange","id":"patch-1","status":"inProgress","changes":[{"path":"old/name.go","kind":{"type":"update","move_path":"new/name.go"},"diff":"@@ -1 +1 @@\n-x\n+y\n"}]}}}`)
+
+	changes := codexTestChanges(t, messages[0])
+	if changes[0]["move_path"] != "new/name.go" {
+		t.Fatalf("expected move_path lifted out of kind, got %#v", changes[0])
+	}
+}
+
+func TestCodexLegacyPatchApplyKeepsEmptyAddedFile(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_begin","call_id":"p1","auto_approved":true,"changes":{"empty.txt":{"type":"add","content":""}}}}}`)
+
+	changes := codexTestChanges(t, messages[0])
+	content, ok := changes[0]["content"].(string)
+	if !ok || content != "" {
+		t.Fatalf("empty added file should keep an empty body: %#v", changes[0])
+	}
+}
+
+func TestCodexRawPatchApplyStatusNormalized(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct{ status, want string }{
+		{"inProgress", "in_progress"},
+		{"completed", "completed"},
+		{"failed", "failed"},
+		{"declined", "declined"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.status, func(t *testing.T) {
+			t.Parallel()
+			c, _, _ := newTestCodexClient(t)
+			c.notificationProtocol = "raw"
+			var messages []Message
+			c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+			c.handleLine(fmt.Sprintf(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"fileChange","id":"patch-1","status":%q,"changes":[{"path":"a.go","kind":{"type":"add"},"diff":"+x"}]}}}`, tc.status))
+
+			if len(messages) != 1 {
+				t.Fatalf("expected 1 message, got %d", len(messages))
+			}
+			if !strings.Contains(messages[0].Output, tc.want) {
+				t.Fatalf("status %q: expected output to contain %q, got %q", tc.status, tc.want, messages[0].Output)
+			}
+		})
+	}
+}
+
+// A missing or malformed `changes` must degrade to the previous payload-less
+// behaviour rather than panicking or emitting a broken payload.
+func TestCodexPatchApplyMalformedChangesDegrade(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		event string
+		raw   bool
+	}{
+		{
+			name:  "legacy changes absent",
+			event: `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_begin","call_id":"p1","auto_approved":true}}}`,
+		},
+		{
+			name:  "legacy changes wrong type",
+			event: `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_begin","call_id":"p1","changes":"not-an-object"}}}`,
+		},
+		{
+			name:  "legacy changes empty",
+			event: `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_begin","call_id":"p1","changes":{}}}}`,
+		},
+		{
+			name:  "legacy change entry not an object",
+			event: `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_begin","call_id":"p1","changes":{"a.txt":42}}}}`,
+		},
+		{
+			name:  "raw changes absent",
+			event: `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"fileChange","id":"patch-1"}}}`,
+			raw:   true,
+		},
+		{
+			name:  "raw changes wrong type",
+			event: `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"fileChange","id":"patch-1","changes":{"path":"a.go"}}}}`,
+			raw:   true,
+		},
+		{
+			name:  "raw change entries unusable",
+			event: `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"fileChange","id":"patch-1","changes":[42,null]}}}`,
+			raw:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c, _, _ := newTestCodexClient(t)
+			if tc.raw {
+				c.notificationProtocol = "raw"
+			}
+			var messages []Message
+			c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+			c.handleLine(tc.event)
+
+			if len(messages) != 1 {
+				t.Fatalf("expected the tool_use message to still be emitted, got %d", len(messages))
+			}
+			if messages[0].Type != MessageToolUse || messages[0].Tool != "patch_apply" {
+				t.Fatalf("unexpected message: %+v", messages[0])
+			}
+			if messages[0].Input != nil {
+				t.Fatalf("expected nil input for unusable changes, got %#v", messages[0].Input)
+			}
+		})
+	}
+}
+
+func TestCodexPatchApplyTruncatesOversizePayload(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	// Legacy add/delete report whole-file content, so a single generated file
+	// can dwarf the transcript budget.
+	huge := strings.Repeat("x", codexPatchInputMaxBytes+5000)
+	event, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "item/started",
+		"params": map[string]any{
+			"item": map[string]any{
+				"type":   "fileChange",
+				"id":     "patch-1",
+				"status": "inProgress",
+				"changes": []any{
+					map[string]any{"path": "big.txt", "kind": map[string]any{"type": "add"}, "diff": huge},
+					map[string]any{"path": "second.txt", "kind": map[string]any{"type": "add"}, "diff": "small"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	c.handleLine(string(event))
+
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	input := messages[0].Input
+	if input["truncated"] != true {
+		t.Fatalf("expected truncated marker, got %#v", input["truncated"])
+	}
+	if input["original_bytes"] == nil {
+		t.Fatal("expected original_bytes to be recorded alongside truncation")
+	}
+
+	changes := codexTestChanges(t, messages[0])
+	total := 0
+	for _, change := range changes {
+		// An `add` is recorded as content, not diff, so both keys count
+		// toward the budget.
+		for _, key := range []string{"diff", "content"} {
+			body, ok := change[key].(string)
+			if !ok {
+				continue
+			}
+			total += len(body)
+			if !utf8.ValidString(body) {
+				t.Fatalf("truncation split a rune in %v", change["path"])
+			}
+		}
+	}
+	if total == 0 {
+		t.Fatal("expected some body to survive truncation")
+	}
+	if total > codexPatchInputMaxBytes {
+		t.Fatalf("payload %d bytes exceeds budget %d", total, codexPatchInputMaxBytes)
+	}
+	// The path survives even when its body is dropped: it is the part a
+	// reviewer still needs.
+	if changes[0]["path"] != "big.txt" || changes[1]["path"] != "second.txt" {
+		t.Fatalf("paths must survive truncation: %#v", changes)
+	}
+	if changes[0]["truncated"] != true {
+		t.Fatalf("expected per-change truncation marker: %#v", changes[0])
+	}
+}
+
+func TestCodexPatchApplyTruncationKeepsValidUTF8(t *testing.T) {
+	t.Parallel()
+
+	// Multi-byte runes straddling the cut must not leave an invalid string,
+	// or the payload fails to marshal into the JSONB column.
+	body := strings.Repeat("世", codexPatchInputMaxBytes)
+	changes := []any{
+		map[string]any{"path": "wide.txt", "kind": "add", "content": body},
+	}
+	input := codexPatchInput(changes)
+	if input["truncated"] != true {
+		t.Fatalf("expected truncation for %d-byte body", len(body))
+	}
+	for _, kept := range codexTestBodies(t, input) {
+		if !utf8.ValidString(kept) {
+			t.Fatal("truncated content is not valid UTF-8")
+		}
+		if len(kept) > codexPatchInputMaxBytes {
+			t.Fatalf("kept %d bytes, budget is %d", len(kept), codexPatchInputMaxBytes)
+		}
+	}
+	if _, err := json.Marshal(input); err != nil {
+		t.Fatalf("truncated payload does not marshal: %v", err)
+	}
+}
+
+func TestCodexPatchApplyUnderBudgetIsNotMarkedTruncated(t *testing.T) {
+	t.Parallel()
+
+	input := codexPatchInput([]any{
+		map[string]any{"path": "a.go", "kind": "update", "diff": "@@ -1 +1 @@\n-a\n+b\n"},
+	})
+	if _, marked := input["truncated"]; marked {
+		t.Fatalf("small payload must not be marked truncated: %#v", input)
+	}
+	if _, marked := input["original_bytes"]; marked {
+		t.Fatalf("small payload must not carry original_bytes: %#v", input)
+	}
+}
+
+// codexTestBodies returns the diff/content bodies carried by a tool_use input.
+//
+// Read the *returned* payload, never the slice handed to codexPatchInput:
+// redaction copies before the budget trims, so the caller's originals stay
+// untouched and asserting on them would pass vacuously.
+func codexTestBodies(t *testing.T, input map[string]any) []string {
+	t.Helper()
+	raw, ok := input["changes"].([]any)
+	if !ok {
+		t.Fatalf("expected changes slice, got %#v", input["changes"])
+	}
+	var bodies []string
+	for _, change := range raw {
+		entry, ok := change.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, key := range []string{"diff", "content"} {
+			if body, ok := entry[key].(string); ok {
+				bodies = append(bodies, body)
+			}
+		}
+	}
+	return bodies
+}
+
+// Redaction has to happen before the size budget, not after it. Several rules
+// only match a credential as a whole: the PEM rule needs both the BEGIN and the
+// END marker. If a key straddles the budget, truncating first strands the
+// opening half — marker plus key material — in text that no later pass can
+// recognise, so both the daemon's and the server's redaction wave it through
+// and it lands in the database and the WebSocket broadcast.
+func TestCodexPatchApplyRedactsBeforeTruncating(t *testing.T) {
+	t.Parallel()
+
+	const keyChunk = "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKg"
+	// BEGIN lands inside the budget; END lands well past it.
+	pem := "-----BEGIN PRIVATE KEY-----\n" +
+		strings.Repeat(keyChunk, 2000) +
+		"\n-----END PRIVATE KEY-----\n"
+	if len(pem) <= codexPatchInputMaxBytes {
+		t.Fatalf("fixture must exceed the budget to exercise the boundary: %d", len(pem))
+	}
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	event, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "item/started",
+		"params": map[string]any{
+			"item": map[string]any{
+				"type": "fileChange", "id": "patch-1", "status": "inProgress",
+				"changes": []any{
+					map[string]any{
+						"path": "id_rsa",
+						"kind": map[string]any{"type": "add"},
+						"diff": pem,
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	c.handleLine(string(event))
+
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	bodies := codexTestBodies(t, messages[0].Input)
+	if len(bodies) == 0 {
+		t.Fatal("expected a recorded body")
+	}
+
+	total := 0
+	for _, body := range bodies {
+		total += len(body)
+		if strings.Contains(body, "BEGIN PRIVATE KEY") {
+			t.Errorf("PEM opening marker survived: %q", body[:min(len(body), 120)])
+		}
+		if strings.Contains(body, keyChunk) {
+			t.Error("private key material survived redaction")
+		}
+		if !strings.Contains(body, "[REDACTED PRIVATE KEY]") {
+			t.Errorf("expected the redaction placeholder, got %q", body[:min(len(body), 120)])
+		}
+	}
+	if total > codexPatchInputMaxBytes {
+		t.Fatalf("payload %d bytes exceeds budget %d", total, codexPatchInputMaxBytes)
+	}
+}
+
+// The daemon and the server redact again after the adapter. Those passes must
+// not corrupt an already-redacted payload, or the placeholder itself would be
+// rewritten on the way to the database.
+func TestCodexPatchApplyRedactionIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	input := codexPatchInput([]any{
+		map[string]any{
+			"path":    ".env",
+			"kind":    "delete",
+			"content": "GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn\n",
+		},
+	})
+
+	first, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(first), "ghp_ABCDEFGH") {
+		t.Fatalf("token survived the adapter: %s", first)
+	}
+
+	second, err := json.Marshal(redact.InputMap(input))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(first) != string(second) {
+		t.Fatalf("a second redaction pass changed the payload:\n first=%s\nsecond=%s", first, second)
+	}
+}
+
+// Redaction running first must not disable the budget for ordinary large
+// patches: a big generated file carries no secret to shrink.
+func TestCodexPatchApplyStillTruncatesNonSecretPayload(t *testing.T) {
+	t.Parallel()
+
+	body := strings.Repeat("x", codexPatchInputMaxBytes+5000)
+	changes := []any{map[string]any{"path": "big.txt", "kind": "add", "content": body}}
+	input := codexPatchInput(changes)
+
+	if input["truncated"] != true {
+		t.Fatalf("expected truncation for a %d-byte body: %#v", len(body), input["truncated"])
+	}
+	if got := input["original_bytes"]; got != len(body) {
+		t.Fatalf("original_bytes should report the pre-redaction size: got %v want %d", got, len(body))
+	}
+	total := 0
+	for _, kept := range codexTestBodies(t, input) {
+		total += len(kept)
+	}
+	if total > codexPatchInputMaxBytes {
+		t.Fatalf("kept %d bytes, budget is %d", total, codexPatchInputMaxBytes)
+	}
+	// The caller's slice is deliberately left alone: redaction copies first.
+	if original, _ := changes[0].(map[string]any)["content"].(string); len(original) != len(body) {
+		t.Fatalf("codexPatchInput must not mutate its argument: %d != %d", len(original), len(body))
+	}
+}
+
+func TestCodexResumeOverflowError(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		errText string
+		want    bool
+	}{
+		{
+			// The exact text executeOnce puts in Result.Error for this failure.
+			name:    "resume overflow",
+			errText: "codex thread/resume failed: codex process exited: bufio.Scanner: token too long",
+			want:    true,
+		},
+		{
+			// Both markers required: an overflow on another RPC leaves the
+			// stored thread perfectly resumable, so retiring it cures nothing.
+			name:    "overflow on thread/start",
+			errText: "codex thread/start failed: codex process exited: bufio.Scanner: token too long",
+			want:    false,
+		},
+		{
+			// An ordinary resume rejection already has a recovery path.
+			name:    "resume failure without overflow",
+			errText: "codex thread/resume failed: thread not found",
+			want:    false,
+		},
+		{
+			name:    "unrelated process failure",
+			errText: "codex process exited: exit status 2",
+			want:    false,
+		},
+		{name: "empty", errText: "", want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := CodexResumeOverflowError(tc.errText); got != tc.want {
+				t.Fatalf("CodexResumeOverflowError(%q) = %v, want %v", tc.errText, got, tc.want)
 			}
 		})
 	}

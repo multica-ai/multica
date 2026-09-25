@@ -4,9 +4,11 @@ import StarterKit from "@tiptap/starter-kit";
 import { Suggestion, type SuggestionProps } from "@tiptap/suggestion";
 import { PluginKey } from "@tiptap/pm/state";
 import { forwardRef, useImperativeHandle } from "react";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createSuggestionPopupRender } from "./suggestion-popup";
+import { isPickerAcceptKey } from "../../common/picker-keys";
+import { PatchedListItem } from "./list-item";
 
 interface TestItem {
   id: string;
@@ -213,4 +215,203 @@ describe("createSuggestionPopupRender", () => {
       });
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// Escape containment (MUL-5429): Escape while a picker is open must close ONLY
+// the picker. ProseMirror calls preventDefault() for a handled key but never
+// stops propagation, and Base UI's dismiss layer listens for Escape on
+// `document` in the BUBBLE phase without consulting defaultPrevented — so
+// without an explicit stopPropagation the same keypress also closed the host
+// create-issue dialog and threw the draft away. The plain document listener
+// below stands in for that dismiss layer.
+// ---------------------------------------------------------------------------
+
+describe("Escape containment while a picker is open", () => {
+  function watchHostEscape() {
+    const hostEscape = vi.fn();
+    document.addEventListener("keydown", hostEscape);
+    return {
+      hostEscape,
+      stop: () => document.removeEventListener("keydown", hostEscape),
+    };
+  }
+
+  it.each(["@", "/"] as const)(
+    "closes the %s popup on Escape without letting the key reach the host dialog",
+    async (char) => {
+      const ed = makeEditor(char);
+      await triggerSuggestion(ed, `${char}a`);
+      const { hostEscape, stop } = watchHostEscape();
+
+      await act(async () => {
+        fireEvent.keyDown(ed.view.dom, { key: "Escape" });
+      });
+      stop();
+
+      await expectPopupClosed();
+      expect(hostEscape).not.toHaveBeenCalled();
+    },
+  );
+
+  it("still lets Escape reach the host when no picker is open", async () => {
+    const ed = makeEditor("@");
+    await act(async () => {
+      ed.commands.focus("end");
+    });
+    const { hostEscape, stop } = watchHostEscape();
+
+    await act(async () => {
+      fireEvent.keyDown(ed.view.dom, { key: "Escape" });
+    });
+    stop();
+
+    // With no picker open Escape is the host dialog's own close shortcut and
+    // must keep working — the fix must not swallow Escape unconditionally.
+    expect(hostEscape).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Plugin-order guard (MUL-3685): when a suggestion is open inside a list item,
+// the suggestion layer's Tab handling must outrank PatchedListItem's
+// Tab -> sinkListItem keymap. This replicates the real extension ordering and
+// fires Tab through ProseMirror's actual handleKeyDown dispatch, so a future
+// reorder that lets the list keymap win is caught here.
+// ---------------------------------------------------------------------------
+
+const AcceptOnTabList = forwardRef<TestListRef, TestListProps>(
+  function AcceptOnTabList({ items, command }, ref) {
+    useImperativeHandle(ref, () => ({
+      // Mirror the real mention/slash lists: accept the highlighted row on the
+      // shared accept keys (Enter / plain Tab), fall through otherwise.
+      onKeyDown: ({ event }) => {
+        if (isPickerAcceptKey(event)) {
+          command(items[0]!);
+          return true;
+        }
+        return false;
+      },
+    }));
+
+    return (
+      <div data-testid="suggestion-popup">
+        {items.map((item) => (
+          <button key={item.id} type="button" onClick={() => command(item)}>
+            {item.label}
+          </button>
+        ))}
+      </div>
+    );
+  },
+);
+
+function makeListEditor() {
+  const pluginKey = new PluginKey("test-list-suggestion");
+  const item: TestItem = { id: "u1", label: "Alice" };
+
+  const TestListSuggestionExtension = Extension.create({
+    name: "testListSuggestion",
+    addProseMirrorPlugins() {
+      return [
+        Suggestion<TestItem, TestItem>({
+          editor: this.editor,
+          char: "@",
+          pluginKey,
+          items: () => [item],
+          command: ({ editor: ed, range, props }) => {
+            ed.commands.insertContentAt(range, `@${props.label}`);
+          },
+          render: createSuggestionPopupRender<TestItem, TestItem, TestListRef, TestListProps>({
+            pluginKey,
+            component: AcceptOnTabList,
+            getProps: (props: SuggestionProps<TestItem, TestItem>) => ({
+              items: props.items,
+              command: props.command,
+            }),
+            onKeyDown: (ref, props) => ref?.onKeyDown(props) ?? false,
+          }),
+        }),
+      ];
+    },
+  });
+
+  editor = new Editor({
+    // Mirror the real wiring (extensions/index.ts): StarterKit's stock list
+    // item is disabled in favour of PatchedListItem, which binds
+    // Tab -> sinkListItem / Shift-Tab -> liftListItem.
+    extensions: [
+      StarterKit.configure({ listItem: false }),
+      PatchedListItem,
+      TestListSuggestionExtension,
+    ],
+    content: "",
+  });
+  render(<EditorContent editor={editor} />);
+  return editor;
+}
+
+// Build a two-item bullet list with the caret in the SECOND item. sinkListItem
+// can only indent an item that has a PRECEDING sibling, so the cursor must be
+// in item 2 for Tab -> sinkListItem to actually fire (Howard, MUL-3685 review):
+// in the first item sink is a no-op, and the guard would pass even if the
+// suggestion layer did nothing. Built from empty so `@` lands at the start of
+// item 2's paragraph (a valid suggestion boundary) without HTML-parse quirks.
+async function buildTwoItemList(ed: Editor) {
+  await act(async () => {
+    ed.commands.focus();
+    ed.commands.toggleBulletList();
+    ed.commands.insertContent("first");
+    ed.commands.splitListItem("listItem");
+  });
+}
+
+async function openPickerInSecondListItem(ed: Editor) {
+  await buildTwoItemList(ed);
+  await triggerSuggestion(ed, "@a");
+}
+
+describe("suggestion Tab priority over the list-item keymap", () => {
+  it("sanity: a bare Tab in the second list item DOES sink it (guard is sink-capable)", async () => {
+    const ed = makeListEditor();
+    await buildTwoItemList(ed);
+
+    await act(async () => {
+      fireEvent.keyDown(ed.view.dom, { key: "Tab" });
+    });
+
+    // No picker open: PatchedListItem's Tab -> sinkListItem nests item 2 under
+    // item 1, producing a second <ul>. This proves the doc/selection actually
+    // lets sinkListItem fire, so the accept-wins assertion below is meaningful
+    // rather than passing because sink was a no-op.
+    expect(ed.getHTML().match(/<ul/g)?.length ?? 0).toBe(2);
+  });
+
+  it("accepts the highlighted row on Tab even when Tab would otherwise sink the item", async () => {
+    const ed = makeListEditor();
+    await openPickerInSecondListItem(ed);
+
+    await act(async () => {
+      fireEvent.keyDown(ed.view.dom, { key: "Tab" });
+    });
+
+    // Accept won over PatchedListItem's Tab -> sinkListItem: the mention text
+    // was inserted and item 2 was NOT nested (still a single <ul>).
+    await waitFor(() => {
+      expect(ed.getText()).toContain("@Alice");
+    });
+    expect(ed.getHTML().match(/<ul/g)?.length ?? 0).toBe(1);
+  });
+
+  it("does not accept on Shift+Tab inside a list item — reverse nav is preserved", async () => {
+    const ed = makeListEditor();
+    await openPickerInSecondListItem(ed);
+
+    await act(async () => {
+      fireEvent.keyDown(ed.view.dom, { key: "Tab", shiftKey: true });
+    });
+
+    // Shift+Tab is not an accept key, so the suggestion never committed.
+    expect(ed.getText()).not.toContain("@Alice");
+  });
 });

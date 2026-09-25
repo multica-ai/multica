@@ -1,0 +1,85 @@
+{
+  "manifest_version": 1,
+  "key": "ai.multica.triage-notify",
+  "name": "Triage Notify",
+  "description": "Sends an issue to an external triage service and writes its answer back as a comment. Also demonstrates a no-side-effect Hook that Multica wakes every five minutes.",
+  "version": "1.1.0",
+  "author": {
+    "name": "multica",
+    "url": "https://multica.ai"
+  },
+  "scopes": [
+    "issues:read",
+    "comments:read",
+    "comments:write",
+    "net:triage.example.com"
+  ],
+  "config": {
+    "team": {
+      "type": "string",
+      "label": "Team",
+      "description": "Passed to the triage service so it can route the issue.",
+      "required": true,
+      "placeholder": "platform"
+    }
+  },
+  "contributes": {
+    "surfaces": [
+      {
+        "key": "triage",
+        "type": "issue_panel",
+        "name": "Triage",
+        "entry": "ui/main.js",
+        "platforms": [
+          "web",
+          "desktop"
+        ]
+      }
+    ],
+    "hooks": [
+      {
+        "key": "triage_issue",
+        "name": "Triage this issue",
+        "description": "Sends the issue title and description to the triage service and posts its suggested owner and priority back as a comment.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string"
+            }
+          }
+        },
+        "triggers": [
+          "ui",
+          "manual",
+          "event"
+        ],
+        "events": [
+          "issue.created"
+        ],
+        "transport": {
+          "type": "http",
+          "url": "https://triage.example.com/hooks/triage"
+        },
+        "timeout_ms": 8000
+      },
+      {
+        "key": "scheduled_heartbeat",
+        "name": "Scheduled heartbeat",
+        "description": "Acknowledges a durable scheduled delivery without writing to Multica or another service.",
+        "triggers": [
+          "schedule"
+        ],
+        "schedule": {
+          "cron": "*/5 * * * *",
+          "timezone": "UTC"
+        },
+        "transport": {
+          "type": "http",
+          "url": "https://triage.example.com/hooks/heartbeat"
+        },
+        "timeout_ms": 8000
+      }
+    ]
+  }
+}

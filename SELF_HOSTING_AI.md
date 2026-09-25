@@ -64,9 +64,21 @@ make selfhost-stop
 
 If the default ports (8080/3000) are in use:
 
-1. Edit `.env` and change `PORT` and `FRONTEND_PORT`
+1. Edit `.env` and change `PORT` and `FRONTEND_PORT`. These are host ports; the
+   containers keep listening on 8080/3000 internally, so no rebuild is needed.
 2. Run `make selfhost`
 3. Run `multica setup self-host --port <PORT> --frontend-port <FRONTEND_PORT>`
+
+Edit the file rather than relying on environment variables: `make` `include`s
+`.env`, so a value in the file outranks the same variable from your shell
+(`PORT=9100 make selfhost` is ignored when `.env` sets `PORT`). A command-line
+assignment does take effect (`make selfhost PORT=9100`), and Docker Compose
+invoked directly is the reverse again — there the environment outranks `.env`.
+
+`BACKEND_PORT` is an optional alias that overrides `PORT` for the backend;
+`API_PORT` and `SERVER_PORT` follow in that order. Whichever route you use, the
+startup output is read back from Docker Compose, so the address it prints is the
+one the stack is actually published on.
 
 ## Troubleshooting
 

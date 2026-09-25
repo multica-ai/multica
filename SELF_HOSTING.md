@@ -8,13 +8,28 @@ Deploy Multica on your own infrastructure in minutes.
 |-----------|-------------|------------|
 | **Backend** | REST API + WebSocket server | Go (single binary) |
 | **Frontend** | Web application | Next.js 16 |
-| **Database** | Primary data store | PostgreSQL 17 with pgvector |
+| **Database** | Primary data store | PostgreSQL 17 (`pgcrypto` + `pg_trgm`) |
 
 Each user who runs AI agents locally also installs the **`multica` CLI** and runs the **agent daemon** on their own machine.
 
+## Anonymous Deployment Telemetry
+
+The self-hosted API server sends one first-party, deployment-level anonymous snapshot per UTC day to the fixed Multica endpoint `https://telemetry.multica.ai/v1/telemetry/events`. This helps maintainers understand which release versions are in use, deployment-size ranges, and aggregate run volume. The endpoint is compiled into the server and cannot be redirected through configuration.
+
+The snapshot contains only the release version; bucketed counts of workspaces, distinct human members, active agents, and daemons seen in the previous 24 hours; and aggregate counts of runs started, completed, failed, and cancelled in that window. It does not include names, email addresses or domains, IP addresses, business IDs, host/device details, repository or organization details, model/plugin data, prompts or output, comments or chats, paths, token/cost data, credentials, errors, stacks, or logs. This telemetry is not used for billing, licensing, authentication, or security decisions.
+
+Telemetry is enabled by default. To stop both collection and network delivery, set `DO_NOT_TRACK=1` or `DO_NOT_TRACK=true` on the API server and recreate/restart the backend. The deployment identity remains in PostgreSQL, so enabling it again does not create a new identity. `ANALYTICS_DISABLED` controls the separate PostHog integration and does not disable this first-party telemetry.
+
+When cloning a production database for staging or testing, clear the clone's `instance_telemetry_state` table before starting its API server (or set `DO_NOT_TRACK=true`); otherwise both deployments share one identity and their same-day snapshots can silently deduplicate each other.
+
 ## Quick Install (Recommended)
 
-Two commands to set up everything — server, CLI, and configuration:
+Two commands to set up everything — server, CLI, and configuration.
+
+<details open>
+<summary><b>macOS / Linux</b></summary>
+
+<br/>
 
 ```bash
 # 1. Install CLI + provision the self-host server
@@ -23,6 +38,20 @@ curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/ins
 # 2. Configure CLI, authenticate, and start the daemon
 multica setup self-host
 ```
+</details>
+<details>
+<summary><b>Windows (PowerShell)</b></summary>
+
+<br/>
+
+```powershell
+# 1. Install CLI + provision the self-host server
+$env:MULTICA_MODE="with-server"; irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+
+# 2. Configure CLI, authenticate, and start the daemon
+multica setup self-host
+```
+</details>
 
 This installs the `multica` CLI, checks out the latest self-host assets, pulls the official Multica images from GHCR, and configures everything for localhost.
 
@@ -91,16 +120,29 @@ brew install multica-ai/tap/multica
 
 You also need at least one AI agent CLI installed:
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` on PATH)
+- [Antigravity CLI](https://antigravity.google/docs/cli-install) (`agy` on PATH)
+- [CodeBuddy Code](https://www.codebuddy.ai/docs/cli/quickstart) (`codebuddy` on PATH)
+- [DevEco Code](https://gitcode.com/openharmony-sig/deveco-code) (`deveco` on PATH)
 - [Codex](https://github.com/openai/codex) (`codex` on PATH)
 - [GitHub Copilot CLI](https://docs.github.com/en/copilot) (`copilot` on PATH)
 - [OpenClaw](https://github.com/openclaw/openclaw) (`openclaw` on PATH)
 - [OpenCode](https://github.com/anomalyco/opencode) (`opencode` on PATH)
+- [Huawei Cloud CodeArts](https://support.huaweicloud.com/qs-codeartssnap/codeartsagent_qs_0004.html) (`codearts` on PATH)
 - [Hermes](https://github.com/NousResearch/hermes) (`hermes` on PATH)
-- Gemini (`gemini` on PATH)
 - [Pi](https://pi.dev/) (`pi` on PATH)
 - [Cursor Agent](https://cursor.com/) (`cursor-agent` on PATH)
 - Kimi (`kimi` on PATH)
+- [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) (`reasonix` on PATH; run `reasonix setup` first)
+- Dim (`dim` on PATH)
 - Kiro CLI (`kiro-cli` on PATH)
+- Qoder CLI (`qodercli` on PATH)
+- Qoder CN CLI (`qoderclicn` on PATH)
+- Trae CLI (`traecli` on PATH)
+- [Grok Build CLI](https://docs.x.ai/) (`grok` on PATH)
+- Qwen Code (`qwen` on PATH)
+- [QwenPaw](https://github.com/agentscope-ai/QwenPaw) (`qwenpaw` on PATH; pick its model in QwenPaw's own configuration)
+- [MiniMax Code CLI](https://www.npmjs.com/package/@minimax-ai/code) (`mcode` 0.1.2+ on PATH). Install a supported Node.js release (`>=22.19 <23` or `>=24 <27`), run `npm install --global @minimax-ai/code@latest`, then `mcode login`.
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh` on PATH with the Multica runtime profile installed; set `DEEPSEEK_API_KEY`)
 
 ### b) One-command setup
 
@@ -151,7 +193,7 @@ The chart creates the following resources in the target namespace:
 
 The `multica-secrets` Secret is **not** managed by the chart — you create it once with `kubectl` so real values never need to land in git.
 
-> **One release per namespace:** the prebuilt `multica-web` image bakes `REMOTE_API_URL=http://backend:8080` at build time, so the chart ships an ExternalName Service literally named `backend`. Because that name is unprefixed, you can run only one Multica release per namespace, and `helm install` will fail if a `Service/backend` already exists there (pass `--take-ownership`, or use a dedicated namespace). If you build a web image with a patched `REMOTE_API_URL`, set `frontend.compatibility.backendAlias: false` to drop the alias.
+> **Runtime frontend upstreams:** current `multica-web` images read `REMOTE_API_URL` and `DOCS_URL` when the Next.js server runs, so API/docs upstream changes do not require a web rebuild. The chart defaults `REMOTE_API_URL` to this release's backend Service. `frontend.compatibility.backendAlias` exists only for legacy images that still baked `REMOTE_API_URL=http://backend:8080` at build time.
 
 > **Prerequisites:** `kubectl` and `helm` (v3.13+ for `--take-ownership`, or v4+) configured for the target cluster, an Ingress controller (Traefik / NGINX), and a default StorageClass.
 
@@ -220,6 +262,8 @@ When developing from a checkout, use the local chart path instead:
 ```bash
 helm install multica deploy/helm/multica -n multica
 ```
+
+If the backend has to reach services whose certificates come from an internal CA, such as a self-hosted Gitea, set `backend.extraCACerts.configMap`. See [Advanced Configuration → Private CA Certificates](SELF_HOSTING_ADVANCED.md#private-ca-certificates-optional).
 
 Watch the pods come up:
 
@@ -346,6 +390,13 @@ The Usage / Runtime dashboards read from a derived `task_usage_hourly` table pop
 
 Multiple backend replicas are safe: each replica ticks every 30 seconds and tries to claim the current 5-minute UTC plan, but the unique key `(job_name, scope_kind, scope_id, plan_time)` means only one wins each plan. Inspect steady-state operation:
 
+> **WeCom (企业微信) smart bot and replica count.** Unlike Slack and Lark, whose outbound is stateless HTTP that any replica can perform, the WeCom smart bot's only outbound path is an in-process WebSocket long connection, held by the replica that owns that bot's lease. What happens to a reply produced on a *different* replica depends on the realtime relay:
+>
+> - **Sharded or dual relay mode (`REDIS_URL` set, the default with Redis):** the reply or inbox push is forwarded to the lease holder over the relay and delivered. Multi-replica WeCom is supported in this mode.
+> - **Legacy relay mode, or no Redis:** the reply is dropped and the WeCom user sees nothing. Run the WeCom-enabled backend as a single replica in this configuration.
+>
+> In **every** mode there is one residual window: a reply produced while *no* replica holds a live connection to that bot — all of them mid-reconnect — is not delivered. It is **counted**: the replica that routed it checks afterwards whether any replica ever claimed the delivery, and increments `multica_wecom_outbound_dropped_total{reason="no_live_connection"}` when none did, so the window can be measured on a deployment rather than guessed at. If a rare lost reply during reconnects is unacceptable, a single replica remains the most conservative deployment. Everything else (including the rollup scheduler above) is multi-replica safe.
+
 ```sql
 SELECT plan_time, status, attempt, runner_id,
        error_code, error_msg, started_at, finished_at
@@ -441,7 +492,9 @@ cd multica
 cp .env.example .env
 ```
 
-Edit `.env` — at minimum, change `JWT_SECRET`:
+Edit `.env` — set `JWT_SECRET` (required): docker compose refuses to start without
+it, and a production backend refuses to boot on the dev default or any known
+placeholder.
 
 ```bash
 JWT_SECRET=$(openssl rand -hex 32)
