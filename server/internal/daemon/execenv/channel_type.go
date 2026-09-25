@@ -13,11 +13,11 @@ package execenv
 // agree on the wire strings below. WeCom keeps its reserved wire discriminator
 // here until its adapter lands.
 const (
+	ChannelTypeTelegram = "telegram"
 	ChannelTypeSlack    = "slack"
 	ChannelTypeFeishu   = "feishu"
 	ChannelTypeWecom    = "wecom"
 	ChannelTypeDingtalk = "dingtalk"
-	ChannelTypeTelegram = "telegram"
 )
 
 // SurfacePersistsTranscript reports whether a chat surface stores its
@@ -121,6 +121,8 @@ func ChannelCarriesFiles(channelType string, serverSaysDelivers bool) bool {
 // names itself in the prompt instead of silently reading as "unknown".
 func ChannelDisplayName(channelType string) string {
 	switch channelType {
+	case ChannelTypeTelegram:
+		return "Telegram"
 	case ChannelTypeSlack:
 		return "Slack"
 	case ChannelTypeFeishu:
@@ -129,8 +131,6 @@ func ChannelDisplayName(channelType string) string {
 		return "WeCom"
 	case ChannelTypeDingtalk:
 		return "DingTalk"
-	case ChannelTypeTelegram:
-		return "Telegram"
 	default:
 		return channelType
 	}
