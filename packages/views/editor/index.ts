@@ -33,9 +33,10 @@ export type {
   PreviewSequence,
 } from "./attachment-preview-modal";
 export {
-  ImageSequenceProvider,
-  useImageSequencePreview,
-} from "./image-sequence-context";
+  PreviewSequenceProvider,
+  collectPreviewSequence,
+  usePreviewSequence,
+} from "./preview-sequence-context";
 export { AttachmentCard } from "./attachment-card";
 export type { AttachmentCardProps } from "./attachment-card";
 export { Attachment } from "./attachment";

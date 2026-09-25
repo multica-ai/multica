@@ -139,19 +139,43 @@ function renderShell() {
 }
 
 beforeEach(() => {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    value: 1280,
+  });
+  localStorage.clear();
   state.currentSlug = "acme";
   state.wsList = [{ id: "ws-1", slug: "acme" }];
 });
 
 describe("DesktopShell workspace gating", () => {
   it("mounts workspace-scoped chrome while the slug resolves", () => {
-    const { queryByTestId } = renderShell();
+    const { queryByRole, queryByTestId } = renderShell();
 
     expect(queryByTestId("app-sidebar")).not.toBeNull();
     expect(queryByTestId("search-command")).not.toBeNull();
     expect(queryByTestId("global-shortcuts")).not.toBeNull();
     expect(queryByTestId("modal-registry")).not.toBeNull();
     expect(queryByTestId("floating-chat")).not.toBeNull();
+    expect(queryByRole("status", { name: /loading workspace/i })).toBeNull();
+  });
+
+  it("keeps traffic-light clearance and a loading shell while the slug is unresolved", () => {
+    state.currentSlug = null;
+
+    const { container, getByRole, getByTestId, queryByTestId } = renderShell();
+
+    expect(queryByTestId("app-sidebar")).toBeNull();
+    expect(
+      container.querySelectorAll("[data-slot='sidebar-trigger']"),
+    ).toHaveLength(0);
+    expect(
+      container.querySelector('[data-slot="main-top-bar"]'),
+    ).toHaveStyle({ paddingLeft: "256px" });
+    expect(
+      getByRole("status", { name: /loading workspace/i }),
+    ).toBeVisible();
+    expect(getByTestId("tab-content")).toBeInTheDocument();
   });
 
   it("drops workspace-scoped chrome when the singleton still points at a deleted workspace", () => {
@@ -166,6 +190,7 @@ describe("DesktopShell workspace gating", () => {
     expect(queryByTestId("global-shortcuts")).toBeNull();
     expect(queryByTestId("modal-registry")).toBeNull();
     expect(queryByTestId("floating-chat")).toBeNull();
+    expect(queryByTestId("tab-content")).not.toBeNull();
   });
 
   it("keeps TabContent mounted with no workspace so the tab router can still resolve one", () => {

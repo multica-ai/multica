@@ -68,6 +68,17 @@ func buildTestRepoTemplate() (string, error) {
 		{"init", "-b", "main"},
 		{"config", "user.name", "Test User"},
 		{"config", "user.email", "test@test.com"},
+		// git commit forks a DETACHED `git maintenance run --auto` and
+		// returns without waiting for it. That background process creates
+		// and removes lock files under .git/ after this function is done,
+		// so newTestRepo's os.CopyFS can list .git/objects/maintenance.lock
+		// and then fail to open it — failing whichever test happened to copy
+		// the template at that moment, in a package that has nothing to do
+		// with git maintenance. Every copy inherits this config, which also
+		// keeps the git commands tests run on their own copy from spawning a
+		// background process that races the assertions against it.
+		{"config", "gc.auto", "0"},
+		{"config", "maintenance.auto", "false"},
 		{"add", "."},
 		{"commit", "-m", "initial"},
 	} {
@@ -136,6 +147,25 @@ func prepareForTest(t *testing.T, localPath string) *LocalWorktree {
 		t.Fatalf("PrepareLocalWorktree: %v", err)
 	}
 	return wt
+}
+
+// Nothing may write inside a repo this package hands to a test while the test
+// is reading it, and git's auto maintenance is the one writer tests do not
+// spawn themselves: it runs detached, outliving the command that started it.
+// In the template that made os.CopyFS race a lock file git was removing; in a
+// copy it would race the test's own assertions. Asserting on a copy covers
+// both, since the copy inherits the template's config.
+func TestTestRepoDisablesGitAutoMaintenance(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	for key, want := range map[string]string{"gc.auto": "0", "maintenance.auto": "false"} {
+		// An unset key exits 1, which is the regression itself — read it
+		// without letting that exit code stand in for the comparison.
+		got, _ := gitTry(t, repo, "config", "--get", key)
+		if got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
 }
 
 // The agent must see the user's uncommitted work, not a clean HEAD checkout.

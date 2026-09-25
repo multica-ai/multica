@@ -10,7 +10,7 @@ Multica isn't on the App Store yet — until that changes, anyone who wants it o
 pnpm ios:mobile:device:prod:release
 ```
 
-This connects to the same backend as `multica.ai`, so your existing account just works.
+This connects to the same backend as `multica.ai`, so your existing account just works. To use a private backend or your own bundle ID, copy `apps/mobile/.env.production.example` to `apps/mobile/.env.production.local` and edit the copy — it overrides the committed `.env.production` key by key and is gitignored, so personal values stay local.
 
 **Prerequisites**: Mac with Xcode, a free Apple ID added under Xcode → Settings → Accounts, iPhone connected via USB with [Developer Mode enabled](https://docs.expo.dev/guides/ios-developer-mode/). Walk through Expo's [Set up your environment](https://docs.expo.dev/get-started/set-up-your-environment/) (pick **Development build → iOS Device**) if any of that is missing.
 
@@ -40,7 +40,7 @@ Everything below is for app developers — you can ignore the rest if you only w
 |---|---|---|
 | `pnpm dev:mobile` | Metro only (reuse existing install) | local (`.env.development.local`) |
 | `pnpm dev:mobile:staging` | Metro only (reuse existing install) | staging (`.env.staging`) |
-| `pnpm dev:mobile:prod` | Metro only (reuse existing install) | production (`.env.production`) |
+| `pnpm dev:mobile:prod` | Metro only (reuse existing install) | production (`.env.production`, overridden by `.env.production.local`) |
 | `pnpm ios:mobile` | Full rebuild + install on **iOS Simulator**, Debug | local |
 | `pnpm ios:mobile:staging` | Full rebuild + install on **iOS Simulator**, Debug | staging |
 | `pnpm ios:mobile:prod` | Full rebuild + install on **iOS Simulator**, Debug | production |
@@ -63,7 +63,7 @@ cp apps/mobile/.env.example apps/mobile/.env.development.local
 # then edit EXPO_PUBLIC_API_URL inside it to your Mac's LAN IP, e.g. http://192.168.1.42:8080
 ```
 
-If your Apple ID isn't on the Multica Apple Developer team yet, also uncomment and set `EXPO_BUNDLE_IDENTIFIER_DEV` to a reverse-domain you own (e.g. `com.yourname.multica.dev`). This **only** overrides the dev variant — staging / production bundle ids are intentionally not overridable so variants can coexist.
+If your Apple ID isn't on the Multica Apple Developer team yet, also set `EXPO_BUNDLE_IDENTIFIER_DEV` to a reverse-domain you own (e.g. `com.yourname.multica.dev`). For a personal production build, set `EXPO_BUNDLE_IDENTIFIER_PROD` in `.env.production.local`.
 
 If your Apple ID belongs to more than one Apple Developer team, also set `EXPO_APPLE_TEAM_ID` to the team that should sign your builds. Unlike the bundle id overrides it applies to every variant, and it is re-applied on each run — so it also fixes a checkout that has already latched onto the wrong team.
 
@@ -105,7 +105,7 @@ A free Apple ID signs builds for **7 days only**, Debug and Release both. After 
 
 ## Pointing at a different backend
 
-Edit `EXPO_PUBLIC_API_URL` in `.env.staging`, `.env.production`, or `.env.development.local` (whichever variant you're running). Then:
+Edit `EXPO_PUBLIC_API_URL` in `.env.staging`, `.env.production.local`, or `.env.development.local` (whichever variant you're running). Then:
 
 - For an installed **Debug build**: restart Metro (`pnpm dev:mobile:staging`) so the next JS bundle picks up the new value.
 - For an installed **Release build**: re-run the `ios:mobile:device:staging:release` command — the value is baked into the embedded bundle at build time.

@@ -1048,6 +1048,14 @@ func (c *hermesClient) writeLine(data []byte) error {
 }
 
 func (c *hermesClient) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	return c.requestAndNotifySent(ctx, method, params, nil)
+}
+
+// requestAndNotifySent runs afterWrite once the complete request has been
+// written to the provider. Callers that expose a concurrent operation tied to
+// that request use it to avoid advertising readiness before the provider has
+// received the lifecycle-starting frame.
+func (c *hermesClient) requestAndNotifySent(ctx context.Context, method string, params any, afterWrite func()) (json.RawMessage, error) {
 	c.mu.Lock()
 	id := c.nextID
 	c.nextID++
@@ -1074,6 +1082,9 @@ func (c *hermesClient) request(ctx context.Context, method string, params any) (
 		delete(c.pending, id)
 		c.mu.Unlock()
 		return nil, fmt.Errorf("write %s: %w", method, err)
+	}
+	if afterWrite != nil {
+		afterWrite()
 	}
 
 	select {

@@ -189,7 +189,7 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		})
 	case "codex":
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discovered(discoverCodexModels(ctx, runtimeCmd), nil)
+			return discoverCodexCatalog(ctx, runtimeCmd), nil
 		})
 	case "antigravity":
 		// agy 1.0.6 added a `--model` flag plus an `agy models` catalog
@@ -426,11 +426,12 @@ func ModelSelectionSupported(providerType string) bool {
 }
 
 // ModelKnownIncompatibleWithProvider reports whether a saved model is a known
-// mismatch for a target runtime provider. For first-party providers with
-// maintained static catalogs, compatibility is exact: the model must be one of
-// the IDs that runtime advertises. Unknown/custom model strings still return
-// false because the UI and CLI allow manual entries and the server should not
-// erase values it cannot confidently classify.
+// mismatch for a target runtime provider. Static catalogs are sufficient to
+// recognize known-good IDs, but they are not allow-lists: Claude and Codex can
+// gain same-family model IDs through live discovery without a Multica release.
+// Unknown/custom model strings still return false because the UI and CLI allow
+// manual entries and the server should not erase values it cannot confidently
+// classify.
 func ModelKnownIncompatibleWithProvider(providerType, model string) bool {
 	model = strings.TrimSpace(model)
 	if model == "" {
@@ -443,6 +444,17 @@ func ModelKnownIncompatibleWithProvider(providerType, model string) bool {
 	}
 	if accepted[modelIDForCapabilityLookup(providerType, model)] {
 		return false
+	}
+	lookupID := modelIDForCapabilityLookup(providerType, model)
+	switch providerType {
+	case "claude":
+		if strings.HasPrefix(lookupID, "claude-") && !strings.ContainsAny(lookupID, "[]") {
+			return false
+		}
+	case "codex":
+		if strings.HasPrefix(lookupID, "gpt-") || isOpenAIReasoningSeriesID(lookupID) {
+			return false
+		}
 	}
 	return isRuntimeSpecificModelID(model)
 }
@@ -584,7 +596,7 @@ func claudeStaticModels() []Model {
 }
 
 // codexStaticModels is the fallback for Codex versions older than 0.122.0
-// and for failed/malformed `codex debug models --bundled` calls. Keep it in
+// and for failed/malformed live and bundled discovery calls. Keep it in
 // sync with the visible entries in the newest locally verified bundled
 // catalog, plus still-common models from older Codex releases. Each entry
 // carries its own reasoning catalog so old/offline CLIs retain the same model
@@ -1013,7 +1025,7 @@ func discoverPiModelsWithin(ctx context.Context, runtimeCmd Command, rpcTimeout,
 	}
 	lookedUp, err := exec.LookPath(runtimeCmd.Path)
 	if err != nil {
-		return []Model{}, nil
+		return nil, fmt.Errorf("pi model discovery: %w", err)
 	}
 	// Split the established 15-second discovery budget so an RPC surface that
 	// accepts the mode but never answers cannot starve the compatibility table
@@ -1216,14 +1228,16 @@ func discoverPiModelsTable(ctx context.Context, runtimeCmd Command) ([]Model, er
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	stdout, err := outputOwned(cmd, runtimeCmd.logger)
-	if err != nil && len(stdout) == 0 && stderr.Len() == 0 {
-		return []Model{}, nil
-	}
+
 	text := string(stdout)
 	if strings.TrimSpace(text) == "" {
 		text = stderr.String()
 	}
-	return parsePiModels(text), nil
+	models := parsePiModels(text)
+	if len(models) == 0 && err != nil {
+		return nil, fmt.Errorf("pi model discovery: RPC probe failed; --list-models: %w: %s", err, strings.TrimSpace(text))
+	}
+	return models, nil
 }
 
 // parsePiModels accepts the `pi --list-models` output. Pi historically
@@ -1341,15 +1355,17 @@ func discoverOmpModels(ctx context.Context, runtimeCmd Command) ([]Model, error)
 		runtimeCmd.Path = "omp"
 	}
 	if _, err := exec.LookPath(runtimeCmd.Path); err != nil {
-		return []Model{}, nil
+		return nil, fmt.Errorf("omp model discovery: %w", err)
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := runtimeCmd.exec(runCtx, "models", "--json")
 	hideAgentWindow(cmd)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
 	stdout, err := outputOwned(cmd, runtimeCmd.logger)
-	if err != nil || len(stdout) == 0 {
-		return []Model{}, nil
+	if err != nil {
+		return nil, fmt.Errorf("omp models --json: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return parseOmpModels(stdout)
 }

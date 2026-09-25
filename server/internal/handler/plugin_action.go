@@ -551,7 +551,7 @@ func (h *Handler) CreatePluginComment(w http.ResponseWriter, r *http.Request) {
 		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "content is required")
 		return
 	}
-	if len(content) > maxPluginCommentBytes {
+	if len(content) > maxCommentContentBytes {
 		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "content is too long")
 		return
 	}
@@ -615,14 +615,11 @@ func (h *Handler) CreatePluginComment(w http.ResponseWriter, r *http.Request) {
 		"issue_status":        issue.Status,
 	})
 	if rootComment != nil {
-		h.TaskService.AutoUnresolveThreadOnReply(r.Context(), rootComment, uuidToString(caller.WorkspaceID), authorType, uuidToString(authorID))
+		h.TaskService.AutoUnresolveThreadOnReply(r.Context(), rootComment, uuidToString(caller.WorkspaceID), authorType, uuidToString(authorID), pgtype.UUID{})
 	}
 
 	writeJSON(w, http.StatusCreated, publicPluginComment(comment))
 }
-
-// maxPluginCommentBytes keeps a surface from using comments as bulk storage.
-const maxPluginCommentBytes = 64 * 1024
 
 // maxPluginCommentsPerRead bounds one read. The query returns the NEWEST N in
 // chronological order, so a surface on a long thread sees the recent end rather

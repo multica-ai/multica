@@ -29,8 +29,9 @@ const originTelegramChat = "telegram_chat"
 
 // NewTelegramResolverSet assembles the Telegram ResolverSet. Pass a nil
 // replier to disable outbound verdict notices; typing (sendChatAction) is
-// enabled when deps carry a decrypter.
-func NewTelegramResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.OutboundReplier, typing engine.TypingNotifier) engine.ResolverSet {
+// enabled when deps carry a decrypter. A nil media resolver (no object
+// storage) ingests photos and files as their placeholder text only.
+func NewTelegramResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.OutboundReplier, typing engine.TypingNotifier, media engine.MediaResolver) engine.ResolverSet {
 	return engine.ResolverSet{
 		Installation: &installationResolver{q: q},
 		Identity:     &identityResolver{q: q},
@@ -40,6 +41,7 @@ func NewTelegramResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.O
 			Direct:   "Telegram direct message",
 			Fallback: "Telegram chat",
 		})},
+		Media:      media,
 		Audit:      &auditor{q: q},
 		Replier:    replier,
 		Typing:     typing,

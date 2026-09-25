@@ -206,8 +206,11 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 | `MULTICA_LLM_BASE_URL` | 비어 있음 | OpenAI 호환 endpoint |
 | `MULTICA_LLM_DEFAULT_MODEL` | `gpt-5.6-luna` | 요청에 모델이 지정되지 않았을 때 사용 |
 | `MULTICA_LLM_MAX_RETRIES` | `2` | 호출당 재시도 상한. `0`은 재시도 비활성화, `1`–`5`는 최대 N회 |
+| `MULTICA_LLM_DISABLE_THINKING` | `false` | 모든 요청에 `chat_template_kwargs: {"enable_thinking": false}`를 첨부. 해당 필드를 해석하는 gateway용 |
 
 `MULTICA_LLM_MAX_RETRIES`는 재시도 정책의 유일한 설정 소스입니다. 설정하지 않으면 기본값 2회, `0`이면 호출당 요청을 정확히 한 번만 보내고, 1–5면 재시도를 최대 그 횟수까지만 합니다. 할당량이 아니라 상한입니다. 재시도 대상 실패만 이를 소모하며, 성공하거나 호출자 자신의 데드라인에 걸리면 더 일찍 끝납니다. 그 밖의 값(음수, 숫자가 아닌 값, 5 초과)은 조용히 보정되지 않고 시작에 실패합니다. 상한은 지연 예산입니다. 백오프는 0.5초에서 시작해 8초 상한까지 두 배씩 늘어나므로, 더 큰 예산은 호출자 자신의 타임아웃을 넘겨 재시도 가능한 실패를 타임아웃으로 바꿉니다. 재시도는 연결 실패와 HTTP 408, 409, 429, 5xx를 대상으로 하며 그 외 4xx는 그대로 반환됩니다. 서버는 시작 시 유효한 정책을 `llm retry policy`로 기록하며 해당 줄에는 자격 증명이 포함되지 않습니다.
+
+`MULTICA_LLM_DISABLE_THINKING`은 모델이 추론(thinking) 패스를 실행해 어시스트 호출의 지연 예산을 잠식하는 gateway를 위한 설정입니다. `true`(또는 `1`)로 설정하면 서버가 모든 요청 본문에 `chat_template_kwargs: {"enable_thinking": false}`를 첨부하며, 이 필드를 전달하는 gateway(vLLM/sglang 계열 배포, 일부 GLM/Qwen 계열 LiteLLM 라우트)는 thinking 패스를 건너뜁니다. 표준 OpenAI endpoint는 알 수 없는 본문 필드를 거부하므로, 업스트림이 이를 받아들이는 경우에만 활성화하세요. GPT-5.6 계열 모델은 후속 질문 요청에서 서버가 이미 `reasoning_effort: none`을 붙입니다. 채팅 자동 제목 생성은 추론 필드를 보내지 않습니다. 이 설정이 그것에 영향을 주는 것은 구성된 업스트림이 `chat_template_kwargs`를 받아들이는 경우뿐입니다. 허용되는 값은 `true`/`false`와 `1`/`0`(대소문자 구분 없음)이며, 그 외 값은 시작에 실패합니다. 시작 로그에 재시도 정책과 함께 유효 상태가 기록됩니다.
 
 이 레이어를 사용하는 기능은 두 가지이며, 둘 다 설정한 endpoint로 채팅 내용을 전송합니다.
 

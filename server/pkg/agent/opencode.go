@@ -44,6 +44,10 @@ var opencodeBlockedArgs = map[string]blockedArgMode{
 // and reading streaming JSON events from stdout — the same pattern as Claude.
 type opencodeBackend struct {
 	cfg Config
+	// session is per-run state, set by Execute on the copy it scans with, so
+	// the cancellation handler can interrupt the session server-side. It is nil
+	// on the Backend New returns and on any backend built directly by a test.
+	session *opencodeSessionTracker
 }
 
 // opencodeSeparatesReasoning recognizes the released OpenCode 1.x wire contract.
@@ -84,6 +88,10 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
+	// See opencode_v2.go for what 2.x changed and why the differences are
+	// handled together rather than one flag at a time.
+	usesV2 := opencodeUsesV2Contract(b.cfg)
+
 	args := []string{"run", "--format", "json", "--dangerously-skip-permissions"}
 	// Anchor OpenCode's project discovery (AGENTS.md walk-up + .opencode/skills/
 	// project config scan) at the task workdir. Without this, OpenCode falls
@@ -94,13 +102,28 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// PWD is also overridden below because OpenCode prefers PWD over cwd when
 	// `--dir` is absent and uses it as the starting point for any further
 	// path resolution.
-	if opts.Cwd != "" {
+	//
+	// 2.x removed `--dir` outright and anchors on the process cwd instead, which
+	// cmd.Dir and the PWD override below already provide. Passing it there is
+	// not a no-op: the CLI rejects the unknown flag and the run dies before it
+	// starts (GH #8586).
+	if opts.Cwd != "" && !usesV2 {
 		args = append(args, "--dir", opts.Cwd)
 	}
-	if opts.Model != "" {
-		args = append(args, "--model", opts.Model)
+	model := opts.Model
+	if usesV2 {
+		// 2.x dropped `--variant` and reads the variant off the model string.
+		folded, ok := opencodeModelArg(model, opts.ThinkingLevel)
+		if !ok {
+			b.cfg.Logger.Warn("opencode: thinking level needs an explicit model on OpenCode 2.x; ignoring",
+				"thinkingLevel", opts.ThinkingLevel)
+		}
+		model = folded
 	}
-	if opts.ThinkingLevel != "" {
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	if opts.ThinkingLevel != "" && !usesV2 {
 		args = append(args, "--variant", opts.ThinkingLevel)
 	}
 	// OpenCode's `run` subcommand has no --prompt flag — passing one makes the
@@ -128,7 +151,11 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// out of OS process listings; the shared command logger separately redacts
 	// argv values.
 
-	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
+	runtimeCmd := b.cfg.commandAt(execPath)
+	// run carries this invocation's session id. Execute scans with it instead of
+	// b so two runs sharing a Backend value cannot observe each other's session.
+	run := &opencodeBackend{cfg: b.cfg, session: &opencodeSessionTracker{}}
+	cmd := runtimeCmd.exec(runCtx, args...)
 	hideAgentWindow(cmd)
 	// Take over context cancellation. The default kills the whole group the
 	// instant runCtx is done; we instead drive a graceful, group-wide
@@ -160,29 +187,55 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if opts.Cwd != "" {
 		env = append(env, "PWD="+opts.Cwd)
 	}
-	// Project agent.mcp_config into OpenCode via OPENCODE_CONFIG_CONTENT —
-	// OpenCode's general inline-config injection mechanism that merges at
-	// "local" scope (after the project-config loop, before remote / managed
-	// configs). MCP is the only field we currently project there; if a
-	// future Multica field needs the same channel it would assemble a
-	// combined OpenCode config slice before the env append.
+	// Project agent.mcp_config into OpenCode. The channel differs by major:
 	//
-	// This deliberately leaves <workdir>/opencode.json untouched — the
-	// workdir is reused across turns for the same (agent, issue), and any
-	// agent- or user-written model / tools / permission settings in it must
-	// survive across runs.
-	mcpContent, err := buildOpenCodeMCPConfigContent(opts.McpConfig)
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-	if mcpContent != "" {
-		if _, dup := b.cfg.Env["OPENCODE_CONFIG_CONTENT"]; dup {
-			b.cfg.Logger.Warn("agent.custom_env sets OPENCODE_CONFIG_CONTENT but agent.mcp_config takes precedence and overrides it")
+	// On 1.x, OPENCODE_CONFIG_CONTENT — OpenCode's general inline-config
+	// injection mechanism that merges at "local" scope (after the
+	// project-config loop, before remote / managed configs). MCP is the only
+	// field we currently project there; if a future Multica field needs the
+	// same channel it would assemble a combined OpenCode config slice before
+	// the env append. That path deliberately leaves <workdir>/opencode.json
+	// untouched — the workdir is reused across turns for the same
+	// (agent, issue), and any agent- or user-written model / tools /
+	// permission settings in it must survive across runs.
+	//
+	// 2.x stopped honouring that env var, and the only channel it left puts the
+	// credentials in the agent's own working tree, where the agent can commit
+	// them. Such runs are refused rather than started without their servers —
+	// see ErrOpenCodeV2MCPUnsupported.
+	if usesV2 {
+		if err := opencodeCheckMCPSupport(opts.McpConfig); err != nil {
+			cancel()
+			return nil, err
 		}
-		env = append(env, "OPENCODE_CONFIG_CONTENT="+mcpContent)
+	} else {
+		mcpContent, err := buildOpenCodeMCPConfigContent(opts.McpConfig)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+		if mcpContent != "" {
+			if _, dup := b.cfg.Env["OPENCODE_CONFIG_CONTENT"]; dup {
+				b.cfg.Logger.Warn("agent.custom_env sets OPENCODE_CONFIG_CONTENT but agent.mcp_config takes precedence and overrides it")
+			}
+			env = append(env, "OPENCODE_CONFIG_CONTENT="+mcpContent)
+		}
 	}
 	cmd.Env = env
+
+	// Capture how this run reaches its OpenCode service, so a later interrupt
+	// talks to the same one. `--server` can arrive through agent.custom_args, and
+	// the default background service is resolved from the process environment and
+	// working directory — an interrupt missing any of that would report success
+	// against a different service while this session kept running.
+	interruptServer, interruptStandalone := opencodeConnectionFromArgs(args)
+	interruptConn := opencodeRunConnection{
+		cmd:        runtimeCmd,
+		server:     interruptServer,
+		standalone: interruptStandalone,
+		env:        env,
+		dir:        opts.Cwd,
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -246,6 +299,15 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		// OpenCode that stopped reading before draining it would otherwise
 		// strand that goroutine for the lifetime of the daemon.
 		closeStdin()
+		// On 2.x the process below is only a client; the run itself belongs to a
+		// background service that survives every signal sent here. Ask the
+		// service to stop the session first, otherwise the agent keeps working —
+		// calling tools and writing to the workdir — after this task is already
+		// recorded as cancelled. Best effort: the signalling below is unchanged
+		// and still runs whether or not this succeeds.
+		if usesV2 {
+			opencodeInterruptSession(interruptConn, run.session.get(), b.cfg.Logger)
+		}
 		if cmd.Process != nil {
 			signalProcessGroup(cmd, syscall.SIGTERM)
 			select {
@@ -263,7 +325,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		defer close(resCh)
 
 		startTime := time.Now()
-		scanResult := b.processEvents(stdout, msgCh)
+		scanResult := run.processEvents(stdout, msgCh)
 
 		// Wait for process exit, then release the cancellation handler.
 		exitErr := cmd.Wait()
@@ -420,6 +482,9 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 
 		if event.SessionID != "" {
 			sessionID = event.SessionID
+			// Publish it for the cancellation handler, which needs a session id
+			// to interrupt a 2.x run server-side. No-op when b has no tracker.
+			b.session.set(event.SessionID)
 		}
 
 		switch event.Type {

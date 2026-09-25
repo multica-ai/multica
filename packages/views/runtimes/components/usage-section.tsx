@@ -20,6 +20,7 @@ import {
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import {
+  cacheHitRatePercent,
   formatTokens,
   formatUsd,
   estimateCost,
@@ -171,9 +172,11 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
 
   const tokensTotal =
     totals.input + totals.output + totals.cacheRead + totals.cacheWrite;
-  const cacheableTokens = totals.input + totals.cacheRead;
-  const cacheHitRate =
-    cacheableTokens > 0 ? Math.round((totals.cacheRead / cacheableTokens) * 100) : 0;
+  const cacheHitRate = cacheHitRatePercent(
+    totals.input,
+    totals.cacheRead,
+    totals.cacheWrite,
+  );
 
   const costDelta = pctChange(totals.cost, prevTotals.cost);
   const locales = i18n.resolvedLanguage ?? i18n.language;
@@ -224,7 +227,14 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
           if the user has saved overrides, so those rates remain editable. */}
       <CustomPricingBar usage={filtered} />
 
-      <div className="grid grid-cols-3 divide-x rounded-lg border bg-card">
+      {/* Stacks below `sm`, matching the Analytics tabs' KPI rows. Three
+          fixed columns leave ~70px of content width inside `KpiCard`'s p-5 at
+          a 390px viewport, and a `text-display` value ("960.1M", "$1,234.56")
+          is far wider than that — it painted past the card's right edge
+          instead of wrapping, because a number is one unbreakable token
+          (#7836). `divide-y` carries the separator through the stacked
+          orientation so the row still reads as one grouped card. */}
+      <div className="grid grid-cols-1 divide-y rounded-lg border bg-card sm:grid-cols-3 sm:divide-x sm:divide-y-0">
         <KpiCard
           label={t(($) => $.usage.kpi_cost_label, { days })}
           value={
@@ -265,10 +275,12 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
           accent={totals.cacheSavings > 0 ? "success" : "default"}
           hint={
             <span>
-              {t(($) => $.usage.kpi_cache_hint, {
-                pct: cacheHitRate,
-                reads: formatTokens(totals.cacheRead),
-              })}
+              {cacheHitRate == null
+                ? "—"
+                : t(($) => $.usage.kpi_cache_hint, {
+                    pct: cacheHitRate,
+                    reads: formatTokens(totals.cacheRead),
+                  })}
             </span>
           }
         />

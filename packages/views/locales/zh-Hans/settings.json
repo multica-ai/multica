@@ -81,7 +81,13 @@
       "blocked": "被外部依赖阻塞。",
       "done": "已完成。",
       "cancelled": "决定不做。"
-    }
+    },
+    "automation_title": "自动化",
+    "pr_auto_complete_label": "PR 合并后自动完成任务",
+    "pr_auto_complete_description": "任务关联的 PR 全部合并，且至少一个 PR 写了关闭语句时，状态改为「已完成」。只对之后合并的 PR 生效。",
+    "pr_auto_complete_example": "关闭语句写在 PR 标题或正文里，例如",
+    "pr_auto_complete_example_title": "Closes MUL-123",
+    "pr_auto_complete_badge": "PR 全部合并时自动进入"
   },
   "quick_actions": {
     "title": "快捷操作",
@@ -161,6 +167,12 @@
     },
     "sticky_comment_bar": {
       "title": "固定底部评论栏"
+    },
+    "running_agent_reply": {
+      "title": "回复正在运行的智能体时",
+      "steer": "插话到当前运行",
+      "after_run": "本轮结束后开始",
+      "hint": "只决定默认选项，每条消息发送前仍可单独修改。"
     },
     "issue_title": "任务创建",
     "comments_title": "评论",
@@ -633,7 +645,7 @@
       },
       "agent_activity": {
         "label": "智能体活动",
-        "description": "智能体运行完成或失败时"
+        "description": "智能体运行失败时"
       }
     },
     "system": {
@@ -755,10 +767,6 @@
     "master_description_off": "GitHub 功能已暂停，已有数据保留。",
     "section_connection": "连接",
     "connection_title": "GitHub App",
-    "connection_description_prefix": "自动把任务关联到 Pull Request。只要 PR 的分支名或标题里出现",
-    "connection_description_suffix": "或正文里写了 Closes MUL-123，PR 就会关联到对应任务；只有带关闭关键字的 PR 合并后，任务才会转为",
-    "connection_description_done": "已完成",
-    "connection_identifier_example": "MUL-123",
     "connected_to": "已连接到 {{login}}",
     "connect_github": "连接 GitHub",
     "connect_opening": "正在打开…",
@@ -788,7 +796,12 @@
     "section_repositories": "代码仓库",
     "repositories_shortcut_label": "仓库 URL 仍在\"代码仓库\"标签页中管理",
     "repositories_shortcut_link": "前往管理 →",
-    "toast_failed": "更新 GitHub 设置失败"
+    "toast_failed": "更新 GitHub 设置失败",
+    "feature_auto_link_description": "PR 标题或分支名含任务编号（如 {{example}}），或正文里写了 \"Closes {{example}}\" 时，自动关联到对应任务。",
+    "feature_pr_auto_complete_label": "PR 合并后自动完成任务",
+    "feature_pr_auto_complete_on": "已开启 · 所有代码托管平台共用",
+    "feature_pr_auto_complete_off": "未开启 · 所有代码托管平台共用",
+    "feature_pr_auto_complete_manage": "设置"
   },
   "vcs": {
     "section_title": "Git 代码托管（自托管）",
@@ -870,6 +883,8 @@
     "agent_bot_connected_label_lark": "已连接到 Lark",
     "agent_bot_manage_link_feishu": "在飞书中管理",
     "agent_bot_manage_link_lark": "在 Lark 中管理",
+    "agent_bot_silent_hint": "Bot 已连接但不回复？确认应用的事件订阅方式是长连接。",
+    "agent_bot_silent_hint_link": "排查指南",
     "agent_bot_manage_tooltip_feishu": "打开飞书开发者控制台中该 Bot 的应用页面——管理权限、修改名称、申请新的权限范围。",
     "agent_bot_manage_tooltip_lark": "打开 Lark 开发者控制台中该 Bot 的应用页面——管理权限、修改名称、申请新的权限范围。",
     "agent_bot_disconnect_tooltip": "将该飞书 Bot 与智能体解绑，Bot 将停止接收飞书消息。",

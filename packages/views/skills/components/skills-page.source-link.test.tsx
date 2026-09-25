@@ -4,6 +4,7 @@ import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import type { SkillSummary } from "@multica/core/types";
+import type { SupportedLocale } from "@multica/core/i18n";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 
@@ -151,11 +152,12 @@ function makeAdapter(
   };
 }
 
-function renderPage(adapter: NavigationAdapter) {
+function renderPage(adapter: NavigationAdapter, locale?: SupportedLocale) {
   renderWithI18n(
     <NavigationProvider value={adapter}>
       <SkillsPage />
     </NavigationProvider>,
+    { locale },
   );
 }
 
@@ -216,5 +218,15 @@ describe("SkillsPage source link vs row navigation", () => {
       "/acme/skills/skill-1",
       "animations",
     );
+  });
+});
+
+describe("SkillsPage docs link", () => {
+  it("points Learn more at the viewer's docs locale", () => {
+    renderPage(makeAdapter(), "fr");
+
+    expect(
+      screen.getByRole("link", { name: "En savoir plus →" }),
+    ).toHaveAttribute("href", "https://multica.ai/docs/fr/skills");
   });
 });

@@ -47,42 +47,47 @@ func (q *Queries) DeleteVCSConnection(ctx context.Context, arg DeleteVCSConnecti
 	return err
 }
 
-const getIssueCombinedPullRequestCloseAggregate = `-- name: GetIssueCombinedPullRequestCloseAggregate :one
-WITH combined AS (
-    SELECT pr.state AS state, ipr.close_intent AS close_intent
-    FROM github_pull_request pr
-    JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-    WHERE ipr.issue_id = $1
-    UNION ALL
-    SELECT pr.state AS state, ipr.close_intent AS close_intent
-    FROM vcs_pull_request pr
-    JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
-    WHERE ipr.issue_id = $1
-)
-SELECT
-    COALESCE(SUM(CASE WHEN state IN ('open', 'draft') THEN 1 ELSE 0 END), 0)::bigint AS open_count,
-    COALESCE(SUM(CASE WHEN state = 'merged' AND close_intent THEN 1 ELSE 0 END), 0)::bigint AS merged_with_close_intent_count
-FROM combined
+const findVCSPullRequestByURL = `-- name: FindVCSPullRequestByURL :one
+SELECT id, workspace_id, connection_id, provider, repo_owner, repo_name, pr_number, title, state, html_url, branch, head_sha, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, additions, deletions, changed_files, created_at, updated_at FROM vcs_pull_request
+WHERE workspace_id = $1
+  AND lower(rtrim(html_url, '/')) = lower($2::text)
+ORDER BY pr_updated_at DESC
+LIMIT 1
 `
 
-type GetIssueCombinedPullRequestCloseAggregateRow struct {
-	OpenCount                  int64 `json:"open_count"`
-	MergedWithCloseIntentCount int64 `json:"merged_with_close_intent_count"`
+type FindVCSPullRequestByURLParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	HtmlUrl     string      `json:"html_url"`
 }
 
-// Cross-provider close gate. An issue can carry PRs from GitHub AND a
-// self-hosted VCS provider at the same time, so auto-advance has to see BOTH
-// table pairs. Reading only one (as the per-provider aggregates do) lets a
-// merged close-intent PR/MR on one provider advance an issue that still has an
-// open PR on the other — either webhook is blind to the other's in-flight work.
-// Sum the in-flight (open/draft) and merged-with-close-intent counts across
-// github_pull_request+issue_pull_request and vcs_pull_request+
-// issue_vcs_pull_request. A bare body mention is not linked on either side, so
-// a passing reference never counts as in-flight.
-func (q *Queries) GetIssueCombinedPullRequestCloseAggregate(ctx context.Context, issueID pgtype.UUID) (GetIssueCombinedPullRequestCloseAggregateRow, error) {
-	row := q.db.QueryRow(ctx, getIssueCombinedPullRequestCloseAggregate, issueID)
-	var i GetIssueCombinedPullRequestCloseAggregateRow
-	err := row.Scan(&i.OpenCount, &i.MergedWithCloseIntentCount)
+func (q *Queries) FindVCSPullRequestByURL(ctx context.Context, arg FindVCSPullRequestByURLParams) (VcsPullRequest, error) {
+	row := q.db.QueryRow(ctx, findVCSPullRequestByURL, arg.WorkspaceID, arg.HtmlUrl)
+	var i VcsPullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ConnectionID,
+		&i.Provider,
+		&i.RepoOwner,
+		&i.RepoName,
+		&i.PrNumber,
+		&i.Title,
+		&i.State,
+		&i.HtmlUrl,
+		&i.Branch,
+		&i.HeadSha,
+		&i.AuthorLogin,
+		&i.AuthorAvatarUrl,
+		&i.MergedAt,
+		&i.ClosedAt,
+		&i.PrCreatedAt,
+		&i.PrUpdatedAt,
+		&i.Additions,
+		&i.Deletions,
+		&i.ChangedFiles,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
 	return i, err
 }
 
@@ -109,44 +114,174 @@ func (q *Queries) GetVCSConnectionByID(ctx context.Context, id pgtype.UUID) (Vcs
 	return i, err
 }
 
-const linkIssueToVCSPullRequest = `-- name: LinkIssueToVCSPullRequest :exec
+const getVCSPullRequestByKey = `-- name: GetVCSPullRequestByKey :one
+SELECT id, workspace_id, connection_id, provider, repo_owner, repo_name, pr_number, title, state, html_url, branch, head_sha, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, additions, deletions, changed_files, created_at, updated_at FROM vcs_pull_request
+WHERE connection_id = $1 AND repo_owner = $2 AND repo_name = $3 AND pr_number = $4
+`
+
+type GetVCSPullRequestByKeyParams struct {
+	ConnectionID pgtype.UUID `json:"connection_id"`
+	RepoOwner    string      `json:"repo_owner"`
+	RepoName     string      `json:"repo_name"`
+	PrNumber     int32       `json:"pr_number"`
+}
+
+// The stored row before a webhook upsert, so the handler can tell a merge
+// transition apart from a later event on an already-merged PR.
+func (q *Queries) GetVCSPullRequestByKey(ctx context.Context, arg GetVCSPullRequestByKeyParams) (VcsPullRequest, error) {
+	row := q.db.QueryRow(ctx, getVCSPullRequestByKey,
+		arg.ConnectionID,
+		arg.RepoOwner,
+		arg.RepoName,
+		arg.PrNumber,
+	)
+	var i VcsPullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ConnectionID,
+		&i.Provider,
+		&i.RepoOwner,
+		&i.RepoName,
+		&i.PrNumber,
+		&i.Title,
+		&i.State,
+		&i.HtmlUrl,
+		&i.Branch,
+		&i.HeadSha,
+		&i.AuthorLogin,
+		&i.AuthorAvatarUrl,
+		&i.MergedAt,
+		&i.ClosedAt,
+		&i.PrCreatedAt,
+		&i.PrUpdatedAt,
+		&i.Additions,
+		&i.Deletions,
+		&i.ChangedFiles,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getVCSPullRequestInWorkspace = `-- name: GetVCSPullRequestInWorkspace :one
+SELECT id, workspace_id, connection_id, provider, repo_owner, repo_name, pr_number, title, state, html_url, branch, head_sha, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, additions, deletions, changed_files, created_at, updated_at FROM vcs_pull_request
+WHERE id = $1 AND workspace_id = $2
+`
+
+type GetVCSPullRequestInWorkspaceParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetVCSPullRequestInWorkspace(ctx context.Context, arg GetVCSPullRequestInWorkspaceParams) (VcsPullRequest, error) {
+	row := q.db.QueryRow(ctx, getVCSPullRequestInWorkspace, arg.ID, arg.WorkspaceID)
+	var i VcsPullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ConnectionID,
+		&i.Provider,
+		&i.RepoOwner,
+		&i.RepoName,
+		&i.PrNumber,
+		&i.Title,
+		&i.State,
+		&i.HtmlUrl,
+		&i.Branch,
+		&i.HeadSha,
+		&i.AuthorLogin,
+		&i.AuthorAvatarUrl,
+		&i.MergedAt,
+		&i.ClosedAt,
+		&i.PrCreatedAt,
+		&i.PrUpdatedAt,
+		&i.Additions,
+		&i.Deletions,
+		&i.ChangedFiles,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const linkIssueToVCSPullRequest = `-- name: LinkIssueToVCSPullRequest :execrows
 
 INSERT INTO issue_vcs_pull_request (
-    issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent
+    issue_id, pull_request_id, linked_by_type, linked_by_id
 ) VALUES (
-    $1, $2, $4, $5, $3
+    $1, $2, 'system', NULL
 )
-ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
-    close_intent = CASE
-        WHEN $6 THEN issue_vcs_pull_request.close_intent
-        ELSE EXCLUDED.close_intent
-    END
+ON CONFLICT (issue_id, pull_request_id) DO NOTHING
 `
 
 type LinkIssueToVCSPullRequestParams struct {
-	IssueID             pgtype.UUID `json:"issue_id"`
-	PullRequestID       pgtype.UUID `json:"pull_request_id"`
-	CloseIntent         bool        `json:"close_intent"`
-	LinkedByType        pgtype.Text `json:"linked_by_type"`
-	LinkedByID          pgtype.UUID `json:"linked_by_id"`
-	PreserveCloseIntent bool        `json:"preserve_close_intent"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+	PullRequestID pgtype.UUID `json:"pull_request_id"`
 }
 
 // =====================
 // Issue ↔ VCS PR link
 // =====================
-// Mirrors the GitHub link upsert: preserve_close_intent freezes close_intent
-// once a terminal merge/close event has been recorded.
-func (q *Queries) LinkIssueToVCSPullRequest(ctx context.Context, arg LinkIssueToVCSPullRequestParams) error {
-	_, err := q.db.Exec(ctx, linkIssueToVCSPullRequest,
-		arg.IssueID,
-		arg.PullRequestID,
-		arg.CloseIntent,
-		arg.LinkedByType,
-		arg.LinkedByID,
-		arg.PreserveCloseIntent,
-	)
-	return err
+// Mirrors LinkIssueToPullRequest: automatic link, 1 only when new.
+func (q *Queries) LinkIssueToVCSPullRequest(ctx context.Context, arg LinkIssueToVCSPullRequestParams) (int64, error) {
+	result, err := q.db.Exec(ctx, linkIssueToVCSPullRequest, arg.IssueID, arg.PullRequestID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const linkIssueToVCSPullRequestManually = `-- name: LinkIssueToVCSPullRequestManually :execrows
+INSERT INTO issue_vcs_pull_request (
+    issue_id, pull_request_id, linked_by_type, linked_by_id
+) VALUES (
+    $1, $2, 'member', $3
+)
+ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
+    linked_by_type = 'member',
+    linked_by_id = EXCLUDED.linked_by_id
+WHERE issue_vcs_pull_request.linked_by_type IS DISTINCT FROM 'member'
+`
+
+type LinkIssueToVCSPullRequestManuallyParams struct {
+	IssueID       pgtype.UUID `json:"issue_id"`
+	PullRequestID pgtype.UUID `json:"pull_request_id"`
+	LinkedByID    pgtype.UUID `json:"linked_by_id"`
+}
+
+func (q *Queries) LinkIssueToVCSPullRequestManually(ctx context.Context, arg LinkIssueToVCSPullRequestManuallyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, linkIssueToVCSPullRequestManually, arg.IssueID, arg.PullRequestID, arg.LinkedByID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const listAutoLinkedIssueIDsForVCSPullRequest = `-- name: ListAutoLinkedIssueIDsForVCSPullRequest :many
+SELECT issue_id FROM issue_vcs_pull_request
+WHERE pull_request_id = $1
+  AND COALESCE(linked_by_type, 'system') <> 'member'
+`
+
+func (q *Queries) ListAutoLinkedIssueIDsForVCSPullRequest(ctx context.Context, pullRequestID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAutoLinkedIssueIDsForVCSPullRequest, pullRequestID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var issue_id pgtype.UUID
+		if err := rows.Scan(&issue_id); err != nil {
+			return nil, err
+		}
+		items = append(items, issue_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listIssueIDsForVCSPRHead = `-- name: ListIssueIDsForVCSPRHead :many
@@ -165,6 +300,31 @@ type ListIssueIDsForVCSPRHeadParams struct {
 // commit-status event can fan out a PR-card refresh to the right issues.
 func (q *Queries) ListIssueIDsForVCSPRHead(ctx context.Context, arg ListIssueIDsForVCSPRHeadParams) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, listIssueIDsForVCSPRHead, arg.ConnectionID, arg.HeadSha)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var issue_id pgtype.UUID
+		if err := rows.Scan(&issue_id); err != nil {
+			return nil, err
+		}
+		items = append(items, issue_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssueIDsForVCSPullRequest = `-- name: ListIssueIDsForVCSPullRequest :many
+SELECT issue_id FROM issue_vcs_pull_request
+WHERE pull_request_id = $1
+`
+
+func (q *Queries) ListIssueIDsForVCSPullRequest(ctx context.Context, pullRequestID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listIssueIDsForVCSPullRequest, pullRequestID)
 	if err != nil {
 		return nil, err
 	}
@@ -243,6 +403,7 @@ WITH checks AS (
 )
 SELECT
     pr.id, pr.workspace_id, pr.connection_id, pr.provider, pr.repo_owner, pr.repo_name, pr.pr_number, pr.title, pr.state, pr.html_url, pr.branch, pr.head_sha, pr.author_login, pr.author_avatar_url, pr.merged_at, pr.closed_at, pr.pr_created_at, pr.pr_updated_at, pr.additions, pr.deletions, pr.changed_files, pr.created_at, pr.updated_at,
+    COALESCE(ipr.linked_by_type, 'system')::text AS linked_by_type,
     COALESCE(c.total, 0)::bigint   AS checks_total,
     COALESCE(c.passed, 0)::bigint  AS checks_passed,
     COALESCE(c.failed, 0)::bigint  AS checks_failed,
@@ -278,6 +439,7 @@ type ListVCSPullRequestsByIssueRow struct {
 	ChangedFiles    int32              `json:"changed_files"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	LinkedByType    string             `json:"linked_by_type"`
 	ChecksTotal     int64              `json:"checks_total"`
 	ChecksPassed    int64              `json:"checks_passed"`
 	ChecksFailed    int64              `json:"checks_failed"`
@@ -322,6 +484,7 @@ func (q *Queries) ListVCSPullRequestsByIssue(ctx context.Context, issueID pgtype
 			&i.ChangedFiles,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LinkedByType,
 			&i.ChecksTotal,
 			&i.ChecksPassed,
 			&i.ChecksFailed,
@@ -369,7 +532,25 @@ func (q *Queries) RotateVCSConnectionWebhookSecret(ctx context.Context, arg Rota
 	return i, err
 }
 
-const unlinkIssueFromVCSPullRequest = `-- name: UnlinkIssueFromVCSPullRequest :exec
+const syncVCSPullRequestCloseIntent = `-- name: SyncVCSPullRequestCloseIntent :exec
+UPDATE issue_vcs_pull_request
+SET close_intent = (issue_id = ANY($1::uuid[]))
+WHERE pull_request_id = $2
+  AND close_intent <> (issue_id = ANY($1::uuid[]))
+`
+
+type SyncVCSPullRequestCloseIntentParams struct {
+	ClosingIssueIds []pgtype.UUID `json:"closing_issue_ids"`
+	PullRequestID   pgtype.UUID   `json:"pull_request_id"`
+}
+
+// Mirrors SyncPullRequestCloseIntent.
+func (q *Queries) SyncVCSPullRequestCloseIntent(ctx context.Context, arg SyncVCSPullRequestCloseIntentParams) error {
+	_, err := q.db.Exec(ctx, syncVCSPullRequestCloseIntent, arg.ClosingIssueIds, arg.PullRequestID)
+	return err
+}
+
+const unlinkIssueFromVCSPullRequest = `-- name: UnlinkIssueFromVCSPullRequest :execrows
 DELETE FROM issue_vcs_pull_request
 WHERE issue_id = $1 AND pull_request_id = $2
 `
@@ -379,17 +560,12 @@ type UnlinkIssueFromVCSPullRequestParams struct {
 	PullRequestID pgtype.UUID `json:"pull_request_id"`
 }
 
-// Drops a link an earlier claim created, for the GitHub twin's reason: while a
-// PR is still editable, the link follows the live title/body parse, so a key the
-// payload still carries but no longer claims — "Closes MUL-1" edited down to
-// "Related MUL-1" — loses its link. A key deleted from the PR outright is NOT
-// covered: the payload keeps no trace of it, so noticing that needs the stored
-// links instead, which is its own change. Callers must not run this once the PR
-// has gone terminal — a post-merge edit cannot retroactively unlink a PR that
-// did the work.
-func (q *Queries) UnlinkIssueFromVCSPullRequest(ctx context.Context, arg UnlinkIssueFromVCSPullRequestParams) error {
-	_, err := q.db.Exec(ctx, unlinkIssueFromVCSPullRequest, arg.IssueID, arg.PullRequestID)
-	return err
+func (q *Queries) UnlinkIssueFromVCSPullRequest(ctx context.Context, arg UnlinkIssueFromVCSPullRequestParams) (int64, error) {
+	result, err := q.db.Exec(ctx, unlinkIssueFromVCSPullRequest, arg.IssueID, arg.PullRequestID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertVCSCommitStatus = `-- name: UpsertVCSCommitStatus :exec

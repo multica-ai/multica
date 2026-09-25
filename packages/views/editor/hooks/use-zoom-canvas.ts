@@ -129,7 +129,7 @@ export function useZoomCanvas({
 
     // offsetWidth/offsetHeight, NOT getBoundingClientRect: both viewers open
     // inside a container that scales in (`zoom-in-95` on the shared Dialog,
-    // motion's scale(0.95) on the attachment modal). A client rect is
+    // motion's scale-in on the attachment viewer's stage). A client rect is
     // transform-scaled, so measuring mid-animation would fit the content
     // against a viewport a few percent too small — and because ResizeObserver
     // reports the untransformed layout box, it never fires when the animation

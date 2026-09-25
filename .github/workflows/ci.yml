@@ -282,6 +282,14 @@ jobs:
   # release, an entry built on the old one must not be restored. setup-go
   # keys on ImageOS for the same reason (actions/setup-go#368).
   #
+  # A rolling entry only grows on its own: each save is the restored entry
+  # plus this commit's objects, and Go trims only what has sat unused for
+  # five days, so the entry carried every recent main commit's race objects.
+  # It reached 3.5 GB in ten days, and restoring and saving it cost more than
+  # the compile it saved (MUL-7547). Before saving, the job therefore drops
+  # every entry this run did not use, leaving the next run the objects of the
+  # tree it is most likely to build.
+  #
   # This job is the only writer of either entry. backend-agent-tests restores
   # both, but it downloads just pkg/agent's slice of the module graph and
   # finishes first, so letting it save would repeat the first-writer-wins
@@ -365,6 +373,14 @@ jobs:
           key: ${{ steps.gocache.outputs.prefix }}${{ github.sha }}
           restore-keys: ${{ steps.gocache.outputs.prefix }}
 
+      # Go refreshes a cache entry's mtime when it uses it, but only once that
+      # mtime is an hour old. So after the run, an entry no newer than an hour
+      # before the first compile is one this run did not use. The prune step
+      # before the save compares against this marker.
+      - name: Mark Go build cache epoch
+        id: goepoch
+        run: touch -d '-1 hour' "$RUNNER_TEMP/go-build-epoch"
+
       - name: Build
         run: cd server && go build -race ./...
 
@@ -386,6 +402,17 @@ jobs:
       - name: Test
         # pkg/agent runs on its own runner: backend-agent-tests below.
         run: bash scripts/test-go.sh --race --only regular
+
+      # Go's own trim (cmd/go/internal/cache) with this run as the window
+      # instead of five days: only `-a`/`-d` entries, and an executable entry
+      # is a directory, so it goes whole. See the job comment.
+      - name: Prune Go build cache to this run's entries
+        if: ${{ !cancelled() && github.event_name == 'push' && steps.goepoch.outcome == 'success' }}
+        run: |
+          du -sh ~/.cache/go-build
+          find ~/.cache/go-build -mindepth 2 -maxdepth 2 \( -name '*-a' -o -name '*-d' \) \
+            ! -newer "$RUNNER_TEMP/go-build-epoch" -exec rm -rf {} +
+          du -sh ~/.cache/go-build
 
       # Publishes from main only; see the job comment. `!cancelled()` so a red
       # main still refreshes the objects for the next run, and the key step's
@@ -609,6 +636,45 @@ jobs:
         # silently as "ok".
         run: go test ./internal/daemon/execenv -v -run '^TestWindowsOpenclawShim' -count=1 -timeout=5m
 
+      - name: Test Windows workdir containment guard in the CLI
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        working-directory: server
+        # The CLI's --content-file / --attachment guard decides whether a path is
+        # inside the task workdir by canonicalizing both sides. Two of the things
+        # that decision rests on are Windows-only and covered nowhere else: a
+        # candidate on another volume, where filepath.Rel returns an error rather
+        # than a "..", so the guard has to read that as "outside" instead of
+        # surfacing `Rel: can't make Z:\... relative to C:\...` as a resolve
+        # failure; and a directory junction — the containment-relevant link shape
+        # that needs no elevation, so the one real hosts have — which resolves to
+        # itself rather than to its target under this module's go directive. The
+        # junction test pins that gap deliberately, records the observations it
+        # rests on, and fails with instructions if the platform ever starts
+        # resolving them.
+        # cmd/multica has no Windows job otherwise, so these windows-tagged
+        # tests run nowhere else. It matters twice over on a non-admin host,
+        # where the package's cross-platform cases skip for want of the symlink
+        # privilege; the ubuntu backend job covers those shapes instead.
+        # -v so a silent skip (or a -run pattern that stops matching) is visible
+        # in the log instead of passing as "ok".
+        run: go test ./cmd/multica -v -run '^TestFileWithinWorkingDirWindows' -count=1 -timeout=5m
+
+      - name: Test Windows link-target classification in internal/util
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        working-directory: server
+        # The guard's Windows correctness rests on internal/util's link-target
+        # grammar (classifyTarget), whose branch ordering is load-bearing:
+        # VolumeName is non-empty for drive-absolute paths too, so asking it
+        # before IsAbs misreads a junction's absolute target as drive-relative
+        # and resolves it against the working directory — exactly how a
+        # junction escape read as inside the workdir for one CI run. The
+        # fixture-free table pins every branch without needing a filesystem,
+        # but windows-tagged util tests run nowhere else. Scoped to the table
+        # by name; the package's symlinked-workdir cases belong to the ubuntu
+        # backend job, which runs the whole package.
+        # -v so a silent skip or a pattern that stops matching is visible.
+        run: go test ./internal/util -v -run '^TestClassifyTarget' -count=1 -timeout=5m
+
       - name: Test Windows isolated repo checkout is committable
         working-directory: server
         # #6449: on Windows the daemon now hands Codex tasks a checkout whose
@@ -777,7 +843,12 @@ jobs:
         if: runner.os != 'Windows'
         run: bash scripts/install.test.sh
 
-      - name: Test PowerShell installer
+      - name: Test installer with Windows PowerShell 5.1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./scripts/install.ps1.test.ps1
+
+      - name: Test installer with PowerShell 7
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/install.ps1.test.ps1

@@ -33,6 +33,26 @@ type LarkJSONFrameDecoder struct{}
 
 func NewLarkJSONFrameDecoder() *LarkJSONFrameDecoder { return &LarkJSONFrameDecoder{} }
 
+// PeekEventType reads header.event_type out of a data-frame payload for
+// logging only — the decoder's drop outcome does not say WHICH event it
+// declined, and a dropped frame writes no audit row either (that table is
+// only reached once a message enters the Router).
+//
+// Returns "" for anything that is not an event envelope: an empty or
+// malformed payload, or a heartbeat. Callers use that to keep the steady
+// stream of heartbeats out of the log while still reporting real events we
+// do not handle.
+func PeekEventType(payload []byte) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	var env larkEventEnvelope
+	if err := json.Unmarshal(payload, &env); err != nil {
+		return ""
+	}
+	return env.Header.EventType
+}
+
 // Decode implements FrameDecoder.
 func (d *LarkJSONFrameDecoder) Decode(payload []byte, inst Installation) (InboundMessage, bool, error) {
 	if len(payload) == 0 {

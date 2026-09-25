@@ -52,6 +52,27 @@ require_rendered_value "$default_backend" 'failureThreshold: 60'
 liveness_block="$(sed -n '/livenessProbe:/,/resources:/p' <<<"$default_backend")"
 require_rendered_value "$liveness_block" 'path: /health'
 reject_rendered_value "$liveness_block" 'path: /healthz'
+reject_rendered_value "$default_backend" 'SSL_CERT_DIR'
+reject_rendered_value "$default_backend" 'extra-ca-certs'
+
+# `helm upgrade --reuse-values` from a chart that predates extraCACerts renders
+# without the key at all; that must still render, with no extra trust.
+legacy_backend="$(
+  helm template multica "$CHART_DIR" \
+    --show-only templates/backend.yaml \
+    --set backend.extraCACerts=null
+)"
+reject_rendered_value "$legacy_backend" 'SSL_CERT_DIR'
+
+extra_ca_backend="$(
+  helm template multica "$CHART_DIR" \
+    --show-only templates/backend.yaml \
+    --set backend.extraCACerts.configMap=internal-ca
+)"
+require_rendered_value "$extra_ca_backend" 'value: /etc/ssl/certs:/etc/multica/ca-certs'
+require_rendered_value "$extra_ca_backend" 'mountPath: /etc/multica/ca-certs'
+require_rendered_value "$extra_ca_backend" 'name: internal-ca'
+require_rendered_value "$extra_ca_backend" 'mountPath: /app/data/uploads'
 
 disabled_config="$(
   helm template multica "$CHART_DIR" \

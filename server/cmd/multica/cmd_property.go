@@ -17,6 +17,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/issueproperty"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // multica property {list|get|create|update|archive|unarchive} — workspace
@@ -585,6 +587,58 @@ func encodeIssuePropertyValue(ctx context.Context, client *cli.APIClient, direct
 	default: // text, date, url — validated server-side
 		return json.Marshal(raw)
 	}
+}
+
+// buildIssueCreateProperties resolves repeatable Name=Value flags into the
+// API's ID-keyed typed bag. A definition may appear only once, including when
+// one flag uses its name and another its UUID.
+func buildIssueCreateProperties(ctx context.Context, client *cli.APIClient, pairs []string) (map[string]json.RawMessage, error) {
+	properties, err := fetchProperties(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]json.RawMessage, len(pairs))
+	var members memberDirectory
+	for _, pair := range pairs {
+		name, rawValue, found := strings.Cut(pair, "=")
+		name = strings.TrimSpace(name)
+		if !found || name == "" {
+			return nil, fmt.Errorf(`--property %q must be in "Name=Value" form`, pair)
+		}
+		if strings.HasSuffix(name, "<") || strings.HasSuffix(name, ">") || strings.HasSuffix(name, "!") {
+			return nil, fmt.Errorf(`--property %q: filter comparison operators are not valid when creating an issue; use a property UUID if its name ends with that character`, pair)
+		}
+		if strings.TrimSpace(rawValue) == "" {
+			return nil, fmt.Errorf("--property %s: value cannot be empty", name)
+		}
+		if strings.TrimSpace(rawValue) == propertyNoValueSentinel {
+			return nil, fmt.Errorf("--property %s: %s is a list-filter value and cannot unset a property during create", name, propertyNoValueSentinel)
+		}
+		property, err := resolvePropertyRef(properties, name)
+		if err != nil {
+			return nil, err
+		}
+		if property.Archived {
+			return nil, fmt.Errorf("property %q is archived and cannot receive new values", property.Name)
+		}
+		if _, duplicate := result[property.ID]; duplicate {
+			return nil, fmt.Errorf("property %q was provided more than once", property.Name)
+		}
+		encoded, err := encodeIssuePropertyValue(ctx, client, &members, property, rawValue)
+		if err != nil {
+			return nil, fmt.Errorf("--property %s: %w", name, err)
+		}
+		config, err := json.Marshal(property.Config)
+		if err != nil {
+			return nil, fmt.Errorf("encode property %q config: %w", property.Name, err)
+		}
+		canonical, err := issueproperty.ValidateValue(db.IssueProperty{Type: property.Type, Config: config}, encoded)
+		if err != nil {
+			return nil, fmt.Errorf("--property %s: %w", name, err)
+		}
+		result[property.ID] = canonical
+	}
+	return result, nil
 }
 
 // propertyOptionName maps a stored option id to its name, or returns the id

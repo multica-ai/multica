@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, useState, useCallback, useEffect, useMemo } from "react";
+import { useRef, useState, useEffect, useMemo } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
-import { contentReferencesAttachment } from "@multica/core/types";
+import { Button } from "@multica/ui/components/ui/button";
+import { contentReferencesAttachment, type AgentTask } from "@multica/core/types";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { composeAnnotatedReply, hasReplyIntent } from "@multica/core/drafts/reply-annotation";
@@ -13,6 +14,9 @@ import { ReplyAnnotations } from "./reply-annotations";
 import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
+import { useRecipientActions } from "../hooks/use-recipient-actions";
+import { SteerAttachmentNotice } from "./steer-attachment-notice";
+import { useStopRunsBeforeSend } from "./use-stop-runs-before-send";
 import { useCommentUploads } from "./use-comment-uploads";
 import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
 import { useStickyComposer } from "../hooks/use-sticky-composer";
@@ -22,10 +26,16 @@ interface CommentInputProps {
   /** Resolves true on success, false on failure. The composer keeps the text
    *  (editor locked + button spinning) until this settles, then clears only on
    *  success — a failed send must not silently discard the user's draft. */
-  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<string | boolean>;
+  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[]) => Promise<string | boolean>;
   /** Called after the server accepts the comment and the composer is cleared. */
   onAccepted?: (commentId: string) => void;
   onEditAnnotation?: (id: string) => boolean;
+}
+
+// A top-level comment belongs to no thread, so it takes a running turn by
+// default only when that turn has no thread of its own (an assignment run).
+function steerTopLevelByDefault(task: AgentTask): boolean {
+  return !task.trigger_comment_id;
 }
 
 function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: CommentInputProps) {
@@ -36,10 +46,8 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
   // Sending mid-upload would strip the pending image's blob URL out of the
   // markdown and bind no attachment id — the comment posts without the file.
   const uploadGate = useUploadGate(editorRef);
-  // Read the persisted draft once on mount. ContentEditor only honors
-  // `defaultValue` at mount time, so this snapshot drives both the editor's
-  // initial content and the submit-button enable state — without this the
-  // button would be disabled even though the editor visibly contains text.
+  // Subscribe to the persisted draft so text written into it from outside
+  // this composer shows up even while it is mounted.
   // Quick actions in the `/` menu: picking one inserts the server-rendered
   // body so the user can edit before sending, instead of firing immediately.
   const quickActionMenu = useQuickActionMenu(issueId);
@@ -47,9 +55,9 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
   const [initialDraft] = useState(() =>
     useCommentDraftStore.getState().getDraft(draftKey),
   );
+  const persistedDraft = useCommentDraftStore((store) => store.getDraft(draftKey));
   const [content, setContent] = useState(initialDraft ?? "");
   const [isEmpty, setIsEmpty] = useState(() => !initialDraft?.trim());
-  const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
   const annotations = useCommentDraftStore((s) => s.getAnnotations(draftKey));
   const composedContent = useMemo(() => composeAnnotatedReply(content, annotations), [content, annotations]);
   const canSend = annotations.length ? hasReplyIntent(content, annotations) : !isEmpty;
@@ -64,6 +72,19 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
   // composer reopened over a still-in-flight upload cannot send past it.
   const { attachments: pendingAttachments, handleUpload, gate } =
     useCommentUploads(draftKey, { issueId }, uploadGate, editorRef);
+  const hasAttachments = useMemo(
+    () => pendingAttachments.some((a) => contentReferencesAttachment(content, a)) || gate.uploading,
+    [pendingAttachments, content, gate.uploading],
+  );
+  const { recipients, attachmentsBlockSteer, routing, setAction, reset: resetRecipients } = useRecipientActions({
+    issueId,
+    agents: triggerPreview.agents,
+    allowSteer: true,
+    hasAttachments,
+    steerByDefault: steerTopLevelByDefault,
+    resetKey: issueId,
+  });
+  const stopRunsBeforeSend = useStopRunsBeforeSend(issueId);
 
   // Readonly-first: the composer renders as a same-looking static shell until
   // the user shows intent (click / keyboard / file drop). An unsent draft is
@@ -89,6 +110,17 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
   // so tab close / mobile background doesn't lose work. Cleared on submit.
   const setDraft = useCommentDraftStore((s) => s.setDraft);
   useEffect(() => {
+    // Only an actual stored value is an external update. An absent entry is
+    // not a command to erase the editor: it is normal during the synchronous
+    // keystroke -> store handoff and after explicit submit cleanup.
+    if (persistedDraft === undefined) return;
+    const next = persistedDraft;
+    if (next === content) return;
+    setContent(next);
+    setIsEmpty(!next.trim());
+    if (next.trim()) lazy.activate();
+  }, [content, lazy, persistedDraft]);
+  useEffect(() => {
     const flush = () => {
       const md = editorRef.current?.getMarkdown();
       if (md && md.trim().length > 0) setDraft(draftKey, md);
@@ -101,27 +133,6 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
       window.removeEventListener("pagehide", flush);
     };
   }, [draftKey, setDraft]);
-
-  useEffect(() => {
-    setSuppressedAgentIds(new Set());
-  }, [issueId]);
-
-  useEffect(() => {
-    const visible = new Set(triggerPreview.agents.map((agent) => agent.id));
-    setSuppressedAgentIds((prev) => {
-      const next = new Set([...prev].filter((id) => visible.has(id)));
-      return next.size === prev.size ? prev : next;
-    });
-  }, [triggerPreview.agents]);
-
-  const toggleSuppressedAgent = useCallback((agentId: string) => {
-    setSuppressedAgentIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(agentId)) next.delete(agentId);
-      else next.add(agentId);
-      return next;
-    });
-  }, []);
 
   // Await-then-render send (MUL-5181): the shared hook reads the markdown,
   // guards empty/in-flight, re-checks the upload gate, locks + spins via
@@ -156,8 +167,13 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
     // so the composer stops reading as "still writing" once the comment is
     // posted above it. Thread replies are the opposite — see ReplyInput.
     afterAccepted: () => (editorScrubbedRef.current ? "blur" : "none"),
-    onSubmit: (content) => {
+    onSubmit: async (content) => {
       editorScrubbedRef.current = false;
+      const { suppressAgentIds, steerTaskIds } = routing;
+      // A preview still catching up with an edited @mention can name a
+      // recipient this comment no longer addresses: never stop a run on it.
+      const restartTaskIds = triggerPreview.isCurrent ? routing.restartTaskIds : [];
+      if (!(await stopRunsBeforeSend(restartTaskIds))) return false;
       // Flush the editor's pending debounce before snapshotting — a late flush
       // of pre-submit typing must not read as an edit made during the request.
       const pending = editorRef.current?.flushPendingUpdate?.();
@@ -170,13 +186,11 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
       const activeIds = pendingAttachments
         .filter((a) => contentReferencesAttachment(content, a))
         .map((a) => a.id);
-      const suppressAgentIds = triggerPreview.agents
-        .filter((agent) => suppressedAgentIds.has(agent.id))
-        .map((agent) => agent.id);
       return onSubmit(
         content,
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
+        steerTaskIds.length > 0 ? steerTaskIds : undefined,
       ).then((commentId) => {
         acceptedCommentIdRef.current = typeof commentId === "string" ? commentId : null;
         return !!commentId;
@@ -198,7 +212,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
       editorRef.current?.clearContent();
       setContent("");
       setIsEmpty(true);
-      setSuppressedAgentIds(new Set());
+      resetRecipients();
       editorScrubbedRef.current = true;
       if (acceptedCommentIdRef.current) onAccepted?.(acceptedCommentIdRef.current);
     },
@@ -209,6 +223,9 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
       {...dropZoneProps}
       className="relative flex flex-col rounded-lg bg-card pb-8 ring-1 ring-border"
     >
+      {attachmentsBlockSteer && <div className="px-3 pt-2">
+        <SteerAttachmentNotice />
+      </div>}
       {annotations.length > 0 && <div className="px-3 pt-2">
         <ReplyAnnotations draftKey={draftKey} annotations={annotations} disabled={submitting}
           onEditAnnotation={onEditAnnotation} />
@@ -232,7 +249,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
       >
         <ContentEditor
           ref={editorRef}
-          defaultValue={initialDraft}
+          value={persistedDraft ?? content}
           onReady={lazy.onReady}
           placeholder={t(($) => $.comment.leave_comment_placeholder)}
           onUpdate={(md) => {
@@ -284,12 +301,11 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
       )}
       <div className="absolute bottom-1 left-2 right-28 min-w-0">
         <CommentTriggerChips
-          agents={triggerPreview.agents}
+          recipients={recipients}
           blocked={triggerPreview.blocked}
           hasAllMembersMention={triggerPreview.hasAllMembersMention}
           draftContent={composedContent}
-          suppressedAgentIds={suppressedAgentIds}
-          onToggle={toggleSuppressedAgent}
+          onActionChange={setAction}
         />
       </div>
       <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
@@ -298,7 +314,17 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
           multiple
           onSelect={(file) => lazy.uploadOrQueue([file])}
         />
-        <SubmitButton
+        {routing.restartTaskIds.length > 0 ? (
+          <Button
+            size="sm"
+            variant="destructive"
+            className="rounded-full"
+            onClick={submit}
+            disabled={!canSend || submitting || gate.uploading}
+          >
+            {t(($) => $.comment.restart_send)}
+          </Button>
+        ) : <SubmitButton
           onClick={submit}
           disabled={!canSend}
           loading={submitting}
@@ -313,7 +339,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
           ariaLabel={gate.uploading
             ? tEditor(($) => $.upload.in_progress)
             : t(($) => $.comment.send_tooltip)}
-        />
+        />}
       </div>
       {isDragOver && <FileDropOverlay />}
     </div>

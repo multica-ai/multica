@@ -7,22 +7,20 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 )
 
-// legacyStatusLine is the pre-MUL-6460 status bullet. Workspaces without
-// custom statuses — including every deployment behind an old server — must
-// keep rendering it byte-identical: it is part of the prompt-cache prefix and
-// the no-custom-statuses path is the compatibility contract of MUL-6460.
-const legacyStatusLine = "- `multica issue status <id> <status> [--no-start]` — flip status (todo / in_progress / in_review / done / blocked / backlog / cancelled).\n"
+// builtInStatusLine is the status bullet for workspaces without custom
+// statuses, including deployments behind an old server.
+const builtInStatusLine = "- `multica issue status <id> <status>` — flip status (todo / in_progress / in_review / done / blocked / backlog / cancelled).\n"
 
 // catalogBridgeBullet distinguishes workflow keys from lifecycle categories;
 // it must appear exactly when a catalog is present.
 const catalogBridgeBullet = "- The workflow rules above refer to exact built-in status keys, not categories. Custom statuses share lifecycle semantics only, not built-in automation behavior.\n"
 
-func TestBriefStatusCatalogAbsentKeepsLegacyLine(t *testing.T) {
+func TestBriefStatusCatalogAbsentUsesBuiltInLine(t *testing.T) {
 	t.Parallel()
 	base := TaskContextForEnv{IssueID: "issue-1", AgentID: "a-1", AgentName: "Eve"}
 	out := buildMetaSkillContent("claude", base)
-	if !strings.Contains(out, legacyStatusLine) {
-		t.Fatalf("brief without a catalog must keep the legacy status line\n---\n%s", out)
+	if !strings.Contains(out, builtInStatusLine) {
+		t.Fatalf("brief without a catalog must list the built-in statuses\n---\n%s", out)
 	}
 	if strings.Contains(out, catalogBridgeBullet) {
 		t.Errorf("brief without a catalog must not carry the catalog bridge bullet")
@@ -46,11 +44,11 @@ func TestBriefStatusCatalogRendered(t *testing.T) {
 		},
 	}
 	out := buildMetaSkillContent("claude", ctx)
-	if strings.Contains(out, legacyStatusLine) {
-		t.Errorf("catalog brief must replace the legacy seven-value enumeration")
+	if strings.Contains(out, builtInStatusLine) {
+		t.Errorf("catalog brief must replace the built-in seven-value enumeration")
 	}
 	for _, want := range []string{
-		"- `multica issue status <id> <status> [--no-start]` — flip status. Available statuses by lifecycle category:\n",
+		"- `multica issue status <id> <status>` — flip status. Available statuses by lifecycle category:\n",
 		"  - unstarted category: `backlog`, `todo` (built-in), `later` (Later — Deferred on purpose), `rework` (Rework)\n",
 		"  - done category: `done` (built-in)\n",
 		"  - started category: `in_progress`, `in_review`, `blocked` (built-in), `human_review` (Human Review — Awaiting human acceptance)\n",

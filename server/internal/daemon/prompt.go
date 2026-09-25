@@ -51,7 +51,7 @@ func backendResumeContinuityNotice(task Task) string {
 // in the runtime brief (CLAUDE.md / AGENTS.md).
 //
 // Every value here changes from one run to the next on the same issue — the
-// initiator differs whenever another person comments, the continuity notice is
+// authorization human differs between runs, the continuity notice is
 // true of one run and false of the next, and the connected-app set is resolved
 // per run from the runtime MCP overlay. Claude Code loads the brief into
 // messages[0], ahead of the entire conversation, so rendering these there threw
@@ -67,7 +67,7 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	if task.PriorSessionResumeUnavailable {
 		b.WriteString(sessionContinuityNoticeFor(task))
 	}
-	b.WriteString(execenv.BuildTaskInitiatorBlock(task.InitiatorType, task.InitiatorName, task.InitiatorEmail))
+	b.WriteString(execenv.BuildOnBehalfOfBlock(task.InitiatorName, task.InitiatorEmail))
 	b.WriteString(execenv.BuildConnectedAppsBlock(task.ConnectedApps))
 	return b.String()
 }
@@ -199,6 +199,17 @@ func BuildPrompt(task Task, provider string, options ...PromptOption) string {
 }
 
 func buildPromptBody(task Task, provider string) string {
+	if task.WakeupID != "" {
+		var b strings.Builder
+		fmt.Fprintf(&b, "You are running as a local coding agent for a Multica workspace.\n\nYour assigned issue ID is: %s\n\n[WAKEUP]\n%s\n\n", task.IssueID, task.HandoffNote)
+		fmt.Fprintf(&b, "Start by running `multica issue get %s --output json`, then read current run/comment state. Decide whether the instruction's goal is met; the trigger reports a fact, not business completion. This is an ordinary run with normal result delivery.\n", task.IssueID)
+		fmt.Fprintf(&b, "Scan comment threads with `multica issue comment list %s --roots-only --summary --compact --output json`, then expand relevant threads with `--thread <id> --tail 30`.\n", task.IssueID)
+		fmt.Fprintf(&b, "Inspect this configuration with `multica issue wakeup get %s %s --output json`. If recurring work is no longer needed, disable it with `multica issue wakeup disable %s %s`.\n", task.IssueID, task.WakeupID, task.IssueID, task.WakeupID)
+		if task.TriggerCommentID != "" {
+			fmt.Fprintf(&b, "Post your result using `multica issue comment add %s --parent %s --content-file ./reply.md --output table && rm ./reply.md`. This is the original delivery thread, not a new comment trigger.\n", task.IssueID, task.TriggerCommentID)
+		}
+		return b.String()
+	}
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}

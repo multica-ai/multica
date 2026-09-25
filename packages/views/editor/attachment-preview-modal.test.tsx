@@ -16,6 +16,7 @@ vi.mock("../platform", () => ({
 // declarations.
 const {
   getAttachmentTextContentMock,
+  getAttachmentMock,
   downloadMock,
   getBaseUrlMock,
   FakePreviewTooLargeError,
@@ -35,6 +36,9 @@ const {
   }
   return {
     getAttachmentTextContentMock: vi.fn(),
+    // Re-sign metadata. Rejects by default: a deployment with nothing to
+    // upgrade to, so the picked URL stands.
+    getAttachmentMock: vi.fn((): Promise<Attachment> => Promise.reject(new Error("no re-sign"))),
     downloadMock: vi.fn(),
     // Default to the web shape (empty base, same-origin). Tests covering
     // the desktop-renderer / standalone-shell case override per-test.
@@ -47,6 +51,7 @@ const {
 vi.mock("@multica/core/api", () => ({
   api: {
     getAttachmentTextContent: getAttachmentTextContentMock,
+    getAttachment: getAttachmentMock,
     getBaseUrl: getBaseUrlMock,
   },
   PreviewTooLargeError: FakePreviewTooLargeError,
@@ -319,7 +324,7 @@ describe("AttachmentPreviewModal — server-relative download_url resolution (MU
   // is loaded from `app://` / file: / dev-server origin and needs the
   // absolute URL — otherwise `<img src>`, `<iframe src>`, `<video src>`
   // hit the shell origin and fail.
-  it("prefixes the configured API base for image previews when download_url is server-relative", () => {
+  it("prefixes the configured API base for image previews when download_url is server-relative", async () => {
     getBaseUrlMock.mockReturnValue("https://api.example.test");
     const att = makeAttachment({
       filename: "shot.png",
@@ -333,10 +338,55 @@ describe("AttachmentPreviewModal — server-relative download_url resolution (MU
         onClose={() => {}}
       />,
     );
-    const img = document.querySelector("img");
-    expect(img?.getAttribute("src")).toBe(
-      "https://api.example.test/api/attachments/att-1/download",
+    // The auth-gated endpoint is only handed to <img> once the re-sign has
+    // settled (here: nothing better on offer).
+    await waitFor(() => {
+      expect(document.querySelector("img")?.getAttribute("src")).toBe(
+        "https://api.example.test/api/attachments/att-1/download",
+      );
+    });
+  });
+
+  // A client that cannot load the auth-gated endpoint natively (desktop,
+  // split-origin web) would fail on it, and a sequence reads that failure as
+  // a broken image and skips it. Nothing reaches <img> until the upgrade lands.
+  it("waits for the re-sign before loading an auth-gated image", async () => {
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    let resolveMeta: (value: Attachment) => void = () => {};
+    getAttachmentMock.mockImplementationOnce(
+      () => new Promise<Attachment>((resolve) => { resolveMeta = resolve; }),
     );
+    const onImageError = vi.fn();
+    // A real id: only the stable `/api/attachments/<uuid>/download` shape is
+    // recognised as the auth-gated endpoint.
+    const id = "11111111-1111-4111-8111-111111111111";
+    const att = makeAttachment({
+      id,
+      filename: "shot.png",
+      content_type: "image/png",
+      download_url: `/api/attachments/${id}/download`,
+    });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+        onImageError={onImageError}
+      />,
+    );
+
+    expect(screen.getByRole("dialog").querySelector("img")).toBeNull();
+    expect(screen.getByText("Loading preview…")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveMeta({ ...att, download_url: "https://cdn.example.test/att-1.png?Signature=fresh" });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("dialog").querySelector("img")?.getAttribute("src")).toBe(
+        "https://cdn.example.test/att-1.png?Signature=fresh",
+      );
+    });
+    expect(onImageError).not.toHaveBeenCalled();
   });
 
   it("prefixes the configured API base for PDF previews when download_url is server-relative", () => {
@@ -470,6 +520,34 @@ describe("AttachmentPreviewModal — controls", () => {
     expect(downloadMock).toHaveBeenCalledWith("att-1");
   });
 
+  it("describes the file by type and size instead of its MIME type", () => {
+    const att = makeAttachment({
+      filename: "manual.pdf",
+      content_type: "application/pdf",
+      size_bytes: 2 * 1024 * 1024,
+    });
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
+    expect(screen.getByText("PDF · 2.0 MB")).toBeInTheDocument();
+    expect(screen.queryByText("application/pdf")).toBeNull();
+  });
+
+  it("hides the desktop window buttons while open and restores them on close", async () => {
+    const setImmersiveMode = vi.fn();
+    (window as unknown as { desktopAPI?: unknown }).desktopAPI = { setImmersiveMode };
+    try {
+      const att = makeAttachment({ filename: "manual.pdf", content_type: "application/pdf" });
+      render(<ClosablePreview attachment={att} />);
+      expect(setImmersiveMode).toHaveBeenLastCalledWith(true);
+
+      fireEvent.click(screen.getByTitle("Close"));
+      await waitFor(() => {
+        expect(setImmersiveMode).toHaveBeenLastCalledWith(false);
+      });
+    } finally {
+      delete (window as unknown as { desktopAPI?: unknown }).desktopAPI;
+    }
+  });
+
   it("clicking the backdrop closes the modal", () => {
     const onClose = vi.fn();
     const att = makeAttachment({ filename: "manual.pdf", content_type: "application/pdf" });
@@ -534,6 +612,21 @@ describe("AttachmentPreviewModal — URL-only source", () => {
       />,
     );
     expect(screen.getByText("This file type can't be previewed.")).toBeTruthy();
+  });
+
+  it("renders an <img> for a caller-declared image whose filename is a caption (MUL-7518)", () => {
+    // A body image's "filename" is the markdown caption — prose, with no
+    // extension to read. The caller knows the slot is an image and says so.
+    const url = "https://cdn.example.test/chart.png?Signature=s";
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "url", url, filename: "报告图表", forceKind: "image" }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.queryByText("This file type can't be previewed.")).toBeNull();
+    expect(document.querySelector("img")?.getAttribute("src")).toBe(url);
   });
 
   it("Download button opens the raw URL externally when no attachment id is available", () => {
@@ -697,6 +790,34 @@ describe("useAttachmentPreview — tryOpen gate", () => {
         kind: "url",
         url: "https://x/y.md",
         filename: "y.md",
+      });
+    });
+    expect(opened).toBe(false);
+  });
+
+  it("accepts a URL source whose kind the caller declares, extension or not (MUL-7518)", () => {
+    const { result } = renderHook(() => useAttachmentPreview());
+    let opened = false;
+    hookAct(() => {
+      opened = result.current.tryOpen({
+        kind: "url",
+        url: "https://x/chart.png",
+        filename: "报告图表",
+        forceKind: "image",
+      });
+    });
+    expect(opened).toBe(true);
+  });
+
+  it("still rejects a declared text kind from a URL source — the id gate wins", () => {
+    const { result } = renderHook(() => useAttachmentPreview());
+    let opened = true;
+    hookAct(() => {
+      opened = result.current.tryOpen({
+        kind: "url",
+        url: "https://x/notes",
+        filename: "notes",
+        forceKind: "markdown",
       });
     });
     expect(opened).toBe(false);
@@ -887,6 +1008,18 @@ describe("AttachmentPreviewModal — image zoom", () => {
 
     fireEvent.keyDown(zoomCanvas(), { key: "+" });
     expect(currentScale()).toBeCloseTo(0.5 * 1.2, 5);
+  });
+
+  // The focus placed on open is for the keyboard controls; drawn as a ring it
+  // framed the whole full-window stage. It stays marked (CSS drops the ring)
+  // until focus leaves, so a reader tabbing back in still sees one.
+  it("keeps the focus ring off for the focus it places itself", () => {
+    stubNaturalSize({ width: 1600, height: 800 });
+    renderImagePreview();
+
+    expect(zoomCanvas()).toHaveAttribute("data-autofocused");
+    fireEvent.blur(zoomCanvas());
+    expect(zoomCanvas()).not.toHaveAttribute("data-autofocused");
   });
 
   it("re-fits on reopen instead of restoring the previous zoom", async () => {

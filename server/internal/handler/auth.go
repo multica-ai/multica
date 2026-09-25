@@ -201,7 +201,7 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 		return db.User{}, false, auth.ErrTemporarilyDisabledUser
 	}
 
-	if err := h.checkSignupAllowed(email, isNew); err != nil {
+	if err := h.checkSignupAllowed(ctx, email, isNew); err != nil {
 		return db.User{}, false, err
 	}
 
@@ -252,7 +252,7 @@ func signupSourceFromRequest(r *http.Request) string {
 	return decoded
 }
 
-func (h *Handler) checkSignupAllowed(email string, isNewUser bool) error {
+func (h *Handler) checkSignupAllowed(ctx context.Context, email string, isNewUser bool) error {
 	if !isNewUser {
 		return nil // existing users always allowed to log in
 	}
@@ -263,27 +263,36 @@ func (h *Handler) checkSignupAllowed(email string, isNewUser bool) error {
 		domain = email[at+1:]
 	}
 
-	// 1. explicit email whitelist always wins
+	// 1. explicit email allowlist always wins
 	if len(h.cfg.AllowedEmails) > 0 && contains(h.cfg.AllowedEmails, email) {
 		return nil
 	}
 
-	// 2. domain whitelist always wins
+	// 2. domain allowlist always wins
 	if len(h.cfg.AllowedEmailDomains) > 0 && contains(h.cfg.AllowedEmailDomains, domain) {
 		return nil
 	}
 
-	// 3. general signup flag
+	// 3. unrestricted signup needs no invitation lookup.
+	if h.cfg.AllowSignup && len(h.cfg.AllowedEmailDomains) == 0 && len(h.cfg.AllowedEmails) == 0 {
+		return nil
+	}
+
+	// 4. A live invitation is an implicit per-email signup allowance. This
+	// also permits invited emails outside configured allowlists, regardless
+	// of ALLOW_SIGNUP. Recheck at account creation in findOrCreateUser.
+	invited, err := h.Queries.HasPendingInvitationForEmail(ctx, email)
+	if err != nil {
+		return fmt.Errorf("check pending invitation for signup: %w", err)
+	}
+	if invited {
+		return nil
+	}
+
 	if !h.cfg.AllowSignup {
 		return ErrSignupProhibited
 	}
-
-	// 4. if allowlists are set but didn't match, block
-	if len(h.cfg.AllowedEmailDomains) > 0 || len(h.cfg.AllowedEmails) > 0 {
-		return ErrEmailNotAllowed
-	}
-
-	return nil
+	return ErrEmailNotAllowed
 }
 
 func contains(slice []string, s string) bool {
@@ -322,12 +331,13 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 		}
 		// User does not exist → treat as new user
 		isNewUser := true
-		if err := h.checkSignupAllowed(email, isNewUser); err != nil {
+		if err := h.checkSignupAllowed(r.Context(), email, isNewUser); err != nil {
 			var signupErr SignupError
 			if errors.As(err, &signupErr) {
 				writeError(w, http.StatusForbidden, signupErr.Error())
 			} else {
-				writeError(w, http.StatusForbidden, "user registration is disabled")
+				slog.Warn("signup eligibility check failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
+				writeError(w, http.StatusInternalServerError, "failed to check signup eligibility")
 			}
 			return
 		}
@@ -338,13 +348,14 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		isNewUser := false
-		if err := h.checkSignupAllowed(email, isNewUser); err != nil {
+		if err := h.checkSignupAllowed(r.Context(), email, isNewUser); err != nil {
 			// This should rarely happen, but handle it anyway
 			var signupErr SignupError
 			if errors.As(err, &signupErr) {
 				writeError(w, http.StatusForbidden, signupErr.Error())
 			} else {
-				writeError(w, http.StatusForbidden, "user registration is disabled")
+				slog.Warn("signup eligibility check failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
+				writeError(w, http.StatusInternalServerError, "failed to check signup eligibility")
 			}
 			return
 		}
@@ -433,6 +444,7 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, signupErr.Error())
 			return
 		}
+		slog.Warn("login user lookup or creation failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
 		writeError(w, http.StatusInternalServerError, "failed to create user")
 		return
 	}
@@ -669,6 +681,7 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		if writeGoogleLoginActionableError(w, err) {
 			return
 		}
+		slog.Warn("login user lookup or creation failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
 		writeError(w, http.StatusInternalServerError, "failed to create user")
 		return
 	}

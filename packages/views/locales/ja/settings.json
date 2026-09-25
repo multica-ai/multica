@@ -81,7 +81,13 @@
       "blocked": "外部依存でブロック中。",
       "done": "完了。",
       "cancelled": "見送り。"
-    }
+    },
+    "automation_title": "自動化",
+    "pr_auto_complete_label": "PR のマージでタスクを自動完了",
+    "pr_auto_complete_description": "関連する PR がすべてマージされ、そのうち 1 つがクローズキーワードでタスクを指定していると、タスクは「完了」になります。今後マージされる PR にのみ適用されます。",
+    "pr_auto_complete_example": "キーワードは PR のタイトルか説明に書きます。例:",
+    "pr_auto_complete_example_title": "Closes MUL-123",
+    "pr_auto_complete_badge": "PR のマージで自動設定"
   },
   "quick_actions": {
     "title": "クイックアクション",
@@ -161,6 +167,12 @@
     },
     "sticky_comment_bar": {
       "title": "コメント欄を下部に固定"
+    },
+    "running_agent_reply": {
+      "title": "実行中のエージェントに返信するとき",
+      "steer": "現在の実行に追加",
+      "after_run": "この実行の後に開始",
+      "hint": "既定の動作だけを決めます。送信前にメッセージごとに変更できます。"
     },
     "issue_title": "タスク作成",
     "comments_title": "コメント",
@@ -633,7 +645,7 @@
       },
       "agent_activity": {
         "label": "エージェントのアクティビティ",
-        "description": "エージェントの実行が完了または失敗したとき"
+        "description": "エージェントの実行が失敗したとき"
       }
     },
     "system": {
@@ -755,10 +767,6 @@
     "master_description_off": "GitHub 機能は停止中です。既存データは保持されています。",
     "section_connection": "接続",
     "connection_title": "GitHub App",
-    "connection_description_prefix": "タスクを Pull request に自動でリンクします。PR のブランチ名かタイトルに",
-    "connection_description_suffix": "があるか、本文に Closes MUL-123 と書かれていれば、対応するタスクにリンクされます。その closing keyword を含む PR がマージされたときだけ、タスクが次のステータスに移動します:",
-    "connection_description_done": "完了",
-    "connection_identifier_example": "MUL-123",
     "connected_to": "{{login}} に接続済み",
     "connect_github": "GitHub を接続",
     "connect_opening": "開いています…",
@@ -788,7 +796,12 @@
     "section_repositories": "リポジトリ",
     "repositories_shortcut_label": "リポジトリ URL はリポジトリタブにあります",
     "repositories_shortcut_link": "リポジトリを管理 →",
-    "toast_failed": "GitHub 設定を更新できませんでした"
+    "toast_failed": "GitHub 設定を更新できませんでした",
+    "feature_auto_link_description": "タイトルかブランチ名にタスク番号（例: {{example}}）を含む PR、または説明に「Closes {{example}}」と書いた PR を、そのタスクに関連付けます。",
+    "feature_pr_auto_complete_label": "PR のマージでタスクを自動完了",
+    "feature_pr_auto_complete_on": "オン · すべてのコードホストで共通",
+    "feature_pr_auto_complete_off": "オフ · すべてのコードホストで共通",
+    "feature_pr_auto_complete_manage": "設定"
   },
   "vcs": {
     "section_title": "Git providers (self-hosted)",
@@ -870,6 +883,8 @@
     "agent_bot_connected_label_lark": "Lark に接続済み",
     "agent_bot_manage_link_feishu": "Feishu で管理",
     "agent_bot_manage_link_lark": "Lark で管理",
+    "agent_bot_silent_hint": "接続済みなのに Bot が応答しない場合は、アプリのイベント購読方法が長時間接続になっているか確認してください。",
+    "agent_bot_silent_hint_link": "トラブルシューティング",
     "agent_bot_manage_tooltip_feishu": "Feishu のデベロッパーコンソールでこのボットのアプリページを開き、スコープ管理 / 名称変更 / 追加権限の申請ができます。",
     "agent_bot_manage_tooltip_lark": "Lark のデベロッパーコンソールでこのボットのアプリページを開き、スコープ管理 / 名称変更 / 追加権限の申請ができます。",
     "agent_bot_disconnect_tooltip": "この Lark ボットとエージェントの連携を解除します。ボットは Lark メッセージの受信を停止します。",

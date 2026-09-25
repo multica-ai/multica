@@ -130,6 +130,11 @@ export const issueKeys = {
   /** Resolve a bare issue identifier (e.g. "MUL-123") to an issue. */
   identifier: (wsId: string, identifier: string) =>
     [...issueKeys.all(wsId), "identifier", identifier] as const,
+  /** Prefix for every per-issue duplicate-relation query in a workspace. */
+  duplicatesAll: (wsId: string) =>
+    [...issueKeys.all(wsId), "duplicates"] as const,
+  duplicates: (wsId: string, id: string) =>
+    [...issueKeys.duplicatesAll(wsId), id] as const,
   /** Prefix for every per-parent children query in a workspace. */
   childrenAll: (wsId: string) =>
     [...issueKeys.all(wsId), "children"] as const,
@@ -460,13 +465,15 @@ export function issueDetailOptions(wsId: string, id: string) {
 export function issueIdentifierOptions(wsId: string, identifier: string) {
   return queryOptions({
     queryKey: issueKeys.identifier(wsId, identifier),
-    queryFn: async ({ signal }) => {
+    // Keep this small, cacheable lookup alive when the last mention unmounts.
+    // A remount can then share its request instead of aborting and restarting it.
+    queryFn: async () => {
       try {
-        return await api.getIssue(identifier, { signal });
+        return await api.getIssue(identifier);
       } catch (err) {
         // Unknown identifier / wrong workspace prefix → render as plain text.
-        // Any other failure (401/5xx/abort) must keep propagating so the query
-        // is retried or cancelled instead of being cached as "no such issue".
+        // Any other failure (401/5xx) must keep propagating so the query
+        // can retry instead of being cached as "no such issue".
         if (err instanceof ApiError && err.status === 404) return null;
         throw err;
       }
@@ -488,6 +495,18 @@ export function childIssueProgressOptions(wsId: string) {
       }
       return map;
     },
+  });
+}
+
+/** Both sides of an issue's duplicate relation: its original and its duplicates. */
+export function issueDuplicatesOptions(wsId: string, id: string) {
+  return queryOptions({
+    queryKey: issueKeys.duplicates(wsId, id),
+    queryFn: () => api.listIssueDuplicates(id),
+    // Same reason as childIssuesOptions: a mark written while this workspace
+    // is not the active realtime subscription would otherwise leave the
+    // Infinity-stale snapshot wrong when the issue is opened again.
+    refetchOnMount: "always",
   });
 }
 

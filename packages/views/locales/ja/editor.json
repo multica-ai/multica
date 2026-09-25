@@ -41,9 +41,6 @@
     "link_copied": "リンクをコピーしました",
     "copy_link_failed": "リンクをコピーできませんでした",
     "canvas_label": "画像キャンバス。ドラッグで移動、スクロールで拡大縮小、ダブルクリックで実際のサイズに切り替えできます。",
-    "previous": "前の画像",
-    "next": "次の画像",
-    "sequence_position": "{{index}} / {{total}}",
     "unavailable": "この画像は表示できないためスキップしました。"
   },
   "canvas": {
@@ -61,7 +58,10 @@
     "preview_unsupported": "このファイル形式はプレビューできません。",
     "close": "閉じる",
     "open_in_new_tab": "新しいタブで開く",
-    "remove": "添付ファイルを削除"
+    "remove": "添付ファイルを削除",
+    "previous": "前へ",
+    "next": "次へ",
+    "sequence_position": "{{index}} / {{total}}"
   },
   "link_hover": {
     "copy_link": "リンクをコピー",

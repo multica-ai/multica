@@ -2013,7 +2013,9 @@ func TestStartTask_AutopilotRunOnlyTask_ResolvesWorkspace(t *testing.T) {
 
 	// Same-workspace daemon token must succeed — this is the bug in #1224.
 	w = httptest.NewRecorder()
-	req = newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/start", nil,
+	req = newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/start", map[string]any{
+		"capabilities": []string{protocol.DaemonCapabilityTaskSupplementV1},
+	},
 		testWorkspaceID, "legit-daemon")
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
@@ -2026,6 +2028,11 @@ func TestStartTask_AutopilotRunOnlyTask_ResolvesWorkspace(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
 	if status != "running" {
 		t.Fatalf("expected task status 'running' after StartTask, got %q", status)
+	}
+	var capabilityRows int
+	dbfx.QueryRow(t, `SELECT count(*) FROM task_supplement_capability WHERE task_id = $1`, taskID).Scan(&capabilityRows)
+	if capabilityRows != 0 {
+		t.Fatalf("run-only autopilot persisted %d supplement capabilities, want 0", capabilityRows)
 	}
 }
 
@@ -3525,13 +3532,9 @@ func TestClaimTask_ChatDeliversAllUnansweredUserMessages(t *testing.T) {
 	}
 }
 
-// TestClaimTask_ChatPopulatesInitiator verifies MUL-2645 for chat tasks: the
-// claim response surfaces the STORED task initiator (initiator_user_id captured
-// at enqueue), NOT chat_session.creator_id. This is the MUL-2645 review fix: for
-// Lark group chats the session creator is the installer, not the sender, so the
-// claim must read the stored sender. The test pins this by making the creator a
-// DIFFERENT user (the "installer") from the stored initiator (the sender) and
-// asserting the claim resolves the sender.
+// TestClaimTask_ChatPopulatesInitiator verifies that a chat run acts on behalf
+// of its stored sender, not the chat session creator (the installer in a Lark
+// group). The originator and initiator_user_id are both the sender on this path.
 func TestClaimTask_ChatPopulatesInitiator(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -3553,10 +3556,10 @@ func TestClaimTask_ChatPopulatesInitiator(t *testing.T) {
 	dbfx.Exec(t, `
 		INSERT INTO chat_message (chat_session_id, role, content) VALUES ($1, 'user', 'hi there')
 	`, sessionID)
-	// initiator_user_id = the real sender (testUserID), distinct from creator.
+	// The real sender (testUserID) is distinct from the session creator.
 	dbfx.Exec(t, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority, initiator_user_id)
-		VALUES ($1, $2, $3, 'queued', 2, $4)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority, initiator_user_id, originator_user_id, accountable_user_id, originator_source)
+		VALUES ($1, $2, $3, 'queued', 2, $4, $4, $4, 'direct_human')
 	`, agentID, runtimeID, sessionID, testUserID)
 
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, daemonID)
@@ -4331,11 +4334,9 @@ func TestClaimTaskByRuntime_CommentTaskMarksComputedZeroDelta(t *testing.T) {
 	}
 }
 
-// TestClaimTaskByRuntime_CommentTaskPopulatesInitiator verifies MUL-2645: the
-// claim response surfaces the triggering comment's member author as the task
-// initiator (type + id + name + email), so a workspace-visible agent learns who
-// actually asked rather than seeing the runtime owner. createCommentTriggeredClaimTask
-// authors the trigger comment as the fixture member (testUserID).
+// TestClaimTaskByRuntime_CommentTaskPopulatesInitiator verifies the common
+// member-comment path: the trigger author and authorization human are the same
+// member. The claim uses the originator for the existing initiator wire fields.
 func TestClaimTaskByRuntime_CommentTaskPopulatesInitiator(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -4344,6 +4345,7 @@ func TestClaimTaskByRuntime_CommentTaskPopulatesInitiator(t *testing.T) {
 	runtimeID := createClaimReclaimRuntime(t, ctx, "Comment initiator runtime")
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Comment initiator agent")
 	taskID, _ := createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET originator_user_id = $2, accountable_user_id = $2, originator_source = 'direct_human' WHERE id = $1`, taskID, testUserID)
 
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "comment-initiator-claim")
 	req = withURLParam(req, "runtimeId", runtimeID)
@@ -4372,6 +4374,171 @@ func TestClaimTaskByRuntime_CommentTaskPopulatesInitiator(t *testing.T) {
 	}
 	if resp.Task.InitiatorEmail != handlerTestEmail {
 		t.Errorf("initiator_email = %q, want %q", resp.Task.InitiatorEmail, handlerTestEmail)
+	}
+}
+
+// Assign-triggered runs have no comment author. The claim must still identify
+// the human whose authority the task uses through the existing flat fields.
+func TestClaimTaskByRuntime_AssignmentHydratesOriginator(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Assignment originator runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Assignment originator agent")
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":          runtimeID,
+		"issue_id":            issueID,
+		"originator_source":   "direct_human",
+		"originator_user_id":  testUserID,
+		"accountable_user_id": testUserID,
+	})
+
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "assignment-originator-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	var resp struct {
+		Task *AgentTaskResponse `json:"task"`
+	}
+	testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK).JSON(&resp)
+	if resp.Task == nil || resp.Task.ID != taskID {
+		t.Fatalf("expected claimed task %s, got %+v", taskID, resp.Task)
+	}
+	if resp.Task.InitiatorType != "member" || resp.Task.InitiatorID != testUserID ||
+		resp.Task.InitiatorName != handlerTestName || resp.Task.InitiatorEmail != handlerTestEmail {
+		t.Fatalf("on-behalf-of = {%q %q %q %q}, want originator {%q %q %q}",
+			resp.Task.InitiatorType, resp.Task.InitiatorID, resp.Task.InitiatorName, resp.Task.InitiatorEmail,
+			testUserID, handlerTestName, handlerTestEmail)
+	}
+}
+
+// TestClaimTaskByRuntime_DelegatedRunHydratesOriginator covers GH-8674: the
+// agent-authored trigger remains in trigger_author_*, while the existing
+// initiator wire fields carry the human whose authority the run uses.
+func TestClaimTaskByRuntime_DelegatedRunHydratesOriginator(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	targetRuntimeID := createClaimReclaimRuntime(t, ctx, "Delegated originator target runtime")
+	targetAgentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, targetRuntimeID, "Delegated originator target")
+	sourceRuntimeID := createClaimReclaimRuntime(t, ctx, "Delegated originator source runtime")
+	sourceAgentID := dbfx.Agent(t, "Delegating agent", sourceRuntimeID)
+	sourceTaskID := dbfx.Task(t, sourceAgentID, testutil.Cols{
+		"runtime_id":          sourceRuntimeID,
+		"issue_id":            issueID,
+		"status":              "completed",
+		"originator_source":   "direct_human",
+		"originator_user_id":  testUserID,
+		"accountable_user_id": testUserID,
+	})
+	triggerID := dbfx.Comment(t, issueID, "Please take over this investigation", testutil.Cols{
+		"author_type":    "agent",
+		"author_id":      sourceAgentID,
+		"source_task_id": sourceTaskID,
+	})
+	taskID := dbfx.Task(t, targetAgentID, testutil.Cols{
+		"runtime_id":             targetRuntimeID,
+		"issue_id":               issueID,
+		"trigger_comment_id":     triggerID,
+		"originator_source":      "delegation",
+		"originator_user_id":     testUserID,
+		"accountable_user_id":    testUserID,
+		"delegated_from_task_id": sourceTaskID,
+	})
+
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+targetRuntimeID+"/tasks/claim", nil, testWorkspaceID, "delegated-originator-claim")
+	req = withURLParam(req, "runtimeId", targetRuntimeID)
+	var resp struct {
+		Task *AgentTaskResponse `json:"task"`
+	}
+	testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK).JSON(&resp)
+	if resp.Task == nil || resp.Task.ID != taskID {
+		t.Fatalf("expected claimed task %s, got %+v", taskID, resp.Task)
+	}
+	if resp.Task.TriggerAuthorType != "agent" || resp.Task.TriggerAuthorName != "Delegating agent" {
+		t.Fatalf("trigger author = {%q %q}, want delegating agent", resp.Task.TriggerAuthorType, resp.Task.TriggerAuthorName)
+	}
+	if resp.Task.InitiatorType != "member" || resp.Task.InitiatorID != testUserID ||
+		resp.Task.InitiatorName != handlerTestName || resp.Task.InitiatorEmail != handlerTestEmail {
+		t.Fatalf("on-behalf-of = {%q %q %q %q}, want originator {%q %q %q}",
+			resp.Task.InitiatorType, resp.Task.InitiatorID, resp.Task.InitiatorName, resp.Task.InitiatorEmail,
+			testUserID, handlerTestName, handlerTestEmail)
+	}
+	if resp.Task.Attribution == nil || resp.Task.Attribution.Originator == nil {
+		t.Fatalf("delegated task lost originator attribution: %+v", resp.Task.Attribution)
+	}
+	if got := resp.Task.Attribution.Originator; got.ID != testUserID || got.Name != handlerTestName || got.Email != handlerTestEmail {
+		t.Fatalf("originator = {%q %q %q}, want {%q %q %q}",
+			got.ID, got.Name, got.Email, testUserID, handlerTestName, handlerTestEmail)
+	}
+}
+
+// A retained trigger comment can name someone other than the member who
+// manually reran the task. The claim identity must follow the latter.
+func TestClaimTaskByRuntime_CommentAuthorDiffersFromOriginator(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Rerun originator runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Rerun originator agent")
+	commentAuthorID, _ := createEphemeralMember(t, testWorkspaceID, "rerun-original-commenter", "member")
+	commentID := dbfx.Comment(t, issueID, "Original request", testutil.Cols{
+		"author_type": "member",
+		"author_id":   commentAuthorID,
+	})
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":          runtimeID,
+		"issue_id":            issueID,
+		"trigger_comment_id":  commentID,
+		"originator_source":   "direct_human",
+		"originator_user_id":  testUserID,
+		"accountable_user_id": testUserID,
+	})
+
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "rerun-originator-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	var resp struct {
+		Task *AgentTaskResponse `json:"task"`
+	}
+	testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK).JSON(&resp)
+	if resp.Task == nil || resp.Task.ID != taskID {
+		t.Fatalf("expected claimed task %s, got %+v", taskID, resp.Task)
+	}
+	if resp.Task.TriggerAuthorType != "member" || resp.Task.TriggerAuthorName != "Membership Cache Test rerun-original-commenter" {
+		t.Fatalf("trigger author = {%q %q}, want original commenter", resp.Task.TriggerAuthorType, resp.Task.TriggerAuthorName)
+	}
+	if resp.Task.InitiatorType != "member" || resp.Task.InitiatorID != testUserID ||
+		resp.Task.InitiatorName != handlerTestName || resp.Task.InitiatorEmail != handlerTestEmail {
+		t.Fatalf("on-behalf-of = {%q %q %q %q}, want rerunning member {%q %q %q}",
+			resp.Task.InitiatorType, resp.Task.InitiatorID, resp.Task.InitiatorName, resp.Task.InitiatorEmail,
+			testUserID, handlerTestName, handlerTestEmail)
+	}
+}
+
+func TestClaimTaskByRuntime_CommentWithoutOriginatorOmitsOnBehalfOf(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Unattributed comment runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Unattributed comment agent")
+	taskID, _ := createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
+
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "unattributed-comment-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	var resp struct {
+		Task *AgentTaskResponse `json:"task"`
+	}
+	testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK).JSON(&resp)
+	if resp.Task == nil || resp.Task.ID != taskID {
+		t.Fatalf("expected claimed task %s, got %+v", taskID, resp.Task)
+	}
+	if resp.Task.TriggerAuthorType != "member" || resp.Task.TriggerAuthorName != handlerTestName {
+		t.Fatalf("trigger author lost: {%q %q}", resp.Task.TriggerAuthorType, resp.Task.TriggerAuthorName)
+	}
+	if resp.Task.InitiatorType != "" || resp.Task.InitiatorID != "" || resp.Task.InitiatorName != "" || resp.Task.InitiatorEmail != "" {
+		t.Fatalf("unattributed run invented on-behalf-of identity: %+v", resp.Task)
 	}
 }
 
@@ -4714,5 +4881,27 @@ func TestBatchIssueGCCheckReadsNoCatalogForBuiltInStatuses(t *testing.T) {
 	if counter.entryReads != 0 || counter.keyReads != 0 {
 		t.Fatalf("built-in batch read the catalog (%d entry, %d key), want 0 — a built-in key IS its own category",
 			counter.entryReads, counter.keyReads)
+	}
+}
+
+func TestDaemonRegister_ProfileUsesStoredRuntimeIdentity(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	profileID := insertRuntimeProfileFixture(t, ctx, "Custom OMP", "pi", "wrapper")
+	if _, err := testPool.Exec(ctx, `UPDATE runtime_profile SET runtime_type = 'omp' WHERE id = $1`, profileID); err != nil {
+		t.Fatal(err)
+	}
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID, "daemon_id": "test-omp-profile", "device_name": "test-device",
+		"runtimes": []map[string]any{{"name": "Custom OMP", "type": "pi", "profile_id": profileID, "status": "online"}},
+	}, testWorkspaceID, "test-omp-profile")
+	testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE profile_id = $1`, profileID) })
+	var provider string
+	dbfx.QueryRow(t, `SELECT provider FROM agent_runtime WHERE profile_id = $1`, profileID).Scan(&provider)
+	if provider != "omp" {
+		t.Fatalf("provider = %q, want stored omp identity", provider)
 	}
 }

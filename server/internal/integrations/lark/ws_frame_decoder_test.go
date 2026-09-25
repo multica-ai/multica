@@ -613,3 +613,26 @@ func TestLarkJSONFrameDecoderNonThreadHasEmptyThreadID(t *testing.T) {
 		t.Errorf("ThreadID = %q want empty for non-thread message", msg.ThreadID)
 	}
 }
+
+func TestPeekEventType(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{"empty payload", "", ""},
+		{"malformed json", "not json", ""},
+		{"heartbeat", "{}", ""},
+		{"handled event", `{"schema":"2.0","header":{"event_type":"im.message.receive_v1"}}`, "im.message.receive_v1"},
+		{"unhandled event", `{"schema":"2.0","header":{"event_type":"im.chat.access_event_v1"}}`, "im.chat.access_event_v1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := PeekEventType([]byte(tc.payload)); got != tc.want {
+				t.Errorf("PeekEventType(%q) = %q, want %q", tc.payload, got, tc.want)
+			}
+		})
+	}
+}

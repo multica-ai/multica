@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Attachment } from "../types/attachment";
 import {
+  collectAttachmentSequence,
   collectImageSequence,
   indexOfImageKey,
   isImageAttachment,
@@ -143,6 +144,7 @@ describe("collectImageSequence", () => {
         url: "https://cdn/x.png",
         filename: "shot",
         attachment: undefined,
+        imageByConstruction: true,
       },
     ]);
   });
@@ -201,6 +203,101 @@ describe("collectImageSequence", () => {
   it("returns an empty sequence for empty input", () => {
     expect(collectImageSequence([])).toEqual([]);
     expect(collectImageSequence([null, undefined, {}])).toEqual([]);
+  });
+});
+
+describe("collectAttachmentSequence", () => {
+  // The web / desktop rule: anything the viewer can open.
+  const previewable = ({ contentType, filename }: { contentType: string; filename: string }) =>
+    isImageAttachment(contentType, filename) ||
+    contentType === "application/pdf" ||
+    filename.endsWith(".md");
+
+  it("pages through every kind the rule accepts, in render order", () => {
+    const pdf = attachment({
+      id: UUID_A,
+      filename: "spec.pdf",
+      content_type: "application/pdf",
+    });
+    const image = attachment({ id: UUID_B });
+    const zip = attachment({
+      id: UUID_C,
+      filename: "bundle.zip",
+      content_type: "application/zip",
+    });
+
+    const sequence = collectAttachmentSequence(
+      [
+        {
+          content: `![shot](/api/attachments/${UUID_B}/download)`,
+          attachments: [image, pdf, zip],
+        },
+      ],
+      previewable,
+    );
+
+    expect(sequence.map((i) => i.key)).toEqual([UUID_B, UUID_A]);
+    expect(sequence.map((i) => i.imageByConstruction)).toEqual([true, false]);
+  });
+
+  it("asks the rule about file cards and says whether they resolved", () => {
+    const seen: Array<{ filename: string; hasRecord: boolean }> = [];
+    const notes = attachment({
+      id: UUID_A,
+      filename: "notes.md",
+      content_type: "text/markdown",
+    });
+
+    const sequence = collectAttachmentSequence(
+      [
+        {
+          content: [
+            `!file[notes.md](/api/attachments/${UUID_A}/download)`,
+            "!file[orphan.md](https://cdn/orphan.md)",
+          ].join("\n\n"),
+          attachments: [notes],
+        },
+      ],
+      (candidate) => {
+        seen.push({ filename: candidate.filename, hasRecord: candidate.hasRecord });
+        return candidate.hasRecord;
+      },
+    );
+
+    expect(seen).toEqual([
+      { filename: "notes.md", hasRecord: true },
+      { filename: "orphan.md", hasRecord: false },
+    ]);
+    expect(sequence.map((i) => i.key)).toEqual([UUID_A]);
+  });
+
+  it("resolves a non-standalone block's references without listing the rest", () => {
+    const inline = attachment({ id: UUID_A });
+    const elsewhere = attachment({ id: UUID_B, filename: "later.png" });
+    const sequence = collectAttachmentSequence(
+      [
+        {
+          content: `![](/api/attachments/${UUID_A}/download)`,
+          attachments: [inline, elsewhere],
+          standalone: false,
+        },
+        { attachments: [elsewhere] },
+      ],
+      previewable,
+    );
+    // `elsewhere` sits at its own block's position, not the first block's.
+    expect(sequence.map((i) => [i.key, i.attachment])).toEqual([
+      [UUID_A, inline],
+      [UUID_B, elsewhere],
+    ]);
+  });
+
+  it("keeps markdown images even when the rule would reject their caption", () => {
+    const sequence = collectAttachmentSequence(
+      [{ content: "![报告图表](https://cdn/chart)" }],
+      () => false,
+    );
+    expect(sequence.map((i) => i.key)).toEqual(["https://cdn/chart"]);
   });
 });
 

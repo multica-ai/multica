@@ -132,8 +132,7 @@ func TestProjectClaudeLevels_PerModelSubset(t *testing.T) {
 //
 // Elon's PR1 review found that `codex debug models --output json` is
 // rejected by codex-cli 0.131.0 — there is no `--output` flag on the
-// subcommand. The fix was to drop the flag and add `--bundled` (which
-// just skips network refresh). These two tests pin the contract:
+// subcommand. The fix was to drop the flag. These two tests pin the contract:
 //
 //   - TestCodexDebugModelsArgs_Pinned asserts the literal argv we pass
 //     so a future "let's add a flag" refactor breaks loudly instead of
@@ -166,7 +165,7 @@ func TestRunCodexDebugModels_ArgvSeenByBinary(t *testing.T) {
 	// Linux ETXTBSY when we exec the file (Go #22315).
 	writeTestExecutable(t, fake, []byte(script))
 
-	raw, err := runCodexDebugModels(context.Background(), Command{Path: fake})
+	raw, err := runCodexDebugModels(context.Background(), Command{Path: fake}, codexDebugModelsArgs...)
 	if err != nil {
 		t.Fatalf("runCodexDebugModels: %v (output=%q)", err, raw)
 	}
@@ -176,7 +175,7 @@ func TestRunCodexDebugModels_ArgvSeenByBinary(t *testing.T) {
 		t.Fatalf("read argv file: %v", err)
 	}
 	got := splitNonEmptyLines(string(data))
-	want := []string{"debug", "models", "--bundled"}
+	want := []string{"debug", "models"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("fake codex received argv %v, want %v", got, want)
 	}
@@ -343,7 +342,7 @@ func TestDiscoverCodexModelsVersionGateAndFallback(t *testing.T) {
 		t.Skip("shell-script fake binary requires a POSIX shell")
 	}
 
-	t.Run("supported version uses bundled catalog", func(t *testing.T) {
+	t.Run("supported version prefers live catalog", func(t *testing.T) {
 		dir := t.TempDir()
 		fake := filepath.Join(dir, "codex")
 		script := `#!/bin/sh
@@ -352,16 +351,51 @@ if [ "$1" = "--version" ]; then
   exit 0
 fi
 printf '%s\n' "$@" > "` + filepath.Join(dir, "argv.txt") + `"
-echo '{"models":[{"slug":"runtime-model","display_name":"Runtime Model","visibility":"list","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"high","description":"Live"}]}]}'
+if [ "$3" = "--bundled" ]; then
+  echo '{"models":[{"slug":"bundled-model","display_name":"Bundled Model","visibility":"list"}]}'
+else
+  echo '{"models":[{"slug":"live-model","display_name":"Live Model","visibility":"list","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"high","description":"Live"}]}]}'
+fi
 `
 		writeTestExecutable(t, fake, []byte(script))
 
-		got := discoverCodexModels(context.Background(), Command{Path: fake})
-		if len(got) != 1 || got[0].ID != "runtime-model" || got[0].Thinking == nil || !hasThinkingLevel(got[0].Thinking, "high") {
-			t.Fatalf("expected runtime catalog, got %+v", got)
+		catalog := discoverCodexCatalog(context.Background(), Command{Path: fake})
+		if len(catalog.Models) != 1 || catalog.Models[0].ID != "live-model" || catalog.Models[0].Thinking == nil || !hasThinkingLevel(catalog.Models[0].Thinking, "high") {
+			t.Fatalf("expected live runtime catalog, got %+v", catalog.Models)
 		}
-		if got[0].SupportsExplicitStandardServiceTier {
-			t.Fatalf("Codex 0.122.0 must not advertise explicit-standard support: %+v", got[0])
+		if catalog.Fallback {
+			t.Fatal("live catalog must be authoritative")
+		}
+		if catalog.Models[0].SupportsExplicitStandardServiceTier {
+			t.Fatalf("Codex 0.122.0 must not advertise explicit-standard support: %+v", catalog.Models[0])
+		}
+	})
+
+	t.Run("live failure uses bundled catalog as non-authoritative fallback", func(t *testing.T) {
+		dir := t.TempDir()
+		fake := filepath.Join(dir, "codex")
+		script := `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "codex-cli 0.144.1"
+  exit 0
+fi
+if [ "$3" = "--bundled" ]; then
+  echo '{"models":[{"slug":"bundled-model","display_name":"Bundled Model","visibility":"list"}]}'
+  exit 0
+fi
+exit 1
+`
+		writeTestExecutable(t, fake, []byte(script))
+
+		catalog, err := ListModels(context.Background(), "codex", Command{Path: fake})
+		if err != nil {
+			t.Fatalf("ListModels: %v", err)
+		}
+		if len(catalog.Models) != 1 || catalog.Models[0].ID != "bundled-model" {
+			t.Fatalf("expected bundled fallback, got %+v", catalog.Models)
+		}
+		if !catalog.Fallback {
+			t.Fatal("bundled catalog after live discovery failure must be non-authoritative")
 		}
 	})
 
@@ -373,12 +407,18 @@ echo '{"models":[{"slug":"runtime-model","display_name":"Runtime Model","visibil
 			"exit 99\n"
 		writeTestExecutable(t, fake, []byte(script))
 
-		got := discoverCodexModels(context.Background(), Command{Path: fake})
-		if len(got) == 0 || got[0].ID != "gpt-6-astra" {
-			t.Fatalf("expected static fallback, got %+v", got)
+		catalog, err := ListModels(context.Background(), "codex", Command{Path: fake})
+		if err != nil {
+			t.Fatalf("ListModels: %v", err)
 		}
-		if got[0].SupportsExplicitStandardServiceTier {
-			t.Fatalf("old Codex must not advertise explicit-standard support: %+v", got[0])
+		if len(catalog.Models) == 0 || catalog.Models[0].ID != "gpt-6-astra" {
+			t.Fatalf("expected static fallback, got %+v", catalog.Models)
+		}
+		if !catalog.Fallback {
+			t.Fatal("static catalog for an old Codex must be non-authoritative")
+		}
+		if catalog.Models[0].SupportsExplicitStandardServiceTier {
+			t.Fatalf("old Codex must not advertise explicit-standard support: %+v", catalog.Models[0])
 		}
 	})
 
@@ -390,12 +430,18 @@ echo '{"models":[{"slug":"runtime-model","display_name":"Runtime Model","visibil
 			"exit 1\n"
 		writeTestExecutable(t, fake, []byte(script))
 
-		got := discoverCodexModels(context.Background(), Command{Path: fake})
-		if len(got) == 0 || got[0].ID != "gpt-6-astra" || got[0].Thinking == nil {
-			t.Fatalf("expected model + thinking fallback, got %+v", got)
+		catalog, err := ListModels(context.Background(), "codex", Command{Path: fake})
+		if err != nil {
+			t.Fatalf("ListModels: %v", err)
 		}
-		if !got[0].SupportsExplicitStandardServiceTier {
-			t.Fatalf("supported Codex version must retain explicit-standard capability through catalog fallback: %+v", got[0])
+		if len(catalog.Models) == 0 || catalog.Models[0].ID != "gpt-6-astra" || catalog.Models[0].Thinking == nil {
+			t.Fatalf("expected model + thinking fallback, got %+v", catalog.Models)
+		}
+		if !catalog.Fallback {
+			t.Fatal("static catalog after both discovery attempts fail must be non-authoritative")
+		}
+		if !catalog.Models[0].SupportsExplicitStandardServiceTier {
+			t.Fatalf("supported Codex version must retain explicit-standard capability through catalog fallback: %+v", catalog.Models[0])
 		}
 	})
 }
@@ -424,6 +470,65 @@ func TestValidateThinkingLevelCodexPerModelFallbackCatalog(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("ValidateThinkingLevel(%q, %q) = %v, want %v", tc.model, tc.level, got, tc.want)
 		}
+	}
+}
+
+// A fallback is not an allow-list for live-only models. Unknown models on an
+// authoritative catalog still fail closed, and known fallback models still
+// have their capabilities checked instead of being passed through.
+func TestValidateCodexCapabilitiesMissingFromFallback(t *testing.T) {
+	fallback := Catalog{Models: []Model{{ID: "gpt-5.5"}}, Fallback: true}
+	for _, tc := range []struct {
+		name     string
+		validate func(func() (Catalog, error), string, string, string) (bool, error)
+		value    string
+	}{
+		{"thinking", ValidateThinkingLevelWith, "high"},
+		{"service tier", ValidateServiceTierWith, "priority"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			load := func() (Catalog, error) { return fallback, nil }
+			if valid, err := tc.validate(load, "codex", "gpt-6-sol", tc.value); valid || err == nil {
+				t.Fatalf("missing live-only model: got (%v, %v), want validation error", valid, err)
+			}
+			if valid, err := tc.validate(load, "codex", "gpt-5.5", tc.value); valid || err != nil {
+				t.Fatalf("known fallback model with unsupported value: got (%v, %v), want (false, nil)", valid, err)
+			}
+			fallback.Fallback = false
+			if valid, err := tc.validate(load, "codex", "gpt-6-sol", tc.value); valid || err != nil {
+				t.Fatalf("authoritative catalog omits model: got (%v, %v), want (false, nil)", valid, err)
+			}
+			fallback.Fallback = true
+		})
+	}
+
+	load := func() (Catalog, error) { t.Fatal("empty model must not read catalog"); return Catalog{}, nil }
+	if valid, err := ValidateThinkingLevelWith(load, "codex", "", "high"); valid || err != nil {
+		t.Fatalf("empty model thinking = (%v, %v), want (false, nil)", valid, err)
+	}
+	if valid, err := ValidateServiceTierWith(load, "codex", "", "priority"); valid || err != nil {
+		t.Fatalf("empty model tier = (%v, %v), want (false, nil)", valid, err)
+	}
+}
+
+func TestValidateServiceTierStandardUsesCLICapabilityOnFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		supported bool
+	}{
+		{"before 0.133", false},
+		{"0.133 and later", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			catalog := Catalog{Models: []Model{{ID: "gpt-5.5", SupportsExplicitStandardServiceTier: tc.supported}}, Fallback: true}
+			load := func() (Catalog, error) { return catalog, nil }
+			for _, model := range []string{"gpt-5.5", "gpt-6-sol"} {
+				got, err := ValidateServiceTierWith(load, "codex", model, "default")
+				if err != nil || got != tc.supported {
+					t.Errorf("model %q on fallback (supported=%v): got (%v, %v), want (%v, nil)", model, tc.supported, got, err, tc.supported)
+				}
+			}
+		})
 	}
 }
 

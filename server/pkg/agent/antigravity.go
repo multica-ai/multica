@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,11 +51,120 @@ type antigravityStreamUsage struct {
 
 type antigravityStreamStepUpdate struct {
 	ConversationID string                  `json:"conversation_id"`
-	StepIndex      int                     `json:"step_index"`
+	StepIndex      *int                    `json:"step_index"`
 	State          string                  `json:"state"`
 	StepType       string                  `json:"step_type"`
 	TextDelta      string                  `json:"text_delta"`
 	Usage          *antigravityStreamUsage `json:"usage"`
+	ToolName       string                  `json:"tool_name"`
+	ToolInfo       *antigravityStreamTool  `json:"tool_info"`
+}
+
+type antigravityStreamTool struct {
+	Name       string          `json:"name"`
+	Parameters map[string]any  `json:"parameters"`
+	Output     json.RawMessage `json:"output"`
+	Error      *struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+type antigravityToolState struct {
+	name string
+	done bool
+}
+
+// Normalize the shared transcript input without duplicating commands or file
+// bodies. Preserve collisions and unknown fields, and do not mutate the snapshot.
+func antigravityToolInput(parameters map[string]any) map[string]any {
+	input := maps.Clone(parameters)
+	for _, alias := range []struct {
+		from, to   string
+		allowEmpty bool
+	}{
+		{"CommandLine", "command", false},
+		{"AbsolutePath", "file_path", false},
+		{"TargetFile", "file_path", false},
+		{"CodeContent", "content", true},
+		{"TargetContent", "old_string", true},
+		{"ReplacementContent", "new_string", true},
+	} {
+		if _, exists := input[alias.to]; exists {
+			continue
+		}
+		if value, ok := parameters[alias.from].(string); ok && (value != "" || alias.allowEmpty) {
+			input[alias.to] = value
+			delete(input, alias.from)
+		}
+	}
+	return input
+}
+
+// Each step has one tool lifecycle, even when agy repeats state snapshots or
+// only emits DONE. The existing daemon uploader handles these normal messages;
+// tool output must never be appended to the assistant's final answer.
+func antigravityToolMessages(step *antigravityStreamStepUpdate, states map[int]antigravityToolState) []Message {
+	if step.StepType != "tool" || step.StepIndex == nil || *step.StepIndex < 0 {
+		return nil
+	}
+	active := strings.EqualFold(step.State, "active")
+	done := strings.EqualFold(step.State, "done")
+	if !active && !done {
+		return nil
+	}
+	index := *step.StepIndex
+	state := states[index]
+	if state.done {
+		return nil
+	}
+	callID := fmt.Sprintf("agy-step-%d", index)
+	var messages []Message
+	if state.name == "" {
+		name := step.ToolName
+		var input map[string]any
+		if step.ToolInfo != nil {
+			if name == "" {
+				name = step.ToolInfo.Name
+			}
+			input = antigravityToolInput(step.ToolInfo.Parameters)
+		}
+		if name == "" {
+			return nil // A later snapshot may provide the missing metadata.
+		}
+		state.name = name
+		messages = append(messages, Message{Type: MessageToolUse, Tool: name, CallID: callID, Input: input})
+	}
+	if done {
+		var output string
+		if info := step.ToolInfo; info != nil {
+			if len(info.Output) > 0 && string(info.Output) != "null" {
+				if err := json.Unmarshal(info.Output, &output); err != nil {
+					output = string(info.Output)
+				}
+			}
+			if info.Error != nil {
+				detail := info.Error.Message
+				if info.Error.Type != "" {
+					if detail != "" {
+						detail = info.Error.Type + ": " + detail
+					} else {
+						detail = info.Error.Type
+					}
+				}
+				// The daemon uploads a bounded prefix of tool output. Put the
+				// error first so verbose stdout cannot hide the failure detail.
+				if output != "" {
+					output = "\n" + output
+				}
+				output = "Tool error: " + detail + output
+			}
+		}
+		messages = append(messages, Message{Type: MessageToolResult, Tool: state.name, CallID: callID, Output: output})
+		state.done = true
+	}
+	states[index] = state
+	return messages
 }
 
 type antigravityStreamResult struct {
@@ -237,6 +347,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		var streamResponse string
 		var streamResultUsage *antigravityStreamUsage
 		streamStepUsage := make(map[int]TokenUsage)
+		streamTools := make(map[int]antigravityToolState)
 		streamLatestAgentResponseStep := -1
 		streamLatestAgentResponseDone := false
 		finalStatus := "completed"
@@ -246,6 +357,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 		trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
 
+	streamLoop:
 		for scanner.Scan() {
 			line := scanner.Text()
 			var event antigravityStreamEvent
@@ -261,22 +373,32 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 					if event.StepUpdate.ConversationID != "" {
 						streamSessionID = event.StepUpdate.ConversationID
 					}
-					if event.StepUpdate.StepType == "agent_response" && event.StepUpdate.StepIndex >= streamLatestAgentResponseStep {
+					for _, message := range antigravityToolMessages(event.StepUpdate, streamTools) {
+						// Tool lifecycle events also drive the daemon's in-flight
+						// counter. Unlike best-effort text, neither half may be
+						// dropped when a transcript consumer temporarily falls behind.
+						select {
+						case msgCh <- message:
+						case <-runCtx.Done():
+							break streamLoop
+						}
+					}
+					if event.StepUpdate.StepType == "agent_response" && event.StepUpdate.StepIndex != nil && *event.StepUpdate.StepIndex >= streamLatestAgentResponseStep {
 						// Only the latest response step determines whether the answer
 						// completed. A prior DONE response may be followed by a newer
 						// ACTIVE response that is cut off by the network error.
-						streamLatestAgentResponseStep = event.StepUpdate.StepIndex
+						streamLatestAgentResponseStep = *event.StepUpdate.StepIndex
 						streamLatestAgentResponseDone = strings.EqualFold(event.StepUpdate.State, "done")
 					}
 					if event.StepUpdate.StepType == "agent_response" && event.StepUpdate.TextDelta != "" {
 						output.WriteString(event.StepUpdate.TextDelta)
 						trySend(msgCh, Message{Type: MessageText, Content: event.StepUpdate.TextDelta})
 					}
-					if strings.EqualFold(event.StepUpdate.State, "done") && event.StepUpdate.Usage != nil && event.StepUpdate.Usage.hasTokens() {
+					if strings.EqualFold(event.StepUpdate.State, "done") && event.StepUpdate.StepIndex != nil && event.StepUpdate.Usage != nil && event.StepUpdate.Usage.hasTokens() {
 						// A step may be re-emitted as its state changes. Keying by
 						// index makes the final DONE snapshot replace, not duplicate,
 						// an earlier copy of the same step.
-						streamStepUsage[event.StepUpdate.StepIndex] = event.StepUpdate.Usage.tokenUsage()
+						streamStepUsage[*event.StepUpdate.StepIndex] = event.StepUpdate.Usage.tokenUsage()
 					}
 				case "result":
 					if event.Result == nil {

@@ -206,16 +206,14 @@ func TestInboundGroupHumanReplyUsesCaptionAndHandlesNonText(t *testing.T) {
 		{
 			name: "caption",
 			reply: &Message{MessageID: 9, From: &User{ID: 222, Username: "ada"},
-				Caption: "diagram caption", Photo: []any{struct{}{}},
+				Caption: "diagram caption", Photo: []PhotoSize{{FileID: "p1"}},
 			},
 			wanted: "diagram caption",
 		},
 		{
 			name: "empty non-text",
 			reply: &Message{MessageID: 9, From: &User{ID: 222, Username: "ada"},
-				Document: &struct {
-					FileName string `json:"file_name"`
-				}{FileName: "notes.txt"},
+				Document: &FileRef{FileID: "d1", FileName: "notes.txt"},
 			},
 			wanted: "[empty or non-text message]",
 		},
@@ -611,7 +609,7 @@ func TestDispatchUnsupportedMediaInAddressedGroupPreservesTopicAndReply(t *testi
 	}
 	base := Message{
 		MessageID: 21, From: &User{ID: 3, FirstName: "U"}, Chat: Chat{ID: -42, Type: "supergroup"},
-		Photo: []any{struct{}{}}, IsTopicMessage: true, MessageThreadID: 8,
+		Sticker: &struct{}{}, IsTopicMessage: true, MessageThreadID: 8,
 	}
 	if err := c.dispatch(context.Background(), Update{UpdateID: 1, Message: &base}); err != nil {
 		t.Fatal(err)
@@ -619,8 +617,9 @@ func TestDispatchUnsupportedMediaInAddressedGroupPreservesTopicAndReply(t *testi
 	if len(got) != 0 {
 		t.Fatalf("unaddressed group media produced notice: %+v", got)
 	}
-	base.Caption = "@my_bot look"
-	base.CaptionEntities = []MessageEntity{{Type: "mention", Offset: 0, Length: 7}}
+	// A sticker cannot carry a caption, so replying to the bot is how it is
+	// addressed in a group.
+	base.ReplyToMessage = &Message{MessageID: 5, From: &User{ID: 999, IsBot: true}}
 	if err := c.dispatch(context.Background(), Update{UpdateID: 2, Message: &base}); err != nil {
 		t.Fatal(err)
 	}

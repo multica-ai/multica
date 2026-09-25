@@ -63,13 +63,13 @@ Categories keep lifecycle reasoning simple. Boards, lists, filters, and sorting 
 
 There is no fixed flow between statuses — members and agents can change them directly.
 
-Agents write the status the issue is in as their work changes it: starting work on what the issue asks for — in whatever form, research, design, or a review the issue itself requests — moves it to `in_progress` right away, so the board shows the work while it runs; delivering moves it to `in_review`; work that continues beyond the turn keeps it `in_progress`; a turn that produces nothing of the issue's own deliverable — answering questions, consulting on work owned elsewhere — leaves the status untouched throughout. These updates are written explicitly by the agent through the Multica CLI during the run — the server does not flip issue status when a run starts or completes (apart from the two system exceptions below). `done` is usually a human confirmation, or an integration such as a PR with close intent that merges.
+Agents write the status the issue is in as their work changes it: starting work on what the issue asks for — in whatever form, research, design, or a review the issue itself requests — moves it to `in_progress` right away, so the board shows the work while it runs; delivering moves it to `in_review`; work that continues beyond the turn keeps it `in_progress`; a turn that produces nothing of the issue's own deliverable — answering questions, consulting on work owned elsewhere — leaves the status untouched throughout. These updates are written explicitly by the agent through the Multica CLI during the run — the server does not flip issue status when a run starts or completes (apart from the two system exceptions below). `done` is usually a human confirmation, or the merge of a linked PR that closes the issue with a keyword such as `Closes MUL-123`.
 
 <Callout type="info">
 Two changes are made by the system:
 
 - When a run fails, the issue has no other runs, and no retry is triggered, `in_progress` rolls back to `todo`.
-- When a linked GitHub PR merges with close intent and no other linked PR is still open or draft, the issue becomes `done`.
+- When every PR linked to the issue is merged and one of them closes it with a keyword such as `Closes MUL-123`, the issue becomes `done` — unless PR auto-complete is off for the workspace or the issue. See [GitHub integration](/github-integration).
 </Callout>
 
 ### Custom statuses

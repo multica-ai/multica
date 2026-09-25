@@ -2,70 +2,51 @@
 
 Product contracts the runtime brief does not fully encode.
 
-- [PR linking and close intent are two distinct contracts](#pr-linking-and-close-intent-are-two-distinct-contracts)
+- [PR linking and auto-complete](#pr-linking-and-auto-complete)
 - [Reading a linked PR's real state](#reading-a-linked-prs-real-state)
 - [Custom properties: typed workflow state](#custom-properties-typed-workflow-state)
 - [Status changes have server side effects](#status-changes-have-server-side-effects)
-- [Claim ownership without duplicating a run](#claim-ownership-without-duplicating-a-run)
 - [Who else is running right now](#who-else-is-running-right-now)
 - [Sub-issues: todo starts work now, backlog parks it](#sub-issues-todo-starts-work-now-backlog-parks-it)
 - [Incorrect to correct](#incorrect-to-correct)
 
-## PR linking and close intent are two distinct contracts
+To attach a local file to an existing issue description, use `multica issue update <id> --attachment <local-path>`. The CLI appends the file's Markdown reference to the end of the description; to replace an image, also use `--description-file` to remove the old reference. Do not put local filesystem paths in the description.
 
-The GitHub webhook runs two separate scans over an incoming PR. They are not the
-same gate and they read different fields.
+## PR linking and auto-complete
 
-**Linking** scans three places for a routable issue key (`PREFIX-NUMBER`, e.g.
-`MUL-123`): the PR **title**, the **branch name**, and the **body right after a
-closing keyword**. Each match writes an issue to PR link row — the link that
-`multica issue pull-requests` reads back. A key that appears in the body as a
-bare mention, with nothing in the title or branch and no closing keyword, is a
-passing reference and links nothing.
-
-```text
-MUL-123: add the thing the issue asks for        # key anywhere in title → links
-agent/dana/mul-123-add-the-thing             # branch ref   → links
-Closes MUL-123                                   # body + closing keyword → links
-Related to MUL-123                               # body mention only → no link
-```
-
-**Close intent** is stricter and is a separate scan over **title or body only —
-never the branch**. It fires only for a key placed immediately after a closing
-keyword (`Closes` / `Fixes` / `Resolves`, optional `:` then whitespace). That
-adjacency is what sets the link row's close-intent flag, the gate that
-auto-advances the issue to `done` when the PR merges.
+A PR is linked to an issue when its **title** or **branch name** contains a
+routable issue key (`PREFIX-NUMBER`, e.g. `MUL-123`), or when its title or body
+puts the key **right after a closing keyword** (`Closes` / `Fixes` /
+`Resolves`, optional `:` then whitespace). A key that appears in the body as a
+bare mention links nothing. People can also link a PR by URL or remove one on
+the issue page; a removed PR is not linked again by later webhooks.
 
 ```text
-Closes MUL-123                                    # links AND records close intent
-Fixes MUL-123
-Resolves MUL-123
-Fix login MUL-123                                 # in a title: links, no close intent
+MUL-123: add the thing the issue asks for     # key in title  → links
+agent/dana/mul-123-add-the-thing              # key in branch → links
+Closes MUL-123   (body)                       # links AND closes
+Related to MUL-123   (body only)              # no link
 ```
 
-Consequence: a bare key in the title or a branch reference links the PR but does
-not close the issue on merge. A closing keyword immediately adjacent to the issue key
-records close intent; on merge, that close intent can move the linked issue to
-`done`.
+**Only a closing keyword completes the issue.** When every PR linked to an issue
+is merged and at least one of them puts a closing keyword right before the key
+(`Closes MUL-123`; `Fix login MUL-123` does not count, and a branch name never
+does), the issue moves to `done` on its own — unless the workspace turned PR
+auto-complete off (Settings → Issue statuses) or someone turned it off for that
+issue. A title or branch key alone links the PR but never completes the issue.
+A linked PR still open or draft keeps the issue waiting, and so does a PR closed
+without merging until someone removes it from the issue.
 
-**Passing mentions link nothing.** A key that appears **only** as a bare mention
-in the body — no closing keyword, and not in the title or branch — does not link
-the PR at all. This keeps `Related MUL-123` or `Follow up in MUL-123` from
-surfacing an unrelated PR as if it were working on that issue. To make a PR show
-up for an issue, put the key in the title, the branch, or after a closing keyword
-in the body — not as a loose body reference.
+The check runs only when a PR event touches the issue: a linked PR merges, a PR
+is linked, or a link is removed. Reopening an issue or changing the setting never
+completes it by itself.
 
-While the PR is still open the link follows the live title and body: adding a key
-links it, and downgrading that key to a plain mention drops the link. Once the PR
-has merged or closed, existing links and their close-intent decision are frozen —
-but a PR that was never linked can still be linked by editing it, so a forgotten
-key is repairable after the fact. That late link does not move the issue to
-`done`; close intent is decided at merge time.
-
-```text
-Closes MUL-123 in the body                        # links
-Related to MUL-123 in the body (no title/branch)  # no link
-```
+While a PR is open, its automatic links and its closing keyword follow the live
+title, branch, and body: removing the key drops the link, and downgrading
+`Closes MUL-123` to a plain mention keeps the title link but drops the close.
+After merge or close, existing links and the close decision stay. Adding a key to
+an already-merged PR still links it, but that late link does not complete the
+issue.
 
 ### Default for code-changing issue work
 
@@ -79,10 +60,10 @@ instead of pretending the run is complete.
 To make the PR show on the issue, put a routable issue key in the PR **title**
 (preferred) or the **branch**. A key that appears only as a bare mention in the
 body links nothing. Do not use a closing keyword (`Closes` / `Fixes` /
-`Resolves`) unless the issue should auto-advance to `done` on merge.
+`Resolves`) unless merging the PR should move the issue to `done`.
 
 ```text
-MUL-123: fix login redirect        # key anywhere in title → links
+MUL-123: fix login redirect        # key in title → links, does not complete
 Closes MUL-123                     # only when merge should mark the issue done
 Part of MUL-123                    # body mention only → no link at all
 ```
@@ -101,9 +82,17 @@ an earlier run.
 multica issue pull-requests <issue-id> --output json
 ```
 
-Returns `{"pull_requests": [...]}`. Each element exposes:
+Returns `{"pull_requests": [...], "auto_complete": {...}}`.
+`auto_complete.state` says what the merge rule will do for this issue:
+`no_close_intent` (no linked PR closes the issue with a keyword, so merging
+completes nothing), `waiting` (some linked PRs are still open or draft),
+`not_merged` (one was closed without merging), `all_merged`,
+`workspace_disabled`, `issue_disabled`, `terminal`, `triage`, or `none`;
+`auto_complete.pull_request_ids` names the PRs the state is about. Each element of `pull_requests` exposes:
 
 - `number`, `html_url`, `title`
+- `link_source` — why the PR is on the issue: `title`, `branch`, `manual`, or
+  `auto` (any other automatic link, such as a closing keyword in the body).
 - `state` — the PR lifecycle as a **single enum**, one of `merged`, `closed`,
   `draft`, `open`. There is no separate `draft` or `merged` boolean in the
   response; the server folds them into `state` (merged wins, then closed, then
@@ -128,10 +117,10 @@ So "is it merged?" is `state == "merged"` (or `merged_at != null`); "is it still
 a draft?" is `state == "draft"`; coarse CI status is `checks_conclusion`.
 
 If the command returns no linked PRs after a PR was opened, check the syntax
-first: the scanner needs a routable issue key in the PR title or branch, or one
-right after a closing keyword in the body — a bare body mention does not count
-(see the passing-mention rule above). When the syntax is the problem, editing the
-title or adding a closing keyword re-runs the scan.
+first: the key must be in the PR title or branch, or right after a closing
+keyword in the body — a bare body mention does not count. When the syntax is the
+problem, editing the title re-runs the scan. If a person removed
+the PR from the issue, it stays removed until someone links it again.
 
 If the key is already written correctly and the list is still empty, stop editing
 the PR blind: another no-op edit cannot fix an integration that never received the
@@ -270,34 +259,25 @@ archived statuses remain readable via an explicit status filter.
   later re-trigger confirms the overall goal is met.
 - **`in_review`** is an accepted issue status. Some workflows use it while a PR
   is open and awaiting review; moving to it is an explicit mutation.
-- **`done`** on a child issue posts a system comment on its parent. If a PR
-  carries close intent (`Closes MUL-XXXX`), it advances the issue to `done`
-  itself on merge — you do not also need to flip it manually.
+- **`done`** on a child issue posts a system comment on its parent. When every
+  PR linked to the issue has merged and one of them carries a closing keyword
+  (`Closes MUL-XXXX`), the server moves it to `done` itself (see PR linking and
+  auto-complete) — you do not also need to flip it manually.
 - **`cancelled`** is a terminal, user-driven decision to close the issue. Like
   `done` it enqueues no new agent work, but it does **not** stop tasks already in
   flight — a run in progress keeps going. To stop a running task, cancel the
   task itself.
+  A cancelled issue may also be marked as a **duplicate** of another issue
+  (`GET /api/issues/<id>/duplicates` shows both sides; issue responses carry
+  the original as `duplicate_of` with its id, identifier, title and status
+  while the mark counts). Moving it to any
+  status other than `cancelled` removes the mark, so reopen a duplicate only
+  when it is really separate work. Marking logs `duplicate_marked` on the
+  duplicate and `duplicate_added` on the original; removing the mark logs
+  `duplicate_unmarked` / `duplicate_removed` (`multica issue timeline --action`).
 - **Failed issue-triggered tasks** may roll an issue from `in_progress` back to
   `todo` when no active task / retry remains — that is the main server-owned
   status write on the agent-run path.
-
-## Claim ownership without duplicating a run
-
-Assigning an active issue to an agent normally starts a run. When the work is
-already underway and the write only records ownership or progress, pass
-`--no-start` on every command in that flow:
-
-```bash
-multica issue assign <issue-id> --to-id <agent-id> --no-start
-multica issue update <issue-id> --assignee-id <agent-id> --no-start
-multica issue status <issue-id> in_progress --no-start
-```
-
-Before self-assigning, check the target issue's comment history for an existing
-claim. The server also suppresses a trusted self-assignment when the exact
-target `(issue, agent)` pair already has a non-terminal task, but it
-deliberately keeps same-agent handoffs to a fresh issue starting runs:
-cross-issue serial chains and triage batches rely on that.
 
 ## Who else is running right now
 
@@ -419,3 +399,31 @@ multica issue create --title "Step 1" --parent <issue-id> --assignee <agent> --s
 multica issue create --title "Step 2" --parent <issue-id> --assignee <agent> --stage 2 --status backlog
 multica issue create --title "Step 3" --parent <issue-id> --assignee <agent> --stage 3 --status backlog
 ```
+
+## Issue wakeups
+
+Use `multica issue wakeup` to arrange a future ordinary run, then finish the
+current run. A wakeup persists on the issue; it is not a sleeping process.
+
+- `wakeup events` lists supported business facts. These work with plugins disabled.
+- `wakeup create <issue> --agent-id <target> --kind event --event task.completed,task.failed,task.cancelled --task-id <run> --instruction-file ./instruction.md` wakes once. Omit `--agent-id` only when acting as the authenticated agent. A specific run must belong to this issue; if already terminal, registration captures its matching state immediately.
+- For a continuing subscription use `--mode continuous`. For task events, use `--filter-agent-id` to match that agent's future runs; this does not replay historical runs. For comment/issue/reaction/attachment changes, use `--filter-actor-type member|agent --filter-actor-id <user-or-agent-id>` to match the actual author/editor. Mutation-only `--filter-agent-id` remains a legacy alias for actor=agent; do not combine it with actor flags.
+- `wakeup create <issue> --kind at --after 10m --instruction-file ./instruction.md` schedules one run. Alternatively use `--at <RFC3339>`.
+- `wakeup create <issue> --kind every --every 1h --instruction-file ./instruction.md` schedules a repeating check. Or use `--kind cron --cron '0 * * * *' --timezone Asia/Shanghai`.
+- `wakeup list <issue>` / `wakeup get <issue> <id>` show the saved configuration, next time and latest run. Only promise that a reminder is arranged after creation succeeds.
+- `wakeup update <issue> <id>` uses the same flags as create and replaces the whole configuration, explicitly re-enabling it. Supply all intended fields. Old unclaimed work is withdrawn.
+- `wakeup disable <issue> <id>` stops future triggers and withdraws unclaimed work. Users can also turn it off in the issue sidebar. Closing/cancelling/completing the issue disables its wakeups; reopening does not restore them.
+- `--parent <comment-id>` keeps result delivery in the original thread.
+
+Read current state with issue get, comment list, and run inspection before
+judging business completion. For CI, use the existing GitHub tools from a time
+wakeup; CI events are not supported here yet. A failed run does not imply its
+business goal is complete. Automatic retry chains are not followed by event
+filters; subscribe to a new run if needed. Once the goal is met, disable any
+continuous configuration. Every wakeup runs under ordinary execution and comment
+delivery rules, even when a periodic check finds no change.
+
+Self-trigger protection excludes the registering run and runs started by the
+same rule when their source identity is available. It does not prevent cycles
+between different rules. Avoid mutually triggering continuous comment subscriptions;
+when waiting for a person's reply, filter that member explicitly.

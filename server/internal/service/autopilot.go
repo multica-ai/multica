@@ -1926,38 +1926,5 @@ func (s *AutopilotService) autopilotAdmitInvoke(ctx context.Context, ap db.Autop
 // autopilot "run now" where the clicker, not the creator, is the admission
 // principal. Fail-closed on any lookup error; no admin bypass.
 func (s *AutopilotService) canMemberInvokeAgent(ctx context.Context, agent db.Agent, memberUserID pgtype.UUID, workspaceID pgtype.UUID) bool {
-	userID := util.UUIDToString(memberUserID)
-	if userID == "" {
-		return false
-	}
-	if util.UUIDToString(agent.OwnerID) == userID {
-		return true
-	}
-	if agent.PermissionMode != "public_to" {
-		return false
-	}
-	targets, err := s.Queries.ListAgentInvocationTargets(ctx, agent.ID)
-	if err != nil {
-		return false
-	}
-	isWorkspaceMember := false
-	if _, err := s.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
-		UserID:      memberUserID,
-		WorkspaceID: workspaceID,
-	}); err == nil {
-		isWorkspaceMember = true
-	}
-	for _, t := range targets {
-		switch t.TargetType {
-		case "workspace":
-			if isWorkspaceMember {
-				return true
-			}
-		case "member":
-			if util.UUIDToString(t.TargetID) == userID {
-				return true
-			}
-		}
-	}
-	return false
+	return CanMemberInvokeAgent(ctx, s.Queries, agent, memberUserID, workspaceID)
 }

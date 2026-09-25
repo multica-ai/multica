@@ -48,6 +48,13 @@ type TimelineEntry struct {
 	SourceTaskID   *string              `json:"source_task_id,omitempty"`
 	// Set only on a tombstone: a comment deleted while it still had replies.
 	DeletedAt *string `json:"deleted_at,omitempty"`
+	// Supplements lists every running turn this comment steered; the single
+	// supplement_* fields mirror the first receipt for older clients.
+	Supplements             []CommentSupplementResponse `json:"supplements,omitempty"`
+	SupplementTaskID        string                      `json:"supplement_task_id,omitempty"`
+	SupplementStatus        string                      `json:"supplement_status,omitempty"`
+	SupplementFailureReason *string                     `json:"supplement_failure_reason,omitempty"`
+	SupplementDeliveredAt   *string                     `json:"supplement_delivered_at,omitempty"`
 }
 
 // timelineHardCap bounds the per-issue timeline payload. Sized as a defensive
@@ -283,6 +290,7 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 	}
 	reactions := h.groupReactions(r, ids)
 	attachments := h.groupAttachments(r, ids)
+	supplements := h.listCommentSupplements(r.Context(), comments[0].WorkspaceID, ids)
 
 	out := make([]TimelineEntry, len(comments))
 	for i, c := range comments {
@@ -309,6 +317,13 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 			ResolvedByID:   uuidToPtr(c.ResolvedByID),
 			SourceTaskID:   uuidToPtr(c.SourceTaskID),
 			DeletedAt:      timestampToPtr(c.DeletedAt),
+		}
+		if receipts := supplements[cid]; len(receipts) > 0 {
+			out[i].Supplements = receipts
+			out[i].SupplementTaskID = receipts[0].TaskID
+			out[i].SupplementStatus = receipts[0].Status
+			out[i].SupplementFailureReason = receipts[0].FailureReason
+			out[i].SupplementDeliveredAt = receipts[0].DeliveredAt
 		}
 	}
 	return out

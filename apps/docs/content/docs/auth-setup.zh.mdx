@@ -111,14 +111,14 @@ Google Console 与 `GOOGLE_REDIRECT_URI` 中的地址必须完全一致，包括
 
 1. 邮箱命中 `ALLOWED_EMAILS`，允许；
 2. 或域名命中 `ALLOWED_EMAIL_DOMAINS`，允许；
-3. 未命中时，如果 `ALLOW_SIGNUP=false`，拒绝；
-4. `ALLOW_SIGNUP=true` 但设置了任意白名单且未命中，仍然拒绝；
-5. 没有设置白名单且 `ALLOW_SIGNUP=true`，允许。
+3. 没有设置白名单且 `ALLOW_SIGNUP=true`，允许；
+4. 否则，如果该邮箱有待接受且未过期的工作区邀请，允许；
+5. 其他情况均拒绝。
 
 常见配置：
 
 ```dotenv
-# 只允许公司域名
+# 允许公司域名和受邀用户
 ALLOW_SIGNUP=false
 ALLOWED_EMAIL_DOMAINS=company.com
 
@@ -132,12 +132,13 @@ ALLOWED_EMAILS=partner@example.net
 
 ## 邀请与注册限制
 
-邀请不会自动绕过注册限制：
+待接受且未过期的工作区邀请允许该邮箱创建账号，即使 `ALLOW_SIGNUP=false`，或邮箱未命中 `ALLOWED_EMAILS` 和 `ALLOWED_EMAIL_DOMAINS`。此例外也适用于 `ALLOW_SIGNUP=true` 且配置了白名单的情况：白名单不会拦截持有有效邀请的用户。
 
-- 对方已经有 Multica 账号时，可以登录并接受邀请；
-- 对方还没有账号时，邮箱必须符合上面的注册规则。
+已有用户仍可登录。新用户如果未命中白名单且未开放注册，就需要待接受且未过期的邀请；缺失、已过期、已接受、已拒绝或已撤销的邀请不能授予注册许可。申请登录码时会检查邀请，创建账号时会再次检查，包括通过 Google 登录创建账号。
 
-在关闭开放注册的实例中邀请新成员时，先把对方邮箱加入 `ALLOWED_EMAILS`。账号创建并接受邀请后，可以再从名单中移除。
+普通受邀人无需再加入 `ALLOWED_EMAILS`，也无需重启服务器。账号创建后，仍需通过正常邀请流程接受邀请才能加入工作区。
+
+撤销邀请不会删除通过该邀请创建的账号，也不会阻止该已有账号登录。
 
 ## 登录有效期
 

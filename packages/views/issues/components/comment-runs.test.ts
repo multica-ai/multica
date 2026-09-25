@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
-import { commentRunOutput, buildCommentRunView, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
+import { commentRunOutput, buildCommentRunView, isRunFailureNotice, orderThreadWithRuns, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
+import { collectThreadReplies } from "./thread-utils";
 
 const groupCommentRuns = (...args: Parameters<typeof buildCommentRunView>) => buildCommentRunView(...args).runs;
 
@@ -14,6 +15,29 @@ function comment(id: string, overrides: Partial<TimelineEntry> = {}): TimelineEn
 }
 
 describe("groupCommentRuns", () => {
+  it("moves one run after each accepted supplement and keeps the final answer in that block", () => {
+    const root = comment("root");
+    const supplement = comment("supplement", {
+      parent_id: root.id,
+      created_at: "2026-09-07T00:01:00Z",
+      supplement_task_id: "run",
+      supplement_status: "delivered",
+    });
+    const answer = comment("answer", {
+      actor_type: "agent",
+      source_task_id: "run",
+      created_at: "2026-09-07T00:02:00Z",
+    });
+    const run = task("run", { trigger_comment_id: root.id, delivered_comment_ids: [root.id] });
+    const view = buildCommentRunView([run], [root, supplement, answer]);
+    expect(view.runs.get(root.id)?.[0]).toMatchObject({
+      anchorCommentId: supplement.id,
+      commentId: answer.id,
+      hasReply: true,
+    });
+    expect(view.timeline.find((entry) => entry.id === answer.id)?.parent_id).toBe(supplement.id);
+  });
+
   it.each(["queued", "dispatched", "running", "completed"] as const)("waits for a missing trigger before placing a %s run and its reply", (status) => {
     const run = task("run", { status, trigger_comment_id: "trigger",
       delivered_comment_ids: status === "queued" || status === "dispatched" ? [] : ["trigger"] });
@@ -132,6 +156,23 @@ describe("groupCommentRuns", () => {
     expect(view.timeline.find((entry) => entry.id === "answer-b")?.parent_id).toBe("answer-a");
     expect(view.timeline.find((entry) => entry.id === "assigned-answer")?.parent_id).toBeUndefined();
     expect(timeline.find((entry) => entry.id === "assigned-answer")?.parent_id).toBe("root");
+  });
+
+  it("moves a run's earlier top-level comments into the thread with its reply", () => {
+    // MUL-7548: only the latest comment used to move under the trigger, so it
+    // rendered above the run's earlier top-level comments.
+    const run = task("run", { trigger_comment_id: "confirm", delivered_comment_ids: ["confirm"] });
+    const timeline = [comment("confirm"),
+      comment("other-thread"),
+      comment("step2", { actor_type: "agent", source_task_id: run.id, created_at: "2026-09-07T00:01:00Z" }),
+      comment("fan-out", { parent_id: "other-thread", actor_type: "agent", source_task_id: run.id, created_at: "2026-09-07T00:02:00Z" }),
+      comment("step3", { actor_type: "agent", source_task_id: run.id, created_at: "2026-09-07T00:03:00Z" })];
+    const view = buildCommentRunView([run], timeline);
+    const parentOf = (id: string) => view.timeline.find((entry) => entry.id === id)?.parent_id;
+    expect(parentOf("step2")).toBe("confirm");
+    expect(parentOf("step3")).toBe("confirm");
+    expect(parentOf("fan-out")).toBe("other-thread");
+    expect(view.runs.get("confirm")).toEqual([{ task: run, commentId: "step3", anchorCommentId: "confirm", hasReply: true }]);
   });
 
   it("does not project reply relationships that would create a comment cycle", () => {
@@ -263,6 +304,20 @@ describe("commentRunOutput", () => {
   });
 });
 
+describe("isRunFailureNotice", () => {
+  const notice = comment("notice", { actor_type: "agent", comment_type: "system", source_task_id: "run", content: "task cancelled by server" });
+  it("matches the platform's failure comment for its own ended run", () => {
+    expect(isRunFailureNotice(notice, task("run", { status: "failed" }))).toBe(true);
+    expect(isRunFailureNotice(notice, task("run", { status: "cancelled" }))).toBe(true);
+  });
+  it("leaves authored replies, other runs, and live runs alone", () => {
+    expect(isRunFailureNotice({ ...notice, comment_type: "comment" }, task("run", { status: "failed" }))).toBe(false);
+    expect(isRunFailureNotice({ ...notice, actor_type: "system" }, task("run", { status: "failed" }))).toBe(false);
+    expect(isRunFailureNotice(notice, task("other", { status: "failed" }))).toBe(false);
+    expect(isRunFailureNotice(notice, task("run", { status: "running" }))).toBe(false);
+  });
+});
+
 describe("standaloneCommentRuns", () => {
   it.each(["queued", "dispatched", "running", "failed", "cancelled", "completed"] as const)("keeps an unanchored %s run visible", (status) => {
     const run = task("assignment", { status, delivered_comment_ids: [] });
@@ -316,12 +371,14 @@ describe("orderTimelineWithRuns", () => {
       .toEqual(["first", "second", "run"]);
   });
 
-  it("parks a working run at the live end and keeps live runs in enqueue order", () => {
-    const earlier = task("earlier", { status: "running", created_at: "2026-09-07T10:00:00Z" });
+  it.each(["queued", "dispatched", "waiting_local_directory", "running"] as const)("keeps a %s run before later comments in enqueue order", (status) => {
+    const earlier = task("earlier", { status, created_at: "2026-09-07T10:00:00Z" });
     const later = task("later", { status: "queued", created_at: "2026-09-07T10:30:00Z" });
+    const before = comment("before", { created_at: "2026-09-07T09:45:00Z" });
+    const between = comment("between", { created_at: "2026-09-07T10:15:00Z" });
     const posted = comment("posted", { created_at: "2026-09-07T10:45:00Z" });
-    expect(order([posted], [{ task: earlier, hasReply: false }, { task: later, hasReply: false }]))
-      .toEqual(["posted", "earlier", "later"]);
+    expect(order([before, between, posted], [{ task: later, hasReply: false }, { task: earlier, hasReply: false }]))
+      .toEqual(["before", "earlier", "between", "later", "posted"]);
   });
 
   it("settles a run that ended without a reply at the time it ended", () => {
@@ -356,5 +413,127 @@ describe("orderTimelineWithRuns", () => {
     expect(order([neighbour, reply], [placed])).toEqual(["aaa-comment", "zzz-task"]);
     expect(order([comment("ccc-comment", { created_at: same }), reply], [placed]))
       .toEqual(["zzz-task", "ccc-comment"]);
+  });
+});
+
+describe("orderThreadWithRuns", () => {
+  const at = (time: string) => `2026-09-23T${time}Z`;
+  // Build the thread the way IssueDetail does, then label each row: a reply
+  // by id, a run slot by what it renders (its latest comment or its
+  // activity), followed by the input it quotes.
+  const thread = (tasks: AgentTask[], timeline: TimelineEntry[]) => {
+    const view = buildCommentRunView(tasks, timeline);
+    const byParent = new Map<string, TimelineEntry[]>();
+    for (const entry of view.timeline) {
+      if (entry.parent_id) byParent.set(entry.parent_id, [...(byParent.get(entry.parent_id) ?? []), entry]);
+    }
+    const root = view.timeline.find((entry) => !entry.parent_id)!;
+    return orderThreadWithRuns(root, collectThreadReplies(root.id, byParent), view.runs.get(root.id) ?? [])
+      .map((row) => !("run" in row) ? row.id
+        : (row.reply?.id ?? `run:${row.run.task.id}`) + (row.replyTo ? ` ↩ ${row.replyTo.id}` : ""));
+  };
+  const answer = (id: string, run: AgentTask, created_at: string, parent_id?: string) =>
+    comment(id, { actor_type: "agent", source_task_id: run.id, created_at, parent_id });
+  const asked = (id: string, trigger: TimelineEntry, overrides: Partial<AgentTask> = {}) =>
+    task(id, { status: "completed", created_at: trigger.created_at, trigger_comment_id: trigger.id,
+      delivered_comment_ids: [trigger.id], ...overrides });
+
+  // The MUL-7349 thread: Elon was asked first but replied last, and his
+  // review used to render right under the request, above everything after it.
+  it("orders agent replies by when they were sent and quotes an input that is not directly above", () => {
+    const root = comment("design", { created_at: at("08:00:00") });
+    const askElon = comment("ask-elon", { parent_id: root.id, created_at: at("08:15:32") });
+    const askSteve = comment("ask-steve", { parent_id: root.id, created_at: at("08:15:41") });
+    const elon = asked("elon", askElon);
+    const steve = asked("steve", askSteve);
+    const timeline = [root, askElon, askSteve, answer("fixed", steve, at("08:23:41"), root.id),
+      answer("review", elon, at("08:32:29"), root.id), comment("follow-up", { parent_id: root.id, created_at: at("08:35:05") })];
+    expect(thread([elon, steve], timeline))
+      .toEqual(["ask-elon", "ask-steve", "fixed", "review ↩ ask-elon", "follow-up"]);
+  });
+
+  it("reads as before when one agent answers the comment directly above", () => {
+    const root = comment("root", { created_at: at("10:00:00") });
+    const ask = comment("ask", { parent_id: root.id, created_at: at("10:01:00") });
+    const run = asked("run", ask);
+    expect(thread([run], [root, ask, answer("answer", run, at("10:05:00"))])).toEqual(["ask", "answer"]);
+    const rootRun = asked("root-run", root);
+    expect(thread([rootRun], [root, answer("root-answer", rootRun, at("10:05:00"))])).toEqual(["root-answer"]);
+  });
+
+  it("keeps a working run after its input until it replies", () => {
+    const root = comment("root", { created_at: at("10:00:00") });
+    const later = comment("later", { parent_id: root.id, created_at: at("10:02:00") });
+    const run = asked("run", root, { status: "running", started_at: at("10:00:05") });
+    expect(thread([run], [root, later])).toEqual(["run:run", "later"]);
+    expect(thread([run], [root, later, answer("answer", run, at("10:04:00"))])).toEqual(["later", "answer ↩ root"]);
+  });
+
+  it("keeps parallel working runs with their inputs until each replies", () => {
+    const root = comment("root", { created_at: at("10:00:00") });
+    const askA = comment("ask-a", { parent_id: root.id, created_at: at("10:01:00") });
+    const askB = comment("ask-b", { parent_id: root.id, created_at: at("10:02:00") });
+    const a = asked("a", askA, { status: "running" });
+    const b = asked("b", askB, { status: "running" });
+    expect(thread([a, b], [root, askA, askB])).toEqual(["ask-a", "run:a", "ask-b", "run:b"]);
+    const answerB = answer("answer-b", b, at("10:05:00"));
+    expect(thread([a, b], [root, askA, askB, answerB])).toEqual(["ask-a", "run:a", "ask-b", "answer-b"]);
+    expect(thread([a, b], [root, askA, askB, answerB, answer("answer-a", a, at("10:06:00"))]))
+      .toEqual(["ask-a", "ask-b", "answer-b", "answer-a ↩ ask-a"]);
+  });
+
+  it("keeps working runs on one input in enqueue order, after that input's other runs", () => {
+    const root = comment("root", { created_at: at("10:00:00") });
+    const ask = comment("ask", { parent_id: root.id, created_at: at("10:01:00") });
+    const first = asked("first", ask, { status: "running" });
+    const second = asked("second", ask, { status: "queued", delivered_comment_ids: [] });
+    expect(thread([first, second], [root, ask, comment("later", { parent_id: root.id, created_at: at("10:02:00") })]))
+      .toEqual(["ask", "run:first", "run:second ↩ ask", "later"]);
+  });
+
+  // MUL-7548 kept one run's comments together at its latest one; each now
+  // reads at its own time, so a comment written in between stays between.
+  it("places each comment a run posts at its own time", () => {
+    const root = comment("root", { created_at: at("10:00:00") });
+    const run = asked("run", root);
+    const progress = answer("progress", run, at("10:01:00"));
+    const final = answer("final", run, at("10:03:00"));
+    expect(thread([run], [root, progress, final])).toEqual(["progress", "final"]);
+    const aside = comment("aside", { parent_id: root.id, created_at: at("10:02:00") });
+    expect(thread([run], [root, progress, aside, final])).toEqual(["progress", "aside", "final ↩ root"]);
+  });
+
+  // A retry answers the same input as the attempt it retries, but it starts
+  // after that attempt ended; it reads below it, not above (MUL-7692).
+  it("keeps a retry below the attempt it retries", () => {
+    const root = comment("root", { created_at: at("10:00:00") });
+    const ask = comment("ask", { parent_id: root.id, created_at: at("10:01:00") });
+    const failed = asked("failed", ask, { status: "failed", started_at: at("10:01:05"), completed_at: at("10:14:00") });
+    const notice = comment("notice", { actor_type: "agent", comment_type: "system", source_task_id: failed.id,
+      parent_id: ask.id, created_at: at("10:14:00") });
+    const retry = asked("retry", ask, { status: "running", created_at: at("10:20:00"), parent_task_id: failed.id });
+    const later = comment("later", { parent_id: root.id, created_at: at("10:25:00") });
+    expect(thread([failed, retry], [root, ask, notice])).toEqual(["ask", "notice", "run:retry ↩ ask"]);
+    expect(thread([failed, retry], [root, ask, notice, later])).toEqual(["ask", "notice", "run:retry ↩ ask", "later"]);
+    const unanswered = asked("unanswered", ask, { status: "failed", completed_at: at("10:14:00") });
+    const again = asked("again", ask, { status: "queued", delivered_comment_ids: [], created_at: at("10:20:00"),
+      parent_task_id: unanswered.id });
+    expect(thread([unanswered, again], [root, ask])).toEqual(["ask", "run:unanswered", "run:again ↩ ask"]);
+  });
+
+  it("settles a run that ended without replying at the time it ended", () => {
+    const root = comment("root", { created_at: at("10:00:00") });
+    const failed = asked("failed", root, { status: "failed", started_at: at("10:00:10"), completed_at: at("10:05:00") });
+    const timeline = [root, comment("before", { parent_id: root.id, created_at: at("10:01:00") }),
+      comment("after", { parent_id: root.id, created_at: at("10:10:00") })];
+    expect(thread([failed], timeline)).toEqual(["before", "run:failed ↩ root", "after"]);
+  });
+
+  it("does not quote a deleted input", () => {
+    const root = comment("root", { created_at: at("10:00:00") });
+    const ask = comment("ask", { parent_id: root.id, created_at: at("10:01:00"), content: "", deleted_at: at("10:03:00") });
+    const run = asked("run", ask);
+    const timeline = [root, ask, comment("kept", { parent_id: ask.id, created_at: at("10:02:00") }), answer("answer", run, at("10:05:00"))];
+    expect(thread([run], timeline)).toEqual(["ask", "kept", "answer"]);
   });
 });

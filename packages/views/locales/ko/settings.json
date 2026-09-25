@@ -81,7 +81,13 @@
       "blocked": "외부 의존성으로 중단됨.",
       "done": "완료.",
       "cancelled": "진행하지 않기로 함."
-    }
+    },
+    "automation_title": "자동화",
+    "pr_auto_complete_label": "PR 병합 시 태스크 자동 완료",
+    "pr_auto_complete_description": "연결된 PR이 모두 병합되고 그중 하나가 닫기 키워드로 태스크를 지정하면 태스크가 완료로 바뀝니다. 앞으로 병합되는 PR에만 적용됩니다.",
+    "pr_auto_complete_example": "키워드는 PR 제목이나 설명에 씁니다. 예:",
+    "pr_auto_complete_example_title": "Closes MUL-123",
+    "pr_auto_complete_badge": "PR 병합 시 자동 설정"
   },
   "quick_actions": {
     "title": "퀵 액션",
@@ -161,6 +167,12 @@
     },
     "sticky_comment_bar": {
       "title": "댓글 입력란을 하단에 고정"
+    },
+    "running_agent_reply": {
+      "title": "실행 중인 에이전트에 답장할 때",
+      "steer": "현재 실행에 추가",
+      "after_run": "이번 실행 후 시작",
+      "hint": "기본값만 정합니다. 보내기 전에 메시지마다 바꿀 수 있습니다."
     },
     "issue_title": "태스크 생성",
     "comments_title": "댓글",
@@ -633,7 +645,7 @@
       },
       "agent_activity": {
         "label": "에이전트 활동",
-        "description": "에이전트 실행이 완료되거나 실패할 때"
+        "description": "에이전트 실행이 실패할 때"
       }
     },
     "system": {
@@ -755,10 +767,6 @@
     "master_description_off": "GitHub 기능이 일시 중지되었습니다. 기존 데이터는 유지됩니다.",
     "section_connection": "연결",
     "connection_title": "GitHub App",
-    "connection_description_prefix": "태스크를 Pull request에 자동으로 연결합니다. PR의 브랜치 이름이나 제목에",
-    "connection_description_suffix": "이(가) 있거나 본문에 Closes MUL-123이 있으면 해당 태스크에 연결되고, 그 종료 키워드가 있는 PR이 병합될 때만 해당 태스크가",
-    "connection_description_done": "완료",
-    "connection_identifier_example": "MUL-123",
     "connected_to": "{{login}}에 연결됨",
     "connect_github": "GitHub 연결",
     "connect_opening": "여는 중...",
@@ -788,7 +796,12 @@
     "section_repositories": "저장소",
     "repositories_shortcut_label": "저장소 URL은 저장소 탭에 있습니다",
     "repositories_shortcut_link": "저장소 관리 →",
-    "toast_failed": "GitHub 설정을 업데이트하지 못했습니다"
+    "toast_failed": "GitHub 설정을 업데이트하지 못했습니다",
+    "feature_auto_link_description": "제목이나 브랜치 이름에 태스크 번호(예: {{example}})가 있거나 설명에 \"Closes {{example}}\"가 있는 PR을 해당 태스크에 연결합니다.",
+    "feature_pr_auto_complete_label": "PR 병합 시 태스크 자동 완료",
+    "feature_pr_auto_complete_on": "켜짐 · 모든 코드 호스트에 공통 적용",
+    "feature_pr_auto_complete_off": "꺼짐 · 모든 코드 호스트에 공통 적용",
+    "feature_pr_auto_complete_manage": "설정"
   },
   "vcs": {
     "section_title": "Git providers (self-hosted)",
@@ -1115,6 +1128,8 @@
     "agent_bot_connected_label_lark": "Lark에 연결됨",
     "agent_bot_manage_link_feishu": "Feishu에서 관리",
     "agent_bot_manage_link_lark": "Lark에서 관리",
+    "agent_bot_silent_hint": "연결됐는데 Bot이 응답하지 않나요? 앱의 이벤트 구독 방식이 롱 커넥션인지 확인하세요.",
+    "agent_bot_silent_hint_link": "문제 해결",
     "agent_bot_manage_tooltip_feishu": "Feishu 개발자 콘솔에서 이 봇의 앱 페이지를 열어 스코프 관리, 이름 변경, 추가 권한 신청을 할 수 있어요.",
     "agent_bot_manage_tooltip_lark": "Lark 개발자 콘솔에서 이 봇의 앱 페이지를 열어 스코프 관리, 이름 변경, 추가 권한 신청을 할 수 있어요.",
     "agent_bot_disconnect_tooltip": "이 Lark 봇과 에이전트 연결을 해제합니다. 봇은 Lark 메시지 수신을 중단합니다.",

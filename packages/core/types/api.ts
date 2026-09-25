@@ -1,5 +1,5 @@
 import type { Issue, IssueMetadata, IssueStatus, IssueStatusCategory, IssuePriority, IssueAssigneeType } from "./issue";
-import type { PropertyFilterValue } from "./property";
+import type { IssuePropertyValues, PropertyFilterValue } from "./property";
 import type { MemberRole } from "./workspace";
 import type { Project, ProjectStatus } from "./project";
 
@@ -21,6 +21,9 @@ export interface CreateIssueRequest {
   /** Issue-scoped label IDs to attach in the same transaction as the create.
    *  Unknown or non-issue ids are rejected by the server with 400. */
   label_ids?: string[];
+  /** ID-keyed custom-property values validated and persisted atomically with
+   * the issue. */
+  properties?: IssuePropertyValues;
 }
 
 export interface CreateCommentSubIssueManualRequest {
@@ -77,6 +80,19 @@ export interface UpdateIssueRequest {
    *  MUL-3375). The assignee/status change still applies. Control field —
    *  strip from optimistic cache patches; never written onto the Issue. */
   suppress_run?: boolean;
+  /** Marks this issue as a duplicate of another issue (MUL-7349). The server
+   *  also sets status to cancelled; any later status change away from
+   *  cancelled removes the mark. Write-only — read it back through
+   *  `listIssueDuplicates`. Control field: strip from optimistic patches. */
+  duplicate_of_issue_id?: string;
+}
+
+/** Both sides of an issue's duplicate relation (MUL-7349). */
+export interface IssueDuplicates {
+  /** The original this issue duplicates, when it is marked as a duplicate. */
+  duplicate_of: Issue | null;
+  /** Issues marked as duplicates of this one. */
+  duplicates: Issue[];
 }
 
 /**

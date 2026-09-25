@@ -41,9 +41,6 @@
     "link_copied": "已复制链接",
     "copy_link_failed": "复制链接失败",
     "canvas_label": "图片画布,拖动可平移,滚动可缩放,双击可切换实际大小。",
-    "previous": "上一张",
-    "next": "下一张",
-    "sequence_position": "第 {{index}} / {{total}} 张",
     "unavailable": "这张图片已失效,已跳过。"
   },
   "canvas": {
@@ -61,7 +58,10 @@
     "preview_unsupported": "该文件类型暂不支持预览。",
     "close": "关闭",
     "open_in_new_tab": "在新标签页打开",
-    "remove": "移除附件"
+    "remove": "移除附件",
+    "previous": "上一个",
+    "next": "下一个",
+    "sequence_position": "{{index}} / {{total}}"
   },
   "link_hover": {
     "copy_link": "复制链接",

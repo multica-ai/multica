@@ -156,10 +156,13 @@ services:
       # and callers fall back silently rather than failing. MULTICA_LLM_MAX_RETRIES
       # is the retry budget: unset = 2, 0 = disabled, 1-5 = an exact ceiling.
       # Anything else fails the boot instead of being silently corrected.
+      # MULTICA_LLM_DISABLE_THINKING asks gateways that honor the field to
+      # turn model reasoning off; see .env.example for the contract.
       MULTICA_LLM_API_KEY: ${MULTICA_LLM_API_KEY:-}
       MULTICA_LLM_BASE_URL: ${MULTICA_LLM_BASE_URL:-}
       MULTICA_LLM_DEFAULT_MODEL: ${MULTICA_LLM_DEFAULT_MODEL:-}
       MULTICA_LLM_MAX_RETRIES: ${MULTICA_LLM_MAX_RETRIES:-}
+      MULTICA_LLM_DISABLE_THINKING: ${MULTICA_LLM_DISABLE_THINKING:-}
       # Lark / Feishu bot integration. MULTICA_LARK_SECRET_KEY is the
       # opt-in: unset = integration disabled. Mainland 飞书 and international
       # Lark are auto-detected per installation and served side by side, so
@@ -178,6 +181,11 @@ services:
       # in the database, so this single deployment-wide key is all the operator
       # needs to set here.
       MULTICA_SLACK_SECRET_KEY: ${MULTICA_SLACK_SECRET_KEY:-}
+      # DingTalk bot integration. MULTICA_DINGTALK_SECRET_KEY is the opt-in:
+      # unset = integration disabled. It encrypts each installation's AppSecret
+      # at rest, so this single deployment-wide key is all the operator needs
+      # to set here.
+      MULTICA_DINGTALK_SECRET_KEY: ${MULTICA_DINGTALK_SECRET_KEY:-}
       # Self-hosted Git provider integration (Forgejo / Gitea / GitLab). This
       # is a self-host-only feature, so the compose file turns it on by default;
       # the managed cloud leaves it unset (off). It still needs a valid
@@ -202,6 +210,12 @@ services:
       # for a debugging session and unset it when that session ends, because
       # what it records is user message content.
       MULTICA_WECOM_TRACE: ${MULTICA_WECOM_TRACE:-}
+      # Telegram bot integration. MULTICA_TELEGRAM_SECRET_KEY is the
+      # opt-in: unset = integration disabled. It decrypts the
+      # per-installation bot token stored in channel_installation.config
+      # (bot_token_encrypted), so this single deployment-wide key is all
+      # the operator needs to set here.
+      MULTICA_TELEGRAM_SECRET_KEY: ${MULTICA_TELEGRAM_SECRET_KEY:-}
     restart: unless-stopped
 
   frontend:

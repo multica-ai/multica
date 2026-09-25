@@ -184,14 +184,12 @@ func TestTriageIssueIsNotAnActiveDuplicate(t *testing.T) {
 	dbfx.Cleanup(t, `DELETE FROM issue WHERE id = $1`, parseUUID(created.ID))
 }
 
-// A merged "Closes" PR links to a triage issue but must not move it out.
+// A merged PR links to a triage issue but must not move it out.
 func TestPullRequestMergeDoesNotAdvanceTriageIssue(t *testing.T) {
 	issueID := triageIssueForTest(t, "closed by a PR while in triage")
-	issue, err := testHandler.Queries.GetIssue(context.Background(), parseUUID(issueID))
-	if err != nil {
-		t.Fatalf("load issue: %v", err)
-	}
-	testHandler.advanceIssueToDone(context.Background(), issue, testWorkspaceID)
+	ctx := context.Background()
+	linkMergedGitHubPRForTest(t, issueID, "triage-guard")
+	testHandler.maybeAutoCompleteIssue(ctx, parseUUID(testWorkspaceID), parseUUID(issueID), nil)
 	if got := issueStatusOf(t, issueID); got == "done" {
 		t.Fatalf("merged PR moved a Triage entry to done")
 	}

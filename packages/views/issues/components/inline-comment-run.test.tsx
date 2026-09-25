@@ -1,17 +1,22 @@
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { api } from "@multica/core/api";
 import { chatKeys } from "@multica/core/chat/queries";
-import type { AgentTask } from "@multica/core/types";
+import { issueKeys } from "@multica/core/issues/queries";
+import type { AgentTask, TimelineEntry } from "@multica/core/types";
 import type { TaskMessagePayload } from "@multica/core/types/events";
 import { renderWithI18n } from "../../test/i18n";
 import { InlineCommentRun } from "./inline-comment-run";
 
+const dispatchReasonCodeMock = vi.hoisted(() => vi.fn());
+
 vi.mock("@multica/core/api", () => ({ api: {
   getIssue: vi.fn(), listTaskMessages: vi.fn(), cancelTask: vi.fn(), rerunIssue: vi.fn(),
-}, dispatchReasonCode: () => undefined }));
+  listTasksByIssue: vi.fn(),
+}, dispatchReasonCode: dispatchReasonCodeMock }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace" }));
 vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActorName: () => "Reviewer" }) }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
@@ -31,7 +36,10 @@ const messages: TaskMessagePayload[] = [
   { task_id: id, issue_id: "issue", seq: 1, type: "text", content: "Checking navigation." },
   { task_id: id, issue_id: "issue", seq: 2, type: "tool_use", tool: "exec_command", input: { command: "pnpm test" } },
 ];
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 function setup(initialTask: AgentTask, hasReply = false, presentation: "inline" | "header" = "inline") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -43,6 +51,37 @@ function setup(initialTask: AgentTask, hasReply = false, presentation: "inline" 
 }
 
 describe("InlineCommentRun", () => {
+  it("places a delivered steer between the steps it arrived between", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([
+      { task_id: id, issue_id: "issue", seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat login.tsx" }, created_at: "2026-09-07T00:00:05Z" },
+      { task_id: id, issue_id: "issue", seq: 2, type: "tool_result", tool: "exec_command", output: "ok", created_at: "2026-09-07T00:00:06Z" },
+      { task_id: id, issue_id: "issue", seq: 3, type: "text", content: "Only touching web now.", created_at: "2026-09-07T00:00:20Z" },
+    ]);
+    const { client } = setup(task());
+    client.setQueryData<TimelineEntry[]>(issueKeys.timeline("issue"), [{
+      id: "steer", type: "comment", actor_type: "member", actor_id: "user",
+      content: "Leave desktop alone.", created_at: "2026-09-07T00:00:08Z",
+      supplements: [{ task_id: id, agent_id: "agent", status: "delivered", delivered_at: "2026-09-07T00:00:10Z" }],
+    }]);
+    await screen.findByText("Only touching web now.");
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    const steer = await screen.findByText("Reviewer added");
+    const row = steer.closest("[data-steer-comment]")!;
+    expect(row).toHaveTextContent("Leave desktop alone.");
+    const before = screen.getAllByText("cat login.tsx").find((node) => node.closest("summary"))!;
+    const after = screen.getAllByText("Only touching web now.").find((node) => node.closest("summary"))!;
+    expect(before.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(row.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("offers no run-level message box: messages go through the thread composer", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue(messages);
+    setup(task({ supplement_capability: "task-supplement-v1", can_supplement: true }));
+    await screen.findByText("pnpm test");
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /message/i })).not.toBeInTheDocument();
+  });
+
   it("previews streamed agent messages in collapsed steps and expands the full body", async () => {
     const message: TaskMessagePayload = {
       task_id: id, issue_id: "issue", seq: 1, type: "text", content: "Checking the PR",
@@ -233,7 +272,7 @@ describe("InlineCommentRun", () => {
     const { client, rerender } = setup(current);
     await screen.findByText("pnpm test");
     const progress = screen.getByText("pnpm test");
-    expect(progress).not.toHaveClass("animate-chat-text-shimmer");
+    expect(progress).not.toHaveClass("shimmer-text");
     expect(progress.closest("[data-run-summary]")).toHaveClass("h-[1lh]", "overflow-hidden");
     expect(document.querySelector("[data-run-loading-indicator]")).toHaveClass(
       "motion-safe:animate-spin",
@@ -365,6 +404,36 @@ describe("InlineCommentRun", () => {
     vi.mocked(api.listTaskMessages).mockResolvedValue(messages);
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
+  it("states how a failed run ended once and keeps the raw error on hover", async () => {
+    setup(task({ status: "failed", failure_reason: "cancelled", error: "task cancelled by server",
+      completed_at: "2026-09-07T00:12:56Z" }));
+    const label = screen.getByText("Cancelled by the system");
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("task cancelled by server")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry run" })).toBeInTheDocument();
+    await userEvent.hover(label);
+    expect(await screen.findByText("task cancelled by server")).toBeInTheDocument();
+  });
+
+  it("keeps the raw error in view when recovery needs a configuration change", () => {
+    setup(task({ status: "failed", failure_reason: "agent_error.provider_auth_or_access",
+      error: "Invalid API key · Please run /login", completed_at: "2026-09-07T00:00:06Z" }));
+    expect(screen.getByText("Provider auth failed")).toBeInTheDocument();
+    expect(screen.getByText("Invalid API key · Please run /login")).toBeInTheDocument();
+  });
+
+  it("offers retry beside a reply only when that reply is the run's failure notice", () => {
+    const client = new QueryClient();
+    const failed = task({ status: "failed", failure_reason: "timeout", error: "run timed out" });
+    const view = (replacesFailureNotice: boolean) => <QueryClientProvider client={client}>
+      <InlineCommentRun run={{ task: failed, commentId: "comment", hasReply: true }} replacesFailureNotice={replacesFailureNotice} />
+    </QueryClientProvider>;
+    const { rerender } = renderWithI18n(view(false));
+    expect(screen.queryByRole("button", { name: "Retry run" })).not.toBeInTheDocument();
+    rerender(view(true));
+    expect(screen.getByRole("button", { name: "Retry run" })).toBeInTheDocument();
   });
 
   it("shows who cancelled the run and keeps legacy rows readable", () => {

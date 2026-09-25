@@ -53,6 +53,15 @@ type deadlineFlakyConn struct {
 	attempts int
 	// failOn reports whether the n-th (1-based) write deadline is refused.
 	failOn func(n int) bool
+
+	// refuseFromSend and swallowAckFromSend act on aibot_send_msg frames,
+	// counted 1-based, so a test can refuse or lose the verdict on the SECOND
+	// piece of a split answer after the first one landed. Unlike failOn these
+	// are failures the peer stated or swallowed, not ones raised before the
+	// write — which is what makes the send partial rather than unsent.
+	refuseFromSend     int
+	swallowAckFromSend int
+	sends              int
 }
 
 func (c *deadlineFlakyConn) newSender() *wsSender {
@@ -87,13 +96,21 @@ func (c *deadlineFlakyConn) WriteMessage(_ int, data []byte) error {
 	}
 	_ = json.Unmarshal(env.Body, &body)
 	c.mu.Lock()
-	if env.Cmd == cmdSendMsg && body.MsgType == "markdown" {
-		c.texts = append(c.texts, body.Markdown.Content)
+	code, msg, swallow := 0, "", false
+	if env.Cmd == cmdSendMsg {
+		c.sends++
+		if c.refuseFromSend > 0 && c.sends >= c.refuseFromSend {
+			code, msg = 45002, "content exceed max length"
+		}
+		swallow = c.swallowAckFromSend > 0 && c.sends >= c.swallowAckFromSend
+		if code == 0 && body.MsgType == "markdown" {
+			c.texts = append(c.texts, body.Markdown.Content)
+		}
 	}
 	s := c.sender
 	c.mu.Unlock()
-	if s != nil {
-		s.routeResponse(frameEnvelope{Headers: frameHeaders{ReqID: env.Headers.ReqID}})
+	if s != nil && !swallow {
+		s.routeResponse(frameEnvelope{Headers: frameHeaders{ReqID: env.Headers.ReqID}, ErrCode: code, ErrMsg: msg})
 	}
 	return nil
 }
@@ -146,18 +163,26 @@ func newRelaySendRig(t *testing.T, failOn func(n int) bool) *relaySendRig {
 // claim gate takes part in.
 func newRelaySendRigWithDedupe(t *testing.T, failOn func(n int) bool, dedupe DedupeStore) *relaySendRig {
 	t.Helper()
+	return newRelaySendRigWithConfig(t, failOn, dedupe, relayRetryConfig)
+}
+
+// newRelaySendRigWithConfig is the rig with the chain sized by the test, for
+// the ones that have to watch a whole re-offer chain run against something
+// slower than a millisecond.
+func newRelaySendRigWithConfig(t *testing.T, failOn func(n int) bool, dedupe DedupeStore, cfg RelayConfig) *relaySendRig {
+	t.Helper()
 	reg := newSendersRegistry()
 	instID := mustTestUUID(t)
 	conn := &deadlineFlakyConn{failOn: failOn}
 	reg.set(instID, conn.newSender())
 
 	mx := newCountingMetrics()
-	o := NewOutbound(&fakeOutboundQueries{}, reg, testLogger(), WithOutboundMetrics(mx))
+	o := NewOutbound(&fakeOutboundQueries{}, reg, nil, testLogger(), WithOutboundMetrics(mx))
 	o.spawn = func(f func()) { f() }
 
 	// No dedupe store: that is the single-replica claim gate, and it leaves the
 	// retry chain — the thing under test — exactly as it is in production.
-	router := NewRelayOutbound(&fanoutRelay{}, dedupe, relayRetryConfig, testLogger())
+	router := NewRelayOutbound(&fanoutRelay{}, dedupe, cfg, testLogger())
 	router.SetMetrics(mx)
 	router.Attach(o)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -400,5 +425,74 @@ func TestRelayedReply_ASettleThatNeverExecutedIsRetried(t *testing.T) {
 	}
 	if v := dedupe.valueOf(dedupeKey(rig.lastEventID())); v != claimSettledValue {
 		t.Fatalf("claim value = %q, want %q", v, claimSettledValue)
+	}
+}
+
+// ---- a relayed answer belongs in the bubble, not under it ----
+
+// The replica that takes a relayed reply is by definition the one holding the
+// socket, and a bubble is writable only on the replica that painted it — which
+// is that same replica. So the round is HERE, and the frame carries the task id
+// that names it.
+//
+// It used to push the words as an ordinary message without ever looking, so on
+// any multi-replica deployment the answer arrived underneath a bubble that then
+// span until the platform's window ran out. The frame carrying the id is only
+// half of it; something has to read it.
+func TestARelayedAnswerSealsTheBubbleItBelongsTo(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.ran(t, "REQ-RELAY", "task-1")
+
+	res := rig.out.deliverRelayed(context.Background(), relayFrame{
+		Kind:           relayKindReply,
+		InstallationID: util.UUIDToString(rig.instID),
+		ChatID:         "CHAT_1",
+		ChatType:       chatTypeGroupInt,
+		Content:        "the routed answer",
+		TaskID:         taskUUID(t, "task-1"),
+		SessionID:      bubbleSession,
+	})
+	if res.outcome != outcomeDone {
+		t.Fatalf("outcome = %v, want outcomeDone", res.outcome)
+	}
+	if pushes := rig.conn.pushes(t); len(pushes) != 0 {
+		t.Fatalf("the routed answer arrived as %d plain message(s) under a bubble that is still "+
+			"turning: %v", len(pushes), pushes)
+	}
+	sealed := false
+	for _, f := range rig.conn.streamFrames(t) {
+		if f["finish"] == true && f["content"] == "the routed answer" {
+			sealed = true
+		}
+	}
+	if !sealed {
+		t.Fatal("the routed answer never sealed the bubble its question opened")
+	}
+}
+
+// An inbox push is not an answer to a round and must never close one — the
+// same distinction the reply counters make, at the one new call site.
+func TestARelayedInboxPushNeverSealsABubble(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.ran(t, "REQ-RELAY-2", "task-1")
+
+	rig.out.deliverRelayed(context.Background(), relayFrame{
+		Kind:           relayKindInbox,
+		InstallationID: util.UUIDToString(rig.instID),
+		ChatID:         "CHAT_1",
+		ChatType:       chatTypeGroupInt,
+		Content:        "an inbox notice",
+		TaskID:         taskUUID(t, "task-1"),
+		SessionID:      bubbleSession,
+	})
+	for _, f := range rig.conn.streamFrames(t) {
+		if f["finish"] == true {
+			t.Fatalf("an inbox push closed a round's bubble: %v", f)
+		}
+	}
+	if got := pushedTexts(t, rig.conn); len(got) != 1 || got[0] != "an inbox notice" {
+		t.Fatalf("the inbox push read %q, want it delivered as an ordinary message", got)
 	}
 }

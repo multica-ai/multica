@@ -10,7 +10,7 @@
 
 **Agents that show up on the board.**
 
-Multica is an open-source workspace where you assign work to AI coding agents the way you'd
+Multica is a source-available workspace where you assign work to AI coding agents the way you'd
 assign it to a teammate — they pick up the issue, report progress, raise blockers, and hand it
 back for review. Self-hostable, works with 26 agent CLIs, no lock-in.
 

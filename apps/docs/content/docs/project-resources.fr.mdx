@@ -1,0 +1,147 @@
+---
+title: Ressources de projet
+description: Rattachez des dépôts GitHub ou des répertoires locaux à un projet pour que les exécutions suivantes disposent d'un contexte de travail stable.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Les ressources d'un [projet](/projects) indiquent aux agents quel code utilise cet ensemble de travail et où s'exécuter. Les ressources restent rattachées au projet : inutile de recoller les URL de dépôts ou les chemins locaux dans chaque tâche.
+
+Deux types de ressources sont pris en charge aujourd'hui :
+
+| Ressource | Idéal pour | Où ont lieu les exécutions |
+|---|---|---|
+| **Dépôt GitHub** | Du code partagé par l'équipe, avec des checkouts gérés par le runtime | Un répertoire de travail géré par le runtime |
+| **Répertoire local** | Un checkout existant, un très gros dépôt, ou lorsque vous voulez inspecter directement les modifications locales | Le répertoire d'origine, sur un ordinateur précis |
+
+## Comment les ressources entrent dans une exécution
+
+Lorsqu'un agent traite une tâche du projet, Multica ajoute le nom du projet, sa description et la liste des ressources au contexte de l'exécution, et écrit `.multica/project/resources.json` dans le répertoire de travail.
+
+La liste des dépôts rattachés à l'espace de travail est toujours incluse dans le contexte de l'exécution. Les dépôts rattachés au projet précisent en plus le code et la ref par défaut qu'utilise cet ensemble de travail.
+
+Un répertoire local ne s'applique qu'au daemon auquel il est lié. Lorsque le daemon chargé d'une exécution dispose d'un répertoire local correspondant, l'agent travaille directement dans ce répertoire ; les autres ordinateurs continuent d'utiliser les dépôts GitHub du projet ou les dépôts de l'espace de travail.
+
+## Ajouter un dépôt GitHub
+
+Ouvrez le projet et choisissez « Ajouter une ressource » sous **Ressources**. Sélectionnez un dépôt déjà rattaché à l'espace de travail, ou collez une URL Git. Les dépôts de l'espace de travail se gèrent dans **Paramètres → Dépôts** ; une fois GitHub connecté, la même page propose **Choisir depuis GitHub** pour importer les dépôts auxquels la GitHub App a accès.
+
+Les dépôts ne se limitent pas à GitHub : toute URL Git accessible par le runtime fonctionne comme ressource de dépôt. Une instance Multica auto-hébergée peut aussi connecter des instances Forgejo, Gitea ou GitLab auto-hébergées dans **Paramètres → Intégrations → Fournisseurs git (auto-hébergés)** ; voir [Fournisseurs Git auto-hébergés](/vcs-integration).
+
+Lors de la création d'un projet, vous pouvez aussi choisir des dépôts directement sous **Dépôts**. Un même projet peut rattacher plusieurs dépôts GitHub.
+
+La `ref` d'une ressource définit la branche, le tag ou le commit que les checkouts suivants utilisent par défaut. `default_branch_hint` donne seulement à l'agent une indication sur la branche par défaut et n'impose pas de changement de branche.
+
+## Ajouter un répertoire local
+
+L'interface d'ajout d'un répertoire local n'existe que dans l'application de bureau, car les navigateurs ne peuvent pas sélectionner de dossiers sur votre ordinateur.
+
+<Callout type="warning">
+**C'est une solution de dernier recours, pas une option par défaut plus pratique.** `local_directory` existe pour les personnes qui n'ont pas d'autre choix — le cas typique est un projet de jeu dont le checkout pèse des dizaines de gigaoctets, et pour lequel recloner le dépôt à chaque exécution n'est tout simplement pas viable.
+
+Si votre répertoire est un dépôt git ordinaire que vous pouvez cloner, **utilisez plutôt `github_repo`** : il utilise le mode worktree par défaut, ce qui permet un nombre illimité d'exécutions simultanées sur le même dépôt. Un `local_directory` traite **une exécution à la fois par défaut** ; si le répertoire est un dépôt git, vous pouvez activer le mode worktree pour retrouver le parallélisme (voir « Comment les exécutions partagent le répertoire »). Lisez « Quand le choisir » ci-dessous avant de vous engager.
+</Callout>
+
+
+1. Assurez-vous que le daemon local de l'application de bureau est en ligne.
+2. Ouvrez les **Ressources** du projet, ou l'onglet **Répertoire local** de la boîte de dialogue de création de projet — le même choix est disponible avant même que le projet existe.
+3. Choisissez « Ajouter un répertoire local », puis sélectionnez le dossier à utiliser.
+4. Choisissez comment les exécutions doivent l'utiliser — **Direct** ou **Parallèle**, décrits dans « Comment les exécutions partagent le répertoire ». L'application de bureau présélectionne **Parallèle** lorsque le dossier est un dépôt git que le runtime de cette machine peut isoler, et **Direct** sinon. Modifiez ce choix sur place, ou plus tard depuis **Ressources** avec le crayon à côté du répertoire.
+
+La présélection ne s'applique qu'au répertoire que vous rattachez maintenant. Un répertoire rattaché auparavant conserve le mode avec lequel il a été enregistré — une configuration existante n'est jamais modifiée à votre insu.
+
+Le répertoire doit être un chemin absolu, doit déjà exister et doit être accessible en lecture et en écriture par le daemon actuel. Les chemins suivants sont refusés : les racines système et les racines de lecteur (`/`, `C:\`), les répertoires personnels eux-mêmes et leurs répertoires parents (comme `/Users`, `/home`, `/root`), ainsi que les répertoires système comme `/etc`, `/var`, `/tmp`, `/usr` et `/opt`. Si le chemin choisi est un lien symbolique, il est d'abord résolu en son chemin réel, puis validé à nouveau selon les mêmes règles ; le verrou de sérialisation s'applique lui aussi au chemin réel.
+
+Chaque projet peut rattacher au plus un répertoire local par daemon. Les différents ordinateurs d'une équipe peuvent chacun rattacher leur propre répertoire pour le même projet.
+
+<Callout type="warning">
+En mode `in_place` (par défaut), un répertoire local n'est pas un environnement isolé : l'agent voit et modifie directement votre branche actuelle et vos fichiers non commités, et Multica ne change pas automatiquement de branche, ne fait ni stash, ni commit, ni push, et n'ouvre pas de PR. Le mode worktree change cela — voir « Comment les exécutions partagent le répertoire » ci-dessous.
+</Callout>
+
+<span id="how-tasks-share-the-directory" />
+
+## Comment les exécutions partagent le répertoire
+
+Un répertoire local dispose de deux modes d'exécution, définis par ressource avec `execution_mode`. L'application de bureau les nomme **Direct** et **Parallèle** ; l'API, le CLI et le reste de cette page utilisent les identifiants.
+
+### `in_place` (par défaut) — « Direct »
+
+L'agent travaille directement dans votre répertoire, et les exécutions ont lieu une à la fois. Lorsque deux exécutions utilisent le même répertoire réel, la seconde passe en `waiting_local_directory` et reprend une fois que la première a libéré le répertoire. Deux chemins qui mènent au même répertoire via des liens symboliques différents sont sérialisés de la même manière.
+
+L'attente ne modifie pas le répertoire. Une exécution en attente peut être annulée ; sinon, elle attend que le répertoire devienne disponible.
+
+### `worktree` — « Parallèle »
+
+Chaque exécution obtient son propre [worktree git](https://git-scm.com/docs/git-worktree) de votre dépôt, créé dans le répertoire de travail propre au runtime. **Les exécutions sur un même répertoire ont lieu simultanément — aucune n'attend**, et aucune n'écrit dans votre copie de travail.
+
+Le répertoire doit être un dépôt git contenant au moins un commit. Si ce n'est pas le cas, les exécutions échouent avec une erreur explicite au lieu de revenir silencieusement à une exécution en série. Le runtime de cette machine doit aussi implémenter ce mode. Il le déclare lorsqu'il se connecte, et Multica se fonde sur cette déclaration plutôt que sur un numéro de version — un build de développement peut afficher une chaîne de version qui semble assez récente sans comporter la moindre implémentation. La déclaration est vérifiée deux fois : l'enregistrement de la ressource est refusé, avec une invitation à mettre à jour l'application sur cette machine, tant que son runtime ne déclare pas cette capacité ; et chaque exécution est de nouveau vérifiée auprès du runtime qui la prend réellement en charge — ainsi, sur une machine rétrogradée après l'enregistrement de la ressource, les exécutions sont annulées avec un motif au lieu d'être silencieusement effectuées sur place. Demander `worktree`, c'est demander l'isolation ; modifier votre copie de travail à la place n'est jamais la solution de repli.
+
+Ce que voit l'agent, et ce que vous récupérez :
+
+- **L'agent part de ce que vous voyez, pas de `HEAD`.** Vos modifications non commitées et vos fichiers non suivis sont rejoués dans le worktree : l'agent ne relit donc pas du code que vous n'avez plus. Votre propre copie de travail, votre index et votre liste de stash ne sont jamais touchés. Si cet état ne peut pas être reproduit fidèlement — y compris lorsque le contenu non suivi dépasse ce que couvre le rejeu (2000 fichiers / 200 Mio) — l'exécution échoue au lieu de partir d'une arborescence que vous ne reconnaîtriez pas. La solution habituelle consiste à ajouter au gitignore, ou à nettoyer, les sorties de build qui ne sont pas déjà ignorées.
+- **Le résultat est une branche de votre dépôt**, une par tâche plutôt qu'une par exécution : `agent/<agent>/<issue>` (une discussion obtient `agent/<agent>/chat-<session>`). Le panneau **Détails de l'exécution** affiche le nom de la branche (et permet de le copier) ; vous pouvez aussi la trouver avec `git branch`. Relisez-la avec `git log` / `git diff`, puis fusionnez-la ou faites un cherry-pick vous-même. Multica ne la fusionne jamais à votre place. Une exécution qui a échoué en cours de route indique tout de même sa branche, car elle a quand même commité ce que l'agent avait produit.
+- **Une suite reprend là où la dernière exécution s'est arrêtée.** Le commentaire suivant sur la même tâche récupère de nouveau cette branche : l'agent repart ainsi du travail qu'il vient de livrer, au lieu de partir de `HEAD` avec ses propres modifications laissées de côté sur une autre branche. Seul ce que vous avez modifié dans votre propre répertoire depuis la dernière exécution est rejoué par-dessus — la branche contient déjà le reste. Fusionnez la branche, et l'exécution suivante repartira de votre `HEAD`. Si deux exécutions d'une même tâche se chevauchent, la seconde bifurque à partir du travail de la première vers `agent/<agent>/<issue>-<task>`, car git n'autorise qu'un seul worktree par branche.
+- **Si vos modifications entrent en conflit avec celles de l'agent, c'est l'agent qui les résout.** Lorsque vous réécrivez les mêmes lignes que l'agent, git ne peut pas décider quelle version l'emporte : l'exécution démarre donc sur un worktree en conflit et reçoit pour consigne de terminer la fusion avant toute autre chose — `git status` dans ce worktree liste les chemins non fusionnés. Une exécution qui laisse un fichier non fusionné ne livre rien : elle échoue, conserve le worktree, et l'exécution suivante propose de nouveau les mêmes modifications ; votre changement n'est donc jamais abandonné en silence.
+- **Seules les branches qui appartiennent à Multica sont reprises.** La reprise d'une branche est décidée par un enregistrement de propriété, et non par son nom : cet enregistrement désigne la conversation, ainsi que le commit auquel la branche a été laissée. Une branche que vous avez créée vous-même et qui s'appelle par hasard `agent/<agent>/<issue>` n'est jamais récupérée, complétée ni lue comme une exécution précédente — pas plus qu'une branche qui ne contient plus le commit enregistré ; supprimer la branche de Multica pour créer la vôtre sous ce nom, ou la déplacer de force sur un autre historique, est donc sans risque. Dans ces cas, l'exécution utilise `agent/<agent>/<issue>-<id>` à la place. Commiter par-dessus une branche livrée est le cas normal et permet de continuer à la reprendre — votre commit est simplement présent lors de l'exécution suivante. Chaque branche commence aussi par son propre commit de référence, qui marque l'arborescence dont est partie la première exécution — c'est ce commit qui identifie la branche par la suite, et `git diff <baseline>..<branch>` correspond exactement au travail de l'agent. Une exécution qui n'a pas pu enregistrer sa branche — parce qu'elle a échoué avant la fin, que l'enregistrement n'a pas pu être écrit, ou qu'elle a réinitialisé son worktree au-delà du commit qui portait vos modifications dans la branche — signale un échec et conserve son worktree, et les exécutions suivantes démarrent une nouvelle branche plutôt que d'en reprendre une dont elles ne peuvent pas prouver qu'elle leur appartient.
+- **Rien n'est abandonné en silence.** Tout ce que l'agent laisse non commité est commité sur cette branche avant la suppression du worktree, y compris lorsque l'exécution échoue en cours de route. Dans le rare cas où ce commit lui-même est impossible — par exemple un dépôt avec `commit.gpgSign` et aucune clé de signature disponible pour le runtime — le worktree est délibérément conservé au lieu d'être supprimé, l'exécution est signalée comme échouée, et `git worktree list` dans votre dépôt indique le répertoire qui contient le travail.
+- **Une exécution qui ne change rien ne laisse aucune trace.** Sa branche est supprimée plutôt que laissée comme entrée vide dans `git branch` — sauf s'il s'agit de la branche de la tâche qui porte le travail d'exécutions précédentes, laquelle est toujours conservée.
+
+Comme le worktree se trouve dans le répertoire de travail du runtime, il est récupéré selon le calendrier de nettoyage habituel. Deux éléments persistent dans votre dépôt : la branche, et une ref cachée par branche sous `refs/multica/local-state/`, qui enregistre à qui elle appartient et l'état de votre répertoire lors de sa dernière reprise. Les refs cachées n'apparaissent jamais dans `git branch` ; listez-les avec `git for-each-ref refs/multica`. Multica supprime chacune d'elles avec sa branche, et élimine celles dont vous avez vous-même supprimé la branche la prochaine fois qu'une exécution démarre sur ce dépôt — vous pouvez aussi toutes les supprimer d'un coup avec `git for-each-ref --format='%(refname)' refs/multica | xargs -n1 git update-ref -d`.
+
+<Callout type="warn">
+**Opérateurs d'instances auto-hébergées :** l'isolation de ce mode est appliquée par le serveur (à l'enregistrement, puis de nouveau lorsqu'un runtime prend en charge chaque exécution) ; un runtime rétrogradé à n'importe quel moment est donc détecté. La combinaison qui n'est *pas* détectée consiste à ramener le serveur à un build antérieur à cette fonctionnalité alors que des runtimes qui n'implémentent pas ce mode sont encore connectés — un ancien serveur n'effectue aucun contrôle, et un tel runtime ignore `execution_mode` et effectuerait l'exécution sur place. Ne ramenez pas le serveur à une version antérieure à celle-ci tant que des ressources `worktree` existent, sauf si tous les runtimes de ces machines sont à jour.
+</Callout>
+
+<Callout type="info">
+Le mode worktree couvre les dépôts git. Un simple répertoire non git s'exécute toujours en série — c'est précisément le rôle de `in_place`.
+</Callout>
+
+## Ce qui est écrit pendant une exécution
+
+Au-delà des modifications de code apportées par l'agent, le runtime peut aussi écrire dans le répertoire les fichiers d'instructions dont a besoin l'outil de codage IA utilisé, ainsi que `.multica/project/resources.json`. Ajoutez-les à `.gitignore` si vous ne voulez pas les versionner.
+
+Multica ne supprime jamais un répertoire local rattaché lors du nettoyage des environnements d'exécution. Les modifications que l'agent apporte au répertoire sont de même nature que celles d'un outil de codage IA que vous lanceriez vous-même dans votre terminal, et demandent la même relecture.
+
+## Gérer les ressources avec le CLI
+
+```bash
+# Rattacher un dépôt lors de la création d'un projet
+multica project create \
+  --title "Agent UX" \
+  --repo https://github.com/multica-ai/multica
+
+# Lister et ajouter des ressources
+multica project resource list <project-id>
+multica project resource add <project-id> \
+  --type github_repo \
+  --url https://github.com/multica-ai/multica \
+  --ref main
+
+# Rattacher un répertoire local sur un daemon précis
+multica project resource add <project-id> \
+  --type local_directory \
+  --local-path /absolute/path/to/repo \
+  --daemon-id <daemon-id>
+
+# Rattacher un dépôt git local et laisser les exécutions tourner simultanément, chacune dans son propre worktree
+multica project resource add <project-id> \
+  --type local_directory \
+  --local-path /absolute/path/to/repo \
+  --daemon-id <daemon-id> \
+  --execution-mode worktree
+
+# Faire passer un répertoire local existant d'un mode à l'autre
+multica project resource update <project-id> <resource-id> --execution-mode worktree
+multica project resource update <project-id> <resource-id> --execution-mode in_place
+
+# Retirer une ressource
+multica project resource remove <project-id> <resource-id>
+```
+
+Les modifications de ressources s'appliquent aux exécutions créées ensuite ; elles ne réécrivent pas les enregistrements des exécutions déjà terminées.
+
+## Étapes suivantes
+
+- [Projets](/projects) — découvrez le contexte, l'avancement et le responsable d'un projet.
+- [Daemon et runtimes](/daemon-runtimes) — découvrez quel ordinateur prend en charge une exécution.
+- [Exécutions](/tasks) — consultez les états d'exécution comme `waiting_local_directory`.

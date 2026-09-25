@@ -75,7 +75,7 @@ func TestOutboundChatDoneWaitsForInFlightPlaceholderSend(t *testing.T) {
 	api, calls, sendStarted, release := gatedTelegramAPI(t)
 	defer release()
 
-	q := newTelegramOutboundQueries()
+	q := newTelegramOutboundQueries(t)
 	q.channelOrigin = true
 	o := NewOutbound(q, nil, api.URL, api.Client(), nil)
 	taskID := telegramTestEvent().TaskID
@@ -147,34 +147,18 @@ func TestOutboundChatDoneWaitsForInFlightPlaceholderSend(t *testing.T) {
 	}
 }
 
-// The mirror case: terminal delivery gets the stream first, between the
-// partial registering it and that partial claiming the send. The partial no
-// longer owns the reply and must not post its placeholder on top of the
-// terminal one.
+// The mirror case: the final answer takes the reply over while a streaming
+// frame is on its way to sending. The frame no longer owns the turn and must
+// not put its placeholder on top of the answer.
 func TestOutboundPartialSkipsSendAfterTerminalConsumedTheStream(t *testing.T) {
 	api, calls, _, release := gatedTelegramAPI(t)
 	release() // no gating needed here
 	ctx := context.Background()
 
-	q := newTelegramOutboundQueries()
+	q := newTelegramOutboundQueries(t)
 	q.channelOrigin = true
 	o := NewOutbound(q, nil, api.URL, api.Client(), nil)
 	taskID := telegramTestEvent().TaskID
-
-	target, err := o.resolveTarget(ctx, telegramPartialEvent(taskID, "hello world"), true)
-	if err != nil || target == nil {
-		t.Fatalf("resolve target: %v (target %v)", err, target)
-	}
-	// Register the stream exactly as handleTaskMessage does, and stop there:
-	// this is the state a partial is in when it is about to claim the send.
-	o.mu.Lock()
-	st := &streamState{
-		chatID: target.chatID, threadID: target.threadID, replyTo: target.replyTo,
-		accumulated: "hello world",
-		schedule:    o.retainChatLocked(target.botKey, target.chatID),
-	}
-	o.streams[target.streamKey] = st
-	o.mu.Unlock()
 
 	done := telegramTestEvent()
 	done.Payload = protocol.ChatDonePayload{
@@ -188,16 +172,24 @@ func TestOutboundPartialSkipsSendAfterTerminalConsumedTheStream(t *testing.T) {
 	}
 
 	// Clear the cooldown the terminal send just set, so the only thing that
-	// can hold this partial back is the ownership check under test.
-	st.schedule.mu.Lock()
-	st.schedule.lastEdit = time.Time{}
-	st.schedule.setBackoffTill(time.Time{})
-	st.schedule.mu.Unlock()
+	// can hold this frame back is the ownership it no longer has.
+	o.mu.Lock()
+	schedules := make([]*chatSchedule, 0, len(o.chats))
+	for _, schedule := range o.chats {
+		schedules = append(schedules, schedule)
+	}
+	o.mu.Unlock()
+	for _, schedule := range schedules {
+		schedule.mu.Lock()
+		schedule.lastEdit = time.Time{}
+		schedule.setBackoffTill(time.Time{})
+		schedule.mu.Unlock()
+	}
 
-	o.pushPartial(ctx, target, st, 0, "hello world")
+	o.handleTaskMessage(telegramPartialEvent(taskID, "hello world"))
 
 	if methods, _ := calls(); len(methods) != 1 {
-		t.Fatalf("partial posted a placeholder for a reply it no longer owned: %v", methods)
+		t.Fatalf("frame touched Telegram for a reply it no longer owned: %v", methods)
 	}
 }
 
@@ -210,7 +202,7 @@ func TestOutboundCapacityRetryRechecksInstallation(t *testing.T) {
 	release() // nothing to gate here
 	ctx := context.Background()
 
-	q := newTelegramOutboundQueries()
+	q := newTelegramOutboundQueries(t)
 	q.channelOrigin = true
 	o := NewOutbound(q, nil, api.URL, api.Client(), nil)
 

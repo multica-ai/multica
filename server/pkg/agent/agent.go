@@ -24,8 +24,11 @@ type Backend interface {
 
 // ExecOptions configures a single execution.
 type ExecOptions struct {
-	Cwd   string
-	Model string
+	// EnableTaskSupplement installs provider hooks only for runs whose daemon/server
+	// capability handshake enabled additional messages.
+	EnableTaskSupplement bool
+	Cwd                  string
+	Model                string
 	// SystemPrompt carries the Multica runtime brief for the few providers
 	// that cannot pick it up from disk. The daemon leaves it empty for every
 	// other provider (see daemon.providerNeedsInlineSystemPrompt), because the
@@ -56,7 +59,7 @@ type ExecOptions struct {
 	// tool continues to use the separate tool watchdog budget.
 	IdleWatchdogTimeout time.Duration
 	// HandshakeTimeout bounds startup RPCs for providers with a long-lived
-	// protocol transport. It is currently consumed by Codex app-server;
+	// protocol transport, including Codex app-server and Claude SDK hooks;
 	// zero uses the provider default rather than disabling the bound.
 	HandshakeTimeout time.Duration
 	// TurnInterruptTimeout bounds how long the Codex backend waits for the
@@ -147,6 +150,17 @@ func runContext(ctx context.Context, timeout time.Duration) (context.Context, co
 
 // Session represents a running agent execution.
 type Session struct {
+	// Supplement delivers an additional human instruction to the currently
+	// active provider turn. Nil means the backend cannot safely do so.
+	// Adapters bound their own transport calls; a hook-based adapter may wait
+	// for the next provider boundary until ctx or the execution is cancelled.
+	Supplement func(context.Context, string) error
+	// SupplementReady reports whether Supplement currently targets a live,
+	// provider-confirmed turn. The daemon must not claim durable input before
+	// this becomes true: claiming during provider initialization would convert
+	// a transient startup window into a user-visible delivery failure. Nil is
+	// fail-closed and means no run-scoped input may be claimed.
+	SupplementReady func() bool
 	// ToolActivity optionally reports backend-owned tool accounting and its last
 	// transition time, independent of the best-effort transcript. Nil uses the
 	// daemon's message-based accounting. The timestamp gives completed tools a
