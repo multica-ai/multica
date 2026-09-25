@@ -51,7 +51,7 @@ func TestSendAttachment_ARevokeInTheDatabaseMidUploadStopsTheFile(t *testing.T) 
 	sender := conn.newSender()
 	reg := newSendersRegistry()
 	reg.set(instID, sender)
-	o := NewOutbound(db.New(pool), reg, slog.Default(), WithAttachments(objects))
+	o := NewOutbound(db.New(pool), reg, nil, slog.Default(), WithAttachments(objects))
 
 	done := make(chan error, 1)
 	go func() {
