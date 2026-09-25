@@ -405,9 +405,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	emailSvc := service.NewEmailService()
 
 	// Email notification channel — strictly downstream of inbox.
-	// Deep-link base is FRONTEND_ORIGIN (where issue pages live), matching
-	// the convention SendInvitationEmail already uses. MULTICA_PUBLIC_URL is
-	// the API host and would 404 on issue links in split self-host setups.
+	// Deep-link base is the public app URL (MULTICA_APP_URL, falling back to
+	// FRONTEND_ORIGIN), where issue pages live — the same base the other
+	// outbound integrations link to. MULTICA_PUBLIC_URL is the API host and
+	// would 404 on issue links in split self-host setups.
 	//
 	// Gated on emailSvc.Configured(): with no transport configured the DEV
 	// stdout fallback would leak notification bodies (recipient + rendered
@@ -415,12 +416,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// email as unavailable in that case; matching here keeps the two
 	// behaviors consistent.
 	if emailSvc.Configured() {
-		frontendOrigin := strings.TrimRight(strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN")), "/")
 		emailNotifier := email.NewNotifier(
 			emailNotifierQueries{q: queries},
 			emailSvc,
 			email.NotifierConfig{
-				Renderer: email.NewRenderer(frontendOrigin),
+				Renderer: email.NewRenderer(appURLFromEnv()),
 				Logger:   slog.Default(),
 			},
 		)
