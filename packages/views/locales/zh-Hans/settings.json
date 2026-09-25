@@ -373,6 +373,7 @@
       "chat": "聊天",
       "notifications": "通知",
       "tokens": "API Token",
+      "security": "安全",
       "general": "常规",
       "repositories": "代码仓库",
       "github": "GitHub",
@@ -660,6 +661,33 @@
       "granted": "当前浏览器可以弹出通知横幅。",
       "denied": "已被浏览器拦截。请在浏览器设置中为本站点开启通知权限。",
       "enabled_badge": "已启用"
+    }
+  },
+  "security": {
+    "title": "安全",
+    "description": "管理你的账号安全设置。",
+    "two_factor": {
+      "label": "验证器应用登录",
+      "hint_unavailable": "此服务器不支持验证器应用登录。",
+      "hint_enabled": "你可以使用验证器应用中的验证码登录。",
+      "hint_disabled": "设置验证器应用，作为邮箱验证码之外的登录方式。",
+      "unavailable_badge": "不可用",
+      "setup_button": "设置",
+      "disable_button": "停用",
+      "setup_title": "设置验证器应用登录",
+      "setup_scan_qr": "用你的验证器应用（Google Authenticator、Authy、1Password 等）扫描此二维码。",
+      "setup_manual": "或手动输入此密钥：",
+      "setup_next": "下一步 — 输入验证码",
+      "setup_verify": "输入验证器应用中的 6 位验证码以确认设置。",
+      "setup_success": "验证器应用登录已启用。",
+      "setup_invalid": "验证码无效，请重试。",
+      "setup_init_error": "TOTP 设置启动失败，请重试。",
+      "disable_title": "停用验证器应用登录",
+      "disable_prompt": "输入验证器应用中的 6 位验证码以停用此登录方式。",
+      "disable_success": "验证器应用登录已停用。",
+      "disable_invalid": "验证码无效，请重试。",
+      "disable_locked": "无效验证码次数过多，请等待 15 分钟后再试。",
+      "confirm": "确认"
     }
   },
   "tokens": {
@@ -1328,6 +1356,15 @@
         "label": "成员",
         "description": "创建并处理任务"
       }
+    },
+    "totp_reset": {
+      "menu_item": "重置身份验证器",
+      "confirm_title": "确定要重置 {{name}} 的身份验证器吗？",
+      "confirm_description": "此操作会清除 {{name}} 在整个 Multica 账户（不只是本 workspace）的身份验证器登录设置。{{name}} 之后可以在 Settings → Security 重新设置。在此之前仍可用邮件验证码登录。",
+      "cancel": "取消",
+      "confirm": "重置身份验证器",
+      "success": "已重置 {{name}} 的身份验证器",
+      "error": "重置身份验证器失败"
     },
     "share_links_title": "分享链接",
     "role_field": "角色：",

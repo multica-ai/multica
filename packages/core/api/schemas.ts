@@ -776,6 +776,7 @@ export interface AppConfigResponse {
    * too, so absent must be treated as false (#8296). */
   comment_delete_keep_replies_supported?: boolean;
   server_version?: string;
+  totp_supported?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1037,6 +1038,7 @@ export const AppConfigSchema = z.object({
   issue_create_properties_supported: BooleanWithDefaultSchema(false),
   comment_delete_keep_replies_supported: BooleanWithDefaultSchema(false),
   server_version: OptionalStringSchema,
+  totp_supported: BooleanWithDefaultSchema(false).optional(),
 }).loose();
 
 export const EMPTY_APP_CONFIG: AppConfigResponse = {
@@ -2516,6 +2518,9 @@ export const UserSchema = z.object({
   timezone: z.string().nullable().default(null),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
+  // totp_enabled is absent on older server builds; default false so the
+  // "Set up" CTA is the safe fallback for users on those deployments.
+  totp_enabled: z.boolean().optional().default(false),
 }).loose();
 
 export const EMPTY_USER: User = {
@@ -3510,6 +3515,68 @@ export const MemberWithUserSchema = z.object({
   name: z.string().optional().default(""),
   email: z.string().optional().default(""),
   avatar_url: z.string().nullable().optional().default(null),
+  // totp_enabled is absent on older server builds; default false so the
+  // "Reset authenticator" action is the safe fallback (hidden) for those
+  // deployments.
+  totp_enabled: z.boolean().optional().default(false),
+}).loose();
+
+export const MemberWithUserListSchema = z.array(MemberWithUserSchema);
+
+export const EMPTY_MEMBER_WITH_USER: MemberWithUser = {
+  id: "",
+  workspace_id: "",
+  user_id: "",
+  role: "member",
+  created_at: "",
+  name: "",
+  email: "",
+  avatar_url: null,
+  totp_enabled: false,
+};
+
+export const AdminResetMemberTOTPResponseSchema = z.object({
+  reset: z.boolean(),
+}).loose();
+
+export const EMPTY_ADMIN_RESET_MEMBER_TOTP_RESPONSE = { reset: false };
+
+// Personal TOTP endpoints. Fallbacks are the "nothing happened" answer, so a
+// malformed response surfaces as a failed step instead of a blank QR code or
+// a falsely confirmed setup/disable.
+export const TOTPSetupInitResponseSchema = z.object({
+  secret: z.string().min(1),
+  otpauth_url: z.string().startsWith("otpauth://"),
+}).loose();
+
+export const EMPTY_TOTP_SETUP_INIT_RESPONSE = { secret: "", otpauth_url: "" };
+
+export const TOTPSetupVerifyResponseSchema = z.object({
+  enabled: z.boolean(),
+}).loose();
+
+export const EMPTY_TOTP_SETUP_VERIFY_RESPONSE = { enabled: false };
+
+export const TOTPDisableResponseSchema = z.object({
+  disabled: z.boolean(),
+}).loose();
+
+export const EMPTY_TOTP_DISABLE_RESPONSE = { disabled: false };
+
+// totp-status always answers configured:true (anti-enumeration), so the
+// fallback mirrors that constant rather than hiding the authenticator option.
+export const TOTPStatusResponseSchema = z.object({
+  configured: z.boolean(),
+}).loose();
+
+export const EMPTY_TOTP_STATUS_RESPONSE = { configured: true };
+
+// A TOTP login response is only usable with a token and a user; there is no
+// safe partial value, so the client rejects anything else before persisting
+// the token or publishing a session.
+export const TOTPLoginResponseSchema = z.object({
+  token: z.string().min(1),
+  user: UserSchema,
 }).loose();
 
 export const JoinShareLinkResponseSchema = z.object({

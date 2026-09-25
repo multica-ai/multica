@@ -18,6 +18,7 @@ import {
   Blocks,
   CreditCard,
   Server,
+  ShieldCheck,
 } from "lucide-react";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureEnabled } from "@multica/core/config";
@@ -36,6 +37,7 @@ import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
 import { IntegrationsTab } from "./integrations-tab";
 import { NotificationsTab } from "./notifications-tab";
+import { SecurityTab } from "./security-tab";
 import { LabelsTab } from "./labels-tab";
 import { IssueStatusesTab } from "./issue-statuses-tab";
 import { PropertiesTab } from "./properties-tab";
@@ -101,6 +103,12 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
           t(($) => $.page.tabs.notifications),
           Bell,
           <NotificationsTab />,
+        ),
+        entry(
+          "security",
+          t(($) => $.page.tabs.security),
+          ShieldCheck,
+          <SecurityTab />,
         ),
         entry(
           "shortcuts",

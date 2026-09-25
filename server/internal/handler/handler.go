@@ -414,7 +414,11 @@ type Handler struct {
 	// so the feature degrades cleanly on deployments without a private key.
 	// Wired in cmd/server/router.go after New.
 	PRRefresh *ghsnapshot.Manager
-	cfg       Config
+	// TOTPService handles TOTP secret generation, encryption, and
+	// validation. Nil when MULTICA_USER_TOTP_KEY is unset (TOTP
+	// disabled); handlers that need it must nil-check and return 503.
+	TOTPService *service.TOTPService
+	cfg         Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {
