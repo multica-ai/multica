@@ -577,11 +577,15 @@ func discoveryCacheKey(providerType string, runtimeCmd Command) string {
 // ── Static catalogs ──
 
 // claudeStaticModels reflects the Claude Code CLI's accepted --model
-// values. Keep this list short and current; stale entries here
-// mislead users more than they help. Default = Sonnet because it's
-// the everyday workhorse (Opus is reserved for advisor-style flows).
+// values. It only fills the picker when live discovery fails and is never
+// validated against (Catalog.Verified), so listing a current model is cheap:
+// a CLI too old to know it reports that itself at launch. Add new models
+// here; drop entries only once the CLI stops accepting them. Default = Sonnet
+// because it's the everyday workhorse (Opus is reserved for advisor-style
+// flows).
 func claudeStaticModels() []Model {
 	return []Model{
+		{ID: "claude-opus-5-5", Label: "Claude Opus 5.5", Provider: "anthropic"},
 		{ID: "claude-sonnet-5", Label: "Claude Sonnet 5", Provider: "anthropic"},
 		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
 		{ID: "claude-fable-5-1", Label: "Claude Fable 5.1", Provider: "anthropic"},
@@ -596,11 +600,12 @@ func claudeStaticModels() []Model {
 }
 
 // codexStaticModels is the fallback for Codex versions older than 0.122.0
-// and for failed/malformed live and bundled discovery calls. Keep it in
-// sync with the visible entries in the newest locally verified bundled
-// catalog, plus still-common models from older Codex releases. Each entry
-// carries its own reasoning catalog so old/offline CLIs retain the same model
-// + thinking picker contract as dynamic discovery. Service tiers are
+// and for failed/malformed live and bundled discovery calls. It lists the
+// visible entries of the newest locally verified live catalog — which can run
+// ahead of the bundled one (gpt-6-sol and gpt-6-luna were live-only on
+// codex-cli 0.155.1) — plus still-common models from older Codex releases.
+// Each entry carries its own reasoning catalog so old/offline CLIs retain the
+// same model + thinking picker contract as dynamic discovery. Service tiers are
 // intentionally NOT guessed here: they are runtime/version/account-sensitive,
 // so a discovery failure hides the speed picker. None of this is validated
 // against — a saved model, effort, or tier reaches the CLI as-is while this
@@ -608,15 +613,12 @@ func claudeStaticModels() []Model {
 func codexStaticModels() []Model {
 	// `Default` here is NOT a user-facing "default model" badge — the picker
 	// stopped rendering that (Multica follows the CLI config when the model is
-	// unset). It only marks the current flagship for the "default must track
-	// the latest release" catalog guard
-	// (TestCodexStaticModelsMatchVerifiedFallbackCatalog,
-	// multica#2009). It is deliberately NOT used to validate effort for an
-	// empty (follow-CLI-config) model: that config can resolve to any model,
-	// so ValidateThinkingLevel fails an empty codex model closed rather than
-	// borrowing this entry's catalog (Astra/Sol/Terra advertise `ultra`; Luna
-	// does not) — see ValidateThinkingLevel and MUL-4347. Keep exactly one
-	// entry flagged.
+	// unset). It only marks the current flagship (multica#2009). It is
+	// deliberately NOT used to validate effort for an empty (follow-CLI-config)
+	// model: that config can resolve to any model, so ValidateThinkingLevel
+	// fails an empty codex model closed rather than borrowing this entry's
+	// catalog (Astra/Sol/Terra advertise `ultra`; Luna does not) — see
+	// ValidateThinkingLevel and MUL-4347. Keep exactly one entry flagged.
 	standardThinking := func(defaultLevel string, includeMax, includeUltra bool) *ModelThinking {
 		levels := []ThinkingLevel{
 			{Value: "low", Label: "Low", Description: "Fast responses with lighter reasoning"},
@@ -645,6 +647,8 @@ func codexStaticModels() []Model {
 	}
 	return []Model{
 		{ID: "gpt-6-astra", Label: "GPT-6 Astra", Provider: "openai", Default: true, Thinking: standardThinking("low", true, true)},
+		{ID: "gpt-6-sol", Label: "GPT-6 Sol", Provider: "openai", Thinking: standardThinking("medium", true, true)},
+		{ID: "gpt-6-luna", Label: "GPT-6 Luna", Provider: "openai", Thinking: standardThinking("medium", true, false)},
 		{ID: "gpt-5.6-sol", Label: "GPT-5.6 Sol", Provider: "openai", Thinking: standardThinking("low", true, true)},
 		{ID: "gpt-5.6-terra", Label: "GPT-5.6 Terra", Provider: "openai", Thinking: standardThinking("medium", true, true)},
 		{ID: "gpt-5.6-luna", Label: "GPT-5.6 Luna", Provider: "openai", Thinking: standardThinking("medium", true, false)},

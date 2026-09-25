@@ -342,6 +342,30 @@ func TestParseCodexModelCatalog(t *testing.T) {
 	}
 }
 
+// Codex reports the GPT-6 family as "GPT-6-Sol" and so on (codex-cli 0.155.1
+// `debug models`). The picker shows each one the way the static catalog
+// spells it, so a model reads the same whether discovery succeeded or not.
+func TestNormalizeCodexModelLabelMatchesStaticGPT6Family(t *testing.T) {
+	t.Parallel()
+	static := map[string]string{}
+	for _, m := range codexStaticModels() {
+		static[m.ID] = m.Label
+	}
+	for id, reported := range map[string]string{
+		"gpt-6-astra": "GPT-6-Astra",
+		"gpt-6-sol":   "GPT-6-Sol",
+		"gpt-6-luna":  "GPT-6-Luna",
+	} {
+		if static[id] == "" {
+			t.Errorf("%s missing from the static Codex catalog", id)
+			continue
+		}
+		if got := normalizeCodexModelLabel(id, reported); got != static[id] {
+			t.Errorf("normalizeCodexModelLabel(%q, %q) = %q, want %q", id, reported, got, static[id])
+		}
+	}
+}
+
 func TestParseCodexModelCatalogMalformed(t *testing.T) {
 	t.Parallel()
 	if _, err := parseCodexModelCatalog([]byte("not json")); err == nil {
