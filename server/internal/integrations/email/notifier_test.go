@@ -48,6 +48,8 @@ type fakeQueries struct {
 	prefsRaw      []byte
 	prefsErr      error
 	workspaceSlug string
+	nonMembers    map[string]bool // uuidString → removed from the workspace
+	memberErr     error
 }
 
 func (f *fakeQueries) GetUserEmail(ctx context.Context, userID pgtype.UUID) (string, error) {
@@ -74,6 +76,12 @@ func (f *fakeQueries) GetNotificationPreference(ctx context.Context,
 }
 func (f *fakeQueries) GetWorkspaceSlug(ctx context.Context, wsID pgtype.UUID) (string, error) {
 	return f.workspaceSlug, nil
+}
+func (f *fakeQueries) IsWorkspaceMember(ctx context.Context, wsID, userID pgtype.UUID) (bool, error) {
+	if f.memberErr != nil {
+		return false, f.memberErr
+	}
+	return !f.nonMembers[uuidString(userID)], nil
 }
 
 func mustUUID(s string) pgtype.UUID {
@@ -568,5 +576,56 @@ func TestNotifier_TimeoutBoundsRateLimitRetries(t *testing.T) {
 	}
 	if calls, _ := sender.stats(); calls != 1 {
 		t.Fatalf("expected the timeout to stop retries after 1 send, got %d", calls)
+	}
+}
+
+func TestNotifier_SkipsRecipientsOutsideTheWorkspace(t *testing.T) {
+	const alice = `"11111111-1111-1111-1111-111111111111"`
+	cases := []struct {
+		name string
+		q    *fakeQueries
+	}{
+		{
+			name: "removed member",
+			q: &fakeQueries{
+				emails:     map[string]string{alice: "alice@example.com"},
+				nonMembers: map[string]bool{alice: true},
+			},
+		},
+		{
+			name: "membership lookup fails closed",
+			q: &fakeQueries{
+				emails:    map[string]string{alice: "alice@example.com"},
+				memberErr: errors.New("db unavailable"),
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bus := events.New()
+			sender := &fakeSender{}
+			n := NewNotifier(tc.q, sender, NotifierConfig{
+				Renderer: NewRenderer("https://app.example.com"),
+			})
+			n.Register(bus)
+
+			bus.Publish(events.Event{
+				Type:        protocol.EventInboxNew,
+				WorkspaceID: "22222222-2222-2222-2222-222222222222",
+				Payload: map[string]any{
+					"item": map[string]any{
+						"recipient_type": "member",
+						"recipient_id":   "11111111-1111-1111-1111-111111111111",
+						"type":           "reaction_added",
+						"title":          "Secret roadmap",
+					},
+				},
+			})
+			n.WaitInflight()
+
+			if calls := sender.Calls(); len(calls) != 0 {
+				t.Fatalf("expected no email, got %d", len(calls))
+			}
+		})
 	}
 }

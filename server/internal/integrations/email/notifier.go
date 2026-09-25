@@ -23,6 +23,9 @@ type NotifierQueries interface {
 	GetUserEmail(ctx context.Context, userID pgtype.UUID) (string, error)
 	GetNotificationPreference(ctx context.Context, arg GetNotificationPreferenceParams) ([]byte, error)
 	GetWorkspaceSlug(ctx context.Context, workspaceID pgtype.UUID) (string, error)
+	// IsWorkspaceMember reports whether the user currently belongs to the
+	// workspace. A confirmed non-member is (false, nil).
+	IsWorkspaceMember(ctx context.Context, workspaceID, userID pgtype.UUID) (bool, error)
 }
 
 // GetNotificationPreferenceParams mirrors the sqlc-generated params struct
@@ -218,6 +221,16 @@ func (n *Notifier) processEvent(e events.Event) {
 	recipientID := parseUUID(recipientIDStr)
 	workspaceID := parseUUID(e.WorkspaceID)
 	if !recipientID.Valid || !workspaceID.Valid {
+		return
+	}
+
+	// Inbox items can still target a user who has since left the workspace
+	// (e.g. a reaction on their old comment). Email leaves the app, so only
+	// deliver to current members, and fail closed on lookup errors.
+	member, err := n.queries.IsWorkspaceMember(ctx, workspaceID, recipientID)
+	if err != nil || !member {
+		n.cfg.Logger.Debug("email notifier: recipient is not a workspace member",
+			"user_id", recipientIDStr, "workspace_id", e.WorkspaceID, "error", err)
 		return
 	}
 

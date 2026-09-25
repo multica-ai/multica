@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/email"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -41,4 +43,18 @@ func (a emailNotifierQueries) GetWorkspaceSlug(ctx context.Context, wsID pgtype.
 		return "", err
 	}
 	return w.Slug, nil
+}
+
+func (a emailNotifierQueries) IsWorkspaceMember(ctx context.Context, wsID, userID pgtype.UUID) (bool, error) {
+	_, err := a.q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      userID,
+		WorkspaceID: wsID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
