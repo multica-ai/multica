@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	publicapiv1 "github.com/multica-ai/multica/server/pkg/publicapi/v1"
 )
 
@@ -397,6 +398,93 @@ func TestPluginActionCannotReachAnotherWorkspacesIssue(t *testing.T) {
 		map[string]string{"issue_ref": otherWorkspaceIssue}))
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("cross-workspace read status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestPluginIssueListIsScopedFilteredAndPaginated(t *testing.T) {
+	installationID := installPluginForAction(t, []string{"issues:read"})
+	projectID := dbfx.Project(t, "Plugin scheduler project")
+	otherProjectID := dbfx.Project(t, "Plugin scheduler other project")
+	assigneeID := createHandlerTestAgent(t, "Plugin Issue List Assignee", nil)
+	inProgressIssue := dbfx.Issue(t, "plugin-list-in-progress", testutil.Cols{
+		"status": "in_progress", "project_id": projectID,
+	})
+	todoIssue := dbfx.Issue(t, "plugin-list-todo", testutil.Cols{
+		"status": "todo", "project_id": projectID, "assignee_type": "agent", "assignee_id": assigneeID,
+	})
+	otherProjectIssue := dbfx.Issue(t, "plugin-list-other-project", testutil.Cols{
+		"status": "todo", "project_id": otherProjectID,
+	})
+	taskAgentID := createHandlerTestAgent(t, "Plugin Issue List Task Agent", nil)
+	dbfx.Task(t, taskAgentID, testutil.Cols{
+		"issue_id": inProgressIssue, "runtime_id": handlerTestRuntimeID(t), "status": "queued",
+	})
+	createIssueInForeignWorkspace(t)
+
+	listIssues := func(query string) publicapiv1.IssueListResponse {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		testHandler.ListPluginIssues(recorder, pluginActionRequest(http.MethodGet, "/v1/issues"+query, installationID, nil, nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("list issues %q: status=%d body=%s", query, recorder.Code, recorder.Body.String())
+		}
+		var response publicapiv1.IssueListResponse
+		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode issue list %q: %v", query, err)
+		}
+		return response
+	}
+
+	page := listIssues("?limit=2")
+	if len(page.Issues) != 2 || page.NextCursor == "" {
+		t.Fatalf("first page = %+v, want two issues and a cursor", page)
+	}
+	if page.Issues[0].ID != otherProjectIssue || page.Issues[1].ID != todoIssue {
+		t.Fatalf("first page ids = [%s %s], want number-descending project order", page.Issues[0].ID, page.Issues[1].ID)
+	}
+	if page.Issues[0].ActiveTaskCount != 0 || page.Issues[1].ActiveTaskCount != 0 {
+		t.Fatalf("first page active counts = [%d %d], want zeros", page.Issues[0].ActiveTaskCount, page.Issues[1].ActiveTaskCount)
+	}
+
+	next := listIssues("?limit=2&cursor=" + page.NextCursor)
+	if len(next.Issues) != 1 || next.Issues[0].ID != inProgressIssue || next.NextCursor != "" {
+		t.Fatalf("second page = %+v, want only the final issue", next)
+	}
+	if next.Issues[0].ActiveTaskCount != 1 {
+		t.Fatalf("active_task_count = %d, want 1", next.Issues[0].ActiveTaskCount)
+	}
+
+	status := listIssues("?status=todo")
+	if len(status.Issues) != 2 || status.Issues[0].ID != otherProjectIssue || status.Issues[1].ID != todoIssue {
+		t.Fatalf("status filter result = %+v", status)
+	}
+	started := listIssues("?status_category=started")
+	if len(started.Issues) != 1 || started.Issues[0].ID != inProgressIssue {
+		t.Fatalf("status category filter result = %+v", started)
+	}
+	project := listIssues("?project_id=" + projectID)
+	if len(project.Issues) != 2 || project.Issues[0].ID != todoIssue || project.Issues[1].ID != inProgressIssue {
+		t.Fatalf("project filter result = %+v", project)
+	}
+	assignee := listIssues("?assignee_id=" + assigneeID)
+	if len(assignee.Issues) != 1 || assignee.Issues[0].ID != todoIssue {
+		t.Fatalf("assignee filter result = %+v", assignee)
+	}
+	active := listIssues("?has_active_tasks=true")
+	if len(active.Issues) != 1 || active.Issues[0].ID != inProgressIssue {
+		t.Fatalf("active filter result = %+v", active)
+	}
+
+	combined := listIssues("?status=todo&assignee_id=" + assigneeID + "&has_active_tasks=false")
+	if len(combined.Issues) != 1 || combined.Issues[0].ID != todoIssue || combined.NextCursor != "" {
+		t.Fatalf("combined filter result = %+v", combined)
+	}
+
+	emptyRecorder := httptest.NewRecorder()
+	testHandler.ListPluginIssues(emptyRecorder, pluginActionRequest(http.MethodGet,
+		"/v1/issues?assignee_id=00000000-0000-0000-0000-000000000000", installationID, nil, nil))
+	if emptyRecorder.Code != http.StatusOK || emptyRecorder.Body.String() != `{"issues":[]}`+"\n" {
+		t.Fatalf("empty result status/body = %d/%s", emptyRecorder.Code, emptyRecorder.Body.String())
 	}
 }
 

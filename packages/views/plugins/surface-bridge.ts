@@ -24,7 +24,9 @@ type BridgeRequest =
 /** Paths a surface may name. Anything else is refused before it reaches fetch. */
 const ALLOWED_PATHS: RegExp[] = [
   /^\/context$/,
+  /^\/issues(?:\?.*)?$/,
   /^\/issues\/[^/]+$/,
+  /^\/issues\/[^/]+\/tasks$/,
   /^\/issues\/[^/]+\/comments$/,
   /^\/storage\/(workspace|user)$/,
   /^\/storage\/(workspace|user)\/[^/]+$/,
