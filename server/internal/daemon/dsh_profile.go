@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -238,9 +239,14 @@ func dshProfileRepair() agent.ExecFormatRepair {
 // the argv and the environment it executes under are assertable on every
 // platform, including the Windows ones where a shell fixture cannot stand in
 // for a package manager.
-func dshProvisionCommand(dshPath, spec string) *exec.Cmd {
+func dshProvisionCommand(dshPath, spec string, runtimeEnv map[string]string) *exec.Cmd {
 	cmd := exec.Command(dshPath, "plugin", "--profile", dshMulticaProfileName, "add", spec)
 	cmd.Env = dshPluginEnv()
+	// A mise target must retain its paired interpreter, even when Desktop
+	// supplies a different Node alongside its plugin package manager.
+	for key, value := range runtimeEnv {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
 	return cmd
 }
 
@@ -264,7 +270,7 @@ func dshProvisionCommand(dshPath, spec string) *exec.Cmd {
 // Returns nil when nothing is configured — the caller treats provisioning as
 // best-effort either way, and the missing-profile verdict stands until a probe
 // succeeds.
-func provisionDshMulticaProfile(ctx context.Context, dshPath string, logger *slog.Logger) error {
+func provisionDshMulticaProfile(ctx context.Context, dshPath string, runtimeEnv map[string]string, logger *slog.Logger) error {
 	specs := dshProfileBundleSpecs()
 	if len(specs) == 0 {
 		return nil
@@ -274,7 +280,7 @@ func provisionDshMulticaProfile(ctx context.Context, dshPath string, logger *slo
 
 	var lastErr error
 	for i, spec := range specs {
-		output, err := processtree.CombinedOutput(ctx, dshProvisionCommand(dshPath, spec), 5*time.Second)
+		output, err := processtree.CombinedOutput(ctx, dshProvisionCommand(dshPath, spec, runtimeEnv), 5*time.Second)
 		switch {
 		case err == nil && dshMulticaProfilePresent():
 			logger.Info("installed the DSH runtime profile",
@@ -315,7 +321,7 @@ func provisionDshMulticaProfile(ctx context.Context, dshPath string, logger *slo
 // that mutates the user's DSH home, and a registry or network failure would
 // otherwise be retried every discovery interval forever. A restart is the
 // retry.
-func (d *Daemon) startDshProfileProvision(dshPath string) bool {
+func (d *Daemon) startDshProfileProvision(dshPath string, runtimeEnv map[string]string) bool {
 	if len(dshProfileBundleSpecs()) == 0 {
 		return false
 	}
@@ -326,6 +332,7 @@ func (d *Daemon) startDshProfileProvision(dshPath string) bool {
 	started := false
 	d.dshProvisionOnce.Do(func() {
 		started = true
+		runtimeEnv = maps.Clone(runtimeEnv)
 		// Set before the goroutine rather than inside it: the verdict that
 		// starts the install is built in the same round, and an offline reason
 		// that says "wait" has to be true from the first deregistration.
@@ -335,7 +342,7 @@ func (d *Daemon) startDshProfileProvision(dshPath string) bool {
 			// provisionDshMulticaProfile returns nil only once the profile is
 			// actually on disk, so nil here means there is something new to
 			// find. The exit status alone would not have meant that.
-			err := provisionDshMulticaProfile(ctx, dshPath, d.logger)
+			err := provisionDshMulticaProfile(ctx, dshPath, runtimeEnv, d.logger)
 			if err == nil {
 				d.logger.Info("DSH runtime profile installed; re-probing to bring dsh online")
 				// Re-probe now rather than at the next scheduled round. The

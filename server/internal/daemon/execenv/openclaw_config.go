@@ -219,6 +219,10 @@ type OpenclawConfigPrep struct {
 	// OpenclawBin is the openclaw CLI binary to invoke for config introspection.
 	// Empty means resolve "openclaw" from PATH at exec time.
 	OpenclawBin string
+	// Env is an optional environment overlay paired with OpenclawBin. It keeps
+	// npm-style env shebangs and config lookup on the same version-manager
+	// toolset that the daemon verified for the task launch.
+	Env map[string]string
 	// Timeout sets the context deadline for each CLI invocation — not a
 	// guaranteed cap on how long the call takes; see openclawCLITimeout. Zero
 	// falls back to the MULTICA_OPENCLAW_CLI_TIMEOUT override, then to
@@ -506,7 +510,7 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 // fails the task.
 func discoverOpenclawConfig(bin string, timeout time.Duration, opts OpenclawConfigPrep) (activePath string, exists bool, resolvedList []any, agentsSource openclawAgentsSource, cached bool, err error) {
 	cachePath := openclawDiscoveryCachePath(opts.CacheDir)
-	if entry, ok := loadOpenclawDiscoveryCache(cachePath, bin, time.Now()); ok {
+	if entry, ok := loadOpenclawDiscoveryCache(cachePath, bin, opts.Env, time.Now()); ok {
 		list, decodeErr := decodeOpenclawCachedAgentsList(entry.AgentsList)
 		if decodeErr == nil {
 			return entry.ActiveConfigPath, true, list, openclawAgentsSource(entry.AgentsSource), true, nil
@@ -517,7 +521,7 @@ func discoverOpenclawConfig(bin string, timeout time.Duration, opts OpenclawConf
 		}
 	}
 
-	activePath, exists, err = openclawActiveConfigPath(bin, timeout)
+	activePath, exists, err = openclawActiveConfigPathWithEnv(bin, opts.Env, timeout)
 	if err != nil {
 		return "", false, nil, "", false, fmt.Errorf("locate openclaw active config: %w", err)
 	}
@@ -529,11 +533,11 @@ func discoverOpenclawConfig(bin string, timeout time.Duration, opts OpenclawConf
 		return activePath, false, nil, "", false, nil
 	}
 
-	resolvedList, agentsSource, err = openclawResolvedAgentsList(bin, timeout)
+	resolvedList, agentsSource, err = openclawResolvedAgentsListWithEnv(bin, opts.Env, timeout)
 	if err != nil {
 		return "", false, nil, "", false, fmt.Errorf("read openclaw agents.list: %w", err)
 	}
-	if storeErr := storeOpenclawDiscoveryCache(cachePath, bin, activePath, resolvedList, agentsSource, time.Now()); storeErr != nil && opts.Logger != nil {
+	if storeErr := storeOpenclawDiscoveryCache(cachePath, bin, opts.Env, activePath, resolvedList, agentsSource, time.Now()); storeErr != nil && opts.Logger != nil {
 		opts.Logger.Warn("execenv: could not cache openclaw discovery; next task will rerun the CLI",
 			"cache", cachePath, "error", storeErr)
 	}
@@ -835,6 +839,10 @@ func rewriteAgentsEntriesWorkspaces(list []any, workDir string) map[string]any {
 // A reported path may use `~` or `$OPENCLAW_HOME` shorthand; we expand it so the
 // $include reference we write is unambiguously absolute.
 func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, error) {
+	return openclawActiveConfigPathWithEnv(bin, nil, timeout)
+}
+
+func openclawActiveConfigPathWithEnv(bin string, env map[string]string, timeout time.Duration) (string, bool, error) {
 	// One deadline for the question, not one per attempt. Both invocations answer
 	// "where is the active config", so they are a single step of preparation with
 	// a preferred and a fallback way of asking — and the budget that has to hold
@@ -856,14 +864,14 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	if path, ok := openclawValidatedConfigPath(ctx, bin); ok {
+	if path, ok := openclawValidatedConfigPathWithEnv(ctx, bin, env); ok {
 		return openclawStatConfigPath(path)
 	}
 
-	out, err := openclawExec(ctx, bin, "config", "file")
+	out, err := runOpenclawCLI(ctx, env, bin, "config", "file")
 	if err != nil {
 		if isOpenclawConfigFileUnsupported(err) {
-			path, exists, ferr := openclawFallbackActiveConfigPath()
+			path, exists, ferr := openclawFallbackActiveConfigPathWithEnv(env)
 			if ferr != nil {
 				return "", false, fmt.Errorf("fallback after unsupported `openclaw config file` (%v): %w", err, ferr)
 			}
@@ -871,7 +879,7 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 		}
 		return "", false, err
 	}
-	return openclawParseActiveConfigPath(out)
+	return openclawParseActiveConfigPathWithEnv(out, env)
 }
 
 // openclawValidatedConfigPath asks `openclaw config validate --json` for the
@@ -897,7 +905,11 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 // from the `CONFIG_PATH ?? "openclaw.json"` fallback upstream prints when it
 // throws before reading the snapshot.
 func openclawValidatedConfigPath(ctx context.Context, bin string) (string, bool) {
-	out, _ := openclawExec(ctx, bin, "config", "validate", "--json")
+	return openclawValidatedConfigPathWithEnv(ctx, bin, nil)
+}
+
+func openclawValidatedConfigPathWithEnv(ctx context.Context, bin string, env map[string]string) (string, bool) {
+	out, _ := runOpenclawCLI(ctx, env, bin, "config", "validate", "--json")
 	trimmed := strings.TrimSpace(out)
 	if trimmed == "" {
 		return "", false
@@ -927,7 +939,7 @@ func openclawValidatedConfigPath(ctx context.Context, bin string) (string, bool)
 			return "", false
 		}
 	}
-	expanded, err := expandOpenclawPath(reported)
+	expanded, err := expandOpenclawPathWithEnv(reported, env)
 	if err != nil || !filepath.IsAbs(expanded) {
 		return "", false
 	}
@@ -935,6 +947,10 @@ func openclawValidatedConfigPath(ctx context.Context, bin string) (string, bool)
 }
 
 func openclawParseActiveConfigPath(out string) (string, bool, error) {
+	return openclawParseActiveConfigPathWithEnv(out, nil)
+}
+
+func openclawParseActiveConfigPathWithEnv(out string, env map[string]string) (string, bool, error) {
 	// OpenClaw may print terminal UI borders (e.g., Doctor warnings) before
 	// the actual path. The path is always the last non-empty line.
 	lines := strings.Split(strings.TrimSpace(out), "\n")
@@ -950,7 +966,7 @@ func openclawParseActiveConfigPath(out string) (string, bool, error) {
 		return "", false, fmt.Errorf("`openclaw config file` returned empty output")
 	}
 	var err error
-	path, err = expandOpenclawPath(path)
+	path, err = expandOpenclawPathWithEnv(path, env)
 	if err != nil {
 		return "", false, err
 	}
@@ -958,20 +974,24 @@ func openclawParseActiveConfigPath(out string) (string, bool, error) {
 }
 
 func openclawFallbackActiveConfigPath() (string, bool, error) {
-	if explicitPath := strings.TrimSpace(os.Getenv("OPENCLAW_CONFIG_PATH")); explicitPath != "" {
-		path, err := expandOpenclawPath(explicitPath)
+	return openclawFallbackActiveConfigPathWithEnv(nil)
+}
+
+func openclawFallbackActiveConfigPathWithEnv(env map[string]string) (string, bool, error) {
+	if explicitPath := strings.TrimSpace(openclawEnvValue(env, "OPENCLAW_CONFIG_PATH")); explicitPath != "" {
+		path, err := expandOpenclawPathWithEnv(explicitPath, env)
 		if err != nil {
 			return "", false, err
 		}
 		return openclawStatConfigPath(path)
 	}
 
-	candidates, canonicalPath, err := openclawFallbackConfigCandidates()
+	candidates, canonicalPath, err := openclawFallbackConfigCandidatesWithEnv(env)
 	if err != nil {
 		return "", false, err
 	}
 	for _, candidate := range candidates {
-		path, err := expandOpenclawPath(candidate)
+		path, err := expandOpenclawPathWithEnv(candidate, env)
 		if err != nil {
 			return "", false, err
 		}
@@ -1001,20 +1021,24 @@ var openclawFallbackConfigDirNames = []string{
 }
 
 func openclawFallbackConfigCandidates() ([]string, string, error) {
+	return openclawFallbackConfigCandidatesWithEnv(nil)
+}
+
+func openclawFallbackConfigCandidatesWithEnv(env map[string]string) ([]string, string, error) {
 	candidates := make([]string, 0, 1+2*len(openclawFallbackConfigFileNames)+len(openclawFallbackConfigDirNames)*len(openclawFallbackConfigFileNames))
-	for _, env := range []string{"CLAWDBOT_CONFIG_PATH"} {
-		if path := strings.TrimSpace(os.Getenv(env)); path != "" {
+	for _, key := range []string{"CLAWDBOT_CONFIG_PATH"} {
+		if path := strings.TrimSpace(openclawEnvValue(env, key)); path != "" {
 			candidates = append(candidates, path)
 		}
 	}
 
-	for _, env := range []string{"OPENCLAW_STATE_DIR", "CLAWDBOT_STATE_DIR"} {
-		if dir := strings.TrimSpace(os.Getenv(env)); dir != "" {
+	for _, key := range []string{"OPENCLAW_STATE_DIR", "CLAWDBOT_STATE_DIR"} {
+		if dir := strings.TrimSpace(openclawEnvValue(env, key)); dir != "" {
 			candidates = appendOpenclawConfigFileCandidates(candidates, dir)
 		}
 	}
 
-	home := strings.TrimSpace(os.Getenv("OPENCLAW_HOME"))
+	home := strings.TrimSpace(openclawEnvValue(env, "OPENCLAW_HOME"))
 	var err error
 	if home == "" {
 		home, err = os.UserHomeDir()
@@ -1022,7 +1046,7 @@ func openclawFallbackConfigCandidates() ([]string, string, error) {
 			return nil, "", fmt.Errorf("resolve openclaw home: %w", err)
 		}
 	} else {
-		home, err = expandOpenclawPath(home)
+		home, err = expandOpenclawPathWithEnv(home, env)
 		if err != nil {
 			return nil, "", fmt.Errorf("resolve OPENCLAW_HOME: %w", err)
 		}
@@ -1122,8 +1146,19 @@ func openclawHomeRest(path string) (string, bool) {
 //
 // Only the tilde is expanded here, deliberately — not the variable form — so a
 // self-referential value cannot resolve against itself.
+func openclawEnvValue(env map[string]string, key string) string {
+	if value, ok := env[key]; ok {
+		return value
+	}
+	return os.Getenv(key)
+}
+
 func openclawHomeFromEnv() (string, error) {
-	home := strings.TrimSpace(os.Getenv("OPENCLAW_HOME"))
+	return openclawHomeFromEnvWithEnv(nil)
+}
+
+func openclawHomeFromEnvWithEnv(env map[string]string) (string, error) {
+	home := strings.TrimSpace(openclawEnvValue(env, "OPENCLAW_HOME"))
 	if home == "" {
 		return "", errors.New("environment variable is empty")
 	}
@@ -1142,12 +1177,16 @@ func openclawHomeFromEnv() (string, error) {
 }
 
 func expandOpenclawPath(path string) (string, error) {
+	return expandOpenclawPathWithEnv(path, nil)
+}
+
+func expandOpenclawPathWithEnv(path string, env map[string]string) (string, error) {
 	// OPENCLAW_HOME before `~`: the two shapes are mutually exclusive, but the
 	// variable form is checked first because an empty OPENCLAW_HOME has to fail
 	// loudly rather than fall through to a relative-path resolution that would
 	// quietly produce a wrong absolute path.
 	if rest, isOpenclawHome := openclawHomeRest(path); isOpenclawHome {
-		home, herr := openclawHomeFromEnv()
+		home, herr := openclawHomeFromEnvWithEnv(env)
 		if herr != nil {
 			return "", fmt.Errorf("expand OPENCLAW_HOME in openclaw config path %q: %w", path, herr)
 		}
@@ -1238,6 +1277,10 @@ func isOpenclawConfigFileUnsupported(err error) bool {
 // Returns a nil list when a source answered with no agents; the source still
 // names what answered.
 func openclawResolvedAgentsList(bin string, timeout time.Duration) ([]any, openclawAgentsSource, error) {
+	return openclawResolvedAgentsListWithEnv(bin, nil, timeout)
+}
+
+func openclawResolvedAgentsListWithEnv(bin string, env map[string]string, timeout time.Duration) ([]any, openclawAgentsSource, error) {
 	// One deadline for both config-schema probes. They ask the same question —
 	// what does the config schema carry per agent? — and the second is only
 	// reached when the first answers "no such path", exactly like
@@ -1248,22 +1291,26 @@ func openclawResolvedAgentsList(bin string, timeout time.Duration) ([]any, openc
 	// answer in total.
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	return openclawResolvedAgentsListWithinDeadline(ctx, bin, timeout)
+	return openclawResolvedAgentsListWithinDeadlineWithEnv(ctx, bin, env, timeout)
 }
 
 // openclawResolvedAgentsListWithinDeadline is the shared-deadline half of
 // openclawResolvedAgentsList: every config-schema probe it makes runs under the
 // ctx it is handed, and only the registry fallback starts a budget of its own.
 func openclawResolvedAgentsListWithinDeadline(ctx context.Context, bin string, timeout time.Duration) ([]any, openclawAgentsSource, error) {
-	out, err := openclawExec(ctx, bin, "config", "get", "agents.list", "--json")
+	return openclawResolvedAgentsListWithinDeadlineWithEnv(ctx, bin, nil, timeout)
+}
+
+func openclawResolvedAgentsListWithinDeadlineWithEnv(ctx context.Context, bin string, env map[string]string, timeout time.Duration) ([]any, openclawAgentsSource, error) {
+	out, err := runOpenclawCLI(ctx, env, bin, "config", "get", "agents.list", "--json")
 	if err != nil {
 		if isOpenclawKeyMissingResult(out, err, "agents.list") {
 			// The config path is gone. On 2026.8+ the keyed replacement exists;
 			// below that the agents live in the sqlite registry.
 			if openclawUnknownConfigPath(out, err, "agents.list") {
-				return openclawResolvedAgentsEntriesOrRegistry(ctx, bin, timeout)
+				return openclawResolvedAgentsEntriesOrRegistryWithEnv(ctx, bin, env, timeout)
 			}
-			list, rerr := openclawRegistryAgentsList(bin, timeout)
+			list, rerr := openclawRegistryAgentsListWithEnv(bin, env, timeout)
 			return list, openclawAgentsSourceRegistry, rerr
 		}
 		return nil, "", annotateOpenclawJSONError(err, out)
@@ -1285,9 +1332,9 @@ func openclawResolvedAgentsListWithinDeadline(ctx context.Context, bin string, t
 		// silently downgrading this host to the registry.
 		if openclawKeyMissingMessageForPath(message, "agents.list") {
 			if openclawUnknownConfigPathMessage(message, "agents.list") {
-				return openclawResolvedAgentsEntriesOrRegistry(ctx, bin, timeout)
+				return openclawResolvedAgentsEntriesOrRegistryWithEnv(ctx, bin, env, timeout)
 			}
-			list, rerr := openclawRegistryAgentsList(bin, timeout)
+			list, rerr := openclawRegistryAgentsListWithEnv(bin, env, timeout)
 			return list, openclawAgentsSourceRegistry, rerr
 		}
 		return nil, "", openclawStdoutEnvelopeError("config get agents.list --json", message)
@@ -1317,10 +1364,14 @@ func openclawResolvedAgentsListWithinDeadline(ctx context.Context, bin string, t
 // `agents.entries` is not a valid config path, so the caller must not write the
 // rows back under that key.
 func openclawResolvedAgentsEntriesOrRegistry(ctx context.Context, bin string, timeout time.Duration) ([]any, openclawAgentsSource, error) {
-	out, err := openclawExec(ctx, bin, "config", "get", "agents.entries", "--json")
+	return openclawResolvedAgentsEntriesOrRegistryWithEnv(ctx, bin, nil, timeout)
+}
+
+func openclawResolvedAgentsEntriesOrRegistryWithEnv(ctx context.Context, bin string, env map[string]string, timeout time.Duration) ([]any, openclawAgentsSource, error) {
+	out, err := runOpenclawCLI(ctx, env, bin, "config", "get", "agents.entries", "--json")
 	if err != nil {
 		if isOpenclawKeyMissingResult(out, err, "agents.entries") {
-			list, rerr := openclawRegistryAgentsList(bin, timeout)
+			list, rerr := openclawRegistryAgentsListWithEnv(bin, env, timeout)
 			return list, openclawAgentsSourceRegistry, rerr
 		}
 		return nil, "", annotateOpenclawJSONError(err, out)
@@ -1335,7 +1386,7 @@ func openclawResolvedAgentsEntriesOrRegistry(ctx context.Context, bin string, ti
 	// no in-config agents, and the registry is still the only place they can be.
 	if message, isEnvelope := openclawJSONErrorMessage(trimmed); isEnvelope {
 		if openclawKeyMissingMessageForPath(message, "agents.entries") {
-			list, rerr := openclawRegistryAgentsList(bin, timeout)
+			list, rerr := openclawRegistryAgentsListWithEnv(bin, env, timeout)
 			return list, openclawAgentsSourceRegistry, rerr
 		}
 		return nil, "", openclawStdoutEnvelopeError("config get agents.entries --json", message)
@@ -1379,9 +1430,13 @@ func openclawResolvedAgentsEntriesOrRegistry(ctx context.Context, bin string, ti
 // Returns nil (not an error) when the registry is empty or the subcommand
 // reports no agents.
 func openclawRegistryAgentsList(bin string, timeout time.Duration) ([]any, error) {
+	return openclawRegistryAgentsListWithEnv(bin, nil, timeout)
+}
+
+func openclawRegistryAgentsListWithEnv(bin string, env map[string]string, timeout time.Duration) ([]any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	out, err := openclawExec(ctx, bin, "agents", "list", "--json")
+	out, err := runOpenclawCLI(ctx, env, bin, "agents", "list", "--json")
 	if err != nil {
 		// Older OpenClaw builds may lack the subcommand entirely; treat an
 		// unrecognized/missing subcommand the same as "no agents to pin"
@@ -1413,9 +1468,13 @@ func openclawRegistryAgentsList(bin string, timeout time.Duration) ([]any, error
 }
 
 // openclawExec is the runtime hook prepareOpenclawConfig uses to invoke the
-// openclaw CLI. Production points at execOpenclawCLI; tests swap in a stub
-// to avoid spawning a real binary. Production code never reassigns it.
-var openclawExec = execOpenclawCLI
+// openclaw CLI. Production points at execOpenclawCLIWithEnv; tests swap in a
+// stub to avoid spawning a real binary. Production code never reassigns it.
+var openclawExec = execOpenclawCLIWithEnv
+
+func runOpenclawCLI(ctx context.Context, env map[string]string, bin string, args ...string) (string, error) {
+	return openclawExec(ctx, env, bin, args...)
+}
 
 // openclawLastNonEmptyLine returns the last non-empty, trimmed line of out.
 // Used by openclawParseActiveConfigPath for the `config file` fallback, where the
@@ -1497,6 +1556,10 @@ func openclawOutputComplete(args []string) agent.OutputComplete {
 // check cancellation the standard way. The process error is still printed for
 // diagnosis, just not as the wrapped cause.
 func execOpenclawCLI(ctx context.Context, bin string, args ...string) (string, error) {
+	return execOpenclawCLIWithEnv(ctx, nil, bin, args...)
+}
+
+func execOpenclawCLIWithEnv(ctx context.Context, env map[string]string, bin string, args ...string) (string, error) {
 	// agent.RunCollectQuiet, not cmd.Output(): this package owns the pipes and
 	// the process tree, which is what makes the deadline above enforceable at all
 	// (MUL-5467 — see openclawCLITimeout). The per-subcommand rule from
@@ -1508,7 +1571,11 @@ func execOpenclawCLI(ctx context.Context, bin string, args ...string) (string, e
 	// alongside the error: annotateOpenclawJSONError reads it, and the typed
 	// timeout sentinel is what lets the daemon classify a local stall
 	// structurally.
-	raw, stderrOut, _, err := agent.RunCollectQuiet(ctx, os.Environ(), 0, openclawOutputComplete(args), bin, args...)
+	childEnv := os.Environ()
+	for key, value := range env {
+		childEnv = append(childEnv, key+"="+value)
+	}
+	raw, stderrOut, _, err := agent.RunCollectQuiet(ctx, childEnv, 0, openclawOutputComplete(args), bin, args...)
 	stdout := string(raw)
 	if err != nil {
 		stderrMsg := strings.TrimSpace(stderrOut)
