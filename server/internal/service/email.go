@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/base64"
 	"errors"
@@ -398,8 +399,10 @@ func (s *EmailService) SendInvitationEmail(to, inviterName, workspaceName, invit
 
 // SendNotification sends a single-recipient transactional notification email.
 // Delivery priority mirrors the constructor: SMTP relay → Resend API → DEV
-// stdout. Returns the first non-recoverable error or nil on success.
-func (s *EmailService) SendNotification(to, subject, textBody, htmlBody string) error {
+// stdout. Returns the first non-recoverable error or nil on success. ctx
+// bounds the Resend request; the SMTP path relies on its own dial and I/O
+// timeouts.
+func (s *EmailService) SendNotification(ctx context.Context, to, subject, textBody, htmlBody string) error {
 	to = strings.TrimSpace(to)
 	if to == "" {
 		return errors.New("email: SendNotification requires non-empty to")
@@ -410,7 +413,7 @@ func (s *EmailService) SendNotification(to, subject, textBody, htmlBody string) 
 		return s.sendSMTP(to, subject, htmlBody)
 	}
 	if s.client != nil {
-		_, err := s.client.Emails.Send(&resend.SendEmailRequest{
+		_, err := s.client.Emails.SendWithContext(ctx, &resend.SendEmailRequest{
 			From:    s.fromEmail,
 			To:      []string{to},
 			Subject: subject,

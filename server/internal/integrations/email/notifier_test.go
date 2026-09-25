@@ -24,7 +24,7 @@ type fakeSender struct {
 }
 type sendCall struct{ To, Subject, Text, HTML string }
 
-func (f *fakeSender) SendNotification(to, subject, text, html string) error {
+func (f *fakeSender) SendNotification(_ context.Context, to, subject, text, html string) error {
 	if f.blockDur > 0 {
 		time.Sleep(f.blockDur)
 	}
@@ -375,7 +375,7 @@ type scriptedSender struct {
 	delay       time.Duration
 }
 
-func (s *scriptedSender) SendNotification(to, subject, text, html string) error {
+func (s *scriptedSender) SendNotification(_ context.Context, to, subject, text, html string) error {
 	s.mu.Lock()
 	s.calls++
 	s.inFlight++
@@ -539,7 +539,7 @@ type blockingSender struct {
 	release chan struct{}
 }
 
-func (b *blockingSender) SendNotification(to, subject, text, html string) error {
+func (b *blockingSender) SendNotification(_ context.Context, to, subject, text, html string) error {
 	b.mu.Lock()
 	b.calls++
 	b.mu.Unlock()
@@ -553,3 +553,21 @@ func (b *blockingSender) count() int {
 	defer b.mu.Unlock()
 	return b.calls
 }
+
+func TestNotifier_TimeoutBoundsRateLimitRetries(t *testing.T) {
+	rateLimited := &resend.RateLimitError{Message: "too many requests", RetryAfter: "10"}
+	sender := &scriptedSender{errs: []error{rateLimited, rateLimited, rateLimited, rateLimited}}
+	n, bus := newDeliveryTestNotifier(sender, NotifierConfig{Timeout: 50 * time.Millisecond})
+
+	start := time.Now()
+	publishMemberInboxEvent(bus)
+	n.WaitInflight()
+
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("delivery ran %v past its 50ms timeout waiting on Retry-After", elapsed)
+	}
+	if calls, _ := sender.stats(); calls != 1 {
+		t.Fatalf("expected the timeout to stop retries after 1 send, got %d", calls)
+	}
+}
+

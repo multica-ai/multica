@@ -422,6 +422,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			email.NotifierConfig{
 				Renderer: email.NewRenderer(appURLFromEnv()),
 				Logger:   slog.Default(),
+				// Per-replica spacing between notification sends. Several
+				// replicas sharing one Resend key should scale this up so
+				// notifications leave room for login codes and invitations.
+				SendInterval: envDurationPositive("EMAIL_NOTIFICATION_SEND_INTERVAL", time.Second),
 			},
 		)
 		emailNotifier.Register(bus)

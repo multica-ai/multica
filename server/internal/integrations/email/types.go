@@ -8,12 +8,16 @@
 // preference key.
 package email
 
-import "github.com/jackc/pgx/v5/pgtype"
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
+)
 
 // EmailSender abstracts the transport so tests can supply a fake. Production
 // uses *service.EmailService.
 type EmailSender interface {
-	SendNotification(to, subject, textBody, htmlBody string) error
+	SendNotification(ctx context.Context, to, subject, textBody, htmlBody string) error
 }
 
 // InboxNotificationPayload is what we extract from an EventInboxNew event's

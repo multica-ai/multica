@@ -37,7 +37,9 @@ type GetNotificationPreferenceParams struct {
 type NotifierConfig struct {
 	Renderer *Renderer
 	Logger   *slog.Logger
-	Timeout  time.Duration
+	// Timeout bounds one delivery end to end once a worker picks it up:
+	// lookups, pacing, the send itself and rate-limit retries.
+	Timeout time.Duration
 	// MaxConcurrent is the number of delivery workers.
 	MaxConcurrent int
 	// QueueSize bounds deliveries waiting for a worker. When it is full new
@@ -64,7 +66,7 @@ func (c NotifierConfig) withDefaults() NotifierConfig {
 		c.Logger = slog.Default()
 	}
 	if c.Timeout == 0 {
-		c.Timeout = 10 * time.Second
+		c.Timeout = 2 * time.Minute
 	}
 	if c.MaxConcurrent <= 0 {
 		c.MaxConcurrent = 2
@@ -117,7 +119,7 @@ type pacer struct {
 	next     time.Time
 }
 
-func (p *pacer) wait() {
+func (p *pacer) wait(ctx context.Context) error {
 	p.mu.Lock()
 	now := time.Now()
 	at := p.next
@@ -126,7 +128,22 @@ func (p *pacer) wait() {
 	}
 	p.next = at.Add(p.interval)
 	p.mu.Unlock()
-	time.Sleep(time.Until(at))
+	return sleepCtx(ctx, time.Until(at))
+}
+
+// sleepCtx waits for d or until ctx is done, whichever comes first.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Register subscribes the notifier to the bus. Call exactly once during boot,
@@ -229,26 +246,32 @@ func (n *Notifier) processEvent(e events.Event) {
 		WorkspaceSlug: slug,
 	})
 
-	n.send(to, notifType, out)
+	n.send(ctx, to, notifType, out)
 }
 
 // send delivers one rendered email, retrying only when the provider reports
 // a rate limit. Other errors are not retried: an SMTP failure after the
 // message was accepted would otherwise deliver a duplicate.
-func (n *Notifier) send(to, notifType string, out RenderOutput) {
+func (n *Notifier) send(ctx context.Context, to, notifType string, out RenderOutput) {
 	backoff := n.cfg.RetryBackoff
 	for attempt := 1; ; attempt++ {
-		n.pacer.wait()
-		err := n.sender.SendNotification(to, out.Subject, out.Text, out.HTML)
+		err := n.pacer.wait(ctx)
 		if err == nil {
-			return
+			err = n.sender.SendNotification(ctx, to, out.Subject, out.Text, out.HTML)
+			if err == nil {
+				return
+			}
 		}
 		if !errors.Is(err, resend.ErrRateLimit) || attempt >= n.cfg.MaxAttempts {
 			n.cfg.Logger.Warn("email notifier: send failed",
 				"to", to, "notif_type", notifType, "attempts", attempt, "error", err)
 			return
 		}
-		time.Sleep(retryWait(err, backoff))
+		if werr := sleepCtx(ctx, retryWait(err, backoff)); werr != nil {
+			n.cfg.Logger.Warn("email notifier: send failed",
+				"to", to, "notif_type", notifType, "attempts", attempt, "error", err)
+			return
+		}
 		backoff *= 2
 	}
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -443,7 +444,7 @@ func TestSendNotification_DevModePrintsToStdout(t *testing.T) {
 	s := NewEmailService()
 
 	// dev mode: call should not return error, body printed to stdout
-	err := s.SendNotification("alice@example.com",
+	err := s.SendNotification(context.Background(), "alice@example.com",
 		"[Multica] new mention",
 		"plain body",
 		"<p>html body</p>")
@@ -457,7 +458,7 @@ func TestSendNotification_RejectsEmptyTo(t *testing.T) {
 	t.Setenv("RESEND_API_KEY", "")
 	s := NewEmailService()
 
-	err := s.SendNotification("", "subj", "text", "<p>html</p>")
+	err := s.SendNotification(context.Background(), "", "subj", "text", "<p>html</p>")
 	if err == nil {
 		t.Fatal("expected error for empty to")
 	}
