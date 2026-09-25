@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/resend/resend-go/v2"
 )
 
 // fakeSender records every call for assertions. Optional blockDur lets a test
@@ -361,4 +362,133 @@ func strings_Contains(s, sub string) bool {
 		}
 	}
 	return len(sub) == 0
+}
+
+// scriptedSender returns the scripted errors in order (nil once exhausted)
+// and records how many sends were in flight at the same time.
+type scriptedSender struct {
+	mu          sync.Mutex
+	errs        []error
+	calls       int
+	inFlight    int
+	maxInFlight int
+	delay       time.Duration
+}
+
+func (s *scriptedSender) SendNotification(to, subject, text, html string) error {
+	s.mu.Lock()
+	s.calls++
+	s.inFlight++
+	if s.inFlight > s.maxInFlight {
+		s.maxInFlight = s.inFlight
+	}
+	var err error
+	if len(s.errs) > 0 {
+		err, s.errs = s.errs[0], s.errs[1:]
+	}
+	s.mu.Unlock()
+
+	time.Sleep(s.delay)
+
+	s.mu.Lock()
+	s.inFlight--
+	s.mu.Unlock()
+	return err
+}
+
+func (s *scriptedSender) stats() (calls, maxInFlight int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls, s.maxInFlight
+}
+
+func newDeliveryTestNotifier(sender EmailSender, cfg NotifierConfig) (*Notifier, *events.Bus) {
+	bus := events.New()
+	q := &fakeQueries{
+		emails: map[string]string{
+			`"11111111-1111-1111-1111-111111111111"`: "alice@example.com",
+		},
+	}
+	cfg.Renderer = NewRenderer("")
+	cfg.RetryBackoff = time.Millisecond
+	n := NewNotifier(q, sender, cfg)
+	n.Register(bus)
+	return n, bus
+}
+
+func TestNotifier_RetriesRateLimitedSend(t *testing.T) {
+	rateLimited := &resend.RateLimitError{Message: "too many requests"}
+	sender := &scriptedSender{errs: []error{rateLimited, rateLimited}}
+	n, bus := newDeliveryTestNotifier(sender, NotifierConfig{})
+
+	publishMemberInboxEvent(bus)
+	n.WaitInflight()
+
+	if calls, _ := sender.stats(); calls != 3 {
+		t.Fatalf("expected 2 rate-limited attempts then a success (3 calls), got %d", calls)
+	}
+}
+
+func TestNotifier_GivesUpOnPersistentRateLimit(t *testing.T) {
+	rateLimited := &resend.RateLimitError{Message: "too many requests"}
+	sender := &scriptedSender{errs: []error{rateLimited, rateLimited, rateLimited, rateLimited}}
+	n, bus := newDeliveryTestNotifier(sender, NotifierConfig{MaxAttempts: 3})
+
+	publishMemberInboxEvent(bus)
+	n.WaitInflight()
+
+	if calls, _ := sender.stats(); calls != 3 {
+		t.Fatalf("expected MaxAttempts=3 sends, got %d", calls)
+	}
+}
+
+func TestNotifier_DoesNotRetryOtherSendErrors(t *testing.T) {
+	sender := &scriptedSender{errs: []error{errors.New("smtp: 554 rejected")}}
+	n, bus := newDeliveryTestNotifier(sender, NotifierConfig{})
+
+	publishMemberInboxEvent(bus)
+	n.WaitInflight()
+
+	if calls, _ := sender.stats(); calls != 1 {
+		t.Fatalf("a non-rate-limit error must not be retried (duplicate risk), got %d calls", calls)
+	}
+}
+
+func TestNotifier_BoundsConcurrentDeliveries(t *testing.T) {
+	sender := &scriptedSender{delay: 20 * time.Millisecond}
+	n, bus := newDeliveryTestNotifier(sender, NotifierConfig{MaxConcurrent: 2})
+
+	for i := 0; i < 6; i++ {
+		publishMemberInboxEvent(bus)
+	}
+	n.WaitInflight()
+
+	calls, maxInFlight := sender.stats()
+	if calls != 6 {
+		t.Fatalf("expected 6 sends, got %d", calls)
+	}
+	if maxInFlight > 2 {
+		t.Fatalf("expected at most 2 concurrent sends, got %d", maxInFlight)
+	}
+}
+
+func TestRetryWait_HonoursRetryAfterWithCap(t *testing.T) {
+	fallback := 250 * time.Millisecond
+	cases := []struct {
+		name string
+		err  error
+		want time.Duration
+	}{
+		{"retry-after seconds", &resend.RateLimitError{RetryAfter: "2"}, 2 * time.Second},
+		{"retry-after capped", &resend.RateLimitError{RetryAfter: "600"}, maxRetryWait},
+		{"unparseable retry-after", &resend.RateLimitError{RetryAfter: "soon"}, fallback},
+		{"no retry-after", &resend.RateLimitError{}, fallback},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := retryWait(tc.err, fallback); got != tc.want {
+				t.Fatalf("retryWait() = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }

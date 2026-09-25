@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/resend/resend-go/v2"
 )
 
 // NotifierQueries is the DB surface the Notifier needs. Production wires
@@ -36,6 +38,15 @@ type NotifierConfig struct {
 	Renderer *Renderer
 	Logger   *slog.Logger
 	Timeout  time.Duration
+	// MaxConcurrent bounds how many deliveries run at once, so the fan-out
+	// of one comment to many subscribers stays under the provider's request
+	// rate (Resend defaults to 2 requests/second).
+	MaxConcurrent int
+	// MaxAttempts is the total number of tries for a rate-limited send.
+	MaxAttempts int
+	// RetryBackoff is the wait before retrying a rate-limited send when the
+	// provider does not say how long to wait; it doubles on each retry.
+	RetryBackoff time.Duration
 }
 
 func (c NotifierConfig) withDefaults() NotifierConfig {
@@ -48,19 +59,39 @@ func (c NotifierConfig) withDefaults() NotifierConfig {
 	if c.Timeout == 0 {
 		c.Timeout = 10 * time.Second
 	}
+	if c.MaxConcurrent <= 0 {
+		c.MaxConcurrent = 2
+	}
+	if c.MaxAttempts <= 0 {
+		c.MaxAttempts = 4
+	}
+	if c.RetryBackoff <= 0 {
+		c.RetryBackoff = time.Second
+	}
 	return c
 }
+
+// maxRetryWait caps a provider-supplied Retry-After so one rate-limited
+// email cannot hold a delivery slot indefinitely.
+const maxRetryWait = 30 * time.Second
 
 // Notifier subscribes to EventInboxNew and sends an email per inbox row.
 type Notifier struct {
 	queries  NotifierQueries
 	sender   EmailSender
 	cfg      NotifierConfig
+	slots    chan struct{}  // bounds concurrent deliveries to cfg.MaxConcurrent
 	inflight sync.WaitGroup // tracks goroutines spawned by handleEvent; tests Wait() on it
 }
 
 func NewNotifier(queries NotifierQueries, sender EmailSender, cfg NotifierConfig) *Notifier {
-	return &Notifier{queries: queries, sender: sender, cfg: cfg.withDefaults()}
+	cfg = cfg.withDefaults()
+	return &Notifier{
+		queries: queries,
+		sender:  sender,
+		cfg:     cfg,
+		slots:   make(chan struct{}, cfg.MaxConcurrent),
+	}
 }
 
 // Register subscribes the notifier to the bus. Call exactly once during boot,
@@ -77,6 +108,8 @@ func (n *Notifier) Register(bus *events.Bus) {
 		n.inflight.Add(1)
 		go func() {
 			defer n.inflight.Done()
+			n.slots <- struct{}{}
+			defer func() { <-n.slots }()
 			n.processEvent(e)
 		}()
 	})
@@ -151,11 +184,43 @@ func (n *Notifier) processEvent(e events.Event) {
 		WorkspaceSlug: slug,
 	})
 
-	if err := n.sender.SendNotification(to, out.Subject, out.Text, out.HTML); err != nil {
-		n.cfg.Logger.Warn("email notifier: send failed",
-			"to", to, "notif_type", notifType, "error", err)
-		return
+	n.send(to, notifType, out)
+}
+
+// send delivers one rendered email, retrying only when the provider reports
+// a rate limit. Other errors are not retried: an SMTP failure after the
+// message was accepted would otherwise deliver a duplicate.
+func (n *Notifier) send(to, notifType string, out RenderOutput) {
+	backoff := n.cfg.RetryBackoff
+	for attempt := 1; ; attempt++ {
+		err := n.sender.SendNotification(to, out.Subject, out.Text, out.HTML)
+		if err == nil {
+			return
+		}
+		if !errors.Is(err, resend.ErrRateLimit) || attempt >= n.cfg.MaxAttempts {
+			n.cfg.Logger.Warn("email notifier: send failed",
+				"to", to, "notif_type", notifType, "attempts", attempt, "error", err)
+			return
+		}
+		time.Sleep(retryWait(err, backoff))
+		backoff *= 2
 	}
+}
+
+// retryWait honours the provider's Retry-After (seconds) when present,
+// capped at maxRetryWait, and otherwise uses the exponential fallback.
+func retryWait(err error, fallback time.Duration) time.Duration {
+	wait := fallback
+	var rl *resend.RateLimitError
+	if errors.As(err, &rl) {
+		if secs, perr := strconv.ParseFloat(rl.RetryAfter, 64); perr == nil && secs > 0 {
+			wait = time.Duration(secs * float64(time.Second))
+		}
+	}
+	if wait > maxRetryWait {
+		wait = maxRetryWait
+	}
+	return wait
 }
 
 func (n *Notifier) isEmailMuted(ctx context.Context, wsID, userID pgtype.UUID) bool {
