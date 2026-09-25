@@ -480,6 +480,7 @@ import {
   EMPTY_TOTP_DISABLE_RESPONSE,
   TOTPStatusResponseSchema,
   EMPTY_TOTP_STATUS_RESPONSE,
+  TOTPLoginResponseSchema,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1018,10 +1019,15 @@ export class ApiClient {
   }
 
   async loginWithTOTP(email: string, code: string): Promise<LoginResponse> {
-    return this.fetch("/auth/login-totp", {
+    const raw = await this.fetch("/auth/login-totp", {
       method: "POST",
       body: JSON.stringify({ email, code }),
     });
+    const parsed = parseWithFallback<LoginResponse | null>(raw, TOTPLoginResponseSchema, null, {
+      endpoint: "/auth/login-totp",
+    });
+    if (!parsed) throw new Error("Malformed login response");
+    return parsed;
   }
 
   async googleLogin(code: string, redirectUri: string): Promise<LoginResponse> {

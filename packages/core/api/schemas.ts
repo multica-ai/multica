@@ -3571,6 +3571,14 @@ export const TOTPStatusResponseSchema = z.object({
 
 export const EMPTY_TOTP_STATUS_RESPONSE = { configured: true };
 
+// A TOTP login response is only usable with a token and a user; there is no
+// safe partial value, so the client rejects anything else before persisting
+// the token or publishing a session.
+export const TOTPLoginResponseSchema = z.object({
+  token: z.string().min(1),
+  user: UserSchema,
+}).loose();
+
 export const JoinShareLinkResponseSchema = z.object({
   member: MemberWithUserSchema,
   workspace_id: z.string(),

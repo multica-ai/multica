@@ -3136,4 +3136,19 @@ describe("ApiClient TOTP response schemas", () => {
     respondWith({});
     await expect(new ApiClient("https://api.example.test").totpDisable("123456")).resolves.toEqual({ disabled: false });
   });
+
+  it("parses a valid TOTP login response", async () => {
+    respondWith({ token: "jwt", user: { id: "u1", email: "a@b.c" } });
+    const result = await new ApiClient("https://api.example.test").loginWithTOTP("a@b.c", "123456");
+    expect(result.token).toBe("jwt");
+    expect(result.user.id).toBe("u1");
+  });
+
+  // No token may be persisted or session published from a malformed login.
+  it("rejects a malformed TOTP login response", async () => {
+    respondWith({ token: "jwt" });
+    await expect(new ApiClient("https://api.example.test").loginWithTOTP("a@b.c", "123456")).rejects.toThrow();
+    respondWith({ token: "", user: { id: "u1" } });
+    await expect(new ApiClient("https://api.example.test").loginWithTOTP("a@b.c", "123456")).rejects.toThrow();
+  });
 });

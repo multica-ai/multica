@@ -195,7 +195,10 @@ function MemberRow({
   const handleReset = async () => {
     setResetting(true);
     try {
-      await api.adminResetMemberTOTP(workspaceID, member.user_id);
+      const { reset } = await api.adminResetMemberTOTP(workspaceID, member.user_id);
+      // The schema fallback is { reset: false }: never report an unconfirmed
+      // account-wide security change as done.
+      if (reset !== true) throw new Error("reset not confirmed");
       toast.success(t(($) => $.members.totp_reset.success, { name: member.name }));
       setResetOpen(false);
       queryClient.invalidateQueries({ queryKey: workspaceKeys.members(workspaceID) });
