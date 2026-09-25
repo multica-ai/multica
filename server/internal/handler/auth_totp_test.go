@@ -10,15 +10,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/pquerna/otp/totp"
 
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // withRealTOTPService swaps a freshly-constructed *service.TOTPService onto
@@ -583,5 +586,49 @@ func TestTOTPDisable_DisablesWithValidCode(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT totp_secret_encrypted IS NOT NULL FROM "user" WHERE id = $1`, userID).Scan(&configured)
 	if configured {
 		t.Fatal("TOTP secret still stored after disable")
+	}
+}
+
+// The members list is cached without a staleness bound, so an account-wide
+// TOTP change must reach every workspace the user belongs to as
+// member:updated; otherwise an admin's "Reset authenticator" action stays
+// out of sync until reload.
+func TestTOTPDisable_PublishesMemberUpdated(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no DB available")
+	}
+	withRealTOTPService(t)
+	userID, _, secret := enrollTOTPUser(t)
+	dbfx.Member(t, testWorkspaceID, userID, "member")
+
+	var mu sync.Mutex
+	var got []MemberWithUserResponse
+	testHandler.Bus.Subscribe(protocol.EventMemberUpdated, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok || e.WorkspaceID != testWorkspaceID {
+			return
+		}
+		m, ok := payload["member"].(MemberWithUserResponse)
+		if !ok || m.UserID != userID {
+			return
+		}
+		mu.Lock()
+		got = append(got, m)
+		mu.Unlock()
+	})
+
+	req := newRequest(http.MethodPost, "/api/auth/totp/disable", map[string]string{
+		"code": totpCodeAt(t, secret, time.Now().Add(30*time.Second)),
+	})
+	req.Header.Set("X-User-ID", userID)
+	testutil.Call(t, testHandler.TOTPDisable, req).Want(http.StatusOK)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 {
+		t.Fatalf("member:updated events for the user = %d, want 1", len(got))
+	}
+	if got[0].TotpEnabled {
+		t.Fatal("member:updated still reports totp_enabled after disable")
 	}
 }

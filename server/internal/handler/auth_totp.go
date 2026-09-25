@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // Account-level attempt budget for codes checked against an enabled TOTP
@@ -190,6 +192,7 @@ func (h *Handler) TOTPSetupVerify(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "authenticator setup changed; start setup again")
 		return
 	}
+	h.publishMemberTOTPChanged(r.Context(), parseUUID(userID), userID)
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": true})
 }
 
@@ -264,6 +267,7 @@ func (h *Handler) TOTPDisable(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "authenticator changed; try again")
 		return
 	}
+	h.publishMemberTOTPChanged(r.Context(), parseUUID(userID), userID)
 	writeJSON(w, http.StatusOK, map[string]any{"disabled": true})
 }
 
@@ -347,6 +351,7 @@ func (h *Handler) AdminResetMemberTOTP(w http.ResponseWriter, r *http.Request) {
 		"target_email", targetUser.Email,
 	)
 
+	h.publishMemberTOTPChanged(r.Context(), targetUUID, uuidToString(caller.UserID))
 	writeJSON(w, http.StatusOK, map[string]any{"reset": true})
 }
 
@@ -433,4 +438,34 @@ func (h *Handler) TOTPLogin(w http.ResponseWriter, r *http.Request) {
 // inputs. Real check is at /api/auth/login-totp time.
 func (h *Handler) TOTPStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"configured": true})
+}
+
+// publishMemberTOTPChanged tells every workspace the user belongs to that
+// their member row changed. TOTP state is account-wide and the members list
+// is cached with no staleness bound, so without this an admin's list keeps a
+// stale totp_enabled and hides (or shows) "Reset authenticator" until reload.
+// Best effort: the TOTP change itself has already been committed.
+func (h *Handler) publishMemberTOTPChanged(ctx context.Context, userID pgtype.UUID, actorID string) {
+	user, err := h.Queries.GetUser(ctx, userID)
+	if err != nil {
+		slog.Warn("totp: load user for member:updated failed", "user_id", uuidToString(userID), "error", err)
+		return
+	}
+	workspaces, err := h.Queries.ListWorkspaces(ctx, userID)
+	if err != nil {
+		slog.Warn("totp: list workspaces for member:updated failed", "user_id", uuidToString(userID), "error", err)
+		return
+	}
+	for _, ws := range workspaces {
+		member, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+			UserID:      userID,
+			WorkspaceID: ws.ID,
+		})
+		if err != nil {
+			continue
+		}
+		h.publish(protocol.EventMemberUpdated, uuidToString(ws.ID), "member", actorID, map[string]any{
+			"member": h.memberWithUserResponse(member, user),
+		})
+	}
 }
