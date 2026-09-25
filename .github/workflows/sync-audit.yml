@@ -1,4 +1,4 @@
-name: Temporary upstream merge audit
+name: Temporary upstream merge verification
 
 on:
   push:
@@ -9,43 +9,192 @@ permissions:
   contents: read
 
 jobs:
-  audit:
+  prepare:
     if: github.repository == 'zhls-ayl/multica'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      candidate: ${{ steps.merge.outputs.candidate }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Inspect pinned merge without changing any remote branch
+      - name: Create the reviewed two-parent merge
+        id: merge
         shell: bash
         run: |
           set -euo pipefail
-          upstream=ebbf1da41b214a60a6cf4c1a415c6044f2f56095
           maintenance=0d4ff6ce7c121ca95bc9eb9f8d61ede6746d7712
-          git cat-file -e "$upstream^{commit}"
-          git cat-file -e "$maintenance^{commit}"
-          mkdir -p /tmp/sync-audit
+          upstream=12f8f3f31111564e5e1b9aac3f7f916e8bba4039
+          expected_tree=9086e668b66158a5feb5e5b16175e6f7f3e0b746
+          test "$(git rev-parse origin/feat/sharecrm-channel)" = "$maintenance"
+          git merge-base --is-ancestor "$upstream" HEAD
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           set +e
-          git merge-tree --write-tree "$upstream" "$maintenance" > /tmp/sync-audit/merge-tree.txt
+          git merge --no-commit --no-ff "$maintenance"
           result=$?
           set -e
-          if [ "$result" -gt 1 ]; then
-            cat /tmp/sync-audit/merge-tree.txt
-            exit "$result"
-          fi
-          cat /tmp/sync-audit/merge-tree.txt
-          base=$(git merge-base "$upstream" "$maintenance")
-          printf 'upstream=%s\nmaintenance=%s\nbase=%s\n' "$upstream" "$maintenance" "$base" > /tmp/sync-audit/refs.txt
-          git diff --name-status "$base" "$maintenance" > /tmp/sync-audit/maintenance-files.txt
-          git archive "$upstream" | gzip > /tmp/sync-audit/upstream.tar.gz
-          git archive "$maintenance" | gzip > /tmp/sync-audit/maintenance.tar.gz
-          git archive "$base" | gzip > /tmp/sync-audit/base.tar.gz
-          git diff "$base" "$maintenance" > /tmp/sync-audit/maintenance.patch
-          git diff "$base" "$upstream" > /tmp/sync-audit/upstream.patch
+          test "$result" -eq 1
+          test "$(git diff --name-only --diff-filter=U)" = '.env.example'
+          python3 - <<'PY'
+          import pathlib, re
+          p = pathlib.Path('.env.example')
+          s, n = re.subn(r'^<<<<<<< HEAD\n(.*?)^=======\n(.*?)^>>>>>>> [^\n]+\n', lambda m: m[1] + '\n' + m[2], p.read_text(), flags=re.M | re.S)
+          assert n == 1, 'Unexpected conflict count'
+          for key in ['MULTICA_DINGTALK_SECRET_KEY', 'MULTICA_SLACK_SECRET_KEY', 'MULTICA_TELEGRAM_SECRET_KEY', 'MULTICA_SHARECRM_SECRET_KEY']:
+              assert s.count(key + '=') == 1, key
+          assert not re.search(r'^(<<<<<<<|=======|>>>>>>>)', s, flags=re.M)
+          p.write_text(s)
+          PY
+          test "$(git hash-object .env.example)" = 432fc3f8da9cc8f5e4cd62123a23a08e446255b4
+          git add .env.example
+          git rm .github/workflows/sync-audit.yml
+          test -z "$(git ls-files -u)"
+          test "$(git write-tree)" = "$expected_tree"
+          git diff --cached ebbf1da41b214a60a6cf4c1a415c6044f2f56095 --check
+          git commit -m 'chore(sync): merge upstream main with ShareCRM and resolve environment conflict'
+          git branch candidate HEAD
+          git merge-base --is-ancestor "$maintenance" HEAD
+          git merge-base --is-ancestor "$upstream" HEAD
+          test "$(git rev-parse HEAD^1)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^2)" = "$maintenance"
+          mkdir -p /tmp/sync-candidate
+          git bundle create /tmp/sync-candidate/candidate.bundle candidate ^"$GITHUB_SHA" ^"$maintenance"
+          git rev-parse HEAD > /tmp/sync-candidate/commit.txt
+          git rev-parse HEAD^{tree} > /tmp/sync-candidate/tree.txt
+          git diff --stat "$maintenance" HEAD > /tmp/sync-candidate/diff-stat.txt
+          echo "candidate=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Candidate $(git rev-parse HEAD), tree $expected_tree; both original heads retained." >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: pinned-sync-audit
-          path: /tmp/sync-audit/
-          retention-days: 1
+          name: verified-merge-candidate
+          path: /tmp/sync-candidate/
+          retention-days: 3
+
+  backend:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: multica
+          POSTGRES_USER: multica
+          POSTGRES_PASSWORD: multica
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd 'pg_isready -U multica -d multica'
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd 'redis-cli ping'
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://multica:multica@localhost:5432/multica?sslmode=disable
+      REDIS_TEST_URL: redis://localhost:6379/1
+      DO_NOT_TRACK: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-merge-candidate
+          path: /tmp/sync-candidate
+      - name: Checkout exact candidate
+        run: |
+          git fetch /tmp/sync-candidate/candidate.bundle candidate:refs/heads/candidate
+          git checkout --detach candidate
+          test "$(git rev-parse HEAD)" = '${{ needs.prepare.outputs.candidate }}'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - name: Build all Go production packages
+        working-directory: server
+        run: go build ./...
+      - name: Apply migrations to isolated CI database
+        working-directory: server
+        run: go run ./cmd/migrate up
+      - name: Test ShareCRM, daemon, execution environment and shared channel engine
+        working-directory: server
+        run: ../scripts/go-test-with-agent-cli-guard.sh -- go test -race -count=1 -timeout=10m ./internal/integrations/sharecrm ./internal/daemon/execenv ./internal/daemon ./internal/integrations/channel/... ./pkg/protocol
+      - name: Test channel claim and external-session integration
+        working-directory: server
+        run: ../scripts/go-test-with-agent-cli-guard.sh -- go test -race -count=1 -timeout=10m ./internal/handler -run '(Share[Cc][Rr][Mm]|Claim.*Channel|Channel.*Claim|ExternalSession)'
+      - name: Check both channel origins survived migrations
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='issue'::regclass AND conname='issue_origin_type_check'" > /tmp/origin-check.txt
+          grep -q sharecrm_chat /tmp/origin-check.txt
+          grep -q telegram_chat /tmp/origin-check.txt
+          cat /tmp/origin-check.txt
+
+  frontend:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-merge-candidate
+          path: /tmp/sync-candidate
+      - name: Checkout exact candidate
+        run: |
+          git fetch /tmp/sync-candidate/candidate.bundle candidate:refs/heads/candidate
+          git checkout --detach candidate
+          test "$(git rev-parse HEAD)" = '${{ needs.prepare.outputs.candidate }}'
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Verify reserved route generation
+        run: |
+          pnpm generate:reserved-slugs
+          git diff --exit-code -- packages/core/paths/reserved-slugs.ts
+      - name: Typecheck shared logic and views
+        run: pnpm --filter @multica/core --filter @multica/views typecheck
+      - name: Test core
+        run: pnpm --filter @multica/core test
+      - name: Test ShareCRM settings and agent integration surfaces
+        run: pnpm --filter @multica/views exec vitest run settings/components/sharecrm-tab.test.tsx settings/components/integrations-tab.test.tsx agents/components/tabs/integrations-tab.test.tsx agents/components/agent-overview-pane.test.tsx
+
+  publish-sync-branch:
+    needs: [prepare, backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-merge-candidate
+          path: /tmp/sync-candidate
+      - name: Publish only the tested synchronization head without forcing
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch /tmp/sync-candidate/candidate.bundle candidate:refs/heads/candidate
+          test "$(git rev-parse candidate)" = '${{ needs.prepare.outputs.candidate }}'
+          test "$(git rev-parse candidate^{tree})" = 9086e668b66158a5feb5e5b16175e6f7f3e0b746
+          test "$(git ls-remote origin refs/heads/feat/sharecrm-channel | cut -f1)" = 0d4ff6ce7c121ca95bc9eb9f8d61ede6746d7712
+          test "$(git ls-remote origin refs/heads/sync/upstream-main-20260925 | cut -f1)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor "$GITHUB_SHA" candidate
+          git merge-base --is-ancestor 0d4ff6ce7c121ca95bc9eb9f8d61ede6746d7712 candidate
+          git merge-base --is-ancestor 12f8f3f31111564e5e1b9aac3f7f916e8bba4039 candidate
+          git push origin candidate:refs/heads/sync/upstream-main-20260925
+          echo "Published tested candidate $(git rev-parse candidate) to sync branch only. Maintenance and main were not changed. Temporary workflow is absent from the candidate tree." >> "$GITHUB_STEP_SUMMARY"
