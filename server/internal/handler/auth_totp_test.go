@@ -512,3 +512,76 @@ func TestEnableUserTOTP_OnlyEnablesTheVerifiedSecret(t *testing.T) {
 		t.Fatalf("enabled a secret that was never verified (rows=%d)", rows)
 	}
 }
+
+func TestConsumeUserTOTPStep_RejectsReplacedSecret(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no DB available")
+	}
+	withRealTOTPService(t)
+	userID, _, _ := enrollTOTPUser(t)
+
+	var verified []byte
+	dbfx.QueryRow(t, `SELECT totp_secret_encrypted FROM "user" WHERE id = $1`, userID).Scan(&verified)
+	// An admin reset and re-enrollment replace the secret after a login read it.
+	dbfx.Exec(t, `UPDATE "user" SET totp_secret_encrypted = $2 WHERE id = $1`, userID, []byte("replaced-secret"))
+
+	rows, err := testHandler.Queries.ConsumeUserTOTPStep(context.Background(), db.ConsumeUserTOTPStepParams{
+		ID:                  parseUUID(userID),
+		TotpSecretEncrypted: verified,
+		Step:                time.Now().Unix()/30 + 1,
+	})
+	if err != nil {
+		t.Fatalf("ConsumeUserTOTPStep: %v", err)
+	}
+	if rows != 0 {
+		t.Fatalf("accepted a code checked against a replaced secret (rows=%d)", rows)
+	}
+}
+
+func TestDisableUserTOTPSecret_KeepsReplacedSecret(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no DB available")
+	}
+	withRealTOTPService(t)
+	userID, _, _ := enrollTOTPUser(t)
+
+	var verified []byte
+	dbfx.QueryRow(t, `SELECT totp_secret_encrypted FROM "user" WHERE id = $1`, userID).Scan(&verified)
+	dbfx.Exec(t, `UPDATE "user" SET totp_secret_encrypted = $2 WHERE id = $1`, userID, []byte("replaced-secret"))
+
+	rows, err := testHandler.Queries.DisableUserTOTPSecret(context.Background(), db.DisableUserTOTPSecretParams{
+		ID:                  parseUUID(userID),
+		TotpSecretEncrypted: verified,
+	})
+	if err != nil {
+		t.Fatalf("DisableUserTOTPSecret: %v", err)
+	}
+	if rows != 0 {
+		t.Fatalf("cleared an authenticator whose code was never checked (rows=%d)", rows)
+	}
+	var enabled bool
+	dbfx.QueryRow(t, `SELECT totp_enabled_at IS NOT NULL FROM "user" WHERE id = $1`, userID).Scan(&enabled)
+	if !enabled {
+		t.Fatal("replaced authenticator was disabled")
+	}
+}
+
+func TestTOTPDisable_DisablesWithValidCode(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no DB available")
+	}
+	withRealTOTPService(t)
+	userID, _, secret := enrollTOTPUser(t)
+
+	req := newRequest(http.MethodPost, "/api/auth/totp/disable", map[string]string{
+		"code": totpCodeAt(t, secret, time.Now().Add(30*time.Second)),
+	})
+	req.Header.Set("X-User-ID", userID)
+	testutil.Call(t, testHandler.TOTPDisable, req).Want(http.StatusOK)
+
+	var configured bool
+	dbfx.QueryRow(t, `SELECT totp_secret_encrypted IS NOT NULL FROM "user" WHERE id = $1`, userID).Scan(&configured)
+	if configured {
+		t.Fatal("TOTP secret still stored after disable")
+	}
+}

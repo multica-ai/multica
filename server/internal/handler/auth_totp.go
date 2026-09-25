@@ -45,8 +45,9 @@ func (h *Handler) checkEnabledTOTPCode(r *http.Request, userID pgtype.UUID, seal
 	}
 	if step, ok := h.TOTPService.MatchCode(secret, code, now); ok {
 		consumed, err := h.Queries.ConsumeUserTOTPStep(r.Context(), db.ConsumeUserTOTPStepParams{
-			ID:   userID,
-			Step: step,
+			ID:                  userID,
+			TotpSecretEncrypted: sealed,
+			Step:                step,
 		})
 		if err != nil {
 			return totpRejected, err
@@ -250,8 +251,17 @@ func (h *Handler) TOTPDisable(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := h.Queries.DisableUserTOTP(r.Context(), parseUUID(userID)); err != nil {
+	disabled, err := h.Queries.DisableUserTOTPSecret(r.Context(), db.DisableUserTOTPSecretParams{
+		ID:                  parseUUID(userID),
+		TotpSecretEncrypted: row.TotpSecretEncrypted,
+	})
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to disable totp")
+		return
+	}
+	if disabled == 0 {
+		// The authenticator changed after the code was checked.
+		writeError(w, http.StatusConflict, "authenticator changed; try again")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"disabled": true})

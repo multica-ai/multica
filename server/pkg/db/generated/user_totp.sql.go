@@ -17,21 +17,25 @@ SET totp_last_used_step  = $1::bigint,
     totp_failed_attempts = 0,
     totp_locked_until    = NULL
 WHERE id = $2
+  AND totp_secret_encrypted = $3
   AND totp_enabled_at IS NOT NULL
   AND (totp_last_used_step IS NULL OR totp_last_used_step < $1::bigint)
   AND (totp_locked_until IS NULL OR totp_locked_until <= now())
 `
 
 type ConsumeUserTOTPStepParams struct {
-	Step int64       `json:"step"`
-	ID   pgtype.UUID `json:"id"`
+	Step                int64       `json:"step"`
+	ID                  pgtype.UUID `json:"id"`
+	TotpSecretEncrypted []byte      `json:"totp_secret_encrypted"`
 }
 
-// Accepts a verified code: succeeds only for a time step later than the last
-// accepted one and while the account is not locked. Concurrent submissions of
-// the same code race on this conditional write, so exactly one wins.
+// Accepts a verified code: succeeds only for the secret the code was checked
+// against, for a time step later than the last accepted one, and while the
+// account is not locked. Concurrent submissions of the same code race on this
+// conditional write, so exactly one wins; a reset or re-enrollment between the
+// read and this write leaves 0 rows.
 func (q *Queries) ConsumeUserTOTPStep(ctx context.Context, arg ConsumeUserTOTPStepParams) (int64, error) {
-	result, err := q.db.Exec(ctx, consumeUserTOTPStep, arg.Step, arg.ID)
+	result, err := q.db.Exec(ctx, consumeUserTOTPStep, arg.Step, arg.ID, arg.TotpSecretEncrypted)
 	if err != nil {
 		return 0, err
 	}
@@ -51,6 +55,33 @@ WHERE id = $1
 func (q *Queries) DisableUserTOTP(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, disableUserTOTP, id)
 	return err
+}
+
+const disableUserTOTPSecret = `-- name: DisableUserTOTPSecret :execrows
+UPDATE "user"
+SET totp_secret_encrypted = NULL,
+    totp_enabled_at       = NULL,
+    totp_last_used_step   = NULL,
+    totp_failed_attempts  = 0,
+    totp_locked_until     = NULL
+WHERE id = $1
+  AND totp_secret_encrypted = $2
+`
+
+type DisableUserTOTPSecretParams struct {
+	ID                  pgtype.UUID `json:"id"`
+	TotpSecretEncrypted []byte      `json:"totp_secret_encrypted"`
+}
+
+// Personal disable: clears only the secret whose code was verified, so a
+// request that raced with re-enrollment cannot erase a different
+// authenticator. The admin reset uses the unconditional DisableUserTOTP.
+func (q *Queries) DisableUserTOTPSecret(ctx context.Context, arg DisableUserTOTPSecretParams) (int64, error) {
+	result, err := q.db.Exec(ctx, disableUserTOTPSecret, arg.ID, arg.TotpSecretEncrypted)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const enableUserTOTP = `-- name: EnableUserTOTP :execrows

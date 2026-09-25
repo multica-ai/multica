@@ -34,6 +34,19 @@ WHERE id = sqlc.arg(id)
   AND totp_secret_encrypted = sqlc.arg(totp_secret_encrypted)
   AND totp_enabled_at IS NULL;
 
+-- name: DisableUserTOTPSecret :execrows
+-- Personal disable: clears only the secret whose code was verified, so a
+-- request that raced with re-enrollment cannot erase a different
+-- authenticator. The admin reset uses the unconditional DisableUserTOTP.
+UPDATE "user"
+SET totp_secret_encrypted = NULL,
+    totp_enabled_at       = NULL,
+    totp_last_used_step   = NULL,
+    totp_failed_attempts  = 0,
+    totp_locked_until     = NULL
+WHERE id = sqlc.arg(id)
+  AND totp_secret_encrypted = sqlc.arg(totp_secret_encrypted);
+
 -- name: DisableUserTOTP :exec
 UPDATE "user"
 SET totp_secret_encrypted = NULL,
@@ -50,14 +63,17 @@ WHERE email = $1
   AND totp_enabled_at IS NOT NULL;
 
 -- name: ConsumeUserTOTPStep :execrows
--- Accepts a verified code: succeeds only for a time step later than the last
--- accepted one and while the account is not locked. Concurrent submissions of
--- the same code race on this conditional write, so exactly one wins.
+-- Accepts a verified code: succeeds only for the secret the code was checked
+-- against, for a time step later than the last accepted one, and while the
+-- account is not locked. Concurrent submissions of the same code race on this
+-- conditional write, so exactly one wins; a reset or re-enrollment between the
+-- read and this write leaves 0 rows.
 UPDATE "user"
 SET totp_last_used_step  = sqlc.arg(step)::bigint,
     totp_failed_attempts = 0,
     totp_locked_until    = NULL
 WHERE id = sqlc.arg(id)
+  AND totp_secret_encrypted = sqlc.arg(totp_secret_encrypted)
   AND totp_enabled_at IS NOT NULL
   AND (totp_last_used_step IS NULL OR totp_last_used_step < sqlc.arg(step)::bigint)
   AND (totp_locked_until IS NULL OR totp_locked_until <= now());
