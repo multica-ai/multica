@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"sync"
 
+	skillpkg "github.com/multica-ai/multica/server/internal/skill"
 	"github.com/multica-ai/multica/server/pkg/skillbundle"
 )
 
@@ -155,14 +155,7 @@ func validateSkillBundle(ref SkillRefData, bundle SkillData) bool {
 }
 
 func safeSkillFilePath(p string) bool {
-	if p == "" || strings.Contains(p, "\x00") || strings.HasPrefix(p, "/") || strings.Contains(p, "\\") {
-		return false
-	}
-	clean := path.Clean(p)
-	if clean == "." || clean != p || strings.HasPrefix(clean, "../") || clean == ".." {
-		return false
-	}
-	return true
+	return skillpkg.IsSafeFilePath(p)
 }
 
 func safeCacheSegment(s string) string {
