@@ -23,6 +23,7 @@ import { StatusIcon } from "@/components/ui/status-icon";
 import { statusOptions } from "@/lib/issue-status";
 import { useIssueStatuses } from "@/lib/use-issue-statuses";
 import { THEME } from "@/lib/theme";
+import { useT } from "@/lib/i18n";
 
 interface Props {
   value: IssueStatus;
@@ -34,12 +35,15 @@ export function StatusPickerBody({ value, onChange }: Props) {
   const checkColor =
     colorScheme === "dark" ? THEME.dark.primary : THEME.light.primary;
   const catalog = useIssueStatuses();
+  const { t } = useT("issues");
   const options = statusOptions(catalog);
 
   return (
     <ScrollView showsVerticalScrollIndicator={false}>
       <View className="px-4 pt-3 pb-2">
-        <Text className="text-lg font-semibold text-foreground">Status</Text>
+        <Text className="text-lg font-semibold text-foreground">
+          {t("filters.status")}
+        </Text>
       </View>
       <View className="px-2">
         {options.map((option) => {
@@ -57,7 +61,7 @@ export function StatusPickerBody({ value, onChange }: Props) {
                 size={18}
               />
               <Text className="flex-1 text-base text-foreground">
-                {option.label}
+                {catalog.labelOf(option.key)}
               </Text>
               {selected ? (
                 <Ionicons name="checkmark" size={20} color={checkColor} />

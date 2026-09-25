@@ -19,6 +19,7 @@ import { SessionActivityBoundary } from "@/components/auth/session-activity-boun
 import { LightboxProvider, prewarmHighlighter } from "@/lib/markdown";
 import { NAV_THEME } from "@/lib/theme";
 import { useColorScheme } from "@/lib/use-color-scheme";
+import { MobileI18nProvider } from "@/lib/i18n";
 
 // Kick off Shiki highlighter init at module load — fires once per process,
 // finishes before the user navigates to any screen with a code block. If
@@ -79,27 +80,29 @@ export default function RootLayout() {
   const { colorScheme, isDarkColorScheme } = useColorScheme();
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        <KeyboardProvider>
-          <QueryClientProvider client={queryClient}>
-            <ThemeProvider value={NAV_THEME[colorScheme]}>
-              <AuthInitializer>
-                <SessionActivityBoundary>
-                <LightboxProvider>
-                  <StatusBar style={isDarkColorScheme ? "light" : "dark"} />
-                  <Stack screenOptions={{ headerShown: false }}>
-                    <Stack.Screen name="index" />
-                    <Stack.Screen name="(auth)" />
-                    <Stack.Screen name="(app)" />
-                  </Stack>
-                  <PortalHost />
-                </LightboxProvider>
-                </SessionActivityBoundary>
-              </AuthInitializer>
-            </ThemeProvider>
-          </QueryClientProvider>
-        </KeyboardProvider>
-      </SafeAreaProvider>
+      <MobileI18nProvider>
+        <SafeAreaProvider>
+          <KeyboardProvider>
+            <QueryClientProvider client={queryClient}>
+              <ThemeProvider value={NAV_THEME[colorScheme]}>
+                <AuthInitializer>
+                  <SessionActivityBoundary>
+                    <LightboxProvider>
+                      <StatusBar style={isDarkColorScheme ? "light" : "dark"} />
+                      <Stack screenOptions={{ headerShown: false }}>
+                        <Stack.Screen name="index" />
+                        <Stack.Screen name="(auth)" />
+                        <Stack.Screen name="(app)" />
+                      </Stack>
+                      <PortalHost />
+                    </LightboxProvider>
+                  </SessionActivityBoundary>
+                </AuthInitializer>
+              </ThemeProvider>
+            </QueryClientProvider>
+          </KeyboardProvider>
+        </SafeAreaProvider>
+      </MobileI18nProvider>
     </GestureHandlerRootView>
   );
 }

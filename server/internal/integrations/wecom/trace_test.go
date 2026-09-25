@@ -549,10 +549,13 @@ func TestTraceOutOrderIsTheWireOrder(t *testing.T) {
 		// does not pay the budget. The probe cannot hide the defect — with the
 		// mutex free it is released at once and A waits for B as before, and
 		// with B already inside it A still reaches the socket second.
-		if !s.mu.TryLock() {
+		// The writer here is a channel semaphore rather than a sync.Mutex —
+		// lockWriter has to be waitable on a context — so the probe asks it
+		// the same question through tryLockWriter.
+		if !s.tryLockWriter() {
 			return
 		}
-		s.mu.Unlock()
+		s.unlockWriter()
 		select {
 		case <-bDone:
 		case <-time.After(traceParkBudget):

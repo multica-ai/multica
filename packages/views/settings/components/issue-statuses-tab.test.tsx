@@ -15,7 +15,16 @@ const createMutate = vi.hoisted(() => vi.fn());
 const updateMutate = vi.hoisted(() => vi.fn());
 const archiveMutate = vi.hoisted(() => vi.fn());
 const navigatePush = vi.hoisted(() => vi.fn());
-vi.mock("@multica/core/paths", () => ({ useWorkspacePaths: () => ({ issues: () => "/dev/issues" }) }));
+const updateWorkspace = vi.hoisted(() => vi.fn());
+let workspaceSettings: Record<string, unknown> = {};
+vi.mock("@multica/core/paths", () => ({
+  useWorkspacePaths: () => ({ issues: () => "/dev/issues" }),
+  useCurrentWorkspace: () => ({ id: "ws-1", settings: workspaceSettings }),
+}));
+vi.mock("@multica/core/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/api")>()),
+  api: { updateWorkspace },
+}));
 vi.mock("../../navigation", () => ({ useNavigation: () => ({ push: navigatePush }) }));
 vi.mock("../../issues/surface/issue-surface", () => ({
   IssueSurfaceWithStore: ({ store, scope }: { store: { getState: () => { statusFilters: string[] } }; scope: { actorKind: string } }) =>
@@ -29,6 +38,7 @@ vi.mock("@tanstack/react-query", () => ({
     data: options.queryKey[0] === "issue-statuses" ? catalog : members(),
     isLoading: false,
   }),
+  useQueryClient: () => ({ setQueryData: vi.fn() }),
 }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/auth", () => ({
@@ -36,6 +46,7 @@ vi.mock("@multica/core/auth", () => ({
 }));
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["members", "ws-1"] }),
+  workspaceKeys: { list: () => ["workspaces"] },
 }));
 // Only the fetch is stubbed. The module's pure helpers (`issueStatusColor`)
 // are what the rows render with, and a stub of those would test the stub.
@@ -92,6 +103,10 @@ const BUILT_IN_IN_REVIEW = entry({
   position: 0,
 });
 
+// Two switches now render (show archived, PR auto-complete); name the one meant.
+const archivedToggle = () =>
+  screen.queryByRole("switch", { name: new RegExp(`^${en.issue_statuses.show_archived.split(" (")[0]}`) });
+
 afterEach(() => {
   cleanup();
   reorderMutate.mockClear();
@@ -99,11 +114,48 @@ afterEach(() => {
   updateMutate.mockClear();
   archiveMutate.mockReset();
   navigatePush.mockClear();
+  updateWorkspace.mockReset();
+  workspaceSettings = {};
   catalog = [];
   role = "owner";
 });
 
 describe("IssueStatusesTab", () => {
+  describe("PR auto-complete (MUL-7429)", () => {
+    const BUILT_IN_DONE = entry({ id: "done", key: "done", name: "Done", category: "done", is_system: true, position: 0 });
+
+    it("saves the workspace setting as soon as the switch changes", async () => {
+      workspaceSettings = { github_enabled: true };
+      updateWorkspace.mockResolvedValue({ id: "ws-1", settings: {} });
+      render(<IssueStatusesTab />);
+      const toggle = screen.getByRole("switch", { name: en.issue_statuses.pr_auto_complete_label });
+      expect(toggle).toHaveAttribute("aria-checked", "true");
+      fireEvent.click(toggle);
+      await waitFor(() =>
+        expect(updateWorkspace).toHaveBeenCalledWith("ws-1", {
+          settings: { github_enabled: true, pr_auto_complete_enabled: false },
+        }),
+      );
+    });
+
+    it("badges the built-in Done row only while the setting is on", () => {
+      catalog = [BUILT_IN_DONE];
+      render(<IssueStatusesTab />);
+      expect(screen.getByText(en.issue_statuses.pr_auto_complete_badge)).toBeInTheDocument();
+      cleanup();
+      workspaceSettings = { pr_auto_complete_enabled: false };
+      render(<IssueStatusesTab />);
+      expect(screen.queryByText(en.issue_statuses.pr_auto_complete_badge)).toBeNull();
+      expect(screen.getByRole("switch", { name: en.issue_statuses.pr_auto_complete_label })).toHaveAttribute("aria-checked", "false");
+    });
+
+    it("shows the setting read-only to a member", () => {
+      role = "member";
+      render(<IssueStatusesTab />);
+      expect(screen.getByRole("switch", { name: en.issue_statuses.pr_auto_complete_label })).toHaveAttribute("aria-disabled", "true");
+    });
+  });
+
   it("aligns category and row actions with equal end padding and pointer target sizes", () => {
     catalog = [BUILT_IN_IN_REVIEW, entry({ key: "qa", name: "QA" })];
     render(<IssueStatusesTab />);
@@ -312,7 +364,7 @@ describe("IssueStatusesTab", () => {
     // Hidden until the toggle is on, but the toggle itself is enabled because
     // the workspace has one.
     expect(screen.queryByText("QA")).toBeNull();
-    expect(screen.getByRole("switch")).toBeEnabled();
+    expect(archivedToggle()).toBeEnabled();
   });
 
   // The category header used to repeat the sentence its built-in row already
@@ -331,7 +383,7 @@ describe("IssueStatusesTab", () => {
     catalog = [BUILT_IN_IN_REVIEW, entry({ key: "qa", name: "QA" })];
     render(<IssueStatusesTab />);
 
-    expect(screen.queryByRole("switch")).toBeNull();
+    expect(archivedToggle()).toBeNull();
   });
 
   it("allows a single custom status to move relative to built-ins", () => {
@@ -376,7 +428,7 @@ describe("IssueStatusesTab", () => {
       entry({ key: "qa", name: "QA", position: 2 }),
     ];
     render(<IssueStatusesTab />);
-    fireEvent.click(screen.getByRole("switch"));
+    fireEvent.click(archivedToggle()!);
     expect(screen.getByText("Old")).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText(en.issue_statuses.actions.open.replace("{{name}}", "QA")));
     fireEvent.click(await screen.findByRole("menuitem", { name: en.issue_statuses.actions.move_up }));

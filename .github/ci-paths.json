@@ -102,6 +102,7 @@
     "Makefile",
     "server/internal/handler/reserved_slugs.json",
     "packages/core/paths/reserved-slugs.ts",
+    "server/cmd/server/router.go",
     ".github/workflows/ci.yml",
     ".github/ci-paths.json",
     "scripts/ci-scope.mjs",

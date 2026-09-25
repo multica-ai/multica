@@ -1,4 +1,5 @@
 export {
+  collectAttachmentSequence,
   collectImageSequence,
   indexOfImageKey,
   isImageAttachment,
@@ -6,4 +7,5 @@ export {
   selectStandaloneAttachments,
   type ImageSequenceBlock,
   type ImageSequenceItem,
+  type SequenceCandidate,
 } from "./image-sequence";

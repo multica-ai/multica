@@ -1,6 +1,6 @@
 ---
 title: Self-hosted Git providers
-description: Connect a self-hosted Forgejo, Gitea, or GitLab instance per workspace so pull/merge requests that carry an issue identifier in their branch name or title, or after a closing keyword in the body, auto-attach to that issue, move it to Done on merge, and show CI status.
+description: Connect a self-hosted Forgejo, Gitea, or GitLab instance per workspace so pull/merge requests that carry an issue identifier in their branch name or title, or after a closing keyword in the body, auto-attach to that issue, move it to Done when they merge with a closing keyword, and show CI status.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -14,7 +14,7 @@ and set `MULTICA_VCS_SECRET_KEY`; until then the section does not appear in
 Settings → Integrations.
 </Callout>
 
-Multica connects to a self-hosted Git provider per workspace: **Forgejo**, **Gitea**, or **GitLab**. Once connected, any pull request (GitLab: merge request) whose branch name or title contains an issue identifier (for example `MUL-123`), or whose body names one after a closing keyword (`Closes MUL-123`), is **auto-linked** to that [issue](/issues), appears under **Pull requests** in the issue sidebar, and — when merged with a closing keyword — moves the issue to **Done**. CI for the head commit shows as a checks bar on the card.
+Multica connects to a self-hosted Git provider per workspace: **Forgejo**, **Gitea**, or **GitLab**. Once connected, any pull request (GitLab: merge request) whose branch name or title contains an issue identifier (for example `MUL-123`), or whose body names one after a closing keyword (`Closes MUL-123`), is **auto-linked** to that [issue](/issues) and appears under **Pull requests** in the issue sidebar. When every PR linked to the issue is merged and one of them used a closing keyword, the issue moves to **Done**. CI for the head commit shows as a checks bar on the card.
 
 These providers run alongside GitHub: a workspace can use any combination.
 
@@ -59,6 +59,12 @@ Set `MULTICA_PUBLIC_URL` to the server's public base URL so Multica can show a r
 The webhook secret is shown only once. Copy it before leaving the page. Reconnecting the same instance rotates the token and secret.
 </Callout>
 
+### Instance with a private CA
+
+If **Connect** reports that the provider's certificate "is signed by a certificate authority this server does not trust", the instance's HTTPS certificate comes from an internal CA (or is self-signed) that the Multica server does not trust. A server operator adds that CA to the backend's trust store: with Helm, set `backend.extraCACerts.configMap`; with Docker Compose, mount the CA and set `SSL_CERT_DIR`. See [Private CA certificates](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#private-ca-certificates-optional) for the steps.
+
+Multica has no option to skip certificate verification, because the connect request carries your access token. If the message says the certificate does not match the host name, or failed verification (for example, it has expired), fix the certificate itself; trusting the CA does not help.
+
 ## Register the webhook
 
 On the repository (or organisation/group, to cover every repo):
@@ -81,7 +87,7 @@ Multica authenticates every delivery against the stored secret, so a webhook wit
 ## What gets mirrored
 
 - **Pull / merge requests** — open, closed, merged, and draft state, author, branch, and (where the provider supplies them) diff stats.
-- **Issue links** — an identifier in the title or branch links the PR to the issue, as does an identifier after a closing keyword in the body; a bare mention in the body links nothing. A closing keyword (`Closes`/`Fixes`/`Resolves MUL-123`) on a merged PR moves the issue to **Done** once no linked PR is still open.
+- **Issue links** — an identifier in the title or branch links the PR to the issue, as does an identifier after a closing keyword in the body; a bare mention in the body links nothing. Once every PR linked to the issue is merged — across GitHub and self-hosted providers — and one of them used a closing keyword (`Closes`/`Fixes`/`Resolves MUL-123`), the issue moves to **Done**, under the same workspace setting and rules as [GitHub](/github-integration).
 - **CI** — Forgejo/Gitea commit statuses and GitLab pipelines aggregate into a passed/failed/pending checks bar for the head commit.
 
 ## Agents opening pull requests

@@ -31,7 +31,23 @@ For install script or manual installs, use:
 multica update
 ```
 
-`multica update` auto-detects your installation method and upgrades accordingly.
+`multica update` uses GitHub Releases by default. Self-hosted installations can
+point the CLI at a GitHub Releases-compatible metadata mirror and an artifact
+mirror without changing the command. To let a daemon poll that source, also
+enable self-update explicitly because self-hosted auto-update is disabled by
+default:
+
+```bash
+export MULTICA_RELEASE_API_BASE_URL=https://updates.example/api
+export MULTICA_RELEASE_DOWNLOAD_BASE_URL=https://updates.example/releases/download
+export MULTICA_DAEMON_AUTO_UPDATE=true
+multica update
+```
+
+The metadata mirror must serve `/repos/multica-ai/multica/releases/latest` and
+`/repos/multica-ai/multica/releases/tags/<tag>`. The artifact mirror must serve
+`/<tag>/<asset-name>` and preserve the published `checksums.txt` contents.
+When these variables are unset, the GitHub defaults remain unchanged.
 
 ## Quick Start
 
@@ -563,9 +579,11 @@ Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assig
 ```bash
 multica issue update <id> --title "New title" --priority urgent
 multica issue update <id> --position 4.5
+multica issue update <id> --attachment revised.png
 ```
 
 `--position` sets the raw ordering value within the board column (lower sorts first). For relative moves, `issue reorder` is easier because it works out the value for you.
+`--attachment` uploads a local file and appends its Markdown reference to the end of the issue description. Repeat the flag to attach multiple files. To replace an existing image, also use `--description-file` to remove the old reference from the description.
 
 ### Reorder Issue
 
@@ -1101,3 +1119,11 @@ On the API, both endpoints accept `?include=content` and `?include=metadata`.
 A request that sends neither still gets `content`, on both endpoints, so a
 server upgrade never changes what an un-upgraded client receives — it is the
 CLI that asks for the smaller shape.
+
+### Custom runtime compatibility targets
+
+Create custom Oh-My-Pi profiles with `multica runtime profile create --runtime-type omp --command-name omp --display-name "Custom Oh-My-Pi"`.
+The immutable `runtime_type` selects model discovery, skills paths, and launch behavior;
+the server derives `protocol_family` (`pi` for `omp`). Custom command/path overrides and
+fixed arguments still apply, and the runtime retains its custom-profile provenance.
+Existing profiles and the legacy `--protocol-family` flag retain their original target.

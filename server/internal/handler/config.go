@@ -81,6 +81,12 @@ type AppConfig struct {
 	// must fail closed when this declaration is absent.
 	AgentConversationStartersSupported bool `json:"agent_conversation_starters_supported"`
 
+	// IssueCreatePropertiesSupported tells independently deployed clients that
+	// POST /api/issues validates and persists the optional properties bag.
+	// Older handlers silently ignore unknown fields, so clients with values must
+	// fail closed when this declaration is absent.
+	IssueCreatePropertiesSupported bool `json:"issue_create_properties_supported"`
+
 	// CommentDeleteKeepRepliesSupported tells clients that deleting a comment
 	// removes only that comment and keeps its replies (#8296), and that
 	// DELETE /api/comments/{id}/keep-replies exists. Older servers deleted the
@@ -106,6 +112,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		// running, the save gate is running with it.
 		LocalWorktreeSupported:             true,
 		AgentConversationStartersSupported: true,
+		IssueCreatePropertiesSupported:     true,
 		CommentDeleteKeepRepliesSupported:  true,
 		AllowSignup:                        os.Getenv("ALLOW_SIGNUP") != "false",
 		GoogleClientID:                     os.Getenv("GOOGLE_CLIENT_ID"),

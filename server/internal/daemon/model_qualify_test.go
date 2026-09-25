@@ -4,6 +4,10 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 
@@ -212,5 +216,64 @@ func TestResolveTaskModelSelectionFailsOpenOnDiscoveryError(t *testing.T) {
 	defer mu.Unlock()
 	if calls != 1 {
 		t.Errorf("catalog reads = %d, want 1 — a failed read must not be retried within the task", calls)
+	}
+}
+
+// Exercise real discovery through the daemon's task-launch guard rather than
+// injecting a prebuilt fallback: live discovery fails, bundled succeeds but
+// lacks the saved model. Model-scoped overrides pass through; the CLI-version
+// gate for explicit standard routing must still reject old Codex binaries.
+func TestResolveTaskModelSelectionKeepsLiveOnlyCodexOverridesOnFallback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	for _, tc := range []struct {
+		name, version string
+		in, want      taskModelSelection
+	}{
+		{
+			name: "new CLI retains model-scoped overrides", version: "0.155.1",
+			in:   taskModelSelection{Model: "gpt-6-sol", ThinkingLevel: "high", ServiceTier: "priority"},
+			want: taskModelSelection{Model: "gpt-6-sol", ThinkingLevel: "high", ServiceTier: "priority"},
+		},
+		{
+			name: "old CLI rejects explicit standard despite missing model", version: "0.130.0",
+			in:   taskModelSelection{Model: "gpt-6-sol", ThinkingLevel: "high", ServiceTier: "default"},
+			want: taskModelSelection{Model: "gpt-6-sol", ThinkingLevel: "high"},
+		},
+		{
+			name: "new CLI accepts explicit standard despite missing model", version: "0.155.1",
+			in:   taskModelSelection{Model: "gpt-6-sol", ThinkingLevel: "high", ServiceTier: "default"},
+			want: taskModelSelection{Model: "gpt-6-sol", ThinkingLevel: "high", ServiceTier: "default"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			logFile := filepath.Join(dir, "calls")
+			binary := filepath.Join(dir, "codex")
+			script := "#!/bin/sh\n" +
+				"printf '%s\\n' \"$*\" >> '" + logFile + "'\n" +
+				"if [ \"$1\" = \"--version\" ]; then echo 'codex-cli " + tc.version + "'; exit 0; fi\n" +
+				"if [ \"$3\" = \"--bundled\" ]; then echo '{\"models\":[{\"slug\":\"gpt-5.5\",\"display_name\":\"GPT-5.5\",\"visibility\":\"list\"}]}'; exit 0; fi\n" +
+				"exit 1\n"
+			if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+
+			got := resolveTaskModelSelection(context.Background(), "codex", agent.Command{Path: binary}, tc.in, quietTaskLog())
+			if got != tc.want {
+				t.Fatalf("launch selection = %+v, want %+v", got, tc.want)
+			}
+			calls, err := os.ReadFile(logFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(calls), "debug models\n") || !strings.Contains(string(calls), "debug models --bundled\n") {
+				t.Fatalf("expected failed live discovery and successful bundled fallback, got %q", calls)
+			}
+			if strings.Count(string(calls), "debug models --bundled\n") != 1 {
+				t.Fatalf("task capability checks must share a single fallback discovery: %q", calls)
+			}
+		})
 	}
 }

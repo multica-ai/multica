@@ -368,7 +368,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 	writeTestExecutable(t, fakeBin, []byte(script))
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
 	}))
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

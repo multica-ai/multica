@@ -21,6 +21,7 @@ import { useDeleteProjectResource } from "@/data/mutations/projects";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
+import { useT } from "@/lib/i18n";
 
 interface Props {
   projectId: string;
@@ -29,6 +30,7 @@ interface Props {
 
 export function ProjectResourcesSection({ projectId, onAdd }: Props) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const { t } = useT("projects");
   const { data: resources, isLoading } = useQuery(
     projectResourcesOptions(wsId, projectId),
   );
@@ -45,12 +47,12 @@ export function ProjectResourcesSection({ projectId, onAdd }: Props) {
 
   const onLongPress = (resource: ProjectResource) => {
     Alert.alert(
-      "Detach resource?",
+      t("resources.detach_title"),
       describeResource(resource),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: t("common:actions.cancel"), style: "cancel" },
         {
-          text: "Detach",
+          text: t("resources.detach"),
           style: "destructive",
           onPress: () => remove.mutate(resource.id),
         },
@@ -62,10 +64,10 @@ export function ProjectResourcesSection({ projectId, onAdd }: Props) {
     <View>
       <View className="flex-row items-center justify-between px-4 py-2 bg-background">
         <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-          Resources
+          {t("resources.title")}
         </Text>
         <Pressable onPress={onAdd} className="px-2 py-1 active:bg-secondary rounded-xs">
-          <Text className="text-xs text-brand">Add</Text>
+            <Text className="text-xs text-brand">{t("resources.add")}</Text>
         </Pressable>
       </View>
       {isLoading ? (
@@ -75,7 +77,7 @@ export function ProjectResourcesSection({ projectId, onAdd }: Props) {
       ) : !resources || resources.length === 0 ? (
         <View className="px-4 py-3">
           <Text className="text-sm text-muted-foreground/70">
-            No resources attached.
+            {t("resources.empty")}
           </Text>
         </View>
       ) : (
@@ -123,6 +125,21 @@ function ResourceRow({
             {describeResource(resource)}
           </Text>
         ) : null}
+        {/* Its own line rather than appended to the URL: a custom label already
+            takes the first slot, and this is the one project setting that
+            silently changes what every task starts from. */}
+        {checkoutRefOf(resource) ? (
+          <View className="flex-row items-center gap-1">
+            <Ionicons
+              name="git-branch-outline"
+              size={11}
+              color={THEME[colorScheme].mutedForeground}
+            />
+            <Text className="text-xs text-muted-foreground" numberOfLines={1}>
+              {checkoutRefOf(resource)}
+            </Text>
+          </View>
+        ) : null}
       </View>
     </Pressable>
   );
@@ -145,4 +162,19 @@ function getResourceUrl(resource: ProjectResource): string | null {
 
 function describeResource(resource: ProjectResource): string {
   return getResourceUrl(resource) ?? resource.resource_type;
+}
+
+/**
+ * The repo's pinned checkout ref, or null when tasks use the default branch.
+ *
+ * Matches the web/desktop badge in
+ * packages/views/projects/components/project-resources-section.tsx — a ref set
+ * on any client has to be visible on every client, or the two disagree about
+ * what the project is configured to do.
+ */
+function checkoutRefOf(resource: ProjectResource): string | null {
+  if (resource.resource_type !== "github_repo") return null;
+  const ref = resource.resource_ref as GithubRepoResourceRef | undefined;
+  const value = ref?.ref?.trim();
+  return value ? value : null;
 }

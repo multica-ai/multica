@@ -130,6 +130,25 @@ CLI の到達確認は `<server-url>/health` に GET を送り、200 を要求�
 curl -fsS <server-url>/health
 ```
 
+## `multica login` が TLS ハンドシェイクのタイムアウトで失敗する
+
+`multica login` でブラウザが開き、Web 側のサインインは完了するのに、CLI は「Sign-in did not complete」または「TLS handshake timed out」で失敗します。`multica --debug login` では `POST /api/tokens` に `net/http: TLS handshake timeout` と表示され、同じマシンの `curl.exe -I https://api.multica.ai` やブラウザは問題なく接続できます。
+
+TCP 接続は確立されますが、TLS ハンドシェイクが完了しません。Multica CLI とデーモンを含む Go クライアントは、既定で TLS ClientHello にポスト量子鍵交換を含めるため、ClientHello が約 1.5 KB になり 2 つのパケットに分割されます。一部のセキュリティソフト、VPN、ルーター、ファイアウォールはこのようなハンドシェイクを破棄します。curl の ClientHello はずっと小さいため通過します。
+
+ポスト量子鍵交換を無効にして再試行し、原因を確認します:
+
+```powershell
+$env:GODEBUG = 'tlsmlkem=0'
+multica --debug login
+```
+
+```bash
+GODEBUG=tlsmlkem=0 multica --debug login
+```
+
+これで成功する場合は、CLI とデーモンを実行するユーザーに対して `GODEBUG=tlsmlkem=0` を恒久的に設定し（Windows では `[Environment]::SetEnvironmentVariable('GODEBUG', 'tlsmlkem=0', 'User')` を実行して新しいターミナルを開く）、デーモンまたはデスクトップアプリを再起動してください。`MULTICA_HTTP_TIMEOUT` を大きくしても効果はありません。ハンドシェイクはこの設定の対象外です。根本的な解決はネットワーク側で行います。分割された TLS ハンドシェイクを破棄する機器やソフトウェアを更新または再設定してください。
+
 ## 認証コードや招待メールが届かない
 
 まず backend の起動ログを確認します。ログには、現在使っているのが `SMTP relay`、`Resend API`、`DEV mode` のどれかが表示されます:

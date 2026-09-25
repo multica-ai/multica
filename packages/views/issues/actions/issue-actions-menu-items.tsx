@@ -8,6 +8,7 @@ import {
   ArrowUp,
   Calendar,
   CalendarClock,
+  CircleEqual,
   ExternalLink,
   FolderOpen,
   Link2,
@@ -119,6 +120,7 @@ export function IssueActionsMenuItems({
     openSetParent,
     removeParent,
     openAddChild,
+    openMarkDuplicate,
     openDeleteConfirm,
   } = actions;
 
@@ -353,6 +355,10 @@ export function IssueActionsMenuItems({
           <P.Item onClick={openAddChild}>
             <ArrowDown className="h-3.5 w-3.5" />
             {t(($) => $.actions.add_sub_issue)}
+          </P.Item>
+          <P.Item onClick={openMarkDuplicate}>
+            <CircleEqual className="h-3.5 w-3.5" />
+            {t(($) => $.actions.mark_duplicate)}
           </P.Item>
         </P.SubContent>
       </P.Sub>

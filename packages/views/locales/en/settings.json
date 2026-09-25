@@ -81,7 +81,13 @@
       "blocked": "Stalled on an external dependency.",
       "done": "Completed.",
       "cancelled": "Decided not to do."
-    }
+    },
+    "automation_title": "Automation",
+    "pr_auto_complete_label": "Complete issues when their PRs merge",
+    "pr_auto_complete_description": "An issue moves to Done once every linked PR is merged and one of them closes it with a keyword. Applies to PRs merged from now on.",
+    "pr_auto_complete_example": "Write the keyword in the PR title or description, e.g.",
+    "pr_auto_complete_example_title": "Closes MUL-123",
+    "pr_auto_complete_badge": "Set when PRs merge"
   },
   "quick_actions": {
     "title": "Quick Actions",
@@ -161,6 +167,12 @@
     },
     "sticky_comment_bar": {
       "title": "Pin comment bar to bottom"
+    },
+    "running_agent_reply": {
+      "title": "When replying to a running agent",
+      "steer": "Add to current run",
+      "after_run": "Start after this run",
+      "hint": "Sets the default only. You can still change it for any message before sending."
     },
     "issue_title": "Issue creation",
     "comments_title": "Comments",
@@ -635,7 +647,7 @@
       },
       "agent_activity": {
         "label": "Agent activity",
-        "description": "When an agent run completes or fails"
+        "description": "When an agent run fails"
       }
     },
     "system": {
@@ -757,10 +769,6 @@
     "master_description_off": "GitHub features are paused. Existing data is kept.",
     "section_connection": "Connection",
     "connection_title": "GitHub App",
-    "connection_description_prefix": "Link issues to pull requests automatically. A PR links when",
-    "connection_description_suffix": "is in its branch name or title, or its body says Closes MUL-123. Merging a PR with that closing keyword also moves the issue to",
-    "connection_description_done": "Done",
-    "connection_identifier_example": "MUL-123",
     "connected_to": "Connected to {{login}}",
     "connect_github": "Connect GitHub",
     "connect_opening": "Opening…",
@@ -790,7 +798,12 @@
     "section_repositories": "Repositories",
     "repositories_shortcut_label": "Repository URLs live in the Repositories tab",
     "repositories_shortcut_link": "Manage repositories →",
-    "toast_failed": "Failed to update GitHub settings"
+    "toast_failed": "Failed to update GitHub settings",
+    "feature_auto_link_description": "Links a PR to the issue whose ID, e.g. {{example}}, is in its title or branch name, or follows “Closes” in its description.",
+    "feature_pr_auto_complete_label": "Complete issues when their PRs merge",
+    "feature_pr_auto_complete_on": "On · shared by every code host",
+    "feature_pr_auto_complete_off": "Off · shared by every code host",
+    "feature_pr_auto_complete_manage": "Manage"
   },
   "vcs": {
     "section_title": "Git providers (self-hosted)",
@@ -872,6 +885,8 @@
     "agent_bot_connected_label_lark": "Connected to Lark",
     "agent_bot_manage_link_feishu": "Manage in Feishu",
     "agent_bot_manage_link_lark": "Manage in Lark",
+    "agent_bot_silent_hint": "Bot connected but silent? Check that the app delivers events over the long connection.",
+    "agent_bot_silent_hint_link": "Troubleshooting",
     "agent_bot_manage_tooltip_feishu": "Open this Bot's app page in Feishu — manage scopes, edit display name, request additional permissions.",
     "agent_bot_manage_tooltip_lark": "Open this Bot's app page in Lark — manage scopes, edit display name, request additional permissions.",
     "agent_bot_disconnect_tooltip": "Unbind this Lark Bot from the Agent. The Bot will stop receiving Lark messages.",

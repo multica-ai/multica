@@ -123,3 +123,51 @@ export function cancellationActorLabel(
     ? t(($) => $.task_failure.cancelled_by_actor, { name })
     : null;
 }
+
+// Wire values that record a cancellation, not an error. A run the platform
+// stopped reads as cancelled even when its row carries status `failed`.
+const CANCELLATION_FAILURE_REASONS: ReadonlySet<string> = new Set([
+  "cancelled",
+  "manual",
+  "user_cancelled",
+]);
+
+// Failures a retry cannot fix until someone changes configuration: the
+// non-retryable auth, quota, config, model, CLI, and runtime-ownership
+// reasons documented in server/pkg/taskfailure.
+const ACTION_REQUIRED_FAILURE_REASONS: ReadonlySet<string> = new Set([
+  "runtime_access_denied",
+  "agent_error.provider_auth_or_access",
+  "agent_error.provider_quota_limit",
+  "agent_error.missing_config",
+  "agent_error.model_not_found_or_unavailable",
+  "agent_error.runtime_version_unsupported",
+  "agent_error.runtime_missing_executable",
+]);
+
+type TaskOutcome = {
+  status: string;
+  error?: string | null;
+  failure_reason?: string | null;
+  cancelled_by?: { type: string; name?: string };
+};
+
+/** A run that was stopped rather than one that broke. */
+export function isCancelledOutcome(task: TaskOutcome): boolean {
+  return task.status === "cancelled"
+    || (task.status === "failed" && CANCELLATION_FAILURE_REASONS.has(task.failure_reason ?? ""));
+}
+
+/** A failed run whose recovery is a configuration change, not a retry. */
+export function failureNeedsAction(task: TaskOutcome): boolean {
+  return task.status === "failed" && ACTION_REQUIRED_FAILURE_REASONS.has(task.failure_reason ?? "");
+}
+
+/**
+ * The one label for how a failed or cancelled run ended: its recorded reason,
+ * else who cancelled it. Null when only the plain status is known.
+ */
+export function runOutcomeLabel(task: TaskOutcome, t: AgentsT): string | null {
+  if (task.status === "failed") return failureReasonLabel(task.failure_reason, t);
+  return cancelReasonLabel(task, t) ?? cancellationActorLabel(task, t);
+}

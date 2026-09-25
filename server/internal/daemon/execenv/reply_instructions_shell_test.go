@@ -11,20 +11,36 @@ import (
 	"testing"
 )
 
-// snippetLines returns the indented command block of a rendered reply
-// cookbook — the lines an agent actually pastes into one shell call.
-func snippetLines(t *testing.T, rendered string) []string {
+// snippetBlock returns the indented command block of a rendered reply
+// cookbook that contains marker — the lines an agent actually pastes into one
+// shell call. The Windows cookbook carries one block per shell (PowerShell and
+// Git Bash, #8627), so a caller names the block by a token unique to it.
+func snippetBlock(t *testing.T, rendered, marker string) []string {
 	t.Helper()
-	var out []string
+	var block []string
+	flush := func() []string {
+		for _, line := range block {
+			if strings.Contains(line, marker) {
+				return block
+			}
+		}
+		return nil
+	}
 	for _, line := range strings.Split(rendered, "\n") {
 		if strings.HasPrefix(line, "    ") && strings.TrimSpace(line) != "" {
-			out = append(out, strings.TrimSpace(line))
+			block = append(block, strings.TrimSpace(line))
+			continue
 		}
+		if found := flush(); found != nil {
+			return found
+		}
+		block = nil
 	}
-	if len(out) == 0 {
-		t.Fatalf("reply instructions contain no command block\n---\n%s", rendered)
+	if found := flush(); found != nil {
+		return found
 	}
-	return out
+	t.Fatalf("reply instructions contain no command block with %q\n---\n%s", marker, rendered)
+	return nil
 }
 
 // stubMultica puts a fake `multica` on PATH that exits with the given code, so
@@ -95,24 +111,37 @@ func TestCommentReplySnippetPropagatesPostFailure(t *testing.T) {
 	const triggerID = "22222222-2222-2222-2222-222222222222"
 
 	for _, tc := range []struct {
-		name  string
-		goos  string
-		shell string
-		wrap  func(script string) []string
+		name   string
+		goos   string
+		shell  string
+		marker string
+		wrap   func(script string) []string
 	}{
 		{
-			name:  "posix/sh",
-			goos:  "linux",
-			shell: "sh",
-			wrap:  func(script string) []string { return []string{"-c", script} },
+			name:   "posix/sh",
+			goos:   "linux",
+			shell:  "sh",
+			marker: "&&",
+			wrap:   func(script string) []string { return []string{"-c", script} },
 		},
 		{
 			// PowerShell is cross-platform, so this exercises the Windows
 			// cookbook's $LASTEXITCODE gate wherever pwsh is installed.
-			name:  "windows/pwsh",
-			goos:  "windows",
-			shell: "pwsh",
-			wrap:  func(script string) []string { return []string{"-NoProfile", "-Command", script} },
+			name:   "windows/pwsh",
+			goos:   "windows",
+			shell:  "pwsh",
+			marker: "$LASTEXITCODE",
+			wrap:   func(script string) []string { return []string{"-NoProfile", "-Command", script} },
+		},
+		{
+			// The Windows cookbook's Git Bash variant (#8627): a Claude Code
+			// agent with the PowerShell tool turned off pastes this one into
+			// bash.exe. Any POSIX sh exercises the same `&&` gate.
+			name:   "windows/git-bash",
+			goos:   "windows",
+			shell:  "sh",
+			marker: "&&",
+			wrap:   func(script string) []string { return []string{"-c", script} },
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -120,7 +149,7 @@ func TestCommentReplySnippetPropagatesPostFailure(t *testing.T) {
 				t.Skipf("%s not available: %v", tc.shell, err)
 			}
 			runtimeGOOS = tc.goos
-			script := strings.Join(snippetLines(t, BuildCommentReplyInstructions("claude", issueID, triggerID, false)), "\n")
+			script := strings.Join(snippetBlock(t, BuildCommentReplyInstructions("claude", issueID, triggerID, false), tc.marker), "\n")
 
 			t.Run("failed post keeps the failure and the body", func(t *testing.T) {
 				code, bodyKept := runSnippet(t, tc.shell, tc.wrap(script), stubMultica(t, 3))

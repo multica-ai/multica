@@ -1,13 +1,16 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"reflect"
 	"sort"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -180,4 +183,43 @@ func hasKey(keys []string, key string) bool {
 		}
 	}
 	return false
+}
+
+// Events published outside the handler render the issue through
+// service.IssueToMapResolved. Its duplicate_of must match the HTTP rendering
+// exactly: clients patch the same cache entry from both.
+func TestResolvedBroadcastDuplicateOfMatchesResponse(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	original := dbfx.Issue(t, "dup-broadcast-original", testutil.Cols{"status": "in_review"})
+	duplicate := seedDuplicate(t, "dup-broadcast-duplicate", original)
+	row, err := testHandler.Queries.GetIssue(ctx, parseUUID(duplicate))
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	prefix := testHandler.getIssuePrefix(ctx, row.WorkspaceID)
+
+	resp := issueToResponse(row, prefix)
+	testHandler.fillStatusCategory(ctx, row.WorkspaceID, &resp)
+	if resp.DuplicateOf == nil {
+		t.Fatal("HTTP rendering lost the mark")
+	}
+	decode := func(v any) map[string]any {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var out map[string]any
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return out
+	}
+	fromResponse := decode(resp.DuplicateOf)
+	fromBroadcast := decode(service.IssueToMapResolved(ctx, testHandler.Queries, row, prefix)["duplicate_of"])
+	if !reflect.DeepEqual(fromBroadcast, fromResponse) {
+		t.Fatalf("broadcast duplicate_of = %v, HTTP duplicate_of = %v", fromBroadcast, fromResponse)
+	}
 }

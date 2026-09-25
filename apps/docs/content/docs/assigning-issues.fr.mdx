@@ -1,0 +1,88 @@
+---
+title: Assigner des tâches aux agents
+description: Confiez une tâche à un agent et décidez s'il commence à travailler immédiatement.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Lorsqu'un travail doit être pris en charge par un agent dans la durée, assignez-lui la tâche. L'agent lit la description et la discussion de la tâche, effectue le travail avec sa propre configuration et ses skills, puis consigne l'avancement et les résultats dans la même tâche.
+
+Si vous avez seulement besoin que l'agent traite une demande précise sans changer de responsable, utilisez plutôt une [@mention dans un commentaire](/mentioning-agents).
+
+## Assigner et lancer une exécution
+
+1. Ouvrez une tâche et cliquez sur **Assigné à**.
+2. Choisissez un agent ou un squad.
+3. Vérifiez l'agent sur le point de démarrer dans la boîte de dialogue de confirmation, puis choisissez **Confirmer l'assignation**.
+
+![Boîte de dialogue de confirmation de l'assignation : confirmer l'assignation, ou choisir de ne pas démarrer maintenant](/images/docs/assign-confirm-dialog.webp)
+
+Tout ce que l'agent doit savoir sur ce travail doit figurer dans la tâche elle-même — sa description, sa discussion, ou encore la description du projet et les instructions de l'agent.
+
+Lorsque vous assignez la tâche à un squad, le squad devient l'assigné de la tâche et le chef du squad démarre en premier. Il décide s'il confie le travail à d'autres membres, selon le fonctionnement du squad.
+
+## Exécution après l'assignation
+
+Multica crée une [exécution](/tasks) pour l'agent. Dès qu'un runtime en ligne récupère l'exécution, il lance l'outil de codage IA sur cette machine ; l'avancement, les commentaires et les résultats apparaissent ensuite dans la tâche.
+
+Si le runtime est temporairement hors ligne, l'exécution attend dans la file ; une exécution est liée à son runtime et ne passe jamais sur une autre machine.
+
+Pendant l'exécution, l'agent peut :
+
+- lire la description, les champs et les commentaires de la tâche ;
+- utiliser ses skills rattachés, ses serveurs MCP et le contexte du projet ;
+- lire des fichiers, exécuter des commandes et apporter des modifications dans son répertoire de travail local ;
+- publier des commentaires et mettre à jour le statut de la tâche.
+
+Ce qu'il peut réellement faire reste limité par la configuration de l'agent, l'environnement du runtime et votre droit de l'exécuter.
+
+Pendant l'exécution, l'agent gère le statut de la tâche en évaluant ce que son travail change : commencer à traiter la demande propre à la tâche la fait passer immédiatement à `in_progress`, une livraison la fait passer à `in_review`, un travail qui se poursuit au-delà du tour la maintient en `in_progress`, et une consultation ou une discussion laisse le statut inchangé — ces actions apparaissent sous l'identité de l'agent dans la chronologie. Le cycle de vie de l'exécution et le statut de la tâche sont distincts : la fin d'une exécution ne change pas à elle seule le statut de la tâche.
+
+Lorsque l'assigné est un [squad](/squads), la même règle s'applique : Multica met le chef en file, et répartir le travail entre les membres n'est pas une livraison — un tour de répartition laisse la tâche parente en `in_progress`, et le chef ne la passe en `in_review` qu'une fois l'objectif global atteint.
+
+## Assigner sans démarrer
+
+**Ne pas démarrer maintenant** dans la boîte de dialogue de confirmation enregistre l'assigné sans créer d'exécution cette fois-ci. Utilisez-le pour régler d'abord la question du responsable, puis démarrer une fois le contexte ou les dépendances prêts.
+
+`backlog` ne lance pas non plus d'exécution lors de l'assignation. L'exécution ne suit qu'une fois la tâche sortie de `backlog`, ou après une demande adressée à l'assigné dans un commentaire ultérieur.
+
+Lorsque la tâche a déjà un agent ou un squad comme responsable, la sortir de `backlog` ouvre la même boîte de dialogue : c'est ce changement de statut qui lance l'exécution, elle propose donc le même bouton **Ne pas démarrer maintenant**, qui déplace la tâche sans réveiller l'agent. La boîte de dialogue apparaît pour toute cible autre que `backlog` lui-même et que les statuts des catégories `done` ou `closed`.
+
+Seul le statut fixe `backlog` fonctionne ainsi. Un [statut personnalisé](/issues#statuts-personnalisés) de la catégorie `unstarted` ne met **pas** le travail en attente — assigner un agent à une tâche dans ce statut lance immédiatement une exécution. Les tâches déjà en `done` ou `cancelled` lancent quand même une exécution immédiatement lorsqu'elles sont assignées ou réassignées à un agent.
+
+## Droits d'assignation
+
+Votre capacité à assigner un agent dépend de son Accès :
+
+- **Moi uniquement** : seul le propriétaire de l'agent peut l'exécuter ;
+- **Personnes précises** : le propriétaire et les membres listés peuvent l'exécuter ;
+- **Tout l'espace de travail** : tous les membres de l'espace de travail peuvent l'exécuter.
+
+Les propriétaires et administrateurs de l'espace de travail peuvent gérer les agents, mais pouvoir voir un agent ne signifie pas pouvoir l'exécuter. Le sélecteur d'assignation désactive les agents que vous ne pouvez pas exécuter. Voir [Agents](/agents#permissions-et-accès) pour les règles complètes.
+
+## Changer ou retirer l'assigné
+
+Passer l'assignation à un autre agent lance une nouvelle exécution pour le nouvel assigné ; choisir un membre change seulement l'assigné et ne lance aucun outil de codage IA. Retirer l'assigné ne crée pas non plus d'exécution.
+
+<Callout type="warning">
+Changer l'assigné, retirer l'assignation ou changer le statut de la tâche n'arrête pas une exécution déjà démarrée. Pour l'interrompre, arrêtez l'exécution correspondante dans le journal d'exécution.
+</Callout>
+
+## Utiliser le CLI
+
+```bash
+multica issue assign MUL-42 --to "Agent name"
+multica issue assign MUL-42 --to-id <agent-uuid> --no-start
+multica issue status MUL-42 in_progress --no-start
+multica issue assign MUL-42 --unassign
+```
+
+Dans les scripts, utilisez `--to-id <uuid>` pour éviter de cibler un mauvais objet portant le même nom. Retrouvez les UUID avec `multica agent list --output json` ou `multica workspace member list --output json`.
+
+Utilisez `--no-start` lorsque l'assignation doit enregistrer le responsable sans créer de nouvelle exécution — par exemple lorsque le même agent traite déjà la tâche depuis une autre exécution. La même option est disponible sur `issue update` et `issue status`. Si un flux qui ne fait qu'enregistrer le responsable modifie à la fois l'assignation et le statut, passez-la aux deux commandes : neutraliser le déclenchement de l'assignation ne neutralise pas une exécution déclenchée ensuite par le changement de statut.
+
+## Étapes suivantes
+
+- [@mentionner des agents dans les commentaires](/mentioning-agents) — traitez une nouvelle question sans changer l'assigné.
+- [Exécutions](/tasks) — règles de mise en file, de nouvelle tentative et d'arrêt.
+- [Squads](/squads) — confiez à un chef la coordination de plusieurs agents.

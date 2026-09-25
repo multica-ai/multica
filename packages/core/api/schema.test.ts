@@ -337,9 +337,136 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       await expect(client.createIssue({ title: "Created" })).rejects.toThrow();
     });
+
+    it("fails closed before POST when create properties are unsupported", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.createIssue({ title: "Created", properties: { "property-1": "value" } }),
+      ).rejects.toThrow("does not support atomic custom properties");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/config");
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    });
+
+    it("preflights properties and requires the canonical response snapshot", async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ issue_create_properties_supported: true }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              ...validIssue,
+              properties: { "property-1": ["first", "second"] },
+            }),
+            { status: 201, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      vi.stubGlobal("fetch", fetchMock);
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.createIssue({
+          title: "Created",
+          properties: { "property-1": ["second", "first", "second"] },
+        }),
+      ).resolves.toMatchObject({ properties: { "property-1": ["first", "second"] } });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: "POST" });
+    });
+
+    it("reports a created identifier when the response property snapshot mismatches", async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ issue_create_properties_supported: true }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(validIssue), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      vi.stubGlobal("fetch", fetchMock);
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.createIssue({ title: "Created", properties: { "property-1": "value" } }),
+      ).rejects.toThrow("Issue MUL-1 was created");
+    });
   });
 
   describe("comment source-context sub-issues", () => {
+    it("preflights manual sub-issue properties and validates their snapshot", async () => {
+      const issue = {
+        id: "issue-2",
+        workspace_id: "ws-1",
+        number: 2,
+        identifier: "MUL-2",
+        title: "Child",
+        description: null,
+        status: "todo",
+        priority: "none",
+        assignee_type: null,
+        assignee_id: null,
+        creator_type: "member",
+        creator_id: "user-1",
+        parent_issue_id: "issue-1",
+        project_id: null,
+        position: 0,
+        stage: null,
+        start_date: null,
+        due_date: null,
+        metadata: {},
+        properties: { "property-1": true },
+        created_at: "2025-01-01T00:00:00Z",
+        updated_at: "2025-01-01T00:00:00Z",
+      };
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ issue_create_properties_supported: true }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(issue), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      vi.stubGlobal("fetch", fetchMock);
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.createCommentSubIssue("comment-1", {
+          mode: "manual",
+          capture_token: "token",
+          issue: { title: "Child", properties: { "property-1": true } },
+        }),
+      ).resolves.toMatchObject({ id: "issue-2" });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[1]?.[0]).toBe(
+        "https://api.example.test/api/comments/comment-1/sub-issues",
+      );
+    });
+
     it("uses the dedicated endpoint for agent creation", async () => {
       stubFetchJson({ task_id: "task-1" }, 202);
       const client = new ApiClient("https://api.example.test");
@@ -781,6 +908,22 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const res = await client.listChildIssues("issue-1");
       expect(res).toEqual({ issues: [] });
+    });
+  });
+
+  describe("listIssueDuplicates", () => {
+    it("falls back to an empty relation when the body is null", async () => {
+      stubFetchJson(null);
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssueDuplicates("issue-1");
+      expect(res).toEqual({ duplicate_of: null, duplicates: [] });
+    });
+
+    it("defaults missing fields instead of failing", async () => {
+      stubFetchJson({});
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssueDuplicates("issue-1");
+      expect(res).toEqual({ duplicate_of: null, duplicates: [] });
     });
   });
 

@@ -199,8 +199,31 @@ export function getPreviewKind(
   return null;
 }
 
+/** Short type label for metadata lines — the extension, upper-cased (`PNG`). */
+export function fileTypeLabel(filename: string): string {
+  return extOf(filename).toUpperCase();
+}
+
 export function isPreviewable(contentType: string, filename: string): boolean {
   return getPreviewKind(contentType, filename) !== null;
+}
+
+// Kinds that render straight from a URL. Text kinds (markdown / html / text)
+// go through the ID-keyed `/api/attachments/{id}/content` proxy, so they can
+// only open when the attachment record is known.
+const URL_PREVIEWABLE_KINDS: ReadonlySet<PreviewKind> = new Set<PreviewKind>([
+  "image",
+  "pdf",
+  "video",
+  "audio",
+]);
+
+/** Whether the viewer can open `kind`, given whether the record is known. */
+export function canOpenPreview(
+  kind: PreviewKind | null,
+  hasRecord: boolean,
+): kind is PreviewKind {
+  return kind !== null && (hasRecord || URL_PREVIEWABLE_KINDS.has(kind));
 }
 
 // Pick the hljs language token for a file. Returns undefined when the file

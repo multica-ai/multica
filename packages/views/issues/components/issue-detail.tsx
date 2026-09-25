@@ -12,6 +12,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type React
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink, useBackOrReplace } from "../../navigation";
+import { IssueDuplicateBanner, IssueDuplicatesSection, isDuplicateIssue } from "./issue-duplicates";
 import {
   Archive,
   Calendar,
@@ -38,8 +39,8 @@ import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload, ImageSequenceProvider } from "../../editor";
-import { collectImageSequence, type ImageSequenceBlock } from "@multica/core/attachments/image-sequence";
+import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload, PreviewSequenceProvider, collectPreviewSequence } from "../../editor";
+import type { ImageSequenceBlock } from "@multica/core/attachments/image-sequence";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -63,13 +64,20 @@ import { PropertyIcon } from "../../common/property-icon";
 import type { Attachment, Issue, IssueProperty, IssueStatus, IssueStatusCategory, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { isBuiltInIssueStatus } from "@multica/core/issue-statuses";
-import { commentLandingTarget } from "@multica/core/issues/comment-deletion";
+import { commentLandingTarget, isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { errorCode } from "@multica/core/api";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
-import { maxSiblingStage } from "./pickers/stage-picker";
+import { StatusIcon } from "./status-icon";
+import { PriorityIcon } from "./priority-icon";
+import { StatusPicker } from "./pickers/status-picker";
+import { PriorityPicker } from "./pickers/priority-picker";
+import { StagePicker, maxSiblingStage } from "./pickers/stage-picker";
+import { StartDatePicker } from "./pickers/start-date-picker";
+import { DueDatePicker } from "./pickers/due-date-picker";
+import { AssigneePicker } from "./pickers/assignee-picker";
+import { LabelPicker } from "./pickers/label-picker";
 import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { IssueActionsDropdown, useIssueActions, IssueActionsContextMenu, IssueContextMenuProvider } from "../actions";
@@ -92,9 +100,10 @@ import { ThreadMinimap, type ThreadMinimapThread } from "./thread-minimap";
 import { collectThreadParticipants, collectThreadReplies, deriveThreadResolution } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
+import { WakeupsSection } from "./wakeups-section";
 import { QuickActionsSection } from "./quick-actions-section";
 import { PluginPanelSection } from "../../plugins";
-import { PullRequestList } from "./pull-request-list";
+import { PullRequestsSection } from "./pull-requests-section";
 import { useGitHubSettings } from "@multica/core/github";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -111,6 +120,7 @@ import { propertyListOptions } from "@multica/core/properties";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import {
   selectExpandedResolved,
+  useCommentCollapseStore,
   useRecentIssuesStore,
   useResolvedExpandStore,
   useSubIssuesCollapseStore,
@@ -299,10 +309,22 @@ function formatActivity(
     case "created":
       return t(($) => $.activity.created);
     case "status_changed":
+      // PR auto-complete (MUL-7429) says why the status moved.
+      if (details.source === "pr_automation") {
+        return t(($) => $.activity.status_changed_pr, {
+          from: statusLabel(details.from ?? "?", t, resolveStatusLabel),
+          to: statusLabel(details.to ?? "?", t, resolveStatusLabel),
+          prs: details.pull_requests ?? "",
+        });
+      }
       return t(($) => $.activity.status_changed, {
         from: statusLabel(details.from ?? "?", t, resolveStatusLabel),
         to: statusLabel(details.to ?? "?", t, resolveStatusLabel),
       });
+    case "pr_auto_complete_changed":
+      return (entry.details as { disabled?: unknown } | undefined)?.disabled === true
+        ? t(($) => $.activity.pr_auto_complete_disabled)
+        : t(($) => $.activity.pr_auto_complete_enabled);
     case "priority_changed":
       return t(($) => $.activity.priority_changed, {
         from: priorityLabel(details.from ?? "?", t),
@@ -335,6 +357,33 @@ function formatActivity(
       });
     case "description_updated":
       return t(($) => $.activity.description_updated);
+    case "duplicate_marked":
+      return t(($) => $.activity.duplicate_marked, {
+        identifier: details.original_identifier || "?",
+      });
+    case "duplicate_unmarked": {
+      const identifier = details.original_identifier || "?";
+      if (details.reason === "original_deleted") {
+        return t(($) => $.activity.duplicate_unmarked_original_deleted, { identifier });
+      }
+      // The row stands in for the status row of the reopen, so it says where
+      // the status went.
+      if (details.to) {
+        return t(($) => $.activity.duplicate_unmarked_to, {
+          identifier,
+          status: statusLabel(details.to, t, resolveStatusLabel),
+        });
+      }
+      return t(($) => $.activity.duplicate_unmarked, { identifier });
+    }
+    case "duplicate_added":
+      return t(($) => $.activity.duplicate_added, {
+        identifier: details.duplicate_identifier || "?",
+      });
+    case "duplicate_removed":
+      return t(($) => $.activity.duplicate_removed, {
+        identifier: details.duplicate_identifier || "?",
+      });
     case "task_completed":
       return t(($) => $.activity.task_completed, { count: entry.coalesced_count ?? 1 });
     case "task_failed":
@@ -363,6 +412,50 @@ function formatActivity(
   }
 }
 
+/**
+ * The issue a duplicate-mark activity (MUL-7349) names, when it can still be
+ * opened. A mark removed because its original was deleted has nowhere to
+ * link, so it renders as plain text.
+ */
+function duplicateActivityLink(entry: TimelineEntry): { id: string; identifier: string } | null {
+  const details = (entry.details ?? {}) as Record<string, string>;
+  switch (entry.action) {
+    case "duplicate_marked":
+    case "duplicate_unmarked":
+      if (details.reason === "original_deleted") return null;
+      return details.original_id && details.original_identifier
+        ? { id: details.original_id, identifier: details.original_identifier }
+        : null;
+    case "duplicate_added":
+    case "duplicate_removed":
+      return details.duplicate_id && details.duplicate_identifier
+        ? { id: details.duplicate_id, identifier: details.duplicate_identifier }
+        : null;
+    default:
+      return null;
+  }
+}
+
+/** Activity copy with the issue it names turned into a link. */
+function ActivityText({ entry, text }: { entry: TimelineEntry; text: string }) {
+  const paths = useWorkspacePaths();
+  const link = duplicateActivityLink(entry);
+  const at = link ? text.indexOf(link.identifier) : -1;
+  if (!link || at < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, at)}
+      <AppLink
+        href={paths.issueDetail(link.id)}
+        newTabTitle={link.identifier}
+        className="font-medium text-foreground underline-offset-4 hover:underline"
+      >
+        {link.identifier}
+      </AppLink>
+      {text.slice(at + link.identifier.length)}
+    </>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -611,19 +704,24 @@ function ActivityBlock({
       )}
       {visibleEntries.map((entry) => {
         const details = (entry.details ?? {}) as Record<string, string>;
+        // Duplicate rows replace the status rows of the same write, so they
+        // carry the status glyph those rows would have had.
         const isStatusChange = entry.action === "status_changed";
+        const markedDuplicate = entry.action === "duplicate_marked";
+        const unmarkedDuplicate = entry.action === "duplicate_unmarked" && !!details.to;
         const isPriorityChange = entry.action === "priority_changed";
         const isStartDateChange = entry.action === "start_date_changed";
         const isDueDateChange = entry.action === "due_date_changed";
 
         let leadIcon: React.ReactNode;
-        if (isStatusChange && details.to) {
+        if ((isStatusChange && details.to) || markedDuplicate || unmarkedDuplicate) {
+          const to = markedDuplicate ? "cancelled" : details.to;
           leadIcon = (
             <StatusIcon
-              status={details.to as IssueStatus}
-              category={resolveStatusCategory(details.to ?? "")}
-              color={resolveStatusColor(details.to ?? "")}
-              icon={resolveStatusIcon(details.to ?? "")}
+              status={to as IssueStatus}
+              category={resolveStatusCategory(to ?? "")}
+              color={resolveStatusColor(to ?? "")}
+              icon={resolveStatusIcon(to ?? "")}
               className="h-4 w-4 shrink-0"
             />
           );
@@ -655,7 +753,12 @@ function ActivityBlock({
               <span className="shrink-0 font-medium">
                 {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
               </span>
-              <span className="truncate">{formatActivity(entry, t, locale, getActorName, resolveStatusLabel)}</span>
+              <span className="truncate">
+                <ActivityText
+                  entry={entry}
+                  text={formatActivity(entry, t, locale, getActorName, resolveStatusLabel)}
+                />
+              </span>
               {(entry.coalesced_count ?? 1) > 1 &&
                 entry.action !== "task_completed" &&
                 entry.action !== "task_failed" && (
@@ -1523,9 +1626,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // - squad_leader_evaluated: never coalesce; outcome/reason are audit data
     const COALESCE_MS = 2 * 60 * 1000;
     const NO_TIME_LIMIT_ACTIONS = new Set(["task_completed", "task_failed"]);
-    const NEVER_COALESCE_ACTIONS = new Set(["squad_leader_evaluated"]);
-    // Unanchored runs join the timeline at the time their card shows: a
-    // published reply's own time, the live end while still working.
+    // Duplicate marks name a different issue on every row.
+    const NEVER_COALESCE_ACTIONS = new Set([
+      "squad_leader_evaluated",
+      "duplicate_marked",
+      "duplicate_unmarked",
+      "duplicate_added",
+      "duplicate_removed",
+    ]);
+    // Unanchored runs keep their enqueue-time slot while working, then use
+    // the published reply's time or the run's end time.
     const entryById = new Map(displayTimeline.map((entry) => [entry.id, entry]));
     const chronological = orderTimelineWithRuns(topLevel, standaloneRuns, entryById);
     const coalesced: (TimelineEntry | CommentRun)[] = [];
@@ -1644,12 +1754,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       items.flatMap((it) => {
         if (it.kind === "activity-group" || !it.entry) return [];
         const replies = timelineView.threadReplies.get(it.id) ?? EMPTY_REPLIES;
+        const resolution = deriveThreadResolution(it.entry, replies);
         return [
           {
             id: it.id,
             entry: it.entry,
-            resolved: deriveThreadResolution(it.entry, replies).kind !== "none",
+            resolved: resolution.kind !== "none",
             participants: collectThreadParticipants(it.entry, replies),
+            // Tombstones render no row, so they get no tick either.
+            replies: replies.filter((reply) => !isDeletedComment(reply)),
+            resolutionReplyId: resolution.kind === "reply" ? resolution.resolutionId : null,
           },
         ];
       }),
@@ -1734,33 +1848,113 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     },
     [],
   );
+  // Flash the landed comment the same way inbox deep-links do, so the eye has
+  // an anchor after the instant jump. (Folded resolved bars don't take the
+  // highlight prop — the scroll itself is the feedback there.)
+  const flashJumpTarget = useCallback((commentId: string) => {
+    setHighlightedId(commentId);
+    if (jumpFlashTimerRef.current !== null) window.clearTimeout(jumpFlashTimerRef.current);
+    jumpFlashTimerRef.current = window.setTimeout(() => setHighlightedId(null), 2000);
+  }, []);
+  // Jump to a mounted comment: any row in flat mode, or a reply inside a
+  // rendered thread. Drive the container's scrollTop directly — never native
+  // scrollIntoView, which also scrolls the desktop shell (#3929).
+  const jumpToComment = useCallback(
+    (commentId: string) => {
+      const el = document.getElementById(`comment-${commentId}`);
+      const container = scrollContainerEl;
+      if (!el || !container) return;
+      const c = container.getBoundingClientRect();
+      const e = el.getBoundingClientRect();
+      container.scrollTop = Math.max(0, container.scrollTop + (e.top - c.top) - 16);
+      flashJumpTarget(commentId);
+    },
+    [scrollContainerEl, flashJumpTarget],
+  );
   const jumpToThread = useCallback(
     (threadId: string) => {
-      if (isFlatTimeline) {
-        // Flat mode mounts every row, so the anchor is always in the DOM.
-        // Drive the container's scrollTop directly — never native
-        // scrollIntoView, which also scrolls the desktop shell (#3929).
-        const el = document.getElementById(`comment-${threadId}`);
-        const container = scrollContainerEl;
-        if (!el || !container) return;
-        const c = container.getBoundingClientRect();
-        const e = el.getBoundingClientRect();
-        container.scrollTop = Math.max(0, container.scrollTop + (e.top - c.top) - 16);
-      } else {
-        // Virtualized mode: the target row may not be mounted, so scroll by
-        // index and let Virtuoso mount it. Offset leaves a small top gap.
-        const index = items.findIndex((it) => it.id === threadId);
-        if (index < 0) return;
-        virtuosoRef.current?.scrollToIndex({ index, align: "start", offset: -16 });
-      }
-      // Flash the landed thread the same way inbox deep-links do, so the eye
-      // has an anchor after the instant jump. (Folded resolved bars don't
-      // take the highlight prop — the scroll itself is the feedback there.)
-      setHighlightedId(threadId);
-      if (jumpFlashTimerRef.current !== null) window.clearTimeout(jumpFlashTimerRef.current);
-      jumpFlashTimerRef.current = window.setTimeout(() => setHighlightedId(null), 2000);
+      // Flat mode mounts every row, so the anchor is always in the DOM.
+      if (isFlatTimeline) return jumpToComment(threadId);
+      // Virtualized mode: the target row may not be mounted, so scroll by
+      // index and let Virtuoso mount it. Offset leaves a small top gap.
+      const index = items.findIndex((it) => it.id === threadId);
+      if (index < 0) return;
+      virtuosoRef.current?.scrollToIndex({ index, align: "start", offset: -16 });
+      flashJumpTarget(threadId);
     },
-    [isFlatTimeline, items, scrollContainerEl],
+    [isFlatTimeline, items, jumpToComment, flashJumpTarget],
+  );
+  // Minimap jump to a reply. A reply's anchor exists only while its thread is
+  // open, so first undo whatever hides it — the reader's own collapse, a root
+  // resolution folding the whole thread into a bar, or a reply resolution
+  // folding the other replies — then mount the thread and let the effect
+  // below align the reply once its row lands.
+  const [pendingReplyJump, setPendingReplyJump] = useState<{ replyId: string; rootId: string } | null>(null);
+  const jumpToReply = useCallback(
+    (replyId: string) => {
+      const rootId = replyToRoot.get(replyId);
+      const index = rootId ? items.findIndex((it) => it.id === rootId) : -1;
+      const rootItem = items[index];
+      const root = rootItem && rootItem.kind !== "activity-group" ? rootItem.entry : undefined;
+      if (!rootId || !root) return;
+      const collapse = useCommentCollapseStore.getState();
+      if (collapse.isCollapsed(id, rootId)) collapse.toggle(id, rootId);
+      if (!expandedResolved.has(rootId)) {
+        const resolution = deriveThreadResolution(root, timelineView.threadReplies.get(rootId) ?? EMPTY_REPLIES);
+        if (resolution.kind === "root" || (resolution.kind === "reply" && resolution.resolutionId !== replyId)) {
+          toggleResolvedExpand(rootId, true);
+        }
+      }
+      if (!isFlatTimeline) virtuosoRef.current?.scrollToIndex({ index, align: "start", offset: -16 });
+      setPendingReplyJump({ replyId, rootId });
+    },
+    [id, items, replyToRoot, expandedResolved, timelineView.threadReplies, toggleResolvedExpand, isFlatTimeline],
+  );
+  // Land the pending reply once its row is in the DOM. The expansion commits
+  // on the next render and Virtuoso mounts the thread a frame or two later, so
+  // wait by frame (~1s cap), then re-align until async layout (markdown, code
+  // highlight, images) settles. Drive scrollTop directly — never native
+  // scrollIntoView (#3929) — and clear any sticky thread bar pinned at the top
+  // of the viewport so it cannot cover the reply's header.
+  useEffect(() => {
+    const container = scrollContainerEl;
+    if (!pendingReplyJump || !container) return;
+    const { replyId, rootId } = pendingReplyJump;
+    let rafId = 0;
+    let frames = 0;
+    let last = -1;
+    const align = () => {
+      const el = document.getElementById(`comment-${replyId}`);
+      if (!el) {
+        if (++frames < 60) rafId = requestAnimationFrame(align);
+        else setPendingReplyJump(null);
+        return;
+      }
+      const stickyBar = document
+        .getElementById(`comment-${rootId}`)
+        ?.querySelector<HTMLElement>("[data-thread-sticky-bar]");
+      const c = container.getBoundingClientRect();
+      const e = el.getBoundingClientRect();
+      const target = Math.max(
+        0,
+        container.scrollTop + (e.top - c.top) - 16 - (stickyBar?.offsetHeight ?? 0),
+      );
+      container.scrollTop = target;
+      if (Math.abs(target - last) > 1 && ++frames < 90) {
+        last = target;
+        rafId = requestAnimationFrame(align);
+        return;
+      }
+      flashJumpTarget(replyId);
+      setPendingReplyJump(null);
+    };
+    rafId = requestAnimationFrame(align);
+    return () => cancelAnimationFrame(rafId);
+  }, [pendingReplyJump, scrollContainerEl, flashJumpTarget]);
+  const jumpToMinimapTarget = useCallback(
+    (commentId: string) =>
+      replyToRoot.has(commentId) ? jumpToReply(commentId) : jumpToThread(commentId),
+    [replyToRoot, jumpToReply, jumpToThread],
   );
 
   const {
@@ -2041,19 +2235,28 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [issueAttachments, descPendingAttachments],
   );
 
-  // Every image in this issue, in the order the page renders them: the
-  // description first, then each timeline comment with its thread replies
+  // Every previewable file in this issue, in the order the page renders them:
+  // the description first, then each timeline comment with its thread replies
   // nested under it (MUL-5752). Built from `items` rather than the flat
   // timeline so a reply sits next to the root it renders under, and from data
   // rather than the DOM because Virtuoso only mounts the visible window.
   //
   // A resolved thread that is currently collapsed still contributes its
-  // images: they belong to the issue and are one click from being on screen,
+  // files: they belong to the issue and are one click from being on screen,
   // so leaving them out would make the counter change depending on which
   // threads happen to be folded.
-  const imageSequence = useMemo(() => {
+  //
+  // The description renders no standalone cards, and its attachment list is
+  // the whole issue's (comment uploads keep `issue_id`) — it only resolves the
+  // description's own references, or every comment file would be counted at
+  // the description's position.
+  const previewSequence = useMemo(() => {
     const blocks: ImageSequenceBlock[] = [
-      { content: issue?.description, attachments: descEditorAttachments },
+      {
+        content: issue?.description,
+        attachments: descEditorAttachments,
+        standalone: false,
+      },
     ];
     for (const item of items) {
       if (item.kind === "activity-group" || !item.entry) continue;
@@ -2065,7 +2268,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         blocks.push({ content: reply.content, attachments: reply.attachments });
       }
     }
-    return collectImageSequence(blocks);
+    return collectPreviewSequence(blocks);
   }, [issue?.description, descEditorAttachments, items, timelineView.threadReplies]);
 
   const handleDescriptionUpload = useCallback(
@@ -2315,7 +2518,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
           {/* Core props — always rendered. */}
           <PropRow label={t(($) => $.detail.prop_status)}>
-            <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
+            <StatusPicker
+              status={issue.status}
+              onUpdate={handleUpdateField}
+              align="start"
+              onMarkDuplicate={actions.openMarkDuplicate}
+              isDuplicate={isDuplicateIssue(issue)}
+            />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
@@ -2500,6 +2709,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           click an action they cannot run, and the refusal is explained at run
           time rather than by a silently shorter list. */}
       <QuickActionsSection issueId={issue.id} />
+      <WakeupsSection issueId={issue.id} closed={["done", "closed"].includes(resolveStatusCategory(issue.status))} />
       <PluginPanelSection issueId={issue.id} />
 
       {/* Parent issue — standalone section, only when the issue has a
@@ -2546,21 +2756,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </div>
       )}
 
+      <IssueDuplicatesSection issueId={issue.id} />
+
       {/* Pull requests — hidden when the workspace disables the PR sidebar
           (or the GitHub master switch is off). Backend data is kept either
           way so re-enabling restores the section instantly. */}
       {githubSettings.prSidebar && (
-        <div>
-          <button
-            type="button"
-            className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${pullRequestsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-            onClick={() => setPullRequestsOpen(!pullRequestsOpen)}
-          >
-            {t(($) => $.detail.section_pull_requests)}
-            <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${pullRequestsOpen ? "rotate-90" : ""}`} />
-          </button>
-          {pullRequestsOpen && <div className="pl-2"><PullRequestList issueId={id} /></div>}
-        </div>
+        <PullRequestsSection
+          issueId={id}
+          identifier={issue.identifier}
+          open={pullRequestsOpen}
+          onOpenChange={setPullRequestsOpen}
+        />
       )}
 
       {/* Execution log — active runs + collapsed past runs, each carrying its
@@ -2652,6 +2859,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onReplyAccepted: scrollToTimelineBottom, onEdit: editComment, onDelete: deleteComment,
             onToggleReaction: handleToggleReaction, onCreateSubIssue: openCommentSubIssue,
             onResolveToggle: handleResolveToggle,
+            onCopyLink: actions.copyCommentLink, onJumpToComment: jumpToComment,
             onCollapseResolved: reply.resolved_at ? () => toggleResolvedExpand(reply.id, false) : undefined,
             expandedResolvedIds: expandedResolved, onResolvedExpandChange: toggleResolvedExpand,
             highlightedCommentId: highlightedId,
@@ -2689,6 +2897,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onToggleReaction={handleToggleReaction}
             onCreateSubIssue={openCommentSubIssue}
             onResolveToggle={handleResolveToggle}
+            onCopyLink={actions.copyCommentLink}
+            onJumpToComment={jumpToComment}
             onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
             expandedResolvedIds={expandedResolved}
             onResolvedExpandChange={toggleResolvedExpand}
@@ -2749,11 +2959,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       : [];
 
   const detailContent = (
-    // Hosts the one image viewer this issue's images page through — see
-    // ImageSequenceProvider. Wraps the whole column so the description
-    // editor's images and the timeline's images share one sequence.
+    // Hosts the one viewer this issue's files page through — see
+    // PreviewSequenceProvider. Wraps the whole column so the description
+    // editor's files and the timeline's files share one sequence.
     <CurrentIssueRenderContextProvider value={currentIssueRenderContext}>
-    <ImageSequenceProvider items={imageSequence}>
+    <PreviewSequenceProvider items={previewSequence}>
     <div className="relative flex h-full min-w-0 flex-1 flex-col">
         {/* In-page find bar — floats over the top-right of the content column
             (below the breadcrumb header), outside the scroll container so it
@@ -2888,6 +3098,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             `useStickyComposer`), so it lands here — right where the launcher
             floats — once the reader scrolls to the bottom. */}
         <div className="mx-auto w-full max-w-4xl px-3 py-6 max-md:pb-chat-launcher md:px-8 md:py-8">
+          <IssueDuplicateBanner
+            issue={issue}
+            onUnmark={() =>
+              handleUpdateField(
+                { status: "todo" },
+                { onSuccess: () => toast.success(t(($) => $.duplicates.unmark_toast)) },
+              )
+            }
+          />
           {titleLazy.active && (
             <div className={titleLazy.ready ? undefined : "hidden"}>
               <TitleEditor
@@ -3482,18 +3701,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             column's px-8 padding when the gutter is 0 (overlay scrollbars),
             so it covers neither the scrollbar nor body text. It also clears
             the resize handle's 4px drag strip at the panel edge. Hover
-            previews a thread, click jumps to it. Hidden on mobile: no
+            previews a comment, click jumps to it. Hidden on mobile: no
             hover, and the gutter is too tight. */}
         {!isMobile && (
           <ThreadMinimap
             threads={minimapThreads}
             scrollContainerEl={scrollContainerEl}
-            onJump={jumpToThread}
+            onJump={jumpToMinimapTarget}
             className="absolute bottom-0 right-3 top-12"
           />
         )}
       </div>
-    </ImageSequenceProvider>
+    </PreviewSequenceProvider>
     </CurrentIssueRenderContextProvider>
   );
 

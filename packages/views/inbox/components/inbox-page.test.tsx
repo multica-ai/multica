@@ -117,12 +117,11 @@ vi.mock("@multica/core/inbox/mutations", () => {
 const issueDetailProps = vi.hoisted(
   () => [] as Array<Record<string, unknown>>,
 );
-vi.mock("../../issues/components", () => ({
+vi.mock("../../issues/components/issue-detail", () => ({
   IssueDetail: (props: Record<string, unknown>) => {
     issueDetailProps.push(props);
     return null;
   },
-  StatusIcon: () => null,
   issueHighlightMementoKey: (issueId: string) => `highlight:${issueId}`,
 }));
 

@@ -59,6 +59,9 @@ func TestMain(m *testing.M) {
 	case "usage_fixture":
 		runFakeClaudeUsageFixture()
 		os.Exit(0)
+	case "supplement":
+		runFakeClaudeSupplement()
+		os.Exit(0)
 	case "startup_stdout_burst":
 		runFakeClaudeStartupStdoutBurst()
 		os.Exit(0)

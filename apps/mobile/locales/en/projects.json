@@ -1,0 +1,76 @@
+{
+  "list": {
+    "title": "Projects",
+    "empty": "No projects yet",
+    "search_placeholder": "Search projects..."
+  },
+  "status": {
+    "planned": "Planned",
+    "in_progress": "In Progress",
+    "paused": "Paused",
+    "completed": "Completed",
+    "cancelled": "Cancelled"
+  },
+  "priority": {
+    "urgent": "Urgent",
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low",
+    "none": "No priority"
+  },
+  "detail": {
+    "properties": "Properties",
+    "related_issues": "Related issues",
+    "resources": "Resources",
+    "lead": "Lead",
+    "no_resources": "No resources attached.",
+    "add_resource": "Add resource"
+  },
+  "form": {
+    "icon_emoji": "Icon (emoji)",
+    "title": "Title",
+    "title_placeholder": "Project title",
+    "description": "Description",
+    "description_placeholder": "What is this project about?",
+    "discard_title": "Discard project?",
+    "discard_message": "Your draft will be lost.",
+    "keep_editing": "Keep editing",
+    "save_failed": "Failed to create project",
+    "save_failed_edit": "Failed to save"
+  },
+  "errors": {
+    "load_failed": "Failed to load project: {{message}}"
+  },
+  "actions": {
+    "creating": "Creating...",
+    "saving": "Saving..."
+  },
+  "menu": {
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "edit_details": "Edit details",
+    "open_web": "Open on web",
+    "project_actions": "Project actions"
+  },
+  "delete": {
+    "title": "Delete project?",
+    "message": "This cannot be undone. Issues in this project will become unassigned from any project."
+  },
+  "properties": {
+    "status": "Status",
+    "priority": "Priority",
+    "lead": "Lead",
+    "unassigned": "Unassigned"
+  },
+  "resources": {
+    "title": "Resources",
+    "add": "Add",
+    "detach_title": "Detach resource?",
+    "detach": "Detach",
+    "empty": "No resources attached."
+  },
+  "runs": {
+    "working": "Working",
+    "count": "Runs · {{count}}"
+  }
+}

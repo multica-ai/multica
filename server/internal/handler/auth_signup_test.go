@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -40,7 +41,8 @@ func TestSignupGating(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newTestHandler(tt.cfg)
-			err := h.checkSignupAllowed(tt.email, tt.isNew)
+			h.Queries = db.New(&mockDB{})
+			err := h.checkSignupAllowed(context.Background(), tt.email, tt.isNew)
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("got err=%v want=%v", err, tt.want)
 			}
@@ -86,12 +88,31 @@ func TestEmailCodeAllowlistErrors(t *testing.T) {
 	}
 }
 
+func TestSignupGatingReturnsPendingInvitationLookupError(t *testing.T) {
+	h := newTestHandler(Config{AllowSignup: false})
+	h.Queries = db.New(&mockDB{pendingInvitationErr: context.Canceled})
+
+	err := h.checkSignupAllowed(context.Background(), "invited@x.com", true)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got err=%v, want context canceled", err)
+	}
+}
+
 type mockDB struct {
 	db.DBTX
-	getUserErr error
+	invitationLookups    int
+	invitationEmail      string
+	getUserErr           error
+	pendingInvitation    bool
+	pendingInvitationErr error
 }
 
 func (m *mockDB) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+	if strings.HasPrefix(sql, "-- name: HasPendingInvitationForEmail :one\n") {
+		m.invitationLookups++
+		m.invitationEmail = args[0].(string)
+		return &mockRow{err: m.pendingInvitationErr, boolValue: &m.pendingInvitation}
+	}
 	return &mockRow{err: m.getUserErr}
 }
 
@@ -101,10 +122,21 @@ func (m *mockDB) Exec(ctx context.Context, sql string, args ...interface{}) (pgc
 
 type mockRow struct {
 	pgx.Row
-	err error
+	err       error
+	boolValue *bool
 }
 
 func (m *mockRow) Scan(dest ...interface{}) error {
+	if m.err != nil {
+		return m.err
+	}
+	if m.boolValue != nil {
+		value, ok := dest[0].(*bool)
+		if !ok {
+			return fmt.Errorf("expected *bool destination, got %T", dest[0])
+		}
+		*value = *m.boolValue
+	}
 	return m.err
 }
 
@@ -154,4 +186,66 @@ func TestFindOrCreateUserGating(t *testing.T) {
 			t.Fatalf("expected whitelisted user to pass signup check, but got %v", err)
 		}
 	})
+}
+
+// Invitations are explicit per-email exceptions for both signup flag values.
+func TestSignupInvitationAllowlistInteraction(t *testing.T) {
+	for _, allowSignup := range []bool{false, true} {
+		for _, allowlist := range []string{"none", "email", "domain", "both"} {
+			for _, invited := range []bool{false, true} {
+				t.Run(fmt.Sprintf("signup=%t/allowlist=%s/invited=%t", allowSignup, allowlist, invited), func(t *testing.T) {
+					cfg := Config{AllowSignup: allowSignup}
+					if allowlist == "email" || allowlist == "both" {
+						cfg.AllowedEmails = []string{"boss@company.com"}
+					}
+					if allowlist == "domain" || allowlist == "both" {
+						cfg.AllowedEmailDomains = []string{"company.com"}
+					}
+					mock := &mockDB{pendingInvitation: invited}
+					h := newTestHandler(cfg)
+					h.Queries = db.New(mock)
+					err := h.checkSignupAllowed(context.Background(), "OUTSIDER@OTHER.COM", true)
+					var want error
+					openSignup := allowSignup && allowlist == "none"
+					if !invited && !openSignup {
+						want = ErrSignupProhibited
+						if allowSignup {
+							want = ErrEmailNotAllowed
+						}
+					}
+					if !errors.Is(err, want) {
+						t.Fatalf("got %v, want %v", err, want)
+					}
+					if !openSignup && (mock.invitationLookups != 1 || mock.invitationEmail != "outsider@other.com") {
+						t.Fatalf("expected one normalized email lookup, got %d for %q", mock.invitationLookups, mock.invitationEmail)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestSignupSkipsUnnecessaryInvitationLookup(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		cfg   Config
+		isNew bool
+	}{
+		{"existing", Config{}, false},
+		{"open", Config{AllowSignup: true}, true},
+		{"email_match", Config{AllowedEmails: []string{"USER@COMPANY.COM"}}, true},
+		{"domain_match", Config{AllowedEmailDomains: []string{"COMPANY.COM"}}, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockDB{pendingInvitationErr: context.Canceled}
+			h := newTestHandler(tt.cfg)
+			h.Queries = db.New(mock)
+			if err := h.checkSignupAllowed(context.Background(), "user@company.com", tt.isNew); err != nil {
+				t.Fatal(err)
+			}
+			if mock.invitationLookups != 0 {
+				t.Fatalf("unexpected invitation lookups: %d", mock.invitationLookups)
+			}
+		})
+	}
 }

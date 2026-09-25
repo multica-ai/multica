@@ -324,6 +324,33 @@ describe("PreferencesTab — Timezone section", () => {
   });
 });
 
+describe("PreferencesTab — Replying to a running agent", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    userRef.current = null;
+    useCommentComposerStore.setState({ runningAgentReply: "steer" });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("defaults to adding the reply to the current run and saves starting after it", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    const select = screen.getByRole("combobox", { name: "When replying to a running agent" });
+    expect(select).toHaveTextContent("Add to current run");
+
+    await user.click(select);
+    await user.click(await screen.findByRole("option", { name: "Start after this run" }));
+
+    expect(useCommentComposerStore.getState().runningAgentReply).toBe("after_run");
+    expect(select).toHaveTextContent("Start after this run");
+    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("PreferencesTab — Sticky comment bar", () => {
   beforeEach(() => {
     vi.clearAllMocks();

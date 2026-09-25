@@ -50,7 +50,7 @@ export const metadata: Metadata = {
     default: "Multica Docs",
   },
   description:
-    "Documentation for Multica — the open-source managed agents platform.",
+    "Documentation for Multica — the source-available managed agents platform.",
 };
 
 export function generateStaticParams() {

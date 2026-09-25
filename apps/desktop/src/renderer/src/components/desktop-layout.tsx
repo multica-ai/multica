@@ -2,6 +2,7 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
 import { motion } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
+import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import {
   useNavigationInputBindings,
   useTabHistory,
@@ -26,6 +27,7 @@ import {
 } from "@multica/views/navigation";
 import { getCurrentSlug, subscribeToCurrentSlug } from "@multica/core/platform";
 import { useDesktopUnreadBadge } from "@multica/views/platform";
+import { useT } from "@multica/views/i18n";
 import {
   DesktopNavigationProvider,
   routeContentLinkPath,
@@ -67,9 +69,9 @@ function useNativeNavigationGestures() {
 // do not land beneath the traffic lights / navigation controls. The matching
 // 200ms transition cancels the sidebar gap's movement during toggle; live
 // resize previews disable it through data-sidebar-resize-consumer.
-function MainTopBar() {
+function MainTopBar({ sidebarMounted }: { sidebarMounted: boolean }) {
   const { state, isCompact } = useSidebar();
-  const sidebarHidden = state === "collapsed" || isCompact;
+  const sidebarHidden = !sidebarMounted || state === "collapsed" || isCompact;
   const toolbarClearance: React.CSSProperties["paddingLeft"] = sidebarHidden
     ? WINDOW_TOOLBAR_CLEARANCE
     : `max(0px, calc(${WINDOW_TOOLBAR_CLEARANCE}px - var(--sidebar-live-width, var(--sidebar-width))))`;
@@ -107,9 +109,17 @@ function MainTopBar() {
 // The canvas hugs the expanded sidebar with a hairline gap. When the sidebar
 // leaves the main flow, the left margin must grow to mirror the fixed mr-2 so
 // the floating canvas sits symmetrically inside the window frame.
-function MainCanvas({ children }: { children: React.ReactNode }) {
+function MainCanvas({
+  children,
+  showWorkspaceLoading,
+}: {
+  children: React.ReactNode;
+  showWorkspaceLoading: boolean;
+}) {
   const { state, isCompact } = useSidebar();
+  const { t } = useT("layout");
   const sidebarHidden = state === "collapsed" || isCompact;
+  const loadingLabel = t(($) => $.workspace_loader.loading_workspace);
 
   return (
     <motion.div
@@ -119,6 +129,19 @@ function MainCanvas({ children }: { children: React.ReactNode }) {
       transition={toolbarMotion}
     >
       {children}
+      {showWorkspaceLoading && (
+        <div
+          aria-label={loadingLabel}
+          aria-live="polite"
+          className="absolute inset-0 z-20 flex items-center justify-center bg-page-canvas"
+          role="status"
+        >
+          <div className="flex flex-col items-center gap-4">
+            <MulticaIcon className="size-8 animate-pulse" />
+            <p className="text-body text-muted-foreground">{loadingLabel}</p>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -251,8 +274,8 @@ export function DesktopShell() {
             {slug && <AppSidebar topSlot={<SidebarTopSpacer />} searchSlot={<SearchTrigger />} />}
             {/* Right side: header + content container */}
             <div className="flex flex-1 min-w-0 flex-col">
-              <MainTopBar />
-              <MainCanvas>
+              <MainTopBar sidebarMounted={Boolean(slug)} />
+              <MainCanvas showWorkspaceLoading={!slug}>
                 {/* Same indicator, same anchor as web: DashboardLayout puts it
                     at the top of SidebarInset, and MainCanvas is desktop's
                     equivalent relative/overflow-hidden content box. Desktop

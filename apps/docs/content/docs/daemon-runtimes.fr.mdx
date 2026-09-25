@@ -1,0 +1,174 @@
+---
+title: Daemon et runtimes
+description: Comment Multica connecte les ordinateurs, détecte les outils de codage IA et lance les exécutions.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica enregistre et coordonne le travail ; ce sont les ordinateurs connectés qui l'exécutent. Le **daemon** d'un ordinateur prend en charge les exécutions et invoque les outils de codage IA installés sur cette machine.
+
+## Daemon et runtime
+
+- Le **daemon** est le processus d'arrière-plan de Multica qui tourne sur un ordinateur. Il se connecte au serveur, détecte les outils locaux, prend en charge les exécutions et renvoie les résultats.
+- Un **runtime** représente un environnement d'exécution concret mis à la disposition d'un espace de travail. Il correspond à un ordinateur associé à un outil de codage IA — ou à un profil de runtime personnalisé — sur cet ordinateur.
+
+Par exemple, un ordinateur sur lequel sont installés Claude Code et Codex est connecté à deux espaces de travail. Le daemon enregistre un runtime Claude Code et un runtime Codex pour chaque espace de travail. Redémarrer le daemon met à jour les enregistrements existants ; il ne crée pas de nouveaux runtimes à chaque fois pour la même combinaison.
+
+## Lieu d'exécution et périmètre des données
+
+Les outils de codage IA qu'invoque un runtime local, leurs propres identifiants de connexion et vos répertoires de code locaux restent tous sur l'ordinateur connecté. Le serveur Multica n'exécute pas de commandes à la place des outils locaux et ne téléverse pas automatiquement l'intégralité de votre répertoire de travail.
+
+Pour permettre à l'équipe de collaborer, le serveur stocke les tâches, les commentaires, la configuration des agents, le contexte des exécutions, les enregistrements d'exécution et les résultats que les agents renvoient. Ce contenu peut inclure des extraits de code ou d'autres éléments de contexte du projet qu'un agent a choisi de lire et d'inclure dans ses réponses.
+
+<Callout type="warning">
+Les variables d'environnement personnalisées d'un agent sont stockées côté serveur et envoyées au runtime au moment de l'exécution. Ne comprenez pas « exécution locale » comme « chaque secret n'existe que sur cette machine » : les variables d'environnement personnalisées et la configuration MCP résident sur le serveur, et leur affichage est limité par les règles applicables aux valeurs sensibles.
+</Callout>
+
+## Démarrer le daemon
+
+Avec Multica Desktop, l'application démarre le daemon automatiquement — aucune commande supplémentaire n'est nécessaire.
+
+Sur le web, sur un ordinateur distant ou dans un environnement sans interface graphique, [installez d'abord le CLI Multica](/cli), puis exécutez :
+
+```bash
+multica daemon start
+```
+
+Par défaut, le daemon s'exécute en arrière-plan. Commandes courantes :
+
+| Commande | Rôle |
+| --- | --- |
+| `multica daemon status` | Afficher l'état du daemon et de la connexion |
+| `multica daemon logs -f` | Suivre les journaux |
+| `multica daemon restart` | Redémarrer le daemon et détecter à nouveau les outils locaux |
+| `multica daemon stop` | Arrêter le daemon |
+| `multica daemon start --foreground` | Exécuter dans le terminal courant, pour le débogage |
+
+Pour placer les répertoires de travail des exécutions sur un autre disque, enregistrez une racine pour le profil courant avec `multica config set workspaces_root <path>`, ou passez `--workspaces-root <path>` à `daemon start` ou `daemon restart`. L'option prime sur `MULTICA_WORKSPACES_ROOT`, qui prime elle-même sur la configuration du profil. Les répertoires d'exécution existants ne sont pas déplacés lorsque la racine change.
+
+Au démarrage, le daemon détecte les outils de codage IA pris en charge présents dans le `PATH` et enregistre des runtimes pour les espaces de travail auxquels vous êtes autorisé à vous connecter. Si vous venez d'installer un outil ou de vous y connecter, redémarrez le daemon pour qu'il le détecte à nouveau.
+
+Pour démarrer, le daemon a besoin de détecter au moins un outil de codage IA intégré pris en charge. Les méthodes d'installation et les noms des exécutables figurent dans [Installer les outils de codage IA](/install-agent-runtime).
+
+## Distribution et statut en ligne
+
+Une fois enregistré, un runtime maintient une connexion persistante. Lorsqu'une nouvelle exécution entre dans la file d'attente, le serveur prévient le daemon concerné ; le daemon interroge aussi le serveur périodiquement, en filet de sécurité après une interruption de connexion. Ainsi, lorsqu'un runtime est en ligne et dispose de capacité libre, les exécutions démarrent généralement immédiatement.
+
+Le daemon envoie un signal de présence (heartbeat) toutes les 15 secondes. Le serveur combine ces signaux et l'état de la connexion pour déterminer si un runtime est en ligne ; lorsqu'un daemon s'arrête de manière inattendue, le runtime apparaît généralement hors ligne en 3 minutes environ au plus tard.
+
+![Détails du runtime pour un ordinateur en ligne : le même daemon a enregistré 7 runtimes, une ligne par outil de codage IA détecté, chacune indiquant le statut en ligne et la version du CLI](/images/docs/runtime-machine-detail.webp)
+
+Lorsqu'un runtime est hors ligne :
+
+- Les exécutions déjà en file d'attente attendent que le runtime revienne. Elles n'échouent qu'une fois que le runtime a cessé d'envoyer des signaux de présence pendant plus longtemps que le délai de grâce de reconnexion **et** que l'exécution elle-même est en file d'attente depuis aussi longtemps ; ainsi, un runtime simplement occupé conserve sa file, et le travail assigné à un runtime déjà hors ligne bénéficie tout de même d'un délai de grâce complet.
+- Les exécutions en cours échouent ; les exécutions de tâche ou de discussion éligibles peuvent être relancées automatiquement.
+- Au redémarrage, le daemon réenregistre ses runtimes et récupère les exécutions qui ne se sont pas terminées proprement la dernière fois.
+- Un runtime hors ligne depuis plus de 7 jours et auquel aucun agent n'est lié (y compris les agents archivés) est supprimé automatiquement.
+
+Les états détaillés et les règles de relance figurent dans [Exécutions](/tasks).
+
+## Limites de parallélisme
+
+Par défaut, un daemon traite au maximum 20 exécutions simultanées, et chaque agent au maximum 6. Le parallélisme effectif correspond à la plus petite de ces deux valeurs.
+
+Une fois une limite atteinte, les nouvelles exécutions restent en file d'attente. Vous pouvez ajuster le parallélisme d'un agent donné dans ses paramètres, et le plafond global de la machine via `MULTICA_DAEMON_MAX_CONCURRENT_TASKS`. Les exécutions en parallèle se disputent en même temps la capacité de la machine, le quota du compte de l'outil et le même répertoire de travail.
+
+## Runtimes privés et publics
+
+Un runtime local est **privé** par défaut : seul le propriétaire du runtime peut y créer des agents. Les propriétaires et administrateurs de l'espace de travail ne font pas exception — le runtime est l'ordinateur de quelqu'un d'autre, et y exécuter un agent consomme sa machine et ses identifiants d'outils.
+
+Seul le propriétaire du runtime peut le rendre **public** — les administrateurs de l'espace de travail peuvent renommer ou supprimer un runtime, mais le partager relève de la décision du propriétaire. Les autres membres de l'espace de travail peuvent alors eux aussi sélectionner ce runtime ; cela ne partage pas les identifiants de connexion de l'outil de codage IA sous-jacent — cela permet seulement aux membres d'acheminer les exécutions de leurs agents vers cet ordinateur.
+
+## Profils de runtime personnalisés
+
+Si votre équipe utilise un wrapper interne, un exécutable à version figée, ou a besoin d'arguments supplémentaires fixes pour un outil compatible, créez un **profil de runtime personnalisé**.
+
+Un profil personnalisé n'ajoute pas de nouveau protocole de communication. Vous choisissez toujours l'une des familles de protocoles que Multica prend déjà en charge (le type de protocole d'intégration de l'outil ; voir [Comparatif des outils de codage IA](/providers)), et la commande elle-même doit être compatible avec cette famille.
+
+### Environnement du runtime pendant une exécution
+
+Lorsque le daemon démarre l'exécution d'un agent, il injecte le contexte de l'exécution dans le processus du runtime. Ces valeurs appartiennent au daemon : l'environnement personnalisé d'un agent ne peut remplacer aucune variable `MULTICA_` ni les variables de répertoire temporaire de l'exécution.
+
+Le tableau liste les variables que les runtimes personnalisés peuvent utiliser aujourd'hui. Il n'est volontairement pas exhaustif et ne constitue pas une surface d'API versionnée. Ne construisez vos intégrations que sur les cinq variables marquées **contrat d'intégration** ; considérez les autres comme des informations indicatives susceptibles de changer.
+
+| Variable | Valeur pendant une exécution | Stabilité |
+| --- | --- | --- |
+| `MULTICA_TOKEN` | Jeton d'API `mat_` limité à l'exécution | **Contrat d'intégration** |
+| `MULTICA_TASK_ID` | ID de l'exécution en cours | **Contrat d'intégration** |
+| `MULTICA_AGENT_ID` | ID de l'agent assigné | **Contrat d'intégration** |
+| `MULTICA_WORKSPACE_ID` | ID de l'espace de travail de l'exécution | **Contrat d'intégration** |
+| `MULTICA_SERVER_URL` | URL du serveur Multica sélectionnée par le daemon | **Contrat d'intégration** |
+| `MULTICA_TASK_CONFIG_ROOT` | Racine privée de configuration du CLI Multica, propre à l'exécution | Indicatif |
+| `MULTICA_TASK_WORKSPACES_ROOT` | Racine des répertoires de travail des exécutions gérés par le daemon | Indicatif |
+| `MULTICA_AGENT_NAME` | Nom affiché de l'agent assigné | Indicatif |
+| `MULTICA_DAEMON_PORT` | Port local de santé/API du daemon utilisé par les commandes réservées aux exécutions, comme `multica repo checkout` | Indicatif |
+| `MULTICA_TASK_SLOT` | Emplacement dans le pool de parallélisme global du daemon ; utile pour les ressources indexées par emplacement, comme les GPU | Indicatif |
+| `TMPDIR` | Répertoire temporaire privé de l'exécution en cours ; également fourni sous `TMP` et `TEMP` pour les outils multiplateformes | Indicatif |
+
+Le serveur détermine l'auteur des requêtes effectuées avec `MULTICA_TOKEN` ; les écritures telles que les commentaires de tâche sont attribuées à l'agent assigné et à l'exécution en cours. Pour tout savoir sur le rattachement du jeton, ses permissions, l'attribution, sa durée de vie maximale de 24 heures et son nettoyage, consultez [Jetons temporaires pour les exécutions d'agents](/auth-tokens#jetons-temporaires-pour-les-exécutions-dagents).
+
+<Callout type="warning">
+Ces valeurs se trouvent dans l'environnement réel du processus du runtime. Tout processus enfant lancé par le runtime hérite par défaut de toutes ces valeurs, y compris `MULTICA_TOKEN`. Si un processus enfant ne doit pas détenir cet identifiant, retirez-le explicitement ; ne comptez pas sur une isolation des processus qui n'existe pas. L'exception va dans l'autre sens : les outils qui filtrent l'environnement de leurs propres sous-processus peuvent exiger une règle d'autorisation explicite. Par exemple, l'outil shell de Codex écarte les noms contenant `TOKEN`, `KEY` ou `SECRET` ; le daemon installe donc une politique shell gérée qui autorise les variables d'exécution requises. Conservez le jeton uniquement dans les environnements de processus — jamais dans un prompt, un journal, un fichier du dépôt ou une configuration persistante. Un processus enfant partage l'identité et les permissions de l'exécution parente ; il ne reçoit pas de nouvelle identité à la portée indépendante.
+</Callout>
+
+### Créer un profil
+
+Seuls les propriétaires et administrateurs de l'espace de travail peuvent créer, modifier ou supprimer des profils de runtime personnalisés :
+
+1. Ouvrez **Runtimes** et accédez à un ordinateur sur lequel la commande est installée.
+2. Cliquez sur **Ajouter un runtime personnalisé**.
+3. Choisissez la famille de protocoles avec laquelle la commande est réellement compatible.
+4. Renseignez le nom, la commande et les arguments fixes, puis enregistrez.
+
+Le profil est partagé dans tout l'espace de travail. Chaque ordinateur connecté recherche la commande de son côté ; seuls les ordinateurs capables de la résoudre dans le `PATH` enregistrent le runtime correspondant. Créer un profil n'installe pas la commande et ne connecte pas les autres membres à l'outil.
+
+Le champ de commande accepte un exécutable et des arguments, pas un script shell. Les arguments simples, les guillemets et les échappements par barre oblique inverse fonctionnent ; les tubes, les redirections, `&&`, `;`, les accents graves (backticks) et l'expansion de variables d'environnement ne fonctionnent pas. Si vous avez besoin de ces comportements, placez-les dans un script d'encapsulation et utilisez ce script comme commande.
+
+### Ordre de vos arguments
+
+Tout ce que vous saisissez dans le champ de commande reste directement après l'exécutable, avant les arguments ajoutés par Multica :
+
+```text
+<your command> <your fixed arguments> <Multica's protocol arguments> <the agent's custom arguments>
+```
+
+C'est ce qui permet à un wrapper à sous-commandes de fonctionner. Si votre commande est `ccms start q36`, l'outil voit d'abord `start q36` et peut sélectionner sa sous-commande avant que n'arrivent le `-p` de Multica et le reste — c'est le seul ordre qu'accepte ce type de wrapper.
+
+Auparavant, vos arguments étaient ajoutés en dernier. La plupart des commandes à options les analysent de la même façon dans les deux cas, mais pas toutes — une commande qui distingue les options globales des options de sous-commande peut être sensible à la position d'une option. Si vous avez déjà un profil avec des arguments fixes, lancez une exécution dessus après la mise à jour pour vérifier qu'il fonctionne toujours.
+
+Deux autres conséquences à connaître :
+
+- **Les valeurs de Multica l'emportent en cas de conflit.** Si vos arguments fixes définissent une option que Multica définit aussi, la valeur de Multica arrive plus tard et prend effet. Surtout, un modèle choisi sur l'agent remplace un `--model` figé dans le profil. Pour imposer un modèle à tout le monde, laissez vide le champ du modèle des agents.
+- **Les options critiques pour le protocole sont ignorées.** `-p`, `--output-format`, `--input-format`, `--permission-mode` et leurs équivalents pour les autres familles sont retirés de vos arguments fixes, car les remplacer romprait la connexion du daemon à l'outil. Les sous-commandes et les autres arguments positionnels sont toujours transmis.
+
+Si un daemon lancé par Desktop ne trouve pas une commande que votre terminal peut exécuter, définissez un chemin absolu pour l'ordinateur courant :
+
+```bash
+multica runtime profile set-path <profile-id> --path /absolute/path/to/command
+```
+
+Supprimer le remplacement de chemin :
+
+```bash
+multica runtime profile unset-path <profile-id>
+```
+
+Modifier un profil n'affecte que les exécutions prises en charge par la suite. Avant de supprimer un profil, occupez-vous des agents actifs encore liés à ses runtimes. Supprimer uniquement l'instance de runtime sur un ordinateur ne supprime pas le profil — un daemon en cours d'exécution le réenregistrera.
+
+## Dépanner un runtime hors ligne
+
+Vérifiez dans cet ordre :
+
+1. Exécutez `multica daemon status` pour confirmer que le daemon tourne.
+2. Exécutez `multica daemon logs -f` pour rechercher des erreurs d'authentification, de réseau ou de détection d'outils.
+3. Exécutez `command -v <tool-command>` dans le même environnement pour confirmer que le daemon peut trouver l'outil.
+4. Ouvrez la page **Runtimes** de Multica et vérifiez que l'ordinateur cible et l'outil de codage IA correspondant apparaissent en ligne.
+5. Après l'installation d'un outil, une modification du chemin ou la mise à jour d'un profil, exécutez `multica daemon restart`.
+
+Si le problème persiste, consultez [Dépannage](/troubleshooting).
+
+## Étapes suivantes
+
+- [Installer les outils de codage IA](/install-agent-runtime) — installer et vérifier un outil de codage IA pris en charge.
+- [Comparatif des outils de codage IA](/providers) — comparer les modèles, la reprise de session, MCP et la prise en charge des skills.
+- [Exécutions](/tasks) — file d'attente, arrêt et relances.

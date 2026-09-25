@@ -81,7 +81,13 @@
       "blocked": "À l'arrêt, en attente d'une dépendance extérieure.",
       "done": "Terminé.",
       "cancelled": "Abandonné."
-    }
+    },
+    "automation_title": "Automatisation",
+    "pr_auto_complete_label": "Terminer les tâches quand leurs PR sont fusionnées",
+    "pr_auto_complete_description": "Une tâche passe à Terminé dès que toutes ses PR liées sont fusionnées et que l’une d’elles la ferme par un mot-clé. S’applique aux PR fusionnées à partir de maintenant.",
+    "pr_auto_complete_example": "Écrivez le mot-clé dans le titre ou la description de la PR, par ex.",
+    "pr_auto_complete_example_title": "Closes MUL-123",
+    "pr_auto_complete_badge": "Définie à la fusion des PR"
   },
   "quick_actions": {
     "title": "Actions rapides",
@@ -161,6 +167,12 @@
     },
     "sticky_comment_bar": {
       "title": "Épingler la barre de commentaire en bas"
+    },
+    "running_agent_reply": {
+      "title": "En répondant à un agent en cours d'exécution",
+      "steer": "Ajouter à l'exécution en cours",
+      "after_run": "Démarrer après cette exécution",
+      "hint": "Définit seulement le choix par défaut. Vous pouvez le modifier pour chaque message avant l'envoi."
     },
     "issue_title": "Création de tâches",
     "comments_title": "Commentaires",
@@ -635,7 +647,7 @@
       },
       "agent_activity": {
         "label": "Activité des agents",
-        "description": "Lorsqu'une exécution d'agent se termine ou échoue"
+        "description": "Lorsqu'une exécution d'agent échoue"
       }
     },
     "system": {
@@ -757,10 +769,6 @@
     "master_description_off": "Les fonctionnalités GitHub sont en pause. Les données existantes sont conservées.",
     "section_connection": "Connexion",
     "connection_title": "GitHub App",
-    "connection_description_prefix": "Associez automatiquement les tâches aux pull requests. Une PR est associée lorsque",
-    "connection_description_suffix": "figure dans le nom de sa branche ou son titre, ou que sa description contient Closes MUL-123. Fusionner une PR contenant ce mot-clé de clôture fait également passer la tâche à",
-    "connection_description_done": "Terminé",
-    "connection_identifier_example": "MUL-123",
     "connected_to": "Connecté à {{login}}",
     "connect_github": "Connecter GitHub",
     "connect_opening": "Ouverture…",
@@ -790,7 +798,12 @@
     "section_repositories": "Dépôts",
     "repositories_shortcut_label": "Les URL de dépôts se trouvent dans l'onglet Dépôts",
     "repositories_shortcut_link": "Gérer les dépôts →",
-    "toast_failed": "Échec de la mise à jour des paramètres GitHub"
+    "toast_failed": "Échec de la mise à jour des paramètres GitHub",
+    "feature_auto_link_description": "Lie une PR à la tâche dont l’identifiant, par ex. {{example}}, figure dans son titre ou sa branche, ou suit « Closes » dans sa description.",
+    "feature_pr_auto_complete_label": "Terminer les tâches quand leurs PR sont fusionnées",
+    "feature_pr_auto_complete_on": "Activé · commun à tous les hébergeurs de code",
+    "feature_pr_auto_complete_off": "Désactivé · commun à tous les hébergeurs de code",
+    "feature_pr_auto_complete_manage": "Gérer"
   },
   "vcs": {
     "section_title": "Fournisseurs git (auto-hébergés)",
@@ -872,6 +885,8 @@
     "agent_bot_connected_label_lark": "Connecté à Lark",
     "agent_bot_manage_link_feishu": "Gérer dans Feishu",
     "agent_bot_manage_link_lark": "Gérer dans Lark",
+    "agent_bot_silent_hint": "Bot connecté mais silencieux ? Vérifiez que l'application envoie les événements via la connexion longue.",
+    "agent_bot_silent_hint_link": "Dépannage",
     "agent_bot_manage_tooltip_feishu": "Ouvrir la page d'application de ce bot dans Feishu — gérer les portées, modifier le nom affiché, demander des permissions supplémentaires.",
     "agent_bot_manage_tooltip_lark": "Ouvrir la page d'application de ce bot dans Lark — gérer les portées, modifier le nom affiché, demander des permissions supplémentaires.",
     "agent_bot_disconnect_tooltip": "Dissocier ce bot Lark de l'agent. Le bot cessera de recevoir les messages Lark.",

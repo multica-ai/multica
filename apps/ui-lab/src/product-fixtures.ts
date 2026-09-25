@@ -300,7 +300,7 @@ export function createFixtureApi(getLocale: () => LabLocale = () => "en") {
       installations: [],
       configured: false,
     }),
-    listIssuePullRequests: async () => ({ pull_requests: [] }),
+    listIssuePullRequests: async () => ({ pull_requests: [], auto_complete: null }),
     listAttachments: async () => [],
     listIssueSubscribers: async () => [],
     getAssigneeFrequency: async () => [],

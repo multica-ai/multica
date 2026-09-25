@@ -26,19 +26,94 @@ type telegramRawEvent struct {
 	// SenderName is the sender's Telegram display name, carried for
 	// group-context attribution.
 	SenderName string `json:"sender_name,omitempty"`
+	// Media is the one file this message carries, for the media resolver to
+	// fetch off the ACK path. Nil for text-only messages.
+	Media *inboundMedia `json:"media,omitempty"`
 }
 
-// inboundFromUpdate normalizes one Telegram update. ok=false means the update
-// must not reach the core: bot/self messages, channel posts, edits (excluded
-// via allowed_updates already), or unsupported media (the caller decides
-// whether to send an "unsupported" notice for p2p).
+// inboundMedia is what the media resolver needs to fetch a message's file:
+// the getFile handle plus the display metadata Telegram already told us.
+type inboundMedia struct {
+	Kind         channel.MsgType `json:"kind"`
+	FileID       string          `json:"file_id"`
+	FileUniqueID string          `json:"file_unique_id,omitempty"`
+	FileName     string          `json:"file_name,omitempty"`
+	MimeType     string          `json:"mime_type,omitempty"`
+	FileSize     int64           `json:"file_size,omitempty"`
+	// Placeholder is the exact marker in the message body the bound
+	// attachment replaces with its Markdown link. It stays as plain text when
+	// the fetch fails, so the agent still knows a file was there.
+	Placeholder string `json:"placeholder"`
+	// PlaceholderIndex is which occurrence of Placeholder in the body is the
+	// sender's: quoted and recent context go in front of it, and a member
+	// who typed the same marker there must not receive the file.
+	PlaceholderIndex int `json:"placeholder_index,omitempty"`
+}
+
+// mediaFromMessage picks the message's downloadable file, or nil. Photos come
+// in several renditions; the largest is the one worth keeping.
+func mediaFromMessage(m *Message) *inboundMedia {
+	switch {
+	case len(m.Photo) > 0:
+		best := m.Photo[0]
+		for _, p := range m.Photo[1:] {
+			if p.Width*p.Height >= best.Width*best.Height {
+				best = p
+			}
+		}
+		return &inboundMedia{Kind: channel.MsgTypeImage, FileID: best.FileID, FileUniqueID: best.FileUniqueID,
+			MimeType: "image/jpeg", FileSize: best.FileSize, Placeholder: "[Image]"}
+	case m.Document != nil:
+		return fileRefMedia(channel.MsgTypeFile, m.Document, "[File: "+firstNonEmpty(m.Document.FileName, "attachment")+"]")
+	case m.Video != nil:
+		return fileRefMedia(channel.MsgTypeVideo, m.Video, "[Video]")
+	case m.VideoNote != nil:
+		return fileRefMedia(channel.MsgTypeVideo, m.VideoNote, "[Video note]")
+	case m.Animation != nil:
+		return fileRefMedia(channel.MsgTypeVideo, m.Animation, "[Animation]")
+	case m.Audio != nil:
+		return fileRefMedia(channel.MsgTypeAudio, m.Audio, "[Audio]")
+	case m.Voice != nil:
+		return fileRefMedia(channel.MsgTypeAudio, m.Voice, "[Voice message]")
+	}
+	return nil
+}
+
+func fileRefMedia(kind channel.MsgType, f *FileRef, placeholder string) *inboundMedia {
+	if f.FileID == "" {
+		return nil
+	}
+	return &inboundMedia{Kind: kind, FileID: f.FileID, FileUniqueID: f.FileUniqueID,
+		FileName: f.FileName, MimeType: f.MimeType, FileSize: f.FileSize, Placeholder: placeholder}
+}
+
+// inboundFromUpdate normalizes one Telegram update without any recent group
+// context. See inboundFromUpdateWithContext.
+func inboundFromUpdate(u Update, botID int64, botUsername string) (channel.InboundMessage, bool) {
+	return inboundFromUpdateWithContext(u, botID, botUsername, nil)
+}
+
+// inboundFromUpdateWithContext normalizes one Telegram update. ok=false means
+// the update must not reach the core: bot/self messages, channel posts, edits
+// (excluded via allowed_updates already), or unsupported media (the caller
+// decides whether to send an "unsupported" notice for p2p).
 //
 // Group addressing policy mirrors Slack v1: a group message is addressed to
 // the bot only when it carries an explicit @bot mention or directly replies to
-// one of the bot's messages. Privacy mode is left ON, so Telegram already
-// withholds unaddressed group chatter from the bot; this check is the
-// defense-in-depth for bots whose privacy mode was disabled in BotFather.
-func inboundFromUpdate(u Update, botID int64, botUsername string) (channel.InboundMessage, bool) {
+// one of the bot's messages. Telegram only withholds unaddressed group
+// chatter while the bot's privacy mode is ON and the bot is not a group admin;
+// the recent-context feature actively invites operators to turn privacy off,
+// so this check — not Telegram — is what keeps unaddressed chatter from
+// starting a turn.
+//
+// recent, when non-nil, supplies the preceding messages of the same
+// chat/topic. They are inlined as a <recent_context> block ahead of an
+// addressed group message (never p2p, never an unaddressed one, and never
+// for /new — a new Chat must not inherit the previous Chat's ambient
+// context), matching Lark's enricher composition: recent → quoted → own.
+// Ambient context is not "selected" context: HasSelectedContext stays tied
+// to the explicitly quoted reply.
+func inboundFromUpdateWithContext(u Update, botID int64, botUsername string, recent recentContextSource) (channel.InboundMessage, bool) {
 	m := u.Message
 	if m == nil || m.From == nil || m.From.IsBot || m.From.ID == botID {
 		return channel.InboundMessage{}, false
@@ -53,6 +128,7 @@ func inboundFromUpdate(u Update, botID int64, botUsername string) (channel.Inbou
 		text = m.Caption
 	}
 	msgType := classifyMessage(m)
+	media := mediaFromMessage(m)
 
 	mentioned := mentionsBot(m, botUsername)
 	repliedToBot := m.ReplyToMessage != nil && m.ReplyToMessage.From != nil && m.ReplyToMessage.From.ID == botID
@@ -61,15 +137,39 @@ func inboundFromUpdate(u Update, botID int64, botUsername string) (channel.Inbou
 	cleaned := normalizeText(text, botUsername)
 	commandText := cleaned
 	forceFresh := false
+	startChat := false
 	if control, ok := engine.ParseControlCommand(cleaned); ok {
 		cleaned = control.Body
 		forceFresh = control.Kind == engine.ControlCommandFreshSession
+		startChat = control.Kind == engine.ControlCommandNewChat
 	}
 	agentText := cleaned
+	own := ""
+	if media != nil {
+		// The placeholder leads the sender's own text, so a caption reads as
+		// the caption of the file above it once the resolver swaps the marker
+		// for the attachment link. Quoted and recent context still go in front.
+		own = media.Placeholder
+		if cleaned != "" {
+			own += "\n" + cleaned
+		}
+		agentText = own
+	}
 	quotedHuman := m.ReplyToMessage != nil && m.ReplyToMessage.From != nil && !m.ReplyToMessage.From.IsBot
 	hasSelectedContext := chatType == channel.ChatTypeGroup && mentioned && quotedHuman
 	if hasSelectedContext {
-		agentText = enrichWithQuotedHumanMessage(cleaned, m.Chat.ID, m.ReplyToMessage)
+		agentText = enrichWithQuotedHumanMessage(agentText, m.Chat.ID, m.ReplyToMessage)
+	}
+	if recent != nil && chatType == channel.ChatTypeGroup && addressed && !startChat {
+		agentText = enrichWithRecentContext(agentText, m, recent)
+	}
+	if media != nil {
+		// The engine replaces the placeholder by occurrence, and the context
+		// enrichers only ever prepend, so the sender's own segment is the
+		// suffix. Count every occurrence ahead of it — user-typed literals
+		// included — so a member who wrote "[Image]" in the window does not
+		// receive the sender's file. Same rule as DingTalk's quoted block.
+		media.PlaceholderIndex = strings.Count(agentText[:len(agentText)-len(own)], media.Placeholder)
 	}
 
 	senderID := strconv.FormatInt(m.From.ID, 10)
@@ -83,6 +183,7 @@ func inboundFromUpdate(u Update, botID int64, botUsername string) (channel.Inbou
 		BotID:      strconv.FormatInt(botID, 10),
 		EventType:  "message",
 		SenderName: senderDisplayName(m.From),
+		Media:      media,
 	})
 
 	var reply *channel.ReplyCtx
@@ -137,18 +238,18 @@ func telegramChatType(t string) (channel.ChatType, bool) {
 	}
 }
 
-// classifyMessage maps the message payload to the normalized MsgType. Only
-// text is actionable in v1 (aligned with Feishu/Slack); media kinds are
-// reported so the caller can reply "unsupported" rather than stay silent.
+// classifyMessage maps the message payload to the normalized MsgType. Text and
+// the downloadable media kinds are ingested; MsgTypeUnknown (stickers,
+// locations, polls, …) is what the caller answers with the unsupported notice.
 func classifyMessage(m *Message) channel.MsgType {
 	switch {
 	case m.Text != "":
 		return channel.MsgTypeText
 	case len(m.Photo) > 0:
 		return channel.MsgTypeImage
-	case m.Voice != nil:
+	case m.Voice != nil, m.Audio != nil:
 		return channel.MsgTypeAudio
-	case m.Video != nil:
+	case m.Video != nil, m.VideoNote != nil, m.Animation != nil:
 		return channel.MsgTypeVideo
 	case m.Document != nil:
 		return channel.MsgTypeFile
@@ -222,6 +323,30 @@ func enrichWithQuotedHumanMessage(instruction string, chatID int64, quoted *Mess
 	msgType := classifyMessage(quoted)
 	block := fmt.Sprintf("<quoted_message message_id=%q sender=%q type=%q>\n%s\n</quoted_message>",
 		messageKey(chatID, quoted.MessageID), sender, msgType, quotedText)
+	if instruction == "" {
+		return block
+	}
+	return block + "\n\n" + instruction
+}
+
+// enrichWithRecentContext prepends the chat/topic's preceding messages to the
+// instruction. The trigger itself and an explicitly quoted parent are excluded
+// from the window: the first is the instruction, the second is already
+// rendered as <quoted_message>. An empty window leaves the text untouched.
+func enrichWithRecentContext(instruction string, m *Message, recent recentContextSource) string {
+	exclude := []int64{m.MessageID}
+	if m.ReplyToMessage != nil {
+		exclude = append(exclude, m.ReplyToMessage.MessageID)
+	}
+	var threadID int64
+	if m.IsTopicMessage {
+		threadID = m.MessageThreadID
+	}
+	entries := recent.Snapshot(m.Chat.ID, threadID, exclude...)
+	if len(entries) == 0 {
+		return instruction
+	}
+	block := renderRecentContextBlock(entries)
 	if instruction == "" {
 		return block
 	}

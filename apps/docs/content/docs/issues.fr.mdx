@@ -1,0 +1,128 @@
+---
+title: Tâches
+description: Une tâche regroupe le contexte, l'assigné, le statut et l'historique d'exécution d'un travail.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Une tâche est l'unité de base de Multica pour organiser le travail : une fonctionnalité, un bug, une investigation — tout ce qu'un membre ou un agent doit prendre en charge et faire avancer. La discussion qui l'entoure, ses changements de statut et chacune de ses exécutions restent au même endroit : inutile de reconstituer le contexte à partir d'historiques de discussion ou de sorties de terminal.
+
+## Composantes d'une tâche
+
+| Élément | Rôle |
+|---|---|
+| **Titre et description** | Objectif, contexte, exigences et critères d'acceptation. |
+| **Statut et priorité** | Où en est le travail et ce qu'il faut traiter en premier. |
+| **Assigné à** | Un membre de l'espace de travail, un agent ou un squad. |
+| **Dates, étiquettes et propriétés personnalisées** | Planification, catégorisation et champs propres à votre équipe. |
+| **Projet et relations parent-enfant** | S'inscrit dans un ensemble de travail plus large, ou se découpe en sous-tâches. |
+| **Activité et journal d'exécution** | Commentaires, changements de statut, exécutions et résultats renvoyés par les agents. |
+
+![Détail d'une tâche : description, discussion, propriétés à droite et journal d'exécution](/images/docs/quickstart-run-result.webp)
+
+## Créer une tâche
+
+Créez-en une depuis la page **Tâches** ou à l'intérieur d'un projet — un titre suffit, et toutes les autres propriétés peuvent être renseignées plus tard.
+
+Chaque tâche porte un numéro, par exemple `MUL-123`. Les chiffres s'incrémentent au sein de l'espace de travail ; après qu'un administrateur a modifié le préfixe des tâches de l'espace de travail, les numéros s'affichent avec le nouveau préfixe. Voir [Espaces de travail](/workspaces#créer-un-espace-de-travail).
+
+## Choisir l'assigné
+
+| Assigné à | Effet |
+|---|---|
+| **Membre** | Ce membre prend en charge le suivi ; aucune exécution n'est créée. |
+| **Agent** | Une exécution est créée pour cet agent. |
+| **Squad** | Le chef du squad la reçoit et décide qui la traite. |
+
+Lorsqu'elle est assignée à un agent ou à un squad, la tâche est immédiatement mise en file d'attente, sauf si elle est en `backlog` ; si le runtime est hors ligne, l'exécution attend dans la file. Les agents et les squads archivés ne peuvent pas être assignés.
+
+L'assignation ne contourne pas l'**Accès** d'un agent ; lors d'une assignation à un squad, c'est l'Accès du chef qui est vérifié. Voir [Assigner des tâches aux agents](/assigning-issues).
+
+## Statut
+
+Chaque espace de travail démarre avec sept statuts intégrés, regroupés en quatre catégories de cycle de vie :
+
+| Catégorie | Statuts intégrés | Signification |
+|---|---|---|
+| `unstarted` (Non démarré) | `backlog`, `todo` | Travail non démarré, qu'il soit planifié ou reporté. |
+| `started` (Démarrage) | `in_progress`, `in_review`, `blocked` | Le travail a commencé, attend une relecture ou ne peut pas continuer pour l'instant. |
+| `done` (Terminé) | `done` | Terminé avec succès ; état final. |
+| `closed` (Fermée) | `cancelled` | Abandonné ; état final, sans aboutissement réussi. |
+
+Les catégories simplifient le raisonnement sur le cycle de vie. Les tableaux, les listes, les filtres et les tris s'appuient tous sur le statut individuel, et les statuts concrets préservent le comportement de workflow plus spécifique sur lequel reposent les agents et les automatisations.
+
+| Statut | Signification |
+|---|---|
+| `backlog` (À planifier) | Pas encore à démarrer. Une tâche assignée à un agent ne crée une exécution qu'après avoir quitté `backlog`. |
+| `todo` (À faire) | Cadrée et en attente de démarrage. |
+| `in_progress` (En cours) | En cours de traitement. |
+| `in_review` (En relecture) | Un résultat attend une relecture. |
+| `done` (Terminé) | Terminée. |
+| `blocked` (Bloqué) | Ne peut pas continuer pour l'instant. |
+| `cancelled` (Annulé) | Abandonnée ; l'historique est conservé. |
+
+Il n'existe pas de flux imposé entre les statuts — membres et agents peuvent les modifier directement.
+
+Les agents inscrivent le statut dans lequel se trouve la tâche à mesure que leur travail le fait évoluer : commencer ce que demande la tâche — quelle qu'en soit la forme : recherche, conception ou relecture demandée par la tâche elle-même — la fait passer immédiatement à `in_progress`, pour que le tableau montre le travail pendant son déroulement ; une livraison la fait passer à `in_review` ; un travail qui se poursuit au-delà du tour la maintient en `in_progress` ; un tour qui ne produit rien du livrable propre à la tâche — répondre à des questions, donner un avis sur un travail géré ailleurs — laisse le statut inchangé du début à la fin. Ces mises à jour sont écrites explicitement par l'agent via le CLI Multica pendant l'exécution — le serveur ne change pas le statut de la tâche au démarrage ou à la fin d'une exécution (hormis les deux exceptions système ci-dessous). `done` relève généralement d'une confirmation humaine, ou d'une intégration, par exemple la fusion d'une PR avec intention de clôture.
+
+<Callout type="info">
+Deux changements sont effectués par le système :
+
+- Lorsqu'une exécution échoue, que la tâche n'a aucune autre exécution et qu'aucune relance n'est déclenchée, `in_progress` revient à `todo`.
+- Lorsqu'une PR GitHub liée est fusionnée avec intention de clôture et qu'aucune autre PR liée n'est encore ouverte ou en brouillon, la tâche passe à `done`.
+</Callout>
+
+### Statuts personnalisés
+
+Un propriétaire ou un administrateur de l'espace de travail peut ajouter des statuts dans **Paramètres → États des tâches** — `Code Review`, `QA`, `Rework`. Chaque statut appartient à l'une des quatre catégories de cycle de vie :
+
+| Catégorie | Signification dans le cycle de vie |
+|---|---|
+| `unstarted` | Non démarré. Comprend les statuts intégrés À planifier et À faire. |
+| `started` | En cours, y compris la relecture et l'attente. |
+| `done` | Terminé avec succès ; état final. |
+| `closed` | Annulé ou abandonné ; état final, sans aboutissement réussi. |
+
+Les statuts personnalisés n'héritent que de la sémantique du cycle de vie. Ils n'héritent ni de la mise en attente propre au statut intégré À planifier, ni de la finalisation des automatisations par En relecture, ni de l'échec signalé par Bloqué, ni de la récupération appliquée à En cours. Utilisez le statut intégré correspondant lorsque ce comportement est nécessaire. Les anciens statuts personnalisés suivent les mêmes règles : Awaiting Response correspond à un travail en cours, et non à une finalisation automatique de relecture. L'assignation et la création suivent toujours les règles générales de déclenchement des agents.
+
+Pour les clients déjà installés, les champs de catégorie existants de l'API conservent l'énumération à sept valeurs transmise sur le réseau. Les nouveaux clients normalisent cette représentation en quatre catégories ; ces valeurs transmises ne confèrent jamais d'héritage de comportement. La base de données ne stocke que les quatre valeurs de cycle de vie.
+
+Quatre conséquences découlent de ce modèle :
+
+- **La catégorie d'un statut est figée dès sa création.** La modifier ensuite changerait le comportement de cycle de vie de toutes les tâches déjà dans ce statut ; l'éditeur la laisse donc en lecture seule. Choisissez d'abord l'étape du cycle de vie, puis nommez le statut.
+- **Le regroupement par statut utilise les statuts individuels.** Les colonnes de la vue Tableau, les sections de la vue Liste et les colonnes de statut de la vue Couloirs distinguent chacune les statuts intégrés et personnalisés. `Code Review` et `QA` ont des colonnes distinctes bien qu'ils appartiennent tous deux à la catégorie Démarrage. Les catégories sont des classifications internes du cycle de vie, pas des noms de colonnes de remplacement.
+- **Les statuts intégrés sont verrouillés.** Leur nom, leur couleur et leur catégorie ne peuvent pas être modifiés, et ils ne peuvent pas être archivés — un espace de travail qui n'ouvre jamais cette page conserve exactement le tableau qu'il avait.
+- **Archiver un statut le retire sans le supprimer.** Les tâches qui l'ont déjà le conservent, gardent son nom et sa couleur, et se comportent de la même manière. Il n'est simplement plus proposé la prochaine fois que quelqu'un définit un statut.
+
+Les statuts intégrés sont traduits dans la langue de l'interface ; un statut personnalisé affiche toujours le nom que vous avez saisi. L'API et le CLI le désignent par sa clé : `multica issue status MUL-42 code_review`. La page des paramètres dérive cette clé du nom ; l'API accepte une clé explicite et ne la dérive qu'à défaut. Dans tous les cas, la clé est figée à la création — renommer le statut ensuite ne la modifie pas.
+
+## Tâches et exécutions
+
+Une tâche est l'enregistrement durable d'un travail ; une [exécution](/tasks) est une intervention concrète d'un agent. Une même tâche peut produire plusieurs exécutions au fil du temps — une première implémentation, des modifications de suivi, une nouvelle vérification. Une exécution terminée signifie seulement que cette exécution a pris fin ; c'est le statut de la tâche qui détermine si la tâche est terminée.
+
+## Projets et sous-tâches
+
+Une tâche appartient à un [projet](/projects) au plus ; le projet fournit des instructions et des ressources partagées aux exécutions qu'il contient. Déplacer une tâche vers un autre projet ne crée pas de copie.
+
+Un travail plus important peut être découpé en sous-tâches : la tâche parente conserve l'objectif global tandis que les sous-tâches avancent indépendamment. Les statuts de la tâche parente et des sous-tâches ne s'influencent pas.
+
+Les sous-tâches peuvent recevoir une **Étape** pour avancer par lots — 1, 2, 3. Lorsque toutes les sous-tâches de la première étape non terminée atteignent `done` ou `cancelled`, la tâche parente reçoit une notification « sous-tâches terminées » ; si l'assigné de la tâche parente est un agent, celui-ci se réveille et décide s'il lance l'étape suivante. Les sous-tâches sans étape forment un seul lot et ne déclenchent qu'une notification, lorsqu'elles sont toutes terminées.
+
+## Changer de vue
+
+La page Tâches propose cinq vues — Liste, Tableau, Grille, Gantt et Couloirs — filtrables et triables par statut, assigné, projet et autres propriétés. Elles affichent toutes les mêmes tâches.
+
+## Supprimer une tâche
+
+Tout membre de l'espace de travail peut supprimer une tâche.
+
+<Callout type="warning">
+La suppression est irréversible : la tâche, avec ses commentaires, ses pièces jointes et ses enregistrements liés, est définitivement supprimée, et les exécutions non terminées sont annulées. Si le travail n'est simplement plus poursuivi, passez plutôt le statut à `cancelled` — la discussion et les résultats restent disponibles.
+</Callout>
+
+## Étapes suivantes
+
+- [Projets](/projects) — organisez un travail qui nécessite plusieurs tâches.
+- [Commentaires](/comments) — discutez, répondez et utilisez les @mentions autour d'une tâche.
+- [Assigner des tâches aux agents](/assigning-issues) — confiez du travail à un agent et lancez la première exécution.
+- [Exécutions](/tasks) — découvrez la mise en file d'attente, le déroulement, les relances et l'annulation.

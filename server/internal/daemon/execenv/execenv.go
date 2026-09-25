@@ -226,12 +226,9 @@ type TaskContextForEnv struct {
 	// context and the agent stays anonymous-user mode.
 	RequestingUserName               string
 	RequestingUserProfileDescription string
-	// Initiator* identify the actor who triggered THIS task (the real
-	// requester) as distinct from the runtime owner. Rendered into the brief
-	// as `## Task Initiator` when a name is present; InitiatorEmail is shown
-	// only for member initiators. Empty for on-assign / autopilot /
-	// quick-create tasks, which have no attributable human initiator. See
-	// MUL-2645.
+	// Initiator* carry the run's authorization human through the existing
+	// daemon claim fields. The name and email are per-turn context, not part of
+	// the runtime brief. Empty when the run has no originator. See GH-8674.
 	InitiatorType  string
 	InitiatorID    string
 	InitiatorName  string

@@ -1,5 +1,3 @@
-import { RUNTIME_ACCESS_DENIED_RECOVERY_COPY } from "./runtime-access-copy";
-
 /**
  * Mirror of `packages/views/agents/components/tabs/task-failure.ts:REASON_LABEL`.
  *
@@ -19,45 +17,62 @@ import { RUNTIME_ACCESS_DENIED_RECOVERY_COPY } from "./runtime-access-copy";
  * a message, so an unrecognised reason degrades to a plain "Failed" instead of
  * leaking an enum string at them.
  */
-const LABELS: Record<string, string> = {
+/**
+ * Must stay in lockstep with the `failure_reason` keys in
+ * `locales/en/chat.json`; the drift test in `failure-reason-label.test.ts`
+ * enforces both directions.
+ */
+export const REASONS = new Set([
   // Platform / scheduler side.
-  queued_expired: "Expired in queue",
-  runtime_offline: "Daemon offline",
-  runtime_recovery: "Daemon restarted",
-  timeout: "Task timed out",
-  iteration_limit: "Hit the iteration limit",
-  agent_blocked: "Waiting on human input",
-  api_invalid_request: "Rejected by the model API",
-  skill_bundle_unavailable: "Couldn't download the agent's skills",
-  runtime_cli_timeout: "Local runtime CLI timed out",
-  environment_prepare_failed: "Couldn't prepare the execution environment",
-  runtime_access_denied: RUNTIME_ACCESS_DENIED_RECOVERY_COPY,
+  "queued_expired",
+  "runtime_offline",
+  "runtime_reconnect_timeout",
+  "runtime_recovery",
+  "timeout",
+  "iteration_limit",
+  "agent_blocked",
+  "api_invalid_request",
+  "skill_bundle_unavailable",
+  "runtime_cli_timeout",
+  "environment_prepare_failed",
+  "invalid_task_identity",
+  "runtime_access_denied",
 
   // Agent process side — provider.
-  "agent_error.provider_auth_or_access": "Provider auth failed",
-  "agent_error.provider_quota_limit": "Provider quota exhausted",
-  "agent_error.provider_capacity_or_rate_limit": "Rate limited by provider",
-  "agent_error.provider_server_error": "Provider server error",
-  "agent_error.provider_network": "Network error reaching provider",
+  "agent_error.provider_auth_or_access",
+  "agent_error.provider_quota_limit",
+  "agent_error.provider_capacity_or_rate_limit",
+  "agent_error.provider_server_error",
+  "agent_error.provider_network",
 
   // Agent process side — agent / runner.
-  "agent_error.process_failure": "Agent process crashed",
-  "agent_error.empty_or_unparseable_output": "Agent returned no usable output",
-  "agent_error.agent_timeout": "Agent timed out",
-  "agent_error.context_overflow": "Context window exceeded",
-  "agent_error.missing_config": "Missing API key or configuration",
-  "agent_error.model_not_found_or_unavailable": "Model unavailable",
-  "agent_error.runtime_version_unsupported": "Runner CLI version unsupported",
-  "agent_error.runtime_missing_executable": "Runner CLI not installed",
-  "agent_error.unknown": "Agent execution error",
+  "agent_error.process_failure",
+  "agent_error.empty_or_unparseable_output",
+  "agent_error.agent_timeout",
+  "agent_error.context_overflow",
+  "agent_error.missing_config",
+  "agent_error.model_not_found_or_unavailable",
+  "agent_error.runtime_version_unsupported",
+  "agent_error.runtime_missing_executable",
+  "agent_error.unknown",
 
-  // Pre-MUL-1949 coarse values, still present on historical rows.
-  agent_error: "Agent execution error",
-  codex_semantic_inactivity: "Codex semantic inactivity timeout",
-  manual: "Cancelled by user",
-};
+  // Daemon operational reasons, outside the canonical taxonomy.
+  "agent_fallback_message",
+  "codex_resume_oversized",
+  "idle_watchdog",
+  "local_directory_error",
+  "cancelled",
 
-export function failureReasonLabel(reason: string | null | undefined): string {
-  if (!reason) return "Failed";
-  return LABELS[reason] ?? "Failed";
+  // Coarse values, still present on historical rows.
+  "agent_error",
+  "codex_semantic_inactivity",
+  "manual",
+  "user_cancelled",
+]);
+
+export function failureReasonKey(reason: string | null | undefined): string {
+  if (!reason || !REASONS.has(reason)) return "failure_reason.default";
+  // Refined wire reasons use dots (`agent_error.provider_auth_or_access`);
+  // the mobile bundle deliberately stores those as flat snake_case keys.
+  return `failure_reason.${reason.replaceAll(".", "_")}`;
 }

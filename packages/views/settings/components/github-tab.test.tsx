@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
@@ -144,7 +144,7 @@ function resetFixtures() {
 describe("GitHubTab", () => {
   beforeEach(resetFixtures);
 
-  it.each([false, true])("keeps matching and close rules beside auto-link when connected=%s", (connected) => {
+  it.each([false, true])("states the linking rule beside auto-link when connected=%s", (connected) => {
     installationsRef.current.installations = connected
       ? [{ id: "inst-1", account_login: "acme" }]
       : [];
@@ -152,9 +152,21 @@ describe("GitHubTab", () => {
 
     const toggle = screen.getByRole("switch", { name: /Auto-link issues and PRs/i });
     const row = within(toggle.parentElement!);
-    expect(row.getByText(/is in its branch name or title, or its body says Closes MUL-123/)).toBeTruthy();
-    expect(row.getByText("Done")).toBeTruthy();
-    expect(screen.getAllByText("MUL-123")).toHaveLength(1);
+    expect(row.getByText(/e\.g\. MUL-123, is in its title or branch name, or follows “Closes” in its description/)).toBeTruthy();
+  });
+
+  // Completion is shared by every code host and lives with the statuses; the
+  // GitHub page only reports it and points there.
+  it("reports PR auto-complete and links to the issue statuses page", () => {
+    render(<GitHubTab />, { wrapper: I18nWrapper });
+    expect(screen.getByText("Complete issues when their PRs merge")).toBeTruthy();
+    expect(screen.getByText(/^On · /)).toBeTruthy();
+    expect(screen.getByText("Manage").closest("a")?.getAttribute("href")).toContain("tab=issue-statuses");
+
+    cleanup();
+    workspaceRef.current.settings = { pr_auto_complete_enabled: false };
+    render(<GitHubTab />, { wrapper: I18nWrapper });
+    expect(screen.getByText(/^Off · /)).toBeTruthy();
   });
 
   it("offers the master switch without a separate turn-off callout", () => {
