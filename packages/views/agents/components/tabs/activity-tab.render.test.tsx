@@ -247,3 +247,51 @@ describe("ActivityTab loaded history rows", () => {
     expect(query.mock.calls.slice(1).map(([before]) => before)).toEqual(["older", "older"]);
   });
 });
+
+// A loaded page is not the total history. Keep the denominator unknown until
+// the server reports that the last page has been reached.
+describe("ActivityTab history completeness", () => {
+  it.each([
+    { nextCursor: "older", subtitle: "10 latest runs" },
+    { nextCursor: null, subtitle: "10 of 200 runs" },
+  ])("shows '$subtitle' for a 200-row page with cursor $nextCursor", async ({ nextCursor, subtitle }) => {
+    agentTasksRef.current = () => Promise.resolve({
+      tasks: Array.from({ length: 200 }, (_, i) => historyTask(i)),
+      nextCursor,
+    });
+    renderTab();
+    expect(await screen.findByText(subtitle)).toBeInTheDocument();
+    if (nextCursor) {
+      expect(screen.queryByText("10 of 200 runs")).not.toBeInTheDocument();
+    }
+    expect(screen.getAllByTestId(/^task-/)).toHaveLength(10);
+  });
+
+  it.each([
+    { nextCursor: "oldest", subtitle: "50 latest runs" },
+    { nextCursor: null, subtitle: "50 of 220 runs" },
+  ])("shows '$subtitle' after loading more history with cursor $nextCursor", async ({ nextCursor, subtitle }) => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({
+        tasks: Array.from({ length: 20 }, (_, i) => historyTask(i)),
+        nextCursor: "older",
+      })
+      .mockResolvedValueOnce({
+        tasks: Array.from({ length: 200 }, (_, i) => historyTask(i + 20)),
+        nextCursor,
+      });
+    agentTasksRef.current = query;
+    renderTab();
+    expect(await screen.findByText("10 latest runs")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Show more/ }));
+    expect(screen.getByText("20 latest runs")).toBeInTheDocument();
+    expect(query).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: /Show more/ }));
+    expect(await screen.findByText(subtitle)).toBeInTheDocument();
+    if (nextCursor) {
+      expect(screen.queryByText(/of 220 runs/)).not.toBeInTheDocument();
+    }
+    expect(screen.getAllByTestId(/^task-/)).toHaveLength(50);
+    expect(query.mock.calls[1]?.[0]).toBe("older");
+  });
+});

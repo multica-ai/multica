@@ -778,6 +778,7 @@ type TaskAgentData struct {
 // Dispatch only begins preparation, so a fallback cancelled before StartTask
 // is still unused. Keep started fallbacks and ordinary cancellations visible,
 // and retain the underlying scheduling records for audit.
+// Keep this predicate in sync with ListAgentTasks in pkg/db/queries/agent.sql.
 func visibleTaskHistory(tasks []db.AgentTaskQueue) []db.AgentTaskQueue {
 	return slices.DeleteFunc(tasks, func(task db.AgentTaskQueue) bool {
 		return task.EscalationForTaskID.Valid &&

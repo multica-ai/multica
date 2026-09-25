@@ -48,7 +48,7 @@ func TestAgentTaskHistoryIndexMigrationAndPagePlans(t *testing.T) {
 		t.Fatal("ListAgentTasks query terminator missing")
 	}
 
-	const version = "548_agent_task_history_page_index"
+	const version = "551_agent_task_history_page_index"
 	const indexName = "idx_agent_task_queue_history_page"
 	options := runOptions{
 		Direction: "up", Files: realMigrationFiles(t, []string{version}, "up"),

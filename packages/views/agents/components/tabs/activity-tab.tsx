@@ -183,7 +183,7 @@ export function ActivityTab({ agent, showPerformance = true }: ActivityTabProps)
       )}
       <RecentWorkSection
         tasks={recentTasks}
-        totalCount={recentTasksAll.length}
+        totalCount={hasNextPage ? undefined : recentTasksAll.length}
         hasMore={hasMoreRecent}
         loading={isLoadingRecent}
         fetchingMore={isFetchingNextPage}
@@ -436,7 +436,8 @@ function RecentWorkSection({
   agent,
 }: {
   tasks: AgentTask[];
-  totalCount: number;
+  // Only known after the server has returned the final history page.
+  totalCount?: number;
   hasMore: boolean;
   loading: boolean;
   onShowMore: () => void;
@@ -454,7 +455,7 @@ function RecentWorkSection({
       ? hasMore
         ? ""
         : t(($) => $.tab_body.activity.subtitle_no_recent)
-      : totalCount > tasks.length
+      : totalCount !== undefined && totalCount > tasks.length
         ? t(($) => $.tab_body.activity.subtitle_recent_progress, { shown: tasks.length, total: totalCount })
         : t(($) => $.tab_body.activity.subtitle_recent_latest, { count: tasks.length });
   return (

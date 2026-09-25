@@ -2620,11 +2620,6 @@ export class ApiClient {
     return this.fetch(`/api/runtimes/${runtimeId}/local-skills/import/${requestId}`);
   }
 
-  async listAgentTasks(agentId: string): Promise<AgentTask[]> {
-    const page = await this.listAgentTasksPage(agentId);
-    return page.tasks;
-  }
-
   async listAgentTasksPage(
     agentId: string,
     options: { limit?: number; before?: string; signal?: AbortSignal } = {},
