@@ -86,13 +86,13 @@ jobs:
           POSTGRES_PASSWORD: multica
         ports: ['5432:5432']
         options: >-
-          --health-cmd 'pg_isready -U multica -d multica'
+          --health-cmd "pg_isready -U multica -d multica"
           --health-interval 5s --health-timeout 5s --health-retries 20
       redis:
         image: redis:7-alpine
         ports: ['6379:6379']
         options: >-
-          --health-cmd 'redis-cli ping'
+          --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       DATABASE_URL: postgres://multica:multica@localhost:5432/multica?sslmode=disable
