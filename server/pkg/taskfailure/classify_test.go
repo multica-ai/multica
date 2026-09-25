@@ -84,6 +84,12 @@ func TestClassifyRules(t *testing.T) {
 		{"rate limit", "rate limit exceeded for tier 3", ReasonAgentProviderCapacityOrRateLimit},
 		{"overloaded", "overloaded_error: please retry", ReasonAgentProviderCapacityOrRateLimit},
 		{"no capacity available", "no capacity available; try again later", ReasonAgentProviderCapacityOrRateLimit},
+		// Session / usage-window limit: transient (recovers at reset), so it must
+		// land in the retryable capacity bucket, NOT quota. "session" splits
+		// rule 4's "you've hit your limit", so without this it fell through to
+		// agent_error.unknown (MS-121).
+		{"session limit resets", "You've hit your session limit · resets 2pm", ReasonAgentProviderCapacityOrRateLimit},
+		{"session limit curly", "You’ve hit your session limit · resets 2pm", ReasonAgentProviderCapacityOrRateLimit},
 
 		// 6. Provider 5xx / server error.
 		{"server had an error", "the server had an error processing your request", ReasonAgentProviderServerError},
