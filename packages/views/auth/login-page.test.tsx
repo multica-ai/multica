@@ -773,6 +773,32 @@ describe("LoginPage", () => {
     expect(screen.queryByText(/check your email/i)).not.toBeInTheDocument();
   });
 
+  it("clears a partially typed authenticator code when falling back to email", async () => {
+    mockTotpState.totpSupported = true;
+    mockSendCode.mockResolvedValueOnce(undefined);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/email/i), "test@example.com");
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/how would you like to verify/i)).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /use authenticator app/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/use your authenticator/i)).toBeInTheDocument();
+    });
+
+    await user.type(getOTPInput(), "123");
+    await user.click(screen.getByRole("button", { name: /use email code instead/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/check your email/i)).toBeInTheDocument();
+    });
+    expect(getOTPInput()).toHaveValue("");
+    expect(mockVerifyCode).not.toHaveBeenCalled();
+  });
+
   it("TOTP login with a CLI callback redirects the token to the CLI", async () => {
     mockTotpState.totpSupported = true;
     mockApiLoginWithTOTP.mockResolvedValueOnce({ token: "totp-jwt-token" });

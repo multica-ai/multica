@@ -447,6 +447,8 @@ export function LoginPage({
                 setError("");
                 try {
                   await useAuthStore.getState().sendCode(email);
+                  // Both methods share `code`; never carry digits across.
+                  setCode("");
                   setStep("code");
                   setCooldown(60);
                 } catch (err) {
@@ -465,7 +467,10 @@ export function LoginPage({
             </Button>
             <Button
               className="w-full"
-              onClick={() => setStep("totp")}
+              onClick={() => {
+                setCode("");
+                setStep("totp");
+              }}
               disabled={loading}
             >
               {t(($) => $.totp.use_authenticator)}
@@ -570,6 +575,8 @@ export function LoginPage({
                 setError("");
                 try {
                   await useAuthStore.getState().sendCode(email);
+                  // Both methods share `code`; never carry digits across.
+                  setCode("");
                   setStep("code");
                   setCooldown(60);
                 } catch (err) {
