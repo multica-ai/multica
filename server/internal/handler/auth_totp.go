@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -107,7 +109,7 @@ func (h *Handler) TOTPSetupVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.TOTPService.ValidateCode(secret, req.Code) {
-		writeError(w, http.StatusUnauthorized, "invalid code")
+		writeError(w, http.StatusBadRequest, "invalid code")
 		return
 	}
 	if err := h.Queries.EnableUserTOTP(r.Context(), parseUUID(userID)); err != nil {
@@ -151,7 +153,7 @@ func (h *Handler) TOTPDisable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.TOTPService.ValidateCode(secret, req.Code) {
-		writeError(w, http.StatusUnauthorized, "invalid code")
+		writeError(w, http.StatusBadRequest, "invalid code")
 		return
 	}
 	if err := h.Queries.DisableUserTOTP(r.Context(), parseUUID(userID)); err != nil {
@@ -266,15 +268,16 @@ func (h *Handler) TOTPLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !isSixDigitCode(req.Code) {
-		writeError(w, http.StatusUnauthorized, "invalid credentials")
+		writeError(w, http.StatusBadRequest, "invalid credentials")
 		return
 	}
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 
 	row, err := h.Queries.GetUserTOTPSecretByEmail(r.Context(), email)
 	if err != nil {
-		// Includes ErrNoRows (no such enabled user). Generic 401.
-		writeError(w, http.StatusUnauthorized, "invalid credentials")
+		// Includes ErrNoRows (no such enabled user). Generic 400, same as a
+		// wrong code, so the response does not reveal whether TOTP is enabled.
+		writeError(w, http.StatusBadRequest, "invalid credentials")
 		return
 	}
 	secret, err := h.TOTPService.OpenSecret(row.TotpSecretEncrypted)
@@ -283,7 +286,7 @@ func (h *Handler) TOTPLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.TOTPService.ValidateCode(secret, req.Code) {
-		writeError(w, http.StatusUnauthorized, "invalid credentials")
+		writeError(w, http.StatusBadRequest, "invalid credentials")
 		return
 	}
 
@@ -294,6 +297,10 @@ func (h *Handler) TOTPLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	tokenString, err := h.issueJWT(user)
 	if err != nil {
+		if errors.Is(err, auth.ErrTemporarilyDisabledUser) {
+			writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to issue token")
 		return
 	}
@@ -308,6 +315,8 @@ func (h *Handler) TOTPLogin(w http.ResponseWriter, r *http.Request) {
 			http.SetCookie(w, cookie)
 		}
 	}
+
+	slog.Info("user logged in", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email, "method", "totp")...)
 	writeJSON(w, http.StatusOK, LoginResponse{
 		Token: tokenString,
 		User:  h.userToResponse(user),

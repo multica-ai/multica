@@ -92,10 +92,10 @@ func TestTOTPSetupVerify_ServiceUnavailableWhenNil(t *testing.T) {
 }
 
 // TestTOTPSetupVerify_FailsOnInvalidCode uses a real TOTPService and verifies
-// that the handler rejects code 000000. Result code is 400 (no setup in
-// progress for the test user) OR 401 (setup ran first and stored a secret;
-// 000000 won't validate against a random secret). Both prove the code was
-// not accepted.
+// that the handler rejects code 000000 with 400, whether no setup is in
+// progress for the test user or setup ran first and 000000 does not validate
+// against the stored secret. Never 401: the web client treats any 401 as an
+// expired session and logs the user out.
 func TestTOTPSetupVerify_FailsOnInvalidCode(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("no DB available")
@@ -107,8 +107,8 @@ func TestTOTPSetupVerify_FailsOnInvalidCode(t *testing.T) {
 	w := httptest.NewRecorder()
 	testHandler.TOTPSetupVerify(w, req)
 
-	if w.Code != http.StatusBadRequest && w.Code != http.StatusUnauthorized {
-		t.Errorf("expected 400 or 401, got %d body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 
@@ -145,10 +145,10 @@ func TestTOTPDisable_RejectsInvalidCode(t *testing.T) {
 	req := newRequest(http.MethodPost, "/api/auth/totp/disable", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	testHandler.TOTPDisable(w, req)
-	// Either 400 (no TOTP enabled — no encrypted secret) or 401 (wrong code).
-	// Both prove rejection.
-	if w.Code != http.StatusBadRequest && w.Code != http.StatusUnauthorized {
-		t.Errorf("expected 400 or 401, got %d body=%s", w.Code, w.Body.String())
+	// 400 whether TOTP is not enabled or the code is wrong; never 401, which
+	// the web client treats as an expired session.
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 
@@ -221,13 +221,13 @@ func TestTOTPLogin_RejectsBadInput(t *testing.T) {
 	}
 	withRealTOTPService(t)
 
-	// non-6-digit code → 401 generic
+	// non-6-digit code → generic 400
 	body, _ := json.Marshal(map[string]string{"email": "nobody@example.com", "code": "abc"})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login-totp", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	testHandler.TOTPLogin(w, req)
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401, got %d body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 
@@ -237,13 +237,13 @@ func TestTOTPLogin_RejectsUnknownEmail(t *testing.T) {
 	}
 	withRealTOTPService(t)
 
-	// well-formed code but user doesn't have TOTP (or doesn't exist) → generic 401
+	// well-formed code but user doesn't have TOTP (or doesn't exist) → generic 400
 	body, _ := json.Marshal(map[string]string{"email": "nobody-totp-test@example.com", "code": "123456"})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login-totp", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	testHandler.TOTPLogin(w, req)
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401, got %d body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 
