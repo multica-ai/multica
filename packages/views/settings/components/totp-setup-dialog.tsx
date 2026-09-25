@@ -145,7 +145,12 @@ export function TOTPSetupDialog(props: {
           <div className="space-y-4">
             <p className="text-sm">{t(($) => $.security.two_factor.setup_verify)}</p>
             <div className="flex justify-center">
-              <InputOTP maxLength={6} value={code} onChange={setCode}>
+              <InputOTP
+                maxLength={6}
+                value={code}
+                onChange={setCode}
+                aria-label={t(($) => $.security.two_factor.setup_verify)}
+              >
                 <InputOTPGroup>
                   {[0, 1, 2, 3, 4, 5].map((i) => (
                     <InputOTPSlot key={i} index={i} />

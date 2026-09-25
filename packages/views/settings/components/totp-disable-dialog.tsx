@@ -13,7 +13,7 @@ import {
   InputOTPGroup,
   InputOTPSlot,
 } from "@multica/ui/components/ui/input-otp";
-import { api } from "@multica/core/api";
+import { api, ApiError } from "@multica/core/api";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
 
@@ -40,8 +40,14 @@ export function TOTPDisableDialog(props: {
       toast.success(t(($) => $.security.two_factor.disable_success));
       props.onSuccess();
       props.onOpenChange(false);
-    } catch {
-      toast.error(t(($) => $.security.two_factor.disable_invalid));
+    } catch (err) {
+      // 429 means the account's attempt budget is spent: even a correct code
+      // is refused until the lock expires, so say so instead of "invalid".
+      toast.error(
+        err instanceof ApiError && err.status === 429
+          ? t(($) => $.security.two_factor.disable_locked)
+          : t(($) => $.security.two_factor.disable_invalid),
+      );
     } finally {
       setLoading(false);
     }
@@ -60,7 +66,12 @@ export function TOTPDisableDialog(props: {
             {t(($) => $.security.two_factor.disable_prompt)}
           </p>
           <div className="flex justify-center">
-            <InputOTP maxLength={6} value={code} onChange={setCode}>
+            <InputOTP
+              maxLength={6}
+              value={code}
+              onChange={setCode}
+              aria-label={t(($) => $.security.two_factor.disable_prompt)}
+            >
               <InputOTPGroup>
                 {[0, 1, 2, 3, 4, 5].map((i) => (
                   <InputOTPSlot key={i} index={i} />

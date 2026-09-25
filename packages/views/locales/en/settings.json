@@ -688,6 +688,7 @@
       "disable_prompt": "Enter the 6-digit code from your authenticator app to disable this sign-in method.",
       "disable_success": "Authenticator app sign-in disabled.",
       "disable_invalid": "Invalid code. Please try again.",
+      "disable_locked": "Too many invalid codes. Wait 15 minutes, then try again.",
       "confirm": "Confirm"
     }
   },

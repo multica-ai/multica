@@ -23,6 +23,9 @@ export function SecurityTab() {
   const { data: me, refetch } = useQuery({
     queryKey: ["me-totp"],
     queryFn: () => api.getMe(),
+    // An admin can reset the authenticator from another session; refetch
+    // whenever the tab mounts so a stale "Disable" cannot hide "Set up".
+    refetchOnMount: "always",
   });
   const enabled = me?.totp_enabled === true;
 

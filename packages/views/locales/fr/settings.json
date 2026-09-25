@@ -688,6 +688,7 @@
       "disable_prompt": "Saisissez le code à 6 chiffres de votre application d'authentification pour désactiver cette méthode de connexion.",
       "disable_success": "Connexion par application d'authentification désactivée.",
       "disable_invalid": "Code invalide. Veuillez réessayer.",
+      "disable_locked": "Trop de codes invalides. Attendez 15 minutes, puis réessayez.",
       "confirm": "Confirmer"
     }
   },

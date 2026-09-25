@@ -686,6 +686,7 @@
       "disable_prompt": "输入验证器应用中的 6 位验证码以停用此登录方式。",
       "disable_success": "验证器应用登录已停用。",
       "disable_invalid": "验证码无效，请重试。",
+      "disable_locked": "无效验证码次数过多，请等待 15 分钟后再试。",
       "confirm": "确认"
     }
   },

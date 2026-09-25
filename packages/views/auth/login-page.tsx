@@ -516,6 +516,7 @@ export function LoginPage({
               value={code}
               onChange={setCode}
               disabled={loading}
+              aria-label={t(($) => $.totp.totp_prompt)}
             >
               <InputOTPGroup>
                 <InputOTPSlot index={0} />
