@@ -138,7 +138,7 @@ model = "o3"
 		t.Fatalf("write fixture: %v", err)
 	}
 
-	if err := sanitizeCopiedCodexConfig(configPath); err != nil {
+	if err := sanitizeCopiedCodexConfig(configPath, "", ""); err != nil {
 		t.Fatalf("sanitizeCopiedCodexConfig failed: %v", err)
 	}
 
@@ -172,7 +172,7 @@ func TestSanitizeCopiedCodexConfigNoop(t *testing.T) {
 		t.Fatalf("stat before: %v", err)
 	}
 
-	if err := sanitizeCopiedCodexConfig(configPath); err != nil {
+	if err := sanitizeCopiedCodexConfig(configPath, "", ""); err != nil {
 		t.Fatalf("sanitizeCopiedCodexConfig failed: %v", err)
 	}
 
@@ -193,7 +193,7 @@ func TestSanitizeCopiedCodexConfigMissingFile(t *testing.T) {
 	t.Parallel()
 
 	missing := filepath.Join(t.TempDir(), "does-not-exist.toml")
-	if err := sanitizeCopiedCodexConfig(missing); err != nil {
+	if err := sanitizeCopiedCodexConfig(missing, "", ""); err != nil {
 		t.Errorf("missing file should be a no-op, got error: %v", err)
 	}
 }

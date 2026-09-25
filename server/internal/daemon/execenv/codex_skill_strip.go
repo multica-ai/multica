@@ -67,8 +67,10 @@ func stripSkillsConfigEntries(content string) string {
 
 // sanitizeCopiedCodexConfig rewrites the per-task config.toml in place,
 // dropping `[[skills.config]]` entries inherited from the shared
-// `~/.codex/config.toml`. No-op if the file doesn't exist or doesn't change.
-func sanitizeCopiedCodexConfig(configPath string) error {
+// `~/.codex/config.toml` and re-keying inherited hook trust from sharedHome to
+// taskHome (see codex_hook_trust.go). No-op if the file doesn't exist or
+// doesn't change.
+func sanitizeCopiedCodexConfig(configPath, sharedHome, taskHome string) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -76,7 +78,7 @@ func sanitizeCopiedCodexConfig(configPath string) error {
 		}
 		return fmt.Errorf("read config.toml: %w", err)
 	}
-	stripped := stripSkillsConfigEntries(string(data))
+	stripped := rehomeCodexHookTrust(stripSkillsConfigEntries(string(data)), sharedHome, taskHome)
 	if stripped == string(data) {
 		return nil
 	}

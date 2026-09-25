@@ -249,7 +249,9 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// `missing field path` and bails out of `thread/start`. Multica writes the
 	// agent's active skills directly to `codex-home/skills/`, so the
 	// user-level registry is redundant here. See codex_skill_strip.go.
-	if err := sanitizeCopiedCodexConfig(filepath.Join(codexHome, "config.toml")); err != nil {
+	// Hook trust keyed by the shared home's path is re-keyed to this home so
+	// hooks the user already trusted keep running; see codex_hook_trust.go.
+	if err := sanitizeCopiedCodexConfig(filepath.Join(codexHome, "config.toml"), sharedHome, codexHome); err != nil {
 		logger.Warn("execenv: codex-home sanitize config failed", "error", err)
 	}
 
