@@ -411,6 +411,9 @@ func newDeliveryTestNotifier(sender EmailSender, cfg NotifierConfig) (*Notifier,
 	}
 	cfg.Renderer = NewRenderer("")
 	cfg.RetryBackoff = time.Millisecond
+	if cfg.SendInterval == 0 {
+		cfg.SendInterval = time.Nanosecond
+	}
 	n := NewNotifier(q, sender, cfg)
 	n.Register(bus)
 	return n, bus
@@ -491,4 +494,62 @@ func TestRetryWait_HonoursRetryAfterWithCap(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNotifier_DropsWhenQueueFull(t *testing.T) {
+	release := make(chan struct{})
+	sender := &blockingSender{release: release, started: make(chan struct{}, 8)}
+	n, bus := newDeliveryTestNotifier(sender, NotifierConfig{MaxConcurrent: 1, QueueSize: 1})
+
+	publishMemberInboxEvent(bus) // taken by the only worker, which blocks
+	<-sender.started
+	publishMemberInboxEvent(bus) // fills the queue
+	publishMemberInboxEvent(bus) // queue full: dropped, and Publish must not block
+	close(release)
+	n.WaitInflight()
+
+	if got := sender.count(); got != 2 {
+		t.Fatalf("expected 2 sends (1 running + 1 queued, 1 dropped), got %d", got)
+	}
+}
+
+func TestNotifier_PacesSendsAcrossWorkers(t *testing.T) {
+	sender := &scriptedSender{}
+	n, bus := newDeliveryTestNotifier(sender, NotifierConfig{
+		MaxConcurrent: 2,
+		SendInterval:  30 * time.Millisecond,
+	})
+
+	start := time.Now()
+	for i := 0; i < 4; i++ {
+		publishMemberInboxEvent(bus)
+	}
+	n.WaitInflight()
+
+	if elapsed := time.Since(start); elapsed < 90*time.Millisecond {
+		t.Fatalf("4 sends at a 30ms interval finished in %v; want >= 90ms", elapsed)
+	}
+}
+
+// blockingSender blocks every send until release is closed.
+type blockingSender struct {
+	mu      sync.Mutex
+	calls   int
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingSender) SendNotification(to, subject, text, html string) error {
+	b.mu.Lock()
+	b.calls++
+	b.mu.Unlock()
+	b.started <- struct{}{}
+	<-b.release
+	return nil
+}
+
+func (b *blockingSender) count() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.calls
 }

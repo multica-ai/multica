@@ -38,10 +38,17 @@ type NotifierConfig struct {
 	Renderer *Renderer
 	Logger   *slog.Logger
 	Timeout  time.Duration
-	// MaxConcurrent bounds how many deliveries run at once, so the fan-out
-	// of one comment to many subscribers stays under the provider's request
-	// rate (Resend defaults to 2 requests/second).
+	// MaxConcurrent is the number of delivery workers.
 	MaxConcurrent int
+	// QueueSize bounds deliveries waiting for a worker. When it is full new
+	// notifications are dropped (and logged) rather than buffered without
+	// limit, so a slow or unavailable provider cannot grow memory.
+	QueueSize int
+	// SendInterval is the minimum spacing between notification sends across
+	// all workers. The default keeps notifications at half of Resend's
+	// default 2 requests/second, leaving headroom on the same API key for
+	// login codes and invitations, which are not retried.
+	SendInterval time.Duration
 	// MaxAttempts is the total number of tries for a rate-limited send.
 	MaxAttempts int
 	// RetryBackoff is the wait before retrying a rate-limited send when the
@@ -62,6 +69,12 @@ func (c NotifierConfig) withDefaults() NotifierConfig {
 	if c.MaxConcurrent <= 0 {
 		c.MaxConcurrent = 2
 	}
+	if c.QueueSize <= 0 {
+		c.QueueSize = 1000
+	}
+	if c.SendInterval <= 0 {
+		c.SendInterval = time.Second
+	}
 	if c.MaxAttempts <= 0 {
 		c.MaxAttempts = 4
 	}
@@ -72,7 +85,7 @@ func (c NotifierConfig) withDefaults() NotifierConfig {
 }
 
 // maxRetryWait caps a provider-supplied Retry-After so one rate-limited
-// email cannot hold a delivery slot indefinitely.
+// email cannot hold a delivery worker indefinitely.
 const maxRetryWait = 30 * time.Second
 
 // Notifier subscribes to EventInboxNew and sends an email per inbox row.
@@ -80,8 +93,9 @@ type Notifier struct {
 	queries  NotifierQueries
 	sender   EmailSender
 	cfg      NotifierConfig
-	slots    chan struct{}  // bounds concurrent deliveries to cfg.MaxConcurrent
-	inflight sync.WaitGroup // tracks goroutines spawned by handleEvent; tests Wait() on it
+	queue    chan events.Event // bounded backlog drained by cfg.MaxConcurrent workers
+	pacer    pacer
+	inflight sync.WaitGroup // queued + running deliveries; tests Wait() on it
 }
 
 func NewNotifier(queries NotifierQueries, sender EmailSender, cfg NotifierConfig) *Notifier {
@@ -90,35 +104,66 @@ func NewNotifier(queries NotifierQueries, sender EmailSender, cfg NotifierConfig
 		queries: queries,
 		sender:  sender,
 		cfg:     cfg,
-		slots:   make(chan struct{}, cfg.MaxConcurrent),
+		queue:   make(chan events.Event, cfg.QueueSize),
+		pacer:   pacer{interval: cfg.SendInterval},
 	}
+}
+
+// pacer spaces calls at least interval apart across goroutines. The first
+// call proceeds immediately.
+type pacer struct {
+	mu       sync.Mutex
+	interval time.Duration
+	next     time.Time
+}
+
+func (p *pacer) wait() {
+	p.mu.Lock()
+	now := time.Now()
+	at := p.next
+	if at.Before(now) {
+		at = now
+	}
+	p.next = at.Add(p.interval)
+	p.mu.Unlock()
+	time.Sleep(time.Until(at))
 }
 
 // Register subscribes the notifier to the bus. Call exactly once during boot,
 // after construction and before HTTP traffic starts.
 //
-// The subscribed callback returns immediately by spawning processEvent on a
-// fresh goroutine. This is required because events.Bus.Publish is synchronous —
-// a stuck SMTP send would otherwise block the HTTP request that triggered the
-// inbox row, scaled by the number of recipients (e.g. an @-all on a 10-person
-// workspace could hang the comment POST for up to 30s × 10 = 5 min). The
-// goroutine inherits no caller context and uses its own timeout from cfg.
+// The subscribed callback only enqueues and never blocks. This is required
+// because events.Bus.Publish is synchronous — a stuck SMTP send would
+// otherwise block the HTTP request that triggered the inbox row, scaled by
+// the number of recipients. A fixed pool of workers drains the bounded queue;
+// when the queue is full the notification is dropped and logged. Workers
+// inherit no caller context and use their own timeout from cfg.
 func (n *Notifier) Register(bus *events.Bus) {
+	for i := 0; i < n.cfg.MaxConcurrent; i++ {
+		go n.worker()
+	}
 	bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
 		n.inflight.Add(1)
-		go func() {
-			defer n.inflight.Done()
-			n.slots <- struct{}{}
-			defer func() { <-n.slots }()
-			n.processEvent(e)
-		}()
+		select {
+		case n.queue <- e:
+		default:
+			n.inflight.Done()
+			n.cfg.Logger.Warn("email notifier: delivery queue full, dropping notification",
+				"workspace_id", e.WorkspaceID, "queue_size", n.cfg.QueueSize)
+		}
 	})
 }
 
-// WaitInflight blocks until all goroutines spawned by Register's handler have
-// finished. Tests call this after bus.Publish to synchronize on delivery; the
-// production server never calls it (goroutines run to completion or are torn
-// down with the process).
+func (n *Notifier) worker() {
+	for e := range n.queue {
+		n.processEvent(e)
+		n.inflight.Done()
+	}
+}
+
+// WaitInflight blocks until every queued delivery has been processed. Tests
+// call this after bus.Publish to synchronize on delivery; the production
+// server never calls it.
 func (n *Notifier) WaitInflight() {
 	n.inflight.Wait()
 }
@@ -193,6 +238,7 @@ func (n *Notifier) processEvent(e events.Event) {
 func (n *Notifier) send(to, notifType string, out RenderOutput) {
 	backoff := n.cfg.RetryBackoff
 	for attempt := 1; ; attempt++ {
+		n.pacer.wait()
 		err := n.sender.SendNotification(to, out.Subject, out.Text, out.HTML)
 		if err == nil {
 			return
