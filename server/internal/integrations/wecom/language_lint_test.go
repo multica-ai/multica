@@ -1,18 +1,17 @@
 package wecom
 
-// language_lint_test.go — the two locale rules, enforced instead of documented.
+// language_lint_test.go — the copy rule, enforced instead of documented.
 //
-// language.go already says "reach localeForSender through localeFor" and
 // strings.go already says "everything the adapter can say is a field here".
-// Neither sentence stops anything: Go has no file-level privacy, and a literal
-// typed into the file that sends it compiles exactly as well as a pack lookup,
-// reads fine to whoever wrote it, and pins that one surface to one language
-// while every other surface follows the reader.
+// That sentence stops nothing: a literal typed into the file that sends it
+// compiles exactly as well as a pack lookup, reads fine to whoever wrote it,
+// and pins that one surface to one language while every other surface follows
+// the reader.
 //
-// This is the state the package was already in once — the copy for the
-// greeting, the binding prompt, the inbox card and the bubble each lived in
-// the file that sent it — and nothing except these two tests would notice it
-// coming back.
+// This is the state the package was already in once — the binding prompt, the
+// offline notices, the inbox card and the attachment notices each lived in the
+// file that sent them — and nothing except this test would notice it coming
+// back.
 
 import (
 	"go/ast"

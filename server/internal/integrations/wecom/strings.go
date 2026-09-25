@@ -166,12 +166,6 @@ type copyPack struct {
 	// and the bubble spins on forever (see hasVisibleChar in ws_frame.go).
 	//
 	// StreamNoReply — the agent finished with nothing to say.
-	// The ways a streaming reply ends in something other than an answer. Each
-	// one closes the loading bubble the question opened, so each one has to
-	// carry visible text — WeCom discards a closing frame it considers empty
-	// and the bubble spins on forever (see hasVisibleChar in ws_frame.go).
-	//
-	// StreamNoReply — the agent finished with nothing to say.
 	// StreamNoReplyWithFiles — the agent finished with no words but produced
 	//   files, which arrive as separate messages right after this one.
 	//   Distinct from StreamNoReply because that copy says nothing is coming,
