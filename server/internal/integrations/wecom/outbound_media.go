@@ -55,26 +55,6 @@ type mediaObjectStore interface {
 // things that can be true — telling them apart is the point (see deliveryState).
 // Hardcoded Chinese, like every other user-facing string this adapter sends
 // (replier.go) — WeCom deployments are China-only.
-const (
-	// mediaSendFailedText — we know it did not arrive. Definite, because
-	// claiming a definite failure that later turns out to be a delivery is how
-	// a user ends up ignoring the notice.
-	mediaSendFailedText = "⚠️ 有文件没能发出来，我这边保留着，需要的话我再试一次。"
-
-	// mediaSendUnknownText — the frame went out and no verdict came back, so
-	// the file may be in the chat already. The wording has to survive both
-	// endings: it must not say "failed" to someone looking at the file, and it
-	// must not say "sent" to someone who never got it. It also explains why
-	// nothing is resent automatically, since that is the obvious next question
-	// and the answer is that a duplicate cannot be taken back.
-	mediaSendUnknownText = "⚠️ 有文件我没收到企业微信的送达回执，可能已经发到了、也可能没有。我不会自动重发，免得发重了；你那边没看到的话说一声，我再发一次。"
-
-	// mediaLookupFailedText — the failure is on our side and before the
-	// question was even answered: we could not read what was attached to this
-	// reply, so we do not know whether there was a file. Saying nothing here is
-	// what leaves a user waiting for something that was never attempted.
-	mediaLookupFailedText = "⚠️ 我这边没查到这条回答带没带文件，所以要是有，这次没发出来。需要的话我再试一次。"
-)
 
 // attachmentBudget bounds one answer's whole attachment delivery — reading
 // every object, uploading it, and sending it. Generous because a 20 MiB file
@@ -143,6 +123,9 @@ type attachmentTarget struct {
 	// SessionID is carried only so a delivery that fails minutes later can
 	// still name the conversation it belonged to in the log and the counter.
 	SessionID string
+	// Locale is the reader's, resolved on the request path — see the call
+	// site in outbound.go for why it cannot be read at the failure.
+	Locale Locale
 }
 
 // OutboundOption configures the chat-done subscriber at construction.
@@ -257,7 +240,7 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 	if err != nil {
 		o.logger.WarnContext(ctx, "wecom outbound: attachment lookup failed",
 			"error", err, "chat_message_id", uuidStringPub(messageID))
-		o.tellUser(ctx, to, mediaLookupFailedText)
+		o.tellUser(ctx, to, copyFor(to.Locale).MediaLookupFailed)
 		replyFailed(dropTransport, err)
 		return
 	}
@@ -287,7 +270,7 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 			"installation_id", uuidStringPub(to.InstallationID),
 			"attachments", len(rows),
 			"pending", maxPendingAttachmentDeliveries)
-		o.tellUser(ctx, to, mediaSendFailedText)
+		o.tellUser(ctx, to, copyFor(to.Locale).MediaSendFailed)
 		return
 	}
 	defer o.releaseAttachmentSlot()
@@ -309,7 +292,7 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 			"installation_id", uuidStringPub(to.InstallationID), "attachments", len(rows))
 		// Deliberately on a fresh context: the one that expired is the reason
 		// we are here, and reusing it would drop the sentence too.
-		o.tellUser(context.WithoutCancel(ctx), to, mediaSendFailedText)
+		o.tellUser(context.WithoutCancel(ctx), to, copyFor(to.Locale).MediaSendFailed)
 		replyFailed(dropTransport, ctx.Err())
 		return
 	}
@@ -392,10 +375,10 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 	// definite wording.
 	var lines []string
 	if failed > 0 {
-		lines = append(lines, mediaSendFailedText)
+		lines = append(lines, copyFor(to.Locale).MediaSendFailed)
 	}
 	if unknown > 0 {
-		lines = append(lines, mediaSendUnknownText)
+		lines = append(lines, copyFor(to.Locale).MediaSendUnknown)
 	}
 	if len(lines) > 0 {
 		o.tellUser(ctx, to, strings.Join(lines, "\n"))
