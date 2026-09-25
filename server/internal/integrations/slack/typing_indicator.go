@@ -264,9 +264,18 @@ func (m *TypingIndicatorManager) handleEvent(e events.Event) {
 }
 
 // chatSessionIDFromEvent recovers the chat session id from a task-lifecycle
-// event. EventChatDone sets it on the envelope; EventTaskFailed carries it only
-// in the broadcast payload map (chat tasks only), so both are checked.
-// Every EventTaskCancelled publisher sets both.
+// event.
+//
+// All three types set BOTH places for a chat task: EventChatDone through
+// service.broadcastChatDone, and EventTaskFailed and EventTaskCancelled
+// through service.taskEvent, which stamps e.ChatSessionID and the
+// chat_session_id payload key together. (The sweeper's own task:failed
+// envelope does the same.) EventTaskFailed is not the exception this comment
+// used to call it — it goes through the same builder as EventTaskCancelled.
+//
+// The payload read is therefore a second look at the same value, kept because
+// it costs one type assertion and it is what keeps an envelope working after a
+// serialization round trip, where only the map survives.
 func chatSessionIDFromEvent(e events.Event) (pgtype.UUID, bool) {
 	if e.ChatSessionID != "" {
 		if id, err := util.ParseUUID(e.ChatSessionID); err == nil && id.Valid {
