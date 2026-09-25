@@ -662,6 +662,12 @@
       "granted": "Ce navigateur peut afficher des bannières de notification.",
       "denied": "Bloqué par votre navigateur. Activez les notifications pour ce site dans ses réglages.",
       "enabled_badge": "Activé"
+    },
+    "email": {
+      "label": "Notifications par e-mail",
+      "hint_enabled": "Vous recevrez un e-mail en cas de nouvelle activité dans votre boîte de réception.",
+      "hint_unavailable": "L'e-mail n'est pas configuré sur ce serveur. Définissez SMTP_HOST ou RESEND_API_KEY pour l'activer.",
+      "unavailable_badge": "Indisponible"
     }
   },
   "tokens": {
