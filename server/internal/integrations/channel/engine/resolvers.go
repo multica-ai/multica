@@ -31,6 +31,10 @@ const (
 	OutcomeIssueUsage    Outcome = "issue_usage"
 	OutcomeAgentOffline  Outcome = "agent_offline"
 	OutcomeAgentArchived Outcome = "agent_archived"
+	// OutcomeInvokeDenied — the sender may not run this agent. The web chat
+	// refuses the same person at the same point; this is that verdict on the
+	// channel side.
+	OutcomeInvokeDenied Outcome = "invoke_denied"
 )
 
 // DropReason enumerates the drop-audit categories. Values match the legacy
@@ -44,6 +48,7 @@ const (
 	DropReasonDuplicate           DropReason = "duplicate"
 	DropReasonRevokedInstallation DropReason = "revoked_installation"
 	DropReasonInvalidEvent        DropReason = "invalid_event"
+	DropReasonInvokeDenied        DropReason = "invocation_not_allowed"
 )
 
 // Result is the typed verdict the Router produces for one inbound message,
@@ -423,6 +428,11 @@ type TaskEnqueuer interface {
 	FinalizeChatTaskEnqueue(ctx context.Context, task db.AgentTaskQueue)
 	PromoteChannelChatTasksIfMediaReady(ctx context.Context, sessionID pgtype.UUID) error
 	PromoteDeferredChannelIssueTask(ctx context.Context, taskID pgtype.UUID) error
+	// MemberMayInvokeAgent is service.CanMemberInvokeAgent keyed by agent id:
+	// the Router has the installation's agent id, not the loaded row. An agent
+	// that no longer exists admits nobody; a lookup that failed is an error, so
+	// an unreachable database is never read as a denial.
+	MemberMayInvokeAgent(ctx context.Context, agentID, userID pgtype.UUID) (bool, error)
 }
 
 // SessionReader reads the rows the debounced flush + /issue identifier need.

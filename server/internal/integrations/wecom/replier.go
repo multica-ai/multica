@@ -27,6 +27,7 @@ const (
 	freshPendingText  = "✅ 已准备从空上下文运行。你的下一条聊天消息仍会进入当前对话，但不会带上之前的上下文。"
 	chatStartedText   = "✅ 已新建 Multica 对话。你的下一条消息会进入该对话。"
 	issueUsageText    = "请填写任务标题，格式如下：\n\n`/issue <标题>`\n`[描述]`（可选）"
+	invokeDeniedText  = "⚠️ 你没有权限运行该智能体。如需使用，请联系它的所有者。"
 )
 
 // OutboundReplier implements engine.OutboundReplier for WeCom.
@@ -131,6 +132,11 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 			r.logger.WarnContext(ctx, "wecom replier: issue usage reply failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
+	case engine.OutcomeInvokeDenied:
+		if err := r.sendInvokeDenied(ctx, inst, msg); err != nil {
+			r.logger.WarnContext(ctx, "wecom replier: invoke-denied notice failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
 	case engine.OutcomeIngested:
 		// Only a /issue-created message warrants a confirmation; a plain
 		// chat message stays silent (the agent's own reply lands via
@@ -215,6 +221,21 @@ func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.Res
 // postPrivate delivers text to a single user's 1:1 chat (chat_type=1),
 // regardless of which room triggered the message. Used for bearer-credential
 // content (the binding link) that must never land in a group.
+// sendInvokeDenied tells a member the agent is not theirs to run.
+//
+// A 1:1 is answered in place. A GROUP trigger is answered in the sender's own
+// 1:1 and the room hears nothing: a line there would tell everyone present both
+// which member was refused and that the agent is someone's private one. The
+// sender is bound by definition at this point — the identity check is what
+// produced the user id this verdict was read for — so a 1:1 route to them
+// exists.
+func (r *OutboundReplier) sendInvokeDenied(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage) error {
+	if aibotChatTypeFromChannel(msg.Source.ChatType) != chatTypeGroupInt {
+		return r.post(ctx, inst, msg, invokeDeniedText)
+	}
+	return r.postPrivate(ctx, inst, msg.Source.SenderID, invokeDeniedText)
+}
+
 func (r *OutboundReplier) postPrivate(ctx context.Context, inst engine.ResolvedInstallation, userID, text string) error {
 	if r.senders == nil {
 		return errors.New("wecom: sender registry not configured")
