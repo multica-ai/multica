@@ -13,6 +13,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
+	"github.com/multica-ai/multica/server/internal/integrations/sharecrm"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
@@ -36,7 +37,7 @@ func TestChannelStartTitleCommandMappingDB(t *testing.T) {
 	if err := pool.Ping(ctx); err != nil {
 		t.Fatal(err)
 	}
-	for _, platform := range []string{"feishu", "telegram", "dingtalk", "slack", "wecom"} {
+	for _, platform := range []string{"feishu", "telegram", "dingtalk", "slack", "wecom", "sharecrm"} {
 		t.Run(platform, func(t *testing.T) {
 			fx := dbfx.New(pool, "", "")
 			suffix := uuid.NewString()
@@ -74,6 +75,8 @@ func TestChannelStartTitleCommandMappingDB(t *testing.T) {
 				binder = slack.NewSlackResolverSet(q, pool, nil, nil, nil).Session
 			case "wecom":
 				binder = wecom.NewResolverSet(nil, session, nil, nil).Session
+			case "sharecrm":
+				binder = sharecrm.NewShareCRMResolverSet(q, pool, nil, nil, nil).Session
 			}
 			msg := channel.InboundMessage{MessageID: "current", CommandText: "Current instruction", Text: "<quoted_message>\nHistorical subject\n</quoted_message>\n\nCurrent instruction", Source: channel.Source{ChannelType: channel.Type(platform), ChatType: channel.ChatTypeP2P, ChatID: suffix, SenderID: "sender"}}
 			result, err := binder.StartSession(ctx, engine.StartSessionParams{Installation: engine.ResolvedInstallation{ID: asUUID(installation), WorkspaceID: asUUID(fx.WorkspaceID), AgentID: asUUID(agent)}, Creator: asUUID(fx.UserID), Sender: asUUID(fx.UserID), Message: msg, PersistMessage: true})
