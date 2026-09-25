@@ -270,7 +270,9 @@ func TestTOTPStatus_AlwaysReturnsConfiguredTrue(t *testing.T) {
 			if w.Code != http.StatusOK {
 				t.Fatalf("status=%d", w.Code)
 			}
-			var resp struct{ Configured bool `json:"configured"` }
+			var resp struct {
+				Configured bool `json:"configured"`
+			}
 			json.NewDecoder(w.Body).Decode(&resp)
 			if !resp.Configured {
 				t.Errorf("status must always return configured:true for email %q", email)
@@ -350,4 +352,3 @@ func TestTOTPRoutes_RequireHumanActorWired(t *testing.T) {
 		})
 	}
 }
-

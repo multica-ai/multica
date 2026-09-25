@@ -132,7 +132,9 @@ func (h *Handler) TOTPDisable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct{ Code string `json:"code"` }
+	var req struct {
+		Code string `json:"code"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
