@@ -570,4 +570,3 @@ func TestNotifier_TimeoutBoundsRateLimitRetries(t *testing.T) {
 		t.Fatalf("expected the timeout to stop retries after 1 send, got %d", calls)
 	}
 }
-
