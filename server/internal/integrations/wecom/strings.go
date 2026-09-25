@@ -125,10 +125,9 @@ type copyPack struct {
 	// new conversation the next message enters. Two commands, two answers:
 	// telling a /clear user their conversation was replaced sends them
 	// looking for a thread that never moved. IssueUsage answers a bare
-	// /issue with the shape it wanted. All three arrived from upstream after
-	// this pack existed, so they are stated here rather than as package
-	// constants — the lint asserts it, and a Chinese literal in replier.go is
-	// a line no other locale can read.
+	// /issue with the shape it wanted. All three are stated here rather than as
+	// package constants — the lint asserts it, and a Chinese literal in
+	// replier.go is a line no other locale can read.
 	FreshPending string
 	ChatStarted  string
 	IssueUsage   string
@@ -167,6 +166,27 @@ type copyPack struct {
 	// and the bubble spins on forever (see hasVisibleChar in ws_frame.go).
 	//
 	// StreamNoReply — the agent finished with nothing to say.
+	// The ways a streaming reply ends in something other than an answer. Each
+	// one closes the loading bubble the question opened, so each one has to
+	// carry visible text — WeCom discards a closing frame it considers empty
+	// and the bubble spins on forever (see hasVisibleChar in ws_frame.go).
+	//
+	// StreamNoReply — the agent finished with nothing to say.
+	// StreamNoReplyWithFiles — the agent finished with no words but produced
+	//   files, which arrive as separate messages right after this one.
+	//   Distinct from StreamNoReply because that copy says nothing is coming,
+	//   and then something arrives: a bubble that contradicts the next message
+	//   reads as a bug even though both halves are working.
+	// StreamNotStarted — no run was triggered at all (agent offline or
+	//   archived, or the enqueue failed); the replier's own notice follows as
+	//   a separate message with the detail.
+	// StreamFailed — the run failed, and the platform published no reason of
+	//   its own. A failure that DID carry one says that instead (failureText
+	//   in typing_indicator.go).
+	// StreamCancelled — the user stopped the run, so no answer is coming.
+	//   Separate copy from StreamFailed on purpose: inviting a retry of
+	//   something somebody just stopped on purpose reads as the bot not having
+	//   noticed.
 	StreamNoReply          string
 	StreamNoReplyWithFiles string
 	StreamNotStarted       string
@@ -282,7 +302,7 @@ var copyPacks = map[Locale]copyPack{
 			"comment_added":      "新评论",
 			"new_comment":        "新评论",
 			"reaction_added":     "表情反应",
-			"task_failed":        "任务失败",
+			"task_failed":        "task 失败",
 			"unassigned":         "取消指派",
 			"assignee_changed":   "指派人变更",
 			"priority_changed":   "优先级变更",
@@ -294,7 +314,7 @@ var copyPacks = map[Locale]copyPack{
 	LocaleEn: {
 		AgentOffline:         "⚠️ The agent is offline right now. Your message was received and will be handled once it's back.",
 		AgentArchived:        "⚠️ This agent has been archived and can't reply. Please contact your workspace admin.",
-		FreshPending:         "✅ Fresh start ready. Your next chat message will run without previous context.",
+		FreshPending:         "✅ Fresh start ready. Your next message stays in this chat but runs without the earlier context.",
 		ChatStarted:          "✅ Started a new Multica chat. Your next message will enter it.",
 		IssueUsage:           "Give the task a title, like this:\n\n`/issue <title>`\n`[description]` (optional)",
 		BindingPromptPrefix:  "👋 Link your Multica account before we can talk:\n",

@@ -24,10 +24,9 @@ import (
 // defaultBindingPath is where the web app serves the bind page.
 const defaultBindingPath = "/wecom/bind"
 
-// normalizeBindingPath applies the one default. It lived beside the enter_chat
-// greeting until that was withdrawn upstream on product grounds; the binding
-// prompt is now the only thing that builds this URL, and the default stays here
-// so a deployment that configures no path still gets a usable link.
+// normalizeBindingPath applies the one default: the binding prompt is the only
+// thing that builds this URL, and a deployment that configures no path still
+// needs a usable link.
 func normalizeBindingPath(p string) string {
 	if p == "" {
 		return defaultBindingPath
@@ -90,6 +89,14 @@ func NewOutboundReplier(cfg OutboundReplierConfig) *OutboundReplier {
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if cfg.Languages == nil {
+		// Not fatal — the deployment language is a usable answer — but it is
+		// the difference between this replier doing its job and quietly doing
+		// main's. A missing wire produces no other symptom: nothing errors,
+		// nothing is empty, every notice just comes out in one language.
+		logger.Warn("wecom replier: no language lookup wired; every notice will use the deployment language " +
+			"whatever the reader's profile says (set OutboundReplierConfig.Languages)")
 	}
 	r := &OutboundReplier{
 		senders:     cfg.Senders,
