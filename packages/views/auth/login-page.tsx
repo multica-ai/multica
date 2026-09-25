@@ -536,6 +536,16 @@ export function LoginPage({
                 setLoading(true);
                 setError("");
                 try {
+                  if (cliCallback) {
+                    // CLI path: hand the token to the CLI listener, same as
+                    // handleVerify does for the emailed code.
+                    const { token } = await api.loginWithTOTP(email, code);
+                    localStorage.setItem("multica_token", token);
+                    api.setToken(token);
+                    onTokenObtained?.();
+                    redirectToCliCallback(cliCallback.url, token, cliCallback.state);
+                    return;
+                  }
                   await useAuthStore.getState().verifyTOTPLogin(email, code);
                   const wsList = await api.listWorkspaces();
                   qc.setQueryData(workspaceKeys.list(), wsList);
