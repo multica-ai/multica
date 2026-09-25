@@ -35,7 +35,8 @@ export function TOTPDisableDialog(props: {
     if (code.length !== 6) return;
     setLoading(true);
     try {
-      await api.totpDisable(code);
+      const { disabled } = await api.totpDisable(code);
+      if (!disabled) throw new Error("disable not confirmed");
       toast.success(t(($) => $.security.two_factor.disable_success));
       props.onSuccess();
       props.onOpenChange(false);

@@ -472,6 +472,14 @@ import {
   AdminResetMemberTOTPResponseSchema,
   EMPTY_MEMBER_WITH_USER,
   EMPTY_ADMIN_RESET_MEMBER_TOTP_RESPONSE,
+  TOTPSetupInitResponseSchema,
+  EMPTY_TOTP_SETUP_INIT_RESPONSE,
+  TOTPSetupVerifyResponseSchema,
+  EMPTY_TOTP_SETUP_VERIFY_RESPONSE,
+  TOTPDisableResponseSchema,
+  EMPTY_TOTP_DISABLE_RESPONSE,
+  TOTPStatusResponseSchema,
+  EMPTY_TOTP_STATUS_RESPONSE,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -976,25 +984,37 @@ export class ApiClient {
   }
 
   async totpSetupInit(): Promise<{ secret: string; otpauth_url: string }> {
-    return this.fetch("/auth/totp/setup-init", { method: "POST" });
+    const raw = await this.fetch("/auth/totp/setup-init", { method: "POST" });
+    return parseWithFallback(raw, TOTPSetupInitResponseSchema, EMPTY_TOTP_SETUP_INIT_RESPONSE, {
+      endpoint: "/auth/totp/setup-init",
+    });
   }
 
   async totpSetupVerify(code: string): Promise<{ enabled: boolean }> {
-    return this.fetch("/auth/totp/setup-verify", {
+    const raw = await this.fetch("/auth/totp/setup-verify", {
       method: "POST",
       body: JSON.stringify({ code }),
+    });
+    return parseWithFallback(raw, TOTPSetupVerifyResponseSchema, EMPTY_TOTP_SETUP_VERIFY_RESPONSE, {
+      endpoint: "/auth/totp/setup-verify",
     });
   }
 
   async totpDisable(code: string): Promise<{ disabled: boolean }> {
-    return this.fetch("/auth/totp/disable", {
+    const raw = await this.fetch("/auth/totp/disable", {
       method: "POST",
       body: JSON.stringify({ code }),
+    });
+    return parseWithFallback(raw, TOTPDisableResponseSchema, EMPTY_TOTP_DISABLE_RESPONSE, {
+      endpoint: "/auth/totp/disable",
     });
   }
 
   async totpStatus(email: string): Promise<{ configured: boolean }> {
-    return this.fetch(`/auth/totp-status?email=${encodeURIComponent(email)}`);
+    const raw = await this.fetch(`/auth/totp-status?email=${encodeURIComponent(email)}`);
+    return parseWithFallback(raw, TOTPStatusResponseSchema, EMPTY_TOTP_STATUS_RESPONSE, {
+      endpoint: "/auth/totp-status",
+    });
   }
 
   async loginWithTOTP(email: string, code: string): Promise<LoginResponse> {

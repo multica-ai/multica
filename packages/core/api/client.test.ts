@@ -3099,3 +3099,41 @@ describe("ApiClient shared credential across windows", () => {
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("ApiClient TOTP response schemas", () => {
+  function respondWith(body: unknown) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+  }
+
+  it("parses a valid setup-init response", async () => {
+    respondWith({ secret: "JBSWY3DPEHPK3PXP", otpauth_url: "otpauth://totp/Multica:a@b.c?secret=JBSWY3DPEHPK3PXP" });
+    await expect(new ApiClient("https://api.example.test").totpSetupInit()).resolves.toEqual({
+      secret: "JBSWY3DPEHPK3PXP",
+      otpauth_url: "otpauth://totp/Multica:a@b.c?secret=JBSWY3DPEHPK3PXP",
+    });
+  });
+
+  // A malformed secret must never reach the QR code as if it were real.
+  it("falls back to an empty setup when setup-init is malformed", async () => {
+    respondWith({ secret: 42, otpauth_url: "https://example.test" });
+    await expect(new ApiClient("https://api.example.test").totpSetupInit()).resolves.toEqual({
+      secret: "",
+      otpauth_url: "",
+    });
+  });
+
+  it("does not report setup or disable as done when the response is malformed", async () => {
+    respondWith({ enabled: "yes" });
+    await expect(new ApiClient("https://api.example.test").totpSetupVerify("123456")).resolves.toEqual({ enabled: false });
+    respondWith({});
+    await expect(new ApiClient("https://api.example.test").totpDisable("123456")).resolves.toEqual({ disabled: false });
+  });
+});

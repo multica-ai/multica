@@ -3541,6 +3541,36 @@ export const AdminResetMemberTOTPResponseSchema = z.object({
 
 export const EMPTY_ADMIN_RESET_MEMBER_TOTP_RESPONSE = { reset: false };
 
+// Personal TOTP endpoints. Fallbacks are the "nothing happened" answer, so a
+// malformed response surfaces as a failed step instead of a blank QR code or
+// a falsely confirmed setup/disable.
+export const TOTPSetupInitResponseSchema = z.object({
+  secret: z.string().min(1),
+  otpauth_url: z.string().startsWith("otpauth://"),
+}).loose();
+
+export const EMPTY_TOTP_SETUP_INIT_RESPONSE = { secret: "", otpauth_url: "" };
+
+export const TOTPSetupVerifyResponseSchema = z.object({
+  enabled: z.boolean(),
+}).loose();
+
+export const EMPTY_TOTP_SETUP_VERIFY_RESPONSE = { enabled: false };
+
+export const TOTPDisableResponseSchema = z.object({
+  disabled: z.boolean(),
+}).loose();
+
+export const EMPTY_TOTP_DISABLE_RESPONSE = { disabled: false };
+
+// totp-status always answers configured:true (anti-enumeration), so the
+// fallback mirrors that constant rather than hiding the authenticator option.
+export const TOTPStatusResponseSchema = z.object({
+  configured: z.boolean(),
+}).loose();
+
+export const EMPTY_TOTP_STATUS_RESPONSE = { configured: true };
+
 export const JoinShareLinkResponseSchema = z.object({
   member: MemberWithUserSchema,
   workspace_id: z.string(),
