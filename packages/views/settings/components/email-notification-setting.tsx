@@ -5,10 +5,10 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useConfigStore } from "@multica/core/config";
 import { notificationPreferenceOptions } from "@multica/core/notification-preferences/queries";
 import { useUpdateNotificationPreferences } from "@multica/core/notification-preferences/mutations";
-import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
+import { SettingsCard, SettingsRow } from "./settings-layout";
 
 /**
  * Channel-level toggle for email notifications. Mirrors the
@@ -54,24 +54,23 @@ export function EmailNotificationSetting() {
     : t(($) => $.notifications.email.hint_unavailable);
 
   return (
-    <Card>
-      <CardContent>
-        <div className="flex items-center justify-between gap-4">
-          <div className="space-y-0.5 pr-4">
-            <p className="text-sm font-medium">
-              {t(($) => $.notifications.email.label)}
-            </p>
-            <p className="text-xs text-muted-foreground">{hint}</p>
-          </div>
-          {emailConfigured ? (
-            <Switch checked={enabled} onCheckedChange={handleToggle} />
-          ) : (
-            <span className="shrink-0 text-xs font-medium text-muted-foreground">
-              {t(($) => $.notifications.email.unavailable_badge)}
-            </span>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+    <SettingsCard>
+      <SettingsRow
+        label={t(($) => $.notifications.email.label)}
+        description={hint}
+      >
+        {emailConfigured ? (
+          <Switch
+            checked={enabled}
+            aria-label={t(($) => $.notifications.email.label)}
+            onCheckedChange={handleToggle}
+          />
+        ) : (
+          <span className="shrink-0 text-xs font-medium text-muted-foreground">
+            {t(($) => $.notifications.email.unavailable_badge)}
+          </span>
+        )}
+      </SettingsRow>
+    </SettingsCard>
   );
 }
