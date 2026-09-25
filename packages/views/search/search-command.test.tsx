@@ -1,17 +1,52 @@
 import { act, type ReactNode } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
+
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  useIssueStatuses: () => buildIssueStatusCatalog([]),
+}));
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { WORKSPACE_PAGES } from "@multica/core/paths";
 import { SearchCommand } from "./search-command";
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 import { useSearchStore } from "./search-store";
 import enCommon from "../locales/en/common.json";
 import enAuth from "../locales/en/auth.json";
 import enSettings from "../locales/en/settings.json";
 import enSearch from "../locales/en/search.json";
+// The palette labels its Pages group from the sidebar's own nav strings, so
+// the layout namespace is part of its contract, not incidental setup.
+import enLayout from "../locales/en/layout.json";
+import enProjects from "../locales/en/projects.json";
+import zhHansProjects from "../locales/zh-Hans/projects.json";
 
 const TEST_RESOURCES = {
-  en: { common: enCommon, auth: enAuth, settings: enSettings, search: enSearch },
+  en: {
+    common: enCommon,
+    auth: enAuth,
+    settings: enSettings,
+    search: enSearch,
+    layout: enLayout,
+    projects: enProjects,
+  },
+};
+
+// Deliberately NOT a full zh-Hans bundle: only `projects` is translated, and
+// every other namespace stays on its English bundle under the zh-Hans key.
+// The one thing under test is whether a project row names its status through
+// the projects namespace, and keeping the chrome in English lets these tests
+// go on addressing the palette by its English placeholder and group headings.
+const ZH_TEST_RESOURCES = {
+  "zh-Hans": {
+    common: enCommon,
+    auth: enAuth,
+    settings: enSettings,
+    search: enSearch,
+    layout: enLayout,
+    projects: zhHansProjects,
+  },
 };
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -23,6 +58,17 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 }
 
 const renderSearch = () => render(<SearchCommand />, { wrapper: I18nWrapper });
+
+function ChineseI18nWrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="zh-Hans" resources={ZH_TEST_RESOURCES}>
+      {children}
+    </I18nProvider>
+  );
+}
+
+const renderSearchInChinese = () =>
+  render(<SearchCommand />, { wrapper: ChineseI18nWrapper });
 
 const {
   mockPush,
@@ -40,6 +86,11 @@ const {
   mockOpenModal,
   mockToastSuccess,
   mockClipboardWrite,
+  mockTimeline,
+  mockCommentCollapseAll,
+  mockCommentExpandAll,
+  mockResolvedCollapseAll,
+  mockResolvedExpandAll,
 } = vi.hoisted(() => ({
   mockPush: vi.fn(),
   mockSearchIssues: vi.fn(),
@@ -79,6 +130,11 @@ const {
   mockOpenModal: vi.fn(),
   mockToastSuccess: vi.fn(),
   mockClipboardWrite: vi.fn(() => Promise.resolve()),
+  mockTimeline: { current: [] as Array<Record<string, unknown>> },
+  mockCommentCollapseAll: vi.fn(),
+  mockCommentExpandAll: vi.fn(),
+  mockResolvedCollapseAll: vi.fn(),
+  mockResolvedExpandAll: vi.fn(),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -131,6 +187,18 @@ vi.mock("@multica/core/issues/stores", () => {
         wsId ? (state.byWorkspace[wsId] ?? EMPTY) : EMPTY,
     openCreateIssueWithPreference: (data?: Record<string, unknown> | null) =>
       mockOpenModal("quick-create-issue", data ?? null),
+    useCommentCollapseStore: Object.assign(vi.fn(), {
+      getState: () => ({
+        collapseAll: mockCommentCollapseAll,
+        expandAll: mockCommentExpandAll,
+      }),
+    }),
+    useResolvedExpandStore: Object.assign(vi.fn(), {
+      getState: () => ({
+        collapseAll: mockResolvedCollapseAll,
+        expandAll: mockResolvedExpandAll,
+      }),
+    }),
   };
 });
 
@@ -138,13 +206,20 @@ vi.mock("@multica/core", () => ({
   useWorkspaceId: () => "ws-test",
 }));
 
-vi.mock("@multica/core/paths", () => ({
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  // Spread the real module so pure helpers (resolveRouteIconName, used to
+  // derive each nav page's icon from its href) stay intact.
+  ...(await importOriginal<typeof import("@multica/core/paths")>()),
   useWorkspacePaths: () => ({
     inbox: () => "/ws-test/inbox",
+    chat: () => "/ws-test/chat",
     myIssues: () => "/ws-test/my-issues",
     issues: () => "/ws-test/issues",
     projects: () => "/ws-test/projects",
+    autopilots: () => "/ws-test/autopilots",
     agents: () => "/ws-test/agents",
+    squads: () => "/ws-test/squads",
+    usage: () => "/ws-test/usage",
     runtimes: () => "/ws-test/runtimes",
     skills: () => "/ws-test/skills",
     settings: () => "/ws-test/settings",
@@ -159,6 +234,9 @@ vi.mock("@multica/core/paths", () => ({
 vi.mock("@multica/core/issues/queries", () => ({
   issueDetailOptions: (_wsId: string, id: string) => ({
     queryKey: ["issues", "ws-test", "detail", id],
+  }),
+  issueTimelineOptions: (id: string) => ({
+    queryKey: ["issues", "timeline", id],
   }),
 }));
 
@@ -200,15 +278,28 @@ vi.mock("@tanstack/react-query", () => ({
   },
   useQueries: (opts: { queries: Array<{ queryKey: readonly unknown[] }> }) =>
     opts.queries.map((q) => ({ data: resolveIssue(q.queryKey) })),
+  useQueryClient: () => ({
+    ensureQueryData: (opts: { queryKey: readonly unknown[] }) =>
+      opts.queryKey[1] === "timeline"
+        ? Promise.resolve(mockTimeline.current)
+        : Promise.reject(new Error(`unexpected key ${String(opts.queryKey)}`)),
+  }),
 }));
 
-vi.mock("../navigation", () => ({
-  useNavigation: () => ({
+// Mock the context module, not the barrel: resolveClickIntent and
+// useIntentNavigate stay the REAL implementations and read this adapter
+// (no openInNewTab — the web shape, so tab intents go through window.open).
+vi.mock("../navigation/context", () => {
+  const adapter = () => ({
     push: mockPush,
     pathname: mockPathname.current,
     getShareableUrl: mockGetShareableUrl,
-  }),
-}));
+  });
+  return {
+    useNavigation: adapter,
+    useOptionalNavigation: adapter,
+  };
+});
 
 vi.mock("@multica/ui/components/common/theme-provider", () => ({
   useTheme: () => ({ theme: mockTheme.current, setTheme: mockSetTheme }),
@@ -235,6 +326,11 @@ describe("SearchCommand", () => {
     mockOpenModal.mockReset();
     mockToastSuccess.mockReset();
     mockClipboardWrite.mockReset().mockResolvedValue(undefined);
+    mockTimeline.current = [];
+    mockCommentCollapseAll.mockReset();
+    mockCommentExpandAll.mockReset();
+    mockResolvedCollapseAll.mockReset();
+    mockResolvedExpandAll.mockReset();
 
     // cmdk calls scrollIntoView on the first selected item, which jsdom doesn't implement
     Element.prototype.scrollIntoView = vi.fn();
@@ -292,6 +388,60 @@ describe("SearchCommand", () => {
     expect(screen.queryByText("Inbox")).not.toBeInTheDocument();
   });
 
+  it("offers every workspace nav page, not a hand-maintained subset", async () => {
+    const user = userEvent.setup();
+    renderSearch();
+    const input = screen.getByPlaceholderText("Type a command or search...");
+
+    // The Pages group is generated from WORKSPACE_PAGES — the same registry
+    // the sidebar and the desktop tab bar read — so searching a page by the
+    // exact name the sidebar shows must always reach it. The hand-written
+    // list this replaced had gone stale by four pages (MUL-6272).
+    for (const page of Object.values(WORKSPACE_PAGES)) {
+      const label = enLayout.nav[page.navKey];
+      await user.clear(input);
+      await user.type(input, label);
+      expect(
+        await screen.findByText(
+          (_, el) => el?.textContent === label && el?.tagName === "SPAN",
+        ),
+      ).toBeInTheDocument();
+    }
+  });
+
+  it("does not surface a page on an incidental substring of a hidden keyword", async () => {
+    const user = userEvent.setup();
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "s");
+
+    // Inbox carries the hidden keyword "notifications". Matching keywords by
+    // substring made a bare "s" pull Inbox into the list with nothing on the
+    // row to explain why; keywords match by prefix instead.
+    await waitFor(() => {
+      expect(
+        screen.getByText((_, el) => el?.textContent === "Settings" && el?.tagName === "SPAN"),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Inbox")).not.toBeInTheDocument();
+  });
+
+  it("navigates to a page whose label differs from its route segment", async () => {
+    const user = userEvent.setup();
+    renderSearch();
+
+    // Analytics lives at /usage: proof the row resolves its destination from
+    // the page key rather than from the words on screen.
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "analytics");
+
+    await user.click(await screen.findByText("Analytics"));
+
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/usage");
+    expect(useSearchStore.getState().open).toBe(false);
+  });
+
   it("navigates to page on selection", async () => {
     const user = userEvent.setup();
     renderSearch();
@@ -304,6 +454,65 @@ describe("SearchCommand", () => {
 
     expect(mockPush).toHaveBeenCalledWith("/ws-test/settings");
     expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  it("cmd-click on a result opens it in a new tab instead of navigating in place", async () => {
+    const user = userEvent.setup();
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "settings");
+
+    const settingsItem = await screen.findByText("Settings");
+    fireEvent.click(settingsItem, { metaKey: true });
+
+    expect(open).toHaveBeenCalledWith(
+      "https://app.multica//ws-test/settings",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(useSearchStore.getState().open).toBe(false);
+    open.mockRestore();
+  });
+
+  it("cmd+Enter opens the highlighted result in a new tab", async () => {
+    const user = userEvent.setup();
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "settings");
+    await screen.findByText("Settings");
+    fireEvent.keyDown(input, { key: "Enter", metaKey: true });
+
+    expect(open).toHaveBeenCalledWith(
+      "https://app.multica//ws-test/settings",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(mockPush).not.toHaveBeenCalled();
+    open.mockRestore();
+  });
+
+  it("a plain selection after an abandoned cmd-click does not inherit the stale intent", async () => {
+    const user = userEvent.setup();
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    // cmd-click somewhere that selects nothing…
+    fireEvent.click(input, { metaKey: true });
+    await user.type(input, "settings");
+
+    const settingsItem = await screen.findByText("Settings");
+    // …then a plain click must navigate in place, not open a tab.
+    await user.click(settingsItem);
+
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/settings");
+    expect(open).not.toHaveBeenCalled();
+    open.mockRestore();
   });
 
   it("lists workspace members and navigates to the member page on selection", async () => {
@@ -452,6 +661,81 @@ describe("SearchCommand", () => {
     expect(mockToastSuccess).toHaveBeenCalledWith("Copied MUL-42");
 
     writeSpy.mockRestore();
+  });
+
+  it("hides fold/unfold-all-comments commands off issue detail routes", async () => {
+    const user = userEvent.setup();
+    mockPathname.current = "/ws-test/projects";
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "fold");
+
+    expect(screen.queryByText("Fold All Comments")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unfold All Comments")).not.toBeInTheDocument();
+  });
+
+  it("folds all comments on the current issue, including expanded resolved threads", async () => {
+    const user = userEvent.setup();
+    mockPathname.current = "/ws-test/issues/issue-1";
+    mockAllIssues.current = [
+      { id: "issue-1", identifier: "MUL-42", title: "Demo", status: "todo" },
+    ];
+    mockTimeline.current = [
+      { type: "activity", id: "act-1", actor_type: "member", actor_id: "u1", created_at: "2026-01-01T00:00:00Z", action: "status_changed" },
+      { type: "comment", id: "root-1", actor_type: "member", actor_id: "u1", created_at: "2026-01-01T01:00:00Z", parent_id: null },
+      { type: "comment", id: "reply-1", actor_type: "member", actor_id: "u1", created_at: "2026-01-01T02:00:00Z", parent_id: "root-1" },
+      { type: "comment", id: "root-2", actor_type: "member", actor_id: "u1", created_at: "2026-01-01T03:00:00Z", parent_id: null, resolved_at: "2026-01-02T00:00:00Z" },
+    ];
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "fold");
+
+    const foldItem = await screen.findByText(
+      (_, el) => el?.textContent === "Fold All Comments" && el?.tagName === "SPAN",
+    );
+    await user.click(foldItem);
+
+    await waitFor(() => {
+      // Root comments only — replies fold with their thread, activities are not comments.
+      expect(mockCommentCollapseAll).toHaveBeenCalledWith("issue-1", ["root-1", "root-2"]);
+    });
+    expect(mockResolvedCollapseAll).toHaveBeenCalledWith("issue-1");
+    expect(mockCommentExpandAll).not.toHaveBeenCalled();
+    expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  it("unfolds all comments and expands resolved threads", async () => {
+    const user = userEvent.setup();
+    mockPathname.current = "/ws-test/issues/issue-1";
+    mockAllIssues.current = [
+      { id: "issue-1", identifier: "MUL-42", title: "Demo", status: "todo" },
+    ];
+    mockTimeline.current = [
+      { type: "comment", id: "root-1", actor_type: "member", actor_id: "u1", created_at: "2026-01-01T01:00:00Z", parent_id: null },
+      { type: "comment", id: "root-2", actor_type: "member", actor_id: "u1", created_at: "2026-01-01T03:00:00Z", parent_id: null, resolved_at: "2026-01-02T00:00:00Z" },
+      // root-3 is reply-resolved: the resolution lives on the reply.
+      { type: "comment", id: "root-3", actor_type: "member", actor_id: "u1", created_at: "2026-01-01T04:00:00Z", parent_id: null },
+      { type: "comment", id: "reply-3", actor_type: "member", actor_id: "u1", created_at: "2026-01-01T05:00:00Z", parent_id: "root-3", resolved_at: "2026-01-02T01:00:00Z" },
+    ];
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "unfold");
+
+    const unfoldItem = await screen.findByText(
+      (_, el) => el?.textContent === "Unfold All Comments" && el?.tagName === "SPAN",
+    );
+    await user.click(unfoldItem);
+
+    await waitFor(() => {
+      expect(mockCommentExpandAll).toHaveBeenCalledWith("issue-1");
+    });
+    // Only threads carrying a resolution get seeded into the expand set.
+    expect(mockResolvedExpandAll).toHaveBeenCalledWith("issue-1", ["root-2", "root-3"]);
+    expect(mockCommentCollapseAll).not.toHaveBeenCalled();
+    expect(useSearchStore.getState().open).toBe(false);
   });
 
   it("filters theme commands by query keywords", async () => {
@@ -668,5 +952,363 @@ describe("SearchCommand", () => {
         el?.tagName === "SPAN",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("lets Home/End edit the query caret instead of hijacking result navigation", async () => {
+    const user = userEvent.setup();
+    renderSearch();
+
+    const input = screen.getByPlaceholderText(
+      "Type a command or search...",
+    ) as HTMLInputElement;
+    await user.type(input, "new");
+
+    // "new" surfaces New Issue + New Project, so cmdk has a multi-item list.
+    await waitFor(() => {
+      expect(
+        screen.getByText((_, el) => el?.textContent === "New Issue" && el?.tagName === "SPAN"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText((_, el) => el?.textContent === "New Project" && el?.tagName === "SPAN"),
+      ).toBeInTheDocument();
+    });
+
+    const selectedValue = () =>
+      document
+        .querySelector('[cmdk-item=""][aria-selected="true"]')
+        ?.getAttribute("data-value") ?? null;
+
+    // cmdk auto-selects the first item; Arrow keys must still move that selection.
+    const first = selectedValue();
+    expect(first).not.toBeNull();
+
+    await user.keyboard("{ArrowDown}");
+    expect(selectedValue()).not.toBe(first);
+
+    await user.keyboard("{ArrowUp}");
+    expect(selectedValue()).toBe(first);
+
+    // Home moves the text caret to the start — it must NOT jump the result list.
+    await user.keyboard("{Home}");
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(0);
+    expect(selectedValue()).toBe(first);
+
+    // End moves the caret to the end — again leaving the result selection alone.
+    await user.keyboard("{End}");
+    expect(input.selectionStart).toBe(input.value.length);
+    expect(input.selectionEnd).toBe(input.value.length);
+    expect(selectedValue()).toBe(first);
+  });
+
+  // MUL-5824: the two searches are ranked independently server-side and the
+  // palette renders the whole Projects group before the whole Issues group, so
+  // per-type ranking let one cancelled project be the very first row. The
+  // partition has to be cross-type and applied here, where results aggregate.
+  describe("mixed issue/project cancelled demotion", () => {
+    const fixtureIssue = (
+      over: Partial<Record<string, unknown>> & { id: string },
+    ) => ({
+      workspace_id: "ws-test",
+      number: 1,
+      identifier: "MUL-1",
+      title: "Untitled",
+      description: null,
+      status: "todo",
+      priority: "none",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 0,
+      start_date: null,
+      due_date: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      match_source: "title",
+      ...over,
+    });
+
+    const fixtureProject = (
+      over: Partial<Record<string, unknown>> & { id: string },
+    ) => ({
+      workspace_id: "ws-test",
+      title: "Untitled",
+      description: null,
+      icon: null,
+      status: "in_progress",
+      priority: "none",
+      lead_type: null,
+      lead_id: null,
+      start_date: null,
+      due_date: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 0,
+      match_source: "title",
+      ...over,
+    });
+
+    /** Rendered result rows, top to bottom, by their cmdk value. */
+    const renderedValues = () =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>('[cmdk-item=""]'),
+      )
+        .map((el) => el.getAttribute("data-value") ?? "")
+        .filter((v) => v.startsWith("project:") || v.startsWith("issue-"));
+
+    /**
+     * Group headings, top to bottom. Queried structurally rather than by text:
+     * a cancelled project also renders "Cancelled" as its status label.
+     */
+    const renderedHeadings = () =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>("[cmdk-group-heading]"),
+      ).map((el) => el.textContent ?? "");
+
+    it("renders project status in the selected UI language", async () => {
+      const user = userEvent.setup();
+      mockSearchProjects.mockResolvedValue({
+        projects: [
+          fixtureProject({
+            id: "proj-localized",
+            title: "localized project",
+            status: "in_progress",
+          }),
+        ],
+        total: 1,
+      });
+
+      renderSearchInChinese();
+      await user.type(
+        screen.getByPlaceholderText("Type a command or search..."),
+        "localized",
+      );
+
+      await waitFor(() => expect(screen.getByText("进行中")).toBeInTheDocument(), {
+        timeout: 2000,
+      });
+      expect(screen.queryByText("In Progress")).toBeNull();
+    });
+
+    it("keeps a cancelled project below a live issue instead of first", async () => {
+      const user = userEvent.setup();
+      mockSearchIssues.mockResolvedValue({
+        issues: [
+          fixtureIssue({
+            id: "issue-live",
+            number: 10,
+            identifier: "MUL-10",
+            title: "search live issue",
+            status: "in_progress",
+          }),
+        ],
+        total: 1,
+      });
+      mockSearchProjects.mockResolvedValue({
+        projects: [
+          fixtureProject({
+            id: "proj-dead",
+            title: "search dead project",
+            status: "cancelled",
+          }),
+        ],
+        total: 1,
+      });
+
+      renderSearch();
+      await user.type(
+        screen.getByPlaceholderText("Type a command or search..."),
+        "search",
+      );
+
+      await waitFor(
+        () => {
+          expect(renderedValues()).toEqual(["issue-live", "project:proj-dead"]);
+        },
+        { timeout: 2000 },
+      );
+      // Still discoverable, just under its own heading at the bottom.
+      expect(renderedHeadings()).toEqual(["Issues", "Cancelled"]);
+    });
+
+    it("keeps live rows of both types above every cancelled row", async () => {
+      const user = userEvent.setup();
+      mockSearchIssues.mockResolvedValue({
+        issues: [
+          fixtureIssue({
+            id: "issue-dead",
+            number: 11,
+            identifier: "MUL-11",
+            title: "search a",
+            status: "cancelled",
+          }),
+          fixtureIssue({
+            id: "issue-live",
+            number: 12,
+            identifier: "MUL-12",
+            title: "search b",
+            status: "todo",
+          }),
+          fixtureIssue({
+            id: "issue-done",
+            number: 13,
+            identifier: "MUL-13",
+            title: "search c",
+            status: "done",
+          }),
+        ],
+        total: 3,
+      });
+      mockSearchProjects.mockResolvedValue({
+        projects: [
+          fixtureProject({ id: "proj-dead", title: "search p1", status: "cancelled" }),
+          fixtureProject({ id: "proj-live", title: "search p2", status: "planned" }),
+        ],
+        total: 2,
+      });
+
+      renderSearch();
+      await user.type(
+        screen.getByPlaceholderText("Type a command or search..."),
+        "search",
+      );
+
+      await waitFor(
+        () => {
+          expect(renderedValues()).toEqual([
+            "project:proj-live",
+            // 'done' is live — only cancelled work is demoted.
+            "issue-live",
+            "issue-done",
+            "project:proj-dead",
+            "issue-dead",
+          ]);
+        },
+        { timeout: 2000 },
+      );
+    });
+
+    it("exempts a cancelled issue the query targets by identifier", async () => {
+      const user = userEvent.setup();
+      mockSearchIssues.mockResolvedValue({
+        issues: [
+          fixtureIssue({
+            id: "issue-hit",
+            number: 7,
+            identifier: "MUL-7",
+            title: "Direct hit",
+            status: "cancelled",
+          }),
+        ],
+        total: 1,
+      });
+      mockSearchProjects.mockResolvedValue({ projects: [], total: 0 });
+
+      renderSearch();
+      await user.type(
+        screen.getByPlaceholderText("Type a command or search..."),
+        "MUL-7",
+      );
+
+      await waitFor(
+        () => {
+          expect(renderedValues()).toEqual(["issue-hit"]);
+        },
+        { timeout: 2000 },
+      );
+      expect(renderedHeadings()).not.toContain("Cancelled");
+    });
+  });
+
+  // Rows from the previous query stay on screen while the next request is in
+  // flight (that is what keeps the list from strobing on every keystroke), so
+  // they have to stop being *reachable*. cmdk re-selects the first valid item
+  // on every input change, so a live stale row means Enter opens a result the
+  // user is no longer searching for.
+  describe("stale results while the next query is in flight", () => {
+    const alphaIssue = {
+      id: "issue-alpha",
+      workspace_id: "ws-test",
+      number: 100,
+      identifier: "MUL-100",
+      title: "Alpha result",
+      description: null,
+      status: "todo",
+      priority: "none",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 0,
+      start_date: null,
+      due_date: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      match_source: "title",
+    };
+
+    /** HighlightText splits the title into <mark> + text, so match the span. */
+    const alphaRowTitle = () =>
+      screen.getByText(
+        (_, el) => el?.textContent === "Alpha result" && el?.tagName === "SPAN",
+      );
+
+    /** Resolve the first query; hang on everything after it. */
+    const answerOnlyAlpha = () => {
+      mockSearchIssues.mockImplementation(({ q }: { q: string }) =>
+        q === "alpha"
+          ? Promise.resolve({ issues: [alphaIssue], total: 1 })
+          : new Promise(() => {}),
+      );
+      mockSearchProjects.mockImplementation(({ q }: { q: string }) =>
+        q === "alpha"
+          ? Promise.resolve({ projects: [], total: 0 })
+          : new Promise(() => {}),
+      );
+    };
+
+    const typeAlphaThenChange = async (
+      user: ReturnType<typeof userEvent.setup>,
+    ) => {
+      answerOnlyAlpha();
+      renderSearch();
+      const input = screen.getByPlaceholderText("Type a command or search...");
+      await user.type(input, "alpha");
+      await waitFor(
+        () => {
+          expect(alphaRowTitle()).toBeInTheDocument();
+        },
+        { timeout: 2000 },
+      );
+      // Query changes; the response for it never arrives.
+      await user.type(input, "zzz");
+      return input;
+    };
+
+    it("does not open the previous query's result on Enter", async () => {
+      const user = userEvent.setup();
+      const input = await typeAlphaThenChange(user);
+
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(mockPush).not.toHaveBeenCalled();
+      expect(useSearchStore.getState().open).toBe(true);
+    });
+
+    it("does not open the previous query's result on click", async () => {
+      const user = userEvent.setup();
+      await typeAlphaThenChange(user);
+
+      // Still painted (that is the point), but inert.
+      fireEvent.click(alphaRowTitle());
+
+      expect(mockPush).not.toHaveBeenCalled();
+      expect(useSearchStore.getState().open).toBe(true);
+    });
   });
 });

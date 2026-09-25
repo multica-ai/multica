@@ -11,6 +11,27 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+// seedAutopilotScheduleTrigger gives an autopilot a schedule trigger recording its
+// creator. Since MUL-6951 an automatic dispatch resolves the human it acts as from
+// this row — and admits the assignee agent as that human — so a dispatch with no
+// trigger has no principal and fails closed.
+func seedAutopilotScheduleTrigger(t *testing.T, queries *db.Queries, ap db.Autopilot) pgtype.UUID {
+	t.Helper()
+	trig, err := queries.CreateAutopilotTrigger(context.Background(), db.CreateAutopilotTriggerParams{
+		AutopilotID:    ap.ID,
+		Kind:           "schedule",
+		Enabled:        true,
+		CronExpression: pgtype.Text{String: "*/5 * * * *", Valid: true},
+		Timezone:       pgtype.Text{String: "UTC", Valid: true},
+		CreatedByType:  pgtype.Text{String: "member", Valid: ap.CreatedByType == "member"},
+		CreatedByID:    ap.CreatedByID,
+	})
+	if err != nil {
+		t.Fatalf("seed schedule trigger: %v", err)
+	}
+	return trig.ID
+}
+
 func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 	ctx := context.Background()
 	queries := db.New(testPool)
@@ -37,7 +58,7 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 		{
 			name: "completed",
 			finalize: func(task db.AgentTaskQueue) {
-				if _, err := taskSvc.CompleteTask(ctx, task.ID, []byte(`{"output":"done"}`), "", ""); err != nil {
+				if _, err := taskSvc.CompleteTask(ctx, task.ID, []byte(`{"output":"done"}`), "", "", "", false, "", ""); err != nil {
 					t.Fatalf("CompleteTask: %v", err)
 				}
 			},
@@ -47,7 +68,7 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 		{
 			name: "failed",
 			finalize: func(task db.AgentTaskQueue) {
-				if _, err := taskSvc.FailTask(ctx, task.ID, "boom", "", "", "agent_error"); err != nil {
+				if _, err := taskSvc.FailTask(ctx, task.ID, "boom", "", "", "", "agent_error", false, "", ""); err != nil {
 					t.Fatalf("FailTask: %v", err)
 				}
 			},
@@ -79,7 +100,7 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 				}
 			})
 
-			run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+			run, err := autopilotSvc.DispatchAutopilot(ctx, ap, seedAutopilotScheduleTrigger(t, queries, ap), "manual", nil)
 			if err != nil {
 				t.Fatalf("DispatchAutopilot: %v", err)
 			}
@@ -172,7 +193,7 @@ func dispatchCreateIssueAutopilot(t *testing.T, title string) linkedIssueAutopil
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
 	})
 
-	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "schedule", nil)
+	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, seedAutopilotScheduleTrigger(t, queries, ap), "schedule", nil)
 	if err != nil {
 		t.Fatalf("DispatchAutopilot: %v", err)
 	}
@@ -230,7 +251,7 @@ func TestAutopilotCreateIssueTaskNoProgressFailureUpdatesRun(t *testing.T) {
 	runTaskWithBudget(t, f.queries, f.taskID, 1)
 
 	const errMsg = "codex app-server no progress timeout after 30s"
-	if _, err := f.taskSvc.FailTask(ctx, f.taskID, errMsg, "", "", "codex_semantic_inactivity"); err != nil {
+	if _, err := f.taskSvc.FailTask(ctx, f.taskID, errMsg, "", "", "", "codex_semantic_inactivity", false, "", ""); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 
@@ -258,7 +279,7 @@ func TestAutopilotCreateIssueTaskAgentErrorFailureUpdatesRun(t *testing.T) {
 	// agent_error is not in retryableReasons, so the first terminal failure is
 	// final — the run must fail carrying the agent's error text.
 	const errMsg = "build failed: ./pkg/foo: undefined: Bar"
-	if _, err := f.taskSvc.FailTask(ctx, f.taskID, errMsg, "", "", "agent_error"); err != nil {
+	if _, err := f.taskSvc.FailTask(ctx, f.taskID, errMsg, "", "", "", "agent_error", false, "", ""); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 
@@ -287,7 +308,7 @@ func TestAutopilotCreateIssueTaskRetryPendingKeepsRunOpen(t *testing.T) {
 
 	// timeout is retryable, so FailTask enqueues a fresh attempt before it
 	// broadcasts the failure event.
-	if _, err := f.taskSvc.FailTask(ctx, f.taskID, "runtime went offline", "", "", "timeout"); err != nil {
+	if _, err := f.taskSvc.FailTask(ctx, f.taskID, "runtime went offline", "", "", "", "timeout", false, "", ""); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 
@@ -369,7 +390,7 @@ func TestAutopilotDispatchSkipsWhenRuntimeOffline(t *testing.T) {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
 	})
 
-	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "schedule", nil)
+	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, seedAutopilotScheduleTrigger(t, queries, ap), "schedule", nil)
 	if err != nil {
 		t.Fatalf("DispatchAutopilot: %v", err)
 	}
@@ -396,6 +417,102 @@ func TestAutopilotDispatchSkipsWhenRuntimeOffline(t *testing.T) {
 	}
 	if taskCount != 0 {
 		t.Fatalf("expected 0 queued tasks for offline-runtime agent, got %d", taskCount)
+	}
+}
+
+// TestAutopilotCreateIssueDispatchCreatesIssueWhenRuntimeOffline locks in the
+// audit-trail contract for tracked autopilots: create_issue mode must still
+// create a visible issue when the assignee runtime is offline, leaving the
+// issue/task to be claimed when the runtime comes back instead of silently
+// recording an unrecoverable skipped run.
+func TestAutopilotCreateIssueDispatchCreatesIssueWhenRuntimeOffline(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+		)
+		VALUES ($1, NULL, 'Offline create-issue runtime', 'local', 'ws1325_offline_runtime', 'offline', '{}'::jsonb, '{}'::jsonb, now())
+		RETURNING id::text
+	`, parseUUID(testWorkspaceID)).Scan(&runtimeID); err != nil {
+		t.Fatalf("create offline runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, 'ws1325-offline-create-issue-agent', '', 'local', '{}'::jsonb, $2, 'workspace', 1, $3)
+		RETURNING id::text
+	`, parseUUID(testWorkspaceID), runtimeID, parseUUID(testUserID)).Scan(&agentID); err != nil {
+		t.Fatalf("create offline agent: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:        parseUUID(testWorkspaceID),
+		Title:              "Offline create-issue autopilot",
+		Description:        pgtype.Text{String: "WS-1325 regression test", Valid: true},
+		AssigneeType:       "agent",
+		AssigneeID:         parseUUID(agentID),
+		Status:             "active",
+		ExecutionMode:      "create_issue",
+		IssueTitleTemplate: pgtype.Text{String: "Tracked issue", Valid: true},
+		CreatedByType:      "member",
+		CreatedByID:        parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
+	})
+
+	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, seedAutopilotScheduleTrigger(t, queries, ap), "schedule", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	if run == nil {
+		t.Fatal("expected a run, got nil")
+	}
+	if run.Status != "issue_created" {
+		t.Fatalf("expected run status 'issue_created', got %q", run.Status)
+	}
+	if !run.IssueID.Valid {
+		t.Fatal("create_issue dispatch did not link an issue")
+	}
+	if run.FailureReason.Valid {
+		t.Fatalf("expected no failure reason, got %q", run.FailureReason.String)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, run.IssueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, run.IssueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, run.IssueID)
+	})
+
+	tasks, err := queries.ListTasksByIssue(ctx, run.IssueID)
+	if err != nil {
+		t.Fatalf("ListTasksByIssue: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected one queued issue task, got %d", len(tasks))
+	}
+	if tasks[0].AgentID != parseUUID(agentID) {
+		t.Fatalf("task agent mismatch: got %v want %v", tasks[0].AgentID, parseUUID(agentID))
+	}
+	if tasks[0].RuntimeID != parseUUID(runtimeID) {
+		t.Fatalf("task runtime mismatch: got %v want %v", tasks[0].RuntimeID, parseUUID(runtimeID))
 	}
 }
 
@@ -474,7 +591,7 @@ func TestManualTriggerDoesNotErrorOnPostAdmissionSkip(t *testing.T) {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
 	})
 
-	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, seedAutopilotScheduleTrigger(t, queries, ap), "manual", nil)
 	if err != nil {
 		t.Fatalf("manual DispatchAutopilot returned error (would 500 the handler): %v", err)
 	}

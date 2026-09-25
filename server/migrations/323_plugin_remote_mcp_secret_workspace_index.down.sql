@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_plugin_remote_mcp_secret_workspace;

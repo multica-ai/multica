@@ -1,8 +1,5 @@
-import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
 import type { ProjectStatus, ProjectPriority } from "../types";
-import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../platform/workspace-storage";
-import { defaultStorage } from "../platform/storage";
+import { createDraftStore } from "../drafts/create-draft-store";
 
 interface ProjectDraft {
   title: string;
@@ -12,6 +9,9 @@ interface ProjectDraft {
   leadType?: "member" | "agent";
   leadId?: string;
   icon?: string;
+  // Calendar days ("YYYY-MM-DD"); empty/undefined means unset.
+  startDate?: string;
+  dueDate?: string;
 }
 
 const EMPTY_DRAFT: ProjectDraft = {
@@ -22,33 +22,12 @@ const EMPTY_DRAFT: ProjectDraft = {
   leadType: undefined,
   leadId: undefined,
   icon: undefined,
+  startDate: undefined,
+  dueDate: undefined,
 };
 
-interface ProjectDraftStore {
-  draft: ProjectDraft;
-  setDraft: (patch: Partial<ProjectDraft>) => void;
-  clearDraft: () => void;
-  hasDraft: () => boolean;
-}
-
-export const useProjectDraftStore = create<ProjectDraftStore>()(
-  persist(
-    (set, get) => ({
-      draft: { ...EMPTY_DRAFT },
-      setDraft: (patch) =>
-        set((s) => ({ draft: { ...s.draft, ...patch } })),
-      clearDraft: () =>
-        set({ draft: { ...EMPTY_DRAFT } }),
-      hasDraft: () => {
-        const { draft } = get();
-        return !!(draft.title || draft.description);
-      },
-    }),
-    {
-      name: "multica_project_draft",
-      storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
-    },
-  ),
-);
-
-registerForWorkspaceRehydration(() => useProjectDraftStore.persist.rehydrate());
+export const useProjectDraftStore = createDraftStore<ProjectDraft>({
+  storageKey: "multica_project_draft",
+  emptyData: EMPTY_DRAFT,
+  hasMeaningful: (d) => !!(d.title || d.description),
+});

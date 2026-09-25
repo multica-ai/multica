@@ -1,21 +1,188 @@
-import type { Issue, IssueStatus, IssuePriority } from "@multica/core/types";
+import type { Issue, IssueStatus, IssuePriority, IssueAssigneeGroup, ProjectStatus, PropertyFilterValue, PropertyOperatorFilter } from "@multica/core/types";
 import type { ActorFilterValue } from "@multica/core/issues/stores/view-store";
+import type { IssueActivityState } from "../surface/activity";
 
 export interface IssueFilters {
   statusFilters: IssueStatus[];
   priorityFilters: IssuePriority[];
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
+  /** Keeps an explicitly active assignee predicate distinct from the normal
+   *  empty-array = no-filter state. When true with no selected assignees and
+   *  includeNoAssignee=false, the predicate intentionally matches nothing. */
+  assigneeFilterActive?: boolean;
   creatorFilters: ActorFilterValue[];
   projectFilters: string[];
   includeNoProject: boolean;
+  /** Lifecycle status of the parent project. Needs
+   *  `IssueFilterContext.projectStatusById` to be evaluated — an Issue only
+   *  carries `project_id`. */
+  projectStatusFilters?: ProjectStatus[];
+  /** See IssueFilterContext.projectStatusById. Carried on the filter object
+   *  so the context-free `filterIssues` entry point can evaluate the
+   *  project-status predicate, like `runningIssueIds` does for working-only. */
+  projectStatusById?: ReadonlyMap<string, ProjectStatus>;
   labelFilters: string[];
+  /** Custom-property filters: definition id → selected values (OR within
+   *  a definition, AND across definitions; checkbox uses "true"/"false"). */
+  propertyFilters?: Record<string, PropertyFilterValue[]>;
   // When `agentRunningFilter` is true, only keep issues whose id is in
-  // `runningIssueIds`. The set is derived by the caller from
-  // `agentTaskSnapshot` (one pass over running tasks) so filter.ts stays
-  // free of any data-fetching dependency.
+  // `runningIssueIds`. The surface derives this set from the independent
+  // `/api/working-agents` projection so filter.ts stays free of fetching.
   agentRunningFilter?: boolean;
   runningIssueIds?: ReadonlySet<string>;
+  // "Show sub-issues" display toggle. When explicitly `false`, hide issues
+  // that have a parent so only top-level issues remain. Undefined / true keeps
+  // the default behaviour of showing everything, so existing callers that omit
+  // it (and mobile's positional variant) are unaffected.
+  showSubIssues?: boolean;
+}
+
+export interface IssueFilterState {
+  statusFilters: IssueStatus[];
+  priorityFilters: IssuePriority[];
+  assigneeFilters: ActorFilterValue[];
+  includeNoAssignee: boolean;
+  /** See IssueFilters.assigneeFilterActive. */
+  assigneeFilterActive?: boolean;
+  creatorFilters: ActorFilterValue[];
+  projectFilters: string[];
+  includeNoProject: boolean;
+  /** See IssueFilters.projectStatusFilters. */
+  projectStatusFilters?: ProjectStatus[];
+  labelFilters: string[];
+  propertyFilters?: Record<string, PropertyFilterValue[]>;
+  workingOnly: boolean;
+  /** See IssueFilters.showSubIssues — only an explicit `false` hides. */
+  showSubIssues?: boolean;
+}
+
+export interface IssueFilterContext {
+  activityByIssueId?: ReadonlyMap<string, IssueActivityState>;
+  runningIssueIds?: ReadonlySet<string>;
+  /** Project id → its lifecycle status, from the workspace project list.
+   *  Absent on surfaces that never load it, which makes the project-status
+   *  filter a no-op there rather than blanking the surface. */
+  projectStatusById?: ReadonlyMap<string, ProjectStatus>;
+}
+
+/**
+ * Filter value that selects issues where a custom property is UNSET ("No
+ * value"). Mirrors the backend sentinel in `parsePropertiesFilterParam`
+ * (`server/internal/handler/property.go`); cannot collide with a real option id
+ * (select options are UUIDs, checkbox uses "true"/"false").
+ */
+export const NO_PROPERTY_VALUE = "__none__";
+
+/**
+ * Match one stored value against one operator filter member. Mirrors the
+ * server-side operator predicates in `parsePropertiesFilterParam`
+ * (`server/internal/handler/property.go`):
+ *
+ * - `contains` is a case-insensitive substring test over stored strings only
+ *   (the server's guarded `ILIKE '%…%'`), so "Foo" and "foo" agree.
+ * - `gt`/`gte`/`lt`/`lte` only match numeric stored values — the server
+ *   guards with `jsonb_typeof(...) = 'number'`, so a text value is a miss
+ *   here too.
+ * - `before`/`after` only match string values and compare lexicographically,
+ *   which is chronological for the "YYYY-MM-DD" date-only strings the server
+ *   stores and filters on.
+ *
+ * A missing key never matches an operator (the server's `->>` yields NULL,
+ * which no operator predicate satisfies) — handled by the caller before this
+ * runs.
+ */
+export function issueValueMatchesOperator(
+  value: NonNullable<Issue["properties"]>[string],
+  filter: PropertyOperatorFilter,
+): boolean {
+  switch (filter.op) {
+    case "contains": {
+      const needle = filter.value.toLowerCase();
+      // An empty needle would substring-match every value ("".includes("") is
+      // true); the server rejects an empty operator value outright, so the
+      // matcher must refuse it too rather than match-all on hand-edited
+      // saved-view blobs.
+      if (needle === "") return false;
+      if (typeof value === "string") return value.toLowerCase().includes(needle);
+      // Numbers, booleans, and arrays never match. Although jsonb ->> can
+      // serialize them, contains is deliberately a text/url operator on both
+      // the server and the client.
+      return false;
+    }
+    case "gt":
+    case "gte":
+    case "lt":
+    case "lte": {
+      if (typeof value !== "number") return false;
+      const bound = Number(filter.value);
+      if (!Number.isFinite(bound)) return false;
+      if (filter.op === "gt") return value > bound;
+      if (filter.op === "gte") return value >= bound;
+      if (filter.op === "lt") return value < bound;
+      return value <= bound;
+    }
+    case "before":
+    case "after": {
+      if (typeof value !== "string") return false;
+      return filter.op === "before" ? value < filter.value : value > filter.value;
+    }
+    default:
+      return false;
+  }
+}
+
+/**
+ * Match one issue against the property filters. Select values are single
+ * option-id strings, multi_select values are option-id arrays, checkbox
+ * values are booleans compared against the "true"/"false" pseudo-options,
+ * and scalar definitions accept operator members (`PropertyOperatorFilter`)
+ * alongside plain equality strings. Within one definition any member
+ * matching is enough (OR); every definition must match (AND). An issue with
+ * no value for a filtered definition matches only when the "No value"
+ * (NO_PROPERTY_VALUE) pseudo-option is selected for it.
+ */
+export function issueMatchesPropertyFilters(
+  issue: Issue,
+  propertyFilters: Record<string, PropertyFilterValue[]> | undefined,
+): boolean {
+  if (!propertyFilters) return true;
+  for (const [propertyId, selected] of Object.entries(propertyFilters)) {
+    if (selected.length === 0) continue;
+    const value = issue.properties?.[propertyId];
+    if (value === undefined) {
+      if (selected.includes(NO_PROPERTY_VALUE)) continue;
+      return false;
+    }
+    const matched = selected.some((member) => {
+      if (member === NO_PROPERTY_VALUE) {
+        // The sentinel never matches a SET value: a literal "__none__" text
+        // value is a real value (the server's key-absence predicate excludes
+        // it from a No-value filter), and this path must agree with the
+        // server.
+        return false;
+      }
+      if (typeof member === "string") {
+        if (typeof value === "string") return member === value;
+        // Compare numerically so "3.50" and 3.5 agree with the server's
+        // jsonb number containment.
+        if (typeof value === "number") return Number(member) === value;
+        if (Array.isArray(value)) return value.includes(member);
+        if (typeof value === "boolean") return member === String(value);
+        return false;
+      }
+      return issueValueMatchesOperator(value, member);
+    });
+    if (!matched) return false;
+  }
+  return true;
+}
+
+function issueIsWorking(issueId: string, context: IssueFilterContext) {
+  if (context.activityByIssueId) {
+    return context.activityByIssueId.get(issueId)?.isWorking === true;
+  }
+  return context.runningIssueIds?.has(issueId) === true;
 }
 
 /**
@@ -27,18 +194,35 @@ export interface IssueFilters {
  * - When assigneeFilters has items → show only those assignees' issues
  * - When both → show matching assignees + unassigned
  */
-export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
-  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds } = filters;
-  const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
+export function applyIssueFilters(
+  issues: Issue[],
+  filters: IssueFilterState,
+  context: IssueFilterContext = {},
+): Issue[] {
+  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, workingOnly } = filters;
+  const hasAssigneeFilter =
+    filters.assigneeFilterActive === true ||
+    assigneeFilters.length > 0 ||
+    includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
+  const projectStatusFilters = filters.projectStatusFilters ?? [];
+  // Without the catalog the predicate cannot be answered. Treat that as
+  // "no filter" — the server-driven surfaces enforce it for real, and a
+  // silent match-none here would empty a list with no visible cause.
+  const projectStatusCatalog = context.projectStatusById;
+  const hasProjectStatusFilter =
+    projectStatusFilters.length > 0 && projectStatusCatalog !== undefined;
   // Empty set passed without `agentRunningFilter` is a no-op. When the
   // filter is on but the set is missing/empty, hide everything — the
   // user opted into "only running" and there is nothing running.
-  const applyAgentRunning = agentRunningFilter === true;
+  const applyWorkingOnly = workingOnly === true;
+  const hideSubIssues = filters.showSubIssues === false;
 
   return issues.filter((issue) => {
-    if (applyAgentRunning && !(runningIssueIds?.has(issue.id) ?? false))
+    if (applyWorkingOnly && !issueIsWorking(issue.id, context))
       return false;
+
+    if (hideSubIssues && issue.parent_issue_id) return false;
 
     if (statusFilters.length > 0 && !statusFilters.includes(issue.status))
       return false;
@@ -81,6 +265,17 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
       }
     }
 
+    if (hasProjectStatusFilter) {
+      // An issue with no project has no status to match, so it never
+      // survives — same as the server's EXISTS predicate. `includeNoProject`
+      // widens the project-id dimension only.
+      const projectStatus = issue.project_id
+        ? projectStatusCatalog.get(issue.project_id)
+        : undefined;
+      if (!projectStatus || !projectStatusFilters.includes(projectStatus))
+        return false;
+    }
+
     if (labelFilters.length > 0) {
       // OR semantics within the filter: keep issues that carry any of the
       // selected labels. Matches existing priority / project multi-select.
@@ -89,6 +284,73 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
       if (!issueLabels.some((l) => labelFilters.includes(l.id))) return false;
     }
 
+    if (!issueMatchesPropertyFilters(issue, filters.propertyFilters)) return false;
+
     return true;
   });
+}
+
+export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
+  return applyIssueFilters(
+    issues,
+    {
+      statusFilters: filters.statusFilters,
+      priorityFilters: filters.priorityFilters,
+      assigneeFilters: filters.assigneeFilters,
+      includeNoAssignee: filters.includeNoAssignee,
+      assigneeFilterActive: filters.assigneeFilterActive,
+      creatorFilters: filters.creatorFilters,
+      projectFilters: filters.projectFilters,
+      includeNoProject: filters.includeNoProject,
+      projectStatusFilters: filters.projectStatusFilters,
+      labelFilters: filters.labelFilters,
+      propertyFilters: filters.propertyFilters,
+      workingOnly: filters.agentRunningFilter === true,
+      showSubIssues: filters.showSubIssues,
+    },
+    {
+      runningIssueIds: filters.runningIssueIds,
+      projectStatusById: filters.projectStatusById,
+    },
+  );
+}
+
+/**
+ * Re-apply the client-only display filters to a server-grouped response.
+ * The assignee-grouped board renders straight from `groups`, bypassing the
+ * flat `applyIssueFilters` output, so the "Show sub-issues" toggle and the
+ * agents-working quick filter must be applied per group here. Recomputes
+ * each group's total and drops emptied groups. Returns the input by
+ * reference when no client filter is active.
+ */
+export function filterAssigneeGroups(
+  groups: IssueAssigneeGroup[] | undefined,
+  filters: {
+    showSubIssues?: boolean;
+    agentRunningFilter?: boolean;
+    runningIssueIds?: ReadonlySet<string>;
+    propertyFilters?: Record<string, PropertyFilterValue[]>;
+  },
+): IssueAssigneeGroup[] | undefined {
+  const applyRunning = filters.agentRunningFilter === true;
+  const hideSubIssues = filters.showSubIssues === false;
+  const hasPropertyFilters = Object.values(filters.propertyFilters ?? {}).some(
+    (selected) => selected.length > 0,
+  );
+  if (!groups || (!applyRunning && !hideSubIssues && !hasPropertyFilters)) return groups;
+
+  const { runningIssueIds } = filters;
+  return groups
+    .map((group) => {
+      const issues = group.issues.filter((issue) => {
+        if (applyRunning && !(runningIssueIds?.has(issue.id) ?? false))
+          return false;
+        if (hideSubIssues && issue.parent_issue_id) return false;
+        if (hasPropertyFilters && !issueMatchesPropertyFilters(issue, filters.propertyFilters))
+          return false;
+        return true;
+      });
+      return { ...group, issues, total: issues.length };
+    })
+    .filter((group) => group.issues.length > 0);
 }

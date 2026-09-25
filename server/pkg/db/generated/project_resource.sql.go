@@ -227,6 +227,50 @@ func (q *Queries) ListProjectResourcesForProjects(ctx context.Context, projectId
 	return items, nil
 }
 
+const listProjectResourcesInWorkspace = `-- name: ListProjectResourcesInWorkspace :many
+SELECT id, project_id, workspace_id, resource_type, resource_ref, label, position, created_at, created_by FROM project_resource
+WHERE project_id = $1 AND workspace_id = $2
+ORDER BY position ASC, created_at ASC
+`
+
+type ListProjectResourcesInWorkspaceParams struct {
+	ProjectID   pgtype.UUID `json:"project_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Workspace-scoped read for the daemon claim path. project_resource carries its
+// own workspace_id, so a corrupt project reference cannot pull another tenant's
+// repository URLs or local paths into a claim response.
+func (q *Queries) ListProjectResourcesInWorkspace(ctx context.Context, arg ListProjectResourcesInWorkspaceParams) ([]ProjectResource, error) {
+	rows, err := q.db.Query(ctx, listProjectResourcesInWorkspace, arg.ProjectID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProjectResource{}
+	for rows.Next() {
+		var i ProjectResource
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.WorkspaceID,
+			&i.ResourceType,
+			&i.ResourceRef,
+			&i.Label,
+			&i.Position,
+			&i.CreatedAt,
+			&i.CreatedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateProjectResource = `-- name: UpdateProjectResource :one
 UPDATE project_resource
 SET resource_ref = $2,

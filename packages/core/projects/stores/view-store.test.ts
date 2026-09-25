@@ -35,14 +35,6 @@ afterEach(() => {
 });
 
 describe("useProjectViewStore", () => {
-  it("defaults to 'compact'", () => {
-    expect(useProjectViewStore.getState().viewMode).toBe("compact");
-  });
-
-  it("setViewMode mutates the store", () => {
-    useProjectViewStore.getState().setViewMode("comfortable");
-    expect(useProjectViewStore.getState().viewMode).toBe("comfortable");
-  });
 
   it("partialize persists view prefs (no actions) under the workspace-namespaced key", async () => {
     setCurrentWorkspace("acme", "ws_a");

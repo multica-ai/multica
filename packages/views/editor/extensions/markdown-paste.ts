@@ -26,8 +26,13 @@
  * enough by themselves, because those should still paste as Markdown source.
  */
 import { Extension } from "@tiptap/core";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
-import { Slice } from "@tiptap/pm/model";
+import { Plugin, PluginKey, type Transaction } from "@tiptap/pm/state";
+import type { EditorView } from "@tiptap/pm/view";
+import {
+  Fragment,
+  Slice,
+  type Node as ProseMirrorNode,
+} from "@tiptap/pm/model";
 
 const LARGE_PASTE_TEXT_THRESHOLD = 50_000;
 const SEMANTIC_RICH_HTML_SELECTOR = [
@@ -347,6 +352,82 @@ function classifyPaste({
   return "markdown";
 }
 
+function canJoinOrderedLists(
+  left: ProseMirrorNode,
+  right: ProseMirrorNode,
+): boolean {
+  const leftType = left.attrs.type ?? "1";
+  const rightType = right.attrs.type ?? "1";
+  if (
+    left.type.name !== "orderedList" ||
+    right.type !== left.type ||
+    leftType !== rightType
+  ) {
+    return false;
+  }
+
+  const parsedLeftStart = Number(left.attrs.start);
+  const parsedRightStart = Number(right.attrs.start);
+  const leftStart = Number.isFinite(parsedLeftStart) ? parsedLeftStart : 1;
+  const rightStart = Number.isFinite(parsedRightStart) ? parsedRightStart : 1;
+  const expectedContinuation = leftStart + left.childCount;
+
+  // Some rich-text sources put every visual item in its own <ol> without a
+  // start value, so the parsed slice becomes adjacent one-item lists that all
+  // restart at 1. An explicit continuation value is the same structure with a
+  // better HTML hint. Both forms should become one list in our document model.
+  return rightStart === 1 || rightStart === expectedContinuation;
+}
+
+function repairOrderedListsInFragment(fragment: Fragment): Fragment {
+  const repaired: ProseMirrorNode[] = [];
+
+  fragment.forEach((node) => {
+    const content = node.isLeaf
+      ? node.content
+      : repairOrderedListsInFragment(node.content);
+    const repairedNode = content.eq(node.content) ? node : node.copy(content);
+    const previous = repaired.at(-1);
+
+    if (previous && canJoinOrderedLists(previous, repairedNode)) {
+      repaired[repaired.length - 1] = previous.copy(
+        previous.content.append(repairedNode.content),
+      );
+      return;
+    }
+
+    repaired.push(repairedNode);
+  });
+
+  return Fragment.fromArray(repaired);
+}
+
+function repairFragmentedOrderedLists(slice: Slice): Slice {
+  const content = repairOrderedListsInFragment(slice.content);
+  if (content.eq(slice.content)) return slice;
+  return new Slice(content, slice.openStart, slice.openEnd);
+}
+
+/**
+ * Marks a transaction as the commit of a paste, the way ProseMirror marks its
+ * own.
+ *
+ * `doPaste` stamps `paste` / `uiEvent` on the transaction it dispatches, but it
+ * returns early once a `handlePaste` prop claims the event — and this extension
+ * is a catch-all that claims nearly every paste. Anything downstream that asks
+ * "did this text arrive by paste?" therefore sees an unmarked transaction and
+ * treats a paste as typing. `issueIdentifierAutolink` reads exactly that, and
+ * without the mark it only ever inspects the token before the caret, so pasting
+ * `See MUL-2 now` autolinks nothing (MUL-5429).
+ *
+ * ProseMirror's author describes these metas as the contract third-party code
+ * relies on to tell user events apart, so any custom `handlePaste` that
+ * dispatches its own transaction owes them.
+ */
+function dispatchPaste(view: EditorView, tr: Transaction): void {
+  view.dispatch(tr.setMeta("paste", true).setMeta("uiEvent", "paste"));
+}
+
 export function createMarkdownPasteExtension() {
   return Extension.create({
     name: "markdownPaste",
@@ -356,7 +437,7 @@ export function createMarkdownPasteExtension() {
         new Plugin({
           key: new PluginKey("markdownPaste"),
           props: {
-            handlePaste(view, event) {
+            handlePaste(view, event, slice) {
               if (!editor.markdown) return false;
               const clipboard = event.clipboardData;
               if (!clipboard) return false;
@@ -371,10 +452,25 @@ export function createMarkdownPasteExtension() {
                 isInsideCodeBlock: $from.parent.type.name === "codeBlock",
               });
 
-              if (mode === "native") return false;
+              if (mode === "native") {
+                // ProseMirror-owned clipboard HTML already represents our exact
+                // document structure. Only repair external rich HTML, where
+                // adjacent <ol> fragments commonly stand for one visual list.
+                if (html && !html.includes("data-pm-slice")) {
+                  const repaired = repairFragmentedOrderedLists(slice);
+                  if (repaired !== slice) {
+                    dispatchPaste(
+                      view,
+                      view.state.tr.replaceSelection(repaired).scrollIntoView(),
+                    );
+                    return true;
+                  }
+                }
+                return false;
+              }
 
               if (mode === "literal") {
-                view.dispatch(view.state.tr.insertText(text));
+                dispatchPaste(view, view.state.tr.insertText(text));
                 return true;
               }
 
@@ -393,13 +489,12 @@ export function createMarkdownPasteExtension() {
                   first?.type.name === "paragraph" &&
                   first.content.size === 0);
               if (text.trim() && parsedEmpty) {
-                view.dispatch(view.state.tr.insertText(text));
+                dispatchPaste(view, view.state.tr.insertText(text));
                 return true;
               }
 
-              const slice = Slice.maxOpen(node.content);
-              const tr = view.state.tr.replaceSelection(slice);
-              view.dispatch(tr);
+              const parsedSlice = Slice.maxOpen(node.content);
+              dispatchPaste(view, view.state.tr.replaceSelection(parsedSlice));
               return true;
             },
           },

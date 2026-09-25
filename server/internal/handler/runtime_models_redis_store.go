@@ -18,10 +18,10 @@ import (
 //
 // Key layout:
 //
-//   mul:model_list:req:<request_id>           → JSON-encoded ModelListRequest, TTL = retention
-//   mul:model_list:pending:<runtime_id>       → ZSET { member = request_id, score = created_at UnixNano }
-//                                                TTL = retention*2 (kept alive long enough for
-//                                                lazy sweep on PopPending)
+//   mul:{runtime_pending}:model_list:req:<request_id>           → JSON-encoded ModelListRequest, TTL = retention
+//   mul:{runtime_pending}:model_list:pending:<runtime_id>       → ZSET { member = request_id, score = created_at UnixNano }
+//                                                                  TTL = retention*2 (kept alive long enough for
+//                                                                  lazy sweep on PopPending)
 //
 // PopPending uses claimPendingScript (defined in
 // runtime_local_skills_redis_store.go) to atomically ZREM the pending entry
@@ -29,10 +29,10 @@ import (
 // requests on a transient Redis hiccup between them.
 
 const (
-	// Namespaced under mul:model_list:* so the key set doesn't collide with
-	// the realtime relay (ws:*) or the local-skill stores (mul:local_skill:*).
-	modelListKeyPrefix          = "mul:model_list:req:"
-	modelListPendingPrefix      = "mul:model_list:pending:"
+	// Namespaced under mul:*:model_list:* so the key set doesn't collide with
+	// the realtime relay (ws:*) or the local-skill stores.
+	modelListKeyPrefix          = "mul:" + runtimePendingRedisHashTag + ":model_list:req:"
+	modelListPendingPrefix      = "mul:" + runtimePendingRedisHashTag + ":model_list:pending:"
 	modelListRedisPopMaxRetries = 5
 )
 
@@ -42,10 +42,10 @@ func modelListPendingKey(runtimeID string) string { return modelListPendingPrefi
 // RedisModelListStore stores model list requests in Redis so every API node
 // agrees on the same pending / running / terminal state.
 type RedisModelListStore struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
-func NewRedisModelListStore(rdb *redis.Client) *RedisModelListStore {
+func NewRedisModelListStore(rdb redis.UniversalClient) *RedisModelListStore {
 	return &RedisModelListStore{rdb: rdb}
 }
 
@@ -64,16 +64,23 @@ func (s *RedisModelListStore) Create(ctx context.Context, runtimeID string) (*Mo
 		return nil, err
 	}
 
-	pipe := s.rdb.TxPipeline()
-	pipe.Set(ctx, modelListKey(req.ID), data, modelListStoreRetention)
-	pipe.ZAdd(ctx, modelListPendingKey(runtimeID), redis.Z{
+	requestKey := modelListKey(req.ID)
+	pendingKey := modelListPendingKey(runtimeID)
+	// Creation does not require a Redis transaction: the request is not
+	// observable by dispatchers until it is added to the pending set. A plain
+	// pipeline also works on managed Redis deployments that deny MULTI.
+	pipe := s.rdb.Pipeline()
+	pipe.Set(ctx, requestKey, data, modelListStoreRetention)
+	pipe.ZAdd(ctx, pendingKey, redis.Z{
 		Score:  float64(now.UnixNano()),
 		Member: req.ID,
 	})
 	// Keep the pending zset alive past the per-record retention so stale
 	// members can be lazily swept on PopPending.
-	pipe.Expire(ctx, modelListPendingKey(runtimeID), modelListStoreRetention*2)
+	pipe.Expire(ctx, pendingKey, modelListStoreRetention*2)
 	if _, err := pipe.Exec(ctx); err != nil {
+		_ = s.rdb.Del(ctx, requestKey).Err()
+		_ = s.rdb.ZRem(ctx, pendingKey, req.ID).Err()
 		return nil, fmt.Errorf("persist model list request: %w", err)
 	}
 	return req, nil
@@ -220,7 +227,7 @@ func (s *RedisModelListStore) PopPending(ctx context.Context, runtimeID string) 
 	return nil, nil
 }
 
-func (s *RedisModelListStore) Complete(ctx context.Context, id string, models []ModelEntry, supported bool) error {
+func (s *RedisModelListStore) Complete(ctx context.Context, id string, models []ModelEntry, unavailable []UnavailableModelEntry, supported bool) error {
 	req, err := s.loadRequest(ctx, id)
 	if err != nil {
 		return err
@@ -230,6 +237,7 @@ func (s *RedisModelListStore) Complete(ctx context.Context, id string, models []
 	}
 	req.Status = ModelListCompleted
 	req.Models = models
+	req.UnavailableModels = unavailable
 	req.Supported = supported
 	req.UpdatedAt = time.Now()
 	return s.persistRequest(ctx, req)

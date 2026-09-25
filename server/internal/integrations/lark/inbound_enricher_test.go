@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 )
 
 // enricherFakeClient is a programmable APIClient for enricher tests. It
@@ -20,6 +22,7 @@ type enricherFakeClient struct {
 	// ListChatMessages canned results + recorder, keyed by chat id.
 	byChat     map[ChatID][]LarkMessage
 	errByChat  map[ChatID]error
+	errSeqChat map[ChatID][]error
 	listCalls  []ChatID
 	listParams []ListMessagesParams
 
@@ -37,6 +40,7 @@ func newEnricherFake() *enricherFakeClient {
 		errByID:    map[string]error{},
 		byChat:     map[ChatID][]LarkMessage{},
 		errByChat:  map[ChatID]error{},
+		errSeqChat: map[ChatID][]error{},
 	}
 }
 
@@ -51,6 +55,13 @@ func (f *enricherFakeClient) GetMessage(ctx context.Context, creds InstallationC
 func (f *enricherFakeClient) ListChatMessages(ctx context.Context, creds InstallationCredentials, p ListMessagesParams) ([]LarkMessage, error) {
 	f.listCalls = append(f.listCalls, p.ChatID)
 	f.listParams = append(f.listParams, p)
+	if seq := f.errSeqChat[p.ChatID]; len(seq) > 0 {
+		err := seq[0]
+		f.errSeqChat[p.ChatID] = seq[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
 	if e, ok := f.errByChat[p.ChatID]; ok {
 		return nil, e
 	}
@@ -68,6 +79,9 @@ func (f *enricherFakeClient) BatchGetUsers(ctx context.Context, creds Installati
 		}
 	}
 	return out, nil
+}
+func (f *enricherFakeClient) DownloadMessageResource(context.Context, InstallationCredentials, DownloadResourceParams) (DownloadedResource, error) {
+	return DownloadedResource{}, nil
 }
 
 // Unused-by-enricher methods — present only to satisfy APIClient.
@@ -163,6 +177,112 @@ func TestEnrichMergeForward(t *testing.T) {
 </forwarded_messages>`
 	if out.Body != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
+	}
+}
+
+func TestEnrichFreshSessionStripsCommandAndSetsFlag(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	in := InboundMessage{
+		MessageType: "text",
+		Body:        "/clear rebuild the plan",
+		CommandBody: "/clear rebuild the plan",
+	}
+
+	out := enrich(t, fake, in, InboundEnricherConfig{})
+
+	if !out.ForceFreshSession {
+		t.Fatalf("ForceFreshSession should be true for /clear")
+	}
+	if out.Body != "rebuild the plan" {
+		t.Fatalf("Body should have directive stripped; got %q", out.Body)
+	}
+	if out.CommandBody != "/clear rebuild the plan" {
+		t.Fatalf("CommandBody should remain the original command source; got %q", out.CommandBody)
+	}
+}
+
+func TestEnrichFreshSessionPreservesQuotedContext(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	fake.byID["om_parent"] = []LarkMessage{
+		textMsg("om_parent", "ou_a", "old context", "1000"),
+	}
+	in := InboundMessage{
+		MessageType: "text",
+		MessageID:   "om_child",
+		Body:        "/clear handle this independently",
+		CommandBody: "/clear handle this independently",
+		ParentID:    "om_parent",
+	}
+
+	out := enrich(t, fake, in, InboundEnricherConfig{})
+
+	if !out.ForceFreshSession {
+		t.Fatalf("ForceFreshSession should be true for /clear")
+	}
+	if !strings.Contains(out.Body, `<quoted_message message_id="om_parent"`) {
+		t.Fatalf("quoted context should be preserved; body=%q", out.Body)
+	}
+	if !strings.HasSuffix(out.Body, "handle this independently") {
+		t.Fatalf("directive should be stripped from user prose; body=%q", out.Body)
+	}
+	if strings.Contains(out.Body, "/clear") {
+		t.Fatalf("stored/enriched body should not include the directive; body=%q", out.Body)
+	}
+}
+
+func TestEnrichNewChatExcludesAutomaticRecentContext(t *testing.T) {
+	t.Parallel()
+
+	fake := newEnricherFake()
+	fake.byChat["oc_group"] = []LarkMessage{textMsg("om_old", "ou_old", "previous chat context", "1")}
+	in := InboundMessage{
+		Body:           "/new start clean",
+		CommandBody:    "/new start clean",
+		ChatID:         "oc_group",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		MessageType:    "text",
+		MessageID:      "om_trigger",
+	}
+
+	out := enrich(t, fake, in, InboundEnricherConfig{RecentContextSize: 10})
+
+	if out.Body != "start clean" {
+		t.Fatalf("Body = %q, want only the new Chat message", out.Body)
+	}
+	if len(fake.listCalls) != 0 {
+		t.Fatalf("recent-context list calls = %d, want 0", len(fake.listCalls))
+	}
+}
+
+func TestEnrichNewChatPreservesExplicitQuotedContext(t *testing.T) {
+	t.Parallel()
+
+	fake := newEnricherFake()
+	fake.byID["om_parent"] = []LarkMessage{textMsg("om_parent", "ou_parent", "explicit context", "1")}
+	in := InboundMessage{
+		Body:           "/new answer this",
+		CommandBody:    "/new answer this",
+		ChatID:         "oc_group",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		MessageType:    "text",
+		MessageID:      "om_trigger",
+		ParentID:       "om_parent",
+	}
+
+	out := enrich(t, fake, in, InboundEnricherConfig{RecentContextSize: 10})
+
+	if !strings.Contains(out.Body, "explicit context") || !strings.Contains(out.Body, "answer this") {
+		t.Fatalf("Body = %q, want quoted context and command body", out.Body)
+	}
+	if strings.Contains(out.Body, "<recent_context") {
+		t.Fatalf("Body = %q, must not contain automatic recent context", out.Body)
+	}
+	if len(fake.listCalls) != 0 {
+		t.Fatalf("recent-context list calls = %d, want 0", len(fake.listCalls))
 	}
 }
 
@@ -346,11 +466,11 @@ func TestEnrichPreservesCommandBodyForIssueParsing(t *testing.T) {
 	out := enrich(t, fake, in, InboundEnricherConfig{})
 
 	// Enriched Body now starts with the quoted block → no longer a command.
-	if _, ok := parseIssueCommand(out.Body); ok {
+	if _, ok := engine.ParseIssueCommand(out.Body); ok {
 		t.Errorf("enriched Body should not parse as /issue (it is prefixed): %q", out.Body)
 	}
 	// CommandBody is untouched and still parses with the right title.
-	cmd, ok := parseIssueCommand(out.CommandBody)
+	cmd, ok := engine.ParseIssueCommand(out.CommandBody)
 	if !ok || cmd.Title != "删除 issue 按钮" {
 		t.Errorf("CommandBody should still parse /issue: cmd=%+v ok=%v", cmd, ok)
 	}
@@ -380,5 +500,45 @@ func TestEnrichResolvesMentionsInChildren(t *testing.T) {
 	out := enrich(t, fake, InboundMessage{MessageType: "merge_forward", MessageID: "om_f"}, InboundEnricherConfig{})
 	if !strings.Contains(out.Body, "@Alice 看一下") {
 		t.Errorf("child mention not resolved: %q", out.Body)
+	}
+}
+
+func TestEnrichSelectedContextSurvivesBareControl(t *testing.T) {
+	for _, command := range []string{"/new", "/clear"} {
+		for _, unavailable := range []bool{false, true} {
+			t.Run(command+map[bool]string{false: "/quote", true: "/unavailable"}[unavailable], func(t *testing.T) {
+				fake := newEnricherFake()
+				fake.byID["parent"] = []LarkMessage{textMsg("parent", "author", "selected text", "1000")}
+				if unavailable {
+					fake.errByID["parent"] = errors.New("unavailable")
+				}
+				out := enrich(t, fake, InboundMessage{MessageType: "text", Body: command, CommandBody: command, ParentID: "parent"}, InboundEnricherConfig{})
+				normalized := channelMessageFromLark(out)
+				if !normalized.HasSelectedContext || normalized.CommandText != command || !strings.Contains(normalized.Text, "<quoted_message ") || strings.Contains(normalized.Text, command) || normalized.ForceFresh != (command == "/clear") {
+					t.Fatalf("selected Lark control = %+v", normalized)
+				}
+			})
+		}
+	}
+	fake := newEnricherFake()
+	fake.byChat["group"] = []LarkMessage{textMsg("recent", "author", "recent only", "1000")}
+	out := enrich(t, fake, InboundMessage{MessageType: "text", ChatType: ChatTypeGroup, ChatID: "group", AddressedToBot: true, Body: "/clear", CommandBody: "/clear"}, InboundEnricherConfig{RecentContextSize: 5})
+	if out.HasSelectedContext {
+		t.Fatal("automatic recent history must not count as sender-selected input")
+	}
+}
+
+func TestEnrichForwardMarksSelectedContext(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		fake := newEnricherFake()
+		fake.byID["forward"] = []LarkMessage{{MessageID: "forward", MessageType: "merge_forward"}, textMsg("child", "sender", "selected forward", "1000")}
+		if failed {
+			fake.errByID["forward"] = errors.New("unavailable")
+		}
+		out := enrich(t, fake, InboundMessage{MessageID: "forward", MessageType: "merge_forward"}, InboundEnricherConfig{})
+		normalized := channelMessageFromLark(out)
+		if !normalized.HasSelectedContext || !strings.Contains(normalized.Text, "<forwarded_messages") {
+			t.Fatalf("forward selection or original format lost: %+v", normalized)
+		}
 	}
 }

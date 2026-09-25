@@ -33,7 +33,7 @@ export function PropRow({
   children,
   interactive = true,
 }: {
-  label: string;
+  label: ReactNode;
   children: ReactNode;
   interactive?: boolean;
 }) {
@@ -43,8 +43,10 @@ export function PropRow({
         interactive ? "transition-colors hover:bg-accent/50" : ""
       }`}
     >
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <div className="flex min-w-0 items-center gap-1.5 truncate text-xs">
+      <span className="flex min-w-0 items-center gap-1.5 text-caption text-muted-foreground">
+        {label}
+      </span>
+      <div className="flex min-w-0 items-center gap-1.5 truncate text-caption">
         {children}
       </div>
     </div>

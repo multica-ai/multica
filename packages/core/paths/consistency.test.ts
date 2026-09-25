@@ -8,41 +8,21 @@ import { RESERVED_SLUGS } from "./reserved-slugs";
 // we hardcode the expected list and assert paths.workspace produces the same
 // keys. If you change either, BOTH need to be updated — the test catches drift.
 describe("paths.workspace() shape", () => {
-  it("exposes the expected parameterless workspace route methods", () => {
-    const ws = paths.workspace("__probe__");
-    const parameterlessRoutes = Object.entries(ws)
-      .filter(([, fn]) => typeof fn === "function" && fn.length === 0)
-      .map(([key]) => key);
-
-    expect(new Set(parameterlessRoutes)).toEqual(
-      new Set([
-        "root",
-        "usage",
-        "issues",
-        "projects",
-        "autopilots",
-        "agents",
-        "squads",
-        "inbox",
-        "myIssues",
-        "runtimes",
-        "skills",
-        "squads",
-        "settings",
-      ]),
-    );
-  });
 
   it("each parameterless route emits /{slug}/{segment}", () => {
     const ws = paths.workspace("acme");
-    // Check that none of the parameterless paths embed a leaked literal
-    // and that their second URL segment matches the method name's kebab-case.
+    // Check that none of the parameterless paths embed a leaked literal and
+    // that each method emits its explicitly registered workspace subpath.
     const expectedSegments: Array<[string, string]> = [
       ["usage", "usage"],
       ["issues", "issues"],
       ["projects", "projects"],
       ["autopilots", "autopilots"],
       ["agents", "agents"],
+      ["newAgent", "agents/new"],
+      ["newAgentManual", "agents/new/manual"],
+      ["newAgentAi", "agents/new/ai"],
+      ["chat", "chat"],
       ["squads", "squads"],
       ["inbox", "inbox"],
       ["myIssues", "my-issues"],

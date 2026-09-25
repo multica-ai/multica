@@ -80,11 +80,38 @@ function pickMarkdownLink(att: Attachment): string {
   return att.url;
 }
 
+// Adapt a completed server `Attachment` into the editor's `UploadResult` (the
+// two URL fields the editor writes into markdown / persists). Exported so the
+// coordinated-upload path (MUL-5181), which runs the request through the
+// module-level upload coordinator rather than this hook, can hand the editor
+// the exact same shape for its inline preview swap.
+export function toUploadResult(att: Attachment): UploadResult {
+  return { ...att, link: att.url, markdownLink: pickMarkdownLink(att) };
+}
+
 export function useFileUpload(
   api: ApiClient,
-  onError?: (error: Error) => void,
+  // Receives the failing `file` alongside the error so hosts can name it in
+  // the failure toast. `uploadWithToast` swallows the rejection after this
+  // fires, so a host that passes nothing reports nothing — the upload
+  // placeholder still disappears, which on its own reads as "my file
+  // silently vanished" (MUL-4808).
+  onError?: (error: Error, file: File) => void,
 ) {
-  const [uploading, setUploading] = useState(false);
+  // In-flight counter, NOT a single boolean. Callers fire multiple uploads
+  // concurrently (drag-drop of N files, paste with multiple images) and the
+  // boolean shape would flip false as soon as the FIRST upload's finally ran
+  // — even though N-1 are still mid-request. Surfaces consuming `uploading`
+  // (the quick-create submit gate, the editor's "Uploading…" button label)
+  // would then unblock submit while uploads are still in flight, causing
+  // `stripBlobUrls` to erase the still-pending images from the markdown and
+  // their attachment ids never to be bound (MUL-3339).
+  //
+  // The exposed `uploading: boolean` keeps the existing call-site contract
+  // (`{ uploading } = useFileUpload(api)` everywhere); only the internal
+  // tracking shape changes.
+  const [inFlight, setInFlight] = useState(0);
+  const uploading = inFlight > 0;
 
   const upload = useCallback(
     async (file: File, ctx?: UploadContext): Promise<UploadResult | null> => {
@@ -92,16 +119,16 @@ export function useFileUpload(
         throw new Error("File exceeds 100 MB limit");
       }
 
-      setUploading(true);
+      setInFlight((n) => n + 1);
       try {
         const att: Attachment = await api.uploadFile(file, {
           issueId: ctx?.issueId,
           commentId: ctx?.commentId,
           chatSessionId: ctx?.chatSessionId,
         });
-        return { ...att, link: att.url, markdownLink: pickMarkdownLink(att) };
+        return toUploadResult(att);
       } finally {
-        setUploading(false);
+        setInFlight((n) => n - 1);
       }
     },
     [api],
@@ -112,7 +139,7 @@ export function useFileUpload(
       try {
         return await upload(file, ctx);
       } catch (err) {
-        onError?.(err instanceof Error ? err : new Error("Upload failed"));
+        onError?.(err instanceof Error ? err : new Error("Upload failed"), file);
         return null;
       }
     },

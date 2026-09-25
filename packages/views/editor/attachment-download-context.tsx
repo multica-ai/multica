@@ -2,7 +2,7 @@
 
 import { createContext, use, useMemo, type ReactNode } from "react";
 import type { Attachment } from "@multica/core/types";
-import { attachmentIdFromDownloadURL } from "@multica/core/types/attachment-url";
+import { matchAttachmentByURL } from "@multica/core/attachments/image-sequence";
 import { openExternal } from "../platform";
 import { useDownloadAttachment } from "./use-download-attachment";
 
@@ -45,23 +45,10 @@ export function AttachmentDownloadProvider({ attachments, children }: ProviderPr
   const download = useDownloadAttachment();
   const value = useMemo<ResolvedDownload>(
     () => {
-      const lookup = (url: string): Attachment | undefined => {
-        if (!url || !attachments?.length) return undefined;
-        // Preferred path: stable `/api/attachments/<id>/download` URL.
-        // Match by id so the lookup survives a host swap (Electron vs
-        // web vs SSR) and any incidental query/fragment.
-        const idFromUrl = attachmentIdFromDownloadURL(url);
-        if (idFromUrl) {
-          const byId = attachments.find((a) => a.id === idFromUrl);
-          if (byId) return byId;
-        }
-        // Legacy path: full URL equality. Covers comments persisted
-        // before MUL-3130, S3/CloudFront markdown that points
-        // straight at the CDN, and anything else where
-        // `attachments[i].url` was the literal value embedded in
-        // markdown.
-        return attachments.find((a) => a.url === url);
-      };
+      // Shared with the gallery sequence builder (MUL-5752) so a markdown URL
+      // can never resolve to one record here and a different one there.
+      const lookup = (url: string): Attachment | undefined =>
+        matchAttachmentByURL(url, attachments);
       return {
         resolveAttachmentId: (url) => lookup(url)?.id,
         resolveAttachment: lookup,

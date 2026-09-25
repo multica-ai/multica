@@ -7,15 +7,23 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/multica-ai/multica/server/internal/auth"
 )
 
-// authRequestWithAgent makes an authenticated request with X-Agent-ID +
-// X-Task-ID headers, causing the server to resolve the actor as an agent
-// instead of a member. resolveActor requires both headers to grant agent
-// identity (defense against header forgery — see #2359 PR review), so we
-// seed a queued task for the agent on demand and pass its UUID as
-// X-Task-ID. The task is best-effort cleaned up via test teardown elsewhere.
+// authRequestWithAgent makes a request the server resolves as coming from an
+// agent, by authenticating with a real `mat_` task token bound to (agent, task,
+// workspace, user) — the same credential the daemon injects into an agent
+// process.
+//
+// It used to send a member token plus X-Agent-ID / X-Task-ID headers. That
+// stopped working, on purpose: both middlewares now strip client-supplied agent
+// identity, because both ids are observable by any workspace member and the
+// pair therefore proved nothing (MUL-3428). A test that poses as an agent must
+// hold the credential a real agent holds.
 func authRequestWithAgent(t *testing.T, method, path string, body any, agentID string) *http.Response {
 	t.Helper()
 	var bodyReader io.Reader
@@ -28,10 +36,7 @@ func authRequestWithAgent(t *testing.T, method, path string, body any, agentID s
 		t.Fatalf("failed to create request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+testToken)
-	req.Header.Set("X-Workspace-ID", testWorkspaceID)
-	req.Header.Set("X-Agent-ID", agentID)
-	req.Header.Set("X-Task-ID", ensureAgentTask(t, agentID))
+	req.Header.Set("Authorization", "Bearer "+mintAgentTaskToken(t, agentID, ensureAgentTask(t, agentID), testUserID))
 
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -40,10 +45,32 @@ func authRequestWithAgent(t *testing.T, method, path string, body any, agentID s
 	return r
 }
 
-// ensureAgentTask returns a queued task UUID belonging to the given agent,
-// inserting one if none exists. Used by authRequestWithAgent so callers
-// can keep treating "set X-Agent-ID" as the single knob for posing as an
-// agent — resolveActor's pair-required policy is satisfied transparently.
+// mintAgentTaskToken issues a task-scoped mat_ token for (agentID, taskID) in
+// the test workspace and returns its raw value. The auth middleware re-stamps
+// X-User-ID / X-Agent-ID / X-Task-ID / X-Workspace-ID from the stored row, so
+// callers pass no identity headers of their own.
+// boundUserID is the token's owning human — the runtime owner in production.
+// It is NOT the human an agent's request acts for; that is the task's
+// originator (MUL-6951), which is why the two are separable in tests.
+func mintAgentTaskToken(t *testing.T, agentID, taskID, boundUserID string) string {
+	t.Helper()
+	raw := fmt.Sprintf("mat_test_%s_%d", strings.ReplaceAll(agentID, "-", ""), time.Now().UnixNano())
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO task_token (token_hash, task_id, agent_id, workspace_id, user_id, expires_at)
+		VALUES ($1, $2, $3, $4, $5, now() + interval '1 hour')
+	`, auth.HashToken(raw), taskID, agentID, testWorkspaceID, boundUserID); err != nil {
+		t.Fatalf("mint task token: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM task_token WHERE token_hash = $1`, auth.HashToken(raw))
+	})
+	return raw
+}
+
+// ensureAgentTask returns a task UUID belonging to the given agent, inserting a
+// queued one if none exists. authRequestWithAgent binds its mat_ token to that
+// task, so callers keep treating "name the agent" as the single knob for
+// posing as one.
 func ensureAgentTask(t *testing.T, agentID string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -80,6 +107,18 @@ func countPendingTasks(t *testing.T, issueID string) int {
 		issueID).Scan(&count)
 	if err != nil {
 		t.Fatalf("failed to count pending tasks: %v", err)
+	}
+	return count
+}
+
+func countPendingTasksForAgent(t *testing.T, issueID, agentID string) int {
+	t.Helper()
+	var count int
+	err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched')`,
+		issueID, agentID).Scan(&count)
+	if err != nil {
+		t.Fatalf("failed to count pending tasks for agent: %v", err)
 	}
 	return count
 }
@@ -141,7 +180,7 @@ func createSecondAgent(t *testing.T) string {
 	runtimeID := agents[0]["runtime_id"].(string)
 
 	resp = authRequest(t, "POST", "/api/agents?workspace_id="+testWorkspaceID, map[string]any{
-		"name":       "Second Test Agent",
+		"name":       fmt.Sprintf("Second Test Agent %d", time.Now().UnixNano()),
 		"runtime_id": runtimeID,
 		"visibility": "workspace",
 	})
@@ -209,7 +248,8 @@ func postComment(t *testing.T, issueID, content string, parentID *string) string
 	return comment["id"].(string)
 }
 
-// postCommentAsAgent posts a comment with the X-Agent-ID header.
+// postCommentAsAgent posts a comment authenticated as the agent, using the
+// real mat_ task token authRequestWithAgent mints.
 func postCommentAsAgent(t *testing.T, issueID, content, agentID string, parentID *string) string {
 	t.Helper()
 	body := map[string]any{
@@ -304,7 +344,7 @@ func TestCommentTriggerOnComment(t *testing.T) {
 		}
 	})
 
-	t.Run("reply to member thread without mentions suppresses trigger", func(t *testing.T) {
+	t.Run("reply to unowned member thread without mentions does not trigger assignee", func(t *testing.T) {
 		clearTasks(t, issueID)
 		// Member starts a thread.
 		threadID := postComment(t, issueID, "Hey team, what do you think?", nil)
@@ -313,21 +353,29 @@ func TestCommentTriggerOnComment(t *testing.T) {
 		// Another member reply (same user in this test, but the key is parent is by member).
 		postComment(t, issueID, "I agree with you", strPtr(threadID))
 		if n := countPendingTasks(t, issueID); n != 0 {
-			t.Errorf("expected 0 pending tasks (member-to-member reply), got %d", n)
+			t.Errorf("expected 0 pending tasks (unowned member thread), got %d", n)
 		}
 	})
 
-	t.Run("reply to member thread after agent replied triggers agent", func(t *testing.T) {
+	t.Run("reply to member thread after agent handled root continues agent", func(t *testing.T) {
 		clearTasks(t, issueID)
 		// Member starts a thread (top-level comment).
 		threadID := postComment(t, issueID, "Please fix this bug", nil)
-		clearTasks(t, issueID)
+		// Complete, but retain, the root-triggered task so the thread keeps its
+		// conversation owner without leaving pending work behind.
+		if _, err := testPool.Exec(context.Background(), `
+			UPDATE agent_task_queue
+			SET status = 'completed', completed_at = now()
+			WHERE issue_id = $1 AND trigger_comment_id = $2
+		`, issueID, threadID); err != nil {
+			t.Fatalf("failed to complete root-triggered task: %v", err)
+		}
 		// Agent replies in the thread.
 		postCommentAsAgent(t, issueID, "Working on it, found the root cause.", agentID, strPtr(threadID))
 		// Member follows up in the same thread without @mentioning the agent.
 		postComment(t, issueID, "Great, please also check the edge case", strPtr(threadID))
 		if n := countPendingTasks(t, issueID); n != 1 {
-			t.Errorf("expected 1 pending task (agent participated in thread), got %d", n)
+			t.Errorf("expected 1 pending task (conversation continuation), got %d", n)
 		}
 	})
 
@@ -395,6 +443,17 @@ func TestCommentTriggerAtAllSuppression(t *testing.T) {
 			t.Errorf("expected 0 pending tasks (@all in agent thread), got %d", n)
 		}
 	})
+
+	// MUL-5411: @all suppresses only the IMPLICIT routes. An explicit @agent in
+	// the same comment is a direct request and must still enqueue that agent.
+	t.Run("@all with explicit @agent still triggers the agent", func(t *testing.T) {
+		clearTasks(t, issueID)
+		content := fmt.Sprintf("[@All](mention://all/all) heads up — [@Agent](mention://agent/%s) please take this", agentID)
+		postComment(t, issueID, content, nil)
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected 1 pending task (@all must not swallow the explicit @agent), got %d", n)
+		}
+	})
 }
 
 // TestCommentTriggerOnAssignNoStatusGate verifies that assigning an agent to
@@ -459,10 +518,10 @@ func TestCommentTriggerOnMentionNoStatusGate(t *testing.T) {
 	}
 }
 
-// TestCommentTriggerThreadInheritedMention verifies that when a top-level
-// comment @mentions an agent (not the assignee), replies in that thread
-// also trigger the mentioned agent — even without explicitly re-mentioning it.
-func TestCommentTriggerThreadInheritedMention(t *testing.T) {
+// TestCommentTriggerThreadExplicitMentions verifies that a member root @mention
+// owns plain replies in that thread, while explicit mentions in the reply still
+// trigger normally.
+func TestCommentTriggerThreadExplicitMentions(t *testing.T) {
 	agentID := getAgentID(t)
 
 	// Create an issue NOT assigned to the agent, so on_comment won't fire.
@@ -473,7 +532,7 @@ func TestCommentTriggerThreadInheritedMention(t *testing.T) {
 		resp.Body.Close()
 	})
 
-	t.Run("reply in thread inherits parent mention", func(t *testing.T) {
+	t.Run("plain reply in thread routes to root mention owner", func(t *testing.T) {
 		clearTasks(t, issueID)
 		// Top-level comment @mentions the agent.
 		content := fmt.Sprintf("[@Agent](mention://agent/%s) can you review this?", agentID)
@@ -486,7 +545,36 @@ func TestCommentTriggerThreadInheritedMention(t *testing.T) {
 		// Reply in the thread WITHOUT mentioning the agent.
 		postComment(t, issueID, "Here is more context for you", strPtr(threadID))
 		if n := countPendingTasks(t, issueID); n != 1 {
-			t.Errorf("expected 1 pending task from thread-inherited mention, got %d", n)
+			t.Errorf("expected 1 pending task from root mention owner, got %d", n)
+		}
+	})
+
+	t.Run("plain reply to multi-agent root routes only first mention", func(t *testing.T) {
+		clearTasks(t, issueID)
+		agentB := createSecondAgent(t)
+		content := fmt.Sprintf(
+			"[@AgentA](mention://agent/%s) [@AgentB](mention://agent/%s) can you both review this?",
+			agentID,
+			agentB,
+		)
+		threadID := postComment(t, issueID, content, nil)
+		if n := countPendingTasksForAgent(t, issueID, agentID); n != 1 {
+			t.Fatalf("expected 1 pending root task for first agent, got %d", n)
+		}
+		if n := countPendingTasksForAgent(t, issueID, agentB); n != 1 {
+			t.Fatalf("expected 1 pending root task for second agent, got %d", n)
+		}
+		clearTasks(t, issueID)
+
+		postComment(t, issueID, "Here is more context for you both", strPtr(threadID))
+		if n := countPendingTasksForAgent(t, issueID, agentID); n != 1 {
+			t.Errorf("expected 1 pending reply task for first agent, got %d", n)
+		}
+		if n := countPendingTasksForAgent(t, issueID, agentB); n != 0 {
+			t.Errorf("expected 0 pending reply tasks for second agent, got %d", n)
+		}
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected exactly 1 pending task after multi-agent root reply, got %d", n)
 		}
 	})
 
@@ -583,9 +671,9 @@ func TestDeleteCommentCancelsTriggeredTasks(t *testing.T) {
 	})
 }
 
-// TestCommentTriggerCoalescing verifies that rapid-fire comments don't create
-// duplicate tasks (coalescing dedup).
-func TestCommentTriggerCoalescing(t *testing.T) {
+// TestCommentThreadsQueueSeparatelyFromAssignment verifies that each root
+// comment queues independently of other threads and the assignment task.
+func TestCommentThreadsQueueSeparatelyFromAssignment(t *testing.T) {
 	agentID := getAgentID(t)
 	issueID := createIssueAssignedToAgent(t, "Coalescing test", agentID)
 	t.Cleanup(func() {
@@ -594,12 +682,21 @@ func TestCommentTriggerCoalescing(t *testing.T) {
 		resp.Body.Close()
 	})
 
-	// Post two comments rapidly — only 1 task should be created (coalescing).
-	postComment(t, issueID, "First comment", nil)
-	postComment(t, issueID, "Second comment", nil)
+	// Distinct root comments must not merge with each other or the assignment.
+	first := postComment(t, issueID, "First comment", nil)
+	second := postComment(t, issueID, "Second comment", nil)
 
-	if n := countPendingTasks(t, issueID); n != 1 {
-		t.Errorf("expected 1 pending task (coalescing), got %d", n)
+	if n := countPendingTasks(t, issueID); n != 3 {
+		t.Fatalf("expected assignment plus two independent thread tasks, got %d", n)
+	}
+	for _, id := range []string{first, second} {
+		var count int
+		if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2 AND trigger_comment_id=$3 AND cardinality(coalesced_comment_ids)=0`, issueID, agentID, id).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Errorf("comment %s should own exactly one unmerged task, got %d", id, count)
+		}
 	}
 }
 

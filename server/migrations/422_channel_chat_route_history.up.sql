@@ -1,0 +1,3 @@
+-- Channel Chat route migration.
+ALTER TABLE channel_chat_session_binding DROP CONSTRAINT IF EXISTS channel_chat_session_binding_installation_id_channel_chat_i_key;
+DROP INDEX IF EXISTS channel_chat_session_binding_installation_id_channel_chat_i_key;

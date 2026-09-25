@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -42,17 +43,30 @@ func TestCommentMentionsAnyone(t *testing.T) {
 	}
 }
 
-// shouldEnqueueSquadLeaderOnCommentForTest reports whether the shared comment
-// trigger computation would wake the issue's assigned squad leader — the
-// boolean view these integration tests assert on.
+// shouldEnqueueSquadLeaderOnCommentForTest reports whether the shared cascade
+// would wake the issue's assigned squad leader.
 func shouldEnqueueSquadLeaderOnCommentForTest(ctx context.Context, issue db.Issue, content, authorType, authorID string) bool {
-	_, ok := testHandler.computeAssignedSquadLeaderCommentTrigger(ctx, issue, content, authorType, authorID, commentTriggerComputeOptions{})
-	return ok
+	triggers, _ := testHandler.computeCommentAgentTriggers(ctx, issue, content, nil, authorType, authorID, commentTriggerComputeOptions{})
+	return triggersContainIssueAssigneeSquadLeader(triggers)
+}
+
+func shouldEnqueueSquadLeaderOnReplyForTest(ctx context.Context, issue db.Issue, content string, parent *db.Comment, authorType, authorID string) bool {
+	triggers, _ := testHandler.computeCommentAgentTriggers(ctx, issue, content, parent, authorType, authorID, commentTriggerComputeOptions{})
+	return triggersContainIssueAssigneeSquadLeader(triggers)
+}
+
+func triggersContainIssueAssigneeSquadLeader(triggers []commentAgentTrigger) bool {
+	for _, trigger := range triggers {
+		if trigger.Source == commentTriggerSourceIssueAssignee && trigger.Squad != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // squadCommentTriggerFixture wires a squad assigned to a fresh issue and
 // returns the loaded db.Issue plus the leader agent UUID for use in
-// computeAssignedSquadLeaderCommentTrigger integration tests.
+// cascade integration tests.
 type squadCommentTriggerFixture struct {
 	Issue    db.Issue
 	SquadID  string
@@ -113,11 +127,10 @@ func newSquadCommentTriggerFixture(t *testing.T) squadCommentTriggerFixture {
 	}
 }
 
-// TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone
-// encodes Bohan's rule (MUL-2170): a member comment that explicitly @mentions
-// anyone — agent, member, squad, or @all — must NOT wake the squad leader.
-// Issue cross-references are not routing and do not suppress the leader.
-// Agent-authored comments are exempt: the leader still coordinates threads.
+// TestShouldEnqueueSquadLeaderOnComment_SkipsWhenCommentRoutesElsewhere
+// pins the cascade: explicit participant mentions do not also wake the assigned
+// squad leader. Issue cross-references are not routing and do not suppress the
+// leader.
 func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -190,12 +203,12 @@ func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone(t *test
 			description: "@squad routes the issue to that squad's leader — current leader stays out",
 		},
 		{
-			name:        "agent comment with @agent still triggers leader",
+			name:        "agent comment with @agent does not also trigger leader",
 			content:     "delegating to [@Other](mention://agent/" + fx.OtherID + ")",
 			authorType:  "agent",
 			authorID:    fx.OtherID,
-			want:        true,
-			description: "agent-authored replies always reach leader so it can coordinate next step",
+			want:        false,
+			description: "explicit @agent routes only to the mentioned target; the assigned squad-leader fallback must not also fire (no double-enqueue)",
 		},
 	}
 
@@ -210,13 +223,12 @@ func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone(t *test
 	}
 }
 
-// TestShouldEnqueueSquadLeaderOnComment_LeaderSelfTriggerByRole covers the
-// role-aware self-trigger guard added for MUL-2218. The leader agent itself
-// should be skipped only when its last activity on the issue was a leader
-// task — never just because the comment author equals the leader ID. This
-// matters for dual-role agents (leader + worker of the same squad): a
-// comment posted from the worker task must still wake the leader.
-func TestShouldEnqueueSquadLeaderOnComment_LeaderSelfTriggerByRole(t *testing.T) {
+// TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredWorkerCommentsWakeLeader
+// pins the MUL-3879 restored behavior in the new MUL-3794 cascade: an
+// agent-authored worker-result comment on a squad-assigned issue wakes the
+// assigned squad leader so the leader→worker→leader coordination loop stays
+// closed, while the leader's own self-trigger loop stays suppressed.
+func TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredWorkerCommentsWakeLeader(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -233,67 +245,77 @@ func TestShouldEnqueueSquadLeaderOnComment_LeaderSelfTriggerByRole(t *testing.T)
 			t.Fatalf("clear tasks: %v", err)
 		}
 	}
-	insertTask := func(isLeader bool, status string) {
+	// insertLeaderTask seeds a same-squad task for the leader agent so the
+	// self-trigger guard can read the agent's most recent role on the issue.
+	// Separate Exec calls get distinct created_at values, so the last inserted
+	// row is the "latest" task.
+	insertLeaderTask := func(isLeader bool, status string) {
 		t.Helper()
 		var runtimeID string
 		if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&runtimeID); err != nil {
 			t.Fatalf("load runtime: %v", err)
 		}
 		if _, err := testPool.Exec(ctx, `
-			INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task)
-			VALUES ($1, $2, $3, $4, $5)
-		`, fx.LeaderID, runtimeID, issueID, status, isLeader); err != nil {
+			INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, squad_id)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`, fx.LeaderID, runtimeID, issueID, status, isLeader, fx.SquadID); err != nil {
 			t.Fatalf("insert task: %v", err)
 		}
 	}
 
-	t.Run("no prior task wakes leader (fresh external trigger)", func(t *testing.T) {
+	// Case 1: a worker agent (not the leader) posts a result comment on the
+	// squad-assigned issue — the assigned leader must wake to coordinate.
+	t.Run("worker agent comment wakes squad leader", func(t *testing.T) {
 		clearTasks()
-		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "noted", "agent", fx.LeaderID); !got {
-			t.Fatalf("no prior task: expected leader to be enqueued, got skip")
+		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "pushed the fix, PR is up", "agent", fx.OtherID); !got {
+			t.Fatalf("worker agent comment: expected leader to wake, got skip")
 		}
 	})
 
-	t.Run("prior leader task suppresses self-trigger", func(t *testing.T) {
+	// Case 2: a dual-role agent (leader of the squad, also runs worker tasks)
+	// posts while its latest task on the issue was a worker task — the leader
+	// role must still wake because the comment is a worker result, not a
+	// leader self-trigger.
+	t.Run("dual-role worker comment wakes leader when latest task is worker", func(t *testing.T) {
 		clearTasks()
-		insertTask(true, "completed")
-		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "noted", "agent", fx.LeaderID); got {
-			t.Fatalf("after leader task: expected skip (anti-loop), got enqueue")
+		insertLeaderTask(true, "completed")  // older leader task
+		insertLeaderTask(false, "completed") // newer worker task → latest role is worker
+		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "done with my worker slice", "agent", fx.LeaderID); !got {
+			t.Fatalf("dual-role worker comment: expected leader to wake, got skip")
 		}
 	})
 
-	t.Run("prior worker task still wakes leader (dual-role agent)", func(t *testing.T) {
+	// Case 3: the leader posts while its latest task was a leader task — this
+	// is a self-trigger loop and must stay suppressed.
+	t.Run("leader comment from latest leader task does not self-trigger", func(t *testing.T) {
 		clearTasks()
-		insertTask(false, "completed")
-		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "result", "agent", fx.LeaderID); !got {
-			t.Fatalf("after worker task: expected leader to be enqueued (MUL-2218), got skip")
+		insertLeaderTask(false, "completed") // older worker task
+		insertLeaderTask(true, "completed")  // newer leader task → latest role is leader
+		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "coordinating next steps", "agent", fx.LeaderID); got {
+			t.Fatalf("leader self-trigger: expected skip, got wake")
 		}
 	})
 
-	t.Run("most recent task is the one that matters", func(t *testing.T) {
+	// Case 4: an agent-authored comment carrying an explicit @agent mention
+	// routes only to the mentioned target — the assigned squad leader must NOT
+	// also be enqueued via the fallback path (no double-enqueue).
+	t.Run("explicit mention does not double-enqueue assigned leader", func(t *testing.T) {
 		clearTasks()
-		insertTask(true, "completed")  // older leader task
-		insertTask(false, "completed") // newer worker task
-		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "result", "agent", fx.LeaderID); !got {
-			t.Fatalf("latest task is worker: expected leader to be enqueued, got skip")
+		content := "handing to [@Other](mention://agent/" + fx.OtherID + ")"
+		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, content, "agent", fx.LeaderID); got {
+			t.Fatalf("explicit mention: expected no assigned-leader fallback, got wake")
 		}
 	})
 }
 
-// TestCreateComment_SquadLeaderSkipOnlyInspectsCurrentMention drives the
-// full CreateComment handler to lock the call-site wiring (comment.go) for
-// the squad-leader-skip rule. Specifically it proves that:
+// TestCreateComment_SquadPlainReplyToMemberParentKeepsRootMentionOwner drives the
+// full CreateComment handler to lock the cascade's reply behavior:
 //
 //   - A member top-level comment that @mentions another agent does NOT
 //     enqueue the squad leader (the mentioned agent owns the next step).
-//   - A subsequent member REPLY in the same thread, containing no mentions
-//     of its own, DOES enqueue the squad leader — i.e. the parent's
-//     @agent mention is not inherited into the leader-skip decision.
-//
-// The matching unit test above exercises the helper in isolation; this
-// test catches a class of regression where someone refactors comment.go
-// to pass the parent's content (or the merged thread content) by mistake.
-func TestCreateComment_SquadLeaderSkipOnlyInspectsCurrentMention(t *testing.T) {
+//   - A subsequent member reply to that member-authored root with no explicit
+//     agent mention continues to the root owner instead of the assignee.
+func TestCreateComment_SquadPlainReplyToMemberParentKeepsRootMentionOwner(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -345,29 +367,39 @@ func TestCreateComment_SquadLeaderSkipOnlyInspectsCurrentMention(t *testing.T) {
 		t.Fatalf("after parent (@OtherAgent): expected 1 OtherAgent task (mention path), got %d", got)
 	}
 
-	// 2. Member posts a reply in the same thread with NO mentions.
-	//    The leader-skip helper must inspect only the reply's body (empty),
-	//    NOT the parent's @OtherAgent mention. Leader must wake up.
+	// 2. Mark OtherAgent's parent task done so queued-task counts below only
+	//    reflect what the plain reply does.
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue SET status = 'completed'
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, fx.OtherID); err != nil {
+		t.Fatalf("complete OtherAgent parent task: %v", err)
+	}
+
+	// 3. Member posts a reply in the same thread with NO mentions.
+	//    The root's @OtherAgent mention owns the thread, so the reply returns
+	//    to OtherAgent instead of falling back to the assigned squad leader.
 	postMemberComment(map[string]any{
 		"content":   "any update?",
 		"parent_id": parent.ID,
 	})
-	if got := countQueued(fx.LeaderID); got != 1 {
-		t.Fatalf("after plain reply: expected 1 leader task (no parent inheritance), got %d", got)
+	if got := countQueued(fx.LeaderID); got != 0 {
+		t.Fatalf("after plain reply: expected 0 leader tasks, got %d", got)
+	}
+	if got := countQueued(fx.OtherID); got != 1 {
+		t.Fatalf("after plain reply: expected 1 OtherAgent task, got %d", got)
 	}
 }
 
-// TestCreateComment_DualRoleAgentWorkerCommentWakesLeader is the full-stack
-// regression test for MUL-2218. Scenario:
+// TestCreateComment_DualRoleAgentWorkerCommentWakesLeader pins the MUL-3879
+// restored coordination loop at the full-handler level. Scenario:
 //
-//   - Agent L is the leader of squad S and also a worker assigned tasks on
-//     issues belonging to S.
-//   - L is woken in its worker role (is_leader_task=false) and posts a comment.
-//   - The squad-leader self-trigger guard MUST still wake L in its leader role
-//     so it can react to the worker output (e.g. delegate the next step).
-//
-// Before the fix the role-blind authorID == leaderID check skipped the
-// leader, leaving the issue stalled.
+//   - Agent L is the leader of squad S and also runs worker tasks on issues
+//     belonging to S.
+//   - L is woken in its worker role (is_leader_task=false) and posts a result
+//     comment.
+//   - A leader-role task IS enqueued so the squad leader can coordinate the
+//     next step — the worker result must not silently strand the issue.
 func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -381,10 +413,10 @@ func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
 	})
 
-	// Seed a worker task for the leader agent on this issue so the guard
-	// infers "agent's last activity was a worker task" — i.e. L is running
-	// in its worker role when it posts the comment. We make it running (not
-	// completed) so we can hand its ID back through X-Task-ID for the
+	// Seed a same-squad worker task for the leader agent on this issue so the
+	// guard infers "agent's last activity was a worker task" — i.e. L is
+	// running in its worker role when it posts the comment. We make it running
+	// (not completed) so we can hand its ID back through X-Task-ID for the
 	// resolveActor agent-identity check.
 	var runtimeID string
 	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&runtimeID); err != nil {
@@ -392,10 +424,10 @@ func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 	}
 	var workerTaskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task)
-		VALUES ($1, $2, $3, 'running', FALSE)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, squad_id)
+		VALUES ($1, $2, $3, 'running', FALSE, $4)
 		RETURNING id
-	`, fx.LeaderID, runtimeID, issueID).Scan(&workerTaskID); err != nil {
+	`, fx.LeaderID, runtimeID, issueID, fx.SquadID).Scan(&workerTaskID); err != nil {
 		t.Fatalf("seed worker task: %v", err)
 	}
 
@@ -413,8 +445,7 @@ func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// A NEW leader-role task must be enqueued for L on this issue so the
-	// leader role can react to its own worker output.
+	// A new leader-role task is enqueued so the leader coordinates next steps.
 	var leaderTasks int
 	if err := testPool.QueryRow(ctx, `
 		SELECT count(*) FROM agent_task_queue
@@ -427,12 +458,302 @@ func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 	}
 }
 
+// TestCreateComment_SquadLeaderMentionTaskDoesNotSelfTriggerAssignedFallback
+// pins MUL-4024's direct-mention gap:
+//
+//   - A member explicitly @mentions the issue's assigned squad leader by agent
+//     id, which queues a generic mention task for L (is_leader_task=false,
+//     squad_id=NULL).
+//   - L posts a plain reply while running that mention task.
+//   - The assigned-squad fallback must not treat that generic mention task as a
+//     same-squad worker result and queue L again as the leader.
+func TestCreateComment_SquadLeaderMentionTaskDoesNotSelfTriggerAssignedFallback(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSquadCommentTriggerFixture(t)
+	issueID := uuidToString(fx.Issue.ID)
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+	})
+
+	postMemberComment := func(body map[string]any) CommentResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := newRequest("POST", "/api/issues/"+issueID+"/comments", body)
+		r = withURLParam(r, "id", issueID)
+		testHandler.CreateComment(w, r)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateComment(member): expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp CommentResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode member comment: %v", err)
+		}
+		return resp
+	}
+	postAgentComment := func(taskID string, body map[string]any) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := newRequest("POST", "/api/issues/"+issueID+"/comments", body)
+		r.Header.Set("X-Agent-ID", fx.LeaderID)
+		r.Header.Set("X-Task-ID", taskID)
+		r = withURLParam(r, "id", issueID)
+		testHandler.CreateComment(w, r)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateComment(agent): expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+	countQueuedLeaderTasks := func() int {
+		t.Helper()
+		var n int
+		if err := testPool.QueryRow(ctx, `
+			SELECT count(*) FROM agent_task_queue
+			WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task = TRUE
+		`, issueID, fx.LeaderID).Scan(&n); err != nil {
+			t.Fatalf("count queued leader tasks: %v", err)
+		}
+		return n
+	}
+
+	trigger := postMemberComment(map[string]any{
+		"content": "[@Leader](mention://agent/" + fx.LeaderID + ") can you check this?",
+	})
+
+	var mentionTaskID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+		  AND is_leader_task = FALSE AND squad_id IS NULL
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID, fx.LeaderID).Scan(&mentionTaskID); err != nil {
+		t.Fatalf("load leader mention task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'running' WHERE id = $1`, mentionTaskID); err != nil {
+		t.Fatalf("mark mention task running: %v", err)
+	}
+
+	postAgentComment(mentionTaskID, map[string]any{
+		"content":   "checked, no action needed",
+		"parent_id": trigger.ID,
+	})
+
+	if got := countQueuedLeaderTasks(); got != 0 {
+		t.Fatalf("leader reply from generic mention task queued %d leader tasks, want 0", got)
+	}
+}
+
+// TestCreateComment_SquadLeaderThreadParentTaskDoesNotSelfTriggerAssignedFallback
+// pins the self-trigger guard across the thread-parent path: a member reply to
+// the leader's earlier comment continues L in the leader role (MUL-7006), and
+// L's reply from THAT task must still not queue L again as the assigned squad
+// leader.
+func TestCreateComment_SquadLeaderThreadParentTaskDoesNotSelfTriggerAssignedFallback(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSquadCommentTriggerFixture(t)
+	issueID := uuidToString(fx.Issue.ID)
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+	})
+
+	var leaderRuntimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&leaderRuntimeID); err != nil {
+		t.Fatalf("load leader runtime: %v", err)
+	}
+	var leaderTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, squad_id)
+		VALUES ($1, $2, $3, 'running', TRUE, $4)
+		RETURNING id
+	`, fx.LeaderID, leaderRuntimeID, issueID, fx.SquadID).Scan(&leaderTaskID); err != nil {
+		t.Fatalf("seed leader task: %v", err)
+	}
+
+	postAgentComment := func(taskID string, body map[string]any) CommentResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := newRequest("POST", "/api/issues/"+issueID+"/comments", body)
+		r.Header.Set("X-Agent-ID", fx.LeaderID)
+		r.Header.Set("X-Task-ID", taskID)
+		r = withURLParam(r, "id", issueID)
+		testHandler.CreateComment(w, r)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateComment(agent): expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp CommentResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode agent comment: %v", err)
+		}
+		return resp
+	}
+	postMemberComment := func(body map[string]any) CommentResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := newRequest("POST", "/api/issues/"+issueID+"/comments", body)
+		r = withURLParam(r, "id", issueID)
+		testHandler.CreateComment(w, r)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateComment(member): expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp CommentResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode member comment: %v", err)
+		}
+		return resp
+	}
+	countQueuedLeaderTasks := func() int {
+		t.Helper()
+		var n int
+		if err := testPool.QueryRow(ctx, `
+			SELECT count(*) FROM agent_task_queue
+			WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task = TRUE
+		`, issueID, fx.LeaderID).Scan(&n); err != nil {
+			t.Fatalf("count queued leader tasks: %v", err)
+		}
+		return n
+	}
+
+	parent := postAgentComment(leaderTaskID, map[string]any{
+		"content": "coordinating this issue",
+	})
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed' WHERE id = $1`, leaderTaskID); err != nil {
+		t.Fatalf("complete leader task: %v", err)
+	}
+
+	trigger := postMemberComment(map[string]any{
+		"content":   "any update?",
+		"parent_id": parent.ID,
+	})
+
+	var threadParentTaskID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+		  AND is_leader_task = TRUE AND squad_id = $3
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID, fx.LeaderID, fx.SquadID).Scan(&threadParentTaskID); err != nil {
+		t.Fatalf("load leader thread-parent task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'running' WHERE id = $1`, threadParentTaskID); err != nil {
+		t.Fatalf("mark thread-parent task running: %v", err)
+	}
+
+	postAgentComment(threadParentTaskID, map[string]any{
+		"content":   "replying from the thread-parent task",
+		"parent_id": trigger.ID,
+	})
+
+	if got := countQueuedLeaderTasks(); got != 0 {
+		t.Fatalf("leader reply from the thread-parent task queued %d leader tasks, want 0", got)
+	}
+}
+
+// TestCreateComment_ReplyToAgentCommentContinuesAuthoringRole pins MUL-7006: a
+// member reply to an agent comment continues the ROLE the replied-to comment
+// was written in. A comment authored by a squad-leader run continues as a
+// leader task — which is what keeps the squad briefing, the coordinator's
+// managed workdir, and its provider session across the turn. A worker-role
+// comment, or one with no recorded authoring run, stays a generic direct-agent
+// task.
+func TestCreateComment_ReplyToAgentCommentContinuesAuthoringRole(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	cases := []struct {
+		name         string
+		seedLeader   bool // the authoring task ran in the leader role
+		stampTask    bool // the comment records which run authored it
+		archiveSquad bool // the squad was deleted (soft-archived) since
+		wantLeader   bool
+	}{
+		{name: "leader-role comment continues as leader", seedLeader: true, stampTask: true, wantLeader: true},
+		{name: "worker-role comment stays direct agent", seedLeader: false, stampTask: true, wantLeader: false},
+		{name: "unrecorded authoring run stays direct agent", seedLeader: true, stampTask: false, wantLeader: false},
+		{name: "archived squad stays direct agent", seedLeader: true, stampTask: true, archiveSquad: true, wantLeader: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runtimeID := dbfx.Runtime(t, "reply-role runtime")
+			leaderID := dbfx.Agent(t, "Reply Role Leader", runtimeID)
+			squadID := dbfx.Squad(t, "Reply Role Squad", leaderID)
+			issueID := dbfx.Issue(t, "reply continues authoring role", testutil.Cols{
+				"assignee_type": "squad",
+				"assignee_id":   squadID,
+			})
+
+			var taskSquadID any
+			if tc.seedLeader {
+				taskSquadID = squadID
+			}
+			authoringTaskID := dbfx.Task(t, leaderID, testutil.Cols{
+				"runtime_id":     runtimeID,
+				"issue_id":       issueID,
+				"status":         "completed",
+				"is_leader_task": tc.seedLeader,
+				"squad_id":       taskSquadID,
+			})
+			// An unstamped comment models a row written before source_task_id
+			// existed (migration 120), or an agent write with no X-Task-ID.
+			var sourceTaskID any
+			if tc.stampTask {
+				sourceTaskID = authoringTaskID
+			}
+			parentID := dbfx.Comment(t, issueID, "prior turn", testutil.Cols{
+				"author_type":    "agent",
+				"author_id":      leaderID,
+				"source_task_id": sourceTaskID,
+			})
+			if tc.archiveSquad {
+				// DeleteSquad transfers the issue to the leader agent and then
+				// soft-archives the squad; the leader's old comments outlive it.
+				dbfx.Exec(t, `UPDATE squad SET archived_at = now() WHERE id = $1`, squadID)
+				dbfx.Exec(t, `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, issueID, leaderID)
+			}
+
+			req := withURLParam(newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+				"content":   "any update?",
+				"parent_id": parentID,
+			}), "id", issueID)
+			testutil.Call(t, testHandler.CreateComment, req).Want(http.StatusCreated)
+
+			var gotLeader bool
+			var gotSquadID *string
+			dbfx.QueryRow(t, `
+				SELECT is_leader_task, squad_id FROM agent_task_queue
+				WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+				ORDER BY created_at DESC
+				LIMIT 1
+			`, issueID, leaderID).Scan(&gotLeader, &gotSquadID)
+
+			if gotLeader != tc.wantLeader {
+				t.Fatalf("reply-triggered task is_leader_task = %v, want %v", gotLeader, tc.wantLeader)
+			}
+			switch {
+			case tc.wantLeader && (gotSquadID == nil || *gotSquadID != squadID):
+				t.Fatalf("leader continuation squad_id = %v, want %s", gotSquadID, squadID)
+			case !tc.wantLeader && gotSquadID != nil:
+				t.Fatalf("direct-agent continuation stamped squad_id = %s, want NULL", *gotSquadID)
+			}
+		})
+	}
+}
+
 // TestCreateRetryTask_InheritsIsLeaderTask locks the retry-clone contract for
 // MUL-2218: auto-retry of a leader-role task must produce a child task that is
 // also is_leader_task=true. Without this, MaybeRetryFailedTask silently
-// demotes a retried leader task to a worker task, and the self-trigger guard
-// in computeAssignedSquadLeaderCommentTrigger / comment.go stops recognising the
-// retried leader's own comments — re-opening the bug this issue fixes.
+// demotes a retried leader task to a worker task, and role-specific claim-time
+// briefing/self-mention guards lose the leader provenance.
 func TestCreateRetryTask_InheritsIsLeaderTask(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -471,7 +792,7 @@ func TestCreateRetryTask_InheritsIsLeaderTask(t *testing.T) {
 				testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1 OR parent_task_id = $1`, parentID)
 			})
 
-			child, err := testHandler.Queries.CreateRetryTask(ctx, util.MustParseUUID(parentID))
+			child, err := testHandler.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{ID: util.MustParseUUID(parentID)})
 			if err != nil {
 				t.Fatalf("CreateRetryTask: %v", err)
 			}

@@ -5,6 +5,7 @@ import {
   XCircle,
   ArrowUpCircle,
   Check,
+  Lock,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { api } from "@multica/core/api";
@@ -36,15 +37,42 @@ async function fetchLatestVersion(): Promise<string | null> {
   }
 }
 
-function stripV(v: string): string {
-  return v.replace(/^v/, "");
+/**
+ * Parses a released CLI version ("v0.4.17" / "0.4.17") into comparable parts,
+ * or null when the string is not a release version.
+ *
+ * A daemon built from source reports a `git describe` string
+ * ("v0.4.17-12-gabc1234") or the ldflags default ("dev"), and neither can be
+ * ordered against a release tag. This mirrors `IsReleaseVersion` in
+ * server/internal/cli/update.go, which is how the daemon's own auto-update
+ * loop decides the same question.
+ */
+function parseReleaseVersion(v: string): number[] | null {
+  const parts = v.trim().replace(/^v/, "").split(".");
+  if (parts.length !== 3) return null;
+  const parsed: number[] = [];
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return null;
+    parsed.push(Number(part));
+  }
+  return parsed;
 }
 
+/**
+ * True when `latest` is strictly newer than `current`.
+ *
+ * An unparseable version on either side compares as "no update available".
+ * Number("dev") is NaN, and every NaN comparison is false, so the old
+ * component-wise scan fell through to the next component and reported an
+ * upgrade for a version string it had never actually read — inviting the
+ * operator to replace a locally built binary on the strength of a claim we
+ * could not make.
+ */
 function isNewer(latest: string, current: string): boolean {
-  const l = stripV(latest).split(".").map(Number);
-  const c = stripV(current).split(".").map(Number);
-  for (let i = 0; i < Math.max(l.length, c.length); i++) {
-    const lv = l[i] ?? 0;
+  const l = parseReleaseVersion(latest);
+  const c = parseReleaseVersion(current);
+  if (!l || !c) return false;
+  for (const [i, lv] of l.entries()) {
     const cv = c[i] ?? 0;
     if (lv > cv) return true;
     if (lv < cv) return false;
@@ -64,7 +92,8 @@ const statusConfig: Record<
 };
 
 interface UpdateSectionProps {
-  runtimeId: string;
+  /** Null for a read-only viewer who cannot use a runtime as the command channel. */
+  runtimeId: string | null;
   currentVersion: string | null;
   isOnline: boolean;
   /**
@@ -128,7 +157,7 @@ export function UpdateSection({
   }, [currentVersion, markCompleted, targetVersion, updating]);
 
   const handleUpdate = async () => {
-    if (!latestVersion) return;
+    if (!latestVersion || !runtimeId) return;
     cleanup();
     setUpdating(true);
     setTargetVersion(latestVersion);
@@ -174,6 +203,13 @@ export function UpdateSection({
     latestVersion &&
     isNewer(latestVersion, currentVersion);
 
+  // A source build cannot be ordered against a release tag, so neither
+  // "update available" nor "Latest" is a claim we can make. Say that, rather
+  // than defaulting to "Latest" and telling the operator their local binary is
+  // up to date when we never parsed its version.
+  const isLocalBuild =
+    !!currentVersion && parseReleaseVersion(currentVersion) === null;
+
   const config = status ? statusConfig[status] : null;
   const Icon = config?.icon;
   const isActive = status === "pending" || status === "running";
@@ -181,38 +217,61 @@ export function UpdateSection({
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-xs text-muted-foreground">{t(($) => $.update.cli_version_label)}</span>
-        <span className="text-xs font-mono">
+        <span className="text-caption text-muted-foreground">{t(($) => $.update.cli_version_label)}</span>
+        <span className="text-caption font-mono">
           {currentVersion ?? t(($) => $.update.version_unknown)}
         </span>
 
         {isManaged ? (
           <span
-            className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+            className="inline-flex items-center gap-1 text-caption text-muted-foreground"
             title={t(($) => $.update.managed_by_desktop_title)}
           >
             {t(($) => $.update.managed_by_desktop)}
           </span>
         ) : (
           <>
-            {!hasUpdate && currentVersion && latestVersion && !status && (
-              <span className="inline-flex items-center gap-1 text-xs text-success">
-                <Check className="h-3 w-3" />
-                {t(($) => $.update.latest)}
+            {isLocalBuild && !status && (
+              <span
+                className="inline-flex items-center gap-1 text-caption text-muted-foreground"
+                title={t(($) => $.update.local_build_title)}
+              >
+                {t(($) => $.update.local_build)}
               </span>
             )}
 
+            {!isLocalBuild &&
+              !hasUpdate &&
+              currentVersion &&
+              latestVersion &&
+              !status && (
+                <span className="inline-flex items-center gap-1 text-caption text-success">
+                  <Check className="h-3 w-3" />
+                  {t(($) => $.update.latest)}
+                </span>
+              )}
+
             {hasUpdate && !status && (
               <>
-                <span className="text-xs text-muted-foreground">→</span>
-                <span className="text-xs font-mono text-info">
+                <span className="text-caption text-muted-foreground">→</span>
+                <span className="text-caption font-mono text-info">
                   {latestVersion}
                 </span>
-                <span className="text-xs text-muted-foreground">{t(($) => $.update.available)}</span>
+                <span className="text-caption text-muted-foreground">{t(($) => $.update.available)}</span>
               </>
             )}
 
-            {hasUpdate && isOnline && !status && (
+            {hasUpdate && !runtimeId && (
+              <span
+                className="inline-flex items-center gap-1 text-caption text-muted-foreground"
+                title={t(($) => $.update.read_only_title)}
+              >
+                <Lock className="h-3 w-3" />
+                {t(($) => $.update.read_only)}
+              </span>
+            )}
+
+            {hasUpdate && runtimeId && isOnline && !status && (
               <Button
                 variant="outline"
                 size="xs"
@@ -228,7 +287,7 @@ export function UpdateSection({
 
         {config && Icon && status && (
           <span
-            className={`inline-flex items-center gap-1 text-xs ${config.color}`}
+            className={`inline-flex items-center gap-1 text-caption ${config.color}`}
           >
             <Icon className={`h-3 w-3 ${isActive ? "animate-spin" : ""}`} />
             {t(($) => $.update.status[status])}
@@ -238,13 +297,13 @@ export function UpdateSection({
 
       {status === "completed" && output && (
         <div className="rounded-lg border bg-success/5 px-3 py-2">
-          <p className="text-xs text-success">{output}</p>
+          <p className="text-caption text-success">{output}</p>
         </div>
       )}
 
       {(status === "failed" || status === "timeout") && error && (
         <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2">
-          <p className="text-xs text-destructive">{error}</p>
+          <p className="text-caption text-destructive">{error}</p>
           {status === "failed" && (
             <Button
               variant="ghost"

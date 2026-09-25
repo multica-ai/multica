@@ -1,4 +1,4 @@
-import type { CommentAuthorType, Reaction } from "./comment";
+import type { CommentAuthorType, CommentSupplementReceipt, Reaction } from "./comment";
 import type { Attachment } from "./attachment";
 
 export interface AssigneeFrequencyEntry {
@@ -13,6 +13,9 @@ export interface TimelineEntry {
   actor_type: string;
   actor_id: string;
   created_at: string;
+  /** Display identity hydrated from the actor's global user row when available. */
+  actor_name?: string;
+  actor_avatar_url?: string;
   // Activity fields
   action?: string;
   details?: Record<string, unknown>;
@@ -20,13 +23,29 @@ export interface TimelineEntry {
   content?: string;
   parent_id?: string | null;
   updated_at?: string;
+  revision?: number;
   comment_type?: string;
+  /** Set only on comments a quick action produced (MUL-5465). Unforgeable. */
+  quick_action_id?: string | null;
   reactions?: Reaction[];
   attachments?: Attachment[];
   resolved_at?: string | null;
   resolved_by_type?: CommentAuthorType | null;
   resolved_by_id?: string | null;
+  source_task_id?: string | null;
+  /** Every running turn this comment steered, one receipt per run. */
+  supplements?: CommentSupplementReceipt[];
+  /** Mirrors the first receipt; servers that predate `supplements` send only these. */
+  supplement_task_id?: string;
+  supplement_status?: "pending" | "delivering" | "delivered" | "failed";
+  supplement_failure_reason?: string;
+  supplement_delivered_at?: string;
+  /**
+   * Set only on a comment deleted while it still had replies: the server keeps
+   * it as an empty tombstone so the replies keep their parent. Read it through
+   * `isDeletedComment`.
+   */
+  deleted_at?: string | null;
   /** Set by frontend coalescing when consecutive identical activities are merged. */
   coalesced_count?: number;
 }
-

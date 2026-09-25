@@ -13,7 +13,6 @@
   "delete_issue": {
     "title": "Delete issue",
     "description": "This will permanently delete this issue and all its comments. This action cannot be undone.",
-    "hint": "Any workspace member can delete issues.",
     "cancel": "Cancel",
     "confirm": "Delete",
     "deleting": "Deleting...",
@@ -29,14 +28,16 @@
     "toast_failed": "Failed to send feedback",
     "send": "Send feedback",
     "sending": "Sending…",
-    "github_hint_prefix": "Want faster handling and open discussion? Head to ",
+    "github_hint_prefix": "You can also send feedback on ",
     "github_hint_link": "GitHub"
   },
   "issue_picker": {
     "search_placeholder": "Search issues...",
     "searching": "Searching...",
     "no_results": "No issues found.",
-    "prompt_to_search": "Type to search issues"
+    "prompt_to_search": "Type to search issues",
+    "suggested_similar": "Similar titles",
+    "suggested_recent": "Recently viewed"
   },
   "set_parent": {
     "title": "Set parent issue",
@@ -50,8 +51,19 @@
     "toast_failed": "Failed to add sub-issue",
     "toast_success": "Added {{identifier}} as sub-issue"
   },
-  "backlog_hint": {
-    "toast_status_failed": "Failed to update status"
+  "run_confirm": {
+    "title_assign": "Confirm assignment?",
+    "assign_single": "Assign this issue to {{name}}. They'll start right away if the run conditions are met.",
+    "assign_batch": "Assign {{count}} issues to {{name}}. They'll start right away if the run conditions are met.",
+    "title_promote": "Start work now?",
+    "promote_single": "Move this issue to {{status}}. {{name}} will start right away if the run conditions are met.",
+    "confirm_assign": "Confirm assignment",
+    "confirm_promote": "Move and start",
+    "dont_start": "Don't start yet",
+    "toast_failed": "Action failed",
+    "create_will_start": "{{name}} will start working right after creation.",
+    "create_will_start_squad": "{{name}}'s leader will review it and start assigning work right after creation.",
+    "create_parked": "Assigned — won't start working in Backlog."
   },
   "create_squad": {
     "title": "Create Squad",
@@ -61,11 +73,11 @@
     "description_label": "Description",
     "description_placeholder": "Describe what this squad is responsible for...",
     "leader_label": "Leader Agent",
-    "leader_hint": "The leader receives all tasks assigned to this squad and coordinates the team.",
+    "leader_hint": "The leader receives all issues assigned to this squad and coordinates the team.",
     "leader_placeholder": "Select a leader agent",
     "members_label": "Additional Members",
     "members_optional": "(optional)",
-    "members_hint": "Members the leader can delegate sub-tasks to. Can be added later.",
+    "members_hint": "The leader can delegate sub-issues to these members.",
     "members_placeholder": "Add agents or workspace members",
     "members_selected_count_one": "{{count}} selected",
     "members_selected_count_other": "{{count}} selected",
@@ -90,8 +102,12 @@
     "icon_tooltip": "Choose icon",
     "title_placeholder": "Project title",
     "description_placeholder": "Add description...",
+    "description_hint": "Shared with agents as context for every run in this project.",
     "lead": "Lead",
     "no_lead": "No lead",
+    "set_start_date": "Set start date...",
+    "set_due_date": "Set due date...",
+    "more_options_aria": "More options",
     "lead_placeholder": "Assign lead...",
     "members_group": "Members",
     "agents_group": "Agents",
@@ -123,7 +139,8 @@
     "local_clear": "Clear",
     "local_pick_failed": "Could not open the directory picker.",
     "local_invalid_dir": "This directory can't be used. Pick another.",
-    "local_hint": "Agents on other machines won't see this path — they'll fail to start. Use repos for shared work."
+    "local_hint": "Agents on other machines won't see this path — they'll fail to start. Use repos for shared work.",
+    "repos_ref_default": "Default branch"
   },
   "create_issue": {
     "sr_manual": "New Issue",
@@ -141,8 +158,37 @@
     "toast_failed": "Failed to create issue",
     "toast_duplicate_title": "Duplicate issue",
     "toast_duplicate_view": "View existing issue",
+    "issue_limit": {
+      "title": "This workspace has reached its issue limit",
+      "checking_description": "Checking the billing actions available for this workspace…",
+      "upgrade_description": "Upgrade to Pro to keep creating issues.",
+      "portal_description": "Open Billing Portal to manage this workspace's subscription and restore issue creation.",
+      "contact_description": "Ask a workspace owner or admin to upgrade to Pro.",
+      "billing_description": "Open Billing to see the upgrade options available for this workspace.",
+      "billing_unavailable_description": "Billing actions could not be loaded. Open Billing to try again.",
+      "billing_disabled_description": "Delete an existing issue to free space, or contact your workspace administrator.",
+      "upgrade_action": "Upgrade to Pro",
+      "portal_action": "Open Billing Portal",
+      "billing_action": "View Billing"
+    },
+    "autopilot_quota_limit": {
+      "title": "This workspace has reached its autopilot run limit",
+      "checking_description": "Checking the billing actions available for this workspace…",
+      "upgrade_description": "Upgrade to Pro to restore autopilot runs.",
+      "portal_description": "Open Billing Portal to manage this workspace's subscription and restore autopilot runs.",
+      "contact_description": "Ask a workspace owner or admin to upgrade to Pro.",
+      "billing_description": "Open Billing to see the upgrade options available for this workspace.",
+      "billing_unavailable_description": "Billing actions could not be loaded. Open Billing to try again.",
+      "billing_disabled_description": "Wait for the current allowance to reset, or contact your workspace administrator.",
+      "upgrade_action": "Upgrade to Pro",
+      "portal_action": "Open Billing Portal",
+      "billing_action": "View Billing"
+    },
     "toast_link_subissues_all_failed": "Failed to link sub-issues",
     "toast_link_subissues_partial": "Failed to link {{failed}} of {{total}} sub-issues",
+    "toast_link_labels_failed": "Failed to attach labels",
+    "toast_set_properties_failed": "Could not set {{count}} custom property values",
+    "unavailable_property_removed": "An unavailable custom property was removed from the draft. Review it before submitting again.",
     "switch_to_agent": "Switch to Agent",
     "switch_to_agent_tooltip": "Switch to create with agent — describe in one line and let the agent file it",
     "switch_to_manual": "Switch to Manual",
@@ -153,9 +199,17 @@
     "subissue_of": "Sub-issue of {{identifier}}",
     "subissue_chip": "Sub-issue: {{identifier}}",
     "parent_with_id": "Parent: {{identifier}}",
+    "set_due_date": "Set due date...",
     "set_start_date": "Set start date...",
     "set_parent": "Set parent issue...",
     "add_subissue": "Add sub-issue...",
+    "set_status": "Set status...",
+    "set_priority": "Set priority...",
+    "set_assignee": "Set assignee...",
+    "set_labels": "Set labels...",
+    "set_project": "Set project...",
+    "customize_fields": "Customize fields...",
+    "custom_properties": "Custom properties",
     "remove_parent": "Remove parent",
     "set_parent_picker": {
       "title": "Set parent issue",
@@ -176,6 +230,12 @@
       "version_missing": "This agent's daemon doesn't report a CLI version. Create with agent needs multica CLI ≥ {{min}}. Upgrade the daemon and reconnect, or switch to manual create.",
       "version_below": "This agent's daemon CLI is {{current}} — Create with agent needs ≥ {{min}}. Upgrade the daemon, or switch to manual create.",
       "prompt_placeholder": "Tell the agent what to do, e.g. \"let Bohan fix the inbox loading slowness in the Web project\"",
+      "source_context_prompt_placeholder": "Tell the agent what to do with this context, e.g. \"continue investigating and fix the issue described here\"",
+      "more_fields_aria": "More fields",
+      "set_project": "Set project...",
+      "set_priority": "Set priority...",
+      "set_due_date": "Set due date...",
+      "customize_fields": "Customize fields...",
       "submit": "Create",
       "sending": "Sending…",
       "uploading": "Uploading…",
@@ -188,5 +248,13 @@
       "error_unknown": "Failed to submit. Try again.",
       "sub_issue_of": "Sub-issue of {{identifier}}"
     }
+  },
+  "mark_duplicate": {
+    "title": "Mark as duplicate",
+    "description": "Search for the original issue. This issue will be cancelled and linked to it.",
+    "toast_success": "Marked as a duplicate of {{identifier}}",
+    "toast_failed": "Failed to mark as duplicate",
+    "error_target_is_duplicate": "{{identifier}} is itself a duplicate. Pick its original instead.",
+    "error_has_duplicates": "Other issues are marked as duplicates of this one. Remove those marks first."
   }
 }

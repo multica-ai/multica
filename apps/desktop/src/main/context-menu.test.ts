@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 // Capture every MenuItem the SUT constructs so each test can assert

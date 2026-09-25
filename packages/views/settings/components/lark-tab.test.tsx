@@ -207,10 +207,40 @@ describe("LarkAgentBindButton (CTA gate)", () => {
     expect(screen.queryByRole("button", { name: /Bind to Lark/i })).toBeNull();
   });
 
-  it("hides both bind CTAs for a non-admin agent owner (matches backend admin gate)", () => {
+  it("hides both bind CTAs for a plain member when no agentOwnerId is supplied (stays admin-only)", () => {
     membersRef.current = [{ user_id: "user-1", role: "member" }];
     const { container } = render(
       <LarkAgentBindButton agentId="agent-1" agentName="Bot" />,
+      { wrapper: I18nWrapper },
+    );
+    expect(container.querySelector("button")).toBeNull();
+  });
+
+  it("shows the Feishu bind CTA for a non-admin agent owner (agentOwnerId matches the user, MUL-4213)", () => {
+    // The backend authorizes the agent's owner via canManageAgent even when
+    // they are only a plain workspace member, so the CTA must render for
+    // them once the caller threads the agent's owner_id.
+    membersRef.current = [{ user_id: "user-1", role: "member" }];
+    render(
+      <LarkAgentBindButton
+        agentId="agent-1"
+        agentName="Bot"
+        agentOwnerId="user-1"
+      />,
+      { wrapper: I18nWrapper },
+    );
+    expect(screen.getByRole("button", { name: /Bind to Feishu/i })).toBeTruthy();
+  });
+
+  it("still hides the CTAs for a non-admin member who is NOT the agent owner", () => {
+    // agentOwnerId belongs to someone else, so a plain member gets nothing.
+    membersRef.current = [{ user_id: "user-1", role: "member" }];
+    const { container } = render(
+      <LarkAgentBindButton
+        agentId="agent-1"
+        agentName="Bot"
+        agentOwnerId="user-2"
+      />,
       { wrapper: I18nWrapper },
     );
     expect(container.querySelector("button")).toBeNull();
@@ -452,6 +482,20 @@ describe("LarkAgentBotConnectedBadge (Unbind / Disconnect)", () => {
     expect(screen.getByTestId("lark-agent-bot-disconnect")).toBeTruthy();
     // Fixture omits region → Feishu copy.
     expect(screen.getByRole("link", { name: /Manage in Feishu/i })).toBeTruthy();
+  });
+
+  it("points a silent bot at the event-delivery check (#8496)", () => {
+    render(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />, {
+      wrapper: I18nWrapper,
+    });
+    // A bound app whose events go to a request URL renders this exact
+    // badge and receives nothing, so the connected state has to name the
+    // one setting that explains the silence.
+    expect(screen.getByText(/long connection/i)).toBeTruthy();
+    const docs = screen.getByRole("link", { name: /Troubleshooting/i });
+    expect(docs.getAttribute("href")).toBe(
+      "https://multica.ai/docs/lark-bot-integration",
+    );
   });
 
   it("opens the confirm dialog and does NOT call the API until the user confirms", async () => {

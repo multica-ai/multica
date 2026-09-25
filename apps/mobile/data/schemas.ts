@@ -12,6 +12,7 @@
 import { z } from "zod";
 import type {
   Agent,
+  AgentInvocationTarget,
   AgentTask,
   Attachment,
   ChatMessage,
@@ -19,6 +20,7 @@ import type {
   ChatSession,
   Comment,
   InboxItem,
+  InboxWorkspaceUnread,
   IssueLabelsResponse,
   Label,
   ListLabelsResponse,
@@ -89,6 +91,9 @@ export const CommentSchema = z.object({
   resolved_at: z.string().nullable().default(null),
   resolved_by_type: z.string().nullable().default(null),
   resolved_by_id: z.string().nullable().default(null),
+  source_task_id: z.string().nullable().optional(),
+  // Tombstone marker (#8296); a malformed value reads as a live comment.
+  deleted_at: z.string().nullable().optional().catch(undefined),
 }).loose() as unknown as z.ZodType<Comment>;
 
 export const EMPTY_COMMENT: Comment = {
@@ -161,6 +166,10 @@ export const ProjectSchema = z.object({
   priority: z.string(),
   lead_type: z.string().nullable(),
   lead_id: z.string().nullable(),
+  // .default(null) so a project from an older backend that omits these keys
+  // parses to null instead of degrading the batch to the empty fallback.
+  start_date: z.string().nullable().default(null),
+  due_date: z.string().nullable().default(null),
   created_at: z.string(),
   updated_at: z.string(),
   issue_count: z.number().default(0),
@@ -194,6 +203,8 @@ export const EMPTY_PROJECT: Project = {
   priority: "none",
   lead_type: null,
   lead_id: null,
+  start_date: null,
+  due_date: null,
   created_at: "",
   updated_at: "",
   issue_count: 0,
@@ -244,6 +255,10 @@ export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
   // unknown server values fall back to "active" so the row still renders.
   status: z.enum(["active", "archived"]).catch("active"),
   has_unread: z.boolean().default(false),
+  // Unread assistant messages after the read cursor. Optional (not defaulted)
+  // so the badge math can tell "older server didn't send it" from a real 0 —
+  // the tab badge sums `unread_count ?? 0`, same rule as web's sidebar.
+  unread_count: z.number().optional(),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();
@@ -267,17 +282,45 @@ export const ChatMessageSchema: z.ZodType<ChatMessage> = z.object({
   attachments: z.array(AttachmentSchema).optional(),
   failure_reason: z.string().nullable().optional(),
   elapsed_ms: z.number().nullable().optional(),
+  message_kind: z.enum(["message", "no_response"]).catch("message").optional(),
+  // One malformed optional suggestion must not erase an otherwise valid
+  // conversation. The server validates these too; this is mixed-version and
+  // corrupted-cache defense at the mobile boundary.
+  quick_actions: z.array(z.object({
+    label: z.string(),
+    prompt: z.string(),
+    primary: z.boolean().optional(),
+  }).loose()).catch([]).optional().default([]),
 }).loose();
 
 export const ChatMessageListSchema = z.array(ChatMessageSchema).default([]);
 
 export const EMPTY_CHAT_MESSAGE_LIST: ChatMessage[] = [];
 
-// All fields optional — server returns an empty object when no in-flight task.
+const ChatQueuedTaskSchema = z.object({
+  task_id: z.string(),
+  status: z.string().default("queued"),
+  created_at: z.string().default(""),
+  message_id: z.string().optional(),
+  content: z.string().optional(),
+}).loose();
+
+const ChatQueuedTasksSchema = z.array(z.unknown()).transform((tasks) =>
+  tasks.flatMap((task) => {
+    const parsed = ChatQueuedTaskSchema.safeParse(task);
+    return parsed.success ? [parsed.data] : [];
+  }),
+);
+
+// All root fields are optional — server returns an empty object when no
+// task is in flight. Ignore malformed queue rows without discarding a valid
+// head, matching packages/core/api/schemas.ts.
 export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
   task_id: z.string().optional(),
   status: z.string().optional(),
   created_at: z.string().optional(),
+  supports_queue: z.boolean().optional(),
+  queued_tasks: ChatQueuedTasksSchema.optional(),
 }).loose();
 
 export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
@@ -285,6 +328,8 @@ export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
 export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> = z.object({
   message_id: z.string(),
   task_id: z.string(),
+  supports_queue: z.boolean().optional(),
+  queued: z.boolean().optional().catch(undefined),
   created_at: z.string().default(""),
 }).loose();
 
@@ -307,6 +352,10 @@ export const TaskMessagePayloadSchema: z.ZodType<TaskMessagePayload> = z.object(
   content: z.string().optional(),
   input: z.record(z.string(), z.unknown()).optional(),
   output: z.string().optional(),
+  // Optional with no default: absent means no daemon measured this record's
+  // completeness, which is not the same as measured-and-complete. `.catch`
+  // keeps a malformed value from failing the row and emptying the transcript.
+  output_truncated: z.boolean().optional().catch(undefined),
   created_at: z.string().optional(),
 }).loose();
 
@@ -333,12 +382,10 @@ const SearchIssueResultSchema = IssueSchema.safeExtend({
 
 export const SearchIssuesResponseSchema = z.object({
   issues: z.array(SearchIssueResultSchema).default([]),
-  total: z.number().default(0),
 }).loose();
 
 export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
   issues: [],
-  total: 0,
 };
 
 const SearchProjectResultSchema = ProjectSchema.safeExtend({
@@ -348,12 +395,10 @@ const SearchProjectResultSchema = ProjectSchema.safeExtend({
 
 export const SearchProjectsResponseSchema = z.object({
   projects: z.array(SearchProjectResultSchema).default([]),
-  total: z.number().default(0),
 }).loose();
 
 export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
   projects: [],
-  total: 0,
 };
 
 // =====================================================
@@ -362,9 +407,11 @@ export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
 // Mirrors AgentTask in packages/core/types/agent.ts. Backend handlers:
 //   GET  /api/issues/{id}/active-task → { tasks: AgentTask[] } (may be empty)
 //   GET  /api/issues/{id}/task-runs   → AgentTask[]
-// Lenient on every field — status / kind / failure_reason all use `.catch()`
-// so a future server-side enum value renders a generic fallback rather than
-// crashing the row (root CLAUDE.md "Enum drift downgrades, not crashes").
+// Lenient on every field — status / kind use `.catch()` so a future
+// server-side enum value renders a generic fallback rather than crashing the
+// row (root CLAUDE.md "Enum drift downgrades, not crashes"). failure_reason is
+// an open string instead: its taxonomy grows on the backend's cadence, so a
+// value this build has never seen must survive parsing and degrade at render.
 
 export const AgentTaskSchema: z.ZodType<AgentTask> = z.object({
   id: z.string(),
@@ -380,14 +427,27 @@ export const AgentTaskSchema: z.ZodType<AgentTask> = z.object({
   completed_at: z.string().nullable().default(null),
   result: z.unknown().default(null),
   error: z.string().nullable().default(null),
+  // Open string, not an enum — same contract as `failure_reason` in
+  // packages/core/types/agent.ts and as the chat message schema above. The
+  // backend taxonomy passed the six coarse values at MUL-1949 and keeps
+  // growing (26 canonical reasons today), so an installed build meets reasons
+  // it predates.
+  //
+  // This field WAS a closed six-value enum, which made the whole thing moot:
+  // `.catch("")` erased every refined reason to `undefined`, so run-row's
+  // badge map has been unreachable for anything but the coarse values since
+  // MUL-5370 widened it, and every agent_error.* / skill_bundle_unavailable /
+  // environment_prepare_failed run rendered a bare "Failed" (#7913). Unknown
+  // reasons are the badge map's problem to degrade, not the parser's to drop.
+  //
   // Backend uses empty string ("") as the "not failed" sentinel (Go
   // `omitempty` on a custom string-typed enum). Normalize that to `undefined`
   // so downstream truthy checks (`if (task.failure_reason)`) don't have to
   // special-case both null/undefined AND "".
   failure_reason: z
-    .enum(["agent_error", "timeout", "runtime_offline", "runtime_recovery", "manual", ""])
+    .string()
     .optional()
-    .catch("")
+    .catch(undefined)
     .transform((v) => (v === "" ? undefined : v)),
   created_at: z.string().default(""),
   chat_session_id: z.string().optional(),
@@ -531,6 +591,24 @@ const InboxItemSchema: z.ZodType<InboxItem> = z.object({
 export const InboxListSchema = z.array(InboxItemSchema).default([]);
 export const EMPTY_INBOX_LIST: InboxItem[] = [];
 
+// Cross-workspace unread summary (`GET /api/inbox/unread-summary`): one entry
+// per workspace the user belongs to that has unread items, already
+// deduplicated per issue server-side. Backs the inbox tab badge. Mirrors
+// InboxUnreadSummarySchema in packages/core/api/schemas.ts. On malformed JSON
+// the fallback is an empty list, which reads as "nothing unread" — the badge
+// simply hides rather than showing a wrong number.
+const InboxWorkspaceUnreadSchema: z.ZodType<InboxWorkspaceUnread> = z
+  .object({
+    workspace_id: z.string(),
+    count: z.number().catch(0),
+  })
+  .loose();
+
+export const InboxUnreadSummarySchema = z
+  .array(InboxWorkspaceUnreadSchema)
+  .default([]);
+export const EMPTY_INBOX_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
+
 export const MemberWithUserSchema: z.ZodType<MemberWithUser> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
@@ -545,6 +623,18 @@ export const MemberWithUserSchema: z.ZodType<MemberWithUser> = z.object({
 export const MemberListSchema = z.array(MemberWithUserSchema).default([]);
 export const EMPTY_MEMBER_LIST: MemberWithUser[] = [];
 
+const AgentInvocationTargetSchema: z.ZodType<AgentInvocationTarget> = z
+  .object({
+    target_type: z.enum(["workspace", "member", "team"]).catch("team"),
+    target_id: z
+      .string()
+      .nullable()
+      .optional()
+      .catch(null)
+      .transform((v) => v ?? null),
+  })
+  .loose();
+
 // Agent schema is loose on every enum / structural field — the agent table is
 // where new modes/visibilities/statuses get added most often. We need only id,
 // name, avatar_url, and a couple of flags for the assignee picker + chat
@@ -553,9 +643,21 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
   runtime_id: z.string().default(""),
+  runtime_bound: z.boolean().optional(),
   name: z.string().default(""),
   description: z.string().default(""),
   instructions: z.string().default(""),
+  conversation_starters: z
+    .array(
+      z
+        .object({
+          label: z.string().default(""),
+          prompt: z.string().default(""),
+        })
+        .loose(),
+    )
+    .catch([])
+    .default([]),
   avatar_url: z.string().nullable().default(null),
   runtime_mode: z.string().catch("daemon") as unknown as z.ZodType<
     Agent["runtime_mode"]
@@ -571,6 +673,8 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   visibility: z.string().catch("workspace") as unknown as z.ZodType<
     Agent["visibility"]
   >,
+  permission_mode: z.enum(["private", "public_to"]).catch("private"),
+  invocation_targets: z.array(AgentInvocationTargetSchema).default([]),
   status: z.string().catch("active") as unknown as z.ZodType<Agent["status"]>,
   max_concurrent_tasks: z.number().default(1),
   model: z.string().default(""),
@@ -663,9 +767,11 @@ export const EMPTY_ISSUE_FALLBACK: import("@multica/core/types").Issue = {
   parent_issue_id: null,
   project_id: null,
   position: 0,
+  stage: null,
   start_date: null,
   due_date: null,
   metadata: {},
+  properties: {},
   created_at: "",
   updated_at: "",
 };

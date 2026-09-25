@@ -39,7 +39,8 @@ vi.mock("@tiptap/react", () => ({
   EditorContent: () => <div data-testid="editor-content" />,
 }));
 
-import { TitleEditor } from "./title-editor";
+import { createShortcutChord } from "@multica/core/shortcuts";
+import { TitleEditor, titleShortcutSubmitAllowed } from "./title-editor";
 
 describe("TitleEditor", () => {
   beforeEach(() => {
@@ -134,5 +135,25 @@ describe("TitleEditor", () => {
 
     expect(mockSetContent).toHaveBeenCalledTimes(1);
     expect(mockSetContent).toHaveBeenCalledWith("", { emitUpdate: false });
+  });
+});
+
+// MUL-4931 — which `send` bindings the title's shortcut-submit path honors.
+describe("titleShortcutSubmitAllowed", () => {
+  it("allows the default Mod+Enter chord", () => {
+    expect(
+      titleShortcutSubmitAllowed(createShortcutChord("Enter", { primary: true })),
+    ).toBe(true);
+  });
+
+  it("refuses plain Enter, which the single-line keymap already owns", () => {
+    // A user may bind `send` to plain Enter for chat. The title must not
+    // inherit it — Enter there means "done", and creating from a half-typed
+    // title is the misfire #5532 removed.
+    expect(titleShortcutSubmitAllowed(createShortcutChord("Enter"))).toBe(false);
+  });
+
+  it("refuses an unbound send action", () => {
+    expect(titleShortcutSubmitAllowed(null)).toBe(false);
   });
 });

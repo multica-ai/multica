@@ -8,7 +8,6 @@
     "unavailable": "멤버를 사용할 수 없습니다",
     "agents_section": "에이전트 ({{count}})",
     "detail_link": "자세히 →",
-    "more_agents_one": "외 에이전트 {{count}}개",
     "more_agents_other": "외 에이전트 {{count}}개"
   },
   "detail": {

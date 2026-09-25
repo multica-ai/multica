@@ -87,6 +87,7 @@ import {
 } from "react-native";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
+import { useQuery } from "@tanstack/react-query";
 import type { Issue, TimelineEntry } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { IssueHeaderCard } from "./issue-header-card";
@@ -97,8 +98,13 @@ import { CommentCard } from "./comment-card";
 import { useLastViewedStore } from "@/data/stores/last-viewed-store";
 import { coalesceTimeline } from "@/lib/timeline-coalesce";
 import { buildTimelineRows, type TimelineRow } from "@/lib/timeline-thread";
+import { ImageSequenceProvider } from "@/lib/markdown/image-sequence";
+import { issueAttachmentsOptions } from "@/data/queries/issues";
+import { useWorkspaceStore } from "@/data/workspace-store";
+import type { ImageSequenceBlock } from "@multica/core/attachments/image-sequence";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
+import { useT } from "@/lib/i18n";
 import { useCommentSelectStore } from "@/data/comment-select-store";
 
 interface Props {
@@ -158,6 +164,33 @@ export function TimelineList({
     if (!entries) return [];
     return buildTimelineRows(coalesceTimeline(entries));
   }, [entries]);
+
+  // Every image on this screen, in render order: the description first, then
+  // each comment row with its replies (MUL-5752). Tapping any of them opens
+  // the lightbox at its real position so a swipe walks to the next.
+  //
+  // The description's attachments come from the same query IssueDescription
+  // uses — TanStack Query dedupes it, so this adds no request.
+  const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const { data: issueAttachments } = useQuery(
+    issueAttachmentsOptions(wsId, issue.id),
+  );
+  const imageBlocks = useMemo<ImageSequenceBlock[]>(() => {
+    const blocks: ImageSequenceBlock[] = [
+      { content: issue.description, attachments: issueAttachments },
+    ];
+    for (const row of data) {
+      if (row.entry.type !== "comment") continue;
+      blocks.push({
+        content: row.entry.content,
+        attachments: row.entry.attachments,
+      });
+      for (const reply of row.replies) {
+        blocks.push({ content: reply.content, attachments: reply.attachments });
+      }
+    }
+    return blocks;
+  }, [issue.description, issueAttachments, data]);
 
   const listRef = useRef<FlashListRef<TimelineRow>>(null);
   // Gates single-shot per (commentId, nonce) tuple. Re-tap from inbox
@@ -357,6 +390,7 @@ export function TimelineList({
       : "list";
 
   return (
+    <ImageSequenceProvider blocks={imageBlocks}>
     <View className="flex-1">
       {/* Outer Pressable owns the "tap anywhere outside the selected
           comment to exit text-selection mode" gesture. Disabled when
@@ -445,6 +479,7 @@ export function TimelineList({
         <NewCommentChip count={newCount} onPress={onJumpToNew} />
       ) : null}
     </View>
+    </ImageSequenceProvider>
   );
 }
 
@@ -465,11 +500,12 @@ function RowSeparator() {
  * disappears the next time the user scrolls past and unmounts the screen).
  */
 function UnreadDivider() {
+  const { t } = useT("issues");
   return (
     <View className="flex-row items-center gap-2 px-4">
       <View className="flex-1 h-px bg-destructive/40" />
       <Text className="text-[10px] uppercase tracking-wider font-medium text-destructive">
-        New
+        {t("new_badge")}
       </Text>
       <View className="flex-1 h-px bg-destructive/40" />
     </View>
@@ -495,13 +531,17 @@ function NewCommentChip({
   onPress: () => void;
 }) {
   const { colorScheme } = useColorScheme();
+  const { t } = useT("issues");
   const fg = THEME[colorScheme].primaryForeground;
   return (
     <Pressable
       onPress={onPress}
       className="absolute bottom-3 self-center px-3.5 py-1.5 rounded-full bg-primary active:opacity-80 flex-row items-center gap-1.5"
       accessibilityRole="button"
-      accessibilityLabel={`Jump to ${count} new ${count === 1 ? "message" : "messages"}`}
+      accessibilityLabel={t(
+        count === 1 ? "jump_a11y_one" : "jump_a11y_other",
+        { count },
+      )}
       style={{
         // shadow comes from system, not Tailwind — keeps the chip readable
         // against either light or dark timeline content beneath.

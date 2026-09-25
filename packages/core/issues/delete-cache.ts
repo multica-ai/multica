@@ -1,4 +1,8 @@
-import type { QueryClient, QueryKey } from "@tanstack/react-query";
+import type {
+  InfiniteData,
+  QueryClient,
+  QueryKey,
+} from "@tanstack/react-query";
 import {
   agentActivityKeys,
   agentRunCountsKeys,
@@ -6,7 +10,11 @@ import {
   agentTasksKeys,
 } from "../agents/queries";
 import { labelKeys } from "../labels/queries";
-import type { Issue, ListIssuesCache } from "../types";
+import type {
+  Issue,
+  ListIssuesCache,
+  ListIssuesResponse,
+} from "../types";
 import { findIssueLocation, removeIssueFromBuckets } from "./cache-helpers";
 import { issueKeys } from "./queries";
 import { useRecentIssuesStore } from "./stores/recent-issues-store";
@@ -54,6 +62,17 @@ export function collectDeletedIssueCacheMetadata(
     collectParentFromListCache(parentIssueIds, data, issueId);
   }
 
+  for (const [, data] of qc.getQueriesData<
+    InfiniteData<ListIssuesResponse, number>
+  >({ queryKey: issueKeys.flatAll(wsId) })) {
+    for (const page of data?.pages ?? []) {
+      collectParentId(
+        parentIssueIds,
+        page.issues.find((issue) => issue.id === issueId)?.parent_issue_id,
+      );
+    }
+  }
+
   for (const [, data] of qc.getQueriesData<ListIssuesCache>({
     queryKey: issueKeys.myAll(wsId),
   })) {
@@ -91,6 +110,24 @@ export function pruneDeletedIssueFromListCaches(
     qc.setQueryData<ListIssuesCache>(key, (old) =>
       old ? removeIssueFromBuckets(old, issueId) : old,
     );
+  }
+
+  for (const [key, data] of qc.getQueriesData<
+    InfiniteData<ListIssuesResponse, number>
+  >({ queryKey: issueKeys.flatAll(wsId) })) {
+    if (!data?.pages) continue;
+    const found = data.pages.some((page) =>
+      page.issues.some((issue) => issue.id === issueId),
+    );
+    if (!found) continue;
+    qc.setQueryData<InfiniteData<ListIssuesResponse, number>>(key, {
+      ...data,
+      pages: data.pages.map((page) => ({
+        ...page,
+        total: Math.max(0, page.total - 1),
+        issues: page.issues.filter((issue) => issue.id !== issueId),
+      })),
+    });
   }
 }
 
@@ -168,6 +205,8 @@ export function cleanupDeletedIssueCaches(
   qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
   // Project Gantt cache lives outside `myAll`, so it needs an explicit
   // refresh when an issue is removed — the deleted row may have been a
   // scheduled bar visible right now.

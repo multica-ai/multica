@@ -3,12 +3,14 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 )
 
 // ---------------------------------------------------------------------------
@@ -27,15 +29,16 @@ const (
 
 // UpdateRequest represents a pending or completed CLI update request.
 type UpdateRequest struct {
-	ID            string       `json:"id"`
-	RuntimeID     string       `json:"runtime_id"`
-	Status        UpdateStatus `json:"status"`
-	TargetVersion string       `json:"target_version"`
-	Output        string       `json:"output,omitempty"`
-	Error         string       `json:"error,omitempty"`
-	CreatedAt     time.Time    `json:"created_at"`
-	UpdatedAt     time.Time    `json:"updated_at"`
-	RunStartedAt  *time.Time   `json:"-"`
+	ID              string       `json:"id"`
+	RuntimeID       string       `json:"runtime_id"`
+	InitiatorUserID string       `json:"-"`
+	Status          UpdateStatus `json:"status"`
+	TargetVersion   string       `json:"target_version"`
+	Output          string       `json:"output,omitempty"`
+	Error           string       `json:"error,omitempty"`
+	CreatedAt       time.Time    `json:"created_at"`
+	UpdatedAt       time.Time    `json:"updated_at"`
+	RunStartedAt    *time.Time   `json:"-"`
 }
 
 const (
@@ -45,7 +48,7 @@ const (
 )
 
 type UpdateStore interface {
-	Create(ctx context.Context, runtimeID, targetVersion string) (*UpdateRequest, error)
+	Create(ctx context.Context, runtimeID, targetVersion, initiatorUserID string) (*UpdateRequest, error)
 	Get(ctx context.Context, id string) (*UpdateRequest, error)
 	HasPending(ctx context.Context, runtimeID string) (bool, error)
 	PopPending(ctx context.Context, runtimeID string) (*UpdateRequest, error)
@@ -91,7 +94,7 @@ func NewInMemoryUpdateStore() *InMemoryUpdateStore {
 	}
 }
 
-func (s *InMemoryUpdateStore) Create(_ context.Context, runtimeID, targetVersion string) (*UpdateRequest, error) {
+func (s *InMemoryUpdateStore) Create(_ context.Context, runtimeID, targetVersion, initiatorUserID string) (*UpdateRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -110,12 +113,13 @@ func (s *InMemoryUpdateStore) Create(_ context.Context, runtimeID, targetVersion
 	}
 
 	req := &UpdateRequest{
-		ID:            randomID(),
-		RuntimeID:     runtimeID,
-		Status:        UpdatePending,
-		TargetVersion: targetVersion,
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
+		ID:              randomID(),
+		RuntimeID:       runtimeID,
+		InitiatorUserID: initiatorUserID,
+		Status:          UpdatePending,
+		TargetVersion:   targetVersion,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
 	}
 	s.requests[req.ID] = req
 	return req, nil
@@ -208,18 +212,12 @@ func (s *InMemoryUpdateStore) Fail(_ context.Context, id string, errMsg string) 
 // InitiateUpdate creates a new CLI update request (protected route, called by frontend).
 func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	rt, member, ok := h.requireRuntimeReadAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeAPI, runtimeID)
 	if !ok {
 		return
 	}
-
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "runtime not found")
-		return
-	}
-
-	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found"); !ok {
+	if !canEditRuntime(member, rt) {
+		writeError(w, http.StatusForbidden, "only runtime owners and workspace admins can update runtimes")
 		return
 	}
 
@@ -235,9 +233,26 @@ func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	update, err := h.UpdateStore.Create(r.Context(), uuidToString(rt.ID), req.TargetVersion)
+	update, err := h.UpdateStore.Create(
+		r.Context(),
+		uuidToString(rt.ID),
+		req.TargetVersion,
+		uuidToString(member.UserID),
+	)
 	if err != nil {
-		writeError(w, http.StatusConflict, err.Error())
+		// Only the in-progress rejection is a conflict the caller can act on.
+		// Every other Create failure is infrastructure — the Redis store wraps
+		// connection failures as "reserve active update: ..." / "persist update
+		// request: ..." — and echoing it back would both leak internals and
+		// label an outage as a user-fixable conflict. That was survivable while
+		// the CLI hid 409 bodies; it no longer is, now that they are shown by
+		// default.
+		if errors.Is(err, errUpdateInProgress) {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		slog.Error("UpdateStore Create failed", "error", err, "runtime_id", uuidToString(rt.ID))
+		writeError(w, http.StatusInternalServerError, "failed to start the update")
 		return
 	}
 
@@ -247,20 +262,10 @@ func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 // GetUpdate returns the status of an update request (protected route, called by frontend).
 func (h *Handler) GetUpdate(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	rt, member, ok := h.requireRuntimeReadAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeUpdatePoll, runtimeID)
 	if !ok {
 		return
 	}
-
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "runtime not found")
-		return
-	}
-	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found"); !ok {
-		return
-	}
-
 	updateID := chi.URLParam(r, "updateId")
 
 	update, err := h.UpdateStore.Get(r.Context(), updateID)
@@ -270,6 +275,13 @@ func (h *Handler) GetUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if update == nil || update.RuntimeID != uuidToString(rt.ID) {
 		writeError(w, http.StatusNotFound, "update not found")
+		return
+	}
+	// Keep an in-flight poll alive if an admin is downgraded after starting
+	// the update. This exception is scoped to the immutable request initiator;
+	// other plain members still cannot read another runtime's update status.
+	if !canEditRuntime(member, rt) && update.InitiatorUserID != uuidToString(member.UserID) {
+		writeError(w, http.StatusForbidden, "only runtime owners, workspace admins, and the update initiator can view this update")
 		return
 	}
 

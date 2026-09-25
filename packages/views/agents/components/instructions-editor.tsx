@@ -53,7 +53,7 @@ export function InstructionsEditor({
   if (!expanded) {
     return (
       <div>
-        <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        <div className="text-caption font-medium uppercase tracking-wider text-muted-foreground">
           {label}
         </div>
         <button
@@ -65,14 +65,14 @@ export function InstructionsEditor({
           <div className="min-w-0 flex-1">
             {value.trim() ? (
               // Preview: first 2 lines of markdown, ellipsised.
-              <div className="line-clamp-2 whitespace-pre-wrap text-sm text-foreground/80">
+              <div className="line-clamp-2 whitespace-pre-wrap text-body text-foreground">
                 {value}
               </div>
             ) : (
-              <div className="text-sm text-muted-foreground">{resolvedPlaceholder}</div>
+              <div className="text-body text-muted-foreground">{resolvedPlaceholder}</div>
             )}
           </div>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-faint-foreground" />
         </button>
       </div>
     );
@@ -81,7 +81,7 @@ export function InstructionsEditor({
   return (
     <div>
       <div className="flex items-center justify-between">
-        <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        <div className="text-caption font-medium uppercase tracking-wider text-muted-foreground">
           {label}
         </div>
         <Button
@@ -89,7 +89,7 @@ export function InstructionsEditor({
           variant="ghost"
           size="sm"
           onClick={() => setExpanded(false)}
-          className="h-6 gap-1 px-2 text-xs"
+          className="h-6 gap-1 px-2 text-caption"
         >
           <X className="h-3 w-3" />
           {t(($) => $.create_dialog.instructions.collapse)}
@@ -106,7 +106,7 @@ export function InstructionsEditor({
           defaultValue={value}
           onUpdate={onChange}
           placeholder={t(($) => $.create_dialog.instructions.editor_placeholder)}
-          className="min-h-[160px] max-h-[320px] overflow-y-auto px-3 py-2.5 text-sm"
+          className="min-h-[160px] max-h-[320px] overflow-y-auto px-3 py-2.5 text-body"
           showBubbleMenu={true}
           disableMentions={true}
         />

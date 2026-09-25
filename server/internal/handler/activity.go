@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"sort"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -19,35 +21,109 @@ type TimelineEntry struct {
 	ActorType string `json:"actor_type"`
 	ActorID   string `json:"actor_id"`
 	CreatedAt string `json:"created_at"`
+	// Display-only identity is hydrated from the global user row for member
+	// actors. It remains available after the member leaves this workspace;
+	// actor_type + actor_id stay the durable attribution keys.
+	ActorName      string `json:"actor_name,omitempty"`
+	ActorAvatarURL string `json:"actor_avatar_url,omitempty"`
 
 	// Activity-only fields
 	Action  *string         `json:"action,omitempty"`
 	Details json.RawMessage `json:"details,omitempty"`
 
 	// Comment-only fields
-	Content        *string              `json:"content,omitempty"`
-	ParentID       *string              `json:"parent_id,omitempty"`
-	UpdatedAt      *string              `json:"updated_at,omitempty"`
-	CommentType    *string              `json:"comment_type,omitempty"`
+	Content     *string `json:"content,omitempty"`
+	ParentID    *string `json:"parent_id,omitempty"`
+	UpdatedAt   *string `json:"updated_at,omitempty"`
+	Revision    int64   `json:"revision,omitempty"`
+	CommentType *string `json:"comment_type,omitempty"`
+	// Set only on comments produced by a quick action run. Unforgeable: there
+	// is no request field for it on the generic comment endpoint.
+	QuickActionID  *string              `json:"quick_action_id,omitempty"`
 	Reactions      []ReactionResponse   `json:"reactions,omitempty"`
 	Attachments    []AttachmentResponse `json:"attachments,omitempty"`
 	ResolvedAt     *string              `json:"resolved_at,omitempty"`
 	ResolvedByType *string              `json:"resolved_by_type,omitempty"`
 	ResolvedByID   *string              `json:"resolved_by_id,omitempty"`
+	SourceTaskID   *string              `json:"source_task_id,omitempty"`
+	// Set only on a tombstone: a comment deleted while it still had replies.
+	DeletedAt *string `json:"deleted_at,omitempty"`
+	// Supplements lists every running turn this comment steered; the single
+	// supplement_* fields mirror the first receipt for older clients.
+	Supplements             []CommentSupplementResponse `json:"supplements,omitempty"`
+	SupplementTaskID        string                      `json:"supplement_task_id,omitempty"`
+	SupplementStatus        string                      `json:"supplement_status,omitempty"`
+	SupplementFailureReason *string                     `json:"supplement_failure_reason,omitempty"`
+	SupplementDeliveredAt   *string                     `json:"supplement_delivered_at,omitempty"`
 }
 
 // timelineHardCap bounds the per-issue timeline payload. Sized as a defensive
 // safety net, not a UX page window: see commentHardCap in comment.go for the
-// data-shape rationale (#1929).
-const timelineHardCap = 2000
+// data-shape rationale (#1929). A variable only so the cap tests can shrink it,
+// like commentHardCap; nothing outside tests assigns it.
+var timelineHardCap = 2000
+
+// timelineProbeLimit reads one row past the cap so "we hit the cap" can be
+// distinguished from "the issue happens to have exactly timelineHardCap rows".
+// Without the probe row an issue sitting exactly on the boundary would report a
+// complete timeline as truncated and pay a needless ancestor-backfill query.
+func timelineProbeLimit() int32 { return int32(timelineHardCap) + 1 }
+
+// Truncation is signalled with a response header rather than a body field
+// because the unpaginated response is a bare JSON array (TimelineEntriesSchema =
+// z.array(TimelineEntrySchema) in packages/core/api/schemas.ts) with nowhere to
+// put a flag. The header is additive: existing clients keep validating.
+//
+// The value names which kinds were truncated ("activity", "comment", or
+// "activity,comment") because the two caps are independent — in practice it is
+// almost always activity alone.
+//
+// There is deliberately no companion "window from" header. An earlier revision
+// emitted one, but TimestampToString is second-precision RFC3339 while the real
+// ordering key is (created_at, id) at full precision, so it could not be used to
+// resume a read without skipping or repeating rows inside a shared second. A
+// resumable cursor needs to be opaque and carry both halves; that is worth
+// designing when there is a consumer, not shipping as a lossy approximation.
+//
+// Exported so the CORS layer can reference the same identifier
+// (corsExposedHeaders in server/cmd/server/router.go). A custom response header
+// is invisible to browser JS unless explicitly exposed, so a rename here that
+// did not reach the CORS list would silently switch the signal back off.
+const HeaderTimelineTruncated = "X-Timeline-Truncated"
+
+// truncatedKinds renders the X-Timeline-Truncated value, "" when nothing was
+// truncated.
+func truncatedKinds(comments, activities bool) string {
+	switch {
+	case comments && activities:
+		return "activity,comment"
+	case comments:
+		return "comment"
+	case activities:
+		return "activity"
+	default:
+		return ""
+	}
+}
+
+// takeNewest trims a timelineProbeLimit read down to timelineHardCap and reports
+// whether the probe row proved older rows exist. rows must be ascending, so the
+// newest timelineHardCap entries are the tail.
+func takeNewest[T any](rows []T) ([]T, bool) {
+	if len(rows) <= timelineHardCap {
+		return rows, false
+	}
+	return rows[len(rows)-timelineHardCap:], true
+}
 
 // timelinePaginatedResponse mirrors the wrapper shape produced by the prior
 // cursor-paginated ListTimeline (#2128). It is preserved as a backward-compat
 // surface for installed Desktop builds and stale Web bundles between #2128 and
 // #1929 that send `?limit=`/`?before=`/`?after=`/`?around=` and parse the
 // response with the old TimelinePageSchema (entries + cursors). Cursors are
-// always nil and `has_more_*` are always false: the new server returns the
-// whole timeline in one shot.
+// always nil and `has_more_after` is always false: the new server returns the
+// whole timeline in one shot. `has_more_before` is now truthful — it reports the
+// hard-cap clamp — instead of being hardcoded false.
 type timelinePaginatedResponse struct {
 	Entries       []TimelineEntry `json:"entries"`
 	NextCursor    *string         `json:"next_cursor"`
@@ -63,7 +139,7 @@ type timelinePaginatedResponse struct {
 //   - No pagination params → flat ASC `TimelineEntry[]`. Matches the legacy
 //     desktop contract (Multica.app ≤ v0.2.25) and the new client.
 //   - Any of `limit` / `before` / `after` / `around` present → wrapped object
-//     with DESC entries + null cursors + has_more_*=false. Matches what a
+//     with DESC entries + null cursors + has_more_after=false. Matches what a
 //     stale v0.2.26+ build expects when it parses the response with
 //     TimelinePageSchema; cursor-walking is now a no-op so the client just
 //     sees a single full page.
@@ -72,6 +148,11 @@ type timelinePaginatedResponse struct {
 // Time-based pagination was removed because it split reply threads at page
 // boundaries, and at observed data sizes (p99 ~30 comments per issue) the
 // cursor machinery was pure overhead.
+//
+// When the hard cap fires each list is independently reduced to its newest
+// entries and X-Timeline-Truncated names which kinds were affected. Comment
+// threads cut by the window are completed afterwards within a bounded context
+// budget; a thread that cannot be completed is omitted as one unit (MUL-5492).
 func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, id)
@@ -83,7 +164,7 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 	comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
-		Limit:       timelineHardCap,
+		Limit:       timelineProbeLimit(),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list comments")
@@ -91,7 +172,7 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 	}
 	activities, err := h.Queries.ListActivitiesForIssue(ctx, db.ListActivitiesForIssueParams{
 		IssueID: issue.ID,
-		Limit:   timelineHardCap,
+		Limit:   timelineProbeLimit(),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list activities")
@@ -102,12 +183,59 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 	wantWrapped := q.Get("limit") != "" || q.Get("before") != "" ||
 		q.Get("after") != "" || q.Get("around") != ""
 
-	if wantWrapped {
-		entries := h.mergeTimeline(r, comments, activities, false)
-		if entries == nil {
-			entries = []TimelineEntry{}
+	// Each list is capped independently and reports its own truncation. The two
+	// are deliberately NOT clamped to a shared floor.
+	//
+	// An earlier revision did clamp them, to guarantee the returned window was a
+	// contiguous correctly-interleaved slice with no region holding only one of
+	// the two kinds. That traded the wrong way round. Comments are human-paced
+	// (p99 ~30, max ever observed ~1.1k) so they essentially never reach the cap,
+	// while activity is machine-paced and reaches it routinely — so the shared
+	// floor was almost always the ACTIVITY floor cutting away comments that had
+	// been fetched successfully and would have rendered fine. It deleted real
+	// content to buy a cosmetic property, and on a busy issue with thirty
+	// comments it was pure loss.
+	//
+	// Not clamping costs only activity density in the older part of the range,
+	// which is metadata, not content — and it is reported rather than hidden.
+	// It also keeps the comment set from being cut at an arbitrary row, which is
+	// why completeCommentThreads repairs any affected thread below.
+	comments, commentsTruncated := takeNewest(comments)
+	activities, activitiesTruncated := takeNewest(activities)
+
+	// Timeline clients derive resolution bars, author lists, and folded counts
+	// from the comments in this response. A parent-only repair would therefore
+	// make a partial thread look complete. Restore all missing siblings and
+	// descendants for affected roots within the shared context budget; if the
+	// walk cannot prove a thread complete, omit that thread as one unit.
+	if commentsTruncated {
+		var err error
+		comments, err = h.completeCommentThreads(ctx, issue.ID, issue.WorkspaceID, comments)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to complete comment threads")
+			return
 		}
-		resp := timelinePaginatedResponse{Entries: entries}
+	}
+
+	if kinds := truncatedKinds(commentsTruncated, activitiesTruncated); kinds != "" {
+		w.Header().Set(HeaderTimelineTruncated, kinds)
+	}
+
+	entries := h.mergeTimeline(r, comments, activities, !wantWrapped)
+	// The current-member directory deliberately excludes departed members, but
+	// timeline attribution must remain readable after they leave. Hydrate only
+	// the member ids already present in this authorised issue response; lookup
+	// failure is display-only and must not make the timeline unavailable.
+	h.hydrateTimelineMemberActors(ctx, entries)
+	if entries == nil {
+		entries = []TimelineEntry{}
+	}
+
+	if wantWrapped {
+		resp := timelinePaginatedResponse{
+			Entries:       entries,
+			HasMoreBefore: commentsTruncated || activitiesTruncated,
+		}
 		// `around=<id>`: locate the anchor in the DESC slice so the legacy
 		// client can scroll-to-highlight without a follow-up request.
 		if anchor := q.Get("around"); anchor != "" {
@@ -123,10 +251,6 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries := h.mergeTimeline(r, comments, activities, true)
-	if entries == nil {
-		entries = []TimelineEntry{}
-	}
 	writeJSON(w, http.StatusOK, entries)
 }
 
@@ -166,6 +290,7 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 	}
 	reactions := h.groupReactions(r, ids)
 	attachments := h.groupAttachments(r, ids)
+	supplements := h.listCommentSupplements(r.Context(), comments[0].WorkspaceID, ids)
 
 	out := make([]TimelineEntry, len(comments))
 	for i, c := range comments {
@@ -180,14 +305,25 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 			ActorID:        uuidToString(c.AuthorID),
 			Content:        &content,
 			CommentType:    &commentType,
+			QuickActionID:  uuidToPtr(c.QuickActionID),
 			ParentID:       uuidToPtr(c.ParentID),
 			CreatedAt:      timestampToString(c.CreatedAt),
 			UpdatedAt:      &updatedAt,
+			Revision:       c.Revision,
 			Reactions:      reactions[cid],
 			Attachments:    attachments[cid],
 			ResolvedAt:     timestampToPtr(c.ResolvedAt),
 			ResolvedByType: textToPtr(c.ResolvedByType),
 			ResolvedByID:   uuidToPtr(c.ResolvedByID),
+			SourceTaskID:   uuidToPtr(c.SourceTaskID),
+			DeletedAt:      timestampToPtr(c.DeletedAt),
+		}
+		if receipts := supplements[cid]; len(receipts) > 0 {
+			out[i].Supplements = receipts
+			out[i].SupplementTaskID = receipts[0].TaskID
+			out[i].SupplementStatus = receipts[0].Status
+			out[i].SupplementFailureReason = receipts[0].FailureReason
+			out[i].SupplementDeliveredAt = receipts[0].DeliveredAt
 		}
 	}
 	return out
@@ -207,6 +343,57 @@ func activityToEntry(a db.ActivityLog) TimelineEntry {
 		Action:    &action,
 		Details:   a.Details,
 		CreatedAt: timestampToString(a.CreatedAt),
+	}
+}
+
+// hydrateTimelineMemberActors adds display identity for member-authored rows
+// without changing the active-member directory's semantics. The ids came from
+// comments/activity rows on an issue loadIssueForUser already authorised, so
+// this creates no arbitrary user lookup surface. The query is bounded by the
+// timeline hard caps and runs once for the whole response, never once per row.
+func (h *Handler) hydrateTimelineMemberActors(ctx context.Context, entries []TimelineEntry) {
+	seen := make(map[string]struct{})
+	ids := make([]pgtype.UUID, 0)
+	for i := range entries {
+		entry := &entries[i]
+		if entry.ActorType != "member" || entry.ActorID == "" {
+			continue
+		}
+		if _, ok := seen[entry.ActorID]; ok {
+			continue
+		}
+		id, err := util.ParseUUID(entry.ActorID)
+		if err != nil {
+			continue
+		}
+		seen[entry.ActorID] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return
+	}
+
+	users, err := h.Queries.GetUsersByIDs(ctx, ids)
+	if err != nil {
+		return
+	}
+	byID := make(map[string]db.GetUsersByIDsRow, len(users))
+	for _, user := range users {
+		byID[uuidToString(user.ID)] = user
+	}
+	for i := range entries {
+		entry := &entries[i]
+		if entry.ActorType != "member" {
+			continue
+		}
+		user, ok := byID[entry.ActorID]
+		if !ok {
+			continue
+		}
+		entry.ActorName = user.Name
+		if user.AvatarUrl.Valid {
+			entry.ActorAvatarURL = h.resolveAvatarURL(user.AvatarUrl.String)
+		}
 	}
 }
 

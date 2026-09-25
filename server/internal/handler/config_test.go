@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 func TestGetConfigReportsCdnSignedMode(t *testing.T) {
@@ -59,6 +60,7 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	t.Setenv("GOOGLE_CLIENT_ID", "google-client-id")
 	t.Setenv("POSTHOG_API_KEY", "phc_test")
 	t.Setenv("POSTHOG_HOST", "https://eu.i.posthog.com")
+	t.Setenv("MULTICA_DAEMON_SERVER_URL", "")
 	t.Setenv("MULTICA_PUBLIC_URL", "https://api.example.com/")
 	t.Setenv("MULTICA_APP_URL", "https://app.example.com/")
 
@@ -104,7 +106,59 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	}
 }
 
+func TestGetConfigUsesDaemonServerURLOverride(t *testing.T) {
+	t.Setenv("MULTICA_DAEMON_SERVER_URL", " https://api.internal.example/// ")
+	t.Setenv("MULTICA_PUBLIC_URL", "https://hooks.example.com/")
+	t.Setenv("MULTICA_APP_URL", "https://app.example.com/")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	var cfg AppConfig
+	testutil.Call(t, testHandler.GetConfig, req).Want(http.StatusOK).JSON(&cfg)
+	if cfg.DaemonServerURL != "https://api.internal.example" {
+		t.Fatalf("daemon_server_url: want override URL, got %q", cfg.DaemonServerURL)
+	}
+	if cfg.DaemonAppURL != "https://app.example.com" {
+		t.Fatalf("daemon_app_url: want app URL, got %q", cfg.DaemonAppURL)
+	}
+}
+
+func TestGetConfigHonorsVCSIntegrationSwitch(t *testing.T) {
+	origCfg := testHandler.cfg
+	t.Cleanup(func() { testHandler.cfg = origCfg })
+
+	fetch := func() map[string]json.RawMessage {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+		w := httptest.NewRecorder()
+		testHandler.GetConfig(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var cfg map[string]json.RawMessage
+		if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+			t.Fatalf("decode config: %v", err)
+		}
+		return cfg
+	}
+
+	testHandler.cfg.VCSIntegrationEnabled = false
+	if _, ok := fetch()["vcs_integration_available"]; ok {
+		t.Fatal("vcs_integration_available must be omitted when the integration is disabled")
+	}
+
+	testHandler.cfg.VCSIntegrationEnabled = true
+	raw, ok := fetch()["vcs_integration_available"]
+	if !ok {
+		t.Fatal("vcs_integration_available must be present when the integration is enabled")
+	}
+	if string(raw) != "true" {
+		t.Fatalf("vcs_integration_available: want true, got %s", raw)
+	}
+}
+
 func TestGetConfigUsesAppURLForSameOriginDaemonSetup(t *testing.T) {
+	t.Setenv("MULTICA_DAEMON_SERVER_URL", "")
+	t.Setenv("MULTICA_PUBLIC_URL", "")
 	t.Setenv("MULTICA_APP_URL", "https://multica.internal.example/")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
@@ -128,6 +182,9 @@ func TestGetConfigUsesAppURLForSameOriginDaemonSetup(t *testing.T) {
 }
 
 func TestGetConfigUsesFrontendOriginForSameOriginDaemonSetup(t *testing.T) {
+	t.Setenv("MULTICA_DAEMON_SERVER_URL", "")
+	t.Setenv("MULTICA_PUBLIC_URL", "")
+	t.Setenv("MULTICA_APP_URL", "")
 	t.Setenv("FRONTEND_ORIGIN", "https://multica.internal.example/")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
@@ -152,6 +209,7 @@ func TestGetConfigUsesFrontendOriginForSameOriginDaemonSetup(t *testing.T) {
 
 func TestGetConfigOmitsOfficialCloudDaemonSetup(t *testing.T) {
 	t.Setenv("MULTICA_PUBLIC_URL", "https://api.multica.ai")
+	t.Setenv("MULTICA_APP_URL", "")
 	t.Setenv("FRONTEND_ORIGIN", "https://multica.ai")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
@@ -208,11 +266,11 @@ func TestGetConfigOmitsCloudDaemonSetupWithoutPublicURL(t *testing.T) {
 	}
 }
 
-// TestGetConfigOmitsCloudDaemonSetupForAppSubdomain covers the app.multica.ai
-// frontend variant of the official cloud.
-func TestGetConfigOmitsCloudDaemonSetupForAppSubdomain(t *testing.T) {
+// TestGetConfigOmitsCloudDaemonSetupForConfiguredAppURL covers the official
+// cloud frontend when it is configured through MULTICA_APP_URL.
+func TestGetConfigOmitsCloudDaemonSetupForConfiguredAppURL(t *testing.T) {
 	t.Setenv("MULTICA_PUBLIC_URL", "")
-	t.Setenv("MULTICA_APP_URL", "https://app.multica.ai")
+	t.Setenv("MULTICA_APP_URL", "https://multica.ai")
 	t.Setenv("FRONTEND_ORIGIN", "")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
@@ -315,5 +373,262 @@ func TestGetConfigExposesWorkspaceCreationDisabled(t *testing.T) {
 	}
 	if !cfg.WorkspaceCreationDisabled {
 		t.Fatalf("workspace_creation_disabled: want true with env on, got false (body=%s)", w.Body.String())
+	}
+}
+
+// TestGetConfigExposesServerVersion verifies /api/config reports the build
+// version main.go stamps into handler.Config via -X main.version on a
+// self-hosted deployment, so operators can confirm what's deployed from the
+// Help popover.
+func TestGetConfigExposesServerVersion(t *testing.T) {
+	origCfg := testHandler.cfg
+	defer func() { testHandler.cfg = origCfg }()
+
+	// Self-hosted frontend origin: the version row is meant for these deployments.
+	t.Setenv("MULTICA_APP_URL", "https://multica.self-hosted.example")
+	t.Setenv("FRONTEND_ORIGIN", "")
+
+	testHandler.cfg.ServerVersion = ""
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.ServerVersion != "" {
+		t.Fatalf("server_version: want empty for dev build, got %q", cfg.ServerVersion)
+	}
+
+	testHandler.cfg.ServerVersion = "1.2.3"
+	w = httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.ServerVersion != "1.2.3" {
+		t.Fatalf("server_version: want 1.2.3, got %q", cfg.ServerVersion)
+	}
+}
+
+// TestGetConfigOmitsServerVersionOnOfficialCloud verifies the build version is
+// suppressed on the managed cloud (frontend host multica.ai) even when the
+// binary is stamped, while a self-hosted frontend origin still reports it. The
+// managed cloud is continuously deployed, so its users don't need the row.
+func TestGetConfigOmitsServerVersionOnOfficialCloud(t *testing.T) {
+	origCfg := testHandler.cfg
+	defer func() { testHandler.cfg = origCfg }()
+	testHandler.cfg.ServerVersion = "1.2.3"
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+
+	// Official cloud: frontend host multica.ai -> version omitted.
+	t.Setenv("MULTICA_APP_URL", "https://multica.ai")
+	t.Setenv("FRONTEND_ORIGIN", "")
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.ServerVersion != "" {
+		t.Fatalf("server_version: want omitted on official cloud, got %q", cfg.ServerVersion)
+	}
+
+	// Self-hosted: operator's own frontend origin -> version reported.
+	t.Setenv("MULTICA_APP_URL", "https://multica.self-hosted.example")
+	w = httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.ServerVersion != "1.2.3" {
+		t.Fatalf("server_version: want 1.2.3 on self-hosted, got %q", cfg.ServerVersion)
+	}
+}
+
+func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
+	h := &Handler{}
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	h.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig default flags: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode default config: %v", err)
+	}
+	if cfg.FeatureFlags["composio_mcp_apps"] {
+		t.Fatalf("composio_mcp_apps: want false by default, got true")
+	}
+	if cfg.FeatureFlags["billing_workspace_subscriptions"] {
+		t.Fatalf("billing_workspace_subscriptions: want false by default, got true")
+	}
+	if cfg.FeatureFlags["plugins_v1"] {
+		t.Fatalf("plugins_v1: want false by default, got true")
+	}
+	for _, retired := range []string{"private_plugins_v1", "remote_mcp_plugins_v1"} {
+		if _, published := cfg.FeatureFlags[retired]; published {
+			t.Fatalf("retired Plugin sub-flag %q must not be published", retired)
+		}
+	}
+	if !cfg.FeatureFlags["agents_skill_toggles"] {
+		t.Fatalf("agents_skill_toggles: want true for installed v0.4.0 clients, got false")
+	}
+	if !cfg.FeatureFlags["settings_resource_labels"] {
+		t.Fatalf("settings_resource_labels: want true for installed clients, got false")
+	}
+	if !cfg.FeatureFlags["agents_agent_builder"] {
+		t.Fatalf("agents_agent_builder: want true for installed clients, got false")
+	}
+	// MUL-5345: hang stack capture is gone from this build, but v0.4.13–v0.4.18 are
+	// installed and still hold a debugger channel open on every renderer whenever
+	// this key arrives as `true`. Those clients are fail-closed on absence, so NOT
+	// publishing the key is what disarms them — re-adding it would put a flag flip
+	// back within reach of a fleet that can no longer produce a usable stack.
+	if _, published := cfg.FeatureFlags["desktop_hang_stack_capture"]; published {
+		t.Fatalf("desktop_hang_stack_capture: must stay unpublished so installed clients keep their debugger channels closed")
+	}
+	// Deliberately unpublished: pre-v0.4.33 clients gate their "New status"
+	// button on this key and fail closed, which is how a client that predates
+	// the v0.4.31 rendering fixes is kept from creating one.
+	if _, published := cfg.FeatureFlags["custom_issue_statuses"]; published {
+		t.Fatalf("custom_issue_statuses: want unpublished, got %v", cfg.FeatureFlags["custom_issue_statuses"])
+	}
+
+	withComposioMCPAppsFlag(t, h, true)
+	w = httptest.NewRecorder()
+	h.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig enabled flags: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode enabled config: %v", err)
+	}
+	if !cfg.FeatureFlags["composio_mcp_apps"] {
+		t.Fatalf("composio_mcp_apps: want true with flag enabled, got false")
+	}
+}
+
+func TestGetConfigExposesEnabledPluginsV1Flag(t *testing.T) {
+	h := &Handler{}
+	withPluginsV1Flag(t, h, true)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	h.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig enabled plugins_v1: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode enabled config: %v", err)
+	}
+	if !cfg.FeatureFlags["plugins_v1"] {
+		t.Fatal("plugins_v1: want true with flag enabled, got false")
+	}
+}
+
+// Clients fail closed on this flag: absent covers every server that predates
+// the signal, including the ones that accept a worktree resource, silently drop
+// execution_mode and run the task in the user's working copy (#7113). A build
+// that HAS the save gate therefore has to say so,
+// unconditionally — not behind a deployment check, an env var or a feature
+// flag, all of which would disable worktree mode for the users who can run it.
+func TestGetConfigDeclaresLocalWorktreeSupport(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if !cfg.LocalWorktreeSupported {
+		t.Fatal("this build runs the worktree save gate but does not advertise it; clients will hide the mode")
+	}
+	// Serialised as a real key, not omitted when false-by-accident: the client
+	// distinguishes "absent" (old server) from an explicit answer.
+	var raw map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw config: %v", err)
+	}
+	if _, ok := raw["local_worktree_supported"]; !ok {
+		t.Fatal("local_worktree_supported missing from the JSON body")
+	}
+}
+
+// Web/Desktop can run ahead of a manually deployed backend. Handlers that
+// predate conversation_starters ignore the unknown JSON field and still answer 200,
+// so clients must see an explicit declaration before sending either create or
+// update writes that contain it.
+func TestGetConfigDeclaresAgentConversationStartersSupport(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if !cfg.AgentConversationStartersSupported {
+		t.Fatal("this build persists conversation_starters but does not advertise the contract")
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw config: %v", err)
+	}
+	if _, ok := raw["agent_conversation_starters_supported"]; !ok {
+		t.Fatal("agent_conversation_starters_supported missing from the JSON body")
+	}
+}
+
+func TestGetConfigDeclaresIssueCreatePropertiesSupport(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if !cfg.IssueCreatePropertiesSupported {
+		t.Fatal("this build atomically persists issue create properties but does not advertise the contract")
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw config: %v", err)
+	}
+	if _, ok := raw["issue_create_properties_supported"]; !ok {
+		t.Fatal("issue_create_properties_supported missing from the JSON body")
+	}
+}
+
+// Web/Desktop, mobile and the CLI promise that a delete keeps the replies only
+// when the server declares it (#8296). Older servers omit the field and delete
+// the replies too, so this build must advertise the contract explicitly.
+func TestGetConfigDeclaresCommentDeleteKeepsReplies(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw config: %v", err)
+	}
+	if raw["comment_delete_keep_replies_supported"] != true {
+		t.Fatalf("comment_delete_keep_replies_supported = %v, want true", raw["comment_delete_keep_replies_supported"])
 	}
 }

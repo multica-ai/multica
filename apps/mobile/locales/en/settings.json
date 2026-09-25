@@ -1,0 +1,84 @@
+{
+  "title": "Settings",
+  "account": {
+    "title": "Account",
+    "sign_out": "Sign out",
+    "sign_out_message": "You'll need to sign in again to use Multica on this device.",
+    "workspace": "Workspace",
+    "workspaces": "Workspaces",
+    "notifications_subtitle": "Inbox and system alerts",
+    "load_failed": "Failed to load workspaces"
+  },
+  "profile": {
+    "title": "Profile",
+    "name": "Name",
+    "email": "Email",
+    "save": "Save profile",
+    "saving": "Saving..."
+  },
+  "appearance": {
+    "title": "Appearance",
+    "theme": "Theme",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  },
+  "language": {
+    "title": "Language",
+    "system": "System",
+    "english": "English",
+    "chinese_simplified": "Simplified Chinese"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "issues": "Issues",
+    "inbox": "Inbox",
+    "chat": "Chat",
+    "mentions": "Mentions",
+    "assignments": "Assignments",
+    "status_changes": "Status changes",
+    "saved": "Notification settings saved"
+  },
+  "workspace": {
+    "switch": "Switch workspace",
+    "select": "Select workspace",
+    "empty": "No workspaces yet"
+  },
+  "avatar": {
+    "take": "Take Photo",
+    "library": "Choose from Library",
+    "remove": "Remove Photo",
+    "change_hint": "Tap to change photo",
+    "permission_title": "Permission needed",
+    "permission_message": "Camera access is required to take a photo.",
+    "too_large_title": "Image too large",
+    "too_large_message": "Pick an image under 5 MB.",
+    "upload_failed": "Upload failed",
+    "upload_failed_default": "Could not upload avatar.",
+    "remove_failed": "Remove failed",
+    "remove_failed_default": "Could not remove avatar."
+  },
+  "errors": {
+    "load_failed": "Failed to load notification preferences.",
+    "save_failed": "Failed to save profile.",
+    "save_failed_default": "Could not save your profile."
+  },
+  "email_fixed": "Email is set at sign-up and can't be changed here.",
+  "groups": {
+    "assignments": "Assignments",
+    "assignments_description": "Assigned or unassigned.",
+    "status_changes": "Status changes",
+    "comments": "Comments",
+    "comments_description": "New comments on issues you're subscribed to.",
+    "mentions": "Mentions",
+    "mentions_description": "When someone @mentions you, including @all and @squad.",
+    "updates": "Issue updates",
+    "updates_description": "Edits to title, description, labels, priority, or due date.",
+    "agent_activity": "Agent activity",
+    "agent_activity_description": "When an agent run fails.",
+    "inbox_notifications": "Inbox notifications",
+    "system": "System",
+    "system_notifications": "System notifications",
+    "system_description": "Account changes, security alerts, product updates."
+  }
+}

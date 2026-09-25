@@ -4,7 +4,9 @@
  *
  * Handles:
  *   - issue:updated / issue:deleted / issue_labels:changed → detail cache
- *   - comment:created / comment:updated / comment:deleted → timeline
+ *   - issue_attachments:changed → attachment cache
+ *   - comment:created / comment:updated / comment:deleted → timeline +
+ *     owner issue revision (detail / list projections)
  *   - activity:created → timeline
  *   - reaction:added / reaction:removed → comment reactions on timeline
  *   - issue_reaction:added / issue_reaction:removed → issue-level reactions on detail
@@ -18,8 +20,8 @@
  * Mobile pattern (per the realtime plan, see
  * /Users/qingnaiyuan/.claude/plans/plan-api-indexed-waffle.md):
  *   - Patch over invalidate where the payload contains the full object
- *   - Event always wins on optimistic-update conflicts; brief flicker
- *     is acceptable, correctness wins.
+ *   - Versioned events win only when their owner revision is not older than
+ *     cached state; an unversioned event over versioned state triggers refetch.
  *   - All handlers self-gate on `issue_id === issueId` so we only react
  *     to events for the currently-viewed issue.
  */
@@ -37,13 +39,17 @@ import { useWSSubscriptions } from "@/lib/use-ws-subscriptions";
 import {
   addCommentReaction,
   addIssueReaction,
+  onIssueAuxiliaryRevision,
   appendTimelineEntry,
   clearIssueDetail,
   commentToTimelineEntry,
+  invalidateIssueAfterReconnect,
+  invalidateIssueOwnerProjections,
   patchIssueDetail,
   patchIssueLabels,
+  patchIssuesList,
   patchMyIssuesList,
-  patchTimelineEntry,
+  replaceCommentTimelineEntry,
   removeCommentCascade,
   removeCommentReaction,
   removeFromMyIssuesList,
@@ -102,6 +108,7 @@ export function useIssueRealtime(
           if (payload.issue.id !== issueId) return;
           patchIssueDetail(qc, wsId, payload.issue);
           patchMyIssuesList(qc, wsId, payload.issue);
+          patchIssuesList(qc, wsId, payload.issue);
         }),
         ws.on("issue:deleted", (payload) => {
           if (payload.issue_id !== issueId) return;
@@ -111,7 +118,14 @@ export function useIssueRealtime(
         }),
         ws.on("issue_labels:changed", (payload) => {
           if (payload.issue_id !== issueId) return;
-          patchIssueLabels(qc, wsId, issueId, payload.labels);
+          patchIssueLabels(qc, wsId, issueId, payload.labels, payload.issue_revision);
+        }),
+        ws.on("issue_attachments:changed", (payload) => {
+          if (payload.issue_id !== issueId) return;
+          onIssueAuxiliaryRevision(qc, wsId, issueId, payload.issue_revision);
+          qc.invalidateQueries({
+            queryKey: issueKeys.attachments(wsId, issueId),
+          });
         }),
 
         // ----- Comments / activity -----
@@ -123,17 +137,20 @@ export function useIssueRealtime(
             issueId,
             commentToTimelineEntry(payload.comment),
           );
+          onIssueAuxiliaryRevision(qc, wsId, issueId, payload.issue_revision);
         }),
         ws.on("comment:updated", (payload) => {
           if (payload.comment.issue_id !== issueId) return;
           const entry = commentToTimelineEntry(payload.comment);
-          patchTimelineEntry(
-            qc,
-            wsId,
-            issueId,
-            (e) => e.type === "comment" && e.id === payload.comment.id,
-            () => entry,
-          );
+          replaceCommentTimelineEntry(qc, wsId, issueId, entry);
+          // Edits and tombstoning deletes can advance the owner issue
+          // (revision, last_activity_at). Mirrors web's comment handlers: apply
+          // issue_revision when present, otherwise refetch the owner projections.
+          if (payload.issue_revision) {
+            onIssueAuxiliaryRevision(qc, wsId, issueId, payload.issue_revision);
+          } else {
+            invalidateIssueOwnerProjections(qc, wsId, issueId);
+          }
         }),
         // Resolve / unresolve broadcast from any client. Payload carries the
         // full Comment with the new resolved_at/resolved_by_* fields, so we
@@ -144,32 +161,25 @@ export function useIssueRealtime(
         ws.on("comment:resolved", (payload) => {
           if (payload.comment.issue_id !== issueId) return;
           const entry = commentToTimelineEntry(payload.comment);
-          patchTimelineEntry(
-            qc,
-            wsId,
-            issueId,
-            (e) => e.type === "comment" && e.id === payload.comment.id,
-            () => entry,
-          );
+          replaceCommentTimelineEntry(qc, wsId, issueId, entry);
         }),
         ws.on("comment:unresolved", (payload) => {
           if (payload.comment.issue_id !== issueId) return;
           const entry = commentToTimelineEntry(payload.comment);
-          patchTimelineEntry(
-            qc,
-            wsId,
-            issueId,
-            (e) => e.type === "comment" && e.id === payload.comment.id,
-            () => entry,
-          );
+          replaceCommentTimelineEntry(qc, wsId, issueId, entry);
         }),
         ws.on("comment:deleted", (payload) => {
           if (payload.issue_id !== issueId) return;
-          // Cascade: descendant replies must come out alongside the parent,
-          // otherwise buildTimelineRows promotes them to top-level rows and
-          // the user sees ghost replies after another client deletes the
-          // thread. Server already cascades; this mirrors it in the cache.
+          // A comment with replies is tombstoned (comment:updated), never
+          // removed, so any cached reply of a removed comment is stale (older
+          // servers cascaded the delete). Sweep them so buildTimelineRows
+          // does not promote them to ghost top-level rows.
           removeCommentCascade(qc, wsId, issueId, payload.comment_id);
+          if (payload.issue_revision) {
+            onIssueAuxiliaryRevision(qc, wsId, issueId, payload.issue_revision);
+          } else {
+            invalidateIssueOwnerProjections(qc, wsId, issueId);
+          }
         }),
         ws.on("activity:created", (payload) => {
           if (payload.issue_id !== issueId) return;
@@ -185,6 +195,7 @@ export function useIssueRealtime(
             issueId,
             payload.reaction.comment_id,
             payload.reaction,
+            payload.comment_revision,
           );
         }),
         ws.on("reaction:removed", (payload) => {
@@ -196,13 +207,14 @@ export function useIssueRealtime(
             payload.comment_id,
             payload.emoji,
             payload.actor_id,
+            payload.comment_revision,
           );
         }),
 
         // ----- Issue-level reactions -----
         ws.on("issue_reaction:added", (payload) => {
           if (payload.issue_id !== issueId) return;
-          addIssueReaction(qc, wsId, issueId, payload.reaction);
+          addIssueReaction(qc, wsId, issueId, payload.reaction, payload.issue_revision);
         }),
         ws.on("issue_reaction:removed", (payload) => {
           if (payload.issue_id !== issueId) return;
@@ -212,6 +224,7 @@ export function useIssueRealtime(
             issueId,
             payload.emoji,
             payload.actor_id,
+            payload.issue_revision,
           );
         }),
 
@@ -225,8 +238,7 @@ export function useIssueRealtime(
 
         // ----- Reconnect -----
         ws.onReconnect(() => {
-          invalidateThisIssue();
-          invalidateTaskQueries();
+          invalidateIssueAfterReconnect(qc, wsId, issueId);
         }),
       ];
     },

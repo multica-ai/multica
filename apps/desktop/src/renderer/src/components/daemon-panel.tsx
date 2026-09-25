@@ -15,6 +15,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { truncateWithEllipsis } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
@@ -24,12 +25,13 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { toast } from "sonner";
+import { useT } from "@multica/views/i18n";
 import type { DaemonStatus } from "../../../shared/daemon-types";
 import {
   DAEMON_STATE_COLORS,
-  DAEMON_STATE_LABELS,
   formatUptime,
 } from "../../../shared/daemon-types";
+import { daemonStateLabel } from "./daemon-i18n";
 import { parseLogLine, type LogLevel, type ParsedLogLine } from "./parse-daemon-log";
 
 interface DaemonPanelProps {
@@ -44,8 +46,8 @@ const MAX_LOG_LINES = 500;
 const LEVELS: readonly LogLevel[] = ["DEBUG", "INFO", "WARN", "ERROR"];
 
 const LEVEL_BADGE_CLASS: Record<LogLevel, string> = {
-  DEBUG: "border-muted-foreground/25 text-muted-foreground/70",
-  INFO: "border-foreground/15 text-foreground/80",
+  DEBUG: "border-muted-foreground/25 text-muted-foreground",
+  INFO: "border-foreground/15 text-foreground",
   WARN: "border-warning/40 text-warning",
   ERROR: "border-destructive/40 text-destructive",
 };
@@ -63,6 +65,7 @@ export function DaemonPanel({
   status,
   runtimeCount,
 }: DaemonPanelProps) {
+  const { t } = useT("settings");
   const [logs, setLogs] = useState<ParsedLogLine[]>([]);
   const [search, setSearch] = useState("");
   // Each level chip is an independent toggle. DEBUG is off by default so
@@ -197,12 +200,12 @@ export function DaemonPanel({
     const text = filtered.map((l) => l.raw).join("\n");
     if (await copyText(text)) {
       toast.success(
-        `Copied ${filtered.length} line${filtered.length === 1 ? "" : "s"}`,
+        t(($) => $.desktop.daemon.copied_lines, { count: filtered.length }),
       );
     } else {
-      toast.error("Failed to copy");
+      toast.error(t(($) => $.desktop.daemon.copy_failed));
     }
-  }, [filtered]);
+  }, [filtered, t]);
 
   const handleClear = useCallback(() => {
     setLogs([]);
@@ -249,15 +252,15 @@ export function DaemonPanel({
         <div className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
           <div className="flex min-w-0 items-center gap-2">
             <Server className="size-4 shrink-0 text-muted-foreground" />
-            <DialogTitle className="text-sm font-medium">
-              Local daemon logs
+            <DialogTitle className="text-body font-medium">
+              {t(($) => $.desktop.daemon.logs_title)}
             </DialogTitle>
             <ContextBadge status={status} runtimeCount={runtimeCount} />
           </div>
           <button
             type="button"
             onClick={() => onOpenChange(false)}
-            aria-label="Close"
+            aria-label={t(($) => $.desktop.daemon.close)}
             className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <X className="size-4" />
@@ -272,8 +275,8 @@ export function DaemonPanel({
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search…"
-              className="h-7 w-full rounded-md border bg-background pl-7 pr-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              placeholder={t(($) => $.desktop.daemon.search)}
+              className="h-7 w-full rounded-md border bg-background pl-7 pr-2 text-caption placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
 
@@ -303,7 +306,7 @@ export function DaemonPanel({
               disabled={filtered.length === 0}
             >
               <CopyIcon className="size-3.5 mr-1.5" />
-              Copy
+              {t(($) => $.desktop.daemon.copy)}
             </Button>
             <Button
               variant="ghost"
@@ -313,7 +316,7 @@ export function DaemonPanel({
               disabled={logs.length === 0}
             >
               <Trash2 className="size-3.5 mr-1.5" />
-              Clear
+              {t(($) => $.desktop.daemon.clear)}
             </Button>
           </div>
         </div>
@@ -322,7 +325,7 @@ export function DaemonPanel({
         <div
           ref={logContainerRef}
           onScroll={handleScroll}
-          className="min-h-0 flex-1 overflow-y-auto bg-muted/20 px-2 py-1 font-mono text-xs"
+          className="min-h-0 flex-1 overflow-y-auto bg-muted/20 px-2 py-1 font-mono text-caption"
         >
           {displayed.length === 0 ? (
             <EmptyState
@@ -362,12 +365,15 @@ export function DaemonPanel({
             communicated implicitly by the presence of the Jump-to-latest
             button below; an explicit "Paused" word read as "log stream is
             paused" (it isn't — data keeps flowing into the buffer). */}
-        <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground">
+        <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-1.5 text-caption text-muted-foreground">
           <span className="tabular-nums">
-            Showing {filtered.length} of {logs.length}
+            {t(($) => $.desktop.daemon.showing_logs, {
+              shown: filtered.length,
+              total: logs.length,
+            })}
             {logs.length === MAX_LOG_LINES && (
-              <span className="ml-1 text-muted-foreground/60">
-                (buffer full)
+              <span className="ml-1 text-muted-foreground">
+                {t(($) => $.desktop.daemon.buffer_full)}
               </span>
             )}
           </span>
@@ -378,7 +384,7 @@ export function DaemonPanel({
               className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 hover:bg-muted hover:text-foreground"
             >
               <ArrowDown className="size-3" />
-              Jump to latest
+              {t(($) => $.desktop.daemon.jump_latest)}
             </button>
           )}
         </div>
@@ -396,9 +402,10 @@ function ContextBadge({
   status: DaemonStatus;
   runtimeCount: number;
 }) {
+  const { t } = useT("settings");
   const isRunning = status.state === "running";
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-md border bg-background px-1.5 py-0.5 text-xs font-normal">
+    <span className="inline-flex items-center gap-1.5 rounded-md border bg-background px-1.5 py-0.5 text-caption font-normal">
       <span
         className={cn(
           "size-1.5 rounded-full",
@@ -411,7 +418,7 @@ function ContextBadge({
           isRunning ? "text-foreground" : "text-muted-foreground",
         )}
       >
-        {DAEMON_STATE_LABELS[status.state]}
+        {daemonStateLabel(status.state, t)}
       </span>
       {isRunning && status.uptime && (
         <span className="text-muted-foreground">
@@ -420,7 +427,7 @@ function ContextBadge({
       )}
       {isRunning && runtimeCount > 0 && (
         <span className="text-muted-foreground">
-          · {runtimeCount} runtime{runtimeCount === 1 ? "" : "s"}
+          · {t(($) => $.desktop.daemon.runtime_count, { count: runtimeCount })}
         </span>
       )}
     </span>
@@ -445,19 +452,19 @@ function FilterChip({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex h-7 items-center gap-1 rounded-md border bg-background px-2 text-xs transition-colors hover:bg-accent",
+        "inline-flex h-7 items-center gap-1 rounded-md border bg-background px-2 text-caption transition-colors hover:bg-accent",
         active
           ? variant
             ? LEVEL_BADGE_CLASS[variant]
             : "bg-accent text-accent-foreground"
-          : "border-dashed text-muted-foreground/50",
+          : "border-dashed text-muted-foreground",
       )}
     >
       {label}
       <span
         className={cn(
           "tabular-nums",
-          active ? "text-current/80" : "text-muted-foreground/40",
+          active ? "text-current" : "text-muted-foreground",
         )}
       >
         {count}
@@ -470,7 +477,7 @@ function LevelBadge({ level }: { level: LogLevel }) {
   return (
     <span
       className={cn(
-        "inline-flex h-4 shrink-0 items-center rounded border px-1 text-[10px] font-medium uppercase tracking-wide",
+        "inline-flex h-4 shrink-0 items-center rounded-xs border px-1 text-micro font-medium uppercase tracking-wide",
         LEVEL_BADGE_CLASS[level],
       )}
     >
@@ -497,7 +504,7 @@ function LogLineRow({
   // for panic stack traces and partial writes during log rotation.
   if (!line.timestamp || !line.level) {
     return (
-      <div className="break-all whitespace-pre-wrap px-2 py-0.5 text-muted-foreground/70">
+      <div className="break-all whitespace-pre-wrap px-2 py-0.5 text-muted-foreground">
         {highlight(line.raw, search)}
       </div>
     );
@@ -506,12 +513,12 @@ function LogLineRow({
   return (
     <div
       className={cn(
-        "grid grid-cols-[auto_auto_minmax(0,1fr)] items-baseline gap-2 rounded px-2 py-0.5 hover:bg-accent/30",
+        "grid grid-cols-[auto_auto_minmax(0,1fr)] items-baseline gap-2 rounded-xs px-2 py-0.5 hover:bg-accent/30",
         hasFields && "cursor-pointer",
       )}
       onClick={hasFields ? onToggle : undefined}
     >
-      <span className="shrink-0 tabular-nums text-muted-foreground/60">
+      <span className="shrink-0 tabular-nums text-muted-foreground">
         {line.timestamp}
       </span>
       <LevelBadge level={line.level} />
@@ -519,7 +526,7 @@ function LogLineRow({
         <div className="flex min-w-0 items-baseline gap-2">
           <span className="break-words">{highlight(line.message, search)}</span>
           {hasFields && !expanded && (
-            <span className="min-w-0 truncate text-muted-foreground/60">
+            <span className="min-w-0 truncate text-muted-foreground">
               {fieldEntries
                 .map(([k, v]) => `${k}=${truncateValue(v)}`)
                 .join("  ")}
@@ -530,8 +537,8 @@ function LogLineRow({
           <div className="ml-1 mt-1 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-muted-foreground">
             {fieldEntries.map(([k, v]) => (
               <Fragment key={k}>
-                <span className="text-muted-foreground/70">{k}</span>
-                <span className="break-all text-foreground/85">{v}</span>
+                <span className="text-muted-foreground">{k}</span>
+                <span className="break-all text-foreground">{v}</span>
               </Fragment>
             ))}
           </div>
@@ -558,6 +565,7 @@ function GroupRows({
   onToggleFields: (id: number) => void;
   search: string;
 }) {
+  const { t } = useT("settings");
   // Folded: show the first occurrence so the user still sees a sample
   // (timestamp, level, message), then a click-to-expand placeholder for
   // the suppressed run. The placeholder uses a dashed border + italics
@@ -574,12 +582,14 @@ function GroupRows({
         <button
           type="button"
           onClick={onToggle}
-          className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded border border-dashed border-muted-foreground/25 bg-muted/30 px-2 py-0.5 text-[11px] italic text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground"
+          className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded-xs border border-dashed border-muted-foreground/25 bg-muted/30 px-2 py-0.5 text-micro italic text-muted-foreground hover:bg-muted/60 hover:text-foreground"
         >
           <span>···</span>
           <span>
-            {rest.length} more &ldquo;{truncateValue(first.message, 48)}
-            &rdquo; — click to expand
+            {t(($) => $.desktop.daemon.more_repeated, {
+              count: rest.length,
+              message: truncateValue(first.message, 48),
+            })}
           </span>
         </button>
       </>
@@ -608,10 +618,14 @@ function GroupRows({
       <button
         type="button"
         onClick={onToggle}
-        className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded border border-dashed border-muted-foreground/25 px-2 py-0.5 text-[11px] italic text-muted-foreground/60 hover:text-foreground"
+        className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded-xs border border-dashed border-muted-foreground/25 px-2 py-0.5 text-micro italic text-muted-foreground hover:text-foreground"
       >
         <span>···</span>
-        <span>collapse {rest.length + 1} repeated</span>
+        <span>
+          {t(($) => $.desktop.daemon.collapse_repeated, {
+            count: rest.length + 1,
+          })}
+        </span>
       </button>
     </>
   );
@@ -626,33 +640,40 @@ function EmptyState({
   hasFilter: boolean;
   isRunning: boolean;
 }) {
+  const { t } = useT("settings");
   let title: string;
   let subtitle: string;
   if (hasFilter) {
-    title = "No matching log lines";
-    subtitle = "Try a different search or level toggle.";
+    title = t(($) => $.desktop.daemon.no_matching_logs);
+    subtitle = t(($) => $.desktop.daemon.no_matching_logs_description);
   } else if (!isRunning) {
-    title = "Daemon isn't running";
-    subtitle = "Start the daemon to see logs here.";
+    title = t(($) => $.desktop.daemon.not_running);
+    subtitle = t(($) => $.desktop.daemon.not_running_description);
   } else if (!hasLogs) {
-    title = "Waiting for logs…";
-    subtitle = "New entries will appear in real time.";
+    title = t(($) => $.desktop.daemon.waiting_logs);
+    subtitle = "";
   } else {
     title = "";
     subtitle = "";
   }
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-1 text-center text-muted-foreground/70">
-      <p className="text-sm">{title}</p>
-      <p className="text-xs text-muted-foreground/50">{subtitle}</p>
+    <div className="flex h-full flex-col items-center justify-center gap-1 text-center text-muted-foreground">
+      <p className="text-body">{title}</p>
+      {subtitle && <p className="text-caption text-muted-foreground">{subtitle}</p>}
     </div>
   );
 }
 
 // ---------- Helpers ----------
 
-function truncateValue(value: string, max = 32): string {
-  return value.length > max ? `${value.slice(0, max)}…` : value;
+// 36 is the width of a canonical UUID. Task, chat-session and holder ids are
+// logged in full so concurrent runs stay distinguishable (#7326), and those
+// ids carry their entropy in the tail — a budget that clipped them would put
+// the ambiguity right back into this collapsed row.
+function truncateValue(value: string, max = 36): string {
+  // `max` is a content-character budget; the shared helper counts the ellipsis
+  // toward its own budget, so pass `max + 1`.
+  return truncateWithEllipsis(value, max + 1);
 }
 
 function highlight(text: string, query: string): ReactNode {
@@ -664,7 +685,7 @@ function highlight(text: string, query: string): ReactNode {
   return (
     <>
       {text.slice(0, idx)}
-      <mark className="rounded bg-warning/30 px-0.5 text-foreground">
+      <mark className="rounded-xs bg-warning/30 px-0.5 text-foreground">
         {text.slice(idx, idx + query.length)}
       </mark>
       {text.slice(idx + query.length)}

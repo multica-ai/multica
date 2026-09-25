@@ -21,6 +21,8 @@ export interface GitHubAsset {
 export interface DownloadAssets {
   macArm64Dmg?: string;
   macArm64Zip?: string;
+  macX64Dmg?: string;
+  macX64Zip?: string;
   winX64Exe?: string;
   winArm64Exe?: string;
   linuxAmd64AppImage?: string;
@@ -63,9 +65,13 @@ export function parseReleaseAssets(raw: GitHubAsset[]): DownloadAssets {
     const url = asset.browser_download_url;
 
     if (platform === "mac") {
-      if (archLower !== "arm64") continue; // we only ship arm64 today
-      if (extLower === "dmg") out.macArm64Dmg = url;
-      else if (extLower === "zip") out.macArm64Zip = url;
+      if (archLower === "arm64") {
+        if (extLower === "dmg") out.macArm64Dmg = url;
+        else if (extLower === "zip") out.macArm64Zip = url;
+      } else if (archLower === "x64") {
+        if (extLower === "dmg") out.macX64Dmg = url;
+        else if (extLower === "zip") out.macX64Zip = url;
+      }
     } else if (platform === "windows") {
       if (extLower !== "exe") continue;
       if (archLower === "x64") out.winX64Exe = url;
@@ -91,4 +97,37 @@ export function parseReleaseAssets(raw: GitHubAsset[]): DownloadAssets {
 /** Whether any desktop asset was parsed out. Used for UI degradation. */
 export function hasAnyAsset(assets: DownloadAssets): boolean {
   return Object.values(assets).some((v) => typeof v === "string");
+}
+
+/**
+ * The twelve desktop artifacts a finished release carries: four Mac,
+ * two Windows, six Linux. Listed explicitly rather than counted, so
+ * adding an optional key to `DownloadAssets` later (a universal Mac
+ * build, say) can't silently redefine what "complete" means.
+ */
+const REQUIRED_ASSET_KEYS: (keyof DownloadAssets)[] = [
+  "macArm64Dmg",
+  "macArm64Zip",
+  "macX64Dmg",
+  "macX64Zip",
+  "winX64Exe",
+  "winArm64Exe",
+  "linuxAmd64AppImage",
+  "linuxAmd64Deb",
+  "linuxAmd64Rpm",
+  "linuxArm64AppImage",
+  "linuxArm64Deb",
+  "linuxArm64Rpm",
+];
+
+/**
+ * Whether every platform/arch/format the /download page offers resolved
+ * to a URL. A release that fails this is either mid-flight (CI has
+ * uploaded Linux + Windows but the manually notarized Mac builds haven't
+ * landed) or permanently broken (a packaging job failed and was never
+ * re-run) — both render dead buttons, so both are worth stepping back
+ * from. See `pickRelease` in `github-release.ts`.
+ */
+export function hasCompleteAssetSet(assets: DownloadAssets): boolean {
+  return REQUIRED_ASSET_KEYS.every((key) => typeof assets[key] === "string");
 }

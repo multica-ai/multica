@@ -36,6 +36,14 @@ import { HtmlPreviewBody } from "./html-preview-body";
 
 const CODE_BLOCK_IFRAME_HEIGHT = "h-[480px]";
 
+/**
+ * Pixel twin of CODE_BLOCK_IFRAME_HEIGHT. The preview iframe is a fixed height,
+ * so the near-viewport lazy shell (rich-content/lazy-rich-block.tsx) can
+ * reserve exactly the space this component will occupy and mount with zero
+ * layout shift. Keep the two in sync.
+ */
+export const HTML_BLOCK_PREVIEW_HEIGHT_PX = 480;
+
 // Label shown in the code-block header. Not a translatable string — it's a
 // language identifier (matches the `lang === "html"` token below).
 const HTML_LANGUAGE_LABEL = "html";
@@ -63,15 +71,15 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
     setView((v) => (v === "preview" ? "source" : "preview"));
 
   return (
-    <div className={cn("code-block-wrapper group/code relative my-2", className)}>
+    <div className={cn("code-block-wrapper group/code relative my-3", className)}>
       <div
-        className="absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100"
+        className="absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100 focus-within:opacity-100"
       >
-        <span className="text-xs text-muted-foreground select-none">{HTML_LANGUAGE_LABEL}</span>
+        <span className="text-caption text-muted-foreground select-none">{HTML_LANGUAGE_LABEL}</span>
         <button
           type="button"
           onClick={toggleView}
-          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          className="flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           title={
             view === "preview"
               ? t(($) => $.code_block.show_source)
@@ -93,7 +101,7 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
           <button
             type="button"
             onClick={() => setFullscreen(true)}
-            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            className="flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             title={t(($) => $.code_block.fullscreen)}
             aria-label={t(($) => $.code_block.fullscreen)}
           >
@@ -103,7 +111,7 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
         <button
           type="button"
           onClick={handleCopy}
-          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          className="flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           title={t(($) => $.code_block.copy_code)}
           aria-label={t(($) => $.code_block.copy_code)}
         >
@@ -117,7 +125,7 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
       {view === "preview" ? (
         <HtmlPreviewBody
           source={{ kind: "inline", html }}
-          title="HTML preview"
+          title={t(($) => $.code_block.html_preview)}
           className={CODE_BLOCK_IFRAME_HEIGHT}
         />
       ) : (
@@ -130,7 +138,7 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
         >
           <HtmlPreviewBody
             source={{ kind: "inline", html }}
-            title="HTML preview"
+            title={t(($) => $.code_block.html_preview)}
             className="h-full w-full"
             iframeClassName="rounded-none border-0"
           />

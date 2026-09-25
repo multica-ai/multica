@@ -2,31 +2,15 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
-
-func TestNewReturnsClaudeBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("claude", Config{ExecutablePath: "/nonexistent/claude"})
-	if err != nil {
-		t.Fatalf("New(claude) error: %v", err)
-	}
-	if _, ok := b.(*claudeBackend); !ok {
-		t.Fatalf("expected *claudeBackend, got %T", b)
-	}
-}
-
-func TestNewReturnsCodexBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("codex", Config{ExecutablePath: "/nonexistent/codex"})
-	if err != nil {
-		t.Fatalf("New(codex) error: %v", err)
-	}
-	if _, ok := b.(*codexBackend); !ok {
-		t.Fatalf("expected *codexBackend, got %T", b)
-	}
-}
 
 func TestNewReturnsCodebuddyBackend(t *testing.T) {
 	t.Parallel()
@@ -39,25 +23,33 @@ func TestNewReturnsCodebuddyBackend(t *testing.T) {
 	}
 }
 
-func TestNewReturnsCopilotBackend(t *testing.T) {
+func TestNewReturnsQoderBackend(t *testing.T) {
 	t.Parallel()
-	b, err := New("copilot", Config{ExecutablePath: "/nonexistent/copilot"})
+	b, err := New("qoder", Config{ExecutablePath: "/nonexistent/qodercli"})
 	if err != nil {
-		t.Fatalf("New(copilot) error: %v", err)
+		t.Fatalf("New(qoder) error: %v", err)
 	}
-	if _, ok := b.(*copilotBackend); !ok {
-		t.Fatalf("expected *copilotBackend, got %T", b)
+	qoder, ok := b.(*qoderBackend)
+	if !ok {
+		t.Fatalf("expected *qoderBackend, got %T", b)
+	}
+	if qoder.defaultExecutable != "qodercli" {
+		t.Fatalf("default executable = %q, want qodercli", qoder.defaultExecutable)
 	}
 }
 
-func TestNewReturnsAntigravityBackend(t *testing.T) {
+func TestNewReturnsQoderCNBackend(t *testing.T) {
 	t.Parallel()
-	b, err := New("antigravity", Config{ExecutablePath: "/nonexistent/agy"})
+	b, err := New("qoderclicn", Config{})
 	if err != nil {
-		t.Fatalf("New(antigravity) error: %v", err)
+		t.Fatalf("New(qoderclicn) error: %v", err)
 	}
-	if _, ok := b.(*antigravityBackend); !ok {
-		t.Fatalf("expected *antigravityBackend, got %T", b)
+	qoder, ok := b.(*qoderBackend)
+	if !ok {
+		t.Fatalf("expected *qoderBackend, got %T", b)
+	}
+	if qoder.defaultExecutable != "qoderclicn" {
+		t.Fatalf("default executable = %q, want qoderclicn", qoder.defaultExecutable)
 	}
 }
 
@@ -80,24 +72,82 @@ func TestNewDefaultsLogger(t *testing.T) {
 
 func TestDetectVersionFailsForMissingBinary(t *testing.T) {
 	t.Parallel()
-	_, err := DetectVersion(context.Background(), "/nonexistent/binary")
+	_, err := DetectVersion(context.Background(), Command{Path: "/nonexistent/binary"})
 	if err == nil {
 		t.Fatal("expected error for missing binary")
+	}
+}
+
+// TestDetectVersionTimesOutOnHang guards MUL-3812: a CLI whose `--version`
+// never returns (e.g. a brew-installed claude wedged by a bun regression) must
+// not stall version detection forever. The daemon detects every runtime's
+// version sequentially inside its blocking preflight, so an unbounded probe
+// would leave the daemon stuck "starting" and *every* runtime on the host
+// disconnected. detectCLIVersion must bound the probe and return an error so
+// the registration loop isolates the broken runtime and the rest still
+// register. The script also leaves an orphaned child holding the stdout pipe
+// open after the parent is killed, exercising the process-tree collector path.
+func TestDetectVersionTimesOutOnHang(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("relies on a /bin/sh hang script")
+	}
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "hang.sh")
+	pidFile := filepath.Join(dir, "child.pid")
+	// The CLI hangs forever (`wait`) and backgrounds a child that inherits and
+	// holds our stdout pipe open even after the parent is killed on timeout —
+	// the exact case RunCollect must cover. The child records its PID so we
+	// can reap it in Cleanup instead of leaking a 60s `sleep` into CI.
+	body := fmt.Sprintf("#!/bin/sh\nsleep 60 &\necho $! > %q\nwait\n", pidFile)
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("write hang script: %v", err)
+	}
+	t.Cleanup(func() {
+		data, err := os.ReadFile(pidFile)
+		if err != nil {
+			return // child never recorded its PID; nothing to reap
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err != nil {
+			return
+		}
+		if proc, err := os.FindProcess(pid); err == nil {
+			_ = proc.Kill()
+		}
+	})
+
+	orig := detectVersionTimeout
+	detectVersionTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { detectVersionTimeout = orig })
+
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() {
+		_, err := DetectVersion(context.Background(), Command{Path: script})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected an error from a hanging --version probe, got nil")
+		}
+		if elapsed := time.Since(start); elapsed > 5*time.Second {
+			t.Fatalf("detection took %v; expected it to be bounded by the timeout", elapsed)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("DetectVersion did not return: version probe is unbounded (regression of MUL-3812)")
 	}
 }
 
 func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	t.Parallel()
 
-	// The factory in New() enumerates every supported agent type; LaunchHeader
-	// must stay in sync so the UI preview never shows an empty skeleton for a
-	// runtime the daemon actually spawns. If a new backend is added, add an
-	// entry to launchHeaders in agent.go and extend this list.
-	supported := []string{
-		"antigravity", "claude", "codebuddy", "codex", "copilot", "cursor", "gemini",
-		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi",
-	}
-	for _, t_ := range supported {
+	// SupportedTypes is the canonical factory/profile whitelist. Iterating it
+	// directly prevents this coverage check from drifting when a backend is
+	// added, so the UI preview always has a launch skeleton.
+	for _, t_ := range SupportedTypes {
 		if header := LaunchHeader(t_); header == "" {
 			t.Errorf("LaunchHeader(%q) returned empty string — add it to launchHeaders", t_)
 		}

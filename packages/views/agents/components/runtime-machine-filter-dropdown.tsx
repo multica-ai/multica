@@ -61,17 +61,17 @@ export function RuntimeMachineFilterDropdown({
           <Button
             variant="outline"
             size="sm"
-            className="h-8 gap-1.5 px-2 text-xs"
+            className="h-8 gap-1.5 px-2 text-caption"
             data-testid="agents-runtime-filter"
           />
         }
       >
         <Server className="h-3 w-3 text-muted-foreground" />
         <span className="max-w-[12rem] truncate">{triggerLabel}</span>
-        <span className="font-mono tabular-nums text-muted-foreground/70">
+        <span className="font-mono tabular-nums text-muted-foreground">
           {triggerCount}
         </span>
-        <ChevronDown className="h-3 w-3 text-muted-foreground/60" />
+        <ChevronDown className="h-3 w-3 text-faint-foreground" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-72 p-0">
         <RuntimeMachineFilterMenu
@@ -125,7 +125,7 @@ function RuntimeMachineFilterMenu({
       />
       {grouped.map((group) => (
         <div key={group.section}>
-          <div className="flex items-center gap-2 px-3 pb-1 pt-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          <div className="flex items-center gap-2 px-3 pb-1 pt-3 text-micro font-medium uppercase tracking-wider text-muted-foreground">
             <span>{t(($) => $.runtime_filter[`section_${group.section}`])}</span>
             <span className="h-px flex-1 bg-border" />
           </div>
@@ -142,7 +142,7 @@ function RuntimeMachineFilterMenu({
         </div>
       ))}
       {machines.length === 0 && (
-        <div className="px-3 py-2 text-xs text-muted-foreground">
+        <div className="px-3 py-2 text-caption text-muted-foreground">
           {t(($) => $.runtime_filter.empty)}
         </div>
       )}
@@ -174,7 +174,7 @@ function RuntimeMachineFilterItem({
       onClick={onClick}
       data-active={active || undefined}
       data-testid={active ? "agents-runtime-filter-active" : undefined}
-      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${
+      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-caption transition-colors ${
         active
           ? "bg-accent text-accent-foreground"
           : "text-foreground hover:bg-muted/60 data-highlighted:bg-muted/60"
@@ -183,12 +183,12 @@ function RuntimeMachineFilterItem({
       <span className="min-w-0 flex-1 truncate">
         <span className="block truncate font-medium">{label}</span>
         {subtitle && (
-          <span className="block truncate text-[11px] font-normal text-muted-foreground">
+          <span className="block truncate text-micro font-normal text-muted-foreground">
             {subtitle}
           </span>
         )}
       </span>
-      <span className="font-mono tabular-nums text-muted-foreground/70">
+      <span className="font-mono tabular-nums text-muted-foreground">
         {t(($) => $.runtime_filter.agent_count, { count })}
       </span>
     </DropdownMenuItem>

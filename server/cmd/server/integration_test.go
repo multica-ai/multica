@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 var (
@@ -71,6 +72,8 @@ func TestMain(m *testing.M) {
 
 	bus := events.New()
 	registerListeners(bus, hub)
+	// Same wiring as main.go: HTTP writes through the test server log activity.
+	registerActivityListeners(bus, db.New(pool))
 	router := NewRouter(pool, hub, bus, analytics.NoopClient{}, nil)
 	testServer = httptest.NewServer(router)
 
@@ -126,14 +129,18 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 		return "", "", err
 	}
 
+	// Owned by the fixture user, like every runtime a real daemon registers
+	// with a member credential: a private runtime is bindable only by its
+	// owner, so an ownerless one could not host the agents these tests create
+	// through the API.
 	var runtimeID string
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
-			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at
 		)
-		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, now())
+		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, $5, now())
 		RETURNING id
-	`, workspaceID, "Integration Test Runtime", "integration_test_runtime", "Integration test runtime").Scan(&runtimeID); err != nil {
+	`, workspaceID, "Integration Test Runtime", "integration_test_runtime", "Integration test runtime", userID).Scan(&runtimeID); err != nil {
 		return "", "", err
 	}
 
@@ -778,6 +785,205 @@ func TestDeleteWorkspaceRequiresOwner(t *testing.T) {
 	}
 }
 
+func TestDingTalkGroupsThroughRouterSupportsFilteredWorkspaceAndAgentScopes(t *testing.T) {
+	removedRouteResp := authRequest(t, http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/dingtalk/group-routes", nil)
+	removedRouteResp.Body.Close()
+	if removedRouteResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("removed DingTalk group-routes status = %d, want 404", removedRouteResp.StatusCode)
+	}
+
+	resp := authRequest(t, http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/dingtalk/groups", nil)
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("member DingTalk groups status = %d, want 200", resp.StatusCode)
+	}
+	var result struct {
+		Groups []any `json:"groups"`
+	}
+	readJSON(t, resp, &result)
+	if result.Groups == nil || len(result.Groups) != 0 {
+		t.Fatalf("disabled DingTalk groups = %#v, want stable empty list", result.Groups)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(context.Background(), `
+SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at LIMIT 1
+`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+	resp = authRequest(t, http.MethodGet, "/api/agents/"+agentID+"/dingtalk/groups", nil)
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("visible Agent DingTalk groups status = %d, want 200", resp.StatusCode)
+	}
+	readJSON(t, resp, &result)
+	if result.Groups == nil || len(result.Groups) != 0 {
+		t.Fatalf("disabled Agent DingTalk groups = %#v, want stable empty list", result.Groups)
+	}
+
+	var memberUserID string
+	if err := testPool.QueryRow(context.Background(), `
+INSERT INTO "user" (name, email) VALUES ('DingTalk group member', $1) RETURNING id
+`, "dingtalk-groups-member-"+time.Now().Format("150405.000000000")+"@example.test").Scan(&memberUserID); err != nil {
+		t.Fatalf("create member user: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')
+`, testWorkspaceID, memberUserID); err != nil {
+		t.Fatalf("create workspace member: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, memberUserID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, memberUserID)
+	})
+	memberToken, err := generateTestJWT(memberUserID, "dingtalk-groups-member@example.test", "DingTalk group member")
+	if err != nil {
+		t.Fatalf("generate member token: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodGet, testServer.URL+"/api/workspaces/"+testWorkspaceID+"/dingtalk/groups", nil)
+	if err != nil {
+		t.Fatalf("build member request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("member request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("member filtered DingTalk groups status = %d, want 200", resp.StatusCode)
+	}
+
+	// Mutation routes admit workspace members to the handler, where the target
+	// agent's ownership is checked. Temporarily make this member the agent owner;
+	// a router-level admin gate would return 403 before the disabled/validation
+	// response below.
+	var originalOwnerID string
+	if err := testPool.QueryRow(context.Background(), `
+SELECT owner_id FROM agent WHERE id = $1
+`, agentID).Scan(&originalOwnerID); err != nil {
+		t.Fatalf("load fixture Agent owner: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+UPDATE agent SET owner_id = $2 WHERE id = $1
+`, agentID, memberUserID); err != nil {
+		t.Fatalf("assign fixture Agent owner: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `UPDATE agent SET owner_id = $2 WHERE id = $1`, agentID, originalOwnerID)
+	})
+	req, err = http.NewRequest(http.MethodPost,
+		testServer.URL+"/api/workspaces/"+testWorkspaceID+"/dingtalk/install/byo?agent_id="+agentID,
+		strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("build member DingTalk install request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("member DingTalk install request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("agent-owner DingTalk install status = %d, want 400 or 403", resp.StatusCode)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+UPDATE agent SET owner_id = $2 WHERE id = $1
+`, agentID, originalOwnerID); err != nil {
+		t.Fatalf("restore fixture Agent owner: %v", err)
+	}
+
+	var originalPermissionMode, originalVisibility string
+	if err := testPool.QueryRow(context.Background(), `
+SELECT permission_mode, visibility FROM agent WHERE id = $1
+`, agentID).Scan(&originalPermissionMode, &originalVisibility); err != nil {
+		t.Fatalf("load fixture Agent access mode: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+UPDATE agent SET permission_mode = 'public_to', visibility = 'workspace' WHERE id = $1
+`, agentID); err != nil {
+		t.Fatalf("make fixture Agent public_to: %v", err)
+	}
+	targetInsert, err := testPool.Exec(context.Background(), `
+INSERT INTO agent_invocation_target (agent_id, target_type, target_id)
+VALUES ($1, 'workspace', $2)
+ON CONFLICT (agent_id, target_type, target_id) DO NOTHING
+`, agentID, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("make fixture agent workspace-visible: %v", err)
+	}
+	insertedTarget := targetInsert.RowsAffected() == 1
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `
+UPDATE agent SET permission_mode = $2, visibility = $3 WHERE id = $1
+`, agentID, originalPermissionMode, originalVisibility)
+		if !insertedTarget {
+			return
+		}
+		_, _ = testPool.Exec(context.Background(), `
+DELETE FROM agent_invocation_target WHERE agent_id = $1 AND target_type = 'workspace' AND target_id = $2
+`, agentID, testWorkspaceID)
+	})
+	req, err = http.NewRequest(http.MethodGet, testServer.URL+"/api/agents/"+agentID+"/dingtalk/groups", nil)
+	if err != nil {
+		t.Fatalf("build member Agent request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("member Agent request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("member visible-Agent DingTalk groups status = %d, want 200", resp.StatusCode)
+	}
+
+	var runtimeID, privateAgentID string
+	if err := testPool.QueryRow(context.Background(), `
+SELECT runtime_id FROM agent WHERE id = $1
+`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("load fixture runtime: %v", err)
+	}
+	if err := testPool.QueryRow(context.Background(), `
+INSERT INTO agent (
+  workspace_id, name, description, runtime_mode, runtime_config, runtime_id,
+  visibility, permission_mode, max_concurrent_tasks, owner_id
+) VALUES ($1, 'DingTalk private groups fixture', '', 'cloud', '{}'::jsonb, $2,
+          'private', 'private', 1, $3)
+RETURNING id
+`, testWorkspaceID, runtimeID, testUserID).Scan(&privateAgentID); err != nil {
+		t.Fatalf("create private Agent: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, privateAgentID)
+	})
+	req, err = http.NewRequest(http.MethodGet, testServer.URL+"/api/agents/"+privateAgentID+"/dingtalk/groups", nil)
+	if err != nil {
+		t.Fatalf("build private Agent request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("private Agent request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("member private-Agent DingTalk groups status = %d, want 403", resp.StatusCode)
+	}
+
+	const outsideWorkspaceID = "d1474000-0000-4000-8000-000000000001"
+	resp = authRequest(t, http.MethodGet, "/api/workspaces/"+outsideWorkspaceID+"/dingtalk/groups", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("non-member DingTalk groups status = %d, want 404", resp.StatusCode)
+	}
+}
+
 // ---- Inbox through full router ----
 
 func TestInboxThroughRouter(t *testing.T) {
@@ -790,6 +996,446 @@ func TestInboxThroughRouter(t *testing.T) {
 	// Inbox may be empty, just verify it returns valid JSON array
 	if items == nil {
 		t.Fatal("expected non-nil inbox items array")
+	}
+}
+
+func TestInboxUnreadSummaryThroughRouter(t *testing.T) {
+	ctx := context.Background()
+
+	// Seed one unread inbox item for the test user in the test workspace.
+	var itemID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title)
+		VALUES ($1, 'member', $2, 'issue_assigned', 'Summary fixture')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&itemID); err != nil {
+		t.Fatalf("failed to seed inbox item: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE id = $1`, itemID)
+	})
+
+	resp := authRequest(t, "GET", "/api/inbox/unread-summary", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("UnreadInboxSummary: expected 200, got %d", resp.StatusCode)
+	}
+	var summary []struct {
+		WorkspaceID string `json:"workspace_id"`
+		Count       int64  `json:"count"`
+	}
+	readJSON(t, resp, &summary)
+
+	var found bool
+	for _, s := range summary {
+		if s.WorkspaceID == testWorkspaceID {
+			found = true
+			if s.Count < 1 {
+				t.Fatalf("expected unread count >= 1 for test workspace, got %d", s.Count)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected test workspace %s in unread summary, got %+v", testWorkspaceID, summary)
+	}
+
+	// After marking it read, the workspace should drop out of the summary.
+	if _, err := testPool.Exec(ctx, `UPDATE inbox_item SET read = true WHERE id = $1`, itemID); err != nil {
+		t.Fatalf("failed to mark item read: %v", err)
+	}
+	resp = authRequest(t, "GET", "/api/inbox/unread-summary", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("UnreadInboxSummary (after read): expected 200, got %d", resp.StatusCode)
+	}
+	readJSON(t, resp, &summary)
+	for _, s := range summary {
+		if s.WorkspaceID == testWorkspaceID && s.Count > 0 {
+			t.Fatalf("expected no unread for test workspace after read, got count %d", s.Count)
+		}
+	}
+}
+
+// ---- Archived inbox (MUL-3736) ----
+
+type inboxItemJSON struct {
+	ID       string  `json:"id"`
+	IssueID  *string `json:"issue_id"`
+	Title    string  `json:"title"`
+	Read     bool    `json:"read"`
+	Archived bool    `json:"archived"`
+}
+
+// seedArchivedFixtureIssue creates an issue owned by the test user and returns
+// its id, registering the cleanup that cascades to its inbox_item rows.
+//
+// `number` is taken from the workspace counter the way the real create path
+// does it (see IncrementIssueCounter). Letting it default to 0 works only for a
+// test that seeds ONE issue — a second one collides on uq_issue_workspace_number.
+func seedArchivedFixtureIssue(t *testing.T, title string) string {
+	t.Helper()
+	ctx := context.Background()
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		WITH bumped AS (
+			UPDATE workspace SET issue_counter = issue_counter + 1
+			WHERE id = $1
+			RETURNING issue_counter
+		)
+		INSERT INTO issue (workspace_id, title, creator_type, creator_id, number)
+		SELECT $1, $2, 'member', $3, bumped.issue_counter FROM bumped
+		RETURNING id
+	`, testWorkspaceID, title, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("failed to seed issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+	return issueID
+}
+
+func listArchivedInbox(t *testing.T) []inboxItemJSON {
+	t.Helper()
+	resp := authRequest(t, "GET", "/api/inbox/archived", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("ListArchivedInbox: expected 200, got %d", resp.StatusCode)
+	}
+	var items []inboxItemJSON
+	readJSON(t, resp, &items)
+	if items == nil {
+		t.Fatal("expected non-nil archived items array")
+	}
+	return items
+}
+
+func TestArchivedInboxThroughRouter(t *testing.T) {
+	issueID := seedArchivedFixtureIssue(t, "Archived fixture")
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, issue_id, archived)
+		VALUES ($1, 'member', $2, 'new_comment', 'archived one', $3, true)
+	`, testWorkspaceID, testUserID, issueID); err != nil {
+		t.Fatalf("failed to seed inbox item: %v", err)
+	}
+
+	var found bool
+	for _, item := range listArchivedInbox(t) {
+		if item.Title == "archived one" {
+			found = true
+			if !item.Archived {
+				t.Fatalf("archived list returned a non-archived item: %+v", item)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected the archived item in GET /api/inbox/archived")
+	}
+}
+
+// The main inbox and the archived list must stay mutually exclusive per issue.
+// Archiving is issue-level, so a NEW notification on an already-archived issue
+// leaves old archived rows sitting next to a fresh active one — without the
+// query's NOT EXISTS guard the issue would render in BOTH lists.
+func TestArchivedInboxExcludesIssuesWithActiveItems(t *testing.T) {
+	ctx := context.Background()
+	revivedIssue := seedArchivedFixtureIssue(t, "Revived fixture")
+	quietIssue := seedArchivedFixtureIssue(t, "Quiet fixture")
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, issue_id, archived, created_at)
+		VALUES
+			-- Archived a while ago, then a new notification arrived: back in the
+			-- main inbox, so it must NOT appear in the archive.
+			($1, 'member', $2, 'new_comment',    'revived-old', $3, true,  now() - interval '2 hours'),
+			($1, 'member', $2, 'status_changed', 'revived-new', $3, false, now()),
+			-- Archived with no follow-up: belongs in the archive.
+			($1, 'member', $2, 'new_comment',    'quiet-old',   $4, true,  now() - interval '2 hours')
+	`, testWorkspaceID, testUserID, revivedIssue, quietIssue); err != nil {
+		t.Fatalf("failed to seed inbox items: %v", err)
+	}
+
+	var sawRevived, sawQuiet bool
+	for _, item := range listArchivedInbox(t) {
+		if item.IssueID == nil {
+			continue
+		}
+		if *item.IssueID == revivedIssue {
+			sawRevived = true
+		}
+		if *item.IssueID == quietIssue {
+			sawQuiet = true
+		}
+	}
+	if sawRevived {
+		t.Fatal("an issue with an active inbox item must not appear in the archived list")
+	}
+	if !sawQuiet {
+		t.Fatal("an issue whose items are all archived must appear in the archived list")
+	}
+}
+
+// Unarchive restores the whole issue group (mirroring issue-level archive) and
+// leaves `read` alone. Restoring an item that was archived while unread raises
+// the unread badge again — that is correct, not a regression: the unread count
+// only ever included non-archived rows.
+func TestUnarchiveInboxPreservesUnread(t *testing.T) {
+	ctx := context.Background()
+	issueID := seedArchivedFixtureIssue(t, "Unarchive fixture")
+
+	var unreadItemID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, issue_id, read, archived, created_at)
+		VALUES ($1, 'member', $2, 'new_comment', 'archived unread', $3, false, true, now())
+		RETURNING id
+	`, testWorkspaceID, testUserID, issueID).Scan(&unreadItemID); err != nil {
+		t.Fatalf("failed to seed inbox item: %v", err)
+	}
+	// A read sibling on the same issue: the restore is issue-level, so it must
+	// come back too — and come back READ, not reset.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, issue_id, read, archived, created_at)
+		VALUES ($1, 'member', $2, 'status_changed', 'archived read', $3, true, true, now() - interval '1 hour')
+	`, testWorkspaceID, testUserID, issueID); err != nil {
+		t.Fatalf("failed to seed sibling inbox item: %v", err)
+	}
+
+	resp := authRequest(t, "POST", "/api/inbox/"+unreadItemID+"/unarchive", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("UnarchiveInboxItem: expected 200, got %d", resp.StatusCode)
+	}
+	var restored inboxItemJSON
+	readJSON(t, resp, &restored)
+	if restored.Archived {
+		t.Fatalf("expected the restored item to be un-archived, got %+v", restored)
+	}
+	if restored.Read {
+		t.Fatalf("unarchive must not mark an unread item read, got %+v", restored)
+	}
+
+	// Both siblings are back, each with its original read state.
+	rows, err := testPool.Query(ctx, `
+		SELECT title, read, archived FROM inbox_item WHERE issue_id = $1 ORDER BY title
+	`, issueID)
+	if err != nil {
+		t.Fatalf("failed to read back inbox items: %v", err)
+	}
+	defer rows.Close()
+	got := map[string][2]bool{}
+	for rows.Next() {
+		var title string
+		var read, archived bool
+		if err := rows.Scan(&title, &read, &archived); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got[title] = [2]bool{read, archived}
+	}
+	if want := ([2]bool{false, false}); got["archived unread"] != want {
+		t.Fatalf("unread item: expected read=false archived=false, got read=%v archived=%v",
+			got["archived unread"][0], got["archived unread"][1])
+	}
+	if want := ([2]bool{true, false}); got["archived read"] != want {
+		t.Fatalf("read sibling: expected read=true archived=false, got read=%v archived=%v",
+			got["archived read"][0], got["archived read"][1])
+	}
+
+	// The restored unread item now counts toward the badge again.
+	resp = authRequest(t, "GET", "/api/inbox/unread-count", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("CountUnreadInbox: expected 200, got %d", resp.StatusCode)
+	}
+	var count struct {
+		Count int64 `json:"count"`
+	}
+	readJSON(t, resp, &count)
+	if count.Count < 1 {
+		t.Fatal("expected the restored unread item to raise the unread count")
+	}
+}
+
+// An inbox item belonging to someone else must not be unarchivable, even with a
+// valid session — the loader resolves the item within the caller's workspace and
+// recipient scope.
+// Mark-unread is the inverse of mark-read and, like it, scoped to the single
+// item: the inbox renders one row per issue carrying that group's NEWEST item,
+// so flipping the whole group would resurrect siblings the user already dealt
+// with. The restored item counts toward the unread badge again.
+func TestMarkInboxUnreadIsItemScoped(t *testing.T) {
+	ctx := context.Background()
+	issueID := seedArchivedFixtureIssue(t, "Mark unread fixture")
+
+	var newestID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, issue_id, read, archived, created_at)
+		VALUES ($1, 'member', $2, 'new_comment', 'newest', $3, true, false, now())
+		RETURNING id
+	`, testWorkspaceID, testUserID, issueID).Scan(&newestID); err != nil {
+		t.Fatalf("failed to seed inbox item: %v", err)
+	}
+	// An older sibling on the same issue, already read. It must stay read.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, issue_id, read, archived, created_at)
+		VALUES ($1, 'member', $2, 'status_changed', 'older sibling', $3, true, false, now() - interval '1 hour')
+	`, testWorkspaceID, testUserID, issueID); err != nil {
+		t.Fatalf("failed to seed sibling inbox item: %v", err)
+	}
+
+	resp := authRequest(t, "POST", "/api/inbox/"+newestID+"/unread", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("MarkInboxUnread: expected 200, got %d", resp.StatusCode)
+	}
+	var updated inboxItemJSON
+	readJSON(t, resp, &updated)
+	if updated.Read {
+		t.Fatalf("expected the item to come back unread, got %+v", updated)
+	}
+	if updated.Archived {
+		t.Fatalf("mark unread must not archive the item, got %+v", updated)
+	}
+
+	rows, err := testPool.Query(ctx, `
+		SELECT title, read FROM inbox_item WHERE issue_id = $1 ORDER BY title
+	`, issueID)
+	if err != nil {
+		t.Fatalf("failed to read back inbox items: %v", err)
+	}
+	defer rows.Close()
+	got := map[string]bool{}
+	for rows.Next() {
+		var title string
+		var read bool
+		if err := rows.Scan(&title, &read); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got[title] = read
+	}
+	if got["newest"] {
+		t.Fatal("the targeted item must be unread")
+	}
+	if !got["older sibling"] {
+		t.Fatal("mark unread must not touch older siblings on the same issue")
+	}
+}
+
+// The read/unread endpoints resolve the item within the caller's workspace and
+// recipient scope, so someone else's notification is not addressable.
+func TestMarkInboxUnreadRejectsForeignItem(t *testing.T) {
+	ctx := context.Background()
+	var foreignItemID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, read)
+		VALUES ($1, 'member', gen_random_uuid(), 'issue_assigned', 'someone else', true)
+		RETURNING id
+	`, testWorkspaceID).Scan(&foreignItemID); err != nil {
+		t.Fatalf("failed to seed foreign inbox item: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE id = $1`, foreignItemID)
+	})
+
+	resp := authRequest(t, "POST", "/api/inbox/"+foreignItemID+"/unread", nil)
+	if resp.StatusCode == 200 {
+		t.Fatal("expected mark-unread of another recipient's item to be rejected")
+	}
+
+	var read bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT read FROM inbox_item WHERE id = $1`, foreignItemID).Scan(&read); err != nil {
+		t.Fatalf("failed to read back foreign item: %v", err)
+	}
+	if !read {
+		t.Fatal("another recipient's item must stay read")
+	}
+}
+
+func TestUnarchiveInboxRejectsForeignItem(t *testing.T) {
+	ctx := context.Background()
+	var foreignItemID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, archived)
+		VALUES ($1, 'member', gen_random_uuid(), 'issue_assigned', 'someone else', true)
+		RETURNING id
+	`, testWorkspaceID).Scan(&foreignItemID); err != nil {
+		t.Fatalf("failed to seed foreign inbox item: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE id = $1`, foreignItemID)
+	})
+
+	resp := authRequest(t, "POST", "/api/inbox/"+foreignItemID+"/unarchive", nil)
+	if resp.StatusCode == 200 {
+		t.Fatal("expected unarchive of another recipient's item to be rejected")
+	}
+
+	var archived bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT archived FROM inbox_item WHERE id = $1`, foreignItemID).Scan(&archived); err != nil {
+		t.Fatalf("failed to read back foreign item: %v", err)
+	}
+	if !archived {
+		t.Fatal("another recipient's item must stay archived")
+	}
+}
+
+// An issue's inbox notifications are deduplicated per issue: opening the issue
+// marks only the NEWEST item read, leaving older siblings unread. The summary
+// must mirror the inbox UI (issue is read when its newest item is read), so a
+// read-newest / unread-older issue must NOT light the switcher dot (MUL-3695).
+func TestInboxUnreadSummaryDedupesByIssue(t *testing.T) {
+	ctx := context.Background()
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_type, creator_id)
+		VALUES ($1, 'Dedup fixture', 'member', $2)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("failed to seed issue: %v", err)
+	}
+	// Deleting the issue cascades to its inbox_item rows (FK ON DELETE CASCADE).
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	// Older sibling stays unread; newer sibling is read (the one "opening the
+	// issue" would have marked read).
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, issue_id, read, created_at)
+		VALUES
+			($1, 'member', $2, 'new_comment',    'older', $3, false, now() - interval '1 hour'),
+			($1, 'member', $2, 'status_changed', 'newer', $3, true,  now())
+	`, testWorkspaceID, testUserID, issueID); err != nil {
+		t.Fatalf("failed to seed inbox items: %v", err)
+	}
+
+	resp := authRequest(t, "GET", "/api/inbox/unread-summary", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("UnreadInboxSummary: expected 200, got %d", resp.StatusCode)
+	}
+	var summary []struct {
+		WorkspaceID string `json:"workspace_id"`
+		Count       int64  `json:"count"`
+	}
+	readJSON(t, resp, &summary)
+	for _, s := range summary {
+		if s.WorkspaceID == testWorkspaceID && s.Count > 0 {
+			t.Fatalf("issue whose newest item is read must not count as unread, got count %d", s.Count)
+		}
+	}
+
+	// Now mark the newest item unread again → the issue becomes unread and the
+	// workspace reappears in the summary.
+	if _, err := testPool.Exec(ctx, `
+		UPDATE inbox_item SET read = false WHERE issue_id = $1 AND title = 'newer'
+	`, issueID); err != nil {
+		t.Fatalf("failed to flip newest item unread: %v", err)
+	}
+	resp = authRequest(t, "GET", "/api/inbox/unread-summary", nil)
+	readJSON(t, resp, &summary)
+	var found bool
+	for _, s := range summary {
+		if s.WorkspaceID == testWorkspaceID && s.Count >= 1 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected workspace in summary once newest item is unread, got %+v", summary)
 	}
 }
 
@@ -875,21 +1521,8 @@ func TestWebSocketIntegration(t *testing.T) {
 	readJSON(t, resp, &issue)
 	issueID := issue["id"].(string)
 
-	// Read the WebSocket message
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	_, msg, err := conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("WebSocket read error: %v", err)
-	}
-
-	// Verify the message contains the issue event
-	var wsMsg map[string]any
-	if err := json.Unmarshal(msg, &wsMsg); err != nil {
-		t.Fatalf("failed to parse WebSocket message: %v", err)
-	}
-	if wsMsg["type"] != "issue:created" {
-		t.Fatalf("expected type 'issue:created', got '%s'", wsMsg["type"])
-	}
+	// Verify the broadcast carries the issue event
+	readWSMessageOfType(t, conn, "issue:created")
 
 	// Update the issue — should trigger another broadcast
 	resp = authRequest(t, "PUT", "/api/issues/"+issueID, map[string]any{
@@ -897,29 +1530,36 @@ func TestWebSocketIntegration(t *testing.T) {
 	})
 	resp.Body.Close()
 
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	_, msg, err = conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("WebSocket read error on update: %v", err)
-	}
-	var updateMsg map[string]any
-	json.Unmarshal(msg, &updateMsg)
-	if updateMsg["type"] != "issue:updated" {
-		t.Fatalf("expected type 'issue:updated', got '%s'", updateMsg["type"])
-	}
+	readWSMessageOfType(t, conn, "issue:updated")
 
 	// Delete the issue — should trigger another broadcast
 	resp = authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
 	resp.Body.Close()
 
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	_, msg, err = conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("WebSocket read error on delete: %v", err)
-	}
-	var deleteMsg map[string]any
-	json.Unmarshal(msg, &deleteMsg)
-	if deleteMsg["type"] != "issue:deleted" {
-		t.Fatalf("expected type 'issue:deleted', got '%s'", deleteMsg["type"])
+	readWSMessageOfType(t, conn, "issue:deleted")
+}
+
+// readWSMessageOfType reads frames until one of the wanted type arrives. The
+// activity listeners are wired like production, so an activity:created frame
+// for the same write can land before or after the issue event itself.
+func readWSMessageOfType(t *testing.T, conn *websocket.Conn, wantType string) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		conn.SetReadDeadline(deadline)
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("WebSocket read error waiting for %s: %v", wantType, err)
+		}
+		var wsMsg map[string]any
+		if err := json.Unmarshal(msg, &wsMsg); err != nil {
+			t.Fatalf("failed to parse WebSocket message: %v", err)
+		}
+		if wsMsg["type"] == wantType {
+			return wsMsg
+		}
+		if wsMsg["type"] != "activity:created" {
+			t.Fatalf("expected type '%s', got '%s'", wantType, wsMsg["type"])
+		}
 	}
 }

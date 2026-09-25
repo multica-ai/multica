@@ -5,17 +5,66 @@ package agent
 import (
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
-// TestPlatformCopilotInvocation_RewritesCmdLauncherToPowerShellFile is the
-// core Windows test: when LookPath resolves copilot to the npm-installed .cmd
-// launcher and a sibling copilot.ps1 exists, we should invoke PowerShell with
-// -File <ps1> and forward every original arg unchanged — including the
-// multi-line -p prompt that would otherwise be mangled by cmd.exe's %*
-// re-expansion inside copilot.cmd.
+// TestPlatformCopilotInvocation_PrefersBundledNativeBinary is the core Windows
+// test: when LookPath resolves copilot to the npm .cmd launcher and the npm
+// package ships copilot.exe, we must spawn that binary directly and forward
+// every original arg unchanged. Both launchers re-serialise argv onto a new
+// command line and mangle the multi-line, quote-bearing -p prompt, which
+// Copilot then rejects with "your prompt was not quoted".
+func TestPlatformCopilotInvocation_PrefersBundledNativeBinary(t *testing.T) {
+	dir := t.TempDir()
+	cmdPath := filepath.Join(dir, "copilot.cmd")
+	ps1Path := filepath.Join(dir, "copilot.ps1")
+	writeFile(t, cmdPath, "@echo off\r\npowershell -NoProfile -ExecutionPolicy Bypass -File \"%~dp0copilot.ps1\" %*\r\n")
+	// A usable .ps1 launcher must NOT win over the native binary.
+	writeFile(t, ps1Path, "# fake copilot.ps1\r\n")
+	stubPowerShell(t, filepath.Join(dir, "powershell.exe"), true)
+
+	pkg := "copilot-win32-x64"
+	if runtime.GOARCH == "arm64" {
+		pkg = "copilot-win32-arm64"
+	}
+	nativeDir := filepath.Join(dir, "node_modules", "@github", "copilot", "node_modules", "@github", pkg)
+	if err := os.MkdirAll(nativeDir, 0o755); err != nil {
+		t.Fatalf("mkdir native dir: %v", err)
+	}
+	nativePath := filepath.Join(nativeDir, "copilot.exe")
+	writeFile(t, nativePath, "")
+
+	prompt := "You are running as a local coding agent.\n\n# Context\nRun `go build -ldflags \"-X main.version=x\"`.\n"
+	args := []string{
+		"-p", prompt,
+		"--output-format", "json",
+		"--allow-all",
+		"--no-ask-user",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	gotExec, gotArgs, ok := platformCopilotInvocation(cmdPath, args, logger)
+	if !ok {
+		t.Fatalf("expected native rewrite to be applied, got ok=false")
+	}
+	if gotExec != nativePath {
+		t.Errorf("argv0: got %q want %q", gotExec, nativePath)
+	}
+	if !reflect.DeepEqual(gotArgs, args) {
+		t.Errorf("argv must pass through untouched:\n got  %#v\n want %#v", gotArgs, args)
+	}
+}
+
+// TestPlatformCopilotInvocation_RewritesCmdLauncherToPowerShellFile covers the
+// fallback: when the bundled native binary can't be located (partial install,
+// or a Copilot build predating the platform packages) but a sibling
+// copilot.ps1 exists, we should invoke PowerShell with -File <ps1> and forward
+// every original arg unchanged — still better than cmd.exe's %* re-expansion
+// inside copilot.cmd.
 func TestPlatformCopilotInvocation_RewritesCmdLauncherToPowerShellFile(t *testing.T) {
 	dir := t.TempDir()
 	cmdPath := filepath.Join(dir, "copilot.cmd")

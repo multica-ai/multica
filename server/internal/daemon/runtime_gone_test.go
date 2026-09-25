@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // freshDaemon builds a Daemon with every map field the production New() seeds
@@ -45,7 +47,7 @@ func stubAgentVersion(t *testing.T) func() {
 	t.Helper()
 	origDetect := detectAgentVersion
 	origCheck := checkAgentMinVersion
-	detectAgentVersion = func(_ context.Context, _ string) (string, error) {
+	detectAgentVersion = func(_ context.Context, _ agent.Command) (string, error) {
 		return "9.9.9", nil
 	}
 	checkAgentMinVersion = func(_, _ string) error { return nil }
@@ -312,12 +314,20 @@ func TestHandleWSHeartbeatAck_NormalAckRecordsFreshness(t *testing.T) {
 	t.Parallel()
 
 	d := freshDaemon("")
-	d.handleWSHeartbeatAck(context.Background(), &HeartbeatResponse{
-		RuntimeID: "rt-1",
-		Status:    "ok",
+	d.wsRPC = newWSRPCClient(wsRPCResponseGrace)
+	generation := d.wsRPC.attach(func(frame []byte) (*wsOutbound, error) {
+		return &wsOutbound{data: frame}, nil
 	})
+	d.handleWSHeartbeatAckForConnection(context.Background(), &HeartbeatResponse{
+		RuntimeID:          "rt-1",
+		Status:             "ok",
+		ServerCapabilities: []string{"rpc-v1"},
+	}, generation)
 	if !d.wsHeartbeatRecentlyAcked("rt-1") {
 		t.Fatalf("normal ack should record WS freshness for rt-1")
+	}
+	if !d.wsRPC.supportsRPCV1() {
+		t.Fatal("rpc-v1 heartbeat acknowledgement should enable WS RPC")
 	}
 }
 
@@ -739,11 +749,12 @@ func TestHandleRuntimeGone_RecoveryContextSurvivesCallerCancellation(t *testing.
 func TestHandleRuntimeGone_RecoveryContextStopsOnDaemonShutdown(t *testing.T) {
 	// Companion to RecoveryContextSurvivesCallerCancellation: when the daemon
 	// IS shutting down, recovery must abort promptly instead of holding the
-	// HTTP call open until its 30s client timeout. We bound the server
-	// handler with a short safety timeout so test cleanup never hangs on a
-	// stuck connection — the assertion is on the daemon-side return time,
-	// not on server-side context propagation.
+	// HTTP call open until its 30s client timeout. The server handler is
+	// released when the test ends so cleanup never hangs on a stuck
+	// connection — the assertion is on the daemon-side return time, not on
+	// server-side context propagation.
 	registerEntered := make(chan struct{}, 1)
+	releaseRegister := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/daemon/register" {
 			select {
@@ -752,13 +763,15 @@ func TestHandleRuntimeGone_RecoveryContextStopsOnDaemonShutdown(t *testing.T) {
 			}
 			select {
 			case <-r.Context().Done():
-			case <-time.After(2 * time.Second):
+			case <-releaseRegister:
 			}
 			return
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(srv.Close)
+	// LIFO: release the handler before Close waits for it.
+	t.Cleanup(func() { close(releaseRegister) })
 
 	d := freshDaemon(srv.URL)
 	d.cfg.Agents = map[string]AgentEntry{"claude": {Path: "/usr/bin/true"}}

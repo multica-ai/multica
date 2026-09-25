@@ -15,15 +15,64 @@ import (
 // TestMain intercepts when the test binary is re-executed as a fake
 // child process by the agent backend. The fake's behavior is selected via
 // CLAUDE_FAKE_MODE; absent that env var, this is a normal `go test` run.
+//
+// Dispatching here rather than from a Test function is what lets a fake be
+// invoked with a real agent CLI's argv: TestMain runs before the testing
+// package parses flags, so arguments like `run --format json` never reach it.
 func TestMain(m *testing.M) {
+	if os.Getenv(codeartsModelHelperEnv) == "1" {
+		runFakeCodeArtsModelHelper()
+		os.Exit(0)
+	}
+	if os.Getenv(opencodeStdinHelperEnv) == "1" {
+		runFakeOpencodeStdinHelper()
+		os.Exit(0)
+	}
+	// Cursor lifecycle fixtures re-execute this binary with the CLI's real argv.
+	if mode := os.Getenv(cursorFakeModeEnv); mode != "" {
+		runFakeCursorStream(mode)
+		os.Exit(0)
+	}
 	switch mode := os.Getenv("CLAUDE_FAKE_MODE"); mode {
 	case "":
+		// Preserve the production relationships while avoiding hundreds of
+		// milliseconds of intentional silence in every ACP fixture.
+		acpNotificationQuietTime = 100 * time.Millisecond
+		hermesNotificationQuietTime = 100 * time.Millisecond
+		grokNotificationQuietTime = 100 * time.Millisecond
+		zeroclawNotificationQuietTime = 100 * time.Millisecond
+		dimNotificationQuietTime = 100 * time.Millisecond
+		dimSessionLoadRetryDelay = 200 * time.Millisecond
+		collectDrainGrace = 750 * time.Millisecond
+		collectSettleGrace = 100 * time.Millisecond
+		probeWaitDelay = 500 * time.Millisecond
+		// Shortened outright rather than in proportion: no test compares these
+		// with another delay. The catalog retry floor now sits below the 75ms
+		// initialize retry backoff, the reverse of production.
+		openclawResultIdleGrace = 300 * time.Millisecond
+		codexCatalogRetryBackoff = 25 * time.Millisecond
+		// Fixtures that re-execute this binary inherit this environment. Under
+		// -race the runtime sleeps atexit_sleep_ms (1s by default) before every
+		// exit, which each of those fake CLIs would otherwise add to its test.
+		os.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
 		os.Exit(m.Run())
+	case "usage_fixture":
+		runFakeClaudeUsageFixture()
+		os.Exit(0)
+	case "supplement":
+		runFakeClaudeSupplement()
+		os.Exit(0)
 	case "startup_stdout_burst":
 		runFakeClaudeStartupStdoutBurst()
 		os.Exit(0)
 	case "control_request":
 		runFakeClaudeControlRequest()
+		os.Exit(0)
+	case "background_control_request":
+		runFakeClaudeBackgroundControlRequest()
+		os.Exit(0)
+	case "async_launched_tool_result":
+		runFakeClaudeAsyncLaunchedToolResult()
 		os.Exit(0)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown CLAUDE_FAKE_MODE: %q\n", mode)
@@ -86,6 +135,57 @@ func runFakeClaudeControlRequest() {
 	fmt.Println(`{"type":"result","subtype":"success","is_error":false,"session_id":"sess-control","result":"done after control"}`)
 }
 
+func runFakeClaudeBackgroundControlRequest() {
+	reader := bufio.NewReader(os.Stdin)
+	if _, err := reader.ReadString('\n'); err != nil {
+		fmt.Fprintf(os.Stderr, "read prompt: %v\n", err)
+		os.Exit(31)
+	}
+	fmt.Println(`{"type":"system","session_id":"sess-background-control"}`)
+	fmt.Println(`{"type":"control_request","request_id":"req-bg","request":{"subtype":"tool_use","tool_name":"Bash","input":{"command":"sleep 60","run_in_background":true}}}`)
+
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "read control response: %v\n", err)
+		os.Exit(32)
+	}
+	var resp struct {
+		Type     string `json:"type"`
+		Response struct {
+			RequestID string `json:"request_id"`
+			Response  struct {
+				UpdatedInput map[string]any `json:"updatedInput"`
+			} `json:"response"`
+		} `json:"response"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &resp); err != nil {
+		fmt.Fprintf(os.Stderr, "decode control response: %v\n", err)
+		os.Exit(33)
+	}
+	if resp.Type != "control_response" || resp.Response.RequestID != "req-bg" {
+		fmt.Fprintf(os.Stderr, "unexpected control response: %s\n", line)
+		os.Exit(34)
+	}
+	if runInBackground, ok := resp.Response.Response.UpdatedInput["run_in_background"].(bool); !ok || runInBackground {
+		fmt.Fprintf(os.Stderr, "expected foreground updatedInput, got: %s\n", line)
+		os.Exit(35)
+	}
+
+	fmt.Println(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-bg","content":"foreground completed"}]}}`)
+	fmt.Println(`{"type":"result","subtype":"success","is_error":false,"session_id":"sess-background-control","result":"done after foreground rewrite"}`)
+}
+
+func runFakeClaudeAsyncLaunchedToolResult() {
+	reader := bufio.NewReader(os.Stdin)
+	if _, err := reader.ReadString('\n'); err != nil {
+		fmt.Fprintf(os.Stderr, "read prompt: %v\n", err)
+		os.Exit(41)
+	}
+	fmt.Println(`{"type":"system","session_id":"sess-async-launched"}`)
+	fmt.Println(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-async","content":{"status":"async_launched","message":"background task launched"}}]}}`)
+	fmt.Println(`{"type":"result","subtype":"success","is_error":false,"session_id":"sess-async-launched","result":"parent turn completed early"}`)
+}
+
 // TestClaudeExecuteDoesNotDeadlockOnStartupStdoutBurst verifies that the
 // claude backend drains stdout concurrently with writing the prompt to
 // stdin. The buggy path serialises the two: writeClaudeInput runs before
@@ -110,7 +210,7 @@ func TestClaudeExecuteDoesNotDeadlockOnStartupStdoutBurst(t *testing.T) {
 
 	backend, err := New("claude", Config{
 		ExecutablePath: self,
-		Env:            map[string]string{"CLAUDE_FAKE_MODE": "startup_stdout_burst"},
+		Env:            map[string]string{"CLAUDE_FAKE_MODE": "startup_stdout_burst", "IS_SANDBOX": "1"},
 		Logger:         slog.Default(),
 	})
 	if err != nil {
@@ -157,7 +257,7 @@ func TestClaudeExecuteRespondsToControlRequest(t *testing.T) {
 
 	backend, err := New("claude", Config{
 		ExecutablePath: self,
-		Env:            map[string]string{"CLAUDE_FAKE_MODE": "control_request"},
+		Env:            map[string]string{"CLAUDE_FAKE_MODE": "control_request", "IS_SANDBOX": "1"},
 		Logger:         slog.Default(),
 	})
 	if err != nil {
@@ -192,5 +292,101 @@ func TestClaudeExecuteRespondsToControlRequest(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for result — claude backend did not answer control_request")
+	}
+}
+
+func TestClaudeExecuteForcesBackgroundControlRequestForeground(t *testing.T) {
+	t.Parallel()
+
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+
+	backend, err := New("claude", Config{
+		ExecutablePath: self,
+		Env:            map[string]string{"CLAUDE_FAKE_MODE": "background_control_request", "IS_SANDBOX": "1"},
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "run a background command", ExecOptions{Timeout: 8 * time.Second})
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if result.Output != "done after foreground rewrite" {
+			t.Fatalf("expected foreground rewrite result, got %q", result.Output)
+		}
+		if result.SessionID != "sess-background-control" {
+			t.Fatalf("expected session id sess-background-control, got %q", result.SessionID)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for result — claude backend did not foreground background control_request")
+	}
+}
+
+func TestClaudeExecuteFailsLoudlyOnAsyncLaunchedToolResult(t *testing.T) {
+	t.Parallel()
+
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+
+	backend, err := New("claude", Config{
+		ExecutablePath: self,
+		Env:            map[string]string{"CLAUDE_FAKE_MODE": "async_launched_tool_result", "IS_SANDBOX": "1"},
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "launch async work", ExecOptions{Timeout: 8 * time.Second})
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "async background task") {
+			t.Fatalf("expected async background task error, got %q", result.Error)
+		}
+		if result.SessionID != "sess-async-launched" {
+			t.Fatalf("expected session id sess-async-launched, got %q", result.SessionID)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for result — claude backend did not fail async_launched tool result")
 	}
 }

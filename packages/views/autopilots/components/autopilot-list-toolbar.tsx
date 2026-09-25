@@ -43,6 +43,7 @@ import {
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { useT } from "../../i18n";
+import { PAGE_TOOLBAR } from "../../layout/page-header";
 
 // Composite "type:id" value for polymorphic actor filter dimensions, so the
 // string[] filter store can hold agent/squad/member references alike.
@@ -187,11 +188,11 @@ export function AutopilotListToolbar({
   const sortLabel = SORT_LABELS[sortField];
 
   const countBadge = (n: number) => (
-    <span className="ml-auto pl-3 text-xs text-muted-foreground">{n}</span>
+    <span className="ml-auto pl-3 text-caption text-muted-foreground">{n}</span>
   );
 
   return (
-    <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-5">
+    <div className={PAGE_TOOLBAR}>
       {/* Left: scope buttons + result count. Scope is the promoted status
           dimension (it does NOT appear in the filter dropdown). No search
           box: scope buttons already partition the (small) set, so search
@@ -213,7 +214,7 @@ export function AutopilotListToolbar({
               onClick={() => onScopeChange(s)}
             >
               {SCOPE_LABELS[s]}
-              <span className="tabular-nums text-xs text-muted-foreground/70">
+              <span className="tabular-nums text-caption text-muted-foreground">
                 {scopeCounts[s]}
               </span>
             </Button>
@@ -243,7 +244,7 @@ export function AutopilotListToolbar({
               {AUTOPILOT_SCOPES.map((s) => (
                 <DropdownMenuRadioItem key={s} value={s}>
                   {SCOPE_LABELS[s]}
-                  <span className="ml-2 tabular-nums text-xs text-muted-foreground/70">
+                  <span className="ml-2 tabular-nums text-caption text-muted-foreground">
                     {scopeCounts[s]}
                   </span>
                 </DropdownMenuRadioItem>
@@ -255,7 +256,7 @@ export function AutopilotListToolbar({
         {hasActiveFilters && (
           <span
             title={t(($) => $.toolbar.result_count_title)}
-            className="hidden shrink-0 text-xs tabular-nums text-muted-foreground md:inline"
+            className="hidden shrink-0 text-caption tabular-nums text-muted-foreground md:inline"
           >
             {visibleCount} / {allRows.length}
           </span>
@@ -320,7 +321,7 @@ export function AutopilotListToolbar({
                   {t(($) => $.toolbar.section_assignee)}
                 </span>
                 {filters.assignees.length > 0 && (
-                  <span className="text-xs font-medium text-primary">
+                  <span className="text-caption font-medium text-primary">
                     {filters.assignees.length}
                   </span>
                 )}
@@ -339,7 +340,7 @@ export function AutopilotListToolbar({
                       <HoverCheck
                         checked={filters.assignees.includes(value)}
                       />
-                      <ActorAvatar actorType={type} actorId={id} size={16} />
+                      <ActorAvatar actorType={type} actorId={id} size="sm" />
                       <span className="min-w-0 truncate">
                         {getActorName(type, id)}
                       </span>
@@ -357,7 +358,7 @@ export function AutopilotListToolbar({
                   {t(($) => $.toolbar.section_trigger)}
                 </span>
                 {filters.triggerKinds.length > 0 && (
-                  <span className="text-xs font-medium text-primary">
+                  <span className="text-caption font-medium text-primary">
                     {filters.triggerKinds.length}
                   </span>
                 )}
@@ -391,7 +392,7 @@ export function AutopilotListToolbar({
                   {t(($) => $.toolbar.section_mode)}
                 </span>
                 {filters.modes.length > 0 && (
-                  <span className="text-xs font-medium text-primary">
+                  <span className="text-caption font-medium text-primary">
                     {filters.modes.length}
                   </span>
                 )}
@@ -419,7 +420,7 @@ export function AutopilotListToolbar({
                   {t(($) => $.toolbar.section_creator)}
                 </span>
                 {filters.creators.length > 0 && (
-                  <span className="text-xs font-medium text-primary">
+                  <span className="text-caption font-medium text-primary">
                     {filters.creators.length}
                   </span>
                 )}
@@ -434,7 +435,7 @@ export function AutopilotListToolbar({
                       className={FILTER_ITEM_CLASS}
                     >
                       <HoverCheck checked={filters.creators.includes(value)} />
-                      <ActorAvatar actorType={type} actorId={id} size={16} />
+                      <ActorAvatar actorType={type} actorId={id} size="sm" />
                       <span className="min-w-0 truncate">
                         {getActorName(type, id)}
                       </span>
@@ -478,7 +479,7 @@ export function AutopilotListToolbar({
           </Tooltip>
           <PopoverContent align="end" className="w-64 p-0">
             <div className="border-b px-3 py-2.5">
-              <span className="text-xs font-medium text-muted-foreground">
+              <span className="text-caption font-medium text-muted-foreground">
                 {t(($) => $.toolbar.sort_by)}
               </span>
               <div className="mt-2 flex items-center gap-1.5">
@@ -488,7 +489,7 @@ export function AutopilotListToolbar({
                       <Button
                         variant="outline"
                         size="sm"
-                        className="flex-1 justify-between text-xs"
+                        className="flex-1 justify-between text-caption"
                       >
                         {sortLabel}
                         <ChevronDown className="size-3 text-muted-foreground" />
@@ -534,7 +535,7 @@ export function AutopilotListToolbar({
             </div>
 
             <div className="px-3 py-2.5">
-              <span className="text-xs font-medium text-muted-foreground">
+              <span className="text-caption font-medium text-muted-foreground">
                 {t(($) => $.toolbar.section_columns)}
               </span>
               <div className="mt-2 space-y-2">
@@ -543,7 +544,7 @@ export function AutopilotListToolbar({
                     key={key}
                     className="flex cursor-pointer items-center justify-between"
                   >
-                    <span className="text-sm">{COLUMN_LABELS[key]}</span>
+                    <span className="text-body">{COLUMN_LABELS[key]}</span>
                     <Switch
                       size="sm"
                       checked={!hiddenColumns.includes(key)}

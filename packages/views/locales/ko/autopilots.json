@@ -27,10 +27,11 @@
   "status": {
     "active": "활성",
     "paused": "일시 중지",
+    "paused_runtime_required": "일시 중지됨 — 담당 에이전트에 런타임이 필요합니다",
     "archived": "보관됨"
   },
   "execution_mode": {
-    "create_issue": "이슈 생성",
+    "create_issue": "태스크 생성",
     "run_only": "실행만"
   },
   "relative_date": {
@@ -69,11 +70,23 @@
     "not_found": "오토파일럿을 찾을 수 없습니다",
     "pause_aria": "오토파일럿 일시 중지",
     "activate_aria": "오토파일럿 활성화",
+    "paused_runtime_required": "담당 에이전트의 런타임이 없어 자동화가 일시 중지되었습니다. 런타임을 연결한 후 다시 활성화하세요.",
+    "bind_runtime": "런타임 연결",
     "edit": "수정",
     "run_now": "지금 실행",
     "running": "실행 중...",
     "toast_triggered": "오토파일럿을 실행했습니다",
     "toast_trigger_failed": "오토파일럿을 실행하지 못했습니다",
+    "run_blocked_invocation_not_allowed": "실행되지 않음 — 이 오토파일럿의 에이전트를 사용할 권한이 없습니다",
+    "run_blocked_runtime_offline": "실행되지 않음 — 에이전트의 런타임이 오프라인입니다",
+    "run_blocked_agent_runtime_required": "실행되지 않음 — 에이전트에 런타임이 없습니다. 실행하려면 런타임을 연결하세요",
+    "run_blocked_runtime_access_denied": "실행되지 않음 — 에이전트가 비공개 런타임에서 실행할 수 없습니다. 런타임을 공개로 변경하거나 에이전트를 다시 연결/복사하세요",
+    "run_blocked_target_unavailable": "실행되지 않음 — 에이전트를 사용할 수 없습니다",
+    "run_blocked_attribution": "실행되지 않음 — 실행의 책임 구성원을 확인할 수 없습니다",
+    "run_blocked_already_active": "실행되지 않음 — 최근 실행이 이미 이 건을 처리했습니다",
+    "run_blocked_quota_exceeded": "실행되지 않음 — 이 기간의 실행 한도에 도달했습니다",
+    "run_blocked_issue_limit_reached": "실행되지 않음 — 워크스페이스가 태스크 수 한도에 도달했습니다",
+    "run_blocked_generic": "실행되지 않음 — 실행이 차단되었습니다",
     "section_properties": "속성",
     "section_triggers": "트리거",
     "section_run_history": "실행 기록",
@@ -85,6 +98,8 @@
     "no_project": "프로젝트 없음",
     "project_unavailable": "프로젝트를 사용할 수 없습니다",
     "field_prompt": "프롬프트",
+    "field_subscribers": "구독자",
+    "field_subscribers_none": "없음",
     "add_trigger": "트리거 추가",
     "no_triggers": "설정된 트리거가 없습니다. 자동으로 실행할 일정을 추가하세요.",
     "no_runs": "아직 실행 기록이 없습니다. 수동으로 실행하려면 \"지금 실행\"을 클릭하세요.",
@@ -99,8 +114,22 @@
       "deleting": "삭제하는 중..."
     }
   },
+  "access": {
+    "title": "접근 권한 관리",
+    "description": "추가한 멤버는 이 오토파일럿을 수정·실행하고 트리거와 webhook을 관리할 수 있습니다.",
+    "current_label": "접근 가능",
+    "add": "멤버 추가",
+    "search_placeholder": "멤버 검색…",
+    "no_results": "멤버를 찾을 수 없습니다",
+    "remove_tooltip": "접근 권한 제거",
+    "empty": "아직 아무에게도 접근 권한을 부여하지 않았습니다.",
+    "toast_granted": "접근 권한을 부여했습니다",
+    "toast_revoked": "접근 권한을 제거했습니다",
+    "toast_failed": "접근 권한을 업데이트하지 못했습니다",
+    "owner_note": "작성자와 워크스페이스 관리자는 항상 접근할 수 있습니다."
+  },
   "run_status": {
-    "issue_created": "이슈 생성됨",
+    "issue_created": "태스크 생성됨",
     "running": "실행 중",
     "skipped": "건너뜀",
     "completed": "완료됨",
@@ -113,7 +142,7 @@
     "api": "API"
   },
   "run": {
-    "issue_linked": "이슈 연결됨",
+    "issue_linked": "태스크 연결됨",
     "view_log": "실행 로그 보기",
     "skipped_group": {
       "label": "건너뜀",
@@ -141,9 +170,13 @@
     "deprecated_badge": "지원 중단",
     "next_label": "다음: {{date}}",
     "webhook_url_label": "Webhook URL",
+    "show_url": "URL 표시",
+    "hide_url": "URL 숨기기",
+    "hidden_url_aria": "Webhook URL이 숨겨져 있습니다 — 클릭하여 표시",
     "copy_url": "URL 복사",
     "url_copied": "Webhook URL을 복사했습니다",
     "url_copy_failed": "URL을 복사하지 못했습니다",
+    "edit_schedule": "일정 수정",
     "rotate_url": "URL 재발급",
     "rotate_confirm_title": "Webhook URL 재발급",
     "rotate_confirm_description": "현재 URL은 즉시 동작을 멈춥니다. 이 URL을 호출하는 외부 시스템은 새 URL로 업데이트해야 합니다. 계속할까요?",
@@ -187,6 +220,8 @@
       "received_at": "수신",
       "last_attempt_at": "마지막 시도",
       "attempt_count": "시도 횟수",
+      "dispatch_attempts": "디스패치 시도 횟수",
+      "available_at": "다음 디스패치",
       "response_status": "응답",
       "dedupe_key": "중복 제거 키",
       "dedupe_source": "중복 제거 소스",
@@ -221,6 +256,16 @@
     "toast_added_webhook": "Webhook 트리거를 추가했습니다",
     "toast_add_failed": "트리거를 추가하지 못했습니다"
   },
+  "edit_trigger_dialog": {
+    "title": "일정 수정",
+    "label_field": "라벨(선택 사항)",
+    "label_placeholder": "예: 평일 오전",
+    "enabled_label": "활성화",
+    "submit": "저장",
+    "submitting": "저장하는 중...",
+    "toast_updated": "일정을 수정했습니다",
+    "toast_update_failed": "일정 수정에 실패했습니다"
+  },
   "dialog": {
     "sr_create": "새 오토파일럿",
     "sr_edit": "오토파일럿 수정",
@@ -253,7 +298,15 @@
     "select_agent": "에이전트 선택",
     "select_assignee": "에이전트 또는 스쿼드 선택",
     "section_project": "프로젝트",
+    "project_hint": "실행 환경도 결정합니다 — 해당 프로젝트의 저장소 또는 로컬 디렉터리",
     "no_project": "프로젝트 없음",
+    "section_subscribers": "구독자",
+    "subscribers_hint": "이 오토파일럿이 만드는 모든 태스크를 자동으로 구독합니다",
+    "subscribers_empty": "구독자가 없습니다. 팀원을 추가하면 매번 알림을 받습니다",
+    "subscribers_add": "구독자 추가",
+    "subscribers_search_placeholder": "이름으로 멤버 검색…",
+    "subscribers_no_results": "일치하는 멤버가 없습니다",
+    "subscribers_remove_tooltip": "제거",
     "section_output_mode": "출력 모드",
     "section_schedule": "일정",
     "section_trigger_kind": "트리거",
@@ -270,44 +323,37 @@
     "event_filter_docs_link_label": "이벤트 필터 작동 방식 알아보기",
     "event_filter_event_placeholder": "예: workflow_run",
     "event_filter_actions_placeholder": "completed, failed",
+    "event_filter_add": "추가",
+    "event_filter_remove_label": "필터 제거",
     "event_filter_hint": "이 이벤트와 일치하는 Webhook만 처리합니다. 비워 두면 모두 허용합니다.",
-    "schedule_disabled_reason": "이 오토파일럿에는 여러 일정이 있습니다. 상세 페이지에서 수정하세요.",
-    "next_run_label": "다음 실행:",
+    "schedule_multiple_notice": "이 오토파일럿에는 일정이 {{count}}개 있습니다. 이 대화상자를 닫고 아래 '트리거'에서 각각 수정하세요.",
+    "schedule_empty": "일정이 없습니다. 이 오토파일럿은 수동으로 실행할 때만 동작합니다.",
+    "schedule_add": "일정 추가",
+    "error_title_required": "오토파일럿 이름을 입력하세요.",
+    "error_assignee_required": "실행할 에이전트 또는 스쿼드를 선택하세요.",
     "output_modes": {
       "create_issue": {
-        "label": "이슈 생성",
-        "description": "실행할 때마다 추적 가능한 이슈를 만듭니다"
+        "label": "태스크 생성",
+        "description": "실행할 때마다 추적 가능한 태스크를 만듭니다"
       },
       "run_only": {
         "label": "실행만",
-        "description": "이슈를 만들지 않고 조용히 실행합니다"
+        "description": "태스크를 만들지 않고 조용히 실행합니다"
       }
-    },
-    "frequency_long": {
-      "hourly": "매시간",
-      "daily": "매일",
-      "weekdays": "평일마다",
-      "weekly": "매주",
-      "custom": "사용자 지정 cron"
-    },
-    "days": {
-      "sunday": "일요일",
-      "monday": "월요일",
-      "tuesday": "화요일",
-      "wednesday": "수요일",
-      "thursday": "목요일",
-      "friday": "금요일",
-      "saturday": "토요일"
     }
   },
-  "trigger_config": {
-    "frequencies": {
-      "hourly": "매시간",
-      "daily": "매일",
-      "weekdays": "평일",
-      "weekly": "요일",
-      "custom": "사용자 지정"
-    },
+  "schedule_editor": {
+    "time_label": "시간",
+    "time_at": "시각 지정",
+    "time_every": "간격 지정",
+    "every_prefix": "매",
+    "unit_hours": "시간",
+    "unit_minutes": "분",
+    "days_label": "요일/날짜",
+    "days_every": "매일",
+    "days_weekly": "요일 지정",
+    "days_monthly": "날짜 지정",
+    "monthly_short_month_hint": "{{day}}일이 없는 달은 건너뜁니다.",
     "days_short": {
       "sun": "일",
       "mon": "월",
@@ -317,32 +363,69 @@
       "fri": "금",
       "sat": "토"
     },
-    "cron_label": "Cron 표현식",
-    "cron_hint": "표준 5필드 cron(분 시 일 월 요일)",
-    "minute_label": "분",
-    "time_label": "시간",
     "timezone_label": "시간대",
-    "days_label": "요일",
-    "summary": {
-      "hourly": "매시간 · :{{min}}",
-      "daily": "매일 {{time}}",
-      "weekdays": "평일 {{time}}",
-      "weekly": "{{days}} {{time}}",
-      "custom": "사용자 지정 cron",
-      "no_days": "—"
-    },
+    "cron_toggle": "Cron",
+    "cron_click_to_edit": "클릭하여 편집",
+    "cron_hint": "표준 5필드 cron (분 시 일 월 요일)",
+    "cron_invalid": "이 cron 표현식은 유효하지 않습니다.",
+    "timezone_invalid": "서버가 이 시간대를 인식하지 못합니다.",
+    "advanced_hint": "이 표현식에는 시각적 편집기에서 표현할 수 없는 기능이 포함되어 있습니다. cron 텍스트를 직접 편집하거나 표현식을 단순화하세요.",
+    "advanced_unverified": "서버에 연결할 수 없어 이 표현식을 검증하지 못했습니다. 컨트롤은 비활성 상태로 유지됩니다. 저장하기 전에 cron 텍스트를 확인하세요.",
+    "advanced_checking": "이 표현식을 서버에서 검증하는 중입니다. 결과가 올 때까지 컨트롤은 비활성 상태입니다.",
+    "next_runs_label": "다음 실행",
+    "next_in": "{{countdown}} 후",
+    "preview_unavailable": "다음 실행 시각을 가져올 수 없습니다.",
+    "no_upcoming_runs": "이 표현식에는 예정된 실행이 없습니다.",
     "describe": {
-      "hourly": "매시간 :{{min}}에 실행",
-      "daily": "매일 {{time}} {{offset}}에 실행",
-      "weekdays": "평일 {{time}} {{offset}}에 실행",
-      "weekly": "매주 {{days}} {{time}} {{offset}}에 실행",
-      "custom": "사용자 지정 일정: {{cron}}"
+      "days_every": "매일",
+      "days_monthly": "매월 {{day}}일",
+      "days_long": {
+        "sun": "일요일",
+        "mon": "월요일",
+        "tue": "화요일",
+        "wed": "수요일",
+        "thu": "목요일",
+        "fri": "금요일",
+        "sat": "토요일"
+      },
+      "days_range": "{{from}}~{{to}}",
+      "days_join": ", ",
+      "time_at": "{{time}}",
+      "time_every_hour": "매시 {{minute}}분",
+      "time_every_hours": "{{interval}}시간마다 (매시 {{minute}}분)",
+      "time_every_hour_window": "매시간",
+      "time_every_hours_window": "{{interval}}시간마다",
+      "time_every_minute": "매분",
+      "time_every_minutes": "{{interval}}분마다",
+      "window": "{{from}}–{{to}}"
     },
     "countdown": {
-      "days_hours": "{{days}}일 {{hours}}시간",
+      "days_hours": "{{days}}일 {{hours}}시간 {{minutes}}분",
       "hours_minutes": "{{hours}}시간 {{minutes}}분",
       "minutes": "{{minutes}}분",
       "less_than_minute": "1분 미만"
+    },
+    "a11y": {
+      "fixed_hour": "시",
+      "fixed_minute": "분",
+      "interval": "간격",
+      "interval_unit": "간격 단위",
+      "window_start_hour": "시간대 시작 시",
+      "window_start_minute": "시간대 시작 분",
+      "window_end_hour": "시간대 종료 시",
+      "window_end_minute": "시간대 종료 분",
+      "day_pattern": "날짜 방식",
+      "day_of_month": "매월 며칠",
+      "timezone": "시간대",
+      "days_full": {
+        "sun": "일요일",
+        "mon": "월요일",
+        "tue": "화요일",
+        "wed": "수요일",
+        "thu": "목요일",
+        "fri": "금요일",
+        "sat": "토요일"
+      }
     }
   },
   "agent_picker": {
@@ -350,7 +433,9 @@
     "select_agent": "에이전트 선택",
     "select_assignee": "에이전트 또는 스쿼드 선택",
     "agents_group": "에이전트",
-    "squads_group": "스쿼드"
+    "squads_group": "스쿼드",
+    "agent_runtime_required": "이 에이전트를 선택하기 전에 런타임을 연결하세요",
+    "squad_runtime_required": "선택하기 전에 이 스쿼드 리더에 런타임을 연결하세요"
   },
   "timezone_picker": {
     "search_placeholder": "시간대 검색..."
@@ -358,7 +443,6 @@
   "toolbar": {
     "result_count_title": "일치하는 자동화 / 전체 자동화",
     "filter_label": "필터",
-    "filter_active_count_one": "필터 {{count}}개",
     "filter_active_count_other": "필터 {{count}}개",
     "clear_filters": "필터 지우기",
     "section_assignee": "담당",
@@ -376,17 +460,63 @@
     "pause": "일시중지",
     "resume": "재개",
     "delete": "삭제",
-    "selected_one": "{{count}}개 선택됨",
     "selected_other": "{{count}}개 선택됨",
     "clear_selection": "선택 해제",
     "delete_dialog": {
       "title": "자동화를 삭제할까요?",
-      "description_one": "\"{{name}}\" 및 실행 기록이 영구 삭제됩니다.",
       "description_other": "자동화 {{count}}개와 실행 기록이 영구 삭제됩니다.",
       "warning": "이 작업은 되돌릴 수 없습니다.",
       "cancel": "취소",
       "confirm": "영구 삭제",
       "deleting": "삭제 중…"
     }
+  },
+  "wakeups": {
+    "title": "작업 깨우기",
+    "scope": "범위",
+    "issue": "작업",
+    "trigger": "트리거",
+    "next": "깨우기 상태",
+    "enabled": "활성화",
+    "all_triggers": "모든 트리거",
+    "event": "이벤트",
+    "at": "일회성",
+    "recurring": "반복",
+    "all_agents": "모든 에이전트",
+    "search": "작업 또는 에이전트 검색",
+    "search_action": "검색",
+    "running": "실행 중",
+    "active_runs": "진행 중인 실행 {{count}}개",
+    "issue_closed": "종료된 작업",
+    "read_only": "생성자 또는 워크스페이스 관리자만 관리할 수 있습니다",
+    "select_row": "{{issue}}, {{agent}} 선택",
+    "select_page": "이 페이지의 활성 항목 선택",
+    "load_error": "깨우기를 불러오지 못했습니다",
+    "loading": "불러오는 중…",
+    "empty": "깨우기 규칙이 없습니다",
+    "selected": "{{count}}개 선택됨",
+    "disable_selected": "선택 항목 끄기",
+    "clear": "선택 해제",
+    "results": "{{page}}페이지 · {{count}}개",
+    "previous": "이전",
+    "next_page": "다음",
+    "confirm_title": "깨우기 {{count}}개를 끄시겠습니까?",
+    "confirm_body": "이후 깨우기를 중지하고 아직 에이전트에게 전달되지 않은 대기 중 실행을 취소합니다. 전달된 실행은 계속되며 실행 로그에서 중지할 수 있습니다.",
+    "cancel": "취소",
+    "confirm": "끄기",
+    "disabling": "끄는 중…",
+    "batch_result": "꺼짐: {{succeeded}}개. 실패: {{failed}}개.",
+    "scopes": {
+      "active": "깨우기 대기 또는 실행 중",
+      "all": "전체",
+      "disabled": "꺼짐",
+      "ended": "종료됨"
+    },
+    "target_agent": "깨울 에이전트",
+    "wakeup_run": "깨운 후 실행",
+    "empty_filtered": "일치하는 깨우기가 없습니다",
+    "clear_filters": "필터 지우기",
+    "batch_success": "깨우기 규칙 {{count}}개를 껐습니다",
+    "batch_partial": "{{succeeded}}개를 껐고 {{failed}}개는 실패했습니다. 실패 항목은 선택된 상태로 남아 다시 시도할 수 있습니다."
   }
 }

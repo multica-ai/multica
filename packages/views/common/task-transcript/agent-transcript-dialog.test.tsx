@@ -1,0 +1,1112 @@
+// @vitest-environment jsdom
+
+import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { api } from "@multica/core/api";
+import type { SupportedLocale } from "@multica/core/i18n";
+import type { AgentRuntime, AgentTask } from "@multica/core/types/agent";
+import { useTranscriptViewStore } from "@multica/core/agents/stores";
+import { renderWithI18n } from "../../test/i18n";
+import { AgentTranscriptDialog } from "./agent-transcript-dialog";
+import type { TimelineItem } from "./build-timeline";
+
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace" }));
+vi.mock("./use-trace-issue-labels", () => ({
+  useTraceIssueLabels: () => (text: string) => text.replaceAll("01a07eca-8e82-775e-be06-e4a97ccfa299", "DEV-17"),
+}));
+
+const copyTextMock = vi.hoisted(() => vi.fn().mockResolvedValue(true));
+
+vi.mock("@multica/core/api", () => ({
+  api: {
+    getAgent: vi.fn().mockResolvedValue(null),
+    listRuntimes: vi.fn().mockResolvedValue([]),
+  },
+}));
+
+vi.mock("@multica/ui/lib/clipboard", () => ({
+  copyText: copyTextMock,
+}));
+
+// Real react-virtuoso renders no data rows under jsdom's zero-height viewport,
+// so stub it with a flat render to make rows visible to these tests.
+vi.mock("react-virtuoso", () => ({
+  Virtuoso: ({
+    data,
+    itemContent,
+    computeItemKey,
+  }: {
+    data: TimelineItem[];
+    itemContent: (i: number, item: TimelineItem) => ReactNode;
+    computeItemKey: (i: number, item: TimelineItem) => number;
+  }) => (
+    <div>
+      {data.map((item, i) => (
+        <div key={computeItemKey(i, item)}>{itemContent(i, item)}</div>
+      ))}
+    </div>
+  ),
+}));
+
+vi.mock("../actor-avatar", () => ({
+  ActorAvatar: () => <span data-testid="actor-avatar" />,
+}));
+
+vi.mock("@multica/ui/components/ui/dialog", () => ({
+  Dialog: ({ open, children }: { open: boolean; children: ReactNode }) =>
+    open ? <>{children}</> : null,
+  DialogContent: ({ children }: { children: ReactNode }) => (
+    <div role="dialog">{children}</div>
+  ),
+  DialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
+}));
+
+vi.mock("@multica/ui/components/ui/dropdown-menu", async () => {
+  const React = await import("react");
+  const RadioContext = React.createContext<{
+    value?: string;
+    onValueChange?: (value: string) => void;
+  }>({});
+
+  return {
+  DropdownMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DropdownMenuTrigger: ({
+    children,
+    ...props
+  }: ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <button type="button" {...props}>
+      {children}
+    </button>
+  ),
+  DropdownMenuContent: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  DropdownMenuSeparator: () => <hr />,
+  DropdownMenuCheckboxItem: ({
+    checked,
+    onCheckedChange,
+    children,
+  }: {
+    checked?: boolean;
+    onCheckedChange?: (checked: boolean) => void;
+    children: ReactNode;
+  }) => (
+    <button
+      type="button"
+      role="menuitemcheckbox"
+      aria-checked={checked === true}
+      onClick={() => onCheckedChange?.(checked !== true)}
+    >
+      {children}
+    </button>
+  ),
+  DropdownMenuItem: ({
+    children,
+    onClick,
+    className: _className,
+  }: ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <button type="button" onClick={onClick}>
+      {children}
+    </button>
+  ),
+  DropdownMenuRadioGroup: ({
+    value,
+    onValueChange,
+    children,
+  }: {
+    value?: string;
+    onValueChange?: (value: string) => void;
+    children: ReactNode;
+  }) => (
+    <RadioContext.Provider value={{ value, onValueChange }}>{children}</RadioContext.Provider>
+  ),
+  DropdownMenuRadioItem: ({
+    value,
+    children,
+  }: {
+    value: string;
+    children: ReactNode;
+  }) => {
+    const ctx = React.useContext(RadioContext);
+    return (
+      <button
+        type="button"
+        role="menuitemradio"
+        aria-checked={ctx.value === value}
+        onClick={() => ctx.onValueChange?.(value)}
+      >
+        {children}
+      </button>
+    );
+  },
+  };
+});
+
+// The transcript body renders agent markdown through RichContent; stub it to
+// keep these tests independent of the markdown pipeline.
+vi.mock("../../rich-content", () => ({
+  RichContent: ({ content }: { content: string }) => (
+    <div data-testid="rich-content">{content}</div>
+  ),
+}));
+
+const baseTask: AgentTask = {
+  id: "task-1",
+  agent_id: "",
+  runtime_id: "",
+  issue_id: "issue-1",
+  status: "completed",
+  priority: 0,
+  dispatched_at: null,
+  started_at: "2026-06-08T08:00:00Z",
+  completed_at: "2026-06-08T08:01:00Z",
+  result: null,
+  error: null,
+  created_at: "2026-06-08T08:00:00Z",
+};
+
+const liveTask: AgentTask = {
+  ...baseTask,
+  runtime_id: "runtime-1",
+  status: "running",
+  completed_at: null,
+};
+
+function runtimeFor(provider: string): AgentRuntime {
+  return {
+    id: "runtime-1",
+    workspace_id: "workspace-1",
+    daemon_id: "daemon-1",
+    name: `${provider} runtime`,
+    runtime_mode: "local",
+    provider,
+    launch_header: "",
+    status: "online",
+    device_info: "",
+    metadata: {},
+    owner_id: "owner-1",
+    visibility: "private",
+    last_seen_at: null,
+    created_at: "2026-06-08T08:00:00Z",
+    updated_at: "2026-06-08T08:00:00Z",
+  };
+}
+
+const items: TimelineItem[] = [
+  {
+    seq: 1,
+    type: "text",
+    content: "Agent summary\nAgent hidden detail",
+  },
+  {
+    seq: 2,
+    type: "thinking",
+    content: "Thinking summary\nThinking hidden detail",
+  },
+  {
+    seq: 3,
+    type: "tool_use",
+    tool: "terminal",
+    input: { command: "pnpm test" },
+  },
+];
+
+function renderDialog(
+  dialogItems: TimelineItem[] = items,
+  options: {
+    task?: AgentTask;
+    isLive?: boolean;
+    locale?: SupportedLocale;
+  } = {},
+) {
+  return renderWithI18n(
+    <AgentTranscriptDialog
+      open
+      onOpenChange={vi.fn()}
+      task={options.task ?? baseTask}
+      items={dialogItems}
+      agentName="Codex"
+      isLive={options.isLive}
+    />,
+    { locale: options.locale },
+  );
+}
+
+beforeEach(() => {
+  cleanup();
+  copyTextMock.mockClear();
+  vi.mocked(api.listRuntimes).mockResolvedValue([]);
+  useTranscriptViewStore.setState({
+    sortDirection: "chronological",
+    selectedFilterKeys: [],
+  });
+});
+
+afterEach(() => {
+  cleanup();
+});
+
+describe("AgentTranscriptDialog", () => {
+  it("opens the matching result and duration for parallel same-tool calls", () => {
+    const at = (seconds: number) =>
+      new Date(Date.parse(baseTask.started_at!) + seconds * 1000).toISOString();
+    renderDialog([
+      { seq: 1, type: "tool_use", tool: "Bash", callId: "A", input: { command: "slow-A" }, created_at: at(0) },
+      { seq: 2, type: "tool_use", tool: "Bash", callId: "B", input: { command: "fast-B" }, created_at: at(1) },
+      { seq: 3, type: "tool_result", tool: "Bash", callId: "B", output: "B finished", created_at: at(3) },
+      { seq: 4, type: "tool_result", tool: "Bash", callId: "A", output: "A finished", created_at: at(10) },
+    ]);
+    const slow = screen.getByRole("button", { name: /slow-A/ });
+    const fast = screen.getByRole("button", { name: /fast-B/ });
+    expect(slow).toHaveTextContent("10s");
+    expect(fast).toHaveTextContent("2.0s");
+    fireEvent.click(slow);
+    expect(screen.getByText("A finished", { selector: "pre" })).toBeInTheDocument();
+    expect(screen.queryByText("B finished", { selector: "pre" })).not.toBeInTheDocument();
+    fireEvent.click(fast);
+    expect(screen.getByText("B finished", { selector: "pre" })).toBeInTheDocument();
+    expect(screen.queryByText("A finished", { selector: "pre" })).not.toBeInTheDocument();
+  });
+
+  it("waits for live events from Antigravity", async () => {
+    vi.mocked(api.listRuntimes).mockResolvedValue([runtimeFor("antigravity")]);
+
+    renderDialog([], { task: liveTask, isLive: true });
+
+    await screen.findByRole("button", { name: "Run details" });
+    expect(screen.getByText("Waiting for events...")).toBeInTheDocument();
+  });
+
+  it("keeps waiting for live events from other runtimes", async () => {
+    vi.mocked(api.listRuntimes).mockResolvedValue([runtimeFor("hermes")]);
+
+    renderDialog([], { task: liveTask, isLive: true });
+
+    // Runtime detail now lives in the ⓘ popover; its trigger appearing proves
+    // the runtime loaded. The non-antigravity live state still waits.
+    await screen.findByRole("button", { name: "Run details" });
+    expect(screen.getByText("Waiting for events...")).toBeInTheDocument();
+  });
+
+  it("shows live Antigravity tool events", async () => {
+    vi.mocked(api.listRuntimes).mockResolvedValue([runtimeFor("antigravity")]);
+
+    renderDialog([
+      { seq: 1, type: "tool_use", tool: "run_command", input: { CommandLine: "echo hello" } },
+      { seq: 2, type: "tool_result", tool: "run_command", output: "hello" },
+    ], { task: liveTask, isLive: true });
+
+    await screen.findByRole("button", { name: "Run details" });
+    expect(screen.queryByText("Waiting for events...")).not.toBeInTheDocument();
+    expect(screen.getAllByText(/run_command/).length).toBeGreaterThan(0);
+  });
+
+  it("preserves selected filters across dialog remounts unconditionally", () => {
+    const first = renderDialog();
+
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Thinking" }));
+
+    expect(screen.queryByTestId("rich-content")).not.toBeInTheDocument();
+    expect(screen.getByText(/Thinking summary/)).toBeInTheDocument();
+    expect(useTranscriptViewStore.getState().selectedFilterKeys).toEqual(["thinking"]);
+
+    first.unmount();
+    renderDialog();
+
+    expect(screen.queryByTestId("rich-content")).not.toBeInTheDocument();
+    expect(screen.getByText(/Thinking summary/)).toBeInTheDocument();
+  });
+
+  it("ignores stale persisted filter keys that are not available in the current transcript", () => {
+    useTranscriptViewStore.setState({
+      selectedFilterKeys: ["thinking"],
+    });
+
+    renderDialog([
+      {
+        seq: 1,
+        type: "text",
+        content: "Only agent summary\nOnly agent hidden detail",
+      },
+    ]);
+
+    expect(screen.getByTestId("rich-content")).toHaveTextContent("Only agent summary");
+    expect(screen.queryByText("No execution data recorded.")).not.toBeInTheDocument();
+  });
+
+  it("reads agent prose in place and keeps tool detail one click away", () => {
+    renderDialog();
+
+    // The report is the narrative and renders whole; a tool call is a line
+    // whose body waits in the inspector. This inversion is the redesign.
+    expect(screen.getByTestId("rich-content")).toHaveTextContent("Agent hidden detail");
+    expect(screen.queryByText(/"command": "pnpm test"/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /pnpm test/ }));
+
+    expect(screen.getByText(/"command": "pnpm test"/)).toBeInTheDocument();
+  });
+
+  // Regression, #7125: a run of short prose steps under a long agent name put
+  // the same semibold name above every one-line body, so the row's heaviest
+  // element was the one value that never changes. Identity belongs to the run,
+  // and the header already carries it.
+  it("states the agent once in the header, not on every prose row", () => {
+    renderWithI18n(
+      <AgentTranscriptDialog
+        open
+        onOpenChange={vi.fn()}
+        task={{ ...baseTask, agent_id: "agent-1" }}
+        items={[
+          { seq: 1, type: "text", content: "Cleanup done. Starting tests:" },
+          { seq: 2, type: "text", content: "Now adding the Feishu row:" },
+          { seq: 3, type: "text", content: "Now the version bump:" },
+        ]}
+        agentName="【Chores|Opus5】Multica Helper"
+      />,
+    );
+
+    expect(screen.getAllByTestId("rich-content")).toHaveLength(3);
+    expect(screen.getAllByText("【Chores|Opus5】Multica Helper")).toHaveLength(1);
+    expect(screen.getAllByTestId("actor-avatar")).toHaveLength(1);
+  });
+
+  // A facet is only readable if you can see what it selects. Tool facets always
+  // could — their rows print the tool name — but prose rows carried no kind
+  // mark at all, so "Agent" in the menu pointed at nothing.
+  it("anchors each filter facet to the glyph its rows carry", () => {
+    renderDialog([
+      { seq: 1, type: "text", content: "Committing now:" },
+      { seq: 2, type: "tool_use", tool: "Bash", input: { command: "git commit" } },
+    ]);
+
+    const agentFacet = screen.getByRole("menuitemcheckbox", { name: "Agent" });
+    expect(agentFacet.querySelector(".lucide-bot")).not.toBeNull();
+
+    const proseRow = screen.getByTestId("rich-content").closest(".group");
+    expect(proseRow?.querySelector(".lucide-bot")).not.toBeNull();
+  });
+
+  it("names a tool facet the way its rows do, keeping the prefix in the key", () => {
+    renderDialog([{ seq: 1, type: "tool_use", tool: "Bash", input: { command: "ls" } }]);
+
+    expect(screen.getByRole("menuitemcheckbox", { name: "Bash" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitemcheckbox", { name: "tool:Bash" })).toBeNull();
+
+    // The label changed; the persisted facet key did not.
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Bash" }));
+    expect(useTranscriptViewStore.getState().selectedFilterKeys).toEqual(["tool:Bash"]);
+  });
+
+  it("folds a call and its result into one step instead of two rows", () => {
+    renderDialog([
+      { seq: 1, type: "tool_use", tool: "Bash", input: { command: "ls" } },
+      { seq: 2, type: "tool_result", tool: "Bash", output: "total 0" },
+    ]);
+
+    // One row for the call, and the result body is not in the list at all.
+    expect(screen.getAllByRole("button", { name: /^Bash/ })).toHaveLength(1);
+    expect(screen.queryByText("total 0")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Bash/ }));
+    expect(screen.getByText("total 0")).toBeInTheDocument();
+  });
+
+  it("shows a meaningful bound instead of rounding a fast call to zero", () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Bash",
+        input: { command: "sed -n 1,20p README.md" },
+        created_at: "2026-06-08T08:00:00.000Z",
+      },
+      {
+        seq: 2,
+        type: "tool_result",
+        tool: "Bash",
+        output: "ok",
+        created_at: "2026-06-08T08:00:00.040Z",
+      },
+    ]);
+
+    expect(screen.getByText("<0.1s")).toBeInTheDocument();
+    expect(screen.queryByText("0.0s")).not.toBeInTheDocument();
+  });
+
+  it("does not claim a duration for legacy calls whose batched timestamps are identical", () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Bash",
+        input: { command: "pwd" },
+        created_at: "2026-06-08T08:00:00.000Z",
+      },
+      {
+        seq: 2,
+        type: "tool_result",
+        tool: "Bash",
+        output: "/repo",
+        created_at: "2026-06-08T08:00:00.000Z",
+      },
+    ]);
+
+    const unknownDuration = screen.getByText("—");
+    expect(unknownDuration).toHaveAttribute("aria-hidden", "true");
+    expect(unknownDuration.parentElement).toHaveAttribute("title", "Exact duration is unavailable.");
+    expect(unknownDuration.parentElement).not.toHaveAttribute("aria-label");
+    expect(screen.getByText("Exact duration is unavailable.")).toHaveClass("sr-only");
+    const row = screen.getByRole("button", { name: /Exact duration is unavailable\./ });
+    fireEvent.click(row);
+    expect(screen.getAllByText("Exact duration is unavailable.")).toHaveLength(2);
+    expect(screen.queryByText("0.0s")).not.toBeInTheDocument();
+  });
+
+  it("keeps a screenshot out of the list and renders it as an image", () => {
+    const output = JSON.stringify([
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" } },
+    ]);
+    renderDialog([
+      { seq: 1, type: "tool_use", tool: "Bash", input: { command: "screenshot" } },
+      { seq: 2, type: "tool_result", tool: "Bash", output },
+    ]);
+
+    // The old surface printed the whole base64 payload into the row.
+    expect(screen.queryByText(/iVBORw0KGgo/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /screenshot/ }));
+
+    expect(screen.getByRole("img", { name: "Image" })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,iVBORw0KGgo=",
+    );
+  });
+
+  it("folds consecutive same-tool calls into one group that expands", () => {
+    renderDialog([
+      { seq: 1, type: "tool_use", tool: "Read", input: { file_path: "/a.ts" } },
+      { seq: 2, type: "tool_result", tool: "Read", output: "a" },
+      { seq: 3, type: "tool_use", tool: "Read", input: { file_path: "/b.ts" } },
+      { seq: 4, type: "tool_result", tool: "Read", output: "b" },
+      { seq: 5, type: "tool_use", tool: "Read", input: { file_path: "/c.ts" } },
+      { seq: 6, type: "tool_result", tool: "Read", output: "c" },
+    ]);
+
+    // The folded row still names what it touched first — "Read · 3 calls"
+    // alone would hide the only detail that makes a group scannable.
+    const group = screen.getByRole("button", { name: /\/a\.ts.*3 calls/ });
+    expect(screen.queryByText("/c.ts")).not.toBeInTheDocument();
+
+    fireEvent.click(group);
+
+    expect(screen.getByText("/c.ts")).toBeInTheDocument();
+  });
+
+  it("narrows the list to steps matching the search", () => {
+    renderDialog();
+
+    fireEvent.change(screen.getByLabelText("Search this run…"), {
+      target: { value: "pnpm" },
+    });
+
+    expect(screen.getByRole("button", { name: /pnpm test/ })).toBeInTheDocument();
+    expect(screen.queryByTestId("rich-content")).not.toBeInTheDocument();
+    expect(screen.getByText("1 of 3 steps")).toBeInTheDocument();
+  });
+
+  it("hides the timeline when steps have no timestamps", () => {
+    renderDialog();
+
+    expect(screen.queryByText("Model")).not.toBeInTheDocument();
+    expect(screen.queryByText("Tools")).not.toBeInTheDocument();
+  });
+
+  it.each([{ count: 1, seconds: 20 }, { count: 8, seconds: 30 }, { count: 8, seconds: 320 }])("shows the timeline for $count steps over $seconds seconds", ({ count, seconds }) => {
+    const at = (seconds: number) =>
+      new Date(Date.parse("2026-06-08T08:00:00Z") + seconds * 1000).toISOString();
+    const longRun: TimelineItem[] = [];
+    for (let i = 0; i < count; i++) {
+      const start = (seconds / count) * i;
+      longRun.push(
+        { seq: i * 2 + 1, type: "tool_use", tool: "Bash", input: { command: `step ${i}` }, created_at: at(start) },
+        { seq: i * 2 + 2, type: "tool_result", tool: "Bash", output: "ok", created_at: at(start + seconds / count / 2) },
+      );
+    }
+
+    renderDialog(longRun, {
+      task: { ...baseTask, started_at: at(0), completed_at: at(seconds) },
+    });
+
+    expect(screen.getByText("Model")).toBeInTheDocument();
+    expect(screen.getByText("Tools")).toBeInTheDocument();
+  });
+
+  it("copies RFC 3339 timestamps before event labels", async () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "text",
+        content: "Agent summary\nAgent hidden detail",
+        created_at: "2026-06-08T08:00:00+08:00",
+      },
+      {
+        seq: 2,
+        type: "thinking",
+        content: "Thinking summary",
+        created_at: "2026-06-08T08:00:05.123Z",
+      },
+    ]);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
+    });
+
+    // Full body (not the truncated summary) with the RFC 3339 prefix, events
+    // separated by a blank line.
+    expect(copyTextMock).toHaveBeenCalledWith(
+      [
+        "[2026-06-08T00:00:00.000Z] [Agent] Agent summary\nAgent hidden detail",
+        "[2026-06-08T08:00:05.123Z] [Thinking] Thinking summary",
+      ].join("\n\n"),
+    );
+  });
+
+  it("keeps older events without a valid timestamp copyable", async () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "text",
+        content: "Missing timestamp",
+      },
+      {
+        seq: 2,
+        type: "error",
+        content: "Invalid timestamp",
+        created_at: "not-a-date",
+      },
+    ]);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
+    });
+
+    expect(copyTextMock).toHaveBeenCalledWith(
+      ["[Agent] Missing timestamp", "[Error] Invalid timestamp"].join("\n\n"),
+    );
+  });
+
+  it("cancels copy feedback timers when the dialog unmounts", async () => {
+    vi.useFakeTimers();
+    try {
+      const { unmount } = renderDialog();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
+        await Promise.resolve();
+      });
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+      unmount();
+
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it("renders a file edit as a diff instead of escaped JSON strings", () => {
+    const { container } = renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Edit",
+        input: {
+          file_path: "/repo/src/counter.rs",
+          old_string: "pub count: u32,",
+          new_string: "pub count: u32,\npub total: u64,",
+        },
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /Edit/ }));
+
+    // Changed lines read as diff rows. Text is asserted on the row, not on a
+    // leaf node: syntax highlighting splits a line across `hljs-*` spans.
+    const rowText = (selector: string) =>
+      Array.from(container.querySelectorAll(selector)).map((el) => el.textContent?.trim());
+    // The first line is unchanged, so it is context; only the second is added.
+    expect(rowText(".bg-success\\/10")).toEqual(["+ pub total: u64,"]);
+    expect(rowText(".bg-destructive\\/10")).toEqual([]);
+    expect(container.querySelector("pre")?.textContent).toContain("pub count: u32,");
+    // ...and the raw JSON keys are gone from the surface.
+    expect(screen.queryByText(/"new_string"/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\\n/)).not.toBeInTheDocument();
+  });
+
+  it("highlights diff rows using the grammar for the file extension", () => {
+    const { container } = renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Edit",
+        input: {
+          file_path: "/repo/src/lib.rs",
+          old_string: "let a = 1;",
+          new_string: "let b = 2;",
+        },
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /Edit/ }));
+
+    // `let` is a Rust keyword, so the highlighter must have marked it up.
+    expect(container.querySelector(".hljs-keyword")?.textContent).toBe("let");
+  });
+
+  it("leaves an unknown extension unhighlighted rather than guessing", () => {
+    const { container } = renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Edit",
+        input: { file_path: "/repo/NOTES", old_string: "let a = 1;", new_string: "let b = 2;" },
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /Edit/ }));
+
+    expect(container.querySelector(".hljs-keyword")).toBeNull();
+    expect(container.textContent).toContain("let b = 2;");
+  });
+
+  it("unwraps a JSON-encoded tool result so it reads as terminal output", () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "tool_result",
+        tool: "Bash",
+        output: '"total 0\\ndrwxr-xr-x  2 user  staff"',
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Bash/ }));
+
+    expect(
+      screen.getByText("total 0\ndrwxr-xr-x  2 user  staff", {
+        selector: "pre",
+        // Keep the newline and column spacing the unwrap is meant to restore.
+        normalizer: (text) => text,
+      }),
+    ).toBeInTheDocument();
+  });
+  it("shows a whole-file write as plain content with a line count", () => {
+    const { container } = renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Write",
+        input: { file_path: "/f.rs", content: "alpha\nbeta" },
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /Write/ }));
+
+    // The outcome row reports "+2" as well, so scope this to the inspector.
+    expect(within(screen.getByRole("complementary")).getByText("+2")).toBeInTheDocument();
+    // Plain content: no per-line + gutter and no diff tinting.
+    const pre = container.querySelector("pre");
+    expect(pre?.textContent).toBe("alpha\nbeta");
+    expect(container.querySelector(".bg-success\\/10")).toBeNull();
+  });
+
+  it("clamps a long body behind the show-all affordance", () => {
+    const content = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n");
+    const { container } = renderDialog([
+      { seq: 1, type: "tool_use", tool: "Write", input: { file_path: "/f.rs", content } },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /Write/ }));
+
+    const pre = container.querySelector("pre");
+    expect(pre?.className).toContain("max-h-52");
+    expect(pre?.className).toContain("overflow-hidden");
+    expect(screen.getByRole("button", { name: "Show all" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+    expect(container.querySelector("pre")?.className).not.toContain("max-h-52");
+  });
+
+  it("does not clamp a short diff", () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Edit",
+        input: { file_path: "/f.rs", old_string: "a", new_string: "b" },
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /Edit/ }));
+
+    expect(screen.queryByRole("button", { name: "Show all" })).not.toBeInTheDocument();
+  });
+
+  // The run-details provider row used to carry its own name map. Pointing it at
+  // the shared runtime formatter is right for every provider except Claude,
+  // whose runtime-list name is "Claude" while this diagnostic row has always
+  // said "Claude Code" — and whose legacy `claude-code` slug title-cases into
+  // "Claude-code". Both aliases are pinned here so the next cleanup keeps them.
+  it.each([
+    ["claude", "Claude Code"],
+    ["claude-code", "Claude Code"],
+    // Everything outside the alias table defers to the shared runtime
+    // formatter, so a new provider needs no edit here.
+    ["omp", "Oh-My-Pi"],
+  ])("names a %s run %s in the run details", async (provider, expected) => {
+    const user = userEvent.setup();
+    vi.mocked(api.listRuntimes).mockResolvedValue([runtimeFor(provider)]);
+
+    renderDialog(items, { task: { ...baseTask, runtime_id: "runtime-1" } });
+
+    await user.click(await screen.findByRole("button", { name: "Run details" }));
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+  });
+});
+
+describe("AgentTranscriptDialog — work directory handoff", () => {
+  it("shows and copies the durable project directory after worktree cleanup", async () => {
+    renderDialog(items, {
+      task: {
+        ...baseTask,
+        work_dir: "/managed/task/worktree",
+        relative_work_dir: "workspace/task/worktree",
+        durable_work_dir: "/Users/dev/project",
+        relative_durable_work_dir: "project",
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Run details" }));
+    expect(screen.getByText("Project directory")).toBeInTheDocument();
+    expect(screen.getByText("project")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTitle("Copy project directory"));
+    expect(copyTextMock).toHaveBeenCalledWith("/Users/dev/project");
+  });
+
+  it("keeps a live task on its actual workdir", async () => {
+    renderDialog(items, {
+      task: {
+        ...liveTask,
+        work_dir: "/managed/task/worktree",
+        relative_work_dir: "workspace/task/worktree",
+        durable_work_dir: "/Users/dev/project",
+        relative_durable_work_dir: "project",
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Run details" }));
+    expect(screen.getByText("Workdir")).toBeInTheDocument();
+    expect(screen.getByText("workspace/task/worktree")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTitle("Copy working directory"));
+    expect(copyTextMock).toHaveBeenCalledWith("/managed/task/worktree");
+  });
+
+  it("keeps a failed-but-preserved task on its worktree", async () => {
+    renderDialog(items, {
+      task: {
+        ...baseTask,
+        status: "failed",
+        work_dir: "/managed/preserved/worktree",
+        relative_work_dir: "workspace/task/worktree",
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Run details" }));
+    expect(screen.getByText("Workdir")).toBeInTheDocument();
+    expect(screen.getByText("workspace/task/worktree")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTitle("Copy working directory"));
+    expect(copyTextMock).toHaveBeenCalledWith("/managed/preserved/worktree");
+  });
+});
+
+// A worktree-mode run never touches the user's working copy: the branch is the
+// only pointer to what it produced. Showing it in Run details is what makes the
+// result findable — including for a run that failed partway, which still
+// commits whatever the agent had done.
+describe("AgentTranscriptDialog — delivered branch", () => {
+  it("shows the branch and copies it", async () => {
+    renderDialog(items, {
+      task: { ...baseTask, branch_name: "agent/j/abc12345" },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Run details" }));
+
+    // Also shown as a produced artifact in the outcome row, hence getAllByText.
+    expect(screen.getAllByText("agent/j/abc12345").length).toBeGreaterThan(0);
+
+    await userEvent.click(screen.getByTitle("Copy branch name"));
+    expect(copyTextMock).toHaveBeenCalledWith("agent/j/abc12345");
+  });
+
+  it("renders nothing for tasks that delivered no branch", async () => {
+    renderDialog(items, { task: { ...baseTask, branch_name: undefined } });
+
+    await userEvent.click(screen.getByRole("button", { name: "Run details" }));
+
+    expect(screen.queryByTitle("Copy branch name")).not.toBeInTheDocument();
+  });
+});
+
+// A server-cancelled run (worktree claim gate, preserved-work delivery) must
+// explain itself: the localized reason rides the status badge and heads the
+// "Reason" row in Run details, while the raw persisted diagnostic sits under
+// its own "Technical details" heading. A user's own cancel stays a plain
+// "Cancelled" for historical rows that predate actor provenance.
+describe("AgentTranscriptDialog — cancel reason", () => {
+  const gateError = "worktree mode needs daemon version 0.4.24 or newer on that machine";
+
+  it("labels a server-cancelled run and surfaces the persisted reason", async () => {
+    renderDialog(items, {
+      task: {
+        ...baseTask,
+        status: "cancelled",
+        error: gateError,
+        failure_reason: "local_directory_error",
+      },
+    });
+
+    expect(screen.getByText(/Local directory error/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Run details" }));
+    expect(screen.getByText(gateError)).toBeInTheDocument();
+  });
+
+  it("renders a server cancellation reason in the active locale", () => {
+    renderDialog(items, {
+      locale: "zh-Hans",
+      task: {
+        ...baseTask,
+        status: "cancelled",
+        error: gateError,
+        failure_reason: "local_directory_error",
+      },
+    });
+
+    expect(screen.getByText(/本地目录出错/)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Local directory error/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps a legacy user-initiated cancel a plain Cancelled", () => {
+    renderDialog(items, {
+      task: { ...baseTask, status: "cancelled", error: null },
+    });
+
+    expect(screen.getByText("Cancelled")).toBeInTheDocument();
+    expect(screen.queryByText(/Local directory error/)).not.toBeInTheDocument();
+  });
+
+  it("names the actor on a new user-initiated cancellation", () => {
+    renderDialog(items, {
+      task: {
+        ...baseTask,
+        status: "cancelled",
+        error: null,
+        cancelled_by: { type: "member", id: "user-1", name: "Jiayuan" },
+      },
+    });
+
+    expect(screen.getByText("Cancelled by Jiayuan")).toBeInTheDocument();
+  });
+
+  // #7411: the status badge used to carry the raw English error as its
+  // `title`. Hovering a translated pill and getting English prose (with an
+  // absolute path in it) is exactly the leak this issue reported.
+  it("keeps the raw diagnostic off the status badge tooltip", () => {
+    renderDialog(items, {
+      locale: "zh-Hans",
+      task: {
+        ...baseTask,
+        status: "cancelled",
+        error: gateError,
+        failure_reason: "local_directory_error",
+      },
+    });
+
+    expect(screen.queryByTitle(gateError)).not.toBeInTheDocument();
+  });
+});
+
+// The two audiences of a failure, kept apart in Run details: the localized
+// reason answers "what happened" for the person who ran the task, the raw
+// persisted text answers "what exactly did the runner say" for whoever
+// debugs it. Merging them is what made #7411 unfixable by translation alone.
+describe("AgentTranscriptDialog — reason vs raw diagnostics", () => {
+  const rawError =
+    "opencode stream ended on an empty step (no text, no tool call, no reported usage)";
+
+  it("heads the localized reason and the raw text with different labels", async () => {
+    renderDialog(items, {
+      task: {
+        ...baseTask,
+        status: "failed",
+        error: rawError,
+        failure_reason: "agent_error.provider_network",
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Run details" }));
+
+    expect(screen.getByText("Reason")).toBeInTheDocument();
+    expect(screen.getByText("Network error reaching provider")).toBeInTheDocument();
+    expect(screen.getByText("Technical details")).toBeInTheDocument();
+    expect(screen.getByText(rawError)).toBeInTheDocument();
+  });
+
+  it("translates both headings and the reason, leaving the raw text verbatim", async () => {
+    renderDialog(items, {
+      locale: "zh-Hans",
+      task: {
+        ...baseTask,
+        status: "failed",
+        error: rawError,
+        failure_reason: "agent_error.provider_network",
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "运行详情" }));
+
+    expect(screen.getByText("原始诊断")).toBeInTheDocument();
+    expect(screen.queryByText("Technical details")).not.toBeInTheDocument();
+    // The diagnostic itself is not translated — it is the runner's own output.
+    // Keeping it readable is the point; presenting it as the reason is not.
+    expect(screen.getByText(rawError)).toBeInTheDocument();
+  });
+
+  it("shows no diagnostics section for a run that persisted no error", async () => {
+    renderDialog(items, {
+      task: { ...baseTask, status: "completed", error: null },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Run details" }));
+
+    expect(screen.queryByText("Technical details")).not.toBeInTheDocument();
+    expect(screen.queryByText("Reason")).not.toBeInTheDocument();
+  });
+});
+
+
+describe("readable issue references", () => {
+  it("searches both the displayed identifier and original UUID", async () => {
+    const issueId = "01a07eca-8e82-775e-be06-e4a97ccfa299";
+    renderDialog([{ seq: 1, type: "tool_use", tool: "exec_command", input: { command: `multica issue get ${issueId} --output json` } }]);
+    expect(screen.getByText("multica issue get DEV-17 --output json")).toBeInTheDocument();
+    const search = screen.getByRole("textbox");
+    fireEvent.change(search, { target: { value: "DEV-17" } });
+    expect(screen.getByText("multica issue get DEV-17 --output json")).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: issueId } });
+    expect(screen.getByText("multica issue get DEV-17 --output json")).toBeInTheDocument();
+  });
+});
+
+// The completeness indicator, #8182 / #8183. A truncation remark sits at the
+// end of the output it describes and waits for the reader to reveal that end;
+// unknown-ness belongs to the run, because one daemon produced all of it. The
+// state matrix lives in build-timeline.test.ts.
+describe("tool output completeness", () => {
+  const SHORT = "line one";
+  // Past ToolDetailSurface's fade threshold, so the body opens collapsed.
+  const LONG = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n");
+
+  function run(output: string, output_truncated?: boolean): TimelineItem[] {
+    return [
+      { seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat big.log" } },
+      { seq: 2, type: "tool_result", tool: "exec_command", output, output_truncated },
+    ];
+  }
+
+  function openStep(items: TimelineItem[]) {
+    renderDialog(items);
+    fireEvent.click(screen.getByRole("button", { name: /cat big\.log/ }));
+  }
+
+  it("remarks at the end of an output the record could not keep whole", () => {
+    openStep(run(SHORT, true));
+
+    expect(screen.getByText(/only the beginning was kept/i)).toBeInTheDocument();
+  });
+
+  it("says nothing about an output the daemon measured as complete", () => {
+    openStep(run(SHORT, false));
+
+    expect(screen.queryByText(/only the beginning was kept/i)).not.toBeInTheDocument();
+  });
+
+  // The remark answers "was that all of it?", which is a question the reader
+  // only has at the bottom. Showing it over a faded, half-shown body answers
+  // ahead of the question and puts the words nowhere near the end they describe.
+  it("waits for the body to be revealed before remarking", () => {
+    openStep(run(LONG, true));
+    expect(screen.queryByText(/only the beginning was kept/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+
+    expect(screen.getByText(/only the beginning was kept/i)).toBeInTheDocument();
+  });
+
+  // Regression guard: a warning badge next to the tool name announced the
+  // caveat before the reader had asked the question.
+  it("keeps the remark out of the step header", () => {
+    openStep(run(SHORT, true));
+
+    const header = screen.getByRole("button", { name: "Copy this step" }).closest("div");
+    expect(header).toHaveTextContent("exec_command");
+    expect(header).not.toHaveTextContent(/only the beginning was kept/i);
+  });
+
+  // A stored tool result is capped at 8192 bytes upstream, so the render clip
+  // must never reach it: one remark, not a second reporting the rounding error.
+  it("leaves a stored tool result with exactly one remark", () => {
+    openStep(run("x".repeat(8192), true));
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+
+    expect(screen.getByText(/only the beginning was kept/i)).toBeInTheDocument();
+    expect(screen.queryByText(/only the start is displayed/i)).not.toBeInTheDocument();
+  });
+
+  // Tool input has no server-side budget and keeps its existing render ceiling.
+  // Nothing about how long an input renders is this change's business.
+  it("still clips a tool input at its existing length", () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "exec_command",
+        input: { command: "echo", payload: "y".repeat(9000) },
+      },
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: /exec_command/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+
+    const body = screen.getByText(/only the start is displayed/i);
+    expect(body.textContent).not.toMatch(/copy|whole record|everything that was saved/i);
+  });
+
+  // A record from before the flag existed says nothing at all. The viewer only
+  // speaks when a daemon measured the output and found bytes missing; it never
+  // volunteers that it cannot tell, in the transcript or above it.
+  it("stays silent on a record whose completeness was never measured", () => {
+    openStep(run(LONG, undefined));
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+
+    expect(screen.queryByText(/only the beginning was kept/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/cannot be confirmed|completeness/i)).not.toBeInTheDocument();
+  });
+});

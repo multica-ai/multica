@@ -1,0 +1,213 @@
+---
+title: Contribuer
+description: Configurez un environnement de développement Multica local, exécutez les tests et soumettez vos modifications en suivant les conventions du dépôt.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica est composé d'un backend Go et d'un monorepo pnpm. Le moyen le plus simple de démarrer en local est `make dev` : cette commande prépare l'environnement, la base de données et les migrations pour le checkout courant, puis démarre Web et l'API.
+
+## Prérequis
+
+- Node.js 22
+- pnpm 10.28.2
+- Go 1.26.6
+- Docker Engine ou Docker Desktop
+- Git et Make
+
+Le `package.json` racine, `server/go.mod` et les workflows de CI font foi pour les versions.
+
+## Premier démarrage
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+make dev
+```
+
+Le checkout principal utilise `.env`. Si ce fichier n'existe pas, `make dev` le crée à partir de `.env.example`, puis démarre l'instance PostgreSQL partagée, installe les dépendances, exécute les migrations et démarre l'API et Web.
+
+Adresses par défaut :
+
+```text
+Web: http://localhost:3000
+API: http://localhost:8080
+```
+
+Le code de vérification local fixe provient de la configuration de développement. N'utilisez pas un `.env` local pour un déploiement exposé à Internet.
+
+## Développer dans un worktree
+
+Le dépôt permet d'exécuter le checkout principal et plusieurs worktrees en même temps. Ils partagent un même conteneur PostgreSQL, mais utilisent des bases de données et des ports distincts.
+
+```bash
+git worktree add ../multica-feature -b feat/my-change main
+cd ../multica-feature
+make setup-worktree
+make start-worktree
+```
+
+`make setup-worktree` génère `.env.worktree` ; le nom de la base de données et les ports sont dérivés du chemin. Pour le redémarrer :
+
+```bash
+make start-worktree
+```
+
+Pour arrêter Web et l'API du worktree courant :
+
+```bash
+make stop-worktree
+```
+
+Vous pouvez aussi exécuter `make dev` directement. Le script détecte un worktree grâce à son fichier `.git` et sélectionne `.env.worktree`.
+
+<Callout type="info">
+Les différents worktrees partagent le conteneur PostgreSQL, pas la base de données. Ne démarrez pas un nouveau projet Compose pour chaque worktree. Vérifiez d'abord `POSTGRES_DB`, `PORT` et `FRONTEND_PORT` dans `.env.worktree`.
+</Callout>
+
+## Commandes courantes
+
+### Workflow complet
+
+```bash
+make up               # Démarre l'environnement de ce checkout (C=api,web,daemon,desktop)
+make status           # Affiche ce qui tourne et prouve qu'il s'agit de cet environnement
+make list             # Liste tous les environnements de cette machine
+make down             # Arrête les processus, conserve la base de données
+make destroy          # Arrête, puis supprime la base de données et libère l'emplacement
+make gc               # Nettoie les environnements expirés ou dont le répertoire n'existe plus
+make dev              # Prépare et démarre le checkout courant au premier plan
+make check            # Exécute le workflow complet de vérification locale
+make build            # Compile les binaires server, CLI et migrate
+```
+
+`make up` traite un environnement comme un objet nommé : il alloue sous verrou les ports de l'API, de Web et du renderer Desktop,
+le nom de la base de données et le profil CLI, puis les enregistre dans `~/.multica/dev/`,
+de sorte que deux checkouts ne peuvent pas occuper le même emplacement sans que l'un d'eux en soit averti.
+Il vérifie la base de données via `DATABASE_URL` et le backend via
+`GET /health`, qui renvoie `pid`, `commit` et `started_at` — une simple réponse 200
+pourrait aussi provenir d'un processus résiduel sur le même port. `make destroy`
+supprime la base de données, le profil CLI, les espaces de travail du daemon, le userData de Desktop et
+l'entrée du registre ; en cas d'échec de la suppression, l'entrée du registre est conservée pour une nouvelle tentative. Les environnements
+temporaires sont nettoyés au mieux lors du `make up` suivant l'expiration de leur TTL.
+
+### Frontend
+
+```bash
+pnpm install
+pnpm dev:web
+pnpm dev:desktop
+pnpm build
+pnpm typecheck
+pnpm lint
+pnpm test
+```
+
+Les commandes racine excluent Mobile par défaut. Mobile dispose de ses propres scripts et de sa propre CI ; lisez `apps/mobile/AGENTS.md` avant de le modifier.
+
+### Backend
+
+```bash
+make server
+make daemon
+make test
+make migrate-up
+make migrate-down
+make sqlc
+```
+
+Pour exécuter une commande CLI depuis les sources :
+
+```bash
+make cli ARGS="issue list"
+```
+
+## Modifier des fonctionnalités frontend
+
+Placez les fonctionnalités nécessaires à la fois à Web et à Desktop selon leur responsabilité :
+
+1. Placez les types d'API, les queries, les mutations et la logique indépendante de la plateforme dans `packages/core/`.
+2. Placez l'UI de base dans `packages/ui/` ; elle ne doit pas dépendre du code métier.
+3. Placez les pages et composants métier dans `packages/views/`.
+4. Conservez les adaptateurs Next.js, Electron et de routage dans l'application correspondante.
+5. Branchez les pages partagées à la fois dans Web et dans Desktop.
+
+TanStack Query gère les données serveur. Zustand gère l'état client, comme les filtres, les brouillons et la mise en page. Consultez [Architecture du projet](/developers/architecture) et le `AGENTS.md` racine pour connaître la frontière exacte.
+
+Lorsque vous ajoutez ou modifiez une API, mettez à jour le schéma zod dans `packages/core/api/` et ajoutez des tests de parsing pour les champs manquants, les valeurs d'enum inconnues et les données malformées.
+
+## Modifier la base de données
+
+Les migrations se trouvent dans `server/migrations/`, et les requêtes dans `server/pkg/db/queries/`.
+
+1. Utilisez le prochain préfixe numérique inutilisé et créez à la fois `.up.sql` et `.down.sql`.
+2. N'ajoutez pas de clés étrangères en base de données, ni de suppressions ou de mises à jour en cascade. Garantissez les relations et le nettoyage dans la couche applicative.
+3. Tout nouvel index doit utiliser `CREATE INDEX CONCURRENTLY` ou `CREATE UNIQUE INDEX CONCURRENTLY`.
+4. Placez chaque index concurrent dans un fichier de migration qui ne contient que cette instruction.
+5. Exécutez `make sqlc` après avoir modifié des requêtes et committez les modifications générées dans `server/pkg/db/generated/`.
+6. Ne modifiez pas directement les fichiers générés par sqlc.
+
+Utilisez une transaction applicative dans la couche service lorsque plusieurs écritures doivent réussir ou être annulées ensemble.
+
+## Emplacement des tests
+
+| Modification | Emplacement des tests |
+| --- | --- |
+| Logique métier partagée, queries, stores | `packages/core/*.test.ts` |
+| Pages et composants partagés | `packages/views/*.test.tsx` |
+| Intégration à la plateforme Web ou Desktop | Répertoire `apps/*` correspondant |
+| Workflows de bout en bout | `e2e/*.spec.ts` |
+| Backend | `*_test.go` dans le package Go concerné |
+
+Exécutez d'abord la vérification la plus proche de la modification, puis élargissez la portée. Pour une modification qui ne touche que Docs :
+
+```bash
+pnpm --filter @multica/docs typecheck
+```
+
+Pour les modifications frontend partagées :
+
+```bash
+pnpm typecheck
+pnpm test
+```
+
+Pour les modifications backend :
+
+```bash
+make test
+```
+
+Avant de soumettre :
+
+```bash
+make check
+```
+
+`make check` exécute la vérification des types TypeScript et les tests unitaires, les tests Go et les tests E2E Playwright. La CI compile et exécute aussi le lint selon la portée des modifications, et lance des tests propres à une plateforme ou à l'installateur.
+
+## Réinitialiser la base de données de développement courante
+
+Lorsque vous avez besoin de données propres, réinitialisez la base de données désignée par le **fichier d'environnement du checkout courant** :
+
+```bash
+make stop
+make db-reset
+make start
+```
+
+`make db-reset` supprime puis recrée la base `POSTGRES_DB` courante et refuse de se connecter à une base de données distante. Avant de l'exécuter, vérifiez `.env` ou `.env.worktree` et confirmez la base de données cible.
+
+## Avant de soumettre
+
+- Lisez le `AGENTS.md` racine et les instructions imbriquées pertinentes.
+- Limitez vos modifications au périmètre nécessaire.
+- Rédigez les commentaires de code en anglais.
+- Ne committez pas `.env`, des jetons, des artefacts de build ni des chemins locaux.
+- Utilisez des conventional commits tels que `feat(scope)`, `fix(scope)` ou `docs`.
+- Dans la PR, décrivez les changements de comportement et les commandes de vérification réellement exécutées.
+
+## Étapes suivantes
+
+- [Conventions de développement](/developers/conventions) — Contrats du dépôt pour le nommage, la terminologie et les textes en chinois.
+- [Architecture du projet](/developers/architecture) — Couches, packages partagés et chemin du code pour une exécution.

@@ -18,7 +18,7 @@ const TEST_RESOURCES = {
 // mocked api throws. vi.hoisted is required because vi.mock is hoisted above
 // imports — a top-level class declaration would not be visible to the mock
 // factory at hoist time.
-const { ApiError, apiDeleteRuntime, apiArchiveAgentsAndDeleteRuntime } = vi.hoisted(() => {
+const { ApiError, apiDeleteRuntime, apiUnbindAgentsAndDeleteRuntime } = vi.hoisted(() => {
   class ApiError extends Error {
     status: number;
     body: unknown;
@@ -31,15 +31,15 @@ const { ApiError, apiDeleteRuntime, apiArchiveAgentsAndDeleteRuntime } = vi.hois
   return {
     ApiError,
     apiDeleteRuntime: vi.fn(),
-    apiArchiveAgentsAndDeleteRuntime: vi.fn(),
+    apiUnbindAgentsAndDeleteRuntime: vi.fn(),
   };
 });
 
 vi.mock("@multica/core/api", () => ({
   api: {
     deleteRuntime: (...args: unknown[]) => apiDeleteRuntime(...args),
-    archiveAgentsAndDeleteRuntime: (...args: unknown[]) =>
-      apiArchiveAgentsAndDeleteRuntime(...args),
+    unbindAgentsAndDeleteRuntime: (...args: unknown[]) =>
+      apiUnbindAgentsAndDeleteRuntime(...args),
     listAgents: vi.fn(),
     listMembers: vi.fn(),
   },
@@ -55,11 +55,11 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
     mutate: vi.fn(),
     mutateAsync: (...args: unknown[]) => apiDeleteRuntime(...args),
   }),
-  useArchiveAgentsAndDeleteRuntime: () => ({
+  useUnbindAgentsAndDeleteRuntime: () => ({
     isPending: false,
     mutate: vi.fn(),
     mutateAsync: (vars: { runtimeId: string; expectedActiveAgentIds: string[] }) =>
-      apiArchiveAgentsAndDeleteRuntime(vars.runtimeId, vars.expectedActiveAgentIds),
+      apiUnbindAgentsAndDeleteRuntime(vars.runtimeId, vars.expectedActiveAgentIds),
   }),
 }));
 
@@ -145,6 +145,8 @@ function makeAgent(id: string, overrides: Partial<Agent> = {}): Agent {
     runtime_config: {},
     custom_args: [],
     visibility: "private",
+    permission_mode: "private",
+    invocation_targets: [],
     status: "idle",
     max_concurrent_tasks: 1,
     model: "claude-sonnet-4-5",
@@ -207,7 +209,7 @@ describe("DeleteRuntimeDialog", () => {
     expect(screen.getByText("Delete runtime")).toBeInTheDocument();
     // No checkbox, no agent table in light mode.
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
-    expect(screen.queryByText(/Archive .* and delete this Runtime/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Unbind .* and delete this Runtime/)).not.toBeInTheDocument();
   });
 
   it("opens directly in cascade mode when local cache shows bound agents, with the destructive button gated by the checkbox", async () => {
@@ -219,11 +221,11 @@ describe("DeleteRuntimeDialog", () => {
     });
 
     expect(
-      screen.getByText(/Archive 2 agents and delete this Runtime/),
+      screen.getByText(/Unbind 2 agents and delete this Runtime/),
     ).toBeInTheDocument();
     // Destructive confirm starts disabled until the user ticks the checkbox.
     const confirm = screen.getByRole("button", {
-      name: /Archive 2 agents and delete runtime/,
+      name: /Unbind 2 agents and delete runtime/,
     }) as HTMLButtonElement;
     expect(confirm.disabled).toBe(true);
 
@@ -231,14 +233,14 @@ describe("DeleteRuntimeDialog", () => {
     fireEvent.click(checkbox);
     await waitFor(() => expect(confirm.disabled).toBe(false));
 
-    apiArchiveAgentsAndDeleteRuntime.mockResolvedValueOnce({
+    apiUnbindAgentsAndDeleteRuntime.mockResolvedValueOnce({
       status: "ok",
-      agents_archived: 2,
+      agents_unbound: 2,
       tasks_cancelled: 0,
     });
     fireEvent.click(confirm);
     await waitFor(() =>
-      expect(apiArchiveAgentsAndDeleteRuntime).toHaveBeenCalledWith("rt-1", [
+      expect(apiUnbindAgentsAndDeleteRuntime).toHaveBeenCalledWith("rt-1", [
         "a-1",
         "a-2",
       ]),
@@ -263,7 +265,7 @@ describe("DeleteRuntimeDialog", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText(/Archive 1 agent and delete this Runtime/),
+        screen.getByText(/Unbind 1 agent and delete this Runtime/),
       ).toBeInTheDocument(),
     );
     expect(screen.getByText("FreshAgent")).toBeInTheDocument();
@@ -274,7 +276,7 @@ describe("DeleteRuntimeDialog", () => {
   });
 
   it("re-prompts when the cascade returns runtime_delete_plan_changed", async () => {
-    apiArchiveAgentsAndDeleteRuntime.mockRejectedValueOnce(
+    apiUnbindAgentsAndDeleteRuntime.mockRejectedValueOnce(
       new ApiError("plan changed", 409, {
         code: "runtime_delete_plan_changed",
         active_agents: [
@@ -296,13 +298,13 @@ describe("DeleteRuntimeDialog", () => {
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(
       screen.getByRole("button", {
-        name: /Archive 2 agents and delete runtime/,
+        name: /Unbind 2 agents and delete runtime/,
       }),
     );
 
     await waitFor(() =>
       expect(
-        screen.getByText(/Archive 3 agents and delete this Runtime/),
+        screen.getByText(/Unbind 3 agents and delete this Runtime/),
       ).toBeInTheDocument(),
     );
     // The new third agent shows in the plan.
@@ -317,5 +319,112 @@ describe("DeleteRuntimeDialog", () => {
     expect(
       screen.getByText(/active agent set changed/i),
     ).toBeInTheDocument();
+  });
+
+  // MUL-3352: the dialog used to refuse self-healing runtimes outright,
+  // both at the affordance and at confirm. The new contract is owner-led:
+  // the affordance is always live, the dialog raises a warning banner so
+  // the user understands the daemon will re-register a new row unless
+  // they stop the daemon, and confirm proceeds normally.
+  it("renders the self-heal banner in light mode for an online local runtime", () => {
+    renderDialog({
+      runtime: makeRuntime({ runtime_mode: "local", status: "online" }),
+      cachedAgents: [],
+    });
+    expect(
+      screen.getByText(/managed by a running local daemon/i),
+    ).toBeInTheDocument();
+  });
+
+  it("explains that deleting a profile-backed runtime only removes the current instance", () => {
+    renderDialog({
+      runtime: makeRuntime({
+        runtime_mode: "local",
+        status: "online",
+        profile_id: "profile-1",
+      }),
+      cachedAgents: [],
+    });
+
+    expect(
+      screen.getByText(/registered from a custom runtime profile/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/delete the custom runtime profile/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/managed by a running local daemon/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the profile-backed runtime explanation in cascade mode", () => {
+    renderDialog({
+      runtime: makeRuntime({ profile_id: "profile-1" }),
+      cachedAgents: [makeAgent("a-1", { name: "Alpha" })],
+    });
+
+    expect(
+      screen.getByText(/registered from a custom runtime profile/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Unbind 1 agent and delete this Runtime/),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the self-heal banner in cascade mode for an online local runtime with bound agents", () => {
+    renderDialog({
+      runtime: makeRuntime({ runtime_mode: "local", status: "online" }),
+      cachedAgents: [makeAgent("a-1", { name: "Alpha" })],
+    });
+    // Both the destructive cascade banner AND the self-heal banner render —
+    // self-heal sits above the destructive one so the user sees the
+    // daemon-will-respawn warning before scanning the agent table.
+    expect(
+      screen.getByText(/managed by a running local daemon/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Unbind 1 agent and delete this Runtime/),
+    ).toBeInTheDocument();
+  });
+
+  it("does NOT render the self-heal banner for offline local or cloud runtimes", () => {
+    // Offline local: no live daemon, so the warning would be misleading.
+    const { unmount } = renderDialog({
+      runtime: makeRuntime({ runtime_mode: "local", status: "offline" }),
+      cachedAgents: [],
+    });
+    expect(
+      screen.queryByText(/managed by a running local daemon/i),
+    ).not.toBeInTheDocument();
+    unmount();
+
+    // Cloud: managed by Fleet, not a self-restarting local daemon.
+    renderDialog({
+      runtime: makeRuntime({ runtime_mode: "cloud", status: "online" }),
+      cachedAgents: [],
+    });
+    expect(
+      screen.queryByText(/managed by a running local daemon/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("allows confirm to proceed on a self-healing runtime instead of toasting an error", async () => {
+    // The old defensive `handleConfirm` returned early with a toast for
+    // self-healing runtimes; this regression pin makes sure the click
+    // actually lands on the delete API now.
+    apiDeleteRuntime.mockResolvedValueOnce({ status: "ok" });
+
+    const onDeleted = vi.fn();
+    renderDialog({
+      runtime: makeRuntime({ runtime_mode: "local", status: "online" }),
+      cachedAgents: [],
+      onDeleted,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete runtime" }));
+    await waitFor(() =>
+      expect(apiDeleteRuntime).toHaveBeenCalledWith("rt-1"),
+    );
+    await waitFor(() => expect(onDeleted).toHaveBeenCalled());
   });
 });

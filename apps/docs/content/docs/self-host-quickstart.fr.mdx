@@ -1,0 +1,393 @@
+---
+title: Démarrage rapide en auto-hébergement
+description: Démarrez Multica avec Docker Compose, connectez-vous, puis reliez votre premier ordinateur.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+L'auto-hébergement de Multica comporte deux parties :
+
+| Partie | Ce qu'elle exécute | Où elle se trouve |
+|---|---|---|
+| **Service Multica** | Web, API et PostgreSQL | Une machine sur laquelle Docker est installé |
+| **Ordinateur** | Le daemon Multica et les outils de codage IA | L'ordinateur sur lequel les développeurs travaillent réellement |
+
+Il peut s'agir de la même machine ou de machines distinctes. L'auto-hébergement ne remplace que la partie Multica Cloud.
+
+Ce guide utilise Docker Compose. Pour un déploiement sur Kubernetes, consultez le [guide d'auto-hébergement](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative) dans le dépôt.
+
+## Avant de commencer
+
+La machine qui exécute le service Multica a besoin de :
+
+- Docker Engine ou Docker Desktop, avec `docker compose` fonctionnel
+- Git, Make, curl et OpenSSL
+- Les ports `3000` et `8080` libres sur la machine
+
+Vérifiez d'abord que Docker et Compose sont disponibles :
+
+```bash
+docker info
+docker compose version
+```
+
+Multica utilise Compose v2, invoqué via `docker compose`. L'ancien `docker-compose` v1 n'est pas pris en charge.
+
+L'ordinateur doit également disposer d'au moins un [outil de codage IA](/providers) installé et connecté, comme Claude Code, Codex ou Cursor. Le CLI Multica est installé à l'étape 5.
+
+## 1. Démarrer Multica
+
+Sur la machine qui fera tourner le service :
+
+```bash
+git clone --depth 1 https://github.com/multica-ai/multica.git
+cd multica
+make selfhost
+```
+
+Au premier lancement, `make selfhost` :
+
+1. Crée `.env` à partir de `.env.example`
+2. Génère un `JWT_SECRET` aléatoire, un mot de passe PostgreSQL et une `MULTICA_VCS_SECRET_KEY` (la clé de chiffrement des intégrations Git auto-hébergées)
+3. Télécharge les images PostgreSQL, backend Multica et frontend Multica
+4. Crée des volumes persistants et démarre les trois conteneurs
+5. Attend que le backend commence à répondre aux vérifications d'état
+
+Relancer `make selfhost` réutilise le `.env` et les volumes existants ; les secrets ne sont pas régénérés.
+
+<Callout type="info">
+`make selfhost` télécharge les images publiées et ne compile pas le code de votre copie locale. Pour tester le code source local, utilisez `make selfhost-build`.
+
+Les images publiées suivent le **tag de version** le plus récent, alors qu'un simple `git clone` récupère `main`, qui a généralement de l'avance. Si vous compilez quoi que ce soit à partir de cette copie locale — le CLI, ou des images via `make selfhost-build` — basculez d'abord sur le tag de version correspondant, afin que les binaires compilés et les conteneurs en cours d'exécution restent sur la même version :
+
+```bash
+git fetch --tags --depth 1
+git checkout $(git tag -l 'v*' --sort=-v:refname | head -1)
+```
+</Callout>
+
+## 2. Vérifier que les services sont prêts
+
+Vérifiez l'état des conteneurs :
+
+```bash
+docker compose -f docker-compose.selfhost.yml ps
+```
+
+`postgres` doit afficher `healthy`, et `backend` et `frontend` doivent être en cours d'exécution. Vérifiez ensuite le backend, la base de données et les migrations :
+
+```bash
+curl -fsS http://localhost:8080/readyz
+```
+
+La réponse attendue est :
+
+```json
+{"status":"ok","checks":{"db":"ok","migrations":"ok"}}
+```
+
+Le conteneur backend exécute les migrations de base de données à chaque démarrage, avant de servir les requêtes ; il n'y a aucune commande de migration manuelle à lancer.
+
+## 3. Choisir le mode d'accès
+
+### Accès local
+
+Ouvrez directement [http://localhost:3000](http://localhost:3000). Vous n'aurez pas non plus besoin de fournir d'URL lorsque vous lancerez `multica setup self-host` plus tard.
+
+### Accès distant
+
+Docker Compose lie `3000` et `8080` uniquement à `127.0.0.1`. Ne remplacez pas cette valeur par `0.0.0.0` pour exposer les ports sur l'Internet public ; utilisez plutôt un proxy inverse avec HTTPS.
+
+L'exemple ci-dessous utilise deux domaines :
+
+- `app.example.com` : l'application web Multica
+- `api.example.com` : l'API, les vérifications d'état et les connexions des daemons
+
+Définissez d'abord les URL publiques dans `.env` :
+
+```bash
+FRONTEND_ORIGIN=https://app.example.com
+MULTICA_APP_URL=https://app.example.com
+MULTICA_PUBLIC_URL=https://api.example.com
+```
+
+Avec cette configuration, tout le trafic du navigateur reste sur le domaine de l'application : les cookies ne passent jamais d'un domaine à l'autre et `COOKIE_DOMAIN` n'est pas nécessaire. Si le navigateur communique plutôt directement avec le domaine de l'API, vous devez la définir — consultez [Variables d'environnement](/environment-variables).
+
+Configurez ensuite le DNS et placez Caddy en proxy devant les ports locaux :
+
+```text
+app.example.com {
+    # Transmettre directement les WebSockets du navigateur au backend
+    @ws path /ws /ws/*
+    handle @ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Tout le reste va au frontend, qui relaie les requêtes d'API et de connexion
+    handle {
+        reverse_proxy 127.0.0.1:3000
+    }
+}
+
+api.example.com {
+    reverse_proxy 127.0.0.1:8080 {
+        flush_interval -1
+    }
+}
+```
+
+Si vous préférez tout servir sur une **origine unique** (un seul domaine, ou un seul hôte avec un seul port — courant sur les petits serveurs), routez explicitement vers le backend les chemins indispensables au daemon et laissez le frontend gérer le reste :
+
+```text
+multica.example.com {
+    # Sonde d'accessibilité du CLI : `multica setup` envoie un GET à <server-url>/health et
+    # attend un 200 — les anciennes versions web ne le relaient pas, il faut donc le router directement
+    handle /health {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # WebSocket temps réel du navigateur — l'image web ne peut pas relayer les upgrades WS
+    handle /ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # WebSocket de connexion longue du daemon : les daemons se connectent à {server-url}/api/daemon/ws
+    # (et non /ws). Sans cette route, la négociation échoue et le daemon se rabat
+    # silencieusement sur le polling
+    handle /api/daemon/ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Tout le reste va au frontend, qui relaie les requêtes d'API et de connexion
+    handle {
+        reverse_proxy 127.0.0.1:3000
+    }
+}
+```
+
+Avec une origine unique, faites pointer les deux URL vers celle-ci (`FRONTEND_ORIGIN` et `MULTICA_APP_URL` dans `.env`, puis `--server-url` et `--app-url` dans `multica setup self-host`).
+
+Caddy obtient les certificats TLS et relaie les WebSockets. Après avoir modifié `.env`, recréez les conteneurs avec `up -d` pour que la nouvelle configuration soit prise en compte :
+
+```bash
+docker compose -f docker-compose.selfhost.yml up -d
+curl -fsS https://api.example.com/readyz
+curl -fsS https://app.example.com/api/config | grep -o '"daemon_server_url":"[^"]*"'
+```
+
+La dernière commande affiche `daemon_server_url`, l'URL que les daemons utilisent pour joindre l'API : `MULTICA_DAEMON_SERVER_URL` si elle est définie, puis `MULTICA_PUBLIC_URL`, sinon l'URL de l'application — `MULTICA_APP_URL`, avec `FRONTEND_ORIGIN` en repli. Lorsque ni `MULTICA_APP_URL` ni `FRONTEND_ORIGIN` n'est défini, le champ est entièrement omis de la réponse (le grep n'affiche donc rien), même si `MULTICA_DAEMON_SERVER_URL` ou `MULTICA_PUBLIC_URL` est défini. S'il affiche une adresse `localhost`, `.env` contient encore les valeurs locales par défaut : définissez explicitement `FRONTEND_ORIGIN` et `MULTICA_APP_URL` avec les URL publiques au lieu de vous appuyer sur les références `${FRONTEND_PORT}` copiées depuis `.env.example`, puis recréez les conteneurs.
+
+<Callout type="warning">
+`docker compose restart` ne fait que redémarrer les conteneurs existants et ne relit pas `.env`. Après une modification de configuration, exécutez `docker compose -f docker-compose.selfhost.yml up -d` pour relire `.env`.
+</Callout>
+
+## 4. Se connecter et créer un espace de travail
+
+Ouvrez `http://localhost:3000` en local, ou le `https://app.example.com` que vous venez de configurer, puis saisissez votre adresse e-mail pour demander un code de vérification.
+
+Aucun service d'e-mail n'est configuré par défaut. Après avoir demandé un code, lisez-le dans les journaux du backend :
+
+```bash
+docker compose -f docker-compose.selfhost.yml logs backend \
+  | grep "Verification code"
+```
+
+Les journaux contiennent une ligne comme celle-ci :
+
+```text
+[DEV] Verification code for you@example.com: 123456
+```
+
+Saisissez le code et créez votre premier espace de travail. Une fois Resend ou SMTP configuré, les codes sont envoyés par e-mail et les membres n'ont plus besoin de lire les journaux des conteneurs — consultez [Configuration de l'authentification](/auth-setup).
+
+<Callout type="warning">
+Les déploiements auto-hébergés utilisent par défaut `APP_ENV=production`, qui désactive les codes de vérification fixes. Ne définissez pas `MULTICA_DEV_VERIFICATION_CODE` sur une instance publique.
+</Callout>
+
+## 5. Connecter un ordinateur
+
+Lancez les commandes ci-dessous sur **l'ordinateur qui fait tourner vos outils de codage IA**, qui n'est pas forcément le serveur qui fait tourner Docker.
+
+<Callout type="warning">
+Les exécutions disposent de toutes les permissions de l'utilisateur qui fait tourner le daemon : elles peuvent lire et écrire tout ce à quoi cet utilisateur a accès. Faites tourner le daemon sous un utilisateur Unix dédié, dans un conteneur ou dans une VM plutôt que sous votre compte personnel. Consultez le [modèle de sécurité](/security-model).
+</Callout>
+
+Installez d'abord le CLI Multica :
+
+**macOS / Linux**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+```
+
+**Windows PowerShell**
+
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+```
+
+Si le service Multica tourne sur ce même ordinateur :
+
+```bash
+multica setup self-host
+```
+
+Si le service Multica tourne sur une autre machine, passez les deux URL configurées précédemment :
+
+```bash
+multica setup self-host \
+  --server-url https://api.example.com \
+  --app-url https://app.example.com
+```
+
+La commande vérifie d'abord `<server-url>/health`, puis ouvre un navigateur pour terminer la connexion. Une fois la connexion effectuée, elle enregistre les identifiants en local et démarre le daemon. Une erreur `Server not reachable` à cette étape signifie que la sonde n'a pas obtenu de 200 sur `/health` : soit le proxy transmet tout à une version web qui ne relaie pas ce chemin, soit le proxy ne route pas du tout `/health` vers le backend, soit il s'agit d'une défaillance de plus bas niveau (DNS, TLS, pare-feu, délai d'attente dépassé, 5xx renvoyé par le backend) — consultez [Dépannage](/troubleshooting#multica-setup-signale-que-le-serveur-est-injoignable).
+
+Vérifiez la connexion :
+
+```bash
+multica daemon status
+```
+
+La sortie doit afficher :
+
+- `Daemon: running`
+- `Agents`, qui liste les outils de codage IA installés sur cette machine
+- `Workspaces` supérieur à `0`
+
+## 6. Terminer la première exécution
+
+De retour dans Multica, dès qu'un runtime en ligne apparaît dans la liste des runtimes, créez un agent et assignez-lui votre première tâche.
+
+Lorsque l'exécution apparaît comme terminée et que la réponse de l'agent s'affiche dans la chronologie, le service auto-hébergé, l'ordinateur et l'outil de codage IA sont tous connectés. Pour le détail, consultez les étapes 3 à 5 du [démarrage rapide](/cloud-quickstart).
+
+## Commandes d'administration courantes
+
+Lancez-les toutes depuis le répertoire du dépôt `multica` :
+
+```bash
+# Vérifier l'état
+docker compose -f docker-compose.selfhost.yml ps
+
+# Suivre les journaux du backend
+docker compose -f docker-compose.selfhost.yml logs -f backend
+
+# Appliquer les modifications de .env
+docker compose -f docker-compose.selfhost.yml up -d
+
+# Arrêter les services en conservant les volumes
+docker compose -f docker-compose.selfhost.yml down
+```
+
+Pour passer aux dernières images publiées :
+
+```bash
+git pull --ff-only
+docker compose -f docker-compose.selfhost.yml pull
+docker compose -f docker-compose.selfhost.yml up -d
+curl -fsS http://localhost:8080/readyz
+```
+
+Il existe deux façons de mettre à niveau une installation Docker Compose. Sur une installation existante, elles produisent le **même résultat** — la cible `selfhost` du `Makefile` exécute les mêmes `docker compose pull` + `up -d`, et en plus crée `.env` s'il est absent et attend `/health` avant d'afficher un résumé de l'état. Choisissez celle que vous préférez :
+
+```bash
+cd multica
+git pull
+make selfhost
+```
+
+```bash
+cd multica
+git pull
+docker compose -f docker-compose.selfhost.yml pull
+docker compose -f docker-compose.selfhost.yml up -d
+```
+
+### Ce que fait réellement `git pull`
+
+`git pull` met à jour **`docker-compose.selfhost.yml` lui-même** — nouvelles variables d'environnement, nouveaux services, vérifications d'état modifiées. Ce n'est **pas** ainsi que vous obtenez une nouvelle version de Multica.
+
+La version que vous exécutez au final est déterminée par `docker compose pull`, qui demande à GHCR vers quoi pointe le tag à cet instant. Une copie locale en retard de plusieurs mois téléchargera quand même les images `latest` du jour ; à l'inverse, `git pull` seul ne change rien tant que vous n'avez pas téléchargé les images et recréé les conteneurs.
+
+<Callout type="warning">
+**Si vous avez figé `MULTICA_IMAGE_TAG`, aucune des deux commandes ne met quoi que ce soit à niveau.** Les deux images sont résolues en `${MULTICA_IMAGE_TAG:-latest}` (`docker-compose.selfhost.yml:42`, `:125`), et `.env.example` fournit `MULTICA_IMAGE_TAG=latest`. Si votre `.env` fige une version précise, `pull` récupère simplement de nouveau ce même tag et vous restez sur l'ancienne version — sans erreur ni avertissement. Vérifiez avant de mettre à niveau :
+
+```bash
+grep MULTICA_IMAGE_TAG .env
+# MULTICA_IMAGE_TAG=v0.4.5   ← figé : remplacez-le d'abord par `latest` (ou la version souhaitée)
+```
+</Callout>
+
+### Votre `.env` n'est pas écrasé
+
+`make selfhost` ne génère `.env` que lorsque le fichier est **absent**. Le relancer sur une installation existante laisse votre `JWT_SECRET`, votre mot de passe Postgres, vos paramètres d'e-mail et `FRONTEND_ORIGIN` exactement tels qu'ils étaient.
+
+### Sauvegardez d'abord Postgres
+
+Les migrations ne vont que vers l'avant ; faites donc un dump avant de mettre à niveau un déploiement auquel vous tenez :
+
+```bash
+docker compose -f docker-compose.selfhost.yml exec -T postgres \
+  pg_dump -U multica multica > multica-backup.sql && gzip multica-backup.sql
+```
+
+<Callout type="warning">
+**Ne redirigez pas `pg_dump` directement vers `gzip` par un pipe.** Un shell renvoie le code de sortie de la *dernière* commande d'un pipeline : `pg_dump … | gzip > backup.sql.gz` se termine donc avec `0` même si le dump a échoué — ce qui laisse une archive de 20 octets parfaitement valide, mais vide. Rediriger d'abord vers un fichier fait compter le code de sortie de `pg_dump` lui-même, et `&&` ne compresse qu'un dump qui a réellement réussi.
+</Callout>
+
+Utilisez vos propres `POSTGRES_USER` / `POSTGRES_DB` de `.env` si vous avez modifié les valeurs par défaut `multica`. Les données résident dans le volume nommé `multica_pgdata`, qui survit à `docker compose down` — mais pas à `down -v`.
+
+### Les migrations s'exécutent d'elles-mêmes
+
+Comme à l'[étape 1](#1-démarrer-multica), le conteneur backend exécute `./migrate up` au démarrage (`docker/entrypoint.sh`) avant de servir le trafic. Il n'y a pas de commande de mise à niveau distincte — démarrer la nouvelle image *est* l'étape de migration. Pour suivre le déroulement :
+
+```bash
+docker compose -f docker-compose.selfhost.yml logs -f backend
+```
+
+Les migrations s'exécutent automatiquement au démarrage du backend ; celles qui complètent rétroactivement des données historiques (comme la 103) terminent aussi ce remplissage automatiquement. Dans de rares cas, le remplissage automatique échoue avec `refusing to drop legacy daily rollups` — consultez [Dépannage](/troubleshooting#la-migration-103-bloque-une-mise-à-niveau).
+
+### Vérifier avec `/readyz`, pas `/health`
+
+`/health` est une sonde de **vivacité** (liveness) — elle renvoie `{"status":"ok"}` tant que le processus tourne, y compris lorsque les migrations ont échoué. `/readyz` (`server/cmd/server/router.go:680` ; `/healthz` en est un alias) vérifie la base de données et l'ensemble des migrations appliquées : c'est donc elle qui détecte une mise à niveau ratée :
+
+```bash
+curl -s localhost:8080/readyz
+# {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
+```
+
+Toute réponse autre qu'un HTTP 200 avec les deux vérifications à `ok` signifie que la nouvelle version n'a pas terminé ses migrations — consultez les journaux du backend avant de lui envoyer du trafic.
+
+### Kubernetes
+
+Helm a son propre chemin de mise à niveau : définissez `images.backend.tag` / `images.frontend.tag` sur la version souhaitée dans votre fichier de valeurs, puis lancez `helm upgrade`. Changer le tag modifie la spécification du pod : Kubernetes télécharge donc la nouvelle image et redéploie progressivement les Deployments — c'est la méthode fiable.
+
+`kubectl -n multica rollout restart` n'est **pas** une mise à niveau en soi. Le chart est livré avec `pullPolicy: IfNotPresent` (`deploy/helm/multica/values.yaml`) : un nœud qui a déjà ce tag en cache réutilise donc l'ancienne image, et le redémarrage ne change silencieusement rien — le même type de piège qu'un `MULTICA_IMAGE_TAG` figé. Si vous voulez suivre un tag flottant de cette manière, définissez d'abord `images.backend.pullPolicy` / `images.frontend.pullPolicy` sur `Always`. Consultez le [guide d'auto-hébergement](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative).
+
+<Callout type="warning">
+`docker compose down` conserve `pgdata` et `backend_uploads`. Ajouter `-v` supprime ces volumes, base de données comprise ; n'exécutez pas `docker compose down -v`, sauf si vous avez l'intention d'effacer l'instance.
+</Callout>
+
+## Problèmes courants
+
+| Symptôme | À vérifier en premier |
+|---|---|
+| `/readyz` ne renvoie pas `ok` | Exécutez `docker compose -f docker-compose.selfhost.yml logs backend postgres`. |
+| Aucun code de vérification n'arrive | Demandez un code, puis cherchez `Verification code` dans les journaux du backend. |
+| `setup self-host` signale que le serveur est injoignable | Depuis l'ordinateur, envoyez une requête à `https://api.example.com/health` pour confirmer que le DNS, le TLS et le proxy inverse sont tous joignables. Un 404 signifie que le proxy envoie `/health` à une ancienne version web qui ne le relaie pas — routez-le vers le backend ([Dépannage](/troubleshooting#multica-setup-signale-que-le-serveur-est-injoignable)). |
+| Le daemon n'affiche rien sous `Agents` | Vérifiez que les outils de codage IA sont dans le `PATH` et connectés, puis exécutez `multica daemon restart`. |
+| Les tâches restent en file d'attente | Exécutez `multica daemon status` pour confirmer que le daemon tourne et qu'il est connecté à l'espace de travail. |
+
+Pour d'autres scénarios, consultez [Dépannage](/troubleshooting).
+
+## Étapes suivantes
+
+- [Configuration de l'authentification](/auth-setup) — configurer l'e-mail, la connexion Google et le périmètre d'inscription.
+- [Variables d'environnement](/environment-variables) — la référence complète de configuration du serveur.
+- [Guide d'auto-hébergement](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md) — Kubernetes, mises à niveau et déploiement manuel.
+- [Application de bureau](/desktop-app) — connecter l'application de bureau à un service auto-hébergé.

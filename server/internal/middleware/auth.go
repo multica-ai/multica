@@ -17,6 +17,20 @@ import (
 
 func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 
+func rejectTemporarilyDisabledUser(w http.ResponseWriter, r *http.Request, userID, email, authPath string) bool {
+	if !auth.IsTemporarilyDisabledUser(userID, email) {
+		return false
+	}
+	slog.Warn(
+		"auth: temporarily disabled user rejected",
+		"path", r.URL.Path,
+		"user_id", userID,
+		"auth_path", authPath,
+	)
+	writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
+	return true
+}
+
 // Auth middleware validates JWT tokens or Personal Access Tokens.
 // Token sources (in priority order):
 //  1. Authorization: Bearer <token> header (PAT or JWT)
@@ -29,12 +43,20 @@ func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 // SELECT and the last_used_at UPDATE — last_used_at is therefore refreshed
 // at most once per TTL window per token, not per request.
 //
+// cfSigner is optional; when non-nil, a session renewed here also gets fresh
+// CloudFront cookies. It is wired into THIS middleware rather than left to
+// RefreshCloudFrontCookies because renewal is what makes the two clocks
+// diverge: every route group that can renew must re-sign, and only the
+// renewer knows it renewed. A group that mounts Auth without the CDN
+// middleware (the plugin bridge) would otherwise slide the session forward
+// while leaving the CDN policy pinned to the original login.
+//
 // cloudPAT is optional; when non-nil, tokens with the mcn_ prefix are
 // validated by calling the Multica Cloud Fleet service rather than the
 // local DB. When nil (Fleet URL unset) mcn_ tokens are rejected at the
 // prefix branch — we don't fall through to the mul_ / JWT paths, since
 // an mcn_ string is by construction not a valid mul_ PAT or JWT.
-func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATVerifier) func(http.Handler) http.Handler {
+func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATVerifier, cfSigner *auth.CloudFrontSigner) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// X-Actor-Source is server-set only — any value supplied by
@@ -45,6 +67,21 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// to convince a downstream handler that its request came
 			// from a non-task-token path.
 			r.Header.Del("X-Actor-Source")
+
+			// Agent identity is server-set for exactly the same reason,
+			// and the rest of the codebase already assumes it (see
+			// resolveActor, actor_guards.go, CreateIssue). Only the mat_
+			// branch below re-stamps these from the token row.
+			//
+			// Without the strip, resolveActor's pair requirement was not a
+			// boundary: BOTH ids are readable by any workspace member
+			// (GET /api/issues/{id}/task-runs returns agent_id + task_id),
+			// so a member could replay a live pair on their own JWT/PAT and
+			// be resolved as that agent — and, since MUL-6951, act with the
+			// authority of that run's originator. MUL-3428, reported and
+			// fixed in #4313.
+			r.Header.Del("X-Agent-ID")
+			r.Header.Del("X-Task-ID")
 
 			tokenString, fromCookie := extractToken(r)
 			if tokenString == "" {
@@ -67,7 +104,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// written into request headers here, OVERRIDING whatever the
 			// client sent, so a downstream actor-resolver cannot be
 			// tricked by a client that strips or forges X-Agent-ID /
-			// X-Task-ID. Owner-only endpoints (e.g. agent env
+			// X-Task-ID. Human-only endpoints (e.g. agent env
 			// management) reject requests authenticated this way; see
 			// `actorSourceFromRequest`. MUL-2600.
 			if strings.HasPrefix(tokenString, "mat_") {
@@ -82,7 +119,11 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 					return
 				}
-				r.Header.Set("X-User-ID", uuidToString(tt.UserID))
+				userID := uuidToString(tt.UserID)
+				if rejectTemporarilyDisabledUser(w, r, userID, "", "task_token") {
+					return
+				}
+				r.Header.Set("X-User-ID", userID)
 				r.Header.Set("X-Agent-ID", uuidToString(tt.AgentID))
 				r.Header.Set("X-Task-ID", uuidToString(tt.TaskID))
 				r.Header.Set("X-Workspace-ID", uuidToString(tt.WorkspaceID))
@@ -103,7 +144,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// personal_access_tokens table for this prefix; an mcn_
 			// string is not a valid mul_ value, so falling through
 			// would just be a redundant DB miss. When the verifier
-			// is unconfigured (no MULTICA_CLOUD_FLEET_URL) we reject
+			// is unconfigured (no MULTICA_CLOUD_URL) we reject
 			// at this branch rather than treating the token as a
 			// JWT/PAT — failing closed avoids a misconfigured prod
 			// silently downgrading auth.
@@ -136,6 +177,9 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					http.Error(w, `{"error":"cloud pat verifier unavailable"}`, http.StatusServiceUnavailable)
 					return
 				}
+				if rejectTemporarilyDisabledUser(w, r, identity.OwnerID, "", "cloud_pat") {
+					return
+				}
 				r.Header.Set("X-User-ID", identity.OwnerID)
 				// Tag the auth path so account-level guards (e.g.
 				// handler.RequireHumanActor on /api/cloud-billing/*)
@@ -162,6 +206,9 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				// entry since. Skip the DB SELECT and the last_used_at
 				// UPDATE — last_used_at is bumped once per TTL window.
 				if userID, ok := patCache.Get(r.Context(), hash); ok {
+					if rejectTemporarilyDisabledUser(w, r, userID, "", "pat_cache") {
+						return
+					}
 					r.Header.Set("X-User-ID", userID)
 					next.ServeHTTP(w, r)
 					return
@@ -179,6 +226,9 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				}
 
 				userID := uuidToString(pat.UserID)
+				if rejectTemporarilyDisabledUser(w, r, userID, "", "pat") {
+					return
+				}
 				r.Header.Set("X-User-ID", userID)
 
 				// Clamp cache TTL to the token's remaining lifetime so a
@@ -225,10 +275,20 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				http.Error(w, `{"error":"invalid claims"}`, http.StatusUnauthorized)
 				return
 			}
+			email, _ := claims["email"].(string)
+			if rejectTemporarilyDisabledUser(w, r, sub, email, "jwt") {
+				return
+			}
 			r.Header.Set("X-User-ID", sub)
-			if email, ok := claims["email"].(string); ok {
+			if email != "" {
 				r.Header.Set("X-User-Email", email)
 			}
+
+			// Sliding session: a browser that keeps using the app keeps its
+			// cookie, instead of being logged out on the anniversary of its
+			// login. No-op until the session drops below half its TTL
+			// (MUL-7436).
+			r = renewCookieSession(w, r, claims, fromCookie, cfSigner)
 
 			next.ServeHTTP(w, r)
 		})

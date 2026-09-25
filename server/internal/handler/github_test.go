@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
@@ -14,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -21,8 +21,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -37,6 +39,11 @@ func TestExtractIdentifiers(t *testing.T) {
 			name: "branch_name",
 			in:   []string{"", "", "mul-1510/fix-login"},
 			want: []string{"MUL-1510"},
+		},
+		{
+			name: "single_character_prefix",
+			in:   []string{"H-412: fix widget parity"},
+			want: []string{"H-412"},
 		},
 		{
 			name: "title_and_body",
@@ -85,6 +92,11 @@ func TestExtractClosingIdentifiers(t *testing.T) {
 			name: "single_closes",
 			in:   []string{"", "Closes MUL-1"},
 			want: []string{"MUL-1"},
+		},
+		{
+			name: "single_character_prefix",
+			in:   []string{"", "Closes H-412"},
+			want: []string{"H-412"},
 		},
 		{
 			name: "all_keyword_inflections",
@@ -141,6 +153,22 @@ func TestExtractClosingIdentifiers(t *testing.T) {
 	}
 }
 
+// TestPRClaimedIdentifiers: the title and branch link, a closing keyword in the
+// title or body links and closes, and a bare body mention claims nothing.
+func TestPRClaimedIdentifiers(t *testing.T) {
+	idents, closing := prClaimedIdentifiers(
+		"ABC-1: Lorem Ipsum",
+		"Closes ABC-4. Follow up work planned in ABC-2.",
+		"fix/abc-3-login",
+	)
+	if want := []string{"ABC-1", "ABC-3", "ABC-4"}; !reflect.DeepEqual(idents, want) {
+		t.Errorf("idents = %v, want %v", idents, want)
+	}
+	if want := []string{"ABC-4"}; !reflect.DeepEqual(closing, want) {
+		t.Errorf("closing = %v, want %v", closing, want)
+	}
+}
+
 func TestDerivePRState(t *testing.T) {
 	cases := []struct {
 		state  string
@@ -160,6 +188,52 @@ func TestDerivePRState(t *testing.T) {
 			t.Errorf("derivePRState(%q, draft=%v, merged=%v) = %q, want %q",
 				tc.state, tc.draft, tc.merged, got, tc.want)
 		}
+	}
+}
+
+func TestIssuePullRequestResponseHidesUnavailableSnapshot(t *testing.T) {
+	fetchedAt := pgtype.Timestamptz{Time: time.Now(), Valid: true}
+	row := db.ListPullRequestsByIssueRow{
+		State:               "open",
+		HeadSha:             "B",
+		SnapshotHeadSha:     "A",
+		SnapshotFetchedAt:   fetchedAt,
+		ApiMergeable:        pgtype.Text{String: "CONFLICTING", Valid: true},
+		ApiMergeStateStatus: pgtype.Text{String: "DIRTY", Valid: true},
+		ChecksRollupState:   pgtype.Text{String: "FAILURE", Valid: true},
+		ChecksTotal:         1,
+		ChecksFailed:        1,
+		FailedCheckNames:    []string{"backend"},
+	}
+
+	// A synchronize webhook moved the row to B while the last stored snapshot
+	// still belongs to A. Old data must not be presented as fresh B data.
+	resp := issuePullRequestRowToResponse(row, true)
+	if resp.SnapshotAvailable == nil || *resp.SnapshotAvailable {
+		t.Fatal("mismatched-head snapshot must be marked unavailable")
+	}
+	if resp.Mergeable != nil || resp.ChecksRollup != nil || resp.ChecksFailed != 0 {
+		t.Fatalf("mismatched-head snapshot leaked into response: %+v", resp)
+	}
+
+	// Even a current stored snapshot is hidden when no App private key is
+	// configured. This covers deployments that disable the feature after data
+	// was already written.
+	row.SnapshotHeadSha = "B"
+	resp = issuePullRequestRowToResponse(row, false)
+	if resp.SnapshotAvailable == nil || *resp.SnapshotAvailable {
+		t.Fatal("disabled snapshot feature must be marked unavailable")
+	}
+	if resp.Mergeable != nil || resp.ChecksRollup != nil || resp.ChecksFailed != 0 {
+		t.Fatalf("disabled feature exposed last-known snapshot: %+v", resp)
+	}
+
+	resp = issuePullRequestRowToResponse(row, true)
+	if resp.SnapshotAvailable == nil || !*resp.SnapshotAvailable {
+		t.Fatal("enabled current-head snapshot must be available")
+	}
+	if resp.Mergeable == nil || *resp.Mergeable != "conflicting" || resp.ChecksFailed != 1 {
+		t.Fatalf("current snapshot was not exposed: %+v", resp)
 	}
 }
 
@@ -195,6 +269,9 @@ func TestStateRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("signState: %v", err)
 	}
+	if parts := strings.Split(tok, "."); len(parts) != 3 {
+		t.Fatalf("default return state has %d parts, want legacy 3-part format", len(parts))
+	}
 	got, ok := verifyState(tok)
 	if !ok {
 		t.Fatal("verifyState rejected a freshly-signed token")
@@ -214,6 +291,103 @@ func TestStateRoundTrip(t *testing.T) {
 	t.Setenv("GITHUB_WEBHOOK_SECRET", "different")
 	if _, ok := verifyState(tok); ok {
 		t.Error("token signed with old secret should fail under a new one")
+	}
+}
+
+func TestStateRoundTripWithRepositoryReturnTarget(t *testing.T) {
+	t.Setenv("GITHUB_WEBHOOK_SECRET", "test-secret-123")
+	wsID := "11111111-2222-3333-4444-555555555555"
+
+	tok, err := signStateForReturn(wsID, githubReturnToRepositories)
+	if err != nil {
+		t.Fatalf("signStateForReturn: %v", err)
+	}
+	if parts := strings.Split(tok, "."); len(parts) != 4 {
+		t.Fatalf("repository return state has %d parts, want 4", len(parts))
+	}
+	gotWorkspaceID, gotReturnTo, ok := verifyStateWithReturn(tok)
+	if !ok {
+		t.Fatal("verifyStateWithReturn rejected a freshly-signed token")
+	}
+	if gotWorkspaceID != wsID || gotReturnTo != githubReturnToRepositories {
+		t.Errorf(
+			"verifyStateWithReturn() = (%q, %q), want (%q, %q)",
+			gotWorkspaceID,
+			gotReturnTo,
+			wsID,
+			githubReturnToRepositories,
+		)
+	}
+
+	tampered := strings.Replace(tok, ".repositories.", ".github.", 1)
+	if _, _, ok := verifyStateWithReturn(tampered); ok {
+		t.Error("tampered return target should fail verification")
+	}
+}
+
+func TestGitHubConnectRepositoryReturnTarget(t *testing.T) {
+	t.Setenv("GITHUB_APP_SLUG", "multica-test")
+	t.Setenv("GITHUB_WEBHOOK_SECRET", "test-secret-123")
+	wsID := "11111111-2222-3333-4444-555555555555"
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/workspaces/"+wsID+"/github/connect?return_to=repositories",
+		nil,
+	)
+	req = withURLParam(req, "id", wsID)
+	rec := httptest.NewRecorder()
+	(&Handler{}).GitHubConnect(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GitHubConnect: got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var body GitHubConnectResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode connect response: %v", err)
+	}
+	installURL, err := url.Parse(body.URL)
+	if err != nil {
+		t.Fatalf("parse install URL: %v", err)
+	}
+	_, returnTo, ok := verifyStateWithReturn(installURL.Query().Get("state"))
+	if !ok || returnTo != githubReturnToRepositories {
+		t.Fatalf("signed return target = %q, valid=%v, want repositories", returnTo, ok)
+	}
+
+	badReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/workspaces/"+wsID+"/github/connect?return_to=https://evil.example",
+		nil,
+	)
+	badReq = withURLParam(badReq, "id", wsID)
+	badRec := httptest.NewRecorder()
+	(&Handler{}).GitHubConnect(badRec, badReq)
+	if badRec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid return target: got %d, want 400", badRec.Code)
+	}
+}
+
+func TestGitHubSetupCallbackRepositoryReturnTarget(t *testing.T) {
+	t.Setenv("GITHUB_WEBHOOK_SECRET", "test-secret-123")
+	t.Setenv("FRONTEND_ORIGIN", "https://app.multica.test/")
+	wsID := "11111111-2222-3333-4444-555555555555"
+	state, err := signStateForReturn(wsID, githubReturnToRepositories)
+	if err != nil {
+		t.Fatalf("signStateForReturn: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/github/setup?installation_id=not-a-number&state="+url.QueryEscape(state),
+		nil,
+	)
+	rec := httptest.NewRecorder()
+	(&Handler{}).GitHubSetupCallback(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("GitHubSetupCallback: got %d, want 302", rec.Code)
+	}
+	if got := rec.Header().Get("Location"); got != "https://app.multica.test/settings?tab=repositories&github_error=bad_installation_id" {
+		t.Fatalf("redirect = %q, want repository settings error", got)
 	}
 }
 
@@ -240,15 +414,11 @@ func TestWebhook_MergedPR_AdvancesLinkedIssueToDone(t *testing.T) {
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
 
 	// Seed an issue we expect the webhook to close out.
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":  "PR auto-merge test",
 		"status": "in_progress",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
 
@@ -300,14 +470,10 @@ func TestWebhook_MergedPR_AdvancesLinkedIssueToDone(t *testing.T) {
 	mac.Write(raw)
 	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 
-	w = httptest.NewRecorder()
 	req2 := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(raw))
 	req2.Header.Set("X-GitHub-Event", "pull_request")
 	req2.Header.Set("X-Hub-Signature-256", sig)
-	testHandler.HandleGitHubWebhook(w, req2)
-	if w.Code != http.StatusAccepted {
-		t.Fatalf("webhook: expected 202, got %d (%s)", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.HandleGitHubWebhook, req2).Want(http.StatusAccepted)
 
 	// Verify PR row + link + issue status.
 	pr, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
@@ -351,15 +517,11 @@ func TestWebhook_MergedPR_PreservesCancelled(t *testing.T) {
 	secret := "cancelled-secret"
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":  "Already cancelled",
 		"status": "cancelled",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
 
@@ -396,11 +558,10 @@ func TestWebhook_MergedPR_PreservesCancelled(t *testing.T) {
 	mac.Write(body)
 	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 
-	w = httptest.NewRecorder()
 	req2 := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(body))
 	req2.Header.Set("X-GitHub-Event", "pull_request")
 	req2.Header.Set("X-Hub-Signature-256", sig)
-	testHandler.HandleGitHubWebhook(w, req2)
+	w = testutil.Call(t, testHandler.HandleGitHubWebhook, req2)
 
 	updated, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
 	if err != nil {
@@ -438,13 +599,18 @@ func TestWebhook_UninstallReturnsWorkspaceForBroadcast(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteGitHubInstallationByInstallationID: %v", err)
 	}
-	if uuidToString(deleted.WorkspaceID) != testWorkspaceID {
-		t.Errorf("expected returned workspace_id %s, got %s", testWorkspaceID, uuidToString(deleted.WorkspaceID))
+	if len(deleted) != 1 {
+		t.Fatalf("expected 1 deleted binding, got %d", len(deleted))
 	}
-	// Re-deleting must surface ErrNoRows so the handler can short-circuit
-	// the broadcast (and not panic).
-	if _, err := testHandler.Queries.DeleteGitHubInstallationByInstallationID(ctx, installationID); err == nil {
-		t.Error("expected ErrNoRows on second delete, got nil")
+	if uuidToString(deleted[0].WorkspaceID) != testWorkspaceID {
+		t.Errorf("expected returned workspace_id %s, got %s", testWorkspaceID, uuidToString(deleted[0].WorkspaceID))
+	}
+	// Re-deleting must return no rows so the handler skips the broadcast
+	// (and does not panic).
+	if again, err := testHandler.Queries.DeleteGitHubInstallationByInstallationID(ctx, installationID); err != nil {
+		t.Errorf("second delete errored: %v", err)
+	} else if len(again) != 0 {
+		t.Errorf("expected 0 rows on second delete, got %d", len(again))
 	}
 }
 
@@ -460,15 +626,11 @@ func TestWebhook_MergedPR_WaitsForOpenSibling(t *testing.T) {
 	secret := "multi-pr-test-secret"
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":  "Multi-PR auto-merge test",
 		"status": "in_progress",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
 
@@ -525,14 +687,10 @@ func TestWebhook_MergedPR_WaitsForOpenSibling(t *testing.T) {
 		mac.Write(raw)
 		sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 
-		rec := httptest.NewRecorder()
 		hookReq := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(raw))
 		hookReq.Header.Set("X-GitHub-Event", "pull_request")
 		hookReq.Header.Set("X-Hub-Signature-256", sig)
-		testHandler.HandleGitHubWebhook(rec, hookReq)
-		if rec.Code != http.StatusAccepted {
-			t.Fatalf("webhook: expected 202, got %d (%s)", rec.Code, rec.Body.String())
-		}
+		testutil.Call(t, testHandler.HandleGitHubWebhook, hookReq).Want(http.StatusAccepted)
 	}
 
 	// Open PR A and PR B against two repos so the (workspace, owner, repo,
@@ -613,21 +771,20 @@ func firePullRequestWebhook(t *testing.T, secret, identifier string, installatio
 	mac.Write(raw)
 	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 
-	rec := httptest.NewRecorder()
 	hookReq := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(raw))
 	hookReq.Header.Set("X-GitHub-Event", "pull_request")
 	hookReq.Header.Set("X-Hub-Signature-256", sig)
-	testHandler.HandleGitHubWebhook(rec, hookReq)
+	rec := testutil.Call(t, testHandler.HandleGitHubWebhook, hookReq)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("webhook %s pr=%d state=%s: expected 202, got %d (%s)",
 			repo, prNumber, prState, rec.Code, rec.Body.String())
 	}
 }
 
-// TestWebhook_ClosedSiblingAfterMerge guards the ordering bug GPT-Boy flagged
-// on PR #2470: PR-A merges first (issue stays in_progress because PR-B is
-// open), then PR-B closes WITHOUT merging. Because PR-A already delivered the
-// work, that close event must re-evaluate the issue and advance it to done.
+// TestWebhook_ClosedSiblingAfterMerge pins the MUL-7429 rule for a sibling
+// that closes without merging: "all linked PRs merged" is the only completion
+// condition, so the issue waits and shows the unmerged PR. Removing that PR
+// from the issue is a PR event and completes it.
 func TestWebhook_ClosedSiblingAfterMerge(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
@@ -636,19 +793,16 @@ func TestWebhook_ClosedSiblingAfterMerge(t *testing.T) {
 	secret := "closed-sibling-secret"
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":  "Closed sibling after merge",
 		"status": "in_progress",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
 
 	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request_exclusion WHERE issue_id = $1`, created.ID)
 		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
 		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
 		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
@@ -680,15 +834,28 @@ func TestWebhook_ClosedSiblingAfterMerge(t *testing.T) {
 		t.Fatalf("issue should stay in_progress while sibling PR open, got %q", intermediate.Status)
 	}
 
-	// Close PR B WITHOUT merging — issue should now advance to done because
-	// PR-A's merge already delivered the work.
+	// Close PR B WITHOUT merging — a closed PR is not a merged one, so the
+	// issue keeps waiting and names the unmerged PR.
 	firePullRequestWebhook(t, secret, created.Identifier, installationID, "repo-b", 2, "closed")
+	afterClose, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	if afterClose.Status != "in_progress" {
+		t.Fatalf("a closed-unmerged sibling must block auto-complete, got %q", afterClose.Status)
+	}
+	if got := prAutoCompleteStateForTest(t, created.ID); got.State != prAutoCompleteNotMerged || len(got.PullRequestIDs) != 1 {
+		t.Fatalf("auto_complete = %+v, want not_merged naming the closed PR", got)
+	}
+
+	// Removing the abandoned PR leaves only merged work behind.
+	unlinkPRForTest(t, created.ID, githubPRIDForTest(t, "repo-b", 2))
 	final, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
 	if err != nil {
 		t.Fatalf("GetIssue: %v", err)
 	}
 	if final.Status != "done" {
-		t.Errorf("expected issue 'done' after sibling closed-without-merge follows a prior merge, got %q", final.Status)
+		t.Errorf("expected issue 'done' after the unmerged PR was removed, got %q", final.Status)
 	}
 }
 
@@ -704,15 +871,11 @@ func TestWebhook_AllClosedWithoutMerge(t *testing.T) {
 	secret := "all-closed-secret"
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":  "All closed no merge",
 		"status": "in_progress",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
 
@@ -781,232 +944,226 @@ func fireBareWebhook(t *testing.T, secret string, installationID int64, prNumber
 	mac.Write(raw)
 	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 
-	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(raw))
 	req.Header.Set("X-GitHub-Event", "pull_request")
 	req.Header.Set("X-Hub-Signature-256", sig)
-	testHandler.HandleGitHubWebhook(rec, req)
+	rec := testutil.Call(t, testHandler.HandleGitHubWebhook, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("webhook pr=%d: expected 202, got %d (%s)", prNumber, rec.Code, rec.Body.String())
 	}
 }
 
-// TestWebhook_MergedPR_OnlyClosesIdentifiersWithClosingKeyword is the repro
-// from GitHub issue multica-ai/multica#3264: a PR that mentions three issues
-// must only auto-complete the one declared with a closing keyword. Follow-up
-// / unblocks references are linked but stay in their previous status.
-func TestWebhook_MergedPR_OnlyClosesIdentifiersWithClosingKeyword(t *testing.T) {
+// ── PR auto-complete (MUL-7429) ────────────────────────────────────────────
+//
+// The rule these tests pin: a PR links to an issue when its title or branch
+// carries the identifier (or a member links it by hand); when every linked PR
+// is merged, the issue moves to Done. Keywords have no special meaning and the
+// body is not scanned. The decision runs only on a PR event for the issue.
+
+// prAutoCompleteTestIssue creates an in_progress issue plus a GitHub
+// installation for the test workspace, with cleanup for everything the
+// webhook and the link endpoints can write.
+func prAutoCompleteTestIssue(t *testing.T, title string, installationID int64) IssueResponse {
+	t.Helper()
+	ctx := context.Background()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  title,
+		"status": "in_progress",
+	})
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	t.Cleanup(func() {
+		bg := context.Background()
+		testPool.Exec(bg, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(bg, `DELETE FROM issue_pull_request_exclusion WHERE issue_id = $1`, created.ID)
+		testPool.Exec(bg, `DELETE FROM issue_pr_automation WHERE issue_id = $1`, created.ID)
+		testPool.Exec(bg, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(bg, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(bg, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(bg, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+	if installationID != 0 {
+		if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+			WorkspaceID:    parseUUID(testWorkspaceID),
+			InstallationID: installationID,
+			AccountLogin:   fmt.Sprintf("acct-%d", installationID),
+			AccountType:    "User",
+		}); err != nil {
+			t.Fatalf("CreateGitHubInstallation: %v", err)
+		}
+	}
+	return created
+}
+
+func issueStatusForTest(t *testing.T, issueID string) string {
+	t.Helper()
+	issue, err := testHandler.Queries.GetIssue(context.Background(), parseUUID(issueID))
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	return issue.Status
+}
+
+func linkedPRCountForTest(t *testing.T, issueID string) int {
+	t.Helper()
+	rows, err := testHandler.Queries.ListPullRequestsByIssue(context.Background(), parseUUID(issueID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	return len(rows)
+}
+
+type issuePullRequestsBodyForTest struct {
+	PullRequests []GitHubPullRequestResponse `json:"pull_requests"`
+	AutoComplete prAutoCompleteResponse      `json:"auto_complete"`
+}
+
+func listIssuePRsForTest(t *testing.T, issueID string) issuePullRequestsBodyForTest {
+	t.Helper()
+	req := withURLParam(newRequest("GET", "/api/issues/"+issueID+"/pull-requests", nil), "id", issueID)
+	w := testutil.Call(t, testHandler.ListPullRequestsForIssue, req).Want(http.StatusOK)
+	var out issuePullRequestsBodyForTest
+	if err := json.NewDecoder(w.Body).Decode(&out); err != nil {
+		t.Fatalf("decode pull requests: %v", err)
+	}
+	return out
+}
+
+func prAutoCompleteStateForTest(t *testing.T, issueID string) prAutoCompleteResponse {
+	t.Helper()
+	return listIssuePRsForTest(t, issueID).AutoComplete
+}
+
+func unlinkPRForTest(t *testing.T, issueID, prID string) {
+	t.Helper()
+	req := newRequest("DELETE", "/api/issues/"+issueID+"/pull-requests/"+prID, nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", issueID)
+	rctx.URLParams.Add("prId", prID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	testutil.Call(t, testHandler.UnlinkIssuePullRequest, req).Want(http.StatusOK)
+}
+
+// linkMergedGitHubPRForTest mirrors a merged PR in the test workspace and
+// links it to issueID automatically with a closing keyword, for tests that
+// drive the completion path without a webhook.
+func linkMergedGitHubPRForTest(t *testing.T, issueID, repo string) {
+	t.Helper()
+	ctx := context.Background()
+	now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
+	pr, err := testHandler.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
+		WorkspaceID: parseUUID(testWorkspaceID), InstallationID: 1, RepoOwner: "acme", RepoName: repo,
+		PrNumber: 1, Title: "merged work", State: "merged", HtmlUrl: "https://github.com/acme/" + repo + "/pull/1",
+		PrCreatedAt: now, PrUpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("upsert pr: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		testPool.Exec(bg, `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, pr.ID)
+		testPool.Exec(bg, `DELETE FROM github_pull_request WHERE id = $1`, pr.ID)
+	})
+	if _, err := testHandler.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{IssueID: parseUUID(issueID), PullRequestID: pr.ID}); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	if err := testHandler.Queries.SyncPullRequestCloseIntent(ctx, db.SyncPullRequestCloseIntentParams{PullRequestID: pr.ID, ClosingIssueIds: []pgtype.UUID{parseUUID(issueID)}}); err != nil {
+		t.Fatalf("close intent: %v", err)
+	}
+}
+
+func githubPRIDForTest(t *testing.T, repo string, number int32) string {
+	t.Helper()
+	pr, err := testHandler.Queries.GetGitHubPullRequest(context.Background(), db.GetGitHubPullRequestParams{
+		WorkspaceID: parseUUID(testWorkspaceID), RepoOwner: "acme", RepoName: repo, PrNumber: number,
+	})
+	if err != nil {
+		t.Fatalf("GetGitHubPullRequest %s#%d: %v", repo, number, err)
+	}
+	return uuidToString(pr.ID)
+}
+
+// TestWebhook_OnlyClosingKeywordCompletes is the repro from #3264: a title
+// identifier links but does not complete, a body "Closes" links and completes,
+// and a passing body mention ("Follow up in") links nothing.
+func TestWebhook_OnlyClosingKeywordCompletes(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
 	}
-	ctx := context.Background()
-	secret := "closing-keyword-secret"
+	secret := "body-mention-secret"
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
-
-	// Three issues to mention in the same PR body.
-	createIssue := func(title string) IssueResponse {
-		t.Helper()
-		w := httptest.NewRecorder()
-		req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-			"title":  title,
-			"status": "in_progress",
-		})
-		testHandler.CreateIssue(w, req)
-		if w.Code != http.StatusCreated {
-			t.Fatalf("CreateIssue %q: %d %s", title, w.Code, w.Body.String())
-		}
-		var out IssueResponse
-		json.NewDecoder(w.Body).Decode(&out)
-		return out
-	}
-	closes := createIssue("primary work")
-	followUp := createIssue("follow up work")
-	unblocks := createIssue("unblocked work")
-
-	t.Cleanup(func() {
-		for _, id := range []string{closes.ID, followUp.ID, unblocks.ID} {
-			testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, id)
-			testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, id)
-			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, id)
-		}
-		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
-	})
-
 	const installationID int64 = 30264001
-	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
-		WorkspaceID:    parseUUID(testWorkspaceID),
-		InstallationID: installationID,
-		AccountLogin:   "closing-keyword-acct",
-		AccountType:    "User",
-	}); err != nil {
-		t.Fatalf("CreateGitHubInstallation: %v", err)
-	}
+	primary := prAutoCompleteTestIssue(t, "primary work", installationID)
+	closes := prAutoCompleteTestIssue(t, "closed only in body", 0)
+	followUp := prAutoCompleteTestIssue(t, "follow up work", 0)
 
-	// PR title mirrors the reporter's repro shape — bare identifier prefix —
-	// and body declares closing intent on `closes` only.
-	title := closes.Identifier + ": Lorem Ipsum dolor sit amet"
-	body := fmt.Sprintf(
-		"Closes %s. Follow up work planned in %s. Unblocks %s.",
-		closes.Identifier, followUp.Identifier, unblocks.Identifier,
-	)
+	title := primary.Identifier + ": Lorem Ipsum dolor sit amet"
+	body := fmt.Sprintf("Closes %s. Follow up work planned in %s.", closes.Identifier, followUp.Identifier)
 	fireBareWebhook(t, secret, installationID, 1, title, body, "fix/login")
 
-	// All three should be linked — auto-link layer is intentionally generous.
-	for _, issue := range []IssueResponse{closes, followUp, unblocks} {
-		linked, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(issue.ID))
-		if err != nil {
-			t.Fatalf("ListPullRequestsByIssue(%s): %v", issue.Identifier, err)
-		}
-		if len(linked) != 1 {
-			t.Errorf("expected %s to be linked to the PR, got %d link rows", issue.Identifier, len(linked))
+	for _, issue := range []IssueResponse{primary, closes} {
+		if n := linkedPRCountForTest(t, issue.ID); n != 1 {
+			t.Errorf("%s should link, got %d rows", issue.Identifier, n)
 		}
 	}
-
-	// Only the closing-keyword identifier advances to done.
-	wantStatus := map[string]string{
-		closes.ID:   "done",
-		followUp.ID: "in_progress",
-		unblocks.ID: "in_progress",
+	if got := issueStatusForTest(t, primary.ID); got != "in_progress" {
+		t.Errorf("title-only issue: status = %q, want in_progress", got)
 	}
-	for _, issue := range []IssueResponse{closes, followUp, unblocks} {
-		got, err := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
-		if err != nil {
-			t.Fatalf("GetIssue(%s): %v", issue.Identifier, err)
-		}
-		if got.Status != wantStatus[issue.ID] {
-			t.Errorf("issue %s: status = %q, want %q", issue.Identifier, got.Status, wantStatus[issue.ID])
-		}
+	if got := prAutoCompleteStateForTest(t, primary.ID); got.State != prAutoCompleteNoCloseIntent {
+		t.Errorf("title-only issue: auto_complete = %+v, want no_close_intent", got)
+	}
+	if got := issueStatusForTest(t, closes.ID); got != "done" {
+		t.Errorf("closing-keyword issue: status = %q, want done", got)
+	}
+	if n := linkedPRCountForTest(t, followUp.ID); n != 0 {
+		t.Errorf("a passing body mention must not link, got %d rows", n)
+	}
+	if got := issueStatusForTest(t, followUp.ID); got != "in_progress" {
+		t.Errorf("mentioned issue: status = %q, want in_progress", got)
 	}
 }
 
-// TestWebhook_MergedPR_TitlePrefixDoesNotClose locks in the design choice
-// that a bare "MUL-X: foo" title (no closing keyword) links but never
-// auto-completes. The user must write `Closes MUL-X` somewhere if they want
-// the merge to flip the status.
-func TestWebhook_MergedPR_TitlePrefixDoesNotClose(t *testing.T) {
+// TestWebhook_TitleAndBranchLinkWithoutCompleting: a title prefix or a branch
+// name links the PR, but only a closing keyword completes the issue — and a
+// branch name is never read as one.
+func TestWebhook_TitleAndBranchLinkWithoutCompleting(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
 	}
-	ctx := context.Background()
-	secret := "title-prefix-secret"
+	secret := "title-branch-secret"
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
-
-	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "title-prefix repro",
-		"status": "in_progress",
-	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
-	}
-	var created IssueResponse
-	json.NewDecoder(w.Body).Decode(&created)
-
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
-	})
-
 	const installationID int64 = 30264002
-	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
-		WorkspaceID:    parseUUID(testWorkspaceID),
-		InstallationID: installationID,
-		AccountLogin:   "title-prefix-acct",
-		AccountType:    "User",
-	}); err != nil {
-		t.Fatalf("CreateGitHubInstallation: %v", err)
-	}
+	byTitle := prAutoCompleteTestIssue(t, "title link", installationID)
+	byBranch := prAutoCompleteTestIssue(t, "branch link", 0)
+	byTitleKeyword := prAutoCompleteTestIssue(t, "title keyword", 0)
 
-	fireBareWebhook(t, secret, installationID, 2, created.Identifier+": fix something", "", "fix/login")
+	fireBareWebhook(t, secret, installationID, 2, byTitle.Identifier+": Fix login flow", "", "feat/login")
+	fireBareWebhook(t, secret, installationID, 3, "Fix login flow", "", "fix/"+strings.ToLower(byBranch.Identifier)+"-login")
+	fireBareWebhook(t, secret, installationID, 4, "Fixes "+byTitleKeyword.Identifier+": login flow", "", "feat/login")
 
-	linked, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	for _, issue := range []IssueResponse{byTitle, byBranch, byTitleKeyword} {
+		if n := linkedPRCountForTest(t, issue.ID); n != 1 {
+			t.Errorf("%s: expected 1 linked PR, got %d", issue.Identifier, n)
+		}
 	}
-	if len(linked) != 1 {
-		t.Errorf("expected 1 linked PR even without a closing keyword, got %d", len(linked))
+	for _, issue := range []IssueResponse{byTitle, byBranch} {
+		if got := issueStatusForTest(t, issue.ID); got != "in_progress" {
+			t.Errorf("%s: status = %q, want in_progress", issue.Identifier, got)
+		}
 	}
-
-	got, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("GetIssue: %v", err)
+	if got := issueStatusForTest(t, byTitleKeyword.ID); got != "done" {
+		t.Errorf("title closing keyword: status = %q, want done", got)
 	}
-	if got.Status != "in_progress" {
-		t.Errorf("expected issue to stay in_progress (title prefix alone is not closing intent), got %q", got.Status)
-	}
-}
-
-// TestWebhook_MergedPR_BranchNameDoesNotClose guards the conservative design
-// decision that identifiers extracted from the branch name link the PR but
-// never auto-complete the issue — branch names are not natural-language
-// fields and cannot carry a closing keyword.
-func TestWebhook_MergedPR_BranchNameDoesNotClose(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("handler test fixture not initialized (no DB?)")
-	}
-	ctx := context.Background()
-	secret := "branch-name-secret"
-	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
-
-	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "branch-name repro",
-		"status": "in_progress",
-	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
-	}
-	var created IssueResponse
-	json.NewDecoder(w.Body).Decode(&created)
-
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
-	})
-
-	const installationID int64 = 30264003
-	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
-		WorkspaceID:    parseUUID(testWorkspaceID),
-		InstallationID: installationID,
-		AccountLogin:   "branch-name-acct",
-		AccountType:    "User",
-	}); err != nil {
-		t.Fatalf("CreateGitHubInstallation: %v", err)
-	}
-
-	branch := strings.ToLower(created.Identifier) + "/fix-login"
-	fireBareWebhook(t, secret, installationID, 3, "Fix login flow", "", branch)
-
-	linked, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("ListPullRequestsByIssue: %v", err)
-	}
-	if len(linked) != 1 {
-		t.Errorf("expected branch-name reference to still link the PR, got %d link rows", len(linked))
-	}
-
-	got, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("GetIssue: %v", err)
-	}
-	if got.Status != "in_progress" {
-		t.Errorf("expected issue to stay in_progress (branch-name reference is not closing intent), got %q", got.Status)
+	list := listIssuePRsForTest(t, byBranch.ID)
+	if len(list.PullRequests) != 1 || list.PullRequests[0].LinkSource != "branch" {
+		t.Errorf("link_source = %+v, want branch", list.PullRequests)
 	}
 }
 
 // firePRWebhook fires a webhook for a single PR with caller-controlled
-// title, body, branch, and lifecycle (open / merged / closed without
-// merge). Tests below need the open→merged sequence so close_intent on
-// one PR has to persist across multiple webhook events for a sibling PR.
+// title, body, branch, and lifecycle (open / edited / merged / closed without
+// merge / edited after merge).
 func firePRWebhook(t *testing.T, secret string, installationID int64, prNumber int32, title, body, branch, lifecycle string) {
 	t.Helper()
 	var action, state string
@@ -1056,196 +1213,371 @@ func firePRWebhook(t *testing.T, secret string, installationID int64, prNumber i
 	mac.Write(raw)
 	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 
-	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(raw))
 	req.Header.Set("X-GitHub-Event", "pull_request")
 	req.Header.Set("X-Hub-Signature-256", sig)
-	testHandler.HandleGitHubWebhook(rec, req)
+	rec := testutil.Call(t, testHandler.HandleGitHubWebhook, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("webhook pr=%d (%s): expected 202, got %d (%s)", prNumber, lifecycle, rec.Code, rec.Body.String())
 	}
 }
 
-func TestWebhook_CloseKeywordRemovedBeforeMergeDoesNotClose(t *testing.T) {
+// TestWebhook_IdentifierRemovedBeforeMergeUnlinks: automatic links follow the
+// PR's title and branch while it is open, so dropping the identifier removes
+// the link and the later merge completes nothing.
+func TestWebhook_IdentifierRemovedBeforeMergeUnlinks(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
 	}
-	ctx := context.Background()
-	secret := "close-intent-removal-secret"
+	secret := "identifier-removed-secret"
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+	const installationID int64 = 30264004
+	created := prAutoCompleteTestIssue(t, "identifier removed", installationID)
 
-	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "close intent can be removed",
-		"status": "in_progress",
-	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	firePRWebhook(t, secret, installationID, 1, created.Identifier+": first attempt", "", "feat/attempt", "opened")
+	if n := linkedPRCountForTest(t, created.ID); n != 1 {
+		t.Fatalf("expected the title to link, got %d rows", n)
 	}
-	var created IssueResponse
-	json.NewDecoder(w.Body).Decode(&created)
-
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
-	})
-
-	const installationID int64 = 30264005
-	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
-		WorkspaceID:    parseUUID(testWorkspaceID),
-		InstallationID: installationID,
-		AccountLogin:   "close-intent-removal-acct",
-		AccountType:    "User",
-	}); err != nil {
-		t.Fatalf("CreateGitHubInstallation: %v", err)
+	firePRWebhook(t, secret, installationID, 1, "Unrelated refactor", "", "feat/attempt", "edited")
+	if n := linkedPRCountForTest(t, created.ID); n != 0 {
+		t.Fatalf("removing the identifier while open should unlink, got %d rows", n)
 	}
-
-	firePRWebhook(t, secret, installationID, 1, "Implement removal path", "Closes "+created.Identifier, "feat/remove-close-intent", "opened")
-	firePRWebhook(t, secret, installationID, 1, "Implement removal path", "Related "+created.Identifier, "feat/remove-close-intent", "edited")
-	firePRWebhook(t, secret, installationID, 1, "Implement removal path", "Related "+created.Identifier, "feat/remove-close-intent", "merged")
-
-	got, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("GetIssue after merge: %v", err)
-	}
-	if got.Status != "in_progress" {
-		t.Fatalf("after closing keyword was removed before merge: status = %q, want in_progress", got.Status)
-	}
-	counts, err := testHandler.Queries.GetIssuePullRequestCloseAggregate(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("GetIssuePullRequestCloseAggregate: %v", err)
-	}
-	if counts.MergedWithCloseIntentCount != 0 {
-		t.Fatalf("merged_with_close_intent_count = %d, want 0", counts.MergedWithCloseIntentCount)
-	}
-
-	w = httptest.NewRecorder()
-	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "post merge close keyword is link only",
-		"status": "in_progress",
-	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue second: %d %s", w.Code, w.Body.String())
-	}
-	var second IssueResponse
-	json.NewDecoder(w.Body).Decode(&second)
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, second.ID)
-		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, second.ID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, second.ID)
-	})
-
-	// Adding a closing keyword after the merge must not rewrite the
-	// merge-time decision and retroactively close either an existing link
-	// or a newly mentioned issue.
-	firePRWebhook(t, secret, installationID, 1, "Implement removal path", "Closes "+created.Identifier+"\nCloses "+second.Identifier, "feat/remove-close-intent", "edited_merged")
-	got, err = testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("GetIssue after post-merge edit: %v", err)
-	}
-	if got.Status != "in_progress" {
-		t.Errorf("after adding closing keyword post-merge: status = %q, want in_progress", got.Status)
-	}
-	got, err = testHandler.Queries.GetIssue(ctx, parseUUID(second.ID))
-	if err != nil {
-		t.Fatalf("GetIssue second after post-merge edit: %v", err)
-	}
-	if got.Status != "in_progress" {
-		t.Errorf("second issue after post-merge closing keyword: status = %q, want in_progress", got.Status)
+	firePRWebhook(t, secret, installationID, 1, "Unrelated refactor", "", "feat/attempt", "merged")
+	if got := issueStatusForTest(t, created.ID); got != "in_progress" {
+		t.Errorf("status = %q, want in_progress", got)
 	}
 }
 
-// TestWebhook_LinkOnlySiblingMergeAfterCloseKeywordPR is the regression
-// guard for the multi-PR sibling case Elon flagged on the first attempt
-// of this fix. Scenario:
-//
-//  1. PR A declares closing intent (`Closes MUL-X`) and is opened.
-//  2. PR B references the same issue (link-only — no closing keyword)
-//     and is opened.
-//  3. PR A merges. The issue stays in_progress because PR B is open.
-//  4. PR B merges later. PR B's webhook has no closing keyword, so the
-//     previous implementation skipped re-evaluating the issue and the
-//     issue stayed stuck in_progress forever.
-//
-// The persisted close_intent column on issue_pull_request fixes this:
-// the aggregate sees PR A's merged+close_intent row regardless of which
-// webhook drives the re-evaluation, so PR B's merge advances the issue.
-func TestWebhook_LinkOnlySiblingMergeAfterCloseKeywordPR(t *testing.T) {
+// TestWebhook_CloseIntentFollowsPRTextUntilMerge: while the PR is open its
+// close intent follows the text — downgrading "Closes" to a plain mention keeps
+// the title link but not the completion, and adding it back restores it. It
+// follows the PR on a manual link too.
+func TestWebhook_CloseIntentFollowsPRTextUntilMerge(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	secret := "close-intent-follows-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+	const installationID int64 = 30264010
+	byTitle := prAutoCompleteTestIssue(t, "close intent follows text", installationID)
+	manual := prAutoCompleteTestIssue(t, "close intent on a manual link", 0)
+
+	title := byTitle.Identifier + ": login flow"
+	firePRWebhook(t, secret, installationID, 1, title, "Closes "+byTitle.Identifier, "feat/login", "opened")
+	if got := prAutoCompleteStateForTest(t, byTitle.ID); got.State != prAutoCompleteWaiting {
+		t.Fatalf("auto_complete = %+v, want waiting", got)
+	}
+	firePRWebhook(t, secret, installationID, 1, title, "Related to "+byTitle.Identifier, "feat/login", "edited")
+	if got := prAutoCompleteStateForTest(t, byTitle.ID); got.State != prAutoCompleteNoCloseIntent {
+		t.Fatalf("after dropping the keyword: auto_complete = %+v, want no_close_intent", got)
+	}
+	firePRWebhook(t, secret, installationID, 1, title, "Fixes "+byTitle.Identifier, "feat/login", "edited")
+	firePRWebhook(t, secret, installationID, 1, title, "Fixes "+byTitle.Identifier, "feat/login", "merged")
+	if got := issueStatusForTest(t, byTitle.ID); got != "done" {
+		t.Errorf("keyword restored before merge: status = %q, want done", got)
+	}
+
+	firePRWebhook(t, secret, installationID, 2, "Session refactor", "", "refactor/session", "opened")
+	req := withURLParam(newRequest("POST", "/api/issues/"+manual.ID+"/pull-requests", map[string]any{"url": "https://github.com/acme/widget/pull/2"}), "id", manual.ID)
+	testutil.Call(t, testHandler.LinkIssuePullRequest, req).Want(http.StatusOK)
+	firePRWebhook(t, secret, installationID, 2, "Session refactor", "Closes "+manual.Identifier, "refactor/session", "edited")
+	firePRWebhook(t, secret, installationID, 2, "Session refactor", "Closes "+manual.Identifier, "refactor/session", "merged")
+	if got := issueStatusForTest(t, manual.ID); got != "done" {
+		t.Errorf("manual link whose PR says Closes: status = %q, want done", got)
+	}
+	if list := listIssuePRsForTest(t, manual.ID); len(list.PullRequests) != 1 || list.PullRequests[0].LinkSource != "manual" {
+		t.Errorf("pull_requests = %+v, want the manual link kept", list.PullRequests)
+	}
+}
+
+// TestWebhook_RemovedKeywordStopsCounting: dropping "Closes" from the PR text
+// clears close intent on every link of the PR, not only on identifiers the PR
+// still claims — a manual link, or an automatic link whose merge event (which
+// carries the final text) arrives before the edit event (PR #8794 review).
+func TestWebhook_RemovedKeywordStopsCounting(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	for _, tc := range []struct {
+		name            string
+		manual          bool
+		editBeforeMerge bool
+	}{
+		{"manual link, keyword edited to a mention", true, true},
+		{"automatic link, merge arrives before the edit", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const secret = "removed-keyword-secret"
+			const installationID int64 = 30264011
+			t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+			issue := prAutoCompleteTestIssue(t, tc.name, installationID)
+
+			firePRWebhook(t, secret, installationID, 1, "Session refactor", "Closes "+issue.Identifier, "refactor/session", "opened")
+			if tc.manual {
+				req := withURLParam(newRequest("POST", "/api/issues/"+issue.ID+"/pull-requests", map[string]any{"url": "https://github.com/acme/widget/pull/1"}), "id", issue.ID)
+				testutil.Call(t, testHandler.LinkIssuePullRequest, req).Want(http.StatusOK)
+			}
+			if tc.editBeforeMerge {
+				firePRWebhook(t, secret, installationID, 1, "Session refactor", "Related to "+issue.Identifier, "refactor/session", "edited")
+				if got := prAutoCompleteStateForTest(t, issue.ID); got.State != prAutoCompleteNoCloseIntent {
+					t.Errorf("after removing the keyword: auto_complete = %+v, want no_close_intent", got)
+				}
+			}
+			firePRWebhook(t, secret, installationID, 1, "Session refactor", "Related to "+issue.Identifier, "refactor/session", "merged")
+			if got := issueStatusForTest(t, issue.ID); got != "in_progress" {
+				t.Errorf("merged without a closing keyword: status = %q, want in_progress", got)
+			}
+		})
+	}
+}
+
+// TestWebhook_AutoLinkOffStillReadsCloseIntent: turning auto-link off stops
+// new links, not the reading of existing links' keywords — otherwise a
+// keyword removed afterwards would still complete the issue (PR #8794 review).
+func TestWebhook_AutoLinkOffStillReadsCloseIntent(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	const secret = "auto-link-off-close-intent-secret"
+	const installationID int64 = 30264012
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+	issue := prAutoCompleteTestIssue(t, "auto-link off after linking", installationID)
+	var previous []byte
+	dbfx.QueryRow(t, `SELECT settings FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&previous)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `UPDATE workspace SET settings = $1 WHERE id = $2`, previous, testWorkspaceID)
+	})
+
+	title := issue.Identifier + ": session refactor"
+	firePRWebhook(t, secret, installationID, 1, title, "Closes "+issue.Identifier, "refactor/session", "opened")
+	dbfx.Exec(t, `UPDATE workspace SET settings = COALESCE(settings, '{}'::jsonb) || '{"github_auto_link_prs_enabled": false}'::jsonb WHERE id = $1`, testWorkspaceID)
+	firePRWebhook(t, secret, installationID, 1, title, "", "refactor/session", "edited")
+	firePRWebhook(t, secret, installationID, 1, title, "", "refactor/session", "merged")
+	if got := issueStatusForTest(t, issue.ID); got != "in_progress" {
+		t.Errorf("keyword removed while auto-link was off: status = %q, want in_progress", got)
+	}
+}
+
+// TestWebhook_PostMergeEditLinksWithoutCompleting: adding a closing keyword to
+// a merged PR links it, but close intent is decided at merge time, so the
+// issue does not complete. Removing it again after merge keeps the link: the
+// work landed.
+func TestWebhook_PostMergeEditLinksWithoutCompleting(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	secret := "post-merge-edit-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+	const installationID int64 = 30264005
+	created := prAutoCompleteTestIssue(t, "post-merge link", installationID)
+
+	firePRWebhook(t, secret, installationID, 1, "Dependency bump", "", "chore/bump", "merged")
+	if n := linkedPRCountForTest(t, created.ID); n != 0 {
+		t.Fatalf("PR without the identifier must not link, got %d rows", n)
+	}
+	firePRWebhook(t, secret, installationID, 1, "Dependency bump", "Closes "+created.Identifier, "chore/bump", "edited_merged")
+	if n := linkedPRCountForTest(t, created.ID); n != 1 {
+		t.Fatalf("post-merge edit should link, got %d rows", n)
+	}
+	if got := issueStatusForTest(t, created.ID); got != "in_progress" {
+		t.Errorf("status = %q, want in_progress", got)
+	}
+	if got := prAutoCompleteStateForTest(t, created.ID); got.State != prAutoCompleteNoCloseIntent {
+		t.Errorf("auto_complete = %+v, want no_close_intent", got)
+	}
+	firePRWebhook(t, secret, installationID, 1, "Dependency bump", "", "chore/bump", "edited_merged")
+	if n := linkedPRCountForTest(t, created.ID); n != 1 {
+		t.Errorf("a post-merge edit must not take delivered work off the issue, got %d rows", n)
+	}
+}
+
+// TestWebhook_ReopenedIssueStaysOpenUntilNewPRMerges is the reason the
+// decision is edge-triggered. A reopened issue whose PRs are all merged must
+// not bounce back to Done on the next unrelated event of a merged PR; the next
+// fix PR's merge completes it again — with no hidden per-issue switch flipped
+// behind the user's back.
+func TestWebhook_ReopenedIssueStaysOpenUntilNewPRMerges(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
 	}
 	ctx := context.Background()
-	secret := "link-only-sibling-secret"
+	secret := "reopen-secret"
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+	const installationID int64 = 30264006
+	created := prAutoCompleteTestIssue(t, "reopen flow", installationID)
 
-	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "needs two prs",
-		"status": "in_progress",
-	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	firePRWebhook(t, secret, installationID, 1, "First fix", "Closes "+created.Identifier, "fix/one", "opened")
+	firePRWebhook(t, secret, installationID, 1, "First fix", "Closes "+created.Identifier, "fix/one", "merged")
+	if got := issueStatusForTest(t, created.ID); got != "done" {
+		t.Fatalf("status after first merge = %q, want done", got)
 	}
-	var created IssueResponse
-	json.NewDecoder(w.Body).Decode(&created)
 
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
-	})
-
-	const installationID int64 = 30264004
-	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
-		WorkspaceID:    parseUUID(testWorkspaceID),
-		InstallationID: installationID,
-		AccountLogin:   "link-only-sibling-acct",
-		AccountType:    "User",
+	if _, err := testHandler.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID: parseUUID(created.ID), Status: "in_progress", WorkspaceID: parseUUID(testWorkspaceID),
 	}); err != nil {
-		t.Fatalf("CreateGitHubInstallation: %v", err)
+		t.Fatalf("reopen: %v", err)
+	}
+	// A later event on the already-merged PR (label, edit, redelivery).
+	firePRWebhook(t, secret, installationID, 1, "First fix (edited)", "Closes "+created.Identifier, "fix/one", "edited_merged")
+	if got := issueStatusForTest(t, created.ID); got != "in_progress" {
+		t.Fatalf("reopened issue bounced back to %q on an event of a merged PR", got)
+	}
+	if got := prAutoCompleteStateForTest(t, created.ID); got.State != prAutoCompleteAllMerged || got.IssueDisabled {
+		t.Fatalf("auto_complete = %+v, want all_merged with the issue still enabled", got)
 	}
 
-	// 1) PR A opens with closing intent.
-	firePRWebhook(t, secret, installationID, 1, "Implement primary path", "Closes "+created.Identifier, "feat/primary", "opened")
-	// 2) PR B opens link-only — title prefix mention, no closing keyword.
-	firePRWebhook(t, secret, installationID, 2, created.Identifier+": follow-up cleanup", "", "feat/cleanup", "opened")
+	firePRWebhook(t, secret, installationID, 2, "Follow-up fix", "Fixes "+created.Identifier, "fix/two", "opened")
+	if got := prAutoCompleteStateForTest(t, created.ID); got.State != prAutoCompleteWaiting {
+		t.Fatalf("auto_complete = %+v, want waiting on the new PR", got)
+	}
+	firePRWebhook(t, secret, installationID, 2, "Follow-up fix", "Fixes "+created.Identifier, "fix/two", "merged")
+	if got := issueStatusForTest(t, created.ID); got != "done" {
+		t.Errorf("status after the follow-up merged = %q, want done", got)
+	}
+}
 
-	// Sanity: issue is still in_progress (both PRs open).
-	got, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("GetIssue after open: %v", err)
+// TestUnlinkIssuePullRequest_IsRememberedAndCompletes: a removed PR stays
+// removed across webhook redeliveries, and removing the last unmerged PR is
+// the PR event that completes the issue.
+func TestUnlinkIssuePullRequest_IsRememberedAndCompletes(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
 	}
-	if got.Status != "in_progress" {
-		t.Fatalf("after both PRs opened: status = %q, want in_progress", got.Status)
+	secret := "unlink-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+	const installationID int64 = 30264007
+	created := prAutoCompleteTestIssue(t, "unlink flow", installationID)
+
+	firePRWebhook(t, secret, installationID, 1, created.Identifier+": abandoned approach", "", "try/one", "opened")
+	firePRWebhook(t, secret, installationID, 2, created.Identifier+": real fix", "Closes "+created.Identifier, "fix/two", "opened")
+	firePRWebhook(t, secret, installationID, 2, created.Identifier+": real fix", "Closes "+created.Identifier, "fix/two", "merged")
+	if got := issueStatusForTest(t, created.ID); got != "in_progress" {
+		t.Fatalf("status = %q, want in_progress while #1 is open", got)
 	}
 
-	// 3) PR A merges. PR B still open → issue stays in_progress.
-	firePRWebhook(t, secret, installationID, 1, "Implement primary path", "Closes "+created.Identifier, "feat/primary", "merged")
-	got, err = testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("GetIssue after A merge: %v", err)
-	}
-	if got.Status != "in_progress" {
-		t.Fatalf("after PR A merged with PR B still open: status = %q, want in_progress", got.Status)
+	unlinkPRForTest(t, created.ID, githubPRIDForTest(t, "widget", 1))
+	if got := issueStatusForTest(t, created.ID); got != "done" {
+		t.Fatalf("status after removing the open PR = %q, want done", got)
 	}
 
-	// 4) PR B merges (link-only, no closing keyword). The persisted
-	// close_intent on PR A's link must still carry the advance.
-	firePRWebhook(t, secret, installationID, 2, created.Identifier+": follow-up cleanup", "", "feat/cleanup", "merged")
-	got, err = testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("GetIssue after B merge: %v", err)
+	firePRWebhook(t, secret, installationID, 1, created.Identifier+": abandoned approach", "", "try/one", "edited")
+	if n := linkedPRCountForTest(t, created.ID); n != 1 {
+		t.Errorf("a removed PR must not be re-linked by the next webhook, got %d rows", n)
 	}
-	if got.Status != "done" {
-		t.Errorf("after both PRs merged (A with close_intent, B link-only): status = %q, want done", got.Status)
+}
+
+// TestLinkIssuePullRequest_ByURL: a pasted PR URL (with trailing path/query)
+// links a mirrored PR by hand, and manual links survive title edits. A manual
+// link carries no close intent of its own, so linking a merged PR that never
+// said "Closes" does not complete the issue. An unknown URL is 404.
+func TestLinkIssuePullRequest_ByURL(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	secret := "manual-link-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+	const installationID int64 = 30264008
+	created := prAutoCompleteTestIssue(t, "manual link", installationID)
+
+	firePRWebhook(t, secret, installationID, 41, "Refactor session helper", "", "refactor/session", "merged")
+
+	link := func(url string) *testutil.Response {
+		req := withURLParam(newRequest("POST", "/api/issues/"+created.ID+"/pull-requests", map[string]any{"url": url}), "id", created.ID)
+		return testutil.Call(t, testHandler.LinkIssuePullRequest, req)
+	}
+	if rec := link("https://github.com/acme/widget/pull/999"); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown PR: expected 404, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if rec := link("github.com/Acme/widget/pull/41/files?w=1"); rec.Code != http.StatusOK {
+		t.Fatalf("link: expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	list := listIssuePRsForTest(t, created.ID)
+	if len(list.PullRequests) != 1 || list.PullRequests[0].LinkSource != "manual" {
+		t.Fatalf("pull_requests = %+v, want one manual link", list.PullRequests)
+	}
+	if got := issueStatusForTest(t, created.ID); got != "in_progress" {
+		t.Errorf("linking a merged PR without a closing keyword: status = %q, want in_progress", got)
+	}
+	if list.AutoComplete.State != prAutoCompleteNoCloseIntent {
+		t.Errorf("auto_complete = %+v, want no_close_intent", list.AutoComplete)
+	}
+	firePRWebhook(t, secret, installationID, 41, "Refactor session helper (renamed)", "", "refactor/session", "edited_merged")
+	if n := linkedPRCountForTest(t, created.ID); n != 1 {
+		t.Errorf("a manual link must survive webhook reconciliation, got %d rows", n)
+	}
+}
+
+// TestPRAutoComplete_WorkspaceAndIssueSwitches: turning the workspace setting
+// off keeps PRs linked but writes no status; turning it back on completes
+// nothing retroactively. The per-issue switch does the same for one issue and
+// is recorded on the timeline.
+func TestPRAutoComplete_WorkspaceAndIssueSwitches(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "switches-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+	const installationID int64 = 30264009
+	wsOff := prAutoCompleteTestIssue(t, "workspace switch", installationID)
+	issueOff := prAutoCompleteTestIssue(t, "issue switch", 0)
+
+	var previous []byte
+	dbfx.QueryRow(t, `SELECT settings FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&previous)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `UPDATE workspace SET settings = $1 WHERE id = $2`, previous, testWorkspaceID)
+	})
+	dbfx.Exec(t, `UPDATE workspace SET settings = COALESCE(settings, '{}'::jsonb) || '{"pr_auto_complete_enabled": false}'::jsonb WHERE id = $1`, testWorkspaceID)
+
+	firePRWebhook(t, secret, installationID, 1, "Work", "Closes "+wsOff.Identifier, "feat/one", "merged")
+	if n := linkedPRCountForTest(t, wsOff.ID); n != 1 {
+		t.Fatalf("setting off must still link, got %d rows", n)
+	}
+	if got := issueStatusForTest(t, wsOff.ID); got != "in_progress" {
+		t.Fatalf("setting off: status = %q, want in_progress", got)
+	}
+	if got := prAutoCompleteStateForTest(t, wsOff.ID); got.State != prAutoCompleteWorkspaceDisabled || got.WorkspaceEnabled {
+		t.Fatalf("auto_complete = %+v, want workspace_disabled", got)
+	}
+	dbfx.Exec(t, `UPDATE workspace SET settings = settings || '{"pr_auto_complete_enabled": true}'::jsonb WHERE id = $1`, testWorkspaceID)
+	if got := issueStatusForTest(t, wsOff.ID); got != "in_progress" {
+		t.Fatalf("turning the setting on must not complete history, got %q", got)
+	}
+
+	put := withURLParam(newRequest("PUT", "/api/issues/"+issueOff.ID+"/pr-auto-complete", map[string]any{"disabled": true}), "id", issueOff.ID)
+	testutil.Call(t, testHandler.SetIssuePRAutoComplete, put).Want(http.StatusOK)
+	firePRWebhook(t, secret, installationID, 2, "Work", "Closes "+issueOff.Identifier, "feat/two", "merged")
+	if got := issueStatusForTest(t, issueOff.ID); got != "in_progress" {
+		t.Fatalf("issue switch off: status = %q, want in_progress", got)
+	}
+	if got := prAutoCompleteStateForTest(t, issueOff.ID); got.State != prAutoCompleteIssueDisabled || !got.IssueDisabled {
+		t.Fatalf("auto_complete = %+v, want issue_disabled", got)
+	}
+	var recorded int
+	dbfx.QueryRow(t, `SELECT count(*) FROM activity_log WHERE issue_id = $1 AND action = 'pr_auto_complete_changed'`, issueOff.ID).Scan(&recorded)
+	if recorded != 1 {
+		t.Errorf("expected the switch change on the timeline, got %d entries", recorded)
+	}
+	_ = ctx
+}
+
+func TestNormalizePullRequestURL(t *testing.T) {
+	for _, tc := range []struct {
+		in, want string
+		ok       bool
+	}{
+		{"https://github.com/Acme/Widget/pull/12", "https://github.com/acme/widget/pull/12", true},
+		{"github.com/acme/widget/pull/12/files?diff=split#r1", "https://github.com/acme/widget/pull/12", true},
+		{"https://gitlab.example.com/group/sub/repo/-/merge_requests/7/diffs", "https://gitlab.example.com/group/sub/repo/-/merge_requests/7", true},
+		{"https://git.example.com/acme/widget/pulls/3", "https://git.example.com/acme/widget/pulls/3", true},
+		{"https://github.com/acme/widget/issues/12", "", false},
+		{"not a url", "", false},
+		{"", "", false},
+	} {
+		got, ok := normalizePullRequestURL(tc.in)
+		if ok != tc.ok || got != tc.want {
+			t.Errorf("normalizePullRequestURL(%q) = (%q, %v), want (%q, %v)", tc.in, got, ok, tc.want, tc.ok)
+		}
 	}
 }
 
@@ -1285,35 +1617,6 @@ func TestDerivePRMergeableState(t *testing.T) {
 	}
 }
 
-func TestAggregateChecksConclusion(t *testing.T) {
-	str := func(p *string) string {
-		if p == nil {
-			return "<nil>"
-		}
-		return *p
-	}
-	cases := []struct {
-		name                           string
-		failed, passed, pending, total int64
-		want                           string
-	}{
-		{"no_suites_nil", 0, 0, 0, 0, "<nil>"},
-		{"any_failure_wins", 1, 5, 0, 6, "failed"},
-		{"failure_beats_pending", 1, 0, 3, 4, "failed"},
-		{"pending_when_no_failure", 0, 1, 2, 3, "pending"},
-		{"all_passed", 0, 3, 0, 3, "passed"},
-		{"counts_zero_but_total_nonzero_returns_nil", 0, 0, 0, 1, "<nil>"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := aggregateChecksConclusion(tc.failed, tc.passed, tc.pending, tc.total)
-			if str(got) != tc.want {
-				t.Errorf("aggregateChecksConclusion = %s, want %s", str(got), tc.want)
-			}
-		})
-	}
-}
-
 // firePullRequestWebhookWithHead is like firePullRequestWebhook but lets the
 // caller control the head SHA and mergeable_state on the payload. The CI
 // tests need both knobs to exercise head-change semantics.
@@ -1348,73 +1651,31 @@ func firePullRequestWebhookWithHead(t *testing.T, secret, identifier string, ins
 	mac.Write(raw)
 	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 
-	rec := httptest.NewRecorder()
 	hookReq := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(raw))
 	hookReq.Header.Set("X-GitHub-Event", "pull_request")
 	hookReq.Header.Set("X-Hub-Signature-256", sig)
-	testHandler.HandleGitHubWebhook(rec, hookReq)
+	rec := testutil.Call(t, testHandler.HandleGitHubWebhook, hookReq)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("webhook %s pr=%d action=%s: expected 202, got %d (%s)",
 			repo, prNumber, action, rec.Code, rec.Body.String())
 	}
 }
 
-func fireCheckSuiteWebhook(t *testing.T, secret string, installationID int64, repo string, prNumbers []int32, suiteID, appID int64, headSHA, conclusion, updatedAt string) {
-	t.Helper()
-	prRefs := make([]map[string]any, 0, len(prNumbers))
-	for _, n := range prNumbers {
-		prRefs = append(prRefs, map[string]any{"number": n})
-	}
-	payload := map[string]any{
-		"action": "completed",
-		"check_suite": map[string]any{
-			"id":            suiteID,
-			"head_sha":      headSHA,
-			"status":        "completed",
-			"conclusion":    conclusion,
-			"updated_at":    updatedAt,
-			"app":           map[string]any{"id": appID},
-			"pull_requests": prRefs,
-		},
-		"repository": map[string]any{
-			"name":  repo,
-			"owner": map[string]any{"login": "acme"},
-		},
-		"installation": map[string]any{"id": installationID},
-	}
-	raw, _ := json.Marshal(payload)
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write(raw)
-	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
-
-	rec := httptest.NewRecorder()
-	hookReq := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(raw))
-	hookReq.Header.Set("X-GitHub-Event", "check_suite")
-	hookReq.Header.Set("X-Hub-Signature-256", sig)
-	testHandler.HandleGitHubWebhook(rec, hookReq)
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("check_suite webhook: expected 202, got %d (%s)", rec.Code, rec.Body.String())
-	}
-}
-
 func setupPRTestIssue(t *testing.T, ctx context.Context, secret string) (IssueResponse, int64) {
 	t.Helper()
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":  "PR CI test",
 		"status": "in_progress",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
 
 	installationID := int64(33445566) + int64(time.Now().UnixNano()%1000000)
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM github_pull_request_check_suite WHERE pr_id IN (SELECT id FROM github_pull_request WHERE workspace_id = $1)`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_pending_check_suite WHERE workspace_id = $1`, testWorkspaceID)
 		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
 		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
 		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
@@ -1430,112 +1691,6 @@ func setupPRTestIssue(t *testing.T, ctx context.Context, secret string) (IssueRe
 		t.Fatalf("CreateGitHubInstallation: %v", err)
 	}
 	return created, installationID
-}
-
-// TestWebhook_CheckSuite_AggregatesAcrossApps ensures the list query reports
-// "failed" when one app's latest suite is a failure and another app's is a
-// success on the same head. Without per-app aggregation, the last-completed
-// suite would silently flip the verdict.
-func TestWebhook_CheckSuite_AggregatesAcrossApps(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("handler test fixture not initialized (no DB?)")
-	}
-	ctx := context.Background()
-	const secret = "ci-aggregate-secret"
-	created, installationID := setupPRTestIssue(t, ctx, secret)
-
-	head := "abc1234567890"
-	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-a", 11, "opened", head, "")
-	// App A → success, App B → failure. The list query must report failed.
-	fireCheckSuiteWebhook(t, secret, installationID, "ci-repo-a", []int32{11}, 1001, 7001, head, "success", "2026-05-01T00:00:00Z")
-	fireCheckSuiteWebhook(t, secret, installationID, "ci-repo-a", []int32{11}, 1002, 7002, head, "failure", "2026-05-01T00:01:00Z")
-
-	rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("ListPullRequestsByIssue: %v", err)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 PR row, got %d", len(rows))
-	}
-	got := aggregateChecksConclusion(rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
-	if got == nil || *got != "failed" {
-		t.Errorf("expected aggregate failed, got %v (counts: failed=%d passed=%d pending=%d total=%d)",
-			got, rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
-	}
-}
-
-// TestWebhook_CheckSuite_OldHeadIgnored asserts that a late-arriving
-// check_suite for a stale head SHA doesn't contaminate the current head's
-// pending view. Without the head_sha filter in the aggregation query, the
-// new head would inherit the old head's "passed" verdict.
-func TestWebhook_CheckSuite_OldHeadIgnored(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("handler test fixture not initialized (no DB?)")
-	}
-	ctx := context.Background()
-	const secret = "ci-oldhead-secret"
-	created, installationID := setupPRTestIssue(t, ctx, secret)
-
-	oldHead := "old1111111111"
-	newHead := "new2222222222"
-
-	// First: open the PR at old head, run a passing suite.
-	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-b", 22, "opened", oldHead, "")
-	fireCheckSuiteWebhook(t, secret, installationID, "ci-repo-b", []int32{22}, 2001, 8001, oldHead, "success", "2026-05-01T00:00:00Z")
-
-	rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("ListPullRequestsByIssue: %v", err)
-	}
-	got := aggregateChecksConclusion(rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
-	if got == nil || *got != "passed" {
-		t.Fatalf("setup: expected passed on old head, got %v", got)
-	}
-
-	// Then: synchronize to new head — no new suite yet. Then a late suite
-	// for the OLD head fires (e.g. a delayed delivery). The current aggregate
-	// must be nil (no suite for the new head).
-	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-b", 22, "synchronize", newHead, "")
-	fireCheckSuiteWebhook(t, secret, installationID, "ci-repo-b", []int32{22}, 2002, 8001, oldHead, "success", "2026-05-01T00:05:00Z")
-
-	rows, err = testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("ListPullRequestsByIssue: %v", err)
-	}
-	got = aggregateChecksConclusion(rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
-	if got != nil {
-		t.Errorf("expected no aggregate (nil) after head change, got %v", got)
-	}
-}
-
-// TestWebhook_CheckSuite_LateOlderEventIgnored guards the single-row ordering
-// rule: for the same (pr_id, suite_id) the upsert must not let a later-
-// delivered older event overwrite the latest one. We send the newer state
-// (failure) first and then the older (success) and assert the row still
-// reads failure.
-func TestWebhook_CheckSuite_LateOlderEventIgnored(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("handler test fixture not initialized (no DB?)")
-	}
-	ctx := context.Background()
-	const secret = "ci-ordering-secret"
-	created, installationID := setupPRTestIssue(t, ctx, secret)
-
-	head := "ord1234567890"
-	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-c", 33, "opened", head, "")
-	// Latest event first.
-	fireCheckSuiteWebhook(t, secret, installationID, "ci-repo-c", []int32{33}, 3001, 9001, head, "failure", "2026-05-01T01:00:00Z")
-	// Late-arriving older event for the same suite.
-	fireCheckSuiteWebhook(t, secret, installationID, "ci-repo-c", []int32{33}, 3001, 9001, head, "success", "2026-05-01T00:00:00Z")
-
-	rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("ListPullRequestsByIssue: %v", err)
-	}
-	got := aggregateChecksConclusion(rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
-	if got == nil || *got != "failed" {
-		t.Errorf("expected failure to win against later-delivered older success, got %v", got)
-	}
 }
 
 // TestWebhook_PullRequest_SynchronizeClearsMergeable verifies that
@@ -1735,15 +1890,14 @@ func TestGitHubRoutes_RoleGating(t *testing.T) {
 
 	const slug = "github-routes-role-gating"
 	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	_, _ = testPool.Exec(ctx, `DELETE FROM "user" WHERE email LIKE $1`, "github-routes-"+slug+"-%")
 
-	var wsID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO workspace (name, slug, description, issue_prefix)
-VALUES ($1, $2, $3, $4)
-RETURNING id
-`, "GitHub Routes Role Gating", slug, "github routes role gating", "GRG").Scan(&wsID); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
+	wsID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "GitHub Routes Role Gating",
+		"slug":         slug,
+		"description":  "github routes role gating",
+		"issue_prefix": "GRG",
+	})
 
 	// Three workspace members + one outsider. We attach the requesting user
 	// via the X-User-ID header so the middleware reads them off the auth
@@ -1752,11 +1906,9 @@ RETURNING id
 		t.Helper()
 		var id string
 		email := fmt.Sprintf("github-routes-%s-%s@multica.ai", slug, label)
-		if err := testPool.QueryRow(ctx, `
+		dbfx.QueryRow(t, `
 INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
-`, "GHR "+label, email).Scan(&id); err != nil {
-			t.Fatalf("create user %s: %v", label, err)
-		}
+`, "GHR "+label, email).Scan(&id)
 		return id
 	}
 	adminUserID := mkUser(t, "admin")
@@ -1769,11 +1921,9 @@ INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
 		{adminUserID, "admin"},
 		{memberUserID, "member"},
 	} {
-		if _, err := testPool.Exec(ctx, `
+		dbfx.Exec(t, `
 INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
-`, wsID, m.userID, m.role); err != nil {
-			t.Fatalf("insert member (%s): %v", m.role, err)
-		}
+`, wsID, m.userID, m.role)
 	}
 
 	const installationID int64 = 90909090
@@ -1807,6 +1957,7 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner", "admin"))
 			r.Get("/github/connect", testHandler.GitHubConnect)
+			r.Get("/github/installations/{installationId}/repositories", testHandler.ListGitHubInstallationRepositories)
 			r.Delete("/github/installations/{installationId}", testHandler.DeleteGitHubInstallation)
 		})
 	})
@@ -1851,6 +2002,16 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
 		}
 	})
 
+	t.Run("GET repositories remains owner/admin only", func(t *testing.T) {
+		path := "/api/workspaces/" + wsID + "/github/installations/" + uuidToString(createdInst.ID) + "/repositories"
+		if code := exercise(t, http.MethodGet, path, memberUserID); code != http.StatusForbidden {
+			t.Errorf("member GET repositories: want 403, got %d", code)
+		}
+		if code := exercise(t, http.MethodGet, path, outsiderUserID); code != http.StatusNotFound {
+			t.Errorf("outsider GET repositories: want 404, got %d", code)
+		}
+	})
+
 	t.Run("DELETE installation remains owner/admin only", func(t *testing.T) {
 		// Member: 403 — middleware rejects before the handler runs.
 		if code := exercise(t, http.MethodDelete, "/api/workspaces/"+wsID+"/github/installations/"+uuidToString(createdInst.ID), memberUserID); code != http.StatusForbidden {
@@ -1865,9 +2026,7 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
 			t.Errorf("admin DELETE installation: want 204, got %d", code)
 		}
 		var remaining int
-		if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM github_installation WHERE id = $1`, uuidToString(createdInst.ID)).Scan(&remaining); err != nil {
-			t.Fatalf("verify deletion: %v", err)
-		}
+		dbfx.QueryRow(t, `SELECT COUNT(*) FROM github_installation WHERE id = $1`, uuidToString(createdInst.ID)).Scan(&remaining)
 		if remaining != 0 {
 			t.Errorf("expected installation row gone after admin DELETE, got %d remaining", remaining)
 		}
@@ -1913,9 +2072,9 @@ func TestGitHubInstallationBroadcastRedaction(t *testing.T) {
 
 // TestWebhook_MergedPR_ChildWithParent_NotifiesParent guards the MUL-2538
 // must-fix: a merged PR is the dominant path by which a sub-issue actually
-// reaches `done`, and that path goes through advanceIssueToDone — not the
+// reaches `done`, and that path goes through maybeAutoCompleteIssue — not the
 // HTTP UpdateIssue / BatchUpdateIssues handlers that originally wired up
-// notifyParentOfChildDone. Without the helper call inside advanceIssueToDone,
+// notifyParentOfChildDone. Without the helper call inside maybeAutoCompleteIssue,
 // the parent receives nothing when a child is closed by merging its PR.
 // This test fires a `pull_request closed merged` webhook against a child
 // issue and verifies the parent gets exactly one platform-generated system
@@ -1929,28 +2088,20 @@ func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
 
 	// Create parent (open) + child (in_progress) pair.
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":  "PR-merge parent " + time.Now().Format(time.RFC3339Nano),
 		"status": "in_progress",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue parent: %d %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var parent IssueResponse
 	json.NewDecoder(w.Body).Decode(&parent)
 
-	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":           "PR-merge child " + time.Now().Format(time.RFC3339Nano),
 		"status":          "in_progress",
 		"parent_issue_id": parent.ID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue child: %d %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var child IssueResponse
 	json.NewDecoder(w.Body).Decode(&child)
 
@@ -2001,14 +2152,10 @@ func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
 	mac.Write(body)
 	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 
-	w = httptest.NewRecorder()
 	req2 := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(body))
 	req2.Header.Set("X-GitHub-Event", "pull_request")
 	req2.Header.Set("X-Hub-Signature-256", sig)
-	testHandler.HandleGitHubWebhook(w, req2)
-	if w.Code != http.StatusAccepted {
-		t.Fatalf("webhook: expected 202, got %d (%s)", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.HandleGitHubWebhook, req2).Want(http.StatusAccepted)
 
 	// Child must now be done (sanity check — the existing path).
 	updatedChild, err := testHandler.Queries.GetIssue(ctx, parseUUID(child.ID))
@@ -2021,23 +2168,19 @@ func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
 
 	// Parent must have received exactly one platform-generated system comment.
 	var sysCount int
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT count(*) FROM comment WHERE issue_id = $1 AND author_type = 'system'`,
 		parent.ID,
-	).Scan(&sysCount); err != nil {
-		t.Fatalf("count system comments on parent: %v", err)
-	}
+	).Scan(&sysCount)
 	if sysCount != 1 {
 		t.Fatalf("expected 1 system comment on parent after PR-merge auto-done, got %d", sysCount)
 	}
 
 	var content string
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT content FROM comment WHERE issue_id = $1 AND author_type = 'system' LIMIT 1`,
 		parent.ID,
-	).Scan(&content); err != nil {
-		t.Fatalf("read system comment: %v", err)
-	}
+	).Scan(&content)
 	if !strings.Contains(content, child.Identifier) {
 		t.Errorf("system comment should reference child identifier %q, got: %s", child.Identifier, content)
 	}
@@ -2051,16 +2194,12 @@ func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
 	}
 }
 
-
-// generateTestRSAKeyPEM mints an RSA-2048 key, returns its PKCS#1 PEM
+// generateTestRSAKeyPEM returns the shared RSA-2048 test key's PKCS#1 PEM
 // encoding (the format GitHub hands operators when they create the App)
 // and the parsed *rsa.PrivateKey for verification.
 func generateTestRSAKeyPEM(t *testing.T) (pemBytes []byte, key *rsa.PrivateKey) {
 	t.Helper()
-	k, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("generate RSA key: %v", err)
-	}
+	k := sharedTestRSAKey(t)
 	der := x509.MarshalPKCS1PrivateKey(k)
 	return pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: der}), k
 }
@@ -2158,6 +2297,146 @@ func TestSignGitHubAppJWT_ClaimsAndSignature(t *testing.T) {
 	}
 	if exp-iat > int64(10*time.Minute/time.Second) {
 		t.Errorf("exp-iat = %d s, exceeds GitHub's 10m max", exp-iat)
+	}
+}
+
+func TestFetchGitHubInstallationRepositories(t *testing.T) {
+	pemBytes, key := generateTestRSAKeyPEM(t)
+	t.Setenv("GITHUB_APP_ID", "424242")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", string(pemBytes))
+
+	const installationID int64 = 314159
+	var tokenRevoked bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/app/installations/314159/access_tokens":
+			bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+			if bearer == "" {
+				http.Error(w, "missing app jwt", http.StatusUnauthorized)
+				return
+			}
+			if _, err := jwt.Parse(bearer, func(token *jwt.Token) (any, error) {
+				return &key.PublicKey, nil
+			}); err != nil {
+				http.Error(w, "bad app jwt", http.StatusUnauthorized)
+				return
+			}
+			var tokenRequest struct {
+				Permissions map[string]string `json:"permissions"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&tokenRequest); err != nil {
+				http.Error(w, "bad token request", http.StatusBadRequest)
+				return
+			}
+			if !reflect.DeepEqual(tokenRequest.Permissions, map[string]string{"metadata": "read"}) {
+				http.Error(w, "overbroad token permissions", http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, http.StatusCreated, map[string]any{"token": "installation-secret"})
+		case r.Method == http.MethodGet && r.URL.Path == "/installation/repositories":
+			if got := r.Header.Get("Authorization"); got != "Bearer installation-secret" {
+				http.Error(w, "bad installation token", http.StatusUnauthorized)
+				return
+			}
+			if r.URL.Query().Get("page") != "2" || r.URL.Query().Get("per_page") != "1" {
+				http.Error(w, "bad pagination", http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"total_count": 3,
+				"repositories": []map[string]any{{
+					"id":             9,
+					"full_name":      "acme/private-repo",
+					"html_url":       "https://github.com/acme/private-repo",
+					"clone_url":      "https://github.com/acme/private-repo.git",
+					"description":    "Private repository",
+					"private":        true,
+					"archived":       false,
+					"default_branch": "main",
+				}},
+			})
+		case r.Method == http.MethodDelete && r.URL.Path == "/installation/token":
+			tokenRevoked = r.Header.Get("Authorization") == "Bearer installation-secret"
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	oldBase := githubAPIBase
+	githubAPIBase = srv.URL
+	t.Cleanup(func() { githubAPIBase = oldBase })
+
+	got, err := fetchGitHubInstallationRepositories(
+		context.Background(),
+		installationID,
+		2,
+		1,
+	)
+	if err != nil {
+		t.Fatalf("fetchGitHubInstallationRepositories: %v", err)
+	}
+	if len(got.Repositories) != 1 {
+		t.Fatalf("repositories = %d, want 1", len(got.Repositories))
+	}
+	repository := got.Repositories[0]
+	if repository.FullName != "acme/private-repo" || !repository.Private {
+		t.Errorf("repository = %+v, want mapped private repository", repository)
+	}
+	if got.TotalCount != 3 || got.NextPage == nil || *got.NextPage != 3 {
+		t.Errorf("pagination = total %d, next %v; want total 3, next 3", got.TotalCount, got.NextPage)
+	}
+	if !tokenRevoked {
+		t.Error("installation token was not revoked after repository listing")
+	}
+}
+
+func TestListGitHubInstallationRepositoriesRejectsCrossWorkspaceRow(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	const installationID int64 = 818181
+	row, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "cross-workspace-acct",
+		AccountType:    "Organization",
+	})
+	if err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
+	})
+
+	otherWorkspaceID := "11111111-2222-3333-4444-555555555555"
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/workspaces/"+otherWorkspaceID+"/github/installations/"+uuidToString(row.ID)+"/repositories",
+		nil,
+	)
+	rec := httptest.NewRecorder()
+	router := chi.NewRouter()
+	router.Get(
+		"/api/workspaces/{id}/github/installations/{installationId}/repositories",
+		testHandler.ListGitHubInstallationRepositories,
+	)
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("cross-workspace row: got %d (%s), want 404", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGitHubWebhook_UnconfiguredDeploymentReturns404(t *testing.T) {
+	t.Setenv("GITHUB_WEBHOOK_SECRET", "")
+	req := httptest.NewRequest(http.MethodPost, "/api/webhooks/github", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+
+	(&Handler{}).HandleGitHubWebhook(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when webhook is unconfigured, got %d (%s)", rec.Code, rec.Body.String())
 	}
 }
 
@@ -2337,20 +2616,20 @@ func TestWebhook_InstallationCreatedRefreshesUnknownLogin(t *testing.T) {
 	mac.Write(body)
 	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 
-	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(body))
 	req.Header.Set("X-GitHub-Event", "installation")
 	req.Header.Set("X-Hub-Signature-256", sig)
-	testHandler.HandleGitHubWebhook(rec, req)
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("webhook: expected 202, got %d (%s)", rec.Code, rec.Body.String())
-	}
+	testutil.Call(t, testHandler.HandleGitHubWebhook, req).Want(http.StatusAccepted)
 
 	// (a) The row's account_login must be the real login, not "unknown".
-	got, err := testHandler.Queries.GetGitHubInstallationByInstallationID(ctx, installationID)
+	rows, err := testHandler.Queries.ListGitHubInstallationsByInstallationID(ctx, installationID)
 	if err != nil {
-		t.Fatalf("get installation: %v", err)
+		t.Fatalf("list installations: %v", err)
 	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 installation row, got %d", len(rows))
+	}
+	got := rows[0]
 	if got.AccountLogin != "real-octocat" {
 		t.Errorf("account_login = %q, want %q (refresh did not overwrite the unknown placeholder)",
 			got.AccountLogin, "real-octocat")
@@ -2387,5 +2666,754 @@ func TestWebhook_InstallationCreatedRefreshesUnknownLogin(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Errorf("expected github_installation:created broadcast after webhook refresh, got none in 2s")
+	}
+}
+
+// TestSetupCallback_ConsumesPendingInstallationCreated covers the inverse
+// race to TestWebhook_InstallationCreatedRefreshesUnknownLogin: GitHub can
+// deliver installation.created before the setup callback has created the local
+// workspace binding. The webhook cannot broadcast yet, but it must not be lost;
+// the callback consumes the pending account metadata even if its direct GitHub
+// API lookup falls back to the "unknown" placeholder.
+func TestSetupCallback_ConsumesPendingInstallationCreated(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "pending-installation-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+	t.Setenv("GITHUB_APP_ID", "")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", "")
+	t.Setenv("FRONTEND_ORIGIN", "https://app.example.test")
+
+	const installationID int64 = 81818181
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
+		testPool.Exec(ctx, `DELETE FROM github_pending_installation WHERE installation_id = $1`, installationID)
+	})
+
+	// Force fetchInstallationAccount to take its degraded path. This pins that
+	// the final real account name comes from the earlier webhook, not the
+	// setup callback's synchronous GitHub API lookup.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "auth required", http.StatusUnauthorized)
+	}))
+	t.Cleanup(srv.Close)
+	oldBase := githubAPIBase
+	githubAPIBase = srv.URL
+	t.Cleanup(func() { githubAPIBase = oldBase })
+
+	body, _ := json.Marshal(map[string]any{
+		"action": "created",
+		"installation": map[string]any{
+			"id": installationID,
+			"account": map[string]any{
+				"login":      "pending-octocat",
+				"type":       "Organization",
+				"avatar_url": "https://example.com/pending.png",
+			},
+		},
+	})
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+	rec := httptest.NewRecorder()
+	hookReq := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(body))
+	hookReq.Header.Set("X-GitHub-Event", "installation")
+	hookReq.Header.Set("X-Hub-Signature-256", sig)
+	testHandler.HandleGitHubWebhook(rec, hookReq)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("webhook: expected 202, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	var pendingLogin string
+	dbfx.QueryRow(t,
+		`SELECT account_login FROM github_pending_installation WHERE installation_id = $1`,
+		installationID,
+	).Scan(&pendingLogin)
+	if pendingLogin != "pending-octocat" {
+		t.Fatalf("pending account_login = %q, want pending-octocat", pendingLogin)
+	}
+
+	state, err := signState(testWorkspaceID)
+	if err != nil {
+		t.Fatalf("signState: %v", err)
+	}
+	setupReq := httptest.NewRequest("GET",
+		fmt.Sprintf("/api/github/setup?installation_id=%d&state=%s", installationID, state),
+		nil,
+	)
+	setupRec := httptest.NewRecorder()
+	testHandler.GitHubSetupCallback(setupRec, setupReq)
+	if setupRec.Code != http.StatusFound {
+		t.Fatalf("setup callback: expected 302, got %d (%s)", setupRec.Code, setupRec.Body.String())
+	}
+	if loc := setupRec.Header().Get("Location"); !strings.Contains(loc, "github_connected=1") {
+		t.Fatalf("setup callback redirect = %q, want github_connected=1", loc)
+	}
+
+	rows, err := testHandler.Queries.ListGitHubInstallationsByInstallationID(ctx, installationID)
+	if err != nil {
+		t.Fatalf("list installations: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 installation row, got %d", len(rows))
+	}
+	got := rows[0]
+	if got.AccountLogin != "pending-octocat" {
+		t.Errorf("account_login = %q, want pending-octocat (callback left the unknown placeholder)", got.AccountLogin)
+	}
+	if got.AccountType != "Organization" {
+		t.Errorf("account_type = %q, want Organization", got.AccountType)
+	}
+	if got.AccountAvatarUrl.String != "https://example.com/pending.png" || !got.AccountAvatarUrl.Valid {
+		t.Errorf("account_avatar_url = %+v, want pending avatar", got.AccountAvatarUrl)
+	}
+
+	var pendingCount int
+	dbfx.QueryRow(t,
+		`SELECT count(*) FROM github_pending_installation WHERE installation_id = $1`,
+		installationID,
+	).Scan(&pendingCount)
+	if pendingCount != 0 {
+		t.Fatalf("pending installation row should be consumed, got count %d", pendingCount)
+	}
+}
+
+// TestWebhook_PullRequest_FansOutToBoundWorkspaces is the MUL-4343 change: one
+// GitHub App installation bound to several workspaces must deliver a repo's PR
+// events to EVERY bound workspace. Each workspace mirrors the PR and auto-links
+// it against its own issues (its own prefix), replacing the old single-workspace
+// routing that dropped the event for every workspace but one.
+func TestWebhook_PullRequest_FansOutToBoundWorkspaces(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "fanout-pr-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	// Workspace B is the shared test workspace (prefix HAN) and owns the issue.
+	w := httptest.NewRecorder()
+	testHandler.CreateIssue(w, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "fan-out PR test",
+		"status": "in_progress",
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	const repo = "fanout-repo"
+	const prNumber int32 = 4343
+	const installationID int64 = 778899101
+
+	// Workspace A is bound to the SAME installation but has no matching issue;
+	// it must still receive the PR mirror.
+	testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
+	testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, "fanout-pr-ws-a")
+	wsA, err := testHandler.Queries.CreateWorkspace(ctx, db.CreateWorkspaceParams{
+		Name: "fanout-pr-ws-a", Slug: "fanout-pr-ws-a", IssuePrefix: "FPA",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	// Bind the installation to BOTH workspaces.
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID: parseUUID(testWorkspaceID), InstallationID: installationID, AccountLogin: "acme", AccountType: "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation B: %v", err)
+	}
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID: wsA.ID, InstallationID: installationID, AccountLogin: "acme", AccountType: "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation A: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE repo_owner = 'acme' AND repo_name = $1`, repo)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wsA.ID)
+	})
+
+	// One PR whose title references workspace B's issue.
+	firePullRequestWebhook(t, secret, created.Identifier, installationID, repo, prNumber, "open")
+
+	// The PR must be mirrored in BOTH bound workspaces.
+	if _, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
+		WorkspaceID: parseUUID(testWorkspaceID), RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
+	}); err != nil {
+		t.Fatalf("expected PR mirrored in workspace B: %v", err)
+	}
+	prA, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
+		WorkspaceID: wsA.ID, RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
+	})
+	if err != nil {
+		t.Fatalf("expected PR fanned out to workspace A: %v", err)
+	}
+
+	// Workspace B links its own issue; workspace A (no matching issue) does not.
+	linked, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(linked) != 1 {
+		t.Fatalf("expected 1 linked PR on workspace B's issue, got %d", len(linked))
+	}
+	if issues, _ := testHandler.Queries.ListIssueIDsForPullRequest(ctx, prA.ID); len(issues) != 0 {
+		t.Fatalf("workspace A has no matching issue, expected 0 links, got %d", len(issues))
+	}
+}
+
+// TestWebhook_PullRequest_AmbiguousCloseAcrossWorkspaces is the #6804
+// regression under MUL-7429. Two workspaces bound to the same installation share
+// an issue prefix (permitted by #2797) and both own a real issue at the same
+// number, so a PR titled "Fix AMB-<n>" resolves in BOTH after the #5183
+// fan-out. A link now means "this PR delivers the issue" and a merged link set
+// completes it, so an identifier nothing in the event can attribute must not
+// link in either workspace — otherwise the merge would complete an issue in a
+// workspace that has nothing to do with the PR. A member links it by hand.
+func TestWebhook_PullRequest_AmbiguousCloseAcrossWorkspaces(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "ambiguous-close-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	// Both workspaces answer to "AMB" — the collision #2797 allows.
+	setWorkspaceIssuePrefixForTest(t, "AMB")
+
+	// Workspace B is the shared test workspace and owns the issue the PR is
+	// really for.
+	w := httptest.NewRecorder()
+	testHandler.CreateIssue(w, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "ambiguous close test",
+		"status": "in_progress",
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var issueB IssueResponse
+	json.NewDecoder(w.Body).Decode(&issueB)
+
+	const repo = "ambiguous-close-repo"
+	const prNumber int32 = 6804
+	const installationID int64 = 660480000
+
+	testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
+	testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, "ambiguous-close-ws-a")
+	wsA, err := testHandler.Queries.CreateWorkspace(ctx, db.CreateWorkspaceParams{
+		Name: "ambiguous-close-ws-a", Slug: "ambiguous-close-ws-a", IssuePrefix: "AMB",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	// Workspace A's own issue at the SAME number. `number` is an explicit
+	// column, so we can place the collision directly instead of pumping the
+	// workspace's issue counter up to B's.
+	issueA, err := testHandler.Queries.CreateIssue(ctx, db.CreateIssueParams{
+		WorkspaceID: wsA.ID,
+		Title:       "unrelated issue that happens to share a number",
+		Status:      "in_progress",
+		Priority:    "none",
+		CreatorType: "member",
+		CreatorID:   parseUUID(testUserID),
+		Number:      issueB.Number,
+	})
+	if err != nil {
+		t.Fatalf("CreateIssue in workspace A: %v", err)
+	}
+
+	for _, wsID := range []pgtype.UUID{parseUUID(testWorkspaceID), wsA.ID} {
+		if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+			WorkspaceID: wsID, InstallationID: installationID, AccountLogin: "acme", AccountType: "User",
+		}); err != nil {
+			t.Fatalf("CreateGitHubInstallation: %v", err)
+		}
+	}
+
+	t.Cleanup(func() {
+		bg := context.Background()
+		testPool.Exec(bg, `DELETE FROM issue_pull_request WHERE issue_id = ANY($1)`,
+			[]string{issueB.ID, uuidToString(issueA.ID)})
+		testPool.Exec(bg, `DELETE FROM github_pull_request WHERE repo_owner = 'acme' AND repo_name = $1`, repo)
+		testPool.Exec(bg, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
+		testPool.Exec(bg, `DELETE FROM activity_log WHERE issue_id = ANY($1)`,
+			[]string{issueB.ID, uuidToString(issueA.ID)})
+		testPool.Exec(bg, `DELETE FROM issue WHERE id = ANY($1)`,
+			[]string{issueB.ID, uuidToString(issueA.ID)})
+		testPool.Exec(bg, `DELETE FROM workspace WHERE id = $1`, wsA.ID)
+	})
+
+	// A stale automatic link from before this rule must not survive either.
+	firePullRequestWebhook(t, secret, issueB.Identifier, installationID, repo, prNumber, "open")
+	prB := githubPRIDForTest(t, repo, prNumber)
+	dbfx.Exec(t, `INSERT INTO issue_pull_request (issue_id, pull_request_id, linked_by_type) VALUES ($1, $2, 'system')`, issueB.ID, prB)
+	firePullRequestWebhook(t, secret, issueB.Identifier, installationID, repo, prNumber, "merged")
+
+	for _, tc := range []struct {
+		name    string
+		issueID pgtype.UUID
+	}{
+		{"workspace B (owns the PR)", parseUUID(issueB.ID)},
+		{"workspace A (collision)", issueA.ID},
+	} {
+		linked, err := testHandler.Queries.ListPullRequestsByIssue(ctx, tc.issueID)
+		if err != nil {
+			t.Fatalf("%s: ListPullRequestsByIssue: %v", tc.name, err)
+		}
+		if len(linked) != 0 {
+			t.Fatalf("%s: an ambiguous identifier must not auto-link, got %d links", tc.name, len(linked))
+		}
+
+		issue, err := testHandler.Queries.GetIssue(ctx, tc.issueID)
+		if err != nil {
+			t.Fatalf("%s: GetIssue: %v", tc.name, err)
+		}
+		if issue.Status == "done" {
+			t.Errorf("%s: issue was auto-advanced to done on an ambiguous close (#6804)", tc.name)
+		}
+	}
+}
+
+// TestPRLinkPolicyPermits pins the fail-closed invariant at the type level:
+// the policy is an allowlist, so anything it was not able to prove is denied.
+func TestPRLinkPolicyPermits(t *testing.T) {
+	const wsA, wsB = "workspace-a", "workspace-b"
+
+	for _, tc := range []struct {
+		name   string
+		policy prLinkPolicy
+		ws     string
+		want   bool
+	}{
+		{
+			name:   "zero value denies",
+			policy: prLinkPolicy{},
+			ws:     wsA,
+			want:   false,
+		},
+		{
+			name:   "single-binding delivery is unrestricted",
+			policy: prLinkPolicy{unrestricted: true},
+			ws:     wsA,
+			want:   true,
+		},
+		{
+			name:   "recorded owner may link",
+			policy: prLinkPolicy{owner: map[string]string{"ABC-100": wsA}},
+			ws:     wsA,
+			want:   true,
+		},
+		{
+			// A workspace that grew a same-numbered issue after the scan is not
+			// the recorded owner, so it still cannot link.
+			name:   "workspace that is not the recorded owner may not link",
+			policy: prLinkPolicy{owner: map[string]string{"ABC-100": wsA}},
+			ws:     wsB,
+			want:   false,
+		},
+		{
+			name:   "ambiguous identifier is denied everywhere",
+			policy: prLinkPolicy{owner: map[string]string{}, ambiguous: map[string]bool{"ABC-100": true}},
+			ws:     wsA,
+			want:   false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.policy.permits("ABC-100", tc.ws); got != tc.want {
+				t.Errorf("permits(ABC-100, %s) = %v, want %v", tc.ws, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPRLinkPolicyPermitsClose: auto-link decides which links get created, not
+// whether a closing keyword counts on links a workspace already has. A
+// workspace that is the only resolver acts with auto-link off; a resolver
+// that shares the identifier with an auto-linking owner does not.
+func TestPRLinkPolicyPermitsClose(t *testing.T) {
+	const wsA, wsB = "workspace-a", "workspace-b"
+
+	for _, tc := range []struct {
+		name   string
+		policy prLinkPolicy
+		ws     string
+		want   bool
+	}{
+		{"zero value denies", prLinkPolicy{}, wsA, false},
+		{"single-binding delivery is unrestricted", prLinkPolicy{unrestricted: true}, wsA, true},
+		{"auto-linking owner acts", prLinkPolicy{owner: map[string]string{"ABC-100": wsA}}, wsA, true},
+		{"sole resolver with auto-link off acts", prLinkPolicy{sole: map[string]string{"ABC-100": wsA}}, wsA, true},
+		{"resolver beside an auto-linking owner does not act", prLinkPolicy{owner: map[string]string{"ABC-100": wsA}}, wsB, false},
+		{"ambiguous identifier is denied everywhere", prLinkPolicy{ambiguous: map[string]bool{"ABC-100": true}}, wsA, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.policy.permitsClose("ABC-100", tc.ws); got != tc.want {
+				t.Errorf("permitsClose(ABC-100, %s) = %v, want %v", tc.ws, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestWebhook_AutoLinkOffKeepsValidClosingKeyword: turning auto-link off in a
+// workspace that shares its installation with another must not drop a closing
+// keyword only this workspace resolves — the merge still completes the issue
+// (PR #8794 re-review).
+func TestWebhook_AutoLinkOffKeepsValidClosingKeyword(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	for _, shared := range []bool{false, true} {
+		name := "single workspace"
+		if shared {
+			name = "shared installation, unique prefix"
+		}
+		t.Run(name, func(t *testing.T) {
+			const secret = "auto-link-off-keeps-keyword-secret"
+			const installationID int64 = 30264013
+			t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+			setWorkspaceIssuePrefixForTest(t, "RVA")
+			if shared {
+				bindSecondWorkspaceForTest(t, "auto-link-off-other-workspace", "RVB", installationID)
+			}
+			issue := prAutoCompleteTestIssue(t, name, installationID)
+			var previous []byte
+			dbfx.QueryRow(t, `SELECT settings FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&previous)
+			t.Cleanup(func() {
+				testPool.Exec(context.Background(), `UPDATE workspace SET settings = $1 WHERE id = $2`, previous, testWorkspaceID)
+			})
+
+			firePRWebhook(t, secret, installationID, 1, "Session refactor", "Closes "+issue.Identifier, "refactor/session", "opened")
+			if got := prAutoCompleteStateForTest(t, issue.ID); got.State != prAutoCompleteWaiting {
+				t.Fatalf("before turning auto-link off: auto_complete = %+v, want waiting", got)
+			}
+			dbfx.Exec(t, `UPDATE workspace SET settings = COALESCE(settings, '{}'::jsonb) || '{"github_auto_link_prs_enabled": false}'::jsonb WHERE id = $1`, testWorkspaceID)
+			firePRWebhook(t, secret, installationID, 1, "Session refactor", "Closes "+issue.Identifier, "refactor/session", "merged")
+			if got := issueStatusForTest(t, issue.ID); got != "done" {
+				t.Errorf("keyword kept, auto-link off: status = %q, want done (auto_complete = %+v)", got, prAutoCompleteStateForTest(t, issue.ID))
+			}
+		})
+	}
+}
+
+// TestWebhook_PullRequest_UniqueResolverAmongBindingsStillAutoCompletes is the
+// other half of the #6804 fix: withholding links must be scoped to the
+// identifiers we could not attribute. Two workspaces share an installation and
+// a prefix, but only one of them actually has an issue at that number — that is
+// a proven unique owner, so auto-complete must still fire for it.
+func TestWebhook_PullRequest_UniqueResolverAmongBindingsStillAutoCompletes(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "unique-resolver-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+	setWorkspaceIssuePrefixForTest(t, "UNQ")
+
+	w := httptest.NewRecorder()
+	testHandler.CreateIssue(w, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "unique resolver test",
+		"status": "in_progress",
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var issueB IssueResponse
+	json.NewDecoder(w.Body).Decode(&issueB)
+
+	const repo = "unique-resolver-repo"
+	const prNumber int32 = 6809
+	const installationID int64 = 660480001
+
+	// Workspace A shares the prefix but has no issue at all, so it can never be
+	// a second resolver.
+	bindSecondWorkspaceForTest(t, "unique-resolver-ws-a", "UNQ", installationID)
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID: parseUUID(testWorkspaceID), InstallationID: installationID, AccountLogin: "acme", AccountType: "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation B: %v", err)
+	}
+
+	t.Cleanup(func() {
+		bg := context.Background()
+		testPool.Exec(bg, `DELETE FROM issue_pull_request WHERE issue_id = $1`, issueB.ID)
+		testPool.Exec(bg, `DELETE FROM github_pull_request WHERE repo_owner = 'acme' AND repo_name = $1`, repo)
+		testPool.Exec(bg, `DELETE FROM activity_log WHERE issue_id = $1`, issueB.ID)
+		testPool.Exec(bg, `DELETE FROM issue WHERE id = $1`, issueB.ID)
+	})
+
+	firePullRequestWebhook(t, secret, issueB.Identifier, installationID, repo, prNumber, "open")
+	firePullRequestWebhook(t, secret, issueB.Identifier, installationID, repo, prNumber, "merged")
+
+	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueB.ID))
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	if issue.Status != "done" {
+		t.Errorf("issue status = %q, want done — a proven unique resolver must keep auto-complete", issue.Status)
+	}
+}
+
+// TestWebhook_PullRequest_UnreadableWorkspaceWithholdsCloseIntent covers the
+// fail-closed half of resolvePRLinkPolicy. The setup is identical to the
+// unique-resolver test above — one real resolver, which would auto-complete —
+// except that a bound workspace's settings cannot be parsed. That workspace
+// might or might not be a second resolver, and since we cannot rule it out, the
+// delivery changes no link and no status: a transient read failure must never
+// promote an ambiguous identifier into an auto-complete.
+func TestWebhook_PullRequest_UnreadableWorkspaceWithholdsCloseIntent(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "unreadable-ws-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+	setWorkspaceIssuePrefixForTest(t, "UNR")
+
+	w := httptest.NewRecorder()
+	testHandler.CreateIssue(w, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "unreadable workspace test",
+		"status": "in_progress",
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var issueB IssueResponse
+	json.NewDecoder(w.Body).Decode(&issueB)
+
+	const repo = "unreadable-ws-repo"
+	const prNumber int32 = 6810
+	const installationID int64 = 660480002
+
+	wsA := bindSecondWorkspaceForTest(t, "unreadable-ws-a", "UNR", installationID)
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID: parseUUID(testWorkspaceID), InstallationID: installationID, AccountLogin: "acme", AccountType: "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation B: %v", err)
+	}
+	// Valid JSONB, but the auto-link flag is not a bool — the settings blob
+	// parses in Postgres and fails in the handler, which is exactly the
+	// "we could not find out" case.
+	dbfx.Exec(t,
+		`UPDATE workspace SET settings = '{"github_auto_link_prs_enabled": 5}'::jsonb WHERE id = $1`, wsA,
+	)
+
+	t.Cleanup(func() {
+		bg := context.Background()
+		testPool.Exec(bg, `DELETE FROM issue_pull_request WHERE issue_id = $1`, issueB.ID)
+		testPool.Exec(bg, `DELETE FROM github_pull_request WHERE repo_owner = 'acme' AND repo_name = $1`, repo)
+		testPool.Exec(bg, `DELETE FROM activity_log WHERE issue_id = $1`, issueB.ID)
+		testPool.Exec(bg, `DELETE FROM issue WHERE id = $1`, issueB.ID)
+	})
+
+	firePullRequestWebhook(t, secret, issueB.Identifier, installationID, repo, prNumber, "open")
+	firePullRequestWebhook(t, secret, issueB.Identifier, installationID, repo, prNumber, "merged")
+
+	if n := linkedPRCountForTest(t, issueB.ID); n != 0 {
+		t.Errorf("no link may be written when a bound workspace could not be inspected, got %d", n)
+	}
+
+	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueB.ID))
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	if issue.Status == "done" {
+		t.Error("issue was auto-advanced despite an unreadable bound workspace — the scan failed open")
+	}
+}
+
+// bindSecondWorkspaceForTest creates a throwaway workspace with the given issue
+// prefix, binds it to installationID, and registers cleanup for both. Returns
+// the new workspace id.
+func bindSecondWorkspaceForTest(t *testing.T, slug, prefix string, installationID int64) pgtype.UUID {
+	t.Helper()
+	ctx := context.Background()
+	testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
+	testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	ws, err := testHandler.Queries.CreateWorkspace(ctx, db.CreateWorkspaceParams{
+		Name: slug, Slug: slug, IssuePrefix: prefix,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace %s: %v", slug, err)
+	}
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID: ws.ID, InstallationID: installationID, AccountLogin: "acme", AccountType: "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation %s: %v", slug, err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		testPool.Exec(bg, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
+		testPool.Exec(bg, `DELETE FROM workspace WHERE id = $1`, ws.ID)
+	})
+	return ws.ID
+}
+
+// TestSecondWorkspaceBindDoesNotUnbindFirst is the #4823 regression: binding
+// the same GitHub App installation in a second workspace must NOT overwrite the
+// first workspace's binding. Both bindings coexist, and re-binding an existing
+// (workspace, installation) pair upserts its row in place.
+func TestSecondWorkspaceBindDoesNotUnbindFirst(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	const installationID int64 = 909090909
+
+	testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, "multi-bind-ws-b")
+	wsB, err := testHandler.Queries.CreateWorkspace(ctx, db.CreateWorkspaceParams{
+		Name:        "multi-bind-ws-b",
+		Slug:        "multi-bind-ws-b",
+		IssuePrefix: "MBB",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
+		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wsB.ID)
+	})
+
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "shared-org",
+		AccountType:    "Organization",
+	}); err != nil {
+		t.Fatalf("bind workspace A: %v", err)
+	}
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    wsB.ID,
+		InstallationID: installationID,
+		AccountLogin:   "shared-org",
+		AccountType:    "Organization",
+	}); err != nil {
+		t.Fatalf("bind workspace B: %v", err)
+	}
+
+	rows, err := testHandler.Queries.ListGitHubInstallationsByInstallationID(ctx, installationID)
+	if err != nil {
+		t.Fatalf("list installations: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 bindings to coexist (silent unbind regression), got %d", len(rows))
+	}
+	seen := map[string]bool{}
+	for _, r := range rows {
+		seen[uuidToString(r.WorkspaceID)] = true
+	}
+	if !seen[testWorkspaceID] || !seen[uuidToString(wsB.ID)] {
+		t.Errorf("both workspaces must retain a binding; got %v", seen)
+	}
+
+	// Re-binding workspace A must upsert its own row in place, not add a third.
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "shared-org-renamed",
+		AccountType:    "Organization",
+	}); err != nil {
+		t.Fatalf("re-bind workspace A: %v", err)
+	}
+	rows, err = testHandler.Queries.ListGitHubInstallationsByInstallationID(ctx, installationID)
+	if err != nil {
+		t.Fatalf("list installations after re-bind: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("re-binding an existing (workspace, installation) must upsert, got %d rows", len(rows))
+	}
+}
+
+// TestWebhook_UninstallDeletesAllBindings verifies a GitHub-side app uninstall
+// drops every workspace binding for the installation and broadcasts to each
+// affected workspace so their Settings tabs refresh.
+func TestWebhook_UninstallDeletesAllBindings(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "uninstall-all-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+	const installationID int64 = 707070707
+
+	testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, "uninstall-all-ws-b")
+	wsB, err := testHandler.Queries.CreateWorkspace(ctx, db.CreateWorkspaceParams{
+		Name:        "uninstall-all-ws-b",
+		Slug:        "uninstall-all-ws-b",
+		IssuePrefix: "UAB",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
+		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wsB.ID)
+	})
+
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "shared-org",
+		AccountType:    "Organization",
+	}); err != nil {
+		t.Fatalf("bind workspace A: %v", err)
+	}
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    wsB.ID,
+		InstallationID: installationID,
+		AccountLogin:   "shared-org",
+		AccountType:    "Organization",
+	}); err != nil {
+		t.Fatalf("bind workspace B: %v", err)
+	}
+
+	gotWS := make(chan string, 2)
+	testHandler.Bus.Subscribe(protocol.EventGitHubInstallationDeleted, func(e events.Event) {
+		select {
+		case gotWS <- e.WorkspaceID:
+		default:
+		}
+	})
+
+	body, _ := json.Marshal(map[string]any{
+		"action":       "deleted",
+		"installation": map[string]any{"id": installationID},
+	})
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	req := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(body))
+	req.Header.Set("X-GitHub-Event", "installation")
+	req.Header.Set("X-Hub-Signature-256", sig)
+	testutil.Call(t, testHandler.HandleGitHubWebhook, req).Want(http.StatusAccepted)
+
+	rows, err := testHandler.Queries.ListGitHubInstallationsByInstallationID(ctx, installationID)
+	if err != nil {
+		t.Fatalf("list installations: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected all bindings deleted, got %d", len(rows))
+	}
+
+	seen := map[string]bool{}
+	deadline := time.After(2 * time.Second)
+	for len(seen) < 2 {
+		select {
+		case ws := <-gotWS:
+			seen[ws] = true
+		case <-deadline:
+			t.Fatalf("expected 2 deleted broadcasts (one per workspace), saw %v", seen)
+		}
+	}
+	if !seen[testWorkspaceID] || !seen[uuidToString(wsB.ID)] {
+		t.Errorf("deleted broadcasts must cover both workspaces; saw %v", seen)
 	}
 }

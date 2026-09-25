@@ -72,7 +72,7 @@ func TestManagerEveryPlanRetriesFailedSamePlanTime(t *testing.T) {
 	defer cancel()
 
 	// Tick 1: handler fails at plan_time T attempt 1.
-	if err := mgr.runOnce(ctx); err != nil {
+	if err := mgr.RunOnce(ctx); err != nil {
 		t.Fatalf("first runOnce: %v", err)
 	}
 
@@ -107,7 +107,7 @@ func TestManagerEveryPlanRetriesFailedSamePlanTime(t *testing.T) {
 
 	// Tick 2: planner must keep cursor on plan_time T so tryClaim's
 	// FAILED-with-retry branch fires.
-	if err := mgr.runOnce(ctx); err != nil {
+	if err := mgr.RunOnce(ctx); err != nil {
 		t.Fatalf("second runOnce: %v", err)
 	}
 

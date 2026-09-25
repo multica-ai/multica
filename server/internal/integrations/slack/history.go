@@ -1,0 +1,737 @@
+package slack
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/slack-go/slack"
+
+	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+)
+
+// ErrNoSlackSession reports that the chat session has no Slack channel binding —
+// it is a Feishu or web-only session. Callers surface it as an empty (not
+// failed) read so the unified `multica chat history` / `multica chat thread`
+// commands answer gracefully on a non-Slack conversation.
+var ErrNoSlackSession = errors.New("slack: session has no slack channel binding")
+
+const (
+	// defaultHistoryLimit is the page size used when the caller asks for none.
+	defaultHistoryLimit = 20
+	// maxHistoryLimit caps a single page so a pull can't dump an unbounded
+	// transcript into the agent's context.
+	maxHistoryLimit = 50
+)
+
+// historyQueries is the slice of generated queries the reader needs.
+type historyQueries interface {
+	GetChannelChatSessionBindingBySession(ctx context.Context, arg db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error)
+	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
+	ListChannelOutboundMessageIDsForContext(ctx context.Context, arg db.ListChannelOutboundMessageIDsForContextParams) ([]string, error)
+	ListChannelOutboundMessagesByIDs(ctx context.Context, arg db.ListChannelOutboundMessagesByIDsParams) ([]db.ChannelOutboundMessage, error)
+}
+
+// historyClient is the slice of the slack-go Web API the reader calls. The real
+// *slack.Client satisfies it; tests inject a fake.
+type historyClient interface {
+	GetConversationHistoryContext(ctx context.Context, params *slack.GetConversationHistoryParameters) (*slack.GetConversationHistoryResponse, error)
+	GetConversationRepliesContext(ctx context.Context, params *slack.GetConversationRepliesParameters) ([]slack.Message, bool, string, error)
+	GetUsersInfoContext(ctx context.Context, users ...string) (*[]slack.User, error)
+}
+
+// History reads a Slack conversation on demand — the pull side of the unified
+// `multica chat history` (channel overview) and `multica chat thread [id]`
+// (one thread) commands (MUL-3871). Both are scoped to the session's OWN
+// channel: the channel is resolved server-side from the binding and never taken
+// from the agent, so a thread id is only a within-channel locator. Sessions with
+// no Slack binding return ErrNoSlackSession.
+type History struct {
+	q         historyQueries
+	decrypt   Decrypter
+	logger    *slog.Logger
+	newClient func(botToken string) historyClient
+}
+
+// NewHistory builds the reader over the generated queries and the bot-token
+// decrypter (box.Open at wiring time).
+func NewHistory(q historyQueries, decrypt Decrypter, logger *slog.Logger) *History {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	h := &History{q: q, decrypt: decrypt, logger: logger}
+	h.newClient = func(botToken string) historyClient {
+		// Only the bot token is needed to read; the app-level token is for the
+		// inbound Socket Mode connection (slack_channel.go).
+		return slack.New(botToken)
+	}
+	return h
+}
+
+// slackTarget is the resolved per-session read context: a bot-token client plus
+// the session's pinned channel and its own thread root.
+type slackTarget struct {
+	client          historyClient
+	installationID  pgtype.UUID
+	bindingID       pgtype.UUID
+	channelID       string
+	threadRoot      string // the session's own thread (empty for a DM)
+	botUserID       string
+	historyStart    string
+	historyEnd      string
+	boundaryPending bool
+}
+
+// resolve maps a chat_session to its Slack channel + bot client. The channel is
+// server-derived here and never accepted from the caller — that is the security
+// boundary for `multica chat thread <id>` (the agent supplies only a
+// within-channel thread locator).
+func (h *History) resolve(ctx context.Context, chatSessionID pgtype.UUID) (slackTarget, error) {
+	binding, err := h.q.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
+		ChatSessionID: chatSessionID,
+		ChannelType:   string(TypeSlack),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return slackTarget{}, ErrNoSlackSession
+		}
+		return slackTarget{}, fmt.Errorf("lookup slack chat binding: %w", err)
+	}
+	inst, err := h.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
+		ID:          binding.InstallationID,
+		ChannelType: string(TypeSlack),
+	})
+	if err != nil {
+		return slackTarget{}, fmt.Errorf("load slack installation: %w", err)
+	}
+	if inst.Status != "active" {
+		return slackTarget{}, ErrNoSlackSession // revoked install: nothing to read
+	}
+	creds, err := decodeCredentials(inst.Config, h.decrypt)
+	if err != nil {
+		return slackTarget{}, fmt.Errorf("decode slack credentials: %w", err)
+	}
+	channelID, threadRoot := historyTarget(binding)
+	return slackTarget{
+		client:          h.newClient(creds.BotToken),
+		installationID:  binding.InstallationID,
+		bindingID:       binding.ID,
+		channelID:       channelID,
+		threadRoot:      threadRoot,
+		botUserID:       creds.BotUserID,
+		historyStart:    binding.HistoryStartMessageID.String,
+		historyEnd:      binding.HistoryEndMessageID.String,
+		boundaryPending: binding.HistoryBoundaryPending,
+	}, nil
+}
+
+// ChannelOverview returns the channel's recent top-level messages (oldest-first),
+// each thread tagged with its id + reply count. It does NOT expand thread
+// contents — it is the table of contents the agent reads to find a thread, then
+// drills into with `multica chat thread <id>`. Backs `multica chat history`.
+func (h *History) ChannelOverview(ctx context.Context, chatSessionID pgtype.UUID, opts channel.HistoryOptions) (channel.HistoryPage, error) {
+	t, err := h.resolve(ctx, chatSessionID)
+	if err != nil {
+		return channel.HistoryPage{}, err
+	}
+	start, end := historyBounds(opts, t)
+	if opts.BoundaryPending || t.boundaryPending || historyCursorReachedStart(opts.Before, start) {
+		return channel.HistoryPage{ChannelType: string(TypeSlack)}, nil
+	}
+	limit := clampHistoryLimit(opts.Limit)
+	latest, oldest, inclusive := historyWindow(opts.Before, start, end)
+	resp, err := t.client.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
+		ChannelID:          t.channelID,
+		Latest:             latest,
+		Oldest:             oldest,
+		Inclusive:          inclusive,
+		Limit:              limit,
+		IncludeAllMetadata: true,
+	})
+	if err != nil {
+		return channel.HistoryPage{}, fmt.Errorf("read slack channel: %w", err)
+	}
+	nextCursor := historyNextCursor(resp.Messages, limit, start)
+	raw, err := h.filterRouteGeneration(ctx, t, resp.Messages, start, end)
+	if err != nil {
+		return channel.HistoryPage{}, err
+	}
+	allowedBotMessages, err := h.allowedBotMessages(ctx, chatSessionID, t, opts, raw)
+	if err != nil {
+		return channel.HistoryPage{}, err
+	}
+	raw = filterContextGeneration(raw, opts, start, end, t.botUserID, allowedBotMessages)
+	page := normalizePage(ctx, t.client, h.logger, raw, t.botUserID, limit, true)
+	page.NextCursor = nextCursor
+	page.ChannelType = string(TypeSlack)
+	return page, nil
+}
+
+// Thread returns one thread's messages (oldest-first). threadID empty reads the
+// thread the session is in (the agent's own thread); a non-empty id reads that
+// specific thread — but always within the session's pinned channel. A DM (no
+// threads) reads its linear conversation. Backs `multica chat thread [id]`.
+func (h *History) Thread(ctx context.Context, chatSessionID pgtype.UUID, threadID string, opts channel.HistoryOptions) (channel.HistoryPage, error) {
+	t, err := h.resolve(ctx, chatSessionID)
+	if err != nil {
+		return channel.HistoryPage{}, err
+	}
+	limit := clampHistoryLimit(opts.Limit)
+	ts := threadID
+	if ts == "" {
+		ts = t.threadRoot // the session's own thread
+	}
+	start, end := historyBounds(opts, t)
+	if opts.BoundaryPending || t.boundaryPending {
+		return channel.HistoryPage{ChannelType: string(TypeSlack), ThreadID: ts}, nil
+	}
+
+	var raw []slack.Message
+	if ts == "" {
+		// No thread to read (a DM, or a group whose root could not be recovered):
+		// fall back to the channel's linear conversation.
+		if historyCursorReachedStart(opts.Before, start) {
+			return channel.HistoryPage{ChannelType: string(TypeSlack), ThreadID: ts}, nil
+		}
+		latest, oldest, inclusive := historyWindow(opts.Before, start, end)
+		resp, herr := t.client.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
+			ChannelID:          t.channelID,
+			Latest:             latest,
+			Oldest:             oldest,
+			Inclusive:          inclusive,
+			Limit:              limit,
+			IncludeAllMetadata: true,
+		})
+		if herr != nil {
+			return channel.HistoryPage{}, fmt.Errorf("read slack thread: %w", herr)
+		}
+		raw = resp.Messages
+	} else {
+		if historyCursorReachedStart(opts.Before, start) {
+			return channel.HistoryPage{ChannelType: string(TypeSlack), ThreadID: ts}, nil
+		}
+		latest, oldest, inclusive := historyWindow(opts.Before, start, end)
+		msgs, _, _, rerr := t.client.GetConversationRepliesContext(ctx, &slack.GetConversationRepliesParameters{
+			ChannelID:          t.channelID,
+			Timestamp:          ts,
+			Latest:             latest,
+			Oldest:             oldest,
+			Inclusive:          inclusive,
+			Limit:              limit,
+			IncludeAllMetadata: true,
+		})
+		if rerr != nil {
+			return channel.HistoryPage{}, fmt.Errorf("read slack thread: %w", rerr)
+		}
+		raw = msgs
+	}
+	nextCursor := historyNextCursor(raw, limit, start)
+	raw, err = h.filterRouteGeneration(ctx, t, raw, start, end)
+	if err != nil {
+		return channel.HistoryPage{}, err
+	}
+	allowedBotMessages, err := h.allowedBotMessages(ctx, chatSessionID, t, opts, raw)
+	if err != nil {
+		return channel.HistoryPage{}, err
+	}
+	raw = filterContextGeneration(raw, opts, start, end, t.botUserID, allowedBotMessages)
+	page := normalizePage(ctx, t.client, h.logger, raw, t.botUserID, limit, false)
+	page.NextCursor = nextCursor
+	page.ChannelType = string(TypeSlack)
+	page.ThreadID = ts
+	return page, nil
+}
+
+func historyBounds(opts channel.HistoryOptions, target slackTarget) (start, end string) {
+	start = opts.After
+	if target.historyStart != "" && (start == "" || slackTSLess(start, target.historyStart)) {
+		start = target.historyStart
+	}
+	end = opts.Until
+	if target.historyEnd != "" && (end == "" || slackTSLess(target.historyEnd, end)) {
+		end = target.historyEnd
+	}
+	return start, end
+}
+
+func historyWindow(before, start, end string) (latest, oldest string, inclusive bool) {
+	latest = before
+	if end != "" && (latest == "" || slackTSLess(end, latest)) {
+		latest = end
+	}
+	if before == "" {
+		return latest, start, start != "" || end != ""
+	}
+	return latest, "", false
+}
+
+func historyCursorReachedStart(before, start string) bool {
+	return before != "" && start != "" && !slackTSLess(start, before)
+}
+
+func historyNextCursor(raw []slack.Message, limit int, historyStart string) string {
+	if len(raw) < limit || len(raw) == 0 {
+		return ""
+	}
+	oldest := raw[0].Timestamp
+	for i := 1; i < len(raw); i++ {
+		if slackTSLess(raw[i].Timestamp, oldest) {
+			oldest = raw[i].Timestamp
+		}
+	}
+	if historyStart != "" && !slackTSLess(historyStart, oldest) {
+		return ""
+	}
+	return oldest
+}
+
+func (h *History) filterRouteGeneration(ctx context.Context, target slackTarget, raw []slack.Message, start, end string) ([]slack.Message, error) {
+	window := raw[:0]
+	ids := make([]string, 0, len(raw))
+	for _, message := range raw {
+		if start != "" && slackTSLess(message.Timestamp, start) {
+			continue
+		}
+		if end != "" && !slackTSLess(message.Timestamp, end) {
+			continue
+		}
+		window = append(window, message)
+		ids = append(ids, message.Timestamp)
+	}
+	if len(window) == 0 {
+		return window, nil
+	}
+	rows, err := h.q.ListChannelOutboundMessagesByIDs(ctx, db.ListChannelOutboundMessagesByIDsParams{
+		InstallationID: target.installationID, ChannelMessageIds: ids,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("load slack outbound route ledger: %w", err)
+	}
+	owners := make(map[string]db.ChannelOutboundMessage, len(rows))
+	for _, row := range rows {
+		owners[row.ChannelMessageID] = row
+	}
+	result := window[:0]
+	for _, message := range window {
+		if message.Metadata.EventType == slackOutboundMetadataEvent {
+			kind, _ := message.Metadata.EventPayload["kind"].(string)
+			bindingID, _ := message.Metadata.EventPayload["binding_id"].(string)
+			if kind == "control_ack" || (bindingID != "" && bindingID != util.UUIDToString(target.bindingID)) {
+				continue
+			}
+		}
+		if owner, ok := owners[message.Timestamp]; ok {
+			if owner.OutboundKind == "control_ack" || owner.BindingID != target.bindingID {
+				continue
+			}
+		}
+		if message.Timestamp == target.historyStart {
+			text := strings.TrimSpace(strings.ReplaceAll(message.Text, "<@"+target.botUserID+">", ""))
+			if body, command := engine.ParseNewChatCommand(text); command {
+				if body == "" {
+					continue
+				}
+				message.Text = body
+			}
+		}
+		result = append(result, message)
+	}
+	return result, nil
+}
+
+func (h *History) allowedBotMessages(ctx context.Context, chatSessionID pgtype.UUID, target slackTarget, opts channel.HistoryOptions, raw []slack.Message) (map[string]struct{}, error) {
+	if opts.ContextRevision <= 1 {
+		return nil, nil
+	}
+	candidates := make([]string, 0, len(raw))
+	for _, message := range raw {
+		if message.User == target.botUserID {
+			candidates = append(candidates, message.Timestamp)
+		}
+	}
+	if len(candidates) == 0 {
+		return map[string]struct{}{}, nil
+	}
+	ids, err := h.q.ListChannelOutboundMessageIDsForContext(ctx, db.ListChannelOutboundMessageIDsForContextParams{
+		ChatSessionID:          chatSessionID,
+		ChannelType:            pgtype.Text{String: string(TypeSlack), Valid: true},
+		InstallationID:         target.installationID,
+		ChannelChatID:          pgtype.Text{String: target.channelID, Valid: true},
+		ChannelContextRevision: pgtype.Int8{Int64: opts.ContextRevision, Valid: true},
+		CandidateMessageIds:    candidates,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("load slack reply provenance: %w", err)
+	}
+	allowed := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		allowed[id] = struct{}{}
+	}
+	return allowed, nil
+}
+
+func filterContextGeneration(raw []slack.Message, opts channel.HistoryOptions, start, end, botUserID string, allowedBotMessages map[string]struct{}) []slack.Message {
+	out := raw[:0]
+	for _, message := range raw {
+		if start != "" && slackTSLess(message.Timestamp, start) {
+			continue
+		}
+		if end != "" && !slackTSLess(message.Timestamp, end) {
+			continue
+		}
+		// Slack timestamps alone are not a causal boundary: a reply from an old
+		// task may be posted after /clear. From generation 2 onward, trust an
+		// assistant message only when its provider id was persisted on a task in
+		// this exact generation. Human and third-party bot messages still follow
+		// the provider time window. Unknown own-bot output fails closed for agent
+		// context but remains visible to people in Slack.
+		if opts.ContextRevision > 1 && message.User == botUserID {
+			if _, ok := allowedBotMessages[message.Timestamp]; !ok {
+				continue
+			}
+		}
+		if message.Timestamp == opts.After {
+			text := strings.TrimSpace(strings.ReplaceAll(message.Text, "<@"+botUserID+">", ""))
+			if body, ok := engine.ParseFreshSessionCommand(text); ok {
+				if body == "" {
+					continue
+				}
+				message.Text = body
+			}
+		}
+		out = append(out, message)
+	}
+	return out
+}
+
+func clampHistoryLimit(n int) int {
+	if n <= 0 {
+		return defaultHistoryLimit
+	}
+	if n > maxHistoryLimit {
+		return maxHistoryLimit
+	}
+	return n
+}
+
+// historyTarget recovers the real channel id and the session's own thread root
+// from the binding. The channel_chat_id may be a composite "channel:threadRoot"
+// isolation key, so the real channel id is read from the binding config
+// (slackBindingConfig). The thread root is the recorded reply thread
+// (last_thread_id), falling back to the composite-key suffix; empty for a DM.
+func historyTarget(b db.ChannelChatSessionBinding) (channelID, threadRoot string) {
+	channelID = b.ChannelChatID
+	if len(b.Config) > 0 {
+		var cfg slackBindingConfig
+		if err := json.Unmarshal(b.Config, &cfg); err == nil && cfg.ChannelID != "" {
+			channelID = cfg.ChannelID
+		}
+	}
+	if b.LastThreadID.Valid && b.LastThreadID.String != "" {
+		threadRoot = b.LastThreadID.String
+	} else if i := strings.IndexByte(b.ChannelChatID, ':'); i >= 0 {
+		threadRoot = b.ChannelChatID[i+1:]
+	}
+	return channelID, threadRoot
+}
+
+// normalizePage turns raw Slack messages into a normalized, oldest-first page:
+// it resolves display names in one batch, labels senders, maps roles, and
+// computes the back-paging cursor. When overview is true, a message that heads a
+// thread (reply_count > 0) is tagged with its thread id + reply count so the
+// agent can drill in with `multica chat thread <id>`.
+func normalizePage(ctx context.Context, client historyClient, logger *slog.Logger, raw []slack.Message, botUserID string, limit int, overview bool) channel.HistoryPage {
+	sort.SliceStable(raw, func(i, j int) bool { return slackTSLess(raw[i].Timestamp, raw[j].Timestamp) })
+
+	names := resolveUserNames(ctx, client, logger, raw, botUserID)
+	labeler := newHistoryLabeler(names)
+
+	out := make([]channel.HistoryMessage, 0, len(raw))
+	for i := range raw {
+		m := raw[i]
+		text := flattenSlackText(m)
+		if text == "" {
+			continue // genuine join/system/edit marker: no readable body
+		}
+		own := m.User != "" && m.User == botUserID
+		role := channel.HistoryRoleUser
+		if own {
+			role = channel.HistoryRoleAssistant
+		}
+		hm := channel.HistoryMessage{
+			ID:       m.Timestamp,
+			Author:   labeler.label(m, own),
+			AuthorID: m.User,
+			Role:     role,
+			Text:     text,
+			TS:       m.Timestamp,
+		}
+		if overview && m.ReplyCount > 0 {
+			hm.ThreadID = m.Timestamp
+			hm.ReplyCount = m.ReplyCount
+			hm.LatestReply = m.LatestReply
+		}
+		out = append(out, hm)
+	}
+
+	return channel.HistoryPage{Messages: out}
+}
+
+// maxDerivedTextLen caps text recovered from attachments/blocks so a verbose
+// alert card cannot flood the agent's context. It applies only to the fallback
+// path; a normal top-level message body is passed through untouched.
+const maxDerivedTextLen = 4000
+
+// flattenSlackText renders a Slack message to the plain-text body the history
+// contract promises (channel.HistoryMessage.Text). Alerting/webhook bots
+// (Grafana cards, incoming webhooks) carry their whole body in attachments or
+// Block Kit blocks and leave the top-level Text empty; without this fallback
+// such a message is indistinguishable from a join/system marker and gets
+// dropped (MUL-3931 / #4803). Order: top-level text, then each attachment's
+// rendered text/fields, then last-resort fallback text, then a best-effort
+// blocks flatten. Returns "" only when nothing renderable exists — a real
+// system marker.
+func flattenSlackText(m slack.Message) string {
+	if t := strings.TrimSpace(m.Text); t != "" {
+		return t
+	}
+	parts := make([]string, 0, len(m.Attachments)+1)
+	for i := range m.Attachments {
+		if t := attachmentText(m.Attachments[i]); t != "" {
+			parts = append(parts, t)
+		}
+	}
+	if len(parts) == 0 {
+		if t := flattenBlocks(m.Blocks); t != "" {
+			parts = append(parts, t)
+		}
+	}
+	return truncateRunes(strings.TrimSpace(strings.Join(parts, "\n")), maxDerivedTextLen)
+}
+
+// attachmentText summarizes one attachment. Attachment fallback is only a
+// last-resort summary for clients that cannot render attachments; Grafana-style
+// alerts often put the useful alert body in Text/Fields while Fallback repeats
+// the short title.
+func attachmentText(a slack.Attachment) string {
+	parts := make([]string, 0, 3+len(a.Fields))
+	for _, s := range []string{a.Pretext, a.Title, a.Text} {
+		if s = strings.TrimSpace(s); s != "" {
+			parts = append(parts, s)
+		}
+	}
+	for _, f := range a.Fields {
+		if s := strings.TrimSpace(f.Title + " " + f.Value); s != "" {
+			parts = append(parts, s)
+		}
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, "\n")
+	}
+	if t := strings.TrimSpace(a.Fallback); t != "" {
+		return t
+	}
+	return flattenBlocks(a.Blocks)
+}
+
+// flattenBlocks renders Block Kit blocks to plain text, best-effort: it walks
+// the common text-bearing blocks (section, header, context, markdown, and
+// rich_text) and skips interactive/media blocks.
+func flattenBlocks(blocks slack.Blocks) string {
+	parts := make([]string, 0, len(blocks.BlockSet))
+	add := func(s string) {
+		if s = strings.TrimSpace(s); s != "" {
+			parts = append(parts, s)
+		}
+	}
+	for _, b := range blocks.BlockSet {
+		switch v := b.(type) {
+		case *slack.SectionBlock:
+			if v.Text != nil {
+				add(v.Text.Text)
+			}
+			for _, f := range v.Fields {
+				if f != nil {
+					add(f.Text)
+				}
+			}
+		case *slack.HeaderBlock:
+			if v.Text != nil {
+				add(v.Text.Text)
+			}
+		case *slack.MarkdownBlock:
+			add(v.Text)
+		case *slack.ContextBlock:
+			for _, el := range v.ContextElements.Elements {
+				if tb, ok := el.(*slack.TextBlockObject); ok {
+					add(tb.Text)
+				}
+			}
+		case *slack.RichTextBlock:
+			add(richTextBlockText(v))
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// richTextBlockText flattens a rich_text block to plain text, best-effort: it
+// walks sections, lists, quotes, and preformatted runs and concatenates their
+// text and link runs (one line per section). Mentions, emoji, and other inline
+// decorations are skipped — this is the plain body an agent needs, not a
+// faithful re-render. A rich_text-only body is the standard shape for messages
+// composed in Slack's own rich text input, so a bot that posts one with an
+// empty top-level Text would otherwise be dropped.
+func richTextBlockText(b *slack.RichTextBlock) string {
+	var lines []string
+	var writeElement func(el slack.RichTextElement)
+	writeSection := func(els []slack.RichTextSectionElement) {
+		var sb strings.Builder
+		for _, e := range els {
+			switch v := e.(type) {
+			case *slack.RichTextSectionTextElement:
+				sb.WriteString(v.Text)
+			case *slack.RichTextSectionLinkElement:
+				if v.Text != "" {
+					sb.WriteString(v.Text)
+				} else {
+					sb.WriteString(v.URL)
+				}
+			}
+		}
+		if s := strings.TrimSpace(sb.String()); s != "" {
+			lines = append(lines, s)
+		}
+	}
+	writeElement = func(el slack.RichTextElement) {
+		switch v := el.(type) {
+		case *slack.RichTextSection:
+			writeSection(v.Elements)
+		case *slack.RichTextQuote:
+			writeSection(v.Elements)
+		case *slack.RichTextPreformatted:
+			writeSection(v.Elements)
+		case *slack.RichTextList:
+			for _, item := range v.Elements {
+				writeElement(item)
+			}
+		}
+	}
+	for _, el := range b.Elements {
+		writeElement(el)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// truncateRunes trims s to at most max runes, appending an ellipsis when cut.
+func truncateRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
+}
+
+// resolveUserNames batch-resolves human senders' display names, best-effort. A
+// failure (missing users:read scope, transport error) yields a nil map so the
+// labeler falls back to positional "User N" rather than blocking the read.
+func resolveUserNames(ctx context.Context, client historyClient, logger *slog.Logger, msgs []slack.Message, botUserID string) map[string]string {
+	seen := make(map[string]bool)
+	ids := make([]string, 0, len(msgs))
+	for i := range msgs {
+		u := msgs[i].User
+		if u == "" || u == botUserID || seen[u] {
+			continue
+		}
+		seen[u] = true
+		ids = append(ids, u)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	users, err := client.GetUsersInfoContext(ctx, ids...)
+	if err != nil || users == nil {
+		if err != nil {
+			logger.WarnContext(ctx, "slack history: user name resolution failed", "ids", len(ids), "error", err)
+		}
+		return nil
+	}
+	names := make(map[string]string, len(*users))
+	for _, u := range *users {
+		if name := slackDisplayName(u); name != "" {
+			names[u.ID] = name
+		}
+	}
+	return names
+}
+
+// slackDisplayName picks the friendliest available name for a Slack user.
+func slackDisplayName(u slack.User) string {
+	switch {
+	case u.Profile.DisplayName != "":
+		return u.Profile.DisplayName
+	case u.RealName != "":
+		return u.RealName
+	default:
+		return u.Name
+	}
+}
+
+// historyLabeler assigns stable, human-readable labels within one page: this bot
+// is "Bot"; a resolved human gets their real name; an unresolved human falls
+// back to positional "User N"; a third-party bot uses its posted username.
+type historyLabeler struct {
+	names map[string]string
+	seen  map[string]string
+	n     int
+}
+
+func newHistoryLabeler(names map[string]string) *historyLabeler {
+	return &historyLabeler{names: names, seen: make(map[string]string)}
+}
+
+func (l *historyLabeler) label(m slack.Message, own bool) string {
+	if own {
+		return "Bot"
+	}
+	key := m.User
+	if key == "" {
+		if m.Username != "" {
+			return m.Username
+		}
+		key = "bot:" + m.BotID
+	}
+	if lbl, ok := l.seen[key]; ok {
+		return lbl
+	}
+	var lbl string
+	if name := l.names[m.User]; name != "" {
+		lbl = name
+	} else if m.Username != "" {
+		lbl = m.Username
+	} else {
+		l.n++
+		lbl = fmt.Sprintf("User %d", l.n)
+	}
+	l.seen[key] = lbl
+	return lbl
+}
+
+// slackTSLess orders two Slack timestamps ("secs.micros") chronologically.
+func slackTSLess(a, b string) bool {
+	return parseSlackTS(a) < parseSlackTS(b)
+}
+
+func parseSlackTS(ts string) float64 {
+	f, _ := strconv.ParseFloat(ts, 64)
+	return f
+}

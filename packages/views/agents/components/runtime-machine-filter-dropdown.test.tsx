@@ -21,6 +21,7 @@ function makeMachine(
     subtitle: "x86_64 macOS",
     deviceInfo: "dev.local · x86_64 macOS",
     cliVersion: "1.0.0",
+    launchedBy: null,
     mode: "local",
     section: "local",
     isCurrent: true,

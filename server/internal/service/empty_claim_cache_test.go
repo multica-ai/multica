@@ -6,12 +6,15 @@ import (
 	"testing"
 	"time"
 
+	redismock "github.com/go-redis/redismock/v9"
 	"github.com/redis/go-redis/v9"
 )
 
-// newRedisTestClient mirrors the helper in internal/auth: connect to
-// REDIS_TEST_URL, flush, and skip when unset so `go test ./...` works
-// on a stock laptop without a Redis instance running.
+const redisTestDB = 12
+
+// newRedisTestClient connects to REDIS_TEST_URL, uses this package's logical
+// test DB, flushes, and skips when unset so `go test ./...` works on a stock
+// laptop without a Redis instance running.
 func newRedisTestClient(t *testing.T) *redis.Client {
 	t.Helper()
 	url := os.Getenv("REDIS_TEST_URL")
@@ -22,6 +25,7 @@ func newRedisTestClient(t *testing.T) *redis.Client {
 	if err != nil {
 		t.Fatalf("parse REDIS_TEST_URL: %v", err)
 	}
+	opts.DB = redisTestDB
 	rdb := redis.NewClient(opts)
 	ctx := context.Background()
 	if err := rdb.Ping(ctx).Err(); err != nil {
@@ -35,6 +39,31 @@ func newRedisTestClient(t *testing.T) *redis.Client {
 		rdb.Close()
 	})
 	return rdb
+}
+
+func TestEmptyClaimKeysRemainRollingDeploymentCompatible(t *testing.T) {
+	const runtimeID = "runtime-a"
+	if got, want := emptyClaimKey(runtimeID), "mul:claim:runtime:empty:runtime-a"; got != want {
+		t.Fatalf("empty claim key = %q, want %q", got, want)
+	}
+	if got, want := emptyClaimVersion(runtimeID), "mul:claim:runtime:version:runtime-a"; got != want {
+		t.Fatalf("empty claim version key = %q, want %q", got, want)
+	}
+}
+
+func TestEmptyClaimCache_IsEmptyUsesClusterSafePipelinedGets(t *testing.T) {
+	rdb, mock := redismock.NewClientMock()
+	t.Cleanup(func() { _ = rdb.Close() })
+	c := NewEmptyClaimCache(rdb)
+
+	mock.ExpectGet(emptyClaimKey("runtime-a")).SetVal("7")
+	mock.ExpectGet(emptyClaimVersion("runtime-a")).SetVal("7")
+	if !c.IsEmpty(context.Background(), "runtime-a") {
+		t.Fatal("expected matching pipelined GET results to hit the cache")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestEmptyClaimCache_NilSafe(t *testing.T) {

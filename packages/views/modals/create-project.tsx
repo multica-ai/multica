@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { ChevronRight, FolderOpen, Maximize2, Minimize2, Search, X as XIcon, UserMinus } from "lucide-react";
+import { CalendarClock, CalendarDays, ChevronRight, FolderOpen, GitBranch, Maximize2, Minimize2, MoreHorizontal, Pencil, Search, X as XIcon, UserMinus } from "lucide-react";
 
 /**
  * GitHub mark — lucide-react v1 dropped brand icons, so we inline the
@@ -29,6 +29,7 @@ import {
   PROJECT_STATUS_ORDER,
   PROJECT_PRIORITY_ORDER,
 } from "@multica/core/projects/config";
+import { splitGithubUrlRef } from "@multica/core/github";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
@@ -57,31 +58,54 @@ import {
   useProjectStatusLabels,
   useProjectPriorityLabels,
 } from "../projects/components/labels";
+import { ProjectStartDatePicker } from "../projects/components/project-start-date-picker";
+import { ProjectDueDatePicker } from "../projects/components/project-due-date-picker";
+import { PillButton } from "../common/pill-button";
+import { githubShortLabel } from "../common/github-url";
+import {
+  GithubRefField,
+  githubRefHasError,
+} from "../projects/components/github-ref-field";
 import {
   isDesktopShell,
   pickDirectory,
   validateLocalDirectory,
 } from "../platform/local-directory";
 import { useLocalDaemonStatus } from "../platform/use-local-daemon-status";
+import {
+  runtimeAdvertisesLocalWorktree,
+  runtimeListOptions,
+} from "@multica/core/runtimes";
+import { useConfigStore } from "@multica/core/config";
+import type { LocalDirectoryExecutionMode } from "@multica/core/types";
+import { LocalDirectoryModeOptions } from "../projects/components/local-directory-mode-dialog";
 
-function PillButton({
-  children,
-  className,
-  ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  return (
-    <button
-      type="button"
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
-        "hover:bg-accent/60 transition-colors cursor-pointer",
-        className,
-      )}
-      {...props}
-    >
-      {children}
-    </button>
-  );
+/**
+ * Builds the resource_ref for a local directory attached during project
+ * creation.
+ *
+ * Exported so the execution-mode contract can be asserted directly: this is the
+ * payload the server stores and the daemon later reads to decide whether tasks
+ * edit the user's folder or hand back a branch, and getting `execution_mode`
+ * wrong here is invisible until a task runs.
+ */
+export function buildLocalDirectoryResourceRef({
+  localPath,
+  daemonId,
+  label,
+  mode,
+}: {
+  localPath: string;
+  daemonId: string;
+  label: string | null;
+  mode: LocalDirectoryExecutionMode;
+}): Record<string, unknown> {
+  return {
+    local_path: localPath,
+    daemon_id: daemonId,
+    ...(label ? { label } : {}),
+    execution_mode: mode,
+  };
 }
 
 function RepoUrlText({
@@ -95,11 +119,8 @@ function RepoUrlText({
     <Tooltip>
       <TooltipTrigger
         render={
-          <span
-            title={url}
-            className={cn("truncate flex-1 text-left", className)}
-          >
-            {url}
+          <span className={cn("truncate flex-1 text-left", className)}>
+            {githubShortLabel(url)}
           </span>
         }
       />
@@ -112,6 +133,9 @@ function RepoUrlText({
 
 export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const { t } = useT("modals");
+  // The execution-mode copy lives in the projects namespace alongside the
+  // resource panel's, so both entry points describe the choice identically.
+  const { t: tProjects } = useT("projects");
   const router = useNavigation();
   const workspace = useCurrentWorkspace();
   const workspaceName = workspace?.name;
@@ -134,6 +158,12 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [leadType, setLeadType] = useState<"member" | "agent" | undefined>(draft.leadType);
   const [leadId, setLeadId] = useState<string | undefined>(draft.leadId);
   const [icon, setIcon] = useState<string | undefined>(draft.icon);
+  const [startDate, setStartDate] = useState<string>(draft.startDate ?? "");
+  const [dueDate, setDueDate] = useState<string>(draft.dueDate ?? "");
+  // Dates are collapsed into the ⋯ overflow by default (progressive
+  // disclosure, mirroring create-issue); these flip a pill inline + open.
+  const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
+  const [dueDatePickerOpen, setDueDatePickerOpen] = useState(false);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -141,9 +171,15 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   // created. Stored as URLs (not full ProjectResource rows) — they're not
   // persisted until handleSubmit fires the createProjectResource calls.
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
+  // Checkout ref per selected repo URL, absent when the repo starts from its
+  // default branch. Keyed by URL rather than folded into selectedRepos so
+  // toggling a repo off and on again does not silently drop the ref.
+  const [repoRefs, setRepoRefs] = useState<Record<string, string>>({});
   const [repoPopoverOpen, setRepoPopoverOpen] = useState(false);
   const [repoSearch, setRepoSearch] = useState("");
   const [customRepoUrl, setCustomRepoUrl] = useState("");
+  const [customRepoRef, setCustomRepoRef] = useState("");
+  const [editingRefFor, setEditingRefFor] = useState<string | null>(null);
   const workspaceRepos = workspace?.repos ?? [];
   const repoQuery = repoSearch.trim().toLowerCase();
   const filteredWorkspaceRepos = workspaceRepos.filter((repo) =>
@@ -163,6 +199,67 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [selectedLocalLabel, setSelectedLocalLabel] = useState<string | null>(null);
   const [localPickError, setLocalPickError] = useState<string | null>(null);
   const [localPicking, setLocalPicking] = useState(false);
+  // Execution mode is chosen here rather than after creation: it decides
+  // whether tasks edit this folder or hand back a branch, which is part of
+  // what the user is setting up, not a setting to discover later.
+  //
+  // null means "the user has not picked one" — distinct from an explicit
+  // in_place. Only then does the folder-derived preselection apply, so an
+  // explicit choice is never overridden by a later folder change.
+  const [localMode, setLocalMode] = useState<LocalDirectoryExecutionMode | null>(null);
+  // undefined = could not check (older desktop build); the daemon re-checks
+  // authoritatively, so unknown stays permissive.
+  const [localIsGitRepo, setLocalIsGitRepo] = useState<boolean | undefined>(undefined);
+  const [localModeOpen, setLocalModeOpen] = useState(false);
+
+  // Worktree mode needs a daemon new enough to implement it; the server refuses
+  // to save the resource otherwise. In this flow the resource is attached in the
+  // same call that creates the project, so an un-caught rejection would fail the
+  // whole creation — check up front and disable the option instead.
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
+  // Capability, not version: a dev-built daemon reports a git-describe string
+  // that the version floor exempts, so the version check passed for a binary
+  // with no worktree implementation (MUL-5707). A backend too old to record the
+  // capability at all is its own answer — blaming this machine for that sent a
+  // user off to update the one piece already on the newest release (#7113).
+  // Preselection only — the server gates the save, including on this bundled
+  // create path, and rejects with a message the modal surfaces.
+  const localAdvertisesWorktree = runtimeAdvertisesLocalWorktree(
+    runtimes,
+    daemonStatus.daemonId,
+  );
+  // One declared boolean from the live server. Servers older than the worktree
+  // save gate drop execution_mode and answer 201, so "the backend will check"
+  // is only true once the backend says it checks (#7113).
+  const serverValidatesWorktree = useConfigStore((state) => state.localWorktreeSupported);
+  const worktreeUnavailableReason =
+    localIsGitRepo === false
+      ? ("not_git" as const)
+      : !serverValidatesWorktree
+        ? ("server_outdated" as const)
+        : undefined;
+  // Preselection, not a default behavior change: when the folder is a git repo
+  // and the machine has advertised that it can run worktree mode, parallel is
+  // the better fit, so it starts selected — visibly, in a control the user can
+  // flip in one click before creating anything. A plain folder starts on
+  // direct, and so does a machine that has not advertised: it may still be able
+  // to (an old row proves nothing), but choosing it FOR the user is how a
+  // rejected save would turn into a failed project creation.
+  //
+  // `localIsGitRepo === undefined` (an older desktop build that doesn't report
+  // it) preselects direct. The asymmetry is deliberate: permissive about what
+  // the user MAY choose, conservative about what we choose FOR them.
+  const preselectedLocalMode: LocalDirectoryExecutionMode =
+    localIsGitRepo === true && localAdvertisesWorktree && worktreeUnavailableReason === undefined
+      ? "worktree"
+      : "in_place";
+  // Never submit a mode the picker would have blocked — the folder can change
+  // after a mode was chosen (pick a git repo, choose worktree, then pick a
+  // plain folder), and the stale choice would fail at task time.
+  const effectiveLocalMode: LocalDirectoryExecutionMode =
+    worktreeUnavailableReason !== undefined
+      ? "in_place"
+      : (localMode ?? preselectedLocalMode);
 
   const handleSourceModeChange = (mode: "repos" | "local") => {
     setSourceMode(mode);
@@ -192,6 +289,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
       }
       setSelectedLocalPath(picked.path);
       setSelectedLocalLabel(picked.basename ?? null);
+      setLocalIsGitRepo(validation.is_git_repo);
     } finally {
       setLocalPicking(false);
     }
@@ -201,6 +299,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     setSelectedLocalPath(null);
     setSelectedLocalLabel(null);
     setLocalPickError(null);
+    setLocalIsGitRepo(undefined);
+    setLocalMode(null);
   };
 
   // Sync field changes to draft store
@@ -212,6 +312,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     setDraft({ leadType: type, leadId: id });
   };
   const updateIcon = (v: string | undefined) => { setIcon(v); setDraft({ icon: v }); };
+  const updateStartDate = (v: string) => { setStartDate(v); setDraft({ startDate: v || undefined }); };
+  const updateDueDate = (v: string) => { setDueDate(v); setDraft({ dueDate: v || undefined }); };
 
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadFilter, setLeadFilter] = useState("");
@@ -227,8 +329,19 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   const createProject = useCreateProject();
 
+  // Every selected repo's branch, not just the one in the add field. A branch
+  // edited on an already-selected row goes through setRepoRef and used to
+  // reach the payload with only an inline error to show for it — the server
+  // accepts commit ids by design, so nothing downstream would have caught it.
+  const hasRejectedRepoRef = selectedRepos.some((url) =>
+    githubRefHasError(repoRefs[url] ?? ""),
+  );
+
   const handleSubmit = async () => {
+    // Checked here as well as on the button: TitleEditor's onSubmit calls this
+    // directly, so a disabled button alone leaves the keyboard path open.
     if (!title.trim() || submitting) return;
+    if (sourceMode === "repos" && hasRejectedRepoRef) return;
     // `sourceMode` decides which side's stash gets persisted — the other
     // side is silently dropped, so repos picked then abandoned for local
     // mode don't leak into the project.
@@ -236,10 +349,15 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
       | Array<{ resource_type: "github_repo" | "local_directory"; resource_ref: Record<string, unknown> }>
       | undefined;
     if (sourceMode === "repos" && selectedRepos.length > 0) {
-      resources = selectedRepos.map((url) => ({
-        resource_type: "github_repo" as const,
-        resource_ref: { url },
-      }));
+      resources = selectedRepos.map((url) => {
+        const ref = repoRefs[url]?.trim();
+        return {
+          resource_type: "github_repo" as const,
+          // Omit the key entirely when empty: an absent ref is what "use the
+          // default branch" looks like on the wire.
+          resource_ref: ref ? { url, ref } : { url },
+        };
+      });
     } else if (
       sourceMode === "local" &&
       selectedLocalPath &&
@@ -248,11 +366,12 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
       resources = [
         {
           resource_type: "local_directory" as const,
-          resource_ref: {
-            local_path: selectedLocalPath,
-            daemon_id: daemonStatus.daemonId,
-            ...(selectedLocalLabel ? { label: selectedLocalLabel } : {}),
-          },
+          resource_ref: buildLocalDirectoryResourceRef({
+            localPath: selectedLocalPath,
+            daemonId: daemonStatus.daemonId,
+            label: selectedLocalLabel,
+            mode: effectiveLocalMode,
+          }),
         },
       ];
     }
@@ -266,6 +385,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         priority,
         lead_type: leadType,
         lead_id: leadId,
+        start_date: startDate || undefined,
+        due_date: dueDate || undefined,
         // Server attaches these in the same transaction as the project.
         resources,
       });
@@ -292,9 +413,47 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   const addCustomRepo = () => {
     const url = customRepoUrl.trim();
-    if (!url) return;
+    const ref = customRepoRef.trim();
+    if (!url || githubRefHasError(ref)) return;
     setSelectedRepos((prev) => (prev.includes(url) ? prev : [...prev, url]));
+    setRepoRefs((prev) => {
+      if (!ref) {
+        const { [url]: _dropped, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [url]: ref };
+    });
     setCustomRepoUrl("");
+    setCustomRepoRef("");
+  };
+
+  // Someone who wants a branch copies it out of the address bar, so a pasted
+  // .../tree/<branch> URL is split into its two halves rather than added whole
+  // as a clone URL that does not exist. Both halves land in visible fields, so
+  // a wrong guess is obvious before the project is created.
+  //
+  // Normalising the URL is unconditional. Gating it on the branch field being
+  // empty meant a second pasted browse URL — changing your mind about which
+  // repo — was stored whole, producing a clone target that does not exist.
+  // Whether to overwrite the BRANCH is the separate question, and the pasted
+  // pair wins: the branch field only appears once a URL is present, so a value
+  // sitting in it came from the previous URL, not from something the user
+  // typed ahead of time.
+  const handleCustomRepoUrlChange = (next: string) => {
+    const split = splitGithubUrlRef(next);
+    setCustomRepoUrl(split.url);
+    if (split.ref) setCustomRepoRef(split.ref);
+  };
+
+  const setRepoRef = (url: string, ref: string) => {
+    const trimmed = ref.trim();
+    setRepoRefs((prev) => {
+      if (!trimmed) {
+        const { [url]: _dropped, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [url]: trimmed };
+    });
   };
 
   return (
@@ -313,9 +472,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         <DialogTitle className="sr-only">{t(($) => $.create_project.title)}</DialogTitle>
 
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
-          <div className="flex items-center gap-1.5 text-xs">
+          <div className="flex items-center gap-1.5 text-caption">
             <span className="text-muted-foreground">{workspaceName}</span>
-            <ChevronRight className="size-3 text-muted-foreground/50" />
+            <ChevronRight className="size-3 text-faint-foreground" />
             <span className="font-medium">{t(($) => $.create_project.title_breadcrumb)}</span>
           </div>
           <div className="flex items-center gap-1">
@@ -360,7 +519,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               render={
                 <button
                   type="button"
-                  className="text-2xl cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
+                  className="text-display-sm cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
                   title={t(($) => $.create_project.icon_tooltip)}
                 >
                   {icon || "📁"}
@@ -380,7 +539,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             autoFocus
             defaultValue={draft.title}
             placeholder={t(($) => $.create_project.title_placeholder)}
-            className="text-lg font-semibold"
+            className="text-title font-semibold"
             onChange={(v) => updateTitle(v)}
             onSubmit={handleSubmit}
           />
@@ -394,16 +553,18 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             onUpdate={(md) => setDraft({ description: md })}
             debounceMs={500}
           />
+          <p className="mt-1 text-caption text-muted-foreground">
+            {t(($) => $.create_project.description_hint)}
+          </p>
         </div>
 
-        {/* Footer: properties (left, wrap) + Create button (right). Single row
-            so the modal stays compact — Linear-style.
+        {/* Property toolbar — mirrors the create-issue footer: a wrapping pill
+            row whose low-frequency fields (start/due date) collapse into a ⋯
+            overflow, with the primary action in a separate bar below.
             Repos lives here alongside the property pills for now. Once we
             support more resource types (Linear / Notion / Figma / Slack), pull
-            them out into a dedicated Resources strip above this footer — a
-            single Repos pill on its own row looked too sparse. */}
-        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t shrink-0">
-          <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+            them out into a dedicated Resources strip above this footer. */}
+        <div className="flex items-center gap-1.5 px-4 py-2 shrink-0 flex-wrap">
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -454,8 +615,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 <PillButton>
                   {leadType && leadId ? (
                     <>
-                      <ActorAvatar actorType={leadType} actorId={leadId} size={16} showStatusDot />
-                      <span>{leadLabel}</span>
+                      <ActorAvatar actorType={leadType} actorId={leadId} size="sm" showStatusDot />
+                      <span className="truncate">{leadLabel}</span>
                     </>
                   ) : (
                     <span className="text-muted-foreground">{t(($) => $.create_project.lead)}</span>
@@ -470,7 +631,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   value={leadFilter}
                   onChange={(e) => setLeadFilter(e.target.value)}
                   placeholder={t(($) => $.create_project.lead_placeholder)}
-                  className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+                  className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
                 />
               </div>
               <div className="p-1 max-h-60 overflow-y-auto">
@@ -480,14 +641,14 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                     updateLead(undefined, undefined);
                     setLeadOpen(false);
                   }}
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent transition-colors"
                 >
                   <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="text-muted-foreground">{t(($) => $.create_project.no_lead)}</span>
                 </button>
                 {filteredMembers.length > 0 && (
                   <>
-                    <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    <div className="px-2 pt-2 pb-1 text-caption font-medium text-muted-foreground uppercase tracking-wider">
                       {t(($) => $.create_project.members_group)}
                     </div>
                     {filteredMembers.map((m) => (
@@ -498,9 +659,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                           updateLead("member", m.user_id);
                           setLeadOpen(false);
                         }}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent transition-colors"
                       >
-                        <ActorAvatar actorType="member" actorId={m.user_id} size={16} />
+                        <ActorAvatar actorType="member" actorId={m.user_id} size="sm" />
                         <span>{m.name}</span>
                       </button>
                     ))}
@@ -508,7 +669,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 )}
                 {filteredAgents.length > 0 && (
                   <>
-                    <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    <div className="px-2 pt-2 pb-1 text-caption font-medium text-muted-foreground uppercase tracking-wider">
                       {t(($) => $.create_project.agents_group)}
                     </div>
                     {filteredAgents.map((a) => (
@@ -519,9 +680,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                           updateLead("agent", a.id);
                           setLeadOpen(false);
                         }}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent transition-colors"
                       >
-                        <ActorAvatar actorType="agent" actorId={a.id} size={16} showStatusDot />
+                        <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
                         <span>{a.name}</span>
                       </button>
                     ))}
@@ -530,13 +691,35 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 {filteredMembers.length === 0 &&
                   filteredAgents.length === 0 &&
                   leadFilter && (
-                    <div className="px-2 py-3 text-center text-sm text-muted-foreground">
+                    <div className="px-2 py-3 text-center text-body text-muted-foreground">
                       {t(($) => $.create_project.no_results)}
                     </div>
                   )}
               </div>
             </PopoverContent>
           </Popover>
+
+          {/* Start date — collapsed into ⋯ unless it has a value or was just
+              opened from the overflow (the calendar anchors on the inline pill). */}
+          {(startDate || startDatePickerOpen) && (
+            <ProjectStartDatePicker
+              startDate={startDate || null}
+              onUpdate={(u) => updateStartDate(u.start_date ?? "")}
+              triggerRender={<PillButton />}
+              open={startDatePickerOpen}
+              onOpenChange={setStartDatePickerOpen}
+            />
+          )}
+
+          {(dueDate || dueDatePickerOpen) && (
+            <ProjectDueDatePicker
+              dueDate={dueDate || null}
+              onUpdate={(u) => updateDueDate(u.due_date ?? "")}
+              triggerRender={<PillButton />}
+              open={dueDatePickerOpen}
+              onOpenChange={setDueDatePickerOpen}
+            />
+          )}
 
           <Popover
             open={repoPopoverOpen}
@@ -581,7 +764,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                     type="button"
                     onClick={() => handleSourceModeChange("repos")}
                     className={cn(
-                      "rounded px-2 py-1 text-xs transition-colors",
+                      "rounded-xs px-2 py-1 text-caption transition-colors",
                       sourceMode === "repos"
                         ? "bg-background shadow-sm font-medium"
                         : "text-muted-foreground hover:text-foreground",
@@ -593,7 +776,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                     type="button"
                     onClick={() => handleSourceModeChange("local")}
                     className={cn(
-                      "rounded px-2 py-1 text-xs transition-colors",
+                      "rounded-xs px-2 py-1 text-caption transition-colors",
                       sourceMode === "local"
                         ? "bg-background shadow-sm font-medium"
                         : "text-muted-foreground hover:text-foreground",
@@ -606,7 +789,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
               {sourceMode === "repos" ? (
                 <>
-                  <div className="text-xs font-medium text-muted-foreground">
+                  <div className="text-caption font-medium text-muted-foreground">
                     {t(($) => $.create_project.repos_heading)}
                   </div>
                   {workspaceRepos.length > 0 ? (
@@ -619,12 +802,12 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                           onChange={(e) => setRepoSearch(e.target.value)}
                           aria-label={t(($) => $.create_project.repos_search_placeholder)}
                           placeholder={t(($) => $.create_project.repos_search_placeholder)}
-                          className="h-8 w-full rounded-md border bg-transparent pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+                          className="h-8 w-full rounded-md border bg-transparent pl-7 pr-2 text-caption outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
                         />
                       </div>
                       <div className="max-h-48 space-y-1 overflow-y-auto">
                         {filteredWorkspaceRepos.length === 0 && repoQuery && (
-                          <p className="py-2 text-center text-xs text-muted-foreground">
+                          <p className="py-2 text-center text-caption text-muted-foreground">
                             {t(($) => $.create_project.repos_search_empty)}
                           </p>
                         )}
@@ -636,7 +819,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                               key={repo.url}
                               onClick={() => toggleRepo(repo.url)}
                               className={cn(
-                                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent transition-colors",
+                                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-caption hover:bg-accent transition-colors",
                                 checked && "bg-accent",
                               )}
                             >
@@ -654,7 +837,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                       </div>
                     </>
                   ) : (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-caption text-muted-foreground">
                       {t(($) => $.create_project.repos_empty)}
                     </p>
                   )}
@@ -663,44 +846,90 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                       e.preventDefault();
                       addCustomRepo();
                     }}
-                    className="flex items-center gap-1.5 pt-1 border-t"
+                    className="space-y-1.5 pt-1 border-t"
                   >
-                    <input
-                      type="text"
-                      value={customRepoUrl}
-                      onChange={(e) => setCustomRepoUrl(e.target.value)}
-                      placeholder={t(($) => $.create_project.repos_url_placeholder)}
-                      className="flex-1 bg-transparent text-xs px-2 py-1 outline-none placeholder:text-muted-foreground"
-                    />
-                    <Button
-                      type="submit"
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 px-2 text-xs"
-                      disabled={!customRepoUrl.trim()}
-                    >
-                      {t(($) => $.create_project.repos_add)}
-                    </Button>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={customRepoUrl}
+                        onChange={(e) => handleCustomRepoUrlChange(e.target.value)}
+                        placeholder={t(($) => $.create_project.repos_url_placeholder)}
+                        className="flex-1 min-w-0 bg-transparent text-caption px-2 py-1 outline-none placeholder:text-muted-foreground"
+                      />
+                      <Button
+                        type="submit"
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 px-2 text-caption"
+                        disabled={!customRepoUrl.trim() || githubRefHasError(customRepoRef)}
+                      >
+                        {t(($) => $.create_project.repos_add)}
+                      </Button>
+                    </div>
+                    {/* Only once a URL is entered: an empty form should still
+                        read as one field, and the default branch is the right
+                        answer often enough that this must not look like a
+                        second required step. */}
+                    {customRepoUrl.trim() && (
+                      <GithubRefField
+                        id="create-project-repo-ref"
+                        value={customRepoRef}
+                        onChange={setCustomRepoRef}
+                      />
+                    )}
                   </form>
                   {selectedRepos.length > 0 && (
                     <div className="space-y-1 pt-1 border-t">
-                      <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                      <div className="text-micro font-medium text-muted-foreground uppercase tracking-wider">
                         {t(($) => $.create_project.repos_selected)}
                       </div>
                       {selectedRepos.map((url) => (
-                        <div
-                          key={url}
-                          className="flex items-center gap-2 text-xs"
-                        >
-                          <GithubIcon className="size-3 text-muted-foreground" />
-                          <RepoUrlText url={url} />
-                          <button
-                            type="button"
-                            onClick={() => toggleRepo(url)}
-                            className="text-muted-foreground hover:text-foreground"
-                          >
-                            <XIcon className="size-3" />
-                          </button>
+                        <div key={url} className="space-y-1">
+                          <div className="flex items-center gap-2 text-caption">
+                            <GithubIcon className="size-3 shrink-0 text-muted-foreground" />
+                            <RepoUrlText url={url} />
+                            {/* The ref rides beside the repo it belongs to,
+                                not in one field for the whole list: each repo
+                                can start somewhere different. */}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEditingRefFor(editingRefFor === url ? null : url)
+                              }
+                              className={cn(
+                                "flex shrink-0 items-center gap-1 rounded-sm px-1 py-0.5 text-micro transition-colors hover:bg-accent",
+                                repoRefs[url]
+                                  ? "text-foreground"
+                                  : "text-muted-foreground",
+                              )}
+                            >
+                              <GitBranch className="size-3" />
+                              <span className="max-w-24 truncate">
+                                {repoRefs[url] ??
+                                  t(($) => $.create_project.repos_ref_default)}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                toggleRepo(url);
+                                if (editingRefFor === url) setEditingRefFor(null);
+                              }}
+                              className="shrink-0 text-muted-foreground hover:text-foreground"
+                            >
+                              <XIcon className="size-3" />
+                            </button>
+                          </div>
+                          {editingRefFor === url && (
+                            <div className="pl-5">
+                              <GithubRefField
+                                value={repoRefs[url] ?? ""}
+                                onChange={(next) => setRepoRef(url, next)}
+                                onSubmit={() => setEditingRefFor(null)}
+                                autoFocus
+                              />
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -708,7 +937,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 </>
               ) : (
                 <>
-                  <div className="text-xs font-medium text-muted-foreground">
+                  <div className="text-caption font-medium text-muted-foreground">
                     {t(($) => $.create_project.local_heading)}
                   </div>
                   {/* Daemon must be online — daemon_id is required to bind
@@ -716,26 +945,26 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                       the picker; once it boots we re-render automatically
                       via useLocalDaemonStatus. */}
                   {daemonStatus.daemonId && daemonStatus.running ? (
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-micro text-muted-foreground">
                       {t(($) => $.create_project.local_on_device, {
                         device: daemonStatus.deviceName ?? t(($) => $.create_project.local_this_machine),
                       })}
                     </p>
                   ) : (
-                    <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                    <p className="text-micro text-amber-600 dark:text-amber-400">
                       {t(($) => $.create_project.local_daemon_offline)}
                     </p>
                   )}
 
                   {selectedLocalPath ? (
                     <div className="rounded-md border px-2 py-2 space-y-1">
-                      <div className="flex items-start gap-2 text-xs">
+                      <div className="flex items-start gap-2 text-caption">
                         <FolderOpen className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
                         <div className="min-w-0 flex-1">
                           {selectedLocalLabel && (
                             <div className="font-medium truncate">{selectedLocalLabel}</div>
                           )}
-                          <div className="font-mono text-[10px] text-muted-foreground break-all">
+                          <div className="font-mono text-micro text-muted-foreground break-all">
                             {selectedLocalPath}
                           </div>
                         </div>
@@ -748,23 +977,66 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                           <XIcon className="size-3" />
                         </button>
                       </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="h-6 w-full text-xs"
-                        onClick={handlePickLocalDirectory}
-                        disabled={localPicking || !daemonStatus.running}
-                      >
-                        {t(($) => $.create_project.local_change)}
-                      </Button>
+                      <div className="flex items-center gap-1.5">
+                        <Popover open={localModeOpen} onOpenChange={setLocalModeOpen}>
+                          <PopoverTrigger
+                            render={
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                // Sized to its (short) label so the wider
+                                // "Change directory…" beside it fits whole.
+                                className="h-6 shrink-0 text-caption"
+                              >
+                                {effectiveLocalMode === "worktree" ? (
+                                  <GitBranch className="size-3 shrink-0" />
+                                ) : (
+                                  <Pencil className="size-3 shrink-0" />
+                                )}
+                                {/* Short labels: the panel is ~380px wide and
+                                    two buttons share it, so the full option
+                                    titles truncate to uselessness. The picker
+                                    below carries the full wording. */}
+                                <span className="truncate">
+                                  {effectiveLocalMode === "worktree"
+                                    ? tProjects(($) => $.resources.mode_badge_worktree)
+                                    : tProjects(($) => $.resources.mode_badge_in_place)}
+                                </span>
+                              </Button>
+                            }
+                          />
+                          <PopoverContent align="start" className="w-80 p-2">
+                            <LocalDirectoryModeOptions
+                              value={effectiveLocalMode}
+                              onChange={(mode) => {
+                                setLocalMode(mode);
+                                setLocalModeOpen(false);
+                              }}
+                              unavailableReason={worktreeUnavailableReason}
+                            />
+                          </PopoverContent>
+                        </Popover>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 flex-1 min-w-0 text-caption"
+                          onClick={handlePickLocalDirectory}
+                          disabled={localPicking || !daemonStatus.running}
+                        >
+                          <span className="truncate">
+                            {t(($) => $.create_project.local_change)}
+                          </span>
+                        </Button>
+                      </div>
                     </div>
                   ) : (
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
-                      className="w-full text-xs"
+                      className="w-full text-caption"
                       onClick={handlePickLocalDirectory}
                       disabled={localPicking || !daemonStatus.running}
                     >
@@ -776,22 +1048,58 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   )}
 
                   {localPickError && (
-                    <p className="text-[11px] text-destructive">{localPickError}</p>
+                    <p className="text-micro text-destructive">{localPickError}</p>
                   )}
 
-                  <p className="text-[10px] text-muted-foreground leading-snug">
+                  <p className="text-micro text-muted-foreground leading-snug">
                     {t(($) => $.create_project.local_hint)}
                   </p>
                 </>
               )}
             </PopoverContent>
           </Popover>
-          </div>
 
+          {/* Overflow — always the last child so it stays at the end of the
+              wrap flow. Only rendered while a date is still collapsible; when
+              both are set there is nothing left to add. */}
+          {(!startDate || !dueDate) && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <PillButton aria-label={t(($) => $.create_project.more_options_aria)}>
+                    <MoreHorizontal className="size-3.5" />
+                  </PillButton>
+                }
+              />
+              <DropdownMenuContent align="start" className="w-auto">
+                {!dueDate && (
+                  <DropdownMenuItem onClick={() => setDueDatePickerOpen(true)}>
+                    <CalendarDays className="h-3.5 w-3.5" />
+                    {t(($) => $.create_project.set_due_date)}
+                  </DropdownMenuItem>
+                )}
+                {!startDate && (
+                  <DropdownMenuItem onClick={() => setStartDatePickerOpen(true)}>
+                    <CalendarClock className="h-3.5 w-3.5" />
+                    {t(($) => $.create_project.set_start_date)}
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+
+        {/* Footer action bar — primary action in its own strip, matching
+            create-issue. */}
+        <div className="flex items-center justify-end border-t px-4 py-3 shrink-0">
           <Button
             size="sm"
             onClick={handleSubmit}
-            disabled={!title.trim() || submitting}
+            disabled={
+              !title.trim() ||
+              submitting ||
+              (sourceMode === "repos" && hasRejectedRepoRef)
+            }
             className="shrink-0"
           >
             {submitting ? t(($) => $.create_project.submitting) : t(($) => $.create_project.submit)}

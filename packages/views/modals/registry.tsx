@@ -1,45 +1,75 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useModalStore } from "@multica/core/modals";
-import { CreateWorkspaceModal } from "./create-workspace";
 import { CreateIssueDialog } from "./create-issue-dialog";
 import { CreateProjectModal } from "./create-project";
 import { CreateSquadModal } from "./create-squad";
 import { FeedbackModal } from "./feedback";
 import { SetParentIssueModal } from "./set-parent-issue";
+import { MarkDuplicateIssueModal } from "./mark-duplicate-issue";
 import { AddChildIssueModal } from "./add-child-issue";
 import { DeleteIssueConfirmModal } from "./delete-issue-confirm";
-import { BacklogAgentHintModal } from "./backlog-agent-hint";
+import { RunConfirmModal } from "./run-confirm";
+import { IssueLimitUpgradeDialog } from "./issue-limit-upgrade-dialog";
 
 export function ModalRegistry() {
   const modal = useModalStore((s) => s.modal);
   const data = useModalStore((s) => s.data);
   const close = useModalStore((s) => s.close);
 
+  let activeModal: ReactNode = null;
   switch (modal) {
-    case "create-workspace":
-      return <CreateWorkspaceModal onClose={close} />;
     // Both modal types open the same shell so the in-modal mode switch is
     // instant — only the inner panel swaps, the Dialog Root stays mounted.
     case "create-issue":
-      return <CreateIssueDialog onClose={close} initialMode="manual" data={data} />;
+      activeModal = (
+        <CreateIssueDialog
+          onClose={close}
+          initialMode="manual"
+          data={data}
+        />
+      );
+      break;
     case "quick-create-issue":
-      return <CreateIssueDialog onClose={close} initialMode="agent" data={data} />;
+      activeModal = (
+        <CreateIssueDialog
+          onClose={close}
+          initialMode="agent"
+          data={data}
+        />
+      );
+      break;
     case "create-project":
-      return <CreateProjectModal onClose={close} />;
+      activeModal = <CreateProjectModal onClose={close} />;
+      break;
     case "create-squad":
-      return <CreateSquadModal onClose={close} />;
+      activeModal = <CreateSquadModal onClose={close} />;
+      break;
     case "feedback":
-      return <FeedbackModal onClose={close} data={data} />;
+      activeModal = <FeedbackModal onClose={close} data={data} />;
+      break;
     case "issue-set-parent":
-      return <SetParentIssueModal onClose={close} data={data} />;
+      activeModal = <SetParentIssueModal onClose={close} data={data} />;
+      break;
+    case "issue-mark-duplicate":
+      activeModal = <MarkDuplicateIssueModal onClose={close} data={data} />;
+      break;
     case "issue-add-child":
-      return <AddChildIssueModal onClose={close} data={data} />;
+      activeModal = <AddChildIssueModal onClose={close} data={data} />;
+      break;
     case "issue-delete-confirm":
-      return <DeleteIssueConfirmModal onClose={close} data={data} />;
-    case "issue-backlog-agent-hint":
-      return <BacklogAgentHintModal onClose={close} data={data} />;
-    default:
-      return null;
+      activeModal = <DeleteIssueConfirmModal onClose={close} data={data} />;
+      break;
+    case "issue-run-confirm":
+      activeModal = <RunConfirmModal onClose={close} data={data} />;
+      break;
   }
+
+  return (
+    <>
+      {activeModal}
+      <IssueLimitUpgradeDialog />
+    </>
+  );
 }

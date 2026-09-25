@@ -1,0 +1,332 @@
+---
+title: Utiliser le CLI
+description: Installez le CLI Multica, connectez-vous et gérez les espaces de travail, les tâches, les agents et les runtimes depuis le terminal.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Le CLI Multica sert à la fois à connecter des runtimes locaux et à gérer, depuis le terminal, les espaces de travail, les tâches, les agents et les automatisations. Cette page présente les parcours courants ; les options prises en charge par la version installée sont toujours définies par le `--help` de chaque commande.
+
+## Installation
+
+**macOS / Linux**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+```
+
+Si Homebrew est installé, vous pouvez aussi exécuter :
+
+```bash
+brew install multica-ai/tap/multica
+```
+
+**Windows PowerShell**
+
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+```
+
+Vérifiez l'installation :
+
+```bash
+multica version
+```
+
+## Première connexion
+
+Se connecter à Multica Cloud :
+
+```bash
+multica setup
+```
+
+Se connecter à une instance auto-hébergée :
+
+```bash
+multica setup self-host \
+  --server-url https://api.example.com \
+  --app-url https://app.example.com
+```
+
+`setup` enregistre l'adresse du serveur, ouvre un navigateur pour finaliser la connexion et démarre le daemon. Une fois l'opération terminée, vérifiez :
+
+```bash
+multica auth status
+multica daemon status
+```
+
+Si vous devez seulement vous reconnecter sans écraser le reste de la configuration, exécutez `multica login`. Sur une machine sans navigateur, créez d'abord un jeton d'accès personnel dans les paramètres web, puis saisissez-le avec :
+
+```bash
+multica login --token
+```
+
+La commande vous invite à coller le jeton dans le terminal, ce qui évite que sa valeur complète n'apparaisse dans l'historique du shell.
+
+## Choisir un espace de travail
+
+Listez les espaces de travail et changez celui par défaut :
+
+```bash
+multica workspace list
+multica workspace switch <slug>
+```
+
+Les commandes suivantes utilisent cet espace de travail. Une commande isolée peut le remplacer avec `--workspace-id`, ou vous pouvez définir `MULTICA_WORKSPACE_ID`.
+
+Inviter des membres :
+
+```bash
+multica workspace member invite teammate@example.com
+multica workspace member invite admin@example.com --role admin
+```
+
+## Opérations courantes sur les tâches
+
+```bash
+# Consulter et rechercher
+multica issue list
+multica issue get MUL-123
+multica issue search "échec de connexion"
+
+# Créer et mettre à jour
+multica issue create --title "Corriger l'échec de connexion"
+multica issue status MUL-123 in_progress
+multica issue assign MUL-123 --to "Backend Agent"
+
+# Commentaires et exécutions
+multica issue comment list MUL-123
+multica issue comment add MUL-123 --content "Vérifiez d'abord les tests de régression"
+multica issue comment update <comment-id> --expected-revision 2 --content "Vérifiez les tests de régression et les notes de version"
+multica issue runs MUL-123
+```
+
+Lisez les descriptions ou commentaires longs depuis stdin pour ne pas avoir à gérer les retours à la ligne et les guillemets :
+
+```bash
+multica issue create --title "Notes de mise à niveau" --description-stdin < notes.md
+multica issue comment add MUL-123 --content-stdin < review.md
+multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
+```
+
+Afficher les messages d'une exécution, ou l'arrêter :
+
+```bash
+multica issue run-messages <task-id> --issue MUL-123
+multica issue cancel-task <task-id> --issue MUL-123
+```
+
+## Agents et skills
+
+```bash
+multica agent list
+multica agent get <agent-id>
+multica agent create --help
+multica agent update <agent-id> --help
+
+multica skill list
+multica skill get <skill-id>
+multica skill import --url <skill-url>
+multica agent skills add <agent-id> --skill-ids <skill-id>
+```
+
+Lorsqu'un import rencontre un skill du même nom, le comportement par défaut est de s'arrêter sans modifier le contenu existant. Choisissez selon votre intention :
+
+```bash
+multica skill import --url <skill-url> --on-conflict overwrite
+multica skill import --url <skill-url> --on-conflict rename
+multica skill import --url <skill-url> --on-conflict skip
+```
+
+`overwrite` n'est autorisé que pour le créateur du skill et conserve l'ID d'origine ainsi que les liaisons avec les agents.
+
+## Daemon et runtimes
+
+```bash
+multica daemon start
+multica daemon stop
+multica daemon restart
+multica daemon status --output json
+multica daemon logs --follow
+
+multica runtime list
+multica runtime rename <runtime-id> "Office Mac"
+multica runtime usage <runtime-id>
+multica runtime activity <runtime-id>
+```
+
+La suppression d'un runtime auquel des agents actifs sont encore liés est refusée par défaut. `multica runtime delete <id> --cascade` dissocie ces agents, préserve leur configuration et leur historique, et annule leurs exécutions actives.
+
+Consultez [Daemon et runtimes](/daemon-runtimes) pour son fonctionnement et les profils personnalisés.
+
+## Vue d'ensemble des commandes
+
+| Commande | Rôle |
+| --- | --- |
+| `issue` | Créer, mettre à jour, assigner et rechercher des tâches ; gérer les commentaires, les abonnés, les étiquettes, les propriétés et les exécutions |
+| `project` | Gérer les projets et leurs ressources |
+| `label`, `property` | Gérer les étiquettes et les propriétés personnalisées de l'espace de travail |
+| `agent`, `skill`, `squad` | Gérer les agents, les skills et les squads |
+| `autopilot` | Gérer les automatisations, les déclencheurs et l'historique des exécutions |
+| `workspace` | Créer, consulter et changer d'espace de travail, et inviter des membres |
+| `repo` | Gérer les dépôts de l'espace de travail et les extraire localement |
+| `daemon`, `runtime` | Démarrer et arrêter le daemon local ; consulter et gérer les runtimes |
+| `attachment` | Envoyer ou télécharger des pièces jointes |
+| `user profile` | Consulter ou mettre à jour le profil de l'utilisateur actuel |
+| `auth`, `login`, `setup` | Se connecter, vérifier l'état de l'authentification et initialiser une connexion |
+| `config` | Consulter ou modifier la configuration locale du profil CLI actuel |
+| `update`, `version` | Mettre à jour le CLI ou afficher la version |
+
+`multica chat` lit **la session de messagerie externe qu'un agent traite actuellement** ; elle sert surtout aux agents des intégrations de messagerie et n'est pas une commande générale pour parcourir n'importe quelle discussion de l'espace de travail.
+
+## ID et formats de sortie
+
+Les tâches utilisent des clés comme `MUL-123` ou des UUID complets ; les préfixes courts d'UUID ne sont pas acceptés.
+
+Pour les autres ressources, les commandes `list` affichent généralement des ID courts copiables et prennent en charge `--full-id` pour obtenir l'UUID complet. Lorsqu'un ID court est ambigu, le CLI demande davantage de caractères ou l'UUID complet. Les ID courts d'exécution exigent aussi `--issue` pour identifier la tâche à laquelle ils appartiennent.
+
+De nombreuses commandes prennent en charge une sortie structurée :
+
+```bash
+multica issue list --output json
+multica agent list --output json
+```
+
+Les scripts doivent utiliser la sortie JSON plutôt que d'analyser les tableaux destinés au terminal. Les formats de sortie et les options de pagination pris en charge par chaque commande sont définis par `multica <command> --help`.
+
+## Profils et configuration
+
+La configuration par défaut se trouve dans `~/.multica/config.json`. Utilisez `--profile <name>` pour isoler un ensemble distinct d'adresse de serveur, de jeton, d'espace de travail par défaut et d'état du daemon :
+
+```bash
+multica setup self-host --profile staging \
+  --server-url https://api.staging.example.com \
+  --app-url https://app.staging.example.com
+
+multica issue list --profile staging
+```
+
+Les profils nommés se trouvent dans `~/.multica/profiles/<name>/config.json`. Inspectez les valeurs actuelles :
+
+```bash
+multica config show
+multica config show --profile staging
+```
+
+Ne définissez pas `MULTICA_DAEMON_PORT` dans le shell hôte, le service Compose ou le point d'entrée du conteneur qui démarre un daemon. Le daemon hôte déduit son port de contrôle de santé de `--profile` et injecte lui-même cette variable dans les exécutions d'agent. Supprimez complètement la variable des anciens environnements de démarrage : sinon, les versions 0.4.22 et 0.4.23 prennent ce shell pour une exécution gérée et refusent la connexion. Les versions plus récentes permettent à la connexion humaine protégée et à `daemon status` de se rétablir lorsque le port est le seul signal d'exécution, mais les commandes API ordinaires et celles qui résolvent un profil restent volontairement bloquées (fail-closed) tant que la variable n'est pas supprimée.
+
+Lorsque le CLI tourne au sein d'une exécution d'agent gérée par le daemon, il ne charge ni ne modifie ces fichiers de profil qui appartiennent à l'utilisateur humain. Les commandes de l'API Multica s'authentifient avec l'identifiant limité à l'exécution que le daemon injecte. `config show` et `config set` utilisent un état privé, local à l'exécution ; les commandes humaines ou locales comme `login`, `logout`, `setup`, `workspace switch`, les modifications de chemin des profils de runtime locaux, `daemon start` / `stop` / `restart`, `daemon logs` et `daemon probe-runtimes` sont indisponibles. Dans ce contexte, `auth status` n'affiche aucun élément de jeton.
+
+`daemon status` et `daemon disk-usage` restent disponibles pour qu'un agent puisse inspecter le runtime qui l'héberge, dans les limites de ce runtime : `status` interroge le port de contrôle de santé injecté par le daemon, et `disk-usage` analyse la racine des répertoires de travail injectée par le daemon. Aucune des deux n'accepte `--profile` ; `disk-usage` refuse aussi `--all-profiles` et `--workspaces-root`, et sa colonne STATUS reste vide, car la renseigner exigerait le jeton enregistré de l'utilisateur humain. Utilisez `du` et `df` pour tout ce qui sort de ce périmètre.
+
+Cela protège la résolution implicite des profils du CLI Multica tout en préservant les variables `HOME` et XDG habituelles qu'utilisent les outils des autres fournisseurs. Ce n'est pas une frontière du système de fichiers au niveau de l'OS : des processus qui tournent sous le même utilisateur système peuvent toujours ouvrir un chemin connu explicitement. Utilisez un utilisateur dédié, un conteneur, une VM ou une isolation équivalente lorsque cette garantie plus forte est nécessaire.
+
+<Callout type="warning">
+Les fichiers de configuration du CLI contiennent des jetons qui permettent d'accéder à Multica en votre nom. Ne les commitez pas dans un dépôt, ne les envoyez pas dans des journaux et ne les partagez avec personne.
+</Callout>
+
+## Référence des commandes
+
+Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelles, regroupées comme le CLI lui-même les regroupe. Toutes les commandes acceptent les options globales `--server-url`, `--workspace-id`, `--profile` et `--debug`. `--output` est déclarée commande par commande, et le format par défaut varie : les commandes `list` affichent par défaut un tableau, tandis que les commandes `get` et `create` renvoient le plus souvent du JSON. Les options complètes sont définies par `multica <command> --help`.
+
+### Core
+
+| Commande | Sous-commande | Rôle | Options principales |
+| --- | --- | --- | --- |
+| `issue` | `list` | Lister les tâches | `--status`, `--priority`, `--assignee`, `--project`, `--metadata` (répétable), `--property` (répétable, `"Name=Value"` ; `__none__` correspond à une valeur non définie), `--limit`, `--offset`, `--sort` (y compris `property:<name-or-id>`), `--full-id`, `--resolve-properties` (JSON uniquement ; lignes avec les noms de propriété, d'option et de membre à côté des ID enregistrés) |
+| | `get <id>` | Afficher une tâche | `--resolve-properties` (JSON uniquement ; lignes avec les noms de propriété, d'option et de membre à côté des ID enregistrés) |
+| | `create` | Créer une tâche | `--title` (obligatoire), `--description` / `--description-stdin` / `--description-file`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment` (répétable) |
+| | `update <id>` | Mettre à jour les champs d'une tâche | Mêmes champs que `create`, plus `--position`, `--no-start` |
+| | `assign <id>` | Assigner ou désassigner | `--to` (correspondance approximative sur le nom parmi les membres, les agents et les squads), `--to-id`, `--unassign`, `--no-start` |
+| | `status <id> <status>` | Changer le statut | `--no-start` |
+| | `reorder <id>` | Déplacer au sein d'une colonne | |
+| | `search <query>` | Rechercher des tâches | `--limit`, `--include-closed` |
+| | `children <id>` | Lister les sous-tâches regroupées par étape | |
+| | `pull-requests <id>` | Lister les PR associées | |
+| | `comment list/add/delete/resolve/unresolve` | Gérer les commentaires | `add` : `--content` / `--content-stdin` / `--content-file`, `--parent`, `--attachment` ; `list` : `--since`, `--thread`, `--tail` |
+| | `subscriber list/add/remove <issue-id>` | Gérer les abonnés | `--user`, `--user-id` (par défaut, l'utilisateur actuel) |
+| | `label list/add/remove <issue-id>` | Gérer les étiquettes d'une tâche | |
+| | `metadata list/get/set/delete <issue-id>` | Gérer les métadonnées clé-valeur au niveau de la tâche | |
+| | `property list/set/unset <issue-id>` | Définir les valeurs des propriétés personnalisées | `set` : `--name`, `--value` (`actor` / `multi_actor` acceptent un nom de membre, un e-mail ou un ID) |
+| | `runs <issue-id>` | Afficher l'historique des exécutions | `--full-id` |
+| | `run-messages <task-id>` | Afficher les messages d'une exécution | `--since`, `--issue` |
+| | `usage <issue-id>` | Afficher la consommation de tokens agrégée | |
+| | `rerun <id>` | Remettre en file une exécution pour l'assigné actuel | |
+| | `cancel-task <task-id>` | Annuler une exécution en cours ou en file d'attente | `--issue` |
+| `project` | `list/get/create/update/delete` | Gérer les projets | |
+| | `status <id> <status>` | Changer le statut d'un projet | |
+| | `resource list/add/update/remove` | Gérer les ressources d'un projet | `--type`, `--url`, `--local-path`, `--daemon-id`, `--execution-mode` (`in_place` / `worktree` pour un répertoire local) |
+| `label` | `list/get/create/update/delete` | Gérer les étiquettes de l'espace de travail | `list` : `--resource-type` (`issue` ou `skill`), `--full-id` ; `create` : `--name`, `--color`, `--resource-type` (`issue` ou `skill`), `--description` |
+| `property` | `list/get/create/update/archive/unarchive` | Gérer les propriétés personnalisées de l'espace de travail | `create` : `--name`, `--type` (`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`), `--option` (répétable, types select uniquement) ; `list` : `--include-archived` ; le type ne peut plus être modifié après la création |
+| `agent` | `list/get/create/update/archive/restore` | Gérer les agents | `--name`, `--runtime-id` (obligatoire pour `create`), `--instructions`, `--conversation-starters`, `--model`, `--thinking-level`, `--mcp-config`, `--permission-mode`, `--max-concurrent-tasks` |
+| | `copy <agent-id>` | Copier dans un nouvel agent ; l'original reste intact | `--name` (par défaut, le nom d'origine suivi de ` (copy)`), `--runtime-id` (copier vers un autre runtime exige aussi `--model`), `--no-skills` ; la configuration secrète comme `custom_env`, `mcp_config` et `runtime_config` n'est pas copiée — fournissez-la à nouveau avec les mêmes options que pour `create` |
+| | `tasks <id>` | Afficher les exécutions d'un agent | |
+| | `avatar <id>` | Envoyer un avatar | |
+| | `env get/set <agent-id>` | Lire et écrire les variables d'environnement personnalisées (propriétaires et administrateurs uniquement) | |
+| | `skills list/set/add <agent-id>` | Gérer les skills rattachés | `--skill-ids` (`set` remplace toute la liste, `add` ajoute à la suite) |
+| | `mcp list/add/enable/disable/remove <agent-id>` | Assigner des serveurs MCP de l'espace de travail à cet agent | Récupérez l'ID du serveur avec `workspace mcp list`. Une entrée de la bibliothèque n'a aucun effet tant qu'elle n'est pas ajoutée ici ; `disable` cesse de l'envoyer sans supprimer l'assignation |
+| `autopilot` | `list/get/create/update/delete` | Gérer les automatisations | `create` : `--title`, `--agent`, `--mode` (tous obligatoires), `--project`, `--subscriber` (répétable) |
+| | `trigger <id>` | Déclencher une exécution manuellement | |
+| | `runs <id>` | Afficher l'historique des exécutions | |
+| | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Gérer les déclencheurs de planification et webhook | |
+| `workspace` | `list/get/create/update/switch` | Gérer les espaces de travail ; `switch` définit l'espace de travail par défaut du profil actuel | |
+| | `mcp list/add/update/remove` | Gérer la bibliothèque de serveurs MCP de l'espace de travail | Les écritures sont réservées aux propriétaires et administrateurs. Un serveur ajouté ici n'est assigné à aucun agent — attribuez-le à un agent avec `multica agent mcp add`. `list` n'affiche que les noms et les transports ; l'entrée enregistrée est en écriture seule et n'est jamais renvoyée. `--server-config-file` / `--server-config-stdin` gardent les jetons hors de l'historique du shell |
+| | `member list/invite <email>` | Consulter les membres, envoyer des invitations | `invite` : `--role` (member ou admin, member par défaut) |
+| `repo` | `list/add/remove/checkout` | Gérer les dépôts de l'espace de travail et les extraire localement | `--url` (répétable) ; `checkout` : `--ref` |
+| `skill` | `list/get/create/update/delete` | Gérer les skills | |
+| | `import` | Importer un skill depuis une URL ou un fichier local | `--url` / `--file`, `--on-conflict` (`fail`, `overwrite`, `rename`, `skip` ; `fail` par défaut) |
+| | `search <query>` | Rechercher des skills | |
+| | `files list/upsert/delete <skill-id>` | Gérer les fichiers d'un skill | |
+| | `label list/add/remove <skill-id>` | Gérer les étiquettes d'un skill | `add` / `remove` : `<label-id>` accepte un UUID complet ou un préfixe court |
+| `squad` | `list/get/create/update/delete` | Gérer les squads (`delete` archive) | |
+| | `member list/add/set-role/remove` | Gérer les membres d'un squad | |
+| | `activity <issue-id> <outcome>` | Enregistrer une évaluation du chef | |
+| `chat` | `history`, `thread [id]` | Lire la session de messagerie externe qu'un agent traite actuellement | `--limit`, `--before` |
+
+### Runtime
+
+| Commande | Sous-commande | Rôle | Options principales |
+| --- | --- | --- | --- |
+| `daemon` | `start` | Démarrer le daemon local | `--foreground`, `--device-name`, `--runtime-name`, `--workspaces-root`, `--poll-interval`, `--heartbeat-interval`, `--agent-timeout` (`0` signifie aucune limite), `--max-concurrent-tasks`, `--no-auto-update` ; chacune a une variable d'environnement `MULTICA_*` correspondante |
+| | `stop` / `status` / `restart` | Arrêter, vérifier l'état, redémarrer (`restart` accepte les mêmes options que `start`) | |
+| | `logs` | Afficher les journaux du daemon | `--follow`, `--lines` |
+| | `disk-usage` | Afficher l'utilisation du disque local | `--by-workspace`, `--by-task`, `--top` |
+| `runtime` | `list/usage/activity/update/rename/delete` | Consulter et gérer les runtimes | `delete` : `--cascade` (dissocie les agents liés, préserve leurs données et annule leurs exécutions) |
+| | `profile list/create/update/delete` | Gérer les profils de runtime personnalisés | |
+| | `profile set-path/unset-path <profile-id>` | Fixer le chemin d'un exécutable local (local uniquement, jamais envoyé au serveur) | |
+
+### Additional
+
+| Commande | Sous-commande | Rôle | Options principales |
+| --- | --- | --- | --- |
+| `auth` | `status` / `logout` | Vérifier l'état de l'authentification ; `logout` supprime seulement le jeton enregistré localement et ne le révoque pas côté serveur | |
+| `user` | `profile get/update` | Consulter ou mettre à jour le profil de l'utilisateur actuel | |
+| `login` | — | Se connecter via le navigateur et configurer automatiquement tous les espaces de travail | `--token` (demande la saisie de façon interactive dans le terminal lorsque l'option est passée sans valeur) |
+| `setup` | `cloud` (par défaut), `self-host` | Enregistrer l'adresse du serveur, finaliser la connexion et démarrer le daemon | `self-host` : `--server-url`, `--app-url`, `--port`, `--frontend-port` |
+| `attachment` | `download <attachment-id>`, `upload <path>` | Télécharger ou envoyer des pièces jointes | `download` : `--output-dir` ; `upload` : `--task` |
+| `config` | `show`, `set <key> <value>` | Consulter ou modifier la configuration locale du profil actuel | Priorité : options de ligne de commande > variables d'environnement > `config.json` > valeurs par défaut intégrées ; définissez une chaîne vide pour effacer une valeur |
+| `update` | — | Mettre à jour le CLI vers la dernière version | |
+| `version` | — | Afficher les informations de version | `--output` (`text` ou `json`) |
+
+## Piloter Multica depuis un autre agent de codage
+
+Si l'essentiel de votre travail se passe déjà dans Codex, Claude Code ou Cursor, vous
+pouvez piloter Multica depuis ces outils au lieu de basculer vers un terminal. Le
+[skill Multica CLI](https://github.com/multica-ai/multica-cli) apprend à ces agents à
+utiliser les commandes de cette page en toute sécurité : lire les tâches et les fils de
+commentaires sans gaspiller de tokens, écrire les commentaires via un fichier, et gérer
+les effets de bord qu'entraînent les mentions, les changements de statut et les assignations.
+
+Il passe entièrement par votre CLI authentifié et n'accorde aucun accès qui lui soit propre :
+les permissions proviennent toujours de votre connexion, du profil sélectionné et de
+l'espace de travail. Il nécessite le CLI v0.4.26 ou ultérieur. Le README du dépôt explique
+l'installation via la marketplace de plugins de Claude Code, l'installateur de skills de
+Codex, Cursor et tout autre outil qui charge des instructions Markdown.
+
+## Étapes suivantes
+
+- [Skill Multica CLI](https://github.com/multica-ai/multica-cli) — piloter Multica depuis Codex, Claude Code ou Cursor.
+- [Authentification et jetons](/auth-tokens) — créer, renouveler et révoquer des PAT.
+- [Dépannage](/troubleshooting) — diagnostiquer les erreurs de commande et les exécutions qui ne démarrent jamais.
+- [Créer et configurer un agent](/agents-create) — la sémantique complète de chaque champ de `agent create`.

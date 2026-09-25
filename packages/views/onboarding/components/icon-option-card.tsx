@@ -1,23 +1,43 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { Check } from "lucide-react";
+import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 
 const OTHER_INPUT_MAX_LENGTH = 80;
 
 /**
- * Card-grid option used by the per-question questionnaire steps
- * (Source / Role / Use case). One row = icon + label. Clicking the
- * card selects it; the parent step decides when to advance (an
- * explicit Continue button gates the transition so users can change
- * their mind before committing). The `Other` variant swaps its
- * label area for a free-text input when selected.
+ * One option in a questionnaire card grid. `slug` is the persisted
+ * enum value; `icon` is a React node (lucide icon, brand SVG, or emoji
+ * span); `label` is the localized string already resolved by the
+ * caller. `isOther` flips this card into a free-text input row.
+ *
+ * Shared by the About-you onboarding step and the workspace
+ * source-backfill prompt, which both render their options through the
+ * cards below.
+ */
+export interface QuestionOption {
+  slug: string;
+  icon: ReactNode;
+  label: string;
+  isOther?: boolean;
+}
+
+/**
+ * A questionnaire option, rendered as a wrapping chip.
+ *
+ * These used to be full-width bordered cards in a 4-column grid. Inside the
+ * onboarding column that grid had nowhere to go, and stacking 18 options as
+ * full-width rows turned one screen into a long scroll. Chips are the block's
+ * own answer for a many-option question, and they wrap to fit whatever width
+ * the column has.
  *
  * `mode` controls ARIA role: `"radio"` for single-select questions
- * (role), `"checkbox"` for multi-select (source, use case). Visual
- * style is identical — the border/shadow treatment already conveys
- * "selected"; multi-select cards just additionally don't deselect
- * other cards when clicked, which is the parent's responsibility.
+ * (role, source), `"checkbox"` for multi-select (use case). Visual
+ * style is identical — the tinted border already conveys "selected";
+ * multi-select chips just additionally don't deselect other chips when
+ * clicked, which is the parent's responsibility.
  */
 export function IconOptionCard({
   icon,
@@ -33,36 +53,35 @@ export function IconOptionCard({
   mode?: "radio" | "checkbox";
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
+      size="lg"
       role={mode}
       aria-checked={selected}
       onClick={onSelect}
-      className={cn(
-        "group flex w-full items-center gap-3 rounded-xl border bg-card px-4 py-3 text-left transition-all",
-        selected
-          ? "border-foreground shadow-[inset_0_0_0_1px_var(--color-foreground)]"
-          : "hover:border-foreground/30 hover:bg-accent/30",
-      )}
+      className={cn(selected && "border-primary/30 bg-primary/5")}
     >
       <span
         aria-hidden
-        className="flex h-7 w-7 shrink-0 items-center justify-center text-[18px] leading-none text-foreground"
+        className={cn(
+          "flex shrink-0 items-center text-muted-foreground [&_svg]:size-4",
+          selected && "text-primary",
+        )}
       >
         {icon}
       </span>
-      <span className="text-[14px] font-medium leading-tight text-foreground">
-        {label}
-      </span>
-    </button>
+      <span>{label}</span>
+      {selected ? <Check aria-hidden className="size-4 shrink-0" /> : null}
+    </Button>
   );
 }
 
 /**
- * "Other" variant — when selected, the label slot is replaced by a
- * borderless text input that inherits the card's typography so the
- * row keeps the same visual weight as the other cards. Auto-focuses
- * on open; Enter triggers the parent's `onConfirm`.
+ * "Other" variant — the same chip, but when selected its label slot becomes a
+ * borderless input that inherits the chip's typography, so the row keeps the
+ * same weight as its neighbours instead of jumping to a full-width field.
+ * Auto-focuses on open; Enter triggers the parent's `onConfirm`.
  */
 export function IconOtherOptionCard({
   icon,
@@ -86,22 +105,23 @@ export function IconOtherOptionCard({
   mode?: "radio" | "checkbox";
 }) {
   return (
-    <div
+    <Button
+      type="button"
+      variant="outline"
+      size="lg"
       role={mode}
       aria-checked={selected}
       onClick={() => {
         if (!selected) onSelect();
       }}
-      className={cn(
-        "flex w-full items-center gap-3 rounded-xl border bg-card px-4 py-3 text-left transition-all",
-        selected
-          ? "border-foreground shadow-[inset_0_0_0_1px_var(--color-foreground)]"
-          : "cursor-pointer hover:border-foreground/30 hover:bg-accent/30",
-      )}
+      className={cn(selected && "border-primary/30 bg-primary/5")}
     >
       <span
         aria-hidden
-        className="flex h-7 w-7 shrink-0 items-center justify-center text-[18px] leading-none text-foreground"
+        className={cn(
+          "flex shrink-0 items-center text-muted-foreground [&_svg]:size-4",
+          selected && "text-primary",
+        )}
       >
         {icon}
       </span>
@@ -120,14 +140,12 @@ export function IconOtherOptionCard({
           placeholder={placeholder}
           maxLength={OTHER_INPUT_MAX_LENGTH}
           aria-label={placeholder}
-          className="min-w-0 flex-1 border-0 bg-transparent p-0 text-[14px] font-medium leading-tight text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+          className="w-32 min-w-0 border-0 bg-transparent p-0 text-inherit placeholder:text-muted-foreground focus:outline-none"
         />
       ) : (
-        <span className="text-[14px] font-medium leading-tight text-foreground">
-          {label}
-        </span>
+        <span>{label}</span>
       )}
-    </div>
+    </Button>
   );
 }
 

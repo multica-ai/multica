@@ -35,14 +35,6 @@ afterEach(() => {
 });
 
 describe("useAgentsViewStore", () => {
-  it("defaults to 'mine'", () => {
-    expect(useAgentsViewStore.getState().scope).toBe("mine");
-  });
-
-  it("setScope mutates the store", () => {
-    useAgentsViewStore.getState().setScope("all");
-    expect(useAgentsViewStore.getState().scope).toBe("all");
-  });
 
   it("partialize persists only view prefs (no actions) under the workspace-namespaced key", async () => {
     setCurrentWorkspace("acme", "ws_a");
@@ -120,5 +112,77 @@ describe("useAgentsViewStore", () => {
     const filters = useAgentsViewStore.getState().filters;
     expect(filters.owners).toEqual([]);
     expect(filters.availability).toEqual(["online"]);
+  });
+
+  describe("access filter dimension", () => {
+    it("toggleFilter('access', value) adds and removes the value", () => {
+      const { toggleFilter } = useAgentsViewStore.getState();
+      toggleFilter("access", "owner-only");
+      expect(useAgentsViewStore.getState().filters.access).toEqual(["owner-only"]);
+      toggleFilter("access", "workspace");
+      expect(useAgentsViewStore.getState().filters.access).toEqual([
+        "owner-only",
+        "workspace",
+      ]);
+      toggleFilter("access", "owner-only");
+      expect(useAgentsViewStore.getState().filters.access).toEqual(["workspace"]);
+    });
+
+    it("persists the access filter under the workspace-namespaced key", async () => {
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      useAgentsViewStore.getState().toggleFilter("access", "specific-people");
+      await flush();
+
+      const raw = localStorage.getItem("multica_agents_view:acme");
+      expect(raw).not.toBeNull();
+      const parsed = JSON.parse(raw as string);
+      expect(parsed.state.filters.access).toEqual(["specific-people"]);
+    });
+
+    it("rehydrates a saved access filter on workspace switch", async () => {
+      localStorage.setItem(
+        "multica_agents_view:acme",
+        JSON.stringify({
+          state: { filters: { access: ["owner-only"] } },
+          version: 0,
+        }),
+      );
+      localStorage.setItem(
+        "multica_agents_view:beta",
+        JSON.stringify({
+          state: { filters: { access: ["workspace"] } },
+          version: 0,
+        }),
+      );
+
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+      expect(useAgentsViewStore.getState().filters.access).toEqual(["owner-only"]);
+
+      setCurrentWorkspace("beta", "ws_b");
+      await flush();
+      await flush();
+      expect(useAgentsViewStore.getState().filters.access).toEqual(["workspace"]);
+    });
+
+    it("backfills access to [] when rehydrating a pre-access payload", async () => {
+      // Pre-access payloads would leave filters.access undefined and crash
+      // the row-filter predicate (`filters.access.length`).
+      localStorage.setItem(
+        "multica_agents_view:acme",
+        JSON.stringify({
+          state: { filters: { availability: ["online"] } },
+          version: 0,
+        }),
+      );
+
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+
+      expect(useAgentsViewStore.getState().filters.access).toEqual([]);
+    });
   });
 });

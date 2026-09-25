@@ -23,6 +23,68 @@ func TestCursorMcpApprovalKeyMatchesCursorAgent(t *testing.T) {
 	}
 }
 
+func TestCursorMcpApprovalKeyMatchesCursorAgentWithReorderedStdioConfig(t *testing.T) {
+	t.Parallel()
+
+	keys, err := cursorMcpApprovalKeys("/tmp/work", map[string]json.RawMessage{
+		"fetch": json.RawMessage(`{ "args": [ "mcp-server-fetch" ], "command": "uvx", "env": { "TOKEN": "x" } }`),
+	})
+	if err != nil {
+		t.Fatalf("cursorMcpApprovalKeys: %v", err)
+	}
+	want := []string{"fetch-4c7232835349773b"}
+	if !reflect.DeepEqual(keys, want) {
+		t.Fatalf("approval keys = %v, want %v", keys, want)
+	}
+}
+
+func TestCursorMcpApprovalKeyMatchesJSONStringifyWithHTMLCharacters(t *testing.T) {
+	t.Parallel()
+
+	keys, err := cursorMcpApprovalKeys("/tmp/work", map[string]json.RawMessage{
+		"fetch": json.RawMessage(`{"command":"uvx","args":["mcp"],"env":{"URL":"https://x.test?a=1&b=2"}}`),
+	})
+	if err != nil {
+		t.Fatalf("cursorMcpApprovalKeys: %v", err)
+	}
+	want := []string{"fetch-37ab92a3e088d73a"}
+	if !reflect.DeepEqual(keys, want) {
+		t.Fatalf("approval keys = %v, want %v", keys, want)
+	}
+}
+
+func TestCursorMcpApprovalKeyMatchesCursorAgentWithStdioTypeAndCwd(t *testing.T) {
+	t.Parallel()
+
+	keys, err := cursorMcpApprovalKeys("/private/tmp/work", map[string]json.RawMessage{
+		"withtypecwd": json.RawMessage(`{"enabled":true,"cwd":"/tmp/probe","timeout":30,"args":["mcp"],"command":"uvx","type":"stdio"}`),
+	})
+	if err != nil {
+		t.Fatalf("cursorMcpApprovalKeys: %v", err)
+	}
+	// Captured from cursor-agent 2026.08.04-aaa8809 via mcp enable.
+	want := []string{"withtypecwd-ba71d2f70913528e"}
+	if !reflect.DeepEqual(keys, want) {
+		t.Fatalf("approval keys = %v, want %v", keys, want)
+	}
+}
+
+func TestCursorMcpApprovalKeyMatchesCursorAgentForRemoteServer(t *testing.T) {
+	t.Parallel()
+
+	keys, err := cursorMcpApprovalKeys("/private/tmp/work", map[string]json.RawMessage{
+		"remote": json.RawMessage(`{"enabled":true,"headers":{"Authorization":"Bearer x"},"timeout":30,"url":"https://mcp.example.com","type":"http"}`),
+	})
+	if err != nil {
+		t.Fatalf("cursorMcpApprovalKeys: %v", err)
+	}
+	// Captured from cursor-agent 2026.08.04-aaa8809 via mcp enable.
+	want := []string{"remote-abc2ffe78532b37e"}
+	if !reflect.DeepEqual(keys, want) {
+		t.Fatalf("approval keys = %v, want %v", keys, want)
+	}
+}
+
 func TestPrepareCursorMcpConfigWritesProjectConfigAndApprovals(t *testing.T) {
 	t.Parallel()
 
@@ -39,7 +101,7 @@ func TestPrepareCursorMcpConfigWritesProjectConfigAndApprovals(t *testing.T) {
 		}
 	}`)
 
-	cursorDataDir, err := prepareCursorMcpConfig(envRoot, workDir, mcpConfig, manifest)
+	cursorDataDir, err := prepareCursorMcpConfig(envRoot, workDir, mcpConfig, "", manifest)
 	if err != nil {
 		t.Fatalf("prepareCursorMcpConfig: %v", err)
 	}
@@ -98,7 +160,7 @@ func TestPrepareCursorMcpConfigManagedEmptySet(t *testing.T) {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatalf("mkdir workDir: %v", err)
 	}
-	cursorDataDir, err := prepareCursorMcpConfig(envRoot, workDir, json.RawMessage(`{"mcpServers":{}}`), &sidecarManifest{})
+	cursorDataDir, err := prepareCursorMcpConfig(envRoot, workDir, json.RawMessage(`{"mcpServers":{}}`), "", &sidecarManifest{})
 	if err != nil {
 		t.Fatalf("prepareCursorMcpConfig: %v", err)
 	}
@@ -119,6 +181,95 @@ func TestPrepareCursorMcpConfigManagedEmptySet(t *testing.T) {
 	}
 }
 
+func TestPrepareCursorMcpConfigSeedsExplicitAuthSource(t *testing.T) {
+	t.Parallel()
+
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workDir: %v", err)
+	}
+	sourceProjectDir := filepath.Join(envRoot, "source-project")
+	if err := os.MkdirAll(sourceProjectDir, 0o700); err != nil {
+		t.Fatalf("mkdir source project: %v", err)
+	}
+	sourceAuth := filepath.Join(sourceProjectDir, cursorMcpAuthFile)
+	if err := os.WriteFile(sourceAuth, []byte(`{"tokens":{"fetch":"secret"}}`), 0o600); err != nil {
+		t.Fatalf("write source auth: %v", err)
+	}
+
+	cursorDataDir, err := prepareCursorMcpConfig(envRoot, workDir, json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"]}}}`), sourceProjectDir, &sidecarManifest{})
+	if err != nil {
+		t.Fatalf("prepareCursorMcpConfig: %v", err)
+	}
+	projectRoot := cursorProjectRoot(workDir)
+	targetAuth := filepath.Join(cursorDataDir, "projects", cursorSlugifyPath(projectRoot), cursorMcpAuthFile)
+	data, err := os.ReadFile(targetAuth)
+	if err != nil {
+		t.Fatalf("read seeded auth: %v", err)
+	}
+	if string(data) != `{"tokens":{"fetch":"secret"}}` {
+		t.Fatalf("seeded auth = %s", data)
+	}
+}
+
+func TestPrepareCursorMcpConfigRemovesPriorAuthOnOptOut(t *testing.T) {
+	t.Parallel()
+
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workDir: %v", err)
+	}
+	sourceProjectDir := filepath.Join(envRoot, "source-project")
+	if err := os.MkdirAll(sourceProjectDir, 0o700); err != nil {
+		t.Fatalf("mkdir source project: %v", err)
+	}
+	sourceAuth := filepath.Join(sourceProjectDir, cursorMcpAuthFile)
+	if err := os.WriteFile(sourceAuth, []byte(`{"tokens":{"fetch":"secret"}}`), 0o600); err != nil {
+		t.Fatalf("write source auth: %v", err)
+	}
+	mcpConfig := json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"]}}}`)
+
+	cursorDataDir, err := prepareCursorMcpConfig(envRoot, workDir, mcpConfig, sourceProjectDir, nil)
+	if err != nil {
+		t.Fatalf("prepareCursorMcpConfig with auth source: %v", err)
+	}
+	projectRoot := cursorProjectRoot(workDir)
+	targetAuth := filepath.Join(cursorDataDir, "projects", cursorSlugifyPath(projectRoot), cursorMcpAuthFile)
+	if _, err := os.Stat(targetAuth); err != nil {
+		t.Fatalf("seeded auth missing: %v", err)
+	}
+
+	cursorDataDir, err = prepareCursorMcpConfig(envRoot, workDir, mcpConfig, "", nil)
+	if err != nil {
+		t.Fatalf("prepareCursorMcpConfig without auth source: %v", err)
+	}
+	targetAuth = filepath.Join(cursorDataDir, "projects", cursorSlugifyPath(projectRoot), cursorMcpAuthFile)
+	if _, err := os.Stat(targetAuth); !os.IsNotExist(err) {
+		t.Fatalf("auth file should be removed after opt-out, stat err=%v", err)
+	}
+}
+
+func TestPrepareCursorMcpConfigRejectsArbitraryAuthSourceFile(t *testing.T) {
+	t.Parallel()
+
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workDir: %v", err)
+	}
+	source := filepath.Join(envRoot, "other.json")
+	if err := os.WriteFile(source, []byte(`{"secret":true}`), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	_, err := prepareCursorMcpConfig(envRoot, workDir, json.RawMessage(`{"mcpServers":{}}`), source, &sidecarManifest{})
+	if err == nil {
+		t.Fatal("expected non-mcp-auth source file to fail")
+	}
+}
+
 func TestPrepareCursorMcpConfigNilDoesNotTakeOwnership(t *testing.T) {
 	t.Parallel()
 
@@ -127,7 +278,7 @@ func TestPrepareCursorMcpConfigNilDoesNotTakeOwnership(t *testing.T) {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatalf("mkdir workDir: %v", err)
 	}
-	cursorDataDir, err := prepareCursorMcpConfig(envRoot, workDir, nil, &sidecarManifest{})
+	cursorDataDir, err := prepareCursorMcpConfig(envRoot, workDir, nil, "", &sidecarManifest{})
 	if err != nil {
 		t.Fatalf("prepareCursorMcpConfig: %v", err)
 	}
@@ -147,7 +298,7 @@ func TestPrepareCursorMcpConfigRejectsMalformedConfig(t *testing.T) {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatalf("mkdir workDir: %v", err)
 	}
-	_, err := prepareCursorMcpConfig(envRoot, workDir, json.RawMessage(`{"mcpServers":{"bad":42}}`), &sidecarManifest{})
+	_, err := prepareCursorMcpConfig(envRoot, workDir, json.RawMessage(`{"mcpServers":{"bad":42}}`), "", &sidecarManifest{})
 	if err == nil {
 		t.Fatal("expected malformed server config to fail")
 	}

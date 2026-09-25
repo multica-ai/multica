@@ -23,7 +23,39 @@
  */
 import { preprocessMentionShortcodes } from "@multica/core/markdown";
 
-const FILE_LINE_RE = /^!file\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/;
+// File-card line matcher, kept in sync with web's parser in
+// `packages/ui/markdown/file-cards.ts` (NEW_FILE_CARD_RE + FILE_CARD_URL_PATTERN):
+//
+//   - Label allows backslash-escaped metacharacters (`\[ \] \\ \( \)`) so a
+//     filename like `a]b.pdf` — which the CLI escapes to `a\]b.pdf` in its
+//     `!file[...]` output (see cmd_attachment.go escapeMarkdownLabel) — is
+//     captured whole. Backslash is excluded from the negated class so
+//     overlapping alternatives can't backtrack (ReDoS, web #4881).
+//   - URL is restricted to the same allowlist web accepts: site-relative
+//     `/uploads/...` and `/api/attachments/<UUID>/download`, plus absolute
+//     `http(s)://`. Anything else (`javascript:`, `data:`, `//host`, other
+//     `/api/…`) is left as plain text so a stored card can't become an
+//     out-of-band navigation.
+const ATTACHMENT_UUID =
+  "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
+const FILE_CARD_URL = `/uploads/[^)]*|https?://[^)]+|/api/attachments/${ATTACHMENT_UUID}/download`;
+const FILE_LINE_RE = new RegExp(
+  `^!file\\[((?:\\\\.|[^\\]\\\\])*)\\]\\((${FILE_CARD_URL})\\)$`,
+);
+
+// Unescape the file-card label back to the real filename (mirrors web's
+// `newMatch[1].replace(/\\([[\]\\()])/g, "$1")`).
+function unescapeFileLabel(label: string): string {
+  return label.replace(/\\([[\]\\()])/g, "$1");
+}
+
+// Re-escape only the characters that would break a markdown LINK label, so the
+// emitted `[📎 name](url)` stays valid markdown. Mobile's target is a link
+// (re-parsed by marked / the enriched renderer), unlike web's HTML
+// `data-filename` attribute — so a raw `]` must not truncate the link text.
+function escapeLinkLabel(name: string): string {
+  return name.replace(/([\\[\]])/g, "\\$1");
+}
 
 function preprocessFileCards(input: string): string {
   return input
@@ -31,7 +63,8 @@ function preprocessFileCards(input: string): string {
     .map((line) => {
       const m = line.trim().match(FILE_LINE_RE);
       if (!m) return line;
-      return `[📎 ${m[1]}](${m[2]})`;
+      const label = escapeLinkLabel(unescapeFileLabel(m[1]!));
+      return `[📎 ${label}](${m[2]})`;
     })
     .join("\n");
 }

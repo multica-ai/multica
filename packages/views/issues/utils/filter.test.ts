@@ -1,6 +1,15 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
-import type { Issue } from "@multica/core/types";
-import { filterIssues, type IssueFilters } from "./filter";
+import type { Issue, IssueAssigneeGroup, ProjectStatus, PropertyFilterValue } from "@multica/core/types";
+import {
+  applyIssueFilters,
+  filterAssigneeGroups,
+  filterIssues,
+  issueMatchesPropertyFilters,
+  NO_PROPERTY_VALUE,
+  type IssueFilters,
+  type IssueFilterState,
+} from "./filter";
 
 const NO_FILTER: IssueFilters = {
   statusFilters: [],
@@ -12,6 +21,8 @@ const NO_FILTER: IssueFilters = {
   includeNoProject: false,
   labelFilters: [],
 };
+
+const NO_FILTER_STATE: IssueFilterState = { ...NO_FILTER, workingOnly: false };
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -30,9 +41,11 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     parent_issue_id: null,
     project_id: null,
     position: 0,
+    stage: null,
     start_date: null,
     due_date: null,
     metadata: {},
+    properties: {},
     created_at: "2025-01-01T00:00:00Z",
     updated_at: "2025-01-01T00:00:00Z",
     ...overrides,
@@ -86,9 +99,12 @@ describe("filterIssues", () => {
     expect(result.map((i) => i.id)).toEqual(["2", "3"]);
   });
 
-  it("hides assigned issues when only 'No assignee' is selected", () => {
-    const result = filterIssues(issues, { ...NO_FILTER, includeNoAssignee: true });
-    expect(result.every((i) => !i.assignee_id)).toBe(true);
+  it("treats an explicitly active empty assignee predicate as match-none", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      assigneeFilterActive: true,
+    });
+    expect(result).toEqual([]);
   });
 
   // --- Creator ---
@@ -151,9 +167,77 @@ describe("filterIssues", () => {
     expect(result.map((i) => i.id)).toEqual(["2", "3"]);
   });
 
-  it("hides project issues when only 'No project' is selected", () => {
-    const result = filterIssues(issues, { ...NO_FILTER, includeNoProject: true });
-    expect(result.every((i) => !i.project_id)).toBe(true);
+  // --- Project status ---
+  // The predicate needs the project catalog, which the surface passes through
+  // the filter context: an Issue only carries `project_id`.
+  const projectStatusById = new Map<string, ProjectStatus>([
+    ["p-1", "in_progress"],
+    ["p-2", "completed"],
+  ]);
+  const byProjectStatus = (
+    state: Partial<IssueFilterState>,
+    catalog: ReadonlyMap<string, ProjectStatus> | undefined,
+  ) =>
+    applyIssueFilters(issues, { ...NO_FILTER_STATE, ...state }, {
+      projectStatusById: catalog,
+    }).map((i) => i.id);
+
+  it("filters by project status", () => {
+    expect(byProjectStatus({ projectStatusFilters: ["in_progress"] }, projectStatusById)).toEqual(["1", "4"]);
+  });
+
+  it("keeps issues whose project matches any selected status", () => {
+    expect(
+      byProjectStatus(
+        { projectStatusFilters: ["in_progress", "completed"] },
+        projectStatusById,
+      ),
+    ).toEqual(["1", "2", "4"]);
+  });
+
+  // Issue "3" has no project. `includeNoProject` widens the project-id
+  // dimension enough to keep it, and the project-status predicate still
+  // drops it — an issue with no project has no status to match.
+  it("never matches an issue without a project", () => {
+    expect(
+      byProjectStatus(
+        {
+          projectStatusFilters: ["in_progress"],
+          projectFilters: ["p-1"],
+          includeNoProject: true,
+        },
+        projectStatusById,
+      ),
+    ).toEqual(["1", "4"]);
+  });
+
+  it("drops an issue whose project is missing from the catalog", () => {
+    expect(
+      byProjectStatus(
+        { projectStatusFilters: ["in_progress"] },
+        new Map<string, ProjectStatus>([["p-2", "completed"]]),
+      ),
+    ).toEqual([]);
+  });
+
+  // A surface that never loads the project catalog must not blank its list:
+  // an absent map means "cannot evaluate", not "matches nothing".
+  it("is a no-op when the project catalog is unavailable", () => {
+    expect(byProjectStatus({ projectStatusFilters: ["in_progress"] }, undefined)).toEqual([
+      "1",
+      "2",
+      "3",
+      "4",
+    ]);
+  });
+
+  it("ANDs project status with the project-id filter", () => {
+    expect(
+      byProjectStatus(
+        { projectStatusFilters: ["in_progress"], projectFilters: ["p-2"] },
+        projectStatusById,
+      ),
+    ).toEqual([]);
   });
 
   it("applies status + project filters together", () => {
@@ -247,5 +331,375 @@ describe("filterIssues", () => {
     // Issue 2 is in_progress (filtered out by status), issue 1 is todo and
     // in the running set → only "1" survives.
     expect(result.map((i) => i.id)).toEqual(["1"]);
+  });
+
+  it("applies workingOnly from activity context without treating queued issues as working", () => {
+    const result = applyIssueFilters(
+      issues,
+      {
+        ...NO_FILTER,
+        workingOnly: true,
+      },
+      {
+        activityByIssueId: new Map([
+          ["1", { isWorking: true, isQueued: false, runningTasks: [], queuedTasks: [] }],
+          ["2", { isWorking: false, isQueued: true, runningTasks: [], queuedTasks: [] }],
+        ]),
+      },
+    );
+
+    expect(result.map((i) => i.id)).toEqual(["1"]);
+  });
+
+  // --- Show sub-issues display toggle ---
+  const parentChildIssues: Issue[] = [
+    makeIssue({ id: "P1", parent_issue_id: null }),
+    makeIssue({ id: "C1", parent_issue_id: "P1" }),
+    makeIssue({ id: "P2", parent_issue_id: null }),
+    makeIssue({ id: "C2", parent_issue_id: "P2" }),
+  ];
+
+  it("hides sub-issues when showSubIssues is false", () => {
+    const result = filterIssues(parentChildIssues, {
+      ...NO_FILTER,
+      showSubIssues: false,
+    });
+    expect(result.map((i) => i.id)).toEqual(["P1", "P2"]);
+  });
+
+  it("keeps sub-issues when showSubIssues is true or omitted", () => {
+    expect(
+      filterIssues(parentChildIssues, { ...NO_FILTER, showSubIssues: true }),
+    ).toHaveLength(4);
+    // Omitting the flag entirely must preserve the show-all default.
+    expect(filterIssues(parentChildIssues, NO_FILTER)).toHaveLength(4);
+  });
+
+  it("composes showSubIssues with other filters (AND semantics)", () => {
+    const mixed: Issue[] = [
+      makeIssue({ id: "P", status: "todo", parent_issue_id: null }),
+      makeIssue({ id: "C", status: "todo", parent_issue_id: "P" }),
+      makeIssue({ id: "PD", status: "done", parent_issue_id: null }),
+    ];
+    const result = filterIssues(mixed, {
+      ...NO_FILTER,
+      statusFilters: ["todo"],
+      showSubIssues: false,
+    });
+    // "C" is a sub-issue (dropped), "PD" is done (dropped) → only "P" survives.
+    expect(result.map((i) => i.id)).toEqual(["P"]);
+  });
+});
+
+describe("filterAssigneeGroups", () => {
+  const group = (id: string, groupIssues: Issue[]): IssueAssigneeGroup => ({
+    id,
+    assignee_type: id === "none" ? null : "agent",
+    assignee_id: id === "none" ? null : id,
+    issues: groupIssues,
+    total: groupIssues.length,
+  });
+
+  it("returns the same reference when no client-side filter is active", () => {
+    const groups = [group("a1", [makeIssue({ id: "1" })])];
+    expect(filterAssigneeGroups(groups, {})).toBe(groups);
+    expect(filterAssigneeGroups(groups, { showSubIssues: true })).toBe(groups);
+    expect(filterAssigneeGroups(groups, { agentRunningFilter: false })).toBe(groups);
+  });
+
+  it("passes undefined through untouched", () => {
+    expect(filterAssigneeGroups(undefined, { showSubIssues: false })).toBeUndefined();
+  });
+
+  it("hides sub-issues, recomputes total, and drops emptied groups", () => {
+    const groups = [
+      group("a1", [
+        makeIssue({ id: "P1", parent_issue_id: null }),
+        makeIssue({ id: "C1", parent_issue_id: "P1" }),
+      ]),
+      // Every issue in this group is a sub-issue → group is removed entirely.
+      group("a2", [makeIssue({ id: "C2", parent_issue_id: "P2" })]),
+    ];
+    const result = filterAssigneeGroups(groups, { showSubIssues: false });
+    expect(
+      result!.map((g) => ({ id: g.id, ids: g.issues.map((i) => i.id), total: g.total })),
+    ).toEqual([{ id: "a1", ids: ["P1"], total: 1 }]);
+  });
+
+  it("keeps only running issues when agentRunningFilter is on", () => {
+    const groups = [
+      group("a1", [makeIssue({ id: "1" }), makeIssue({ id: "2" })]),
+      group("a2", [makeIssue({ id: "3" })]),
+      group("none", [makeIssue({ id: "4" })]),
+    ];
+    const result = filterAssigneeGroups(groups, {
+      agentRunningFilter: true,
+      runningIssueIds: new Set(["2", "4"]),
+    });
+    expect(
+      result!.map((g) => ({ id: g.id, ids: g.issues.map((i) => i.id), total: g.total })),
+    ).toEqual([
+      { id: "a1", ids: ["2"], total: 1 },
+      { id: "none", ids: ["4"], total: 1 },
+    ]);
+  });
+
+  it("composes showSubIssues and agentRunningFilter (AND semantics)", () => {
+    const groups = [
+      group("a1", [
+        makeIssue({ id: "P", parent_issue_id: null }),
+        makeIssue({ id: "C", parent_issue_id: "P" }),
+      ]),
+    ];
+    // "C" is running but is a sub-issue; "P" is a top-level issue but not
+    // running → both dropped, group removed.
+    const result = filterAssigneeGroups(groups, {
+      showSubIssues: false,
+      agentRunningFilter: true,
+      runningIssueIds: new Set(["C"]),
+    });
+    expect(result).toEqual([]);
+  });
+});
+
+describe("property filters", () => {
+  const sevId = "prop-severity";
+  const platId = "prop-platforms";
+  const doneId = "prop-done";
+  const numId = "prop-estimate";
+  const critical = makeIssue({ id: "P1", properties: { [sevId]: "opt-critical" } });
+  const minor = makeIssue({ id: "P2", properties: { [sevId]: "opt-minor", [platId]: ["opt-ios", "opt-web"] } });
+  const unset = makeIssue({ id: "P3" });
+  const checked = makeIssue({ id: "P4", properties: { [doneId]: true } });
+  const estimate = makeIssue({ id: "P5", properties: { [numId]: 3.5 } });
+  const wholeNumber = makeIssue({ id: "P6", properties: { [numId]: 1 } });
+  const textId = "prop-note";
+  const textNote = makeIssue({ id: "P7", properties: { [textId]: "hello" } });
+
+  it("select values match by option id (OR within the definition)", () => {
+    const result = filterIssues([critical, minor, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [sevId]: ["opt-critical", "opt-minor"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P1", "P2"]);
+  });
+
+  it("issues without a value never match a filtered definition", () => {
+    const result = filterIssues([critical, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [sevId]: ["opt-critical"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P1"]);
+  });
+
+  it("multi_select matches on intersection", () => {
+    const result = filterIssues([critical, minor], {
+      ...NO_FILTER,
+      propertyFilters: { [platId]: ["opt-web"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P2"]);
+  });
+
+  it("checkbox values match the true/false pseudo-options", () => {
+    const result = filterIssues([checked, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [doneId]: ["true"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P4"]);
+  });
+
+  it("no-value matches issues where the property is unset", () => {
+    // P1/P2/P3 have no `doneId` at all; P4 has it set to true.
+    const result = filterIssues([critical, minor, unset, checked], {
+      ...NO_FILTER,
+      propertyFilters: { [doneId]: [NO_PROPERTY_VALUE] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P1", "P2", "P3"]);
+  });
+
+  it("no-value ORs with a value within the definition", () => {
+    const result = filterIssues([critical, minor, unset, checked], {
+      ...NO_FILTER,
+      propertyFilters: { [doneId]: ["true", NO_PROPERTY_VALUE] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P1", "P2", "P3", "P4"]);
+  });
+
+  it("no-value ANDs across definitions", () => {
+    // Only P2 carries `sevId=opt-minor` and leaves `doneId` unset.
+    const result = filterIssues([critical, minor, unset, checked], {
+      ...NO_FILTER,
+      propertyFilters: { [sevId]: ["opt-minor"], [doneId]: [NO_PROPERTY_VALUE] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P2"]);
+  });
+
+  it("number values match by their string form", () => {
+    const result = filterIssues([estimate, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [numId]: ["3.5"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P5"]);
+  });
+
+  it("number values match non-canonical numeric forms like the server", () => {
+    // Server containment matches the stored jsonb number, so "3.50" and "1"
+    // must match 3.5 and 1 here too.
+    expect(
+      filterIssues([estimate, wholeNumber, unset], {
+        ...NO_FILTER,
+        propertyFilters: { [numId]: ["3.50"] },
+      }).map((i) => i.id),
+    ).toEqual(["P5"]);
+    expect(
+      filterIssues([estimate, wholeNumber, unset], {
+        ...NO_FILTER,
+        propertyFilters: { [numId]: ["1"] },
+      }).map((i) => i.id),
+    ).toEqual(["P6"]);
+  });
+
+  it("number no-value matches issues without the property", () => {
+    const result = filterIssues([estimate, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [numId]: [NO_PROPERTY_VALUE] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P3"]);
+  });
+
+  it("text values match by exact string", () => {
+    const result = filterIssues([textNote, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [textId]: ["hello"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P7"]);
+  });
+
+  it("a literal __none__ text value does not match a No-value filter", () => {
+    // The server's key-absence predicate excludes it; this path must agree.
+    const literalNone = makeIssue({ id: "P8", properties: { [textId]: NO_PROPERTY_VALUE } });
+    expect(
+      filterIssues([literalNone, unset], {
+        ...NO_FILTER,
+        propertyFilters: { [textId]: [NO_PROPERTY_VALUE] },
+      }).map((i) => i.id),
+    ).toEqual(["P3"]);
+  });
+
+  it("ANDs across definitions", () => {
+    const result = filterIssues([critical, minor], {
+      ...NO_FILTER,
+      propertyFilters: { [sevId]: ["opt-minor"], [platId]: ["opt-ios"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P2"]);
+  });
+
+  it("empty selections are inert", () => {
+    const result = filterIssues([critical, minor, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [sevId]: [] },
+    });
+    expect(result).toHaveLength(3);
+  });
+
+  it("filterAssigneeGroups applies property filters per group", () => {
+    const groups: IssueAssigneeGroup[] = [
+      { id: "assignee:member:u-1", assignee_type: "member", assignee_id: "u-1", issues: [critical, minor], total: 2 },
+    ];
+    const result = filterAssigneeGroups(groups, {
+      propertyFilters: { [sevId]: ["opt-critical"] },
+    });
+    expect(result?.[0]?.issues.map((i) => i.id)).toEqual(["P1"]);
+    expect(result?.[0]?.total).toBe(1);
+  });
+});
+
+// Scalar operator members (#7692): the matrix mirrors the server predicates in
+// server/internal/handler/property.go — contains is a case-insensitive
+// substring over stored strings only, gt/gte/lt/lte match stored numbers, and
+// before/after compare "YYYY-MM-DD" strings lexicographically. A missing key
+// never matches an operator, matching the server's NULL ->> semantics.
+describe("scalar operator filters", () => {
+  const textId = "prop-note";
+  const urlId = "prop-link";
+  const numId = "prop-estimate";
+  const dateId = "prop-due";
+
+  const withText = makeIssue({ id: "T", properties: { [textId]: "Hello World" } });
+  const withUrl = makeIssue({ id: "U", properties: { [urlId]: "https://example.com/Repo" } });
+  const withNum = makeIssue({ id: "N", properties: { [numId]: 3.5 } });
+  const withBool = makeIssue({ id: "B", properties: { [textId]: true } });
+  const withArray = makeIssue({ id: "A", properties: { [textId]: ["opt-alpha", "opt-beta"] } });
+  const withDate = makeIssue({ id: "D", properties: { [dateId]: "2026-03-01" } });
+  const unset = makeIssue({ id: "X" });
+
+  const matches = (issue: Issue, defId: string, member: PropertyFilterValue) =>
+    issueMatchesPropertyFilters(issue, { [defId]: [member] });
+
+  it("contains is a case-insensitive substring over text", () => {
+    expect(matches(withText, textId, { op: "contains", value: "world" })).toBe(true);
+    expect(matches(withText, textId, { op: "contains", value: "WORLD" })).toBe(true);
+    expect(matches(withText, textId, { op: "contains", value: "lo Wo" })).toBe(true);
+    expect(matches(withText, textId, { op: "contains", value: "hello!" })).toBe(false);
+  });
+
+  it("contains matches url values and never matches an unset key or an empty needle", () => {
+    expect(matches(withUrl, urlId, { op: "contains", value: "example.com" })).toBe(true);
+    expect(matches(unset, urlId, { op: "contains", value: "example.com" })).toBe(false);
+    // Asserted against a SET value on purpose: the unset case short-circuits
+    // before the operator runs, so it cannot catch an empty-needle match-all.
+    // The server rejects empty operator values; the matcher agrees.
+    expect(matches(withText, textId, { op: "contains", value: "" })).toBe(false);
+  });
+
+  it("contains never stringifies non-string stored values", () => {
+    expect(matches(withNum, numId, { op: "contains", value: "3.5" })).toBe(false);
+    expect(matches(withBool, textId, { op: "contains", value: "true" })).toBe(false);
+    expect(matches(withArray, textId, { op: "contains", value: "alpha" })).toBe(false);
+  });
+
+  it("number comparisons match stored numbers with the bound as a string", () => {
+    expect(matches(withNum, numId, { op: "gt", value: "3.5" })).toBe(false);
+    expect(matches(withNum, numId, { op: "gte", value: "3.5" })).toBe(true);
+    expect(matches(withNum, numId, { op: "lt", value: "3.50" })).toBe(false);
+    expect(matches(withNum, numId, { op: "lte", value: "3.50" })).toBe(true);
+  });
+
+  it("number comparisons reject non-numeric bounds and non-number values", () => {
+    expect(matches(withNum, numId, { op: "gt", value: "abc" })).toBe(false);
+    expect(matches(withText, textId, { op: "gt", value: "1" })).toBe(false);
+    expect(matches(unset, numId, { op: "gte", value: "1" })).toBe(false);
+  });
+
+  it("before/after compare date strings lexicographically", () => {
+    expect(matches(withDate, dateId, { op: "before", value: "2026-03-02" })).toBe(true);
+    expect(matches(withDate, dateId, { op: "before", value: "2026-03-01" })).toBe(false);
+    expect(matches(withDate, dateId, { op: "after", value: "2026-02-28" })).toBe(true);
+    expect(matches(withDate, dateId, { op: "after", value: "2026-03-01" })).toBe(false);
+    expect(matches(unset, dateId, { op: "before", value: "2030-01-01" })).toBe(false);
+    expect(matches(withNum, dateId, { op: "before", value: "2030-01-01" })).toBe(false);
+  });
+
+  it("an operator ORs with equality and No value within the definition", () => {
+    const lateDate = makeIssue({ id: "D2", properties: { [dateId]: "2027-01-01" } });
+    const result = filterIssues([withDate, lateDate, unset], {
+      ...NO_FILTER,
+      propertyFilters: {
+        [dateId]: [{ op: "before", value: "2026-06-01" }, "2027-01-01", NO_PROPERTY_VALUE],
+      },
+    });
+    expect(result.map((i) => i.id)).toEqual(["D", "D2", "X"]);
+  });
+
+  it("operators AND across definitions like every other filter group", () => {
+    const both = makeIssue({ id: "B", properties: { [textId]: "release notes", [numId]: 10 } });
+    const result = filterIssues([withText, withNum, both], {
+      ...NO_FILTER,
+      propertyFilters: {
+        [textId]: [{ op: "contains", value: "release" }],
+        [numId]: [{ op: "gte", value: "10" }],
+      },
+    });
+    expect(result.map((i) => i.id)).toEqual(["B"]);
   });
 });
