@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -35,6 +36,7 @@ func TestTerminalReportStoreRoundTripAndPermissions(t *testing.T) {
 		durableWorkDir:        "/private/project",
 		sessionRolloutMissing: true,
 		retiredSessionID:      "retired-private",
+		warnings:              []string{"Temporary worktree cleanup is pending."},
 	}
 	if err := store.enqueue(report); err != nil {
 		t.Fatalf("enqueue terminal report: %v", err)
@@ -43,8 +45,16 @@ func TestTerminalReportStoreRoundTripAndPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list terminal reports: %v", err)
 	}
-	if len(items) != 1 || items[0].report != report {
+	if len(items) != 1 || !reflect.DeepEqual(items[0].report, report) {
 		t.Fatalf("round trip = %+v, want %+v", items, report)
+	}
+	if err := store.enqueue(report); err != nil {
+		t.Fatalf("identical warning-bearing enqueue: %v", err)
+	}
+	warningConflict := report
+	warningConflict.warnings = []string{"Different cleanup warning."}
+	if err := store.enqueue(warningConflict); err == nil || !strings.Contains(err.Error(), "conflicts with the original") {
+		t.Fatalf("changed warning enqueue error = %v, want original-payload conflict", err)
 	}
 
 	if runtime.GOOS != "windows" {
@@ -116,7 +126,7 @@ func TestTerminalReportStoreRecoversFlushedTempFileAfterCrash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("recover interrupted report: %v", err)
 	}
-	if len(items) != 1 || items[0].report != report {
+	if len(items) != 1 || !reflect.DeepEqual(items[0].report, report) {
 		t.Fatalf("recovered reports = %+v, want %+v", items, report)
 	}
 	if _, err := os.Stat(tempName); !errors.Is(err, os.ErrNotExist) {
@@ -162,6 +172,7 @@ func TestTerminalReportReplaysAfterClientRetryWindow(t *testing.T) {
 	report := terminalTaskReport{
 		kind:           terminalTaskReportComplete,
 		taskID:         "task-retry-window",
+		warnings:       []string{"Temporary worktree cleanup is pending."},
 		output:         "the original answer",
 		branchName:     "agent/recovered",
 		sessionID:      "session-1",
@@ -179,6 +190,7 @@ func TestTerminalReportReplaysAfterClientRetryWindow(t *testing.T) {
 	}
 
 	online.Store(true)
+	d = New(d.cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	pending, delivered := d.replayPendingTerminalReports(context.Background())
 	if pending != 0 || delivered != 1 {
 		t.Fatalf("replay result pending=%d delivered=%d, want 0/1", pending, delivered)
@@ -189,6 +201,9 @@ func TestTerminalReportReplaysAfterClientRetryWindow(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	for i, body := range bodies {
+		if !reflect.DeepEqual(body["warnings"], []any{report.warnings[0]}) {
+			t.Fatalf("attempt %d warnings = %#v, want original warnings", i+1, body["warnings"])
+		}
 		if body["output"] != report.output || body["branch_name"] != report.branchName || body["durable_work_dir"] != report.durableWorkDir {
 			t.Fatalf("attempt %d payload = %#v, want original report", i+1, body)
 		}
@@ -232,7 +247,7 @@ func TestTerminalReportReplaysAfterDaemonRestart(t *testing.T) {
 	if pending != 0 || delivered != 1 {
 		t.Fatalf("restart replay pending=%d delivered=%d, want 0/1", pending, delivered)
 	}
-	if replayed != report {
+	if !reflect.DeepEqual(replayed, report) {
 		t.Fatalf("restart replay = %+v, want %+v", replayed, report)
 	}
 }
@@ -337,7 +352,7 @@ func TestTerminalReportPermanentRejectionQuarantinesOriginalAndStopsReplay(t *te
 	if err != nil {
 		t.Fatalf("validate failed terminal report: %v", err)
 	}
-	if got != report {
+	if !reflect.DeepEqual(got, report) {
 		t.Fatalf("quarantined payload = %+v, want original %+v", got, report)
 	}
 	if record.PermanentRejectionCount != terminalReportPermanentRejectionLimit || record.QuarantinedAt == nil {

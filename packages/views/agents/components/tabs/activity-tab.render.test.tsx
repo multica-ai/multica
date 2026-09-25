@@ -17,9 +17,15 @@ const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
+vi.mock("@multica/core/paths", () => ({
+  useWorkspacePaths: () => ({ issueDetail: (id: string) => `/issues/${id}` }),
+}));
 
 // TaskRow never mounts in these aggregate/loading/empty-state tests.
 vi.mock("@multica/core/api", () => ({ api: {} }));
+vi.mock("../../../common/task-transcript", () => ({
+  TranscriptButton: () => null,
+}));
 
 // Keep "Now" empty while varying activity outcomes and task-list loading.
 const agentTasksRef = vi.hoisted(() => ({
@@ -138,5 +144,40 @@ describe("ActivityTab Recent work loading state", () => {
     expect(
       document.querySelectorAll('[data-slot="skeleton"]').length,
     ).toBe(0);
+  });
+
+  it.each([
+    { status: "completed", cancelled_by: undefined, label: "Succeeded" },
+    {
+      status: "cancelled",
+      cancelled_by: { type: "member", name: "Alex" },
+      label: "Cancelled by Alex",
+    },
+  ])("keeps cleanup warnings alongside $status attribution", async ({ status, cancelled_by, label }) => {
+    agentTasksRef.current = () =>
+      Promise.resolve([
+        {
+          id: "task-1",
+          agent_id: "agent-1",
+          runtime_id: "runtime-1",
+          issue_id: "",
+          status,
+          cancelled_by,
+          priority: 0,
+          dispatched_at: null,
+          started_at: null,
+          completed_at: "2026-08-28T01:00:00Z",
+          result: null,
+          error: null,
+          warnings: ["automatic retry could not be recorded"],
+          created_at: "2026-08-28T00:00:00Z",
+          kind: "quick_create",
+        },
+      ]);
+
+    renderTab();
+
+    expect(await screen.findByText("Warning")).toBeInTheDocument();
+    expect(screen.getByText(label)).toBeInTheDocument();
   });
 });

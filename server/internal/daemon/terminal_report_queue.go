@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -56,6 +57,7 @@ type persistedTerminalTaskReport struct {
 	FailureReason         string    `json:"failure_reason,omitempty"`
 	SessionRolloutMissing bool      `json:"session_rollout_missing,omitempty"`
 	RetiredSessionID      string    `json:"retired_session_id,omitempty"`
+	Warnings              []string  `json:"warnings,omitempty"`
 
 	PermanentRejectionCount   int        `json:"permanent_rejection_count,omitempty"`
 	FirstPermanentRejectionAt *time.Time `json:"first_permanent_rejection_at,omitempty"`
@@ -67,6 +69,15 @@ type persistedTerminalTaskReport struct {
 type pendingTerminalTaskReport struct {
 	fileName string
 	report   terminalTaskReport
+}
+
+func terminalReportsEqual(a, b terminalTaskReport) bool {
+	return a.kind == b.kind && a.taskID == b.taskID && a.output == b.output &&
+		a.branchName == b.branchName && a.errorMessage == b.errorMessage &&
+		a.sessionID == b.sessionID && a.workDir == b.workDir &&
+		a.durableWorkDir == b.durableWorkDir && a.failureReason == b.failureReason &&
+		a.sessionRolloutMissing == b.sessionRolloutMissing && a.retiredSessionID == b.retiredSessionID &&
+		slices.Equal(a.warnings, b.warnings)
 }
 
 type terminalReportStoreStats struct {
@@ -146,6 +157,7 @@ func persistedTerminalReport(report terminalTaskReport, createdAt time.Time) (pe
 		FailureReason:         report.failureReason,
 		SessionRolloutMissing: report.sessionRolloutMissing,
 		RetiredSessionID:      report.retiredSessionID,
+		Warnings:              slices.Clone(report.warnings),
 	}, nil
 }
 
@@ -177,6 +189,7 @@ func (record persistedTerminalTaskReport) terminalReport() (terminalTaskReport, 
 		failureReason:         record.FailureReason,
 		sessionRolloutMissing: record.SessionRolloutMissing,
 		retiredSessionID:      record.RetiredSessionID,
+		warnings:              slices.Clone(record.Warnings),
 	}, nil
 }
 
@@ -227,7 +240,7 @@ func (s *terminalReportStore) enqueue(report terminalTaskReport) error {
 		if decodeErr != nil {
 			return fmt.Errorf("existing terminal report %s is invalid: %w", name, decodeErr)
 		}
-		if existingReport != report {
+		if !terminalReportsEqual(existingReport, report) {
 			return fmt.Errorf("terminal report for task %s conflicts with the original pending payload", report.taskID)
 		}
 		return nil
@@ -382,7 +395,7 @@ func (s *terminalReportStore) recoverTempFiles(entries []os.DirEntry) error {
 				continue
 			}
 			existingReport, decodeErr := existing.terminalReport()
-			if decodeErr != nil || existingReport != report {
+			if decodeErr != nil || !terminalReportsEqual(existingReport, report) {
 				errs = append(errs, fmt.Errorf("interrupted terminal report %s conflicts with existing payload", name))
 				continue
 			}
@@ -472,7 +485,7 @@ func (s *terminalReportStore) recordPermanentRejection(item pendingTerminalTaskR
 	if err != nil {
 		return false, fmt.Errorf("validate rejected terminal report: %w", err)
 	}
-	if item.fileName != terminalReportFileName(report.taskID) || report != item.report {
+	if item.fileName != terminalReportFileName(report.taskID) || !terminalReportsEqual(report, item.report) {
 		return false, errors.New("rejected terminal report no longer matches queued payload")
 	}
 
@@ -507,7 +520,7 @@ func (s *terminalReportStore) recordPermanentRejection(item pendingTerminalTaskR
 			return false, fmt.Errorf("existing failed terminal report is unreadable: %w", decodeErr)
 		}
 		existingReport, decodeErr := existing.terminalReport()
-		if decodeErr != nil || existingReport != report {
+		if decodeErr != nil || !terminalReportsEqual(existingReport, report) {
 			return false, errors.New("failed terminal report conflicts with queued payload")
 		}
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
