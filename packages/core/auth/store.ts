@@ -95,7 +95,7 @@ export function createAuthStore(options: AuthStoreOptions) {
       }
       onLogin?.();
       identifyAnalytics(user.id, { email: user.email, name: user.name });
-      set({ user });
+      set({ user, isLoading: false, status: "authenticated", expired: false });
       return user;
     },
 
