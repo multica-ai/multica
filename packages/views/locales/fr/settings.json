@@ -373,6 +373,7 @@
       "chat": "Discussion",
       "notifications": "Notifications",
       "tokens": "Jetons d'API",
+      "security": "Sécurité",
       "general": "Général",
       "repositories": "Dépôts",
       "github": "GitHub",
@@ -662,6 +663,32 @@
       "granted": "Ce navigateur peut afficher des bannières de notification.",
       "denied": "Bloqué par votre navigateur. Activez les notifications pour ce site dans ses réglages.",
       "enabled_badge": "Activé"
+    }
+  },
+  "security": {
+    "title": "Sécurité",
+    "description": "Gérez les paramètres de sécurité de votre compte.",
+    "two_factor": {
+      "label": "Connexion par application d'authentification",
+      "hint_unavailable": "La connexion par application d'authentification n'est pas disponible sur ce serveur.",
+      "hint_enabled": "Vous pouvez vous connecter avec les codes de votre application d'authentification.",
+      "hint_disabled": "Configurez une application d'authentification comme alternative aux codes par e-mail.",
+      "unavailable_badge": "Indisponible",
+      "setup_button": "Configurer",
+      "disable_button": "Désactiver",
+      "setup_title": "Configurer la connexion par application d'authentification",
+      "setup_scan_qr": "Scannez ce code QR avec votre application d'authentification (Google Authenticator, Authy, 1Password, etc.).",
+      "setup_manual": "Ou saisissez cette clé secrète manuellement :",
+      "setup_next": "Suivant — saisir le code",
+      "setup_verify": "Saisissez le code à 6 chiffres de votre application d'authentification pour confirmer la configuration.",
+      "setup_success": "Connexion par application d'authentification activée.",
+      "setup_invalid": "Code invalide. Veuillez réessayer.",
+      "setup_init_error": "Impossible de démarrer la configuration TOTP. Veuillez réessayer.",
+      "disable_title": "Désactiver la connexion par application d'authentification",
+      "disable_prompt": "Saisissez le code à 6 chiffres de votre application d'authentification pour désactiver cette méthode de connexion.",
+      "disable_success": "Connexion par application d'authentification désactivée.",
+      "disable_invalid": "Code invalide. Veuillez réessayer.",
+      "confirm": "Confirmer"
     }
   },
   "tokens": {
@@ -1335,6 +1362,15 @@
         "label": "Membre",
         "description": "Créer des tâches et y travailler"
       }
+    },
+    "totp_reset": {
+      "menu_item": "Réinitialiser l'authentificateur",
+      "confirm_title": "Réinitialiser l'authentificateur de {{name}} ?",
+      "confirm_description": "Cette action désactive la connexion par authentificateur de {{name}} pour l'ensemble de son compte Multica, et pas seulement pour cet espace de travail. Cette personne devra la reconfigurer depuis Paramètres → Sécurité pour se connecter avec un code d'authentificateur. En attendant, elle peut toujours se connecter avec un code par e-mail.",
+      "cancel": "Annuler",
+      "confirm": "Réinitialiser l'authentificateur",
+      "success": "Authentificateur réinitialisé pour {{name}}",
+      "error": "Échec de la réinitialisation de l'authentificateur"
     },
     "share_links_title": "Liens de partage",
     "role_field": "Rôle :",
