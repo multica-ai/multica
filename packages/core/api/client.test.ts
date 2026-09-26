@@ -3100,3 +3100,71 @@ describe("ApiClient shared credential across windows", () => {
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("ApiClient run code changes (MUL-7651)", () => {
+  const validChange = {
+    id: "cc-1",
+    issue_id: "issue-1",
+    task_id: "task-1",
+    agent_id: "agent-1",
+    scope: "run",
+    source: "local_worktree",
+    repo_key: "https://github.com/acme/app",
+    repo_label: "acme/app",
+    repo_url: "https://github.com/acme/app.git",
+    branch: "agent/lambda/mul-1",
+    base_ref: "",
+    base_commit: "1111111",
+    head_commit: "2222222",
+    file_count: 3,
+    additions: 96,
+    deletions: 43,
+    files_truncated: false,
+    patch_available: true,
+    patch_size: 2048,
+    patch_omitted: null,
+    created_at: "2026-09-27T00:00:00Z",
+  };
+
+  function stubJSON(body: unknown) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } }),
+      ),
+    );
+  }
+
+  it("parses the issue's code changes and defaults fields an older server omits", async () => {
+    const { repo_url: _url, base_ref: _ref, patch_size: _size, ...older } = validChange;
+    stubJSON({ code_changes: [older] });
+    const result = await new ApiClient("https://api.example.test").listIssueCodeChanges("issue-1");
+    expect(result.code_changes[0]).toMatchObject({ id: "cc-1", additions: 96, repo_url: "", base_ref: "", patch_size: 0 });
+  });
+
+  it("falls back to an empty list when the list is malformed", async () => {
+    stubJSON({ code_changes: [{ ...validChange, additions: "many" }] });
+    await expect(new ApiClient("https://api.example.test").listIssueCodeChanges("issue-1")).resolves.toEqual({ code_changes: [] });
+  });
+
+  it("parses a change's files and patch", async () => {
+    stubJSON({ ...validChange, files: [{ path: "a.ts", status: "added", additions: 1, deletions: 0 }], patch: "diff --git a/a.ts b/a.ts\n" });
+    const detail = await new ApiClient("https://api.example.test").getIssueCodeChange("issue-1", "cc-1");
+    expect(detail.files[0]).toMatchObject({ path: "a.ts", status: "added", binary: false });
+    expect(detail.patch).toContain("diff --git");
+  });
+
+  it("rejects a malformed change instead of showing an empty diff", async () => {
+    stubJSON({ ...validChange, files: "none" });
+    await expect(new ApiClient("https://api.example.test").getIssueCodeChange("issue-1", "cc-1")).rejects.toThrow();
+  });
+
+  it("parses a pull request diff and rejects a malformed one", async () => {
+    stubJSON({ pull_request_id: "pr-1", files: [{ path: "a.ts", status: "modified", additions: 1, deletions: 1 }], patch: null, patch_omitted: "too_large" });
+    const diff = await new ApiClient("https://api.example.test").getIssuePullRequestDiff("issue-1", "pr-1");
+    expect(diff).toMatchObject({ pull_request_id: "pr-1", patch: null, patch_omitted: "too_large", files_truncated: false });
+
+    stubJSON({ files: [] });
+    await expect(new ApiClient("https://api.example.test").getIssuePullRequestDiff("issue-1", "pr-1")).rejects.toThrow();
+  });
+});

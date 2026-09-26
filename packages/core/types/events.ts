@@ -90,7 +90,8 @@ export type WSEventType =
   | "github_installation:deleted"
   | "pull_request:linked"
   | "pull_request:updated"
-  | "pull_request:unlinked";
+  | "pull_request:unlinked"
+  | "code_changes:created";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;
@@ -131,6 +132,12 @@ export interface IssueLabelsChangedPayload {
   issue_id: string;
   labels: Label[];
   issue_revision?: number;
+}
+
+/** A run's code change landed (MUL-7651). */
+export interface CodeChangesCreatedPayload {
+  issue_id: string;
+  task_id: string;
 }
 
 export interface IssueAttachmentsChangedPayload {
@@ -651,6 +658,7 @@ export interface WSEventPayloadMap {
   "pull_request:linked": unknown;
   "pull_request:updated": unknown;
   "pull_request:unlinked": unknown;
+  "code_changes:created": CodeChangesCreatedPayload;
 }
 
 /**

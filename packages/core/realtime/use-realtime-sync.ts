@@ -681,6 +681,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
   qc.invalidateQueries({ queryKey: issueKeys.usageAll() });
   qc.invalidateQueries({ queryKey: issueKeys.attachmentsAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.codeChangesAll() });
   qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
   // Per-chat-session caches are also keyed without wsId, so the
   // chatKeys.all(wsId) prefix above only reaches session lists / aggregates.
@@ -900,6 +901,11 @@ export function useRealtimeSync(
       telegram_installation: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: telegramKeys.installations(wsId) });
+      },
+      // A run's code change landed (MUL-7651). Summaries only; a stored
+      // change's detail never changes.
+      code_changes: () => {
+        qc.invalidateQueries({ queryKey: issueKeys.codeChangesAll() });
       },
       pull_request: () => {
         // PR list is keyed by issue id, not workspace, so we invalidate all

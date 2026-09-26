@@ -7,6 +7,10 @@ export const githubKeys = {
   repositories: (wsId: string, installationId: string) =>
     [...githubKeys.all(wsId), "installations", installationId, "repositories"] as const,
   pullRequests: (issueId: string) => ["github", "pull-requests", issueId] as const,
+  /** Under the PR list's prefix, so a `pull_request:` event (new commits)
+   *  refreshes an open diff too. */
+  pullRequestDiff: (issueId: string, pullRequestId: string) =>
+    [...githubKeys.pullRequests(issueId), "diff", pullRequestId] as const,
 };
 
 export const githubInstallationsOptions = (wsId: string) =>
@@ -37,4 +41,15 @@ export const issuePullRequestsOptions = (issueId: string) =>
     queryKey: githubKeys.pullRequests(issueId),
     queryFn: () => api.listIssuePullRequests(issueId),
     enabled: !!issueId,
+  });
+
+// A linked PR's changes (MUL-7651). One attempt: a failure means the GitHub App
+// cannot read it, and the viewer falls back to the branch diff at once.
+export const issuePullRequestDiffOptions = (issueId: string, pullRequestId: string) =>
+  queryOptions({
+    queryKey: githubKeys.pullRequestDiff(issueId, pullRequestId),
+    queryFn: () => api.getIssuePullRequestDiff(issueId, pullRequestId),
+    enabled: !!issueId && !!pullRequestId,
+    retry: false,
+    gcTime: 60_000,
   });

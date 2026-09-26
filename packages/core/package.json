@@ -16,6 +16,7 @@
     "./attachments": "./attachments/index.ts",
     "./attachments/deliverables": "./attachments/deliverables.ts",
     "./attachments/image-sequence": "./attachments/image-sequence.ts",
+    "./code-changes": "./code-changes/index.ts",
     "./api": "./api/index.ts",
     "./api/client": "./api/client.ts",
     "./api/schema": "./api/schema.ts",

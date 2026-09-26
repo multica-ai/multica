@@ -47,6 +47,7 @@ import type {
   GroupedIssuesResponse,
   GitHubConnectResponse,
   IssuePullRequestsResponse,
+  ListTaskCodeChangesResponse,
   InboxItem,
   InboxWorkspaceUnread,
   Label,
@@ -448,6 +449,66 @@ export const EMPTY_ISSUE_PULL_REQUESTS_RESPONSE: IssuePullRequestsResponse = {
   pull_requests: [],
   auto_complete: null,
 };
+
+// Run code changes (MUL-7651). Enums stay strings: a newer server's status or
+// scope must not discard the whole list; the views map unknown values.
+export const CodeChangeFileSchema = z.object({
+  path: z.string(),
+  old_path: z.string().optional(),
+  status: z.string().optional().default("modified"),
+  additions: z.number().optional().default(0),
+  deletions: z.number().optional().default(0),
+  binary: z.boolean().optional().default(false),
+}).loose();
+
+export const TaskCodeChangeSchema = z.object({
+  id: z.string(),
+  issue_id: z.string(),
+  task_id: z.string(),
+  agent_id: z.string(),
+  scope: z.string(),
+  source: z.string().optional().default("local_worktree"),
+  repo_key: z.string(),
+  repo_label: z.string().optional().default(""),
+  repo_url: z.string().optional().default(""),
+  branch: z.string().optional().default(""),
+  base_ref: z.string().optional().default(""),
+  base_commit: z.string(),
+  head_commit: z.string(),
+  file_count: z.number().optional().default(0),
+  additions: z.number().optional().default(0),
+  deletions: z.number().optional().default(0),
+  files_truncated: z.boolean().optional().default(false),
+  patch_available: z.boolean().optional().default(false),
+  patch_size: z.number().optional().default(0),
+  patch_omitted: z.string().nullable().optional().default(null),
+  created_at: z.string(),
+}).loose();
+
+export const ListTaskCodeChangesResponseSchema = z.object({
+  code_changes: z.array(TaskCodeChangeSchema).default([]),
+}).loose();
+
+export const EMPTY_LIST_TASK_CODE_CHANGES_RESPONSE: ListTaskCodeChangesResponse = {
+  code_changes: [],
+};
+
+export const TaskCodeChangeDetailSchema = TaskCodeChangeSchema.extend({
+  files: z.array(CodeChangeFileSchema).default([]),
+  patch: z.string().nullable().optional().default(null),
+}).loose();
+
+export const PullRequestDiffSchema = z.object({
+  pull_request_id: z.string(),
+  head_sha: z.string().optional().default(""),
+  file_count: z.number().optional().default(0),
+  additions: z.number().optional().default(0),
+  deletions: z.number().optional().default(0),
+  files: z.array(CodeChangeFileSchema).default([]),
+  files_truncated: z.boolean().optional().default(false),
+  patch: z.string().nullable().optional().default(null),
+  patch_omitted: z.string().nullable().optional().default(null),
+}).loose();
 
 // Label responses are consumed by settings tables and resource pickers. Keep
 // the resource type lenient so newer server scopes do not break older clients,
