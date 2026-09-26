@@ -401,6 +401,17 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		params.Context = pgtype.Text{String: *req.Context, Valid: true}
 	}
 	if req.Settings != nil {
+		if incoming, ok := req.Settings.(map[string]any); ok {
+			// Only an old client's flip of the retired PR switch needs the
+			// stored value; see reconcilePRMergeSettings.
+			var stored map[string]any
+			if _, sent := incoming[prAutoCompleteLegacyKey]; sent {
+				if existing, err := h.Queries.GetWorkspace(r.Context(), idUUID); err == nil {
+					_ = json.Unmarshal(existing.Settings, &stored)
+				}
+			}
+			reconcilePRMergeSettings(stored, incoming)
+		}
 		s, _ := json.Marshal(req.Settings)
 		params.Settings = s
 	}

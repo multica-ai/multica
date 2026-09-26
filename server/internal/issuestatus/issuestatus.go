@@ -586,6 +586,7 @@ type Resolver struct {
 	workspaceID pgtype.UUID
 	categories  map[string]string
 	names       map[string]string
+	archived    map[string]bool
 	loaded      bool
 	loadErr     error
 }
@@ -615,9 +616,13 @@ func (r *Resolver) load(ctx context.Context, q Querier) {
 	}
 	r.categories = make(map[string]string, len(entries))
 	r.names = make(map[string]string, len(entries))
+	r.archived = make(map[string]bool)
 	for _, e := range entries {
 		r.categories[e.Key] = e.Category
 		r.names[e.Key] = e.Name
+		if e.ArchivedAt.Valid {
+			r.archived[e.Key] = true
+		}
 	}
 }
 
@@ -650,6 +655,27 @@ func (r *Resolver) Category(ctx context.Context, q Querier, status string) strin
 		return category
 	}
 	r.load(ctx, q)
+	category := r.categories[status]
+	if !IsCategory(category) {
+		return ""
+	}
+	return category
+}
+
+// WritableCategory returns the category of a status a background writer may
+// still move an issue to: a built-in (resolved without I/O), or a custom
+// status that exists and is not archived. It returns "" for anything else,
+// including a failed catalog read, so side-effect callers fail closed. It
+// mirrors Resolve's rules while sharing the Resolver's single catalog read.
+func (r *Resolver) WritableCategory(ctx context.Context, q Querier, status string) string {
+	if IsBuiltIn(status) {
+		category, _ := CategoryForBehavior(status)
+		return category
+	}
+	r.load(ctx, q)
+	if r.archived[status] {
+		return ""
+	}
 	category := r.categories[status]
 	if !IsCategory(category) {
 		return ""

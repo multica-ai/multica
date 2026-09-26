@@ -237,7 +237,7 @@ describe("ApiClient pull-request response schema", () => {
   it("parses the auto-complete decision and link source", async () => {
     stubPullRequests({
       pull_requests: [{ ...validPR, link_source: "title" }],
-      auto_complete: { state: "waiting", pull_request_ids: ["pr-1"], issue_disabled: false, workspace_enabled: true },
+      auto_complete: { state: "waiting", pull_request_ids: ["pr-1"], issue_disabled: false, workspace_enabled: true, target_status: "in_review" },
     });
     const result = await new ApiClient("https://api.example.test").listIssuePullRequests("issue-1");
     expect(result.pull_requests[0]?.link_source).toBe("title");
@@ -246,6 +246,7 @@ describe("ApiClient pull-request response schema", () => {
       pull_request_ids: ["pr-1"],
       issue_disabled: false,
       workspace_enabled: true,
+      target_status: "in_review",
     });
   });
 

@@ -1922,7 +1922,7 @@ describe("IssueDetail (shared)", () => {
 
   // MUL-7429: an automatic status change says why, and the per-issue switch
   // shows on the timeline.
-  it("explains PR auto-complete activity", async () => {
+  it("explains PR merge automation activity", async () => {
     mockApiObj.listTimeline.mockResolvedValue([
       {
         type: "activity",
@@ -1949,7 +1949,7 @@ describe("IssueDetail (shared)", () => {
     await waitFor(() => {
       expect(screen.getByText(/after every linked PR merged \(#12, #19\)/i)).toBeInTheDocument();
     });
-    expect(screen.getByText(/turned off PR auto-complete for this issue/i)).toBeInTheDocument();
+    expect(screen.getByText(/set this issue to keep its status when PRs merge/i)).toBeInTheDocument();
   });
 
   it("renders activity rows with unknown status values without crashing", async () => {

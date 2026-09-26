@@ -7,6 +7,7 @@ import { ChevronRight, CircleSlash, MoreHorizontal, Plus, RotateCcw, Settings } 
 import { ApiError } from "@multica/core/api";
 import {
   issuePullRequestsOptions,
+  useGitHubSettings,
   useLinkIssuePullRequest,
   useSetIssuePRAutoComplete,
 } from "@multica/core/github";
@@ -26,10 +27,10 @@ import { useT } from "../../i18n";
 import { PullRequestList } from "./pull-request-list";
 
 /**
- * The issue sidebar's Pull requests section: the linked PRs, what the
- * "every linked PR merged → Done" rule will do for this issue, and the two
- * exceptions a person can make — link a PR by hand, or turn auto-complete off
- * for this one issue (MUL-7429).
+ * The issue sidebar's Pull requests section: the linked PRs, what merging them
+ * will do to this issue's status, and the two exceptions a person can make —
+ * link a PR by hand, or keep this one issue's status when its PRs merge
+ * (MUL-7429, MUL-7726).
  */
 export function PullRequestsSection({
   issueId,
@@ -64,7 +65,11 @@ export function PullRequestsSection({
         {supported ? (
           <>
             <LinkPullRequestPopover issueId={issueId} identifier={identifier} onLinked={() => onOpenChange(true)} />
-            <AutoCompleteMenu issueId={issueId} disabled={data?.auto_complete?.issue_disabled ?? false} />
+            <AutoCompleteMenu
+              issueId={issueId}
+              disabled={data?.auto_complete?.issue_disabled ?? false}
+              workspaceEnabled={data?.auto_complete?.workspace_enabled ?? true}
+            />
           </>
         ) : null}
       </div>
@@ -87,6 +92,7 @@ function LinkPullRequestPopover({
   onLinked: () => void;
 }) {
   const { t } = useT("issues");
+  const { autoLinkPRs } = useGitHubSettings();
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState("");
   const link = useLinkIssuePullRequest(issueId);
@@ -148,7 +154,7 @@ function LinkPullRequestPopover({
             value={url}
             placeholder={t(($) => $.pr_automation.link_placeholder)}
             aria-invalid={error ? true : undefined}
-            aria-describedby={`link-pr-${issueId}-hint`}
+            aria-describedby={error || !autoLinkPRs ? undefined : `link-pr-${issueId}-hint`}
             onChange={(e) => {
               setUrl(e.target.value);
               if (link.error) link.reset();
@@ -158,11 +164,12 @@ function LinkPullRequestPopover({
             <p role="alert" className="text-caption text-destructive">
               {error}
             </p>
-          ) : (
+          ) : autoLinkPRs ? (
+            // Only true while the workspace auto-links PRs.
             <p id={`link-pr-${issueId}-hint`} className="text-caption text-muted-foreground">
               {t(($) => $.pr_automation.link_hint, { identifier })}
             </p>
-          )}
+          ) : null}
           <div className="flex justify-end">
             <Button
               type="submit"
@@ -179,7 +186,15 @@ function LinkPullRequestPopover({
   );
 }
 
-function AutoCompleteMenu({ issueId, disabled }: { issueId: string; disabled: boolean }) {
+function AutoCompleteMenu({
+  issueId,
+  disabled,
+  workspaceEnabled,
+}: {
+  issueId: string;
+  disabled: boolean;
+  workspaceEnabled: boolean;
+}) {
   const { t } = useT("issues");
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
@@ -195,19 +210,24 @@ function AutoCompleteMenu({ issueId, disabled }: { issueId: string; disabled: bo
         }
       />
       <DropdownMenuContent align="end" className="w-60">
-        <DropdownMenuItem
-          disabled={setAutoComplete.isPending}
-          onClick={() =>
-            setAutoComplete.mutate(!disabled, {
-              onError: () => toast.error(t(($) => $.pr_automation.update_failed)),
-            })
-          }
-        >
-          {disabled ? <RotateCcw /> : <CircleSlash />}
-          {disabled ? t(($) => $.pr_automation.enable) : t(($) => $.pr_automation.disable)}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => navigation.push(`${paths.settings()}?tab=issue-statuses`)}>
+        {/* When the workspace leaves status alone, the issue switch changes nothing. */}
+        {workspaceEnabled ? (
+          <>
+            <DropdownMenuItem
+              disabled={setAutoComplete.isPending}
+              onClick={() =>
+                setAutoComplete.mutate(!disabled, {
+                  onError: () => toast.error(t(($) => $.pr_automation.update_failed)),
+                })
+              }
+            >
+              {disabled ? <RotateCcw /> : <CircleSlash />}
+              {disabled ? t(($) => $.pr_automation.enable) : t(($) => $.pr_automation.disable)}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        ) : null}
+        <DropdownMenuItem onClick={() => navigation.push(`${paths.settings()}?tab=integrations&integration=github`)}>
           <Settings />
           {t(($) => $.pr_automation.settings)}
         </DropdownMenuItem>

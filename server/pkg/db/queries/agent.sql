@@ -578,7 +578,7 @@ RETURNING *;
 
 -- name: SetTaskWorkflowStep :exec
 -- Moves a run's workflow step along with a status change the run itself made
--- (MUL-7420). See migration 556.
+-- (MUL-7420). See migration 557.
 UPDATE agent_task_queue SET workflow_step = @workflow_step WHERE id = @id;
 
 -- name: CreateManualQuickCreateRetryTask :one

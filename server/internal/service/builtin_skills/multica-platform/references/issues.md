@@ -2,7 +2,7 @@
 
 Product contracts the runtime brief does not fully encode.
 
-- [PR linking and auto-complete](#pr-linking-and-auto-complete)
+- [PR linking](#pr-linking)
 - [Reading a linked PR's real state](#reading-a-linked-prs-real-state)
 - [Custom properties: typed workflow state](#custom-properties-typed-workflow-state)
 - [Status changes have server side effects](#status-changes-have-server-side-effects)
@@ -12,7 +12,7 @@ Product contracts the runtime brief does not fully encode.
 
 To attach a local file to an existing issue description, use `multica issue update <id> --attachment <local-path>`. The CLI appends the file's Markdown reference to the end of the description; to replace an image, also use `--description-file` to remove the old reference. Do not put local filesystem paths in the description.
 
-## PR linking and auto-complete
+## PR linking
 
 A PR is linked to an issue when its **title** or **branch name** contains a
 routable issue key (`PREFIX-NUMBER`, e.g. `MUL-123`), or when its title or body
@@ -24,29 +24,12 @@ the issue page; a removed PR is not linked again by later webhooks.
 ```text
 MUL-123: add the thing the issue asks for     # key in title  → links
 agent/dana/mul-123-add-the-thing              # key in branch → links
-Closes MUL-123   (body)                       # links AND closes
+Closes MUL-123   (body)                       # key after a keyword → links
 Related to MUL-123   (body only)              # no link
 ```
 
-**Only a closing keyword completes the issue.** When every PR linked to an issue
-is merged and at least one of them puts a closing keyword right before the key
-(`Closes MUL-123`; `Fix login MUL-123` does not count, and a branch name never
-does), the issue moves to `done` on its own — unless the workspace turned PR
-auto-complete off (Settings → Issue statuses) or someone turned it off for that
-issue. A title or branch key alone links the PR but never completes the issue.
-A linked PR still open or draft keeps the issue waiting, and so does a PR closed
-without merging until someone removes it from the issue.
-
-The check runs only when a PR event touches the issue: a linked PR merges, a PR
-is linked, or a link is removed. Reopening an issue or changing the setting never
-completes it by itself.
-
-While a PR is open, its automatic links and its closing keyword follow the live
-title, branch, and body: removing the key drops the link, and downgrading
-`Closes MUL-123` to a plain mention keeps the title link but drops the close.
-After merge or close, existing links and the close decision stay. Adding a key to
-an already-merged PR still links it, but that late link does not complete the
-issue.
+While a PR is open, its automatic links follow the live title, branch, and
+body: removing the key drops the link. After merge or close, existing links stay.
 
 ### Default for code-changing issue work
 
@@ -59,12 +42,10 @@ instead of pretending the run is complete.
 
 To make the PR show on the issue, put a routable issue key in the PR **title**
 (preferred) or the **branch**. A key that appears only as a bare mention in the
-body links nothing. Do not use a closing keyword (`Closes` / `Fixes` /
-`Resolves`) unless merging the PR should move the issue to `done`.
+body links nothing.
 
 ```text
-MUL-123: fix login redirect        # key in title → links, does not complete
-Closes MUL-123                     # only when merge should mark the issue done
+MUL-123: fix login redirect        # key in title → links
 Part of MUL-123                    # body mention only → no link at all
 ```
 
@@ -82,13 +63,7 @@ an earlier run.
 multica issue pull-requests <issue-id> --output json
 ```
 
-Returns `{"pull_requests": [...], "auto_complete": {...}}`.
-`auto_complete.state` says what the merge rule will do for this issue:
-`no_close_intent` (no linked PR closes the issue with a keyword, so merging
-completes nothing), `waiting` (some linked PRs are still open or draft),
-`not_merged` (one was closed without merging), `all_merged`,
-`workspace_disabled`, `issue_disabled`, `terminal`, `triage`, or `none`;
-`auto_complete.pull_request_ids` names the PRs the state is about. Each element of `pull_requests` exposes:
+Returns `{"pull_requests": [...], ...}`. Each element of `pull_requests` exposes:
 
 - `number`, `html_url`, `title`
 - `link_source` — why the PR is on the issue: `title`, `branch`, `manual`, or
@@ -259,10 +234,7 @@ archived statuses remain readable via an explicit status filter.
   later re-trigger confirms the overall goal is met.
 - **`in_review`** is an accepted issue status. Some workflows use it while a PR
   is open and awaiting review; moving to it is an explicit mutation.
-- **`done`** on a child issue posts a system comment on its parent. When every
-  PR linked to the issue has merged and one of them carries a closing keyword
-  (`Closes MUL-XXXX`), the server moves it to `done` itself (see PR linking and
-  auto-complete) — you do not also need to flip it manually.
+- **`done`** on a child issue posts a system comment on its parent.
 - **`cancelled`** is a terminal, user-driven decision to close the issue. Like
   `done` it enqueues no new agent work, but it does **not** stop tasks already in
   flight — a run in progress keeps going. To stop a running task, cancel the

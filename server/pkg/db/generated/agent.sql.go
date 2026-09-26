@@ -8602,7 +8602,7 @@ type SetTaskWorkflowStepParams struct {
 }
 
 // Moves a run's workflow step along with a status change the run itself made
-// (MUL-7420). See migration 556.
+// (MUL-7420). See migration 557.
 func (q *Queries) SetTaskWorkflowStep(ctx context.Context, arg SetTaskWorkflowStepParams) error {
 	_, err := q.db.Exec(ctx, setTaskWorkflowStep, arg.WorkflowStep, arg.ID)
 	return err
