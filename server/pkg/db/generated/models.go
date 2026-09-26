@@ -177,6 +177,8 @@ type AgentTaskQueue struct {
 	CancelledByID             pgtype.UUID `json:"cancelled_by_id"`
 	CancelledByName           pgtype.Text `json:"cancelled_by_name"`
 	IssueSnapshot             []byte      `json:"issue_snapshot"`
+	// created_at of the newest task_message persisted for this task. NULL means no message has been reported yet, never "silent since the epoch" — a task dispatched a second ago has no message and is not late; measure a NULL row against created_at. Advanced best-effort by the task_message writers: the bump never blocks the message insert, so under concurrent writers to this row a bump can be skipped and the value trails by one batch. Not reset on completion, so it keeps the last message time after the run ends. Not comparable to completed_at: the cancel path stamps completed_at before the daemon flushes its final transcript, so last_event_at can be the later of the two.
+	LastEventAt pgtype.Timestamptz `json:"last_event_at"`
 }
 
 type AgentToLabel struct {

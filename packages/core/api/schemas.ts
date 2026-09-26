@@ -1866,6 +1866,10 @@ export const AgentTaskSchema = z.object({
   dispatched_at: z.string().nullable().default(null),
   started_at: z.string().nullable().default(null),
   completed_at: z.string().nullable().default(null),
+  // Null both before the first message and on a server that predates the
+  // field, so it degrades to the same "unknown" either way rather than to a
+  // wrong instant.
+  last_event_at: z.string().nullable().optional(),
   result: z.unknown().default(null),
   error: z.string().nullable().default(null),
   failure_reason: z.string().optional(),

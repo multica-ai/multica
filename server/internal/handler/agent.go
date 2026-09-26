@@ -403,6 +403,7 @@ type AgentTaskResponse struct {
 	DispatchedAt         *string               `json:"dispatched_at"`
 	StartedAt            *string               `json:"started_at"`
 	CompletedAt          *string               `json:"completed_at"`
+	LastEventAt          *string               `json:"last_event_at"` // the only timestamp here that moves while a run WORKS rather than when it changes state, so `now - last_event_at` separates a long run from a wedged one. Full contract on the column (models.go); sub-second because batches arrive ~2/s and a whole second would collapse them
 	Result               any                   `json:"result"`
 	Error                *string               `json:"error"`
 	FailureReason        string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
@@ -839,6 +840,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		DispatchedAt:           timestampToPtr(t.DispatchedAt),
 		StartedAt:              timestampToPtr(t.StartedAt),
 		CompletedAt:            timestampToPtr(t.CompletedAt),
+		LastEventAt:            timestampToNanoPtr(t.LastEventAt),
 		Result:                 result,
 		Error:                  textToPtr(t.Error),
 		FailureReason:          failureReason,

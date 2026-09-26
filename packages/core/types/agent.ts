@@ -324,6 +324,13 @@ export interface AgentTask {
   dispatched_at: string | null;
   started_at: string | null;
   completed_at: string | null;
+  /**
+   * When the run last persisted a message — the only timestamp here that moves
+   * while a run works rather than when it changes state. Null before the first
+   * message and on a server predating the field; both mean "unknown", not
+   * "silent since the epoch". Absent entirely on a server predating the field.
+   */
+  last_event_at?: string | null;
   result: unknown;
   error: string | null;
   // Empty string when the task is not in a failed state (the backend uses
