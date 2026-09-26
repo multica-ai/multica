@@ -67,6 +67,9 @@ vi.mock("./wecom-tab", () => ({ WecomTab: () => <div>WeCom detail</div> }));
 vi.mock("./telegram-tab", () => ({
   TelegramTab: () => <div>Telegram detail</div>,
 }));
+vi.mock("./sharecrm-tab", () => ({
+  ShareCRMTab: () => <div>ShareCRM detail</div>,
+}));
 
 import { IntegrationsTab } from "./integrations-tab";
 
@@ -91,11 +94,18 @@ describe("Integration directory", () => {
       screen.getByRole("link", { name: /GitHub Connected/ }),
     ).toBeInTheDocument();
     expect(screen.queryByText("GitHub detail")).not.toBeInTheDocument();
-    const shapes = ["lark", "slack", "dingtalk", "wecom", "telegram"].map(
+    const shapes = [
+      "lark",
+      "slack",
+      "dingtalk",
+      "wecom",
+      "telegram",
+      "sharecrm",
+    ].map(
       (channel) =>
         screen.getByTestId(`integration-channel-icon-${channel}`).innerHTML,
     );
-    expect(new Set(shapes).size).toBe(5);
+    expect(new Set(shapes).size).toBe(shapes.length);
     fireEvent.click(screen.getByRole("link", { name: /GitHub Connected/ }));
     expect(state.push).toHaveBeenCalledWith(
       "/acme/settings?tab=integrations&integration=github",
@@ -109,6 +119,12 @@ describe("Integration directory", () => {
     expect(
       screen.getByRole("link", { name: "All integrations" }),
     ).toHaveAttribute("href", "/acme/settings?tab=integrations");
+  });
+  it("opens ShareCRM from the messaging directory", () => {
+    state.search = "tab=integrations&integration=sharecrm";
+    renderWithI18n(<IntegrationsTab />);
+    expect(screen.getByText("ShareCRM detail")).toBeInTheDocument();
+    expect(screen.queryByText("Slack detail")).not.toBeInTheDocument();
   });
   it("handles the existing GitHub bookmark", () => {
     state.search = "tab=github";
@@ -173,7 +189,14 @@ describe("Integration directory", () => {
     expect(
       screen.getByRole("link", { name: /GitHub Connected/ }),
     ).toBeInTheDocument();
-    for (const channel of ["Lark", "Slack", "DingTalk", "WeCom", "Telegram"]) {
+    for (const channel of [
+      "Lark",
+      "Slack",
+      "DingTalk",
+      "WeCom",
+      "Telegram",
+      "ShareCRM",
+    ]) {
       expect(
         screen.getByRole("link", { name: new RegExp(`${channel} Not connected`) }),
       ).toBeInTheDocument();
