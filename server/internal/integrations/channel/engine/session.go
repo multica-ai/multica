@@ -1066,7 +1066,14 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 				media.ref.Type == channel.MsgTypeImage,
 			)
 			issueMarkdown = append(issueMarkdown, block)
-			if media.ref.InlinePlaceholder != "" {
+			// InlineIDOnly markers are left out on purpose. A marker that only
+			// refers to an attachment sits in the adapter's quoted context,
+			// which composeIssueCommandMediaDescription excludes from the
+			// description by contract; materializing it here would put
+			// somebody else's picture into the issue body as if the reporter
+			// had attached it. The attachment itself is still created and
+			// still listed above.
+			if media.ref.InlinePlaceholder != "" && !media.ref.InlineIDOnly {
 				replacements = append(replacements, inlineMediaReplacement{
 					placeholder: media.ref.InlinePlaceholder,
 					index:       media.ref.InlineIndex,
@@ -1123,7 +1130,7 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 		replacements = append(replacements, inlineMediaReplacement{
 			placeholder: media.ref.InlinePlaceholder,
 			index:       media.ref.InlineIndex,
-			markdown:    inlineAttachmentMarkdown(media.ref, media.id),
+			markdown:    inlineMediaMarkdown(media.ref, media.id),
 		})
 	}
 	if body, changed := composeInlineMediaBody(in.Body, replacements); changed {
@@ -1254,6 +1261,39 @@ func nthSubstringIndex(body, marker string, target int) int {
 		}
 		offset = found + len(marker)
 	}
+}
+
+// inlineMediaMarkdown is what an adapter's marker is replaced with once the
+// attachment behind it exists — either the object embedded, or the marker
+// naming it. See channel.MediaRef.InlineIDOnly for which an adapter asks for
+// and why.
+func inlineMediaMarkdown(ref channel.MediaRef, id pgtype.UUID) string {
+	if ref.InlineIDOnly {
+		return inlineAttachmentIDMarker(ref.InlinePlaceholder, id)
+	}
+	return inlineAttachmentMarkdown(ref, id)
+}
+
+// inlineAttachmentIDMarker rewrites a bracketed marker so it names the
+// attachment it stands for: "[Image: unavailable]" becomes
+// "[Image: 019fe1d3-…]".
+//
+// Everything up to the first colon is kept, so the label is whatever the
+// adapter called the thing and the engine only replaces the state word after
+// it. That is deliberate — the marker the adapter renders and the marker that
+// replaces it have to stay the same shape for a reader to see them as one
+// thing, and the only way to guarantee that is to derive one from the other
+// rather than spell the vocabulary out twice.
+func inlineAttachmentIDMarker(marker string, id pgtype.UUID) string {
+	label := strings.TrimSuffix(strings.TrimPrefix(marker, "["), "]")
+	if colon := strings.IndexByte(label, ':'); colon >= 0 {
+		label = label[:colon]
+	}
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return "[" + uuid.UUID(id.Bytes).String() + "]"
+	}
+	return "[" + label + ": " + uuid.UUID(id.Bytes).String() + "]"
 }
 
 func inlineAttachmentMarkdown(ref channel.MediaRef, id pgtype.UUID) string {
