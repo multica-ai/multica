@@ -568,6 +568,7 @@ function QuickActionDialog({
               id="qa-prompt"
               value={form.prompt}
               rows={5}
+              className="max-h-48 resize-y"
               placeholder={t(($) => $.quick_actions.field_prompt_placeholder)}
               onChange={(e) => setForm((f) => ({ ...f, prompt: e.target.value }))}
             />
