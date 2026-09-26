@@ -1,11 +1,18 @@
 -- name: ListInboxItems :many
+-- LIMIT bounds the response the same way ListArchivedInboxItems does: the
+-- active inbox grows without end for a busy recipient (v1 ships no pagination),
+-- and an unbounded SELECT returns every sibling row — multi-MB / multi-second
+-- for a heavy backlog (GH #6527). Rows are newest-first, and the UI groups one
+-- row per issue carrying that group's NEWEST item, so truncation drops only the
+-- OLDEST rows and can never hide a group's rendered newest row.
 SELECT i.*,
        iss.status AS issue_status,
        iss.priority AS issue_priority
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = false
-ORDER BY i.created_at DESC;
+ORDER BY i.created_at DESC
+LIMIT 200;
 
 -- name: ListArchivedInboxItems :many
 -- Archived counterpart of ListInboxItems, backing the inbox's "Archived"
