@@ -33,6 +33,7 @@ multica runtime delete <runtime-id>
 multica repo checkout <url>
 multica repo checkout <url> --ref <branch-or-sha>
 multica repo checkout <url> --fresh
+multica repo checkout <url> --full
 ```
 
 Runtime and repo commands affect active agent execution. Do not restart daemons,
@@ -65,6 +66,16 @@ trigger path refuses it with `agent_runtime_required`.
 runtimes use a linked worktree; Linux and Windows Codex use task-local Git
 metadata so a task can stage and commit without making the shared repository
 cache writable.
+
+If the selected revision contains `.multica/sparse-profile`, a new checkout
+uses its Git sparse-checkout patterns in non-cone mode before materializing
+files. Repositories without this file get a full checkout. An existing sparse
+checkout keeps its current selection on ordinary reuse, even when the profile
+changes upstream; `--fresh` reapplies the selected revision's profile, and
+`--full` widens the checkout without discarding local edits. Use `--full` for
+tasks that need excluded media or snapshot fixtures. The profile affects only
+which files appear locally; committing from a sparse checkout does not remove
+excluded paths from the repository tree.
 
 Running `repo checkout` again where the repository is already checked out
 (the same task, a follow-up turn, or a reused workdir) never silently discards

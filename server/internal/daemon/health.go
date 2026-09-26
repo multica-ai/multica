@@ -118,6 +118,9 @@ type repoCheckoutRequest struct {
 	// --fresh`). Without it an existing checkout that holds work is kept; older
 	// daemons ignore the field and always start over.
 	Fresh bool `json:"fresh,omitempty"`
+	// Full widens an existing sparse checkout or skips a versioned profile
+	// when creating a new task checkout.
+	Full bool `json:"full,omitempty"`
 }
 
 type activeRepoCheckoutTask struct {
@@ -502,6 +505,7 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			CoAuthoredByEnabled: d.workspaceCoAuthoredByEnabled(req.WorkspaceID),
 			IsolatedGitMetadata: req.CheckoutMode == repoCheckoutModeIsolated,
 			Fresh:               req.Fresh,
+			Full:                req.Full,
 		}
 		if req.RetryBusy {
 			params.LockWaitTimeout = repoCheckoutLockWaitTimeout

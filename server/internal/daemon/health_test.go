@@ -607,6 +607,24 @@ func TestRepoCheckoutForwardsFresh(t *testing.T) {
 	}
 }
 
+func TestRepoCheckoutForwardsFull(t *testing.T) {
+	t.Parallel()
+	const workspaceID = "ws-checkout"
+	const repoURL = "https://github.com/org/repo.git"
+	cache := &recordingRepoCache{lookupPath: "/cache/org/repo.git"}
+	workDir := t.TempDir()
+	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, workDir, cache)
+	rec := httptest.NewRecorder()
+	body := strings.NewReader(`{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"` + workDir + `","task_id":"task-1","full":true}`)
+	d.repoCheckoutHandler().ServeHTTP(rec, authorizedRepoCheckoutRequest(body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !cache.lastCreateParams().Full {
+		t.Fatal("full checkout flag was not forwarded to repo cache")
+	}
+}
+
 func TestRepoCheckoutRejectsUnknownMode(t *testing.T) {
 	t.Parallel()
 
