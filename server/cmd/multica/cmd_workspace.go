@@ -91,8 +91,13 @@ var workspaceSwitchCmd = &cobra.Command{
 		"prefix (≥4 hex chars) as shown in 'workspace list'. Subsequent " +
 		"commands without --workspace-id or MULTICA_WORKSPACE_ID will target " +
 		"this workspace.\n\n" +
-		"Resolution priority (highest to lowest): --workspace-id flag, " +
-		"MULTICA_WORKSPACE_ID env, profile default (set by this command).\n\n" +
+		"Resolution priority (highest to lowest): --workspace flag, " +
+		"--workspace-id flag, MULTICA_WORKSPACE_ID env, profile default (set by " +
+		"this command).\n\n" +
+		"The profile default is shared, mutable state: a concurrent 'switch' " +
+		"can retarget it mid-run. For deterministic scripts, pass the global " +
+		"--workspace <id|slug|prefix> flag on each command instead of relying " +
+		"on the default.\n\n" +
 		"For low-level use, 'multica config set workspace_id <id>' writes the " +
 		"same setting without verification.",
 	Args: exactArgs(1),
