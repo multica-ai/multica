@@ -917,6 +917,7 @@
       "setup_description": "このランタイムは作成時の対話と、新しいエージェントの既定値に使われます。",
       "start": "会話を開始",
       "connect_runtime": "ランタイムを接続",
+      "draft_parse_failed": "この返信からフォームを入力できませんでした。エージェントに下書きの再生成を依頼するか、手動で入力してください。",
       "start_failed": "Agent Builder を開始できませんでした。",
       "send_failed": "メッセージを送信できませんでした。",
       "stop_failed": "現在の生成を停止できませんでした。",
