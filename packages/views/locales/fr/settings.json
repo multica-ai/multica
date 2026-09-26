@@ -157,6 +157,7 @@
       "korean": "한국어",
       "japanese": "日本語",
       "french": "Français",
+      "russian": "Русский",
       "sync_failed": "Langue enregistrée sur cet appareil, mais la synchronisation avec votre compte a échoué. Vos autres appareils peuvent afficher la langue précédente."
     },
     "timezone": {
