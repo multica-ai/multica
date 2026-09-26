@@ -4002,10 +4002,21 @@ export class ApiClient {
   // the mutations below are owner/admin only and return 403 otherwise.
   async listIssueStatuses(includeArchived = false): Promise<ListIssueStatusesResponse> {
     const query = includeArchived ? "?include_archived=true" : "";
-    const raw = await this.fetch<unknown>(`/api/issue-statuses${query}`);
-    return parseWithFallback(raw, ListIssueStatusesResponseSchema, EMPTY_LIST_ISSUE_STATUSES_RESPONSE, {
-      endpoint: "GET /api/issue-statuses",
-    });
+    try {
+      const raw = await this.fetch<unknown>(`/api/issue-statuses${query}`);
+      return parseWithFallback(raw, ListIssueStatusesResponseSchema, EMPTY_LIST_ISSUE_STATUSES_RESPONSE, {
+        endpoint: "GET /api/issue-statuses",
+      });
+    } catch (error) {
+      // Desktop can update independently from a self-hosted server. Servers
+      // predating the status-catalog route still support the seven built-in
+      // statuses, so treat a missing route as that legacy catalog instead of
+      // blocking every issue surface. Other failures remain retryable errors.
+      if (error instanceof ApiError && error.status === 404) {
+        return EMPTY_LIST_ISSUE_STATUSES_RESPONSE;
+      }
+      throw error;
+    }
   }
 
   async createIssueStatus(data: CreateIssueStatusRequest): Promise<IssueStatusEntry> {
