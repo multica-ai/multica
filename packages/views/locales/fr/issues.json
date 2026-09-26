@@ -1117,6 +1117,25 @@
     "hourly": "Réveil chaque heure",
     "today_time": "Aujourd’hui {{time}}"
   },
+  "schedule_dialog": {
+    "trigger_tooltip": "Planifier l’exécution",
+    "title": "Planifier l’exécution",
+    "description": "Choisissez une date et une heure. L’assigné s’exécutera une fois, automatiquement.",
+    "no_assignee": "Assignez cette tâche à quelqu’un avant de planifier une exécution.",
+    "loading": "Chargement…",
+    "date_label": "Date",
+    "time_label": "Heure",
+    "past_time_error": "Choisissez une heure dans le futur.",
+    "schedule_button": "Planifier",
+    "cancel_button": "Annuler",
+    "close_button": "Fermer",
+    "pending_description": "Cette tâche est planifiée pour s’exécuter à {{time}}.",
+    "cancel_schedule_button": "Annuler la planification",
+    "toast_scheduled": "Exécution planifiée",
+    "toast_cancelled": "Planification annulée",
+    "toast_failed": "Une erreur s’est produite. Réessayez.",
+    "toast_conflict": "Cette tâche a déjà une planification en attente"
+  },
   "duplicates": {
     "banner_prefix": "Doublon de",
     "unmark": "Pas un doublon",
