@@ -420,6 +420,15 @@ func TestPluginIssueListIsScopedFilteredAndPaginated(t *testing.T) {
 		"issue_id": inProgressIssue, "runtime_id": handlerTestRuntimeID(t), "status": "queued",
 	})
 	createIssueInForeignWorkspace(t)
+	var inProgressNumber, todoNumber int
+	dbfx.QueryRow(t, `SELECT number FROM issue WHERE id = $1`, inProgressIssue).Scan(&inProgressNumber)
+	dbfx.QueryRow(t, `SELECT number FROM issue WHERE id = $1`, todoIssue).Scan(&todoNumber)
+	firstIssue, secondIssue := inProgressIssue, todoIssue
+	firstActiveCount := int32(1)
+	if todoNumber > inProgressNumber {
+		firstIssue, secondIssue = todoIssue, inProgressIssue
+		firstActiveCount = 0
+	}
 
 	listIssues := func(query string) publicapiv1.IssueListResponse {
 		t.Helper()
@@ -437,19 +446,19 @@ func TestPluginIssueListIsScopedFilteredAndPaginated(t *testing.T) {
 
 	projectQuery := "?project_id=" + projectID
 	page := listIssues(projectQuery + "&limit=1")
-	if len(page.Issues) != 1 || page.Issues[0].ID != inProgressIssue || page.NextCursor == "" {
+	if len(page.Issues) != 1 || page.Issues[0].ID != firstIssue || page.NextCursor == "" {
 		t.Fatalf("first page = %+v, want the newest issue and a cursor", page)
 	}
-	if page.Issues[0].ActiveTaskCount != 1 {
+	if page.Issues[0].ActiveTaskCount != firstActiveCount {
 		t.Fatalf("first page active count = %d, want 1", page.Issues[0].ActiveTaskCount)
 	}
 
 	next := listIssues(projectQuery + "&limit=1&cursor=" + page.NextCursor)
-	if len(next.Issues) != 1 || next.Issues[0].ID != todoIssue || next.NextCursor != "" {
+	if len(next.Issues) != 1 || next.Issues[0].ID != secondIssue || next.NextCursor != "" {
 		t.Fatalf("second page = %+v, want only the final project issue", next)
 	}
-	if next.Issues[0].ActiveTaskCount != 0 {
-		t.Fatalf("second page active count = %d, want 0", next.Issues[0].ActiveTaskCount)
+	if next.Issues[0].ActiveTaskCount != 1-firstActiveCount {
+		t.Fatalf("second page active count = %d, want the remaining fixture count", next.Issues[0].ActiveTaskCount)
 	}
 
 	status := listIssues(projectQuery + "&status=todo")
@@ -461,7 +470,7 @@ func TestPluginIssueListIsScopedFilteredAndPaginated(t *testing.T) {
 		t.Fatalf("status category filter result = %+v", started)
 	}
 	project := listIssues(projectQuery)
-	if len(project.Issues) != 2 || project.Issues[0].ID != inProgressIssue || project.Issues[1].ID != todoIssue {
+	if len(project.Issues) != 2 || project.Issues[0].ID != firstIssue || project.Issues[1].ID != secondIssue {
 		t.Fatalf("project filter result = %+v", project)
 	}
 	otherProject := listIssues("?project_id=" + otherProjectID)
