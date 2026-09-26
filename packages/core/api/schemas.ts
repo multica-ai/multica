@@ -1340,6 +1340,18 @@ export const IssueSchema = z.object({
   properties: IssuePropertyValuesSchema,
   reactions: z.array(z.unknown()).optional(),
   labels: z.array(z.unknown()).optional(),
+  // List-only projection. An older backend omits it; a malformed additive
+  // summary cannot blank the entire issue list.
+  linked_pull_requests: z.array(z.object({
+    provider: z.string(),
+    number: z.number(),
+    title: z.string(),
+    state: z.string(),
+    html_url: z.string(),
+    checks_rollup: z.enum(["success", "failure", "pending", "error", "expected"]).optional().catch(undefined),
+    checks_conclusion: z.enum(["passed", "failed", "pending"]).optional().catch(undefined),
+    snapshot_available: z.boolean().optional().catch(undefined),
+  }).loose()).optional().catch(undefined),
   created_at: z.string(),
   updated_at: z.string(),
   revision: z.number().int().positive().optional(),

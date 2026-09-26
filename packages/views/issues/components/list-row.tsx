@@ -25,6 +25,7 @@ import { LabelChip } from "../../labels/label-chip";
 import { CustomStatusChip } from "./custom-status-chip";
 import { IssueDuplicateOfMarker } from "./issue-duplicates";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { LinkedPRIndicator } from "./linked-pr-indicator";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
 import { useLocale } from "../../i18n";
 
@@ -183,6 +184,7 @@ function ListRowContent({
             />
           )}
         </AppLink>
+        <LinkedPRIndicator prs={issue.linked_pull_requests} />
       </div>
     </IssueActionsContextMenu>
   );

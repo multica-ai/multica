@@ -102,6 +102,10 @@ type IssueResponse struct {
 	// preserves whatever labels are already in cache. nil pointer = "field
 	// absent, do not touch"; non-nil (incl. empty slice) = authoritative list.
 	Labels *[]LabelResponse `json:"labels,omitempty"`
+	// LinkedPullRequests is a compact list projection, bulk-loaded for the
+	// current page. Other issue responses omit it so realtime field patches do
+	// not erase the list projection.
+	LinkedPullRequests *[]IssuePullRequestSummary `json:"linked_pull_requests,omitempty"`
 	// SourceContext is detail-only. List, board, search, and children responses
 	// deliberately omit the potentially large immutable snapshot.
 	SourceContext *sourceContextDetailResponse `json:"source_context,omitempty"`
@@ -1822,6 +1826,12 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 		ids[i] = issue.ID
 	}
 	labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
+	prMap, err := h.linkedPullRequestsByIssue(ctx, wsUUID, ids)
+	if err != nil {
+		slog.Warn("ListIssues linked pull requests failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list issues")
+		return
+	}
 	resp := make([]IssueResponse, len(issues))
 	for i, issue := range issues {
 		resp[i] = issueListRowToResponse(issue, prefix)
@@ -1830,6 +1840,11 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 			labels = []LabelResponse{}
 		}
 		resp[i].Labels = &labels
+		prs := prMap[resp[i].ID]
+		if prs == nil {
+			prs = []IssuePullRequestSummary{}
+		}
+		resp[i].LinkedPullRequests = &prs
 	}
 	h.fillStatusCategories(ctx, wsUUID, resp)
 

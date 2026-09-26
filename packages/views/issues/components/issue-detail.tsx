@@ -104,7 +104,9 @@ import { WakeupsSection } from "./wakeups-section";
 import { QuickActionsSection } from "./quick-actions-section";
 import { PluginPanelSection } from "../../plugins";
 import { PullRequestsSection } from "./pull-requests-section";
+import { LinkedPRIndicator } from "./linked-pr-indicator";
 import { useGitHubSettings } from "@multica/core/github";
+import { issuePullRequestsOptions } from "@multica/core/github";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -1307,6 +1309,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const githubSettings = useGitHubSettings();
+  const { data: linkedPRData } = useQuery(issuePullRequestsOptions(id));
+  const headerPRs = linkedPRData?.pull_requests.map((pr) => ({
+    provider: pr.provider ?? "github",
+    number: pr.number,
+    title: pr.title,
+    state: pr.state,
+    html_url: pr.html_url,
+    checks_rollup: pr.checks_rollup ?? undefined,
+    checks_conclusion: pr.checks_conclusion ?? undefined,
+    snapshot_available: pr.snapshot_available,
+  }));
 
   // Per-issue, per-session set of optional properties currently visible in
   // the sidebar Properties section. Seeded on issue switch with whichever
@@ -2999,6 +3012,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 it never overlaps the title (which truncates to make room).
                 It self-hides when no agent is active. */}
             <IssueAgentHeaderChip issueId={id} />
+            <LinkedPRIndicator prs={headerPRs} />
             {onDone && !issueBehavesAsAny(issue, ["done", "closed"]) && (
               <Tooltip>
                 <TooltipTrigger

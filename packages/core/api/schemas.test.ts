@@ -168,6 +168,28 @@ describe("ChatSessionSchema", () => {
   });
 });
 describe("IssueSchema (via ListIssuesResponseSchema)", () => {
+  it("parses linked PR summaries without requiring them from older servers", () => {
+    const summary = {
+      provider: "gitlab", number: 12, title: "Fix", state: "open",
+      html_url: "https://gitlab.example/repo/-/merge_requests/12",
+      checks_conclusion: "failed",
+    };
+    const current = ListIssuesResponseSchema.parse({
+      issues: [{ ...baseIssue, linked_pull_requests: [summary] }], total: 1,
+    });
+    expect(current.issues[0]?.linked_pull_requests).toMatchObject([summary]);
+    const legacy = ListIssuesResponseSchema.parse({ issues: [baseIssue], total: 1 });
+    expect(legacy.issues[0]?.linked_pull_requests).toBeUndefined();
+  });
+
+  it("drops malformed linked PR data without losing the issue list", () => {
+    const parsed = ListIssuesResponseSchema.parse({
+      issues: [{ ...baseIssue, linked_pull_requests: [{ state: "open" }] }], total: 1,
+    });
+    expect(parsed.issues).toHaveLength(1);
+    expect(parsed.issues[0]?.linked_pull_requests).toBeUndefined();
+  });
+
   // A custom status key can be derived rather than readable — "客户确认" becomes
   // `in_review_2` — so the display name travels with it. The field has to
   // survive a server that predates it, since an issue that fails validation
