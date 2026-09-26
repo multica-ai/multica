@@ -60,7 +60,6 @@ import { descriptionPreview } from "./description-preview";
 import { useCommentAnnotations } from "./use-comment-annotations";
 import { useAttachmentVersions } from "./deliverables/attachment-versions";
 import { VersionBadge } from "./deliverables/version-badge";
-import { JustifiedImageRow } from "./justified-image-row";
 import { useRunCommentMotion } from "./use-run-comment-motion";
 
 const commentActionClassName =
@@ -232,13 +231,13 @@ export function AttachmentList({
 
   const images = standalone.filter((a) => standaloneAttachmentGroup(a) === "image");
   const files = standalone.filter((a) => standaloneAttachmentGroup(a) === "file");
-  const render = (a: Attachment, layout: "block" | "card") => {
+  const render = (a: Attachment) => {
     const version = versions?.get(a.id);
     return (
       <AttachmentRenderer
         key={a.id}
         attachment={{ kind: "record", attachment: a }}
-        layout={layout}
+        layout="card"
         badge={version ? <VersionBadge version={version} /> : undefined}
         editable={!!onRemove}
         onDelete={onRemove ? () => onRemove(a.id) : undefined}
@@ -246,20 +245,19 @@ export function AttachmentList({
     );
   };
 
-  // A lone image keeps its full size; several form justified rows (one
-  // height per row, edge to edge). Every other file — HTML too: an uploaded
-  // file is a deliverable to open, not part of the text — is a card in a
-  // grid, not a full-width row each.
+  // Every image shows at its full size, one under another, so it reads
+  // without opening (MUL-7736). Every other file — HTML too: an uploaded file
+  // is a deliverable to open, not part of the text — is a card in a grid, not
+  // a full-width row each.
   return (
     <AttachmentDownloadProvider attachments={attachments}>
       <div className={cn("flex flex-col gap-2", className)}>
-        {images.length === 1 && render(images[0]!, "block")}
-        {images.length > 1 && (
-          <JustifiedImageRow items={images} renderTile={(a) => render(a, "card")} />
+        {images.length > 0 && (
+          <div className="flex flex-col items-start gap-2">{images.map(render)}</div>
         )}
         {files.length > 0 && (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(min(15rem,100%),1fr))] gap-2">
-            {files.map((a) => render(a, "card"))}
+            {files.map(render)}
           </div>
         )}
       </div>

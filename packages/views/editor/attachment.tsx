@@ -101,9 +101,8 @@ export interface AttachmentProps {
   onDelete?: () => void;
   /**
    * "block" (default) renders each kind at full width, as a body renders it.
-   * "card" is the compact form a list of standalone attachments lays out: an
-   * image becomes a fixed-height tile, any other file a card. HTML keeps its
-   * embedded preview in both — the preview is the point of attaching it.
+   * "card" is the form a list of standalone attachments lays out: an image
+   * keeps its full size up to a height cap, any other file becomes a card.
    */
   layout?: "block" | "card";
   /** Card layout only — rendered after the file name, e.g. a version badge. */
@@ -423,7 +422,7 @@ export function Attachment({
           onView={openPreview}
           onDownload={handleDownload}
           onDelete={onDelete}
-          className={cn(layout === "card" && "image-tile", className)}
+          className={cn(layout === "card" && "image-standalone", className)}
         />
         {preview.modal}
       </>

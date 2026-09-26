@@ -152,7 +152,7 @@ export function selectStandaloneAttachments(
 
 /**
  * How a standalone attachment is laid out under its body (MUL-7649): images
- * as a row of thumbnails, everything else — HTML included — as file cards.
+ * at full size, everything else — HTML included — as file cards.
  */
 export type StandaloneAttachmentGroup = "image" | "file";
 
@@ -164,7 +164,7 @@ export function standaloneAttachmentGroup(
 
 /**
  * The order a surface renders its standalone attachments in (MUL-7649):
- * images first (a row of thumbnails), then everything else (a grid of file
+ * images first (each at full size), then everything else (a grid of file
  * cards). Stable within each group. The sequence builder walks standalone
  * attachments in this same order, so paging through the viewer follows the
  * screen.

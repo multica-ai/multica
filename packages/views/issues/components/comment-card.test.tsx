@@ -132,21 +132,29 @@ describe("AttachmentList — layout (MUL-7649)", () => {
     expect(screen.queryByTitle("Preview")).toBeNull();
   });
 
-  it("puts several images in one row of tiles, and keeps a lone image full size", () => {
-    const { container, unmount } = renderList(
+  // MUL-7736: several screenshots used to shrink into one row of thumbnails,
+  // so reading any of them took a click. Each keeps its full size instead.
+  it("shows every image at full size, one under another", () => {
+    const { container } = renderList(
       <AttachmentList
-        attachments={[file("a", "a.png", "image/png"), file("b", "b.png", "image/png")]}
+        attachments={[
+          file("a", "a.png", "image/png"),
+          file("b", "b.png", "image/png"),
+          file("c", "c.png", "image/png"),
+        ]}
         content=""
       />,
     );
-    expect(container.querySelectorAll(".image-tile")).toHaveLength(2);
-    unmount();
-
-    const single = renderList(
-      <AttachmentList attachments={[file("c", "c.png", "image/png")]} content="" />,
-    );
-    expect(single.container.querySelector(".image-figure")).toBeTruthy();
-    expect(single.container.querySelector(".image-tile")).toBeNull();
+    const figures = container.querySelectorAll(".image-figure");
+    expect(figures).toHaveLength(3);
+    expect([...container.querySelectorAll("img")].map((img) => img.getAttribute("alt"))).toEqual([
+      "a.png",
+      "b.png",
+      "c.png",
+    ]);
+    // No tile box sized to a shared row height around any of them.
+    for (const figure of figures) expect(figure).toHaveClass("image-standalone");
+    expect(container.querySelector("[style*='height']")).toBeNull();
   });
 
   it("lays groups out images, then files, whatever the upload order", () => {
@@ -160,9 +168,9 @@ describe("AttachmentList — layout (MUL-7649)", () => {
         content=""
       />,
     );
-    const tile = container.querySelector(".image-tile")!;
+    const image = container.querySelector(".image-figure")!;
     const card = screen.getByRole("button", { name: "notes.md" });
-    expect(tile.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(image.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   // Reverses the MUL-2330 pin. An uploaded HTML file is a deliverable, not
