@@ -279,6 +279,7 @@
     "composio_mcp": "Applications MCP",
     "integrations": "Intégrations",
     "runtime_config": "Routage",
+    "task_tokens": "Jetons d'identité",
     "discard_dialog_title": "Abandonner les modifications non enregistrées ?",
     "discard_dialog_description": "Cet onglet contient des modifications non enregistrées. Les quitter maintenant les abandonnera.",
     "discard_keep": "Continuer à modifier",
@@ -504,6 +505,15 @@
       "revealing": "Affichage…",
       "reveal_failed_toast": "Échec du chargement des valeurs d'environnement",
       "empty_editable": "Aucune variable d’environnement configurée."
+    },
+    "task_tokens": {
+      "description": "Choisissez les systèmes internes sur lesquels cet agent peut agir. Les jetons sont signés à chaque exécution au nom de la personne qui l'a déclenchée, et ne sont jamais conservés.",
+      "docs_link": "Guide d'intégration",
+      "unconfigured": "Aucun jeton d'identité n'est configuré sur ce déploiement.",
+      "load_failed": "Impossible de charger les jetons d'identité. Réessayez dans un instant.",
+      "injected_as": "Injecté dans {{env}}",
+      "saved": "Jetons d'identité mis à jour",
+      "save_failed": "Impossible de mettre à jour les jetons d'identité"
     },
     "custom_args": {
       "intro": "Ajoutez des arguments CLI transmis au démarrage de cet agent.",
