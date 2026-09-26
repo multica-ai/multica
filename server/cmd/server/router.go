@@ -2021,6 +2021,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/wakeups/{wakeupID}/disable", h.DisableIssueWakeup)
 					r.Post("/wakeups/{wakeupID}/enable", h.EnableIssueWakeup)
 					r.Patch("/wakeups/{wakeupID}/instruction", h.EditIssueWakeupInstruction)
+					r.Delete("/wakeups/{wakeupID}", h.DeleteIssueWakeup)
+					r.Post("/wakeups/{wakeupID}/trigger", h.TriggerIssueWakeup)
+					r.Post("/wakeups/{wakeupID}/checkin", h.CheckInIssueWakeup)
+					r.Get("/wakeups/{wakeupID}/runs", h.ListIssueWakeupRuns)
+					r.Get("/system-wakeups", h.ListIssueSystemWakeups)
+					r.Put("/system-wakeups/{rule}", h.UpdateIssueSystemWakeup)
 					r.Get("/active-task", h.GetActiveTaskForIssue)
 					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
 					r.With(handler.RequireHumanActor).Post("/tasks/{taskId}/supplements", h.CreateTaskSupplement)
@@ -2356,6 +2362,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/agent-task-snapshot", h.ListWorkspaceAgentTaskSnapshot)
 			r.Get("/api/issue-wakeup-summaries", h.ListWorkspaceWakeupSummaries)
 			r.Get("/api/issue-wakeups", h.ListWorkspaceWakeups)
+			r.Get("/api/issue-wakeup-paused", h.ListPausedWakeups)
+			r.Get("/api/system-wakeups", h.ListWorkspaceSystemWakeups)
+			r.Put("/api/system-wakeups/{rule}", h.UpdateWorkspaceSystemWakeup)
 
 			// Independent workspace-level list backing the issues-header
 			// "agents working" chip and its assignee-id Table filter.

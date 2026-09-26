@@ -910,7 +910,8 @@
     "tool_kind_command": "Commands",
     "tool_kind_write": "Edits",
     "tool_kind_read": "Reads",
-    "tool_kind_misc": "Other"
+    "tool_kind_misc": "Other",
+    "trigger_wakeup": "Wakeup"
   },
   "task_failure": {
     "cancelled_by_system": "Cancelled by the system",

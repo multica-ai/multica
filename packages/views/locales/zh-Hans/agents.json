@@ -891,7 +891,8 @@
     "tool_kind_command": "命令",
     "tool_kind_write": "编辑",
     "tool_kind_read": "读取",
-    "tool_kind_misc": "其他"
+    "tool_kind_misc": "其他",
+    "trigger_wakeup": "唤醒触发"
   },
   "task_failure": {
     "cancelled_by_system": "已由系统取消",

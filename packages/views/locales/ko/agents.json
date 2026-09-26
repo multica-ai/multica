@@ -797,7 +797,8 @@
     "tool_kind_command": "명령",
     "tool_kind_write": "편집",
     "tool_kind_read": "읽기",
-    "tool_kind_misc": "기타"
+    "tool_kind_misc": "기타",
+    "trigger_wakeup": "깨우기"
   },
   "task_failure": {
     "cancelled_by_system": "시스템에서 취소함",

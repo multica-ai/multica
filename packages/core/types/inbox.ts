@@ -28,7 +28,10 @@ export type InboxItemType =
   // System notifications are intentionally issue-less. Keep them in the
   // same Inbox model so read/archive/realtime behavior remains consistent.
   | "autopilot_paused"
-  | "autopilot_quota_exceeded";
+  | "autopilot_quota_exceeded"
+  // Sub-issues of an issue assigned to the recipient closed (the child_done
+  // system rule notifies a member assignee instead of waking an agent).
+  | "children_done";
 
 /**
  * One workspace's unread inbox count in the cross-workspace summary

@@ -789,7 +789,8 @@
     "tool_kind_command": "コマンド",
     "tool_kind_write": "編集",
     "tool_kind_read": "読み取り",
-    "tool_kind_misc": "その他"
+    "tool_kind_misc": "その他",
+    "trigger_wakeup": "起動"
   },
   "task_failure": {
     "cancelled_by_system": "システムによってキャンセルされました",

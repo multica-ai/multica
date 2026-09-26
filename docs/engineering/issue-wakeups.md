@@ -1,9 +1,11 @@
 # Issue wakeups
 
-An agent can save an event subscription or a timer on an issue, finish its run,
-and receive another ordinary run when the input arrives. Business completion is
-still decided by the agent after reading current state. There is no sleeping
-process, business-condition evaluator, or second run lifecycle.
+An agent or a member can save an event subscription, a condition or a timer on
+an issue; the agent finishes its run and receives another ordinary run when the
+input arrives. The platform only compares facts it stores (a field value,
+sub-issue status, a linked pull request's state); business completion is still
+decided by the agent after reading current state. There is no sleeping process
+or second run lifecycle.
 
 ## Product contract
 
@@ -53,9 +55,17 @@ multica issue wakeup create ISSUE --kind at --after 10m --instruction-file ./ins
 multica issue wakeup create ISSUE --kind every --every 1h --instruction-file ./instruction.md
 multica issue wakeup create ISSUE --kind cron --cron '0 * * * *' --timezone Asia/Shanghai --instruction-file ./instruction.md
 multica issue wakeup create ISSUE --kind event --event task.completed,task.failed,task.cancelled --task-id RUN --instruction-file ./instruction.md
+multica issue wakeup create ISSUE --until-status in_review --instruction-file ./instruction.md
+multica issue wakeup create ISSUE --until-pr checks --expires-in 2h --on-timeout wake --instruction-file ./instruction.md
+multica issue wakeup create ISSUE --until-children-done --stage 1 --instruction-file ./instruction.md
+multica issue wakeup create ISSUE --until-issue MUL-123 --until-issue-state done --instruction-file ./instruction.md
 multica issue wakeup list ISSUE
 multica issue wakeup get ISSUE WAKEUP
+multica issue wakeup runs ISSUE WAKEUP
+multica issue wakeup trigger ISSUE WAKEUP
 multica issue wakeup disable ISSUE WAKEUP
+multica issue wakeup delete ISSUE WAKEUP
+multica issue wakeup checkin ISSUE WAKEUP --note "CI still running"
 ```
 
 Specify `--agent-id` for human callers; authenticated agents default to themselves.
@@ -79,9 +89,9 @@ new configuration's recorded human principal.
 The scheduler checks approximately every 30 seconds. One-shot timers remain
 queued while their runtime is offline. Repeating timers coalesce missed periods
 into one pending check and continue from the next future time; they do not replay
-every historical tick. All runs retain normal comment delivery, including checks
-that find no change. CI can be polled by the agent; CI push events are not claimed
-as supported by this version.
+every historical tick. Runs keep normal comment delivery, except that a run an
+every/cron rule started may end with a check-in instead (see below). Linked pull
+request conditions read the stored PR snapshot; there is no separate CI event.
 
 ## Event catalog
 
@@ -396,3 +406,221 @@ the subscription revision avoids invalidating receipts and queued work on a text
 edit. This additive endpoint needs no migration and does not change existing
 clients. Deploy the API before using the editor; an older API rejects the new
 endpoint and the editor keeps the unsaved text.
+
+
+## Deadlines, member-created rules and the child-done system rule
+
+Rules can end on their own. `expires_in_seconds` is a relative wait stored in
+`expiry_seconds`; re-enabling restarts it from now. `expires_at` is an absolute
+end, typically a recurring check's end date; a passed absolute end cannot be
+re-enabled without replacing the rule. Single-time (`at`) rules end when they
+fire and take no deadline. Rules without either field keep the previous
+open-ended behavior, so existing agent-created rules are unaffected.
+
+The scheduler treats `enabled AND expires_at <= now()` as a candidate (partial
+index 553). Under the usual rule lock, a reached deadline disables the rule and
+sets `timed_out_at`; `disabled_at` stays NULL because it means "turned off by a
+person" and claim-time checks refuse wakeup runs whose rule has `disabled_at`.
+Inputs captured before the deadline still dispatch. `on_timeout=wake` (event
+rules only) records one `wakeup.timeout` receipt, so the target runs once to
+escalate, extend or stop; `end` (the default) ends without a run.
+
+Members create rules from the issue sidebar with the existing create endpoint;
+the form maps choices (a time, a recurring check with an end date, someone's
+reply, an agent's run ending, or raw events) onto the same configuration an
+agent sends. List responses add `created_by_agent`, `created_by_name` and the
+redacted `source_agent_*` of the run that created a rule.
+
+The parent-assignee wake on a closed sub-issue stage is the platform's
+`child_done` system rule: an ordinary `issue_wakeup` row with `system_rule`
+set (migration 554), one per parent (unique index 555). It shares the
+condition, receipts, runaway protection, timeline entries, list and run model
+of people's rules; what differs is owned by the platform:
+
+- **Target.** `agent_id` and `created_by` are NULL. When it fires the rule
+  resolves the parent's assignee: an agent gets a wakeup run, a squad's leader
+  gets a leader-role run, a member gets a `children_done` inbox notification,
+  and no assignee (or an agent that cannot run) only records the timeline
+  entry. The run is accountable to the parent's own provenance, as a run its
+  assignment would start, and it is not re-checked against a creator at claim
+  time; claim requires the rule on and the agent runnable.
+- **Condition.** `{"type":"children_done","each_stage":true}` (clients cannot
+  set `each_stage`). It holds with fingerprint `stage:N` when stage N and every
+  earlier stage are closed while a later stage waits, and with `all` when every
+  sub-issue, staged or not, is closed; the last stage alone does not hold, so
+  the wrap-up waits for unstaged sub-issues. A reopened sub-issue clears the
+  fingerprint, so closing it again fires again. People's `children_done`
+  conditions read the same sub-issue set (`childrenDone`).
+- **Evaluation.** Not polled (`next_fire_at` stays NULL). Migration 557 adds
+  `issue_child_event` and triggers on `issue` that record, in the writing
+  transaction and for every writer, a sub-issue entering or leaving a closed
+  status (built-in or custom done/closed category), joining or leaving a parent,
+  or changing stage. The request that wrote it processes the rows right after
+  commit (`ProcessChildEvents`: claim per parent, create the parent's rule if
+  missing, give every sub-issue rule on the parent a `children.changed` hint,
+  dispatch them, people's rules first); the `issue_child_event_sweep` job
+  retries rows left unclaimed for 30 seconds or claimed for more than five
+  minutes and deletes processed rows after a week. The rule also subscribes to
+  `issue.status_changed` on the parent, so leaving backlog re-evaluates it.
+- **Holds.** A parent in backlog is not woken and nothing is marked as seen:
+  leaving backlog wakes the assignee once for what closed meanwhile. A closed
+  parent keeps the rule (the platform never disables a system rule for a
+  closed issue); it rests until the parent reopens.
+- **Joining a waiting run.** If the target agent already has an unstarted run
+  on the parent that runs as the person the rule's own run would (see "Repeat
+  runs" below), the rule keeps its facts for that run instead of queuing a
+  second one. Runaway protection is the hourly limit
+  (12 runs, then `paused_reason=rate`); loop detection does not apply because
+  stage hand-offs cross issues by design, and there is no fire cap.
+- **Instruction.** The run's `[WAKEUP]` block carries the instruction and the
+  observation (each stage's closed and cancelled counts, the closed stage, the
+  next stage). The instruction is the issue's own (`instruction` on the row),
+  else the workspace's (`system_wakeup_child_done_instruction`), else the
+  built-in `ChildDoneDefaultInstruction`. The daemon tells the agent the rule is
+  the platform's and not to change it. No system comment is posted; the
+  `wakeup_triggered` entry (`rule=child_done`, `stage`, `total`, `target_*`,
+  `outcome`: `woke`, `notified`, `merged` or `none`) is the record.
+
+People manage it, agents cannot. `GET /api/issues/{id}/system-wakeups`
+describes what the parent is waiting for (lowest open stage or every
+sub-issue, remaining, target, why no run would start) with the row's `id`,
+`revision`, `enabled`, `instruction`, `default_instruction`, `customized` and
+`paused_reason`. `PUT /api/issues/{id}/system-wakeups/child_done` accepts a
+partial body from a member (403 for an agent), creates the row if needed, sets
+`customized_at`, clears a pause when turning it on, and records what already
+holds so facts that closed while it was off do not fire. The ordinary
+per-rule endpoints (update, enable, disable, instruction, trigger, delete)
+reject system rows. The workspace default lives in the settings keys
+`system_wakeup_child_done` (only an explicit `false` turns it off) and
+`system_wakeup_child_done_instruction`, edited under Settings → Wakeups through
+`GET /api/system-wakeups` and `PUT /api/system-wakeups/child_done` (owners and
+admins). Changing the default applies to every rule nobody customized and the
+platform did not pause, re-baselining the ones it turns on.
+
+Open parents that predate the rule get it from the sweep job's one-time
+backfill, with what already holds recorded so nothing fires. Whichever writer
+creates a rule (the backfill or processing a change), sub-issues whose closing
+is recorded in `issue_child_event` but not yet processed count as still open
+in its baseline, so that closing still wakes the assignee. System rows do not count
+toward the per-issue and per-workspace capacity (`guard_issue_wakeup_capacity`).
+
+Migrations 552–559 are additive for existing rows. Deploy them before the
+server and the server before clients; older clients ignore the new fields.
+Issue and workspace deletion remove the rows with the issue's other wakeups
+and `issue_child_event` rows.
+
+## Repeat runs: acknowledged and merged firings
+
+Runs are serialized per issue and agent (`ClaimAgentTask`), so a wakeup never
+runs beside another run of its agent, but it can queue behind one and repeat it.
+Pending runs are unique per issue, agent and scope (`comment_thread_id`, which
+is the rule id for wakeup runs), so an assignment run, a comment run and each
+rule's run used to queue separately. Every rule, the system rule included, now
+checks two things before it creates a run:
+
+- **Acknowledged.** Every input came from the target agent itself. An issue,
+  comment, reaction or attachment event whose single actor is the agent never
+  wakes it (task events, times, "wake now" and deadlines never count as the
+  agent's own). A `condition.met` input counts when the rule is the platform's
+  or its creating run belonged to the agent, and every run that caused it is
+  the agent's unfinished run on this issue. Causes travel with the hints:
+  captured events carry `source_task_id`, and `issue_child_event.source_task_id`
+  records `multica.source_task_id` for closing, leaving and restaging (adding
+  or reopening a sub-issue satisfies nothing and is ignored). A person's
+  condition rule still runs after the agent's own change, because the running
+  agent does not have its instruction. The inputs are consumed with a
+  `wakeup_triggered` entry (`outcome=acknowledged`). This is the #8849 fix: a
+  coordinator closing its own stage is not woken again while that run is going.
+- **Merged.** The agent has a queued run on the issue that runs as the same
+  person the rule's own run would: the rule's creator, or for `child_done` the
+  person `childDoneRunAs` resolves from the parent. The rule then starts
+  nothing and keeps its inputs (`FindWaitingIssueRun`); timers advance and a
+  `once` rule stays on, as while its own run is claimed. When a daemon that
+  advertises `joined-wakeups-v1` claims that run, `JoinWaitingWakeups` runs
+  after every claim gate: for each such rule, locked with `SKIP LOCKED`, it
+  checks again that the rule is on, has no run of its own, targets this agent,
+  runs as this run's originator, the creator may still use the agent, the
+  inputs are not the agent's own and do not close a loop. It then consumes the
+  inputs into the run, advances the rule (a `once` rule ends, a merge counts
+  toward `max_fires` and can pause the rule there), adds the rule's chain to
+  the run's `wakeup_chain`, writes a `wakeup_triggered` entry
+  (`outcome=merged`, `task_id`) and appends `{wakeup_id, wakeup_revision,
+  note}` to the run's `context.wakeup_joined`. The claim response carries the
+  notes as `wakeup_joined`; the daemon renders them as a
+  `[WAKEUP — joined this run]` block for every prompt kind. A re-claim drops
+  entries whose rule was deleted, turned off or changed since.
+
+Nothing is handed over before the claim, so a rule never loses inputs to a run
+that does not take them: if the waiting run is cancelled, or an older daemon
+claims it, the rule still has its inputs and starts its own run on a later
+tick. Joining skips the hourly run limit, which counts the rule's own runs;
+every join needs a run some other trigger queued, so joins alone cannot run
+away. The create form tells a member when a reply or comment rule would wake
+the issue's agent assignee, whose comment-triggered run it will join.
+
+## Conditions, runaway protection and check-ins
+
+**Conditions.** `condition` on the create/update body is a structured predicate
+the scheduler evaluates:
+
+| type | fields | holds when |
+| --- | --- | --- |
+| `issue_field` | `field=status`, `value` | this issue has that status key |
+| `issue_field` | `field=assignee`, `assignee_type`, `assignee_id` | it is assigned to that member, agent or squad |
+| `issue_field` | `field=label`, `label_id` | it has that label |
+| `issue_field` | `field=property`, `property_id`, `value` | the property's stored value equals `value` |
+| `children_done` | optional `stage` | every sub-issue (or every one up to that stage) is closed |
+| `pull_request` | `event=checks_finished` or `merged` | a linked PR's checks finished on its current head, or it merged |
+| `other_issue` | `issue_id`, `state=done`, `ended` or `in_review` | another issue in the workspace reaches that state |
+
+A condition rule stays `kind=event`. Validation derives the same-issue events
+that can change the fact (for example `issue.status_changed`) as hints: the
+existing capture triggers record them, and dispatch consumes them only to
+evaluate early. The scheduler also re-evaluates every 30 seconds. A satisfied
+predicate becomes one `condition.met` receipt carrying the observed facts; the
+fingerprint of those facts is kept in `condition_state`, so a repeating rule
+fires again only after the predicate turned false or its facts changed (a new PR
+head's result, another sub-issue set). States already true at registration fire
+on the first check; finished checks from before registration are ignored. The
+watched issue's identifier is stored in the condition for display.
+
+**Runaway protection.** Repeating event rules default to `max_fires=20`
+(1–1000, any repeating rule may set it); the run that reaches the cap is
+created and the rule is paused with `paused_reason=max_fires`. Each wakeup run
+stores `wakeup_chain`, the rules that led to it; a rule whose chain already
+passes through it twice (a third pass without a person in between) is paused
+with `loop`, and an event rule that already started 12 runs in the past hour is
+paused with `rate`. Both also set `disabled_at`, so queued runs of the rule are
+refused at claim. A member's action carries no source run and so starts a fresh
+chain; "wake now" is exempt. Turning a rule back on clears the reason and
+restarts the count. `GET /api/issue-wakeup-paused` lists paused rules on open
+issues for board cues.
+
+**Check-ins.** `POST /api/issues/{id}/wakeups/{wakeupID}/checkin` (`{ "note" }`,
+at most 500 characters) is accepted only from the running task the rule
+started, and only for every/cron rules. It stores `wakeup_checkin` in the
+task's context and a `wakeup_checkin` activity; completion then skips the
+synthesized fallback comment. Comment- and assignment-triggered runs are
+unchanged. The `[WAKEUP]` block of a scheduled check gives the exact command,
+and the runtime brief states the exception.
+
+**Management.** `POST .../trigger` queues one run as if the rule fired
+(creator or admin, refused while the rule is turned off or paused by a loop or
+burst), `DELETE .../{wakeupID}` removes the rule and its pending inputs and
+withdraws its unstarted runs, and `GET .../runs` returns the latest ten runs
+with their triggers, check-in note and whether they commented.
+
+**Timeline and lists.** The service writes `wakeup_created`,
+`wakeup_triggered` (not for every/cron runs, which show as runs),
+`wakeup_timed_out`, `wakeup_paused` and `wakeup_checkin` activities with a
+snapshot of the rule, published after commit. The workspace list adds a
+`source` filter and column (`member`, `agent`, `system`), a `paused` scope,
+`runs_7d`, and the child-done system rule of each open parent still waiting on
+sub-issues (a row once the rule exists; its target is the parent's assignee). The issue header shows what
+the issue is waiting for and opens the Wakeups section; board cards say it in a
+few words, or that a rule was paused.
+
+Migrations 556–559 are additive (new columns, a table with its trigger, and two
+concurrent indexes). Deploy them before the server and the server before the
+clients; older clients ignore the new fields, and older servers read as "no
+condition, not paused" in new clients.

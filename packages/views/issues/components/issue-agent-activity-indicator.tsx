@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useMemo, useState } from "react";
-import { Bell, Clock3 } from "lucide-react";
+import { Bell, Clock3, TriangleAlert } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import {
@@ -11,8 +11,8 @@ import {
 } from "@multica/ui/components/ui/hover-card";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import type { AgentTask, IssueWakeupSummaryRow } from "@multica/core/types";
-import { workspaceWakeupSummariesOptions } from "@multica/core/issues/wakeups";
+import type { AgentTask, IssueWakeupSummaryRow, PausedWakeup } from "@multica/core/types";
+import { pausedWakeupsOptions, workspaceWakeupSummariesOptions } from "@multica/core/issues/wakeups";
 import { cn } from "@multica/ui/lib/utils";
 import type { AvatarSize } from "@multica/ui/lib/avatar-size";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
@@ -109,6 +109,14 @@ export const IssueAgentActivityIndicator = memo(
       ...workspaceWakeupSummariesOptions(wsId),
       select: selectWakeups,
     });
+    const selectPaused = useCallback(
+      (rows: PausedWakeup[]) => rows.some((row) => row.issue_id === issueId),
+      [issueId],
+    );
+    const { data: paused = false } = useQuery({
+      ...pausedWakeupsOptions(wsId),
+      select: selectPaused,
+    });
     const select = useCallback(
       (snapshot: AgentTask[]) => selectIssueTasks(snapshot, issueId),
       [issueId],
@@ -137,14 +145,15 @@ export const IssueAgentActivityIndicator = memo(
     const hasTasks = agentIds.length > 0;
     const hoverTasks = [...groups.running, ...groups.queued];
     const wakeupTriggered = hoverTasks.some((task) => !!task.wakeup_id);
-    if (!hasTasks && !wakeupCount) return null;
+    if (!hasTasks && !wakeupCount && !paused) return null;
     const isRunning = opacity === "full";
-    const waitingLabel =
-      wakeups[0]?.kind === "event"
-        ? t(($) => $.wakeups.waiting_event)
-        : wakeups[0]
-          ? text.trigger(wakeups[0])
-          : "";
+    // One sentence of what the issue waits for; a paused rule speaks up only
+    // when nothing else is waiting, because it needs someone to look.
+    const waitingLabel = wakeups[0]
+      ? text.waiting(wakeups[0])
+      : paused
+        ? t(($) => $.wakeups.wait.paused)
+        : "";
     const label = hasTasks
       ? isRunning
         ? t(($) => $.agent_activity.status_running)
@@ -185,12 +194,14 @@ export const IssueAgentActivityIndicator = memo(
       </>
     ) : (
       <>
-        {wakeups[0]?.kind === "event" ? (
+        {!wakeups[0] ? (
+          <TriangleAlert className="size-3 text-destructive" aria-hidden="true" />
+        ) : wakeups[0].kind === "event" ? (
           <Bell className="size-3 text-muted-foreground" aria-hidden="true" />
         ) : (
           <Clock3 className="size-3 text-muted-foreground" aria-hidden="true" />
         )}
-        <span className="max-w-36 truncate text-micro text-muted-foreground">
+        <span className={cn("max-w-36 truncate text-micro", wakeups[0] ? "text-muted-foreground" : "text-destructive")}>
           {waitingLabel}
         </span>
         {wakeupCount > 1 && (
@@ -226,6 +237,11 @@ export const IssueAgentActivityIndicator = memo(
         </HoverCardTrigger>
         <HoverCardContent align="end" className="w-72">
           {hasTasks && <AgentActivityHoverContent tasks={hoverTasks} />}
+          {paused && !wakeupCount && (
+            <p className={cn("text-caption text-destructive", hasTasks && "mt-2 border-t border-border pt-2")}>
+              {t(($) => $.wakeups.wait.paused)}
+            </p>
+          )}
           {wakeupCount > 0 && (
             <div
               className={cn(

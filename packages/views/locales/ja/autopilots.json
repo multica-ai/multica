@@ -476,7 +476,6 @@
     "scope": "範囲",
     "issue": "タスク",
     "trigger": "トリガー",
-    "next": "ウェイクアップ状態",
     "enabled": "有効",
     "all_triggers": "すべてのトリガー",
     "event": "イベント",
@@ -484,7 +483,6 @@
     "recurring": "繰り返し",
     "all_agents": "すべてのエージェント",
     "search": "タスク・エージェントを検索",
-    "search_action": "検索",
     "running": "実行中",
     "active_runs": "{{count}} 件の実行が進行中",
     "issue_closed": "タスクは終了済み",
@@ -510,13 +508,31 @@
       "active": "起動待ち・実行中",
       "all": "すべて",
       "disabled": "無効",
-      "ended": "終了"
+      "ended": "終了",
+      "paused": "一時停止中"
     },
     "target_agent": "起動するエージェント",
-    "wakeup_run": "起動後の実行",
     "empty_filtered": "一致するルールがありません",
     "clear_filters": "フィルターを解除",
     "batch_success": "{{count}} 件のルールを無効化しました",
-    "batch_partial": "{{succeeded}} 件を無効化、{{failed}} 件が失敗しました。失敗した項目を選択したまま再試行できます。"
+    "batch_partial": "{{succeeded}} 件を無効化、{{failed}} 件が失敗しました。失敗した項目を選択したまま再試行できます。",
+    "source": "作成元",
+    "sources": {
+      "all": "作成元：すべて",
+      "member": "メンバー",
+      "agent": "エージェント",
+      "system": "システム"
+    },
+    "runs_7d": "直近 7 日の実行",
+    "ends": "期限",
+    "until_issue_ends": "タスク終了まで",
+    "fires_once": "一度だけ起動",
+    "assignee_target": "担当者 · {{name}}",
+    "no_target": "エージェントの担当者なし",
+    "banner_other": "{{count}} 件の起動が自動で一時停止しました：{{issue}}「{{condition}}」— {{reason}}",
+    "banner_view": "表示",
+    "create": "起動を追加",
+    "create_pick_issue": "起動を追加するタスクを選択",
+    "create_pick_issue_description": "起動はこのタスクに属し、タスクの終了とともに終わります。"
   }
 }

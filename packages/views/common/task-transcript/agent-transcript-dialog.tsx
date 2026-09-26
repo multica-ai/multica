@@ -808,7 +808,9 @@ export function AgentTranscriptDialog({
   // up front than the runtime/provider diagnostics, which live in the ⓘ popover.
   const triggerLabel = task.parent_task_id
     ? t(($) => $.transcript.trigger_retry)
-    : task.kind === "comment" || task.trigger_comment_id
+    : task.wakeup_id
+      ? t(($) => $.transcript.trigger_wakeup)
+      : task.kind === "comment" || task.trigger_comment_id
       ? t(($) => $.transcript.trigger_comment)
       : task.kind === "autopilot" || task.autopilot_run_id
         ? t(($) => $.transcript.trigger_autopilot)

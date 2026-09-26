@@ -1998,6 +1998,8 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText(/set this issue to keep its status when PRs merge/i)).toBeInTheDocument();
   });
 
+  // MUL-7680: the child-done system rule's comment is the woken agent's
+  // instruction; people read one timeline line that can reveal it.
   it("renders activity rows with unknown status values without crashing", async () => {
     mockApiObj.listTimeline.mockResolvedValue([
       {

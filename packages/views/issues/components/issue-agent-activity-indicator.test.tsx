@@ -6,8 +6,12 @@ import type { AgentTask } from "@multica/core/types";
 const mockState = vi.hoisted(() => ({
   snapshot: [] as unknown[],
   summaries: [] as unknown[],
+  paused: [] as unknown[],
 }));
 
+vi.mock("./wakeup-condition-names", () => ({
+  useConditionNames: () => ({ status: (key: string) => key, label: () => undefined, property: () => undefined, actor: (_type: string, id: string) => id }),
+}));
 vi.mock("../../common/use-viewing-timezone", () => ({
   useViewingTimezone: () => "UTC",
 }));
@@ -90,6 +94,10 @@ vi.mock("@tanstack/react-query", async () => {
             : mockState.snapshot,
         };
       }
+      if (opts.queryKey?.[0] === "issue-wakeup-paused")
+        return {
+          data: opts.select ? opts.select(mockState.paused) : mockState.paused,
+        };
       if (opts.queryKey?.[0] === "issue-wakeup-summaries")
         return {
           data: opts.select
@@ -122,6 +130,7 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
 }
 
 beforeEach(() => {
+  mockState.paused = [];
   cleanup();
   mockState.snapshot = [makeTask()];
   mockState.summaries = [];
@@ -180,9 +189,23 @@ it("shows waiting and aggregate count even without an active run", () => {
   mockState.snapshot = [];
   mockState.summaries = [eventSummary];
   render(<IssueAgentActivityIndicator issueId="issue-1" hoverCard={false} />);
-  expect(screen.getByText("Waiting for trigger")).toBeInTheDocument();
+  // The cue says what the issue waits for, in a few words.
+  expect(screen.getByText("Waiting for a run to end")).toBeInTheDocument();
   expect(screen.getByText("+1")).toBeInTheDocument();
   expect(screen.queryByTestId("agent-avatar-stack")).toBeNull();
+});
+it("names the person a reply wait is for", () => {
+  mockState.snapshot = [];
+  mockState.summaries = [{ ...eventSummary, event_types: ["comment.created"], filter_actor_type: "member", filter_actor_id: "u1", filter_actor_name: "Jiayuan" }];
+  render(<IssueAgentActivityIndicator issueId="issue-1" hoverCard={false} />);
+  expect(screen.getByText("Waiting for Jiayuan to reply")).toBeInTheDocument();
+});
+it("flags a rule the platform paused when nothing else is waiting", () => {
+  mockState.snapshot = [];
+  mockState.summaries = [];
+  mockState.paused = [{ issue_id: "issue-1", id: "wake-9", agent_id: "agent-1", paused_reason: "loop" }];
+  render(<IssueAgentActivityIndicator issueId="issue-1" hoverCard={false} />);
+  expect(screen.getByText("Wakeup paused")).toBeInTheDocument();
 });
 it("prioritizes active runs, marking wakeup origin separately from future count", () => {
   mockState.snapshot = [

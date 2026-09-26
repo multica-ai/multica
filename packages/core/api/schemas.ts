@@ -3538,6 +3538,28 @@ export const EMPTY_JOIN_SHARE_LINK_RESPONSE: {
   workspace_slug: "",
 };
 
+export const WakeupConditionSchema = z.union([
+  z.object({ type: z.literal("issue_field"), field: z.literal("status"), value: z.string() }),
+  z.object({ type: z.literal("issue_field"), field: z.literal("assignee"), assignee_type: z.enum(["member", "agent", "squad"]), assignee_id: z.string() }),
+  z.object({ type: z.literal("issue_field"), field: z.literal("label"), label_id: z.string() }),
+  z.object({ type: z.literal("issue_field"), field: z.literal("property"), property_id: z.string(), value: z.unknown() }),
+  z.object({ type: z.literal("children_done"), stage: z.number().int().nullish() }),
+  z.object({ type: z.literal("pull_request"), event: z.enum(["checks_finished", "merged"]) }),
+  z.object({ type: z.literal("other_issue"), issue_id: z.string(), state: z.enum(["done", "ended", "in_review"]), identifier: z.string().optional() }),
+]);
+
+export const WakeupRunSchema = z.object({
+  id: z.string(), status: z.string(), created_at: z.string(),
+  started_at: z.string().nullable(), completed_at: z.string().nullable(),
+  checkin_note: z.string().default(""), triggers: z.array(z.string()).default([]),
+  commented: z.boolean().default(false),
+});
+
+export const PausedWakeupSchema = z.object({
+  issue_id: z.string(), id: z.string(), agent_id: z.string(),
+  paused_reason: z.enum(["max_fires", "loop", "rate"]).catch("rate"),
+});
+
 export const IssueWakeupSchema = z.object({
   id: z.string(), issue_id: z.string(), agent_id: z.string(), agent_name: z.string().default(""),
   instruction: z.string(), kind: z.enum(["event", "at", "every", "cron"]), mode: z.enum(["once", "continuous"]),
@@ -3550,13 +3572,38 @@ export const IssueWakeupSchema = z.object({
   filter_actor_name: z.string().nullable().optional(),
   revision: z.number().int().positive().optional(),
   filter_agent_name: z.string().nullable().optional(), last_task_status: z.string().nullable().optional(),
+  expires_at: z.string().nullish(), expiry_seconds: z.number().nullish(),
+  on_timeout: z.enum(["wake", "end"]).nullish().catch(null), timed_out_at: z.string().nullish(),
+  created_by_agent: z.boolean().optional(), created_by_name: z.string().nullish(),
+  source_agent_id: z.string().nullish(), source_agent_name: z.string().nullish(),
+  // An unknown condition shape from a newer server reads as "no condition".
+  condition: WakeupConditionSchema.nullish().catch(null),
+  max_fires: z.number().int().nullish(), fire_count: z.number().int().nonnegative().optional().catch(undefined),
+  paused_reason: z.enum(["max_fires", "loop", "rate"]).nullish().catch(null),
+});
+
+export const SystemWakeupSchema = z.object({
+  id: z.string().default(""), revision: z.number().int().nonnegative().default(0),
+  rule: z.literal("child_done"), enabled: z.boolean(), instruction: z.string().default(""),
+  default_instruction: z.string().default(""), customized: z.boolean().default(false),
+  paused_reason: z.enum(["max_fires", "loop", "rate"]).nullish().catch(null).transform((v) => v ?? null),
+  staged: z.boolean(), stage: z.number().int().nullable(), total: z.number().int().nonnegative(),
+  remaining: z.number().int().nonnegative(), waiting: z.array(z.string()).default([]),
+  target: z.object({ type: z.enum(["agent", "squad", "member"]), id: z.string(), name: z.string() }).nullable().catch(null),
+  blocked: z.enum(["", "backlog", "member_assignee", "no_assignee"]).catch(""),
+  workspace_default: z.boolean().default(true),
+});
+
+export const WorkspaceSystemWakeupSchema = z.object({
+  rule: z.literal("child_done"), enabled: z.boolean().default(true), instruction: z.string().default(""),
+  builtin_instruction: z.string().default(""), customized: z.number().int().nonnegative().default(0),
 });
 
 export const IssueWakeupSummaryRowSchema = IssueWakeupSchema.pick({
   id: true, issue_id: true, agent_id: true, agent_name: true, kind: true, mode: true,
   event_types: true, filter_task_id: true, filter_agent_name: true, interval_seconds: true,
   filter_actor_type: true, filter_actor_id: true, filter_actor_name: true,
-  cron_expression: true, timezone: true, next_fire_at: true,
+  cron_expression: true, timezone: true, next_fire_at: true, condition: true,
 }).extend({ active_count: z.number().int().positive(), event_count: z.number().int().nonnegative() });
 
 export const WorkspaceWakeupPageSchema = z.object({
@@ -3564,10 +3611,20 @@ export const WorkspaceWakeupPageSchema = z.object({
     issue_title: z.string(), issue_identifier: z.string(), issue_closed: z.boolean(),
     can_manage: z.boolean(), active_runs: z.number().int().nonnegative(),
     task: AgentTaskSchema.nullable(),
+    // System rule rows have no target when the issue has no agent assignee,
+    // and no revision.
+    agent_id: z.string().nullish().transform((v) => v ?? ""),
+    revision: z.number().int().positive().nullish().catch(undefined).transform((v) => v ?? undefined),
+    source: z.enum(["member", "agent", "system"]).catch("member").default("member"),
+    runs_7d: z.number().int().nonnegative().default(0),
+    rule: z.literal("child_done").nullish().catch(null),
+    system_stage: z.number().int().nullish(), system_remaining: z.number().int().nullish(),
+    target_type: z.string().nullish(),
   })),
   total: z.number().int().nonnegative(),
   counts: z.object({
     active: z.number().int().nonnegative(), all: z.number().int().nonnegative(),
+    paused: z.number().int().nonnegative().default(0),
     disabled: z.number().int().nonnegative(), ended: z.number().int().nonnegative(),
   }),
   agents: z.array(z.object({ id: z.string(), name: z.string() })),

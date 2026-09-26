@@ -30,6 +30,7 @@ import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { IssueUsageDialog } from "./issue-usage-dialog";
 import { TaskStatusIcon } from "./task-status-icon";
 import { useStatusLabel, useTriggerText } from "./task-run-labels";
+import { WakeupRunLabel } from "./wakeup-source-chip";
 
 // Right-panel section that lists every agent run for this issue. Active
 // runs sit at the top (always visible when present); past runs (terminal
@@ -363,7 +364,11 @@ export function ActiveTaskRow({
   // same change that adds incremental reporting + cache invalidation.
   return (
     <RowShell task={task}>
-      <TriggerText text={trigger} />
+      {task.wakeup_id ? (
+        <WakeupRunLabel task={task} fallback={trigger} render={(label) => <TriggerText text={label} />} />
+      ) : (
+        <TriggerText text={trigger} />
+      )}
       <TaskCommentCoverage task={task} />
       <RowStatus title={label}>
         {task.status === "running" ? (
@@ -505,7 +510,11 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
 
   return (
     <RowShell task={task} title={rowTitle}>
-      <TriggerText text={trigger} />
+      {task.wakeup_id ? (
+        <WakeupRunLabel task={task} fallback={trigger} render={(label) => <TriggerText text={label} />} />
+      ) : (
+        <TriggerText text={trigger} />
+      )}
       <TaskCommentCoverage task={task} />
       <RowStatus title={statusTitle}>
         <TaskStatusIcon status={task.status} />

@@ -94,39 +94,54 @@ func TestIssueWakeupEventAtomicOnceAndIndependentInputs(t *testing.T) {
 		t.Fatalf("rollback left %d receipts", n)
 	}
 	comment := f.Comment(t, util.UUIDToString(issue), "source")
-	// Existing assign task must coexist and must not absorb the wakeup.
-	ordinary := f.Task(t, agent, testutil.Cols{"issue_id": issue, "runtime_id": testutil.Raw("(SELECT runtime_id FROM agent WHERE id='" + agent + "')")})
+	// The agent's assignment run, which runs as the rule's creator, is still
+	// waiting to start: the wakeup keeps its input for it instead of queuing a
+	// second run behind it, and hands it over when the run is claimed.
+	ordinary := wakeWaitingRun(t, f, issue, agent, f.UserID)
 	wakeDispatch(t, s, w)
 	wakeDispatch(t, s, w)
+	if n := wakeRuns(t, f, w.ID); n != 0 {
+		t.Fatalf("the wakeup queued %d runs of its own", n)
+	}
 	got, e := f.q.GetIssueWakeup(ctx, db.GetIssueWakeupParams{ID: w.ID, WorkspaceID: w.WorkspaceID})
 	if e != nil {
 		t.Fatal(e)
 	}
-	if got.Enabled || !got.LastTaskID.Valid {
-		t.Fatalf("not consumed: %+v", got)
+	if !got.Enabled || got.LastTaskID.Valid {
+		t.Fatalf("the once rule was used up before its input was handed over: %+v", got)
 	}
-	task, e := f.q.GetAgentTask(ctx, got.LastTaskID)
+	if notes := wakeClaim(t, f, s, ordinary); !strings.Contains(notes, comment) || !strings.Contains(notes, "Review latest changes") {
+		t.Fatalf("the claimed run lacks the joined input: %q", notes)
+	}
+	got, e = f.q.GetIssueWakeup(ctx, db.GetIssueWakeupParams{ID: w.ID, WorkspaceID: w.WorkspaceID})
 	if e != nil {
 		t.Fatal(e)
+	}
+	if got.Enabled || util.UUIDToString(got.LastTaskID) != ordinary || got.FireCount != 1 {
+		t.Fatalf("after joining: enabled=%t last_task=%s fire_count=%d", got.Enabled, util.UUIDToString(got.LastTaskID), got.FireCount)
+	}
+	if n := wakeRuns(t, f, w.ID); n != 0 {
+		t.Fatalf("the wakeup also queued %d runs of its own", n)
+	}
+}
+
+// Without a run waiting to start, the wakeup starts its own run under the
+// rule creator's authority.
+func TestIssueWakeupStartsItsOwnRunWhenNothingWaits(t *testing.T) {
+	f, s, issue, agent := wakeFixture(t)
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", EventTypes: []string{"comment.created"}, Instruction: "Review latest changes"})
+	comment := f.Comment(t, util.UUIDToString(issue), "source")
+	wakeDispatch(t, s, w)
+	got, err := f.q.GetIssueWakeup(context.Background(), db.GetIssueWakeupParams{ID: w.ID, WorkspaceID: w.WorkspaceID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := f.q.GetAgentTask(context.Background(), got.LastTaskID)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if !strings.Contains(task.HandoffNote.String, comment) || task.OriginatorUserID != parseTestUUID(t, f.UserID) {
 		t.Fatal("missing input or principal")
-	}
-	if n := f.Count(t, "SELECT count(*) FROM agent_task_queue WHERE context->>'wakeup_id'=$1", util.UUIDToString(w.ID)); n != 1 {
-		t.Fatalf("duplicate runs %d", n)
-	}
-	_, e = s.Disable(ctx, issue, w.ID, parseTestUUID(t, f.UserID))
-	if e != nil {
-		t.Fatal(e)
-	}
-	var status string
-	f.QueryRow(t, "SELECT status FROM agent_task_queue WHERE id=$1", ordinary).Scan(&status)
-	if status != "queued" {
-		t.Fatal("disable changed assign task")
-	}
-	f.QueryRow(t, "SELECT status FROM agent_task_queue WHERE id=$1", task.ID).Scan(&status)
-	if status != "cancelled" {
-		t.Fatal("wakeup not withdrawn")
 	}
 }
 

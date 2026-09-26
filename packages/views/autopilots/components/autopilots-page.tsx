@@ -50,7 +50,7 @@ import {
   TabsTrigger,
   TabsContent,
 } from "@multica/ui/components/ui/tabs";
-import { WorkspaceWakeups } from "./workspace-wakeups";
+import { WorkspaceWakeupCreate, WorkspaceWakeups } from "./workspace-wakeups";
 import { useNavigation, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { formatInTimeZone } from "../../common/format-in-time-zone";
@@ -639,6 +639,7 @@ export function AutopilotsPage() {
   });
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [wakeupCreateOpen, setWakeupCreateOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] =
     useState<AutopilotTemplate | null>(null);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
@@ -809,11 +810,17 @@ export function AutopilotsPage() {
         title={t(($) => $.page.title)}
         count={tab === "autopilots" ? totalCount : undefined}
         actions={
-          tab === "autopilots" && (
+          tab === "autopilots" ? (
             <CollectionPageHeaderAction
               icon={Plus}
               label={t(($) => $.page.new_autopilot)}
               onClick={() => openCreate()}
+            />
+          ) : (
+            <CollectionPageHeaderAction
+              icon={Plus}
+              label={t(($) => $.wakeups.create)}
+              onClick={() => setWakeupCreateOpen(true)}
             />
           )
         }
@@ -830,6 +837,7 @@ export function AutopilotsPage() {
         className="flex min-h-0 flex-col data-hidden:hidden"
       >
         <WorkspaceWakeups key={wsId} />
+        <WorkspaceWakeupCreate open={wakeupCreateOpen} onOpenChange={setWakeupCreateOpen} />
       </TabsContent>
       <TabsContent
         value="autopilots"

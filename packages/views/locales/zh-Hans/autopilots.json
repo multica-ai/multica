@@ -476,7 +476,6 @@
     "scope": "范围",
     "issue": "任务",
     "trigger": "触发条件",
-    "next": "唤醒状态",
     "enabled": "开启",
     "all_triggers": "所有触发方式",
     "event": "事件",
@@ -484,7 +483,6 @@
     "recurring": "周期",
     "all_agents": "所有智能体",
     "search": "搜索任务或智能体",
-    "search_action": "搜索",
     "running": "运行中",
     "active_runs": "{{count}} 个运行未结束",
     "issue_closed": "任务已关闭",
@@ -510,13 +508,31 @@
       "active": "待唤醒或执行中",
       "all": "全部",
       "disabled": "已关闭",
-      "ended": "已结束"
+      "ended": "已结束",
+      "paused": "已暂停"
     },
     "target_agent": "唤醒对象",
-    "wakeup_run": "唤醒后的运行",
     "empty_filtered": "没有匹配的唤醒",
     "clear_filters": "清除筛选",
     "batch_success": "已关闭 {{count}} 条唤醒",
-    "batch_partial": "已关闭 {{succeeded}} 条，{{failed}} 条失败；失败项仍保留选中，可重试。"
+    "batch_partial": "已关闭 {{succeeded}} 条，{{failed}} 条失败；失败项仍保留选中，可重试。",
+    "source": "来源",
+    "sources": {
+      "all": "来源：全部",
+      "member": "成员",
+      "agent": "智能体",
+      "system": "系统"
+    },
+    "runs_7d": "近 7 天运行",
+    "ends": "有效期",
+    "until_issue_ends": "任务结束前",
+    "fires_once": "触发一次",
+    "assignee_target": "负责人 · {{name}}",
+    "no_target": "没有智能体负责人",
+    "banner_other": "{{count}} 条唤醒已自动暂停：{{issue}}「{{condition}}」——{{reason}}",
+    "banner_view": "查看",
+    "create": "新建唤醒",
+    "create_pick_issue": "选择要添加唤醒的任务",
+    "create_pick_issue_description": "唤醒属于该任务，并随任务结束而停止。"
   }
 }

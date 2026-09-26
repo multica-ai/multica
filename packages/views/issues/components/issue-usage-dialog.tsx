@@ -25,6 +25,7 @@ import {
 } from "../../runtimes/utils";
 import { KpiCard } from "../../runtimes/components/shared";
 import { useStatusLabel, useTriggerText } from "./task-run-labels";
+import { WakeupRunLabel } from "./wakeup-source-chip";
 import { TaskStatusIcon } from "./task-status-icon";
 
 // Per-run cost breakdown for one issue — the surface the execution log's
@@ -341,7 +342,9 @@ function RunRow({ task, maxTokens }: { task: AgentTask; maxTokens: number }) {
       <td className="!pl-0 !text-left">
         <div className="flex items-center gap-2">
           <ActorAvatar actorType="agent" actorId={task.agent_id} size="sm" enableHoverCard />
-          <span className="max-w-[13rem] truncate">{trigger}</span>
+          <span className="max-w-[13rem] truncate">
+            {task.wakeup_id ? <WakeupRunLabel task={task} fallback={trigger} render={(label) => label} /> : trigger}
+          </span>
           {task.status === "running" ? (
             <span className="inline-flex shrink-0 items-center gap-1 text-micro text-info">
               <span className="h-1.5 w-1.5 rounded-full bg-info" />

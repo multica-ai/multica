@@ -33,6 +33,9 @@ export function useTriggerText(task: AgentTask): string {
       ? t(($) => $.execution_log.trigger_retry_attempt_prefix, { attempt: task.attempt })
       : t(($) => $.execution_log.trigger_retry_prefix)
     : "";
+  // A wakeup run's stored summary is the rule's instruction; it reads as
+  // the wakeup instead. WakeupRunLabel adds the rule's condition.
+  if (task.wakeup_id) return retryPrefix + t(($) => $.wakeups.triggered_by_wakeup);
 
   if (task.trigger_summary) return retryPrefix + stripMentionMarkdown(task.trigger_summary);
   if (isRetry) {

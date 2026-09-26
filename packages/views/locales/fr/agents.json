@@ -910,7 +910,8 @@
     "tool_kind_command": "Commandes",
     "tool_kind_write": "Modifications",
     "tool_kind_read": "Lectures",
-    "tool_kind_misc": "Autres"
+    "tool_kind_misc": "Autres",
+    "trigger_wakeup": "Réveil"
   },
   "task_failure": {
     "cancelled_by_system": "Annulée par le système",

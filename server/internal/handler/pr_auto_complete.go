@@ -286,7 +286,9 @@ func (h *Handler) maybeAutoCompleteIssue(ctx context.Context, workspaceID, issue
 	h.broadcastCancelledWakeups(ctx, updated.WorkspaceID, cancelledWakeups)
 	// A merged PR is the most common way a sub-issue reaches done; the parent
 	// hears about it on the same path as a manual status change.
-	h.notifyParentOfChildDone(ctx, issue, updated)
+	if updated.ParentIssueID.Valid {
+		h.processChildEvents(ctx, updated.ParentIssueID)
+	}
 
 	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
 	resp := issueToResponse(updated, prefix)

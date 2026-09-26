@@ -61,6 +61,7 @@ import { useCommentAnnotations } from "./use-comment-annotations";
 import { useAttachmentVersions } from "./deliverables/attachment-versions";
 import { VersionBadge } from "./deliverables/version-badge";
 import { useRunCommentMotion } from "./use-run-comment-motion";
+import { WakeupSourceChip } from "./wakeup-source-chip";
 
 const commentActionClassName =
   "text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50";
@@ -730,6 +731,10 @@ function CommentRow({
         <SteerBadge issueId={issueId} entry={entry} />
         {runHeader}
 
+        {entry.actor_type === "agent" && entry.source_task_id && (
+          <WakeupSourceChip issueId={issueId} taskId={entry.source_task_id} />
+        )}
+
         {isResolution && (
           <span className="text-caption font-medium text-success">
             {t(($) => $.comment.resolve.resolution_badge)}
@@ -1234,6 +1239,9 @@ function CommentCardImpl({
 
                   <SteerBadge issueId={issueId} entry={entry} />
                   {renderRuns(entry.id, "header")}
+                  {entry.actor_type === "agent" && entry.source_task_id && (
+                    <WakeupSourceChip issueId={issueId} taskId={entry.source_task_id} />
+                  )}
                 </>
               )}
 
