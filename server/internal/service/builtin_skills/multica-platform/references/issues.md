@@ -278,6 +278,12 @@ archived statuses remain readable via an explicit status filter.
 - **Failed issue-triggered tasks** may roll an issue from `in_progress` back to
   `todo` when no active task / retry remains — that is the main server-owned
   status write on the agent-run path.
+  Provider overload/rate limits and temporary server errors retry within the
+  configured attempt budget (2 by default; 1 disables retries). The first retry
+  waits 30-60 seconds, with exponential backoff and jitter capped at 5 minutes.
+  A `deferred` retry is persisted work: wait for it instead of dispatching a
+  duplicate run. Auth and billing-quota failures still need intervention, and
+  run-only Autopilots retain their own schedule.
 
 ## Who else is running right now
 

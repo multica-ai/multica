@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 	"sync"
@@ -5201,7 +5202,8 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 // etc.) are intentionally excluded — those are real problems that the user
 // should see, not infrastructure flakiness.
 //
-// The one agent_error.* exception is provider_network: a mid-stream provider
+// Transient provider errors are exceptions. Overload/rate limits and provider
+// server errors retry with backoff and the configured attempt budget. A network
 // disconnect (e.g. Claude Code's "API Error: Connection closed mid-response")
 // is transient infrastructure flakiness, not an agent decision. Unattended
 // issue runs otherwise terminate on it, while interactive chat only survives
@@ -5214,12 +5216,14 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 // that did download is already cached on disk — a retry resumes from there
 // instead of re-fetching the whole set (MUL-5370).
 var retryableReasons = map[string]bool{
-	string(taskfailure.ReasonRuntimeOffline):         true,
-	string(taskfailure.ReasonRuntimeRecovery):        true,
-	string(taskfailure.ReasonTimeout):                true,
-	"codex_semantic_inactivity":                      true,
-	string(taskfailure.ReasonAgentProviderNetwork):   true,
-	string(taskfailure.ReasonSkillBundleUnavailable): true,
+	string(taskfailure.ReasonRuntimeOffline):                   true,
+	string(taskfailure.ReasonRuntimeRecovery):                  true,
+	string(taskfailure.ReasonTimeout):                          true,
+	"codex_semantic_inactivity":                                true,
+	string(taskfailure.ReasonAgentProviderNetwork):             true,
+	string(taskfailure.ReasonAgentProviderCapacityOrRateLimit): true,
+	string(taskfailure.ReasonAgentProviderServerError):         true,
+	string(taskfailure.ReasonSkillBundleUnavailable):           true,
 }
 
 // runtime_offline retries start deferred, not queued: their positive fire_at
@@ -5232,12 +5236,15 @@ var retryableReasons = map[string]bool{
 // Transient provider stream cuts (provider_network) get a bespoke three-tier
 // schedule (MUL-4910): first run + immediate retry + one retry deferred ~5s.
 // A blip that survives the immediate retry gets a short cooldown before the
-// final attempt instead of firing back-to-back. Every other retryable reason
-// keeps the task's generic max_attempts ceiling and retries immediately.
+// final attempt instead of firing back-to-back. Overload and server failures
+// keep the configured max_attempts and use exponential backoff with equal jitter,
+// starting at 30-60 seconds and capped at 5 minutes. Other retries are immediate.
 const (
 	runtimeOfflineRetryDeferral   = time.Second
 	providerNetworkMaxAttempts    = 3
 	providerNetworkFinalRetryWait = 5 * time.Second
+	providerBackoffInitialWait    = time.Minute
+	providerBackoffMaxWait        = 5 * time.Minute
 )
 
 // retryAttemptCeiling reports how many attempts the auto-retry path allows for
@@ -5264,10 +5271,17 @@ func retryAttemptCeiling(reason string, taskMaxAttempts int32) int32 {
 // retryDelayForAttempt reports how long to defer the NEXT attempt after a
 // failure at failedAttempt. runtime_offline always gets a positive fire_at so
 // it waits for the health-gated promotion path. provider_network's final
-// attempt is deferred ~5s; every other retry remains immediate (zero delay →
-// the child is created 'queued', claimable at once). Callers pass the returned
-// delay to CreateRetryTask via fire_at.
+// attempt is deferred ~5s. Overload and server errors receive a jittered cooldown
+// persisted as fire_at; no worker or request sleeps while waiting.
 func retryDelayForAttempt(reason string, failedAttempt int32) time.Duration {
+	if reason == string(taskfailure.ReasonAgentProviderCapacityOrRateLimit) ||
+		reason == string(taskfailure.ReasonAgentProviderServerError) {
+		ceiling := providerBackoffInitialWait
+		for attempt := int32(1); attempt < failedAttempt && ceiling < providerBackoffMaxWait; attempt++ {
+			ceiling = min(ceiling*2, providerBackoffMaxWait)
+		}
+		return ceiling/2 + time.Duration(rand.Int64N(int64(ceiling/2)+1))
+	}
 	if reason == string(taskfailure.ReasonRuntimeOffline) {
 		return runtimeOfflineRetryDeferral
 	}

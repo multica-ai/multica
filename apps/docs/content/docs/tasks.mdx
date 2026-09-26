@@ -79,6 +79,8 @@ Changing an issue's assignee or status does not stop a run that has already star
 
 Transient faults — a runtime going briefly offline, a daemon restart, an execution timeout, or a network interruption in the AI coding tool — can trigger an automatic retry. A regular run executes at most twice by default; tool network interruptions get up to three attempts.
 
+Provider overload, rate limits (429/529), and temporary server errors (5xx) also retry within the configured attempt budget. The first retry waits 30-60 seconds; subsequent delays double, with random jitter and a five-minute cap. Setting `max_attempts` to `1` disables automatic retries. Pending retries are stored in the database and resume the existing session when possible.
+
 Errors returned by the agent itself are usually not retried automatically. Expired credentials, exhausted quota, misconfiguration, or a model unable to complete the request all need the cause fixed first, followed by a manual retry.
 
 An Autopilot's **run only** mode does not retry automatically, to avoid overlapping with the next scheduled run. The **create issue** mode produces regular issue runs, so infrastructure failures still retry under the rules above. Both modes show their final result in the Autopilot run history.
@@ -110,8 +112,8 @@ The failure reasons shown in the execution log and usage stats fall into two gro
 | --- | --- | --- |
 | `provider_auth_or_access` | Model provider authentication failed or access denied (401/403) | Sign in again in that AI coding tool, or check the API key |
 | `provider_quota_limit` | Quota or balance exhausted (402) | Top up or switch accounts |
-| `provider_capacity_or_rate_limit` | Rate limited or out of capacity (429/529) | Retry later |
-| `provider_server_error` | Model provider server error (5xx) | Retry later |
+| `provider_capacity_or_rate_limit` | Rate limited or out of capacity (429/529) | Automatically retries after a cooldown while attempts remain |
+| `provider_server_error` | Model provider server error (5xx) | Automatically retries after a cooldown while attempts remain |
 | `provider_network` | Network failure reaching the model provider | Retries automatically; check the executing machine's network if it persists |
 | `model_not_found_or_unavailable` | The model does not exist or is currently unavailable | Pick an available model in the agent settings |
 | `context_overflow` | Context exceeded the model window | Narrow the issue scope or reduce the input |
@@ -165,6 +167,7 @@ Automatic retry covers only the transient faults below, and only applies to runs
 | Codex stalled with no meaningful output | 2 by default |
 | Skill bundle download failure | 2 by default (the agent process has not started at this point; already-downloaded bundles come from the local cache) |
 | Tool network interruption | Up to 3; the final attempt starts after a delay of about 5 seconds |
+| Provider overload, rate limit, or server error | Configured limit (2 by default); first retry after 30-60 seconds, exponential backoff capped at 5 minutes |
 
 All other failure reasons (auth, quota, configuration, model, and so on) never retry automatically; fix the cause first, then retry manually.
 

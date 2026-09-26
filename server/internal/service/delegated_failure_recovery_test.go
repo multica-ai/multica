@@ -1004,26 +1004,35 @@ func TestHandleFailedTasksFinalDelegatedFailureWakesCoordinator(t *testing.T) {
 }
 
 func TestFailTaskRetryPendingDoesNotWakeCoordinator(t *testing.T) {
-	f, svc := seedDelegatedFailureFixture(t)
-	ctx := context.Background()
-	failedID := f.insertWorkerTask(t, "running", "comment", 1, 2)
+	for _, tc := range []struct {
+		name, message, reason string
+	}{
+		{"timeout", "task timed out", "timeout"},
+		{"provider overload", "stream disconnected before completion: Our servers are currently overloaded. Please try again later.", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, svc := seedDelegatedFailureFixture(t)
+			ctx := context.Background()
+			failedID := f.insertWorkerTask(t, "running", "comment", 1, 2)
 
-	if _, err := svc.FailTask(ctx, failedID, "task timed out", "", "", "", "timeout", false, "", ""); err != nil {
-		t.Fatalf("FailTask: %v", err)
-	}
+			if _, err := svc.FailTask(ctx, failedID, tc.message, "", "", "", tc.reason, false, "", ""); err != nil {
+				t.Fatalf("FailTask: %v", err)
+			}
 
-	var retries, recoveries, comments int
-	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE parent_task_id = $1`, failedID).Scan(&retries); err != nil {
-		t.Fatalf("count retries: %v", err)
-	}
-	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&recoveries); err != nil {
-		t.Fatalf("count recoveries: %v", err)
-	}
-	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE type = 'progress_update' AND source_task_id = $1`, failedID).Scan(&comments); err != nil {
-		t.Fatalf("count recovery comments: %v", err)
-	}
-	if retries != 1 || recoveries != 0 || comments != 0 {
-		t.Fatalf("retry/recovery/comments = %d/%d/%d, want 1/0/0", retries, recoveries, comments)
+			var retries, recoveries, comments int
+			if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE parent_task_id = $1`, failedID).Scan(&retries); err != nil {
+				t.Fatalf("count retries: %v", err)
+			}
+			if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&recoveries); err != nil {
+				t.Fatalf("count recoveries: %v", err)
+			}
+			if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE type = 'progress_update' AND source_task_id = $1`, failedID).Scan(&comments); err != nil {
+				t.Fatalf("count recovery comments: %v", err)
+			}
+			if retries != 1 || recoveries != 0 || comments != 0 {
+				t.Fatalf("retry/recovery/comments = %d/%d/%d, want 1/0/0", retries, recoveries, comments)
+			}
+		})
 	}
 }
 
