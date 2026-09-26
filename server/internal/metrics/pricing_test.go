@@ -2,6 +2,30 @@ package metrics
 
 import "testing"
 
+func TestPriceForModelAliasDeepSeekFlash(t *testing.T) {
+	want := ModelPrice{
+		Provider:       "deepseek",
+		Model:          "flash",
+		InputPerM:      0.15,
+		CacheReadPerM:  0.003,
+		CacheWritePerM: 0.15,
+		OutputPerM:     0.60,
+	}
+	for _, model := range []string{
+		"deepseek-flash",
+		"deepseek/deepseek-flash",
+		"deepseek:deepseek-flash",
+	} {
+		got, ok := PriceForModelAlias(model)
+		if !ok {
+			t.Fatalf("PriceForModelAlias(%q) did not resolve", model)
+		}
+		if got != want {
+			t.Fatalf("PriceForModelAlias(%q) = %+v, want %+v", model, got, want)
+		}
+	}
+}
+
 func TestPriceForModelAliasAnthropicCurrentGeneration(t *testing.T) {
 	cases := []struct {
 		model string

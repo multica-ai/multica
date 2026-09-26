@@ -580,6 +580,23 @@ describe("estimateCost", () => {
     expect(cost).toBeCloseTo(0.14 + 0.28 + 0.0028, 5);
   });
 
+  it("prices the current deepseek-flash id at its published off-peak rate", () => {
+    const usage = {
+      ...zeroUsage,
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+    };
+
+    expect(estimateCost({ ...usage, model: "deepseek-flash" })).toBeCloseTo(
+      0.15 + 0.6 + 0.003,
+      5,
+    );
+    expect(
+      estimateCost({ ...usage, model: "deepseek/deepseek-flash" }),
+    ).toBeCloseTo(0.15 + 0.6 + 0.003, 5);
+  });
+
   it("prices the deepseek-chat / deepseek-reasoner aliases at the same rate as deepseek-v4-flash", () => {
     // The DeepSeek docs explicitly route both legacy names to v4-flash —
     // they must hit the same numbers, not the older $0.27/$1.10 tier.
@@ -933,6 +950,7 @@ describe("estimateCost", () => {
     // would only fire on bare IDs and the dashboard would still show
     // $0.00 for the runtime that actually triggered this work.
     expect(isModelPriced("deepseek/deepseek-v4-flash")).toBe(true);
+    expect(isModelPriced("deepseek/deepseek-flash")).toBe(true);
     expect(isModelPriced("moonshotai/kimi-k2.6")).toBe(true);
     expect(isModelPriced("zhipuai/glm-5.1")).toBe(true);
     expect(isModelPriced("zhipuai/glm-4.5-air")).toBe(true);

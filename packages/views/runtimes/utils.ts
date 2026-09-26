@@ -276,14 +276,15 @@ const MODEL_PRICING: Record<
   "gpt-4o-mini":        { input: 0.15, output: 0.60, cacheRead: 0.075, cacheWrite: 0.15 },
   "gpt-4o":             { input: 2.50, output: 10,   cacheRead: 1.25,  cacheWrite: 2.50 },
 
-  // -- DeepSeek (api-docs.deepseek.com/quick_start/pricing).
-  //    The official catalog lists exactly two current SKUs; `deepseek-chat`
-  //    and `deepseek-reasoner` are aliases that route to `deepseek-v4-flash`
-  //    (non-thinking and thinking mode respectively) per the same page.
+  // -- DeepSeek (api-docs.deepseek.com/quick_start/pricing; models.dev).
+  //    `deepseek-flash` is the current V4.1 Flash ID. Its static row uses the
+  //    published off-peak rate because usage records do not carry the billing
+  //    window. Retired IDs keep their existing rows for historical estimates.
   //    `deepseek-v4-pro` is currently under a 75%-off promo that ends
   //    2026-05-31 15:59 UTC; we price at the post-promo standard rate
   //    ($1.74/$3.48) so the dashboard does not jump 4× on June 1 — accept
   //    a brief over-estimate during the promo over a sudden cliff after it. --
+  "deepseek-flash":     { input: 0.15, output: 0.60, cacheRead: 0.003, cacheWrite: 0.15 },
   "deepseek-v4-flash":  { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
   "deepseek-v4-pro":    { input: 1.74, output: 3.48, cacheRead: 0.0145, cacheWrite: 1.74 },
   "deepseek-chat":      { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
