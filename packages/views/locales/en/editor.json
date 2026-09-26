@@ -162,5 +162,23 @@
     "export_png": "Download PNG",
     "export_svg": "Download SVG",
     "export_source": "Download .mmd"
+  },
+  "diff": {
+    "layout": "Diff layout",
+    "unified": "Unified",
+    "split": "Split",
+    "filter_files": "Filter files",
+    "files_count_one": "{{count}} file",
+    "files_count_other": "{{count}} files",
+    "no_matching_files": "No files match",
+    "binary": "Binary file",
+    "file_not_in_patch": "No line-by-line diff was kept for this file",
+    "no_text_changes": "Only the name or mode changed",
+    "show_more_lines_one": "Show {{count}} more line",
+    "show_more_lines_other": "Show {{count}} more lines",
+    "copy_path": "Copy path",
+    "path_copied": "Path copied",
+    "copy_failed": "Couldn't copy",
+    "no_changes": "No changes"
   }
 }

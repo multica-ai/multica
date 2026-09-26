@@ -1186,5 +1186,32 @@
     "overview_close": "Close",
     "overview_empty": "No deliverables of this type.",
     "group_comment_by": "Comment by {{name}}"
+  },
+  "code_changes": {
+    "card_title": "Changes in this run",
+    "viewer_title": "Code changes",
+    "files_one": "{{count}} file",
+    "files_other": "{{count}} files",
+    "run_number": "Run #{{number}}",
+    "scope_label": "Changes to show",
+    "scope_run": "This run",
+    "scope_run_numbered": "This run #{{number}}",
+    "scope_issue": "Whole issue",
+    "scope_issue_pr": "Whole issue · PR #{{number}}",
+    "list_run_one": "This run · {{count}} file",
+    "list_run_other": "This run · {{count}} files",
+    "list_issue_one": "Whole issue · {{count}} file",
+    "list_issue_other": "Whole issue · {{count}} files",
+    "copy_patch": "Copy patch",
+    "download_patch": "Download patch",
+    "patch_copied": "Patch copied",
+    "copy_failed": "Couldn't copy",
+    "open_pr": "Open PR #{{number}}",
+    "patch_too_large": "Too large to show line by line; only the file list was kept.",
+    "patch_unavailable": "The line-by-line diff couldn't be read; only the file list is shown.",
+    "files_truncated": "Only the first {{count}} files are listed.",
+    "pr_fallback": "Couldn't read PR #{{number}} from GitHub. Showing the branch against where the work started.",
+    "loading": "Loading changes…",
+    "load_failed": "Couldn't load the changes"
   }
 }

@@ -11,7 +11,7 @@
  * rather than looked at (Markdown, text) render on a centered sheet that
  * keeps the app's own theme.
  *
- * Single viewer for every previewable kind. Handles 9 PreviewKinds:
+ * Single viewer for every previewable kind. Handles 10 PreviewKinds:
  *
  *   - image : <img> on the shared ZoomCanvas — fit on open, then wheel /
  *             drag / pinch / double-click / keyboard zoom, same controls as
@@ -38,6 +38,9 @@
  *   - text     : fetch text, highlight with lowlight if the extension
  *                maps to a known hljs language, with numbered lines and a
  *                wrap toggle.
+ *   - diff     : fetch text, parse it as a unified diff and show it in the
+ *                diff viewer (file list + unified / side-by-side diff). Text
+ *                that holds no diff falls back to the text view.
  *
  * The same top bar and stage also stand alone as the "open in new tab" page
  * (`AttachmentPreviewStandalone`), so a file looks the same in both.
@@ -53,7 +56,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -71,6 +73,7 @@ import {
   File,
   FileAudio,
   FileCode,
+  FileDiff,
   FileSpreadsheet,
   FileText,
   FileVideo,
@@ -128,6 +131,16 @@ import {
   HtmlViewportFrame,
   type HtmlViewport,
 } from "./html-viewport-frame";
+import { PatchPreview } from "./diff/patch-preview";
+import {
+  ChromeButton,
+  ChromeDivider,
+  ChromeSegmented,
+  DRAG,
+  DiffLayoutToggle,
+  NO_DRAG,
+  type DiffLayout,
+} from "./viewer-chrome";
 
 // ---------------------------------------------------------------------------
 // Preview source — full attachment, or URL-only (media types only)
@@ -414,14 +427,6 @@ export function PreviewImagePrefetch({ source }: { source: PreviewSource }) {
 // Viewer — frame + dispatch
 // ---------------------------------------------------------------------------
 
-// Desktop window chrome. The viewer covers the whole window, including the
-// top bar's drag region, so it declares its own: the viewer is `no-drag`
-// (a drag region underneath would otherwise swallow clicks on its controls),
-// its top bar drags the window, and the controls in that bar opt back out.
-// Chromium-only CSS; browsers ignore it.
-const NO_DRAG = { WebkitAppRegion: "no-drag" } as CSSProperties;
-const DRAG = { WebkitAppRegion: "drag" } as CSSProperties;
-
 // A focused player or field owns its arrow keys (seek, caret) — the sequence
 // only takes them when nothing else would.
 function ownsArrowKeys(target: EventTarget | null): boolean {
@@ -625,6 +630,7 @@ const KIND_ICONS: Record<PreviewKind, LucideIcon> = {
   table: FileSpreadsheet,
   structured: FileCode,
   text: FileCode,
+  diff: FileDiff,
 };
 
 type StructuredView = "tree" | "raw";
@@ -719,12 +725,14 @@ function PreviewPanel({
   const structuredParse = useStructuredParse(state, kind === "structured");
   const treeAvailable = structuredParse?.ok !== false;
   const structuredView: StructuredView = treeAvailable ? structuredChoice : "raw";
+  const [diffLayout, setDiffLayout] = useState<DiffLayout>("unified");
   const view: StageView = {
     wrap,
     htmlViewport,
     htmlSource,
     structuredView,
     structuredParse,
+    diffLayout,
     renderHtmlFrame,
   };
 
@@ -920,6 +928,12 @@ function PreviewPanel({
               <ChromeDivider />
             </>
           )}
+          {kind === "diff" && (
+            <>
+              <DiffLayoutToggle layout={diffLayout} onChange={setDiffLayout} />
+              <ChromeDivider />
+            </>
+          )}
           {locate && (
             <ChromeButton label={locate.label} onClick={locate.onSelect}>
               <MessageSquareText className="size-4" />
@@ -1037,94 +1051,6 @@ function PreviewPanel({
 // ---------------------------------------------------------------------------
 // Chrome controls
 // ---------------------------------------------------------------------------
-
-// Top-bar icon button. Sits inside the `dark` header, so the semantic tokens
-// resolve to the dark set whatever the app theme is.
-function ChromeButton({
-  label,
-  shortcut,
-  pressed,
-  disabled,
-  onClick,
-  children,
-}: {
-  label: string;
-  /** Single-key shortcut, shown in the tooltip and announced to AT. */
-  shortcut?: string;
-  /** Toggle buttons pass their state; plain actions leave it unset. */
-  pressed?: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      className={cn(
-        "flex size-8 items-center justify-center rounded-md transition-colors enabled:hover:bg-secondary enabled:hover:text-foreground disabled:opacity-40",
-        pressed ? "bg-secondary text-foreground" : "text-muted-foreground",
-      )}
-      title={shortcut ? `${label} (${shortcut})` : label}
-      aria-label={label}
-      aria-keyshortcuts={shortcut}
-      aria-pressed={pressed}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      {children}
-    </button>
-  );
-}
-
-// A one-of-several choice in the top bar (viewport width, tree / raw). Same
-// pressed look as the toggle buttons beside it. Labels show once the bar has
-// room for them; below that the icons carry the choice, named by tooltip.
-function ChromeSegmented<T extends string>({
-  label,
-  value,
-  options,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  value: T;
-  options: ReadonlyArray<{ value: T; label: string; icon: LucideIcon }>;
-  disabled?: boolean;
-  onChange: (value: T) => void;
-}) {
-  return (
-    <div role="group" aria-label={label} className="flex items-center gap-0.5">
-      {options.map((option) => {
-        const pressed = option.value === value;
-        const Icon = option.icon;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            className={cn(
-              "flex h-8 min-w-8 items-center justify-center gap-1.5 rounded-md px-2 text-label transition-colors enabled:hover:bg-secondary enabled:hover:text-foreground disabled:opacity-40",
-              pressed ? "bg-secondary text-foreground" : "text-muted-foreground",
-            )}
-            title={option.label}
-            aria-label={option.label}
-            aria-pressed={pressed}
-            disabled={disabled}
-            onClick={() => onChange(option.value)}
-          >
-            <Icon className="size-4 shrink-0" />
-            <span className="hidden @7xl:inline" aria-hidden>
-              {option.label}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function ChromeDivider() {
-  return <span className="mx-1.5 h-4 w-px bg-input" aria-hidden />;
-}
 
 // Prev / next in the stage gutters, vertically centered — next to the
 // content, never on it. `onClick` undefined means "boundary reached": the
@@ -1250,6 +1176,7 @@ interface StageView {
   structuredView: StructuredView;
   /** The `structured` kind's parse, once its body has loaded. */
   structuredParse: ReturnType<typeof parseStructured> | null;
+  diffLayout: DiffLayout;
   renderHtmlFrame: HtmlFrameRenderer;
 }
 
@@ -1259,6 +1186,7 @@ const TEXT_BACKED_KINDS: ReadonlySet<PreviewKind> = new Set<PreviewKind>([
   "table",
   "structured",
   "text",
+  "diff",
 ]);
 
 // Dispatch on PreviewKind. New cases go here; remember that the viewer frame
@@ -1436,6 +1364,18 @@ function PreviewContent({
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
           render={(text) => code(text, extensionToLanguage(state.filename))}
+        />
+      );
+    case "diff":
+      return (
+        <TextBackedPreview
+          attachmentId={state.attachmentId!}
+          onDownload={onDownload}
+          render={(text) => (
+            <div className="h-full pb-4">
+              <PatchPreview patch={text} layout={view.diffLayout} fallback={code(text, "diff")} />
+            </div>
+          )}
         />
       );
   }

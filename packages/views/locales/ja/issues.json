@@ -1150,5 +1150,29 @@
     "overview_close": "閉じる",
     "overview_empty": "この種類の成果物はありません。",
     "group_comment_by": "{{name}} のコメント"
+  },
+  "code_changes": {
+    "card_title": "この実行の変更",
+    "viewer_title": "コード変更",
+    "files_other": "{{count}} ファイル",
+    "run_number": "実行 #{{number}}",
+    "scope_label": "表示する変更",
+    "scope_run": "この実行",
+    "scope_run_numbered": "この実行 #{{number}}",
+    "scope_issue": "タスク全体",
+    "scope_issue_pr": "タスク全体 · PR #{{number}}",
+    "list_run_other": "この実行 · {{count}} ファイル",
+    "list_issue_other": "タスク全体 · {{count}} ファイル",
+    "copy_patch": "パッチをコピー",
+    "download_patch": "パッチをダウンロード",
+    "patch_copied": "パッチをコピーしました",
+    "copy_failed": "コピーできませんでした",
+    "open_pr": "PR #{{number}} を開く",
+    "patch_too_large": "変更が大きすぎるため、ファイル一覧のみ保存されています。",
+    "patch_unavailable": "行単位の差分を読み込めないため、ファイル一覧のみ表示しています。",
+    "files_truncated": "最初の {{count}} ファイルのみ表示しています。",
+    "pr_fallback": "GitHub から PR #{{number}} を読み込めませんでした。作業の起点に対するブランチの差分を表示しています。",
+    "loading": "変更を読み込み中…",
+    "load_failed": "変更を読み込めませんでした"
   }
 }

@@ -48,6 +48,11 @@ describe("getPreviewKind", () => {
     // Plain text
     ["text/plain", "log.txt", "text"],
 
+    // Patches open in the diff viewer (MUL-7651)
+    ["text/plain", "fix.patch", "diff"],
+    ["application/octet-stream", "changes.diff", "diff"],
+    ["text/x-diff", "changes", "diff"],
+
     // Build files without extension
     ["application/octet-stream", "Dockerfile", "text"],
     ["application/octet-stream", "Makefile", "text"],

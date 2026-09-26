@@ -26,7 +26,9 @@ export type PreviewKind =
   // JSON / JSON Lines / YAML — a collapsible tree, with the source one toggle
   // away.
   | "structured"
-  | "text";
+  | "text"
+  // .patch / .diff — the diff viewer (MUL-7651).
+  | "diff";
 
 /** How a `structured` file's body parses. */
 export type StructuredFormat = "json" | "jsonl" | "yaml";
@@ -88,6 +90,8 @@ const EXT_LANGUAGE_MAP: Record<string, string> = {
   lua: "lua",
   vim: "vim",
   sql: "sql",
+  patch: "diff",
+  diff: "diff",
   csv: "plaintext",
   tsv: "plaintext",
 };
@@ -117,6 +121,7 @@ const TEXT_EXTENSIONS = new Set<string>([
   "ts", "tsx", "js", "jsx", "mjs", "cjs",
   "css", "scss", "sass", "less",
   "sql",
+  "patch", "diff",
   "java", "kt", "swift",
   "c", "cc", "cpp", "h", "hpp",
   "cs", "php", "lua", "vim",
@@ -233,6 +238,10 @@ export function getPreviewKind(
     return "table";
   }
   if (structuredFormat(contentType, filename)) return "structured";
+  // Uploaded patches open in the diff viewer (MUL-7651).
+  if (ct === "text/x-diff" || ct === "text/x-patch" || ext === "patch" || ext === "diff") {
+    return "diff";
+  }
 
   if (isTextLike(contentType, filename)) return "text";
   return null;
