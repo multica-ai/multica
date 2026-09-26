@@ -8305,12 +8305,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Worktree mode runs the same pass for a different reason: the worktree is
 	// disposable, but its branch is the deliverable, and Finalize commits
 	// whatever is still on disk. Without this the sidecars would land in every
-	// task's diff. The .git/info/exclude trick repocache uses for github_repo
-	// worktrees is not available here — a linked worktree resolves info/exclude
-	// to the user's own common git dir, so using it would silently change what
-	// `git status` hides in the user's checkout. Removing the files we wrote is
-	// both narrower and exact; it also leaves a genuine agent edit to a tracked
-	// CLAUDE.md intact, since CleanupRuntimeConfig only excises our marker block.
+	// task's diff. The task-scoped Git excludes hide untracked runtime files
+	// from the agent, but cleanup still removes them from disk before Finalize
+	// and leaves a genuine agent edit to a tracked CLAUDE.md intact, since
+	// CleanupRuntimeConfig only excises our marker block.
 	//
 	// Ordering: registered immediately after the Finalize defer above, so LIFO
 	// runs cleanup first and Finalize commits an already-clean worktree. It must
@@ -8541,6 +8539,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	// Repo checkouts happen on demand after the agent starts. Give only this
+	// task's Git subprocesses an effective ignore file before any checkout.
+	if !env.LocalDirectory {
+		if err := repocache.ConfigureAgentGitExcludes(taskTempDir, agentEnv); err != nil {
+			return TaskResult{}, fmt.Errorf("configure agent Git excludes: %w", err)
+		}
+	}
 	if provider == "reasonix" {
 		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
 		if err != nil {
