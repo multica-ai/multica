@@ -90,6 +90,10 @@ DO UPDATE SET
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
+WHERE COALESCE(agent_runtime.metadata->>'owner_generation', '') NOT LIKE 'g%'
+   OR EXCLUDED.metadata->>'owner_generation' = agent_runtime.metadata->>'owner_generation'
+   OR (EXCLUDED.metadata->>'owner_generation' LIKE 'g%'
+       AND split_part(EXCLUDED.metadata->>'owner_generation', ':', 1) > split_part(agent_runtime.metadata->>'owner_generation', ':', 1))
 RETURNING *, (xmax = 0) AS inserted;
 
 -- name: UpsertAgentRuntimeWithProfile :one
@@ -124,6 +128,10 @@ DO UPDATE SET
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
+WHERE COALESCE(agent_runtime.metadata->>'owner_generation', '') NOT LIKE 'g%'
+   OR EXCLUDED.metadata->>'owner_generation' = agent_runtime.metadata->>'owner_generation'
+   OR (EXCLUDED.metadata->>'owner_generation' LIKE 'g%'
+       AND split_part(EXCLUDED.metadata->>'owner_generation', ':', 1) > split_part(agent_runtime.metadata->>'owner_generation', ':', 1))
 RETURNING *, (xmax = 0) AS inserted;
 
 -- name: UpdateAgentRuntimeVisibility :one
@@ -229,6 +237,17 @@ WHERE id = $1 AND status <> 'online';
 UPDATE agent_runtime
 SET status = 'offline', updated_at = now()
 WHERE id = $1;
+
+-- name: SetAgentRuntimeOfflineIfOwner :execrows
+-- A delayed deregister from a prior local owner must not take the replacement
+-- owner's registration offline. The compare and write are one DB statement.
+UPDATE agent_runtime
+SET status = 'offline',
+    metadata = COALESCE(metadata, '{}'::jsonb) ||
+        CASE WHEN sqlc.narg('offline_reason')::jsonb IS NULL THEN '{}'::jsonb
+             ELSE jsonb_build_object('offline_reason', sqlc.narg('offline_reason')::jsonb) END,
+    updated_at = now()
+WHERE id = @id AND metadata->>'owner_generation' = @owner_generation::text;
 
 -- name: SetAgentRuntimeOfflineWithReason :exec
 -- Takes a runtime offline and records WHY, for the one class of cause the user

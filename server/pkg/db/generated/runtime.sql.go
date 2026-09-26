@@ -1241,6 +1241,32 @@ func (q *Queries) SetAgentRuntimeOffline(ctx context.Context, id pgtype.UUID) er
 	return err
 }
 
+const setAgentRuntimeOfflineIfOwner = `-- name: SetAgentRuntimeOfflineIfOwner :execrows
+UPDATE agent_runtime
+SET status = 'offline',
+    metadata = COALESCE(metadata, '{}'::jsonb) ||
+        CASE WHEN $1::jsonb IS NULL THEN '{}'::jsonb
+             ELSE jsonb_build_object('offline_reason', $1::jsonb) END,
+    updated_at = now()
+WHERE id = $2 AND metadata->>'owner_generation' = $3::text
+`
+
+type SetAgentRuntimeOfflineIfOwnerParams struct {
+	OfflineReason   []byte      `json:"offline_reason"`
+	ID              pgtype.UUID `json:"id"`
+	OwnerGeneration string      `json:"owner_generation"`
+}
+
+// A delayed deregister from a prior local owner must not take the replacement
+// owner's registration offline. The compare and write are one DB statement.
+func (q *Queries) SetAgentRuntimeOfflineIfOwner(ctx context.Context, arg SetAgentRuntimeOfflineIfOwnerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAgentRuntimeOfflineIfOwner, arg.OfflineReason, arg.ID, arg.OwnerGeneration)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setAgentRuntimeOfflineWithReason = `-- name: SetAgentRuntimeOfflineWithReason :exec
 UPDATE agent_runtime
 SET status = 'offline',
@@ -1590,6 +1616,10 @@ DO UPDATE SET
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
+WHERE COALESCE(agent_runtime.metadata->>'owner_generation', '') NOT LIKE 'g%'
+   OR EXCLUDED.metadata->>'owner_generation' = agent_runtime.metadata->>'owner_generation'
+   OR (EXCLUDED.metadata->>'owner_generation' LIKE 'g%'
+       AND split_part(EXCLUDED.metadata->>'owner_generation', ':', 1) > split_part(agent_runtime.metadata->>'owner_generation', ':', 1))
 RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, (xmax = 0) AS inserted
 `
 
@@ -1694,6 +1724,10 @@ DO UPDATE SET
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
+WHERE COALESCE(agent_runtime.metadata->>'owner_generation', '') NOT LIKE 'g%'
+   OR EXCLUDED.metadata->>'owner_generation' = agent_runtime.metadata->>'owner_generation'
+   OR (EXCLUDED.metadata->>'owner_generation' LIKE 'g%'
+       AND split_part(EXCLUDED.metadata->>'owner_generation', ':', 1) > split_part(agent_runtime.metadata->>'owner_generation', ':', 1))
 RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, (xmax = 0) AS inserted
 `
 

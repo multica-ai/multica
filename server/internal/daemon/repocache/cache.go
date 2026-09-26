@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/processtree"
 )
 
@@ -172,8 +173,27 @@ type Cache struct {
 	// hold its lock — git's own lockfiles (packed-refs.lock, config.lock,
 	// worktree admin dirs) don't tolerate parallel mutations on the same
 	// repo. Separate repos are independent and run concurrently.
+	//
+	// This is the SAME-PROCESS half: it also carries the foreground-priority and
+	// maintenance-preemption semantics. It is not the cross-process boundary —
+	// see locks below.
 	repoLocks sync.Map // barePath -> *repoLock
+	// locks is the cross-process half of the same boundary. One work-state scope
+	// can be served by several daemon processes (a CLI daemon and a Desktop daemon
+	// on one machine and backend), and they share this cache root, so two of them
+	// can drive incompatible git mutations on one bare repo. Every mutation below
+	// takes RepoMutationTarget(barePath) exclusively, and heavy maintenance
+	// additionally requires the repositories to be free of task activity across
+	// the scope — see WithRepoMaintenance. The claims live beside the scope, never
+	// inside the repo, so they survive the eviction they authorise.
+	locks execenv.ScopeLocks
 }
+
+// repoMutationClaimWait bounds how long a mutation waits for the same mutation
+// in a sibling daemon. Long enough to cover a slow clone or fetch — waiting is
+// correct here, because the alternative is two git processes mutating one repo —
+// and short enough that a wedged peer surfaces as an error instead of a hang.
+const repoMutationClaimWait = 10 * time.Minute
 
 // ErrRepoBusy means a foreground checkout could not acquire its repository
 // within the caller's bounded wait. Callers that advertised retry support can
@@ -300,7 +320,52 @@ func (l *repoLock) cancelMaintenanceAndWait() {
 
 // New creates a new repo cache rooted at the given directory.
 func New(root string, logger *slog.Logger) *Cache {
-	return &Cache{root: root, logger: logger}
+	return NewScoped(root, logger, execenv.ScopeLocks{})
+}
+
+// NewScoped creates a repo cache whose mutations are also excluded across every
+// daemon process serving the same work-state scope. A zero ScopeLocks keeps the
+// process-local behaviour only, which is what hand-built configurations and most
+// tests want.
+func NewScoped(root string, logger *slog.Logger, locks execenv.ScopeLocks) *Cache {
+	return &Cache{root: root, logger: logger, locks: locks}
+}
+
+// lockRepoForMutation takes both halves of the mutation boundary, in one order
+// every caller shares: the local per-repo lock (foreground priority, maintenance
+// preemption, same-process serialization), then the scope-level mutation claim
+// (cross-process ownership of the same bare repo).
+//
+// Local first, then scope: the local lock is what decides priority and
+// cancellation, so it must be held before this process starts waiting on another
+// process — otherwise a maintenance holder here could be starved by a peer, and
+// the foreground-preemption contract would silently change.
+func (c *Cache) lockRepoForMutation(ctx context.Context, barePath string) (func(), error) {
+	local := c.lockForRepo(barePath)
+	if err := local.LockContext(ctx); err != nil {
+		return nil, err
+	}
+	claim, err := c.acquireRepoMutationClaim(ctx, barePath)
+	if err != nil {
+		local.Unlock()
+		return nil, err
+	}
+	return func() {
+		claim.Release()
+		local.Unlock()
+	}, nil
+}
+
+// acquireRepoMutationClaim takes the scope-level mutation claim, bounded by the
+// caller's deadline when it has one.
+func (c *Cache) acquireRepoMutationClaim(ctx context.Context, barePath string) (*execenv.ScopeClaim, error) {
+	wait := repoMutationClaimWait
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining > 0 && remaining < wait {
+			wait = remaining
+		}
+	}
+	return c.locks.AcquireTargetExclusive(execenv.RepoMutationTarget(barePath), wait)
 }
 
 // lockForRepo returns the mutex dedicated to the given bare repo path. See
@@ -347,9 +412,11 @@ func (c *Cache) CancelMaintenance() {
 // if a repo is temporarily removed and re-added).
 //
 // Per-repo mutation serializes against CreateWorktree on the same bare path
-// via lockForRepo. Different repos run sequentially within a single Sync call
-// but concurrent Sync calls (different workspaces, or the same workspace
-// re-synced while checkouts are running) do not block each other.
+// through lockRepoForMutation: the local per-repo lock for this process, and the
+// scope-level mutation claim for every other daemon serving the same work-state
+// scope (they share this cache root). Different repos run sequentially within a
+// single Sync call but concurrent Sync calls (different workspaces, or the same
+// workspace re-synced while checkouts are running) do not block each other.
 func (c *Cache) Sync(workspaceID string, repos []RepoInfo) error {
 	return c.SyncContext(context.Background(), workspaceID, repos)
 }
@@ -372,8 +439,8 @@ func (c *Cache) SyncContext(ctx context.Context, workspaceID string, repos []Rep
 		}
 		barePath := filepath.Join(wsDir, bareDirName(repo.URL))
 
-		repoLock := c.lockForRepo(barePath)
-		if err := repoLock.LockContext(ctx); err != nil {
+		releaseRepo, err := c.lockRepoForMutation(ctx, barePath)
+		if err != nil {
 			return err
 		}
 		if isBareRepo(barePath) {
@@ -395,7 +462,7 @@ func (c *Cache) SyncContext(ctx context.Context, workspaceID string, repos []Rep
 				}
 			}
 		}
-		repoLock.Unlock()
+		releaseRepo()
 	}
 	return firstErr
 }
@@ -465,18 +532,20 @@ func LastUsed(barePath string) (time.Time, bool) {
 
 // WithRepoLock serializes caller-supplied mutations on a bare repo against all
 // other same-repo operations that use the cache's lock (Sync, Fetch,
-// CreateWorktree, and daemon GC maintenance).
+// CreateWorktree, and daemon GC maintenance) — in this process through the local
+// per-repo lock, and across every daemon of the work-state scope through the
+// scope-level mutation claim, which this holds for the duration of fn.
 func (c *Cache) WithRepoLock(barePath string, fn func() error) error {
 	return c.WithRepoLockContext(context.Background(), barePath, fn)
 }
 
 // WithRepoLockContext is the cancellable form of WithRepoLock.
 func (c *Cache) WithRepoLockContext(ctx context.Context, barePath string, fn func() error) error {
-	repoLock := c.lockForRepo(barePath)
-	if err := repoLock.LockContext(ctx); err != nil {
+	releaseRepo, err := c.lockRepoForMutation(ctx, barePath)
+	if err != nil {
 		return err
 	}
-	defer repoLock.Unlock()
+	defer releaseRepo()
 	return fn()
 }
 
@@ -484,6 +553,14 @@ func (c *Cache) WithRepoLockContext(ctx context.Context, barePath string, fn fun
 // waiter cancels the context passed to fn, then waits for fn to stop its process
 // tree and release the repository. ran=false means maintenance was skipped
 // because foreground work already owned or was waiting for the repository.
+//
+// "Idle" is checked on both sides of the process boundary: locally through the
+// foreground-priority lock, and across the scope through two non-blocking
+// claims — no sibling daemon mutating this repo, and no task anywhere in this
+// work state that may be using it. The cross-process half cannot preempt the
+// other process the way a local foreground waiter does, so a peer's maintenance
+// is waited out by the caller's own bound instead; what is guaranteed is
+// exclusion, not immediate preemption.
 func (c *Cache) WithRepoMaintenance(ctx context.Context, barePath string, fn func(context.Context) error) (ran bool, err error) {
 	repoLock := c.lockForRepo(barePath)
 	maintenanceCtx, ok := repoLock.tryLockMaintenance(ctx)
@@ -491,6 +568,16 @@ func (c *Cache) WithRepoMaintenance(ctx context.Context, barePath string, fn fun
 		return false, nil
 	}
 	defer repoLock.Unlock()
+	mutationClaim, ok, err := c.locks.TryAcquireTargetDelete(execenv.RepoMutationTarget(barePath))
+	if err != nil || !ok {
+		return false, err
+	}
+	defer mutationClaim.Release()
+	activityClaim, ok, err := c.locks.TryAcquireTargetDelete(execenv.RepoActivityTarget(barePath))
+	if err != nil || !ok {
+		return false, err
+	}
+	defer activityClaim.Release()
 	return true, fn(maintenanceCtx)
 }
 
@@ -791,21 +878,20 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	// Serialize concurrent CreateWorktree calls on the same bare repo. Git's
 	// own lockfiles (packed-refs.lock, config.lock, worktree admin dirs)
 	// can't tolerate parallel fetch + worktree mutations on the same repo.
-	repoLock := c.lockForRepo(barePath)
 	lockCtx := ctx
 	cancel := func() {}
 	if params.LockWaitTimeout > 0 {
 		lockCtx, cancel = context.WithTimeout(ctx, params.LockWaitTimeout)
 	}
-	err := repoLock.LockContext(lockCtx)
+	releaseRepo, err := c.lockRepoForMutation(lockCtx, barePath)
 	cancel()
 	if err != nil {
-		if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+		if ctx.Err() == nil && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, execenv.ErrScopeLockTimeout)) {
 			return nil, fmt.Errorf("%w: %s", ErrRepoBusy, params.RepoURL)
 		}
 		return nil, err
 	}
-	defer repoLock.Unlock()
+	defer releaseRepo()
 	if err := ctx.Err(); err != nil {
 		return nil, context.Cause(ctx)
 	}

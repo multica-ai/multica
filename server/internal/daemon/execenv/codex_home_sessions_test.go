@@ -468,7 +468,7 @@ func TestPruneCodexSessionStores(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
 	// Stores live under the profile namespace; the default profile is "".
-	storeRoot := filepath.Join(home, codexSessionStoreRoot, codexSessionStoreNamespace(""))
+	storeRoot := filepath.Join(home, codexSessionStoreRoot, CodexSessionNamespaceForProfile(""))
 
 	freshStore := filepath.Join(storeRoot, "agent-1", "issue-fresh")
 	staleStore := filepath.Join(storeRoot, "agent-1", "issue-stale")
@@ -570,31 +570,33 @@ func TestPruneCodexSessionStores_ActiveStoreNotReclaimed(t *testing.T) {
 	assertAbsent(t, storeDir)
 }
 
-// TestPruneCodexSessionStores_IsolatesProfiles is Elon's cross-profile blocker:
-// two profile-daemons share one ~/.codex, so one daemon's GC must never reclaim
-// another profile's store — the in-process reservation guard cannot span
-// processes, but the per-profile namespace makes their store trees disjoint so a
-// GC only ever sees, and reclaims, its own (MUL-4424).
-func TestPruneCodexSessionStores_IsolatesProfiles(t *testing.T) {
+// TestPruneCodexSessionStores_IsolatesWorkStates is Elon's cross-daemon blocker
+// under the work-state scope (GH #8280): two daemons on one machine share one
+// ~/.codex, so one daemon's GC must never reclaim another's store — the
+// in-process reservation guard cannot span processes, but the work-state
+// namespace makes their store trees disjoint so a GC only ever sees, and
+// reclaims, its own (MUL-4424).
+func TestPruneCodexSessionStores_IsolatesWorkStates(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
-	// A store owned by the "staging" profile daemon, idle past retention.
-	stagingStore := codexSessionStoreDir(home, codexSessionStoreKey("staging", TaskContextForEnv{AgentID: "agent-1", IssueID: "issue-1"}))
-	seedRolloutAt(t, filepath.Join(stagingStore, "2026", "06", "01", "rollout-2026-06-01T00-00-00-s.jsonl"), 16)
-	chtimesTree(t, stagingStore, time.Now().Add(-30*24*time.Hour))
+	// A store owned by a daemon serving a different backend, idle past retention.
+	otherScope := CodexSessionNamespaceForProfile("staging")
+	otherStore := codexSessionStoreDir(home, codexSessionStoreKey(otherScope, TaskContextForEnv{AgentID: "agent-1", IssueID: "issue-1"}))
+	seedRolloutAt(t, filepath.Join(otherStore, "2026", "06", "01", "rollout-2026-06-01T00-00-00-s.jsonl"), 16)
+	chtimesTree(t, otherStore, time.Now().Add(-30*24*time.Hour))
 
-	// The production (default) daemon prunes — it must NOT touch staging's store,
-	// even with no guard, because staging is a different namespace it never scans.
+	// This daemon prunes its own namespace — it must NOT touch the other store,
+	// even with no guard, because that namespace is one it never scans.
 	if removed, _ := PruneCodexSessionStores("", 14*24*time.Hour, time.Now(), nil, testLogger()); removed != 0 {
-		t.Fatalf("removed = %d, want 0 — another profile's store must be out of scope", removed)
+		t.Fatalf("removed = %d, want 0 — another work state's store must be out of scope", removed)
 	}
-	assertPresent(t, stagingStore)
+	assertPresent(t, otherStore)
 
-	// The staging daemon prunes its own namespace → reclaims its idle store.
-	if removed, _ := PruneCodexSessionStores("staging", 14*24*time.Hour, time.Now(), nil, testLogger()); removed != 1 {
-		t.Fatalf("removed = %d, want 1 — the owning profile reclaims its idle store", removed)
+	// The owning namespace prunes → reclaims its idle store.
+	if removed, _ := PruneCodexSessionStores(otherScope, 14*24*time.Hour, time.Now(), nil, testLogger()); removed != 1 {
+		t.Fatalf("removed = %d, want 1 — the owning work state reclaims its idle store", removed)
 	}
-	assertAbsent(t, stagingStore)
+	assertAbsent(t, otherStore)
 }
 
 // TestCodexSessionStoreNamespaceInjective guards the profile->namespace map
@@ -611,12 +613,12 @@ func TestCodexSessionStoreNamespaceInjective(t *testing.T) {
 		{"p_default", "default"}, // an encoded-looking name must not alias another
 	}
 	for _, p := range pairs {
-		if a, b := codexSessionStoreNamespace(p[0]), codexSessionStoreNamespace(p[1]); a == b {
+		if a, b := CodexSessionNamespaceForProfile(p[0]), CodexSessionNamespaceForProfile(p[1]); a == b {
 			t.Errorf("profiles %q and %q collide in namespace %q", p[0], p[1], a)
 		}
 	}
 	// Deterministic for a fixed profile.
-	if codexSessionStoreNamespace("staging") != codexSessionStoreNamespace("staging") {
+	if CodexSessionNamespaceForProfile("staging") != CodexSessionNamespaceForProfile("staging") {
 		t.Error("namespace must be deterministic for a fixed profile")
 	}
 }
@@ -630,7 +632,7 @@ func TestCodexSessionStoreNamespace_FitsDirectorySegment(t *testing.T) {
 	t.Parallel()
 	base := t.TempDir()
 	for _, profile := range []string{"", "staging", strings.Repeat("a", 127), strings.Repeat("z", 255)} {
-		ns := codexSessionStoreNamespace(profile)
+		ns := CodexSessionNamespaceForProfile(profile)
 		if len(ns) > 255 {
 			t.Errorf("profile (len %d) -> namespace (len %d) exceeds the 255-byte single-segment limit", len(profile), len(ns))
 		}
@@ -648,7 +650,7 @@ func TestPruneCodexSessionStores_NoCrossProfileCollision(t *testing.T) {
 	for _, pair := range [][2]string{{"", "default"}, {"staging.prod", "stagingprod"}} {
 		home := t.TempDir()
 		t.Setenv("CODEX_HOME", home)
-		a, b := pair[0], pair[1]
+		a, b := CodexSessionNamespaceForProfile(pair[0]), CodexSessionNamespaceForProfile(pair[1])
 		storeA := codexSessionStoreDir(home, codexSessionStoreKey(a, TaskContextForEnv{AgentID: "agent", IssueID: "issue"}))
 		storeB := codexSessionStoreDir(home, codexSessionStoreKey(b, TaskContextForEnv{AgentID: "agent", IssueID: "issue"}))
 		seedRolloutAt(t, filepath.Join(storeA, "2026", "06", "01", "rollout-2026-06-01T00-00-00-a.jsonl"), 16)
@@ -677,7 +679,7 @@ func TestPruneCodexSessionStores_NoCrossProfileCollision(t *testing.T) {
 func TestPruneCodexSessionStores_RemovesEmptyAgentDir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
-	storeRoot := filepath.Join(home, codexSessionStoreRoot, codexSessionStoreNamespace(""))
+	storeRoot := filepath.Join(home, codexSessionStoreRoot, CodexSessionNamespaceForProfile(""))
 	onlyStore := filepath.Join(storeRoot, "agent-lonely", "issue-1")
 	seedRolloutAt(t, filepath.Join(onlyStore, "2026", "06", "01", "rollout-2026-06-01T00-00-00-x.jsonl"), 16)
 

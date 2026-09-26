@@ -5,10 +5,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
-
-	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 // Background
@@ -30,7 +29,7 @@ import (
 //
 // The store is keyed by (agent, hermes profile, conversation):
 //
-//	<multica profile dir>/hermes-sessions/<agent>/<hermes profile>/<conversation>/state.db
+//	<daemon work-state root>/hermes-sessions/<agent>/<hermes profile>/<conversation>/state.db
 //
 // Keying to the conversation — the issue, or `chat_<id>` for a chat session —
 // is what makes this safe to share where #6693 could not. Its stated reason
@@ -55,34 +54,35 @@ import (
 // database rather than in the task directory, and a task teardown can never
 // take the write-ahead log with it.
 
-// hermesSessionStoreRoot is the directory under the daemon's Multica profile
-// dir that holds every agent's persistent Hermes conversation shards.
+// hermesSessionStoreRoot is the directory under the daemon's work-state root
+// that holds every agent's persistent Hermes conversation shards.
 const hermesSessionStoreRoot = "hermes-sessions"
 
 // hermesSessionDBEntry is the database file name inside both the store and the
 // overlay home — Hermes resolves it relative to HERMES_HOME.
 const hermesSessionDBEntry = "state.db"
 
-// HermesSessionStorePath returns the persistent session store for
-// (daemonProfile, agentID, sourceHome, conversation), or "" when the session
-// database must stay task-local — no agent to key on, no conversation to key
-// on (neither an issue nor a chat session), or an unresolvable Multica profile
-// dir. The daemon marks the returned path in-use for the task's duration so
-// PruneHermesSessionStores never reclaims it mid-mount.
-func HermesSessionStorePath(daemonProfile, agentID, sourceHome string, task TaskContextForEnv) string {
+// HermesSessionStorePath returns the persistent session store for (stateRoot,
+// agentID, sourceHome, conversation), or "" when the session database must stay
+// task-local — no agent to key on, no conversation to key on (neither an issue
+// nor a chat session), or no work-state root. The daemon marks the returned path
+// in-use for the task's duration so PruneHermesSessionStores never reclaims it
+// mid-mount.
+//
+// stateRoot is the daemon's resolved work-state root
+// (daemon.WorkStateScope.StateRoot), the machine + backend boundary, so a
+// conversation started under one Multica profile resumes under another profile
+// aimed at the same backend (GH #8280).
+func HermesSessionStorePath(stateRoot, agentID, sourceHome string, task TaskContextForEnv) string {
 	agent := sanitizePathSegment(agentID)
-	if agent == "" {
+	if agent == "" || strings.TrimSpace(stateRoot) == "" {
 		return ""
 	}
 	conversation := hermesConversationSegment(task)
 	if conversation == "" {
 		return ""
 	}
-	profileDir, err := cli.ProfileDir(daemonProfile)
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(profileDir, hermesSessionStoreRoot, agent,
+	return filepath.Join(stateRoot, hermesSessionStoreRoot, agent,
 		hermesMemoryProfileSegment(sourceHome), conversation)
 }
 
@@ -394,15 +394,11 @@ func touchHermesSessionStore(storeDir string, logger *slog.Logger) {
 // reserve (may be nil) atomically claims a store for deletion exactly as
 // PruneCodexSessionStores uses it: ok=false means a live task holds the store,
 // so it is left alone. nil disables the guard (tests).
-func PruneHermesSessionStores(daemonProfile string, retention time.Duration, now time.Time, reserve func(storeDir string) (commit func(), ok bool), logger *slog.Logger) (removed int, bytesFreed int64) {
-	if retention <= 0 {
+func PruneHermesSessionStores(stateRoot string, retention time.Duration, now time.Time, reserve func(storeDir string) (commit func(), ok bool), logger *slog.Logger) (removed int, bytesFreed int64) {
+	if retention <= 0 || strings.TrimSpace(stateRoot) == "" {
 		return 0, 0
 	}
-	profileDir, err := cli.ProfileDir(daemonProfile)
-	if err != nil {
-		return 0, 0
-	}
-	root := filepath.Join(profileDir, hermesSessionStoreRoot)
+	root := filepath.Join(stateRoot, hermesSessionStoreRoot)
 	agents, err := os.ReadDir(root)
 	if err != nil {
 		return 0, 0 // not created yet, or unreadable — nothing to prune

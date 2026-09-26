@@ -213,12 +213,14 @@ type DaemonRegisterRequest struct {
 		// runtime_profile (MUL-3284). Empty = built-in runtime (legacy path).
 		// Type carries the protocol family for both built-in and custom rows
 		// so task routing (agent.New) is unchanged.
-		ProfileID string `json:"profile_id"`
+		ProfileID       string `json:"profile_id"`
+		OwnerGeneration string `json:"owner_generation"`
 	} `json:"runtimes"`
 	FailedProfiles []struct {
-		ProfileID   string `json:"profile_id"`
-		CommandName string `json:"command_name"`
-		Reason      string `json:"reason"`
+		ProfileID       string `json:"profile_id"`
+		CommandName     string `json:"command_name"`
+		Reason          string `json:"reason"`
+		OwnerGeneration string `json:"owner_generation"`
 	} `json:"failed_profiles"`
 }
 
@@ -333,6 +335,7 @@ func (h *Handler) inheritMachineCustomName(ctx context.Context, rt db.AgentRunti
 }
 
 var errRuntimeProfileDisabled = errors.New("runtime profile is disabled")
+var errStaleRuntimeRegistration = errors.New("runtime ownership has changed")
 
 // upsertRuntimeWithProfile serializes custom-runtime registration with profile
 // deletion. The profile row remains KEY SHARE locked until the runtime upsert
@@ -367,6 +370,9 @@ func (h *Handler) upsertRuntimeWithProfile(
 
 	row, err = qtx.UpsertAgentRuntimeWithProfile(ctx, build(profile))
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return row, profile, errStaleRuntimeRegistration
+		}
 		return row, profile, fmt.Errorf("upsert profile runtime: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -484,10 +490,11 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// same signal the claim path uses, instead of re-deriving it from a
 		// version string (MUL-5707).
 		metadata, _ := json.Marshal(map[string]any{
-			"version":      runtime.Version,
-			"cli_version":  req.CLIVersion,
-			"launched_by":  req.LaunchedBy,
-			"capabilities": requestClientCapabilities(r),
+			"version":          runtime.Version,
+			"cli_version":      req.CLIVersion,
+			"launched_by":      req.LaunchedBy,
+			"capabilities":     requestClientCapabilities(r),
+			"owner_generation": runtime.OwnerGeneration,
 		})
 
 		var registered db.AgentRuntime
@@ -527,6 +534,10 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			}
 			if errors.Is(err, errRuntimeProfileDisabled) {
 				writeError(w, http.StatusConflict, "runtime profile is disabled: "+runtime.ProfileID)
+				return
+			}
+			if errors.Is(err, errStaleRuntimeRegistration) {
+				writeError(w, http.StatusConflict, err.Error())
 				return
 			}
 			if err != nil {
@@ -575,6 +586,10 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				Metadata:    metadata,
 				OwnerID:     ownerID,
 			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusConflict, errStaleRuntimeRegistration.Error())
+				return
+			}
 			if err != nil {
 				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
 					uuidToString(ownerID),
@@ -654,7 +669,9 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			h.mergeLegacyRuntimes(r, registered, provider, req.LegacyDaemonIDs)
 		}
 
-		resp = append(resp, runtimeToResponse(registered))
+		registeredResponse := runtimeToResponse(registered)
+		registeredResponse.OwnerGeneration = runtime.OwnerGeneration
+		resp = append(resp, registeredResponse)
 	}
 	for _, failed := range req.FailedProfiles {
 		profileID := strings.TrimSpace(failed.ProfileID)
@@ -697,6 +714,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 					"runtime_profile_registration_error": true,
 					"runtime_profile_failure_reason":     reason,
 					"command_name":                       resolvedCommandName,
+					"owner_generation":                   failed.OwnerGeneration,
 				})
 				return db.UpsertAgentRuntimeWithProfileParams{
 					WorkspaceID: wsUUID,
@@ -925,14 +943,26 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 // it sent one. An absent or unusable reason falls back to the plain offline
 // write: a malformed payload must never cost the caller the state change it
 // actually asked for.
-func (h *Handler) setRuntimeOffline(ctx context.Context, runtimeID pgtype.UUID, reason json.RawMessage) error {
+func (h *Handler) setRuntimeOffline(ctx context.Context, runtimeID pgtype.UUID, reason json.RawMessage, ownerGeneration string) (bool, error) {
+	if ownerGeneration != "" {
+		var offlineReason []byte
+		if len(reason) > 0 && json.Valid(reason) {
+			offlineReason = reason
+		}
+		rows, err := h.Queries.SetAgentRuntimeOfflineIfOwner(ctx, db.SetAgentRuntimeOfflineIfOwnerParams{
+			ID: runtimeID, OfflineReason: offlineReason, OwnerGeneration: ownerGeneration,
+		})
+		return rows > 0, err
+	}
 	if len(reason) > 0 && json.Valid(reason) {
-		return h.Queries.SetAgentRuntimeOfflineWithReason(ctx, db.SetAgentRuntimeOfflineWithReasonParams{
+		err := h.Queries.SetAgentRuntimeOfflineWithReason(ctx, db.SetAgentRuntimeOfflineWithReasonParams{
 			ID:            runtimeID,
 			OfflineReason: reason,
 		})
+		return err == nil, err
 	}
-	return h.Queries.SetAgentRuntimeOffline(ctx, runtimeID)
+	err := h.Queries.SetAgentRuntimeOffline(ctx, runtimeID)
+	return err == nil, err
 }
 
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.
@@ -942,7 +972,8 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 		// OfflineReasons is optional and keyed by runtime id. Present only for
 		// causes the user must repair — a daemon shutting down sends none, so an
 		// older daemon simply keeps today's behaviour (MUL-6164).
-		OfflineReasons map[string]json.RawMessage `json:"offline_reasons"`
+		OfflineReasons   map[string]json.RawMessage `json:"offline_reasons"`
+		OwnerGenerations map[string]string          `json:"owner_generations"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -951,6 +982,10 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 
 	if len(req.RuntimeIDs) == 0 {
 		writeError(w, http.StatusBadRequest, "runtime_ids is required")
+		return
+	}
+	if strings.HasSuffix(r.URL.Path, "/deregister/fenced") && req.OwnerGenerations == nil {
+		writeError(w, http.StatusBadRequest, "owner_generations is required")
 		return
 	}
 	runtimeUUIDs, ok := parseUUIDSliceOrBadRequest(w, req.RuntimeIDs, "runtime_ids")
@@ -994,9 +1029,23 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if err := h.setRuntimeOffline(r.Context(), rt.ID, req.OfflineReasons[rid]); err != nil {
+		generation := req.OwnerGenerations[rid]
+		if generation == "" {
+			var metadata map[string]json.RawMessage
+			if err := json.Unmarshal(rt.Metadata, &metadata); err != nil {
+				continue
+			}
+			if strings.HasSuffix(r.URL.Path, "/deregister/fenced") || len(metadata["owner_generation"]) > 0 && string(metadata["owner_generation"]) != `""` {
+				continue // neither a malformed new request nor a legacy request can retire a fenced owner
+			}
+		}
+		updated, err := h.setRuntimeOffline(r.Context(), rt.ID, req.OfflineReasons[rid], generation)
+		if err != nil {
 			slog.Warn("deregister: failed to set offline", "runtime_id", rid, "error", err)
 			continue
+		}
+		if !updated {
+			continue // a newer owner registered before this request landed
 		}
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeOffline(
 			uuidToString(rt.OwnerID),

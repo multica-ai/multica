@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/daemon"
 )
 
 // TestResolveDaemonStringOverridePrecedence pins the three-tier order:
@@ -52,7 +53,7 @@ func TestResolveDaemonWorkspacesRootPrecedence(t *testing.T) {
 	flagRoot := filepath.Join(t.TempDir(), "flag")
 	envRoot := filepath.Join(t.TempDir(), "env")
 	configRoot := filepath.Join(t.TempDir(), "config")
-	t.Setenv("HOME", home)
+	stageTestHome(t, home)
 	t.Setenv("USERPROFILE", home)
 	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{WorkspacesRoot: configRoot}, "dev"); err != nil {
 		t.Fatalf("SaveCLIConfigForProfile: %v", err)
@@ -91,7 +92,15 @@ func TestResolveDaemonWorkspacesRootPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve default root: %v", err)
 	}
-	wantDefault := filepath.Join(home, "multica_workspaces_dev")
+	// With no explicit root the daemon uses the backend-scoped default, not a
+	// profile-derived one: a profile namespaces config/auth/lifecycle, never
+	// persistent work state (GH #8280). This profile has no recorded server_url,
+	// so the backend is the built-in default.
+	baseURL, err := daemon.NormalizeServerBaseURL(daemon.DefaultServerURL)
+	if err != nil {
+		t.Fatalf("normalize default server url: %v", err)
+	}
+	wantDefault := filepath.Join(home, "multica_workspaces_"+daemon.WorkStateKey(baseURL))
 	if got != wantDefault {
 		t.Fatalf("default root = %q, want %q", got, wantDefault)
 	}

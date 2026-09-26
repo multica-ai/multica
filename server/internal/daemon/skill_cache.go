@@ -48,6 +48,26 @@ func (c *SkillBundleCache) Load(workspaceID string, ref SkillRefData) (SkillData
 	return bundle, true
 }
 
+// Store publishes a bundle under its immutable content key.
+//
+// Audited for the shared workspaces root (two daemon processes serving one
+// backend share .skill-cache, GH #8280). Concurrent stores for the same key from
+// different processes are benign and stay unlocked on purpose:
+//
+//   - the key is the content hash, so two writers publish identical bytes and
+//     whichever rename wins leaves the same content authoritative;
+//   - the bundle is written into a temp directory and published with one rename,
+//     so a reader sees the old complete file, the new complete file, or ENOENT —
+//     never a partial one (the temp directory is never a key any reader looks
+//     up);
+//   - the loser's rename can remove the winner's fresh directory before retrying,
+//     and Load validates the JSON and drops anything unparseable, so the worst
+//     outcome of an interleaving is a cache miss and a re-download, not a wrong
+//     or corrupt bundle.
+//
+// So this needs no scope-level lock: the correctness property (never serve
+// invalid content) holds without one, and adding a claim would only remove a
+// benign re-download.
 func (c *SkillBundleCache) Store(workspaceID string, bundle SkillData) error {
 	if c == nil || c.root == "" {
 		return nil

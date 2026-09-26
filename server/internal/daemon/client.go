@@ -1063,12 +1063,14 @@ type RuntimeOfflineReason struct {
 // Deregister takes runtimes offline. reasons is optional and keyed by runtime
 // id: a daemon shutting down has nothing to explain, while one that condemned a
 // broken CLI does.
-func (c *Client) Deregister(ctx context.Context, runtimeIDs []string, reasons map[string]RuntimeOfflineReason) error {
-	body := map[string]any{"runtime_ids": runtimeIDs}
+func (c *Client) Deregister(ctx context.Context, runtimeIDs []string, reasons map[string]RuntimeOfflineReason, ownerGenerations map[string]string) error {
+	body := map[string]any{"runtime_ids": runtimeIDs, "owner_generations": ownerGenerations}
 	if len(reasons) > 0 {
 		body["offline_reasons"] = reasons
 	}
-	return c.postJSON(ctx, "/api/daemon/deregister", body, nil)
+	// A distinct route fails closed against a server that predates the fence:
+	// the legacy endpoint would ignore owner_generations and mutate the new owner.
+	return c.postJSON(ctx, "/api/daemon/deregister/fenced", body, nil)
 }
 
 // RegisterResponse holds the server's response to a daemon registration.
