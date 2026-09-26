@@ -143,6 +143,8 @@ vi.mock("../i18n", () => ({
           table_empty: "No rows",
           table_rows: "rows",
           table_columns: "columns",
+          address: "Address",
+          reload: "Reload",
         },
       }),
   }),
@@ -152,6 +154,8 @@ import {
   AttachmentPreviewModal,
   useAttachmentPreview,
 } from "./attachment-preview-modal";
+import { withFragmentNavShim } from "./utils/iframe-fragment-nav";
+import { withLocationBridge } from "./utils/iframe-location-bridge";
 import { renderHook, act as hookAct } from "@testing-library/react";
 
 // Fresh QueryClient per render — no retries (preview errors are typed,
@@ -308,12 +312,72 @@ describe("AttachmentPreviewModal — dispatch", () => {
       // (MUL-2330). The combination with `allow-same-origin` would defeat
       // the sandbox, so this assertion must stay exact.
       expect(frame?.getAttribute("sandbox")).toBe("allow-scripts");
-      // srcdoc carries the original HTML plus the fragment-nav shim
-      // appended at the end (see utils/iframe-fragment-nav.ts).
-      const srcdoc = frame?.getAttribute("srcdoc") ?? "";
-      expect(srcdoc.startsWith("<p>hi</p>")).toBe(true);
-      expect(srcdoc).toContain("scrollIntoView");
+      // srcdoc carries the original HTML between the address bridge in
+      // front (utils/iframe-location-bridge.ts) and the fragment-nav shim
+      // appended at the end (utils/iframe-fragment-nav.ts).
+      expect(frame?.getAttribute("srcdoc")).toBe(
+        withLocationBridge(withFragmentNavShim("<p>hi</p>"), ""),
+      );
     });
+  });
+
+  it("loads the HTML at the address typed into its address bar", async () => {
+    getAttachmentTextContentMock.mockResolvedValueOnce({
+      text: "<p>hi</p>",
+      originalContentType: "text/html",
+    });
+    const att = makeAttachment({ filename: "mock.html", content_type: "text/html" });
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
+
+    const input = await screen.findByLabelText("Address");
+    fireEvent.change(input, { target: { value: "mock.html?s=overview" } });
+    fireEvent.submit(input.closest("form")!);
+
+    const frame = document.querySelector("iframe[sandbox]") as HTMLIFrameElement;
+    expect(frame.getAttribute("srcdoc")).toBe(
+      withLocationBridge(withFragmentNavShim("<p>hi</p>"), "?s=overview"),
+    );
+    expect((input as HTMLInputElement).value).toBe("?s=overview");
+  });
+
+  it("keeps the HTML's address across the source view", async () => {
+    getAttachmentTextContentMock.mockResolvedValueOnce({
+      text: "<p>hi</p>",
+      originalContentType: "text/html",
+    });
+    const att = makeAttachment({ filename: "mock.html", content_type: "text/html" });
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
+
+    const input = await screen.findByLabelText("Address");
+    fireEvent.change(input, { target: { value: "?s=ia" } });
+    fireEvent.submit(input.closest("form")!);
+    fireEvent.click(screen.getByRole("button", { name: "View source" }));
+    expect(screen.queryByLabelText("Address")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "View source" }));
+
+    expect(screen.getByLabelText("Address")).toHaveValue("?s=ia");
+    expect(document.querySelector("iframe[sandbox]")?.getAttribute("srcdoc")).toBe(
+      withLocationBridge(withFragmentNavShim("<p>hi</p>"), "?s=ia"),
+    );
+  });
+
+  it("drops an unsubmitted address on Escape without closing the viewer", async () => {
+    getAttachmentTextContentMock.mockResolvedValueOnce({
+      text: "<p>hi</p>",
+      originalContentType: "text/html",
+    });
+    const att = makeAttachment({ filename: "mock.html", content_type: "text/html" });
+    render(<ClosablePreview attachment={att} />);
+
+    const input = (await screen.findByLabelText("Address")) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "?s=draft" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(input.value).toBe("");
+    expect(screen.getByRole("dialog")).toBeTruthy();
+
+    // With nothing left to drop, Escape closes the viewer as usual.
+    fireEvent.keyDown(input, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
   it("renders a code block with lowlight for source files", async () => {
@@ -710,6 +774,33 @@ describe("AttachmentPreviewModal — open-in-new-tab", () => {
       { activate: true },
     );
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the new tab at the address the HTML is at", async () => {
+    getAttachmentTextContentMock.mockResolvedValueOnce({
+      text: "<p>hi</p>",
+      originalContentType: "text/html",
+    });
+    const att = makeAttachment({
+      filename: "report.html",
+      content_type: "text/html",
+    });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    const input = await screen.findByLabelText("Address");
+    fireEvent.change(input, { target: { value: "?s=ia#top" } });
+    fireEvent.submit(input.closest("form")!);
+    fireEvent.click(screen.getByTitle("Open in new tab"));
+    expect(openInNewTabMock).toHaveBeenCalledWith(
+      "/acme/attachments/att-1/preview?name=report.html&loc=%3Fs%3Dia%23top",
+      "report.html",
+      { activate: true },
+    );
   });
 
   it("falls back to window.open against the shareable URL and closes the modal (web)", async () => {

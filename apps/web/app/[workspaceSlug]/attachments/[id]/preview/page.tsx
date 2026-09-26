@@ -17,10 +17,16 @@ export default function AttachmentPreviewWebPage({
   const { id } = use(params);
   const search = useSearchParams();
   const filename = search.get("name") ?? undefined;
+  // Query and fragment the document opens at (the viewer's address bar).
+  const initialAddress = search.get("loc") ?? undefined;
 
   return (
     <ErrorBoundary resetKeys={[id]}>
-      <AttachmentPreviewPage attachmentId={id} filename={filename} />
+      <AttachmentPreviewPage
+        attachmentId={id}
+        filename={filename}
+        initialAddress={initialAddress}
+      />
     </ErrorBoundary>
   );
 }

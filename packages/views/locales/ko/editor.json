@@ -81,7 +81,9 @@
     "tree_keys_other": "키 {{count}}개",
     "table_empty": "행이 없습니다",
     "table_rows_other": "{{count}}행",
-    "table_columns_other": "{{count}}열"
+    "table_columns_other": "{{count}}열",
+    "address": "주소",
+    "reload": "새로고침"
   },
   "link_hover": {
     "copy_link": "링크 복사",

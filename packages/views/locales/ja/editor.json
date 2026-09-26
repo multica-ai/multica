@@ -81,7 +81,9 @@
     "tree_keys_other": "{{count}} 個のキー",
     "table_empty": "行がありません",
     "table_rows_other": "{{count}} 行",
-    "table_columns_other": "{{count}} 列"
+    "table_columns_other": "{{count}} 列",
+    "address": "アドレス",
+    "reload": "再読み込み"
   },
   "link_hover": {
     "copy_link": "リンクをコピー",

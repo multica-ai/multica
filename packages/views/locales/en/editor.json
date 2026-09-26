@@ -85,7 +85,9 @@
     "table_rows_one": "{{count}} row",
     "table_rows_other": "{{count}} rows",
     "table_columns_one": "{{count}} column",
-    "table_columns_other": "{{count}} columns"
+    "table_columns_other": "{{count}} columns",
+    "address": "Address",
+    "reload": "Reload"
   },
   "link_hover": {
     "copy_link": "Copy link",

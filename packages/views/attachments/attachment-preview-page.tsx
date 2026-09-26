@@ -21,28 +21,41 @@
  * The route is workspace-scoped (`/{slug}/attachments/{id}/preview`) for
  * tenancy isolation; the attachment endpoints themselves are auth-checked, so
  * the slug is purely a URL contract.
+ *
+ * An HTML file opens at the `loc` the viewer handed over (its address bar,
+ * MUL-7737). On desktop the address the reader left is kept in the tab's
+ * view state, so a tab switch comes back to the same screen.
  */
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useT } from "../i18n";
+import { useRestoredViewState, useViewStateWriter } from "../platform";
 import {
   AttachmentPreviewStandalone,
   type HtmlFrameRenderer,
 } from "../editor/attachment-preview-modal";
+import type { HtmlPreviewLocation } from "../editor/hooks/use-html-preview-location";
+import { normalizeHtmlPreviewAddress } from "../editor/utils/iframe-location-bridge";
 import { useHtmlPreviewScrollRestore } from "./use-html-preview-scroll-restore";
+
+/** View-state key the page keeps an HTML file's address under. */
+export const HTML_PREVIEW_ADDRESS_KEY = "html-preview-address";
 
 interface AttachmentPreviewPageProps {
   attachmentId: string;
   /** Optional display name. Titles the tab until the record has loaded. */
   filename?: string;
+  /** Query and fragment an HTML file opens at (the route's `loc`). */
+  initialAddress?: string;
 }
 
 export function AttachmentPreviewPage({
   attachmentId,
   filename,
+  initialAddress,
 }: AttachmentPreviewPageProps) {
   const { t } = useT("editor");
   const query = useQuery({
@@ -64,11 +77,22 @@ export function AttachmentPreviewPage({
     if (title) document.title = title;
   }, [title]);
 
+  const restoredAddress = useRestoredViewState(HTML_PREVIEW_ADDRESS_KEY);
+  const writeViewState = useViewStateWriter();
+  const keepAddress = useCallback(
+    (address: string) => writeViewState(HTML_PREVIEW_ADDRESS_KEY, address),
+    [writeViewState],
+  );
+
   if (attachment) {
     return (
       <AttachmentPreviewStandalone
         attachment={attachment}
         renderHtmlFrame={renderPageHtmlFrame}
+        initialHtmlAddress={normalizeHtmlPreviewAddress(
+          restoredAddress ?? initialAddress ?? "",
+        )}
+        onHtmlAddressChange={keepAddress}
       />
     );
   }
@@ -94,15 +118,31 @@ export function AttachmentPreviewPage({
 // content change (re-upload) structurally remounts a fresh document; the
 // hook reports y=0 with the new key until that document scrolls, and
 // messages from the previous document are dropped by token.
-function PageHtmlFrame({ html, title }: { html: string; title: string }) {
+function PageHtmlFrame({
+  html,
+  title,
+  location,
+}: {
+  html: string;
+  title: string;
+  location: HtmlPreviewLocation;
+}) {
   const { contentKey, buildSrcDoc, iframeRef, onLoad } =
     useHtmlPreviewScrollRestore(html);
+  const { frameRef } = location;
+  const setFrame = useCallback(
+    (el: HTMLIFrameElement | null) => {
+      iframeRef(el);
+      frameRef(el);
+    },
+    [iframeRef, frameRef],
+  );
   return (
     <iframe
-      key={contentKey}
-      ref={iframeRef}
+      key={`${contentKey}:${location.frameKey}`}
+      ref={setFrame}
       onLoad={onLoad}
-      srcDoc={buildSrcDoc(html)}
+      srcDoc={location.withAddress(buildSrcDoc(html))}
       sandbox="allow-scripts"
       title={title}
       className="h-full w-full border-0 bg-background"
