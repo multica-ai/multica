@@ -1114,6 +1114,7 @@ type RuntimeProfile struct {
 	ProtocolFamily string   `json:"protocol_family"`
 	RuntimeType    string   `json:"runtime_type"`
 	CommandName    string   `json:"command_name"`
+	SkipIfMissing  bool     `json:"skip_if_missing"`
 	Description    *string  `json:"description"`
 	FixedArgs      []string `json:"fixed_args"`
 	Visibility     string   `json:"visibility"`

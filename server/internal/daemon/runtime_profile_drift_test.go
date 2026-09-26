@@ -88,6 +88,11 @@ func TestProfileSetSignature_DetectsRegistrationAffectingChanges(t *testing.T) {
 			out[0].Visibility = "private"
 			return out
 		}},
+		{"change skip_if_missing", func(in []RuntimeProfile) []RuntimeProfile {
+			out := append([]RuntimeProfile(nil), in...)
+			out[0].SkipIfMissing = true
+			return out
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

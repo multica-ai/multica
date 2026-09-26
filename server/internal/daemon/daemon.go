@@ -3141,11 +3141,13 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 						failureReason += "; "
 					}
 					failureReason += "command not found on PATH or provider discovery: " + profile.CommandName
-					*failedProfiles = append(*failedProfiles, map[string]string{
-						"profile_id":   profile.ID,
-						"command_name": profile.CommandName,
-						"reason":       failureReason,
-					})
+					if !profile.SkipIfMissing {
+						*failedProfiles = append(*failedProfiles, map[string]string{
+							"profile_id":   profile.ID,
+							"command_name": profile.CommandName,
+							"reason":       failureReason,
+						})
+					}
 					continue
 				}
 			} else {
@@ -3192,9 +3194,10 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 //
 // The hashed projection covers exactly the fields that affect what the
 // daemon sends in a Register call: ID, Enabled, runtime identity, CommandName,
-// FixedArgs (the launch args every agent on this runtime inherits) and
+// FixedArgs (the launch args every agent on this runtime inherits),
 // Visibility (so a hypothetical future per-creator filter still triggers
-// drift). Profiles are sorted by ID first so the digest is order-independent
+// drift), and SkipIfMissing. Profiles are sorted by ID first so the digest is
+// order-independent
 // (the server is allowed to return them in any order).
 func profileSetSignature(profiles []RuntimeProfile) string {
 	if len(profiles) == 0 {
@@ -3206,12 +3209,13 @@ func profileSetSignature(profiles []RuntimeProfile) string {
 	// Field separator chosen to never appear in a UUID, slug, or arg.
 	const sep = "\x1f"
 	for _, p := range sorted {
-		fmt.Fprintf(h, "%s%s%t%s%s%s%s%s%s%s",
+		fmt.Fprintf(h, "%s%s%t%s%s%s%s%s%s%s%t%s",
 			p.ID, sep,
 			p.Enabled, sep,
 			agent.ProfileRuntimeType(p.RuntimeType, p.ProtocolFamily), sep,
 			p.CommandName, sep,
 			p.Visibility, sep,
+			p.SkipIfMissing, sep,
 		)
 		for _, a := range p.FixedArgs {
 			fmt.Fprintf(h, "%s%s", a, sep)
