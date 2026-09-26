@@ -18,12 +18,14 @@ import {
   Blocks,
   CreditCard,
   Server,
+  Workflow,
 } from "lucide-react";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureEnabled } from "@multica/core/config";
 import {
   BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
   PLUGINS_V1_FLAG,
+  PROJECT_WORKFLOWS_V1_FLAG,
 } from "@multica/core/feature-flags";
 import { cn } from "@multica/ui/lib/utils";
 import { resolveSettingsLocation, settingsHref } from "./settings-navigation";
@@ -38,6 +40,7 @@ import { IntegrationsTab } from "./integrations-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { LabelsTab } from "./labels-tab";
 import { IssueStatusesTab } from "./issue-statuses-tab";
+import { WorkflowsTab } from "../../workflows/workflows-tab";
 import { PropertiesTab } from "./properties-tab";
 import { QuickActionsTab } from "./quick-actions-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
@@ -67,6 +70,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     useCurrentWorkspace()?.name ?? t(($) => $.page.workspace_fallback);
   const navigation = useNavigation();
   const pluginsEnabled = useFeatureEnabled(PLUGINS_V1_FLAG, false);
+  const workflowsEnabled = useFeatureEnabled(PROJECT_WORKFLOWS_V1_FLAG, false);
   const billingEnabled = useFeatureEnabled(
     BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
     false,
@@ -150,13 +154,29 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
       label: t(($) => $.page.groups.issues),
       scope: workspaceName,
       entries: [
-        entry(
-          "issue-statuses",
-          t(($) => $.page.tabs.issue_statuses),
-          CircleDot,
-          <IssueStatusesTab />,
-          true,
-        ),
+        ...(workflowsEnabled
+          ? [
+              entry(
+                "workflows",
+                t(($) => $.page.tabs.workflows),
+                Workflow,
+                <WorkflowsTab />,
+                true,
+              ),
+            ]
+          : []),
+        // With workflows on, the status library lives inside Workflows.
+        ...(workflowsEnabled
+          ? []
+          : [
+              entry(
+                "issue-statuses",
+                t(($) => $.page.tabs.issue_statuses),
+                CircleDot,
+                <IssueStatusesTab />,
+                true,
+              ),
+            ]),
         entry(
           "labels",
           t(($) => $.page.tabs.labels),
@@ -228,7 +248,11 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   ];
   const location = resolveSettingsLocation(navigation.searchParams);
   const candidate =
-    location.tab === "billing" && !billingEnabled ? "workspace" : location.tab;
+    location.tab === "billing" && !billingEnabled
+      ? "workspace"
+      : location.tab === "issue-statuses" && workflowsEnabled
+        ? "workflows"
+        : location.tab;
   const active =
     groups
       .flatMap((group) => group.entries)
@@ -320,6 +344,8 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
             active.wide ? "max-w-5xl" : "max-w-4xl",
           )}
         >
+          {/* An open workflow renders its own trail down to the workflow. (MUL-7420) */}
+          {!(active.value === "workflows" && navigation.searchParams.has("workflow")) && (
           <div className="mb-3 flex min-w-0 items-center gap-2 text-caption text-muted-foreground">
             <span className="truncate">{activeGroup.scope}</span>
             {activeGroup.scope !== activeGroup.label && (
@@ -329,6 +355,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               </>
             )}
           </div>
+          )}
           {active.content}
         </div>
       </div>

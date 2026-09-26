@@ -9,6 +9,8 @@ import { issueSurfaceGanttOptions } from "@multica/core/issues/surface/repositor
 import type { IssueSurfaceQueryPlan } from "@multica/core/issues/surface/query-plan";
 import type { IssueStatus, ProjectStatus, PropertyFilterValue } from "@multica/core/types";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useProjectWorkflow } from "@multica/core/issue-workflows";
+import { workflowColumns } from "../utils/workflow-columns";
 import { issueBehavesAsAny, statusColumnKeys, visibleStatusKeys } from "@multica/core/issues";
 import {
   applyIssueFilters,
@@ -370,20 +372,29 @@ export function useIssueSurfaceData({
   );
 
   const catalog = useIssueStatuses(wsId);
+  // A project using a workflow shows exactly its steps, in workflow order.
+  // (MUL-7420)
+  const projectWorkflow = useProjectWorkflow(wsId, projectId);
 
   const visibleStatuses = useMemo<IssueStatus[]>(() => {
     // An explicit exact-key filter wins over hidden column preferences.
-    return visibleStatusKeys(
-      statusFilters,
-      hiddenStatusKeys,
-      catalog,
+    return workflowColumns(
+      visibleStatusKeys(
+        statusFilters,
+        hiddenStatusKeys,
+        catalog,
+      ),
+      projectWorkflow,
     );
-  }, [statusFilters, hiddenStatusKeys, catalog]);
+  }, [statusFilters, hiddenStatusKeys, catalog, projectWorkflow]);
 
   // Each catalog status can be hidden or restored independently.
   const hiddenStatuses = useMemo<IssueStatus[]>(
-    () => statusColumnKeys(catalog).filter((s) => !visibleStatuses.includes(s)),
-    [catalog, visibleStatuses],
+    () =>
+      (projectWorkflow ? workflowColumns(null, projectWorkflow) : statusColumnKeys(catalog)).filter(
+        (s) => !visibleStatuses.includes(s),
+      ),
+    [catalog, projectWorkflow, visibleStatuses],
   );
 
   const activeFilters = useMemo(

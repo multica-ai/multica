@@ -82,7 +82,10 @@
       "done": "已完成。",
       "cancelled": "决定不做。"
     },
-    "pr_auto_complete_badge": "PR 合并后自动进入"
+    "pr_auto_complete_badge": "PR 合并后自动进入",
+    "builtin_badge": "内置",
+    "workflow_usage_other": "{{count}} 个工作流在用",
+    "workflow_usage_none": "未被工作流使用"
   },
   "quick_actions": {
     "title": "快捷操作",
@@ -380,7 +383,8 @@
       "quick_actions": "快捷操作",
       "plugins": "Plugins",
       "mcp": "MCP",
-      "billing": "账单与套餐"
+      "billing": "账单与套餐",
+      "workflows": "工作流"
     },
     "groups": {
       "personal": "个人设置",

@@ -432,6 +432,27 @@ func (h *Handler) ArchiveIssueStatus(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// A status a project workflow lists stays active, or that workflow's
+	// projects would lose a column. Workflow edits take the same exclusive
+	// lock, so none can add the status back between this check and the
+	// archive. (MUL-7420)
+	workflowNames, err := qtx.ListIssueWorkflowNamesUsingStatusKey(r.Context(), db.ListIssueWorkflowNamesUsingStatusKeyParams{
+		WorkspaceID: wsUUID,
+		StatusKey:   entry.Key,
+	})
+	if err != nil {
+		slog.Warn("ArchiveIssueStatus workflow check failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to check workflows using status")
+		return
+	}
+	if len(workflowNames) > 0 {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":     fmt.Sprintf("cannot archive status: workflow %q still uses it; remove it from the workflow first", workflowNames[0]),
+			"code":      "issue_status_in_workflow",
+			"workflows": workflowNames,
+		})
+		return
+	}
 
 	archived, err := qtx.ArchiveIssueStatusEntry(r.Context(), db.ArchiveIssueStatusEntryParams{
 		ID:          entry.ID,

@@ -23,6 +23,7 @@ export type MoveIssueUpdates = Pick<
   | "assignee_type"
   | "assignee_id"
   | "position"
+  | "stop_previous_assignee_runs"
   | "parent_issue_id"
   | "project_id"
 > & {

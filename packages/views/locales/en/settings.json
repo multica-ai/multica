@@ -82,7 +82,11 @@
       "done": "Completed.",
       "cancelled": "Decided not to do."
     },
-    "pr_auto_complete_badge": "Set when PRs merge"
+    "pr_auto_complete_badge": "Set when PRs merge",
+    "builtin_badge": "Built-in",
+    "workflow_usage_one": "{{count}} workflow uses it",
+    "workflow_usage_other": "{{count}} workflows use it",
+    "workflow_usage_none": "In no workflow"
   },
   "quick_actions": {
     "title": "Quick Actions",
@@ -380,7 +384,8 @@
       "quick_actions": "Quick Actions",
       "plugins": "Plugins",
       "mcp": "MCP",
-      "billing": "Billing"
+      "billing": "Billing",
+      "workflows": "Workflows"
     },
     "groups": {
       "personal": "Personal",

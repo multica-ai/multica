@@ -782,7 +782,72 @@ func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 	if len(ctx.IssueStatuses) > 0 {
 		b.WriteString("- The workflow rules above refer to exact built-in status keys, not categories. Custom statuses share lifecycle semantics only, not built-in automation behavior.\n")
 	}
+	if ctx.ProjectWorkflow != nil {
+		b.WriteString("- This issue's project uses its own workflow (below): the issue's status can only be one of that workflow's keys. Where a rule above names a key the workflow does not list — `in_review` on delivery, for example — finish your step by moving to the step's next status instead.\n")
+	}
 	b.WriteString("- Your turn produced none of the issue's own deliverable — you answered a question or consulted on work owned elsewhere → write nothing, at any point; questions, discussion, and acknowledgements never touch status. This no-write default is what keeps concurrent runs from flapping the board.\n\n")
+	writeProjectWorkflow(b, ctx.ProjectWorkflow)
+}
+
+// writeProjectWorkflow emits the issue's project workflow (MUL-7420): its
+// statuses in board order, who each step hands the issue to, and the current
+// step's instructions and exits. Moving the issue into a step with a handler
+// reassigns it to that handler, which is how work passes along the workflow;
+// nothing advances the status when a run ends.
+//
+// Names, handlers and instructions are user-authored and pass through the
+// same sanitizers as the status catalog; a step whose key fails the code-token
+// check is dropped.
+func writeProjectWorkflow(b *strings.Builder, w *ProjectWorkflowForEnv) {
+	if w == nil || len(w.Steps) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "### Project Workflow: %s\n\n", sanitizeNameForBriefMarkdown(w.Name))
+	b.WriteString("Statuses in order. Moving the issue into a step that hands off reassigns it to that step's handler and starts their run; the system never advances the status when a run ends.\n\n")
+	var current *ProjectWorkflowStepForEnv
+	for i := range w.Steps {
+		s := &w.Steps[i]
+		key := sanitizeBriefCodeToken(s.Key)
+		if key == "" {
+			continue
+		}
+		fmt.Fprintf(b, "- `%s`", key)
+		if name := sanitizeNameForBriefMarkdown(s.Name); name != "" {
+			fmt.Fprintf(b, " %s", name)
+		}
+		if handler := sanitizeNameForBriefMarkdown(s.Handler); handler != "" {
+			fmt.Fprintf(b, " — hands off to %s", handler)
+		}
+		if s.Key == w.CurrentStatusKey {
+			b.WriteString(" (current)")
+			current = s
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	if current == nil {
+		return
+	}
+	if instructions := strings.TrimSpace(current.Instructions); instructions != "" {
+		b.WriteString("Current step instructions:\n")
+		for _, line := range strings.Split(instructions, "\n") {
+			b.WriteString("> ")
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+	next := sanitizeBriefCodeToken(current.NextStatusKey)
+	back := sanitizeBriefCodeToken(current.BackStatusKey)
+	if next != "" {
+		fmt.Fprintf(b, "- Step done → `multica issue status <id> %s`\n", next)
+	}
+	if back != "" {
+		fmt.Fprintf(b, "- Needs changes → `multica issue status <id> %s`\n", back)
+	}
+	if next != "" || back != "" {
+		b.WriteString("\n")
+	}
 }
 
 // writeSubIssueCreation emits the Sub-issue Creation section.

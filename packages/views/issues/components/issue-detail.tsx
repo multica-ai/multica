@@ -32,6 +32,7 @@ import {
   Tag,
   Unlink,
   Users,
+  Workflow,
 } from "lucide-react";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -60,6 +61,7 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
+import { TimelineHandoff } from "../../workflows/timeline-handoff";
 import { PropertyIcon } from "../../common/property-icon";
 import type { Attachment, Issue, IssueProperty, IssueStatus, IssueStatusCategory, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
@@ -110,6 +112,12 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
+import {
+  useProjectWorkflow,
+  workflowAllowsStatus,
+  workflowDoneStatus,
+  workflowReopenStatus,
+} from "@multica/core/issue-workflows";
 import { useRecentContextStore } from "@multica/core/chat";
 import { useModalStore } from "@multica/core/modals";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
@@ -744,41 +752,51 @@ function ActivityBlock({
           );
         }
 
+        const handoff = isStatusChange && !!details.handoff_to_id;
         return (
-          <div key={entry.id} className="flex items-center text-caption text-muted-foreground">
-            <div className="mr-2 flex w-4 shrink-0 justify-center">
-              {leadIcon}
-            </div>
-            <div className="flex min-w-0 flex-1 items-center gap-1">
-              <span className="shrink-0 font-medium">
-                {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
-              </span>
-              <span className="truncate">
-                <ActivityText
-                  entry={entry}
-                  text={formatActivity(entry, t, locale, getActorName, resolveStatusLabel)}
-                />
-              </span>
-              {(entry.coalesced_count ?? 1) > 1 &&
-                entry.action !== "task_completed" &&
-                entry.action !== "task_failed" && (
-                  <span className="shrink-0 rounded-xs bg-muted px-1.5 py-0.5 text-caption font-medium tabular-nums text-muted-foreground">
-                    {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
-                  </span>
-                )}
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <span className="ml-auto shrink-0 cursor-default">
-                      {timeAgo(entry.created_at)}
+          <div key={entry.id} className="text-caption text-muted-foreground">
+            <div className="flex items-center">
+              <div className="mr-2 flex w-4 shrink-0 justify-center">
+                {leadIcon}
+              </div>
+              <div className="flex min-w-0 flex-1 items-center gap-1">
+                <span className="shrink-0 font-medium">
+                  {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
+                </span>
+                <span className="truncate">
+                  <ActivityText
+                    entry={entry}
+                    text={formatActivity(entry, t, locale, getActorName, resolveStatusLabel)}
+                  />
+                </span>
+                {(entry.coalesced_count ?? 1) > 1 &&
+                  entry.action !== "task_completed" &&
+                  entry.action !== "task_failed" && (
+                    <span className="shrink-0 rounded-xs bg-muted px-1.5 py-0.5 text-caption font-medium tabular-nums text-muted-foreground">
+                      {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
                     </span>
-                  }
-                />
-                <TooltipContent side="top">
-                  {new Date(entry.created_at).toLocaleString(locale)}
-                </TooltipContent>
-              </Tooltip>
+                  )}
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span className="ml-auto shrink-0 cursor-default">
+                        {timeAgo(entry.created_at)}
+                      </span>
+                    }
+                  />
+                  <TooltipContent side="top">
+                    {new Date(entry.created_at).toLocaleString(locale)}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
             </div>
+            {/* A workflow handoff (MUL-7420) keeps the status row and adds who
+                the step handed the issue to beneath it. */}
+            {handoff && (
+              <div className="ml-6">
+                <TimelineHandoff details={details} />
+              </div>
+            )}
           </div>
         );
       })}
@@ -885,6 +903,8 @@ function SubIssueRow({
         <StatusPicker
           status={child.status}
           onUpdate={handleUpdate}
+          projectId={child.project_id}
+          issue={child}
           align="start"
           trigger={
             <StatusIcon
@@ -2295,6 +2315,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
+  // One-click status actions land on statuses the issue's workflow allows
+  // (MUL-7420): done may be a custom done step, and marking a duplicate
+  // cancels, which a workflow may not list.
+  const issueWorkflow = useProjectWorkflow(wsId, issue?.project_id);
+  const doneStatus = workflowDoneStatus(issueWorkflow, resolveStatusCategory);
+  const canMarkDuplicate = workflowAllowsStatus(issueWorkflow, "cancelled");
 
   // Labels live in their own query (not on the issue body) — fetch the count
   // here so seeding can decide whether the "Labels" optional row should be
@@ -2522,7 +2548,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               status={issue.status}
               onUpdate={handleUpdateField}
               align="start"
-              onMarkDuplicate={actions.openMarkDuplicate}
+              projectId={issue.project_id}
+              issue={issue}
+              onMarkDuplicate={canMarkDuplicate ? actions.openMarkDuplicate : undefined}
               isDuplicate={isDuplicateIssue(issue)}
             />
           </PropRow>
@@ -2535,6 +2563,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               onUpdate={handleUpdateField}
             />
           </PropRow>
+          <IssueWorkflowPropRow projectId={issue.project_id} label={t(($) => $.workflows.project.label)} />
 
           {/* Optional props — rendered only when set on the issue OR added
               via "+ Add property" in this session. Row order follows the
@@ -2999,7 +3028,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 it never overlaps the title (which truncates to make room).
                 It self-hides when no agent is active. */}
             <IssueAgentHeaderChip issueId={id} />
-            {onDone && !issueBehavesAsAny(issue, ["done", "closed"]) && (
+            {onDone && doneStatus && !issueBehavesAsAny(issue, ["done", "closed"]) && (
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -3007,7 +3036,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       variant="ghost"
                       size="icon-sm"
                       className="text-muted-foreground"
-                      onClick={() => { handleUpdateField({ status: "done" }); onDone?.(); }}
+                      onClick={() => { handleUpdateField({ status: doneStatus }); onDone?.(); }}
                     >
                       <CircleCheck />
                     </Button>
@@ -3102,7 +3131,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             issue={issue}
             onUnmark={() =>
               handleUpdateField(
-                { status: "todo" },
+                { status: workflowReopenStatus(issueWorkflow) },
                 { onSuccess: () => toast.success(t(($) => $.duplicates.unmark_toast)) },
               )
             }
@@ -3752,5 +3781,26 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </AnimatedRightSidebar>
       </ResizablePanel>
     </ResizablePanelGroup>
+  );
+}
+
+/**
+ * The workflow the issue follows through its project (MUL-7420). Read-only:
+ * a workflow belongs to the project, so it changes there. Shown only when
+ * the project uses one.
+ */
+function IssueWorkflowPropRow({ projectId, label }: { projectId: string | null; label: string }) {
+  const { t } = useT("issues");
+  const wsId = useWorkspaceId();
+  const workflow = useProjectWorkflow(wsId, projectId);
+  if (!workflow) return null;
+  return (
+    <PropRow label={label}>
+      <span className="flex min-w-0 items-center gap-1.5 px-1 text-muted-foreground">
+        <Workflow aria-hidden className="size-3.5 shrink-0" />
+        <span className="truncate text-foreground">{workflow.name}</span>
+        <span className="shrink-0 text-caption">{t(($) => $.workflows.detail.follows_project)}</span>
+      </span>
+    </PropRow>
   );
 }

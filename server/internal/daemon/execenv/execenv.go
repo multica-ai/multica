@@ -214,6 +214,9 @@ type TaskContextForEnv struct {
 	// cap dropped from IssueStatuses, so the brief can disclose truncation
 	// instead of presenting a partial catalog as complete.
 	IssueStatusesOmitted int
+	// ProjectWorkflow is the issue's project workflow (MUL-7420). Nil — for
+	// Default-workflow projects and old servers — leaves the brief unchanged.
+	ProjectWorkflow *ProjectWorkflowForEnv
 	// ConnectedApps lists per-run external app capabilities mounted through
 	// MCP overlays. Rendered briefly so the agent can map app names such as
 	// Notion to the actual MCP server name (`composio`).
@@ -246,6 +249,23 @@ type IssueStatusForEnv struct {
 	Name        string
 	Category    string
 	Description string
+}
+
+// ProjectWorkflowForEnv is the workflow of the issue's project (MUL-7420),
+// present only when that project uses a workflow other than the Default.
+type ProjectWorkflowForEnv struct {
+	Name             string
+	CurrentStatusKey string
+	Steps            []ProjectWorkflowStepForEnv
+}
+
+type ProjectWorkflowStepForEnv struct {
+	Key           string
+	Name          string
+	Handler       string
+	Instructions  string
+	NextStatusKey string
+	BackStatusKey string
 }
 
 type SkillContextForEnv struct {

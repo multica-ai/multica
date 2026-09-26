@@ -82,7 +82,10 @@
       "done": "완료.",
       "cancelled": "진행하지 않기로 함."
     },
-    "pr_auto_complete_badge": "PR 병합 시 자동 설정"
+    "pr_auto_complete_badge": "PR 병합 시 자동 설정",
+    "builtin_badge": "기본 제공",
+    "workflow_usage_other": "워크플로 {{count}}개에서 사용 중",
+    "workflow_usage_none": "사용하는 워크플로 없음"
   },
   "quick_actions": {
     "title": "퀵 액션",
@@ -380,7 +383,8 @@
       "quick_actions": "퀵 액션",
       "plugins": "Plugins",
       "mcp": "MCP",
-      "billing": "결제 및 요금제"
+      "billing": "결제 및 요금제",
+      "workflows": "워크플로"
     },
     "groups": {
       "personal": "개인 설정",

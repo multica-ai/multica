@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
 import { Virtuoso } from "react-virtuoso";
-import { EyeOff, FolderMinus, MoreHorizontal, Plus, UserMinus } from "lucide-react";
+import { Ban, EyeOff, FolderMinus, MoreHorizontal, Plus, UserMinus } from "lucide-react";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import type {
@@ -19,6 +19,7 @@ import {
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useActorName } from "@multica/core/workspace/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
@@ -33,6 +34,9 @@ import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { DeferredPopup } from "../../common/deferred-popup";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { VirtuosoSeed } from "../../common/virtuoso-seed";
+import { useBoardWorkflow } from "./board-workflow-context";
+import { stepHandlerActor, useStepHandlerLabel } from "../../workflows/step-handler";
+import { workflowStep } from "@multica/core/issue-workflows";
 import type { IssueCreateDefaults } from "../surface/types";
 
 // Insertion-position prediction intentionally omitted. The server's
@@ -126,7 +130,12 @@ export const BoardColumn = memo(function BoardColumn({
   const archived = !!status && !!entryOf(status)?.archived_at;
   const cfg = status ? STATUS_CONFIG[categoryOf(status)] : null;
   const { setNodeRef, isOver: droppableIsOver } = useDroppable({ id: group.id });
-  const isOver = droppableIsOver && !archived;
+  // A dragged card whose project workflow does not list this status cannot
+  // land here; the column dims and says why. (MUL-7420)
+  const { dropBlockedReason, dropHint } = useBoardWorkflow();
+  const blockedReason = status ? dropBlockedReason(status) : null;
+  const isOver = droppableIsOver && !archived && !blockedReason;
+  const hint = isOver && status ? dropHint(status) : null;
   const viewStoreApi = useViewStoreApi();
   // A status fixed by the open saved view cannot be hidden from the board —
   // that would silently strip one of the view's own conditions.
@@ -192,12 +201,31 @@ export const BoardColumn = memo(function BoardColumn({
   );
 
   return (
-    <div style={{ width: BOARD_COL_WIDTH }} className={`flex shrink-0 flex-col rounded-xl ${cfg?.columnBg ?? "bg-muted/40"} p-2`}>
-      <div className="mb-2 flex items-center justify-between px-1.5">
+    <div
+      style={{ width: BOARD_COL_WIDTH }}
+      className={`relative flex shrink-0 flex-col rounded-xl ${cfg?.columnBg ?? "bg-muted/40"} p-2 ${
+        hint ? "ring-2 ring-brand/30" : ""
+      }`}
+    >
+      {/* A dragged card whose workflow lacks this status cannot land here: the
+          column is hatched over and says why. (MUL-7420) */}
+      {blockedReason && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-background/60 bg-[repeating-linear-gradient(135deg,transparent_0_8px,var(--color-border)_8px_9px)]"
+        >
+          <span className="flex items-center gap-1.5 rounded-md border border-surface-border bg-card px-2.5 py-1 text-caption text-muted-foreground shadow-sm">
+            <Ban className="size-3" />
+            {blockedReason}
+          </span>
+        </div>
+      )}
+      <div className="mb-2 flex items-center justify-between gap-2 px-1.5">
         <BoardGroupHeading group={group} count={totalCount ?? issueIds.length} />
 
-        {/* Right: add + menu */}
-        <div className="flex items-center gap-1">
+        {/* Right: step handler + add + menu */}
+        <div className="flex min-w-0 items-center gap-1">
+          {status && <WorkflowStepHandlerBadge status={status} />}
           {/* Column-header popups mount lazily: a board/swimlane renders one
               header per column and almost none of these menus/tooltips are
               ever opened — eagerly mounting them dominated surface mount
@@ -258,6 +286,16 @@ export const BoardColumn = memo(function BoardColumn({
         </div>
       </div>
       <div className="relative min-h-[200px] flex-1 rounded-lg">
+        {hint && (
+          <div className="pointer-events-none absolute inset-x-1 bottom-1 z-10 flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-brand/50 bg-card px-3 py-3 text-caption text-muted-foreground shadow-sm">
+            {hint.actor && <ActorAvatar actorType={hint.actor.type} actorId={hint.actor.id} size="xs" profileLink={false} />}
+            <span className="truncate">
+              {hint.run
+                ? t(($) => $.workflows.board.drop_hint_run, { name: hint.name })
+                : t(($) => $.workflows.board.drop_hint, { name: hint.name })}
+            </span>
+          </div>
+        )}
         {isOver && sortLabel && (
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/40">
             <span className="rounded-md bg-popover px-2.5 py-1 text-caption font-medium text-popover-foreground shadow-sm border border-border">
@@ -340,6 +378,36 @@ export const BoardColumn = memo(function BoardColumn({
     </div>
   );
 });
+
+/**
+ * On a project board whose project uses a workflow, names who entering this
+ * column hands the issue to. (MUL-7420)
+ */
+function WorkflowStepHandlerBadge({ status }: { status: string }) {
+  const { scopeWorkflow, scopeProject } = useBoardWorkflow();
+  const handlerLabel = useStepHandlerLabel(scopeProject);
+  const { getActorName } = useActorName();
+  const { t } = useT("issues");
+  const step = workflowStep(scopeWorkflow, status);
+  const label = handlerLabel(step);
+  if (!step || !label) return null;
+  const actor = stepHandlerActor(step, scopeProject);
+  const text = t(($) => $.workflows.hands_off_to, { name: label });
+  return (
+    <DeferredTooltip
+      trigger={
+        <span
+          className="inline-flex min-w-0 max-w-32 items-center gap-1 rounded-full border border-surface-border bg-background/70 py-0.5 pl-0.5 pr-2 text-caption"
+          aria-label={text}
+        >
+          {actor && <ActorAvatar actorType={actor.type} actorId={actor.id} size="xs" profileLink={false} />}
+          <span className="truncate">{actor ? getActorName(actor.type, actor.id) : label}</span>
+        </span>
+      }
+      content={text}
+    />
+  );
+}
 
 function BoardGroupHeading({
   group,

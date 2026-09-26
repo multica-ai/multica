@@ -1283,6 +1283,14 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 		{
+			// issue_workflow references the status catalog and projects by
+			// value only, so it is swept alongside the catalog. (MUL-7420)
+			name: "delete issue workflows",
+			run: func() error {
+				return qtx.DeleteIssueWorkflowsForWorkspace(ctx, requester.WorkspaceID)
+			},
+		},
+		{
 			name: "delete autopilot children",
 			run:  func() error { return qtx.DeleteWorkspaceAutopilotChildren(ctx, requester.WorkspaceID) },
 		},

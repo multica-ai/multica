@@ -82,7 +82,10 @@
       "done": "完了。",
       "cancelled": "見送り。"
     },
-    "pr_auto_complete_badge": "PR のマージで自動設定"
+    "pr_auto_complete_badge": "PR のマージで自動設定",
+    "builtin_badge": "組み込み",
+    "workflow_usage_other": "{{count}} 件のワークフローで使用中",
+    "workflow_usage_none": "ワークフローで未使用"
   },
   "quick_actions": {
     "title": "クイックアクション",
@@ -380,7 +383,8 @@
       "quick_actions": "クイックアクション",
       "plugins": "Plugins",
       "mcp": "MCP",
-      "billing": "請求とプラン"
+      "billing": "請求とプラン",
+      "workflows": "ワークフロー"
     },
     "groups": {
       "personal": "個人設定",

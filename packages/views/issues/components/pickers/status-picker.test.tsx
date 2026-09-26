@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses";
-import type { IssueStatusEntry } from "@multica/core/types";
+import type { IssueStatusEntry, IssueWorkflow } from "@multica/core/types";
 import { renderWithI18n } from "../../../test/i18n";
 import { StatusPicker } from "./status-picker";
 
@@ -19,6 +19,23 @@ vi.mock("@multica/core/hooks", () => ({
 
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => buildIssueStatusCatalog(catalogEntries),
+}));
+
+// Project workflows (MUL-7420): the picker resolves the issue's project and its
+// workflow through one hook, fed directly here like the catalog.
+let projectWorkflow: IssueWorkflow | null = null;
+
+vi.mock("@multica/core/issue-workflows", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/issue-workflows")>()),
+  useProjectWithWorkflow: () => ({ project: null, workflow: projectWorkflow }),
+}));
+
+vi.mock("../../../common/actor-avatar", () => ({
+  ActorAvatar: ({ actorId }: { actorId: string }) => <span data-testid={`avatar-${actorId}`} />,
+}));
+
+vi.mock("@multica/core/workspace/hooks", () => ({
+  useActorName: () => ({ getActorName: (_type: string, id: string) => (id === "agent-1" ? "Sentinel" : "Unknown") }),
 }));
 
 function entry(overrides: Partial<IssueStatusEntry>): IssueStatusEntry {
@@ -71,6 +88,7 @@ function optionRow(label: string): HTMLElement {
 afterEach(() => {
   cleanup();
   catalogEntries = undefined;
+  projectWorkflow = null;
 });
 
 describe("StatusPicker trigger color", () => {
@@ -161,5 +179,53 @@ describe("StatusPicker on an issue that already is a duplicate", () => {
       />,
     );
     expect(screen.getByRole("button", { name: "Change original" })).toBeTruthy();
+  });
+});
+
+describe("StatusPicker in a project that uses a workflow", () => {
+  const TODO = entry({ id: "todo", key: "todo", name: "Todo", category: "unstarted", is_system: true, position: 0 });
+  const DONE = entry({ id: "done", key: "done", name: "Done", category: "done", is_system: true, position: 0 });
+
+  it("offers only the workflow's steps, in workflow order, naming each handoff", () => {
+    catalogEntries = [TODO, IN_REVIEW, QA, DONE];
+    projectWorkflow = {
+      id: "wf-1",
+      workspace_id: "workspace-1",
+      name: "Delivery",
+      description: "",
+      initial_status_key: "todo",
+      steps: [
+        { status_key: "todo", handler: { type: "none" }, instructions: "" },
+        { status_key: "qa", handler: { type: "agent", id: "agent-1" }, instructions: "" },
+        { status_key: "done", handler: { type: "none" }, instructions: "" },
+      ],
+      project_ids: ["project-1"],
+      created_at: "",
+      updated_at: "",
+    };
+    renderWithI18n(
+      <StatusPicker status="todo" projectId="project-1" onUpdate={() => {}} open onOpenChange={() => {}} />,
+    );
+
+    const rows = Array.from(document.querySelectorAll("button[data-picker-item]")).map(
+      (el) => el.textContent?.trim(),
+    );
+    // The current step shows its check; the others say who entering them
+    // hands the issue to, or that the assignee stays.
+    expect(rows).toEqual(["Todo", "QAHands off to SentinelSentinel", "DoneKeep assignee"]);
+    expect(screen.getByText("Hands off to Sentinel").className).toContain("sr-only");
+    expect(screen.getByTestId("avatar-agent-1")).toBeTruthy();
+    expect(screen.getByText("Delivery")).toBeTruthy();
+    expect(screen.getByText(/Only this issue’s workflow statuses are shown/)).toBeTruthy();
+    expect(screen.queryByText("In Review")).toBeNull();
+  });
+
+  it("offers the whole catalog when the project uses the Default workflow", () => {
+    catalogEntries = [TODO, IN_REVIEW, QA, DONE];
+    renderWithI18n(
+      <StatusPicker status="todo" projectId="project-1" onUpdate={() => {}} open onOpenChange={() => {}} />,
+    );
+    expect(optionRow("In Review")).toBeTruthy();
+    expect(screen.queryByText(/Hands off to/)).toBeNull();
   });
 });

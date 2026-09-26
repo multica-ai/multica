@@ -82,7 +82,11 @@
       "done": "Terminé.",
       "cancelled": "Abandonné."
     },
-    "pr_auto_complete_badge": "Définie à la fusion des PR"
+    "pr_auto_complete_badge": "Définie à la fusion des PR",
+    "builtin_badge": "Intégré",
+    "workflow_usage_one": "{{count}} workflow l’utilise",
+    "workflow_usage_other": "{{count}} workflows l’utilisent",
+    "workflow_usage_none": "Dans aucun workflow"
   },
   "quick_actions": {
     "title": "Actions rapides",
@@ -380,7 +384,8 @@
       "quick_actions": "Actions rapides",
       "plugins": "Plugins",
       "mcp": "MCP",
-      "billing": "Facturation"
+      "billing": "Facturation",
+      "workflows": "Workflows"
     },
     "groups": {
       "personal": "Personnel",

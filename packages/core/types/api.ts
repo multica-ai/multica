@@ -80,6 +80,10 @@ export interface UpdateIssueRequest {
    *  MUL-3375). The assignee/status change still applies. Control field —
    *  strip from optimistic cache patches; never written onto the Issue. */
   suppress_run?: boolean;
+  /** When a status change hands the issue off to a workflow step's handler,
+   *  also stop the active runs of the agent it was taken from (MUL-7420).
+   *  Control field — strip from optimistic cache patches. */
+  stop_previous_assignee_runs?: boolean;
   /** Marks this issue as a duplicate of another issue (MUL-7349). The server
    *  also sets status to cancelled; any later status change away from
    *  cancelled removes the mark. Write-only — read it back through
@@ -108,6 +112,7 @@ export interface MoveIssueRequest
     | "assignee_id"
     | "parent_issue_id"
     | "project_id"
+    | "stop_previous_assignee_runs"
   > {
   before_id: string | null;
   after_id: string | null;

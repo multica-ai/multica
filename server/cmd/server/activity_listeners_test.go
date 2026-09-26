@@ -244,6 +244,68 @@ func TestActivityIssueUpdated_AssigneeChanged(t *testing.T) {
 	}
 }
 
+// TestActivityIssueUpdated_WorkflowHandoff pins the merged timeline entry for
+// a workflow handoff (MUL-7420): one status row carrying who the issue went
+// to and the brief, and no separate assignee row repeating it.
+func TestActivityIssueUpdated_WorkflowHandoff(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerActivityListeners(bus, queries)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupActivities(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	agentType := "agent"
+	agentID := "0f0e0d0c-0b0a-4909-8807-060504030201"
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:           issueID,
+				WorkspaceID:  testWorkspaceID,
+				Title:        "activity test issue",
+				Status:       "code_review",
+				Priority:     "medium",
+				CreatorType:  "member",
+				CreatorID:    testUserID,
+				AssigneeType: &agentType,
+				AssigneeID:   &agentID,
+			},
+			"status_changed":     true,
+			"prev_status":        "implement",
+			"assignee_changed":   true,
+			"prev_assignee_type": (*string)(nil),
+			"prev_assignee_id":   (*string)(nil),
+			"workflow_handoff": map[string]string{
+				"workflow": "Delivery", "to_type": "agent", "to_id": agentID, "run": "true", "note": "Review the PR.",
+			},
+		},
+	})
+
+	activities := listActivitiesForIssue(t, queries, issueID)
+	if len(activities) != 1 || activities[0].Action != "status_changed" {
+		t.Fatalf("expected one status_changed activity, got %+v", activities)
+	}
+	var details map[string]string
+	if err := json.Unmarshal(activities[0].Details, &details); err != nil {
+		t.Fatalf("failed to unmarshal details: %v", err)
+	}
+	for key, want := range map[string]string{
+		"from": "implement", "to": "code_review", "handoff_workflow": "Delivery",
+		"handoff_to_type": "agent", "handoff_to_id": agentID, "handoff_run": "true", "handoff_note": "Review the PR.",
+	} {
+		if details[key] != want {
+			t.Fatalf("details[%q] = %q, want %q (all: %v)", key, details[key], want, details)
+		}
+	}
+}
+
 func TestActivityIssueUpdated_NoChangeFlags(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
