@@ -3105,6 +3105,28 @@ func (s *acpProviderErrorSniffer) Finalize() {
 	_, _ = s.Write([]byte(remaining + "\n"))
 }
 
+// discardRecovered drops everything captured so far, including the sticky
+// terminal flag, so a diagnostic the caller has since recovered from cannot
+// decide the run's final status. It is for a failure the protocol itself
+// retried successfully — an auth method that was refused before another one
+// was accepted — where the CLI logs a terminal-looking line for an attempt
+// that turned out not to be terminal at all. Sniffing continues afterwards,
+// so a later execution failure still promotes completed→failed.
+//
+// Only call this once the recovery is known to have succeeded, and only for
+// what preceded it: stderr arrives asynchronously, so a line the child wrote
+// before the successful retry but that reaches the sniffer after this call
+// is not dropped.
+func (s *acpProviderErrorSniffer) discardRecovered() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.remains = s.remains[:0]
+	s.lines = nil
+	s.seen = map[string]bool{}
+	s.terminal = false
+	s.resetEchoJSON()
+}
+
 func (s *acpProviderErrorSniffer) startEchoJSON(payload string) {
 	payload = strings.TrimSpace(payload)
 	if payload == "" || (payload[0] != '{' && payload[0] != '[') {
