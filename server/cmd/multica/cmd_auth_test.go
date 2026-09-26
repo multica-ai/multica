@@ -25,7 +25,26 @@ func TestMain(m *testing.M) {
 	} {
 		os.Unsetenv(key)
 	}
-	os.Exit(m.Run())
+
+	// Redirect both home variables to one scratch directory for the whole
+	// binary. On Windows os.UserHomeDir reads USERPROFILE, not HOME, so a
+	// test that redirects only HOME still resolves ~/.multica against the
+	// real home — which is how a full-suite run once wrote SaveCLIConfig
+	// fixtures over a real default-profile config.json. Process-wide
+	// redirection isolates tests that forget their own redirect on every
+	// platform; per-test t.Setenv overrides still take precedence.
+	var scratchHome string
+	if home, err := os.MkdirTemp("", "multica-cli-tests-home-"); err == nil {
+		scratchHome = home
+		os.Setenv("HOME", home)
+		os.Setenv("USERPROFILE", home)
+	}
+
+	code := m.Run()
+	if scratchHome != "" {
+		os.RemoveAll(scratchHome)
+	}
+	os.Exit(code)
 }
 
 // testCmd returns a minimal cobra.Command with the --profile persistent flag

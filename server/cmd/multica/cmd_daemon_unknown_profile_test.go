@@ -23,6 +23,11 @@ func mkProfiles(t *testing.T, names ...string) string {
 	t.Chdir(t.TempDir())
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	// On Windows os.UserHomeDir reads USERPROFILE, not HOME — without
+	// redirecting both, ProfileDir keeps resolving against the real home and
+	// every isolation this helper promises silently stops applying (the
+	// suite runs on ubuntu in CI, where HOME alone suffices).
+	t.Setenv("USERPROFILE", home)
 	for _, name := range names {
 		dir := filepath.Join(home, ".multica", "profiles", filepath.FromSlash(name))
 		if err := os.MkdirAll(dir, 0o755); err != nil {
