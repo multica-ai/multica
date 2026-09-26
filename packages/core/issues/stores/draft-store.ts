@@ -106,6 +106,10 @@ interface IssueDraftStore {
   // choice instead of always opening with no assignee.
   lastAssigneeType?: IssueAssigneeType;
   lastAssigneeId?: string;
+  // Last project picked at submit time. Persisted across drafts so a re-open
+  // of the create form — notably retrying a failed agent task from the inbox —
+  // starts on the previously chosen project instead of no project.
+  lastProjectId?: string;
   setShared: (patch: Partial<IssueCreateShared>) => void;
   setManual: (patch: Partial<IssueCreateManual>) => void;
   setAgent: (patch: Partial<IssueCreateAgent>) => void;
@@ -114,6 +118,7 @@ interface IssueDraftStore {
   beginIsolatedDraft: () => void;
   endIsolatedDraft: () => void;
   setLastAssignee: (type?: IssueAssigneeType, id?: string) => void;
+  setLastProject: (id?: string) => void;
   hasDraft: () => boolean;
 }
 
@@ -184,6 +189,7 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
       draft: migrateDraft(undefined),
       lastAssigneeType: undefined,
       lastAssigneeId: undefined,
+      lastProjectId: undefined,
       setShared: (patch) =>
         set((s) => ({ draft: { ...s.draft, shared: { ...s.draft.shared, ...patch } } })),
       setManual: (patch) =>
@@ -195,7 +201,7 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
       clearDraft: () =>
         set((s) => ({
           draft: {
-            shared: emptyShared(),
+            shared: { ...emptyShared(), projectId: s.lastProjectId },
             manual: {
               ...emptyManual(),
               assigneeType: s.lastAssigneeType,
@@ -211,7 +217,7 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
           return {
             isolatedDraftBackup: s.draft,
             draft: {
-              shared: emptyShared(),
+              shared: { ...emptyShared(), projectId: s.lastProjectId },
               manual: {
                 ...emptyManual(),
                 assigneeType: s.lastAssigneeType,
@@ -228,6 +234,7 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
           : s),
       setLastAssignee: (type, id) =>
         set({ lastAssigneeType: type, lastAssigneeId: id }),
+      setLastProject: (id) => set({ lastProjectId: id }),
       hasDraft: () => {
         const { manual, agent, shared } = get().draft;
         return !!(
@@ -251,6 +258,7 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
         draft: state.isolatedDraftBackup ?? state.draft,
         lastAssigneeType: state.lastAssigneeType,
         lastAssigneeId: state.lastAssigneeId,
+        lastProjectId: state.lastProjectId,
       }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<IssueDraftStore> & {
@@ -272,14 +280,15 @@ registerDraftCleanup({
   storageKey: "multica_issue_draft",
   workspaceScoped: true,
   // Full reset, NOT clearDraft(): clearDraft deliberately keeps the
-  // last-assignee preference and re-seeds it into the fresh draft's manual
-  // slot — correct between drafts of one user, but on logout it would hand
-  // the previous user's last-picked assignee to the next login on this tab.
+  // last-assignee and last-project preferences and re-seeds them into the fresh
+  // draft — correct between drafts of one user, but on logout it would hand the
+  // previous user's last-picked assignee/project to the next login on this tab.
   resetInMemory: () =>
     useIssueDraftStore.setState({
       draft: migrateDraft(undefined),
       lastAssigneeType: undefined,
       lastAssigneeId: undefined,
+      lastProjectId: undefined,
       isolatedDraftBackup: undefined,
     }),
 });
