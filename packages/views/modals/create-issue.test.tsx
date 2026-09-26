@@ -127,7 +127,7 @@ const emptyIssueDraft = () => ({
   manual: {
     title: "",
     description: "",
-    status: "todo" as const,
+    status: "todo" as string,
     startDate: null as string | null,
     assigneeType: undefined as "agent" | "squad" | "member" | undefined,
     assigneeId: undefined as string | undefined,
@@ -152,7 +152,14 @@ const mockDraftStore = {
   setActiveMode: mockSetActiveMode,
   clearDraft: mockClearDraft,
   setLastAssignee: mockSetLastAssignee,
-  hasDraft: () => false,
+  hasDraft: () => !!(
+    mockDraftStore.draft.manual.title ||
+    mockDraftStore.draft.manual.description ||
+    mockDraftStore.draft.agent.prompt ||
+    Object.keys(mockDraftStore.draft.manual.propertyValues).length > 0 ||
+    mockDraftStore.draft.shared.attachments.some((upload) =>
+      upload.status === "uploaded" || upload.status === "uploading")
+  ),
 };
 
 const mockQuickCreateStore = {
@@ -634,6 +641,12 @@ describe("CreateIssueModal", () => {
     // Reset the unified draft mock so per-test seeding (assignee, project, …)
     // doesn't leak into the next test in the suite.
     mockDraftStore.draft = emptyIssueDraft();
+    mockDraftStore.lastAssigneeType = undefined;
+    mockDraftStore.lastAssigneeId = undefined;
+    mockSetLastAssignee.mockImplementation((type, id) => {
+      mockDraftStore.lastAssigneeType = type;
+      mockDraftStore.lastAssigneeId = id;
+    });
     mockSetShared.mockImplementation((patch: Partial<typeof mockDraftStore.draft.shared>) => {
       mockDraftStore.draft.shared = { ...mockDraftStore.draft.shared, ...patch };
     });
@@ -762,6 +775,35 @@ describe("CreateIssueModal", () => {
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-1");
   });
 
+  it("starts a fresh create from todo without a remembered stage", async () => {
+    const user = userEvent.setup();
+    const first = renderModal(<CreateIssueModal onClose={vi.fn()} data={{
+      parent_issue_id: "parent-1",
+      status: "in_progress",
+      stage: 2,
+    }} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+      target: { value: "Follow up" },
+    });
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "in_progress", parent_issue_id: "parent-1", stage: 2 }),
+    ));
+    first.unmount();
+    renderModal(<CreateIssueModal onClose={vi.fn()} data={{ parent_issue_id: "parent-1" }} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+      target: { value: "Another child" },
+    });
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "todo", parent_issue_id: "parent-1", stage: undefined }),
+    ));
+  });
+
   it("forwards selected labels in the create payload so they attach in the same transaction", async () => {
     const user = userEvent.setup();
     mockDraftStore.draft.manual.labelIds = [
@@ -827,12 +869,16 @@ describe("CreateIssueModal", () => {
     });
   });
 
-  it("keeps manual mode open and clears content when create another is enabled", async () => {
+  it("keeps status, assignee, parent, and stage for the next issue in a batch", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     mockQuickCreateStore.keepOpen = true;
+    mockDraftStore.draft.manual.assigneeType = "member";
+    mockDraftStore.draft.manual.assigneeId = "alice";
 
-    renderModal(<CreateIssueModal onClose={onClose} />);
+    const modal = renderModal(<CreateIssueModal onClose={onClose} data={{
+      parent_issue_id: "parent-1", status: "in_progress", stage: 2,
+    }} />);
 
     await user.type(screen.getByPlaceholderText("Issue title"), "First follow-up issue");
     await user.type(screen.getByPlaceholderText("Add description..."), "Description to clear");
@@ -842,14 +888,15 @@ describe("CreateIssueModal", () => {
       expect(mockCreateIssue).toHaveBeenCalledWith({
         title: "First follow-up issue",
         description: "Description to clear",
-        status: "todo",
+        status: "in_progress",
         priority: "none",
-        assignee_type: undefined,
-        assignee_id: undefined,
+        assignee_type: "member",
+        assignee_id: "alice",
         start_date: undefined,
         due_date: undefined,
         attachment_ids: undefined,
-        parent_issue_id: undefined,
+        parent_issue_id: "parent-1",
+        stage: 2,
         project_id: undefined,
       });
     });
@@ -860,9 +907,9 @@ describe("CreateIssueModal", () => {
     expect(mockSetManual).toHaveBeenCalledWith({
       title: "",
       description: "",
-      status: "todo",
-      assigneeType: undefined,
-      assigneeId: undefined,
+      status: "in_progress",
+      assigneeType: "member",
+      assigneeId: "alice",
       startDate: null,
       labelIds: [],
       propertyValues: {},
@@ -873,6 +920,48 @@ describe("CreateIssueModal", () => {
       dueDate: null,
       attachments: [],
     });
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Second follow-up issue");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(2));
+    expect(mockCreateIssue).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      title: "Second follow-up issue",
+      status: "in_progress",
+      assignee_type: "member",
+      assignee_id: "alice",
+      parent_issue_id: "parent-1",
+      stage: 2,
+    }));
+
+    mockSetManual({ status: "done" });
+    modal.unmount();
+    expect(mockDraftStore.draft.manual.status).toBe("todo");
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Fresh issue");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(3));
+    expect(mockCreateIssue).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      status: "todo", parent_issue_id: undefined, stage: undefined,
+    }));
+  });
+
+  it("preserves an unfinished next issue instead of clearing it on close", async () => {
+    const user = userEvent.setup();
+    mockQuickCreateStore.keepOpen = true;
+    const modal = renderModal(<CreateIssueModal onClose={vi.fn()} data={{
+      status: "in_progress",
+    }} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "First issue");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(screen.getByPlaceholderText("Issue title")).toHaveValue(""));
+    await user.type(screen.getByPlaceholderText("Issue title"), "Unfinished next issue");
+    modal.unmount();
+
+    expect(mockDraftStore.draft.manual.title).toBe("Unfinished next issue");
+    expect(mockDraftStore.draft.manual.status).toBe("in_progress");
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    expect(screen.getByPlaceholderText("Issue title")).toHaveValue("Unfinished next issue");
   });
 
   it("includes configured custom properties in the atomic create request", async () => {
