@@ -1576,6 +1576,7 @@ export class ApiClient {
     parentId?: string,
     attachmentIds?: string[],
     suppressAgentIds?: string[],
+    steerTaskIds?: string[],
   ): Promise<Comment> {
     return this.fetch(`/api/issues/${issueId}/comments`, {
       method: "POST",
@@ -1585,6 +1586,7 @@ export class ApiClient {
         ...(parentId ? { parent_id: parentId } : {}),
         ...(attachmentIds?.length ? { attachment_ids: attachmentIds } : {}),
         ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
+        ...(steerTaskIds?.length ? { steer_task_ids: steerTaskIds } : {}),
       }),
     });
   }
@@ -2725,18 +2727,6 @@ export class ApiClient {
     return parseWithFallback<AgentTask[]>(raw, AgentTaskListSchema, [], {
       endpoint: "GET /api/issues/:id/task-runs",
     });
-  }
-
-  async createTaskSupplement(issueId: string, taskId: string, content: string, clientRequestId: string): Promise<Comment> {
-    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/tasks/${taskId}/supplements`, {
-      method: "POST",
-      body: JSON.stringify({ content, client_request_id: clientRequestId }),
-    });
-    const comment = parseWithFallback<Comment>(raw, CommentSchema, EMPTY_COMMENT, {
-      endpoint: "POST /api/issues/:id/tasks/:taskId/supplements",
-    });
-    if (!comment.id) throw new Error("Invalid additional-message response");
-    return comment;
   }
 
   async retryTaskSupplement(issueId: string, taskId: string, commentId: string): Promise<void> {

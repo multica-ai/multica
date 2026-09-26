@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
-import { commentRunOutput, buildCommentRunView, orderThreadWithRuns, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
+import { commentRunOutput, buildCommentRunView, isRunFailureNotice, orderThreadWithRuns, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
 import { collectThreadReplies } from "./thread-utils";
 
 const groupCommentRuns = (...args: Parameters<typeof buildCommentRunView>) => buildCommentRunView(...args).runs;
@@ -304,6 +304,20 @@ describe("commentRunOutput", () => {
   });
 });
 
+describe("isRunFailureNotice", () => {
+  const notice = comment("notice", { actor_type: "agent", comment_type: "system", source_task_id: "run", content: "task cancelled by server" });
+  it("matches the platform's failure comment for its own ended run", () => {
+    expect(isRunFailureNotice(notice, task("run", { status: "failed" }))).toBe(true);
+    expect(isRunFailureNotice(notice, task("run", { status: "cancelled" }))).toBe(true);
+  });
+  it("leaves authored replies, other runs, and live runs alone", () => {
+    expect(isRunFailureNotice({ ...notice, comment_type: "comment" }, task("run", { status: "failed" }))).toBe(false);
+    expect(isRunFailureNotice({ ...notice, actor_type: "system" }, task("run", { status: "failed" }))).toBe(false);
+    expect(isRunFailureNotice(notice, task("other", { status: "failed" }))).toBe(false);
+    expect(isRunFailureNotice(notice, task("run", { status: "running" }))).toBe(false);
+  });
+});
+
 describe("standaloneCommentRuns", () => {
   it.each(["queued", "dispatched", "running", "failed", "cancelled", "completed"] as const)("keeps an unanchored %s run visible", (status) => {
     const run = task("assignment", { status, delivered_comment_ids: [] });
@@ -487,6 +501,24 @@ describe("orderThreadWithRuns", () => {
     expect(thread([run], [root, progress, final])).toEqual(["progress", "final"]);
     const aside = comment("aside", { parent_id: root.id, created_at: at("10:02:00") });
     expect(thread([run], [root, progress, aside, final])).toEqual(["progress", "aside", "final ↩ root"]);
+  });
+
+  // A retry answers the same input as the attempt it retries, but it starts
+  // after that attempt ended; it reads below it, not above (MUL-7692).
+  it("keeps a retry below the attempt it retries", () => {
+    const root = comment("root", { created_at: at("10:00:00") });
+    const ask = comment("ask", { parent_id: root.id, created_at: at("10:01:00") });
+    const failed = asked("failed", ask, { status: "failed", started_at: at("10:01:05"), completed_at: at("10:14:00") });
+    const notice = comment("notice", { actor_type: "agent", comment_type: "system", source_task_id: failed.id,
+      parent_id: ask.id, created_at: at("10:14:00") });
+    const retry = asked("retry", ask, { status: "running", created_at: at("10:20:00"), parent_task_id: failed.id });
+    const later = comment("later", { parent_id: root.id, created_at: at("10:25:00") });
+    expect(thread([failed, retry], [root, ask, notice])).toEqual(["ask", "notice", "run:retry ↩ ask"]);
+    expect(thread([failed, retry], [root, ask, notice, later])).toEqual(["ask", "notice", "run:retry ↩ ask", "later"]);
+    const unanswered = asked("unanswered", ask, { status: "failed", completed_at: at("10:14:00") });
+    const again = asked("again", ask, { status: "queued", delivered_comment_ids: [], created_at: at("10:20:00"),
+      parent_task_id: unanswered.id });
+    expect(thread([unanswered, again], [root, ask])).toEqual(["ask", "run:unanswered", "run:again ↩ ask"]);
   });
 
   it("settles a run that ended without replying at the time it ended", () => {

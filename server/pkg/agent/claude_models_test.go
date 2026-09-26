@@ -140,8 +140,8 @@ func TestClaudeModelsFromInfos_CurrentCLI(t *testing.T) {
 		}
 	}
 
-	// Effort levels come from the row itself, replacing the `claude --help`
-	// scrape plus the hand-kept claudeModelEffortAllow table.
+	// Effort levels come from the row itself, not the `claude --help`
+	// superset the static catalog offers on every model.
 	opus := models[0]
 	if opus.Thinking == nil {
 		t.Fatal("opus should advertise a thinking catalog")

@@ -635,7 +635,8 @@ func init() {
 	issueUpdateCmd.Flags().String("description", "", "New description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
 	issueUpdateCmd.Flags().Bool("description-stdin", false, "Read new description from stdin (preserves multi-line content verbatim)")
 	issueUpdateCmd.Flags().String("description-file", "", "Read new description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
-	issueUpdateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file to read a path outside the current working directory. Off by default so a stale temp file from another run/environment can't be picked up (MUL-4252).")
+	issueUpdateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file / --attachment to read a path outside the current working directory. Off by default so a stale temp file from another run/environment can't be picked up (MUL-4252).")
+	issueUpdateCmd.Flags().StringSlice("attachment", nil, "Local file path(s) to attach to the issue description (repeatable); references are appended to the end of the description")
 	issueUpdateCmd.Flags().String("status", "", "New status")
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member, agent, or squad; fuzzy match)")
@@ -1316,7 +1317,8 @@ type pendingAttachment struct {
 // returns an error with nothing uploaded. Both `issue create` and
 // `comment add` share this so an invalid attachment can never leave an earlier
 // one uploaded as an orphaned issue attachment while the issue/comment is never
-// created (which would duplicate on retry).
+// created (which would duplicate on retry). `issue update` also uses this
+// preflight so an invalid later path cannot leave earlier files uploaded.
 func collectLocalAttachments(cmd *cobra.Command, attachments []string) ([]pendingAttachment, error) {
 	pending := make([]pendingAttachment, 0, len(attachments))
 	for _, filePath := range attachments {
@@ -1640,6 +1642,7 @@ func activeDuplicateIssueCreateMessage(err error) (string, bool) {
 }
 
 func runIssueUpdate(cmd *cobra.Command, args []string) error {
+	attachmentPaths, _ := cmd.Flags().GetStringSlice("attachment")
 	noStart, _ := cmd.Flags().GetBool("no-start")
 	statusChanged := cmd.Flags().Changed("status")
 	statusFlag, _ := cmd.Flags().GetString("status")
@@ -1661,7 +1664,11 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := cli.APIContext(context.Background())
+	timeout := cli.APITimeout()
+	if len(attachmentPaths) > 0 {
+		timeout = cli.AtLeastAPITimeout(60 * time.Second)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
@@ -1679,11 +1686,8 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		// `issue update` has no --attachment flag, so the hint must point at the
-		// command that does. Telling the agent to "pass --attachment" here would
-		// name an argument this command rejects.
 		if err := guardLocalPathLinks(desc, "issue description",
-			"`multica issue update` cannot carry files — deliver the file with `multica issue comment add <issue-id> --attachment <path>` instead, and drop the link."); err != nil {
+			"Attach the file with `multica issue update <issue-id> --attachment <path>` and drop the local-path link."); err != nil {
 			return err
 		}
 		body["description"] = desc
@@ -1748,8 +1752,44 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		body["position"] = v
 	}
 
-	if len(body) == 0 {
+	if len(body) == 0 && len(attachmentPaths) == 0 {
 		return fmt.Errorf("no fields to update; use flags like --title, --status, --priority, --assignee, etc.")
+	}
+	// Validate every path before any upload so an invalid later path cannot
+	// leave earlier files uploaded and unbound.
+	pending, err := collectLocalAttachments(cmd, attachmentPaths)
+	if err != nil {
+		return err
+	}
+	if len(body) == 0 && len(pending) == 0 {
+		return fmt.Errorf("no local attachments to update; --attachment accepts file paths, not URLs")
+	}
+	desc, changed := body["description"].(string)
+	if len(pending) > 0 && !changed {
+		var issue struct {
+			Description *string `json:"description"`
+		}
+		if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID), &issue); err != nil {
+			return fmt.Errorf("get issue description before binding attachments: %w", err)
+		}
+		if issue.Description != nil {
+			desc = *issue.Description
+		}
+	}
+	attachmentIDs := make([]string, 0, len(pending))
+	attachmentRefs := make([]cli.AttachmentResponse, 0, len(pending))
+	for _, att := range pending {
+		uploaded, uploadErr := client.UploadIssueAttachment(ctx, att.data, att.path, "")
+		if uploadErr != nil {
+			return fmt.Errorf("upload attachment %s: %w; already uploaded IDs: %v", att.path, uploadErr, attachmentIDs)
+		}
+		attachmentIDs = append(attachmentIDs, uploaded.ID)
+		attachmentRefs = append(attachmentRefs, uploaded)
+		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
+	}
+	if len(attachmentRefs) > 0 {
+		body["description"] = appendAttachmentReferences(desc, attachmentRefs)
+		body["attachment_ids"] = attachmentIDs
 	}
 	if noStart {
 		body["suppress_run"] = true
@@ -1757,6 +1797,9 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
+		if len(attachmentIDs) > 0 {
+			return fmt.Errorf("update issue (uploaded IDs: %v): %w", attachmentIDs, err)
+		}
 		return fmt.Errorf("update issue: %w", err)
 	}
 

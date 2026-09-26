@@ -42,6 +42,7 @@
     "./issues/timeline-sort": "./issues/timeline-sort.ts",
     "./issues/comment-deletion": "./issues/comment-deletion.ts",
     "./issues/comment-trigger-outcomes": "./issues/comment-trigger-outcomes.ts",
+    "./issues/run-steering": "./issues/run-steering.ts",
     "./issues/date": "./issues/date.ts",
     "./issues/ws-updaters": "./issues/ws-updaters.ts",
     "./issues/surface/*": "./issues/surface/*.ts",

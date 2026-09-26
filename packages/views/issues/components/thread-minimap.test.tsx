@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import type { TimelineEntry } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
-import { ThreadMinimap, commentPreview, waveScale } from "./thread-minimap";
+import { MAX_RAIL_TICKS, ThreadMinimap, commentPreview, waveScale } from "./thread-minimap";
 
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({
@@ -75,11 +75,24 @@ describe("waveScale", () => {
 });
 
 describe("ThreadMinimap", () => {
+  const thread = (entry: TimelineEntry, replies: TimelineEntry[] = []) => ({
+    id: entry.id,
+    entry,
+    resolved: false,
+    participants: [],
+    replies,
+    resolutionReplyId: null as string | null,
+  });
   const threads = [
-    { id: "c1", entry: comment("c1", "First thread opener\nwith details"), resolved: false, participants: [] },
-    { id: "c2", entry: comment("c2", "Second thread opener"), resolved: false, participants: [] },
-    { id: "c3", entry: comment("c3", ""), resolved: false, participants: [] },
+    thread(comment("c1", "First thread opener\nwith details")),
+    thread(comment("c2", "Second thread opener")),
+    thread(comment("c3", "")),
   ];
+  const reply = (id: string, content: string, actorName: string): TimelineEntry => ({
+    ...comment(id, content),
+    actor_name: actorName,
+    created_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+  });
 
   it("renders nothing below the thread threshold", () => {
     const { container } = renderWithI18n(
@@ -338,5 +351,136 @@ describe("ThreadMinimap", () => {
     fireEvent.click(screen.getByRole("button", { name: "Second thread opener" }));
     expect(onJump).toHaveBeenCalledTimes(1);
     expect(onJump).toHaveBeenCalledWith("c2");
+  });
+
+  it("gives every reply a short tick under its thread, out of the tab order", () => {
+    const onJump = vi.fn();
+    renderWithI18n(
+      <ThreadMinimap
+        threads={[
+          thread(comment("c1", "First thread opener"), [
+            reply("r1", "Looking into it", "Alice"),
+            reply("r2", "**Fixed** in the latest build", "Lambda"),
+          ]),
+          ...threads.slice(1),
+        ]}
+        scrollContainerEl={null}
+        onJump={onJump}
+      />,
+    );
+
+    const nav = screen.getByRole("navigation", { name: "Jump to comment thread" });
+    const ticks = within(nav).getAllByRole("button");
+    expect(ticks.map((tick) => tick.getAttribute("aria-label"))).toEqual([
+      "First thread opener",
+      "Alice: Looking into it",
+      "Lambda: Fixed in the latest build",
+      "Second thread opener",
+      "member:author-c3",
+    ]);
+    // Replies sit at half the thread tick's length and pitch.
+    expect(ticks[1]!.firstElementChild).toHaveClass("w-1.5");
+    expect(ticks[0]!.firstElementChild).toHaveClass("w-3");
+    expect(ticks[1]).toHaveAttribute("tabindex", "-1");
+    expect(ticks[0]).not.toHaveAttribute("tabindex");
+
+    fireEvent.click(ticks[2]!);
+    expect(onJump).toHaveBeenCalledWith("r2");
+  });
+
+  it("lists replies under their thread in the outline and marks the resolution", () => {
+    const onJump = vi.fn();
+    renderWithI18n(
+      <ThreadMinimap
+        threads={[
+          {
+            ...thread(comment("c1", "First thread opener"), [
+              reply("r1", "Looking into it", "Alice"),
+              reply("r2", "Fixed in the latest build", "Lambda"),
+            ]),
+            resolved: true,
+            resolutionReplyId: "r2",
+          },
+          ...threads.slice(1),
+        ]}
+        scrollContainerEl={null}
+        onJump={onJump}
+      />,
+    );
+
+    act(() => screen.getByRole("button", { name: "First thread opener (resolved)" }).focus());
+    const list = screen.getByRole("list");
+    const rows = within(list).getAllByRole("button");
+    expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual([
+      "First thread opener (resolved)",
+      "Alice: Looking into it",
+      "Lambda: Fixed in the latest build",
+      "Second thread opener",
+      "member:author-c3",
+    ]);
+    const resolution = within(list).getByRole("button", { name: "Lambda: Fixed in the latest build" });
+    expect(within(resolution).getByLabelText("Resolution")).toBeInTheDocument();
+    expect(within(resolution).getByText("5m ago")).toBeInTheDocument();
+    expect(
+      within(list).getByRole("button", { name: "Alice: Looking into it" }),
+    ).not.toContainElement(within(list).queryByLabelText("Resolution"));
+
+    fireEvent.pointerEnter(resolution);
+    expect(resolution).toHaveAttribute("data-active");
+    fireEvent.click(resolution);
+    expect(onJump).toHaveBeenCalledWith("r2");
+  });
+
+  it("returns focus to the reply's own tick on Escape", () => {
+    renderWithI18n(
+      <ThreadMinimap
+        threads={[
+          thread(comment("c1", "First thread opener"), [reply("r1", "Looking into it", "Alice")]),
+          ...threads.slice(1),
+        ]}
+        scrollContainerEl={null}
+        onJump={vi.fn()}
+      />,
+    );
+    const nav = screen.getByRole("navigation");
+    act(() => within(nav).getByRole("button", { name: "First thread opener" }).focus());
+    const row = within(screen.getByRole("list")).getByRole("button", { name: "Alice: Looking into it" });
+    act(() => row.focus());
+    fireEvent.keyDown(row, { key: "Escape" });
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "Alice: Looking into it" })).toHaveFocus();
+  });
+
+  it("keeps one tick per thread past the rail budget but still lists every reply", () => {
+    const manyReplies = Array.from({ length: MAX_RAIL_TICKS }, (_, i) =>
+      reply(`r${i}`, `Reply number ${i}`, "Alice"),
+    );
+    const onJump = vi.fn();
+    renderWithI18n(
+      <ThreadMinimap
+        threads={[thread(comment("c1", "First thread opener"), manyReplies), ...threads.slice(1)]}
+        scrollContainerEl={null}
+        onJump={onJump}
+      />,
+    );
+
+    const nav = screen.getByRole("navigation");
+    expect(within(nav).getAllByRole("button")).toHaveLength(3);
+
+    act(() => within(nav).getByRole("button", { name: "First thread opener" }).focus());
+    const list = screen.getByRole("list");
+    expect(within(list).getAllByRole("button")).toHaveLength(3 + MAX_RAIL_TICKS);
+
+    // A reply row without a tick of its own lights its thread's tick, and
+    // Escape hands focus back to that tick.
+    const row = within(list).getByRole("button", { name: "Alice: Reply number 7" });
+    act(() => row.focus());
+    expect(
+      within(nav).getByRole("button", { name: "First thread opener" }).firstElementChild,
+    ).toHaveClass("bg-brand");
+    fireEvent.click(row, { detail: 0 });
+    expect(onJump).toHaveBeenCalledWith("r7");
+    fireEvent.keyDown(row, { key: "Escape" });
+    expect(within(nav).getByRole("button", { name: "First thread opener" })).toHaveFocus();
   });
 });

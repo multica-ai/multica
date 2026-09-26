@@ -6,16 +6,25 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
-import { useT } from "../../i18n";
+import { useT, useTimeAgo } from "../../i18n";
 
 // ---------------------------------------------------------------------------
-// ThreadMinimap — quick-jump rail with a complete thread outline.
-// The rail shows viewport position; hovering or focusing any tick opens one
-// stationary, scrollable list of every thread title. Rows jump to the same
-// timeline anchors as the ticks, including folded resolved threads.
+// ThreadMinimap — quick-jump rail with a complete comment outline.
+// Every thread is a long tick and every reply a short tick beneath it, so the
+// rail doubles as a map of where the conversation runs long. Hovering or
+// focusing any tick opens one stationary, scrollable outline of every thread
+// with its replies listed under it. Rows jump to the same timeline anchors as
+// the ticks, including replies inside collapsed or resolved threads.
 
 /** Minimum number of threads before the rail is worth its pixels. */
 const MIN_THREADS = 2;
+
+/**
+ * Most ticks the rail draws before it drops the reply ticks and keeps one per
+ * thread. Past this, ticks compressed to their minimum pitch stop being
+ * individually targetable; the outline still lists every reply.
+ */
+export const MAX_RAIL_TICKS = 80;
 
 /** Intent delay before the card first appears; gliding afterwards is instant. */
 const PREVIEW_OPEN_DELAY_MS = 150;
@@ -100,29 +109,64 @@ export interface ThreadMinimapThread {
   resolved: boolean;
   /** Unique authors across the root and every nested reply, in first-seen order. */
   participants: TimelineEntry[];
+  /**
+   * Live (non-deleted) replies in timeline order. Each gets a short tick and an
+   * outline row; its `comment-${id}` anchor exists only once the thread is
+   * expanded, which the caller's `onJump` takes care of.
+   */
+  replies: TimelineEntry[];
+  /** The reply that resolved the thread ("Resolve thread with comment"), if any. */
+  resolutionReplyId: string | null;
 }
 
 interface ThreadMinimapProps {
   threads: ThreadMinimapThread[];
   /** The issue detail scroll container; null until its callback ref populates. */
   scrollContainerEl: HTMLElement | null;
-  onJump: (threadId: string) => void;
+  /** Called with a thread root id or a reply id. */
+  onJump: (commentId: string) => void;
   /** Positioning within the page (e.g. `absolute right-3 top-12 bottom-0`) — owned by the caller, like FindBar. */
   className?: string;
 }
 
+/** One rail tick / outline row: a thread root or one of its replies. */
+interface MinimapItem {
+  kind: "thread" | "reply";
+  id: string;
+  entry: TimelineEntry;
+  /** The thread itself for a root, the enclosing thread for a reply. */
+  thread: ThreadMinimapThread;
+  /** Index of the enclosing thread's own item. */
+  threadIndex: number;
+}
+
+function flattenThreads(threads: readonly ThreadMinimapThread[]): MinimapItem[] {
+  const items: MinimapItem[] = [];
+  for (const thread of threads) {
+    const threadIndex = items.length;
+    items.push({ kind: "thread", id: thread.id, entry: thread.entry, thread, threadIndex });
+    for (const reply of thread.replies) {
+      items.push({ kind: "reply", id: reply.id, entry: reply, thread, threadIndex });
+    }
+  }
+  return items;
+}
+
 // ---------------------------------------------------------------------------
-// useVisibleThreadIds — "which comment threads are on screen right now"
+// useVisibleCommentIds — "which rail comments are on screen right now"
 // ---------------------------------------------------------------------------
 //
-// Which threads intersect the scroll viewport, so the rail can darken their
-// ticks. Deliberately the rail's alone: "on screen" is a set, not a point, and
+// Which ticked comments intersect the scroll viewport, so the rail can darken
+// their ticks. A thread root's anchor wraps its whole card, so a thread tick
+// stays dark while any of the thread is on screen; a reply's anchor is its own
+// row. Deliberately the rail's alone: "on screen" is a set, not a point, and
 // only a column of ticks can show a span without suggesting multiple selection.
 //
 // Computed from DOM rects on scroll/resize instead of an IntersectionObserver
 // because Virtuoso mounts/unmounts rows while scrolling — an observer would
 // lose its targets. Unmounted rows are by definition outside the (overscanned)
-// viewport, so "no element" correctly counts as not visible.
+// viewport, and replies of a folded thread have no row at all, so "no element"
+// correctly counts as not visible.
 
 function sameIdSet(a: Set<string>, b: Set<string>): boolean {
   if (a.size !== b.size) return false;
@@ -130,8 +174,8 @@ function sameIdSet(a: Set<string>, b: Set<string>): boolean {
   return true;
 }
 
-function useVisibleThreadIds(
-  threadIds: readonly string[],
+function useVisibleCommentIds(
+  commentIds: readonly string[],
   scrollContainerEl: HTMLElement | null,
 ): Set<string> {
   const [visibleIds, setVisibleIds] = useState<Set<string>>(() => new Set());
@@ -145,7 +189,7 @@ function useVisibleThreadIds(
       raf = 0;
       const rect = container.getBoundingClientRect();
       const next = new Set<string>();
-      for (const id of threadIds) {
+      for (const id of commentIds) {
         const el = document.getElementById(`comment-${id}`);
         if (!el) continue;
         const r = el.getBoundingClientRect();
@@ -169,48 +213,66 @@ function useVisibleThreadIds(
       ro.disconnect();
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [threadIds, scrollContainerEl]);
+  }, [commentIds, scrollContainerEl]);
 
   return visibleIds;
 }
 
-/** The thread currently highlighted in the outline and rail. */
+/** The item currently highlighted in the outline and rail. */
 interface PreviewAnchor {
+  /** Index into the flattened items (threads and replies). */
   index: number;
 }
 
 function MinimapTick({
+  kind,
+  index,
   label,
   inViewport,
   isHighlighted,
   onClick,
 }: {
+  kind: MinimapItem["kind"];
+  /** Item index — how pointer and focus handlers map a tick back to its row. */
+  index: number;
   label: string;
   inViewport: boolean;
   /** The corresponding outline row is active. */
   isHighlighted: boolean;
   onClick: React.MouseEventHandler<HTMLButtonElement>;
 }) {
+  const isReply = kind === "reply";
   return (
     <button
       type="button"
       aria-label={label}
+      data-index={index}
+      // Reply ticks stay out of the tab order: dozens of stops on a 6px rail
+      // would bury the thread ticks. Keyboard users reach every reply through
+      // the outline, which opens as soon as a thread tick takes focus.
+      tabIndex={isReply ? -1 : undefined}
       onClick={onClick}
       // 20px wide, tick flushed to the right end: with the rail inset 12px
       // (see the caller's className) the strip spans 12–32px from the panel
       // edge, which clears a classic scrollbar's ~11px gutter on one side and
       // stops exactly at the content column's 32px padding on the other — so
       // it never sits on the scrollbar nor on body text, in either scrollbar
-      // mode.
-      className="group/tick flex min-h-[5px] w-5 flex-[0_1_0.875rem] cursor-pointer items-center justify-end focus-visible:outline-none"
+      // mode. Reply ticks take half the pitch, so a thread's replies pack
+      // tightly under it and each thread reads as one group.
+      className={cn(
+        "group/tick flex w-5 cursor-pointer items-center justify-end focus-visible:outline-none",
+        isReply ? "min-h-1 flex-[0_1_0.4375rem]" : "min-h-[5px] flex-[0_1_0.875rem]",
+      )}
     >
       <span
         className={cn(
           // Enlargement is a right-anchored `scale` (compositor-friendly, and
           // what the JS wave writes inline), so ticks grow inward, away from
           // the scrollbar. The 100ms ease-out doubles as smoothing between
-          // pointer samples and as the settle on leave.
-          "h-0.5 w-3 origin-right rounded-full transition-[scale,background-color] duration-100 ease-out",
+          // pointer samples and as the settle on leave. Reply ticks are half
+          // the length of thread ticks and share their colors.
+          "h-0.5 origin-right rounded-full transition-[scale,background-color] duration-100 ease-out",
+          isReply ? "w-1.5" : "w-3",
           inViewport ? "bg-foreground/70" : "bg-muted-foreground/30",
           !isHighlighted && "group-hover/tick:bg-foreground",
           // CSS floor states for when no inline wave value is present:
@@ -234,27 +296,38 @@ export function ThreadMinimap({
   className,
 }: ThreadMinimapProps) {
   const { t } = useT("issues");
+  const timeAgo = useTimeAgo();
   const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
-  const threadIds = useMemo(() => threads.map((th) => th.id), [threads]);
-  const visibleIds = useVisibleThreadIds(threadIds, scrollContainerEl);
+  const items = useMemo(() => flattenThreads(threads), [threads]);
+  // Item indexes that get a rail tick: every comment while they fit, one per
+  // thread beyond MAX_RAIL_TICKS.
+  const railIndexes = useMemo(
+    () =>
+      items.length <= MAX_RAIL_TICKS
+        ? items.map((_, i) => i)
+        : items.flatMap((item, i) => (item.kind === "thread" ? [i] : [])),
+    [items],
+  );
+  const railIds = useMemo(() => railIndexes.map((i) => items[i]!.id), [items, railIndexes]);
+  const visibleIds = useVisibleCommentIds(railIds, scrollContainerEl);
 
-  // Flattened previews, cached per thread by content so an unrelated timeline
+  // Flattened previews, cached per comment by content so an unrelated timeline
   // update (reaction, new reply elsewhere) doesn't re-flatten every comment.
   const prevPreviewsRef = useRef<Map<string, { content: string | undefined; preview: { title: string; body: string } }>>(new Map());
   const previews = useMemo(() => {
     const next = new Map<string, { content: string | undefined; preview: { title: string; body: string } }>();
-    const arr = threads.map((th) => {
-      const cached = prevPreviewsRef.current.get(th.id);
+    const arr = items.map((item) => {
+      const cached = prevPreviewsRef.current.get(item.id);
       const preview =
-        cached && cached.content === th.entry.content
+        cached && cached.content === item.entry.content
           ? cached.preview
-          : commentPreview(th.entry.content ?? "");
-      next.set(th.id, { content: th.entry.content, preview });
+          : commentPreview(item.entry.content ?? "");
+      next.set(item.id, { content: item.entry.content, preview });
       return preview;
     });
     prevPreviewsRef.current = next;
     return arr;
-  }, [threads]);
+  }, [items]);
 
   const shimRef = useRef<HTMLDivElement | null>(null);
   const navRef = useRef<HTMLElement | null>(null);
@@ -308,7 +381,7 @@ export function ThreadMinimap({
     }, PREVIEW_CLOSE_DELAY_MS);
   }, [cancelClose, showPreview]);
 
-  const handleJump = useCallback((threadId: string, event: React.MouseEvent<HTMLButtonElement>) => {
+  const handleJump = useCallback((commentId: string, event: React.MouseEvent<HTMLButtonElement>) => {
     // Mouse clicks must not pin a hover outline through leftover button focus.
     // Keyboard activation keeps focus so the reader can continue navigating.
     if (event.detail > 0) {
@@ -316,7 +389,7 @@ export function ThreadMinimap({
       // Blur schedules a close; keep the card until the pointer actually leaves.
       cancelClose();
     }
-    onJump(threadId);
+    onJump(commentId);
   }, [cancelClose, onJump]);
 
   const runWave = useCallback(() => {
@@ -329,7 +402,7 @@ export function ThreadMinimap({
     // Read pass, then write pass — never interleaved, one reflow at most.
     const scales: string[] = [];
     let nearest: { index: number; dist: number } | null = null;
-    buttons.forEach((b, i) => {
+    buttons.forEach((b) => {
       if (y === null) {
         scales.push("");
         return;
@@ -339,7 +412,7 @@ export function ThreadMinimap({
       const dist = Math.abs(y - centerY);
       const s = reducedMotionRef.current ? 1 : waveScale(y - centerY);
       scales.push(s > 1.001 ? `${s.toFixed(3)} 1` : "");
-      if (!nearest || dist < nearest.dist) nearest = { index: i, dist };
+      if (!nearest || dist < nearest.dist) nearest = { index: Number(b.dataset.index), dist };
     });
     buttons.forEach((b, i) => {
       const tick = b.firstElementChild as HTMLElement | null;
@@ -386,14 +459,11 @@ export function ThreadMinimap({
   // there is no pointer, so there is no accidental-hover to debounce.
   const handleFocus = useCallback(
     (e: React.FocusEvent) => {
-      const nav = navRef.current;
-      const shim = shimRef.current;
       const btn = (e.target as HTMLElement).closest("button");
-      if (!nav || !shim || !btn) return;
+      if (!btn) return;
       cancelClose();
-      const buttons = [...nav.querySelectorAll<HTMLButtonElement>("button")];
-      const index = buttons.indexOf(btn as HTMLButtonElement);
-      if (index < 0) return;
+      const index = Number(btn.dataset.index);
+      if (Number.isNaN(index)) return;
       showPreview({ index });
     },
     [cancelClose, showPreview],
@@ -415,6 +485,43 @@ export function ThreadMinimap({
 
   if (threads.length < MIN_THREADS) return null;
 
+  const actorName = (entry: TimelineEntry) =>
+    entry.actor_name || getActorName(entry.actor_type, entry.actor_id);
+  const itemTitle = (item: MinimapItem, index: number) =>
+    isDeletedComment(item.entry)
+      ? t(($) => $.comment.deleted_placeholder)
+      : previews[index]!.title || actorName(item.entry);
+  // Accessible name shared by a tick and its outline row: resolution is
+  // announced on thread ticks, a reply names its author up front.
+  const itemLabel = (item: MinimapItem, index: number) => {
+    const title = itemTitle(item, index);
+    if (item.kind === "reply") {
+      return t(($) => $.detail.thread_nav_reply_label, { author: actorName(item.entry), title });
+    }
+    return item.thread.resolved ? t(($) => $.detail.thread_nav_resolved_label, { title }) : title;
+  };
+  const avatarFor = (entry: TimelineEntry, size: "xs" | "sm") => {
+    const name = actorName(entry);
+    const avatarUrl = entry.actor_avatar_url?.startsWith("/")
+      ? resolvePublicFileUrl(entry.actor_avatar_url)
+      : entry.actor_avatar_url ?? getActorAvatarUrl(entry.actor_type, entry.actor_id);
+    return (
+      <ActorAvatar
+        name={name}
+        initials={getActorInitials(entry.actor_type, entry.actor_id, name)}
+        avatarUrl={avatarUrl}
+        isAgent={entry.actor_type === "agent"}
+        size={size}
+      />
+    );
+  };
+  // With reply ticks dropped, a highlighted reply row lights its thread's tick.
+  const highlightedTick = preview
+    ? items.length <= MAX_RAIL_TICKS
+      ? preview.index
+      : items[preview.index]?.threadIndex
+    : undefined;
+
   return (
     // Positioning shim; only the nav and the card take pointer events so the
     // strip never blocks content clicks.
@@ -426,7 +533,11 @@ export function ThreadMinimap({
         event.stopPropagation();
         const activeIndex = previewRef.current?.index;
         if (cardRef.current?.contains(document.activeElement) && activeIndex !== undefined) {
-          navRef.current?.querySelectorAll("button")[activeIndex]?.focus();
+          const nav = navRef.current;
+          const tick =
+            nav?.querySelector<HTMLButtonElement>(`button[data-index="${activeIndex}"]`) ??
+            nav?.querySelector<HTMLButtonElement>(`button[data-index="${items[activeIndex]?.threadIndex}"]`);
+          tick?.focus();
         }
         cancelClose();
         if (openTimerRef.current !== null) {
@@ -435,7 +546,10 @@ export function ThreadMinimap({
         }
         showPreview(null);
       }}
-      className={cn("pointer-events-none z-10 flex flex-col justify-center py-6", className)}
+      // z-30, like the find bar: the outline must paint over every sticky
+      // affordance pinned in the timeline (comment headers z-10, resolve
+      // collapse bars z-20), which jumping into a resolved thread now pins.
+      className={cn("pointer-events-none z-30 flex flex-col justify-center py-6", className)}
     >
       <nav
         ref={navRef}
@@ -444,28 +558,21 @@ export function ThreadMinimap({
         onPointerLeave={handleWaveLeave}
         onFocusCapture={handleFocus}
         onBlurCapture={scheduleClose}
-        // Bounded height + shrinkable ticks: when threads outgrow the rail,
+        // Bounded height + shrinkable ticks: when comments outgrow the rail,
         // flex compresses the spacing (down to min-h) instead of overflowing.
         className="pointer-events-auto flex max-h-full flex-col overflow-hidden"
       >
-        {threads.map((thread, i) => {
-          const title = isDeletedComment(thread.entry)
-            ? t(($) => $.comment.deleted_placeholder)
-            : previews[i]!.title ||
-              thread.entry.actor_name ||
-              getActorName(thread.entry.actor_type, thread.entry.actor_id);
+        {railIndexes.map((i) => {
+          const item = items[i]!;
           return (
             <MinimapTick
-              key={thread.id}
-              // Announce resolution on the tick as well as in the outline.
-              label={
-                thread.resolved
-                  ? t(($) => $.detail.thread_nav_resolved_label, { title })
-                  : title
-              }
-              inViewport={visibleIds.has(thread.id)}
-              isHighlighted={preview?.index === i}
-              onClick={(event) => handleJump(thread.id, event)}
+              key={item.id}
+              kind={item.kind}
+              index={i}
+              label={itemLabel(item, i)}
+              inViewport={visibleIds.has(item.id)}
+              isHighlighted={highlightedTick === i}
+              onClick={(event) => handleJump(item.id, event)}
             />
           );
         })}
@@ -480,26 +587,55 @@ export function ThreadMinimap({
           onBlurCapture={scheduleClose}
           className="pointer-events-auto absolute right-8 top-1/2 max-h-[calc(100%-3rem)] w-80 max-w-[calc(100vw-4rem)] -translate-y-1/2 overflow-y-auto overscroll-contain rounded-xl bg-popover p-2 text-body text-popover-foreground shadow-lg ring-1 ring-foreground/10"
         >
+          {/* One <li> per item, replies included, so row index === item index. */}
           <ul>
-            {threads.map((thread, index) => {
-              const title = isDeletedComment(thread.entry)
-                ? t(($) => $.comment.deleted_placeholder)
-                : previews[index]!.title || thread.entry.actor_name ||
-                  getActorName(thread.entry.actor_type, thread.entry.actor_id);
-              const participantNames = thread.participants.map((participant) =>
-                participant.actor_name || getActorName(participant.actor_type, participant.actor_id),
-              );
+            {items.map((item, index) => {
+              const title = itemTitle(item, index);
+              const rowProps = {
+                type: "button" as const,
+                onPointerEnter: () => showPreview({ index }),
+                onFocus: () => showPreview({ index }),
+                onClick: (event: React.MouseEvent<HTMLButtonElement>) => handleJump(item.id, event),
+                "data-active": preview.index === index || undefined,
+                "aria-label": itemLabel(item, index),
+              };
+
+              if (item.kind === "reply") {
+                return (
+                  // The guide line runs down the left of consecutive reply rows,
+                  // tying them to the thread row above.
+                  <li
+                    key={item.id}
+                    className="relative ml-3 before:absolute before:inset-y-0 before:left-0 before:w-px before:bg-surface-border"
+                  >
+                    <button
+                      {...rowProps}
+                      className="flex w-full items-center gap-2 rounded-md py-1 pl-3 pr-3 text-left text-label text-muted-foreground transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-active:font-medium data-active:text-brand"
+                    >
+                      <span className="inline-flex shrink-0" aria-hidden="true">
+                        {avatarFor(item.entry, "xs")}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">{title}</span>
+                      {item.thread.resolutionReplyId === item.id && (
+                        <CheckCircle2
+                          className="size-3 shrink-0 text-success"
+                          aria-label={t(($) => $.comment.resolve.resolution_badge)}
+                        />
+                      )}
+                      <span className="shrink-0 text-micro font-normal tabular-nums text-muted-foreground">
+                        {timeAgo(item.entry.created_at)}
+                      </span>
+                    </button>
+                  </li>
+                );
+              }
+
+              const thread = item.thread;
+              const participantNames = thread.participants.map(actorName);
               return (
-                <li key={thread.id}>
+                <li key={item.id}>
                   <button
-                    type="button"
-                    onPointerEnter={() => showPreview({ index })}
-                    onFocus={() => showPreview({ index })}
-                    onClick={(event) => handleJump(thread.id, event)}
-                    data-active={preview.index === index || undefined}
-                    aria-label={thread.resolved
-                      ? t(($) => $.detail.thread_nav_resolved_label, { title })
-                      : title}
+                    {...rowProps}
                     aria-description={participantNames.join(", ") || undefined}
                     className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-body text-muted-foreground transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-active:font-medium data-active:text-brand"
                   >
@@ -513,27 +649,15 @@ export function ThreadMinimap({
                       )}
                     </span>
                     <span className="inline-flex shrink-0 items-center -space-x-1.5" aria-hidden="true">
-                      {thread.participants.slice(0, 3).map((participant, participantIndex) => {
-                        const name = participantNames[participantIndex]!;
-                        const avatarUrl = participant.actor_avatar_url?.startsWith("/")
-                          ? resolvePublicFileUrl(participant.actor_avatar_url)
-                          : participant.actor_avatar_url ?? getActorAvatarUrl(participant.actor_type, participant.actor_id);
-                        return (
-                          <span
-                            key={`${participant.actor_type}:${participant.actor_id}`}
-                            title={name}
-                            className="inline-flex rounded-full ring-2 ring-popover"
-                          >
-                            <ActorAvatar
-                              name={name}
-                              initials={getActorInitials(participant.actor_type, participant.actor_id, name)}
-                              avatarUrl={avatarUrl}
-                              isAgent={participant.actor_type === "agent"}
-                              size="sm"
-                            />
-                          </span>
-                        );
-                      })}
+                      {thread.participants.slice(0, 3).map((participant, participantIndex) => (
+                        <span
+                          key={`${participant.actor_type}:${participant.actor_id}`}
+                          title={participantNames[participantIndex]!}
+                          className="inline-flex rounded-full ring-2 ring-popover"
+                        >
+                          {avatarFor(participant, "sm")}
+                        </span>
+                      ))}
                       {thread.participants.length > 3 && (
                         <span
                           title={participantNames.slice(3).join(", ")}

@@ -418,7 +418,7 @@ fire and take no deadline. Rules without either field keep the previous
 open-ended behavior, so existing agent-created rules are unaffected.
 
 The scheduler treats `enabled AND expires_at <= now()` as a candidate (partial
-index 549). Under the usual rule lock, a reached deadline disables the rule and
+index 552). Under the usual rule lock, a reached deadline disables the rule and
 sets `timed_out_at`; `disabled_at` stays NULL because it means "turned off by a
 person" and claim-time checks refuse wakeup runs whose rule has `disabled_at`.
 Inputs captured before the deadline still dispatch. `on_timeout=wake` (event
@@ -439,7 +439,7 @@ remaining sub-issues, target, and why it would not wake anyone), and
 wake; `instruction` (at most 4,000 bytes) is appended to the stage comment.
 Issue and workspace deletion remove override rows.
 
-Migrations 548–551 are additive. Deploy them before the server; deploy the
+Migrations 551–554 are additive. Deploy them before the server; deploy the
 server before the updated web and desktop clients, which call the new
 endpoints. Older clients ignore the new response fields.
 
@@ -448,7 +448,7 @@ workspace settings key `system_wakeup_child_done` (only an explicit `false`
 turns it off), edited under Settings → Issue statuses. The per-issue `PUT`
 accepts partial bodies, so a list can toggle a rule without its instruction.
 
-The trigger no longer runs only after the write. Migration 553 adds
+The trigger no longer runs only after the write. Migration 556 adds
 `issue_child_done_event` and an `AFTER UPDATE OF status` trigger on `issue`
 that records a child's move into a closed status (built-in or a custom status in
 the done/closed category) in the writing transaction, for every writer. The
@@ -530,7 +530,7 @@ child-done system rule (its id is the issue id). The issue header shows what
 the issue is waiting for and opens the Wakeups section; board cards say it in a
 few words, or that a rule was paused.
 
-Migrations 552–555 are additive (new columns, a table with its trigger, and two
+Migrations 555–558 are additive (new columns, a table with its trigger, and two
 concurrent indexes). Deploy them before the server and the server before the
 clients; older clients ignore the new fields, and older servers read as "no
 condition, not paused" in new clients.

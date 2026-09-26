@@ -235,7 +235,7 @@ func TestChildDoneCatalogSnapshotPredatesParent(t *testing.T) {
 func TestChildDoneUnknownStatusSkipsNotification(t *testing.T) {
 	ctx := context.Background()
 	// Whether a child entered a closed status is decided by the status write
-	// (migration 553); the notifier only resolves parent and sibling statuses.
+	// (migration 556); the notifier only resolves parent and sibling statuses.
 	for _, tc := range []struct {
 		name, current, parent string
 		siblingStage          int

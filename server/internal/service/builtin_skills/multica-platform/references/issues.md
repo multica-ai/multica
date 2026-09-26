@@ -10,6 +10,8 @@ Product contracts the runtime brief does not fully encode.
 - [Sub-issues: todo starts work now, backlog parks it](#sub-issues-todo-starts-work-now-backlog-parks-it)
 - [Incorrect to correct](#incorrect-to-correct)
 
+To attach a local file to an existing issue description, use `multica issue update <id> --attachment <local-path>`. The CLI appends the file's Markdown reference to the end of the description; to replace an image, also use `--description-file` to remove the old reference. Do not put local filesystem paths in the description.
+
 ## PR linking and auto-complete
 
 A PR is linked to an issue when its **title** or **branch name** contains a

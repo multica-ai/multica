@@ -205,7 +205,7 @@ func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 	// while every title test stays green. lark and telegram are today's only
 	// enriching adapters and both comply: lark maps the decoder's
 	// pre-enrichment CommandBody, telegram the cleaned instruction captured
-	// before enrichWithQuotedHumanMessage.
+	// before enrichWithQuotedMessage.
 	if msg.CommandText == "" {
 		msg.CommandText = msg.Text
 	}

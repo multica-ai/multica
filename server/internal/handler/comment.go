@@ -82,11 +82,15 @@ type CommentResponse struct {
 	// was blocked (no invoke permission, target unavailable, runtime offline) now
 	// reports that here instead of silently dropping the trigger, so the client
 	// can show "comment posted, but N targets were not triggered".
-	TriggerOutcomes         []CommentTriggerOutcome `json:"trigger_outcomes,omitempty"`
-	SupplementTaskID        string                  `json:"supplement_task_id,omitempty"`
-	SupplementStatus        string                  `json:"supplement_status,omitempty"`
-	SupplementFailureReason *string                 `json:"supplement_failure_reason,omitempty"`
-	SupplementDeliveredAt   *string                 `json:"supplement_delivered_at,omitempty"`
+	TriggerOutcomes []CommentTriggerOutcome `json:"trigger_outcomes,omitempty"`
+	// Supplements lists every running turn this comment steered, one receipt
+	// per run. The single supplement_* fields mirror the first receipt for
+	// clients that predate multi-run steering.
+	Supplements             []CommentSupplementResponse `json:"supplements,omitempty"`
+	SupplementTaskID        string                      `json:"supplement_task_id,omitempty"`
+	SupplementStatus        string                      `json:"supplement_status,omitempty"`
+	SupplementFailureReason *string                     `json:"supplement_failure_reason,omitempty"`
+	SupplementDeliveredAt   *string                     `json:"supplement_delivered_at,omitempty"`
 }
 
 // CommentTriggerOutcome is the per-target result of an explicit @agent / @squad
@@ -1486,6 +1490,11 @@ type CreateCommentRequest struct {
 	ParentID         *string  `json:"parent_id"`
 	AttachmentIDs    []string `json:"attachment_ids"`
 	SuppressAgentIDs []string `json:"suppress_agent_ids"`
+	// SteerTaskIDs are the running turns the author chose to add this comment
+	// to, instead of starting a follow-up run for their agents. A turn that
+	// has ended, or cannot take additional input, is never swapped for another
+	// one: its agent keeps the normal trigger.
+	SteerTaskIDs []string `json:"steer_task_ids"`
 }
 
 type CommentTriggerPreviewRequest struct {
@@ -1761,6 +1770,15 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	steerTaskIDs, ok := parseUUIDSliceOrBadRequest(w, req.SteerTaskIDs, "steer_task_ids")
+	if !ok {
+		return
+	}
+	// A running turn receives text only, so a comment that carries files is
+	// always a normal trigger.
+	if len(attachmentIDs) > 0 {
+		steerTaskIDs = nil
+	}
 
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
@@ -1876,6 +1894,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		Type:         req.Type,
 		ParentID:     parentID,
 		SourceTaskID: sourceTaskID,
+		// The author's "don't start" choices outlive this call: completion
+		// replay skips the agents it names.
+		SuppressedAgentIds: suppressAgentIDs,
 	}
 	var created db.CreateCommentRow
 	var err error
@@ -1966,7 +1987,10 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// The comment is already saved; a blocked mention must not fail the whole
 	// request. Surface the per-target outcomes so the client can show partial
 	// success instead of a silent no-op (MUL-4525 §2).
-	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs)
+	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs, steerTaskIDs)
+	if len(steerTaskIDs) > 0 {
+		applyCommentSupplements(&resp, h.listCommentSupplements(r.Context(), issue.WorkspaceID, []pgtype.UUID{comment.ID})[uuidToString(comment.ID)])
+	}
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -2007,7 +2031,10 @@ func isNoteComment(content string) bool {
 // (MUL-4525 §2): blocked mentions from resolution plus queued / coalesced /
 // deferred / blocked from enqueue. UI-suppressed triggers (the user unchecked
 // them) are removed before enqueue and produce no outcome.
-func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs []pgtype.UUID) []CommentTriggerOutcome {
+//
+// steerTaskIDs are the running turns the author chose: a recipient whose chosen
+// turn is still running receives this comment there instead of a follow-up run.
+func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs, steerTaskIDs []pgtype.UUID) []CommentTriggerOutcome {
 	if isNoteComment(comment.Content) {
 		return nil
 	}
@@ -2018,7 +2045,11 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	})
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
 	h.noteBlockedRuntimeTargets(ctx, issue, targets)
+	triggers, steered := h.steerCommentAgentTriggers(ctx, issue, comment, actorType, triggers, steerTaskIDs)
 	enqueued := h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
+	for agentID, result := range steered {
+		enqueued[agentID] = result
+	}
 	return commentTriggerOutcomes(targets, enqueued)
 }
 
@@ -3353,13 +3384,13 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "comment not found")
 		return
 	}
-	if _, err := h.Queries.GetTaskSupplementByComment(r.Context(), db.GetTaskSupplementByCommentParams{
+	if bound, err := h.Queries.CommentHasTaskSupplement(r.Context(), db.CommentHasTaskSupplementParams{
 		CommentID: existing.ID, WorkspaceID: wsUUID,
-	}); err == nil {
-		writeError(w, http.StatusConflict, "additional messages cannot be edited")
-		return
-	} else if !errors.Is(err, pgx.ErrNoRows) {
+	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to verify additional message")
+		return
+	} else if bound {
+		writeError(w, http.StatusConflict, "additional messages cannot be edited")
 		return
 	}
 
@@ -3475,6 +3506,8 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		ID:           commentUUID,
 		Content:      req.Content,
 		SourceTaskID: sourceTaskID,
+		// New text replaces the "don't start" choices completion replay keeps.
+		SuppressedAgentIds: suppressAgentIDs,
 	}
 	if req.ContentBase != nil {
 		updateParams.ContentBase = pgtype.Text{String: *req.ContentBase, Valid: true}
@@ -3580,7 +3613,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		}
 
 		h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, existing.ID)
-		return h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), suppressAgentIDs)
+		return h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), suppressAgentIDs, nil)
 	}
 
 	// Fetch reactions and attachments for the updated comment.
@@ -3818,20 +3851,23 @@ func (h *Handler) deleteComment(ctx context.Context, commentID, workspaceID pgty
 	}
 	// Keep receipt admission locked through deletion so a concurrent retry
 	// cannot resurrect or deliver the content being removed.
-	receipt, receiptErr := qtx.LockTaskSupplementByComment(ctx, db.LockTaskSupplementByCommentParams{
+	receipts, receiptErr := qtx.LockTaskSupplementsByComment(ctx, db.LockTaskSupplementsByCommentParams{
 		CommentID: commentID, WorkspaceID: workspaceID,
 	})
-	if receiptErr == nil {
+	if receiptErr != nil {
+		return out, receiptErr
+	}
+	for _, receipt := range receipts {
 		if receipt.Status == "pending" || receipt.Status == "delivering" {
 			return out, errTaskSupplementInFlight
 		}
+	}
+	if len(receipts) > 0 {
 		if err := qtx.DeleteTaskSupplementByComment(ctx, db.DeleteTaskSupplementByCommentParams{
 			CommentID: commentID, WorkspaceID: workspaceID,
 		}); err != nil {
 			return out, err
 		}
-	} else if !errors.Is(receiptErr, pgx.ErrNoRows) {
-		return out, receiptErr
 	}
 	// Separate statement on purpose: its snapshot postdates the locks above,
 	// so it sees every committed reply, and none can be added while they are

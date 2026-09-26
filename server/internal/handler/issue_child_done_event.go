@@ -14,7 +14,7 @@ import (
 
 // processChildDoneEvents runs the child-done system rule for the transitions
 // recorded on these parents. The status write records each transition in its
-// own transaction (migration 553); this claims them, evaluates the stage
+// own transaction (migration 556); this claims them, evaluates the stage
 // barrier against the current sibling state, and marks them processed. A
 // failure leaves the claim to expire so SweepChildDone retries it.
 func (h *Handler) processChildDoneEvents(ctx context.Context, parentIDs ...pgtype.UUID) error {

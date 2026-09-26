@@ -1784,6 +1784,11 @@ SELECT * FROM agent
 WHERE id = $1
 FOR UPDATE;
 
+-- name: HasTaskForIssue :one
+-- Returns true if the issue has any task in any status. Webhook recovery
+-- treats even a terminal task as proof that ownership moved downstream.
+SELECT EXISTS (SELECT 1 FROM agent_task_queue WHERE issue_id = $1);
+
 -- name: HasActiveTaskForIssue :one
 -- Returns true if there is any queued, dispatched, waiting_local_directory,
 -- or running task for the issue.

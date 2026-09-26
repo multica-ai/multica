@@ -29,7 +29,7 @@ import (
 // Guards on whether the comment fires at all:
 //   - the child must transition from a non-terminal status INTO a terminal one
 //     (done or cancelled, including custom statuses in those categories). The
-//     status write records the transition itself (migration 553), so repeat
+//     status write records the transition itself (migration 556), so repeat
 //     saves of an already-terminal child never fire. Cancelled counts because
 //     a cancelled sibling never finishes and so closes its stage.
 //   - parent must not be "done" or "cancelled" — the parent is already

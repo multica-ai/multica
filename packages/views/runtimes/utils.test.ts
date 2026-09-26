@@ -265,6 +265,30 @@ describe("estimateCost", () => {
     }
   });
 
+  it("prices Opus 5.5 at its own 4/20 tier with 0.05x cache reads, not Opus 5's", () => {
+    // Opus 5.5 is cheaper than Opus 5 ($4 / $20, $5 cache write) and prices
+    // cache reads at 0.05x input ($0.20) instead of the usual 0.1x. Copilot
+    // reports it dotted, so every spelling must reach the 5.5 row.
+    for (const model of [
+      "claude-opus-5-5",
+      "claude-opus-5-5[1m]",
+      "claude-opus-5.5",
+      "anthropic/claude-opus-5-5",
+    ]) {
+      expect(
+        estimateCost({
+          ...zeroUsage,
+          model,
+          input_tokens: 1_000_000,
+          output_tokens: 1_000_000,
+          cache_read_tokens: 1_000_000,
+          cache_write_tokens: 1_000_000,
+        }),
+      ).toBeCloseTo(4 + 20 + 0.2 + 5, 5);
+      expect(isModelPriced(model)).toBe(true);
+    }
+  });
+
   it("prices each dotted Codex catalog SKU at its own tier, not gpt-5", () => {
     // Every dotted minor version is priced independently. The resolver does
     // exact-match-after-date-strip (no startsWith fallback), so each row
