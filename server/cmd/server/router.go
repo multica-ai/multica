@@ -2295,6 +2295,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/failures/by-agent", h.GetDashboardFailuresByAgent)
 			})
 
+			// Usage export — exact workspace-scoped machine-readable totals.
+			r.Get("/api/usage/export", h.GetWorkspaceUsageExport)
+
 			// Runtimes
 			r.Route("/api/runtimes", func(r chi.Router) {
 				r.Get("/", h.ListAgentRuntimes)
