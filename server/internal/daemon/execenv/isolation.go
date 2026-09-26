@@ -20,15 +20,17 @@ import (
 const PreparationHelperArg = "__multica_execenv_prepare"
 
 const (
-	preparationActionPrepare = "prepare"
-	preparationActionReuse   = "reuse"
-	preparationWaitDelay     = 2 * time.Second
+	preparationActionPrepare       = "prepare"
+	preparationActionReuse         = "reuse"
+	preparationActionClaudePlugins = "claude_plugins"
+	preparationWaitDelay           = 2 * time.Second
 )
 
 type preparationRequest struct {
-	Action  string         `json:"action"`
-	Prepare *PrepareParams `json:"prepare,omitempty"`
-	Reuse   *ReuseParams   `json:"reuse,omitempty"`
+	Action        string                    `json:"action"`
+	Prepare       *PrepareParams            `json:"prepare,omitempty"`
+	Reuse         *ReuseParams              `json:"reuse,omitempty"`
+	ClaudePlugins *ClaudePluginCopiesParams `json:"claude_plugins,omitempty"`
 }
 
 // preparationOpenclawGatewayPin is the private helper-protocol view of an
@@ -48,9 +50,10 @@ type preparationReuseParams struct {
 }
 
 type preparationRequestPayload struct {
-	Action  string                    `json:"action"`
-	Prepare *preparationPrepareParams `json:"prepare,omitempty"`
-	Reuse   *preparationReuseParams   `json:"reuse,omitempty"`
+	Action        string                    `json:"action"`
+	Prepare       *preparationPrepareParams `json:"prepare,omitempty"`
+	Reuse         *preparationReuseParams   `json:"reuse,omitempty"`
+	ClaudePlugins *ClaudePluginCopiesParams `json:"claude_plugins,omitempty"`
 }
 
 type preparationResponse struct {
@@ -120,6 +123,22 @@ func ReuseIsolated(ctx context.Context, command []string, params ReuseParams, lo
 		Action: preparationActionReuse,
 		Reuse:  &params,
 	}, logger)
+}
+
+// PrepareClaudePluginCopiesIsolated snapshots plugins after the native policy
+// query has observed the final workdir. Keep filesystem I/O inside the existing
+// killable helper rather than moving potentially blocked reads into the daemon.
+func PrepareClaudePluginCopiesIsolated(ctx context.Context, command []string, params ClaudePluginCopiesParams, logger *slog.Logger) ([]string, error) {
+	env, err := runPreparationProcess(ctx, command, preparationRequest{
+		Action: preparationActionClaudePlugins, ClaudePlugins: &params,
+	}, logger)
+	if err != nil {
+		return nil, err
+	}
+	if env == nil || env.RootDir != params.RootDir {
+		return nil, fmt.Errorf("invalid Claude plugin preparation response")
+	}
+	return env.ClaudePluginDirs, nil
 }
 
 func runPreparationProcess(ctx context.Context, command []string, request preparationRequest, logger *slog.Logger) (*Environment, error) {
@@ -220,7 +239,7 @@ func runPreparationProcess(ctx context.Context, command []string, request prepar
 // this trusted local process boundary; ordinary json.Marshal calls on the
 // public type remain redacted.
 func marshalPreparationRequest(request preparationRequest) ([]byte, error) {
-	payload := preparationRequestPayload{Action: request.Action}
+	payload := preparationRequestPayload{Action: request.Action, ClaudePlugins: request.ClaudePlugins}
 	if request.Prepare != nil {
 		payload.Prepare = &preparationPrepareParams{
 			PrepareParams:   request.Prepare,
@@ -274,7 +293,7 @@ func RunPreparationHelper(in io.Reader, out io.Writer, logger *slog.Logger) erro
 	var response preparationResponse
 	switch request.Action {
 	case preparationActionPrepare:
-		if request.Prepare == nil || request.Reuse != nil {
+		if request.Prepare == nil || request.Reuse != nil || request.ClaudePlugins != nil {
 			return errors.New("invalid prepare request")
 		}
 		env, err := Prepare(*request.Prepare, logger)
@@ -284,10 +303,20 @@ func RunPreparationHelper(in io.Reader, out io.Writer, logger *slog.Logger) erro
 			response.ErrorKind = preparationErrorKind(err)
 		}
 	case preparationActionReuse:
-		if request.Reuse == nil || request.Prepare != nil {
+		if request.Reuse == nil || request.Prepare != nil || request.ClaudePlugins != nil {
 			return errors.New("invalid reuse request")
 		}
 		response.Environment = Reuse(*request.Reuse, logger)
+	case preparationActionClaudePlugins:
+		if request.ClaudePlugins == nil || request.Prepare != nil || request.Reuse != nil {
+			return errors.New("invalid Claude plugin preparation request")
+		}
+		dirs, err := PrepareClaudePluginCopies(*request.ClaudePlugins)
+		if err != nil {
+			response.Error = err.Error()
+		} else {
+			response.Environment = &Environment{RootDir: request.ClaudePlugins.RootDir, ClaudePluginDirs: dirs}
+		}
 	default:
 		return fmt.Errorf("unknown preparation action %q", request.Action)
 	}
