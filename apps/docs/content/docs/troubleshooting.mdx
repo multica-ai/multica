@@ -97,6 +97,22 @@ An online daemon does not mean the tool itself works. Open the run's detailed re
 
 Run the same tool directly in a terminal on the executing computer first. If the tool cannot start on its own, fix its sign-in or configuration, then retry the run from the execution log.
 
+## Tasks cannot see shell environment variables
+
+If a coding tool runs fine in your terminal but its tasks fail with a missing environment variable or a "not logged in" error, the daemon is running with a different environment than your shell.
+
+When Multica Desktop is launched from the Dock, Finder, or `open`, the operating system starts it through the desktop launcher with a minimal environment. Desktop runs your login shell once to recover `PATH`, which is why the daemon still finds the `claude` or `codex` binary, but it does not import other variables. Anything exported only from `~/.zshrc` or `~/.bashrc` stays invisible to the daemon and to the tasks it starts.
+
+Confirm it by running the tool with an empty environment:
+
+```bash
+env -i HOME="$HOME" PATH="$PATH" claude -p "hi"
+```
+
+If that fails while a plain `claude -p "hi"` succeeds, the credential comes from your shell configuration and the daemon cannot see it.
+
+Set the credential as one of the agent's custom environment variables instead. Those are stored server-side and sent to the runtime at execution time, so they reach the tool no matter how the app was started. Restarting the daemon from a terminal that already has the variable also works, but only until Desktop starts the daemon itself again.
+
 ## Realtime updates stop working
 
 If runs still execute but comments and status changes no longer appear live, the WebSocket is usually not connected.
