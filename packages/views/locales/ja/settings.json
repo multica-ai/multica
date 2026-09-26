@@ -233,6 +233,14 @@
         "label": "タスク内を検索",
         "description": "開いているタスクの詳細を検索します。"
       },
+      "openIssueStatus": {
+        "label": "タスクのステータスを開く",
+        "description": "表示中のタスクのステータス選択を開きます。"
+      },
+      "openIssuePriority": {
+        "label": "タスクの優先度を開く",
+        "description": "表示中のタスクの優先度選択を開きます。"
+      },
       "archiveInboxItem": {
         "label": "通知をアーカイブ",
         "description": "開いているインボックス通知をアーカイブします。アーカイブ表示中はアーカイブを解除します。"

@@ -108,6 +108,7 @@ import { useGitHubSettings } from "@multica/core/github";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
@@ -150,6 +151,7 @@ import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
 import { useInPageFind } from "../hooks/use-in-page-find";
+import { useIssuePropertyShortcuts, type IssuePropertyShortcut } from "../hooks/use-issue-property-shortcuts";
 import { useStickyComposer } from "../hooks/use-sticky-composer";
 import { FindBar } from "./find-bar";
 import {
@@ -1252,6 +1254,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const id = issueId;
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
+  const statusShortcut = useShortcut("openIssueStatus");
+  const priorityShortcut = useShortcut("openIssuePriority");
   const openModal = useModalStore((state) => state.open);
 
   // Issue navigation — read from TQ list cache
@@ -1302,6 +1306,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [isMobile]);
   const sidebarOpen = isMobile ? mobileSidebarOpen : desktopSidebarOpen;
   const [propertiesOpen, setPropertiesOpen] = useState(true);
+  const [statusPickerOpen, setStatusPickerOpen] = useState(false);
+  const [priorityPickerOpen, setPriorityPickerOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
@@ -1477,6 +1483,30 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       return cached?.description != null ? cached : undefined;
     },
   });
+  useEffect(() => {
+    setStatusPickerOpen(false);
+    setPriorityPickerOpen(false);
+  }, [id]);
+  const openPropertyPicker = useCallback((property: IssuePropertyShortcut) => {
+    setPropertiesOpen(true);
+    if (isMobile) setMobileSidebarOpen(true);
+    else if (!desktopSidebarOpen) beginDesktopSidebarToggle(true);
+    if (property === "status") {
+      setPriorityPickerOpen(false);
+      setStatusPickerOpen(true);
+    } else {
+      setStatusPickerOpen(false);
+      setVisibleOptionalProps((previous) => new Set(previous).add("priority"));
+      setPriorityPickerOpen(true);
+    }
+  }, [isMobile, desktopSidebarOpen, beginDesktopSidebarToggle]);
+  useIssuePropertyShortcuts(
+    rightSidebarShortcutTargetRef,
+    !!issue,
+    statusShortcut,
+    priorityShortcut,
+    openPropertyPicker,
+  );
   const descriptionSourceId = `description:${id}`;
   const descriptionAnnotations = useCommentAnnotations({
     draftKey: `new:${id}`,
@@ -2372,6 +2402,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         return next;
       });
       setAutoOpenProp(key);
+      if (key === "priority") setPriorityPickerOpen(true);
       // Dismiss the "+ Add property" popover so it doesn't sit stacked
       // behind the picker we're about to auto-open.
       setAddPropPopoverOpen(false);
@@ -2521,7 +2552,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <StatusPicker
               status={issue.status}
               onUpdate={handleUpdateField}
+              open={statusPickerOpen}
+              onOpenChange={setStatusPickerOpen}
               align="start"
+              tooltip={statusShortcut ? `${t(($) => $.detail.prop_status)} (${formatShortcut(statusShortcut)})` : undefined}
               onMarkDuplicate={actions.openMarkDuplicate}
               isDuplicate={isDuplicateIssue(issue)}
             />
@@ -2544,8 +2578,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <PriorityPicker
                 priority={issue.priority}
                 onUpdate={handleUpdateField}
+                open={priorityPickerOpen}
+                onOpenChange={setPriorityPickerOpen}
                 align="start"
-                defaultOpen={autoOpenProp === "priority"}
+                tooltip={priorityShortcut ? `${t(($) => $.detail.prop_priority)} (${formatShortcut(priorityShortcut)})` : undefined}
               />
             </PropRow>
           )}

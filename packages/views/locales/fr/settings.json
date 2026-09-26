@@ -233,6 +233,14 @@
         "label": "Rechercher dans la tâche",
         "description": "Rechercher dans la tâche ouverte."
       },
+      "openIssueStatus": {
+        "label": "Ouvrir le statut de la tâche",
+        "description": "Ouvrir le sélecteur de statut de la tâche affichée."
+      },
+      "openIssuePriority": {
+        "label": "Ouvrir la priorité de la tâche",
+        "description": "Ouvrir le sélecteur de priorité de la tâche affichée."
+      },
       "archiveInboxItem": {
         "label": "Archiver la notification",
         "description": "Archiver la notification ouverte, ou la restaurer lors de la consultation des archives."

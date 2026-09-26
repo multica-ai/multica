@@ -233,6 +233,14 @@
         "label": "Find in issue",
         "description": "Search within the open issue detail."
       },
+      "openIssueStatus": {
+        "label": "Open issue status",
+        "description": "Open the status picker on the visible issue detail."
+      },
+      "openIssuePriority": {
+        "label": "Open issue priority",
+        "description": "Open the priority picker on the visible issue detail."
+      },
       "archiveInboxItem": {
         "label": "Archive notification",
         "description": "Archive the open inbox notification, or restore it while reading the archive."

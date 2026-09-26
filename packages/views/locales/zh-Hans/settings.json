@@ -233,6 +233,14 @@
         "label": "在任务中查找",
         "description": "搜索当前打开的任务详情。"
       },
+      "openIssueStatus": {
+        "label": "打开任务状态",
+        "description": "打开当前任务详情的状态选择器。"
+      },
+      "openIssuePriority": {
+        "label": "打开任务优先级",
+        "description": "打开当前任务详情的优先级选择器。"
+      },
       "archiveInboxItem": {
         "label": "归档通知",
         "description": "归档当前打开的收件箱通知；在归档列表中则取消归档。"

@@ -1065,6 +1065,33 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("Add property")).toBeInTheDocument();
   });
 
+  it("opens the status picker with S on a visible issue detail", async () => {
+    const { container } = renderIssueDetail();
+    await screen.findByText("Properties");
+    const scrollRoot = container.querySelector<HTMLElement>('[data-tab-scroll-root="main:issue-1"]');
+    expect(scrollRoot).not.toBeNull();
+    vi.spyOn(scrollRoot!, "getClientRects").mockReturnValue({ length: 1 } as DOMRectList);
+
+    fireEvent.keyDown(document.body, { key: "s" });
+    await waitFor(() => expect(Array.from(document.querySelectorAll("button[data-picker-item]"))
+      .some((row) => row.textContent?.trim() === "Todo")).toBe(true));
+  });
+
+  it("reveals an unset priority and opens its picker with P", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, priority: "none" });
+    const { container } = renderIssueDetail();
+    await screen.findByText("Properties");
+    expect(screen.queryByText("Priority")).not.toBeInTheDocument();
+    const scrollRoot = container.querySelector<HTMLElement>('[data-tab-scroll-root="main:issue-1"]');
+    expect(scrollRoot).not.toBeNull();
+    vi.spyOn(scrollRoot!, "getClientRects").mockReturnValue({ length: 1 } as DOMRectList);
+
+    fireEvent.keyDown(document.body, { key: "p" });
+    expect(await screen.findByText("Priority")).toBeInTheDocument();
+    await waitFor(() => expect(Array.from(document.querySelectorAll("button[data-picker-item]"))
+      .some((row) => row.textContent?.trim() === "Urgent")).toBe(true));
+  });
+
   it("hides every optional property row when none are set", async () => {
     // Override the default fixture: nothing optional set.
     mockApiObj.getIssue.mockResolvedValue({

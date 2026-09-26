@@ -23,6 +23,7 @@ export function StatusPicker({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
+  tooltip,
   onMarkDuplicate,
   isDuplicate,
 }: {
@@ -39,6 +40,7 @@ export function StatusPicker({
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
+  tooltip?: React.ReactNode;
   /**
    * Adds the "Mark as duplicate" action. It is an action, not a status: it
    * opens a picker for the original and only writes once one is chosen. Pass
@@ -87,6 +89,7 @@ export function StatusPicker({
       }}
       width="w-52"
       align={align}
+      tooltip={tooltip}
       triggerRender={triggerRender}
       searchable={searchable}
       searchPlaceholder={t(($) => $.filters.search_status)}

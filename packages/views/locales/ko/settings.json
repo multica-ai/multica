@@ -233,6 +233,14 @@
         "label": "태스크에서 찾기",
         "description": "열린 태스크 상세 내용에서 검색합니다."
       },
+      "openIssueStatus": {
+        "label": "태스크 상태 열기",
+        "description": "현재 보이는 태스크의 상태 선택기를 엽니다."
+      },
+      "openIssuePriority": {
+        "label": "태스크 우선순위 열기",
+        "description": "현재 보이는 태스크의 우선순위 선택기를 엽니다."
+      },
       "archiveInboxItem": {
         "label": "알림 보관",
         "description": "열린 인박스 알림을 보관합니다. 보관함을 보는 중에는 보관을 해제합니다."
