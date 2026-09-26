@@ -4168,20 +4168,34 @@ func parseCodexSessionFileSince(path string, startTime time.Time, resumed bool) 
 	}
 	defer f.Close()
 
+	result, err := parseCodexSessionUsage(f, startTime, resumed)
+	if err != nil {
+		slog.Warn("failed to read Codex session usage", "path", path, "error", err)
+		return nil
+	}
+	return result
+}
+
+func parseCodexSessionUsage(r io.Reader, startTime time.Time, resumed bool) (*codexSessionUsage, error) {
 	var result codexSessionUsage
 	var previousTotal, accumulated, finalUsage codexRawTokenUsage
 	previousTotalFound := false
 	finalUsageFound := false
 	afterStartBoundary := false
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+	reader := bufio.NewReaderSize(r, 1024*1024)
 
-	for scanner.Scan() {
-		line := scanner.Bytes()
+	for eof := false; !eof; {
+		line, err := readCodexSessionUsageLine(reader)
+		if err != nil && err != io.EOF {
+			// A partial scan may miss a resume baseline or a counter reset.
+			// Never present the preceding snapshot as complete usage.
+			return nil, err
+		}
+		eof = err == io.EOF
 
 		// Fast pre-filter.
-		if !bytesContainsStr(line, "token_count") && !bytesContainsStr(line, "turn_context") {
+		if !codexSessionLineMayContainUsage(line) {
 			continue
 		}
 
@@ -4230,10 +4244,42 @@ func parseCodexSessionFileSince(path string, startTime time.Time, resumed bool) 
 	}
 
 	if !finalUsageFound {
-		return nil
+		return nil, nil
 	}
 	result.usage = codexTokenUsage(finalUsage)
-	return &result
+	return &result, nil
+}
+
+func codexSessionLineMayContainUsage(line []byte) bool {
+	return bytesContainsStr(line, "token_count") || bytesContainsStr(line, "turn_context")
+}
+
+// readCodexSessionUsageLine drains oversized image/tool records without growing
+// the reader's buffer or treating their remaining fragments as new JSONL rows.
+// If any fragment could contain usage metadata, fail conservatively instead of
+// dropping a potential baseline, counter reset, or timestamp boundary.
+func readCodexSessionUsageLine(reader *bufio.Reader) ([]byte, error) {
+	line, err := reader.ReadSlice('\n')
+	if err != bufio.ErrBufferFull {
+		return line, err
+	}
+	mayContainUsage := codexSessionLineMayContainUsage(line)
+	// Preserve enough overlap to recognize either marker split across chunks.
+	var boundary [2 * len("turn_context")]byte
+	for err == bufio.ErrBufferFull {
+		n := copy(boundary[:], line[len(line)-len("turn_context"):])
+		line, err = reader.ReadSlice('\n')
+		m := copy(boundary[n:], line)
+		mayContainUsage = mayContainUsage || codexSessionLineMayContainUsage(line) ||
+			codexSessionLineMayContainUsage(boundary[:n+m])
+	}
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	if mayContainUsage {
+		return nil, fmt.Errorf("Codex session usage record exceeds %d bytes", reader.Size())
+	}
+	return nil, err
 }
 
 func subtractCodexRawTokenUsage(total, baseline codexRawTokenUsage) codexRawTokenUsage {
