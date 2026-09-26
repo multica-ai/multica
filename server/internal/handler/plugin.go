@@ -64,17 +64,18 @@ type pluginInstallationResponse struct {
 	// The published version this installation is bound to. Nothing about it can
 	// change under the workspace's feet: upgrading means pointing at a different
 	// version id, which is a second consent.
-	PackageVersionID  string                      `json:"package_version_id"`
-	Enabled           bool                        `json:"enabled"`
-	GrantedScopes     []string                    `json:"granted_scopes"`
-	ConfigSchema      []service.PluginConfigField `json:"config_schema"`
-	Config            map[string]any              `json:"config"`
-	ConfiguredSecrets []string                    `json:"configured_secrets"`
-	Surfaces          []plugincontract.Surface    `json:"surfaces"`
-	Hooks             []pluginHookResponse        `json:"hooks"`
-	Resources         []plugincontract.Resource   `json:"resources"`
-	CreatedAt         string                      `json:"created_at"`
-	UpdatedAt         string                      `json:"updated_at"`
+	PackageVersionID  string                           `json:"package_version_id"`
+	Enabled           bool                             `json:"enabled"`
+	GrantedScopes     []string                         `json:"granted_scopes"`
+	ConfigSchema      []service.PluginConfigField      `json:"config_schema"`
+	Config            map[string]any                   `json:"config"`
+	ConfiguredSecrets []string                         `json:"configured_secrets"`
+	Surfaces          []plugincontract.Surface         `json:"surfaces"`
+	Hooks             []pluginHookResponse             `json:"hooks"`
+	Resources         []plugincontract.Resource        `json:"resources"`
+	ComposerCommands  []plugincontract.ComposerCommand `json:"composer_commands"`
+	CreatedAt         string                           `json:"created_at"`
+	UpdatedAt         string                           `json:"updated_at"`
 }
 
 // pluginHookResponse omits input_schema: the settings page lists what a hook is
@@ -154,6 +155,10 @@ func (h *Handler) pluginInstallationPayload(ctx context.Context, installation db
 	if resources == nil {
 		resources = []plugincontract.Resource{}
 	}
+	composerCommands := manifest.Contributes.ComposerCommands
+	if composerCommands == nil {
+		composerCommands = []plugincontract.ComposerCommand{}
+	}
 
 	return pluginInstallationResponse{
 		ID:                uuidToString(installation.ID),
@@ -170,6 +175,7 @@ func (h *Handler) pluginInstallationPayload(ctx context.Context, installation db
 		Surfaces:          surfaces,
 		Hooks:             hooks,
 		Resources:         resources,
+		ComposerCommands:  composerCommands,
 		CreatedAt:         installation.CreatedAt.Time.UTC().Format(timeFormatRFC3339),
 		UpdatedAt:         installation.UpdatedAt.Time.UTC().Format(timeFormatRFC3339),
 	}, nil

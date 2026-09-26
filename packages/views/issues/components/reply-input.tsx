@@ -281,6 +281,8 @@ function ReplyInput({
             currentIssueId={issueId}
             attachments={pendingAttachments}
             enableSlashCommands
+            pluginComposerContext="issue_reply"
+            pluginIssueId={issueId}
             slashCommandMode="command"
             quickActionMenu={quickActionMenu}
           />

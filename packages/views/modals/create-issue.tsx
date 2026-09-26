@@ -968,6 +968,8 @@ export function ManualCreatePanel({
               <ContentEditor
                 ref={descEditorRef}
                 defaultValue={draft.manual.description}
+                enableSlashCommands
+                pluginComposerContext="issue_create"
                 placeholder={t(($) => $.create_issue.description_placeholder)}
                 onUpdate={(md) => setManual({ description: md })}
                 onSubmit={handleSubmit}

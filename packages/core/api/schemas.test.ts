@@ -2065,6 +2065,7 @@ describe("Plugin schemas", () => {
     expect(parsed.surfaces).toEqual([]);
     expect(parsed.hooks).toEqual([]);
     expect(parsed.resources).toEqual([]);
+    expect(parsed.composer_commands).toEqual([]);
   });
 
   it("does not model a secret value even when the server sends one", () => {
@@ -2162,6 +2163,32 @@ describe("Plugin schemas", () => {
       }],
     });
     expect(installation.hooks[0]?.schedule?.next_run_at).toBe("2026-08-23T10:15:00Z");
+  });
+
+  it("preserves composer command contributions in preview and installation DTOs", () => {
+    const command = {
+      key: "release-notes",
+      label: "release-notes",
+      description: "Draft release notes",
+      contexts: ["chat", "issue_comment"],
+      surface: "release-dialog",
+    };
+    const preview = PluginPreviewSchema.parse({
+      manifest: {
+        key: "com.example.release",
+        name: "Release",
+        version: "1.0.0",
+        author: { name: "example" },
+        contributes: { composer_commands: [command] },
+      },
+    });
+    const installation = PluginInstallationSchema.parse({
+      id: "installation-1",
+      composer_commands: [command],
+    });
+
+    expect(preview.manifest.contributes?.composer_commands).toEqual([command]);
+    expect(installation.composer_commands).toEqual([command]);
   });
 });
 

@@ -24,7 +24,7 @@ import { PluginSurfaceFrame } from "./plugin-surface-frame";
  * derived from the granted `net:` scopes — differing only in where it appears.
  * What it is NOT is a way
  * for a plugin to interrupt somebody: it opens because a person picked it from
- * the issue menu, never on the plugin's own initiative.
+ * the issue menu or a composer command, never on the plugin's own initiative.
  */
 
 export interface PluginModalTarget {
@@ -73,13 +73,17 @@ interface PluginModalSurfaceProps {
   target: PluginModalTarget | null;
   issueId?: string;
   onOpenChange: (open: boolean) => void;
+  onComposerInsert?: (text: string) => boolean | Promise<boolean>;
 }
 
-export function PluginModalSurface({ target, issueId, onOpenChange }: PluginModalSurfaceProps) {
-  // Same source as usePluginModalSurfaces above: a modal only ever opens from
-  // the issue menu, which is inside the workspace route.
-  const workspace = useCurrentWorkspace();
+export function PluginModalSurface({ target, issueId, onOpenChange, onComposerInsert }: PluginModalSurfaceProps) {
   if (!target) return null;
+  return <ActivePluginModalSurface target={target} issueId={issueId} onOpenChange={onOpenChange} onComposerInsert={onComposerInsert} />;
+}
+
+function ActivePluginModalSurface({ target, issueId, onOpenChange, onComposerInsert }: PluginModalSurfaceProps & { target: PluginModalTarget }) {
+  // Issue-menu and composer-command modals both open inside a workspace route.
+  const workspace = useCurrentWorkspace();
   return (
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
@@ -102,6 +106,7 @@ export function PluginModalSurface({ target, issueId, onOpenChange }: PluginModa
           installation={target.installation}
           surface={target.surface}
           issueId={issueId}
+          onComposerInsert={onComposerInsert}
         />
       </DialogContent>
     </Dialog>

@@ -335,10 +335,11 @@ func withHostCapabilities(t *testing.T) {
 	t.Helper()
 	previous := testHandler.PluginService.Host
 	testHandler.PluginService.Host = plugincontract.Capabilities{
-		SurfaceTypes:  map[string]bool{plugincontract.SurfaceIssuePanel: true, plugincontract.SurfaceSidebarPanel: true, plugincontract.SurfaceModal: true},
-		HookTriggers:  map[string]bool{plugincontract.TriggerUI: true, plugincontract.TriggerManual: true, plugincontract.TriggerAgent: true, plugincontract.TriggerEvent: true},
-		HookTransport: map[string]bool{plugincontract.TransportHTTP: true, plugincontract.TransportMCP: true},
-		ResourceTypes: map[string]bool{plugincontract.ResourceSkill: true},
+		SurfaceTypes:     map[string]bool{plugincontract.SurfaceIssuePanel: true, plugincontract.SurfaceSidebarPanel: true, plugincontract.SurfaceModal: true},
+		HookTriggers:     map[string]bool{plugincontract.TriggerUI: true, plugincontract.TriggerManual: true, plugincontract.TriggerAgent: true, plugincontract.TriggerEvent: true},
+		HookTransport:    map[string]bool{plugincontract.TransportHTTP: true, plugincontract.TransportMCP: true},
+		ResourceTypes:    map[string]bool{plugincontract.ResourceSkill: true},
+		ComposerCommands: true,
 	}
 	t.Cleanup(func() { testHandler.PluginService.Host = previous })
 }

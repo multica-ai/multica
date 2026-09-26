@@ -45,10 +45,12 @@ import { cn } from "@multica/ui/lib/utils";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useQueryClient } from "@tanstack/react-query";
+import { getCurrentWsId } from "@multica/core/platform";
+import { pluginInstallationsOptions } from "@multica/core/plugins";
 import { issueIdentifierOptions } from "@multica/core/issues/queries";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
 import { isIssueIdentifier } from "@multica/ui/markdown";
-import type { Attachment } from "@multica/core/types";
+import type { Attachment, PluginInstallationListResponse } from "@multica/core/types";
 import {
   parseMarkdownChunked,
   MARKDOWN_CHUNK_THRESHOLD,
@@ -56,7 +58,16 @@ import {
 } from "./utils/parse-markdown-chunked";
 import type { MentionItem } from "./extensions/mention-suggestion";
 import type { IssueIdentifierResolver } from "./extensions/issue-identifier-autolink";
-import type { BuiltinCommandSuggestionOptions } from "./extensions/slash-command-suggestion";
+import type { BuiltinCommandSuggestionOptions, PluginCommandSuggestionOptions } from "./extensions/slash-command-suggestion";
+import type { PluginComposerContext } from "../plugins/plugin-composer-commands";
+import { PluginModalSurface } from "../plugins/plugin-modal-surface";
+import { isDesktopShell } from "../platform/local-directory";
+import {
+  capturePluginComposerInvocation,
+  insertPluginComposerMarkdown,
+  isPluginComposerInvocationInstalled,
+  type PluginComposerInvocation,
+} from "./plugin-composer-insertion";
 import { createEditorExtensions } from "./extensions";
 import {
   uploadAndInsertFile,
@@ -192,6 +203,10 @@ interface ContentEditorBaseProps {
   mentionContextItems?: MentionItem[];
   /** Enable the `/` command picker. Defaults false. */
   enableSlashCommands?: boolean;
+  /** Declares which workspace-plugin commands this composer accepts. */
+  pluginComposerContext?: PluginComposerContext;
+  /** Issue context for plugin modal calls from comment and reply composers. */
+  pluginIssueId?: string;
   /**
    * Which `/` menu to show when enableSlashCommands is true: "skill" (default)
    * lists the active agent's skills (chat); "command" shows the fixed built-in
@@ -377,6 +392,8 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       mentionMode = "default",
       mentionContextItems,
       enableSlashCommands = false,
+      pluginComposerContext,
+      pluginIssueId,
       slashCommandMode = "skill",
       quickActionMenu,
       attachments,
@@ -409,6 +426,46 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // set is built once at mount, so a directly-captured options object would
     // freeze whatever closures existed then and stop seeing new quick actions.
     const quickActionMenuRef = useRef<BuiltinCommandSuggestionOptions | undefined>(quickActionMenu);
+    const queryClient = useQueryClient();
+    const activeEditorRef = useRef<Editor | null>(null);
+    const pluginInvocationRef = useRef<PluginComposerInvocation | null>(null);
+    const [pluginInvocation, setPluginInvocation] = useState<PluginComposerInvocation | null>(null);
+    const selectPluginCommand = useCallback<PluginCommandSuggestionOptions["onSelect"]>(({ editor, range, target }) => {
+      const workspaceId = getCurrentWsId();
+      if (!workspaceId) return;
+      const invocation = capturePluginComposerInvocation(target, workspaceId, editor, range);
+      pluginInvocationRef.current = invocation;
+      setPluginInvocation(invocation);
+    }, []);
+    const insertPluginMarkdown = useCallback(async (text: string): Promise<boolean> => {
+      const invocation = pluginInvocationRef.current;
+      if (!invocation || !pluginComposerContext || getCurrentWsId() !== invocation.workspaceId) return false;
+      // Installation revocation takes effect even if its modal was already
+      // open. Read through the API, not the menu cache, before accepting a
+      // local draft write from the plugin's still-live MessagePort.
+      let installations: PluginInstallationListResponse;
+      try {
+        installations = await queryClient.fetchQuery({
+          ...pluginInstallationsOptions(invocation.workspaceId),
+          staleTime: 0,
+        });
+      } catch {
+        return false;
+      }
+      const stillInstalled = isPluginComposerInvocationInstalled(
+        invocation,
+        installations,
+        pluginComposerContext,
+        isDesktopShell() ? "desktop" : "web",
+      );
+      if (!stillInstalled || getCurrentWsId() !== invocation.workspaceId ||
+          pluginInvocationRef.current !== invocation ||
+          !insertPluginComposerMarkdown(invocation, activeEditorRef.current, text)) return false;
+      pluginInvocationRef.current = null;
+      // Keep the modal alive for its success response; the user can close it
+      // after seeing confirmation. The bridge also consumes this insertion.
+      return true;
+    }, [pluginComposerContext, queryClient]);
     const lastEmittedRef = useRef<string | null>(null);
     // `content` already consumes the initial synchronized value when Tiptap
     // mounts. Track later changes separately so the sync effect does not parse
@@ -512,7 +569,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     quickActionMenuRef.current = quickActionMenu;
     flushPendingOnUnmountRef.current = flushPendingOnUnmount;
 
-    const queryClient = useQueryClient();
 
     // Linear-style bare identifier autolink resolver. Fully lazy — it runs only
     // on user input, never on render, so it adds no query hook to this widely
@@ -619,6 +675,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           onRenderError: (error: unknown) =>
             quickActionMenuRef.current?.onRenderError?.(error),
         },
+        pluginCommandMenu: pluginComposerContext
+          ? { context: pluginComposerContext, onSelect: selectPluginCommand }
+          : undefined,
         resolveIssueIdentifierRef,
       }),
       onUpdate: ({ editor: ed }) => {
@@ -686,6 +745,18 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         },
       },
     });
+
+    useEffect(() => {
+      activeEditorRef.current = editor;
+      if (pluginInvocationRef.current && pluginInvocationRef.current.editor !== editor) {
+        pluginInvocationRef.current = null;
+        setPluginInvocation(null);
+      }
+      return () => {
+        if (activeEditorRef.current === editor) activeEditorRef.current = null;
+        pluginInvocationRef.current = null;
+      };
+    }, [editor]);
 
     // Signal hosts that the deferred editor instance now exists. Fired from a
     // passive effect (not `onCreate`) so it runs after the commit in which
@@ -1005,6 +1076,19 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} selectionAction={selectionAction} />
           )}
           <LinkHoverCard {...hover} />
+          {pluginComposerContext && <PluginModalSurface
+            target={pluginInvocation ? {
+              installation: pluginInvocation.target.installation,
+              surface: pluginInvocation.target.surface,
+            } : null}
+            issueId={pluginIssueId}
+            onComposerInsert={insertPluginMarkdown}
+            onOpenChange={(open) => {
+              if (open) return;
+              pluginInvocationRef.current = null;
+              setPluginInvocation(null);
+            }}
+          />}
         </div>
       </AttachmentDownloadProvider>
     );

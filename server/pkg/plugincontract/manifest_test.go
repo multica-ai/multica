@@ -56,6 +56,138 @@ func mutate(t *testing.T, edit func(doc map[string]any)) []byte {
 	return raw
 }
 
+func composerCommandManifest(t *testing.T) []byte {
+	t.Helper()
+	return mutate(t, func(doc map[string]any) {
+		contributes := doc["contributes"].(map[string]any)
+		surfaces := contributes["surfaces"].([]any)
+		surfaces = append(surfaces, map[string]any{
+			"key": "draft-ui", "type": SurfaceModal, "name": "Draft UI", "entry": "ui/draft.js",
+		})
+		contributes["surfaces"] = surfaces
+		contributes["composer_commands"] = []any{map[string]any{
+			"key": "draft", "label": "draft", "description": "Prepare a draft",
+			"contexts": []any{string(ComposerContextChat), string(ComposerContextIssueComment)},
+			"surface":  "draft-ui",
+		}}
+	})
+}
+
+func TestParseManifestAcceptsComposerCommand(t *testing.T) {
+	manifest, canonical, err := ParseManifest(composerCommandManifest(t))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if len(manifest.Contributes.ComposerCommands) != 1 {
+		t.Fatalf("composer commands = %+v", manifest.Contributes.ComposerCommands)
+	}
+	command := manifest.Contributes.ComposerCommands[0]
+	if command.Key != "draft" || command.Label != "draft" || command.Surface != "draft-ui" || len(command.Contexts) != 2 || command.Contexts[0] != ComposerContextChat {
+		t.Fatalf("unexpected composer command: %+v", command)
+	}
+	if _, _, err := ParseManifest(canonical); err != nil {
+		t.Fatalf("canonical manifest does not reparse: %v", err)
+	}
+}
+
+func TestParseManifestAcceptsScopeFreeComposerCommand(t *testing.T) {
+	raw := composerCommandManifest(t)
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc["scopes"] = []any{}
+	contributes := doc["contributes"].(map[string]any)
+	delete(contributes, "hooks")
+	delete(contributes, "resources")
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, canonical, err := ParseManifest(raw)
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if manifest.Scopes == nil || len(manifest.Scopes) != 0 {
+		t.Fatalf("scopes = %#v, want explicit empty array", manifest.Scopes)
+	}
+	if !strings.Contains(string(canonical), `"scopes":[]`) {
+		t.Fatalf("canonical manifest lost empty scopes: %s", canonical)
+	}
+}
+
+func TestParseManifestValidatesComposerCommandContract(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(map[string]any)
+		want string
+	}{
+		{name: "missing contexts", edit: func(command map[string]any) { delete(command, "contexts") }, want: "contexts must not be empty"},
+		{name: "empty contexts", edit: func(command map[string]any) { command["contexts"] = []any{} }, want: "contexts must not be empty"},
+		{name: "unsupported context", edit: func(command map[string]any) { command["contexts"] = []any{"chat", "desktop"} }, want: "unsupported context"},
+		{name: "duplicate context", edit: func(command map[string]any) { command["contexts"] = []any{"chat", "chat"} }, want: "duplicate context"},
+		{name: "invalid label", edit: func(command map[string]any) { command["label"] = "Draft Helper" }, want: "lowercase slash-command name"},
+		{name: "surface is missing", edit: func(command map[string]any) { command["surface"] = "missing" }, want: "does not reference a declared surface"},
+		{name: "surface is not modal", edit: func(command map[string]any) { command["surface"] = "hello" }, want: "must reference a modal surface"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := mutate(t, func(doc map[string]any) {
+				contributes := doc["contributes"].(map[string]any)
+				surfaces := contributes["surfaces"].([]any)
+				surfaces = append(surfaces, map[string]any{
+					"key": "draft-ui", "type": SurfaceModal, "name": "Draft UI", "entry": "ui/draft.js",
+				})
+				contributes["surfaces"] = surfaces
+				command := map[string]any{
+					"key": "draft", "label": "draft", "contexts": []any{"chat"}, "surface": "draft-ui",
+				}
+				tc.edit(command)
+				contributes["composer_commands"] = []any{command}
+			})
+			_, _, err := ParseManifest(raw)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want it to mention %q", err, tc.want)
+			}
+		})
+	}
+
+	t.Run("duplicate command key", func(t *testing.T) {
+		raw := mutate(t, func(doc map[string]any) {
+			contributes := doc["contributes"].(map[string]any)
+			surfaces := contributes["surfaces"].([]any)
+			surfaces = append(surfaces, map[string]any{
+				"key": "draft-ui", "type": SurfaceModal, "name": "Draft UI", "entry": "ui/draft.js",
+			})
+			contributes["surfaces"] = surfaces
+			command := map[string]any{"key": "draft", "label": "draft", "contexts": []any{"chat"}, "surface": "draft-ui"}
+			contributes["composer_commands"] = []any{command, command}
+		})
+		_, _, err := ParseManifest(raw)
+		if err == nil || !strings.Contains(err.Error(), "duplicate composer command key") {
+			t.Fatalf("error = %v, want duplicate composer command key", err)
+		}
+	})
+
+	t.Run("unknown command field", func(t *testing.T) {
+		raw := mutate(t, func(doc map[string]any) {
+			contributes := doc["contributes"].(map[string]any)
+			surfaces := contributes["surfaces"].([]any)
+			surfaces = append(surfaces, map[string]any{
+				"key": "draft-ui", "type": SurfaceModal, "name": "Draft UI", "entry": "ui/draft.js",
+			})
+			contributes["surfaces"] = surfaces
+			contributes["composer_commands"] = []any{map[string]any{
+				"key": "draft", "label": "draft", "contexts": []any{"chat"}, "surface": "draft-ui", "auto_submit": true,
+			}}
+		})
+		_, _, err := ParseManifest(raw)
+		if err == nil || !strings.Contains(err.Error(), "unknown field") {
+			t.Fatalf("error = %v, want strict unknown-field rejection", err)
+		}
+	})
+}
+
 func TestParseManifestAcceptsReferenceDocument(t *testing.T) {
 	manifest, canonical, err := ParseManifest([]byte(validManifest))
 	if err != nil {
@@ -209,9 +341,14 @@ func TestParseManifestRejectsMalformedDocuments(t *testing.T) {
 			"duplicate",
 		},
 		{
-			"empty scopes",
-			mutate(t, func(doc map[string]any) { doc["scopes"] = []any{} }),
-			"must not be empty",
+			"missing scopes",
+			mutate(t, func(doc map[string]any) { delete(doc, "scopes") }),
+			"must be an array",
+		},
+		{
+			"null scopes",
+			mutate(t, func(doc map[string]any) { doc["scopes"] = nil }),
+			"must be an array",
 		},
 		{
 			"unsupported config type",
@@ -433,7 +570,7 @@ func TestNetDomainsOnlyReturnsNetScopes(t *testing.T) {
 // everything the host cannot run is reported, everything it can run is not, and
 // all of it arrives at once.
 func TestCheckCapabilitiesReportsEveryUnavailableContribution(t *testing.T) {
-	manifest, _, err := ParseManifest([]byte(validManifest))
+	manifest, _, err := ParseManifest(composerCommandManifest(t))
 	if err != nil {
 		t.Fatalf("ParseManifest: %v", err)
 	}
@@ -460,6 +597,9 @@ func TestCheckCapabilitiesReportsEveryUnavailableContribution(t *testing.T) {
 	}
 	for _, resource := range manifest.Contributes.Resources {
 		wantAll = append(wantAll, "resource "+resource.Type)
+	}
+	if len(manifest.Contributes.ComposerCommands) > 0 {
+		wantAll = append(wantAll, "composer commands")
 	}
 	for _, want := range wantAll {
 		if !containsString(unavailable.Missing, want) {
@@ -492,12 +632,16 @@ func TestCheckCapabilitiesReportsEveryUnavailableContribution(t *testing.T) {
 	for _, resource := range manifest.Contributes.Resources {
 		assertGateAgrees(t, reported, "resource "+resource.Type, host.ResourceTypes[resource.Type])
 	}
+	if len(manifest.Contributes.ComposerCommands) > 0 {
+		assertGateAgrees(t, reported, "composer commands", host.ComposerCommands)
+	}
 
 	full := Capabilities{
-		SurfaceTypes:  map[string]bool{SurfaceIssuePanel: true, SurfaceSidebarPanel: true, SurfaceModal: true},
-		HookTriggers:  map[string]bool{TriggerUI: true, TriggerManual: true, TriggerAgent: true, TriggerEvent: true, TriggerSchedule: true},
-		HookTransport: map[string]bool{TransportHTTP: true, TransportMCP: true},
-		ResourceTypes: map[string]bool{ResourceSkill: true},
+		SurfaceTypes:     map[string]bool{SurfaceIssuePanel: true, SurfaceSidebarPanel: true, SurfaceModal: true},
+		HookTriggers:     map[string]bool{TriggerUI: true, TriggerManual: true, TriggerAgent: true, TriggerEvent: true, TriggerSchedule: true},
+		HookTransport:    map[string]bool{TransportHTTP: true, TransportMCP: true},
+		ResourceTypes:    map[string]bool{ResourceSkill: true},
+		ComposerCommands: true,
 	}
 	if err := manifest.CheckCapabilities(full); err != nil {
 		t.Fatalf("CheckCapabilities with full host support: %v", err)

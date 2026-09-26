@@ -3,11 +3,49 @@ package plugincontract_test
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/pkg/plugincontract"
 )
+
+// Keep the shipped example on the same publish path as an uploaded package.
+// A syntactically valid manifest alone cannot catch a missing or invalid UI entry.
+func TestComposerSnippetExampleIsPublishable(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "examples", "plugins", "composer-snippet")
+	files := map[string]string{}
+	for _, name := range []string{plugincontract.ManifestFilename, "ui/main.js"} {
+		content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+		if err != nil {
+			t.Fatalf("read example %s: %v", name, err)
+		}
+		files[name] = string(content)
+	}
+	bundle, err := plugincontract.ParseBundle(zipBundle(t, files))
+	if err != nil {
+		t.Fatalf("publish Markdown Snippet example: %v", err)
+	}
+	if bundle.Manifest.Key != "ai.multica.composer-snippet" || len(bundle.Manifest.Contributes.ComposerCommands) != 1 {
+		t.Fatalf("unexpected example contribution: %+v", bundle.Manifest)
+	}
+	if len(bundle.Manifest.Scopes) != 0 {
+		t.Fatalf("static snippet example should not request scopes: %v", bundle.Manifest.Scopes)
+	}
+	manifestJSON, err := json.Marshal(bundle.Manifest)
+	if err != nil {
+		t.Fatalf("marshal example manifest: %v", err)
+	}
+	var serialized map[string]json.RawMessage
+	if err := json.Unmarshal(manifestJSON, &serialized); err != nil {
+		t.Fatalf("decode serialized example manifest: %v", err)
+	}
+	if !bytes.Equal(serialized["scopes"], []byte("[]")) {
+		t.Fatalf("scope-free manifest should serialize scopes as an array, got %s", serialized["scopes"])
+	}
+}
 
 const bundleManifest = `{
   "manifest_version": 1,

@@ -78,3 +78,17 @@ surface will look native without shipping a stylesheet.
 
 The frame does not auto-size. Call `multica.ui.resize(px)` after your content
 settles; the host clamps the value.
+
+## Composer commands
+
+A plugin can declare `contributes.composer_commands` with a slash label,
+one or more composer contexts, and the key of a `modal` surface in the same
+manifest. Selecting the command opens that sandboxed surface. The host does
+not send the user's draft to the plugin.
+
+From that modal, call `await multica.composer.insert(markdown)` to replace the
+selected slash text in the draft. The host accepts at most one insertion per
+opening, limits it to 64 KiB, and refuses it if the draft changed while the
+modal was open. It never submits the draft. An ordinary panel or modal opened
+from the issue menu cannot use this method. The modal stays open so it can show
+the insertion result; the user closes it after reviewing that confirmation.

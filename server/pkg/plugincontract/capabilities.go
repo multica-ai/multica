@@ -14,10 +14,11 @@ import (
 //
 // Flip an entry on in the same change that lands its runtime.
 type Capabilities struct {
-	SurfaceTypes  map[string]bool
-	HookTriggers  map[string]bool
-	HookTransport map[string]bool
-	ResourceTypes map[string]bool
+	SurfaceTypes     map[string]bool
+	HookTriggers     map[string]bool
+	HookTransport    map[string]bool
+	ResourceTypes    map[string]bool
+	ComposerCommands bool
 }
 
 // HostCapabilities is the currently shipped set.
@@ -53,7 +54,8 @@ func HostCapabilities() Capabilities {
 		// A skill resource is not a call in either direction — it is a SKILL.md
 		// written into the existing skill table at install and removed at
 		// uninstall. service.InstallSkillResources does that.
-		ResourceTypes: map[string]bool{ResourceSkill: true},
+		ResourceTypes:    map[string]bool{ResourceSkill: true},
+		ComposerCommands: true,
 	}
 }
 
@@ -90,6 +92,9 @@ func (m Manifest) CheckCapabilities(host Capabilities) error {
 		if !host.ResourceTypes[resource.Type] {
 			missing["resource "+resource.Type] = true
 		}
+	}
+	if len(m.Contributes.ComposerCommands) > 0 && !host.ComposerCommands {
+		missing["composer commands"] = true
 	}
 	if len(missing) == 0 {
 		return nil

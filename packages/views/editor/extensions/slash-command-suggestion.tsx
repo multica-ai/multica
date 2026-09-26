@@ -13,11 +13,20 @@ import type { SuggestionOptions } from "@tiptap/suggestion";
 import { PluginKey } from "@tiptap/pm/state";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
+import { configStore, featureFlagEnabled } from "@multica/core/config";
+import { PLUGINS_V1_FLAG } from "@multica/core/feature-flags";
 import { getCurrentWsId } from "@multica/core/platform";
+import { pluginInstallationsOptions, pluginKeys } from "@multica/core/plugins";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { isImeComposing } from "@multica/core/utils";
 import { workspaceKeys } from "@multica/core/workspace/queries";
-import type { Agent, MemberWithUser } from "@multica/core/types";
+import type { Agent, MemberWithUser, PluginInstallationListResponse } from "@multica/core/types";
+import {
+  collectComposerCommands,
+  type PluginComposerCommandTarget,
+  type PluginComposerContext,
+} from "../../plugins/plugin-composer-commands";
+import { isDesktopShell } from "../../platform/local-directory";
 import { useT } from "../../i18n";
 import {
   createSuggestionPopupRender,
@@ -44,6 +53,17 @@ export interface SlashCommandItem {
    * so the visible string stays localized (the typed `/label` does not).
    */
   descriptionKey?: BuiltinCommandKey;
+  /** A declarative command contributed by an enabled workspace plugin. */
+  pluginCommand?: PluginComposerCommandTarget;
+}
+
+export interface PluginCommandSuggestionOptions {
+  context: PluginComposerContext;
+  onSelect: (selection: {
+    editor: Parameters<NonNullable<SuggestionOptions<SlashCommandItem>["command"]>>[0]["editor"];
+    range: { from: number; to: number };
+    target: PluginComposerCommandTarget;
+  }) => void;
 }
 
 interface SlashCommandListProps {
@@ -139,7 +159,9 @@ export const SlashCommandList = forwardRef<
     // Single height authority — mirrors MentionList.
     <div className="rounded-md border bg-popover py-1 shadow-md w-72 max-h-[min(300px,var(--suggestion-available-height,300px))] overflow-y-auto">
       {items.map((item, index) => {
-        const description = describe(item);
+        const description = item.pluginCommand
+          ? [item.pluginCommand.installation.name, item.description].filter(Boolean).join(" · ")
+          : describe(item);
         return (
           <button
             key={item.id}
@@ -192,7 +214,32 @@ function rankSkillMatches<T extends { name: string; description?: string }>(
     .map((entry) => entry.skill);
 }
 
-function buildItems(qc: QueryClient, query: string): SlashCommandItem[] {
+function pluginCommandItems(
+  qc: QueryClient,
+  wsId: string,
+  query: string,
+  options?: PluginCommandSuggestionOptions,
+): SlashCommandItem[] | Promise<SlashCommandItem[]> {
+  if (!options || !featureFlagEnabled(configStore.getState().featureFlags, PLUGINS_V1_FLAG)) return [];
+  const project = (response: PluginInstallationListResponse): SlashCommandItem[] =>
+    collectComposerCommands(response.plugins, options.context, isDesktopShell() ? "desktop" : "web")
+      .filter((target) => target.command.label.toLowerCase().startsWith(query.toLowerCase()))
+      .map((target) => ({
+        id: `plugin:${target.id}`,
+        label: target.command.label,
+        description: target.command.description,
+        pluginCommand: target,
+      }));
+  const cached = qc.getQueryData<PluginInstallationListResponse>(pluginKeys.installed(wsId));
+  if (cached) return project(cached);
+  return qc.fetchQuery(pluginInstallationsOptions(wsId)).then(project).catch(() => []);
+}
+
+function buildItems(
+  qc: QueryClient,
+  query: string,
+  pluginOptions?: PluginCommandSuggestionOptions,
+): SlashCommandItem[] | Promise<SlashCommandItem[]> {
   const wsId = getCurrentWsId();
   if (!wsId) return [];
 
@@ -216,12 +263,20 @@ function buildItems(qc: QueryClient, query: string): SlashCommandItem[] {
     null;
 
   const q = query.toLowerCase();
-  return rankSkillMatches(activeAgent?.skills ?? [], q)
-    .slice(0, MAX_ITEMS)
-    .map((s) => ({ id: s.id, label: s.name, description: s.description ?? "" }));
+  // Creation composers had no slash picker before plugin commands. Keep the
+  // active-Agent Skill list limited to chat so enabling a plugin contribution
+  // there does not surface unrelated chat Skills.
+  const skills = pluginOptions && pluginOptions.context !== "chat"
+    ? []
+    : rankSkillMatches(activeAgent?.skills ?? [], q)
+        .slice(0, MAX_ITEMS)
+        .map((s) => ({ id: s.id, label: s.name, description: s.description ?? "" }));
+  const combine = (plugins: SlashCommandItem[]) => [...skills, ...plugins].slice(0, MAX_ITEMS);
+  const plugins = pluginCommandItems(qc, wsId, query, pluginOptions);
+  return plugins instanceof Promise ? plugins.then(combine) : combine(plugins);
 }
 
-export function createSlashCommandSuggestion(qc: QueryClient): Omit<
+export function createSlashCommandSuggestion(qc: QueryClient, pluginOptions?: PluginCommandSuggestionOptions): Omit<
   SuggestionOptions<SlashCommandItem>,
   "editor"
 > {
@@ -233,8 +288,12 @@ export function createSlashCommandSuggestion(qc: QueryClient): Omit<
     // Only open over a `/` the user actually typed, so a pasted path
     // (`/usr/local/bin`) never opens the skill picker (MUL-5429).
     shouldShow: ({ editor, range }) => isTriggerArmedAt(editor, range.from),
-    items: ({ query }) => buildItems(qc, query),
+    items: ({ query }) => buildItems(qc, query, pluginOptions),
     command: ({ editor, range, props }) => {
+      if (props.pluginCommand && pluginOptions) {
+        pluginOptions.onSelect({ editor, range, target: props.pluginCommand });
+        return;
+      }
       const nodeAfter = editor.view.state.selection.$to.nodeAfter;
       const overrideSpace = nodeAfter?.text?.startsWith(" ");
       if (overrideSpace) {
@@ -266,6 +325,7 @@ export function createSlashCommandSuggestion(qc: QueryClient): Omit<
         items: props.items,
         query: props.query,
         command: props.command,
+        hideOnEmpty: pluginOptions?.context === "issue_create" || pluginOptions?.context === "agent_create",
       }),
       onKeyDown: (ref, props) => ref?.onKeyDown(props) ?? false,
     }),
@@ -304,6 +364,7 @@ export function quickActionIdFromItem(item: SlashCommandItem): string {
 export function buildBuiltinCommandItems(
   query: string,
   quickActions: { id: string; name: string; description?: string }[] = [],
+  pluginItems: SlashCommandItem[] = [],
 ): SlashCommandItem[] {
   const q = query.toLowerCase();
   // Quick actions lead: on an issue they are the reason a user reaches for
@@ -313,9 +374,11 @@ export function buildBuiltinCommandItems(
     label: a.name,
     description: a.description || undefined,
   }));
-  return [...actionItems, ...BUILTIN_COMMANDS]
-    .filter((c) => c.label.toLowerCase().startsWith(q))
-    .slice(0, MAX_ITEMS);
+  const matchingActions = actionItems.filter((item) => item.label.toLowerCase().startsWith(q));
+  const matchingBuiltins = BUILTIN_COMMANDS.filter((item) => item.label.toLowerCase().startsWith(q));
+  const visibleActions = matchingActions.slice(0, MAX_ITEMS - matchingBuiltins.length);
+  const pluginBudget = MAX_ITEMS - visibleActions.length - matchingBuiltins.length;
+  return [...visibleActions, ...matchingBuiltins, ...pluginItems.slice(0, pluginBudget)];
 }
 
 export interface BuiltinCommandSuggestionOptions {
@@ -342,6 +405,8 @@ export interface BuiltinCommandSuggestionOptions {
 
 export function createBuiltinCommandSuggestion(
   options: BuiltinCommandSuggestionOptions = {},
+  qc?: QueryClient,
+  pluginOptions?: PluginCommandSuggestionOptions,
 ): Omit<SuggestionOptions<SlashCommandItem>, "editor"> {
   const pluginKey = new PluginKey("builtinCommandSuggestion");
 
@@ -351,8 +416,20 @@ export function createBuiltinCommandSuggestion(
     // Only open over a `/` the user actually typed, so a pasted path
     // (`/usr/local/bin`) never opens the command menu (MUL-5429).
     shouldShow: ({ editor, range }) => isTriggerArmedAt(editor, range.from),
-    items: ({ query }) => buildBuiltinCommandItems(query, options.getQuickActions?.() ?? []),
+    items: ({ query }) => {
+      const quickActions = options.getQuickActions?.() ?? [];
+      const wsId = getCurrentWsId();
+      if (!qc || !wsId) return buildBuiltinCommandItems(query, quickActions);
+      const combine = (plugins: SlashCommandItem[]) =>
+        buildBuiltinCommandItems(query, quickActions, plugins);
+      const plugins = pluginCommandItems(qc, wsId, query, pluginOptions);
+      return plugins instanceof Promise ? plugins.then(combine) : combine(plugins);
+    },
     command: ({ editor, range, props }) => {
+      if (props.pluginCommand && pluginOptions) {
+        pluginOptions.onSelect({ editor, range, target: props.pluginCommand });
+        return;
+      }
       if (isQuickActionItem(props)) {
         const render = options.renderQuickAction;
         if (!render) return;

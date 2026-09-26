@@ -45,7 +45,7 @@ import {
 } from "./issue-identifier-autolink";
 import { SlashCommandExtension } from "./slash-command-extension";
 import { createSlashCommandSuggestion, createBuiltinCommandSuggestion } from "./slash-command-suggestion";
-import type { BuiltinCommandSuggestionOptions } from "./slash-command-suggestion";
+import type { BuiltinCommandSuggestionOptions, PluginCommandSuggestionOptions } from "./slash-command-suggestion";
 import { SuggestionTriggerArmingExtension } from "./suggestion-trigger-arming";
 import { CodeBlockView } from "./code-block-view";
 import { PatchedListItem, PatchedTaskItem } from "./list-item";
@@ -181,6 +181,7 @@ export interface EditorExtensionsOptions {
    * owns React Query access. Omit on composers with no issue context.
    */
   quickActionMenu?: BuiltinCommandSuggestionOptions;
+  pluginCommandMenu?: PluginCommandSuggestionOptions;
   /**
    * Resolver for Linear-style bare issue-identifier autolinking. When present
    * (and mentions are enabled), typing a boundary after `MUL-123` or pasting
@@ -283,9 +284,9 @@ export function createEditorExtensions(
       suggestion: !options.enableSlashCommands
         ? { char: "/", allow: () => false }
         : options.slashCommandMode === "command"
-          ? createBuiltinCommandSuggestion(options.quickActionMenu)
+          ? createBuiltinCommandSuggestion(options.quickActionMenu, options.queryClient, options.pluginCommandMenu)
           : options.queryClient
-            ? createSlashCommandSuggestion(options.queryClient)
+            ? createSlashCommandSuggestion(options.queryClient, options.pluginCommandMenu)
             : { char: "/", allow: () => false },
     }),
     Typography,

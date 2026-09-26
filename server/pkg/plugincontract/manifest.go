@@ -167,11 +167,12 @@ var knownEvents = map[string]bool{
 func IsKnownEvent(event string) bool { return knownEvents[event] }
 
 var (
-	pluginKeySegmentPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`)
-	contributionKeyPattern  = regexp.MustCompile(`^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$`)
-	semverPattern           = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`)
-	netDomainPattern        = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
-	relativePathPattern     = regexp.MustCompile(`^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$`)
+	pluginKeySegmentPattern     = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`)
+	contributionKeyPattern      = regexp.MustCompile(`^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$`)
+	composerCommandLabelPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
+	semverPattern               = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`)
+	netDomainPattern            = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
+	relativePathPattern         = regexp.MustCompile(`^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$`)
 )
 
 type Manifest struct {
@@ -193,9 +194,41 @@ type Author struct {
 }
 
 type Contributes struct {
-	Surfaces  []Surface  `json:"surfaces,omitempty"`
-	Hooks     []Hook     `json:"hooks,omitempty"`
-	Resources []Resource `json:"resources,omitempty"`
+	Surfaces         []Surface         `json:"surfaces,omitempty"`
+	Hooks            []Hook            `json:"hooks,omitempty"`
+	Resources        []Resource        `json:"resources,omitempty"`
+	ComposerCommands []ComposerCommand `json:"composer_commands,omitempty"`
+}
+
+// ComposerContext names a host-owned editor location where a plugin command
+// may be offered. It grants no access to the current draft and cannot submit it.
+type ComposerContext string
+
+const (
+	ComposerContextChat         ComposerContext = "chat"
+	ComposerContextIssueComment ComposerContext = "issue_comment"
+	ComposerContextIssueReply   ComposerContext = "issue_reply"
+	ComposerContextIssueCreate  ComposerContext = "issue_create"
+	ComposerContextAgentCreate  ComposerContext = "agent_create"
+)
+
+var knownComposerContexts = map[ComposerContext]bool{
+	ComposerContextChat:         true,
+	ComposerContextIssueComment: true,
+	ComposerContextIssueReply:   true,
+	ComposerContextIssueCreate:  true,
+	ComposerContextAgentCreate:  true,
+}
+
+// ComposerCommand contributes a slash suggestion that opens one of this
+// plugin's existing modal surfaces. The host retains ownership of the editor
+// and of any eventual insertion into its draft.
+type ComposerCommand struct {
+	Key         string            `json:"key"`
+	Label       string            `json:"label"`
+	Description string            `json:"description,omitempty"`
+	Contexts    []ComposerContext `json:"contexts"`
+	Surface     string            `json:"surface"`
 }
 
 // Surface is a host-mounted iframe. The host owns where it appears; the plugin
@@ -447,8 +480,8 @@ func (m Manifest) Validate() error {
 }
 
 func (m Manifest) validateScopes() error {
-	if len(m.Scopes) == 0 {
-		return fmt.Errorf("scopes must not be empty")
+	if m.Scopes == nil {
+		return fmt.Errorf("scopes must be an array")
 	}
 	if len(m.Scopes) > 64 {
 		return fmt.Errorf("scopes must not exceed 64 entries")
@@ -546,9 +579,9 @@ func (m Manifest) validateConfig() error {
 }
 
 func (m Manifest) validateContributions() error {
-	total := len(m.Contributes.Surfaces) + len(m.Contributes.Hooks) + len(m.Contributes.Resources)
+	total := len(m.Contributes.Surfaces) + len(m.Contributes.Hooks) + len(m.Contributes.Resources) + len(m.Contributes.ComposerCommands)
 	if total == 0 {
-		return fmt.Errorf("contributes must declare at least one surface, hook, or resource")
+		return fmt.Errorf("contributes must declare at least one surface, hook, resource, or composer command")
 	}
 	if total > 64 {
 		return fmt.Errorf("contributes must not exceed 64 entries")
@@ -702,6 +735,58 @@ func (m Manifest) validateContributions() error {
 		}
 		if want := "skills/" + resource.Key + "/SKILL.md"; resource.Entry != want {
 			return fmt.Errorf("%s.entry must be %q", field, want)
+		}
+	}
+
+	composerCommandKeys := map[string]bool{}
+	for index, command := range m.Contributes.ComposerCommands {
+		field := fmt.Sprintf("contributes.composer_commands[%d]", index)
+		if !contributionKeyPattern.MatchString(command.Key) {
+			return fmt.Errorf("%s.key is invalid", field)
+		}
+		if composerCommandKeys[command.Key] {
+			return fmt.Errorf("duplicate composer command key %q", command.Key)
+		}
+		composerCommandKeys[command.Key] = true
+		if !composerCommandLabelPattern.MatchString(command.Label) {
+			return fmt.Errorf("%s.label must be a lowercase slash-command name", field)
+		}
+		if command.Description != "" {
+			if err := validateDisplayText(field+".description", command.Description, 500); err != nil {
+				return err
+			}
+		}
+		if len(command.Contexts) == 0 {
+			return fmt.Errorf("%s.contexts must not be empty", field)
+		}
+		if len(command.Contexts) > len(knownComposerContexts) {
+			return fmt.Errorf("%s.contexts contains too many entries", field)
+		}
+		contextSeen := map[ComposerContext]bool{}
+		for _, composerContext := range command.Contexts {
+			if !knownComposerContexts[composerContext] {
+				return fmt.Errorf("%s.contexts contains unsupported context %q", field, composerContext)
+			}
+			if contextSeen[composerContext] {
+				return fmt.Errorf("%s.contexts contains duplicate context %q", field, composerContext)
+			}
+			contextSeen[composerContext] = true
+		}
+		if !contributionKeyPattern.MatchString(command.Surface) {
+			return fmt.Errorf("%s.surface is invalid", field)
+		}
+		var surfaceType string
+		for _, surface := range m.Contributes.Surfaces {
+			if surface.Key == command.Surface {
+				surfaceType = surface.Type
+				break
+			}
+		}
+		if surfaceType == "" {
+			return fmt.Errorf("%s.surface %q does not reference a declared surface", field, command.Surface)
+		}
+		if surfaceType != SurfaceModal {
+			return fmt.Errorf("%s.surface %q must reference a modal surface", field, command.Surface)
 		}
 	}
 	return nil
