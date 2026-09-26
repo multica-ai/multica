@@ -98,6 +98,7 @@ multica issue assign MUL-123 --to "Backend Agent"
 # Comments and runs
 multica issue comment list MUL-123
 multica issue comment add MUL-123 --content "Check the regression tests first"
+multica issue comment update <comment-id> --expected-revision 2 --content "Check the regression tests and release notes"
 multica issue runs MUL-123
 ```
 
@@ -106,6 +107,7 @@ Read long descriptions or comments from stdin to avoid dealing with newlines and
 ```bash
 multica issue create --title "Upgrade notes" --description-stdin < notes.md
 multica issue comment add MUL-123 --content-stdin < review.md
+multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
 ```
 
 View the messages of a single run, or stop one:
@@ -255,7 +257,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | `project` | `list/get/create/update/delete` | Manage projects | |
 | | `status <id> <status>` | Change project status | |
 | | `resource list/add/update/remove` | Manage project resources | `--type`, `--url`, `--local-path`, `--daemon-id`, `--execution-mode` (`in_place` / `worktree` for a local directory) |
-| `label` | `list/get/create/update/delete` | Manage workspace labels | |
+| `label` | `list/get/create/update/delete` | Manage workspace labels | `list`: `--resource-type` (`issue` or `skill`), `--full-id`; `create`: `--name`, `--color`, `--resource-type` (`issue` or `skill`), `--description` |
 | `property` | `list/get/create/update/archive/unarchive` | Manage workspace custom properties | `create`: `--name`, `--type` (`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`), `--option` (repeatable, select types only); `list`: `--include-archived`; the type cannot be changed after creation |
 | `agent` | `list/get/create/update/archive/restore` | Manage agents | `--name`, `--runtime-id` (required for `create`), `--instructions`, `--conversation-starters`, `--model`, `--thinking-level`, `--mcp-config`, `--permission-mode`, `--max-concurrent-tasks` |
 | | `copy <agent-id>` | Copy into a new agent; the original is untouched | `--name` (defaults to the original name plus ` (copy)`), `--runtime-id` (copying to another runtime also requires `--model`), `--no-skills`; secret configuration such as `custom_env`, `mcp_config`, and `runtime_config` is not copied — re-provide it with the same flags as `create` |
@@ -276,6 +278,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | | `import` | Import a skill from a URL or local file | `--url` / `--file`, `--on-conflict` (`fail`, `overwrite`, `rename`, `skip`; default `fail`) |
 | | `search <query>` | Search skills | |
 | | `files list/upsert/delete <skill-id>` | Manage the files inside a skill | |
+| | `label list/add/remove <skill-id>` | Manage labels on a skill | `add` / `remove`: `<label-id>` accepts a full UUID or short prefix |
 | `squad` | `list/get/create/update/delete` | Manage squads (`delete` archives) | |
 | | `member list/add/set-role/remove` | Manage squad members | |
 | | `activity <issue-id> <outcome>` | Record a leader evaluation | |

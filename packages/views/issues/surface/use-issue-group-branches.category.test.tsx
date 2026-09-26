@@ -17,9 +17,9 @@ import { useIssueGroupBranches } from "./use-issue-group-branches";
 
 /**
  * Swimlane cells are CATEGORIES when the compound secondary axis says so. The
- * server returning a custom `qa` row into the `in_review` cell is only half the
+ * server returning a custom `qa` row into the `started` cell is only half the
  * job — the client re-checks each row against its descriptor, and matching the
- * raw key there (`qa !== "in_review"`) threw the card away again.
+ * raw key there (`qa !== "started"`) threw the card away again.
  */
 
 function makeIssue(id: string, status: string, category: IssueStatusCategory): Issue {
@@ -54,7 +54,8 @@ const QUERY = {
   sort: { field: "position" as const, direction: "asc" as const },
 };
 
-const CELL_KEY = "compound:project:p1:status_category:in_review";
+const CATEGORY_CELL_KEY = "compound:project:p1:status_category:started";
+const STATUS_CELL_KEY = "compound:project:p1:status:in_review";
 
 function wrapper(qc: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -69,6 +70,8 @@ afterEach(() => {
 
 describe("useIssueGroupBranches — category secondary axis", () => {
   function setup(secondary: "status" | "status_category") {
+    const status = secondary === "status_category" ? "started" : "in_review";
+    const cellKey = secondary === "status_category" ? CATEGORY_CELL_KEY : STATUS_CELL_KEY;
     const listIssueTableGroups = vi.fn(async (_request: IssueTableGroupsRequest) => ({
       query_fingerprint: "test",
       total: 2,
@@ -79,8 +82,8 @@ describe("useIssueGroupBranches — category secondary axis", () => {
           count: 2,
           secondary_groups: [
             {
-              key: CELL_KEY,
-              value: { kind: "status" as const, status: "in_review" },
+              key: cellKey,
+              value: { kind: "status" as const, status },
               count: 2,
             },
           ],
@@ -94,8 +97,8 @@ describe("useIssueGroupBranches — category secondary axis", () => {
       parent_id: null,
       total: 2,
       rows: [
-        { issue: makeIssue("qa-1", "qa", "in_review"), direct_child_count: 0 },
-        { issue: makeIssue("std-1", "in_review", "in_review"), direct_child_count: 0 },
+        { issue: makeIssue("qa-1", "qa", "started"), direct_child_count: 0 },
+        { issue: makeIssue("std-1", "in_review", "started"), direct_child_count: 0 },
       ],
       branch_total: 2,
       next_cursor: null,
@@ -114,23 +117,23 @@ describe("useIssueGroupBranches — category secondary axis", () => {
             kind: "compound",
             primary: "project",
             secondary,
-            secondary_values: ["in_review"],
+            secondary_values: [status],
           },
-          secondaryValues: ["in_review"],
+          secondaryValues: [status],
           enabled: true,
         }),
       { wrapper: wrapper(qc) },
     );
   }
 
-  // The regression: the server correctly folded `qa` into the in_review cell,
-  // and the client then dropped the card because `qa !== "in_review"`.
+  // The regression: the server correctly folded `qa` into the Started cell,
+  // and the client then dropped the card because `qa !== "started"`.
   it("keeps a custom-status row in its category cell", async () => {
     const { result } = setup("status_category");
 
     // Branches are lazy: the lane activates its cell when it scrolls into view.
-    await waitFor(() => expect(result.current.pagination[CELL_KEY]).toBeDefined());
-    act(() => result.current.pagination[CELL_KEY]!.loadMore());
+    await waitFor(() => expect(result.current.pagination[CATEGORY_CELL_KEY]).toBeDefined());
+    act(() => result.current.pagination[CATEGORY_CELL_KEY]!.loadMore());
 
     await waitFor(() => expect(result.current.issues.length).toBe(2));
     expect(result.current.issues.map((i) => i.id).sort()).toEqual(["qa-1", "std-1"]);
@@ -141,8 +144,8 @@ describe("useIssueGroupBranches — category secondary axis", () => {
   it("still matches on the exact key when the axis is the status key", async () => {
     const { result } = setup("status");
 
-    await waitFor(() => expect(result.current.pagination[CELL_KEY]).toBeDefined());
-    act(() => result.current.pagination[CELL_KEY]!.loadMore());
+    await waitFor(() => expect(result.current.pagination[STATUS_CELL_KEY]).toBeDefined());
+    act(() => result.current.pagination[STATUS_CELL_KEY]!.loadMore());
 
     await waitFor(() => expect(result.current.issues.length).toBe(1));
     expect(result.current.issues.map((i) => i.id)).toEqual(["std-1"]);

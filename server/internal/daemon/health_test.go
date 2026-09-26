@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -93,6 +95,38 @@ func TestHealthHandlerReportsCLIVersionAndTaskCounts(t *testing.T) {
 	}
 	if resp.ResourceWaitTaskCount != 1 {
 		t.Errorf("ResourceWaitTaskCount: got %d, want 1", resp.ResourceWaitTaskCount)
+	}
+}
+
+func TestHealthHandlerReportsTerminalReportQueueCountsAndBytes(t *testing.T) {
+	d := New(Config{
+		WorkspacesRoot: t.TempDir(),
+		ServerBaseURL:  "https://api.example.test",
+		DaemonID:       "health-terminal-reports",
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	d.ready.Store(true)
+	report := terminalTaskReport{kind: terminalTaskReportComplete, taskID: "pending", output: "private output"}
+	if err := d.terminalReports.enqueue(report); err != nil {
+		t.Fatalf("enqueue pending report: %v", err)
+	}
+	if err := os.MkdirAll(d.terminalReports.failedDir(), 0o700); err != nil {
+		t.Fatalf("create failed queue: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(d.terminalReports.failedDir(), "failed.json"), []byte("failed payload"), 0o600); err != nil {
+		t.Fatalf("write failed report: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	var resp HealthResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode health response: %v", err)
+	}
+	if resp.PendingTerminalReportCount != 1 || resp.PendingTerminalReportBytes == 0 ||
+		resp.FailedTerminalReportCount != 1 || resp.FailedTerminalReportBytes != int64(len("failed payload")) {
+		t.Fatalf("terminal report health = pending:%d/%d failed:%d/%d",
+			resp.PendingTerminalReportCount, resp.PendingTerminalReportBytes,
+			resp.FailedTerminalReportCount, resp.FailedTerminalReportBytes)
 	}
 }
 

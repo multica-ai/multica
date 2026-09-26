@@ -4,11 +4,13 @@ import Link from "next/link";
 import { LandingHeader } from "./landing-header";
 import { LandingFooter } from "./landing-footer";
 import { GitHubMark, githubUrl } from "./shared";
+import { InlineLinks } from "./inline-links";
 import { useLocale } from "../i18n";
 
 export function AboutPageClient() {
   const { t } = useLocale();
   const n = t.about.nameLine;
+  const team = t.about.team;
 
   return (
     <>
@@ -22,9 +24,9 @@ export function AboutPageClient() {
             <p>
               {n.prefix}
               <strong className="font-semibold text-[#0a0d12]">
-                {n.mul}
+                {n.mult}
               </strong>
-              {n.tiplexed}
+              {n.iplexed}
               <strong className="font-semibold text-[#0a0d12]">
                 {n.i}
               </strong>
@@ -54,6 +56,42 @@ export function AboutPageClient() {
               {t.about.cta}
             </Link>
           </div>
+
+          <section className="mt-16 border-t border-[#0a0d12]/10 pt-12 sm:mt-20 sm:pt-16">
+            <h2 className="landing-serif text-[2rem] leading-[1.1] tracking-[-0.02em] sm:text-[2.4rem]">
+              {team.title}
+            </h2>
+            <div className="mt-6 space-y-6 text-body-lg leading-[1.8] text-[#0a0d12]/70 sm:text-title-sm">
+              {team.paragraphs.map((p, i) => (
+                <p key={i}>
+                  <InlineLinks text={p} />
+                </p>
+              ))}
+            </div>
+            <dl className="mt-10 grid gap-px overflow-hidden rounded-2xl border border-[#0a0d12]/8 bg-[#0a0d12]/8 sm:grid-cols-2">
+              {team.contacts.map((contact) => {
+                const external = contact.href.startsWith("http");
+                return (
+                  <div key={contact.label} className="bg-white p-6">
+                    <dt className="text-caption font-semibold uppercase tracking-[0.1em] text-[#0a0d12]/40">
+                      {contact.label}
+                    </dt>
+                    <dd className="mt-2">
+                      <Link
+                        href={contact.href}
+                        {...(external
+                          ? { target: "_blank", rel: "noreferrer" }
+                          : {})}
+                        className="text-body-lg font-semibold text-[#0a0d12] underline decoration-[#0a0d12]/20 underline-offset-4 transition-colors hover:decoration-[#0a0d12]"
+                      >
+                        {contact.linkLabel}
+                      </Link>
+                    </dd>
+                  </div>
+                );
+              })}
+            </dl>
+          </section>
         </div>
       </main>
       <LandingFooter />

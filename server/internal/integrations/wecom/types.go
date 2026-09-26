@@ -38,10 +38,23 @@
 // (outbound_media.go) and never to the agent, which has already exited.
 // Routing that outcome back into a later turn is its own piece of work.
 //
-// Known limit, deliberate: outbound delivery requires a SINGLE backend
-// replica, because the only send path is the in-process WebSocket in
-// sendersRegistry while EventChatDone dispatches on the in-process
-// events.Bus. See SELF_HOSTING.md.
+// Outbound no longer requires a single backend replica. The only send path is
+// still the in-process WebSocket in sendersRegistry, held by whichever replica
+// owns that bot's lease, so a reply produced on another replica is routed to
+// the lease holder over the Redis Stream relay (relay_outbound.go). Where
+// there is no relay to route it — legacy relay mode, or no Redis at all — the
+// reply is dropped, and a WeCom-enabled backend has to run as a single
+// replica. In every mode, a reply produced while NO replica holds a live
+// connection (all of them mid-reconnect) is still lost. See SELF_HOSTING.md.
+//
+// Every aibot_send_msg leaves under a per-chat quota gate (rate_limit.go).
+// A chat slightly over WeCom's quota has its push delayed into the next free
+// slot; one that bursts past what the caller's budget can wait for is refused
+// before the write, with nothing on the wire — best effort, not lossless. A
+// frame WeCom throttles anyway is retried once, when the caller can still
+// afford the wait. The gate holds no shared state: the same lease that makes
+// one replica the only sender makes that replica's own count the platform's
+// count.
 package wecom
 
 import (

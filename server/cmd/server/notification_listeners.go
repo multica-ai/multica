@@ -86,22 +86,56 @@ var delegatedAlwaysNotifTypes = map[string]bool{
 	"agent_blocked": true,
 }
 
-// delegatedStatusNotify are the statuses whose ARRIVAL is worth an inbox item
-// for a delegated subscriber — someone whose agent filed this issue on their
-// behalf.
+// issueStatusIsHandoff reports whether ARRIVING on this status hands the issue
+// back to a human. It is the one predicate behind both the delegated-subscriber
+// tier and the stale task_failed dismissal, which used to be two hand-kept
+// allowlists that drifted apart (MUL-7379).
 //
-// in_review is the important one: in Multica's agent flow an agent parks
-// completed work in in_review, so that is the dominant "this needs you now"
-// transition, not done.
+// It decides on LIFECYCLE plus one exact key, the split MUL-7364 established:
 //
-// Everything absent from this set is churn for someone who never asked for this
-// specific issue: routine forward progress (todo, in_progress), deliberate
-// parking (backlog), comment traffic, and field edits.
-var delegatedStatusNotify = map[string]bool{
-	"in_review": true,
-	"done":      true,
-	"cancelled": true,
-	"blocked":   true,
+//   - done / closed are terminal, so arriving there always ends someone's wait;
+//   - started is a handoff EXCEPT on the fixed in_progress key. in_progress is
+//     the one status the platform itself writes to mean "an agent is working"
+//     — the brief tells agents to write it, and failure recovery, the sweeper
+//     and the webhook repair all key off it — so arriving there is routine
+//     forward progress, not a handoff;
+//   - unstarted is never a handoff: nobody is waiting on queued or parked work.
+//
+// That makes a CUSTOM started status a handoff. This is deliberate. A workspace
+// does not mint "Awaiting Response" or "Code Review" to describe an agent
+// typing; it mints one to mark the point where a person has to look. Before
+// MUL-7240 those statuses carried the in_review/blocked category and notified
+// for that reason; collapsing to four categories silently stopped them, which
+// is the regression this restores. A custom status that really is an
+// in_progress synonym now notifies where it did not — an accepted cost, since a
+// missed handoff strands the issue while a spare inbox row costs one dismissal.
+//
+// Triage never reaches this predicate: it is not a status but a column of its
+// own (MUL-7213), so an entry waiting in Triage carries whatever status the
+// triager has proposed and is answered on that. Suppressing notifications for
+// Triage entries is a separate rule and belongs to MUL-7219.
+//
+// The error is preserved rather than swallowed so each caller can choose its
+// own failure direction; built-ins answer without touching the catalog, so only
+// custom statuses can fail here at all.
+func issueStatusIsHandoff(
+	ctx context.Context,
+	queries *db.Queries,
+	workspaceID pgtype.UUID,
+	status string,
+) (bool, error) {
+	category, err := issuestatus.CategoryWithError(ctx, queries, workspaceID, status)
+	if err != nil {
+		return false, err
+	}
+	switch category {
+	case issuestatus.CategoryDone, issuestatus.CategoryClosed:
+		return true, nil
+	case issuestatus.CategoryStarted:
+		return status != issuestatus.InProgress, nil
+	default:
+		return false, nil
+	}
 }
 
 // deliverToSubscriber reports whether a subscriber row should receive this
@@ -118,7 +152,11 @@ var delegatedStatusNotify = map[string]bool{
 // as well, so when the agent moves the parent to in_review/done that transition
 // delivers here — which is the natural "the tree is done" signal. Deriving it
 // from children was reinventing a notification the platform already sends.
-func deliverToSubscriber(reason, notifType, issueStatus string) bool {
+//
+// statusIsHandoff is the resolved issueStatusIsHandoff answer for the issue's
+// current status, so the catalog is read once per notification rather than once
+// per subscriber row.
+func deliverToSubscriber(reason, notifType string, statusIsHandoff bool) bool {
 	if reason != "delegated" {
 		return true
 	}
@@ -128,7 +166,7 @@ func deliverToSubscriber(reason, notifType, issueStatus string) bool {
 	if notifType != "status_changed" {
 		return false
 	}
-	return delegatedStatusNotify[issueStatus]
+	return statusIsHandoff
 }
 
 // notifTypeToGroup maps each InboxItemType to a user-configurable preference
@@ -194,19 +232,6 @@ func loadUserPrefs(
 		result[util.UUIDToString(row.UserID)] = prefs
 	}
 	return result
-}
-
-// terminalStatusForTaskFailedDismiss is the set of issue statuses that mark
-// the issue as "the user no longer needs to triage past failures." When a
-// status change lands on one of these, any pre-existing task_failed inbox
-// rows for the issue are archived so the inbox stays a fresh-signal surface.
-// `in_review` is included because in Multica's agent flow that's the most
-// reliable "work delivered" handoff — and a status flip back to in_progress
-// will simply produce new task_failed rows that surface normally.
-var terminalStatusForTaskFailedDismiss = map[string]bool{
-	"in_review": true,
-	"done":      true,
-	"cancelled": true,
 }
 
 // archiveStaleTaskFailedInbox archives all task_failed inbox rows for the
@@ -361,11 +386,20 @@ func notifyIssueSubscribers(
 	notified := map[string]bool{}
 	tierSuppressed := map[string]bool{}
 
-	// Normalize a custom status to the canonical status it inherits, so the
-	// delegated tier's status allowlist below keys off behavior rather than a
-	// literal. A built-in key returns itself without a query, so the common
-	// path is unchanged. (MUL-6243)
-	issueStatus = issuestatus.Effective(ctx, queries, parseUUID(workspaceID), issueStatus)
+	// Resolve the handoff question once for the whole subscriber list, rather
+	// than per row. A built-in key answers without a query, so the common path
+	// still performs no I/O. (MUL-7379)
+	//
+	// FAIL OPEN. A catalog read can only fail for a CUSTOM status, and the two
+	// outcomes are not symmetric: a spare inbox row costs one dismissal, while
+	// a dropped one silently strands the issue on a status whose whole purpose
+	// is to be waited on, with no other signal to the delegated subscriber.
+	statusIsHandoff, err := issueStatusIsHandoff(ctx, queries, parseUUID(workspaceID), issueStatus)
+	if err != nil {
+		slog.Warn("resolve issue status handoff for delegated delivery; delivering",
+			"issue_id", subscriberIssueID, "status", issueStatus, "error", err)
+		statusIsHandoff = true
+	}
 
 	subs, err := queries.ListIssueSubscribers(ctx, parseUUID(subscriberIssueID))
 	if err != nil {
@@ -408,7 +442,7 @@ func notifyIssueSubscribers(
 
 		// Delegated subscriptions deliver a narrower event set than direct
 		// ones — see deliverToSubscriber.
-		if !deliverToSubscriber(sub.Reason, notifType, issueStatus) {
+		if !deliverToSubscriber(sub.Reason, notifType, statusIsHandoff) {
 			tierSuppressed[subID] = true
 			continue
 		}
@@ -762,13 +796,25 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				issue.Title, "",
 				statusDetails)
 
-			// When the issue progresses past the failure (in_review / done /
-			// cancelled), retire any stale task_failed inbox rows so the
-			// inbox reflects the current state of the work, not its history.
-			// The activity log keeps the full failure history for audit.
-			if terminalStatusForTaskFailedDismiss[issuestatus.Effective(
-				ctx, queries, parseUUID(e.WorkspaceID), issue.Status,
-			)] {
+			// When the issue progresses past the failure, retire any stale
+			// task_failed inbox rows so the inbox reflects the current state of
+			// the work, not its history. The activity log keeps the full
+			// failure history for audit.
+			//
+			// Same handoff predicate as the delegated tier, minus Blocked:
+			// blocked hands the issue to a human, but it hands over work that
+			// is still stuck, so the past failures remain worth triaging.
+			// Blocked is excluded by its exact key — a custom started status is
+			// a review gate, not a stall. (MUL-7379)
+			//
+			// FAIL CLOSED here, unlike delivery: hiding a failure notice on a
+			// guess is worse than leaving a stale one the user can dismiss.
+			handoff, handoffErr := issueStatusIsHandoff(ctx, queries, parseUUID(e.WorkspaceID), issue.Status)
+			switch {
+			case handoffErr != nil:
+				slog.Warn("resolve issue status handoff for task_failed dismissal; keeping rows",
+					"issue_id", issue.ID, "status", issue.Status, "error", handoffErr)
+			case handoff && issue.Status != issuestatus.Blocked:
 				archiveStaleTaskFailedInbox(ctx, queries, bus, e.WorkspaceID, issue.ID)
 			}
 		}

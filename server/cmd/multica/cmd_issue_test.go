@@ -10,12 +10,14 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
@@ -302,6 +304,203 @@ func TestResolveTextFlag(t *testing.T) {
 	})
 }
 
+// withWorkdirShape chdirs into a workdir that is either reached through a
+// symlink (logical) or is its own canonical path, and returns the temp dir the
+// case may use as "outside". BOTH shapes matter, and for opposite reasons:
+//
+//   - logical: os.Getwd() prefers $PWD when it names the current directory, and
+//     everything that sets $PWD carries the path as typed — a shell's `cd`,
+//     testing.T.Chdir, and the PWD the daemon exports to agent processes (see
+//     pkg/agent/opencode.go). This is the shape where an unresolved candidate
+//     reads as "outside the workdir" though it plainly is not.
+//   - canonical: this is the shape where an unresolved candidate reads as
+//     "inside the workdir" although a symlink takes it out — so it is the only
+//     shape in which the escape-hatch cases below can fail. Run them only under
+//     the logical shape and they pass no matter what the code does, because
+//     there everything unresolved looks outside.
+func withWorkdirShape(t *testing.T, canonical bool) (outside string) {
+	t.Helper()
+	root := t.TempDir()
+	physical := filepath.Join(root, "physical")
+	if err := os.MkdirAll(physical, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	workdir := filepath.Join(root, "logical")
+	if err := os.Symlink(physical, workdir); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if canonical {
+		resolved, err := filepath.EvalSymlinks(physical)
+		if err != nil {
+			t.Fatalf("resolve workdir: %v", err)
+		}
+		workdir = resolved
+	}
+	t.Chdir(workdir)
+	return t.TempDir()
+}
+
+// TestFileWithinWorkingDir covers the containment predicate behind the
+// MUL-4252 guardrail directly, because the callers only ever exercise it with
+// files that already exist — and existence is precisely what used to hide the
+// bug. A candidate that does not exist yet cannot go through
+// filepath.EvalSymlinks, and the fallbacks it used to have (one filepath.Dir
+// step, then filepath.Clean) left it unresolved as soon as an intermediate
+// directory was missing too. That failed in both directions:
+//
+//   - Against a workdir reached through a symlink, `subdir/report.md` read as
+//     outside the workdir. The command then reported a missing file as a
+//     guardrail violation and advised --allow-external-file — the one move that
+//     makes things worse, since it only disables the guard.
+//   - Against a canonical workdir, `escape/sub/report.md` — where `escape` is a
+//     symlink out of the workdir — read as INSIDE it, so the guard admitted a
+//     path that resolves to a machine-shared directory.
+func TestFileWithinWorkingDir(t *testing.T) {
+	for _, shape := range []struct {
+		name      string
+		canonical bool
+	}{
+		{name: "workdir reached through a symlink", canonical: false},
+		{name: "canonical workdir", canonical: true},
+	} {
+		t.Run(shape.name, func(t *testing.T) {
+			outside := withWorkdirShape(t, shape.canonical)
+			sep := string(filepath.Separator)
+			if err := os.WriteFile("exists.txt", []byte("x"), 0o644); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			// `nested` exists so the ".."-comes-back-inside row exercises real
+			// resolution. It deliberately is NOT the directory the
+			// missing-intermediate rows name: give those an existing parent and
+			// a one-level fallback handles them, so the rows stop failing
+			// against unresolved comparisons and stop covering the regression
+			// they exist for.
+			if err := os.Mkdir("nested", 0o755); err != nil {
+				t.Fatalf("mkdir fixture: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(outside, "stale.md"), []byte("x"), 0o644); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			// sibling.md sits NEXT TO the symlink's target, i.e. one ".." away
+			// from it, and it exists — so a guard that collapses ".." lexically
+			// does not merely misjudge, it admits a readable outside file.
+			escapeTarget := filepath.Join(outside, "shared")
+			if err := os.Mkdir(escapeTarget, 0o755); err != nil {
+				t.Fatalf("mkdir fixture: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(outside, "sibling.md"), []byte("another run's file"), 0o644); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(escapeTarget, "stale.md"), []byte("x"), 0o644); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			// A symlink inside the workdir pointing out of it: the escape hatch
+			// the resolution exists to close. It has to stay closed however much
+			// of the path below it is missing.
+			if err := os.Symlink(escapeTarget, "escape"); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+
+			cases := []struct {
+				name string
+				path string
+				want bool
+			}{
+				{name: "existing file in the workdir", path: "exists.txt", want: true},
+				{name: "missing leaf in the workdir", path: "missing.txt", want: true},
+				{name: "missing intermediate directory", path: "subdir/report.md", want: true},
+				{name: "several missing levels", path: "a/b/c/d/report.md", want: true},
+				{name: "the workdir itself", path: ".", want: true},
+				{name: "existing file outside the workdir", path: filepath.Join(outside, "stale.md"), want: false},
+				{name: "missing file outside the workdir", path: filepath.Join(outside, "gone", "stale.md"), want: false},
+				{name: "relative traversal out of the workdir", path: filepath.Join("..", "escaped.md"), want: false},
+				{name: "traversal that comes back inside", path: "nested" + sep + ".." + sep + "exists.txt", want: true},
+				{name: "symlinked escape hatch", path: filepath.Join("escape", "stale.md"), want: false},
+				{name: "symlinked escape hatch with a missing leaf", path: filepath.Join("escape", "missing.md"), want: false},
+				{name: "symlinked escape hatch with a missing directory", path: filepath.Join("escape", "sub", "missing.md"), want: false},
+				{name: "symlinked escape hatch with several missing levels", path: filepath.Join("escape", "a", "b", "missing.md"), want: false},
+				// ".." AFTER a symlink is the case a lexical clean gets wrong:
+				// the string collapses to a path inside the workdir, while the
+				// kernel follows `escape` out of it first and then goes up. The
+				// file it lands on exists, so os.ReadFile really would read
+				// another run's file — no race needed.
+				{name: "dot-dot across the symlinked escape hatch", path: "escape" + sep + ".." + sep + "sibling.md", want: false},
+			}
+
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					got, err := fileWithinWorkingDir(tc.path)
+					if err != nil {
+						t.Fatalf("fileWithinWorkingDir(%q): %v", tc.path, err)
+					}
+					if got != tc.want {
+						t.Errorf("fileWithinWorkingDir(%q) = %v, want %v", tc.path, got, tc.want)
+					}
+				})
+			}
+		})
+	}
+}
+
+// TestEnsureFileFlagWithinWorkdirReportsMissingFileAsMissing is the
+// caller-level shape of the same bug: the guardrail must not intercept a path
+// that is inside the workdir, or the error the agent reads points at
+// --allow-external-file instead of at the file it forgot to write.
+func TestEnsureFileFlagWithinWorkdirReportsMissingFileAsMissing(t *testing.T) {
+	withWorkdirShape(t, false)
+	cmd := &cobra.Command{Use: "test"}
+	cmd.Flags().Bool("allow-external-file", false, "")
+
+	if err := ensureFileFlagWithinWorkdir(cmd, "content-file", "content", "subdir/report.md"); err != nil {
+		t.Fatalf("in-workdir path must pass the guardrail, got %v", err)
+	}
+	if err := ensureAttachmentWithinWorkdir(cmd, "out/chart.png"); err != nil {
+		t.Fatalf("in-workdir attachment must pass the guardrail, got %v", err)
+	}
+}
+
+// TestExternalFileErrorLeadsWithMissingFile pins the remaining half of the
+// misleading diagnosis. For a path that is genuinely outside the workdir AND
+// does not exist, the guard used to advise --allow-external-file and nothing
+// else, so the agent's reasonable next move was to disable the guard and retry
+// — earning a second, unrelated "no such file" error. There is no stale file to
+// protect anyone from when the path does not exist, so the missing file is the
+// fact that leads.
+func TestExternalFileErrorLeadsWithMissingFile(t *testing.T) {
+	outside := withWorkdirShape(t, false)
+	cmd := &cobra.Command{Use: "test"}
+	cmd.Flags().Bool("allow-external-file", false, "")
+
+	missing := filepath.Join(outside, "desc.md")
+	err := ensureFileFlagWithinWorkdir(cmd, "description-file", "description", missing)
+	if err == nil {
+		t.Fatal("expected an error for a missing path outside the workdir")
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("error should lead with the missing file, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "outside the current working directory") {
+		t.Errorf("error should still record that the path is external, got: %v", err)
+	}
+
+	// An existing external file is the case the guard was built for: the
+	// wording must keep pointing at the escape hatch.
+	stale := filepath.Join(outside, "stale.md")
+	if err := os.WriteFile(stale, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	err = ensureAttachmentWithinWorkdir(cmd, stale)
+	if err == nil {
+		t.Fatal("expected an error for an existing path outside the workdir")
+	}
+	if strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("an existing file must not be reported as missing, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "allow-external-file") {
+		t.Errorf("error should point at --allow-external-file, got: %v", err)
+	}
+}
+
 // TestEnsureAttachmentWithinWorkdir covers the MUL-4252 guardrail extended to
 // --attachment: a local attachment path outside the task workdir is rejected
 // (so an agent can't attach another run's stale /tmp file), with the same
@@ -364,6 +563,210 @@ func newIssueCommentAddTestCmd() *cobra.Command {
 	cmd.Flags().String("parent", "", "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
+}
+
+func newIssueCommentUpdateTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("content", "", "")
+	cmd.Flags().Bool("content-stdin", false, "")
+	cmd.Flags().String("content-file", "", "")
+	cmd.Flags().Bool("allow-external-file", false, "")
+	cmd.Flags().Int64("expected-revision", 0, "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func TestIssueCommentUpdateCommandRegistration(t *testing.T) {
+	cmd, _, err := issueCommentCmd.Find([]string{"update"})
+	if err != nil {
+		t.Fatalf("find issue comment update: %v", err)
+	}
+	if cmd != issueCommentUpdateCmd {
+		t.Fatalf("found command = %q, want issue comment update", cmd.CommandPath())
+	}
+	for _, anchor := range []string{
+		"merge your change into it before retrying",
+		"re-enqueues every agent the new body mentions",
+	} {
+		if !strings.Contains(cmd.Long, anchor) {
+			t.Fatalf("long help should carry the conflict rule and the re-trigger side effect (missing %q), got %q", anchor, cmd.Long)
+		}
+	}
+	for _, name := range []string{"content", "content-stdin", "content-file", "allow-external-file", "expected-revision", "output"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("issue comment update missing --%s", name)
+		}
+	}
+}
+
+func TestRunIssueCommentUpdateSendsExpectedRequest(t *testing.T) {
+	chdirWithDaemonTaskMarker(t)
+	const commentID = "11111111-1111-4111-8111-111111111111"
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Method != http.MethodPut {
+			t.Fatalf("method = %s, want PUT", r.Method)
+		}
+		if r.URL.Path != "/api/comments/"+commentID {
+			t.Fatalf("path = %q, want /api/comments/%s", r.URL.Path, commentID)
+		}
+		if ws := r.Header.Get("X-Workspace-ID"); ws != "ws-1" {
+			t.Fatalf("X-Workspace-ID = %q, want ws-1", ws)
+		}
+		if contentType := r.Header.Get("Content-Type"); contentType != "application/json" {
+			t.Fatalf("Content-Type = %q, want application/json", contentType)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if len(body) != 2 || body["content"] != "updated\ncomment" || body["expected_revision"] != float64(7) {
+			t.Fatalf("body = %#v, want content plus expected revision", body)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":      commentID,
+			"content": body["content"],
+		})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueCommentUpdateTestCmd()
+	_ = cmd.Flags().Set("content", `updated\ncomment`)
+	_ = cmd.Flags().Set("expected-revision", "7")
+	stderr := captureStderr(t)
+	defer stderr.restore()
+	out, err := captureStdout(t, func() error {
+		return runIssueCommentUpdate(cmd, []string{commentID})
+	})
+	if err != nil {
+		t.Fatalf("runIssueCommentUpdate: %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+	if got := stderr.read(); got != "Comment "+commentID+" updated.\n" {
+		t.Fatalf("stderr = %q", got)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode stdout JSON %q: %v", out, err)
+	}
+	if got["id"] != commentID || got["content"] != "updated\ncomment" {
+		t.Fatalf("stdout = %#v", got)
+	}
+}
+
+func TestRunIssueCommentUpdateReadsContentFileAndHonorsTableOutput(t *testing.T) {
+	const commentID = "22222222-2222-4222-8222-222222222222"
+	t.Chdir(t.TempDir())
+	const content = "Updated title\n\nChinese: \u4e2d\u6587; literal \\n stays literal.\n"
+	if err := os.WriteFile("comment.md", []byte(content), 0o644); err != nil {
+		t.Fatalf("write comment file: %v", err)
+	}
+
+	var gotContent string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		gotContent, _ = body["content"].(string)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": commentID, "content": gotContent})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	cmd := newIssueCommentUpdateTestCmd()
+	_ = cmd.Flags().Set("content-file", "comment.md")
+	_ = cmd.Flags().Set("expected-revision", "4")
+	_ = cmd.Flags().Set("output", "table")
+	stderr := captureStderr(t)
+	defer stderr.restore()
+	out, err := captureStdout(t, func() error {
+		return runIssueCommentUpdate(cmd, []string{commentID})
+	})
+	if err != nil {
+		t.Fatalf("runIssueCommentUpdate: %v", err)
+	}
+	if gotContent != strings.TrimSuffix(content, "\n") {
+		t.Fatalf("request content = %q, want file body preserved", gotContent)
+	}
+	if out != "" {
+		t.Fatalf("table output wrote stdout %q, want empty", out)
+	}
+	if got := stderr.read(); got != "Comment "+commentID+" updated.\n" {
+		t.Fatalf("stderr = %q", got)
+	}
+}
+
+func TestRunIssueCommentUpdateRejectsMissingContentBeforeRequest(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	cmd := newIssueCommentUpdateTestCmd()
+	_ = cmd.Flags().Set("expected-revision", "1")
+	err := runIssueCommentUpdate(cmd, []string{"comment-1"})
+	if err == nil || err.Error() != "--content, --content-stdin, or --content-file is required" {
+		t.Fatalf("error = %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("requests = %d, want 0 for local validation failure", requests)
+	}
+}
+
+func TestRunIssueCommentUpdateRejectsMissingOrInvalidRevisionBeforeRequest(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	for _, revision := range []string{"", "0", "-1"} {
+		cmd := newIssueCommentUpdateTestCmd()
+		_ = cmd.Flags().Set("content", "updated")
+		if revision != "" {
+			_ = cmd.Flags().Set("expected-revision", revision)
+		}
+		err := runIssueCommentUpdate(cmd, []string{"comment-1"})
+		if err == nil || !strings.Contains(err.Error(), "--expected-revision is required and must be a positive integer") {
+			t.Fatalf("revision %q error = %v", revision, err)
+		}
+	}
+	if requests != 0 {
+		t.Fatalf("requests = %d, want 0 for local revision validation failures", requests)
+	}
+}
+
+func TestRunIssueCommentUpdateWrapsAPIError(t *testing.T) {
+	chdirWithDaemonTaskMarker(t)
+	const commentID = "33333333-3333-4333-8333-333333333333"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "only comment author or admin can edit", http.StatusForbidden)
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueCommentUpdateTestCmd()
+	_ = cmd.Flags().Set("content", "not allowed")
+	_ = cmd.Flags().Set("expected-revision", "2")
+	err := runIssueCommentUpdate(cmd, []string{commentID})
+	if err == nil {
+		t.Fatal("expected API error")
+	}
+	if !strings.Contains(err.Error(), "update comment: PUT /api/comments/"+commentID+" returned 403") {
+		t.Fatalf("error lacks update context: %v", err)
+	}
 }
 
 // TestRunIssueCommentAddRejectsExternalAttachmentWithZeroUploads is the MUL-4252
@@ -443,7 +846,147 @@ func newIssueCreateTestCmd() *cobra.Command {
 	cmd.Flags().String("output", "json", "")
 	cmd.Flags().StringSlice("attachment", nil, "")
 	cmd.Flags().StringSlice("attachment-id", nil, "")
+	cmd.Flags().StringArray("property", nil, "")
 	return cmd
+}
+
+func TestRunIssueCreatePropertiesFailClosedBeforePost(t *testing.T) {
+	t.Chdir(t.TempDir())
+	posts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/config":
+			json.NewEncoder(w).Encode(map[string]any{})
+		case "/api/issues":
+			posts++
+			w.WriteHeader(http.StatusCreated)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Must stay atomic")
+	_ = cmd.Flags().Set("property", "Owner=Alice")
+	err := runIssueCreate(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "does not support atomic custom properties") {
+		t.Fatalf("error = %v, want capability failure", err)
+	}
+	if posts != 0 {
+		t.Fatalf("old server received %d create POST(s), want zero", posts)
+	}
+}
+
+func TestRunIssueCreateSendsCanonicalIDKeyedProperties(t *testing.T) {
+	t.Chdir(t.TempDir())
+	textID := uuid.NewString()
+	multiID := uuid.NewString()
+	firstID := uuid.NewString()
+	secondID := uuid.NewString()
+	var createBody map[string]any
+	posts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/config":
+			json.NewEncoder(w).Encode(map[string]any{"issue_create_properties_supported": true})
+		case "/api/properties":
+			json.NewEncoder(w).Encode(map[string]any{"properties": []map[string]any{
+				{"id": textID, "name": "Summary", "type": "text", "config": map[string]any{}, "archived": false},
+				{"id": multiID, "name": "Platforms", "type": "multi_select", "config": map[string]any{"options": []map[string]any{
+					{"id": firstID, "name": "One"}, {"id": secondID, "name": "Two"},
+				}}, "archived": false},
+			}})
+		case "/api/issues":
+			posts++
+			if err := json.NewDecoder(r.Body).Decode(&createBody); err != nil {
+				t.Errorf("decode create body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"id": "issue-1", "identifier": "MUL-1", "title": "With properties",
+				"status": "todo", "priority": "none", "properties": createBody["properties"],
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "With properties")
+	_ = cmd.Flags().Set("property", "Summary=  exact text  ")
+	_ = cmd.Flags().Set("property", "Platforms=Two,One,Two")
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+	if posts != 1 {
+		t.Fatalf("create POST count = %d, want 1", posts)
+	}
+	properties, ok := createBody["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties body = %#v", createBody["properties"])
+	}
+	if properties[textID] != "  exact text  " {
+		t.Fatalf("text property = %#v", properties[textID])
+	}
+	if got := properties[multiID]; !reflect.DeepEqual(got, []any{firstID, secondID}) {
+		t.Fatalf("multi property = %#v, want config-order dedupe", got)
+	}
+}
+
+func TestRunIssueCreateRejectsDuplicateAndFilterPropertySyntaxBeforePost(t *testing.T) {
+	t.Chdir(t.TempDir())
+	propertyID := uuid.NewString()
+	posts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/config":
+			json.NewEncoder(w).Encode(map[string]any{"issue_create_properties_supported": true})
+		case "/api/properties":
+			json.NewEncoder(w).Encode(map[string]any{"properties": []map[string]any{{
+				"id": propertyID, "name": "Owner", "type": "text", "config": map[string]any{}, "archived": false,
+			}}})
+		case "/api/issues":
+			posts++
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	for _, test := range []struct {
+		name  string
+		flags []string
+		want  string
+	}{
+		{name: "same definition by name and id", flags: []string{"Owner=Alice", propertyID + "=Bob"}, want: "provided more than once"},
+		{name: "none sentinel", flags: []string{"Owner=__none__"}, want: "list-filter value"},
+		{name: "comparison operator", flags: []string{"Owner>=Alice"}, want: "comparison operators"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := newIssueCreateTestCmd()
+			_ = cmd.Flags().Set("title", "Rejected properties")
+			for _, flag := range test.flags {
+				_ = cmd.Flags().Set("property", flag)
+			}
+			err := runIssueCreate(cmd, nil)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+	if posts != 0 {
+		t.Fatalf("invalid property flags sent %d create POST(s)", posts)
+	}
 }
 
 func TestRunIssueCreateSendsAllowDuplicate(t *testing.T) {
@@ -532,6 +1075,196 @@ func TestRunIssueCreateSendsExistingAttachmentIDs(t *testing.T) {
 	}
 }
 
+// issueCreateAttachmentServer serves the upload + create pair `issue create
+// --attachment` walks, recording the request order so a test can assert the
+// upload happens BEFORE the issue exists. uploadStatus != 200 fails every
+// upload.
+type issueCreateAttachmentServer struct {
+	srv          *httptest.Server
+	uploadStatus int
+	calls        []string
+	createBody   map[string]any
+	uploadNames  []string
+}
+
+func newIssueCreateAttachmentServer(t *testing.T) *issueCreateAttachmentServer {
+	t.Helper()
+	s := &issueCreateAttachmentServer{uploadStatus: http.StatusOK}
+	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/upload-file":
+			s.calls = append(s.calls, "upload")
+			if s.uploadStatus != http.StatusOK {
+				w.WriteHeader(s.uploadStatus)
+				_, _ = w.Write([]byte(`{"error":"storage unavailable"}`))
+				return
+			}
+			file, header, err := r.FormFile("file")
+			if err != nil {
+				t.Errorf("upload without file part: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			defer file.Close()
+			if issueID := r.FormValue("issue_id"); issueID != "" {
+				t.Errorf("upload carried issue_id %q; issue create must upload unbound and bind via attachment_ids", issueID)
+			}
+			name := header.Filename
+			s.uploadNames = append(s.uploadNames, name)
+			id := fmt.Sprintf("att-%d", len(s.uploadNames))
+			contentType := "application/octet-stream"
+			if strings.HasSuffix(name, ".png") {
+				contentType = "image/png"
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":           id,
+				"filename":     name,
+				"content_type": contentType,
+				"url":          "https://storage.example/" + id,
+				"download_url": "/api/attachments/" + id + "/download",
+				"markdown_url": "https://api.example/api/attachments/" + id + "/download",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues":
+			s.calls = append(s.calls, "create")
+			if err := json.NewDecoder(r.Body).Decode(&s.createBody); err != nil {
+				t.Errorf("decode create body: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+				"title":      "With attachments",
+				"status":     "todo",
+				"priority":   "none",
+			})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(s.srv.Close)
+	setCLITestServerEnv(t, s.srv.URL)
+	return s
+}
+
+// writeIssueCreateAttachment writes a file in the current working directory so
+// it passes the MUL-4252 workdir guard.
+func writeIssueCreateAttachment(t *testing.T, name string) string {
+	t.Helper()
+	if err := os.WriteFile(name, []byte("payload"), 0o600); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+	return name
+}
+
+// TestRunIssueCreateAppendsAttachmentReferencesToDescription is the MUL-7600 /
+// #8692 regression: a file passed to `issue create --attachment` was uploaded
+// with an issue_id but never referenced from the description, and an issue
+// renders only the files its description references — so the file existed
+// server-side and appeared nowhere on web, desktop or mobile. The upload must
+// now precede the create and its markdown must land in the description.
+func TestRunIssueCreateAppendsAttachmentReferencesToDescription(t *testing.T) {
+	t.Chdir(t.TempDir())
+	srv := newIssueCreateAttachmentServer(t)
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "With attachments")
+	_ = cmd.Flags().Set("description", "Repro steps below.")
+	_ = cmd.Flags().Set("attachment", writeIssueCreateAttachment(t, "shot.png"))
+	_ = cmd.Flags().Set("attachment", writeIssueCreateAttachment(t, "server.log"))
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+
+	if want := []string{"upload", "upload", "create"}; !slices.Equal(srv.calls, want) {
+		t.Fatalf("request order = %v, want %v (uploads must precede the create so a failure leaves no issue)", srv.calls, want)
+	}
+	desc, _ := srv.createBody["description"].(string)
+	wantImage := "![shot.png](https://api.example/api/attachments/att-1/download)"
+	wantFile := "!file[server.log](https://api.example/api/attachments/att-2/download)"
+	if !strings.Contains(desc, wantImage) {
+		t.Errorf("description missing image reference %q; got %q", wantImage, desc)
+	}
+	if !strings.Contains(desc, wantFile) {
+		t.Errorf("description missing file card reference %q; got %q", wantFile, desc)
+	}
+	if !strings.HasPrefix(desc, "Repro steps below.\n\n") {
+		t.Errorf("description dropped the author's body; got %q", desc)
+	}
+	ids, ok := srv.createBody["attachment_ids"].([]any)
+	if !ok || len(ids) != 2 || ids[0] != "att-1" || ids[1] != "att-2" {
+		t.Fatalf("attachment_ids = %#v, want [att-1 att-2]", srv.createBody["attachment_ids"])
+	}
+}
+
+// TestRunIssueCreateKeepsDescriptionWhenAttachmentIsOnlyFile covers a create
+// with no --description: the snippet alone becomes the description, otherwise
+// the file still has nothing referencing it.
+func TestRunIssueCreateKeepsDescriptionWhenAttachmentIsOnlyFile(t *testing.T) {
+	t.Chdir(t.TempDir())
+	srv := newIssueCreateAttachmentServer(t)
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Screenshot only")
+	_ = cmd.Flags().Set("attachment", writeIssueCreateAttachment(t, "shot.png"))
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+
+	if got, want := srv.createBody["description"], "![shot.png](https://api.example/api/attachments/att-1/download)"; got != want {
+		t.Fatalf("description = %#v, want %q", got, want)
+	}
+}
+
+// TestRunIssueCreateDoesNotDuplicateReferencedAttachment guards the
+// quick-create path: the agent keeps the user's pasted markdown in the
+// description, so appending the same reference again would render one file
+// twice.
+func TestRunIssueCreateDoesNotDuplicateReferencedAttachment(t *testing.T) {
+	t.Chdir(t.TempDir())
+	srv := newIssueCreateAttachmentServer(t)
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Already referenced")
+	_ = cmd.Flags().Set("description", "Before\n\n![shot.png](https://api.example/api/attachments/att-1/download)\n\nAfter")
+	_ = cmd.Flags().Set("attachment", writeIssueCreateAttachment(t, "shot.png"))
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+
+	desc, _ := srv.createBody["description"].(string)
+	if got := strings.Count(desc, "/api/attachments/att-1/download"); got != 1 {
+		t.Fatalf("attachment referenced %d times, want 1; got %q", got, desc)
+	}
+	ids, ok := srv.createBody["attachment_ids"].([]any)
+	if !ok || len(ids) != 1 || ids[0] != "att-1" {
+		t.Fatalf("attachment_ids = %#v, want [att-1] so the referenced file still binds", srv.createBody["attachment_ids"])
+	}
+}
+
+// TestRunIssueCreateFailsBeforeCreateWhenUploadFails pins the new failure
+// shape: the upload runs first, so a storage failure means no issue was
+// created and the caller can retry without duplicating one. The old order
+// created the issue, warned on stderr, and silently lost the file.
+func TestRunIssueCreateFailsBeforeCreateWhenUploadFails(t *testing.T) {
+	t.Chdir(t.TempDir())
+	srv := newIssueCreateAttachmentServer(t)
+	srv.uploadStatus = http.StatusInternalServerError
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Upload fails")
+	_ = cmd.Flags().Set("attachment", writeIssueCreateAttachment(t, "shot.png"))
+	err := runIssueCreate(cmd, nil)
+	if err == nil {
+		t.Fatal("expected upload failure to abort the create")
+	}
+	if !strings.Contains(err.Error(), "no issue created") {
+		t.Errorf("error should tell the caller no issue exists; got %v", err)
+	}
+	if slices.Contains(srv.calls, "create") {
+		t.Fatalf("issue was created despite the failed upload: %v", srv.calls)
+	}
+}
+
 func TestRunIssueCreateShowsDuplicateMessage(t *testing.T) {
 	want := "Active duplicate issue exists: YUA-36 SH-PM-SYNTH-01 Synthesize recommendation-to-shortlist planning outputs (status: in_progress). Set allow_duplicate=true or use --allow-duplicate to create another."
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -610,10 +1343,12 @@ func TestRunIssuePullRequestsListsLinkedPRsAsJSON(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	drainCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); drainCh <- b }()
 	err := runIssuePullRequests(cmd, []string{"MUL-2818"})
 	_ = w.Close()
 	os.Stdout = old
-	out, _ := io.ReadAll(r)
+	out := <-drainCh
 	if err != nil {
 		t.Fatalf("runIssuePullRequests: %v", err)
 	}
@@ -678,10 +1413,12 @@ func TestRunIssueUsageReturnsTokenSummaryAsJSON(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	drainCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); drainCh <- b }()
 	err := runIssueUsage(cmd, []string{"MUL-2818"})
 	_ = w.Close()
 	os.Stdout = old
-	out, _ := io.ReadAll(r)
+	out := <-drainCh
 	if err != nil {
 		t.Fatalf("runIssueUsage: %v", err)
 	}
@@ -823,10 +1560,12 @@ func TestRunIssuePullRequestsTableIncludesCoreFields(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	drainCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); drainCh <- b }()
 	printIssuePullRequestsTable(prs)
 	_ = w.Close()
 	os.Stdout = old
-	out, _ := io.ReadAll(r)
+	out := <-drainCh
 	text := string(out)
 	for _, want := range []string{"NUMBER", "STATE", "TITLE", "URL", "42", "open", "MUL-2818 add issue PR CLI", "https://github.com/multica-ai/multica/pull/42"} {
 		if !strings.Contains(text, want) {
@@ -2998,6 +3737,7 @@ func newIssueUpdateTestCmd() *cobra.Command {
 	cmd.Flags().Bool("description-stdin", false, "")
 	cmd.Flags().String("description-file", "", "")
 	cmd.Flags().Bool("allow-external-file", false, "")
+	cmd.Flags().StringSlice("attachment", nil, "")
 	cmd.Flags().String("status", "", "")
 	cmd.Flags().String("priority", "", "")
 	cmd.Flags().String("assignee", "", "")
@@ -3011,6 +3751,103 @@ func newIssueUpdateTestCmd() *cobra.Command {
 	cmd.Flags().Bool("no-start", false, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
+}
+
+func TestRunIssueUpdateAppendsLocalAttachmentToDescription(t *testing.T) {
+	t.Chdir(t.TempDir())
+	const issueID = "11111111-1111-4111-8111-111111111111"
+	const uploadedID = "33333333-3333-4333-8333-333333333333"
+	path := writeIssueCreateAttachment(t, "revised.png")
+	var calls []string
+	var body map[string]any
+	uploadIncludedIssueID := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/api/upload-file":
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Errorf("parse upload: %v", err)
+			}
+			uploadIncludedIssueID = r.FormValue("issue_id") != ""
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": uploadedID, "filename": "revised.png", "content_type": "image/png",
+				"markdown_url": "https://api.example/api/attachments/" + uploadedID + "/download",
+			})
+		case "/api/issues/" + issueID:
+			if r.Method == http.MethodGet {
+				_ = json.NewEncoder(w).Encode(map[string]any{"description": "Existing body"})
+			} else {
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("decode update: %v", err)
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID, "title": "Updated"})
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("attachment", path)
+	if err := runIssueUpdate(cmd, []string{issueID}); err != nil {
+		t.Fatalf("runIssueUpdate: %v", err)
+	}
+	if got := body["description"].(string); got != "Existing body\n\n![revised.png](https://api.example/api/attachments/"+uploadedID+"/download)" {
+		t.Fatalf("description = %q", got)
+	}
+	if ids, ok := body["attachment_ids"].([]any); !ok || !reflect.DeepEqual(ids, []any{uploadedID}) {
+		t.Fatalf("attachment_ids = %#v", body["attachment_ids"])
+	}
+	if uploadIncludedIssueID {
+		t.Fatal("upload included issue_id; update must bind the unbound upload in the PUT")
+	}
+	if want := []string{"GET /api/issues/" + issueID, "POST /api/upload-file", "PUT /api/issues/" + issueID}; !slices.Equal(calls, want) {
+		t.Fatalf("calls = %v, want %v", calls, want)
+	}
+}
+
+func TestRunIssueUpdateAttachmentUsesProvidedDescriptionWithoutFetching(t *testing.T) {
+	t.Chdir(t.TempDir())
+	const issueID = "11111111-1111-4111-8111-111111111111"
+	const attachmentID = "22222222-2222-4222-8222-222222222222"
+	path := writeIssueCreateAttachment(t, "revised.png")
+	var calls []string
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/api/upload-file":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": attachmentID, "filename": "revised.png", "content_type": "image/png",
+				"markdown_url": "https://api.example/api/attachments/" + attachmentID + "/download",
+			})
+		case "/api/issues/" + issueID:
+			if r.Method == http.MethodGet {
+				t.Error("description GET must be skipped when --description is provided")
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode update: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID, "title": "Updated"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("attachment", path)
+	_ = cmd.Flags().Set("description", "Replacement body")
+	if err := runIssueUpdate(cmd, []string{issueID}); err != nil {
+		t.Fatalf("runIssueUpdate: %v", err)
+	}
+	if got := body["description"].(string); !strings.HasPrefix(got, "Replacement body\n\n") {
+		t.Fatalf("description = %q", got)
+	}
+	if want := []string{"POST /api/upload-file", "PUT /api/issues/" + issueID}; !slices.Equal(calls, want) {
+		t.Fatalf("calls = %v, want %v", calls, want)
+	}
 }
 
 func newIssueAssignTestCmd() *cobra.Command {
@@ -4221,13 +5058,15 @@ func TestRunIssueCommentListCompactWiring(t *testing.T) {
 			t.Fatalf("pipe: %v", err)
 		}
 		os.Stdout = w
+		drainCh := make(chan []byte, 1)
+		go func() { b, _ := io.ReadAll(r); drainCh <- b }()
 		runErr := runIssueCommentList(cmd, []string{issueID})
 		w.Close()
 		os.Stdout = orig
 		if runErr != nil {
 			t.Fatalf("runIssueCommentList: %v", runErr)
 		}
-		out, _ := io.ReadAll(r)
+		out := <-drainCh
 		var got []map[string]any
 		if err := json.Unmarshal(out, &got); err != nil {
 			t.Fatalf("output not JSON: %v\n---\n%s", err, out)

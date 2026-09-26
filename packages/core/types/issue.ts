@@ -1,15 +1,15 @@
 import type { Label } from "./label";
 import type { IssuePropertyValues } from "./property";
 
-/**
- * A status CATEGORY — the behavior equivalence class an issue's status belongs
- * to. There are exactly 7, and each is also the key of the built-in status that
- * defines it, which is why this stayed a closed union while `Issue.status`
- * became open. Board columns, filters and the presentation config are all keyed
- * off categories, so their shape is fixed no matter how many custom statuses a
- * workspace defines. (MUL-6243)
- */
+/** Four lifecycle classifications. User-facing columns group by status key. */
 export type IssueStatusCategory =
+  | "unstarted"
+  | "started"
+  | "done"
+  | "closed";
+
+/** The seven built-in status keys kept for issue/API compatibility. */
+export type BuiltInIssueStatus =
   | "backlog"
   | "todo"
   | "in_progress"
@@ -28,7 +28,7 @@ export type IssueStatusCategory =
  * must resolve the key to its CATEGORY first — `useIssueStatuses(wsId)` in a
  * component, `statusCategoryOfKey` in a pure path. (MUL-6243)
  */
-export type IssueStatus = IssueStatusCategory | (string & {});
+export type IssueStatus = BuiltInIssueStatus | (string & {});
 
 export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
@@ -159,6 +159,14 @@ export interface IssueSourceContext {
   snapshot: SourceContextSnapshot;
 }
 
+/** The original a duplicate points at: enough to link it and show its status. */
+export interface IssueDuplicateOf {
+  id: string;
+  identifier: string;
+  title: string;
+  status: IssueStatus;
+}
+
 export interface Issue {
   id: string;
   workspace_id: string;
@@ -169,9 +177,8 @@ export interface Issue {
   status: IssueStatus;
   /**
    * The category `status` belongs to, when the endpoint resolved it. Optional
-   * because a BUILT-IN status is its own category and needs no resolution —
-   * use `issueStatusCategory(issue)` rather than reading this directly.
-   * (MUL-6243)
+   * because older backends did not emit it. Built-in keys map to a category
+   * locally; use `issueStatusCategory(issue)` rather than reading this directly.
    */
   status_category?: IssueStatusCategory;
   /**
@@ -189,6 +196,12 @@ export interface Issue {
   creator_type: IssueAssigneeType;
   creator_id: string;
   parent_issue_id: string | null;
+  /**
+   * The original this issue duplicates (MUL-7349): present only while the
+   * issue is cancelled and the original still exists, resolved by the server.
+   * Absent when connected to an older backend.
+   */
+  duplicate_of?: IssueDuplicateOf | null;
   project_id: string | null;
   position: number;
   // Ordered barrier group among sibling sub-issues (null = unstaged). The

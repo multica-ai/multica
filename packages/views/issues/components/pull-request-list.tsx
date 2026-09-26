@@ -2,12 +2,15 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   CheckCircle2,
   Circle,
   CircleDashed,
   CircleSlash,
   GitMerge,
+  MoreHorizontal,
+  Unlink,
   GitPullRequest,
   GitPullRequestArrow,
   GitPullRequestClosed,
@@ -20,14 +23,33 @@ import {
   deriveChecksStatus,
   deriveMergeStatus,
   shouldShowPullRequestStats,
+  useLinkIssuePullRequest,
+  useSetIssuePRAutoComplete,
+  useUnlinkIssuePullRequest,
   type PullRequestChecksStatus,
   type PullRequestMergeStatus,
 } from "@multica/core/github";
-import type { GitHubPullRequest, GitHubPullRequestState } from "@multica/core/types";
+import { useWorkspacePaths } from "@multica/core/paths";
+import type {
+  GitHubPullRequest,
+  GitHubPullRequestState,
+  PRAutoComplete,
+} from "@multica/core/types";
+import { Button } from "@multica/ui/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
+import { AppLink } from "../../navigation";
 import { useT, useTimeAgo } from "../../i18n";
 
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
+
 
 // Keep the existing sidebar density: show the first 3 PR rows inline, then
 // collapse the rest once the section reaches 4 rows.
@@ -43,19 +65,30 @@ const STATE_ICON: Record<
   closed: { icon: GitPullRequestClosed, className: "text-rose-600 dark:text-rose-400" },
 };
 
-export function PullRequestList({ issueId }: { issueId: string }) {
+export function PullRequestList({
+  issueId,
+  identifier = "",
+}: {
+  issueId: string;
+  /** The issue's identifier, for the "linked by MUL-1 in the title" label. */
+  identifier?: string;
+}) {
   const { t } = useT("issues");
   const [expanded, setExpanded] = useState(false);
   const { data, isLoading } = useQuery(issuePullRequestsOptions(issueId));
   const prs = data?.pull_requests ?? [];
+  // Older backends send no auto-complete block and have no link/unlink
+  // endpoints, so the row actions stay hidden with it.
+  const autoComplete = data?.auto_complete ?? null;
+  const rowActions = autoComplete ? { issueId, identifier, autoComplete } : null;
 
   if (isLoading) {
     return <p className="text-caption text-muted-foreground px-2">{t(($) => $.detail.pull_requests_loading)}</p>;
   }
   if (prs.length === 0) {
     return (
-      <p className="text-caption text-muted-foreground px-2">
-        {t(($) => $.detail.pull_requests_empty)}
+      <p className="px-2 text-caption text-muted-foreground">
+        {t(($) => $.detail.pull_requests_empty_title)}
       </p>
     );
   }
@@ -71,12 +104,12 @@ export function PullRequestList({ issueId }: { issueId: string }) {
   return (
     <div className="space-y-1">
       {expandedHead.map((pr) => (
-        <PullRequestRow key={pr.id} pr={pr} />
+        <PullRequestRow key={pr.id} pr={pr} actions={rowActions} />
       ))}
       {useCollapse ? (
         <div className="space-y-1">
           {expanded
-            ? collapsedTail.map((pr) => <PullRequestRow key={pr.id} pr={pr} />)
+            ? collapsedTail.map((pr) => <PullRequestRow key={pr.id} pr={pr} actions={rowActions} />)
             : null}
           <button
             type="button"
@@ -89,25 +122,220 @@ export function PullRequestList({ issueId }: { issueId: string }) {
           </button>
         </div>
       ) : null}
+      {autoComplete ? (
+        <AutoCompleteLine issueId={issueId} identifier={identifier} prs={prs} autoComplete={autoComplete} />
+      ) : null}
     </div>
   );
 }
 
-function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
+
+interface RowActions {
+  issueId: string;
+  identifier: string;
+  autoComplete: PRAutoComplete;
+}
+
+const prLabel = (pr: Pick<GitHubPullRequest, "number">) => `#${pr.number}`;
+
+/**
+ * Remove a PR from the issue. The server remembers the removal (webhooks will
+ * not link it again) and treats it as a PR event, so removing the last
+ * unmerged PR can complete the issue — the toast says so, and offers undo only
+ * when nothing else changed.
+ */
+function useUnlinkPullRequest(issueId: string, before: PRAutoComplete) {
+  const { t } = useT("issues");
+  const unlink = useUnlinkIssuePullRequest(issueId);
+  const relink = useLinkIssuePullRequest(issueId);
+  return (pr: GitHubPullRequest) => {
+    unlink.mutate(pr.id, {
+      onSuccess: (after) => {
+        const completed =
+          before.state !== "terminal" && after.auto_complete?.state === "terminal";
+        if (completed) {
+          toast.success(t(($) => $.pr_automation.unlinked_completed, { pr: prLabel(pr) }));
+          return;
+        }
+        toast.success(t(($) => $.pr_automation.unlinked, { pr: prLabel(pr) }), {
+          action: {
+            label: t(($) => $.pr_automation.undo),
+            onClick: () => relink.mutate({ pull_request_id: pr.id }),
+          },
+        });
+      },
+      onError: () => toast.error(t(($) => $.pr_automation.unlink_failed)),
+    });
+  };
+}
+
+function linkSourceLabel(pr: GitHubPullRequest, identifier: string, t: IssuesT): string {
+  switch (pr.link_source) {
+    case "manual":
+      return t(($) => $.pr_automation.source_manual);
+    case "title":
+      return t(($) => $.pr_automation.source_title, { identifier });
+    case "branch":
+      return t(($) => $.pr_automation.source_branch);
+    default:
+      return t(($) => $.pr_automation.source_auto);
+  }
+}
+
+function PullRequestRowMenu({ pr, actions }: { pr: GitHubPullRequest; actions: RowActions }) {
+  const { t } = useT("issues");
+  const unlink = useUnlinkPullRequest(actions.issueId, actions.autoComplete);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t(($) => $.pr_automation.row_menu)}
+            className="absolute top-1 right-0 opacity-0 group-hover/pr:opacity-100 group-focus-within/pr:opacity-100 data-popup-open:opacity-100 [@media(pointer:coarse)]:opacity-100"
+          >
+            <MoreHorizontal />
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="font-normal">
+            {linkSourceLabel(pr, actions.identifier, t)}
+          </DropdownMenuLabel>
+          <DropdownMenuItem onClick={() => unlink(pr)}>
+            <Unlink />
+            {t(($) => $.pr_automation.unlink)}
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * One line under the PR list saying what the "every linked PR merged, one says
+ * Closes → Done" rule will do for this issue, straight from the server's
+ * decision. Terminal, triage and unknown states render nothing.
+ */
+function AutoCompleteLine({
+  issueId,
+  identifier,
+  prs,
+  autoComplete,
+}: {
+  issueId: string;
+  identifier: string;
+  prs: GitHubPullRequest[];
+  autoComplete: PRAutoComplete;
+}) {
+  const { t } = useT("issues");
+  const paths = useWorkspacePaths();
+  const unlink = useUnlinkPullRequest(issueId, autoComplete);
+  const setAutoComplete = useSetIssuePRAutoComplete(issueId);
+  const named = autoComplete.pull_request_ids
+    .map((id) => prs.find((pr) => pr.id === id))
+    .filter((pr): pr is GitHubPullRequest => !!pr);
+  const list = named.map(prLabel).join(", ");
+  const action = (label: string, onClick: () => void) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className="font-medium text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground"
+    >
+      {label}
+    </button>
+  );
+
+  let icon: React.ReactNode;
+  let body: React.ReactNode;
+  switch (autoComplete.state) {
+    case "waiting":
+      if (named.length === 0) return null;
+      icon = <CircleDashed className="text-muted-foreground" />;
+      body = t(($) => $.pr_automation.waiting, { count: named.length, prs: list });
+      break;
+    case "not_merged": {
+      if (named.length === 0) return null;
+      const only = named.length === 1 ? named[0] : undefined;
+      icon = <TriangleAlert className="text-amber-600 dark:text-amber-400" />;
+      body = (
+        <>
+          {t(($) => $.pr_automation.not_merged, { prs: list })}
+          {only ? <> · {action(t(($) => $.pr_automation.not_merged_action), () => unlink(only))}</> : null}
+        </>
+      );
+      break;
+    }
+    case "no_close_intent":
+      icon = <CircleSlash className="text-muted-foreground" />;
+      body = t(($) => $.pr_automation.no_close_intent, { identifier });
+      break;
+    case "all_merged":
+      icon = <CheckCircle2 className="text-muted-foreground" />;
+      body = t(($) => $.pr_automation.all_merged);
+      break;
+    case "issue_disabled":
+      icon = <CircleSlash className="text-muted-foreground" />;
+      body = (
+        <>
+          {t(($) => $.pr_automation.issue_disabled)} ·{" "}
+          {action(t(($) => $.pr_automation.issue_disabled_action), () =>
+            setAutoComplete.mutate(false, {
+              onError: () => toast.error(t(($) => $.pr_automation.update_failed)),
+            }),
+          )}
+        </>
+      );
+      break;
+    case "workspace_disabled":
+      icon = <CircleSlash className="text-muted-foreground" />;
+      body = (
+        <>
+          {t(($) => $.pr_automation.workspace_disabled)} ·{" "}
+          <AppLink
+            href={`${paths.settings()}?tab=issue-statuses`}
+            className="font-medium text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground"
+          >
+            {t(($) => $.pr_automation.workspace_disabled_action)}
+          </AppLink>
+        </>
+      );
+      break;
+    default:
+      return null;
+  }
+  return (
+    <p
+      data-testid="pr-auto-complete-line"
+      className="mt-1 flex items-start gap-1.5 border-t border-border pt-2 text-caption text-muted-foreground [&>svg]:mt-0.5 [&>svg]:size-3.5 [&>svg]:shrink-0"
+    >
+      {icon}
+      <span className="min-w-0">{body}</span>
+    </p>
+  );
+}
+
+function PullRequestRow({ pr, actions }: { pr: GitHubPullRequest; actions: RowActions | null }) {
   const { t } = useT("issues");
   const cfg = STATE_ICON[pr.state] ?? { icon: GitPullRequest, className: "" };
   const StateIcon = cfg.icon;
   const isDraft = pr.state === "draft";
   const stateLabel = getStateLabel(pr.state, t);
 
+  // The row link and its menu are siblings: a button inside an anchor is
+  // invalid HTML, and the menu must not open the PR.
   return (
+    <div className="group/pr relative -mx-2 rounded-md transition-colors hover:bg-accent/50">
     <a
       data-testid="pull-request-row"
       href={pr.html_url}
       target="_blank"
       rel="noreferrer noopener"
       className={cn(
-        "flex items-start gap-2 rounded-md px-2 py-1.5 -mx-2 hover:bg-accent/50 transition-colors group",
+        "flex items-start gap-2 rounded-md px-2 py-1.5 group",
+        actions ? "pr-7" : null,
         isDraft ? "opacity-80" : null,
       )}
     >
@@ -123,6 +351,8 @@ function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
         <PullRequestRowDetails pr={pr} />
       </div>
     </a>
+    {actions ? <PullRequestRowMenu pr={pr} actions={actions} /> : null}
+    </div>
   );
 }
 

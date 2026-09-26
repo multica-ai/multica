@@ -58,6 +58,7 @@ var supportedLanguages = map[string]struct{}{
 	"zh-Hans": {},
 	"ko":      {},
 	"ja":      {},
+	"fr":      {},
 }
 
 type UserResponse struct {
@@ -162,10 +163,20 @@ func (h *Handler) issueJWT(user db.User) (string, error) {
 	if auth.IsTemporarilyDisabledUser(uuidToString(user.ID), user.Email) {
 		return "", auth.ErrTemporarilyDisabledUser
 	}
+	// `sid` identifies this login for as long as it lasts: sliding renewal
+	// copies it forward, so it stays put while `exp` moves. The CSRF token is
+	// bound to it rather than to the token string, which is what lets the
+	// auth cookie be re-issued mid-session without invalidating CSRF tokens
+	// other tabs are already holding (MUL-7436).
+	sid, err := auth.NewSessionID()
+	if err != nil {
+		return "", err
+	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":   uuidToString(user.ID),
 		"email": user.Email,
 		"name":  user.Name,
+		"sid":   sid,
 		"exp":   time.Now().Add(auth.AuthTokenTTL()).Unix(),
 		"iat":   time.Now().Unix(),
 	})
@@ -190,7 +201,7 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 		return db.User{}, false, auth.ErrTemporarilyDisabledUser
 	}
 
-	if err := h.checkSignupAllowed(email, isNew); err != nil {
+	if err := h.checkSignupAllowed(ctx, email, isNew); err != nil {
 		return db.User{}, false, err
 	}
 
@@ -241,7 +252,7 @@ func signupSourceFromRequest(r *http.Request) string {
 	return decoded
 }
 
-func (h *Handler) checkSignupAllowed(email string, isNewUser bool) error {
+func (h *Handler) checkSignupAllowed(ctx context.Context, email string, isNewUser bool) error {
 	if !isNewUser {
 		return nil // existing users always allowed to log in
 	}
@@ -252,27 +263,36 @@ func (h *Handler) checkSignupAllowed(email string, isNewUser bool) error {
 		domain = email[at+1:]
 	}
 
-	// 1. explicit email whitelist always wins
+	// 1. explicit email allowlist always wins
 	if len(h.cfg.AllowedEmails) > 0 && contains(h.cfg.AllowedEmails, email) {
 		return nil
 	}
 
-	// 2. domain whitelist always wins
+	// 2. domain allowlist always wins
 	if len(h.cfg.AllowedEmailDomains) > 0 && contains(h.cfg.AllowedEmailDomains, domain) {
 		return nil
 	}
 
-	// 3. general signup flag
+	// 3. unrestricted signup needs no invitation lookup.
+	if h.cfg.AllowSignup && len(h.cfg.AllowedEmailDomains) == 0 && len(h.cfg.AllowedEmails) == 0 {
+		return nil
+	}
+
+	// 4. A live invitation is an implicit per-email signup allowance. This
+	// also permits invited emails outside configured allowlists, regardless
+	// of ALLOW_SIGNUP. Recheck at account creation in findOrCreateUser.
+	invited, err := h.Queries.HasPendingInvitationForEmail(ctx, email)
+	if err != nil {
+		return fmt.Errorf("check pending invitation for signup: %w", err)
+	}
+	if invited {
+		return nil
+	}
+
 	if !h.cfg.AllowSignup {
 		return ErrSignupProhibited
 	}
-
-	// 4. if allowlists are set but didn't match, block
-	if len(h.cfg.AllowedEmailDomains) > 0 || len(h.cfg.AllowedEmails) > 0 {
-		return ErrEmailNotAllowed
-	}
-
-	return nil
+	return ErrEmailNotAllowed
 }
 
 func contains(slice []string, s string) bool {
@@ -311,12 +331,13 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 		}
 		// User does not exist → treat as new user
 		isNewUser := true
-		if err := h.checkSignupAllowed(email, isNewUser); err != nil {
+		if err := h.checkSignupAllowed(r.Context(), email, isNewUser); err != nil {
 			var signupErr SignupError
 			if errors.As(err, &signupErr) {
 				writeError(w, http.StatusForbidden, signupErr.Error())
 			} else {
-				writeError(w, http.StatusForbidden, "user registration is disabled")
+				slog.Warn("signup eligibility check failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
+				writeError(w, http.StatusInternalServerError, "failed to check signup eligibility")
 			}
 			return
 		}
@@ -327,13 +348,14 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		isNewUser := false
-		if err := h.checkSignupAllowed(email, isNewUser); err != nil {
+		if err := h.checkSignupAllowed(r.Context(), email, isNewUser); err != nil {
 			// This should rarely happen, but handle it anyway
 			var signupErr SignupError
 			if errors.As(err, &signupErr) {
 				writeError(w, http.StatusForbidden, signupErr.Error())
 			} else {
-				writeError(w, http.StatusForbidden, "user registration is disabled")
+				slog.Warn("signup eligibility check failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
+				writeError(w, http.StatusInternalServerError, "failed to check signup eligibility")
 			}
 			return
 		}
@@ -422,6 +444,7 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, signupErr.Error())
 			return
 		}
+		slog.Warn("login user lookup or creation failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
 		writeError(w, http.StatusInternalServerError, "failed to create user")
 		return
 	}
@@ -547,7 +570,7 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	clientID := os.Getenv("GOOGLE_CLIENT_ID")
 	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
 	if clientID == "" || clientSecret == "" {
-		writeError(w, http.StatusServiceUnavailable, "Google login is not configured")
+		writeFeatureDisabled(w, "google_login_not_configured", "Google login is not configured")
 		return
 	}
 
@@ -658,6 +681,7 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		if writeGoogleLoginActionableError(w, err) {
 			return
 		}
+		slog.Warn("login user lookup or creation failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
 		writeError(w, http.StatusInternalServerError, "failed to create user")
 		return
 	}

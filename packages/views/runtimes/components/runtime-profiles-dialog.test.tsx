@@ -17,10 +17,9 @@ const mutationState = vi.hoisted(() => ({
 }));
 
 vi.mock("@tanstack/react-query", async () => {
-  const actual =
-    await vi.importActual<typeof import("@tanstack/react-query")>(
-      "@tanstack/react-query",
-    );
+  const actual = await vi.importActual<typeof import("@tanstack/react-query")>(
+    "@tanstack/react-query",
+  );
   return {
     ...actual,
     useQuery: vi.fn(() => ({
@@ -126,9 +125,7 @@ describe("RuntimeProfilesDialog", () => {
     expect(
       screen.getByText("Create your first custom runtime"),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Pick a base protocol family/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Pick a base protocol family/)).toBeInTheDocument();
 
     const builtinsToggle = screen.getByRole("button", {
       name: /Supported base protocols/,
@@ -188,6 +185,26 @@ describe("RuntimeProfilesDialog", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("creates an Oh-My-Pi compatibility target without a client protocol mapping", async () => {
+    renderDialog({ intent: "create" });
+    fireEvent.click(screen.getByRole("button", { name: "Oh-My-Pi" }));
+    fireEvent.change(screen.getByLabelText("Display name"), {
+      target: { value: "Custom OMP" },
+    });
+    fireEvent.change(screen.getByLabelText("Command"), {
+      target: { value: "wrapper launch" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create runtime" }));
+    await waitFor(() =>
+      expect(mutationState.createProfile).toHaveBeenCalledWith({
+        display_name: "Custom OMP",
+        runtime_type: "omp",
+        command_name: "wrapper",
+        fixed_args: ["launch"],
+      }),
+    );
+  });
+
   it("parses a pasted command line into fixed_args on create", async () => {
     renderDialog();
 
@@ -214,7 +231,7 @@ describe("RuntimeProfilesDialog", () => {
     await waitFor(() =>
       expect(mutationState.createProfile).toHaveBeenCalledWith({
         display_name: "Composer Agent",
-        protocol_family: "codex",
+        runtime_type: "codex",
         command_name: "agent",
         fixed_args: ["--model", "composer-2.5"],
       }),
@@ -235,7 +252,9 @@ describe("RuntimeProfilesDialog", () => {
       screen.getByRole("heading", { name: "New custom runtime" }),
     ).toBeInTheDocument();
     expect(screen.getByText(/from Studio Mac/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View setup guide" })).toHaveAttribute(
+    expect(
+      screen.getByRole("link", { name: "View setup guide" }),
+    ).toHaveAttribute(
       "href",
       "https://multica.ai/docs/daemon-runtimes#custom-runtime-profiles",
     );
@@ -243,7 +262,9 @@ describe("RuntimeProfilesDialog", () => {
     expect(
       screen.queryByText("Create your first custom runtime"),
     ).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Back" }),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /codex/i }));
     expect(screen.getByText("Step 2 of 2")).toBeInTheDocument();

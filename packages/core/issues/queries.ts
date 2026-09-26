@@ -130,6 +130,11 @@ export const issueKeys = {
   /** Resolve a bare issue identifier (e.g. "MUL-123") to an issue. */
   identifier: (wsId: string, identifier: string) =>
     [...issueKeys.all(wsId), "identifier", identifier] as const,
+  /** Prefix for every per-issue duplicate-relation query in a workspace. */
+  duplicatesAll: (wsId: string) =>
+    [...issueKeys.all(wsId), "duplicates"] as const,
+  duplicates: (wsId: string, id: string) =>
+    [...issueKeys.duplicatesAll(wsId), id] as const,
   /** Prefix for every per-parent children query in a workspace. */
   childrenAll: (wsId: string) =>
     [...issueKeys.all(wsId), "children"] as const,
@@ -241,17 +246,14 @@ export type AssigneeGroupedIssuesFilter = Omit<
 export const ISSUE_PAGE_SIZE = 50;
 
 /**
- * CATEGORIES fetched and paginated into the list/board cache — all 7,
- * `cancelled` included. `cancelled` is a first-class default (MUL-4290), so it
- * lives in the cache and renders like any other column; there is no separate
+ * CATEGORIES fetched and paginated into the list/board cache — all four,
+ * `closed` included. It lives in the cache even when hidden by the surface's
+ * display preferences; there is no separate
  * "visible board" subset. This constant governs fetch/cache membership.
  *
- * Keyed on category, not on status key (MUL-6243). A workspace can define any
- * number of custom statuses, and bucketing by status would mean one more
- * parallel `listIssues` request on every board load per status added. Bucketing
- * by category keeps the fan-out fixed at 7 forever; a custom status appears in
- * the column of the category it inherits, and the card's own badge is what
- * shows which specific status it is on.
+ * These are internal legacy cache buckets, not user-facing columns.
+ * Board/List use independently paged exact-key table branches; Swimlane uses
+ * compound status branches. Never derive visible column identity from this cache.
  */
 export const PAGINATED_CATEGORIES: readonly IssueStatusCategory[] = ALL_STATUSES;
 
@@ -463,13 +465,15 @@ export function issueDetailOptions(wsId: string, id: string) {
 export function issueIdentifierOptions(wsId: string, identifier: string) {
   return queryOptions({
     queryKey: issueKeys.identifier(wsId, identifier),
-    queryFn: async ({ signal }) => {
+    // Keep this small, cacheable lookup alive when the last mention unmounts.
+    // A remount can then share its request instead of aborting and restarting it.
+    queryFn: async () => {
       try {
-        return await api.getIssue(identifier, { signal });
+        return await api.getIssue(identifier);
       } catch (err) {
         // Unknown identifier / wrong workspace prefix → render as plain text.
-        // Any other failure (401/5xx/abort) must keep propagating so the query
-        // is retried or cancelled instead of being cached as "no such issue".
+        // Any other failure (401/5xx) must keep propagating so the query
+        // can retry instead of being cached as "no such issue".
         if (err instanceof ApiError && err.status === 404) return null;
         throw err;
       }
@@ -491,6 +495,18 @@ export function childIssueProgressOptions(wsId: string) {
       }
       return map;
     },
+  });
+}
+
+/** Both sides of an issue's duplicate relation: its original and its duplicates. */
+export function issueDuplicatesOptions(wsId: string, id: string) {
+  return queryOptions({
+    queryKey: issueKeys.duplicates(wsId, id),
+    queryFn: () => api.listIssueDuplicates(id),
+    // Same reason as childIssuesOptions: a mark written while this workspace
+    // is not the active realtime subscription would otherwise leave the
+    // Infinity-stale snapshot wrong when the issue is opened again.
+    refetchOnMount: "always",
   });
 }
 

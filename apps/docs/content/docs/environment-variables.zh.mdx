@@ -42,7 +42,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `PORT` | `8080` | API 监听端口 |
 | `JWT_SECRET` | 生产环境必填 | 登录 JWT、部分签名流程使用的密钥；生产环境对空值或已知占位值拒绝启动 |
 | `APP_ENV` | 空 | 生产环境设为 `production` |
-| `AUTH_TOKEN_TTL` | `720h`（30 天） | 浏览器 JWT 与 cookie 有效期；接受 Go duration 或正整数秒数 |
+| `AUTH_TOKEN_TTL` | `720h`（30 天） | 浏览器 JWT 与 cookie 有效期；接受 Go duration 或正整数秒数。会话会滑动续期：剩余有效期过半后，持续使用的会话会被续期而不是到期。低于 `60s` 的取值会按 `60s` 处理 |
 | `LOG_LEVEL` | 应用默认 | 日志级别 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 收到终止信号后，开始优雅退出前等待多久 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 运行时离线后可重新连接且不终止在途运行的宽限时间；低于 `150s` 时按 `150s` 处理 |
@@ -206,8 +206,11 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `MULTICA_LLM_BASE_URL` | 空 | OpenAI 兼容 endpoint |
 | `MULTICA_LLM_DEFAULT_MODEL` | `gpt-5.6-luna` | 请求未指定模型时使用 |
 | `MULTICA_LLM_MAX_RETRIES` | `2` | 单次调用的重试上限；`0` 表示禁用重试，`1`–`5` 表示最多重试 N 次 |
+| `MULTICA_LLM_DISABLE_THINKING` | `false` | 在每个请求中附带 `chat_template_kwargs: {"enable_thinking": false}`，供支持该字段的网关关闭模型思考 |
 
 `MULTICA_LLM_MAX_RETRIES` 是重试策略的唯一配置源。不设置时使用默认的 2 次；设为 `0` 表示每次调用只发一个请求；设为 1–5 表示最多重试这么多次。它是上限而不是配额：只有可重试的失败才会消耗它，请求成功或调用方自身的超时都会让调用提前结束。其它取值（负数、非数字、大于 5）会让服务启动失败，而不是被静默纠正。上限是一个延迟预算：退避从 0.5s 开始翻倍，上限 8s，更大的预算会超出调用方自身的超时，把可重试的失败变成超时失败。重试覆盖连接失败以及 HTTP 408、409、429 和 5xx；其余 4xx 直接返回。服务启动时会以 `llm retry policy` 打印生效策略，其中不包含任何凭据。
+
+`MULTICA_LLM_DISABLE_THINKING` 面向"模型会先跑一段推理（thinking）并吃掉辅助调用延迟预算"的网关。设为 `true`（或 `1`）时，服务端会在每个请求体中附带 `chat_template_kwargs: {"enable_thinking": false}`；支持透传该字段的网关（vLLM/sglang 类部署、部分 GLM/Qwen 系的 LiteLLM 路由）会因此跳过思考阶段。标准 OpenAI 端点会拒绝未知的请求体字段，所以仅在上游接受时启用。GPT-5.6 系模型在后续提问建议请求中已由服务端附带 `reasoning_effort: none`。会话自动命名不发送推理字段；只有当所配置的上游接受 `chat_template_kwargs` 时，此项才会影响它。可接受的取值为 `true`/`false` 和 `1`/`0`（不区分大小写）；其它取值会让服务启动失败。启动日志会在重试策略旁打印生效状态。
 
 有两个功能会使用这一层，它们都会把聊天内容发送到你配置的 endpoint：
 
@@ -304,11 +307,16 @@ multica config show
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
+| `DO_NOT_TRACK` | 空（默认开启遥测） | 设为 `1` 或 `true`（不区分大小写）后，停止首方匿名自托管遥测的采集与发送 |
 | `ANALYTICS_DISABLED` | `false` | 设为 `true` 关闭 PostHog 上报 |
 | `POSTHOG_API_KEY` | 空 | 不设置时统计上报关闭；接入自己的 PostHog 项目时填写 |
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog 地址 |
 | `METRICS_ADDR` | 空 | Prometheus metrics 监听地址；空表示不启动 |
 | `REALTIME_METRICS_TOKEN` | 空 | 保护 `/health/realtime` 的 bearer token |
+
+首方自托管遥测每天按 UTC 发送一份部署级快照，固定且不可配置的地址为 `https://telemetry.multica.ai/v1/telemetry/events`。快照只包含正式发布版本、工作区数/去重成员数/活跃智能体数/过去 24 小时活跃守护进程数的分桶，以及过去 24 小时运行的开始、完成、失败和取消总数。不会发送名称、邮箱或域名、IP、业务标识符、主机或设备信息、代码仓库、模型或 plugin、prompt/output、评论或聊天、文件路径、token/费用、凭据、错误文本、stack 或日志。此数据只用于了解自托管版本采用、部署规模区间与聚合使用量，不用于计费、授权、认证或安全决策。
+
+`DO_NOT_TRACK` 与 `ANALYTICS_DISABLED` 相互独立：前者控制这份首方匿名快照，后者控制可选的 PostHog 集成。
 
 ## 接下来
 

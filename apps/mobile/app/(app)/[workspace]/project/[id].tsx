@@ -44,6 +44,7 @@ import { useCreatePin, useDeletePin } from "@/data/mutations/pins";
 import { useAuthStore } from "@/data/auth-store";
 import { useProjectRealtime } from "@/data/realtime/use-project-realtime";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useT } from "@/lib/i18n";
 
 export default function ProjectDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -83,17 +84,27 @@ export default function ProjectDetail() {
     );
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
+  const { t } = useT("projects");
 
   const onPressMore = () => {
     if (!project) return;
     const wsUrl = process.env.EXPO_PUBLIC_WEB_URL;
-    const options = [
-      "Cancel",
-      isPinned ? "Unpin" : "Pin",
-      "Edit details",
-      ...(wsUrl ? ["Open on web"] : []),
-      "Delete",
-    ];
+    const actions = ["cancel", isPinned ? "unpin" : "pin", "edit"];
+    if (wsUrl) actions.push("open_web");
+    actions.push("delete");
+    const options = actions.map((action) =>
+      action === "cancel"
+        ? t("common:actions.cancel")
+        : action === "pin"
+          ? t("menu.pin")
+          : action === "unpin"
+            ? t("menu.unpin")
+            : action === "edit"
+              ? t("menu.edit_details")
+              : action === "open_web"
+                ? t("menu.open_web")
+                : t("common:actions.delete"),
+    );
     const destructiveIndex = options.length - 1;
     ActionSheetIOS.showActionSheetWithOptions(
       {
@@ -102,20 +113,20 @@ export default function ProjectDetail() {
         destructiveButtonIndex: destructiveIndex,
       },
       (i) => {
-        const label = options[i];
-        if (label === "Pin") {
+        const action = actions[i];
+        if (action === "pin") {
           createPin.mutate({ item_type: "project", item_id: project.id });
           return;
         }
-        if (label === "Unpin") {
+        if (action === "unpin") {
           deletePin.mutate({ itemType: "project", itemId: project.id });
           return;
         }
-        if (label === "Edit details") {
+        if (action === "edit") {
           if (wsSlug) router.push(`/${wsSlug}/project/${id}/edit`);
           return;
         }
-        if (label === "Open on web" && wsUrl) {
+        if (action === "open_web" && wsUrl) {
           Linking.openURL(`${wsUrl}/${wsSlug}/projects/${id}`);
           return;
         }
@@ -128,12 +139,12 @@ export default function ProjectDetail() {
 
   const onDelete = () => {
     Alert.alert(
-      "Delete project?",
-      "This cannot be undone. Issues in this project will become unassigned from any project.",
+      t("delete.title"),
+      t("delete.message"),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: t("common:actions.cancel"), style: "cancel" },
         {
-          text: "Delete",
+          text: t("common:actions.delete"),
           style: "destructive",
           onPress: () => {
             deleteProject.mutate(undefined, {
@@ -149,14 +160,14 @@ export default function ProjectDetail() {
     <SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
       <Stack.Screen
         options={{
-          title: project?.title || "Project",
-          headerBackTitle: "Back",
+          title: project?.title || t("navigation:routes.project"),
+          headerBackTitle: t("common:actions.back"),
           headerRight: project
             ? () => (
                 <IconButton
                   name="ellipsis-horizontal"
                   onPress={onPressMore}
-                  accessibilityLabel="Project actions"
+                  accessibilityLabel={t("menu.project_actions")}
                 />
               )
             : undefined,
@@ -169,13 +180,15 @@ export default function ProjectDetail() {
       ) : detail.error || projectMissing ? (
         <View className="flex-1 items-center justify-center px-6 gap-3">
           <Text className="text-sm text-destructive text-center">
-            Failed to load project:{" "}
-            {detail.error instanceof Error
-              ? detail.error.message
-              : "not found"}
+            {t("errors.load_failed", {
+              message:
+                detail.error instanceof Error
+                  ? detail.error.message
+                  : "not found",
+            })}
           </Text>
           <Button variant="outline" onPress={() => detail.refetch()}>
-            <Text>Retry</Text>
+            <Text>{t("common:actions.retry")}</Text>
           </Button>
         </View>
       ) : (

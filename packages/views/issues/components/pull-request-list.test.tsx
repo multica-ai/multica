@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
-import type { GitHubPullRequest } from "@multica/core/types";
+import type { GitHubPullRequest, PRAutoComplete } from "@multica/core/types";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 
@@ -16,15 +16,37 @@ vi.mock("@multica/core/github/queries", async () => {
     ...actual,
     issuePullRequestsOptions: (issueId: string) => ({
       queryKey: ["github", "pull-requests", issueId],
-      queryFn: async () => ({ pull_requests: mockPRs }),
+      queryFn: async () => ({ pull_requests: mockPRs, auto_complete: mockAutoComplete }),
       enabled: !!issueId,
     }),
   };
 });
 
+const apiMock = vi.hoisted(() => ({
+  unlinkIssuePullRequest: vi.fn(),
+  linkIssuePullRequest: vi.fn(),
+  setIssuePRAutoComplete: vi.fn(),
+}));
+vi.mock("@multica/core/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/api")>()),
+  api: apiMock,
+}));
+const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+vi.mock("sonner", () => ({ toast: toastMock }));
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/paths")>()),
+  useWorkspacePaths: () => ({ settings: () => "/acme/settings" }),
+}));
+vi.mock("../../navigation", () => ({
+  AppLink: ({ href, children, className }: { href: string; children: React.ReactNode; className?: string }) => (
+    <a href={href} className={className}>{children}</a>
+  ),
+}));
+
 import { PullRequestList } from "./pull-request-list";
 
 let mockPRs: GitHubPullRequest[] = [];
+let mockAutoComplete: PRAutoComplete | null = null;
 
 function makePR(overrides: Partial<GitHubPullRequest> = {}): GitHubPullRequest {
   return {
@@ -67,7 +89,7 @@ function renderList() {
   return render(
     <QueryClientProvider client={qc}>
       <I18nProvider resources={TEST_RESOURCES} locale="en">
-        <PullRequestList issueId="issue-1" />
+        <PullRequestList issueId="issue-1" identifier="MUL-1" />
       </I18nProvider>
     </QueryClientProvider>,
   );
@@ -352,5 +374,101 @@ describe("PullRequestList sidebar rows", () => {
     expect(screen.getByText("PR-C")).toBeInTheDocument();
     expect(screen.queryByText("PR-D")).not.toBeInTheDocument();
     expect(screen.getByText("Show 1 more")).toBeInTheDocument();
+  });
+});
+
+// MUL-7429: the line under the list says what "every linked PR merged, one says
+// Closes → Done" will do, straight from the server's decision, and each row can
+// be removed.
+describe("PullRequestList auto-complete", () => {
+  beforeEach(() => {
+    mockAutoComplete = null;
+    apiMock.unlinkIssuePullRequest.mockReset();
+    apiMock.linkIssuePullRequest.mockReset();
+    apiMock.setIssuePRAutoComplete.mockReset();
+    toastMock.success.mockReset();
+  });
+
+  const decision = (state: string, ids: string[] = [], extra: Partial<PRAutoComplete> = {}): PRAutoComplete => ({
+    state,
+    pull_request_ids: ids,
+    issue_disabled: false,
+    workspace_enabled: true,
+    ...extra,
+  });
+
+  it("names the PR the issue is waiting on", async () => {
+    mockPRs = [makePR({ id: "a", number: 12, state: "merged" }), makePR({ id: "b", number: 19 })];
+    mockAutoComplete = decision("waiting", ["b"]);
+    renderList();
+    expect(await screen.findByText("Completes when #19 merges")).toBeInTheDocument();
+  });
+
+  it("offers to remove a PR that closed without merging", async () => {
+    mockPRs = [makePR({ id: "a", number: 12, state: "merged" }), makePR({ id: "b", number: 19, state: "closed" })];
+    mockAutoComplete = decision("not_merged", ["b"]);
+    apiMock.unlinkIssuePullRequest.mockResolvedValue({ pull_requests: [], auto_complete: decision("terminal") });
+    renderList();
+    const line = await screen.findByTestId("pr-auto-complete-line");
+    expect(line).toHaveTextContent("#19 closed without merging");
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(apiMock.unlinkIssuePullRequest).toHaveBeenCalledWith("issue-1", "b"));
+    // Removing the last unmerged PR completed the issue; the toast says so and
+    // offers no undo.
+    await waitFor(() =>
+      expect(toastMock.success).toHaveBeenCalledWith("Removed #19. Every remaining PR is merged, so the issue is done."),
+    );
+  });
+
+  it("says merging won't complete the issue when no PR closes it", async () => {
+    mockPRs = [makePR({ id: "a", number: 12, link_source: "title" })];
+    mockAutoComplete = decision("no_close_intent");
+    renderList();
+    expect(await screen.findByTestId("pr-auto-complete-line")).toHaveTextContent(
+      "Won’t complete: no “Closes MUL-1”",
+    );
+  });
+
+  it("links the workspace setting when auto-complete is off there", async () => {
+    mockPRs = [makePR({ id: "a", number: 12, state: "merged" })];
+    mockAutoComplete = decision("workspace_disabled", [], { workspace_enabled: false });
+    renderList();
+    expect(await screen.findByTestId("pr-auto-complete-line")).toHaveTextContent("PR auto-complete is off for this workspace");
+    expect(screen.getByText("Settings").closest("a")?.getAttribute("href")).toBe("/acme/settings?tab=issue-statuses");
+  });
+
+  it("turns auto-complete back on for the issue from the line", async () => {
+    mockPRs = [makePR({ id: "a", number: 12 })];
+    mockAutoComplete = decision("issue_disabled", [], { issue_disabled: true });
+    apiMock.setIssuePRAutoComplete.mockResolvedValue({ pull_requests: mockPRs, auto_complete: decision("waiting", ["a"]) });
+    renderList();
+    fireEvent.click(await screen.findByRole("button", { name: "Turn on" }));
+    await waitFor(() => expect(apiMock.setIssuePRAutoComplete).toHaveBeenCalledWith("issue-1", false));
+  });
+
+  it("says nothing for a finished issue", async () => {
+    mockPRs = [makePR({ id: "a", number: 12, state: "merged" })];
+    mockAutoComplete = decision("terminal");
+    renderList();
+    await waitForRender();
+    expect(screen.queryByTestId("pr-auto-complete-line")).toBeNull();
+  });
+
+  it("hides row actions and the line on a backend without auto-complete", async () => {
+    mockPRs = [makePR({ id: "a", number: 12 })];
+    mockAutoComplete = null;
+    renderList();
+    await waitForRender();
+    expect(screen.queryByRole("button", { name: "Pull request actions" })).toBeNull();
+    expect(screen.queryByTestId("pr-auto-complete-line")).toBeNull();
+  });
+
+  it("explains how a PR was linked in its menu", async () => {
+    mockPRs = [makePR({ id: "a", number: 12, link_source: "title" })];
+    mockAutoComplete = decision("waiting", ["a"]);
+    renderList();
+    fireEvent.click(await screen.findByRole("button", { name: "Pull request actions" }));
+    expect(await screen.findByText("Linked by MUL-1 in the title")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Remove from issue" })).toBeInTheDocument();
   });
 });

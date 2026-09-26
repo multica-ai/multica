@@ -373,7 +373,7 @@ function PublishAndInstall({ wsId, canManage }: { wsId: string; canManage: boole
   };
 
   return (
-    <SettingsSection title={t(($) => $.plugins.publish.title)} description={t(($) => $.plugins.publish.description)}>
+    <SettingsSection title={t(($) => $.plugins.publish.title)} >
       <SettingsCard>
         <div className="flex flex-col gap-2 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-caption text-muted-foreground">{t(($) => $.plugins.publish.hint)}</p>
@@ -679,7 +679,7 @@ export function PluginsTab() {
   const installations = useMemo(() => data?.plugins ?? [], [data]);
 
   return (
-    <SettingsTab title={t(($) => $.plugins.title)} description={t(($) => $.plugins.description)}>
+    <SettingsTab title={t(($) => $.plugins.title)} >
       {!canManage ? (
         <Alert>
           <AlertCircle />

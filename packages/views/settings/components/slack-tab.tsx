@@ -35,6 +35,7 @@ import { slackInstallationsOptions, slackKeys } from "@multica/core/slack";
 import { api } from "@multica/core/api";
 import type { SlackInstallation } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { docsLocalePrefix } from "../../common/docs-locale";
 import { openExternal } from "../../platform";
 import { useLocale, useT } from "../../i18n";
 
@@ -64,9 +65,9 @@ export function SlackTab() {
   const installations = data?.installations ?? [];
   const configured = data?.configured === true;
   // install_supported tracks whether the OAuth client credentials are wired on
-  // the server. When false, "Connect Slack" would 503, so we hide the connect
-  // entry points and surface a "coming soon" notice. Already-installed bots
-  // still appear below and remain manageable.
+  // the server. When false, "Connect Slack" would be rejected, so we hide the
+  // connect entry points and surface a "coming soon" notice. Already-installed
+  // bots still appear below and remain manageable.
   const installSupported = data?.install_supported === true;
 
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
@@ -242,14 +243,7 @@ const SLACK_BYO_VIDEO_URL = "";
 // prefixes (English has none), matching the convention used elsewhere in the
 // app for doc links (e.g. the autopilots webhook docs link).
 function slackDocsUrl(lang: string | undefined): string {
-  const prefix = lang?.startsWith("zh")
-    ? "/zh"
-    : lang?.startsWith("ja")
-      ? "/ja"
-      : lang?.startsWith("ko")
-        ? "/ko"
-        : "";
-  return `https://multica.ai/docs${prefix}/slack-bot-integration`;
+  return `https://multica.ai/docs${docsLocalePrefix(lang)}/slack-bot-integration`;
 }
 
 // SlackAgentBindButton is the per-agent CTA exposed from the agent detail page.

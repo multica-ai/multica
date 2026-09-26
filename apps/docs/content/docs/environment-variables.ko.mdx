@@ -42,7 +42,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `PORT` | `8080` | API listen port |
 | `JWT_SECRET` | 프로덕션에서 필수 | 로그인 JWT와 일부 서명 절차에서 사용하는 키. 프로덕션에서는 비어 있거나 알려진 자리표시자 값으로 부팅 거부 |
 | `APP_ENV` | 비어 있음 | 프로덕션 환경에서는 `production`으로 설정 |
-| `AUTH_TOKEN_TTL` | `720h`(30일) | 브라우저 JWT와 cookie 유효 기간. Go duration 또는 양의 정수 초 허용 |
+| `AUTH_TOKEN_TTL` | `720h`(30일) | 브라우저 JWT와 cookie 유효 기간. Go duration 또는 양의 정수 초 허용. 세션은 유효 기간의 절반이 지나면 슬라이딩 갱신되어, 계속 사용하는 동안에는 만료되지 않습니다. `60s` 미만은 `60s`로 조정됩니다 |
 | `LOG_LEVEL` | 앱 기본값 | 로그 수준 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 종료 신호를 받은 뒤 graceful shutdown을 시작하기 전 대기 시간 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 오프라인 런타임이 진행 중인 실행을 실패시키지 않고 재연결할 수 있는 유예 시간. `150s` 미만은 `150s`로 조정됨 |
@@ -206,8 +206,11 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 | `MULTICA_LLM_BASE_URL` | 비어 있음 | OpenAI 호환 endpoint |
 | `MULTICA_LLM_DEFAULT_MODEL` | `gpt-5.6-luna` | 요청에 모델이 지정되지 않았을 때 사용 |
 | `MULTICA_LLM_MAX_RETRIES` | `2` | 호출당 재시도 상한. `0`은 재시도 비활성화, `1`–`5`는 최대 N회 |
+| `MULTICA_LLM_DISABLE_THINKING` | `false` | 모든 요청에 `chat_template_kwargs: {"enable_thinking": false}`를 첨부. 해당 필드를 해석하는 gateway용 |
 
 `MULTICA_LLM_MAX_RETRIES`는 재시도 정책의 유일한 설정 소스입니다. 설정하지 않으면 기본값 2회, `0`이면 호출당 요청을 정확히 한 번만 보내고, 1–5면 재시도를 최대 그 횟수까지만 합니다. 할당량이 아니라 상한입니다. 재시도 대상 실패만 이를 소모하며, 성공하거나 호출자 자신의 데드라인에 걸리면 더 일찍 끝납니다. 그 밖의 값(음수, 숫자가 아닌 값, 5 초과)은 조용히 보정되지 않고 시작에 실패합니다. 상한은 지연 예산입니다. 백오프는 0.5초에서 시작해 8초 상한까지 두 배씩 늘어나므로, 더 큰 예산은 호출자 자신의 타임아웃을 넘겨 재시도 가능한 실패를 타임아웃으로 바꿉니다. 재시도는 연결 실패와 HTTP 408, 409, 429, 5xx를 대상으로 하며 그 외 4xx는 그대로 반환됩니다. 서버는 시작 시 유효한 정책을 `llm retry policy`로 기록하며 해당 줄에는 자격 증명이 포함되지 않습니다.
+
+`MULTICA_LLM_DISABLE_THINKING`은 모델이 추론(thinking) 패스를 실행해 어시스트 호출의 지연 예산을 잠식하는 gateway를 위한 설정입니다. `true`(또는 `1`)로 설정하면 서버가 모든 요청 본문에 `chat_template_kwargs: {"enable_thinking": false}`를 첨부하며, 이 필드를 전달하는 gateway(vLLM/sglang 계열 배포, 일부 GLM/Qwen 계열 LiteLLM 라우트)는 thinking 패스를 건너뜁니다. 표준 OpenAI endpoint는 알 수 없는 본문 필드를 거부하므로, 업스트림이 이를 받아들이는 경우에만 활성화하세요. GPT-5.6 계열 모델은 후속 질문 요청에서 서버가 이미 `reasoning_effort: none`을 붙입니다. 채팅 자동 제목 생성은 추론 필드를 보내지 않습니다. 이 설정이 그것에 영향을 주는 것은 구성된 업스트림이 `chat_template_kwargs`를 받아들이는 경우뿐입니다. 허용되는 값은 `true`/`false`와 `1`/`0`(대소문자 구분 없음)이며, 그 외 값은 시작에 실패합니다. 시작 로그에 재시도 정책과 함께 유효 상태가 기록됩니다.
 
 이 레이어를 사용하는 기능은 두 가지이며, 둘 다 설정한 endpoint로 채팅 내용을 전송합니다.
 
@@ -304,11 +307,16 @@ multica config show
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
+| `DO_NOT_TRACK` | 비어 있음(텔레메트리 활성화) | `1` 또는 `true`(대소문자 구분 없음)로 설정하면 자사 익명 셀프 호스트 텔레메트리 수집과 전송 중지 |
 | `ANALYTICS_DISABLED` | `false` | `true`로 설정하면 PostHog 전송 비활성화 |
 | `POSTHOG_API_KEY` | 비어 있음 | 설정하지 않으면 통계 전송 비활성화. 자체 PostHog 프로젝트 연결 시 입력 |
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog 주소 |
 | `METRICS_ADDR` | 비어 있음 | Prometheus metrics listen 주소. 비어 있으면 시작하지 않음 |
 | `REALTIME_METRICS_TOKEN` | 비어 있음 | `/health/realtime`을 보호하는 bearer token |
+
+자사 셀프 호스트 텔레메트리는 UTC 기준 하루에 한 번 배포 단위 스냅샷을 고정되어 설정할 수 없는 `https://telemetry.multica.ai/v1/telemetry/events` 주소로 전송합니다. 정식 릴리스 버전, 작업 공간 수·중복을 제거한 멤버 수·활성 에이전트 수·지난 24시간 활성 데몬 수의 버킷, 그리고 지난 24시간 시작·완료·실패·취소된 실행의 집계만 포함합니다. 이름, 이메일 주소나 도메인, IP, 업무 ID, 호스트나 기기 정보, 저장소, 모델이나 plugin, prompt/output, 댓글이나 채팅, 파일 경로, token/비용, 자격 증명, 오류, stack, 로그는 전송하지 않습니다. 이 데이터는 셀프 호스트 버전 사용 현황, 배포 규모, 집계 사용량을 파악하는 데만 쓰며 결제, 라이선스, 인증, 보안 판단에는 사용하지 않습니다.
+
+`DO_NOT_TRACK`과 `ANALYTICS_DISABLED`는 서로 독립적입니다. 전자는 이 익명 스냅샷을, 후자는 선택 사항인 PostHog 연동을 제어합니다.
 
 ## 다음 단계
 

@@ -8,11 +8,13 @@ import { CardPressable } from "@/components/ui/card";
 import { workspaceListOptions } from "@/data/queries/workspaces";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useT } from "@/lib/i18n";
 
 export default function SelectWorkspace() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const setCurrentWorkspace = useWorkspaceStore((s) => s.setCurrentWorkspace);
+  const { t } = useT("workspace");
   const { data, isLoading, error, refetch } = useQuery(workspaceListOptions());
 
   const onSelect = async (id: string, slug: string) => {
@@ -25,14 +27,14 @@ export default function SelectWorkspace() {
       <ScrollView contentContainerClassName="px-6 py-6 gap-6">
         <View className="gap-1">
           <Text className="text-xs uppercase tracking-wider text-muted-foreground">
-            Signed in as
+            {t("auth.signed_in_as")}
           </Text>
           <Text className="text-base text-foreground">{user?.email}</Text>
         </View>
 
         <View className="gap-3">
           <Text className="text-2xl font-semibold text-foreground">
-            Select a workspace
+            {t("title")}
           </Text>
 
           {isLoading ? (
@@ -42,17 +44,18 @@ export default function SelectWorkspace() {
           ) : error ? (
             <View className="gap-3">
               <Text className="text-sm text-destructive">
-                Failed to load workspaces:{" "}
-                {error instanceof Error ? error.message : "unknown error"}
+                {t("errors.load_failed", {
+                  message:
+                    error instanceof Error ? error.message : "unknown",
+                })}
               </Text>
               <Button variant="outline" onPress={() => refetch()}>
-                <Text>Retry</Text>
+                <Text>{t("common:actions.retry")}</Text>
               </Button>
             </View>
           ) : !data || data.length === 0 ? (
             <Text className="text-sm text-muted-foreground">
-              You don&apos;t belong to any workspaces yet. Contact your workspace
-              admin to be invited.
+              {t("empty")}
             </Text>
           ) : (
             <View className="gap-3">
@@ -80,7 +83,7 @@ export default function SelectWorkspace() {
 
         <View className="pt-4 border-t border-border">
           <Button variant="outline" onPress={() => logout()}>
-            <Text>Sign out</Text>
+            <Text>{t("actions.sign_out")}</Text>
           </Button>
         </View>
       </ScrollView>

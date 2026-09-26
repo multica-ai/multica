@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { ArrowLeft, ChevronRight, FolderGit2, Blocks } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { ApiError } from "@multica/core/api";
+import { ApiError, errorCode } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentMember } from "@multica/core/permissions";
 import {
@@ -50,6 +50,14 @@ interface IntegrationEntry {
   state: ConnectionState;
 }
 
+// The IM channels soft-revoke: the row survives with status 'revoked', so a row
+// count never falls back to zero and would report a torn-down bot as connected
+// forever. GitHub and VCS hard-delete instead, so their count-based reads below
+// are correct and deliberately left as they are (#8496).
+const hasActiveInstallation = (data: {
+  installations?: { status: string }[];
+}) => data.installations?.some((inst) => inst.status === "active") ?? false;
+
 export function IntegrationsTab() {
   const { t } = useT("settings");
   const navigation = useNavigation();
@@ -64,6 +72,7 @@ export function IntegrationsTab() {
   });
   const composioAvailable =
     composioEnabled &&
+    errorCode(toolkits.error) !== "composio_not_configured" &&
     !(toolkits.error instanceof ApiError && toolkits.error.status === 503);
 
   // Reuse the detail pages' query caches. Never report a failed or pending read
@@ -76,27 +85,27 @@ export function IntegrationsTab() {
   const lark = useQuery({
     ...larkInstallationsOptions(wsId),
     enabled: canView,
-    select: (data) => (data.installations?.length ?? 0) > 0,
+    select: hasActiveInstallation,
   });
   const slack = useQuery({
     ...slackInstallationsOptions(wsId),
     enabled: canView,
-    select: (data) => (data.installations?.length ?? 0) > 0,
+    select: hasActiveInstallation,
   });
   const dingtalk = useQuery({
     ...dingtalkInstallationsOptions(wsId),
     enabled: canView,
-    select: (data) => (data.installations?.length ?? 0) > 0,
+    select: hasActiveInstallation,
   });
   const wecom = useQuery({
     ...wecomInstallationsOptions(wsId),
     enabled: canView,
-    select: (data) => (data.installations?.length ?? 0) > 0,
+    select: hasActiveInstallation,
   });
   const telegram = useQuery({
     ...telegramInstallationsOptions(wsId),
     enabled: canView,
-    select: (data) => (data.installations?.length ?? 0) > 0,
+    select: hasActiveInstallation,
   });
   const vcs = useQuery({
     ...vcsConnectionsOptions(wsId),
@@ -249,7 +258,6 @@ export function IntegrationsTab() {
   return (
     <SettingsTab
       title={t(($) => $.page.tabs.integrations)}
-      description={t(($) => $.integrations.description)}
     >
       {groups.map((group) => (
         <SettingsSection

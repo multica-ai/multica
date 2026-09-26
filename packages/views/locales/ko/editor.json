@@ -41,9 +41,6 @@
     "link_copied": "링크를 복사했습니다",
     "copy_link_failed": "링크를 복사하지 못했습니다",
     "canvas_label": "이미지 캔버스. 드래그하여 이동, 스크롤하여 확대/축소, 두 번 클릭하여 실제 크기로 전환할 수 있습니다.",
-    "previous": "이전 이미지",
-    "next": "다음 이미지",
-    "sequence_position": "{{index}} / {{total}}",
     "unavailable": "이 이미지를 불러올 수 없어 건너뛰었습니다."
   },
   "canvas": {
@@ -61,7 +58,10 @@
     "preview_unsupported": "이 파일 형식은 미리보기를 지원하지 않습니다.",
     "close": "닫기",
     "open_in_new_tab": "새 탭에서 열기",
-    "remove": "첨부 파일 제거"
+    "remove": "첨부 파일 제거",
+    "previous": "이전",
+    "next": "다음",
+    "sequence_position": "{{index}} / {{total}}"
   },
   "link_hover": {
     "copy_link": "링크 복사",

@@ -48,18 +48,26 @@ type TimelineEntry struct {
 	SourceTaskID   *string              `json:"source_task_id,omitempty"`
 	// Set only on a tombstone: a comment deleted while it still had replies.
 	DeletedAt *string `json:"deleted_at,omitempty"`
+	// Supplements lists every running turn this comment steered; the single
+	// supplement_* fields mirror the first receipt for older clients.
+	Supplements             []CommentSupplementResponse `json:"supplements,omitempty"`
+	SupplementTaskID        string                      `json:"supplement_task_id,omitempty"`
+	SupplementStatus        string                      `json:"supplement_status,omitempty"`
+	SupplementFailureReason *string                     `json:"supplement_failure_reason,omitempty"`
+	SupplementDeliveredAt   *string                     `json:"supplement_delivered_at,omitempty"`
 }
 
 // timelineHardCap bounds the per-issue timeline payload. Sized as a defensive
 // safety net, not a UX page window: see commentHardCap in comment.go for the
-// data-shape rationale (#1929).
-const timelineHardCap = 2000
+// data-shape rationale (#1929). A variable only so the cap tests can shrink it,
+// like commentHardCap; nothing outside tests assigns it.
+var timelineHardCap = 2000
 
 // timelineProbeLimit reads one row past the cap so "we hit the cap" can be
 // distinguished from "the issue happens to have exactly timelineHardCap rows".
 // Without the probe row an issue sitting exactly on the boundary would report a
 // complete timeline as truncated and pay a needless ancestor-backfill query.
-const timelineProbeLimit = timelineHardCap + 1
+func timelineProbeLimit() int32 { return int32(timelineHardCap) + 1 }
 
 // Truncation is signalled with a response header rather than a body field
 // because the unpaginated response is a bare JSON array (TimelineEntriesSchema =
@@ -156,7 +164,7 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 	comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
-		Limit:       timelineProbeLimit,
+		Limit:       timelineProbeLimit(),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list comments")
@@ -164,7 +172,7 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 	}
 	activities, err := h.Queries.ListActivitiesForIssue(ctx, db.ListActivitiesForIssueParams{
 		IssueID: issue.ID,
-		Limit:   timelineProbeLimit,
+		Limit:   timelineProbeLimit(),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list activities")
@@ -282,6 +290,7 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 	}
 	reactions := h.groupReactions(r, ids)
 	attachments := h.groupAttachments(r, ids)
+	supplements := h.listCommentSupplements(r.Context(), comments[0].WorkspaceID, ids)
 
 	out := make([]TimelineEntry, len(comments))
 	for i, c := range comments {
@@ -308,6 +317,13 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 			ResolvedByID:   uuidToPtr(c.ResolvedByID),
 			SourceTaskID:   uuidToPtr(c.SourceTaskID),
 			DeletedAt:      timestampToPtr(c.DeletedAt),
+		}
+		if receipts := supplements[cid]; len(receipts) > 0 {
+			out[i].Supplements = receipts
+			out[i].SupplementTaskID = receipts[0].TaskID
+			out[i].SupplementStatus = receipts[0].Status
+			out[i].SupplementFailureReason = receipts[0].FailureReason
+			out[i].SupplementDeliveredAt = receipts[0].DeliveredAt
 		}
 	}
 	return out

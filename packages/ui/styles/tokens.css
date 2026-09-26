@@ -122,7 +122,27 @@
 }
 
 :root {
+    /* Dialog motion, shared by popup and backdrop. */
+    --dialog-enter-duration: 100ms;
+    --dialog-exit-duration: 100ms;
+    --dialog-enter-easing: ease;
+    --dialog-exit-easing: ease;
+
     color-scheme: light;
+    /* Button geometry. Text and icon-only buttons share the height ladder.
+       Keep the defaults aligned with the existing compact product controls. */
+    --button-height-xs: 1.5rem;
+    --button-height-sm: 1.75rem;
+    --button-height-default: 2rem;
+    --button-height-lg: 2.25rem;
+    --button-padding-xs: 0.5rem;
+    --button-padding-sm: 0.625rem;
+    --button-padding-default: 0.625rem;
+    --button-padding-lg: 0.625rem;
+    --button-gap-xs: 0.25rem;
+    --button-gap-sm: 0.25rem;
+    --button-gap-default: 0.375rem;
+    --button-gap-lg: 0.375rem;
     /* Surface system: the app shell is the quiet outer frame; the page canvas
        is where lists, boards, and conversations live; surfaces are reserved
        for bounded content groups; raised surfaces are ephemeral overlays. */
@@ -201,6 +221,7 @@
     --chart-4: oklch(0.85 0.06 255);
     --chart-5: oklch(0.92 0.03 255);
     --radius: 0.5rem;
+    --issue-row-height: 36px;
     --sidebar: oklch(0.964435 0.001327 286.375);
     --sidebar-foreground: oklch(0.141 0.005 285.823);
     --sidebar-primary: oklch(0.21 0.006 285.885);
@@ -209,7 +230,7 @@
     --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
     --sidebar-border: oklch(0.92 0.004 286.32);
     --sidebar-ring: oklch(0.705 0.015 286.067);
-    --brand: oklch(0.55 0.16 255);
+    --brand: oklch(0.56079497 0.19449888 256.41258418);
     --brand-foreground: oklch(0.985 0 0);
     --success: oklch(0.55 0.16 145);
     --warning: oklch(0.75 0.16 85);
@@ -279,6 +300,7 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.552 0.016 285.938);
+    /* Brand also paints body-text links; keep it readable on dark surfaces. */
     --brand: oklch(0.65 0.16 255);
     --brand-foreground: oklch(0.985 0 0);
     --success: oklch(0.65 0.15 145);

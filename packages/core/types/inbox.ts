@@ -65,3 +65,17 @@ export interface InboxItem {
   created_at: string;
   details: Record<string, string> | null;
 }
+
+
+export interface ArchivedInboxPage {
+  items: InboxItem[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+export interface ArchivedInboxFacets {
+  statuses: Record<string, number>;
+  priorities: Record<string, number>;
+  actors: Record<string, number>;
+  unreadCount: number;
+}

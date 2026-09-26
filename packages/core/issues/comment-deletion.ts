@@ -3,11 +3,36 @@ import type { TimelineEntry } from "@multica/core/types";
 /**
  * True for a comment deleted while it still had replies (#8296). The server
  * keeps its row as a tombstone — empty content, no attachments, reactions or
- * resolution — so every reply keeps its direct parent. Clients render a
- * placeholder in its place and offer no actions on it.
+ * resolution — so every reply keeps its direct parent. Clients render nothing
+ * in its place: the replies it held render flat, where it was. The one
+ * exception is a thread ROOT, which keeps a placeholder as the thread's head.
  */
 export function isDeletedComment(entry: { deleted_at?: string | null }): boolean {
   return typeof entry.deleted_at === "string" && entry.deleted_at !== "";
+}
+
+/**
+ * The comment a deep link should land on. A deleted REPLY renders nothing, so
+ * an inbox notification or a share link that names one has no anchor to scroll
+ * to and no row to flash: land on the comment just above where it was — the
+ * nearest visible reply before it, or the thread root when it had none. The
+ * original id stays the notification's identity; only the landing moves.
+ *
+ * Any other id is its own target, including a deleted ROOT — that one still
+ * renders. `replies` must be the thread's replies in render order.
+ */
+export function commentLandingTarget(
+  commentId: string,
+  rootId: string,
+  replies: readonly TimelineEntry[],
+): string {
+  const index = replies.findIndex((reply) => reply.id === commentId);
+  if (index < 0 || !isDeletedComment(replies[index]!)) return commentId;
+  for (let i = index - 1; i >= 0; i--) {
+    const previous = replies[i]!;
+    if (!isDeletedComment(previous)) return previous.id;
+  }
+  return rootId;
 }
 
 function hasReplies(entries: readonly TimelineEntry[], commentId: string): boolean {

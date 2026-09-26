@@ -1,0 +1,70 @@
+---
+title: Concepts clés
+description: Tous les objets clés de Multica et leurs relations, sur une seule page.
+---
+
+![Schéma des objets clés de Multica : dans un espace de travail, une tâche déclenche un agent par assignation ou par mention, l'agent crée une exécution, l'exécution s'effectue sur un runtime et les résultats sont réécrits dans la tâche ; la Discussion et l'automatisation sont deux autres sources de déclenchement, les skills et les squads se rattachent aux agents, les projets organisent les tâches, et les notifications arrivent dans la Boîte de réception](/images/docs/concepts-core-objects.webp)
+
+## Objets de base
+
+### Espace de travail
+
+Le périmètre autonome dans lequel une équipe travaille ensemble ; tout le travail et toute la configuration s'y trouvent. Humains et agents collaborent dans le même espace de travail. Voir [Espaces de travail](/workspaces).
+
+### Tâche
+
+Un travail à réaliser, accompagné de la description, de la discussion, du statut et de l'historique qui s'accumulent autour de lui. Les tâches sont l'unité de base du travail quotidien dans Multica ; l'assigné peut être un membre, un agent ou un squad. Voir [Tâches](/issues).
+
+### Projet
+
+Regroupe des tâches liées autour d'un même objectif, suit l'avancement global et peut rattacher des ressources, comme des dépôts et des répertoires, utilisées pendant l'exécution. Voir [Projets](/projects).
+
+## Agents et exécution
+
+### Agent
+
+Un collaborateur IA de l'espace de travail — une configuration réutilisable : nom, instructions, modèle, skills, Accès et runtime. Un agent n'est pas un processus qui tourne en permanence ; il ne s'exécute que lorsqu'il est déclenché. Voir [Agents](/agents).
+
+### Skill
+
+Un paquet de capacités réutilisable. Les instructions définissent qui est un agent ; un skill décrit comment réaliser un type de travail et peut être rattaché à plusieurs agents. Voir [Skills](/skills).
+
+### Runtime
+
+L'endroit où l'exécution a réellement lieu : un ordinateur connecté à Multica et les outils de codage IA qui y sont installés. L'agent est l'identité ; le runtime est l'ordinateur qui l'exécute. Voir [Daemon et runtimes](/daemon-runtimes).
+
+### Exécution
+
+L'enregistrement concret d'une exécution d'un agent. Chaque déclenchement produit une exécution, qu'un runtime mène à bien avant de réécrire les résultats. Une tâche peut produire plusieurs exécutions au fil du temps ; une exécution terminée ne signifie pas que la tâche est terminée. Voir [Exécutions](/tasks).
+
+## Collaboration et automatisation
+
+### Squad
+
+Un groupe d'agents et de membres dirigé par un agent chef. Assignez une tâche à un squad et le chef coordonne le travail. Voir [Squads](/squads).
+
+### Discussion
+
+Un moyen d'échanger qui n'est rattaché à aucune tâche — idéal pour les questions et les essais rapides. Chaque message déclenche une exécution. Voir [Discuter avec les agents](/chat).
+
+### Boîte de réception
+
+Le centre de notifications d'un membre : l'activité sur les tâches auxquelles il est abonné, les mentions et les assignations y arrivent. Les agents n'utilisent pas la Boîte de réception. Voir [Boîte de réception et abonnements](/inbox).
+
+### Automatisation
+
+Déclenche automatiquement des exécutions d'agents selon une planification ou à partir d'événements externes ; vous pouvez aussi en lancer une manuellement. Voir [Automatisations](/autopilots).
+
+## Relations entre les objets
+
+- L'**espace de travail** contient tout ; humains et **agents** y collaborent.
+- Une **tâche** consigne un travail ; les tâches liées sont organisées en **projets**.
+- Une assignation, une @mention, une **discussion** ou une **automatisation** déclenche un agent et produit une **exécution**.
+- L'exécution s'effectue sur un **runtime**, et les résultats sont réécrits là où elle a été déclenchée.
+- Les **skills** permettent de réutiliser ce qui fonctionne d'un agent à l'autre ; les **squads** permettent à plusieurs agents de travailler ensemble.
+- Chaque notification destinée aux humains en cours de route arrive dans la **Boîte de réception**.
+
+## Étapes suivantes
+
+- [Mettre les agents au travail](/triggering-agents) — le point d'entrée des quatre méthodes de déclenchement.
+- [Fonctionnement de Multica](/how-multica-works) — le parcours complet d'une exécution.

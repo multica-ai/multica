@@ -92,7 +92,7 @@ function LeadIcon({
       <StatusIcon
         status={details.to}
         category={catalog.categoryOf(details.to)}
-        color={catalog.colorOf(details.to)}
+        icon={catalog.iconOf(details.to)} color={catalog.colorOf(details.to)}
         size={14}
       />
     );

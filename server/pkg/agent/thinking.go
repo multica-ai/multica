@@ -3,7 +3,10 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -39,7 +42,7 @@ type thinkingCacheKey struct {
 }
 
 type thinkingCacheEntry struct {
-	value     map[string]*ModelThinking // keyed by model ID
+	value     claudeEffortHelp
 	expiresAt time.Time
 }
 
@@ -50,17 +53,17 @@ var (
 	thinkingCache   = map[thinkingCacheKey]thinkingCacheEntry{}
 )
 
-func thinkingCacheGet(key thinkingCacheKey) (map[string]*ModelThinking, bool) {
+func thinkingCacheGet(key thinkingCacheKey) (claudeEffortHelp, bool) {
 	thinkingCacheMu.Lock()
 	defer thinkingCacheMu.Unlock()
 	entry, ok := thinkingCache[key]
 	if !ok || time.Now().After(entry.expiresAt) {
-		return nil, false
+		return claudeEffortHelp{}, false
 	}
 	return entry.value, true
 }
 
-func thinkingCachePut(key thinkingCacheKey, value map[string]*ModelThinking) {
+func thinkingCachePut(key thinkingCacheKey, value claudeEffortHelp) {
 	thinkingCacheMu.Lock()
 	defer thinkingCacheMu.Unlock()
 	thinkingCache[key] = thinkingCacheEntry{value: value, expiresAt: time.Now().Add(thinkingDiscoveryTTL)}
@@ -76,11 +79,14 @@ func resetThinkingCacheForTests() {
 
 // ── Claude ───────────────────────────────────────────────────────────
 //
-// `claude --help` advertises `--effort <level>` with the full superset
-// in parentheses; we parse that line to learn which levels the CLI
-// version on this host accepts. Per-model gaps (Opus-only `xhigh`,
-// session-only `max`) come from a hand-maintained table because the
-// CLI does not expose model→effort mappings programmatically.
+// Live discovery (claude_models.go) gets each model's effort levels from the
+// CLI itself. This section only serves the static catalog used when that
+// discovery fails: `claude --help` advertises `--effort <level>` with the full
+// superset in parentheses, and every static model offers that superset. There
+// is deliberately no per-model table — a fallback catalog is a picker
+// affordance, not something the daemon validates against, so narrowing it per
+// model would only be one more list to keep in step with new models
+// (MUL-7691).
 
 // claudeEffortRe matches the help line emitted by `claude --help`:
 //
@@ -100,50 +106,48 @@ var claudeEffortLabel = map[string]string{
 	"max":    "Max",
 }
 
-// claudeModelEffortAllow restricts the level set per model where the
-// upstream documentation says only some are valid. Empty / missing
-// model → use the parsed superset as-is (current Claude Code default).
-// Update this map when Anthropic publishes a new model that does not
-// support `xhigh` / `max`.
-var claudeModelEffortAllow = map[string]map[string]bool{
-	// Opus is the only model that publicly supports xhigh; the help
-	// list still includes it for Sonnet / Haiku so we filter here.
-	"claude-opus-5":             {"low": true, "medium": true, "high": true, "xhigh": true, "max": true},
-	"claude-opus-4-8":           {"low": true, "medium": true, "high": true, "xhigh": true, "max": true},
-	"claude-opus-4-7":           {"low": true, "medium": true, "high": true, "xhigh": true, "max": true},
-	"claude-opus-4-6":           {"low": true, "medium": true, "high": true, "xhigh": true, "max": true},
-	"claude-sonnet-4-6":         {"low": true, "medium": true, "high": true, "max": true},
-	"claude-sonnet-4-5":         {"low": true, "medium": true, "high": true, "max": true},
-	"claude-haiku-4-5-20251001": {"low": true, "medium": true, "high": true},
-}
-
-// claudeStaticEffortFallback is the conservative subset used when
-// parsing the `--effort` help line fails (binary missing, output drift,
-// etc.). Picked from the lowest-common-denominator across recent
-// Claude Code releases.
+// claudeStaticEffortFallback is the conservative picker used when
+// `claude --help` cannot be captured at all (binary missing, timeout).
+// Picked from the lowest-common-denominator across recent Claude Code
+// releases.
 var claudeStaticEffortFallback = []string{"low", "medium", "high"}
 
 // claudeStaticEffortFullSuperset is what `claude --help` listed on
-// 2.1.121. Used as the catalog superset when a model isn't in the
-// per-model allow-list — we'd rather over-offer and let the CLI
-// reject than artificially block valid combinations.
+// 2.1.121. The picker offers it when help names `--effort` but its value
+// list no longer parses — we'd rather over-offer and let the CLI reject
+// than artificially block valid combinations.
 var claudeStaticEffortFullSuperset = []string{"low", "medium", "high", "xhigh", "max"}
 
-// annotateClaudeThinking populates each entry's Thinking field by
-// running `claude --help` once and projecting the parsed superset
-// through claudeModelEffortAllow. Errors are silently absorbed so a
-// missing CLI doesn't break model listing — the UI just hides the
-// picker for that model.
-func annotateClaudeThinking(ctx context.Context, models []Model, cmd Command) {
-	mapping := loadClaudeThinkingByModel(ctx, cmd)
-	for i := range models {
-		if t, ok := mapping[models[i].ID]; ok && t != nil {
-			models[i].Thinking = t
-		}
-	}
+// claudeEffortHelp is what one `claude --help` run established about
+// `--effort`.
+type claudeEffortHelp struct {
+	// flag is the binary's own vocabulary, surfaced as
+	// Catalog.CLIThinkingLevels: nil when help could not establish it, a
+	// non-nil empty slice when the binary predates the flag.
+	flag []string
+	// picker is what the static catalog offers every model.
+	picker []string
 }
 
-func loadClaudeThinkingByModel(ctx context.Context, cmd Command) map[string]*ModelThinking {
+// annotateClaudeThinking gives every static model the effort picker read
+// from `claude --help` and returns the binary's own `--effort` vocabulary
+// (see claudeEffortHelp.flag). Errors are silently absorbed so a missing
+// CLI doesn't break model listing.
+func annotateClaudeThinking(ctx context.Context, models []Model, cmd Command) []string {
+	help := loadClaudeEffortHelp(ctx, cmd)
+	levels := claudeThinkingLevels(help.picker)
+	if len(levels) > 0 {
+		for i := range models {
+			models[i].Thinking = &ModelThinking{
+				SupportedLevels: append([]ThinkingLevel(nil), levels...),
+				DefaultLevel:    "medium",
+			}
+		}
+	}
+	return help.flag
+}
+
+func loadClaudeEffortHelp(ctx context.Context, cmd Command) claudeEffortHelp {
 	if cmd.Path == "" {
 		cmd.Path = "claude"
 	}
@@ -152,59 +156,45 @@ func loadClaudeThinkingByModel(ctx context.Context, cmd Command) map[string]*Mod
 	if cached, ok := thinkingCacheGet(key); ok {
 		return cached
 	}
-
-	superset := claudeEffortSuperset(ctx, cmd)
-	result := map[string]*ModelThinking{}
-	for _, m := range claudeStaticModels() {
-		allow := claudeModelEffortAllow[m.ID]
-		levels := projectClaudeLevels(superset, allow)
-		if len(levels) == 0 {
-			continue
-		}
-		result[m.ID] = &ModelThinking{
-			SupportedLevels: levels,
-			DefaultLevel:    "medium",
-		}
-	}
-	thinkingCachePut(key, result)
-	return result
+	help := readClaudeEffortHelp(ctx, cmd)
+	thinkingCachePut(key, help)
+	return help
 }
 
-// claudeEffortSuperset returns the parsed `--effort` value list. When
-// the help output can't be captured at all it returns the static
-// fallback rather than nothing so callers can still render a usable
-// picker.
-func claudeEffortSuperset(ctx context.Context, runtimeCmd Command) []string {
+// readClaudeEffortHelp runs `claude --help`. When its output can't be
+// captured at all the binary's vocabulary is unknown, and the picker still
+// gets the conservative static subset so it stays usable.
+func readClaudeEffortHelp(ctx context.Context, runtimeCmd Command) claudeEffortHelp {
 	cmd := runtimeCmd.exec(ctx, "--help")
 	hideAgentWindow(cmd)
 	out, err := combinedOutputOwned(cmd, runtimeCmd.logger)
 	if err != nil {
-		return append([]string(nil), claudeStaticEffortFallback...)
+		return claudeEffortHelp{picker: append([]string(nil), claudeStaticEffortFallback...)}
 	}
-	return claudeEffortLevelsFromHelp(string(out))
+	return claudeEffortHelpFromText(string(out))
 }
 
-// claudeEffortLevelsFromHelp decides the effort superset from a
-// successfully captured `claude --help`. Three cases:
-//   - the value list parsed → use it verbatim;
+// claudeEffortHelpFromText reads a successfully captured `claude --help`.
+// Three cases:
+//   - the value list parsed → it is both the binary's vocabulary and the
+//     picker;
 //   - `--effort` is advertised but the value list didn't parse → help
-//     format drifted; fall back to the last known good superset so
-//     newer levels are still offered until we hand-edit the fallback;
-//   - `--effort` is absent entirely → the installed CLI predates the
-//     flag. Return no levels: offering any would let the daemon pass
-//     ValidateThinkingLevel and inject --effort, which such a binary
-//     rejects with `error: unknown option '--effort'` — hard-failing
-//     every task for an agent with a persisted thinking_level instead
-//     of degrading to a plain run.
-func claudeEffortLevelsFromHelp(helpText string) []string {
-	parsed := parseClaudeEffortHelp(helpText)
-	if len(parsed) > 0 {
-		return parsed
+//     format drifted. The vocabulary is unknown, so nothing is vetoed, and
+//     the picker falls back to the last known good superset;
+//   - `--effort` is absent entirely → the installed CLI predates the flag.
+//     Its vocabulary is empty and the picker offers nothing: injecting
+//     --effort would make such a binary reject the launch with
+//     `error: unknown option '--effort'` — hard-failing every task for an
+//     agent with a persisted thinking_level instead of degrading to a plain
+//     run.
+func claudeEffortHelpFromText(helpText string) claudeEffortHelp {
+	if parsed := parseClaudeEffortHelp(helpText); len(parsed) > 0 {
+		return claudeEffortHelp{flag: parsed, picker: parsed}
 	}
 	if strings.Contains(helpText, "--effort") {
-		return append([]string(nil), claudeStaticEffortFullSuperset...)
+		return claudeEffortHelp{picker: append([]string(nil), claudeStaticEffortFullSuperset...)}
 	}
-	return nil
+	return claudeEffortHelp{flag: []string{}}
 }
 
 // parseClaudeEffortHelp extracts the comma-separated value list from a
@@ -226,12 +216,9 @@ func parseClaudeEffortHelp(helpText string) []string {
 	return out
 }
 
-func projectClaudeLevels(superset []string, allow map[string]bool) []ThinkingLevel {
-	out := make([]ThinkingLevel, 0, len(superset))
-	for _, value := range superset {
-		if allow != nil && !allow[value] {
-			continue
-		}
+func claudeThinkingLevels(values []string) []ThinkingLevel {
+	out := make([]ThinkingLevel, 0, len(values))
+	for _, value := range values {
 		label, ok := claudeEffortLabel[value]
 		if !ok {
 			// New value the daemon hasn't been taught yet — surface
@@ -245,25 +232,24 @@ func projectClaudeLevels(superset []string, allow map[string]bool) []ThinkingLev
 
 // ── Codex ────────────────────────────────────────────────────────────
 //
-// `codex debug models --bundled` is the structured discovery hook for the
-// visible model catalog, each model's reasoning catalog, and service tiers. OpenAI added
-// the command and `--bundled` flag together in Codex 0.122.0 (openai/codex
-// #18625). Older versions, failed invocations, and malformed/empty payloads
-// use codexStaticModels so the picker remains usable.
+// `codex debug models` is the structured discovery hook for the live visible
+// model catalog, each model's reasoning catalog, and service tiers. OpenAI
+// added the command in Codex 0.122.0 (openai/codex #18625). Older versions,
+// failed invocations, and malformed/empty payloads use the bundled catalog and
+// then codexStaticModels so the picker remains usable offline.
 //
 // We prefer this over the older config-error probe trick because:
 //   1. It gives us per-model subsets without hand-maintained tables.
 //   2. The schema is structured and has been stable since its 0.122.0 debut.
 //   3. It doesn't pollute stderr with an intentional misconfiguration.
 //
-// The subcommand emits JSON on stdout by default — there is no
-// `--output json` flag (a prior version of this code passed one and
-// silently failed on 0.131.0). We add `--bundled` to skip the network
-// refresh: discovery runs on every daemon poll and a network hop here
-// would block the picker behind whatever the user's connection allows.
-// The bundled catalog is what determines which `model_reasoning_effort`
-// tokens the local binary actually accepts, which is the only thing we
-// need for validation.
+// The subcommand emits JSON on stdout by default — there is no `--output json`
+// flag (a prior version of this code passed one and silently failed on
+// 0.131.0). The live form matters because Codex can receive new account-visible
+// models without a CLI release; `--bundled` only reflects the binary's compiled
+// snapshot. A failed live refresh falls back to `--bundled`, marked
+// non-authoritative so neither daemon nor server caches pin it after the
+// network recovers.
 //
 // The static fallback deliberately mirrors a recently verified bundled
 // model/thinking catalog. It does not guess service-tier availability.
@@ -290,7 +276,7 @@ const (
 )
 
 // codexDebugModelsResponse mirrors the JSON shape emitted by
-// `codex debug models --bundled` (Codex 0.122.0+). Only the fields we
+// `codex debug models` (Codex 0.122.0+). Only the fields we
 // consume are typed; unknown keys are ignored.
 type codexDebugModelsResponse struct {
 	Models []codexDebugModel `json:"models"`
@@ -316,32 +302,50 @@ type codexDebugServiceTier struct {
 	Description string `json:"description"`
 }
 
-// discoverCodexModels returns the installed Codex binary's bundled visible
+// discoverCodexCatalog returns the installed Codex binary's live visible
 // catalog, including reasoning metadata. Version detection happens before the
 // debug command so old binaries do not log a predictable "unknown command"
 // failure on every cache refresh.
-func discoverCodexModels(ctx context.Context, cmd Command) []Model {
+func discoverCodexCatalog(ctx context.Context, cmd Command) Catalog {
 	if cmd.Path == "" {
 		cmd.Path = "codex"
 	}
 	version, err := DetectVersion(ctx, cmd)
 	if err != nil {
-		return codexStaticModels()
+		return Catalog{Models: codexStaticModels(), Fallback: true}
 	}
 	supportsExplicitStandard := codexSupportsExplicitStandardServiceTier(version)
 	if !codexSupportsDebugModels(version) {
-		return annotateCodexExplicitStandardServiceTier(codexStaticModels(), supportsExplicitStandard)
+		return Catalog{
+			Models:   annotateCodexExplicitStandardServiceTier(codexStaticModels(), supportsExplicitStandard),
+			Fallback: true,
+		}
 	}
 
-	raw, err := runCodexDebugModels(ctx, cmd)
-	if err != nil {
-		return annotateCodexExplicitStandardServiceTier(codexStaticModels(), supportsExplicitStandard)
+	liveCtx, cancel := context.WithTimeout(ctx, codexLiveCatalogTimeout)
+	raw, err := runCodexDebugModels(liveCtx, cmd, codexDebugModelsArgs...)
+	cancel()
+	if err == nil {
+		models, parseErr := parseCodexModelCatalog(raw)
+		if parseErr == nil && len(models) > 0 {
+			return Catalog{Models: annotateCodexExplicitStandardServiceTier(models, supportsExplicitStandard)}
+		}
 	}
-	models, err := parseCodexModelCatalog(raw)
-	if err != nil || len(models) == 0 {
-		return annotateCodexExplicitStandardServiceTier(codexStaticModels(), supportsExplicitStandard)
+
+	raw, err = runCodexDebugModels(ctx, cmd, codexBundledDebugModelsArgs...)
+	if err == nil {
+		models, parseErr := parseCodexModelCatalog(raw)
+		if parseErr == nil && len(models) > 0 {
+			return Catalog{
+				Models:   annotateCodexExplicitStandardServiceTier(models, supportsExplicitStandard),
+				Fallback: true,
+			}
+		}
 	}
-	return annotateCodexExplicitStandardServiceTier(models, supportsExplicitStandard)
+	return Catalog{
+		Models:   annotateCodexExplicitStandardServiceTier(codexStaticModels(), supportsExplicitStandard),
+		Fallback: true,
+	}
 }
 
 func codexSupportsDebugModels(version string) bool {
@@ -374,23 +378,25 @@ func annotateCodexExplicitStandardServiceTier(models []Model, supported bool) []
 	return models
 }
 
-// codexDebugModelsArgs is the argv we pass to discover the local Codex
-// catalog. Kept as a package-level var (not a literal at the call site)
-// so tests can assert the exact form a real `codex` invocation receives,
-// not just the parser behavior on a fixture string. The argv shape is
-// the contract that broke under PR1 review; the test that pins it sits
-// in thinking_test.go.
-var codexDebugModelsArgs = []string{"debug", "models", "--bundled"}
+const codexLiveCatalogTimeout = 15 * time.Second
 
-func runCodexDebugModels(ctx context.Context, runtimeCmd Command) ([]byte, error) {
-	cmd := runtimeCmd.exec(ctx, codexDebugModelsArgs...)
+// codexDebugModelsArgs is the argv we pass for the authoritative live catalog.
+// codexBundledDebugModelsArgs is the offline fallback. Kept as package-level
+// vars so tests can assert the exact form a real `codex` invocation receives.
+var (
+	codexDebugModelsArgs        = []string{"debug", "models"}
+	codexBundledDebugModelsArgs = []string{"debug", "models", "--bundled"}
+)
+
+func runCodexDebugModels(ctx context.Context, runtimeCmd Command, args ...string) ([]byte, error) {
+	cmd := runtimeCmd.exec(ctx, args...)
 	hideAgentWindow(cmd)
 	return outputOwned(cmd, runtimeCmd.logger)
 }
 
 // parseCodexModelCatalog projects the CLI's raw catalog into the daemon wire
 // model. Hidden entries are intentionally excluded to match Codex's own model
-// picker; the first visible entry is the bundled catalog's preferred default.
+// picker; the first visible entry is the catalog's preferred default.
 func parseCodexModelCatalog(raw []byte) ([]Model, error) {
 	var resp codexDebugModelsResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
@@ -424,6 +430,10 @@ func normalizeCodexModelLabel(id, label string) string {
 	switch id {
 	case "gpt-6-astra":
 		return "GPT-6 Astra"
+	case "gpt-6-sol":
+		return "GPT-6 Sol"
+	case "gpt-6-luna":
+		return "GPT-6 Luna"
 	case "gpt-5.6-sol":
 		return "GPT-5.6 Sol"
 	case "gpt-5.6-terra":
@@ -648,6 +658,15 @@ func catalogLoader(ctx context.Context, providerType string, cmd Command) func()
 //     "unknown model → reject" (the misjudgement flagged in an earlier
 //     review). opencode has no single default, so it accepts a level any
 //     advertised model supports.
+//   - omp: fails closed for the same reason by a different route — see
+//     ThinkingRequiresExplicitModel.
+//
+// Only a catalog discovery verified may reject a level. A fallback or empty
+// catalog (see Catalog.Verified) answers with errUnverifiedCatalog, which the
+// daemon treats like any lookup failure: the saved level goes to the CLI
+// unchanged. The one thing still enforced there is the binary's own effort
+// vocabulary (Catalog.CLIThinkingLevels) — a Claude CLI without `--effort`
+// rejects the launch outright, whatever model it would have run.
 //
 // The lookup goes through ListModels so it sees the *current* CLI
 // catalog (including dynamic discovery for codex), not just a static
@@ -673,16 +692,23 @@ func ValidateThinkingLevelWith(loadCatalog func() (Catalog, error), providerType
 	if value == "" {
 		return true, nil
 	}
-	// Codex empty-model fail-closed (see doc comment). Checked before the
-	// catalog load so the outcome is deterministic even when discovery would
-	// error — an errored lookup makes the daemon pass the level through, which
-	// is exactly what we must NOT do for an unresolved codex model.
-	if model == "" && providerType == "codex" {
+	// Empty-model fail-closed, checked BEFORE the catalog load so the outcome is
+	// deterministic even when discovery would error. That ordering is the whole
+	// point: on a lookup error the daemon passes the level through to the CLI
+	// (see its thinking_level guard), which is exactly what must not happen for
+	// a provider whose effective model we cannot know.
+	if model == "" && ThinkingRequiresExplicitModel(providerType) {
 		return false, nil
 	}
 	catalog, err := loadCatalog()
 	if err != nil {
 		return false, err
+	}
+	if catalog.CLIThinkingLevels != nil && !slices.Contains(catalog.CLIThinkingLevels, value) {
+		return false, nil
+	}
+	if !catalog.Verified() {
+		return false, fmt.Errorf("%w; cannot validate %s thinking level %q", errUnverifiedCatalog, providerType, value)
 	}
 	models := catalog.Models
 	target := modelIDForCapabilityLookup(providerType, model)
@@ -698,6 +724,9 @@ func ValidateThinkingLevelWith(loadCatalog func() (Catalog, error), providerType
 			}
 		}
 		if target == "" {
+			// opencode has no single default model, so it accepts a level any
+			// advertised model supports. Providers that instead require a pinned
+			// model never reach here — they were already rejected above.
 			if providerType == "opencode" {
 				return anyModelSupportsThinkingValue(models, value), nil
 			}
@@ -727,6 +756,50 @@ func ValidateThinkingLevelWith(loadCatalog func() (Catalog, error), providerType
 	return false, nil
 }
 
+// errUnverifiedCatalog is what the capability checks answer when the catalog
+// they were handed is not the runtime's own (see Catalog.Verified). It is an
+// error rather than a "no" on purpose: the daemon passes a value it could not
+// check through to the CLI instead of discarding the user's saved choice.
+var errUnverifiedCatalog = errors.New("model discovery did not return the runtime's own catalog")
+
+// ThinkingRequiresExplicitModel reports whether a provider refuses to carry an
+// effort unless a model is pinned, because its empty-model resolution happens
+// somewhere Multica cannot observe:
+//
+//   - codex: the effective model comes from the local config.toml and can be any
+//     installed model, so borrowing the catalog's Default entry would green-light
+//     levels the configured model may not support (MUL-4347).
+//   - omp: its `models --json` catalog marks no default at all and sorts by
+//     provider/id, so no entry here is the one that would run. At task time omp
+//     resolves its own default role model and clamps the requested level to what
+//     THAT model supports, so a level validated against any other entry is not
+//     the level that runs (MUL-7412).
+//
+// Both are checked before any catalog read, so discovery failing cannot turn
+// into "pass the level through".
+func ThinkingRequiresExplicitModel(providerType string) bool {
+	switch providerType {
+	case "codex", "omp":
+		return true
+	}
+	return false
+}
+
+// ThinkingLevelRejectedWithoutModel reports whether the API should refuse to
+// STORE an effort that has no pinned model, instead of storing it and leaving
+// the daemon to drop it at launch.
+//
+// Deliberately narrower than ThinkingRequiresExplicitModel. codex shares the
+// execution constraint but predates this check: agents out there already hold an
+// effort alongside an empty model, and 400ing that combination would block
+// unrelated edits to them, so codex stays grandfathered and the daemon keeps
+// dropping the level. omp has no such history — persisting an effort at all was
+// impossible before MUL-7412 — so it is strict from the start and the invalid
+// combination never reaches storage.
+func ThinkingLevelRejectedWithoutModel(providerType string) bool {
+	return providerType == "omp"
+}
+
 // ValidateServiceTier reports whether value is advertised by the current
 // Codex catalog for the explicit model. An empty value is always valid and
 // means "inherit runtime configuration". Codex's "default" sentinel is valid
@@ -753,6 +826,11 @@ func ValidateServiceTierWith(loadCatalog func() (Catalog, error), providerType, 
 	if err != nil {
 		return false, err
 	}
+	// Explicit standard routing is a CLI-version capability, not a per-model
+	// one: discoverCodexCatalog stamps it on every entry, fallback entries
+	// included, from the installed version alone. Resolve it before the
+	// unverified-catalog pass-through below: an old CLI must never receive
+	// "default" just because discovery failed.
 	if value == codexStandardServiceTier {
 		for _, candidate := range catalog.Models {
 			if candidate.SupportsExplicitStandardServiceTier {
@@ -760,6 +838,9 @@ func ValidateServiceTierWith(loadCatalog func() (Catalog, error), providerType, 
 			}
 		}
 		return false, nil
+	}
+	if !catalog.Verified() {
+		return false, fmt.Errorf("%w; cannot validate %s service tier %q", errUnverifiedCatalog, providerType, value)
 	}
 	for _, m := range catalog.Models {
 		if m.ID != model {
@@ -824,6 +905,20 @@ var providerThinkingEnums = map[string]map[string]bool{
 	// Pi owns a fixed CLI vocabulary; RPC discovery narrows this universe to
 	// the exact subset supported by each model before execution.
 	"pi": {
+		"off":     true,
+		"minimal": true,
+		"low":     true,
+		"medium":  true,
+		"high":    true,
+		"xhigh":   true,
+		"max":     true,
+	},
+	// omp (Oh-My-Pi) dispatches to the pi backend (see BuiltinRuntimes), so it
+	// inherits pi's fixed CLI vocabulary; discoverOmpModels narrows it to each
+	// model's advertised efforts before execution. `auto` is deliberately absent
+	// even though omp's --thinking accepts it — see ompThinkingFromCatalogEntry
+	// (MUL-7412).
+	"omp": {
 		"off":     true,
 		"minimal": true,
 		"low":     true,

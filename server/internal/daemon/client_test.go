@@ -100,6 +100,72 @@ func TestClient_IdentityHeaders_GetJSON(t *testing.T) {
 	}
 }
 
+func TestStartTaskCapabilityNegotiationMixedVersions(t *testing.T) {
+	defer noSleepRetry(t)()
+	const prefix = `{"supplement_capability":"task-supplement-v1","issue":{"description":"`
+	const suffix = `"}}`
+	responseAtLimit := prefix + strings.Repeat("x", (1<<20)-len(prefix)-len(suffix)) + suffix
+	for _, tc := range []struct {
+		name          string
+		response      string
+		contentLength string
+		negotiated    bool
+		wantError     bool
+		retry         bool
+	}{
+		{name: "empty response", response: ""},
+		{name: "truncated HTTP body", contentLength: "8", wantError: true, retry: true},
+		{name: "truncated response", response: `{"supplement_capability":`, wantError: true},
+		{name: "trailing garbage", response: `{"supplement_capability":"task-supplement-v1"}garbage`, wantError: true},
+		{name: "HTML response", response: `<html>Proxy error</html>`, wantError: true},
+		{name: "response at size limit", response: responseAtLimit, negotiated: true},
+		{name: "response exceeds size limit", response: responseAtLimit + " ", wantError: true},
+		{name: "old server task response", response: `{"id":"task-1","status":"running"}`, negotiated: false},
+		{name: "new server explicit capability", response: `{"supplement_capability":"task-supplement-v1"}`, negotiated: true},
+	} {
+		for _, mode := range []string{"legacy", "claim-fenced"} {
+			t.Run(tc.name+"/"+mode, func(t *testing.T) {
+				var calls atomic.Int32
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls.Add(1)
+					var body struct {
+						Capabilities []string `json:"capabilities"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Errorf("decode start request: %v", err)
+					}
+					if len(body.Capabilities) != 1 || body.Capabilities[0] != protocol.DaemonCapabilityTaskSupplementV1 {
+						t.Errorf("capabilities = %#v", body.Capabilities)
+					}
+					w.Header().Set("Content-Type", "application/json")
+					if tc.contentLength != "" {
+						w.Header().Set("Content-Length", tc.contentLength)
+					}
+					_, _ = w.Write([]byte(tc.response))
+				}))
+				defer srv.Close()
+
+				task := startTestClaim()
+				task.StartClaimSupported = mode == "claim-fenced"
+				got, err := NewClient(srv.URL).StartTask(context.Background(), task, protocol.DaemonCapabilityTaskSupplementV1)
+				if (err != nil) != tc.wantError {
+					t.Errorf("StartTask: %v", err)
+				}
+				if got != tc.negotiated {
+					t.Errorf("negotiated = %v, want %v", got, tc.negotiated)
+				}
+				wantCalls := 1
+				if tc.retry && task.StartClaimSupported {
+					wantCalls += len(startTaskRetrySchedule)
+				}
+				if got := int(calls.Load()); got != wantCalls {
+					t.Errorf("requests = %d, want %d", got, wantCalls)
+				}
+			})
+		}
+	}
+}
+
 func TestClient_ResolveRemoteMCPCredentialUsesExplicitDaemonToken(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer mdt_task_broker" {
@@ -422,20 +488,22 @@ func TestPostJSONWithRetry_PermanentBailsImmediately(t *testing.T) {
 }
 
 func TestPostJSONWithRetry_CtxCancelStopsRetries(t *testing.T) {
+	t.Parallel()
+
 	// Use the real sleeper here so we can observe a cancel preempting it.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		w.WriteHeader(http.StatusBadGateway)
+		w.(http.Flusher).Flush()
+		// Cancel only once the first attempt has been answered: it lands while
+		// the client finishes that response or in the 1s retry sleep after it,
+		// never before the first attempt, and no second attempt can start.
+		cancel()
 	}))
 	defer srv.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		// Cancel quickly so the first sleep is aborted long before its 1s.
-		time.Sleep(50 * time.Millisecond)
-		cancel()
-	}()
 
 	c := NewClient(srv.URL)
 	schedule := []time.Duration{time.Second, time.Second, time.Second}

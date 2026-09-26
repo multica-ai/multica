@@ -126,6 +126,7 @@ WITH checks AS (
 )
 SELECT
     pr.*,
+    COALESCE(ipr.linked_by_type, 'system')::text AS linked_by_type,
     COALESCE(c.total, 0)::bigint   AS checks_total,
     COALESCE(c.passed, 0)::bigint  AS checks_passed,
     COALESCE(c.failed, 0)::bigint  AS checks_failed,
@@ -135,32 +136,6 @@ JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
 LEFT JOIN checks c ON c.pr_id = pr.id
 WHERE ipr.issue_id = sqlc.arg('issue_id')
 ORDER BY pr.pr_created_at DESC;
-
--- name: GetIssueCombinedPullRequestCloseAggregate :one
--- Cross-provider close gate. An issue can carry PRs from GitHub AND a
--- self-hosted VCS provider at the same time, so auto-advance has to see BOTH
--- table pairs. Reading only one (as the per-provider aggregates do) lets a
--- merged close-intent PR/MR on one provider advance an issue that still has an
--- open PR on the other — either webhook is blind to the other's in-flight work.
--- Sum the in-flight (open/draft) and merged-with-close-intent counts across
--- github_pull_request+issue_pull_request and vcs_pull_request+
--- issue_vcs_pull_request. A bare body mention is not linked on either side, so
--- a passing reference never counts as in-flight.
-WITH combined AS (
-    SELECT pr.state AS state, ipr.close_intent AS close_intent
-    FROM github_pull_request pr
-    JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-    WHERE ipr.issue_id = $1
-    UNION ALL
-    SELECT pr.state AS state, ipr.close_intent AS close_intent
-    FROM vcs_pull_request pr
-    JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
-    WHERE ipr.issue_id = $1
-)
-SELECT
-    COALESCE(SUM(CASE WHEN state IN ('open', 'draft') THEN 1 ELSE 0 END), 0)::bigint AS open_count,
-    COALESCE(SUM(CASE WHEN state = 'merged' AND close_intent THEN 1 ELSE 0 END), 0)::bigint AS merged_with_close_intent_count
-FROM combined;
 
 -- =====================
 -- VCS commit status (CI)
@@ -194,28 +169,59 @@ WHERE pr.connection_id = $1 AND pr.head_sha = $2 AND pr.head_sha <> '';
 -- Issue ↔ VCS PR link
 -- =====================
 
--- name: LinkIssueToVCSPullRequest :exec
--- Mirrors the GitHub link upsert: preserve_close_intent freezes close_intent
--- once a terminal merge/close event has been recorded.
+-- name: LinkIssueToVCSPullRequest :execrows
+-- Mirrors LinkIssueToPullRequest: automatic link, 1 only when new.
 INSERT INTO issue_vcs_pull_request (
-    issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent
+    issue_id, pull_request_id, linked_by_type, linked_by_id
 ) VALUES (
-    $1, $2, sqlc.narg('linked_by_type'), sqlc.narg('linked_by_id'), $3
+    $1, $2, 'system', NULL
+)
+ON CONFLICT (issue_id, pull_request_id) DO NOTHING;
+
+-- name: SyncVCSPullRequestCloseIntent :exec
+-- Mirrors SyncPullRequestCloseIntent.
+UPDATE issue_vcs_pull_request
+SET close_intent = (issue_id = ANY(sqlc.arg('closing_issue_ids')::uuid[]))
+WHERE pull_request_id = sqlc.arg('pull_request_id')
+  AND close_intent <> (issue_id = ANY(sqlc.arg('closing_issue_ids')::uuid[]));
+
+-- name: LinkIssueToVCSPullRequestManually :execrows
+INSERT INTO issue_vcs_pull_request (
+    issue_id, pull_request_id, linked_by_type, linked_by_id
+) VALUES (
+    $1, $2, 'member', sqlc.narg('linked_by_id')
 )
 ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
-    close_intent = CASE
-        WHEN sqlc.arg('preserve_close_intent') THEN issue_vcs_pull_request.close_intent
-        ELSE EXCLUDED.close_intent
-    END;
+    linked_by_type = 'member',
+    linked_by_id = EXCLUDED.linked_by_id
+WHERE issue_vcs_pull_request.linked_by_type IS DISTINCT FROM 'member';
 
--- name: UnlinkIssueFromVCSPullRequest :exec
--- Drops a link an earlier claim created, for the GitHub twin's reason: while a
--- PR is still editable, the link follows the live title/body parse, so a key the
--- payload still carries but no longer claims — "Closes MUL-1" edited down to
--- "Related MUL-1" — loses its link. A key deleted from the PR outright is NOT
--- covered: the payload keeps no trace of it, so noticing that needs the stored
--- links instead, which is its own change. Callers must not run this once the PR
--- has gone terminal — a post-merge edit cannot retroactively unlink a PR that
--- did the work.
+-- name: ListIssueIDsForVCSPullRequest :many
+SELECT issue_id FROM issue_vcs_pull_request
+WHERE pull_request_id = $1;
+
+-- name: ListAutoLinkedIssueIDsForVCSPullRequest :many
+SELECT issue_id FROM issue_vcs_pull_request
+WHERE pull_request_id = $1
+  AND COALESCE(linked_by_type, 'system') <> 'member';
+
+-- name: UnlinkIssueFromVCSPullRequest :execrows
 DELETE FROM issue_vcs_pull_request
 WHERE issue_id = $1 AND pull_request_id = $2;
+
+-- name: GetVCSPullRequestByKey :one
+-- The stored row before a webhook upsert, so the handler can tell a merge
+-- transition apart from a later event on an already-merged PR.
+SELECT * FROM vcs_pull_request
+WHERE connection_id = $1 AND repo_owner = $2 AND repo_name = $3 AND pr_number = $4;
+
+-- name: GetVCSPullRequestInWorkspace :one
+SELECT * FROM vcs_pull_request
+WHERE id = $1 AND workspace_id = $2;
+
+-- name: FindVCSPullRequestByURL :one
+SELECT * FROM vcs_pull_request
+WHERE workspace_id = $1
+  AND lower(rtrim(html_url, '/')) = lower(sqlc.arg('html_url')::text)
+ORDER BY pr_updated_at DESC
+LIMIT 1;

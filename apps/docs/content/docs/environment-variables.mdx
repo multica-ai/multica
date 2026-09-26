@@ -42,7 +42,7 @@ You also need to pick an email service, otherwise verification codes and invitat
 | `PORT` | `8080` | API listen port |
 | `JWT_SECRET` | required in production | Secret for sign-in JWTs and some signing flows; production refuses to boot on empty or known placeholders |
 | `APP_ENV` | empty | Set to `production` in production |
-| `AUTH_TOKEN_TTL` | `720h` (30 days) | Lifetime of browser JWTs and cookies; accepts a Go duration or a positive integer of seconds |
+| `AUTH_TOKEN_TTL` | `720h` (30 days) | Lifetime of browser JWTs and cookies; accepts a Go duration or a positive integer of seconds. Sessions slide: one in continuous use is re-issued rather than expiring, from the halfway point of its lifetime onward. Values below `60s` are clamped to `60s` |
 | `LOG_LEVEL` | application default | Log level |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | How long to wait after a termination signal before graceful shutdown begins |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | How long an offline runtime may reconnect before its in-flight runs fail; values below `150s` are clamped |
@@ -206,8 +206,11 @@ This group configures server-side assist generation, such as conversation titles
 | `MULTICA_LLM_BASE_URL` | empty | OpenAI-compatible endpoint |
 | `MULTICA_LLM_DEFAULT_MODEL` | `gpt-5.6-luna` | Used when a request does not specify a model |
 | `MULTICA_LLM_MAX_RETRIES` | `2` | Retry ceiling per call; `0` disables retries, `1`–`5` cap it at N |
+| `MULTICA_LLM_DISABLE_THINKING` | `false` | Add `chat_template_kwargs: {"enable_thinking": false}` to every request, for gateways that honor the field |
 
 `MULTICA_LLM_MAX_RETRIES` is the single source for the retry policy. Leave it unset for the default of 2, set `0` to send exactly one request per call, or set 1–5 to cap retries at that many. It is a ceiling, not a quota: only retryable failures consume it, and a success or the caller's own deadline can end the call sooner. Any other value — negative, non-numeric, or above 5 — fails startup instead of being corrected silently. The ceiling is a latency budget: backoff starts at 0.5s and doubles to an 8s cap, so a larger budget would outlast the callers' own deadlines and turn a retryable failure into a timeout. Retries cover connection failures and HTTP 408, 409, 429 and 5xx; all other 4xx responses are returned as-is. The server logs the effective policy at startup as `llm retry policy`, with no credentials in the line.
+
+`MULTICA_LLM_DISABLE_THINKING` is for gateways whose models spend a reasoning ("thinking") pass that dominates the latency budget of the assist calls. When set to `true` (or `1`), the server adds `chat_template_kwargs: {"enable_thinking": false}` to every request body; gateways that forward the field — vLLM/sglang-style deployments and some GLM/Qwen-style LiteLLM routes — then skip the thinking pass. Standard OpenAI endpoints reject unknown body fields, so only enable this when your upstream accepts it. GPT-5.6-family models already get `reasoning_effort: none` on the follow-up questions request. Chat auto-titling sends no reasoning field; this switch affects it only when the configured upstream accepts `chat_template_kwargs`. Accepted values are `true`/`false` and `1`/`0` (case-insensitive); anything else fails startup. The startup log reports the effective state alongside the retry policy.
 
 Two features use this layer, and each one sends chat content to the endpoint you configure:
 
@@ -304,11 +307,16 @@ A few value rules:
 
 | Variable | Default | Description |
 |---|---|---|
+| `DO_NOT_TRACK` | empty (telemetry enabled) | Set `1` or `true` (case-insensitive) to stop first-party anonymous self-host telemetry collection and delivery |
 | `ANALYTICS_DISABLED` | `false` | Set `true` to turn off PostHog reporting |
 | `POSTHOG_API_KEY` | empty | Reporting is off when unset; set it to use your own PostHog project |
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog host |
 | `METRICS_ADDR` | empty | Prometheus metrics listen address; empty means not started |
 | `REALTIME_METRICS_TOKEN` | empty | Bearer token protecting `/health/realtime` |
+
+First-party self-host telemetry sends one deployment-level snapshot per UTC day to the fixed, non-configurable `https://telemetry.multica.ai/v1/telemetry/events` endpoint. It contains the formal release version; bucketed workspace, distinct-human-member, active-agent, and 24-hour active-daemon counts; and aggregate run counts for the previous 24 hours. It never includes names, email addresses or domains, IP addresses, business identifiers, host/device details, repositories, models/plugins, prompts/output, comments/chats, paths, token/cost data, credentials, errors, stacks, or logs. It is used only to understand self-hosted version adoption, deployment-size ranges, and aggregate usage—not for billing, licensing, authentication, or security decisions.
+
+`DO_NOT_TRACK` and `ANALYTICS_DISABLED` are independent. The former controls this first-party anonymous snapshot; the latter controls the optional PostHog integration.
 
 ## Next steps
 

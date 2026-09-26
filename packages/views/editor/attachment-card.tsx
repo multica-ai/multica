@@ -11,7 +11,7 @@
 
 import { Download, Eye, FileText, Loader2, Trash2 } from "lucide-react";
 import { useT } from "../i18n";
-import { getPreviewKind } from "./utils/preview";
+import { canOpenPreview, getPreviewKind } from "./utils/preview";
 
 interface AttachmentCardChromeProps {
   filename: string;
@@ -135,15 +135,9 @@ export function AttachmentCard({
   onDelete,
 }: AttachmentCardProps) {
   const kind = filename ? getPreviewKind(contentType, filename) : null;
-  // Media kinds (pdf/video/audio) are previewable from a URL alone — the
-  // modal renders them as <video>/<audio>/<iframe src=url>. Text kinds
-  // (markdown/html/text) need the ID-keyed `/api/attachments/{id}/content`
-  // proxy, so they only preview when we have an attachmentId — otherwise
+  // Without an attachmentId only the URL-renderable kinds open — otherwise
   // the Eye button would call tryOpen, get rejected, and do nothing.
-  const isUrlPreviewableKind =
-    kind === "pdf" || kind === "video" || kind === "audio";
-  const canPreview =
-    !!href && kind !== null && (!!attachmentId || isUrlPreviewableKind);
+  const canPreview = !!href && canOpenPreview(kind, !!attachmentId);
 
   return (
     <div className="my-1">

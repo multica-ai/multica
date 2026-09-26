@@ -9,6 +9,20 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+// OfflineRuntimeTTLSeconds is how long an offline runtime is kept before
+// retention GC deletes it, once no active agent and no non-terminal task
+// remain on it. GC applies this to every runtime row, including the
+// profile-backed ones the interactive delete endpoints refuse — so those
+// refusal messages quote this same number to tell the user when the row they
+// cannot delete will disappear on its own. Keeping one constant is what stops
+// that promise from drifting away from the sweeper that has to honour it.
+const OfflineRuntimeTTLSeconds = 7 * 24 * 3600.0
+
+// OfflineRuntimeTTLDays renders OfflineRuntimeTTLSeconds for user-facing copy.
+func OfflineRuntimeTTLDays() int {
+	return int(OfflineRuntimeTTLSeconds / 86400)
+}
+
 var (
 	// ErrRuntimeNotDrained means a runtime or one of its bound user agents
 	// still owns a non-terminal task. Callers must abort the transaction rather
@@ -84,7 +98,7 @@ func TeardownRuntime(ctx context.Context, qtx *db.Queries, runtimeID pgtype.UUID
 		if err != nil {
 			return out, fmt.Errorf("cancel tasks: %w", err)
 		}
-		if err := SettleDeliveredDelegatedFailureRecoveries(ctx, qtx, cancelled...); err != nil {
+		if err := SettleTerminalTaskState(ctx, qtx, cancelled...); err != nil {
 			return out, err
 		}
 		out.CancelledTasks = cancelled

@@ -42,7 +42,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `PORT` | `8080` | API のリッスンポート |
 | `JWT_SECRET` | 本番環境で必須 | ログイン JWT と一部の署名フローに使うシークレット。本番では空または既知のプレースホルダーだと起動を拒否 |
 | `APP_ENV` | 空 | プロダクションでは `production` を設定 |
-| `AUTH_TOKEN_TTL` | `720h`（30 日） | ブラウザ JWT と cookie の有効期間。Go duration または正の整数秒を受け付けます |
+| `AUTH_TOKEN_TTL` | `720h`（30 日） | ブラウザ JWT と cookie の有効期間。Go duration または正の整数秒を受け付けます。セッションは有効期間の半分を過ぎるとスライド更新され、使い続けている限り失効しません。`60s` 未満は `60s` に補正されます |
 | `LOG_LEVEL` | アプリのデフォルト | ログレベル |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 終了シグナル受信後、グレースフルシャットダウンを開始するまでの待機時間 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | オフラインのランタイムが処理中の作業を失敗させずに再接続できる猶予時間。`150s` 未満は `150s` に補正されます |
@@ -206,8 +206,11 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | `MULTICA_LLM_BASE_URL` | 空 | OpenAI 互換の endpoint |
 | `MULTICA_LLM_DEFAULT_MODEL` | `gpt-5.6-luna` | リクエストがモデルを指定しない場合に使用 |
 | `MULTICA_LLM_MAX_RETRIES` | `2` | 1 回の呼び出しあたりのリトライ上限。`0` はリトライ無効、`1`〜`5` は最大 N 回 |
+| `MULTICA_LLM_DISABLE_THINKING` | `false` | すべてのリクエストに `chat_template_kwargs: {"enable_thinking": false}` を付加。このフィールドを解釈する gateway 用 |
 
 `MULTICA_LLM_MAX_RETRIES` はリトライポリシーの唯一の設定元です。未設定ならデフォルトの 2 回、`0` なら 1 回の呼び出しにつきリクエストは 1 回だけ、1〜5 ならリトライは最大その回数までになります。これは割り当てではなく上限です。消費するのはリトライ対象の失敗だけで、成功や呼び出し側自身のデッドラインによって早く終わることもあります。それ以外の値（負数、非数値、5 超過）は静かに補正されるのではなく起動に失敗します。上限はレイテンシ予算です。バックオフは 0.5 秒から始まり 8 秒を上限に倍増するため、これより大きい予算は呼び出し側自身のタイムアウトを超え、リトライ可能な失敗をタイムアウトに変えてしまいます。リトライの対象は接続失敗と HTTP 408、409、429、5xx で、それ以外の 4xx はそのまま返されます。サーバーは起動時に有効なポリシーを `llm retry policy` として記録しますが、その行に資格情報は含まれません。
+
+`MULTICA_LLM_DISABLE_THINKING` は、モデルが推論（thinking）パスを実行してアシスト呼び出しのレイテンシ予算を食いつぶす gateway 向けの設定です。`true`（または `1`）にすると、サーバーはすべてのリクエストボディに `chat_template_kwargs: {"enable_thinking": false}` を付加します。このフィールドを転送する gateway（vLLM/sglang 系のデプロイや、GLM/Qwen 系の一部 LiteLLM ルート）は、thinking パスを省略します。標準の OpenAI endpoint は未知のボディフィールドを拒否するため、上流が受け付ける場合のみ有効にしてください。GPT-5.6 系モデルはフォローアップ質問のリクエストではサーバーが既に `reasoning_effort: none` を付けます。チャットの自動タイトル生成は推論フィールドを送信しません。本設定がそれに影響するのは、構成された上流が `chat_template_kwargs` を受け付ける場合だけです。指定できる値は `true`/`false` と `1`/`0`（大文字小文字を区別しない）で、それ以外は起動に失敗します。起動ログにはリトライポリシーと併せて有効な状態が記録されます。
 
 このレイヤーを使う機能は 2 つあり、どちらも設定した endpoint にチャットの内容を送信します。
 
@@ -304,11 +307,16 @@ multica config show
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
+| `DO_NOT_TRACK` | 空（テレメトリー有効） | `1` または `true`（大文字小文字を区別しない）で、ファーストパーティの匿名セルフホストテレメトリーの収集と送信を停止 |
 | `ANALYTICS_DISABLED` | `false` | `true` で PostHog への送信を無効化 |
 | `POSTHOG_API_KEY` | 空 | 未設定の場合は分析送信が無効。自前の PostHog プロジェクトを使う場合に設定 |
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog アドレス |
 | `METRICS_ADDR` | 空 | Prometheus metrics のリッスンアドレス。空なら起動しません |
 | `REALTIME_METRICS_TOKEN` | 空 | `/health/realtime` を保護する bearer token |
+
+ファーストパーティのセルフホストテレメトリーは、UTC 日ごとにデプロイ単位のスナップショットを、固定かつ設定変更不可の `https://telemetry.multica.ai/v1/telemetry/events` へ送信します。正式リリース版、ワークスペース数・重複を除いたメンバー数・アクティブなエージェント数・過去 24 時間のアクティブなデーモン数のバケット、および過去 24 時間に開始・完了・失敗・キャンセルされた実行の集計値だけを含みます。名前、メールアドレスやドメイン、IP、業務 ID、ホストやデバイス情報、リポジトリ、モデルや plugin、prompt/output、コメントやチャット、ファイルパス、token/費用、認証情報、エラー、stack、ログは送信しません。このデータはセルフホスト版の採用状況、デプロイ規模、集計利用量の把握だけに使われ、課金、ライセンス、認証、セキュリティ判断には使われません。
+
+`DO_NOT_TRACK` と `ANALYTICS_DISABLED` は独立しています。前者はこの匿名スナップショットを、後者は任意の PostHog 連携を制御します。
 
 ## 次のステップ
 

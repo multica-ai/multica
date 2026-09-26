@@ -1,0 +1,97 @@
+---
+title: Bot Telegram
+description: Connectez un agent Multica à votre propre bot Telegram pour les conversations privées, les mentions dans les groupes, les sujets et /issue.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica utilise un bot que vous créez avec [@BotFather](https://t.me/BotFather), l'outil officiel de Telegram. Un bot correspond à un agent Multica. Créez un bot distinct pour chaque agent qui a besoin de sa propre identité Telegram.
+
+La prise en charge de Telegram est [maintenue par la communauté](/community-maintained) : elle est incluse dans chaque version, mais sans SLA de support officiel. Signalez les problèmes dans les [issues GitHub](https://github.com/multica-ai/multica/issues).
+
+## Avant de commencer
+
+- Un propriétaire ou un administrateur de l'espace de travail Multica doit connecter le bot.
+- Le serveur API doit pouvoir joindre `https://api.telegram.org`.
+- Vous avez besoin du jeton de bot délivré par @BotFather. Traitez-le comme un mot de passe.
+
+## 1. Créer le bot
+
+1. Ouvrez [@BotFather](https://t.me/BotFather) et envoyez `/newbot`.
+2. Choisissez un nom d'affichage et un nom d'utilisateur se terminant par `bot`.
+3. Copiez le jeton de l'API HTTP.
+4. Laissez **Group Privacy** activé pour la configuration par défaut, à visibilité minimale : dans les groupes, Telegram ne transmet alors au bot que les commandes, les @mentions explicites et les réponses à ses messages. Le désactiver est facultatif. Cela permet au bot d'inclure la conversation de groupe environnante comme contexte, avec pour contrepartie qu'il reçoit alors tous les messages du groupe — voir [Groupes et sujets de forum](#groupes-et-sujets-de-forum).
+
+<Callout type="warning">
+Ne collez jamais le jeton dans une tâche, un message de discussion, un journal ou un dépôt de code source. S'il est exposé, révoquez-le avec @BotFather, puis reconnectez le bot avec le nouveau jeton.
+</Callout>
+
+## 2. Le connecter à un agent
+
+1. Dans Multica, ouvrez **Agents**, sélectionnez un agent et ouvrez **Intégrations**.
+2. Cliquez sur **Connecter Telegram**.
+3. Collez le jeton du bot et cliquez sur **Connecter**.
+
+Multica appelle Telegram pour vérifier le bot, s'assure qu'aucun webhook sortant n'entre en conflit avec le long polling, chiffre le jeton et démarre une connexion `getUpdates` supervisée. Un bot déjà connecté à un autre agent ou espace de travail doit d'abord y être déconnecté.
+
+## Première utilisation et association de compte
+
+La première fois qu'un membre écrit au bot, celui-ci lui envoie un lien d'association de compte Multica à usage unique. Ouvrez-le, connectez-vous au même espace de travail Multica, puis revenez dans Telegram et renvoyez le message. Le lien expire au bout de 15 minutes ; écrivez de nouveau au bot pour obtenir un nouveau lien.
+
+Dans un groupe, le bot ne publie jamais publiquement ce lien, qui donne accès à quiconque le détient. Il demande d'abord à l'expéditeur de démarrer une conversation privée.
+
+Seuls les membres actuels de l'espace de travail peuvent utiliser le bot. L'appartenance est revérifiée à chaque message.
+
+## Utiliser le bot
+
+### Conversations privées
+
+Ouvrez le bot et envoyez-lui directement du texte. Aucune @mention n'est nécessaire.
+
+### Groupes et sujets de forum
+
+Ajoutez le bot à un groupe, puis @mentionnez-le ou répondez directement à l'un de ses messages. Les messages acceptés restent dans la conversation Multica qui se poursuit. Un message de groupe qui ne s'adresse pas au bot ne démarre jamais, à lui seul, une conversation ni un tour. Il est toutefois conservé dans une petite mémoire tampon : les 10 derniers messages reçus par le bot pour chaque groupe (ou chaque sujet de forum), effacés à chaque redémarrage du serveur. Lorsqu'un membre s'adresse ensuite au bot — par une @mention ou en répondant à l'un de ses messages —, ces messages en mémoire tampon sont ajoutés en tête de ce tour comme contexte en lecture seule, et enregistrés avec le tour dans la conversation. Une photo ou un fichier en mémoire tampon n'y apparaît que sous forme de marqueur, tel que `[Image]`, suivi de sa légende ; le fichier lui-même n'est pas récupéré. `/new` démarre une nouvelle discussion sans ce contexte. Ce qui arrive dans la mémoire tampon dépend de ce que Telegram transmet : avec Group Privacy activé, il s'agit uniquement des commandes, des @mentions explicites et des réponses au bot ; le contexte ne contient donc que des messages qui lui étaient déjà adressés. Pour inclure les échanges ordinaires du groupe, désactivez Group Privacy dans @BotFather, puis retirez le bot du groupe et ajoutez-le de nouveau ; il reçoit dès lors tous les messages du groupe. Un bot administrateur du groupe reçoit tous les messages quel que soit le réglage de confidentialité : son contexte inclut donc les échanges ordinaires sans aucune modification dans @BotFather. Lorsque vous répondez au message d'une autre personne, @mentionnez explicitement le bot : c'est seulement dans ce cas que l'expéditeur et le texte (ou la légende) cités sont inclus avec votre instruction. Lorsqu'une réponse adressée au bot cite un message contenant une photo ou un fichier, ce fichier est joint lui aussi, quel qu'en soit l'expéditeur. Répondre au message d'une personne sans mentionner le bot ne le déclenche pas. Chaque groupe ordinaire a sa propre discussion Multica continue ; les sujets de forum sont isolés dans des discussions distinctes.
+
+### Commandes
+
+- `/new` crée une nouvelle discussion Multica vide et y achemine les messages suivants de la conversation Telegram. `/new <message>` crée la discussion avec ce message comme premier tour. Dans une réponse à une autre personne qui mentionne explicitement le bot, la citation sélectionnée reste jointe à ce premier tour.
+- `/clear` conserve la discussion Multica en cours et applique un nouveau contexte visible par l'agent au prochain message non vide. `/clear <message>` utilise ce message comme premier tour après la limite de contexte ; une citation de réponse explicitement sélectionnée reste jointe.
+- `/issue <title>` crée une tâche Multica ; les lignes suivantes servent de description facultative. `/issue` sans titre renvoie des indications d'utilisation.
+- Les suffixes de commande Telegram tels que `/issue@your_bot` sont pris en charge dans les groupes.
+
+### Réponses et contenus pris en charge
+
+Le bot diffuse le texte en continu en publiant puis en modifiant un message Telegram, cite le message déclencheur, respecte les sujets de forum et découpe les longues réponses pour rester sous la limite de taille des messages Telegram. Les réponses finales sont livrées de façon asynchrone par une file d'attente interne au processus. Normalement, le backoff d'une conversation n'occupe pas de worker ; si la pression sur le cache compacte l'état exact du backoff, d'autres conversations de la même installation du bot peuvent être retardées par précaution. La file d'attente finale a une capacité fixe : les dépassements sont rejetés et journalisés, et les réponses en file ne sont pas récupérées après un redémarrage du service.
+
+Les photos, fichiers, vidéos, messages vocaux et audio parviennent à l'agent sous forme de pièces jointes dans la même conversation, la légende servant de texte du message. Répondre à un message qui en contient un — dans une conversation privée ou, en s'adressant au bot, dans un groupe, quel qu'en soit l'expéditeur — cite ce message avant votre instruction et joint son fichier, ce qui permet de désigner à l'agent une photo ou une vidéo antérieure. Telegram ne permet à un bot de télécharger que des fichiers de 20 Mo au maximum ; lorsqu'un fichier ne peut pas être récupéré (trop volumineux, ou échec du téléchargement), le bot vous le signale et l'agent ne voit qu'un espace réservé. Les fichiers produits par l'agent sont renvoyés dans la conversation sous forme de messages distincts, après sa réponse : les photos jusqu'à 10 Mo s'affichent directement, tout le reste arrive sous forme de fichier, jusqu'à 50 Mo ; si la livraison d'un fichier ne peut pas être confirmée, le bot le signale et le fichier reste joint à la réponse dans Multica. Dans les deux sens, le serveur doit disposer d'un stockage des pièces jointes (voir la section Configuration en auto-hébergement ci-dessous) ; sans cela, le bot répond aux médias en indiquant qu'ils ne sont pas pris en charge, et l'agent est informé qu'il ne peut pas envoyer de fichiers. Les stickers, positions, sondages et autres messages qui ne sont pas des fichiers reçoivent la même réponse dans les conversations privées et lorsqu'ils sont adressés au bot dans un groupe ; dans un groupe, ceux qui ne lui sont pas adressés restent sans réponse.
+
+## Gérer les connexions
+
+Ouvrez **Paramètres → Intégrations → Telegram** pour voir les bots connectés. Les propriétaires et administrateurs peuvent en déconnecter un. La déconnexion arrête le long polling et les réponses sortantes, mais conserve les conversations Multica et les enregistrements d'audit.
+
+## Configuration en auto-hébergement
+
+Définissez une clé de chiffrement stable de 32 octets avant de démarrer le serveur API :
+
+```dotenv
+MULTICA_TELEGRAM_SECRET_KEY=<base64-encoded 32-byte key>
+```
+
+Générez-en une avec `openssl rand -base64 32`. Conservez-la durablement : la perdre ou la renouveler rend illisibles les jetons de bot existants et oblige à reconnecter chaque bot.
+
+Les liens d'association utilisent `MULTICA_APP_URL`, ou à défaut `FRONTEND_ORIGIN`. L'adresse obtenue doit être accessible aux membres. Le réseau ou le proxy du serveur doit autoriser l'accès HTTPS à `api.telegram.org` ; Go respecte les variables d'environnement standard `HTTPS_PROXY` et `NO_PROXY`.
+
+## Dépannage
+
+- **Le bot ne peut pas être vérifié** : vérifiez d'abord la connectivité du serveur et les réglages du proxy. Ne générez un nouveau jeton que si Telegram rejette lui-même le jeton actuel.
+- **Conflit de webhook** : supprimez le webhook existant du bot avant de le connecter. Telegram n'autorise pas `getUpdates` tant qu'un webhook est actif.
+- **Conflit de polling 409** : une autre instance ou un autre processus Multica interroge le même bot. Arrêtez l'autre consommateur ou utilisez un bot distinct par environnement.
+- **Aucune réponse dans le groupe** : vérifiez que le bot est dans le groupe et que le message le @mentionne ou répond à l'un de ses messages.
+- **Lien d'association expiré** : envoyez un autre message privé au bot et utilisez le lien le plus récent.
+- **Le bot ne s'exécute pas** : vérifiez si l'agent est archivé et si son [runtime](/daemon-runtimes) est en ligne.
+
+## Étapes suivantes
+
+- [Intégrations de messagerie](/channels) — comparer les plateformes et comprendre la gestion des sessions et des identités.
+- [Discussion](/chat) — comment les messages adressés au bot deviennent des exécutions d'agent.
+- [Tâches](/issues) — le travail créé par `/issue`.

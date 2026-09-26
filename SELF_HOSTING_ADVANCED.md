@@ -71,7 +71,7 @@ Changes take effect after restarting the backend / compose stack. The web UI rea
 
 | Variable | Description |
 |----------|-------------|
-| `ALLOW_SIGNUP` | Set to `false` to disable new user signups on a private instance |
+| `ALLOW_SIGNUP` | Set to `false` to restrict new accounts to allowlisted or invited users |
 | `ALLOWED_EMAIL_DOMAINS` | Optional comma-separated allowlist of email domains |
 | `ALLOWED_EMAILS` | Optional comma-separated allowlist of exact email addresses |
 | `DISABLE_WORKSPACE_CREATION` | Set to `true` to make `POST /api/workspaces` return 403 for every caller — users can only join workspaces they were invited to |
@@ -80,14 +80,14 @@ Changes take effect after restarting the backend / compose stack. The web UI rea
 
 #### Locking down workspace creation
 
-`ALLOW_SIGNUP=false` blocks new accounts from being created, but it does **not** block an already-signed-in user from creating another workspace via `POST /api/workspaces`. On a self-hosted instance where every issue/repo/agent must be visible to the platform admin, set `DISABLE_WORKSPACE_CREATION=true` to close that gap. The recommended bootstrap sequence is:
+`ALLOW_SIGNUP=false` restricts new accounts to allowlisted or invited users, but it does **not** block an already-signed-in user from creating another workspace via `POST /api/workspaces`. On a self-hosted instance where every issue/repo/agent must be visible to the platform admin, set `DISABLE_WORKSPACE_CREATION=true` to close that gap. The recommended bootstrap sequence is:
 
 1. Start the instance with `DISABLE_WORKSPACE_CREATION=false` (the default).
 2. Sign in as the admin and create the shared workspace.
-3. Set `DISABLE_WORKSPACE_CREATION=true` and restart the backend. Optionally set `ALLOW_SIGNUP=false` at the same time if you also want to block new account creation.
+3. Set `DISABLE_WORKSPACE_CREATION=true` and restart the backend. Optionally set `ALLOW_SIGNUP=false` at the same time if you also want to restrict new account creation.
 4. Going forward, additional users join via invitation only — the "Create workspace" affordance is hidden in the UI and any direct API call returns 403.
 
-> Note: setting `ALLOW_SIGNUP=false` blocks **all** new account creation, including users who already have a pending invitation. If you need invited users to be able to sign up but not create their own workspaces, keep `ALLOW_SIGNUP=true` (optionally combined with `ALLOWED_EMAIL_DOMAINS` / `ALLOWED_EMAILS`) and only flip `DISABLE_WORKSPACE_CREATION=true`.
+> Note: setting `ALLOW_SIGNUP=false` enables invite-only account creation. A new user with a live pending workspace invitation can create an account with the invited email; users without an allowlist match or a valid invitation remain blocked. Invitations also permit emails outside configured allowlists when `ALLOW_SIGNUP=true`. Revocation does not delete accounts already created using an invitation or prevent those accounts from signing in. Combine this with `DISABLE_WORKSPACE_CREATION=true` when invitees must join an existing workspace instead of creating their own.
 
 ### File Storage (Optional)
 
@@ -176,6 +176,71 @@ fallback: Next uses `PORT` for its own frontend listener before it evaluates the
 rewrite configuration. Its backend fallback therefore accepts
 `BACKEND_PORT` → `API_PORT` → `SERVER_PORT` → `8080`, while an explicit
 `REMOTE_API_URL` or `NEXT_PUBLIC_API_URL` still takes priority.
+
+### Private CA Certificates (Optional)
+
+The backend checks the TLS certificates of the HTTPS services it calls against
+the system trust store in its image. A service whose certificate comes from an
+internal CA — for example a [self-hosted Gitea, Forgejo, or GitLab](https://multica.ai/docs/vcs-integration)
+— fails until the backend trusts that CA. Connecting such a Git provider reports
+that its certificate is signed by a certificate authority the server does not
+trust.
+
+Add the CA to the backend's trust store rather than turning verification off.
+The backend is a Go program: on Linux it loads the system certificate bundle
+plus every PEM file in the directories listed in `SSL_CERT_DIR`. Mount the CA
+into its own read-only directory and list it after the system directory:
+
+```
+SSL_CERT_DIR=/etc/ssl/certs:/etc/multica/ca-certs
+```
+
+**Kubernetes (Helm):** create a ConfigMap whose keys are PEM files, then point
+`backend.extraCACerts.configMap` at it. The chart mounts it at
+`/etc/multica/ca-certs` and sets `SSL_CERT_DIR` as above.
+
+```bash
+kubectl -n multica create configmap multica-extra-ca --from-file=internal-ca.crt
+helm upgrade multica oci://ghcr.io/multica-ai/charts/multica \
+  --version <chart-version> -n multica --reuse-values \
+  --set backend.extraCACerts.configMap=multica-extra-ca
+```
+
+**Docker Compose:** put the PEM files in a directory next to
+`docker-compose.selfhost.yml` (here `./ca-certs`) and add an override file,
+`docker-compose.ca.yml`:
+
+```yaml
+services:
+  backend:
+    environment:
+      SSL_CERT_DIR: /etc/ssl/certs:/etc/multica/ca-certs
+    volumes:
+      - ./ca-certs:/etc/multica/ca-certs:ro
+```
+
+```bash
+docker compose -f docker-compose.selfhost.yml -f docker-compose.ca.yml up -d backend
+```
+
+Pass both files every time you run a command that recreates the backend. A
+command with only `docker-compose.selfhost.yml`, such as `make selfhost`,
+recreates the backend without the CA.
+
+Things to know:
+
+- **The backend reads the CA only when it starts.** After you add or replace a
+  CA file, restart the backend: `kubectl -n multica rollout restart deploy/multica-backend`,
+  or `docker compose -f docker-compose.selfhost.yml -f docker-compose.ca.yml restart backend`.
+  With Compose, `up -d` is not enough here: the container's configuration has
+  not changed, so Compose keeps the running container. With Helm, a
+  `helm upgrade` also restarts the backend when the ConfigMap has changed.
+- **The CA applies to the whole backend process**, not only the Git provider
+  integration: every outbound TLS client in the backend that uses the system
+  trust store trusts it too.
+- **Only the trust problem is fixed.** An expired certificate, or one that does
+  not cover the host name in the URL, is still rejected; fix the certificate
+  itself.
 
 ### WeCom frame tracing
 

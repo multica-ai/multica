@@ -89,7 +89,7 @@ pnpm lint
 pnpm test
 ```
 
-根命令默认排除 Mobile。移动端有独立脚本和 CI，修改前先阅读 `apps/mobile/CLAUDE.md`。
+根命令默认排除 Mobile。移动端有独立脚本和 CI，修改前先阅读 `apps/mobile/AGENTS.md`。
 
 ### Backend
 
@@ -118,7 +118,7 @@ Web 与 Desktop 都需要的功能按职责放置：
 4. Next.js、Electron 和路由适配留在对应 app；
 5. 共享页面需要同时接入 Web 与 Desktop。
 
-服务端数据由 TanStack Query 管理，筛选、草稿和布局等客户端状态由 Zustand 管理。具体边界见[项目架构](/developers/architecture)和根目录 `CLAUDE.md`。
+服务端数据由 TanStack Query 管理，筛选、草稿和布局等客户端状态由 Zustand 管理。具体边界见[项目架构](/developers/architecture)和根目录 `AGENTS.md`。
 
 新增或修改 API 时，要同步更新 `packages/core/api/` 中的 zod schema，并为缺失字段、未知枚举或格式错误增加解析测试。
 
@@ -186,7 +186,7 @@ make start
 
 ## 提交前检查
 
-- 阅读根目录 `CLAUDE.md` 和相关子目录说明；
+- 阅读根目录 `AGENTS.md` 和相关子目录说明；
 - 只修改当前 task 需要的范围；
 - 代码注释使用英文；
 - 不提交 `.env`、令牌、构建产物或本机路径；

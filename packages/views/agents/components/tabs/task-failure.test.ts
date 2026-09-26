@@ -4,6 +4,7 @@ import { createI18n } from "@multica/core/i18n/react";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { describe, expect, it } from "vitest";
 import enAgents from "../../../locales/en/agents.json";
+import frAgents from "../../../locales/fr/agents.json";
 import jaAgents from "../../../locales/ja/agents.json";
 import koAgents from "../../../locales/ko/agents.json";
 import zhHansAgents from "../../../locales/zh-Hans/agents.json";
@@ -12,7 +13,10 @@ import {
   FAILURE_REASON_I18N_KEYS,
   cancellationActorLabel,
   cancelReasonLabel,
+  failureNeedsAction,
   failureReasonLabel,
+  isCancelledOutcome,
+  runOutcomeLabel,
 } from "./task-failure";
 
 const AGENT_RESOURCES = {
@@ -20,6 +24,7 @@ const AGENT_RESOURCES = {
   "zh-Hans": zhHansAgents,
   ja: jaAgents,
   ko: koAgents,
+  fr: frAgents,
 } as const;
 
 function fixedT(locale: SupportedLocale): TFunction<"agents"> {
@@ -105,6 +110,7 @@ describe("cancelReasonLabel", () => {
       "zh-Hans": "已由系统取消",
       ja: "システムによってキャンセルされました",
       ko: "시스템에서 취소함",
+      fr: "Annulée par le système",
     };
 
     for (const locale of Object.keys(expected) as SupportedLocale[]) {
@@ -151,6 +157,13 @@ describe("failureReasonLabel", () => {
     expect(failureReasonLabel("invalid_task_identity", enT)).toBe(
       "Run identity mismatch",
     );
+  });
+
+  it("maps runtime access denial to actionable recovery copy", () => {
+    const label = failureReasonLabel("runtime_access_denied", enT);
+    expect(label).toMatch(/make the runtime public/i);
+    expect(label).toMatch(/rebind\/copy/i);
+    expect(label).not.toBe("Task identity mismatch");
   });
 
   it("covers operational reasons emitted outside the canonical taxonomy", () => {
@@ -205,5 +218,34 @@ describe("failureReasonLabel", () => {
     expect(failureReasonLabel(null, enT)).toBeNull();
     expect(failureReasonLabel(undefined, enT)).toBeNull();
     expect(failureReasonLabel("", enT)).toBeNull();
+  });
+});
+
+describe("run outcome", () => {
+  it("reads a failed row with a cancellation reason as cancelled", () => {
+    expect(isCancelledOutcome({ status: "failed", failure_reason: "cancelled" })).toBe(true);
+    expect(isCancelledOutcome({ status: "failed", failure_reason: "user_cancelled" })).toBe(true);
+    expect(isCancelledOutcome({ status: "cancelled" })).toBe(true);
+    expect(isCancelledOutcome({ status: "failed", failure_reason: "timeout" })).toBe(false);
+    expect(isCancelledOutcome({ status: "failed" })).toBe(false);
+  });
+
+  it("flags only failures that need a configuration change", () => {
+    expect(failureNeedsAction({ status: "failed", failure_reason: "agent_error.provider_auth_or_access" })).toBe(true);
+    expect(failureNeedsAction({ status: "failed", failure_reason: "runtime_access_denied" })).toBe(true);
+    expect(failureNeedsAction({ status: "failed", failure_reason: "agent_error.provider_capacity_or_rate_limit" })).toBe(false);
+    expect(failureNeedsAction({ status: "cancelled", failure_reason: "runtime_access_denied" })).toBe(false);
+  });
+
+  it("labels a run once: reason first, then who cancelled it", () => {
+    expect(runOutcomeLabel({ status: "failed", failure_reason: "cancelled" }, enT)).toBe("Cancelled by the system");
+    expect(runOutcomeLabel({ status: "failed", failure_reason: null }, enT)).toBeNull();
+    expect(runOutcomeLabel({
+      status: "cancelled", failure_reason: "queued_expired", cancelled_by: { type: "system" },
+    }, enT)).toBe("Expired in queue");
+    expect(runOutcomeLabel({
+      status: "cancelled", cancelled_by: { type: "member", name: "Jiayuan" },
+    }, enT)).toBe("Cancelled by Jiayuan");
+    expect(runOutcomeLabel({ status: "cancelled" }, enT)).toBeNull();
   });
 });

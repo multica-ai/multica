@@ -33,7 +33,10 @@ import Animated, {
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import type { Reaction, TimelineEntry } from "@multica/core/types";
-import { isDeletedComment } from "@multica/core/issues/comment-deletion";
+import {
+  commentLandingTarget,
+  isDeletedComment,
+} from "@multica/core/issues/comment-deletion";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { useActorLookup } from "@/data/use-actor-name";
@@ -54,6 +57,7 @@ import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { continuousCorners } from "@/lib/radius";
+import { useT } from "@/lib/i18n";
 import { ReactionBar } from "./reaction-bar";
 import { useCommentLongPress } from "./comment-context-menu";
 import { useCommentSelectStore } from "@/data/comment-select-store";
@@ -127,6 +131,16 @@ export function CommentCard({
     }
   }, [resolved, highlightedCommentId, entry.id, replies]);
 
+  const visibleReplies = replies.filter((reply) => !isDeletedComment(reply));
+  // A deleted reply renders nothing, so a notification pointing at one has no
+  // row to flash. Flash the comment just above where it was instead — the
+  // expansion above still keys off the original id, which is in this thread
+  // either way. Web does the same in its deep-link effect
+  // (packages/views/issues/components/issue-detail.tsx).
+  const highlightId = highlightedCommentId
+    ? commentLandingTarget(highlightedCommentId, entry.id, replies)
+    : highlightedCommentId;
+
   if (resolved && !expanded) {
     return (
       <ResolvedThreadBar
@@ -174,7 +188,12 @@ export function CommentCard({
             issueIdentifier={issueIdentifier}
             onPressChange={handlePressChange}
           />
-          {replies.map((reply) => (
+          {/* A deleted reply renders nothing: its row is kept only so its own
+           *  replies keep a direct parent (#8296), and this list is flat, so
+           *  they already render in its place. Mirrors the reply list in
+           *  packages/views/issues/components/comment-card.tsx. A deleted ROOT
+           *  still renders its placeholder — it heads the thread. */}
+          {visibleReplies.map((reply) => (
             <View key={reply.id} className="border-t border-border/60 pt-3">
               <CommentBody
                 entry={reply}
@@ -183,12 +202,12 @@ export function CommentCard({
                 onPressChange={handlePressChange}
               />
               <ReplyHighlightOverlay
-                active={highlightedCommentId === reply.id}
+                active={highlightId === reply.id}
               />
             </View>
           ))}
         </View>
-        <RootHighlightOverlay active={highlightedCommentId === entry.id} />
+        <RootHighlightOverlay active={highlightId === entry.id} />
       </View>
     </View>
   );
@@ -214,6 +233,7 @@ function ResolvedThreadBar({
   onExpand: () => void;
 }) {
   const { getName } = useActorLookup();
+  const { t } = useT("issues");
   const { colorScheme } = useColorScheme();
   const mutedFg = THEME[colorScheme].mutedForeground;
 
@@ -244,7 +264,9 @@ function ResolvedThreadBar({
     return remaining > 0 ? `${named} +${remaining}` : named;
   }, [entry, replies, getName]);
 
-  const total = 1 + replies.length;
+  // Deleted replies render nothing when the thread expands, so the folded
+  // count must not promise them either.
+  const total = 1 + replies.filter((reply) => !isDeletedComment(reply)).length;
 
   return (
     <View className="px-4">
@@ -253,15 +275,20 @@ function ResolvedThreadBar({
         className="flex-row items-center gap-2.5 px-4 py-3 rounded-xl bg-surface-1 active:opacity-70"
         style={continuousCorners}
         accessibilityRole="button"
-        accessibilityLabel={`Resolved thread by ${authorsLabel}, ${total} ${total === 1 ? "message" : "messages"}. Tap to expand.`}
+        accessibilityLabel={t(
+          total === 1 ? "resolved.a11y_folded_one" : "resolved.a11y_folded_other",
+          { authors: authorsLabel, count: total },
+        )}
       >
         <Ionicons name="checkmark-circle" size={18} color={mutedFg} />
         <Text
           className="flex-1 text-sm text-muted-foreground"
           numberOfLines={1}
         >
-          Resolved · {total} {total === 1 ? "message" : "messages"} by{" "}
-          {authorsLabel}
+          {t(total === 1 ? "resolved.summary_one" : "resolved.summary_other", {
+            count: total,
+            authors: authorsLabel,
+          })}
         </Text>
         <Ionicons name="chevron-down" size={14} color={mutedFg} />
       </Pressable>
@@ -287,6 +314,7 @@ function ResolvedIndicator({
   onCollapse: () => void;
 }) {
   const { getName } = useActorLookup();
+  const { t } = useT("issues");
   const { colorScheme } = useColorScheme();
   const mutedFg = THEME[colorScheme].mutedForeground;
   const resolverName = getName(
@@ -299,17 +327,16 @@ function ResolvedIndicator({
       onPress={onCollapse}
       className="flex-row items-center gap-2 active:opacity-60"
       accessibilityRole="button"
-      accessibilityLabel="Collapse resolved thread"
+      accessibilityLabel={t("resolved.collapse_a11y")}
     >
       <Ionicons name="checkmark-circle" size={14} color={mutedFg} />
       <Text className="text-xs text-muted-foreground flex-1" numberOfLines={1}>
-        Resolved by{" "}
-        <Text className="text-xs text-foreground font-medium">
-          {resolverName}
-        </Text>
+        {t("resolved.resolved_by", { name: resolverName })}
         {entry.resolved_at ? ` · ${timeAgo(entry.resolved_at)}` : ""}
       </Text>
-      <Text className="text-xs text-muted-foreground">Collapse</Text>
+      <Text className="text-xs text-muted-foreground">
+        {t("resolved.collapse")}
+      </Text>
     </Pressable>
   );
 }
@@ -428,7 +455,10 @@ function CommentBody({
 
   // Reactions live on TimelineEntry.reactions (mirrored from Comment).
   // Pass through to the bar; toggle finds existing match by emoji + actor.
-  const reactions: Reaction[] = (entry.reactions ?? []) as Reaction[];
+  const reactions = useMemo(
+    () => (entry.reactions ?? []) as Reaction[],
+    [entry.reactions],
+  );
 
   const onToggleReaction = useCallback(
     (emoji: string) => {
@@ -488,9 +518,10 @@ function CommentBody({
   }, [longPress.isPressed, entry.id, isSelecting, onPressChange]);
 
   if (isDeletedComment(entry)) {
-    // Kept only so the replies to it stay attached (#8296): no author, body
-    // or long-press actions. Mirrors CommentRow's placeholder in
-    // packages/views/issues/components/comment-card.tsx.
+    // Only a deleted thread ROOT reaches this — the card filters deleted
+    // replies out. The root keeps a placeholder because its replies hang off
+    // it and the thread would otherwise have no head. Mirrors the root
+    // placeholder in packages/views/issues/components/comment-card.tsx.
     return (
       <Text className="text-sm italic text-muted-foreground">
         This comment was deleted
@@ -568,6 +599,7 @@ function FailedActions({
   onDiscard: () => void;
 }) {
   const { colorScheme } = useColorScheme();
+  const { t } = useT("issues");
   const destructive = THEME[colorScheme].destructive;
   return (
     <View className="flex-row items-center gap-2 mt-0.5">
@@ -576,24 +608,26 @@ function FailedActions({
         className="flex-1 text-xs text-destructive"
         numberOfLines={1}
       >
-        {error || "Couldn't send"}
+        {error || t("failed.send")}
       </Text>
       <Pressable
         onPress={onRetry}
         hitSlop={6}
         accessibilityRole="button"
-        accessibilityLabel="Retry sending comment"
+        accessibilityLabel={t("failed.retry_a11y")}
       >
-        <Text className="text-xs text-primary font-medium">Retry</Text>
+        <Text className="text-xs text-primary font-medium">
+          {t("failed.retry")}
+        </Text>
       </Pressable>
       <Pressable
         onPress={onDiscard}
         hitSlop={6}
         accessibilityRole="button"
-        accessibilityLabel="Discard failed comment"
+        accessibilityLabel={t("failed.discard_a11y")}
       >
         <Text className="text-xs text-muted-foreground font-medium">
-          Discard
+          {t("failed.discard")}
         </Text>
       </Pressable>
     </View>

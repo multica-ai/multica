@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Check, ChevronRight, Copy, Terminal } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -25,13 +31,12 @@ import {
   UI_MOTION_DURATION,
 } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
+import { CliInstallCommand } from "../../common/cli-install-command";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
 type Step = "instructions" | "success";
 
-const INSTALL_CMD =
-  "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
 const CLOUD_SERVER_URL = "https://api.multica.ai";
 const CLOUD_APP_URL = "https://multica.ai";
 
@@ -191,37 +196,41 @@ function CopyButton({ text, ariaLabel }: { text: string; ariaLabel: string }) {
   );
 }
 
+function CommandRow({ cmd, copyAria }: { cmd: string; copyAria: string }) {
+  return (
+    <div className="flex items-start gap-2 rounded-lg bg-muted px-3 py-2.5 font-mono text-body">
+      <Terminal
+        className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground"
+        aria-hidden
+      />
+      <code
+        className={cn(
+          "min-w-0 flex-1 break-all whitespace-pre-wrap tabular-nums",
+          CODE_LIGATURE_CLASS,
+        )}
+      >
+        {cmd}
+      </code>
+      <CopyButton text={cmd} ariaLabel={copyAria} />
+    </div>
+  );
+}
+
 function CommandStep({
   n,
   label,
-  cmd,
-  copyAria,
+  children,
 }: {
   n: number;
   label: string;
-  cmd: string;
-  copyAria: string;
+  children: ReactNode;
 }) {
   return (
     <div>
       <p className="mb-1.5 text-caption font-medium text-foreground">
         {n}. {label}
       </p>
-      <div className="flex items-start gap-2 rounded-lg bg-muted px-3 py-2.5 font-mono text-body">
-        <Terminal
-          className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground"
-          aria-hidden
-        />
-        <code
-          className={cn(
-            "min-w-0 flex-1 break-all whitespace-pre-wrap tabular-nums",
-            CODE_LIGATURE_CLASS,
-          )}
-        >
-          {cmd}
-        </code>
-        <CopyButton text={cmd} ariaLabel={copyAria} />
-      </div>
+      {children}
     </div>
   );
 }
@@ -248,20 +257,33 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
         <div className="space-y-4">
-          <CommandStep
-            n={1}
-            label={t(($) => $.connect.step1_label)}
-            cmd={INSTALL_CMD}
-            copyAria={t(($) => $.connect.copy_aria)}
-          />
+          {/* Step 1 owns the platform switch: the install command differs by
+              OS, so the user picks instead of us guessing. Step 2's
+              `multica setup` is platform-independent. */}
+          <CommandStep n={1} label={t(($) => $.connect.step1_label)}>
+            <CliInstallCommand
+              labels={{
+                group: t(($) => $.connect.platform_group),
+                macosLinux: t(($) => $.connect.platform_macos_linux),
+                windows: t(($) => $.connect.platform_windows),
+              }}
+            >
+              {(cmd) => (
+                <CommandRow
+                  cmd={cmd}
+                  copyAria={t(($) => $.connect.copy_aria)}
+                />
+              )}
+            </CliInstallCommand>
+          </CommandStep>
 
           <div>
-            <CommandStep
-              n={2}
-              label={t(($) => $.connect.step2_label)}
-              cmd={setupCmd}
-              copyAria={t(($) => $.connect.copy_aria)}
-            />
+            <CommandStep n={2} label={t(($) => $.connect.step2_label)}>
+              <CommandRow
+                cmd={setupCmd}
+                copyAria={t(($) => $.connect.copy_aria)}
+              />
+            </CommandStep>
             <p className="mt-1.5 text-micro leading-[1.55] text-muted-foreground">
               {t(($) => $.connect.step2_hint)}
             </p>
@@ -295,12 +317,12 @@ function TroubleshootingDetails({ tokenCmd }: { tokenCmd: string }) {
       </summary>
       <div className="space-y-2 border-t px-3 pt-2.5 pb-3 text-micro leading-[1.55] text-muted-foreground">
         <p>{t(($) => $.connect.trouble_intro)}</p>
-        <CommandStep
-          n={2}
-          label={t(($) => $.connect.step2_label)}
-          cmd={tokenCmd}
-          copyAria={t(($) => $.connect.copy_aria)}
-        />
+        <CommandStep n={2} label={t(($) => $.connect.step2_label)}>
+          <CommandRow
+            cmd={tokenCmd}
+            copyAria={t(($) => $.connect.copy_aria)}
+          />
+        </CommandStep>
         <p>
           {t(($) => $.connect.trouble_token_hint_prefix)}
           <span className="font-medium text-foreground">
@@ -357,9 +379,6 @@ function LiveListening() {
       </span>
       <span className="font-medium text-foreground">
         {t(($) => $.connect.live_listening)}
-      </span>
-      <span className="text-muted-foreground">
-        {t(($) => $.connect.live_listening_hint)}
       </span>
     </div>
   );

@@ -212,7 +212,10 @@ func Classify(rawError string) Reason {
 	//    messages and the stable Pi/OMP exit composite, rather than treating
 	//    the same broad substrings from local tools or MCP servers as retryable.
 	//    Mirror these Pi message shapes into the MUL-1949 offline backfill SQL.
-	case isPiProviderNetworkError(lower),
+	//    Cursor can exit before its first stream event with a Node connect
+	//    ETIMEDOUT error. Keep that failed resume network-safe instead of
+	//    letting the exit-status wrapper trigger a fresh-session retry.
+	case isPiProviderNetworkError(lower), isCursorProviderNetworkError(lower),
 		containsAny(lower,
 			"stream disconnected",
 			opencodeStreamEndedPrefix,
@@ -428,6 +431,20 @@ var legacyOpenclawCLITimeoutReasons = map[string]bool{
 var legacyEnvironmentPrepareWitnesses = []string{
 	"prepare execution environment:",
 	"reuse execution environment:",
+}
+
+// isCursorProviderNetworkError recognizes the captured Cursor provider error,
+// bare or in the adapter's process-failure wrapper. Do not match ETIMEDOUT
+// globally: a local tool or MCP connection timeout is not provider evidence.
+func isCursorProviderNetworkError(lower string) bool {
+	if strings.HasPrefix(lower, "cursor-agent exited with error: ") {
+		_, stderr, ok := strings.Cut(lower, "; cursor stderr: ")
+		if !ok {
+			return false
+		}
+		lower = strings.TrimSpace(stderr)
+	}
+	return strings.HasPrefix(lower, "error: [unavailable] connect etimedout ")
 }
 
 func isPiProviderNetworkError(lower string) bool {

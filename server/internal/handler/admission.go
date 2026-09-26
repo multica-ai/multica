@@ -37,6 +37,9 @@ const (
 	// DispatchDeferred: admitted but intentionally not started yet (e.g. a
 	// backlog issue parked until promotion, or suppress_run).
 	DispatchDeferred DispatchStatus = "deferred"
+	// DispatchSteered: the comment was bound to the target's running turn
+	// instead of starting a run. Only returned when the author asked to steer.
+	DispatchSteered DispatchStatus = "steered"
 	// DispatchBlocked: the run was refused. ReasonCode carries why.
 	DispatchBlocked DispatchStatus = "blocked"
 )
@@ -53,15 +56,18 @@ const (
 	ReasonQueued                = dispatch.ReasonQueued
 	ReasonCoalesced             = dispatch.ReasonCoalesced
 	ReasonDeferred              = dispatch.ReasonDeferred
+	ReasonSteered               = dispatch.ReasonSteered
 	ReasonInvocationNotAllowed  = dispatch.ReasonInvocationNotAllowed
 	ReasonTargetUnavailable     = dispatch.ReasonTargetUnavailable
 	ReasonRuntimeOffline        = dispatch.ReasonRuntimeOffline
 	ReasonRuntimeUnusable       = dispatch.ReasonRuntimeUnusable
+	ReasonRuntimeAccessDenied   = dispatch.ReasonRuntimeAccessDenied
 	ReasonRuntimeProfileMissing = dispatch.ReasonRuntimeProfileMissing
 	ReasonAgentRuntimeRequired  = dispatch.ReasonAgentRuntimeRequired
 	ReasonAttributionBlocked    = dispatch.ReasonAttributionBlocked
 	ReasonAlreadyActive         = dispatch.ReasonAlreadyActive
 	ReasonSelfTriggerSuppressed = dispatch.ReasonSelfTriggerSuppressed
+	ReasonIssueInTriage         = dispatch.ReasonIssueInTriage
 	ReasonInternalError         = dispatch.ReasonInternalError
 )
 
@@ -120,6 +126,8 @@ func dispatchBlockedFallbackMessage(code DispatchReasonCode) string {
 		return "the target's runtime is offline"
 	case ReasonRuntimeUnusable:
 		return "the target's agent CLI cannot run on its machine"
+	case ReasonRuntimeAccessDenied:
+		return "the target cannot run on this runtime"
 	case ReasonRuntimeProfileMissing:
 		return "the target's agent CLI is missing a runtime profile on its machine"
 	case ReasonAgentRuntimeRequired:
@@ -128,6 +136,8 @@ func dispatchBlockedFallbackMessage(code DispatchReasonCode) string {
 		return "the run couldn't be attributed to a responsible member"
 	case ReasonAlreadyActive:
 		return "a run is already active for this target"
+	case ReasonIssueInTriage:
+		return "the issue is in Triage and has no owner to run yet; accept it out of Triage first"
 	default:
 		return "the run was blocked"
 	}

@@ -166,9 +166,6 @@ export function ContactSalesPageClient() {
             <h1 className="mt-2 landing-serif text-[2.4rem] leading-[1.1] tracking-[-0.02em] sm:text-[2.8rem]">
               {c.title}
             </h1>
-            <p className="mt-3 text-body text-[#0a0d12]/60 sm:text-body-lg">
-              {c.subtitle}
-            </p>
           </div>
 
           {state.status === "success" ? (
@@ -252,7 +249,6 @@ function FormCard({
   const countryId = useId();
   const useCaseId = useId();
   const goalsId = useId();
-  const goalsHintId = useId();
   const consentOutreachId = useId();
   const consentUpdatesId = useId();
 
@@ -261,14 +257,6 @@ function FormCard({
       onSubmit={onSubmit}
       className="space-y-8 rounded-(--landing-radius-card) border border-[#0a0d12]/8 bg-white p-6 shadow-[0_1px_2px_rgba(10,13,18,0.04)] sm:p-10"
     >
-      <div className="rounded-(--landing-radius-action) border border-[#0a0d12]/8 bg-[#f7f8fa] p-4 text-label leading-[1.6] text-[#0a0d12]/72">
-        <p className="font-semibold text-[#0a0d12]">
-          <span aria-hidden className="mr-1.5">📌</span>
-          {dict.notice.badge}
-        </p>
-        <p className="mt-1">{dict.notice.body}</p>
-      </div>
-
       <div className="grid gap-5 sm:grid-cols-2">
         <Field label={dict.fields.firstName} htmlFor={firstNameId} required>
           <TextInput
@@ -368,8 +356,6 @@ function FormCard({
       <Field
         label={dict.fields.goals}
         htmlFor={goalsId}
-        hint={dict.fields.goalsHint}
-        hintId={goalsHintId}
       >
         <textarea
           id={goalsId}
@@ -378,7 +364,6 @@ function FormCard({
           rows={4}
           maxLength={2000}
           disabled={busy}
-          aria-describedby={goalsHintId}
           className="block w-full rounded-(--landing-radius-control) border border-[#0a0d12]/14 bg-white px-3.5 py-2.5 text-body text-[#0a0d12] placeholder:text-[#0a0d12]/35 transition-colors focus:border-[#0a0d12]/40 focus:outline-none focus:ring-2 focus:ring-[#0a0d12]/10 disabled:opacity-60"
         />
       </Field>

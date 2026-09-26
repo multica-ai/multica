@@ -30,6 +30,7 @@
     "open_in_new_tab": "Open in new tab"
   },
   "list": {
+    "loading_selection": "Loading notification…",
     "empty": "No notifications",
     "mark_done_tooltip": "Mark as done",
     "archive_tooltip": "Archive",
@@ -42,7 +43,10 @@
     "archived_title": "Archived",
     "archived_empty": "No archived notifications",
     "unarchive_tooltip": "Unarchive",
-    "actions_aria": "Notification actions"
+    "actions_aria": "Notification actions",
+    "load_more": "Load more",
+    "loading_more": "Loading…",
+    "retry": "Retry"
   },
   "detail": {
     "select_prompt": "Select a notification to view details",
@@ -98,6 +102,7 @@
     "unarchived": "Notification restored"
   },
   "errors": {
+    "archived_lookup_failed": "Failed to load the linked notification",
     "source_context_retry_failed": "Could not retry with the original context",
     "source_context_retry_unavailable": "This context can no longer be retried. Start again from the branch point.",
     "mark_read_failed": "Failed to mark as read",
@@ -109,6 +114,7 @@
     "archive_all_read_failed": "Failed to archive read items",
     "archive_completed_failed": "Failed to archive completed",
     "unarchive_failed": "Failed to unarchive",
-    "archived_load_failed": "Failed to load archived notifications"
+    "archived_load_failed": "Failed to load archived notifications",
+    "filters_load_failed": "Could not load filters"
   }
 }

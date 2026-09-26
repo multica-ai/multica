@@ -1,7 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { TimelineEntry } from "../types";
-import { applyCommentDeletion, isDeletedComment, removeCommentSubtree } from "./comment-deletion";
+import {
+  applyCommentDeletion,
+  commentLandingTarget,
+  isDeletedComment,
+  removeCommentSubtree,
+} from "./comment-deletion";
 
 const DELETED_AT = "2026-09-11T08:00:00Z";
 
@@ -93,5 +98,31 @@ describe("removeCommentSubtree", () => {
   it("removes the comment and every descendant, and nothing else", () => {
     const timeline = [comment("a", null), comment("b", "a"), comment("c", "b"), comment("d", null)];
     expect(ids(removeCommentSubtree(timeline, "a"))).toEqual(["d"]);
+  });
+});
+
+describe("commentLandingTarget", () => {
+  const tombstone = (id: string) => comment(id, "root", { content: "", deleted_at: DELETED_AT });
+  const live = (id: string) => comment(id, "root");
+
+  it("lands on the visible reply above a tombstone", () => {
+    const replies = [live("r1"), tombstone("r2"), live("r3")];
+    expect(commentLandingTarget("r2", "root", replies)).toBe("r1");
+  });
+
+  it("skips back over consecutive tombstones", () => {
+    const replies = [live("r1"), tombstone("r2"), tombstone("r3")];
+    expect(commentLandingTarget("r3", "root", replies)).toBe("r1");
+  });
+
+  it("falls back to the thread root when nothing visible precedes the tombstone", () => {
+    expect(commentLandingTarget("r1", "root", [tombstone("r1"), live("r2")])).toBe("root");
+  });
+
+  it.each([
+    ["a live reply", "r2", [live("r1"), live("r2")]],
+    ["an id the thread does not hold — a root, or a comment outside the cache", "root", [live("r1")]],
+  ])("leaves %s as its own target", (_case, target, replies: TimelineEntry[]) => {
+    expect(commentLandingTarget(target, "root", replies)).toBe(target);
   });
 });

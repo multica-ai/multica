@@ -58,7 +58,7 @@ import { taskMessagesOptions } from "@/data/queries/chat";
 import { Text } from "@/components/ui/text";
 import { Markdown } from "@/lib/markdown";
 import { ImageSequenceProvider } from "@/lib/markdown/image-sequence";
-import { failureReasonLabel } from "@/lib/failure-reason-label";
+import { failureReasonKey } from "@/lib/failure-reason-label";
 import { formatElapsedMs } from "@/lib/format-elapsed";
 import { cn } from "@/lib/utils";
 import { useChatSelectStore } from "@/data/chat-select-store";
@@ -75,6 +75,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { useT } from "@/lib/i18n";
 
 interface Props {
   messages: ChatMessage[];
@@ -273,6 +274,7 @@ function MessageRow({
   quickActionsDisabled: boolean;
 }) {
   const isUser = message.role === "user";
+  const { t } = useT("chat");
   const isFailure = !!message.failure_reason;
   const isSelecting = useChatSelectStore(
     (s) => s.selectingId === message.id,
@@ -282,7 +284,7 @@ function MessageRow({
   if (isFailure) {
     return (
       <FailureBubble
-        reasonLabel={failureReasonLabel(message.failure_reason)}
+        reasonLabel={t(failureReasonKey(message.failure_reason))}
         rawError={message.content}
         elapsedMs={message.elapsed_ms ?? null}
         isSelecting={isSelecting}
@@ -386,6 +388,7 @@ function AssistantRow({
   // instead of an empty Markdown block; caption reads "Finished in" not
   // "Replied in".
   const isNoResponse = message.message_kind === "no_response";
+  const { t } = useT("chat");
   const body = (
     <View className="gap-1.5">
       {timeline.length > 0 ? (
@@ -393,7 +396,7 @@ function AssistantRow({
       ) : null}
       {isNoResponse ? (
         <Text className="text-sm italic text-muted-foreground">
-          The agent finished this turn without a text reply.
+          {t("no_response")}
         </Text>
       ) : (
         <Markdown
@@ -448,6 +451,7 @@ function QuickActions({
   onSelect: (action: ChatQuickAction) => void | Promise<unknown>;
 }) {
   const [submitting, setSubmitting] = useState(false);
+  const { t } = useT("chat");
   const blocked = disabled || submitting;
 
   const handleSelect = async (action: ChatQuickAction) => {
@@ -466,7 +470,7 @@ function QuickActions({
   return (
     <View
       className="flex-row flex-wrap gap-2 pt-0.5"
-      accessibilityLabel="Suggested follow-ups"
+      accessibilityLabel={t("a11y.suggested_followups")}
     >
       {actions.slice(0, 3).map((action, index) => (
         <Pressable
@@ -511,12 +515,13 @@ function ElapsedCaption({
   variant: "replied" | "failed" | "finished";
   elapsedMs: number;
 }) {
+  const { t } = useT("chat");
   const label =
     variant === "replied"
-      ? `Replied in ${formatElapsedMs(elapsedMs)}`
+      ? t("elapsed.replied", { time: formatElapsedMs(elapsedMs) })
       : variant === "finished"
-        ? `Finished in ${formatElapsedMs(elapsedMs)}`
-        : `Failed after ${formatElapsedMs(elapsedMs)}`;
+        ? t("elapsed.finished", { time: formatElapsedMs(elapsedMs) })
+        : t("elapsed.failed", { time: formatElapsedMs(elapsedMs) });
   return (
     <Text className="text-xs text-muted-foreground/80 mt-1">{label}</Text>
   );
@@ -536,6 +541,7 @@ function FailureBubble({
   longPress: ReturnType<typeof useChatMessageLongPress>;
 }) {
   const hasRawError = rawError.trim().length > 0;
+  const { t } = useT("chat");
 
   // B6: pass `selectable={isSelecting}` rather than hard-coding
   // `selectable` — otherwise UIKit's text-selection gesture pre-empts
@@ -561,7 +567,7 @@ function FailureBubble({
             <CollapsibleTrigger asChild>
               <View
                 accessibilityRole="button"
-                accessibilityLabel="Show error details"
+                accessibilityLabel={t("a11y.show_error_details")}
                 className="mt-1 flex-row items-center gap-1 active:opacity-70"
               >
                 <Ionicons
@@ -570,7 +576,7 @@ function FailureBubble({
                   color="#71717a"
                 />
                 <Text className="text-xs text-muted-foreground">
-                  Show details
+                  {t("details.show")}
                 </Text>
               </View>
             </CollapsibleTrigger>

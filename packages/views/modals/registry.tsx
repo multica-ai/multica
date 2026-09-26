@@ -7,6 +7,7 @@ import { CreateProjectModal } from "./create-project";
 import { CreateSquadModal } from "./create-squad";
 import { FeedbackModal } from "./feedback";
 import { SetParentIssueModal } from "./set-parent-issue";
+import { MarkDuplicateIssueModal } from "./mark-duplicate-issue";
 import { AddChildIssueModal } from "./add-child-issue";
 import { DeleteIssueConfirmModal } from "./delete-issue-confirm";
 import { RunConfirmModal } from "./run-confirm";
@@ -50,6 +51,9 @@ export function ModalRegistry() {
       break;
     case "issue-set-parent":
       activeModal = <SetParentIssueModal onClose={close} data={data} />;
+      break;
+    case "issue-mark-duplicate":
+      activeModal = <MarkDuplicateIssueModal onClose={close} data={data} />;
       break;
     case "issue-add-child":
       activeModal = <AddChildIssueModal onClose={close} data={data} />;

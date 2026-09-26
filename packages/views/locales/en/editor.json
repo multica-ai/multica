@@ -41,9 +41,6 @@
     "link_copied": "Link copied",
     "copy_link_failed": "Failed to copy link",
     "canvas_label": "Image canvas. Drag to pan, scroll to zoom, double-click to toggle actual size.",
-    "previous": "Previous image",
-    "next": "Next image",
-    "sequence_position": "{{index}} / {{total}}",
     "unavailable": "That image is no longer available — skipped it."
   },
   "canvas": {
@@ -61,7 +58,10 @@
     "preview_unsupported": "This file type can't be previewed.",
     "close": "Close",
     "open_in_new_tab": "Open in new tab",
-    "remove": "Remove attachment"
+    "remove": "Remove attachment",
+    "previous": "Previous",
+    "next": "Next",
+    "sequence_position": "{{index}} / {{total}}"
   },
   "link_hover": {
     "copy_link": "Copy link",

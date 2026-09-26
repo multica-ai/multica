@@ -65,6 +65,7 @@ func TestResolveOpenclawCLITimeout(t *testing.T) {
 // The pre-existing context contract must survive alongside it: callers that
 // check errors.Is(err, context.DeadlineExceeded) keep working.
 func TestExecOpenclawCLITimeoutIsTypedSentinel(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("shell shim shape is covered by the windows-tagged tests")
 	}
@@ -117,6 +118,7 @@ func TestPrepareOpenclawConfigPropagatesTimeoutSentinel(t *testing.T) {
 // but it is not a slow CLI — labelling it as one would tell the user to raise
 // a deadline that was never involved.
 func TestExecOpenclawCLICancellationIsNotATimeout(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("shell shim shape is covered by the windows-tagged tests")
 	}
@@ -155,6 +157,7 @@ func TestExecOpenclawCLICancellationIsNotATimeout(t *testing.T) {
 // non-retryable reason — rather than doubling the time spent inside the outer
 // preparation budget to reach an identical conclusion.
 func TestOpenclawActiveConfigPathSpendsOneBudgetAcrossBothAttempts(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("shell shim shape is covered by the windows-tagged tests")
 	}
@@ -171,7 +174,7 @@ func TestOpenclawActiveConfigPathSpendsOneBudgetAcrossBothAttempts(t *testing.T)
 			"  'config file') printf '/tmp/openclaw.json\\n' ;;\n"+
 			"esac\n", "")
 
-	const budget = 1500 * time.Millisecond
+	const budget = 300 * time.Millisecond
 	start := time.Now()
 	_, _, err = openclawActiveConfigPath(shim, budget)
 	elapsed := time.Since(start)
@@ -209,6 +212,14 @@ func TestOpenclawActiveConfigPathSpendsOneBudgetAcrossBothAttempts(t *testing.T)
 // reads anything (see TestPrepareOpenclawConfigManagedMcpCostsNoExtraCLICall), so
 // this drives the managed path too and still expects four invocations across
 // three deadlines: path resolution's two share one.
+//
+// The config-schema read is itself a two-invocation chain now — 2026.8 hosts are
+// asked for `agents.entries` when `agents.list` is gone — and those two share a
+// budget for the same reason path resolution's pair does: they ask one question,
+// and the second is only reached when the first says the path is not there. The
+// worst case is therefore five invocations across three deadlines, and the
+// registry fallback — a different question, answered from sqlite — still starts a
+// deadline of its own.
 func TestPrepareOpenclawConfigWorstCaseCLIBudgets(t *testing.T) {
 	envRoot := t.TempDir()
 	workDir := filepath.Join(envRoot, "workdir")
@@ -225,8 +236,11 @@ func TestPrepareOpenclawConfigWorstCaseCLIBudgets(t *testing.T) {
 		"config validate --json": {err: errors.New("error: unknown command 'validate'")},
 		// 1b. fallback path resolution, under the same deadline as 1a
 		"config file": {stdout: userConfigPath},
-		// 2. pre-2026.6 schema read, which this host does not have
-		"config get agents.list --json": {err: errors.New("Config path not found: agents.list")},
+		// 2a. the schema generation whose per-agent list this host retired
+		"config get agents.list --json": {err: errors.New("Unknown config path: agents.list")},
+		// 2b. its keyed replacement, under the same deadline as 2a, on a host
+		// whose agents live in the registry
+		"config get agents.entries --json": {stdout: `{"error":"Config path is valid but unset: agents.entries"}`},
 		// 3. registry fallback
 		"agents list --json": {stdout: `[{"id":"scout"}]`},
 		// No fourth entry, and the managed mcp_config below is why that is worth
@@ -260,6 +274,7 @@ func TestPrepareOpenclawConfigWorstCaseCLIBudgets(t *testing.T) {
 		"config validate --json",
 		"config file",
 		"config get agents.list --json",
+		"config get agents.entries --json",
 		"agents list --json",
 	}
 	if strings.Join(invocations, " | ") != strings.Join(wantInvocations, " | ") {
@@ -278,5 +293,19 @@ func TestPrepareOpenclawConfigWorstCaseCLIBudgets(t *testing.T) {
 			"separate deadlines (%v vs %v); they answer the same question and must "+
 			"share one budget",
 			stub.calls[0].deadline, stub.calls[1].deadline)
+	}
+	// And that the config-schema pair shares its budget the same way, since a
+	// fresh deadline there is exactly what took the old ceiling to four.
+	if len(stub.calls) >= 4 {
+		if stub.calls[2].deadline != stub.calls[3].deadline {
+			t.Errorf("`config get agents.list --json` and `config get agents.entries --json` ran "+
+				"under separate deadlines (%v vs %v); they answer the same question and must "+
+				"share one budget, or the worst case grows a deadline",
+				stub.calls[2].deadline, stub.calls[3].deadline)
+		}
+		if stub.calls[4].deadline == stub.calls[2].deadline {
+			t.Errorf("the registry fallback shares the config-schema deadline; it reads a " +
+				"different source and must keep its own budget")
+		}
 	}
 }

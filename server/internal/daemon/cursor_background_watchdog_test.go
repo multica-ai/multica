@@ -229,6 +229,8 @@ func TestExecuteAndDrain_BackgroundNativeCountSurvivesDroppedTranscript(t *testi
 // "fixed" into agreeing without changing what MULTICA_AGENT_TOOL_WATCHDOG=0
 // promises. See the knob's documentation in config.go.
 func TestCursorBackgroundCapturedDisabledToolWatchdog(t *testing.T) {
+	t.Parallel()
+
 	d := newTestDaemon(t)
 	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
 	d.cfg.AgentToolWatchdog = 0

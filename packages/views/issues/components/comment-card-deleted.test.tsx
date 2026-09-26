@@ -6,9 +6,10 @@ import type { TimelineEntry } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 
 // #8296: deleting a comment keeps its replies. A comment deleted while it had
-// replies arrives as a tombstone (`deleted_at` set, empty body) and renders as
-// a placeholder with no actions. The cache rules live in
-// packages/core/issues/comment-deletion.test.ts.
+// replies arrives as a tombstone (`deleted_at` set, empty body). A tombstoned
+// REPLY renders nothing — the replies it held already render in its place; a
+// tombstoned ROOT keeps a placeholder, since it heads the thread. The cache
+// rules live in packages/core/issues/comment-deletion.test.ts.
 
 vi.mock("@multica/core/api", () => ({
   api: { uploadFile: vi.fn() },
@@ -98,13 +99,25 @@ function renderThread(root: TimelineEntry, replies: TimelineEntry[]) {
 const actionMenus = () => screen.queryAllByRole("button", { name: "Comment actions" });
 
 describe("CommentCard — deleted comments", () => {
-  it("renders a deleted reply as a placeholder and keeps the replies to it", () => {
-    renderThread(comment("a", null), [tombstone("bb", "a"), comment("ccc", "bb")]);
+  it("renders no row for a deleted reply and keeps the replies to it", () => {
+    const { container } = renderThread(comment("a", null), [tombstone("bb", "a"), comment("ccc", "bb")]);
 
-    expect(screen.getByText("This comment was deleted")).toBeTruthy();
+    expect(screen.queryByText("This comment was deleted")).toBeNull();
     expect(screen.getByText("body ccc")).toBeTruthy();
-    // Root and the live reply keep their actions; the placeholder has none.
+    // No leftover chrome either: the root and the live reply are the only rows.
+    expect(container.querySelectorAll("[data-comment-block]")).toHaveLength(2);
     expect(actionMenus()).toHaveLength(2);
+  });
+
+  it("leaves a deleted reply out of the folded count", () => {
+    renderThread(comment("a", null), [
+      tombstone("bb", "a"),
+      comment("ccc", "bb"),
+      comment("dddd", "a", { resolved_at: "2026-09-11T09:00:00Z" }),
+    ]);
+
+    // "ccc" folds behind the bar; the tombstone is not a comment to count.
+    expect(screen.getByText("1 comment from Ada")).toBeTruthy();
   });
 
   it("renders a deleted root as a placeholder and keeps the thread open for replies", () => {

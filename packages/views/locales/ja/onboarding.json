@@ -3,16 +3,13 @@
     "wordmark": "Multica",
     "label": "オンボーディングの手順",
     "about_you": {
-      "label": "あなたについて",
-      "description": "役割と、実現したいこと。"
+      "label": "あなたについて"
     },
     "workspace": {
-      "label": "ワークスペース",
-      "description": "名前と URL を決める。"
+      "label": "ワークスペース"
     },
     "runtime": {
-      "label": "Mika を知る",
-      "description": "最初のエージェント仲間と、その実行環境。"
+      "label": "Mika を知る"
     }
   },
   "welcome": {
@@ -22,12 +19,10 @@
     "headline_emphasis": "ワークスペースに。",
     "lede": "同僚に仕事を任せるようにタスクを割り当てるだけ。エージェントが引き受け、ステータスを更新し、完了したらコメントします。",
     "lede_web": "デスクトップ版にはランタイムが同梱されており、何もインストールする必要はありません。ご自身の CLI を接続するには、ウェブで続けてください。",
-    "lede_desktop": "完了するころには、実際のエージェントがあなたの最初のタスクに返信しています。",
     "download_desktop": "デスクトップ版をダウンロード",
     "continue_on_web": "ウェブで続ける",
     "start_exploring": "探索を始める",
     "skip_existing": "以前にやったことがあります",
-    "illustration_caption": "すべてのタスク、すべてのスレッド、すべての判断を、チームとエージェントで共有。",
     "illustration": {
       "card1_actor_name": "あなた",
       "card1_actor_initial": "N",
@@ -59,9 +54,8 @@
   },
   "source_backfill": {
     "eyebrow": "ちょっと質問",
-    "lede": "ひとつだけ質問です。Multica がどんな方に役立っているかを把握するのに役立ちます。答えたらすぐ作業に戻れます。",
+    "lede": "Multica を知ったきっかけを教えてください。",
     "submit": "送信",
-    "hint_ready": "OK です。準備ができたら送信を押してください。",
     "save_failed_toast": "保存できませんでした"
   },
   "questions": {
@@ -117,13 +111,15 @@
     "other_aria": "別の内容を入力"
   },
   "step_question": {
-    "hint_pick": "ひとつ選んで続けてください。答えたくない場合はスキップできます。",
-    "hint_continue": "いい感じです。準備ができたら「続ける」を押してください。"
+    "hint_pick": "スキップできます。"
   },
   "cli_install": {
     "copy_aria": "コピー",
     "intro": "エージェントを実行するには、このコンピュータにエージェントランタイム(Claude Code、Codex、Cursor など)が必要です。サーバーやリモート開発環境でも動作します。",
     "step1_label": "Multica CLI をインストール",
+    "platform_group": "プラットフォームを選択",
+    "platform_macos_linux": "macOS / Linux",
+    "platform_windows": "Windows",
     "step2_label": "デーモンを起動"
   },
   "cloud_waitlist": {
@@ -175,7 +171,6 @@
     "issue_prefix_suffix": " のように表示されます。あとで設定から変更できます。",
     "issue_prefix_pending": "上の URL を入力すると、タスク番号はそれに合わせて決まります。ここに直接入力することもできます。",
     "create_new_title": "新しいワークスペースを作成",
-    "create_new_subtitle": "新しく始めましょう — 別の業務領域のための独立した場所です。",
     "hint_opening": "{{name}} を開いています。",
     "hint_creating": "{{name}} を作成しています。",
     "hint_creating_pending": "{{name}} を作成中…",
@@ -204,7 +199,6 @@
     "scanning_lede_prefix": "エージェントは、あなたがすでに持っている AI コーディングツールを通じて作業します — たとえば ",
     "scanning_lede_suffix": " など。このコンピュータにインストール済みのものを確認しています。",
     "found_headline": "Mika はどこで動かしますか？",
-    "found_lede": "このコンピュータで見つかったエージェントランタイムです。あとで切り替えたり追加したりできます。",
     "runtime_count_other": "エージェントランタイム {{count}} 個",
     "status_all_online": "すべてオンライン",
     "status_none_online": "オンラインなし",
@@ -215,7 +209,7 @@
     "empty_lede_prefix": "エージェントランタイムとは、私たちが接続する AI コーディングツールです — たとえば ",
     "empty_lede_suffix": " など。1 つインストールして更新するか、下から進む方法を選んでください。",
     "empty_skip_title": "今はスキップ",
-    "empty_skip_subtitle": "先にワークスペースに入ります。このコンピュータにエージェントランタイムが接続されるまでエージェントは実行を開始できませんが、閲覧、計画、チームメイトの招待は可能です。",
+    "empty_skip_subtitle": "ランタイムに接続するまでエージェントは実行できません。",
     "empty_skip_action": "スキップ",
     "empty_waitlist_title": "クラウドコンピュータを使う",
     "empty_waitlist_subtitle": "クラウドでコンピュータを動かします。まだ提供されていません。",
@@ -226,16 +220,15 @@
     "hint_selected": "選択中: {{name}}",
     "hint_pick": "Mika と始めるには、上でエージェントランタイムを選んでください。",
     "hint_waiting": "最初の結果を待っています…",
-    "hint_skip_or_refresh": "インストール後に更新するか、スキップしてワークスペースに入ってください。",
     "continue": "Mika と始める"
   },
   "step_platform": {
     "eyebrow": "コンピュータを接続",
     "headline": "エージェントを実行するコンピュータを接続しましょう。",
-    "lede": "このワークスペースの参謀長である Mika は、Multica に接続した実際のコンピュータで動きます。どう接続するかを選んでください。",
-    "hint_default": "接続方法を選んでください。スキップしてあとでコンピュータを接続することもできます。",
+    "lede": "コンピュータに接続して Mika を使い始めましょう。",
+    "hint_default": "後から接続できます。",
     "download_title": "このコンピュータを使う",
-    "download_subtitle": "デスクトップアプリをインストールして、このコンピュータを接続します。新しいタブで開くので、そこでプラットフォームを選んでください。",
+    "download_subtitle": "デスクトップ版をインストールして、このコンピュータを接続します。",
     "download_button": "ダウンロード",
     "cli_title": "ターミナルから接続",
     "cli_subtitle": "サーバー、リモート開発環境、ヘッドレスなコンピュータを接続します。ターミナルが必要です。",
@@ -244,7 +237,6 @@
     "cloud_subtitle": "クラウドでコンピュータを動かします。まだ提供されていません。",
     "cloud_action": "近日公開",
     "cli_dialog_title": "ターミナルから接続",
-    "cli_dialog_description": "デスクトップと同じ接続を、ターミナルからセットアップします。サーバー、リモート開発環境、ヘッドレスなコンピュータに使ってください。",
     "cli_dialog_pick_hint": "上でコンピュータを選んでください。",
     "cli_dialog_connect": "接続して続ける",
     "runtimes_connected_other": "コンピュータ {{count}} 台を接続済み",

@@ -13,7 +13,7 @@
     "filter_all_description": "当前视图下的所有运行时",
     "empty": {
       "title": "还没有运行时",
-      "hint": "桌面端会自动扫描这台电脑。想把另一台电脑加进来——服务器、远程开发机，或任何能开终端的电脑——在这里添加。"
+      "hint": "桌面端自动检测本机；可在此连接其他电脑。"
     },
     "no_matches": {
       "title": "无匹配",
@@ -24,16 +24,15 @@
     },
     "bootstrapping": {
       "title": "正在启动本地运行时...",
-      "hint": "通常需要几秒钟。守护进程正在向工作区注册。"
+      "hint": "正在连接工作区..."
     }
   },
   "mika_setup": {
     "title": "运行时已准备好，和 Mika 开始。",
-    "description": "Mika 会把你的目标转化为任务、协调合适的智能体，并在工作流需要时帮你添加可复用的 specialist。",
+    "description": "让 Mika 帮你安排任务和协调智能体。",
     "action": "和 Mika 开始",
     "failed": "无法启动 Mika",
     "dialog_title": "让 Mika 在哪台电脑上运行？",
-    "dialog_description": "选择 Mika 使用的运行时。之后可以在设置里更改。",
     "cancel": "取消"
   },
   "machine": {
@@ -76,7 +75,7 @@
     "rename": "重命名机器",
     "rename_dialog": {
       "title": "重命名机器",
-      "description": "给这台机器起一个你能认出来的名字。会应用到这台机器上的所有运行时，并在给智能体选择运行时时显示。",
+      "description": "用于这台机器及其所有运行时。",
       "placeholder": "例如：我的 MacBook",
       "hint": "留空则使用设备的默认名称。",
       "cancel": "取消",
@@ -191,10 +190,12 @@
     "title": "添加电脑",
     "description": "在要添加的电脑上运行这两条命令。守护进程一上线，这里就会自动识别。",
     "step1_label": "安装 Multica CLI",
+    "platform_group": "选择你的系统",
+    "platform_macos_linux": "macOS / Linux",
+    "platform_windows": "Windows",
     "step2_label": "启动守护进程",
     "step2_hint": "会打开浏览器登录，然后在后台保持守护进程运行。",
     "live_listening": "等待你的电脑上线",
-    "live_listening_hint": "守护进程一启动就会被识别，通常不到一分钟。",
     "troubleshooting": "那台电脑打不开浏览器？",
     "trouble_intro": "改用 token 登录替代第 2 步，适用于任何有终端的环境。",
     "trouble_token_hint_prefix": "在 ",
@@ -205,21 +206,20 @@
     "copy_aria": "复制",
     "cancel": "取消",
     "success_title": "电脑已连接",
-    "success_description": "电脑已经上线就绪。创建一个智能体，运行就可以派发到这里。",
+    "success_description": "电脑已连接，可以创建智能体。",
     "view_runtime": "查看运行时",
     "create_agent": "创建智能体"
   },
   "cloud_runtime": {
     "action": "云端运行时",
     "title": "云端运行时",
-    "description": "创建托管云端节点，并查看它的 Fleet 状态。",
+    "description": "创建云端运行环境。",
     "create_title": "新节点",
-    "create_hint": "只需要填写名称、实例规格和磁盘大小，其余配置由 Fleet 默认处理。",
     "nodes_title": "Fleet 节点",
     "refresh": "刷新",
     "nodes_empty": "还没有云端节点",
     "nodes_failed": "云端运行时不可用",
-    "nodes_failed_hint": "Fleet 未返回节点列表。",
+    "nodes_failed_hint": "无法加载云端节点，请重试。",
     "node_fallback_name": "云端节点",
     "create": "创建节点",
     "creating": "创建中...",
@@ -338,7 +338,7 @@
       "read_only": "只读"
     },
     "detail": {
-      "base_family": "基础协议类型",
+      "base_family": "基础运行时",
       "command": "命令",
       "description": "描述",
       "no_description": "无描述",
@@ -350,12 +350,12 @@
     "form": {
       "create_title": "新建自定义运行时",
       "edit_title": "编辑自定义运行时",
-      "step_family_label": "选择基础协议类型",
-      "step_family_hint": "此运行时使用的底层 CLI 协议。",
+      "step_family_label": "选择基础运行时",
+      "step_family_hint": "选择此命令兼容的 CLI。",
       "step_details_label": "配置运行时",
       "step_progress": "第 {{current}} / {{total}} 步",
-      "family_label": "基础协议类型",
-      "family_locked_hint": "创建后无法更改基础协议类型。",
+      "family_label": "基础运行时",
+      "family_locked_hint": "创建后无法更改基础运行时。",
       "display_name_label": "显示名称",
       "display_name_placeholder": "例如：我的自定义 Claude...",
       "command_name_label": "命令",
@@ -389,7 +389,7 @@
       "cancel": "取消",
       "deleting": "正在删除...",
       "toast_deleted": "已从工作区删除自定义运行时",
-      "error_bound": "仍有智能体在使用此运行时，无法删除。",
+      "error_bound": "仍有智能体在使用此自定义运行时，无法删除；这些智能体可能位于注册了该运行时的其他机器上。",
       "error_generic": "删除运行时失败。"
     }
   },

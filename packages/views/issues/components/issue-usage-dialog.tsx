@@ -15,6 +15,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
 import { formatDuration } from "../../agents/components/agent-activity-hover-content";
 import {
+  cacheHitRatePercent,
   collectUnmappedModels,
   formatTokens,
   formatUsd,
@@ -84,14 +85,10 @@ export function IssueUsageDialog({
     [priced, pricings],
   );
 
-  // Floor, not round: on a cache-heavy issue 99.55% rounds to "100% hit rate",
-  // which claims every single token came from cache. Flooring only ever says
-  // 100% when it is actually 100%, and one percentage point of pessimism is
-  // cheaper than an impossible-looking number.
   const cacheHitRate =
-    total && total.input + total.cacheRead > 0
-      ? Math.floor((total.cacheRead / (total.input + total.cacheRead)) * 100)
-      : 0;
+    total == null
+      ? null
+      : cacheHitRatePercent(total.input, total.cacheRead, total.cacheWrite);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -134,10 +131,14 @@ export function IssueUsageDialog({
                 label={t(($) => $.usage_detail.kpi_cache)}
                 value={formatUsd(total.cacheSavings)}
                 accent={total.cacheSavings > 0 ? "success" : "default"}
-                hint={t(($) => $.usage_detail.kpi_cache_hint, {
-                  pct: cacheHitRate,
-                  reads: formatTokens(total.cacheRead),
-                })}
+                hint={
+                  cacheHitRate == null
+                    ? "—"
+                    : t(($) => $.usage_detail.kpi_cache_hint, {
+                        pct: cacheHitRate,
+                        reads: formatTokens(total.cacheRead),
+                      })
+                }
               />
               <KpiCard
                 label={t(($) => $.usage_detail.kpi_tokens)}

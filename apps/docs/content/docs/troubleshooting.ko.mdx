@@ -130,6 +130,25 @@ CLI 도달 확인은 `<server-url>/health`에 GET을 보내 200을 기대합니�
 curl -fsS <server-url>/health
 ```
 
+## `multica login`이 TLS 핸드셰이크 시간 초과로 실패함
+
+`multica login`이 브라우저를 열고 웹 로그인은 완료되지만 CLI는 "Sign-in did not complete" 또는 "TLS handshake timed out"으로 실패합니다. `multica --debug login`은 `POST /api/tokens`에서 `net/http: TLS handshake timeout`을 표시하며, 같은 컴퓨터의 `curl.exe -I https://api.multica.ai`나 브라우저는 정상적으로 연결됩니다.
+
+TCP 연결은 열리지만 TLS 핸드셰이크가 끝나지 않습니다. Multica CLI와 데몬을 포함한 Go 클라이언트는 기본적으로 TLS ClientHello에 양자내성 키 교환을 포함하므로 ClientHello가 약 1.5 KB가 되어 두 패킷으로 나뉩니다. 일부 보안 소프트웨어, VPN, 라우터, 방화벽은 이런 핸드셰이크를 버립니다. curl의 ClientHello는 훨씬 작아서 통과합니다.
+
+양자내성 키 교환을 끄고 다시 시도해 원인을 확인합니다:
+
+```powershell
+$env:GODEBUG = 'tlsmlkem=0'
+multica --debug login
+```
+
+```bash
+GODEBUG=tlsmlkem=0 multica --debug login
+```
+
+이렇게 해서 성공하면 CLI와 데몬을 실행하는 사용자에게 `GODEBUG=tlsmlkem=0`을 영구적으로 설정하고(Windows에서는 `[Environment]::SetEnvironmentVariable('GODEBUG', 'tlsmlkem=0', 'User')`를 실행한 뒤 새 터미널을 여세요) 데몬 또는 데스크톱 앱을 다시 시작하세요. `MULTICA_HTTP_TIMEOUT`을 늘려도 도움이 되지 않습니다. 핸드셰이크는 이 설정의 영향을 받지 않습니다. 근본적인 해결은 네트워크 쪽에서 해야 합니다. 분할된 TLS 핸드셰이크를 버리는 장비나 소프트웨어를 업데이트하거나 재구성하세요.
+
 ## 인증 코드 및 초대 이메일이 도착하지 않음
 
 먼저 backend 시작 로그를 확인합니다. 로그에는 현재 `SMTP relay`, `Resend API`, `DEV mode` 중 무엇을 사용하는지 표시됩니다.

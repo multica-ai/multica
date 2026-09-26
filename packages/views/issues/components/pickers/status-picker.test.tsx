@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses";
 import type { IssueStatusEntry } from "@multica/core/types";
@@ -28,7 +28,7 @@ function entry(overrides: Partial<IssueStatusEntry>): IssueStatusEntry {
     key: "custom",
     name: "Custom",
     description: "",
-    category: "in_review",
+    category: "started",
     // Seeded per status by the server — including for the built-ins, which
     // are not recolorable and must ignore it.
     color: "#22c55e",
@@ -79,7 +79,7 @@ describe("StatusPicker trigger color", () => {
   // one and as the `text-success` token in the other — the same status in two
   // visibly different greens, side by side. (MUL-6440)
   it("paints a built-in from the token, exactly like its row in the list", () => {
-    catalogEntries = [IN_REVIEW, QA];
+    catalogEntries = [IN_REVIEW, { ...QA, icon: "slash" }];
     const { container } = renderWithI18n(
       <StatusPicker status="in_review" onUpdate={() => {}} open onOpenChange={() => {}} />,
     );
@@ -98,7 +98,7 @@ describe("StatusPicker trigger color", () => {
   // The other half of the same rule: a CUSTOM status has no token to fall back
   // on, so its own color has to reach both controls.
   it("paints a custom status from its own color in both places", () => {
-    catalogEntries = [IN_REVIEW, QA];
+    catalogEntries = [IN_REVIEW, { ...QA, icon: "slash" }];
     const { container } = renderWithI18n(
       <StatusPicker status="qa" onUpdate={() => {}} open onOpenChange={() => {}} />,
     );
@@ -108,5 +108,58 @@ describe("StatusPicker trigger color", () => {
 
     expect(trigger?.style.color).toBe("rgb(236, 122, 45)");
     expect(row?.style.color).toBe(trigger?.style.color);
+    expect(trigger?.querySelector("line")).not.toBeNull();
+    expect(row?.innerHTML).toBe(trigger?.innerHTML);
+  });
+});
+
+describe("StatusPicker mark-as-duplicate action", () => {
+  // Create and batch surfaces must never offer it: an issue that does not
+  // exist yet cannot duplicate anything.
+  it("is absent unless the caller opts in", () => {
+    renderWithI18n(
+      <StatusPicker status="todo" onUpdate={() => {}} open onOpenChange={() => {}} />,
+    );
+    expect(screen.queryByRole("button", { name: "Mark as duplicate" })).toBeNull();
+  });
+
+  it("is an action beside the options, not another status", () => {
+    const onMarkDuplicate = vi.fn();
+    const onUpdate = vi.fn();
+    const onOpenChange = vi.fn();
+    renderWithI18n(
+      <StatusPicker
+        status="todo"
+        onUpdate={onUpdate}
+        open
+        onOpenChange={onOpenChange}
+        onMarkDuplicate={onMarkDuplicate}
+      />,
+    );
+
+    const action = screen.getByRole("button", { name: "Mark as duplicate" });
+    // Outside the arrow-key listbox, so keyboard nav and search skip it.
+    expect(action.hasAttribute("data-picker-item")).toBe(false);
+
+    fireEvent.click(action);
+    expect(onMarkDuplicate).toHaveBeenCalledTimes(1);
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("StatusPicker on an issue that already is a duplicate", () => {
+  it("relabels the action to re-point the mark", () => {
+    renderWithI18n(
+      <StatusPicker
+        status="cancelled"
+        onUpdate={() => {}}
+        open
+        onOpenChange={() => {}}
+        onMarkDuplicate={() => {}}
+        isDuplicate
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Change original" })).toBeTruthy();
   });
 });

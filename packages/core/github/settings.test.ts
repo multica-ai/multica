@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveGitHubSettings } from "./settings";
+import { deriveGitHubSettings, derivePRAutoCompleteEnabled } from "./settings";
 import type { Workspace } from "../types";
 
 function ws(settings: Record<string, unknown>): Pick<Workspace, "settings"> {
@@ -62,5 +62,17 @@ describe("deriveGitHubSettings", () => {
         ws({ github_enabled: true, github_pr_sidebar_enabled: null }),
       ),
     ).toMatchObject({ enabled: true, prSidebar: true });
+  });
+});
+
+describe("derivePRAutoCompleteEnabled", () => {
+  it("is on unless explicitly turned off", () => {
+    expect(derivePRAutoCompleteEnabled(null)).toBe(true);
+    expect(derivePRAutoCompleteEnabled(ws({}))).toBe(true);
+    expect(derivePRAutoCompleteEnabled(ws({ pr_auto_complete_enabled: false }))).toBe(false);
+  });
+
+  it("does not follow the GitHub master switch", () => {
+    expect(derivePRAutoCompleteEnabled(ws({ github_enabled: false }))).toBe(true);
   });
 });

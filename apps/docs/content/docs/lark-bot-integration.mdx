@@ -86,6 +86,7 @@ Restart the API server, then connect the Bot from the agent's **Integrations** p
 - **QR code expired**: close the dialog and start the connection again.
 - **The Bot asks for account binding**: open the binding link and sign in with the Multica account for that workspace.
 - **The Bot doesn't run**: check whether the agent is archived and whether the [runtime](/daemon-runtimes) it uses is online.
+- **The Bot never replies at all**: the app must push events over a long connection — Multica has no webhook endpoint. In the Feishu/Lark developer console, open **Events & Callbacks → Event Configuration** and confirm that the subscription method is the long connection rather than a request URL, that `im.message.receive_v1` is subscribed, and that the app version carrying that configuration is published (and approved, where the tenant reviews releases). An app set to a request URL still binds, still shows Connected, and silently receives nothing.
 
 ## Next steps
 

@@ -5,6 +5,22 @@ import (
 	"testing"
 )
 
+func TestTaskSupplementVersionGate(t *testing.T) {
+	for _, tc := range []struct {
+		provider, version string
+		want              bool
+	}{
+		{"codex", "codex-cli 0.100.0", true}, {"codex", "0.99.0", false},
+		{"claude", "2.1.110 (Claude Code)", true}, {"claude", "2.1.109", false},
+		{"grok", "1.0.14", true}, {"grok", "1.0.13", false}, {"grok", "0.2.120", false},
+		{"codex", "", false}, {"claude", "dev", false}, {"kimi", "9.0.0", false},
+	} {
+		if got := SupportsTaskSupplement(tc.provider, tc.version); got != tc.want {
+			t.Errorf("%s %q: supported=%v, want %v", tc.provider, tc.version, got, tc.want)
+		}
+	}
+}
+
 func TestParseSemver(t *testing.T) {
 	tests := []struct {
 		input   string
@@ -215,6 +231,16 @@ func TestCheckMinVersion(t *testing.T) {
 		{"zeroclaw", "invalid", true},
 		{"dim", "0.2.99", true},
 		{"dim", "invalid", true},
+		// opencode: 1.1.54 is the first build that honors TMPDIR/TMP/TEMP for
+		// Bun native-module extraction. 1.1.53 and 1.1.49 are the versions
+		// actually measured leaking into the shared temp dir (#8392); the CLI
+		// prints a bare semver, so there is no prefix to strip.
+		{"opencode", "1.1.54", false},
+		{"opencode", "1.1.55", false},
+		{"opencode", "1.18.30", false},
+		{"opencode", "1.1.53", true},
+		{"opencode", "1.1.49", true},
+		{"opencode", "0.15.0", true},
 		{"unknown", "1.0.0", false},
 	}
 	for _, tt := range tests {

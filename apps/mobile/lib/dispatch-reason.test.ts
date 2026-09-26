@@ -47,6 +47,17 @@ describe("sendFailureMessage", () => {
     ).toMatch(/runtime/i);
   });
 
+  // PUCK-89: a private-runtime owner mismatch never resolves by retrying. The
+  // message must name the real fixes instead of the generic retry advice.
+  it("gives runtime_access_denied actionable copy, not a retry", () => {
+    const message = sendFailureMessage(
+      apiError({ reason_code: "runtime_access_denied" }),
+    );
+    expect(message).toMatch(/private runtime/i);
+    expect(message).toMatch(/public|rebind/i);
+    expect(message).not.toMatch(/try again/i);
+  });
+
   it("falls back to a retryable message for anything else", () => {
     expect(sendFailureMessage(new Error("timeout"))).toMatch(/try again/i);
   });

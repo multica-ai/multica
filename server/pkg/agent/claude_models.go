@@ -241,8 +241,8 @@ func discoverClaudeCatalog(ctx context.Context, runtimeCmd Command) Catalog {
 
 func claudeStaticCatalog(ctx context.Context, runtimeCmd Command) Catalog {
 	static := claudeStaticModels()
-	annotateClaudeThinking(ctx, static, runtimeCmd)
-	return Catalog{Models: static, Fallback: true}
+	cliLevels := annotateClaudeThinking(ctx, static, runtimeCmd)
+	return Catalog{Models: static, Fallback: true, CLIThinkingLevels: cliLevels}
 }
 
 // discoverClaudeModels enumerates the local Claude Code catalog over the
@@ -425,9 +425,8 @@ func claudeModelLabel(info claudeModelInfo, id string) string {
 
 // claudeThinkingFromInfo builds the per-model effort catalog from the row's own
 // advertisement. This is the discovery path's clearest win over the static one:
-// loadClaudeThinkingByModel has to scrape `claude --help` for a global superset
-// and then narrow it through claudeModelEffortAllow, a hand-kept table of which
-// models really take xhigh. Here each model states its own levels.
+// annotateClaudeThinking can only scrape `claude --help` for a global superset
+// and offer it on every model. Here each model states its own levels.
 //
 // DefaultLevel is deliberately left empty. The rows carry no default-effort
 // field, and empty already means "the runtime picks, we don't know" — a more

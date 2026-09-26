@@ -1075,9 +1075,6 @@ export function RuntimeLocalSkillImportPanel({
           <p className="text-body text-muted-foreground">
             {t(($) => $.runtime_import.no_skills_title)}
           </p>
-          <p className="mt-1 text-caption text-muted-foreground">
-            {t(($) => $.runtime_import.no_skills_hint)}
-          </p>
         </div>
       );
     }
@@ -1095,9 +1092,6 @@ export function RuntimeLocalSkillImportPanel({
 
         {filteredRuntimeSkills.length === 0 ? (
           <div className="rounded-lg border border-dashed px-4 py-8 text-center">
-            <p className="text-body text-muted-foreground">
-              {t(($) => $.runtime_import.no_search_results_title)}
-            </p>
             <p className="mt-1 text-caption text-muted-foreground">
               {t(($) => $.runtime_import.no_search_results_hint, {
                 query: skillSearchQuery.trim(),

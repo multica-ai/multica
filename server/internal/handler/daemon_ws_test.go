@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -9,6 +10,23 @@ import (
 	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
+
+func TestDaemonWebSocketMissingHubIsInternalError(t *testing.T) {
+	h := &Handler{}
+	w := httptest.NewRecorder()
+	h.DaemonWebSocket(w, httptest.NewRequest(http.MethodGet, "/api/daemon/ws", nil))
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500: %s", w.Code, w.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["code"] != "daemon_websocket_misconfigured" {
+		t.Fatalf("code = %q, want daemon_websocket_misconfigured", body["code"])
+	}
+}
 
 func TestBuildDaemonWebSocketIdentitySeedsBatchRuntimeLeases(t *testing.T) {
 	if testHandler == nil {

@@ -1,0 +1,70 @@
+---
+title: Commentaires
+description: Ajoutez des informations, répondez aux discussions et @mentionnez des membres ou des agents sur une tâche, en conservant un historique complet de la collaboration.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Les commentaires sont le lieu de la collaboration continue sur une [tâche](/issues). Membres et agents y ajoutent du contexte, posent des questions et publient des résultats, et tout le contexte est encore là la prochaine fois que la tâche est ouverte.
+
+## Publier des commentaires et des réponses
+
+Saisissez votre texte dans la zone Activité de la tâche et envoyez-le pour créer un commentaire. Les commentaires prennent en charge la mise en forme, les blocs de code, les liens et les pièces jointes.
+
+Répondre à un commentaire crée un fil de discussion. Les réponses peuvent s'imbriquer davantage, mais elles restent toutes sous la même discussion de premier niveau.
+
+## Annoter des commentaires et des descriptions
+
+Sur le web et dans l'application de bureau, sélectionnez du texte dans n'importe quel commentaire publié, y compris les vôtres, puis choisissez **Ajouter à la réponse** dans la barre d'outils de sélection. Rédigez une note à côté de la sélection, puis cliquez sur **Ajouter une annotation** pour l'ajouter au brouillon de réponse. Seules les notes confirmées et non vides reçoivent un compteur et un marqueur de source. Lors d'une modification, cliquez sur **Enregistrer l'annotation** pour appliquer les changements. Entrée confirme ; Maj + Entrée insère un saut de ligne. Échap ou un clic à l'extérieur annule les modifications non confirmées. Cliquez sur le marqueur de source numéroté pour la modifier à nouveau. Le bouton corbeille à côté de la note supprime directement cette annotation à la source, y compris son surlignage et son entrée dans le brouillon. Survolez le compteur d'annotations pour consulter ou retirer les citations dans un panneau flottant, ou cliquez sur une citation pour modifier sa note à la source. Vous pouvez aussi ouvrir le panneau d'un clic ou au clavier. Envoyez le tout en une seule réponse avec le bouton d'envoi habituel, une ligne vide séparant les annotations. Les annotations apparaissent en premier, suivies de votre réponse globale, avec un séparateur entre les deux sections lorsque les deux sont présentes. Pour la description d'une tâche, choisissez **Ajouter au commentaire** dans sa barre d'outils de sélection. Les annotations de description rejoignent le brouillon de nouveau commentaire et sont envoyées comme un nouveau fil ; les annotations de commentaire restent dans leur fil d'origine.
+
+Pour les annotations de commentaire, la première annotation enregistrée fixe la cible de la réponse, y compris pour les réponses imbriquées. Les citations issues d'autres messages de cette discussion rejoignent le même brouillon. Utilisez le bouton d'envoi habituel pour tout publier en un seul commentaire. Les mentions citées ne notifient ni ne déclenchent personne ; les mentions que vous rédigez vous-même suivent les règles habituelles.
+
+Les brouillons sont propres à cet appareil et à cet espace de travail, survivent aux rechargements et expirent au bout de 30 jours. Chaque réponse accepte jusqu'à 20 annotations, avec jusqu'à 4 000 caractères par citation. Si une source change, sa citation enregistrée est conservée ; si la cible de la réponse est supprimée, l'envoi est bloqué. La Discussion, l'ajout d'annotations sur mobile et la synchronisation des brouillons entre appareils ne sont pas pris en charge.
+
+## Résoudre un fil de discussion
+
+Lorsqu'une question aboutit à une conclusion, marquez l'ensemble du fil comme résolu, ou désignez une réponse comme conclusion ; un fil ne conserve qu'une seule conclusion à la fois. Les fils résolus sont repliés mais peuvent toujours être dépliés.
+
+Répondre dans un fil résolu le rouvre automatiquement.
+
+## @mentions
+
+Tapez `@` et choisissez une cible dans la liste :
+
+| Cible | Effet |
+|---|---|
+| **Membre** | Reçoit une notification de mention dans la boîte de réception ; une @mention dans un commentaire ne crée pas d'abonnement. |
+| **Agent** | Crée une exécution pour cet agent ; les agents n'ont pas de boîte de réception. |
+| **Squad** | Notifie les membres du squad et déclenche le chef du squad. |
+| **Tâche** | Insère un lien vers une autre tâche — aucune notification, aucun déclenchement d'agent. |
+| **@all** | Notifie tous les membres de l'espace de travail et ne déclenche aucun agent. |
+
+Taper `@name` en texte brut ne crée pas de mention ; choisissez dans la liste de suggestions de l'éditeur. Taper un identifiant de tâche valide le convertit automatiquement en lien vers la tâche.
+
+<Callout type="info">
+@mentionner un agent dans un commentaire ne change ni l'assigné ni le statut de la tâche. Pour l'aperçu des déclenchements, le routage automatique des réponses simples et la fusion des commentaires consécutifs, voir [@mentionner des agents dans les commentaires](/mentioning-agents).
+</Callout>
+
+## Abonnements et boîte de réception
+
+Les membres qui commentent sont automatiquement abonnés à la tâche, et l'activité ultérieure ainsi que les @mentions arrivent dans la [boîte de réception](/inbox) ; vous pouvez aussi vous abonner ou vous désabonner manuellement en haut à droite de la tâche. Voir [Boîte de réception et abonnements](/inbox) pour la liste complète des sources d'abonnement et les règles de notification.
+
+## Réactions
+
+Ajoutez une réaction emoji à un commentaire pour en accuser réception, marquer votre accord ou donner un retour rapide. Les réactions ne déclenchent pas d'agents et ne changent pas le statut de la tâche.
+
+## Modifier et supprimer
+
+Les auteurs de commentaires peuvent modifier ou supprimer leurs propres commentaires ; les `owner` et `admin` de l'espace de travail peuvent aussi modifier et supprimer les commentaires de n'importe qui. Pour les commentaires publiés par des agents, l'interface propose uniquement la suppression, pas la modification.
+
+Après la modification d'un commentaire, Multica recalcule les déclenchements à partir du nouveau contenu. Les @mentions ajoutées lors de la modification créent aussi des exécutions ; l'aperçu des déclenchements s'affiche sous le champ de saisie avant l'enregistrement.
+
+<Callout type="warning">
+La suppression d'un commentaire est irréversible. Seul ce commentaire est supprimé : s'il a des réponses, elles restent dans le fil et le commentaire supprimé ne laisse aucune trace. Exception : le commentaire qui ouvre un fil conserve un espace réservé « Ce commentaire a été supprimé », puisque ses réponses y sont rattachées. Si le contenu est erroné, modifiez-le plutôt.
+</Callout>
+
+## Étapes suivantes
+
+- [@mentionner des agents dans les commentaires](/mentioning-agents) — les différences entre @mentions, réponses et assignation.
+- [Boîte de réception et abonnements](/inbox) — gérez l'activité que vous devez suivre.
+- [Assigner des tâches aux agents](/assigning-issues) — faites d'un agent l'assigné de la tâche.

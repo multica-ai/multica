@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -306,5 +307,48 @@ func TestHandleModelList_FixedArgsFilteredBeforeDiscovery(t *testing.T) {
 
 	if strings.Join(prefix, "\x00") != "start\x00q36" {
 		t.Fatalf("discovery prefix = %v, want the protocol flag filtered out", prefix)
+	}
+}
+
+func TestHandleModelList_CustomOmpCompatibilityTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX fixture")
+	}
+	fx := newModelListFixture(t)
+	listModels = agent.ListModels
+	path := fakeExecutable(t, "omp-wrapper")
+	script := `#!/bin/sh
+[ "$1" = "launch" ] || exit 3
+shift
+if [ "$1 $2" = "models --json" ]; then
+ echo '{"models":[{"provider":"commandcode","id":"deepseek/model","selector":"commandcode/deepseek/model"}]}'
+ exit 0
+fi
+echo "Error: unknown flags: $*" >&2
+exit 2
+`
+	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{}
+	rt := Runtime{ID: "rt-custom", Provider: "omp", ProfileID: "prof-1"}
+	d.runtimeIndex[rt.ID] = rt
+	d.profileLaunchSpecs[rt.ProfileID] = profileLaunchSpec{path: path, fixedArgs: []string{"launch"}}
+	d.handleModelList(context.Background(), rt, "req-omp")
+	_, _, _, report := fx.snapshot()
+	if report["status"] != "completed" {
+		t.Fatalf("OMP discovery: %+v", report)
+	}
+	models, _ := report["models"].([]any)
+	if len(models) != 1 || models[0].(map[string]any)["id"] != "commandcode/deepseek/model" {
+		t.Fatalf("lost provider-qualified selector: %+v", report)
+	}
+	rt.Provider = "pi"
+	d.handleModelList(context.Background(), rt, "req-pi")
+	_, _, _, report = fx.snapshot()
+	reason, _ := report["error"].(string)
+	if report["status"] != "failed" || !strings.Contains(reason, "unknown flags") {
+		t.Fatalf("failed probes must report a reason: %+v", report)
 	}
 }

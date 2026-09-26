@@ -13,7 +13,6 @@
   "delete_issue": {
     "title": "태스크 삭제",
     "description": "이 태스크와 모든 댓글이 영구 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
-    "hint": "워크스페이스 멤버라면 누구나 태스크를 삭제할 수 있습니다.",
     "cancel": "취소",
     "confirm": "삭제",
     "deleting": "삭제하는 중...",
@@ -29,14 +28,16 @@
     "toast_failed": "피드백을 보내지 못했습니다",
     "send": "피드백 보내기",
     "sending": "보내는 중...",
-    "github_hint_prefix": "더 빠른 처리와 공개 논의를 원하시면 ",
+    "github_hint_prefix": "여기에서도 피드백을 보낼 수 있습니다: ",
     "github_hint_link": "GitHub"
   },
   "issue_picker": {
     "search_placeholder": "태스크 검색...",
     "searching": "검색 중...",
     "no_results": "태스크를 찾을 수 없습니다.",
-    "prompt_to_search": "태스크를 검색하려면 입력하세요"
+    "prompt_to_search": "태스크를 검색하려면 입력하세요",
+    "suggested_similar": "제목이 비슷한 태스크",
+    "suggested_recent": "최근 본 태스크"
   },
   "set_parent": {
     "title": "상위 태스크 설정",
@@ -76,7 +77,7 @@
     "leader_placeholder": "리더 에이전트 선택",
     "members_label": "추가 멤버",
     "members_optional": "(선택 사항)",
-    "members_hint": "리더가 하위 태스크를 위임할 수 있는 멤버입니다. 나중에 추가할 수 있습니다.",
+    "members_hint": "리더가 이 멤버들에게 하위 태스크를 위임할 수 있습니다.",
     "members_placeholder": "에이전트 또는 워크스페이스 멤버 추가",
     "members_selected_count_other": "{{count}}개 선택됨",
     "members_more_count": "+{{count}}",
@@ -136,7 +137,8 @@
     "local_clear": "지우기",
     "local_pick_failed": "디렉터리 선택 창을 열 수 없습니다.",
     "local_invalid_dir": "이 디렉터리는 사용할 수 없습니다. 다른 디렉터리를 선택하세요.",
-    "local_hint": "다른 기기의 에이전트는 이 경로를 볼 수 없어 시작에 실패합니다. 공유 작업에는 저장소를 사용하세요."
+    "local_hint": "다른 기기의 에이전트는 이 경로를 볼 수 없어 시작에 실패합니다. 공유 작업에는 저장소를 사용하세요.",
+    "repos_ref_default": "기본 브랜치"
   },
   "create_issue": {
     "sr_manual": "새 태스크",
@@ -184,6 +186,7 @@
     "toast_link_subissues_partial": "하위 태스크 {{total}}개 중 {{failed}}개를 연결하지 못했습니다",
     "toast_link_labels_failed": "라벨을 연결하지 못했습니다",
     "toast_set_properties_failed": "사용자 지정 속성 값 {{count}}개를 설정하지 못했습니다",
+    "unavailable_property_removed": "더 이상 사용할 수 없는 사용자 지정 속성이 초안에서 제거되었습니다. 내용을 확인한 후 다시 제출해 주세요.",
     "switch_to_agent": "에이전트로 전환",
     "switch_to_agent_tooltip": "에이전트로 만들기로 전환합니다. 한 줄로 설명하면 에이전트가 태스크를 작성합니다.",
     "switch_to_manual": "직접 만들기로 전환",
@@ -243,5 +246,13 @@
       "error_unknown": "제출하지 못했습니다. 다시 시도하세요.",
       "sub_issue_of": "{{identifier}}의 하위 태스크"
     }
+  },
+  "mark_duplicate": {
+    "title": "중복으로 표시",
+    "description": "원본 태스크를 검색하세요. 이 태스크는 취소되고 원본 태스크에 연결됩니다.",
+    "toast_success": "{{identifier}}의 중복으로 표시했습니다",
+    "toast_failed": "중복으로 표시하지 못했습니다",
+    "error_target_is_duplicate": "{{identifier}}은(는) 이미 중복입니다. 원본 태스크를 선택하세요",
+    "error_has_duplicates": "다른 태스크가 이 태스크의 중복으로 표시되어 있습니다. 먼저 해당 표시를 해제하세요"
   }
 }

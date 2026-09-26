@@ -13,7 +13,6 @@
   "delete_issue": {
     "title": "删除任务",
     "description": "将永久删除该任务及其所有评论。此操作不可撤销。",
-    "hint": "工作区任何成员都可以删除任务。",
     "cancel": "取消",
     "confirm": "删除",
     "deleting": "删除中...",
@@ -29,14 +28,16 @@
     "toast_failed": "发送反馈失败",
     "send": "发送反馈",
     "sending": "发送中...",
-    "github_hint_prefix": "想被更快处理、参与讨论？请去 ",
+    "github_hint_prefix": "也可在以下平台提交反馈：",
     "github_hint_link": "GitHub"
   },
   "issue_picker": {
     "search_placeholder": "搜索任务...",
     "searching": "搜索中...",
     "no_results": "未找到任务。",
-    "prompt_to_search": "输入关键词搜索任务"
+    "prompt_to_search": "输入关键词搜索任务",
+    "suggested_similar": "标题相似",
+    "suggested_recent": "最近查看"
   },
   "set_parent": {
     "title": "设置父任务",
@@ -76,7 +77,7 @@
     "leader_placeholder": "选择一个队长智能体",
     "members_label": "附加成员",
     "members_optional": "（可选）",
-    "members_hint": "队长可以向这些成员委派子任务，也可稍后再添加。",
+    "members_hint": "队长可向这些成员委派子任务。",
     "members_placeholder": "添加智能体或工作区成员",
     "members_selected_count_other": "已选 {{count}} 人",
     "members_more_count": "+{{count}}",
@@ -136,7 +137,8 @@
     "local_clear": "清除",
     "local_pick_failed": "无法打开目录选择器。",
     "local_invalid_dir": "该目录不可用，请重新选择。",
-    "local_hint": "其他机器上的智能体看不到这个路径，会启动失败。需要协作请用仓库模式。"
+    "local_hint": "其他机器上的智能体看不到这个路径，会启动失败。需要协作请用仓库模式。",
+    "repos_ref_default": "默认分支"
   },
   "create_issue": {
     "sr_manual": "新建任务",
@@ -184,6 +186,7 @@
     "toast_link_subissues_partial": "{{total}} 个子任务中有 {{failed}} 个关联失败",
     "toast_link_labels_failed": "关联标签失败",
     "toast_set_properties_failed": "有 {{count}} 个自定义属性设置失败",
+    "unavailable_property_removed": "一个已不可用的自定义属性已从草稿移除，请确认后重新提交。",
     "switch_to_agent": "切换到智能体",
     "switch_to_agent_tooltip": "切换到通过智能体创建——一句话描述，让它替你建",
     "switch_to_manual": "切换到手动",
@@ -243,5 +246,13 @@
       "error_unknown": "提交失败，请重试。",
       "sub_issue_of": "作为 {{identifier}} 的子任务"
     }
+  },
+  "mark_duplicate": {
+    "title": "标记为重复",
+    "description": "搜索原始任务。当前任务会被取消，并关联到它。",
+    "toast_success": "已标记为 {{identifier}} 的重复",
+    "toast_failed": "无法标记为重复",
+    "error_target_is_duplicate": "{{identifier}} 本身是重复任务，请选择它的原始任务",
+    "error_has_duplicates": "已有任务被标记为此任务的重复，请先解除这些标记"
   }
 }

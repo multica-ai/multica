@@ -28,6 +28,7 @@ import {
   tokenAtCursor,
   type MentionMarker,
 } from "@/lib/mention-serialize";
+import { isMentionBoundaryAfter } from "@multica/core/markdown";
 
 export interface MentioningState {
   start: number;
@@ -139,10 +140,10 @@ export function useMentionInput(): UseMentionInputReturn {
     const s = selectionRef.current;
     const before = t.slice(0, s.start);
     const after = t.slice(s.end);
-    // Mention tokens require a word boundary before `@`. If the prior char
-    // isn't whitespace (or start-of-text), pad with a space — otherwise the
-    // suggestion bar won't trigger.
-    const needsPad = before.length > 0 && !/\s$/.test(before);
+    // A mention token needs a token boundary before `@`. Pad with a space when
+    // the character before the caret is one the `@` would glue onto; CJK text
+    // needs no pad, because there the `@` already starts a token.
+    const needsPad = !isMentionBoundaryAfter(before.slice(-2));
     const inserted = (needsPad ? " " : "") + "@";
     const next = before + inserted + after;
     const cursor = before.length + inserted.length;

@@ -1,0 +1,83 @@
+{
+  "title": "Inbox",
+  "empty": {
+    "title": "You're all caught up",
+    "body": "Notifications and agent updates appear here."
+  },
+  "actions": {
+    "mark_read": "Mark read",
+    "mark_unread": "Mark unread",
+    "mark_all_read": "Mark all read",
+    "archive": "Archive",
+    "archive_all": "Archive all",
+    "archive_all_read": "Archive all read",
+    "archive_completed": "Archive completed",
+    "inbox_actions": "Inbox actions"
+  },
+  "filters": {
+    "all": "All",
+    "unread": "Unread"
+  },
+  "archive": {
+    "confirm_title": "Archive all?",
+    "confirm_body": "This archives every inbox item, read or unread. You can still find them via the issue pages."
+  },
+  "errors": {
+    "load_failed": "Failed to load inbox: {{message}}"
+  },
+  "detail": {
+    "priority_none": "No priority",
+    "priority_low": "Low",
+    "priority_medium": "Medium",
+    "priority_high": "High",
+    "priority_urgent": "Urgent",
+    "status_todo": "Todo",
+    "status_in_progress": "In Progress",
+    "status_done": "Done",
+    "status_blocked": "Blocked",
+    "notification": "Notification",
+    "close": "Close notification",
+    "unavailable": "This notification is no longer available.",
+    "billing_disabled": "Billing changes are unavailable for this workspace. Contact your workspace administrator for help.",
+    "contact_admin": "Ask a workspace owner or admin to review the billing options.",
+    "review_billing": "Review billing options",
+    "review_billing_web": "Open Multica on the web to review billing options."
+  },
+  "type": {
+    "assigned": "Assigned",
+    "subscribed": "Subscribed",
+    "unassigned": "Unassigned",
+    "reassigned": "Reassigned",
+    "status_changed": "Status changed",
+    "priority_changed": "Priority changed",
+    "start_date_changed": "Start date changed",
+    "due_date_changed": "Due date changed",
+    "new_comment": "New comment",
+    "mentioned": "Mentioned",
+    "review_requested": "Review requested",
+    "task_completed": "Task completed",
+    "task_failed": "Task failed",
+    "agent_blocked": "Agent blocked",
+    "agent_completed": "Agent completed",
+    "reaction_added": "Reaction added",
+    "quick_create_done": "Quick-create done",
+    "quick_create_failed": "Quick-create failed",
+    "quick_create_unconfirmed": "Quick-create needs a check",
+    "autopilot_paused": "Autopilot paused",
+    "autopilot_quota_exceeded": "Autopilot run limit reached",
+    "set_status": "Set status to",
+    "set_priority": "Set priority to",
+    "assigned_to": "Assigned to {{name}}",
+    "removed_assignee": "Removed assignee",
+    "set_due_date": "Set due date to {{date}}",
+    "removed_due_date": "Removed due date",
+    "reacted_with": "Reacted with {{emoji}}",
+    "created_with_agent": "Created with agent: {{identifier}}",
+    "failed_with_detail": "Failed: {{detail}}",
+    "run_limit_blocked": "Run blocked because the limit was reached"
+  },
+  "body": {
+    "autopilot_title_limit": "Autopilot \"{{title}}\" was not started because this workspace has reached its limit of {{limit}} runs for the current period. The allowance resets {{resetAt}}.",
+    "autopilot_limit": "This workspace has reached its limit of {{limit}} autopilot runs for the current period. This execution was not started. The allowance resets {{resetAt}}."
+  }
+}

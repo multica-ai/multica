@@ -24,10 +24,12 @@ import (
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/maintenance"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/profiling"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/scheduler"
+	"github.com/multica-ai/multica/server/internal/selfhosttelemetry"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/tasktoken"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -196,6 +198,25 @@ func parseLLMMaxRetries(raw string) (*llm.RetryOverride, error) {
 	return override, nil
 }
 
+// parseLLMDisableThinking turns the raw MULTICA_LLM_DISABLE_THINKING value
+// into the bool llm.Config.DisableThinking expects. It follows the
+// parseLLMMaxRetries contract: unset is a valid state (the knob stays off),
+// and anything that does not read as a deliberate true/false stops the boot
+// instead of being coerced — a typo'd "ture" that silently did nothing would
+// leave an operator debugging latency the configuration claims to remove.
+func parseLLMDisableThinking(raw string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return false, nil
+	case "1", "true":
+		return true, nil
+	case "0", "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("must be a boolean (true/false or 1/0), got %q", raw)
+	}
+}
+
 func envPositiveInt64(name string, def int64) int64 {
 	raw := os.Getenv(name)
 	if raw == "" {
@@ -306,6 +327,10 @@ func newMainHTTPServer(addr string, handler http.Handler) *http.Server {
 
 func main() {
 	logger.Init()
+	// Read the opt-out before constructing any telemetry dependency. In the
+	// disabled case no collector or HTTP client is ever created.
+	telemetryConfig := selfhosttelemetry.ConfigFromDoNotTrack(os.Getenv("DO_NOT_TRACK"))
+	selfhosttelemetry.LogStartupStatus(slog.Default(), telemetryConfig)
 	// Warn about missing configuration
 	if err := jwtSecretBootError(os.Getenv("JWT_SECRET"), os.Getenv("APP_ENV")); err != nil {
 		slog.Error(
@@ -647,6 +672,14 @@ func main() {
 		readRecorder = dbRoutingMetrics
 	}
 
+	// Same contract for the thinking-off hint: an unparseable value must stop
+	// the boot rather than read as "disabled" and look configured.
+	llmDisableThinking, err := parseLLMDisableThinking(os.Getenv("MULTICA_LLM_DISABLE_THINKING"))
+	if err != nil {
+		slog.Error("invalid MULTICA_LLM_DISABLE_THINKING", "error", err)
+		os.Exit(1)
+	}
+
 	// Build the task-token issuer before the router. A deployment that meant
 	// to issue identity tokens must not come up silently issuing none, so a
 	// malformed catalog or key stops the boot rather than degrading.
@@ -673,6 +706,7 @@ func main() {
 		FeatureFlags:        flags,
 		HeartbeatScheduler:  heartbeatScheduler,
 		LLMMaxRetries:       llmMaxRetries,
+		LLMDisableThinking:  llmDisableThinking,
 		TaskTokenIssuer:     taskTokenIssuer,
 	})
 	var replicaQueries *db.Queries
@@ -691,10 +725,15 @@ func main() {
 
 	srv := newMainHTTPServer(":"+port, r)
 	profilingServer := profiling.NewServer()
+	maintenanceServer, maintenanceErr := maintenance.NewServer(os.Getenv("MAINTENANCE_PORT"), maintenance.NewService(pool, maintenance.StatusCategory{}))
+	if maintenanceErr != nil {
+		slog.Error("maintenance listener disabled", "error", maintenanceErr)
+	}
 
 	// Start background workers.
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
+	telemetryWorker := selfhosttelemetry.New(pool, version, telemetryConfig, slog.Default())
 	// Reuse the router's services here. In particular, the router wires the
 	// EmptyClaim cache into TaskService; constructing a second TaskService for
 	// scheduled Autopilot dispatch would send the daemon wakeup without bumping
@@ -725,6 +764,9 @@ func main() {
 	// work, so there is no separate queue TTL to tune: a busy runtime keeps its
 	// backlog, and a departed one retires everything it owned at once.
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus, runtimeReconnectGrace)
+	if telemetryWorker != nil {
+		go telemetryWorker.Run(sweepCtx)
+	}
 	go runDelegatedFailureRecoverySweeper(sweepCtx, taskSvc)
 	// Seven-day runtime retention does not share the 30-second liveness tick:
 	// its bounded transactions run independently once per hour, so a slow GC
@@ -798,6 +840,9 @@ func main() {
 	// not fit). Crash recovery, occurrence-level idempotency, lease
 	// theft, and retry are all reused from the manager + sys_cron_executions
 	// — there is no separate goroutine for scheduled Autopilot anymore.
+	if err := schedulerMgr.Register(scheduler.IssueWakeupJob(&service.IssueWakeupService{Tasks: taskSvc})); err != nil {
+		slog.Error("scheduler: register issue wakeups", "error", err)
+	}
 	if err := schedulerMgr.Register(scheduler.AutopilotScheduleDispatchJob(pool, queries, autopilotSvc)); err != nil {
 		slog.Warn("scheduler: failed to register autopilot_schedule_dispatch job", "error", err)
 	}
@@ -815,6 +860,15 @@ func main() {
 			slog.Info("metrics server starting", "addr", metricsConfig.Addr)
 			if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				slog.Error("metrics server disabled after startup error", "error", err)
+			}
+		}()
+	}
+
+	if maintenanceServer != nil {
+		go func() {
+			slog.Info("maintenance server starting", "addr", maintenanceServer.Addr)
+			if err := maintenanceServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("maintenance listener disabled", "error", err)
 			}
 		}()
 	}
@@ -852,6 +906,17 @@ func main() {
 	// finds no socket to deliver over.
 	shutdownSequence{
 		StopAutopilot: autopilotCancel,
+		DrainMaintenance: func() {
+			if maintenanceServer == nil {
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 16*time.Second)
+			defer cancel()
+			if err := maintenanceServer.Shutdown(ctx); err != nil {
+				slog.Error("maintenance shutdown interrupted", "error", err)
+				_ = maintenanceServer.Close()
+			}
+		},
 		DrainHTTP: func() {
 			apiShutdownCtx, apiShutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			if err := srv.Shutdown(apiShutdownCtx); err != nil {

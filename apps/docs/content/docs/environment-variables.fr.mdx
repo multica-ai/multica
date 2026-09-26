@@ -1,0 +1,322 @@
+---
+title: Variables d'environnement
+description: Configuration courante du serveur, du stockage, des intégrations et du runtime pour auto-héberger Multica.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica lit les variables d'environnement au démarrage du processus. Après en avoir modifié une, redémarrez le processus API, web ou daemon concerné. La commande `docker compose restart` de Docker Compose ne relit pas `.env` ; recréez les conteneurs avec `up -d` pour que les modifications prennent effet.
+
+Cette page ne liste que la configuration liée au déploiement ; les variables de test et les variables internes aux exécutions n'y figurent pas. Il s'agit d'une référence organisée par thème — pour les étapes complètes de déploiement, consultez le [démarrage rapide de l'auto-hébergement](/self-host-quickstart).
+
+## Configuration minimale pour la production
+
+```dotenv
+DATABASE_URL=postgres://user:password@postgres:5432/multica?sslmode=require
+JWT_SECRET=<long-random-secret>
+APP_ENV=production
+FRONTEND_ORIGIN=https://multica.example.com
+MULTICA_APP_URL=https://multica.example.com
+MULTICA_PUBLIC_URL=https://api.multica.example.com
+```
+
+Vous devez aussi choisir un service d'e-mail ; sinon, les codes de vérification et les invitations sont uniquement écrits dans le journal du serveur.
+
+<Callout type="warning">
+`JWT_SECRET` est obligatoire en production : avec `APP_ENV=production`, le backend refuse de démarrer si la valeur est vide ou correspond à une valeur d'exemple connue (générez-en une avec `openssl rand -hex 32`). Ne définissez pas `MULTICA_DEV_VERIFICATION_CODE`.
+</Callout>
+
+## API et base de données
+
+| Variable | Valeur par défaut | Description |
+|---|---|---|
+| `DATABASE_URL` | base de données `multica` locale | Chaîne de connexion PostgreSQL |
+| `DATABASE_MAX_CONNS` | `25` | Nombre maximal de connexions à la base de données par processus API |
+| `DATABASE_MIN_CONNS` | `5` | Nombre minimal de connexions conservées par chaque processus API |
+| `DATABASE_SEARCH_WORK_MEM_MB` | `64` | Plafond de `work_mem` PostgreSQL, en Mo, pour chaque nœud de plan de recherche ; définissez `1`-`64` pour l'abaisser, ou `0` pour conserver la valeur par défaut de la base de données ou de la session |
+| `DATABASE_REPLICA_URL` | vide | Chaîne de connexion facultative vers un réplica PostgreSQL en lecture seule ; les nouvelles connexions sont validées comme étant en lecture seule, et les fonctionnalités métier doivent explicitement choisir, dans le code, des lectures à cohérence à terme |
+| `DATABASE_REPLICA_MAX_CONNS` | `10` | Nombre maximal de connexions au réplica par processus API |
+| `DATABASE_REPLICA_MIN_CONNS` | `0` | Nombre minimal de connexions au réplica conservées par chaque processus API |
+| `MULTICA_DATABASE_STARTUP_TIMEOUT` | `3m` | Budget de nouvelles tentatives, au niveau du conteneur, partagé par la migration et le démarrage de l'API ; définissez `0` pour une seule tentative par phase, avec échec immédiat |
+| `MULTICA_DATABASE_CONNECT_TIMEOUT` | `5s` | Délai de repli pour chaque tentative de connexion au démarrage ; le `connect_timeout` natif de pgx, `PGCONNECT_TIMEOUT` ou les paramètres de service sont prioritaires |
+| `PORT` | `8080` | Port d'écoute de l'API |
+| `JWT_SECRET` | obligatoire en production | Secret des JWT de connexion et de certains flux de signature ; en production, le démarrage est refusé si la valeur est vide ou correspond à une valeur d'exemple connue |
+| `APP_ENV` | vide | Définissez `production` en production |
+| `AUTH_TOKEN_TTL` | `720h` (30 jours) | Durée de vie des JWT et des cookies du navigateur ; accepte une durée Go ou un nombre entier positif de secondes. Les sessions sont glissantes : une session utilisée en continu est réémise au lieu d'expirer, à partir de la moitié de sa durée de vie. Les valeurs inférieures à `60s` sont ramenées à `60s` |
+| `LOG_LEVEL` | valeur par défaut de l'application | Niveau de journalisation |
+| `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | Délai d'attente, après un signal d'arrêt, avant le début de l'arrêt propre |
+| `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | Durée pendant laquelle un runtime hors ligne peut se reconnecter avant que ses exécutions en cours n'échouent ; les valeurs inférieures à `150s` sont relevées à ce plancher |
+
+Lorsque vous définissez un délai de maintien avant arrêt sur Kubernetes, `terminationGracePeriodSeconds` doit dépasser ce délai plus le temps nécessaire à l'arrêt proprement dit.
+
+Les limites de connexions du primaire et du réplica sont indépendantes. Dimensionnez leur somme, sur l'ensemble des processus API, par rapport au plafond de connexions du cluster PostgreSQL. Par défaut, les connexions au réplica sont recyclées au bout de cinq minutes afin de revalider le mode lecture seule après une promotion. En cas d'échec de connexion au réplica, les requêtes basculent de façon transparente vers le primaire et un court disjoncteur passif s'ouvre ; aucune sonde de base de données en arrière-plan n'est ajoutée. L'application n'impose aucune limite de retard aux lectures sur le réplica : surveillez le retard de réplication au niveau de la base de données et gardez sur le primaire les lectures sensibles à la cohérence.
+
+## URL publiques et accès depuis le navigateur
+
+| Variable | Valeur par défaut | Description |
+|---|---|---|
+| `FRONTEND_ORIGIN` | vide | Origine du frontend visitée par les utilisateurs ; utilisée pour CORS, les cookies et les liens d'invitation |
+| `MULTICA_APP_URL` | se rabat sur `FRONTEND_ORIGIN` | URL web accessible aux utilisateurs ; utilisée par les URL de connexion du CLI et de liaison de compte |
+| `MULTICA_PUBLIC_URL` | vide | URL publique de l'API ; utilisée pour les URL de webhook et les instructions de connexion des runtimes |
+| `MULTICA_DAEMON_SERVER_URL` | se rabat sur `MULTICA_PUBLIC_URL`, puis sur `MULTICA_APP_URL` / `FRONTEND_ORIGIN` | URL du serveur que le processus API insère dans `multica setup self-host` ; définissez-la lorsque les daemons joignent l'API via une URL différente de l'URL publique des webhooks |
+| `CORS_ALLOWED_ORIGINS` | vide | Origines HTTP supplémentaires autorisées, séparées par des virgules |
+| `ALLOWED_ORIGINS` | se rabat sur les origines CORS / frontend | Liste des origines WebSocket autorisées, séparées par des virgules |
+| `COOKIE_DOMAIN` | vide | Obligatoire lorsque le frontend et l'API utilisent des hôtes différents et que le navigateur communique directement avec le domaine de l'API ; laissez vide pour les déploiements sur un seul domaine |
+
+<Callout type="warning">
+`MULTICA_DAEMON_SERVER_URL` est renvoyée par le point de terminaison `/api/config`, qui ne requiert aucune authentification, et elle est visible par les clients. Considérez-la comme une configuration publique ; n'y placez jamais d'identifiants, de jetons ni d'autres secrets.
+</Callout>
+
+Lorsque le frontend et l'API s'exécutent sur des hôtes différents et que le navigateur communique directement avec le domaine de l'API, vous devez définir `COOKIE_DOMAIN` — sinon le navigateur ne peut pas lire le cookie CSRF : toutes les requêtes d'écriture renvoient `403 CSRF validation failed`, alors que les lectures fonctionnent normalement. Utilisez le domaine parent le plus restreint qui couvre les deux hôtes (`.agent.example.com` plutôt que `.example.com`). Il étend le cookie de session de connexion à tous les hôtes de ce domaine, ce qui n'est acceptable que si tous ces hôtes sont exploités par la même entité de confiance. Après l'avoir modifié, effacez les anciens cookies sur les deux hôtes et reconnectez-vous. Si vous suivez la configuration en origine unique du [démarrage rapide de l'auto-hébergement](/self-host-quickstart#3-choisir-le-mode-daccès) (le navigateur ne visite que le domaine de l'application), laissez-le vide. N'utilisez pas d'adresse IP — les navigateurs ignorent les cookies dont le Domain est une adresse IP.
+
+<Callout type="warning">
+Les déploiements auto-hébergés doivent définir `FRONTEND_ORIGIN`. Sans cette variable, les liens d'invitation, les attributs de sécurité des cookies et les vérifications d'origine WebSocket peuvent tous diverger de votre domaine réel.
+</Callout>
+
+## E-mail et connexion
+
+### Resend
+
+| Variable | Valeur par défaut | Description |
+|---|---|---|
+| `RESEND_API_KEY` | vide | Sa définition active Resend |
+| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | Adresse de l'expéditeur ; doit appartenir à un domaine vérifié |
+
+### SMTP
+
+SMTP est prioritaire sur Resend dès que `SMTP_HOST` n'est pas vide.
+
+| Variable | Valeur par défaut | Description |
+|---|---|---|
+| `SMTP_HOST` | vide | Hôte SMTP ; sa définition active SMTP |
+| `SMTP_PORT` | `25` | Valeurs courantes : 25, 587, 465 |
+| `SMTP_USERNAME` | vide | Nom d'utilisateur ; laissez vide pour les relais anonymes |
+| `SMTP_PASSWORD` | vide | Mot de passe |
+| `SMTP_FROM_EMAIL` | se rabat sur `RESEND_FROM_EMAIL` | Expéditeur de l'enveloppe (Envelope From) et en-tête From du message |
+| `SMTP_TLS` | `starttls` | `implicit`, `smtps` ou `ssl` signifient TLS implicite ; le port 465 l'active automatiquement |
+| `SMTP_TLS_INSECURE` | `false` | Ignore la vérification des certificats ; réseaux internes de confiance uniquement |
+| `SMTP_EHLO_NAME` | nom d'hôte | Nom EHLO/FQDN exigé par les relais stricts |
+
+### Google OAuth
+
+| Variable | Valeur par défaut | Description |
+|---|---|---|
+| `GOOGLE_CLIENT_ID` | vide | ID client Google OAuth |
+| `GOOGLE_CLIENT_SECRET` | vide | Secret client Google OAuth |
+| `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | Doit correspondre exactement à l'URL de rappel configurée dans la Google Console |
+
+### Périmètre des inscriptions
+
+| Variable | Valeur par défaut | Description |
+|---|---|---|
+| `ALLOW_SIGNUP` | `true` | Autorise ou non la création de nouveaux comptes lorsqu'aucune liste d'autorisation n'est configurée |
+| `ALLOWED_EMAILS` | vide | Adresses e-mail complètes autorisées à s'inscrire, séparées par des virgules |
+| `ALLOWED_EMAIL_DOMAINS` | vide | Domaines e-mail autorisés à s'inscrire, séparés par des virgules |
+| `DISABLE_WORKSPACE_CREATION` | `false` | Empêche tous les utilisateurs de créer des espaces de travail ; aucune exception pour les propriétaires ou les administrateurs |
+| `MULTICA_DEV_VERIFICATION_CODE` | vide | Code de test fixe à 6 chiffres pour les environnements hors production |
+
+Pour l'ordre exact d'évaluation des listes d'autorisation, consultez [Connexion et inscription](/auth-setup#restrictions-dinscription).
+
+## Stockage des pièces jointes
+
+Lorsque `S3_BUCKET` n'est pas défini, Multica utilise le disque local.
+
+### S3 ou stockage compatible
+
+| Variable | Valeur par défaut | Description |
+|---|---|---|
+| `S3_BUCKET` | vide | Nom du bucket ; n'utilisez pas le nom d'hôte complet |
+| `S3_REGION` | `us-west-2` | Région où se trouve le bucket |
+| `AWS_ACCESS_KEY_ID` | chaîne d'identifiants par défaut du SDK | Clé d'accès statique |
+| `AWS_SECRET_ACCESS_KEY` | chaîne d'identifiants par défaut du SDK | Clé secrète statique |
+| `AWS_ENDPOINT_URL` | vide | Point de terminaison compatible S3, comme MinIO |
+| `S3_USE_PATH_STYLE` | `true` avec un point de terminaison personnalisé | Utiliser ou non l'adressage de type chemin (path-style) |
+| `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`, `cloudfront`, `presign` ou `proxy` |
+| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | Durée de vie des URL de téléchargement signées |
+
+Utilisez `ATTACHMENT_DOWNLOAD_MODE=proxy` lorsque le point de terminaison — un MinIO interne, par exemple — n'est pas accessible depuis le navigateur.
+
+### Disque local
+
+| Variable | Valeur par défaut | Description |
+|---|---|---|
+| `LOCAL_UPLOAD_DIR` | `./data/uploads` | Répertoire des fichiers et des métadonnées ; nécessite un volume persistant |
+| `LOCAL_UPLOAD_BASE_URL` | vide | URL de base publique facultative ; si elle est vide, des URL relatives internes à l'application sont renvoyées |
+
+### CloudFront
+
+| Variable | Description |
+|---|---|
+| `CLOUDFRONT_DOMAIN` | Domaine du CDN |
+| `CLOUDFRONT_KEY_PAIR_ID` | ID de la paire de clés CloudFront |
+| `CLOUDFRONT_PRIVATE_KEY` | Clé privée complète |
+| `CLOUDFRONT_PRIVATE_KEY_SECRET` | À utiliser lorsque la clé privée est lue depuis Secrets Manager |
+
+## Redis et limitation de débit
+
+| Variable | Valeur par défaut | Description |
+|---|---|---|
+| `REDIS_URL` | vide | L'unique URL de connexion utilisée par toutes les fonctionnalités reposant sur Redis, notamment la limitation de débit partagée, les événements en temps réel, les baux WebSocket des canaux et les caches de jetons |
+| `REDIS_CLUSTER_MODE` | `false` | Force le client Redis Cluster, y compris pour un point de terminaison de configuration unique ; le mode cluster exige la base de données 0 et `REALTIME_RELAY_MODE=sharded` |
+| `REDIS_DISABLE_CLIENT_NAME` | `false` | Définissez `true` lorsqu'un Redis managé bloque `CLIENT SETNAME` |
+| `RATE_LIMIT_AUTH` | `5` | Requêtes par minute et par IP pour envoyer un code de vérification ou lancer la connexion avec Google |
+| `RATE_LIMIT_AUTH_VERIFY` | `20` | Vérifications de code par minute et par IP |
+| `RATE_LIMIT_INVITATION_ACTOR_10M` | `10` | Invitations à l'espace de travail que chaque personne qui invite peut créer par fenêtre glissante de 10 minutes ; `0` désactive cette limite |
+| `RATE_LIMIT_INVITATION_WORKSPACE_24H` | `50` | Invitations que l'ensemble des administrateurs peuvent créer par espace de travail et par fenêtre glissante de 24 heures ; `0` désactive cette limite |
+| `RATE_LIMIT_INVITATION_RECIPIENT_24H` | `6` | Invitations qu'une même adresse e-mail destinataire normalisée peut recevoir, tous espaces de travail confondus, par fenêtre glissante de 24 heures ; `0` désactive cette limite |
+| `RATE_LIMIT_TRUSTED_PROXIES` | vide | CIDR des proxys autorisés à fournir `X-Forwarded-For`, séparés par des virgules |
+| `MULTICA_TRUSTED_PROXIES` | vide | CIDR des proxys de confiance pour les webhooks d'automatisation et les connexions en temps réel |
+
+Les déploiements situés derrière un proxy inverse doivent lister les plages d'adresses réelles de leurs proxys. Ne faites pas confiance à toutes les sources sans distinction, sinon les clients peuvent falsifier les IP transmises.
+
+Les limites de débit d'authentification nécessitent `REDIS_URL` ; sans cette variable, le journal de démarrage indique que la limitation de débit d'authentification est désactivée. Les limites d'invitation fonctionnent quand même sans Redis, dans la mémoire locale du processus, et deviennent partagées entre les réplicas lorsque Redis est configuré. Si le Redis configuré devient temporairement indisponible, la limitation de débit d'authentification laisse passer les requêtes (fail open), tandis que la création d'invitations renvoie une erreur `503` réessayable au lieu d'envoyer des e-mails sans protection.
+
+## Intégrations externes
+
+| Intégration | Variable | Description |
+|---|---|---|
+| GitHub | `GITHUB_APP_SLUG` | Slug de la GitHub App |
+| GitHub | `GITHUB_WEBHOOK_SECRET` | Secret de signature HMAC des webhooks et de l'état de connexion |
+| GitHub | `GITHUB_APP_ID` | Nécessaire pour le statut CI et la possibilité de fusion sur les cartes de PR, ainsi que pour le sélecteur de dépôts « Choisir depuis GitHub » |
+| GitHub | `GITHUB_APP_PRIVATE_KEY` | Clé privée PEM complète associée à l'App ID ; mêmes usages que ci-dessus |
+| Lark | `MULTICA_LARK_SECRET_KEY` | Clé de chiffrement des identifiants de 32 octets, encodée en Base64 |
+| Slack | `MULTICA_SLACK_SECRET_KEY` | Clé de chiffrement des jetons de 32 octets, encodée en Base64 |
+| Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | Clé de chiffrement du jeton du bot de 32 octets, encodée en Base64 |
+| Composio | `COMPOSIO_API_KEY` | Active les connexions d'outils Composio |
+| Composio | `COMPOSIO_CALLBACK_BASE_URL` | URL de l'API de rappel ; peut se rabattre sur `MULTICA_PUBLIC_URL` |
+| Composio | `COMPOSIO_STATE_SECRET` | Secret de signature de l'état OAuth ; peut être dérivé de `JWT_SECRET` |
+| Git auto-hébergé | `MULTICA_VCS_INTEGRATION_ENABLED` | Interrupteur de l'intégration Forgejo/Gitea/GitLab ; activé par défaut dans compose |
+| Git auto-hébergé | `MULTICA_VCS_SECRET_KEY` | Clé de chiffrement de 32 octets, encodée en Base64 (`openssl rand -base64 32`) ; sans elle, la fonctionnalité est entièrement indisponible |
+| Plugins | `MULTICA_PLUGIN_SECRET_KEY` | Clé de 32 octets, encodée en Base64, pour les secrets stockés et les URL de lancement de surface chiffrées |
+| Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | Origine navigateur dédiée, sans cookies, routée vers ce backend ; doit différer des origines de l'application et de l'API, et préserver `Host` |
+| Plugins | `MULTICA_PLUGIN_API_URL` | URL de base complète et versionnée de la Plugin Public API, comme `https://plugin-api.example.com/v1` ; se rabat sur `MULTICA_PUBLIC_URL` + `/v1` |
+| Plugins | `MULTICA_PLUGIN_DIR` | Répertoire absolu facultatif utilisé pour publier des bundles de plugins locaux pendant le développement |
+
+Sans `GITHUB_APP_ID` et la clé privée, les PR sont toujours liées, reflétées et déclenchent normalement le passage à `done` lors du merge, mais les cartes n'affichent ni statut CI ni possibilité de fusion, et l'entrée de dépôt « Choisir depuis GitHub » est désactivée.
+
+Pour les étapes de configuration, consultez [Intégration GitHub](/github-integration#configuration-en-auto-hébergement), [Bot Lark](/lark-bot-integration#configuration-en-auto-hébergement), [Bot Slack](/slack-bot-integration#configuration-en-auto-hébergement) et [Bot Telegram](/telegram-bot-integration#configuration-en-auto-hébergement).
+
+## LLM côté serveur
+
+Ce groupe configure la génération d'assistance côté serveur, comme les titres des conversations ; il ne s'agit pas des identifiants des outils de codage IA que les agents utilisent pour réaliser les exécutions.
+
+| Variable | Valeur par défaut | Description |
+|---|---|---|
+| `MULTICA_LLM_API_KEY` | vide | Clé d'API compatible OpenAI |
+| `MULTICA_LLM_BASE_URL` | vide | Point de terminaison compatible OpenAI |
+| `MULTICA_LLM_DEFAULT_MODEL` | `gpt-5.6-luna` | Utilisé lorsqu'une requête ne précise pas de modèle |
+| `MULTICA_LLM_MAX_RETRIES` | `2` | Plafond de nouvelles tentatives par appel ; `0` désactive les nouvelles tentatives, `1`–`5` les plafonnent à N |
+
+`MULTICA_LLM_MAX_RETRIES` est la seule source de la politique de nouvelles tentatives. Laissez-la non définie pour la valeur par défaut de 2, définissez `0` pour envoyer exactement une requête par appel, ou une valeur de 1 à 5 pour plafonner les nouvelles tentatives à ce nombre. C'est un plafond, pas un quota : seuls les échecs réessayables le consomment, et un succès ou l'échéance propre de l'appelant peut mettre fin à l'appel plus tôt. Toute autre valeur — négative, non numérique ou supérieure à 5 — fait échouer le démarrage au lieu d'être corrigée silencieusement. Ce plafond est un budget de latence : le délai entre deux tentatives commence à 0,5 s et double jusqu'à un maximum de 8 s, si bien qu'un budget plus élevé dépasserait les échéances des appelants et transformerait un échec réessayable en expiration de délai. Les nouvelles tentatives couvrent les échecs de connexion et les codes HTTP 408, 409, 429 et 5xx ; toutes les autres réponses 4xx sont renvoyées telles quelles. Au démarrage, le serveur journalise la politique effective sous la forme `llm retry policy`, sans aucun identifiant dans la ligne.
+
+Deux fonctionnalités utilisent cette couche, et chacune envoie du contenu de discussion au point de terminaison que vous configurez :
+
+- **Titre automatique des discussions** — le premier message de l'utilisateur dans une nouvelle session de discussion, envoyé tel quel. Les pièces jointes ne sont jamais incluses.
+- **Questions de suivi** (les boutons de suggestion sous la réponse d'un agent) — la fin de la conversation : jusqu'à 6 messages, la réponse à laquelle les questions font suite étant tronquée à 3 000 caractères et chaque message plus ancien à 800.
+
+Lorsque la clé d'API et l'URL de base sont toutes deux vides, cette couche est désactivée et n'effectue aucune requête en amont — aucune des deux fonctionnalités ci-dessus n'envoie quoi que ce soit. C'est la configuration prise en charge lorsque votre politique n'autorise pas cette couche à envoyer du contenu de discussion hors du déploiement : les sessions de discussion conservent le titre que le client dérive du premier message, les boutons de questions de suivi n'apparaissent pas, et tout le reste fonctionne normalement.
+
+<Callout type="info">
+Ceci ne concerne que la couche d'assistance. L'exécution d'un agent suit un chemin de données distinct : lorsqu'un agent répond dans une discussion, votre daemon exécute l'outil de codage IA de cet agent avec les propres identifiants de l'outil, et ne lui transmet pas les paramètres `MULTICA_LLM_*` ci-dessus. (Les variables de connexion à Multica propres à l'exécution, dont l'agent a besoin, sont injectées séparément par le daemon.) Vider les variables ci-dessus n'a aucun effet sur ce chemin — contrôlez-le via la configuration du runtime de l'agent.
+</Callout>
+
+## Configuration du daemon
+
+Les variables ci-dessous sont lues sur l'ordinateur qui exécute vos agents, et non dans le conteneur de l'API.
+
+| Variable | Valeur par défaut | Description |
+|---|---|---|
+| `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | URL de l'API / WebSocket Multica ; accepte aussi `http(s)` |
+| `MULTICA_DAEMON_DEVICE_NAME` | nom d'hôte | Nom de l'appareil affiché dans la liste des runtimes |
+| `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` | Nom d'affichage du runtime |
+| `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | Intervalle d'interrogation des exécutions lorsqu'aucun événement de réveil n'arrive |
+| `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` | Borne supérieure des interrogations de sécurité de la prise en charge via WebSocket lorsque celle-ci est saine, configurée indépendamment de `MULTICA_DAEMON_POLL_INTERVAL` ; une gigue à la baisse ramène la valeur par défaut effective à `2m30s`–`2m45s`, tandis que les anciens serveurs et les prises en charge incertaines conservent l'intervalle d'interrogation ordinaire |
+| `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Intervalle des signaux de vie (heartbeat) |
+| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Plafond d'exécutions simultanées par daemon |
+| `MULTICA_AGENT_TIMEOUT` | `0` | Durée maximale absolue par exécution ; `0` signifie aucune limite |
+| `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | Durée maximale de silence, sans sortie ni exécution d'outil ; `0` désactive entièrement le watchdog |
+| `MULTICA_AGENT_TOOL_WATCHDOG` | identique à `MULTICA_AGENT_IDLE_WATCHDOG` | Durée maximale de silence pour un seul appel d'outil ; ne la définissez que pour laisser aux outils plus de marge qu'au modèle, `0` n'arrête jamais de force un appel d'outil. Les shells d'arrière-plan de Cursor restent en cours tant que les processus qui leur appartiennent ne se sont pas terminés ; à cette limite, le daemon arrête ces processus et accorde à Cursor un nouveau budget de watchdog pour produire son résultat final. Si l'appartenance des processus ou leur nettoyage ne peut pas être vérifié, la politique ordinaire d'annulation des exécutions s'applique |
+| `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | Seuil de silence propre à OpenCode |
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | identique à `MULTICA_AGENT_IDLE_WATCHDOG` | Seuil de silence sémantique de Codex. Le minuteur propre à Codex ne peut pas voir qu'un outil est en cours d'exécution ; il suit donc le plus grand des budgets d'inactivité et d'outil au lieu de maintenir un plafond distinct et plus court |
+| `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Surcharge explicite du plafond d'absence de progression du premier tour de Codex ; `0` conserve la valeur par défaut. L'attente effective du premier tour reste bornée par `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` et par le délai d'exécution global — définissez `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` strictement au-dessus de cette valeur (avec une certaine marge), sinon l'attente est tronquée à cette valeur et la nouvelle tentative de démarrage du catalogue de modèles est ignorée. Des valeurs égales ne suffisent pas : le minuteur sémantique est armé en premier, donc à durées égales la nouvelle tentative peut quand même être perdue |
+| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` ; `thread/start`, `thread/resume` : `60s` | Plafonds de la poignée de main au démarrage du Codex app-server. Une valeur explicite remplace globalement les deux budgets |
+| `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` | Délai de grâce, après une annulation, accordé au Codex app-server pour accuser réception de `turn/interrupt` et émettre `turn/completed`, afin de conserver la consommation finale de tokens avant le nettoyage forcé du processus. Sur des hôtes inhabituellement lents, ajustez-le à partir de la latence d'interruption enregistrée dans les journaux du daemon |
+| `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true` ; auto-hébergé `false` | Vérifier et appliquer automatiquement ou non les mises à jour du CLI |
+| `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Intervalle de vérification des mises à jour |
+| `MULTICA_DAEMON_AUTO_RELOAD` | `true` | Redémarrer ou non sur un binaire `multica` remplacé sur disque par un moyen externe (`brew upgrade`, un nouveau téléchargement, une compilation locale). Indépendant de `MULTICA_DAEMON_AUTO_UPDATE` |
+| `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Répertoire racine des répertoires de travail des exécutions |
+| `MULTICA_AGENT_TEMP_BASE` | `/tmp` (Linux/macOS) | Linux/macOS uniquement. Répertoire parent des répertoires temporaires privés de chaque exécution ; doit être un répertoire absolu existant et accessible en écriture, et une valeur invalide fait échouer le démarrage de l'exécution au lieu de se rabattre sur `/tmp`. Choisissez un chemin court — les outils enfants peuvent y lier des sockets AF_UNIX, et `sun_path` est limité à 108 octets sous Linux et à 104 sous macOS |
+| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | Conserver les répertoires des exécutions pour le débogage |
+
+Pour le contexte interne que le daemon injecte dans les exécutions des agents, consultez [Environnement des exécutions](/daemon-runtimes#environnement-du-runtime-pendant-une-exécution).
+
+Chaque outil de codage IA accepte `MULTICA_<PROVIDER>_PATH` et `MULTICA_<PROVIDER>_MODEL` pour remplacer le chemin de la commande et le modèle par défaut. QwenPaw et MiniMax Code n'ont pas de variable de modèle, car Multica ne leur envoie jamais de modèle ; la variable de chemin de MiniMax Code est `MULTICA_MCODE_PATH` — consultez [Comparaison des outils de codage IA](/providers#sources-des-modèles). DeepSeek Harness prend en charge `MULTICA_DSH_PATH` et `MULTICA_DSH_MODEL` (un ID de modèle du catalogue dsh, par exemple `deepseek-official/deepseek-chat`). DeepSeek Harness accepte en outre `MULTICA_DSH_PROFILE_BUNDLE` : une liste de bundles, séparés par des virgules, à installer dans son profil `multica` lorsque ce profil est absent, essayés dans l'ordre, chaque entrée étant une spécification npm, un répertoire ou une archive tarball empaquetée. Elle n'est pas définie par défaut, et c'est ce profil qui fournit le protocole `--stdio` que pilote Multica : si la variable n'est pas définie, l'installation DSH reste intacte et le daemon signale le profil manquant au lieu d'enregistrer un runtime inutilisable. Le bridge de Multica n'est pas encore publié sur un registre npm public ; le choix d'une valeur est donc traité dans [Installer un runtime d'agent](/install-agent-runtime). Ce que vous définissez est installé dans le répertoire DSH de chaque hôte de daemon sans autre confirmation : considérez donc ce choix comme une décision relative à la chaîne d'approvisionnement. L'installation qu'active `MULTICA_DSH_PROFILE_BUNDLE` est volontairement limitée : elle s'exécute au plus une fois par durée de vie du daemon, uniquement lorsque la sonde signale que le profil est réellement absent, et un échec est journalisé avec la sortie du gestionnaire de paquets lui-même et n'est retenté qu'après un redémarrage du daemon. Une sonde qui expire, ou qui répond avec une version de protocole que ce daemon ne pilote pas, est signalée et ne donne jamais lieu à une installation par-dessus — le daemon n'écrase pas un profil présent à dessein. Pour diagnostiquer, recherchez `DSH runtime profile` dans le journal du daemon ; pour annuler une installation, supprimez `$DSH_HOME/profiles/multica` (par défaut `~/.dsh/profiles/multica`). `MULTICA_DSH_PLUGIN_PATH` remplace le répertoire à partir duquel l'installation résout pnpm. DSH Desktop conserve le pnpm vers lequel `dsh plugin` redirige dans son propre répertoire de commandes du runtime, sous macOS comme sous Windows, et le daemon le trouve et l'ajoute automatiquement en tête — y compris dans l'arborescence versionnée qu'utilise une version plus récente de Desktop. Cette variable n'est donc nécessaire que pour une installation que le daemon ne parvient pas à trouver, ou pour que l'installation utilise votre propre pnpm. La définir remplace entièrement la recherche : si le répertoire n'existe pas, l'installation se rabat sur le pnpm présent dans le `PATH` du daemon plutôt que sur celui fourni. Linux n'a pas de DSH Desktop ; l'installation y utilise donc toujours le `PATH`. Dim prend en charge `MULTICA_DIM_PATH` et `MULTICA_DIM_MODEL` (un ID de modèle du catalogue dim). ZeroClaw prend en charge `MULTICA_ZEROCLAW_PATH` mais n'a pas de variable de modèle ; c'est son profil d'agent qui détermine le choix du modèle. Les arguments par défaut à l'échelle de la machine via `MULTICA_<PROVIDER>_ARGS` sont actuellement pris en charge pour cinq outils : Claude Code, Codex, CodeBuddy, Qwen Code et QwenPaw. Les variables sont `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS` et `MULTICA_QWENPAW_ARGS`. Par exemple :
+
+```dotenv
+MULTICA_CLAUDE_PATH=/opt/bin/claude
+MULTICA_CLAUDE_ARGS=--max-turns 40
+```
+
+Le nettoyage vérifié des processus d'arrière-plan de Cursor nécessite Linux 6.9 ou une version ultérieure (pidfd de groupe de processus), la prise en charge par le noyau macOS des requêtes d'identité de processus et de l'envoi de signaux par audit token, ou un Job Object imbriqué correctement attribué sous Windows. Sous macOS, chaque processus reçoit ses signaux au moyen d'une version de PID vérifiée par le noyau ; aucune adhésion à un groupe de la même session n'est nécessaire. Ces API macOS sont privées et vérifiées au moment de la capture. Un lancement qui ne peut pas être revendiqué renvoie son résultat d'outil d'origine et utilise le watchdog d'inactivité ordinaire, y compris lorsque le watchdog d'outil vaut `0`. Le travail déjà revendiqué reste en cours si le nettoyage ne peut pas être confirmé. Avec un watchdog d'outil à `0`, cette limite n'existe pas du tout : le travail d'arrière-plan revendiqué maintient l'exécution en cours aussi longtemps qu'il vit, si bien que l'exécution n'est bornée que par `MULTICA_AGENT_TIMEOUT`, qui vaut `0` par défaut.
+
+Les processus d'arrière-plan de Cursor qui appartiennent à l'exécution sont aussi arrêtés lorsque celle-ci se termine normalement : un serveur d'arrière-plan lancé par cette exécution ne survit donc pas intentionnellement à la finalisation. macOS peut reconnaître des enfants tardifs grâce aux identités de parent d'origine conservées, mais ne peut pas prouver une chaîne dont les processus intermédiaires ont disparu avant d'être observés. De tels processus, le travail qui quitte le groupe suivi, ou des erreurs persistantes d'appartenance ou d'envoi de signaux peuvent laisser du travail d'arrière-plan derrière eux. Un nettoyage non confirmé est journalisé et n'ouvre jamais la fenêtre de récupération réservée aux nettoyages réussis ; les processus inconnus ne sont pas tués sur la seule base de leur PID numérique ou de leur groupe de processus.
+
+L'ordre de priorité est : option de ligne de commande → variable d'environnement → `~/.multica/config.json` → valeur par défaut intégrée. Pour le comportement du watchdog, consultez [Daemon et runtimes](/daemon-runtimes).
+
+### Rendre persistante la configuration du daemon
+
+Les paramètres courants côté daemon peuvent aussi être écrits dans `~/.multica/config.json` au lieu de dépendre des variables d'environnement du shell ; les profils nommés conservent les leurs dans `~/.multica/profiles/<name>/config.json` :
+
+```bash
+multica config set poll_interval 10s
+multica config show
+```
+
+Clés prises en charge :
+
+| Clé | Valeur par défaut | Description |
+|---|---|---|
+| `server_url` | `ws://localhost:8080/ws` | URL de l'API / WebSocket Multica |
+| `app_url` | vide | URL web utilisée pour la connexion dans le navigateur |
+| `workspace_id` | vide | Espace de travail par défaut |
+| `device_name` | nom d'hôte | Nom de l'appareil affiché dans la liste des runtimes |
+| `runtime_name` | `Local Agent` | Nom d'affichage du runtime |
+| `workspaces_root` | chemin sous `~` dépendant du profil | Répertoire racine des répertoires de travail des exécutions |
+| `max_concurrent_tasks` | `20` | Plafond d'exécutions simultanées ; `0` ou une valeur vide signifie non défini |
+| `poll_interval` | `30s` | Intervalle d'interrogation des exécutions |
+| `ws_claim_poll_interval` | `3m` | Borne supérieure des interrogations de sécurité de la prise en charge via WebSocket lorsque celle-ci est saine, indépendante de `poll_interval` ; le daemon applique une gigue uniquement à la baisse |
+| `heartbeat_interval` | `15s` | Intervalle des signaux de vie (heartbeat) |
+| `agent_timeout` | illimité | Durée maximale absolue par exécution |
+| `codex_semantic_inactivity_timeout` | dérivée | Seuil de silence sémantique de Codex. Si rien n'est défini, il prend le plus grand des budgets des watchdogs d'inactivité et d'outil ; un budget d'outil de `0` se rabat sur le budget d'inactivité, et ce n'est que lorsque l'ensemble des watchdogs est désactivé que Codex conserve son propre `10m` |
+| `codex_handshake_timeout` | `30s` ; `thread/start`, `thread/resume` : `60s` | Plafonds de la poignée de main au démarrage du Codex app-server. Une valeur explicite remplace globalement les deux budgets |
+| `disable_auto_update` | suit l'environnement | `true` désactive la mise à jour automatique ; `false` efface la surcharge locale et revient à la variable d'environnement ou à la valeur par défaut |
+| `auto_update_check_interval` | `6h` | Intervalle de vérification des mises à jour |
+| `disable_auto_reload` | suit l'environnement | `true` empêche le daemon de suivre un binaire remplacé sur disque ; `false` efface la surcharge locale. Résolu indépendamment de `disable_auto_update` |
+
+Quelques règles concernant les valeurs :
+
+- Les clés de durée acceptent des durées Go positives (comme `10s`, `2h`) ; `0s` et les valeurs négatives sont refusées. La seule exception est `agent_timeout` : `0s` est valide et désactive explicitement la limite de durée des exécutions.
+- Passer une chaîne vide efface une valeur persistée et revient à la variable d'environnement ou à la valeur par défaut intégrée, par exemple `multica config set poll_interval ""`.
+- `max_concurrent_tasks` exige un entier positif ou nul.
+- Les valeurs relatives de `workspaces_root` sont converties en chemins absolus lors de l'enregistrement.
+
+## Observabilité et analytique
+
+| Variable | Valeur par défaut | Description |
+|---|---|---|
+| `DO_NOT_TRACK` | vide (télémétrie activée) | Définissez `1` ou `true` (insensible à la casse) pour arrêter la collecte et l'envoi de la télémétrie anonyme propre à Multica pour les instances auto-hébergées |
+| `ANALYTICS_DISABLED` | `false` | Définissez `true` pour désactiver l'envoi de données à PostHog |
+| `POSTHOG_API_KEY` | vide | L'envoi est désactivé si elle n'est pas définie ; définissez-la pour utiliser votre propre projet PostHog |
+| `POSTHOG_HOST` | `https://us.i.posthog.com` | Hôte PostHog |
+| `METRICS_ADDR` | vide | Adresse d'écoute des métriques Prometheus ; vide signifie non démarré |
+| `REALTIME_METRICS_TOKEN` | vide | Jeton Bearer qui protège `/health/realtime` |
+
+La télémétrie propre à Multica pour les instances auto-hébergées envoie un instantané par jour UTC, au niveau du déploiement, au point de terminaison fixe et non configurable `https://telemetry.multica.ai/v1/telemetry/events`. Il contient la version officielle publiée ; les nombres, regroupés par tranches, d'espaces de travail, de membres humains distincts, d'agents actifs et de daemons actifs sur 24 heures ; ainsi que le nombre agrégé d'exécutions des 24 heures précédentes. Il n'inclut jamais de noms, d'adresses ou de domaines e-mail, d'adresses IP, d'identifiants métier, de détails sur les hôtes ou les appareils, de dépôts, de modèles ou de plugins, de prompts ou de sorties, de commentaires ou de discussions, de chemins, de données de tokens ou de coûts, d'identifiants de connexion, d'erreurs, de piles d'appels ni de journaux. Il sert uniquement à comprendre l'adoption des versions auto-hébergées, les tranches de taille des déploiements et l'usage agrégé — et non à la facturation, aux licences, à l'authentification ou aux décisions de sécurité.
+
+`DO_NOT_TRACK` et `ANALYTICS_DISABLED` sont indépendantes. La première contrôle cet instantané anonyme propre à Multica ; la seconde contrôle l'intégration facultative avec PostHog.
+
+## Étapes suivantes
+
+- [Connexion et inscription](/auth-setup) — méthodes de connexion et restrictions d'inscription.
+- [Dépannage](/troubleshooting) — diagnostic des problèmes de déploiement à partir des symptômes.
+- [Daemon et runtimes](/daemon-runtimes) — les équivalents côté daemon de cette configuration.

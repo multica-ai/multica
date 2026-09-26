@@ -207,13 +207,6 @@ export function AgentPerformanceSummary({ agent }: { agent: Agent }) {
     () => deriveAvgDurationLast30d(agentTasks, Date.now()),
     [agentTasks],
   );
-  const successPct =
-    summary.totalRuns > 0
-      ? Math.round(
-          ((summary.totalRuns - summary.totalFailed) / summary.totalRuns) *
-            100,
-        )
-      : 100;
 
   return (
     <section className="mt-5 border-t pt-5">
@@ -234,7 +227,7 @@ export function AgentPerformanceSummary({ agent }: { agent: Agent }) {
               })}
             />
             <Metric
-              value={`${successPct}%`}
+              value={<SuccessRate rate={summary.successRate} />}
               label={t(($) => $.tab_body.activity.success_label)}
             />
             <Metric
@@ -247,6 +240,13 @@ export function AgentPerformanceSummary({ agent }: { agent: Agent }) {
               destructive={summary.totalFailed > 0}
             />
           </div>
+          {summary.totalCancelled > 0 && (
+            <p className="mt-2 text-caption text-muted-foreground">
+              {t(($) => $.tab_body.activity.cancelled_count, {
+                count: summary.totalCancelled,
+              })}
+            </p>
+          )}
           <Sparkline
             buckets={summary.buckets}
             width={250}
@@ -264,7 +264,7 @@ function Metric({
   label,
   destructive = false,
 }: {
-  value: string;
+  value: ReactNode;
   label: string;
   destructive?: boolean;
 }) {
@@ -279,6 +279,32 @@ function Metric({
       </div>
       <div className="truncate text-micro text-muted-foreground">{label}</div>
     </div>
+  );
+}
+
+function SuccessRate({
+  rate,
+  labelled = false,
+}: {
+  rate: number | null;
+  labelled?: boolean;
+}) {
+  const { t } = useT("agents");
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span tabIndex={0} />}>
+        {rate === null
+          ? "—"
+          : labelled
+            ? t(($) => $.tab_body.activity.success_pct, { percent: rate })
+            : `${rate}%`}
+      </TooltipTrigger>
+      <TooltipContent>
+        {rate === null
+          ? t(($) => $.tab_body.activity.success_unavailable)
+          : t(($) => $.tab_body.activity.success_hint)}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -326,10 +352,6 @@ function Last30dSection({
   const summary = summarizeActivityWindow(activity, 30);
   const { totalRuns, totalFailed } = summary;
   const locales = i18n.resolvedLanguage ?? i18n.language;
-  const successPct =
-    totalRuns > 0
-      ? Math.round(((totalRuns - totalFailed) / totalRuns) * 100)
-      : 100;
 
   return (
     <Section title={t(($) => $.tab_body.activity.section_last_30d)} subtitle={t(($) => $.tab_body.activity.subtitle_performance)}>
@@ -351,7 +373,7 @@ function Last30dSection({
               </span>
             </div>
             <div className="text-caption text-muted-foreground">
-              {t(($) => $.tab_body.activity.success_pct, { percent: successPct })}
+              <SuccessRate rate={summary.successRate} labelled />
               {avgDurationMs > 0 && (
                 <>
                   <Sep />
@@ -363,6 +385,16 @@ function Last30dSection({
                   <Sep />
                   <span className="text-destructive">
                     {t(($) => $.tab_body.activity.failed_count, { count: totalFailed })}
+                  </span>
+                </>
+              )}
+              {summary.totalCancelled > 0 && (
+                <>
+                  <Sep />
+                  <span>
+                    {t(($) => $.tab_body.activity.cancelled_count, {
+                      count: summary.totalCancelled,
+                    })}
                   </span>
                 </>
               )}
@@ -799,6 +831,7 @@ type TimeAgoFn = (dateStr: string) => string;
 function taskStatusLabel(status: AgentTask["status"], t: AgentsT): string {
   switch (status) {
     case "queued":
+    case "deferred":
       return t(($) => $.tab_body.activity.status.queued);
     case "dispatched":
       return t(($) => $.tab_body.activity.status.dispatched);

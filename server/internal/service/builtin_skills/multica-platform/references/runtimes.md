@@ -38,6 +38,16 @@ multica repo checkout <url> --fresh
 Runtime and repo commands affect active agent execution. Do not restart daemons,
 update runtimes, or check out arbitrary repos just to test.
 
+`runtime usage` reports what the provider CLI reported. Claude and CodeBuddy
+usage prefers the CLI's final per-model totals. If a run ends without usable
+final usage, Multica can recover only main-loop input and cache tokens: split
+assistant events with the same response ID count once. Output tokens stay zero
+when no final count is available; that does not establish that the model
+produced no output. Subagent totals require final per-model usage. Streams that
+omit response IDs retain best-effort per-event input/cache accounting. These
+fallback figures can be incomplete; use the provider's billing records for
+actual charges. This correction applies to new runs, not historical usage rows.
+
 `runtime update` and `runtime delete` are writes. Starting a runtime update is
 limited to its owner or a workspace owner/admin; the original initiator may keep
 polling that specific in-flight request if their admin role changes.

@@ -1100,26 +1100,31 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 	if !strings.Contains(out, "across all threads") {
 		t.Errorf("hint must state the count is issue-wide, got:\n%s", out)
 	}
-	// Parent thread first: the --thread <trigger> read is the prioritized action.
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --since "+since+" --compact --output json") {
-		t.Errorf("hint must point at the triggering (parent) thread --since read first, got:\n%s", out)
+	// ONE read, and it is the issue-wide delta the server already computed
+	// (MUL-7344): `--since` without `--thread` returns every comment created
+	// after the anchor in every thread, so it IS the scan's answer.
+	if !strings.Contains(out, "multica issue comment list "+issueID+" --since "+since+" --compact --output json") {
+		t.Errorf("hint must point at the issue-wide --since delta read, got:\n%s", out)
 	}
-	if !strings.Contains(out, "--tail 30") {
-		t.Errorf("hint must offer the full-thread (--tail 30) option, got:\n%s", out)
+	if !strings.Contains(out, "reading it is the scan workflow step 2 requires") {
+		t.Errorf("hint must say the delta read answers the scan, got:\n%s", out)
 	}
-	// The scan is phrased as a flag swap on the thread command (MUL-5721
-	// OPT-1) instead of a second full command that restated the UUID and
-	// anchor, and it is pointed at as the wide read step 2 requires.
-	if !strings.Contains(out, "`--roots-only --summary` in place of `--thread ... --since ...`") {
-		t.Errorf("hint must hand over the scan as the wide read, got:\n%s", out)
+	// The full-thread read stays available for the reply itself, on --tail 30
+	// (never `--thread ... --since ...`, which drops the thread root).
+	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --tail 30 --compact --output json") {
+		t.Errorf("hint must offer the full-thread (--tail 30) read, got:\n%s", out)
+	}
+	// The scan the delta read replaces must not also be handed over.
+	if strings.Contains(out, "--roots-only --summary") {
+		t.Errorf("warm hint must not hand over the roots scan alongside the delta read, got:\n%s", out)
+	}
+	if strings.Contains(out, "--thread thread-root-1 --since") {
+		t.Errorf("warm hint must not combine --thread with --since (drops the thread root), got:\n%s", out)
 	}
 	for _, banned := range []string{"blindly", "Only if you need", "rerun it without `--thread`"} {
 		if strings.Contains(out, banned) {
 			t.Errorf("warm hint must not make the wide read optional (%q), got:\n%s", banned, out)
 		}
-	}
-	if strings.Contains(out, "multica issue comment list "+issueID+" --since "+since+" --output json") {
-		t.Errorf("warm hint must not render a second full issue-wide command (MUL-5721 OPT-1), got:\n%s", out)
 	}
 	// The old cursor-heavy paragraph must be gone.
 	if strings.Contains(out, "Next reply cursor") || strings.Contains(out, "--before-id") {
@@ -1760,9 +1765,9 @@ func TestPerTurnContextBlocksCarryMovedBriefSections(t *testing.T) {
 		// What this test cares about is that the section reaches the per-turn
 		// message at all, not which variant it is.
 		"could not be restored",
-		"## Task Initiator",
-		"initiated by **Bohan** (bohan@example.com), a member of this workspace",
-		"credentials stay scoped to the runtime owner",
+		"## On Behalf Of",
+		"acting on behalf of **Bohan** (bohan@example.com)",
+		"credentials and access remain scoped to the runtime owner",
 		"## Connected Apps",
 		"- Notion (`notion`) via MCP server `composio`",
 	} {
@@ -1779,7 +1784,7 @@ func TestPerTurnContextBlocksOmittedWhenEmpty(t *testing.T) {
 	prompt := BuildPrompt(Task{IssueID: "issue-1"}, "claude")
 	for _, banned := range []string{
 		"## Session Continuity Notice",
-		"## Task Initiator",
+		"## On Behalf Of",
 		"## Connected Apps",
 	} {
 		if strings.Contains(prompt, banned) {
@@ -1788,18 +1793,66 @@ func TestPerTurnContextBlocksOmittedWhenEmpty(t *testing.T) {
 	}
 }
 
-// An assignment-triggered run carries the initiator too — it is not a
-// comment-path-only block.
+// An assignment-triggered run also carries the authorization human.
 func TestPerTurnContextBlocksOnAssignmentPath(t *testing.T) {
 	t.Parallel()
 
 	prompt := BuildPrompt(Task{
 		IssueID:       "issue-1",
-		InitiatorType: "agent",
-		InitiatorName: "GPT-Boy",
+		InitiatorType: "member",
+		InitiatorName: "Alice",
 	}, "claude")
-	if !strings.Contains(prompt, "initiated by **GPT-Boy**, another agent in this workspace") {
-		t.Errorf("assignment-triggered prompt lost the initiator block\n---\n%s", prompt)
+	if !strings.Contains(prompt, "acting on behalf of **Alice**") {
+		t.Errorf("assignment-triggered prompt lost the authorization human\n---\n%s", prompt)
+	}
+}
+
+func TestPerTurnContextBlocksOnDelegatedPath(t *testing.T) {
+	t.Parallel()
+
+	prompt := BuildPrompt(Task{
+		IssueID:               "issue-1",
+		TriggerCommentID:      "comment-1",
+		TriggerCommentContent: "Please take over",
+		TriggerAuthorType:     "agent",
+		TriggerAuthorName:     "Agent A",
+		InitiatorType:         "member",
+		InitiatorID:           "user-alice",
+		InitiatorName:         "Alice",
+		InitiatorEmail:        "alice@example.com",
+	}, "claude")
+
+	for _, want := range []string{
+		"Agent A",
+		"## On Behalf Of",
+		"acting on behalf of **Alice** (alice@example.com)",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("delegated prompt must contain %q\n---\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "## Task Initiator") || strings.Contains(prompt, "## Original Requester") {
+		t.Errorf("delegated prompt must use one identity block\n---\n%s", prompt)
+	}
+}
+
+func TestTaskDecodesAndRendersOnBehalfOf(t *testing.T) {
+	t.Parallel()
+
+	var task Task
+	if err := json.Unmarshal([]byte(`{
+		"issue_id":"issue-1",
+		"initiator_type":"member", "initiator_id":"user-alice",
+		"initiator_name":"Alice", "initiator_email":"alice@example.com"
+	}`), &task); err != nil {
+		t.Fatal(err)
+	}
+	prompt := BuildPrompt(task, "claude")
+	if !strings.Contains(prompt, "## On Behalf Of") || !strings.Contains(prompt, "**Alice** (alice@example.com)") {
+		t.Errorf("daemon claim JSON lost authorization human\n---\n%s", prompt)
+	}
+	if strings.Contains(prompt, "## Task Initiator") || strings.Contains(prompt, "## Original Requester") {
+		t.Errorf("daemon must not render old identity blocks\n---\n%s", prompt)
 	}
 }
 
@@ -2070,4 +2123,116 @@ func TestWorktreeReplayConflictBlock(t *testing.T) {
 			t.Fatalf("the remainder was not reported for a long list:\n%s", block)
 		}
 	})
+}
+
+// issueStateTask is the shared comment-trigger fixture for the issue-state
+// hint cases below. Every case differs only in the issue-state fields, so
+// building the rest once keeps the branch under test visible.
+func issueStateTask(issueID string) Task {
+	return Task{
+		IssueID:               issueID,
+		TriggerCommentID:      "trigger-1",
+		TriggerThreadID:       "thread-root-1",
+		TriggerCommentContent: "ping",
+		TriggerAuthorType:     "member",
+		PriorSessionID:        "session-123",
+		NewCommentsDeltaKnown: true,
+	}
+}
+
+// TestBuildPromptIssueUnchangedDropsTheIssueRead pins MUL-7344's acceptance
+// case: a resumed follow-up whose issue did not move is no longer told to run
+// `multica issue get` before doing anything. The comparison is reported as
+// workflow step 1's answer, with the read left as a conditional fallback.
+func TestBuildPromptIssueUnchangedDropsTheIssueRead(t *testing.T) {
+	const issueID = "issue-unchanged-1"
+	task := issueStateTask(issueID)
+	task.IssueStateDeltaKnown = true
+	task.IssueStatus = "in_progress"
+	task.IssueAssigneeType = "agent"
+	task.IssueAssigneeID = "agent-7"
+	out := BuildPrompt(task, "claude")
+
+	if strings.Contains(out, "Start by running `multica issue get") {
+		t.Errorf("an unchanged issue must not carry the unconditional read imperative, got:\n%s", out)
+	}
+	for _, want := range []string{
+		"The issue is unchanged since your last run",
+		"the server compared title and description",
+		"status: in_progress; assignee: agent agent-7",
+		"only if resumed memory is not enough",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prompt missing %q, got:\n%s", want, out)
+		}
+	}
+	// Combined with the empty comment delta this is the full acceptance case:
+	// neither context read is imperative any more.
+	if strings.Contains(out, "--roots-only --summary") {
+		t.Errorf("an unchanged issue with an empty comment delta must carry no scan, got:\n%s", out)
+	}
+}
+
+// TestBuildPromptIssueChangedNamesFieldsAndReads: the comparison found
+// something, so the read comes back — with the changed field names, so the
+// agent knows what moved instead of diffing the whole record.
+func TestBuildPromptIssueChangedNamesFieldsAndReads(t *testing.T) {
+	const issueID = "issue-changed-1"
+	task := issueStateTask(issueID)
+	task.IssueStateDeltaKnown = true
+	task.IssueStatus = "todo"
+	task.IssueAssigneeType = "member"
+	task.IssueAssigneeID = "user-3"
+	task.IssueChangedFields = []string{"description", "status"}
+	out := BuildPrompt(task, "claude")
+
+	for _, want := range []string{
+		"Since your last run the issue changed: description, status",
+		"status: todo; assignee: member user-3",
+		"Read it: `multica issue get " + issueID + " --output json`",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prompt missing %q, got:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "The issue is unchanged") {
+		t.Errorf("a changed issue must not be reported as unchanged, got:\n%s", out)
+	}
+}
+
+// TestBuildPromptIssueStateFallsBackToTheRead pins the safe default at the
+// prompt layer: a cold start and a dropped resume both keep the instruction
+// they have always carried. An unknown delta is covered by the same branch and
+// is exercised in the execenv helper's own table.
+func TestBuildPromptIssueStateFallsBackToTheRead(t *testing.T) {
+	cases := map[string]func(*Task){
+		"cold start": func(task *Task) {
+			task.PriorSessionID = ""
+			task.NewCommentsDeltaKnown = false
+		},
+		"resume dropped": func(task *Task) {
+			task.PriorSessionResumeUnavailable = true
+		},
+		"delta not computed": func(task *Task) {
+			task.IssueStateDeltaKnown = false
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			const issueID = "issue-fallback-1"
+			task := issueStateTask(issueID)
+			// Every case starts from a server that DID compare, so the only
+			// thing suppressing the waiver is the mutation under test.
+			task.IssueStateDeltaKnown = true
+			task.IssueStatus = "todo"
+			mutate(&task)
+			out := BuildPrompt(task, "claude")
+			if !strings.Contains(out, "Start by running `multica issue get "+issueID+" --output json` to understand your task, then decide how to proceed.") {
+				t.Errorf("expected the unconditional issue read, got:\n%s", out)
+			}
+			if strings.Contains(out, "The issue is unchanged") {
+				t.Errorf("nothing may claim the issue is unchanged here, got:\n%s", out)
+			}
+		})
+	}
 }
