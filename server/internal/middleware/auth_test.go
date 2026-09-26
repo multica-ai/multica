@@ -9,11 +9,53 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/redis/go-redis/v9"
 )
 
 const redisTestDB = 13
+
+func TestApplyPATWorkspaceScope(t *testing.T) {
+	workspaceID := pgtype.UUID{Bytes: [16]byte{15: 1}, Valid: true}
+	const workspaceIDString = "00000000-0000-0000-0000-000000000001"
+
+	t.Run("injects bound workspace", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+		if !applyPATWorkspaceScope(req, workspaceID) {
+			t.Fatal("scope unexpectedly rejected")
+		}
+		if got := req.Header.Get("X-Workspace-ID"); got != workspaceIDString {
+			t.Fatalf("X-Workspace-ID = %q, want %q", got, workspaceIDString)
+		}
+	})
+
+	t.Run("rejects cross-workspace header", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+		req.Header.Set("X-Workspace-ID", "00000000-0000-0000-0000-000000000002")
+		if applyPATWorkspaceScope(req, workspaceID) {
+			t.Fatal("cross-workspace header was accepted")
+		}
+	})
+
+	t.Run("rejects cross-workspace query", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/issues?workspace_id=00000000-0000-0000-0000-000000000002", nil)
+		if applyPATWorkspaceScope(req, workspaceID) {
+			t.Fatal("cross-workspace query was accepted")
+		}
+	})
+
+	t.Run("leaves unscoped token selector unchanged", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+		req.Header.Set("X-Workspace-ID", "00000000-0000-0000-0000-000000000002")
+		if !applyPATWorkspaceScope(req, pgtype.UUID{}) {
+			t.Fatal("unscoped token was rejected")
+		}
+		if got := req.Header.Get("X-Workspace-ID"); got != "00000000-0000-0000-0000-000000000002" {
+			t.Fatalf("X-Workspace-ID changed to %q", got)
+		}
+	})
+}
 
 // newRedisTestClient connects to REDIS_TEST_URL, uses this package's logical
 // test DB, flushes, and skips when unset — same gating pattern the rest of the
