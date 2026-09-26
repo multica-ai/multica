@@ -251,6 +251,58 @@ func (s *ChannelStore) GetLarkUserBindingByOpenID(ctx context.Context, arg GetUs
 	return userBindingFromRow(row)
 }
 
+// NotificationTarget is a bound Feishu user plus the active installation whose
+// bot can deliver a personal notification to that user.
+type NotificationTarget struct {
+	Binding      UserBinding
+	Installation Installation
+}
+
+func (s *ChannelStore) ListNotificationTargetsForUser(ctx context.Context, workspaceID, userID pgtype.UUID) ([]NotificationTarget, error) {
+	rows, err := s.Queries.ListFeishuNotificationTargetsForUser(ctx, db.ListFeishuNotificationTargetsForUserParams{
+		WorkspaceID:   workspaceID,
+		MulticaUserID: userID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	targets := make([]NotificationTarget, 0, len(rows))
+	for _, row := range rows {
+		binding, err := userBindingFromRow(db.ChannelUserBinding{
+			ID:             row.BindingID,
+			WorkspaceID:    row.BindingWorkspaceID,
+			MulticaUserID:  row.MulticaUserID,
+			InstallationID: row.BindingInstallationID,
+			ChannelType:    row.BindingChannelType,
+			ChannelUserID:  row.ChannelUserID,
+			Config:         row.BindingConfig,
+			BoundAt:        row.BoundAt,
+		})
+		if err != nil {
+			return nil, err
+		}
+		inst, err := installationFromRow(db.ChannelInstallation{
+			ID:               row.InstallationID,
+			WorkspaceID:      row.InstallationWorkspaceID,
+			AgentID:          row.AgentID,
+			ChannelType:      row.InstallationChannelType,
+			Config:           row.InstallationConfig,
+			Status:           row.InstallationStatus,
+			WsLeaseToken:     row.WsLeaseToken,
+			WsLeaseExpiresAt: row.WsLeaseExpiresAt,
+			InstallerUserID:  row.InstallerUserID,
+			InstalledAt:      row.InstalledAt,
+			CreatedAt:        row.CreatedAt,
+			UpdatedAt:        row.UpdatedAt,
+		})
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, NotificationTarget{Binding: binding, Installation: inst})
+	}
+	return targets, nil
+}
+
 func (s *ChannelStore) CreateLarkUserBinding(ctx context.Context, arg CreateUserBindingParams) (UserBinding, error) {
 	cfg, err := encodeBindingConfig(UserBinding{UnionID: arg.UnionID})
 	if err != nil {
