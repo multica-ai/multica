@@ -29,20 +29,20 @@
   border-radius: var(--radius);
 }
 
-/* A thumbnail in a row of standalone images (the "card" layout): every image
-   the same height at its own aspect ratio, so a set of screenshots reads as
-   one strip instead of a stack of full-width frames. */
+/* A thumbnail in a row of standalone images (the "card" layout): it fills
+   the box its row gives it — the row sizes each box from the image's own
+   aspect ratio — so a set of screenshots reads as one strip instead of a
+   stack of full-width frames. */
 .image-figure.image-tile {
   display: block;
   margin: 0;
-  height: 9rem;
-  max-width: 100%;
+  width: 100%;
+  height: 100%;
 }
 
 .image-figure.image-tile .image-content {
+  width: 100%;
   height: 100%;
-  width: auto;
-  max-width: 100%;
   object-fit: cover;
   box-shadow: 0 0 0 1px var(--border);
 }

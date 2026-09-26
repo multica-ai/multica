@@ -60,6 +60,7 @@ import { descriptionPreview } from "./description-preview";
 import { useCommentAnnotations } from "./use-comment-annotations";
 import { useAttachmentVersions } from "./deliverables/attachment-versions";
 import { VersionBadge } from "./deliverables/version-badge";
+import { JustifiedImageRow } from "./justified-image-row";
 import { useRunCommentMotion } from "./use-run-comment-motion";
 
 const commentActionClassName =
@@ -246,15 +247,15 @@ export function AttachmentList({
     );
   };
 
-  // A lone image keeps its full size; several sit in one row at a shared
-  // height. HTML keeps its embedded preview. Every other file is a card in a
-  // grid, not a full-width row each.
+  // A lone image keeps its full size; several form justified rows (one
+  // height per row, edge to edge). HTML keeps its embedded preview. Every
+  // other file is a card in a grid, not a full-width row each.
   return (
     <AttachmentDownloadProvider attachments={attachments}>
       <div className={cn("flex flex-col gap-2", className)}>
         {images.length === 1 && render(images[0]!, "block")}
         {images.length > 1 && (
-          <div className="flex flex-wrap gap-2">{images.map((a) => render(a, "card"))}</div>
+          <JustifiedImageRow items={images} renderTile={(a) => render(a, "card")} />
         )}
         {html.map((a) => render(a, "block"))}
         {files.length > 0 && (
