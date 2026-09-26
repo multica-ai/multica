@@ -22,12 +22,16 @@ const TEST_RESOURCES = { en: { agents: enAgents, common: enCommon, issues: enIss
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
 
 // Counts MockContentEditor mounts. This pins the description to exactly one
-// eager editor per issue and catches stale editor reuse across issue switches.
+// deferred editor per issue and catches stale editor reuse across issue switches.
 const contentEditorMounts = vi.hoisted(() => ({ count: 0 }));
 // Every ReadonlyContent render, by content. A comment card renders its body
 // through it, so this counts card renders without reaching into the card.
 const readonlyContentRenders = vi.hoisted(() => [] as string[]);
 const descriptionSelectionAction = vi.hoisted(() => ({ current: undefined as { label: string; onSelect: () => void } | undefined }));
+// MUL-7095: witness the description wrapper's pre-instance mousedown path —
+// whether the guard probed the instance window and what it forwarded.
+const mockDescHasInstance = vi.hoisted(() => vi.fn(() => false));
+const mockDescFocusAtCoords = vi.hoisted(() => vi.fn());
 // Stable empty-attachments reference: the real store returns a shared constant
 // so the `useCommentDraftStore(s => s.getAttachments(key))` selector keeps a
 // stable identity. A fresh `[]` per call would loop useSyncExternalStore.
@@ -225,7 +229,10 @@ vi.mock("../../editor", async () => ({
         setEditorValue(markdown);
       },
       focus: () => {},
-      focusAtCoords: () => {},
+      // MUL-7095: recorded per witness so the wrapper-mousedown contract
+      // tests can assert the pre-instance guard's exact call shape.
+      hasEditorInstance: mockDescHasInstance,
+      focusAtCoords: mockDescFocusAtCoords,
       // The top-level composer blurs after a posted comment (afterAccepted).
       blur: () => {},
       // Read by the submit-time upload gate; no uploads are exercised here.
@@ -832,8 +839,8 @@ describe("IssueDetail (shared)", () => {
   it("renders issue title and description after loading", async () => {
     renderIssueDetail();
 
-    // The description is the one eager editor: keeping one renderer avoids the
-    // layout jump caused by swapping a long react-markdown tree for ProseMirror.
+    // The description stays on ContentEditor's deferred default: it mounts
+    // one editor per issue without synchronous eager creation in route render.
     // Title and comment/reply composers remain readonly-first.
     expect(await screen.findByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
     expect(screen.getByText("Implement authentication")).toBeInTheDocument();
@@ -951,7 +958,62 @@ describe("IssueDetail (shared)", () => {
     expect(description).toHaveAttribute("data-flush-on-unmount", "true");
   });
 
-  it("remounts the eager description on issue switch without carrying stale content", async () => {
+  // MUL-7095: the wrapper owns the pre-instance click window. These fire a
+  // real mousedown against the real description wrapper (not the imperative
+  // handle) and assert the guard's exact call shape per case.
+  describe("description wrapper pre-instance mousedown (MUL-7095)", () => {
+    beforeEach(() => {
+      mockDescHasInstance.mockReset();
+      mockDescHasInstance.mockReturnValue(false);
+      mockDescFocusAtCoords.mockReset();
+    });
+
+    it("forwards a wrapper mousedown to focusAtCoords while the instance is null", async () => {
+      const { container } = renderIssueDetail();
+      await screen.findByDisplayValue("Add JWT auth to the backend");
+      const wrapper = container.querySelector<HTMLDivElement>("div.relative.mt-5.rounded-lg");
+      expect(wrapper).not.toBeNull();
+      fireEvent.mouseDown(wrapper!, { clientX: 120, clientY: 80 });
+      expect(mockDescHasInstance).toHaveBeenCalledTimes(1);
+      expect(mockDescFocusAtCoords).toHaveBeenCalledTimes(1);
+      expect(mockDescFocusAtCoords).toHaveBeenCalledWith({ x: 120, y: 80 });
+    });
+
+    it("leaves live-editor clicks to the editor container handler", async () => {
+      mockDescHasInstance.mockReturnValue(true);
+      const { container } = renderIssueDetail();
+      await screen.findByDisplayValue("Add JWT auth to the backend");
+      const wrapper = container.querySelector<HTMLDivElement>("div.relative.mt-5.rounded-lg");
+      fireEvent.mouseDown(wrapper!, { clientX: 40, clientY: 30 });
+      expect(mockDescHasInstance).toHaveBeenCalledTimes(1);
+      // Live clicks stay with the editor's own container handler — the
+      // wrapper must not double-latch them into the focus queue.
+      expect(mockDescFocusAtCoords).not.toHaveBeenCalled();
+    });
+
+    it("does not latch interactive children or already-handled clicks", async () => {
+      const { container } = renderIssueDetail();
+      await screen.findByDisplayValue("Add JWT auth to the backend");
+      const wrapper = container.querySelector<HTMLDivElement>("div.relative.mt-5.rounded-lg");
+      expect(wrapper).not.toBeNull();
+      // An annotation popup button lives inside the wrapper: clicking it
+      // must not latch a caret position (exclusion parity with the editor
+      // container handler).
+      const interactive = document.createElement("button");
+      interactive.textContent = "popup";
+      wrapper!.appendChild(interactive);
+      fireEvent.mouseDown(interactive, { clientX: 10, clientY: 10 });
+      expect(mockDescFocusAtCoords).not.toHaveBeenCalled();
+      interactive.remove();
+      // An inner handler that already preventDefaulted owns the click.
+      const prevented = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+      prevented.preventDefault();
+      wrapper!.dispatchEvent(prevented);
+      expect(mockDescFocusAtCoords).not.toHaveBeenCalled();
+    });
+  });
+
+  it("remounts the description on issue switch without carrying stale content", async () => {
     // The web route reuses IssueDetail across issues. The keyed description
     // editor must remount atomically for the new issue while the title remains
     // on its cheap stand-in.

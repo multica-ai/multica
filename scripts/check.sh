@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ==========================================================================
-# Full verification pipeline: typecheck → unit tests → Go tests → E2E
+# Full verification pipeline: typecheck → unit tests → Go tests → E2E (chromium + webkit)
 # Usage: bash scripts/check.sh
 # ==========================================================================
 
@@ -80,21 +80,21 @@ bash scripts/ensure-postgres.sh "$ENV_FILE"
 # Step 1: TypeScript typecheck
 # --------------------------------------------------------------------------
 echo ""
-echo "==> [1/5] TypeScript typecheck..."
+echo "==> [1/6] TypeScript typecheck..."
 pnpm typecheck || { EXIT_CODE=1; exit 1; }
 
 # --------------------------------------------------------------------------
 # Step 2: TypeScript unit tests (Vitest)
 # --------------------------------------------------------------------------
 echo ""
-echo "==> [2/5] TypeScript unit tests..."
+echo "==> [2/6] TypeScript unit tests..."
 pnpm test || { EXIT_CODE=1; exit 1; }
 
 # --------------------------------------------------------------------------
 # Step 3: Go tests
 # --------------------------------------------------------------------------
 echo ""
-echo "==> [3/5] Go tests..."
+echo "==> [3/6] Go tests..."
 echo "==> Verifying Go test wrapper..."
 bash scripts/test-go.test.sh || { EXIT_CODE=1; exit 1; }
 echo "==> Running database migrations..."
@@ -105,7 +105,7 @@ bash scripts/test-go.sh || { EXIT_CODE=1; exit 1; }
 # Step 4: Start services for E2E (only if not already running)
 # --------------------------------------------------------------------------
 echo ""
-echo "==> [4/5] Starting services for E2E..."
+echo "==> [4/6] Starting services for E2E..."
 
 if curl -sf "http://localhost:${PORT}/health" > /dev/null 2>&1; then
   echo "    Backend already running on :$PORT"
@@ -128,8 +128,23 @@ else
 fi
 
 # --------------------------------------------------------------------------
-# Step 5: E2E tests (Playwright)
+# Step 5: E2E tests (Playwright, chromium)
 # --------------------------------------------------------------------------
 echo ""
-echo "==> [5/5] E2E tests (Playwright)..."
+echo "==> [5/6] E2E tests (Playwright, chromium)..."
 pnpm exec playwright test || { EXIT_CODE=1; exit 1; }
+
+# --------------------------------------------------------------------------
+# Step 6: E2E tests (Playwright, webkit — MUL-7095 description-reentry spec)
+#
+# WebKit is deliberately outside the default project matrix: it is a gate for
+# re-entry/geometry/scroll plus first-edit/drop determinism on
+# `e2e/description-reentry.spec.ts` only, not a second axis for every spec.
+# `e2e/description-navigation-trace.spec.ts` stays Chromium-only (its Long
+# Tasks API recorder has no WebKit entry type), so the webkit config does not
+# match it. WebKit needs its own browser install:
+#   pnpm exec playwright install --with-deps webkit
+# --------------------------------------------------------------------------
+echo ""
+echo "==> [6/6] E2E tests (Playwright, webkit)..."
+pnpm exec playwright test --config=playwright.webkit.config.ts || { EXIT_CODE=1; exit 1; }
