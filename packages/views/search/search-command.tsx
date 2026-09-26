@@ -431,6 +431,12 @@ export function SearchCommand() {
 
     if (currentIssueId && currentIssue) {
       const identifier = currentIssue.identifier;
+      // Collapse state is keyed by the issue UUID, not by whatever the URL
+      // segment happens to be. Since v0.4.15 the route rewrites the address bar
+      // to the canonical identifier, so `currentIssueId` is "MUL-123" while
+      // CommentCard and useResolvedExpandStore both read under `currentIssue.id`.
+      // Keying off the segment wrote a second, orphaned set of entries.
+      const issueId = currentIssue.id;
       items.push(
         {
           key: "copy-issue-link",
@@ -467,12 +473,12 @@ export function SearchCommand() {
             // still can't load, no comments are on screen — dropping the
             // action matches the visible state.
             void queryClient
-              .ensureQueryData(issueTimelineOptions(currentIssueId))
+              .ensureQueryData(issueTimelineOptions(issueId))
               .then((entries) => {
                 useCommentCollapseStore
                   .getState()
-                  .collapseAll(currentIssueId, rootCommentIds(entries));
-                useResolvedExpandStore.getState().collapseAll(currentIssueId);
+                  .collapseAll(issueId, rootCommentIds(entries));
+                useResolvedExpandStore.getState().collapseAll(issueId);
               })
               .catch(() => {});
             setOpen(false);
@@ -485,12 +491,12 @@ export function SearchCommand() {
           keywords: ["unfold", "expand", "comments", "展开", "评论"],
           onSelect: () => {
             void queryClient
-              .ensureQueryData(issueTimelineOptions(currentIssueId))
+              .ensureQueryData(issueTimelineOptions(issueId))
               .then((entries) => {
-                useCommentCollapseStore.getState().expandAll(currentIssueId);
+                useCommentCollapseStore.getState().expandAll(issueId);
                 useResolvedExpandStore
                   .getState()
-                  .expandAll(currentIssueId, resolvedThreadRootIds(entries));
+                  .expandAll(issueId, resolvedThreadRootIds(entries));
               })
               .catch(() => {});
             setOpen(false);
