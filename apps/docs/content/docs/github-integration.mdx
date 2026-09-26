@@ -9,17 +9,16 @@ Once GitHub is connected, Multica automatically links pull requests based on iss
 
 The GitHub integration only reads the repositories authorized at install time; it never pushes commits, comments, or status checks.
 
-Self-hosted Multica can also connect self-hosted Forgejo, Gitea, or GitLab instances in parallel, with the same PR auto-linking, merge-driven status changes, and CI display. The entry point is **Settings → Integrations → Git hosting**; see [Self-hosted Git hosting](/vcs-integration). Multica Cloud does not offer this entry point.
+Self-hosted Multica can also connect self-hosted Forgejo, Gitea, or GitLab instances in parallel, with the same PR auto-linking, merge-driven status changes, and CI display. The entry point is **Settings → Code**; see [Self-hosted Git hosting](/vcs-integration). Multica Cloud does not offer this entry point.
 
 ## Connect GitHub
 
 A workspace owner or admin can complete the connection:
 
-1. Open **Settings → GitHub**.
-2. Turn on the GitHub integration master switch.
-3. Click **Connect GitHub**.
-4. In GitHub, pick the account or organization and authorize all repositories or a chosen subset.
-5. Return to Multica after the installation completes.
+1. Open **Settings → Code**.
+2. In the **GitHub** row, click **Connect GitHub**.
+3. In GitHub, pick the account or organization and authorize all repositories or a chosen subset.
+4. Return to Multica after the installation completes.
 
 The connection status shows on the same page. Regular members can view the status but can't connect, disconnect, or change the switches.
 
@@ -29,20 +28,19 @@ The **GitHub connection** decides which repositories Multica receives PR events 
 
 ## Feature switches
 
-**Settings → GitHub** has these settings:
+The **Pull requests & issues** section of **Settings → Code** has these settings. **Pause GitHub features** in the GitHub row's **⋯** menu stops the three switches below without disconnecting the GitHub App.
 
 | Switch | Effect |
 |---|---|
-| GitHub integration | Master switch. When off, the three below stop working, but the GitHub App stays connected. |
 | PR sidebar | Shows linked pull requests in issue detail. |
 | Co-authored-by | Adds `Co-authored-by: multica-agent <github@multica.ai>` to commits created by agents. |
 | Auto-link PRs | Links a PR to the issue whose identifier is in its branch name or title, or follows a closing keyword in its body. |
-| After PRs merge, move the issue to | What merging every PR linked to an issue does: move it to a status (`Done` by default) or leave it alone. See [When merged PRs move an issue](#when-merged-prs-move-an-issue). |
+| After PRs merge, move the issue to | What merging every PR linked to an issue does: move it to a status (`Done` by default) or leave it alone. Set on **Settings → Statuses & transitions**; the Code page shows the current choice. See [When merged PRs move an issue](#when-merged-prs-move-an-issue). |
 | **PR card → CI & mergeability** | For each linked PR, Multica fetches an authenticated GitHub API snapshot and mirrors its **CI status** and **mergeability** onto the card (see **What the PR card shows** below). |
 
 
 
-**After PRs merge, move the issue to** applies to every code host, including [self-hosted Git hosting](/vcs-integration), whose page shows the same setting.
+**After PRs merge, move the issue to** applies to every code host, including [self-hosted Git hosting](/vcs-integration).
 
 ## Link a PR to an issue
 
@@ -88,7 +86,7 @@ Click an entry to open the PR on GitHub. Turning off the **PR sidebar** only hid
 
 ## When merged PRs move an issue
 
-A merged PR doesn't necessarily mean the issue is finished, so the workspace decides what a merge does: **Settings → Integrations → GitHub → After PRs merge, move the issue to**. Pick `Done` (the default for new workspaces), another started or done status — a custom one such as *Awaiting regression* works too — or **Don't change**. Workspaces that existed before this setting keep their behavior: if merging didn't always complete their issues, they start on **Don't change**.
+A merged PR doesn't necessarily mean the issue is finished, so the workspace decides what a merge does: **Settings → Statuses & transitions → Automatic transitions**. Pick `Done` (the default for new workspaces), another started or done status — a custom one such as *Awaiting regression* works too — or **Don't change**. Workspaces that existed before this setting keep their behavior: if merging didn't always complete their issues, they start on **Don't change**.
 
 An issue moves to the chosen status when all of the following hold:
 
@@ -111,7 +109,7 @@ If one identifier matches an issue in more than one of the connected workspaces 
 
 ## Disconnect
 
-Clicking **Disconnect** in **Settings → GitHub** only removes the relationship between the current Multica workspace and the installation; it does not uninstall the App from GitHub for you. Existing PR records are kept, and new events stop flowing into that workspace.
+Choosing **Disconnect** from the GitHub row's **⋯** menu on **Settings → Code** only removes the relationship between the current Multica workspace and the installation; it does not uninstall the App from GitHub for you. Existing PR records are kept, and new events stop flowing into that workspace.
 
 To revoke repository authorization on the GitHub side, uninstall the App or adjust its repository scope from your personal or organization GitHub App installations page. After uninstalling, every Multica workspace linked to that installation stops receiving events.
 
@@ -181,7 +179,7 @@ When upgrading an existing deployment, run the regular database migrations first
 make migrate-up
 ```
 
-Restart the API server, then complete the connection in **Settings → GitHub**.
+Restart the API server, then complete the connection in **Settings → Code**.
 
 ## Troubleshooting
 

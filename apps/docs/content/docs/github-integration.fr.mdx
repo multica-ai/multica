@@ -9,31 +9,29 @@ Une fois GitHub connecté, Multica associe automatiquement les pull requests à 
 
 L'intégration GitHub se contente de lire les dépôts autorisés lors de l'installation ; elle ne pousse jamais de commits, de commentaires ni de status checks.
 
-Multica auto-hébergé peut aussi connecter en parallèle des instances Forgejo, Gitea ou GitLab auto-hébergées, avec la même association automatique des PR, le même passage à Terminé à la fusion et le même affichage de la CI. Le point d'entrée est **Paramètres → Intégrations → Fournisseurs git (auto-hébergés)** ; voir [Fournisseurs Git auto-hébergés](/vcs-integration). Multica Cloud ne propose pas ce point d'entrée.
+Multica auto-hébergé peut aussi connecter en parallèle des instances Forgejo, Gitea ou GitLab auto-hébergées, avec la même association automatique des PR, le même passage à Terminé à la fusion et le même affichage de la CI. Le point d'entrée est **Paramètres → Code** ; voir [Fournisseurs Git auto-hébergés](/vcs-integration). Multica Cloud ne propose pas ce point d'entrée.
 
 ## Connecter GitHub
 
 Un propriétaire ou un administrateur de l'espace de travail peut effectuer la connexion :
 
-1. Ouvrez **Paramètres → GitHub**.
-2. Activez l'interrupteur principal de l'intégration GitHub, **Activer les fonctions GitHub**.
-3. Cliquez sur **Connecter GitHub**.
-4. Sur GitHub, choisissez le compte ou l'organisation, puis autorisez tous les dépôts ou une sélection d'entre eux.
-5. Revenez sur Multica une fois l'installation terminée.
+1. Ouvrez **Paramètres → Code**.
+2. Sur la ligne **GitHub**, cliquez sur **Connecter GitHub**.
+3. Sur GitHub, choisissez le compte ou l'organisation, puis autorisez tous les dépôts ou une sélection d'entre eux.
+4. Revenez sur Multica une fois l'installation terminée.
 
 L'état de la connexion s'affiche sur la même page. Les membres ordinaires peuvent consulter cet état, mais ne peuvent ni connecter, ni déconnecter, ni modifier les interrupteurs.
 
 <Callout type="info">
-La **connexion GitHub** détermine de quels dépôts Multica reçoit les événements de PR ; le réglage des **dépôts de code** (onglet **Dépôts**) détermine les dépôts que les agents peuvent choisir au démarrage des exécutions. Ils ont des rôles différents et se configurent séparément.
+La **connexion GitHub** détermine de quels dépôts Multica reçoit les événements de PR ; le réglage des **dépôts de code** (section **Dépôts** de la même page) détermine les dépôts que les agents peuvent choisir au démarrage des exécutions. Ils ont des rôles différents et se configurent séparément.
 </Callout>
 
 ## Interrupteurs de fonctions
 
-**Paramètres → GitHub** comporte quatre interrupteurs :
+La section **Pull requests et tâches** de **Paramètres → Code** comporte ces interrupteurs. **Mettre en pause les fonctionnalités GitHub**, dans le menu **⋯** de la ligne GitHub, désactive les trois interrupteurs ci-dessous sans déconnecter la GitHub App.
 
 | Interrupteur | Effet |
 |---|---|
-| Activer les fonctions GitHub | Interrupteur principal. Lorsqu'il est désactivé, les trois interrupteurs ci-dessous cessent de fonctionner, mais la GitHub App reste connectée. |
 | Barre latérale des pull requests | Affiche les pull requests associées dans le détail de la tâche. |
 | Mention Co-authored-by | Ajoute `Co-authored-by: multica-agent <github@multica.ai>` aux commits créés par les agents. |
 | Lier automatiquement tâches et PR | Détecte les identifiants de tâche dans le nom de branche ou le titre d'une PR, ainsi que dans sa description lorsqu'ils suivent un mot-clé de clôture. |
@@ -99,7 +97,7 @@ Par exemple, une PR qui référence à la fois `MUL-1` et `ENG-2` peut être ass
 
 ## Déconnecter
 
-Cliquer sur **Déconnecter** dans **Paramètres → GitHub** supprime seulement la relation entre l'espace de travail Multica courant et l'installation ; cela ne désinstalle pas l'App de GitHub à votre place. Les enregistrements de PR existants sont conservés, et les nouveaux événements cessent d'arriver dans cet espace de travail.
+Choisir **Déconnecter** dans le menu **⋯** de la ligne GitHub, sur **Paramètres → Code**, supprime seulement la relation entre l'espace de travail Multica courant et l'installation ; cela ne désinstalle pas l'App de GitHub à votre place. Les enregistrements de PR existants sont conservés, et les nouveaux événements cessent d'arriver dans cet espace de travail.
 
 Pour révoquer l'autorisation d'accès aux dépôts côté GitHub, désinstallez l'App ou ajustez son périmètre de dépôts depuis la page des installations de GitHub Apps de votre compte personnel ou de votre organisation. Après la désinstallation, tous les espaces de travail Multica liés à cette installation cessent de recevoir des événements.
 
@@ -169,7 +167,7 @@ Lors de la mise à niveau d'un déploiement existant, exécutez d'abord les migr
 make migrate-up
 ```
 
-Redémarrez le serveur API, puis effectuez la connexion dans **Paramètres → GitHub**.
+Redémarrez le serveur API, puis effectuez la connexion dans **Paramètres → Code**.
 
 ## Dépannage
 
