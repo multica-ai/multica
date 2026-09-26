@@ -58,6 +58,29 @@ describe("DynamicBlock", () => {
     await waitFor(() => expect(copyTextMock).toHaveBeenCalledWith("<p>chart</p>"));
   });
 
+  it("reveals the actions on hover, but keeps them up in the source view and after a copy", async () => {
+    copyTextMock.mockResolvedValue(true);
+    const { container } = renderBlock();
+    const actions = container.querySelector<HTMLElement>("[data-dynamic-block-actions]")!;
+    const hiddenUntilHover = "[@media(hover:hover)]:opacity-0";
+
+    // The title always shows; only the actions wait for hover or focus.
+    expect(actions.textContent).not.toContain("Latency");
+    expect(actions.className).toContain(hiddenUntilHover);
+    expect(actions.className).toContain("group-hover/dynamic-block:opacity-100");
+    expect(actions.className).toContain("group-focus-within/dynamic-block:opacity-100");
+
+    // Preview is the way back from the source view, so it cannot hide.
+    fireEvent.click(screen.getByRole("tab", { name: "Source" }));
+    await waitFor(() => expect(actions.className).not.toContain(hiddenUntilHover));
+    fireEvent.click(screen.getByRole("tab", { name: "Preview" }));
+    await waitFor(() => expect(actions.className).toContain(hiddenUntilHover));
+
+    // The copy confirmation stays readable after the pointer leaves.
+    fireEvent.click(screen.getByRole("button", { name: "Copy source" }));
+    await waitFor(() => expect(actions.className).not.toContain(hiddenUntilHover));
+  });
+
   it("has no fullscreen button unless the kind offers one", () => {
     renderBlock();
     expect(screen.queryByRole("button", { name: "Fullscreen" })).toBeNull();

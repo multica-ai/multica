@@ -7,10 +7,11 @@
  * A dynamic block is part of the message body. That is what separates it from
  * an attachment, which is a file and shows as a card that opens the viewer. So
  * the frame reads as content, not as a file: an always-visible title bar (kind
- * icon, title, kind chip, Preview | Source, fullscreen, copy) over a body that
- * takes its content's height, collapsed past DYNAMIC_BLOCK_COLLAPSE_AT_PX
- * behind a fade and "Show all". Loading and error states live inside the same
- * frame, so a block that fails never breaks the comment around it.
+ * icon, title, kind chip; the Preview | Source, fullscreen and copy actions
+ * fade in on hover or focus, MUL-7733) over a body that takes its content's
+ * height, collapsed past DYNAMIC_BLOCK_COLLAPSE_AT_PX behind a fade and
+ * "Show all". Loading and error states live inside the same frame, so a block
+ * that fails never breaks the comment around it.
  *
  * The kinds supply only the preview; the frame owns the chrome, the source
  * view and the error panel.
@@ -111,6 +112,9 @@ export function DynamicBlock({
   const Icon = KIND_ICON[kind];
   const kindLabel = KIND_LABEL[kind];
   const trimmedTitle = title?.trim();
+  // The actions stay up while they carry state the reader has to see: the
+  // source view (Preview is how to get back) and the copy confirmation.
+  const actionsPinned = view === "source" || copied;
 
   const handleCopy = async () => {
     if (await copyText(source)) {
@@ -124,8 +128,9 @@ export function DynamicBlock({
       value={view}
       onValueChange={(value) => setView(value as DynamicBlockView)}
       data-dynamic-block={kind}
+      // No outer margin: the lazy shell around the block owns that spacing.
       className={cn(
-        "my-3 gap-0 overflow-hidden rounded-lg border bg-surface shadow-[var(--surface-shadow)]",
+        "group/dynamic-block gap-0 overflow-hidden rounded-lg border bg-surface shadow-[var(--surface-shadow)]",
         error && view === "preview" && "border-destructive/35",
         className,
       )}
@@ -147,42 +152,56 @@ export function DynamicBlock({
           </span>
         )}
         <span className="flex-1" />
-        <TabsList
-          aria-label={t(($) => $.dynamic_block.view)}
-          className="mr-1 shrink-0 gap-0.5 rounded-md p-0.5 group-data-horizontal/tabs:h-[26px]"
+        {/* The title identifies the block and always shows; the actions fade
+            in while the block is hovered or holds focus (MUL-7733). Opacity,
+            not display, so they keep their place in the bar and in the tab
+            order. Touch has no hover to reveal them, so there they always
+            show. */}
+        <div
+          data-dynamic-block-actions=""
+          className={cn(
+            "flex shrink-0 items-center gap-2 transition-opacity duration-150 ease-out",
+            !actionsPinned &&
+              "group-focus-within/dynamic-block:opacity-100 group-hover/dynamic-block:opacity-100 [@media(hover:hover)]:opacity-0",
+          )}
         >
-          <TabsTrigger value="preview" className="rounded-sm px-2 text-caption">
-            {t(($) => $.dynamic_block.preview)}
-          </TabsTrigger>
-          <TabsTrigger value="source" className="rounded-sm px-2 text-caption">
-            {t(($) => $.dynamic_block.source)}
-          </TabsTrigger>
-        </TabsList>
-        {onFullscreen && (
+          <TabsList
+            aria-label={t(($) => $.dynamic_block.view)}
+            className="mr-1 shrink-0 gap-0.5 rounded-md p-0.5 group-data-horizontal/tabs:h-[26px]"
+          >
+            <TabsTrigger value="preview" className="rounded-sm px-2 text-caption">
+              {t(($) => $.dynamic_block.preview)}
+            </TabsTrigger>
+            <TabsTrigger value="source" className="rounded-sm px-2 text-caption">
+              {t(($) => $.dynamic_block.source)}
+            </TabsTrigger>
+          </TabsList>
+          {onFullscreen && (
+            <Button
+              ref={fullscreenButtonRef}
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground"
+              onClick={onFullscreen}
+              title={t(($) => $.code_block.fullscreen)}
+              aria-label={t(($) => $.code_block.fullscreen)}
+            >
+              <Maximize2 />
+            </Button>
+          )}
           <Button
-            ref={fullscreenButtonRef}
             type="button"
             variant="ghost"
             size="icon-xs"
             className="text-muted-foreground"
-            onClick={onFullscreen}
-            title={t(($) => $.code_block.fullscreen)}
-            aria-label={t(($) => $.code_block.fullscreen)}
+            onClick={handleCopy}
+            title={t(($) => $.dynamic_block.copy_source)}
+            aria-label={t(($) => $.dynamic_block.copy_source)}
           >
-            <Maximize2 />
+            {copied ? <Check /> : <Copy />}
           </Button>
-        )}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          className="text-muted-foreground"
-          onClick={handleCopy}
-          title={t(($) => $.dynamic_block.copy_source)}
-          aria-label={t(($) => $.dynamic_block.copy_source)}
-        >
-          {copied ? <Check /> : <Copy />}
-        </Button>
+        </div>
       </div>
       <TabsContent value="preview" keepMounted>
         {error && (
