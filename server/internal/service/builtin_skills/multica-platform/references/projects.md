@@ -55,6 +55,7 @@ multica project resource list <project-id> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --ref <branch-or-sha> --output json
 multica project resource add <project-id> --type local_directory --local-path <abs-path> --daemon-id <daemon-id> --output json
+multica project resource add <project-id> --type local_directory --local-path <abs-path> --daemon-id <daemon-id> --agent-id <agent-id> --output json
 multica project resource add <project-id> --type local_directory --local-path <abs-path> --daemon-id <daemon-id> --execution-mode worktree --output json
 multica project resource update <project-id> <resource-id> --execution-mode in_place --output json
 multica project resource update <project-id> <resource-id> --url <new-github-url> --output json

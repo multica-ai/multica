@@ -1061,11 +1061,9 @@ func TestProjectResourceLabelConvergence(t *testing.T) {
 }
 
 // TestProjectResourceLocalDirectoryDaemonScopedConflict pins the project-level
-// conflict check for local_directory: one row per daemon per project. The
-// daemon-side resolver picks the first match by daemon_id, so silently
-// allowing two rows on the same daemon — even at distinct paths — would let
-// the agent write into whichever sorts first. The DB UNIQUE constraint only
-// catches identical ref JSON; this check covers the broader invariant.
+// conflict check for local_directory: one default row plus one row per exact
+// agent binding on each daemon. The DB UNIQUE constraint only catches
+// identical ref JSON; this check covers the selector invariant.
 func TestProjectResourceLocalDirectoryDaemonScopedConflict(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
@@ -1144,6 +1142,39 @@ func TestProjectResourceLocalDirectoryDaemonScopedConflict(t *testing.T) {
 	testHandler.CreateProjectResource(w, req)
 	if w.Code != http.StatusConflict {
 		t.Errorf("same daemon different path create: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// An exact agent binding may coexist with the daemon default and selects a
+	// different persistent root for that agent.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/projects/"+project.ID+"/resources", map[string]any{
+		"resource_type": "local_directory",
+		"resource_ref": map[string]any{
+			"local_path": "/Users/foo/work/agent-a",
+			"daemon_id":  daemonID,
+			"agent_id":   "agent-a",
+		},
+	})
+	req = withURLParam(req, "id", project.ID)
+	testHandler.CreateProjectResource(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("agent-specific attach: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// A second path for the same exact selector is still ambiguous and rejected.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/projects/"+project.ID+"/resources", map[string]any{
+		"resource_type": "local_directory",
+		"resource_ref": map[string]any{
+			"local_path": "/Users/foo/work/agent-a-other",
+			"daemon_id":  daemonID,
+			"agent_id":   "agent-a",
+		},
+	})
+	req = withURLParam(req, "id", project.ID)
+	testHandler.CreateProjectResource(w, req)
+	if w.Code != http.StatusConflict {
+		t.Errorf("duplicate agent binding: expected 409, got %d: %s", w.Code, w.Body.String())
 	}
 
 	// Adding the same path on a DIFFERENT daemon is allowed — each daemon
@@ -1325,6 +1356,29 @@ func TestCreateProjectBundledLocalDirectoryDaemonConflict(t *testing.T) {
 	if len(resp.Resources) != 2 {
 		t.Errorf("per-daemon bundle: expected 2 resources, got %d", len(resp.Resources))
 	}
+
+	// One daemon may bundle distinct exact agent bindings.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Bundled per-agent rows",
+		"resources": []map[string]any{
+			{"resource_type": "local_directory", "resource_ref": map[string]any{"local_path": "/Users/foo/work/a1", "daemon_id": "d-bundle-agent", "agent_id": "agent-a"}},
+			{"resource_type": "local_directory", "resource_ref": map[string]any{"local_path": "/Users/foo/work/a2", "daemon_id": "d-bundle-agent", "agent_id": "agent-b"}},
+		},
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("per-agent bundle: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var perAgent ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&perAgent); err != nil {
+		t.Fatalf("decode per-agent project: %v", err)
+	}
+	defer func() {
+		r := newRequest("DELETE", "/api/projects/"+perAgent.ID, nil)
+		r = withURLParam(r, "id", perAgent.ID)
+		testHandler.DeleteProject(httptest.NewRecorder(), r)
+	}()
 }
 
 // execution_mode selects between the historical exclusive in-place run and

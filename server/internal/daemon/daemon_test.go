@@ -2063,6 +2063,48 @@ func TestGatePiResumeToSessionFile(t *testing.T) {
 	}
 }
 
+func TestGateLocalDirectoryResumeBinding(t *testing.T) {
+	t.Parallel()
+
+	previous := t.TempDir()
+	current := t.TempDir()
+	task := Task{PriorSessionID: "session-file", PriorWorkDir: previous}
+	taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
+	assignment := &localDirectoryAssignment{
+		Ref:     localDirectoryRef{ExecutionMode: localDirectoryModeInPlace},
+		AbsPath: current,
+	}
+
+	if gateLocalDirectoryResumeBinding(&task, &taskCtx, assignment, slog.Default()) {
+		t.Fatal("changed persistent binding reported resumable")
+	}
+	if task.PriorSessionID != "" || taskCtx.PriorSessionResumed {
+		t.Fatalf("stale session survived: task=%+v context=%+v", task, taskCtx)
+	}
+	if !task.PriorSessionResumeUnavailable || !taskCtx.PriorSessionResumeUnavailable {
+		t.Fatal("binding change was not surfaced as unavailable continuity")
+	}
+
+	for _, tc := range []struct {
+		name       string
+		assignment *localDirectoryAssignment
+	}{
+		{"same in-place directory", &localDirectoryAssignment{AbsPath: previous}},
+		{"worktree mode changes directories by design", &localDirectoryAssignment{Ref: localDirectoryRef{ExecutionMode: localDirectoryModeWorktree}, AbsPath: current}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			keptTask := Task{PriorSessionID: "session-file", PriorWorkDir: previous}
+			keptCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
+			if !gateLocalDirectoryResumeBinding(&keptTask, &keptCtx, tc.assignment, slog.Default()) {
+				t.Fatal("compatible binding rejected")
+			}
+			if keptTask.PriorSessionID == "" || !keptCtx.PriorSessionResumed {
+				t.Fatal("compatible session was cleared")
+			}
+		})
+	}
+}
+
 func TestGatePiResumeDropsUnusableSessionFile(t *testing.T) {
 	t.Parallel()
 
