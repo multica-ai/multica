@@ -55,8 +55,16 @@ const (
 	prAutoCompleteAllMerged         = "all_merged"         // every linked PR merged
 )
 
-// prMergeStatusNone is the setting value that leaves an issue's status alone.
-const prMergeStatusNone = "none"
+// Workspace settings keys. pr_auto_complete_enabled is the switch desktop
+// clients before MUL-7726 still show and write; prMergeStatusFromSettings
+// reads it when pr_merge_status is absent, and reconcilePRMergeSettings keeps
+// the two in step on every write.
+const (
+	prMergeStatusKey        = "pr_merge_status"
+	prAutoCompleteLegacyKey = "pr_auto_complete_enabled"
+	// prMergeStatusNone is the value that leaves an issue's status alone.
+	prMergeStatusNone = "none"
+)
 
 type prAutoCompleteDecision struct {
 	State string
@@ -72,26 +80,71 @@ type prAutoCompleteDecision struct {
 }
 
 // prMergeStatusSetting reads the workspace's choice: "none", or the key of the
-// status a merge moves an issue to. Absent means Done. An unreadable settings
-// blob means none: the setting authorizes a status write, so it must not
-// default to the permissive side.
+// status a merge moves an issue to. An unreadable settings blob means none:
+// the setting authorizes a status write, so it must not default to the
+// permissive side.
 func prMergeStatusSetting(ws db.Workspace) string {
 	if len(ws.Settings) == 0 {
 		return issuestatus.Done
 	}
-	var s struct {
-		Status *string `json:"pr_merge_status"`
-	}
+	var s map[string]any
 	if err := json.Unmarshal(ws.Settings, &s); err != nil {
 		return prMergeStatusNone
 	}
-	if s.Status == nil {
-		return issuestatus.Done
+	return prMergeStatusFromSettings(s)
+}
+
+// prMergeStatusFromSettings is prMergeStatusSetting on decoded settings.
+// Without pr_merge_status it follows the retired switch (a pod or client from
+// before MUL-7726 may have written only that): off means none, else Done.
+func prMergeStatusFromSettings(s map[string]any) string {
+	raw, ok := s[prMergeStatusKey]
+	if !ok || raw == nil {
+		if prAutoCompleteLegacyOn(s) {
+			return issuestatus.Done
+		}
+		return prMergeStatusNone
 	}
-	if key := strings.ToLower(strings.TrimSpace(*s.Status)); key != "" {
+	value, ok := raw.(string)
+	if !ok {
+		return prMergeStatusNone
+	}
+	if key := strings.ToLower(strings.TrimSpace(value)); key != "" {
 		return key
 	}
 	return prMergeStatusNone
+}
+
+// prAutoCompleteLegacyOn reads the retired switch the way releases before
+// MUL-7726 did: absent means on, anything but a boolean means off.
+func prAutoCompleteLegacyOn(s map[string]any) bool {
+	raw, ok := s[prAutoCompleteLegacyKey]
+	if !ok || raw == nil {
+		return true
+	}
+	on, ok := raw.(bool)
+	return ok && on
+}
+
+// reconcilePRMergeSettings adjusts a settings write so desktop clients from
+// before MUL-7726 keep working. Those clients show and flip only the retired
+// switch, and send back the rest of the settings they hold. A flip of that
+// switch becomes a choice here (off → none, on → Done). Every write then
+// mirrors the switch from the effective choice, so an old client shows it
+// correctly. stored may be nil when the current settings could not be read.
+func reconcilePRMergeSettings(stored, incoming map[string]any) {
+	if _, sent := incoming[prAutoCompleteLegacyKey]; sent && prAutoCompleteLegacyOn(incoming) != prAutoCompleteLegacyOn(stored) {
+		if prAutoCompleteLegacyOn(incoming) {
+			incoming[prMergeStatusKey] = issuestatus.Done
+		} else {
+			incoming[prMergeStatusKey] = prMergeStatusNone
+		}
+	}
+	if prMergeStatusFromSettings(incoming) == prMergeStatusNone {
+		incoming[prAutoCompleteLegacyKey] = false
+	} else {
+		delete(incoming, prAutoCompleteLegacyKey)
+	}
 }
 
 // resolvePRMergeTarget returns the status a merge moves issues to in this

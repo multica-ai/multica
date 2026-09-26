@@ -1530,12 +1530,93 @@ func TestPRMergeStatusSetting(t *testing.T) {
 		{`{"pr_merge_status": "none"}`, "none"},
 		{`{"pr_merge_status": " In_Review "}`, "in_review"},
 		{`{"pr_merge_status": ""}`, "none"},
-		{`{"pr_auto_complete_enabled": false}`, "done"},
+		// Written only by a client or pod from before MUL-7726.
+		{`{"pr_auto_complete_enabled": false}`, "none"},
+		{`{"pr_auto_complete_enabled": "off"}`, "none"},
+		{`{"pr_auto_complete_enabled": false, "pr_merge_status": "in_review"}`, "in_review"},
 		{`not json`, "none"},
 	} {
 		if got := prMergeStatusSetting(db.Workspace{Settings: []byte(tc.settings)}); got != tc.want {
 			t.Errorf("prMergeStatusSetting(%q) = %q, want %q", tc.settings, got, tc.want)
 		}
+	}
+}
+
+// TestReconcilePRMergeSettings: a desktop client from before MUL-7726 flips
+// only the retired switch and echoes the rest of its settings. The flip becomes
+// a choice, an echo changes nothing, and the switch always mirrors the choice.
+func TestReconcilePRMergeSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		stored, incoming string
+		wantStatus       any
+		wantLegacy       any // nil = key absent
+	}{
+		{"old client turns it off", `{}`, `{"pr_auto_complete_enabled": false}`, "none", false},
+		{"old client turns it back on", `{"pr_merge_status": "none", "pr_auto_complete_enabled": false}`, `{"pr_merge_status": "none", "pr_auto_complete_enabled": true}`, "done", nil},
+		{"old client echoes a custom target", `{"pr_merge_status": "awaiting_regression"}`, `{"pr_merge_status": "awaiting_regression", "github_pr_sidebar_enabled": false}`, "awaiting_regression", nil},
+		{"new client picks a status", `{"pr_merge_status": "none", "pr_auto_complete_enabled": false}`, `{"pr_merge_status": "in_review", "pr_auto_complete_enabled": false}`, "in_review", nil},
+		{"new client picks no change", `{}`, `{"pr_merge_status": "none"}`, "none", false},
+		{"unreadable stored settings, switch off", ``, `{"pr_auto_complete_enabled": false}`, "none", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stored, incoming map[string]any
+			if tc.stored != "" {
+				json.Unmarshal([]byte(tc.stored), &stored)
+			}
+			json.Unmarshal([]byte(tc.incoming), &incoming)
+			reconcilePRMergeSettings(stored, incoming)
+			if got := incoming["pr_merge_status"]; got != tc.wantStatus {
+				t.Errorf("pr_merge_status = %v, want %v", got, tc.wantStatus)
+			}
+			got, present := incoming["pr_auto_complete_enabled"]
+			if tc.wantLegacy == nil && present {
+				t.Errorf("pr_auto_complete_enabled = %v, want absent", got)
+			}
+			if tc.wantLegacy != nil && got != tc.wantLegacy {
+				t.Errorf("pr_auto_complete_enabled = %v, want %v", got, tc.wantLegacy)
+			}
+		})
+	}
+}
+
+// TestUpdateWorkspace_RetiredPRSwitch: turning the old switch off from a
+// desktop client that predates MUL-7726 must stop merges from moving issues,
+// not just save a key the server no longer reads (PR #8862 review).
+func TestUpdateWorkspace_RetiredPRSwitch(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	wsID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name": "Retired PR switch", "slug": "retired-pr-switch", "description": "", "issue_prefix": "RPS",
+	})
+	dbfx.Exec(t, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')`, wsID, testUserID)
+	save := func(settings map[string]any) string {
+		t.Helper()
+		req := withURLParam(newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{"settings": settings}), "id", wsID)
+		testutil.Call(t, testHandler.UpdateWorkspace, req).Want(http.StatusOK)
+		ws, err := testHandler.Queries.GetWorkspace(context.Background(), parseUUID(wsID))
+		if err != nil {
+			t.Fatalf("GetWorkspace: %v", err)
+		}
+		return prMergeStatusSetting(ws)
+	}
+	if got := save(map[string]any{"pr_auto_complete_enabled": false}); got != "none" {
+		t.Fatalf("old client turned the switch off: merge status = %q, want none", got)
+	}
+	if got := save(map[string]any{"pr_merge_status": "none", "pr_auto_complete_enabled": true}); got != "done" {
+		t.Fatalf("old client turned the switch back on: merge status = %q, want done", got)
+	}
+	if got := save(map[string]any{"pr_merge_status": "in_review"}); got != "in_review" {
+		t.Fatalf("new client choice: merge status = %q, want in_review", got)
+	}
+	if got := save(map[string]any{"pr_merge_status": "in_review", "github_pr_sidebar_enabled": false}); got != "in_review" {
+		t.Fatalf("old client echo of other settings: merge status = %q, want in_review", got)
+	}
+	// The review case: a target is chosen, and an old client turns its switch
+	// off while echoing that target back.
+	if got := save(map[string]any{"pr_merge_status": "in_review", "pr_auto_complete_enabled": false}); got != "none" {
+		t.Fatalf("old client turned the switch off over a chosen target: merge status = %q, want none", got)
 	}
 }
 

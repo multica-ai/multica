@@ -13,6 +13,8 @@
 --     closing keyword (or nothing merged yet)                  -> none
 --   * no linked PR, or every merged link carried a keyword     -> left absent
 --
+-- Pinned workspaces also get pr_auto_complete_enabled = false, the switch
+-- desktop clients from before this change still show, so they show it off.
 -- Only workspaces without an explicit pr_merge_status are touched, so a replay
 -- is harmless. The scan reads link rows once; the write touches only the
 -- pinned workspaces.
@@ -41,7 +43,7 @@ pinned AS (
 )
 UPDATE workspace AS w
 SET settings = (CASE WHEN jsonb_typeof(w.settings) = 'object' THEN w.settings ELSE '{}'::jsonb END)
-    || '{"pr_merge_status": "none"}'::jsonb
+    || '{"pr_merge_status": "none", "pr_auto_complete_enabled": false}'::jsonb
 WHERE NOT (jsonb_typeof(w.settings) = 'object' AND w.settings ? 'pr_merge_status')
   AND (
       (jsonb_typeof(w.settings) = 'object' AND w.settings->>'pr_auto_complete_enabled' = 'false')

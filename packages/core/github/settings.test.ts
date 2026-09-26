@@ -78,8 +78,12 @@ describe("derivePRMergeStatus", () => {
     expect(derivePRMergeStatus(ws({ pr_merge_status: 5 }))).toBe("none");
   });
 
-  it("ignores the retired switch and the GitHub master switch", () => {
-    expect(derivePRMergeStatus(ws({ pr_auto_complete_enabled: false }))).toBe("done");
+  it("follows the retired switch only when no status is chosen", () => {
+    expect(derivePRMergeStatus(ws({ pr_auto_complete_enabled: false }))).toBe("none");
+    expect(derivePRMergeStatus(ws({ pr_auto_complete_enabled: false, pr_merge_status: "in_review" }))).toBe("in_review");
+  });
+
+  it("ignores the GitHub master switch", () => {
     expect(derivePRMergeStatus(ws({ github_enabled: false }))).toBe("done");
   });
 });

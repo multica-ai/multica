@@ -72,8 +72,8 @@ func TestPRMergeStatusMigration(t *testing.T) {
 		}
 	}
 	for i, tc := range cases {
-		var got *string
-		if err := tx.QueryRow(ctx, `SELECT settings->>'pr_merge_status' FROM workspace WHERE id = $1`, workspaces[i]).Scan(&got); err != nil {
+		var got, legacy *string
+		if err := tx.QueryRow(ctx, `SELECT settings->>'pr_merge_status', settings->>'pr_auto_complete_enabled' FROM workspace WHERE id = $1`, workspaces[i]).Scan(&got, &legacy); err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}
 		value := ""
@@ -82,6 +82,11 @@ func TestPRMergeStatusMigration(t *testing.T) {
 		}
 		if value != tc.want {
 			t.Errorf("%s: pr_merge_status = %q, want %q", tc.name, value, tc.want)
+		}
+		// Desktop clients from before the change show the retired switch; a
+		// pinned workspace must show it off there.
+		if tc.want == "none" && (legacy == nil || *legacy != "false") {
+			t.Errorf("%s: pr_auto_complete_enabled = %v, want false", tc.name, legacy)
 		}
 	}
 }
