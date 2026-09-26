@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -100,6 +101,78 @@ func TestPluginHookToolsListIsWhatTheServerSent(t *testing.T) {
 	}
 	if !names["triage_a1b2__summarize"] || !names["release_c3d4__summarize"] {
 		t.Fatalf("both plugins' hooks must appear under distinct names, got %v", names)
+	}
+}
+
+func TestPluginHookDuplicateNamesKeepTheFirstDescriptorAndRoute(t *testing.T) {
+	tools := []PluginHookTool{
+		{InstallationID: "inst-first", HookKey: "first", Name: "shared_tool",
+			Description: "The first hook.", InputSchema: json.RawMessage(`{"type":"object","properties":{"first":{"type":"string"}}}`)},
+		{InstallationID: "inst-duplicate", HookKey: "duplicate", Name: "shared_tool",
+			Description: "The duplicate hook.", InputSchema: json.RawMessage(`{"type":"object","properties":{"duplicate":{"type":"integer"}}}`)},
+		{InstallationID: "inst-other", HookKey: "other", Name: "other_tool",
+			Description: "The independent hook.", InputSchema: json.RawMessage(`{"type":"object","properties":{"other":{"type":"boolean"}}}`)},
+	}
+	original, err := json.Marshal(tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls []string
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	_, set, err := startTaskPluginHookMCP(ctx, "task-1", tools,
+		func(_ context.Context, taskID, installationID, hookKey string, _ json.RawMessage) (json.RawMessage, error) {
+			calls = append(calls, taskID+"/"+installationID+"/"+hookKey)
+			return json.RawMessage(`{"ok":true}`), nil
+		}, nil)
+	if err != nil {
+		t.Fatalf("start hook MCP: %v", err)
+	}
+	t.Cleanup(set.Close)
+	server := set.server.Handler.(*pluginHookMCPServer)
+	unchanged, err := json.Marshal(tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(unchanged) != string(original) {
+		t.Fatalf("starting the server mutated the caller's tools: got %s, want %s", unchanged, original)
+	}
+
+	response := callMCP(t, server, server.path, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+	result, ok := response["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("no result in %v", response)
+	}
+	listed, ok := result["tools"].([]any)
+	if !ok || len(listed) != 2 {
+		t.Fatalf("tools = %v, want the first shared tool and the independent tool", result["tools"])
+	}
+	for i, want := range []PluginHookTool{tools[0], tools[2]} {
+		var schema map[string]any
+		if err := json.Unmarshal(want.InputSchema, &schema); err != nil {
+			t.Fatal(err)
+		}
+		wantDescriptor := map[string]any{
+			"name": want.Name, "description": want.Description, "inputSchema": schema,
+		}
+		if !reflect.DeepEqual(listed[i], wantDescriptor) {
+			t.Fatalf("descriptor %d = %v, want %v", i, listed[i], wantDescriptor)
+		}
+		request, err := json.Marshal(map[string]any{
+			"jsonrpc": "2.0", "id": i + 2, "method": "tools/call",
+			"params": map[string]any{"name": want.Name, "arguments": map[string]any{}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		response := callMCP(t, server, server.path, string(request))
+		result, ok := response["result"].(map[string]any)
+		if !ok || result["isError"] == true {
+			t.Fatalf("call %q failed: %v", want.Name, response)
+		}
+	}
+	if want := []string{"task-1/inst-first/first", "task-1/inst-other/other"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("invocations = %v, want %v", calls, want)
 	}
 }
 
