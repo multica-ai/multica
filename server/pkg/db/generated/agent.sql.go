@@ -4675,7 +4675,10 @@ SELECT
     COUNT(*)::int AS task_count,
     COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count,
     COUNT(*) FILTER (WHERE atq.status = 'completed')::int AS completed_count,
-    COUNT(*) FILTER (WHERE atq.status = 'cancelled')::int AS cancelled_count
+    COUNT(*) FILTER (WHERE atq.status = 'cancelled')::int AS cancelled_count,
+    COALESCE(SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)) * 1000)
+        FILTER (WHERE atq.completed_at > atq.started_at), 0)::float8 AS duration_ms,
+    COUNT(*) FILTER (WHERE atq.completed_at > atq.started_at)::int AS duration_count
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
@@ -4692,6 +4695,8 @@ type GetWorkspaceAgentActivity30dRow struct {
 	FailedCount    int32              `json:"failed_count"`
 	CompletedCount int32              `json:"completed_count"`
 	CancelledCount int32              `json:"cancelled_count"`
+	DurationMs     float64            `json:"duration_ms"`
+	DurationCount  int32              `json:"duration_count"`
 }
 
 // Returns per-agent daily activity buckets for the last 30 days. Single
@@ -4726,6 +4731,8 @@ func (q *Queries) GetWorkspaceAgentActivity30d(ctx context.Context, workspaceID 
 			&i.FailedCount,
 			&i.CompletedCount,
 			&i.CancelledCount,
+			&i.DurationMs,
+			&i.DurationCount,
 		); err != nil {
 			return nil, err
 		}
@@ -5430,11 +5437,29 @@ func (q *Queries) ListActiveTasksByIssueFamily(ctx context.Context, arg ListActi
 const listAgentTasks = `-- name: ListAgentTasks :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot FROM agent_task_queue
 WHERE agent_id = $1
-ORDER BY created_at DESC
+  -- Apply visibility before LIMIT so hidden fallbacks cannot end a page early.
+  -- Keep this predicate in sync with handler.visibleTaskHistory.
+  AND NOT (escalation_for_task_id IS NOT NULL AND started_at IS NULL
+           AND status IN ('deferred', 'cancelled'))
+  AND (created_at, id) < ($2::timestamptz, $3::uuid)
+ORDER BY created_at DESC, id DESC
+LIMIT $4
 `
 
-func (q *Queries) ListAgentTasks(ctx context.Context, agentID pgtype.UUID) ([]AgentTaskQueue, error) {
-	rows, err := q.db.Query(ctx, listAgentTasks, agentID)
+type ListAgentTasksParams struct {
+	AgentID         pgtype.UUID        `json:"agent_id"`
+	BeforeCreatedAt pgtype.Timestamptz `json:"before_created_at"`
+	BeforeID        pgtype.UUID        `json:"before_id"`
+	PageLimit       int32              `json:"page_limit"`
+}
+
+func (q *Queries) ListAgentTasks(ctx context.Context, arg ListAgentTasksParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, listAgentTasks,
+		arg.AgentID,
+		arg.BeforeCreatedAt,
+		arg.BeforeID,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

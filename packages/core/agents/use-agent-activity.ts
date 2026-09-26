@@ -33,6 +33,7 @@ export interface AgentActivity {
    * zero days.
    */
   daysSinceCreated: number;
+  avgDurationMs?: number;
 }
 
 /**
@@ -159,6 +160,8 @@ export function deriveAgentActivity(
   // slots so index 0 = oldest, index DAYS-1 = today.
   const today = startOfDay(now);
 
+  let durationMs = 0;
+  let durationCount = 0;
   for (const b of buckets) {
     const ts = new Date(b.bucket_at).getTime();
     if (Number.isNaN(ts)) continue;
@@ -170,6 +173,8 @@ export function deriveAgentActivity(
     target.failed += b.failed_count;
     target.completed += b.completed_count;
     target.cancelled += b.cancelled_count;
+    durationMs += b.duration_ms ?? 0;
+    durationCount += b.duration_count ?? 0;
   }
 
   const createdAt = new Date(agentCreatedAt).getTime();
@@ -182,6 +187,7 @@ export function deriveAgentActivity(
   return {
     buckets: series,
     daysSinceCreated,
+    avgDurationMs: durationCount > 0 ? Math.round(durationMs / durationCount) : 0,
   };
 }
 

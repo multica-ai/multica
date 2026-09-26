@@ -247,6 +247,7 @@ import {
   RuntimeProfileSchema,
   RuntimeProfileListSchema,
   AgentTaskListSchema,
+  AgentTaskPageSchema,
   AgentActivityBucketListSchema,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
@@ -2619,11 +2620,22 @@ export class ApiClient {
     return this.fetch(`/api/runtimes/${runtimeId}/local-skills/import/${requestId}`);
   }
 
-  async listAgentTasks(agentId: string): Promise<AgentTask[]> {
-    const raw = await this.fetch<unknown>(`/api/agents/${agentId}/tasks`);
-    return parseWithFallback<AgentTask[]>(raw, AgentTaskListSchema, [], {
-      endpoint: "GET /api/agents/:id/tasks",
+  async listAgentTasksPage(
+    agentId: string,
+    options: { limit?: number; before?: string; signal?: AbortSignal } = {},
+  ): Promise<{ tasks: AgentTask[]; nextCursor: string | null }> {
+    const search = new URLSearchParams({ limit: String(options.limit ?? 200) });
+    if (options.before) search.set("before", options.before);
+    const response = await this.fetchRaw(`/api/agents/${agentId}/tasks?${search}`, {
+      signal: options.signal,
     });
+    const tasks: unknown = await response.json();
+    return parseWithFallback(
+      { tasks, nextCursor: response.headers.get("X-Agent-Tasks-Next-Cursor") },
+      AgentTaskPageSchema,
+      { tasks: [], nextCursor: null },
+      { endpoint: "GET /api/agents/:id/tasks" },
+    );
   }
 
   // Workspace-scoped agent task snapshot: every active task

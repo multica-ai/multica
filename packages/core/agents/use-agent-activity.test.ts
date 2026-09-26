@@ -245,3 +245,19 @@ describe("buildActivityMap", () => {
     expect(summarizeActivityWindow(a, 30).totalRuns).toBe(0);
   });
 });
+
+
+describe("aggregate duration", () => {
+  it("weights daily duration totals by measured runs, independent of task pages", () => {
+    const result = deriveAgentActivity([
+      { ...bucket("a", 0, 200), duration_ms: 12000000, duration_count: 200 },
+      { ...bucket("a", 1, 1), duration_ms: 600000, duration_count: 1 },
+      { ...bucket("a", 40, 1), duration_ms: 99999999, duration_count: 1 },
+    ], "2026-01-01", NOW);
+    expect(result.avgDurationMs).toBe(Math.round(12600000 / 201));
+  });
+
+  it("does not estimate duration when the server omits aggregates", () => {
+    expect(deriveAgentActivity([bucket("a", 0, 5)], "2026-01-01", NOW).avgDurationMs).toBe(0);
+  });
+});
