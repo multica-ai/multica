@@ -6,19 +6,23 @@ import { renderWithI18n } from "../../test/i18n";
 import { WakeupCreate } from "./wakeup-create";
 
 const create = vi.fn();
+let assigneeAgent = "emacs";
 vi.mock("./wakeup-condition-names", () => ({
   useConditionNames: () => ({ status: (key: string) => key, label: () => undefined, property: () => undefined, actor: (_type: string, id: string) => id }),
 }));
 vi.mock("@multica/core/issues", () => ({
   useCreateIssueWakeup: () => ({ mutateAsync: create, isPending: false }),
   childIssuesOptions: () => ({ queryKey: ["children"] }),
+  issueDetailOptions: () => ({ queryKey: ["issue-detail"] }),
 }));
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
   useQuery: ({ queryKey }: { queryKey: unknown[] }) => ({
     data: JSON.stringify(queryKey).includes("members")
       ? [{ user_id: "user-j", name: "Jiayuan" }]
-      : [
+      : JSON.stringify(queryKey).includes("issue-detail")
+        ? { id: "issue", assignee_type: "agent", assignee_id: assigneeAgent }
+        : [
           { id: "emacs", name: "Emacs", archived_at: null, runtime_id: "rt" },
           { id: "grok", name: "Grok", archived_at: null, runtime_id: "rt" },
         ],
@@ -40,6 +44,7 @@ async function chooseCondition(label: string) {
 }
 
 beforeEach(() => {
+  assigneeAgent = "emacs";
   create.mockReset().mockResolvedValue(undefined);
   // The send shortcut is the primary modifier + Enter; pin the platform so
   // Cmd means primary on every CI runner.
@@ -48,6 +53,19 @@ beforeEach(() => {
 afterEach(() => configureShortcutPlatform(null));
 
 describe("WakeupCreateForm", () => {
+  it("says a reply wait for the assignee joins the run a comment already starts", async () => {
+    await renderForm();
+    await chooseCondition("有人回复");
+    expect(screen.getByText(/Emacs 是负责人，成员发评论时本来就会被触发/)).toBeVisible();
+  });
+
+  it("says nothing when the rule wakes someone other than the assignee", async () => {
+    assigneeAgent = "grok";
+    await renderForm();
+    await chooseCondition("有人回复");
+    expect(screen.queryByText(/是负责人，成员发评论时本来就会被触发/)).toBeNull();
+  });
+
   it("asks for a condition before creating anything", async () => {
     await renderForm();
     fireEvent.click(screen.getByRole("button", { name: /创建/ }));

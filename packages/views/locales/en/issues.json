@@ -521,6 +521,8 @@
     "pr_auto_complete_enabled": "turned PR auto-complete back on for this issue",
     "wakeup_created": "added a wakeup: {{condition}} · wake {{agent}}",
     "wakeup_triggered": "{{condition}} · woke {{agent}}",
+    "wakeup_triggered_merged": "{{condition}} · joined {{agent}}'s waiting run",
+    "wakeup_triggered_acknowledged": "{{condition}} · {{agent}} did this itself; not woken again",
     "wakeup_triggered_manual": "{{name}} woke {{agent}} now",
     "wakeup_child_done_stage_one": "Stage {{stage}}'s sub-issue finished",
     "wakeup_child_done_stage_other": "Stage {{stage}}'s {{count}} sub-issues all finished",
@@ -529,6 +531,7 @@
     "wakeup_child_done_woke": " · woke {{name}}",
     "wakeup_child_done_notified": " · notified {{name}}",
     "wakeup_child_done_merged": " · joined {{name}}'s waiting run",
+    "wakeup_child_done_acknowledged": " · {{name}} is already on it; not woken again",
     "wakeup_assignee": "the assignee",
     "wakeup_timed_out_wake": "{{condition}} did not happen in time · woke {{agent}} to handle it",
     "wakeup_timed_out_end": "Wakeup ended at its deadline: {{condition}}",
@@ -1239,7 +1242,8 @@
       "missing_value": "Choose a value.",
       "missing_issue": "Choose an issue.",
       "checked": "Checked",
-      "unchecked": "Unchecked"
+      "unchecked": "Unchecked",
+      "assignee_comment_hint": "{{name}} is the assignee and already runs when a member comments. This rule joins that run instead of starting another; add it only to give that run an extra instruction."
     },
     "system": {
       "badge": "System",

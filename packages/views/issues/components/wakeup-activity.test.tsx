@@ -54,6 +54,15 @@ describe("wakeup timeline entries", () => {
     expect(read(entry("wakeup_triggered", { rule: "child_done", stage: 2, total: 1, outcome: "none" }))).toBe(
       "第 2 阶段的 1 个子任务已全部结束",
     );
+    expect(read(entry("wakeup_triggered", { rule: "child_done", stage: 1, total: 2, target_type: "agent", target_id: "a", outcome: "acknowledged" }))).toBe(
+      "第 1 阶段的 2 个子任务已全部结束，Emacs 正在处理，未重复唤醒",
+    );
+    expect(read(entry("wakeup_triggered", { wakeup: reply, outcome: "merged" }))).toBe(
+      "当此任务有新评论时（由 Jiayuan 触发），并入了 Emacs 待开始的运行",
+    );
+    expect(read(entry("wakeup_triggered", { wakeup: reply, outcome: "acknowledged" }))).toBe(
+      "当此任务有新评论时（由 Jiayuan 触发），由 Emacs 自己触发，未重复唤醒",
+    );
     expect(read(entry("wakeup_timed_out", { wakeup: reply, woke: true }))).toContain("唤醒了 Emacs 处理超时");
     expect(read(entry("wakeup_paused", { wakeup: reply, reason: "loop" }))).toBe("已暂停：与其他唤醒规则互相触发");
     expect(read(entry("wakeup_checkin", { wakeup: reply, note: "进度 72%" }, { actor_type: "agent", actor_id: "g", coalesced_count: 3 }))).toBe(

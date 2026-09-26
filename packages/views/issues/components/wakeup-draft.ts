@@ -47,6 +47,16 @@ export type WakeupRecurrence = "hourly" | "daily" | "weekdays";
 export const WAKEUP_WAIT_DAYS = [1, 3, 7, 30] as const;
 export const WAKEUP_MAX_FIRES = [5, 10, 20, 50] as const;
 
+/**
+ * Whether the draft would wake the issue's agent assignee on members'
+ * comments, which already run it. The server folds such a firing into that run.
+ */
+export function wakesAssigneeOnComments(draft: Pick<WakeupDraft, "condition" | "replyActor" | "events" | "agentId">, assigneeAgentId: string | null) {
+  if (!assigneeAgentId || draft.agentId !== assigneeAgentId) return false;
+  if (draft.condition === "reply") return draft.replyActor?.type !== "agent";
+  return draft.condition === "custom" && draft.events.includes("comment.created");
+}
+
 export interface WakeupDraft {
   condition: WakeupCondition | null;
   atPreset: WakeupAtPreset;

@@ -18,7 +18,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { childIssuesOptions, useCreateIssueWakeup } from "@multica/core/issues";
+import { childIssuesOptions, issueDetailOptions, useCreateIssueWakeup } from "@multica/core/issues";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { labelListOptions } from "@multica/core/labels/queries";
 import { propertyListOptions } from "@multica/core/properties/queries";
@@ -65,6 +65,7 @@ import {
   buildWakeupInput,
   emptyWakeupDraft,
   isEventCondition,
+  wakesAssigneeOnComments,
   type WakeupAtPreset,
   type WakeupCondition,
   type WakeupDraft,
@@ -158,6 +159,7 @@ export function WakeupCreateForm({
   const sendShortcut = useShortcut("send");
   const { data: agents = [] } = useQuery(agentListOptions(workspaceId));
   const { data: properties = [] } = useQuery(propertyListOptions(workspaceId));
+  const { data: issue } = useQuery(issueDetailOptions(workspaceId, issueId));
   const update = (patch: Partial<WakeupDraft>) => {
     setDraft((prev) => ({ ...prev, ...patch }));
     setError("");
@@ -235,6 +237,11 @@ export function WakeupCreateForm({
           />
         </div>
       </div>
+      {wakesAssigneeOnComments(draft, issue?.assignee_type === "agent" ? (issue.assignee_id ?? null) : null) && (
+        <p className="mt-2.5 rounded-md bg-muted/60 px-2.5 py-2 text-caption leading-5 text-muted-foreground">
+          {t(($) => $.wakeups.create.assignee_comment_hint, { name: agentName ?? "" })}
+        </p>
+      )}
       {draft.condition === "at" && draft.atPreset === "custom" && (
         <Input
           type="datetime-local"

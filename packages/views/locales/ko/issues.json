@@ -512,12 +512,15 @@
     "pr_auto_complete_enabled": "이 태스크의 PR 자동 완료를 다시 켰습니다",
     "wakeup_created": "깨우기를 추가했습니다: {{condition}} · {{agent}} 깨우기",
     "wakeup_triggered": "{{condition}} · {{agent}}을(를) 깨웠습니다",
+    "wakeup_triggered_merged": "{{condition}} · {{agent}}의 대기 중인 실행에 합쳤습니다",
+    "wakeup_triggered_acknowledged": "{{condition}} · {{agent}} 자신의 작업이라 다시 깨우지 않았습니다",
     "wakeup_triggered_manual": "{{name}}이(가) {{agent}}을(를) 바로 깨웠습니다",
     "wakeup_child_done_stage_other": "{{stage}}단계 하위 태스크 {{count}}개가 모두 끝났습니다",
     "wakeup_child_done_all_other": "하위 태스크 {{count}}개가 모두 끝났습니다",
     "wakeup_child_done_woke": " · {{name}}을(를) 깨웠습니다",
     "wakeup_child_done_notified": " · {{name}}에게 알렸습니다",
     "wakeup_child_done_merged": " · {{name}}의 대기 중인 실행에 합쳤습니다",
+    "wakeup_child_done_acknowledged": " · {{name}}이(가) 이미 처리 중이라 다시 깨우지 않았습니다",
     "wakeup_assignee": "담당자",
     "wakeup_timed_out_wake": "기한 내에 일어나지 않음({{condition}}) · {{agent}}을(를) 깨워 처리하게 했습니다",
     "wakeup_timed_out_end": "기한이 되어 깨우기가 종료됨: {{condition}}",
@@ -1202,7 +1205,8 @@
       "missing_value": "값을 선택하세요.",
       "missing_issue": "태스크를 선택하세요.",
       "checked": "선택됨",
-      "unchecked": "선택 안 됨"
+      "unchecked": "선택 안 됨",
+      "assignee_comment_hint": "{{name}}은(는) 담당자라 멤버가 댓글을 달면 이미 실행됩니다. 이 규칙은 그 실행에 합쳐지고 새 실행을 만들지 않습니다. 추가 지시가 필요할 때만 사용하세요."
     },
     "system": {
       "badge": "시스템",

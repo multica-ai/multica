@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { buildWakeupInput, emptyWakeupDraft, type WakeupDraft } from "./wakeup-draft";
+import { buildWakeupInput, emptyWakeupDraft, wakesAssigneeOnComments, type WakeupDraft } from "./wakeup-draft";
 
 const now = new Date(2026, 8, 24, 15, 0, 0);
 const draft = (patch: Partial<WakeupDraft>): WakeupDraft => ({
@@ -115,5 +115,19 @@ describe("platform conditions", () => {
     expect(input({ condition: "reply", mode: "continuous", maxFires: 10 })).toMatchObject({ input: { max_fires: 10 } });
     const once = input({ condition: "reply" });
     expect("input" in once && once.input.max_fires).toBeUndefined();
+  });
+});
+
+describe("wakesAssigneeOnComments", () => {
+  it("flags rules that wake the agent assignee on members' comments", () => {
+    const reply = draft({ condition: "reply", agentId: "agent" });
+    expect(wakesAssigneeOnComments(reply, "agent")).toBe(true);
+    expect(wakesAssigneeOnComments({ ...reply, replyActor: { type: "member", id: "u" } }, "agent")).toBe(true);
+    // Agents' comments do not start the assignee's runs.
+    expect(wakesAssigneeOnComments({ ...reply, replyActor: { type: "agent", id: "a" } }, "agent")).toBe(false);
+    expect(wakesAssigneeOnComments(draft({ condition: "custom", agentId: "agent", events: ["comment.created"] }), "agent")).toBe(true);
+    expect(wakesAssigneeOnComments(draft({ condition: "custom", agentId: "agent", events: ["issue.status_changed"] }), "agent")).toBe(false);
+    expect(wakesAssigneeOnComments(reply, "someone-else")).toBe(false);
+    expect(wakesAssigneeOnComments(reply, null)).toBe(false);
   });
 });

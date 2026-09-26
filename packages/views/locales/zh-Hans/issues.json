@@ -512,12 +512,15 @@
     "pr_auto_complete_enabled": "恢复了此任务的 PR 自动完成",
     "wakeup_created": "添加了唤醒：{{condition}}唤醒 {{agent}}",
     "wakeup_triggered": "{{condition}}，唤醒了 {{agent}}",
+    "wakeup_triggered_merged": "{{condition}}，并入了 {{agent}} 待开始的运行",
+    "wakeup_triggered_acknowledged": "{{condition}}，由 {{agent}} 自己触发，未重复唤醒",
     "wakeup_triggered_manual": "{{name}} 立即唤醒了 {{agent}}",
     "wakeup_child_done_stage_other": "第 {{stage}} 阶段的 {{count}} 个子任务已全部结束",
     "wakeup_child_done_all_other": "{{count}} 个子任务已全部结束",
     "wakeup_child_done_woke": "，唤醒了 {{name}}",
     "wakeup_child_done_notified": "，已通知 {{name}}",
     "wakeup_child_done_merged": "，并入了 {{name}} 待开始的运行",
+    "wakeup_child_done_acknowledged": "，{{name}} 正在处理，未重复唤醒",
     "wakeup_assignee": "负责人",
     "wakeup_timed_out_wake": "等待超时（{{condition}}），唤醒了 {{agent}} 处理超时",
     "wakeup_timed_out_end": "唤醒已到期结束：{{condition}}",
@@ -1202,7 +1205,8 @@
       "missing_value": "请选择一个值。",
       "missing_issue": "请选择一个任务。",
       "checked": "已勾选",
-      "unchecked": "未勾选"
+      "unchecked": "未勾选",
+      "assignee_comment_hint": "{{name}} 是负责人，成员发评论时本来就会被触发。这条规则会并入那次运行，不会多跑一次；只有想追加指令时才需要它。"
     },
     "system": {
       "badge": "系统",

@@ -44,8 +44,11 @@ interface WakeupDetails {
   total?: number;
   target_type?: string;
   target_id?: string;
-  /** child_done: woke (a run), notified (a member), merged (joined a waiting run), none. */
-  outcome?: "woke" | "notified" | "merged" | "none";
+  /**
+   * woke (a run), notified (a member), merged (joined a run already waiting
+   * to start), acknowledged (the agent's own action; no run), none.
+   */
+  outcome?: "woke" | "notified" | "merged" | "acknowledged" | "none";
   events?: string[];
   actor_type?: string;
   actor_id?: string;
@@ -117,6 +120,8 @@ export function formatWakeupActivity(
             return closed + t(($) => $.activity.wakeup_child_done_notified, { name });
           case "merged":
             return closed + t(($) => $.activity.wakeup_child_done_merged, { name });
+          case "acknowledged":
+            return closed + t(($) => $.activity.wakeup_child_done_acknowledged, { name });
           default:
             return closed;
         }
@@ -124,6 +129,8 @@ export function formatWakeupActivity(
       if (details.events?.length === 1 && details.events[0] === "wakeup.manual" && details.actor_id) {
         return t(($) => $.activity.wakeup_triggered_manual, { name: getActorName("member", details.actor_id), agent });
       }
+      if (details.outcome === "merged") return t(($) => $.activity.wakeup_triggered_merged, { condition, agent });
+      if (details.outcome === "acknowledged") return t(($) => $.activity.wakeup_triggered_acknowledged, { condition, agent });
       return t(($) => $.activity.wakeup_triggered, { condition, agent });
     }
     case "wakeup_timed_out":

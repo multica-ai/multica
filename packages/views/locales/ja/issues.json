@@ -512,12 +512,15 @@
     "pr_auto_complete_enabled": "このタスクの PR による自動完了を再開しました",
     "wakeup_created": "起動を追加しました：{{condition}} · {{agent}} を起こす",
     "wakeup_triggered": "{{condition}} · {{agent}} を起こしました",
+    "wakeup_triggered_merged": "{{condition}}（{{agent}} の開始待ちの実行に合流しました）",
+    "wakeup_triggered_acknowledged": "{{condition}}（{{agent}} 自身の操作のため、再度は起こしていません）",
     "wakeup_triggered_manual": "{{name}} が {{agent}} を今すぐ起こしました",
     "wakeup_child_done_stage_other": "ステージ {{stage}} の {{count}} 件のサブタスクがすべて終わりました",
     "wakeup_child_done_all_other": "{{count}} 件のサブタスクがすべて終わりました",
     "wakeup_child_done_woke": "（{{name}} を起こしました）",
     "wakeup_child_done_notified": "（{{name}} に通知しました）",
     "wakeup_child_done_merged": "（{{name}} の開始待ちの実行に合流しました）",
+    "wakeup_child_done_acknowledged": "（{{name}} が対応中のため、再度は起こしていません）",
     "wakeup_assignee": "担当者",
     "wakeup_timed_out_wake": "期限までに起きませんでした（{{condition}}）· {{agent}} を起こして対応させました",
     "wakeup_timed_out_end": "期限で起動が終了しました：{{condition}}",
@@ -1202,7 +1205,8 @@
       "missing_value": "値を選択してください。",
       "missing_issue": "タスクを選択してください。",
       "checked": "オン",
-      "unchecked": "オフ"
+      "unchecked": "オフ",
+      "assignee_comment_hint": "{{name}} は担当者のため、メンバーのコメントですでに起きます。このルールはその実行に合流し、別の実行は始めません。追加の指示を渡したいときだけ使ってください。"
     },
     "system": {
       "badge": "システム",

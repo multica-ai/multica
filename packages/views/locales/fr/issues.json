@@ -521,6 +521,8 @@
     "pr_auto_complete_enabled": "a réactivé la fin automatique par PR pour cette tâche",
     "wakeup_created": "a ajouté un réveil : {{condition}} · réveiller {{agent}}",
     "wakeup_triggered": "{{condition}} · {{agent}} réveillé",
+    "wakeup_triggered_merged": "{{condition}} · ajouté à l’exécution en attente de {{agent}}",
+    "wakeup_triggered_acknowledged": "{{condition}} · déclenché par {{agent}} lui-même ; pas de nouveau réveil",
     "wakeup_triggered_manual": "{{name}} a réveillé {{agent}} maintenant",
     "wakeup_child_done_stage_one": "La sous-tâche de l’étape {{stage}} est terminée",
     "wakeup_child_done_stage_other": "Les {{count}} sous-tâches de l’étape {{stage}} sont terminées",
@@ -529,6 +531,7 @@
     "wakeup_child_done_woke": " · {{name}} réveillé",
     "wakeup_child_done_notified": " · {{name}} notifié",
     "wakeup_child_done_merged": " · ajouté à l’exécution en attente de {{name}}",
+    "wakeup_child_done_acknowledged": " · {{name}} s’en occupe déjà ; pas de nouveau réveil",
     "wakeup_assignee": "le responsable",
     "wakeup_timed_out_wake": "{{condition}} n’est pas arrivé à temps · {{agent}} réveillé pour gérer",
     "wakeup_timed_out_end": "Réveil terminé à échéance : {{condition}}",
@@ -1239,7 +1242,8 @@
       "missing_value": "Choisissez une valeur.",
       "missing_issue": "Choisissez une tâche.",
       "checked": "Cochée",
-      "unchecked": "Décochée"
+      "unchecked": "Décochée",
+      "assignee_comment_hint": "{{name}} est le responsable et s’exécute déjà quand un membre commente. Cette règle rejoint cette exécution au lieu d’en lancer une autre ; ajoutez-la seulement pour lui donner une instruction de plus."
     },
     "system": {
       "badge": "Système",
