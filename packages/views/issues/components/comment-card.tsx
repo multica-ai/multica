@@ -35,6 +35,7 @@ import { useCommentUploads } from "./use-comment-uploads";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { api, dispatchReasonCode, errorCode } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
+import { AgentQuestionCard, agentQuestionOf } from "./agent-question-card";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import { useRecipientActions } from "../hooks/use-recipient-actions";
@@ -1403,11 +1404,25 @@ function CommentCardImpl({
               </div>
             ) : !noticeRun && (
               <>
-                <div tabIndex={currentUserId ? 0 : undefined} role="group"
+                {agentQuestionOf(entry) ? (
+                  // An agent question (AskUserQuestion, GitHub #8048) renders
+                  // as an answer card instead of its markdown body; the body
+                  // stays the fallback for readers without the card.
+                  <AgentQuestionCard
+                    entry={entry}
+                    replies={replies}
+                    agentName={entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
+                    onSubmit={(content) => onReply(entry.id, content)}
+                    onAccepted={onReplyAccepted}
+                    className="pl-8 max-md:pl-0"
+                  />
+                ) : (
+                  <div tabIndex={currentUserId ? 0 : undefined} role="group"
             aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
             data-comment-content={entry.id} className="pl-8 max-md:pl-0 text-body leading-relaxed text-foreground">
-                  <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
-                </div>
+                    <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+                  </div>
+                )}
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8 max-md:pl-0" />
                 <div className="pl-8 max-md:pl-0">
                   <SteerReceipts issueId={issueId} entry={entry} />

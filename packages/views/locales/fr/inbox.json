@@ -75,6 +75,7 @@
     "task_failed": "Exécution en échec",
     "agent_blocked": "Agent bloqué",
     "agent_completed": "Agent terminé",
+    "agent_question": "Question de l'agent",
     "reaction_added": "Réaction",
     "quick_create_done": "Créé avec un agent",
     "quick_create_failed": "Échec de la création avec un agent",

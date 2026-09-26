@@ -683,6 +683,22 @@
     "stop_tooltip": "Arrêter l'agent",
     "cancel_failed": "Échec de l'annulation de l'exécution"
   },
+  "agent_question": {
+    "title": "{{name}} a une question",
+    "title_fallback": "L'agent a une question",
+    "pick_single": "Choisir une option",
+    "pick_multiple": "Choisir toutes les options qui s'appliquent",
+    "other_option": "Autre",
+    "other_placeholder": "Écrire votre propre réponse",
+    "submit": "Envoyer la réponse",
+    "sending": "Envoi…",
+    "submit_failed": "Échec de l'envoi de la réponse",
+    "answered": "Répondu",
+    "resume_hint": "L'agent reprend dès que vous répondez.",
+    "waiting_chip": "{{name}} attend votre réponse",
+    "waiting_chip_fallback": "Un agent attend votre réponse",
+    "option_group_label": "Options pour : {{question}}"
+  },
   "execution_log": {
     "section": "Journal d'exécution",
     "show_past": "Afficher les exécutions passées ({{count}})",

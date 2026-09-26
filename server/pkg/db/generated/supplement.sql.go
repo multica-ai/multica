@@ -278,7 +278,7 @@ WITH locked_task AS MATERIALIZED (
     SELECT i.id, i.workspace_id, 'member', $4, $5, 'comment', t.trigger_comment_id
     FROM touched_issue i
     JOIN locked_task t ON t.issue_id = i.id
-    RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at, deleted_at, suppressed_agent_ids
+    RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at, deleted_at, suppressed_agent_ids, question_payload
 ), inserted_supplement AS (
     INSERT INTO task_supplement (
         task_id, workspace_id, issue_id, comment_id, author_id,
@@ -292,7 +292,7 @@ WITH locked_task AS MATERIALIZED (
     JOIN inserted_comment c ON c.issue_id = i.id
     RETURNING task_id, workspace_id, issue_id, comment_id, author_id, client_request_id, status, failure_reason, attempt_count, created_at, updated_at, delivered_at
 )
-SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type, c.created_at, c.updated_at, c.parent_id, c.workspace_id, c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.source_task_id, c.quick_action_id, c.via_plugin_id, c.revision, c.recovery_settled_at, c.deleted_at, c.suppressed_agent_ids, i.revision AS issue_revision,
+SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type, c.created_at, c.updated_at, c.parent_id, c.workspace_id, c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.source_task_id, c.quick_action_id, c.via_plugin_id, c.revision, c.recovery_settled_at, c.deleted_at, c.suppressed_agent_ids, c.question_payload, i.revision AS issue_revision,
        s.task_id AS supplement_task_id, s.status AS supplement_status,
        s.failure_reason AS supplement_failure_reason,
        s.delivered_at AS supplement_delivered_at
@@ -331,6 +331,7 @@ type CreateTaskSupplementRow struct {
 	RecoverySettledAt       pgtype.Timestamptz `json:"recovery_settled_at"`
 	DeletedAt               pgtype.Timestamptz `json:"deleted_at"`
 	SuppressedAgentIds      []pgtype.UUID      `json:"suppressed_agent_ids"`
+	QuestionPayload         []byte             `json:"question_payload"`
 	IssueRevision           int64              `json:"issue_revision"`
 	SupplementTaskID        pgtype.UUID        `json:"supplement_task_id"`
 	SupplementStatus        string             `json:"supplement_status"`
@@ -372,6 +373,7 @@ func (q *Queries) CreateTaskSupplement(ctx context.Context, arg CreateTaskSupple
 		&i.RecoverySettledAt,
 		&i.DeletedAt,
 		&i.SuppressedAgentIds,
+		&i.QuestionPayload,
 		&i.IssueRevision,
 		&i.SupplementTaskID,
 		&i.SupplementStatus,
