@@ -2,8 +2,11 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -103,6 +106,55 @@ type AggregateDiskUsageReport struct {
 	TotalRepoCacheSizeBytes int64           `json:"total_repo_cache_size_bytes"`
 	TotalRepoCacheCount     int             `json:"total_repo_cache_count"`
 }
+
+// WorkspaceReapSnapshot captures the task-root footprint before or after a
+// reaper run. TaskRootRecordCount is the number of stable-root records under
+// .task_roots; TaskRootCount and TotalSizeBytes are from ScanDiskUsage.
+type WorkspaceReapSnapshot struct {
+	TaskRootCount       int   `json:"task_root_count"`
+	TaskRootRecordCount int   `json:"task_root_record_count"`
+	TotalSizeBytes      int64 `json:"total_size_bytes"`
+}
+
+// WorkspaceReapResult records the decision for one scanned task root. Action
+// is one of would_remove, removed, skipped, or failed.
+type WorkspaceReapResult struct {
+	Path         string   `json:"path"`
+	ParentID     string   `json:"parent_id,omitempty"`
+	ParentStatus string   `json:"parent_status"`
+	Action       string   `json:"action"`
+	Reason       string   `json:"reason"`
+	Files        []string `json:"files,omitempty"`
+}
+
+// WorkspaceReapReport is the complete, per-root outcome of a workspace reap.
+// Reaping is dry-run unless Applied is true.
+type WorkspaceReapReport struct {
+	WorkspacesRoot string                `json:"workspaces_root"`
+	Applied        bool                  `json:"applied"`
+	Before         WorkspaceReapSnapshot `json:"before"`
+	After          WorkspaceReapSnapshot `json:"after"`
+	Results        []WorkspaceReapResult `json:"results"`
+}
+
+type workspaceReapOptions struct {
+	inspectTree func(context.Context, string) ([]string, error)
+	removeRoot  func(context.Context, string, string, func(context.Context, string) ([]string, error)) error
+}
+
+type workspaceReapRefusal struct {
+	reason string
+	files  []string
+}
+
+func (e *workspaceReapRefusal) Error() string { return e.reason }
+
+// Deterministic seams for identity-swap regressions around the reap lock.
+// They are nil outside tests.
+var (
+	reapLockTestHook          func()
+	reapBeforeRemovalTestHook func()
+)
 
 // ScanDiskUsageRoots scans every root in order and returns the combined report.
 // It reuses ScanDiskUsage per root — a missing root yields an empty per-root
@@ -448,6 +500,278 @@ func ResolveParentStatuses(ctx context.Context, report *DiskUsageReport, fetch P
 		}
 	}
 	return firstErr
+}
+
+// ReapTerminalCleanWorkspaces removes only issue task roots whose parent card
+// is done or cancelled and whose Git worktree has no changes. The caller must
+// resolve ParentStatus first; an empty or unrecognized status is a refusal.
+// apply is deliberately opt-in so callers can present every decision before
+// any local workspace is removed.
+func ReapTerminalCleanWorkspaces(ctx context.Context, workspacesRoot string, diskReport DiskUsageReport, artifactPatterns []string, apply bool) (WorkspaceReapReport, error) {
+	return reapTerminalCleanWorkspaces(ctx, workspacesRoot, diskReport, artifactPatterns, apply, workspaceReapOptions{
+		inspectTree: inspectGitWorktree,
+		removeRoot:  removeOwnedCleanTaskRoot,
+	})
+}
+
+func reapTerminalCleanWorkspaces(ctx context.Context, workspacesRoot string, diskReport DiskUsageReport, artifactPatterns []string, apply bool, options workspaceReapOptions) (WorkspaceReapReport, error) {
+	if options.inspectTree == nil || options.removeRoot == nil {
+		return WorkspaceReapReport{}, errors.New("workspace reaper requires a tree inspector and root remover")
+	}
+	before, err := workspaceReapSnapshot(workspacesRoot, diskReport)
+	if err != nil {
+		return WorkspaceReapReport{}, err
+	}
+	report := WorkspaceReapReport{
+		WorkspacesRoot: workspacesRoot,
+		Applied:        apply,
+		Before:         before,
+		Results:        make([]WorkspaceReapResult, 0, len(diskReport.Tasks)),
+	}
+
+	for _, task := range diskReport.Tasks {
+		result := WorkspaceReapResult{
+			Path:         task.Path,
+			ParentID:     task.ParentID,
+			ParentStatus: task.ParentStatus,
+		}
+		switch {
+		case task.Kind != string(execenv.GCKindIssue):
+			result.Action = "skipped"
+			result.Reason = "task is not backed by an issue card"
+		case task.ParentID == "":
+			result.Action = "skipped"
+			result.Reason = "task has no parent card identity"
+		case task.ParentStatus == "":
+			result.Action = "skipped"
+			result.Reason = "card status could not be resolved"
+		case task.ParentStatus != "done" && task.ParentStatus != "cancelled":
+			result.Action = "skipped"
+			result.Reason = fmt.Sprintf("card status %q is not done or cancelled", task.ParentStatus)
+		default:
+			changes, inspectErr := options.inspectTree(ctx, filepath.Join(task.Path, "workdir"))
+			if inspectErr != nil {
+				result.Action = "skipped"
+				result.Reason = fmt.Sprintf("could not verify clean Git tree: %v", inspectErr)
+			} else if len(changes) > 0 {
+				result.Action = "skipped"
+				result.Reason = "Git tree has uncommitted or untracked files"
+				result.Files = changes
+			} else if !apply {
+				result.Action = "would_remove"
+				result.Reason = "terminal card and clean Git tree"
+			} else if removeErr := options.removeRoot(ctx, workspacesRoot, task.Path, options.inspectTree); removeErr != nil {
+				var refusal *workspaceReapRefusal
+				if errors.As(removeErr, &refusal) {
+					result.Action = "skipped"
+					result.Reason = refusal.reason
+					result.Files = refusal.files
+				} else {
+					result.Action = "failed"
+					result.Reason = fmt.Sprintf("could not remove task root: %v", removeErr)
+				}
+			} else {
+				result.Action = "removed"
+				result.Reason = "terminal card and clean Git tree"
+			}
+		}
+		report.Results = append(report.Results, result)
+	}
+
+	if !apply {
+		report.After = before
+		return report, nil
+	}
+	afterDiskReport, err := ScanDiskUsage(workspacesRoot, artifactPatterns)
+	if err != nil {
+		return report, fmt.Errorf("scan workspaces root after reap: %w", err)
+	}
+	report.After, err = workspaceReapSnapshot(workspacesRoot, afterDiskReport)
+	if err != nil {
+		return report, err
+	}
+	return report, nil
+}
+
+func workspaceReapSnapshot(workspacesRoot string, report DiskUsageReport) (WorkspaceReapSnapshot, error) {
+	recordCount, err := taskRootRecordCount(workspacesRoot)
+	if err != nil {
+		return WorkspaceReapSnapshot{}, err
+	}
+	return WorkspaceReapSnapshot{
+		TaskRootCount:       report.TotalTaskCount,
+		TaskRootRecordCount: recordCount,
+		TotalSizeBytes:      report.TotalSizeBytes,
+	}, nil
+}
+
+func taskRootRecordCount(workspacesRoot string) (int, error) {
+	entries, err := os.ReadDir(filepath.Join(workspacesRoot, ".task_roots"))
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read task root records: %w", err)
+	}
+	count := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// inspectGitWorktree finds every Git worktree under workDir and returns each
+// changed path reported by porcelain status. A task without a Git worktree is
+// deliberately not treated as clean: there is no tree whose contents we can
+// prove safe to remove.
+func inspectGitWorktree(ctx context.Context, workDir string) ([]string, error) {
+	repositories, err := gitWorktreeRoots(workDir)
+	if err != nil {
+		return nil, err
+	}
+	if len(repositories) == 0 {
+		return nil, fmt.Errorf("no Git worktree found below %s", workDir)
+	}
+
+	changes := make([]string, 0)
+	for _, repository := range repositories {
+		out, err := exec.CommandContext(ctx, "git", "-C", repository, "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none").CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("git status in %s: %w: %s", repository, err, strings.TrimSpace(string(out)))
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if line == "" {
+				continue
+			}
+			path := strings.TrimSpace(line)
+			if len(line) > 3 {
+				path = strings.TrimSpace(line[3:])
+			}
+			changes = append(changes, repository+": "+path)
+		}
+	}
+	return changes, nil
+}
+
+func gitWorktreeRoots(workDir string) ([]string, error) {
+	repositories := make([]string, 0)
+	seen := make(map[string]struct{})
+	err := filepath.WalkDir(workDir, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Name() != ".git" {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		repository := filepath.Dir(path)
+		if _, ok := seen[repository]; !ok {
+			seen[repository] = struct{}{}
+			repositories = append(repositories, repository)
+		}
+		if entry.IsDir() {
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk workdir %s: %w", workDir, err)
+	}
+	sort.Strings(repositories)
+	return repositories, nil
+}
+
+func removeOwnedCleanTaskRoot(ctx context.Context, workspacesRoot, taskRoot string, inspectTree func(context.Context, string) ([]string, error)) error {
+	// Prove ownership before creating the lock file. A terminal card's metadata
+	// is not enough to justify modifying an arbitrary directory under a custom
+	// workspaces root, and ownership is checked again after the lock below.
+	if _, err := reapTaskRootOwner(workspacesRoot, taskRoot); err != nil {
+		return &workspaceReapRefusal{reason: fmt.Sprintf("task root ownership could not be proven: %v", err)}
+	}
+	validatedInfo, err := os.Stat(taskRoot)
+	if err != nil {
+		return &workspaceReapRefusal{reason: fmt.Sprintf("could not inspect task root before locking: %v", err)}
+	}
+	root, err := os.OpenRoot(workspacesRoot)
+	if err != nil {
+		return fmt.Errorf("open workspaces root: %w", err)
+	}
+	defer root.Close()
+
+	rel, err := filepath.Rel(workspacesRoot, taskRoot)
+	if err != nil || !filepath.IsLocal(rel) {
+		return &workspaceReapRefusal{reason: "task root is outside the workspaces root"}
+	}
+	if reapLockTestHook != nil {
+		reapLockTestHook()
+	}
+	claim, lockedInfo, err := execenv.LockEnvRootForReuse(root, rel, taskRoot)
+	if err != nil {
+		return &workspaceReapRefusal{reason: fmt.Sprintf("task root is active or could not be exclusively locked: %v", err)}
+	}
+	if claim == nil {
+		return &workspaceReapRefusal{reason: "task root disappeared before it could be removed"}
+	}
+	if lockedInfo == nil || !os.SameFile(validatedInfo, lockedInfo) {
+		claim.Release()
+		return &workspaceReapRefusal{reason: "task root changed identity before it could be locked"}
+	}
+	defer claim.Release()
+
+	owner, err := reapTaskRootOwner(workspacesRoot, taskRoot)
+	if err != nil {
+		return &workspaceReapRefusal{reason: fmt.Sprintf("task root ownership could not be proven: %v", err)}
+	}
+	changes, err := inspectTree(ctx, filepath.Join(taskRoot, "workdir"))
+	if err != nil {
+		return &workspaceReapRefusal{reason: fmt.Sprintf("could not recheck clean Git tree before removal: %v", err)}
+	}
+	if len(changes) > 0 {
+		return &workspaceReapRefusal{reason: "Git tree changed before removal", files: changes}
+	}
+	if reapBeforeRemovalTestHook != nil {
+		reapBeforeRemovalTestHook()
+	}
+	currentInfo, err := os.Stat(taskRoot)
+	if err != nil {
+		return &workspaceReapRefusal{reason: fmt.Sprintf("could not inspect task root before removal: %v", err)}
+	}
+	if !os.SameFile(lockedInfo, currentInfo) {
+		return &workspaceReapRefusal{reason: "task root changed identity before removal"}
+	}
+	if err := os.RemoveAll(taskRoot); err != nil {
+		return err
+	}
+	if err := execenv.RemoveRootDirRecord(workspacesRoot, taskRoot, *owner); err != nil {
+		return fmt.Errorf("remove task root record: %w", err)
+	}
+	return nil
+}
+
+func reapTaskRootOwner(workspacesRoot, taskRoot string) (*execenv.EnvRootOwner, error) {
+	owner, err := execenv.ReadEnvRootOwner(taskRoot)
+	if err != nil {
+		return nil, err
+	}
+	if owner == nil || owner.TaskID == "" {
+		return nil, errors.New("task owner is missing")
+	}
+	validated := *owner
+	if validated.WorkspaceID == "" {
+		meta, metaErr := execenv.ReadGCMeta(taskRoot)
+		if metaErr != nil || strings.TrimSpace(meta.WorkspaceID) == "" {
+			return nil, errors.New("task owner has no workspace identity")
+		}
+		validated.WorkspaceID = strings.TrimSpace(meta.WorkspaceID)
+	}
+	if err := execenv.ValidateEnvRootOwnerPath(workspacesRoot, taskRoot, validated); err != nil {
+		return nil, err
+	}
+	return &validated, nil
 }
 
 // taskSize walks taskDir and returns (totalBytes, artifactBytes). It never
