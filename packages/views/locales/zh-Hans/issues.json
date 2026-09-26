@@ -382,6 +382,7 @@
     "select_sub_issue_aria": "选择 {{identifier}}",
     "section_properties": "属性",
     "section_parent_issue": "父任务",
+    "section_pull_requests": "Pull Request",
     "section_metadata": "元数据",
     "section_details": "详情",
     "section_quick_actions": "快捷操作",
@@ -1124,8 +1125,6 @@
   },
   "deliverables": {
     "section_title": "产物",
-    "group_code": "代码",
-    "group_files": "文件",
     "view_all_other": "查看全部 {{count}} 个产物",
     "name_with_version": "{{name}}，第 {{version}} 版",
     "version_short": "v{{version}}",

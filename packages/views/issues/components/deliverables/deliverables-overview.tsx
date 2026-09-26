@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { LayoutGrid, MessageSquareText, X } from "lucide-react";
 import type { DeliverableFile } from "@multica/core/attachments/deliverables";
-import type { GitHubPullRequest, TimelineEntry } from "@multica/core/types";
+import type { TimelineEntry } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { useLocale, useT, useTimeAgo } from "../../../i18n";
@@ -15,7 +15,6 @@ import { SegmentedToggle } from "../../../common/segmented-toggle";
 import { usePreviewSequence } from "../../../editor";
 import { fileTypeLabel } from "../../../editor/utils/preview";
 import { useImmersiveMode } from "../../../platform";
-import { PullRequestStateIcon } from "../pull-request-list";
 import type { DeliverableOrigin } from "./deliverable-details";
 import {
   DELIVERABLE_CATEGORIES,
@@ -24,7 +23,7 @@ import {
 } from "./deliverable-kind";
 import { DeliverableThumbnail } from "./deliverable-thumbnail";
 import { VersionBadge } from "./version-badge";
-import { useOpenAttachment, type IssueDeliverables } from "./use-issue-deliverables";
+import { useOpenAttachment } from "./use-open-attachment";
 
 type Filter = "all" | DeliverableCategory;
 
@@ -44,15 +43,15 @@ interface FileGroup {
  * Every deliverable of the issue on one dark stage (MUL-7649), opened from
  * the sidebar's "view all" and from the viewer's grid button (`G`).
  *
- * Code first, then files grouped by the comment that posted them, in page
- * order, each group one click from that comment. Files show their latest
- * version only, so the count here always equals the sidebar's.
+ * Files grouped by the comment that posted them, in page order, each group
+ * one click from that comment. Files show their latest version only, so the
+ * count here always equals the sidebar's.
  */
 export function DeliverablesOverview({
   open,
   onClose,
   identifier,
-  deliverables,
+  files,
   commentById,
   onLocate,
   returnKey,
@@ -60,7 +59,7 @@ export function DeliverablesOverview({
   open: boolean;
   onClose: () => void;
   identifier: string;
-  deliverables: IssueDeliverables;
+  files: ReadonlyArray<DeliverableFile>;
   commentById: ReadonlyMap<string, TimelineEntry>;
   onLocate: (origin: DeliverableOrigin) => void;
   /** The file the viewer was showing when it opened this; `G` goes back to it. */
@@ -121,7 +120,7 @@ export function DeliverablesOverview({
             >
               <OverviewBody
                 identifier={identifier}
-                deliverables={deliverables}
+                files={files}
                 commentById={commentById}
                 onClose={onClose}
                 onOpenFile={(file) => {
@@ -145,14 +144,14 @@ export function DeliverablesOverview({
 
 function OverviewBody({
   identifier,
-  deliverables,
+  files,
   commentById,
   onClose,
   onOpenFile,
   onLocate,
 }: {
   identifier: string;
-  deliverables: IssueDeliverables;
+  files: ReadonlyArray<DeliverableFile>;
   commentById: ReadonlyMap<string, TimelineEntry>;
   onClose: () => void;
   onOpenFile: (file: DeliverableFile) => void;
@@ -160,7 +159,7 @@ function OverviewBody({
 }) {
   const { t } = useT("issues");
   const [filter, setFilter] = useState<Filter>("all");
-  const { pullRequests, files, count } = deliverables;
+  const count = files.length;
 
   const categoryByKey = useMemo(
     () =>
@@ -197,7 +196,6 @@ function OverviewBody({
   }, [files, filter, categoryByKey, commentById]);
 
   const totalBytes = files.reduce((sum, f) => sum + Math.max(0, f.latest.size_bytes), 0);
-  const showCode = filter === "all" && pullRequests.length > 0;
 
   const categoryLabels: Record<DeliverableCategory, string> = {
     image: t(($) => $.deliverables.filter_image),
@@ -262,22 +260,12 @@ function OverviewBody({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-10 pt-4 sm:px-16">
-        {!showCode && groups.length === 0 ? (
+        {groups.length === 0 ? (
           <p className="pt-24 text-center text-body text-muted-foreground">
             {t(($) => $.deliverables.overview_empty)}
           </p>
         ) : (
           <div className="space-y-10">
-            {showCode && (
-              <section aria-label={t(($) => $.deliverables.group_code)}>
-                <h2 className="mb-3 text-body font-medium">{t(($) => $.deliverables.group_code)}</h2>
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
-                  {pullRequests.map((pr) => (
-                    <PullRequestTile key={pr.id} pr={pr} />
-                  ))}
-                </div>
-              </section>
-            )}
             {groups.map((group) => (
               <CommentGroup
                 key={group.commentId}
@@ -389,34 +377,5 @@ function FileTile({ file, onOpen }: { file: DeliverableFile; onOpen: () => void 
         </span>
       )}
     </button>
-  );
-}
-
-function PullRequestTile({ pr }: { pr: GitHubPullRequest }) {
-  const { t } = useT("issues");
-  const hasStats = pr.additions != null || pr.deletions != null || pr.changed_files != null;
-  return (
-    <a
-      href={pr.html_url}
-      target="_blank"
-      rel="noreferrer noopener"
-      className="flex min-w-0 items-start gap-3 rounded-lg bg-secondary/60 p-3 ring-1 ring-border transition-shadow hover:ring-foreground/40"
-    >
-      <PullRequestStateIcon state={pr.state} className="mt-0.5 size-4 shrink-0" />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-body font-medium">{pr.title}</span>
-        <span className="block truncate text-caption text-muted-foreground">
-          {pr.repo_owner}/{pr.repo_name}#{pr.number}
-        </span>
-        {hasStats && (
-          <span className="mt-1 flex items-center gap-1.5 text-caption tabular-nums text-muted-foreground">
-            <span className="text-emerald-400">+{pr.additions ?? 0}</span>
-            <span className="text-rose-400">−{pr.deletions ?? 0}</span>
-            <span aria-hidden>·</span>
-            {t(($) => $.detail.pull_request_card_files_count, { count: pr.changed_files ?? 0 })}
-          </span>
-        )}
-      </span>
-    </a>
   );
 }

@@ -65,19 +65,6 @@ const STATE_ICON: Record<
   closed: { icon: GitPullRequestClosed, className: "text-rose-600 dark:text-rose-400" },
 };
 
-/** A PR's state glyph in its state color — shared with the deliverables overview. */
-export function PullRequestStateIcon({
-  state,
-  className,
-}: {
-  state: GitHubPullRequestState;
-  className?: string;
-}) {
-  const cfg = STATE_ICON[state] ?? { icon: GitPullRequest, className: "" };
-  const Icon = cfg.icon;
-  return <Icon className={cn(cfg.className, className)} />;
-}
-
 export function PullRequestList({
   issueId,
   identifier = "",
@@ -332,6 +319,8 @@ function AutoCompleteLine({
 
 function PullRequestRow({ pr, actions }: { pr: GitHubPullRequest; actions: RowActions | null }) {
   const { t } = useT("issues");
+  const cfg = STATE_ICON[pr.state] ?? { icon: GitPullRequest, className: "" };
+  const StateIcon = cfg.icon;
   const isDraft = pr.state === "draft";
   const stateLabel = getStateLabel(pr.state, t);
 
@@ -350,7 +339,7 @@ function PullRequestRow({ pr, actions }: { pr: GitHubPullRequest; actions: RowAc
         isDraft ? "opacity-80" : null,
       )}
     >
-      <PullRequestStateIcon state={pr.state} className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+      <StateIcon className={cn("h-3.5 w-3.5 mt-0.5 shrink-0", cfg.className)} />
       <div className="min-w-0 flex-1">
         <p className="text-caption font-medium leading-snug truncate group-hover:text-foreground">
           {pr.title}

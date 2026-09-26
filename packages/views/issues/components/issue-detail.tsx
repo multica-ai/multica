@@ -103,6 +103,8 @@ import { ExecutionLogSection } from "./execution-log-section";
 import { WakeupsSection } from "./wakeups-section";
 import { QuickActionsSection } from "./quick-actions-section";
 import { PluginPanelSection } from "../../plugins";
+import { PullRequestsSection } from "./pull-requests-section";
+import { useGitHubSettings } from "@multica/core/github";
 import { DeliverablesSection } from "./deliverables/deliverables-section";
 import { DeliverablesOverview } from "./deliverables/deliverables-overview";
 import {
@@ -110,7 +112,7 @@ import {
   useDeliverableDetails,
   type DeliverableOrigin,
 } from "./deliverables/deliverable-details";
-import { useIssueDeliverables } from "./deliverables/use-issue-deliverables";
+import { collectDeliverableFiles } from "@multica/core/attachments/deliverables";
 import { AttachmentVersionsProvider } from "./deliverables/attachment-versions";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -1311,7 +1313,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
+  const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
   const [metadataOpen, setMetadataOpen] = useState(false);
+  const githubSettings = useGitHubSettings();
 
   // Per-issue, per-session set of optional properties currently visible in
   // the sidebar Properties section. Seeded on issue switch with whichever
@@ -2278,9 +2282,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     return collectPreviewSequence(blocks);
   }, [issue?.description, descEditorAttachments, items, timelineView.threadReplies]);
 
-  // What this issue has delivered as a whole: the sidebar section, the
-  // overview grid and the viewer's info panel all read this (MUL-7649).
-  const deliverables = useIssueDeliverables(id, timeline);
+  // The files this issue has delivered as a whole: the sidebar section, the
+  // overview grid, the viewer's info panel and the comments' version badges
+  // all read this (MUL-7649).
+  const deliverableFiles = useMemo(() => collectDeliverableFiles(timeline), [timeline]);
   const commentById = useMemo(
     () =>
       new Map(
@@ -2355,7 +2360,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [locateRequest, items, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand, isFlatTimeline, jumpToThread, jumpToComment]);
 
   const describeDeliverable = useDeliverableDetails({
-    files: deliverables.files,
+    files: deliverableFiles,
     commentById,
     onLocate: locateOrigin,
   });
@@ -2865,16 +2870,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
       <IssueDuplicatesSection issueId={issue.id} />
 
-      {/* Deliverables — the issue's pull requests and the files its comments
-          delivered. The code group follows the workspace's PR sidebar switch
-          (backend data is kept either way, so re-enabling restores it
-          instantly). Hidden while nothing has been delivered. */}
-      <DeliverablesSection
-        issueId={id}
-        identifier={issue.identifier}
-        deliverables={deliverables}
-        onOpenOverview={openOverview}
-      />
+      {/* Pull requests — hidden when the workspace disables the PR sidebar
+          (or the GitHub master switch is off). Backend data is kept either
+          way so re-enabling restores the section instantly. */}
+      {githubSettings.prSidebar && (
+        <PullRequestsSection
+          issueId={id}
+          identifier={issue.identifier}
+          open={pullRequestsOpen}
+          onOpenChange={setPullRequestsOpen}
+        />
+      )}
+
+      {/* Deliverables — the files this issue's comments delivered. Hidden
+          while there are none. */}
+      <DeliverablesSection files={deliverableFiles} onOpenOverview={openOverview} />
 
       {/* Execution log — active runs + collapsed past runs, each carrying its
           own token spend, with the issue total on the section header.
@@ -3828,13 +3838,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       describeItem={describeDeliverable}
       onOpenOverview={openOverviewFromViewer}
     >
-      <AttachmentVersionsProvider files={deliverables.files}>{layout}</AttachmentVersionsProvider>
+      <AttachmentVersionsProvider files={deliverableFiles}>{layout}</AttachmentVersionsProvider>
       <DeliverablesOverview
         open={overview.open}
         onClose={closeOverview}
         returnKey={overview.returnKey}
         identifier={issue.identifier}
-        deliverables={deliverables}
+        files={deliverableFiles}
         commentById={commentById}
         onLocate={locateOrigin}
       />

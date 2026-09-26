@@ -386,6 +386,7 @@
     "select_sub_issue_aria": "Sélectionner {{identifier}}",
     "section_properties": "Propriétés",
     "section_parent_issue": "Tâche parente",
+    "section_pull_requests": "Pull requests",
     "section_metadata": "Métadonnées",
     "section_details": "Détails",
     "section_quick_actions": "Actions rapides",
@@ -1157,8 +1158,6 @@
   },
   "deliverables": {
     "section_title": "Livrables",
-    "group_code": "Code",
-    "group_files": "Fichiers",
     "view_all_one": "Voir le livrable",
     "view_all_other": "Voir les {{count}} livrables",
     "name_with_version": "{{name}}, version {{version}}",

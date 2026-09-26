@@ -41,14 +41,14 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
   useWorkspacePaths: () => ({ settings: () => "/acme/settings" }),
 }));
 
-import { PullRequestsGroup } from "./pull-requests-section";
+import { PullRequestsSection } from "./pull-requests-section";
 
 function renderSection() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
       <I18nProvider resources={TEST_RESOURCES} locale="en">
-        <PullRequestsGroup issueId="issue-1" identifier="MUL-1" />
+        <PullRequestsSection issueId="issue-1" identifier="MUL-1" open onOpenChange={() => {}} />
       </I18nProvider>
     </QueryClientProvider>,
   );
@@ -61,7 +61,7 @@ const decision: PRAutoComplete = {
   workspace_enabled: true,
 };
 
-describe("PullRequestsGroup (MUL-7429)", () => {
+describe("PullRequestsSection (MUL-7429)", () => {
   beforeEach(() => {
     mockAutoComplete = decision;
     apiMock.linkIssuePullRequest.mockReset();

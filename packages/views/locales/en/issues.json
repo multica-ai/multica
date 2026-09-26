@@ -386,6 +386,7 @@
     "select_sub_issue_aria": "Select {{identifier}}",
     "section_properties": "Properties",
     "section_parent_issue": "Parent issue",
+    "section_pull_requests": "Pull requests",
     "section_metadata": "Metadata",
     "section_details": "Details",
     "section_quick_actions": "Quick Actions",
@@ -1157,8 +1158,6 @@
   },
   "deliverables": {
     "section_title": "Deliverables",
-    "group_code": "Code",
-    "group_files": "Files",
     "view_all_one": "View all {{count}} deliverable",
     "view_all_other": "View all {{count}} deliverables",
     "name_with_version": "{{name}}, version {{version}}",

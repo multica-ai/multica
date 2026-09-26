@@ -382,6 +382,7 @@
     "select_sub_issue_aria": "{{identifier}} 선택",
     "section_properties": "속성",
     "section_parent_issue": "상위 태스크",
+    "section_pull_requests": "Pull requests",
     "section_metadata": "메타데이터",
     "section_details": "세부 정보",
     "section_quick_actions": "퀵 액션",
@@ -1124,8 +1125,6 @@
   },
   "deliverables": {
     "section_title": "산출물",
-    "group_code": "코드",
-    "group_files": "파일",
     "view_all_other": "산출물 {{count}}개 모두 보기",
     "name_with_version": "{{name}}, 버전 {{version}}",
     "version_short": "v{{version}}",

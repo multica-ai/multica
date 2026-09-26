@@ -1,25 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
-import type { Attachment, GitHubPullRequest, TimelineEntry } from "@multica/core/types";
+import {
+  collectDeliverableFiles,
+  type DeliverableFile,
+} from "@multica/core/attachments/deliverables";
+import type { Attachment, TimelineEntry } from "@multica/core/types";
 import { renderWithI18n } from "../../../test/i18n";
 
-const { openAtMock, tryOpenMock, downloadMock, githubSettings, pullRequests } = vi.hoisted(() => ({
+const { openAtMock, tryOpenMock, downloadMock } = vi.hoisted(() => ({
   openAtMock: vi.fn((_key: string) => true),
   tryOpenMock: vi.fn(() => false),
   downloadMock: vi.fn(),
-  githubSettings: { prSidebar: true },
-  pullRequests: { current: [] as GitHubPullRequest[] },
-}));
-
-vi.mock("@multica/core/github", () => ({
-  useGitHubSettings: () => githubSettings,
-  issuePullRequestsOptions: (issueId: string) => ({
-    queryKey: ["github", "pull-requests", issueId],
-    queryFn: async () => ({ pull_requests: pullRequests.current }),
-  }),
 }));
 
 vi.mock("@multica/core/workspace/hooks", () => ({
@@ -46,17 +39,8 @@ vi.mock("@multica/core/workspace/avatar-url", () => ({
 
 vi.mock("../../../platform", () => ({ useImmersiveMode: () => {} }));
 
-vi.mock("../pull-requests-section", () => ({
-  PullRequestsGroup: ({ identifier }: { identifier: string }) => (
-    <div data-testid="pull-requests-group">{identifier}</div>
-  ),
-}));
-
-vi.mock("../pull-request-list", () => ({ PullRequestStateIcon: () => null }));
-
 import { DeliverablesSection } from "./deliverables-section";
 import { DeliverablesOverview } from "./deliverables-overview";
-import { useIssueDeliverables, type IssueDeliverables } from "./use-issue-deliverables";
 
 function attachment(over: Partial<Attachment> & { id: string }): Attachment {
   return {
@@ -96,44 +80,8 @@ function comment(
   };
 }
 
-function pr(over: Partial<GitHubPullRequest> = {}): GitHubPullRequest {
-  return {
-    id: "pr-1",
-    provider: "github",
-    workspace_id: "ws-1",
-    repo_owner: "acme",
-    repo_name: "widget",
-    number: 8712,
-    title: "Notification matrix",
-    state: "open",
-    html_url: "https://example.test/pr/8712",
-    branch: "feat/x",
-    author_login: "octocat",
-    author_avatar_url: null,
-    merged_at: null,
-    closed_at: null,
-    pr_created_at: "2026-09-20T00:00:00Z",
-    pr_updated_at: "2026-09-20T00:00:00Z",
-    mergeable: null,
-    merge_state_status: null,
-    snapshot_available: true,
-    checks_rollup: null,
-    checks_total: 0,
-    checks_passed: 0,
-    checks_failed: 0,
-    checks_running: 0,
-    failed_check_names: [],
-    snapshot_stale: false,
-    snapshot_fetched_at: null,
-    additions: 164,
-    deletions: 58,
-    changed_files: 7,
-    ...over,
-  };
-}
-
 // A run posted a screenshot and a report, a later run re-uploaded the
-// report: three uploads, two deliverables.
+// report next to a CSV: four uploads, three deliverables.
 const SHOT = attachment({
   id: "shot",
   filename: "settings.png",
@@ -154,97 +102,51 @@ const TIMELINE: TimelineEntry[] = [
   comment("c-1", [SHOT, REPORT_V1]),
   comment("c-2", [REPORT_V2, CSV], { created_at: "2026-09-21T09:00:00Z" }),
 ];
+const FILES = collectDeliverableFiles(TIMELINE);
 
-function wrapper({ children }: { children: ReactNode }) {
+function withQuery(children: ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
 }
 
-async function deliverablesFor(timeline: TimelineEntry[]): Promise<IssueDeliverables> {
-  const { result } = renderHook(() => useIssueDeliverables("issue-1", timeline), { wrapper });
-  if (githubSettings.prSidebar && pullRequests.current.length > 0) {
-    await waitFor(() => expect(result.current.pullRequests).toHaveLength(pullRequests.current.length));
-  }
-  return result.current;
-}
-
-function renderSection(deliverables: IssueDeliverables, onOpenOverview = vi.fn()) {
+function renderSection(files: ReadonlyArray<DeliverableFile>, onOpenOverview = vi.fn()) {
   return renderWithI18n(
-    wrapper({
-      children: (
-        <DeliverablesSection
-          issueId="issue-1"
-          identifier="MUL-7588"
-          deliverables={deliverables}
-          onOpenOverview={onOpenOverview}
-        />
-      ),
-    }),
+    withQuery(<DeliverablesSection files={files} onOpenOverview={onOpenOverview} />),
   );
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  githubSettings.prSidebar = true;
-  pullRequests.current = [];
-});
-
-describe("useIssueDeliverables", () => {
-  it("counts pull requests and files, a re-upload as one file", async () => {
-    pullRequests.current = [pr()];
-    const deliverables = await deliverablesFor(TIMELINE);
-    expect(deliverables.files.map((f) => f.latest.id)).toEqual(["csv", "report-2", "shot"]);
-    expect(deliverables.count).toBe(4);
-  });
-
-  it("drops the code group when the workspace hides the PR sidebar", async () => {
-    githubSettings.prSidebar = false;
-    pullRequests.current = [pr()];
-    const deliverables = await deliverablesFor(TIMELINE);
-    expect(deliverables.pullRequests).toEqual([]);
-    expect(deliverables.count).toBe(3);
-  });
 });
 
 describe("DeliverablesSection", () => {
-  it("renders nothing while nothing has been delivered and PRs are hidden", async () => {
-    githubSettings.prSidebar = false;
-    const { container } = renderSection(await deliverablesFor([]));
+  it("renders nothing while nothing has been delivered", () => {
+    const { container } = renderSection([]);
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("keeps the code group up with nothing delivered, so a PR can be linked", async () => {
-    renderSection(await deliverablesFor([]));
-    const header = screen.getByRole("button", { name: /Deliverables/ });
-    expect(header).not.toHaveTextContent(/\d/);
-    expect(screen.getByTestId("pull-requests-group")).toHaveTextContent("MUL-7588");
-    expect(screen.queryByRole("button", { name: /View all/ })).toBeNull();
-  });
+  it("shows the latest version of each file and the total", () => {
+    renderSection(FILES);
 
-  it("shows the code group, the latest version of each file and the total", async () => {
-    pullRequests.current = [pr()];
-    renderSection(await deliverablesFor(TIMELINE));
-
-    expect(screen.getByRole("button", { name: /Deliverables/ })).toHaveTextContent("4");
-    expect(screen.getByTestId("pull-requests-group")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Deliverables/ })).toHaveTextContent("3");
     // One row for the report, marked as its second version.
     const report = screen.getByRole("button", { name: "report.md, version 2" });
     expect(report).toHaveTextContent("v2");
     expect(screen.getAllByTitle("report.md")).toHaveLength(1);
     expect(screen.getByRole("button", { name: "settings.png" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "View all 4 deliverables" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View all 3 deliverables" })).toBeInTheDocument();
   });
 
-  it("opens the latest version in the page's viewer", async () => {
-    renderSection(await deliverablesFor(TIMELINE));
+  it("opens the latest version in the page's viewer", () => {
+    renderSection(FILES);
     fireEvent.click(screen.getByRole("button", { name: "report.md, version 2" }));
     expect(openAtMock).toHaveBeenCalledWith("report-2");
   });
 
-  it("downloads a file neither the sequence nor the viewer can open", async () => {
+  it("downloads a file neither the sequence nor the viewer can open", () => {
     openAtMock.mockReturnValueOnce(false);
     renderSection(
-      await deliverablesFor([
+      collectDeliverableFiles([
         comment("c-9", [
           attachment({ id: "zip", filename: "bundle.zip", content_type: "application/zip" }),
         ]),
@@ -255,9 +157,9 @@ describe("DeliverablesSection", () => {
     expect(downloadMock).toHaveBeenCalledWith("zip");
   });
 
-  it("opens the overview from view all", async () => {
+  it("opens the overview from view all", () => {
     const onOpenOverview = vi.fn();
-    renderSection(await deliverablesFor(TIMELINE), onOpenOverview);
+    renderSection(FILES, onOpenOverview);
     fireEvent.click(screen.getByRole("button", { name: "View all 3 deliverables" }));
     expect(onOpenOverview).toHaveBeenCalledTimes(1);
   });
@@ -266,51 +168,41 @@ describe("DeliverablesSection", () => {
 describe("DeliverablesOverview", () => {
   const commentById = new Map(TIMELINE.map((entry) => [entry.id, entry]));
 
-  function renderOverview(
-    deliverables: IssueDeliverables,
-    props: Partial<Parameters<typeof DeliverablesOverview>[0]> = {},
-  ) {
+  function renderOverview(props: Partial<Parameters<typeof DeliverablesOverview>[0]> = {}) {
     const onClose = vi.fn();
     const onLocate = vi.fn();
     renderWithI18n(
-      wrapper({
-        children: (
-          <DeliverablesOverview
-            open
-            onClose={onClose}
-            identifier="MUL-7588"
-            deliverables={deliverables}
-            commentById={commentById}
-            onLocate={onLocate}
-            returnKey={null}
-            {...props}
-          />
-        ),
-      }),
+      withQuery(
+        <DeliverablesOverview
+          open
+          onClose={onClose}
+          identifier="MUL-7588"
+          files={FILES}
+          commentById={commentById}
+          onLocate={onLocate}
+          returnKey={null}
+          {...props}
+        />,
+      ),
     );
     return { onClose, onLocate };
   }
 
-  it("counts exactly what the sidebar counts", async () => {
-    pullRequests.current = [pr()];
-    const deliverables = await deliverablesFor(TIMELINE);
-    renderOverview(deliverables);
+  it("counts exactly what the sidebar counts", () => {
+    renderOverview();
     const dialog = screen.getByRole("dialog", { name: "MUL-7588" });
-    expect(within(dialog).getByText(/^4 deliverables/)).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: /^All\s*4$/ })).toBeInTheDocument();
-    // Code, then one group per posting comment; the report sits with its v2.
-    expect(within(dialog).getByRole("region", { name: "Code" })).toBeInTheDocument();
+    expect(within(dialog).getByText(/^3 deliverables/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /^All\s*3$/ })).toBeInTheDocument();
+    // One group per posting comment; the report sits with its v2.
     const groups = within(dialog).getAllByRole("region", { name: "Comment by Lambda" });
     expect(groups).toHaveLength(2);
     expect(within(groups[0]!).getByTitle("settings.png")).toBeInTheDocument();
     expect(within(groups[1]!).getByTitle("report.md")).toHaveTextContent("v2");
   });
 
-  it("filters by kind", async () => {
-    pullRequests.current = [pr()];
-    renderOverview(await deliverablesFor(TIMELINE));
+  it("filters by kind", () => {
+    renderOverview();
     fireEvent.click(screen.getByRole("button", { name: /^Images\s*1$/ }));
-    expect(screen.queryByRole("region", { name: "Code" })).toBeNull();
     expect(screen.getByTitle("settings.png")).toBeInTheDocument();
     expect(screen.queryByTitle("report.md")).toBeNull();
 
@@ -318,8 +210,8 @@ describe("DeliverablesOverview", () => {
     expect(screen.getByText("No deliverables of this type.")).toBeInTheDocument();
   });
 
-  it("opens a file and locates a comment, closing itself first", async () => {
-    const { onClose, onLocate } = renderOverview(await deliverablesFor(TIMELINE));
+  it("opens a file and locates a comment, closing itself first", () => {
+    const { onClose, onLocate } = renderOverview();
     fireEvent.click(screen.getByTitle("latency.csv"));
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(openAtMock).toHaveBeenCalledWith("csv");
@@ -330,8 +222,8 @@ describe("DeliverablesOverview", () => {
     expect(onLocate).toHaveBeenCalledWith({ kind: "comment", commentId: "c-2" });
   });
 
-  it("goes back to the viewer's file with G, and closes with Escape", async () => {
-    const { onClose } = renderOverview(await deliverablesFor(TIMELINE), { returnKey: "shot" });
+  it("goes back to the viewer's file with G, and closes with Escape", () => {
+    const { onClose } = renderOverview({ returnKey: "shot" });
     act(() => {
       fireEvent.keyDown(document, { key: "g" });
     });

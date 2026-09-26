@@ -382,6 +382,7 @@
     "select_sub_issue_aria": "{{identifier}} を選択",
     "section_properties": "プロパティ",
     "section_parent_issue": "親タスク",
+    "section_pull_requests": "Pull requests",
     "section_metadata": "メタデータ",
     "section_details": "詳細",
     "section_quick_actions": "クイックアクション",
@@ -1124,8 +1125,6 @@
   },
   "deliverables": {
     "section_title": "成果物",
-    "group_code": "コード",
-    "group_files": "ファイル",
     "view_all_other": "成果物 {{count}} 件をすべて表示",
     "name_with_version": "{{name}}（バージョン {{version}}）",
     "version_short": "v{{version}}",

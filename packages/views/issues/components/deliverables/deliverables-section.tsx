@@ -7,9 +7,8 @@ import { useT } from "../../../i18n";
 import { formatBytes } from "../../../common/format-bytes";
 import { fileIcon } from "../../../editor/utils/file-icon";
 import { getPreviewKind } from "../../../editor/utils/preview";
-import { PullRequestsGroup } from "../pull-requests-section";
 import { DeliverableThumbnail } from "./deliverable-thumbnail";
-import { useOpenAttachment, type IssueDeliverables } from "./use-issue-deliverables";
+import { useOpenAttachment } from "./use-open-attachment";
 import { VersionBadge } from "./version-badge";
 
 // The sidebar is a summary, not the list: the newest few of each, and the
@@ -18,32 +17,24 @@ const RECENT_IMAGES = 3;
 const RECENT_FILES = 4;
 
 /**
- * "Deliverables" in the issue sidebar (MUL-7649): what this issue has
- * delivered as a whole — its pull requests, then the files its comments
- * uploaded. Not grouped by run; each comment still shows its own files.
- *
- * Absorbs the former standalone "Pull requests" section and follows its
- * workspace switch: with the PR sidebar on, the code group — and so the
- * section — is always there, since that is where a PR gets linked by hand;
- * with it off, the section shows only once a comment has delivered a file.
+ * "Deliverables" in the issue sidebar (MUL-7649): the files this issue's
+ * comments delivered, as a whole — not grouped by run; each comment still
+ * shows its own files. Pull requests keep their own section above: linking
+ * one and PR auto-complete are issue workflow, not output. Renders nothing
+ * until a comment delivers a file.
  */
 export function DeliverablesSection({
-  issueId,
-  identifier,
-  deliverables,
+  files,
   onOpenOverview,
 }: {
-  issueId: string;
-  identifier: string;
-  deliverables: IssueDeliverables;
+  files: ReadonlyArray<DeliverableFile>;
   onOpenOverview: () => void;
 }) {
   const { t } = useT("issues");
   const [open, setOpen] = useState(true);
   const { open: openAttachment, modal } = useOpenAttachment();
-  const { showCode, files, count } = deliverables;
 
-  if (!showCode && files.length === 0) return null;
+  if (files.length === 0) return null;
 
   const images: DeliverableFile[] = [];
   const others: DeliverableFile[] = [];
@@ -63,59 +54,48 @@ export function DeliverablesSection({
         aria-expanded={open}
       >
         {t(($) => $.deliverables.section_title)}{" "}
-        {count > 0 && (
-          <span className="rounded-xs bg-muted px-1 text-micro font-medium tabular-nums text-muted-foreground">
-            {count}
-          </span>
-        )}
+        <span className="rounded-xs bg-muted px-1 text-micro font-medium tabular-nums text-muted-foreground">
+          {files.length}
+        </span>
         <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
       </button>
       {open && (
-        <div className="space-y-3 pl-2">
-          {showCode && <PullRequestsGroup issueId={issueId} identifier={identifier} />}
-          {files.length > 0 && (
-            <section aria-label={t(($) => $.deliverables.group_files)}>
-              <p className="mb-1.5 text-micro font-medium text-muted-foreground">
-                {t(($) => $.deliverables.group_files)}
-                <span className="tabular-nums"> · {files.length}</span>
-              </p>
-              {images.length > 0 && (
-                <div className="mb-1.5 grid grid-cols-3 gap-1.5">
-                  {images.map((file) => (
-                    <button
-                      key={file.key}
-                      type="button"
-                      className="relative aspect-[4/3] overflow-hidden rounded-md ring-1 ring-border transition-shadow hover:ring-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      title={file.latest.filename}
-                      aria-label={versionedName(file, t)}
-                      onClick={() => openAttachment(file.latest)}
-                    >
-                      <DeliverableThumbnail
-                        attachment={file.latest}
-                        showTypeLabel={false}
-                        className="size-full"
-                      />
-                    </button>
-                  ))}
-                </div>
-              )}
-              {others.map((file) => (
-                <FileRow
+        <div className="pl-2">
+          {images.length > 0 && (
+            <div className="mb-1.5 grid grid-cols-3 gap-1.5">
+              {images.map((file) => (
+                <button
                   key={file.key}
-                  file={file}
-                  onOpen={() => openAttachment(file.latest)}
-                />
+                  type="button"
+                  className="relative aspect-[4/3] overflow-hidden rounded-md ring-1 ring-border transition-shadow hover:ring-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  title={file.latest.filename}
+                  aria-label={versionedName(file, t)}
+                  onClick={() => openAttachment(file.latest)}
+                >
+                  <DeliverableThumbnail
+                    attachment={file.latest}
+                    showTypeLabel={false}
+                    className="size-full"
+                  />
+                </button>
               ))}
-              <button
-                type="button"
-                className="mt-0.5 flex w-[calc(100%+1rem)] -mx-2 items-center gap-2 rounded-md px-2 py-1 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-                onClick={onOpenOverview}
-              >
-                <LayoutGrid className="size-3.5 shrink-0" />
-                {t(($) => $.deliverables.view_all, { count })}
-              </button>
-            </section>
+            </div>
           )}
+          {others.map((file) => (
+            <FileRow
+              key={file.key}
+              file={file}
+              onOpen={() => openAttachment(file.latest)}
+            />
+          ))}
+          <button
+            type="button"
+            className="mt-0.5 flex w-[calc(100%+1rem)] -mx-2 items-center gap-2 rounded-md px-2 py-1 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+            onClick={onOpenOverview}
+          >
+            <LayoutGrid className="size-3.5 shrink-0" />
+            {t(($) => $.deliverables.view_all, { count: files.length })}
+          </button>
         </div>
       )}
       {modal}
