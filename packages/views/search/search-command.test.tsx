@@ -256,7 +256,8 @@ function resolveIssue(key: readonly unknown[]) {
   // issueDetailOptions key shape: ["issues", wsId, "detail", id]
   if (key[0] === "issues" && key[2] === "detail") {
     const id = key[3];
-    return mockAllIssues.current.find((i) => i.id === id);
+    // api.getIssue accepts a UUID or a bare identifier, so the mock does too.
+    return mockAllIssues.current.find((i) => i.id === id || i.identifier === id);
   }
   return undefined;
 }
@@ -704,6 +705,38 @@ describe("SearchCommand", () => {
     expect(mockResolvedCollapseAll).toHaveBeenCalledWith("issue-1");
     expect(mockCommentExpandAll).not.toHaveBeenCalled();
     expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  // Regression: since identifier URLs (v0.4.15) the route segment is "MUL-42"
+  // while CommentCard and useResolvedExpandStore key off the UUID, so folding
+  // under the segment wrote an orphaned second set of entries.
+  it("folds all comments under the issue UUID on an identifier URL", async () => {
+    const user = userEvent.setup();
+    mockPathname.current = "/ws-test/issues/MUL-42";
+    mockAllIssues.current = [
+      { id: "issue-1", identifier: "MUL-42", title: "Demo", status: "todo" },
+    ];
+    mockTimeline.current = [
+      { type: "comment", id: "root-1", actor_type: "member", actor_id: "u1", created_at: "2026-01-01T01:00:00Z", parent_id: null },
+      { type: "comment", id: "root-2", actor_type: "member", actor_id: "u1", created_at: "2026-01-01T03:00:00Z", parent_id: null, resolved_at: "2026-01-02T00:00:00Z" },
+    ];
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "fold");
+
+    const foldItem = await screen.findByText(
+      (_, el) => el?.textContent === "Fold All Comments" && el?.tagName === "SPAN",
+    );
+    await user.click(foldItem);
+
+    await waitFor(() => {
+      expect(mockCommentCollapseAll).toHaveBeenCalledWith("issue-1", ["root-1", "root-2"]);
+    });
+    // The identifier must never reach the collapse stores — the threads on
+    // screen read their collapsed state under the UUID.
+    expect(mockResolvedCollapseAll).toHaveBeenCalledWith("issue-1");
+    expect(mockCommentCollapseAll).not.toHaveBeenCalledWith("MUL-42", expect.anything());
   });
 
   it("unfolds all comments and expands resolved threads", async () => {
