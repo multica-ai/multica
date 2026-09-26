@@ -828,11 +828,12 @@ type Issue struct {
 	DuplicateOfIssueID pgtype.UUID        `json:"duplicate_of_issue_id"`
 }
 
-type IssueChildDoneEvent struct {
+type IssueChildEvent struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	ParentID    pgtype.UUID        `json:"parent_id"`
 	ChildID     pgtype.UUID        `json:"child_id"`
+	Kind        string             `json:"kind"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	ClaimedAt   pgtype.Timestamptz `json:"claimed_at"`
 	ProcessedAt pgtype.Timestamptz `json:"processed_at"`
@@ -963,16 +964,6 @@ type IssueSubscriber struct {
 	OptOutScope    pgtype.Text        `json:"opt_out_scope"`
 }
 
-type IssueSystemWakeup struct {
-	IssueID     pgtype.UUID        `json:"issue_id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Rule        string             `json:"rule"`
-	Enabled     bool               `json:"enabled"`
-	Instruction string             `json:"instruction"`
-	UpdatedBy   pgtype.UUID        `json:"updated_by"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-}
-
 type IssueToLabel struct {
 	IssueID pgtype.UUID `json:"issue_id"`
 	LabelID pgtype.UUID `json:"label_id"`
@@ -1044,6 +1035,8 @@ type IssueWakeup struct {
 	ExpirySeconds   pgtype.Int8        `json:"expiry_seconds"`
 	OnTimeout       pgtype.Text        `json:"on_timeout"`
 	TimedOutAt      pgtype.Timestamptz `json:"timed_out_at"`
+	SystemRule      pgtype.Text        `json:"system_rule"`
+	CustomizedAt    pgtype.Timestamptz `json:"customized_at"`
 	Condition       json.RawMessage    `json:"condition"`
 	ConditionState  string             `json:"condition_state"`
 	MaxFires        pgtype.Int4        `json:"max_fires"`

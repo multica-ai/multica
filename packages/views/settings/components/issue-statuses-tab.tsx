@@ -943,55 +943,7 @@ function PRAutoCompleteSection({ canManage }: { canManage: boolean }) {
             onCheckedChange={(v) => void persist(v)}
           />
         </SettingsRow>
-        <ChildDoneDefaultRow canManage={canManage} />
       </SettingsCard>
     </SettingsSection>
-  );
-}
-
-/**
- * The workspace default for the child-done wakeup: when a stage of an issue's
- * sub-issues finishes, wake the issue's agent assignee. Each issue can
- * override it in its Wakeups section.
- */
-function ChildDoneDefaultRow({ canManage }: { canManage: boolean }) {
-  const { t } = useT("settings");
-  const workspace = useCurrentWorkspace();
-  const qc = useQueryClient();
-  const [saving, setSaving] = useState(false);
-  const settings = (workspace?.settings ?? {}) as Record<string, unknown>;
-  const enabled = settings.system_wakeup_child_done !== false;
-
-  async function persist(next: boolean) {
-    if (!workspace || saving) return;
-    setSaving(true);
-    try {
-      const updated = await api.updateWorkspace(workspace.id, {
-        settings: { ...((workspace.settings as Record<string, unknown>) ?? {}), system_wakeup_child_done: next },
-      });
-      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
-        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
-      );
-      toast.success(t(($) => $.auto_save.toast_saved), { id: "settings-auto-save" });
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.auto_save.failed));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <SettingsRow
-      label={<label htmlFor="child-done-wakeup">{t(($) => $.issue_statuses.child_done_label)}</label>}
-      description={t(($) => $.issue_statuses.child_done_description)}
-    >
-      <Switch
-        id="child-done-wakeup"
-        checked={enabled}
-        disabled={!canManage || saving}
-        aria-busy={saving || undefined}
-        onCheckedChange={(v) => void persist(v)}
-      />
-    </SettingsRow>
   );
 }

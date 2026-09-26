@@ -431,42 +431,83 @@ reply, an agent's run ending, or raw events) onto the same configuration an
 agent sends. List responses add `created_by_agent`, `created_by_name` and the
 redacted `source_agent_*` of the run that created a rule.
 
-The parent-assignee wake on a closed sub-issue stage used to be implicit.
-`GET /api/issues/{id}/system-wakeups` now describes it (lowest open stage,
-remaining sub-issues, target, and why it would not wake anyone), and
-`PUT /api/issues/{id}/system-wakeups/child_done` stores a per-issue override in
-`issue_system_wakeup`: `enabled=false` suppresses the stage notification and
-wake; `instruction` (at most 4,000 bytes) is appended to the stage comment.
-Issue and workspace deletion remove override rows.
+The parent-assignee wake on a closed sub-issue stage is the platform's
+`child_done` system rule: an ordinary `issue_wakeup` row with `system_rule`
+set (migration 553), one per parent (unique index 554). It shares the
+condition, receipts, runaway protection, timeline entries, list and run model
+of people's rules; what differs is owned by the platform:
 
-Migrations 551–554 are additive. Deploy them before the server; deploy the
-server before the updated web and desktop clients, which call the new
-endpoints. Older clients ignore the new response fields.
+- **Target.** `agent_id` and `created_by` are NULL. When it fires the rule
+  resolves the parent's assignee: an agent gets a wakeup run, a squad's leader
+  gets a leader-role run, a member gets a `children_done` inbox notification,
+  and no assignee (or an agent that cannot run) only records the timeline
+  entry. The run is accountable to the parent's own provenance, as a run its
+  assignment would start, and it is not re-checked against a creator at claim
+  time; claim requires the rule on and the agent runnable.
+- **Condition.** `{"type":"children_done","each_stage":true}` (clients cannot
+  set `each_stage`). It holds with fingerprint `stage:N` when stage N and every
+  earlier stage are closed while a later stage waits, and with `all` when every
+  sub-issue, staged or not, is closed; the last stage alone does not hold, so
+  the wrap-up waits for unstaged sub-issues. A reopened sub-issue clears the
+  fingerprint, so closing it again fires again. People's `children_done`
+  conditions read the same sub-issue set (`childrenDone`).
+- **Evaluation.** Not polled (`next_fire_at` stays NULL). Migration 556 adds
+  `issue_child_event` and triggers on `issue` that record, in the writing
+  transaction and for every writer, a sub-issue entering or leaving a closed
+  status (built-in or custom done/closed category), joining or leaving a parent,
+  or changing stage. The request that wrote it processes the rows right after
+  commit (`ProcessChildEvents`: claim per parent, create the parent's rule if
+  missing, give every sub-issue rule on the parent a `children.changed` hint,
+  dispatch them, people's rules first); the `issue_child_event_sweep` job
+  retries rows left unclaimed for 30 seconds or claimed for more than five
+  minutes and deletes processed rows after a week. The rule also subscribes to
+  `issue.status_changed` on the parent, so leaving backlog re-evaluates it.
+- **Holds.** A parent in backlog is not woken and nothing is marked as seen:
+  leaving backlog wakes the assignee once for what closed meanwhile. A closed
+  parent keeps the rule (the platform never disables a system rule for a
+  closed issue); it rests until the parent reopens.
+- **Joining a waiting run.** If the target agent already has an unstarted run
+  on the parent (any trigger but this rule), the rule consumes its facts into
+  a `merged` timeline entry instead of queuing a second run; that run reads the
+  current sub-issues when it starts. Runaway protection is the hourly limit
+  (12 runs, then `paused_reason=rate`); loop detection does not apply because
+  stage hand-offs cross issues by design, and there is no fire cap.
+- **Instruction.** The run's `[WAKEUP]` block carries the instruction and the
+  observation (each stage's closed and cancelled counts, the closed stage, the
+  next stage). The instruction is the issue's own (`instruction` on the row),
+  else the workspace's (`system_wakeup_child_done_instruction`), else the
+  built-in `ChildDoneDefaultInstruction`. The daemon tells the agent the rule is
+  the platform's and not to change it. No system comment is posted; the
+  `wakeup_triggered` entry (`rule=child_done`, `stage`, `total`, `target_*`,
+  `outcome`: `woke`, `notified`, `merged` or `none`) is the record.
 
-The rule follows a workspace default until an issue sets its own: the
-workspace settings key `system_wakeup_child_done` (only an explicit `false`
-turns it off), edited under Settings → Issue statuses. The per-issue `PUT`
-accepts partial bodies, so a list can toggle a rule without its instruction.
+People manage it, agents cannot. `GET /api/issues/{id}/system-wakeups`
+describes what the parent is waiting for (lowest open stage or every
+sub-issue, remaining, target, why no run would start) with the row's `id`,
+`revision`, `enabled`, `instruction`, `default_instruction`, `customized` and
+`paused_reason`. `PUT /api/issues/{id}/system-wakeups/child_done` accepts a
+partial body from a member (403 for an agent), creates the row if needed, sets
+`customized_at`, clears a pause when turning it on, and records what already
+holds so facts that closed while it was off do not fire. The ordinary
+per-rule endpoints (update, enable, disable, instruction, trigger, delete)
+reject system rows. The workspace default lives in the settings keys
+`system_wakeup_child_done` (only an explicit `false` turns it off) and
+`system_wakeup_child_done_instruction`, edited under Settings → Wakeups through
+`GET /api/system-wakeups` and `PUT /api/system-wakeups/child_done` (owners and
+admins). Changing the default applies to every rule nobody customized and the
+platform did not pause, re-baselining the ones it turns on.
 
-The trigger no longer runs only after the write. Migration 556 adds
-`issue_child_done_event` and an `AFTER UPDATE OF status` trigger on `issue`
-that records a child's move into a closed status (built-in or a custom status in
-the done/closed category) in the writing transaction, for every writer. The
-request that wrote it processes the rows right after commit
-(`processChildDoneEvents`: claim per parent, evaluate the barrier against the
-current siblings, mark processed); the `issue_child_done_sweep` scheduler job
-retries rows left unclaimed for 30 seconds or claimed for more than five
-minutes, and deletes processed rows after a week. A database failure while
-processing leaves the claim to expire, so the sweep retries it; a status that
-cannot be resolved is still skipped. Because every writer records transitions,
-a child closed outside the HTTP handlers (for example marked as a duplicate)
-now also notifies its parent, after at most one sweep interval.
+Open parents that predate the rule get it from the sweep job's one-time
+backfill, with what already holds recorded so nothing fires. A parent whose
+sub-issues change before the backfill reaches it gets its rule when the change
+is processed, with the closing sub-issues treated as still open in the
+baseline, so that change still wakes the assignee. System rows do not count
+toward the per-issue and per-workspace capacity (`guard_issue_wakeup_capacity`).
 
-Each trigger also writes a `wakeup_triggered` activity (`rule=child_done`,
-stage, total, target, and the system comment's id). Clients show that entry in
-place of the system comment and can reveal the comment's text; the comment
-itself stays, because it is the woken agent's instruction and its trigger
-comment.
+Migrations 551–558 are additive for existing rows. Deploy them before the
+server and the server before clients; older clients ignore the new fields.
+Issue and workspace deletion remove the rows with the issue's other wakeups
+and `issue_child_event` rows.
 
 ## Conditions, runaway protection and check-ins
 
@@ -525,8 +566,8 @@ with their triggers, check-in note and whether they commented.
 `wakeup_timed_out`, `wakeup_paused` and `wakeup_checkin` activities with a
 snapshot of the rule, published after commit. The workspace list adds a
 `source` filter and column (`member`, `agent`, `system`), a `paused` scope,
-`runs_7d`, and one row per open parent still waiting on sub-issues for the
-child-done system rule (its id is the issue id). The issue header shows what
+`runs_7d`, and the child-done system rule of each open parent still waiting on
+sub-issues (a row once the rule exists; its target is the parent's assignee). The issue header shows what
 the issue is waiting for and opens the Wakeups section; board cards say it in a
 few words, or that a rule was paused.
 

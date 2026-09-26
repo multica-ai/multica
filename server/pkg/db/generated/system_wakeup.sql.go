@@ -7,33 +7,108 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const claimChildDoneEvents = `-- name: ClaimChildDoneEvents :many
-UPDATE issue_child_done_event SET claimed_at=clock_timestamp()
-WHERE parent_id= $1 AND processed_at IS NULL
- AND (claimed_at IS NULL OR claimed_at < clock_timestamp()-interval '5 minutes')
-RETURNING id, workspace_id, parent_id, child_id, created_at, claimed_at, processed_at
+const applySystemWakeupDefault = `-- name: ApplySystemWakeupDefault :many
+UPDATE issue_wakeup SET enabled= $1,updated_at=clock_timestamp()
+WHERE workspace_id= $2 AND system_rule= $3 AND customized_at IS NULL
+ AND paused_reason IS NULL AND enabled<> $1::bool
+RETURNING id, workspace_id, issue_id, agent_id, created_by, source_task_id, parent_comment_id, instruction, kind, mode, event_types, filter_agent_id, filter_task_id, interval_seconds, cron_expression, timezone, next_fire_at, enabled, disabled_at, revision, last_task_id, last_error, created_at, updated_at, filter_actor_type, filter_actor_id, expires_at, expiry_seconds, on_timeout, timed_out_at, system_rule, customized_at, condition, condition_state, max_fires, fire_count, paused_reason
 `
 
-// Claim a parent's recorded child transitions. A claim that was not finished
-// within five minutes (a crashed or failed attempt) can be claimed again.
-func (q *Queries) ClaimChildDoneEvents(ctx context.Context, parentID pgtype.UUID) ([]IssueChildDoneEvent, error) {
-	rows, err := q.db.Query(ctx, claimChildDoneEvents, parentID)
+type ApplySystemWakeupDefaultParams struct {
+	Enabled     bool        `json:"enabled"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	SystemRule  pgtype.Text `json:"system_rule"`
+}
+
+// The workspace default changed. Rules nobody customized and the platform did
+// not pause follow it.
+func (q *Queries) ApplySystemWakeupDefault(ctx context.Context, arg ApplySystemWakeupDefaultParams) ([]IssueWakeup, error) {
+	rows, err := q.db.Query(ctx, applySystemWakeupDefault, arg.Enabled, arg.WorkspaceID, arg.SystemRule)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []IssueChildDoneEvent{}
+	items := []IssueWakeup{}
 	for rows.Next() {
-		var i IssueChildDoneEvent
+		var i IssueWakeup
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.AgentID,
+			&i.CreatedBy,
+			&i.SourceTaskID,
+			&i.ParentCommentID,
+			&i.Instruction,
+			&i.Kind,
+			&i.Mode,
+			&i.EventTypes,
+			&i.FilterAgentID,
+			&i.FilterTaskID,
+			&i.IntervalSeconds,
+			&i.CronExpression,
+			&i.Timezone,
+			&i.NextFireAt,
+			&i.Enabled,
+			&i.DisabledAt,
+			&i.Revision,
+			&i.LastTaskID,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FilterActorType,
+			&i.FilterActorID,
+			&i.ExpiresAt,
+			&i.ExpirySeconds,
+			&i.OnTimeout,
+			&i.TimedOutAt,
+			&i.SystemRule,
+			&i.CustomizedAt,
+			&i.Condition,
+			&i.ConditionState,
+			&i.MaxFires,
+			&i.FireCount,
+			&i.PausedReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const claimChildEvents = `-- name: ClaimChildEvents :many
+UPDATE issue_child_event SET claimed_at=clock_timestamp()
+WHERE parent_id= $1 AND processed_at IS NULL
+ AND (claimed_at IS NULL OR claimed_at < clock_timestamp()-interval '5 minutes')
+RETURNING id, workspace_id, parent_id, child_id, kind, created_at, claimed_at, processed_at
+`
+
+// Claim a parent's recorded sub-issue changes. A claim that was not finished
+// within five minutes (a crashed or failed attempt) can be claimed again.
+func (q *Queries) ClaimChildEvents(ctx context.Context, parentID pgtype.UUID) ([]IssueChildEvent, error) {
+	rows, err := q.db.Query(ctx, claimChildEvents, parentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []IssueChildEvent{}
+	for rows.Next() {
+		var i IssueChildEvent
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
 			&i.ParentID,
 			&i.ChildID,
+			&i.Kind,
 			&i.CreatedAt,
 			&i.ClaimedAt,
 			&i.ProcessedAt,
@@ -48,66 +123,408 @@ func (q *Queries) ClaimChildDoneEvents(ctx context.Context, parentID pgtype.UUID
 	return items, nil
 }
 
-const deleteProcessedChildDoneEvents = `-- name: DeleteProcessedChildDoneEvents :execrows
-WITH batch AS MATERIALIZED (
- SELECT e.id FROM issue_child_done_event e WHERE e.processed_at < $1
- ORDER BY e.processed_at LIMIT 1000 FOR UPDATE SKIP LOCKED
-)
-DELETE FROM issue_child_done_event d USING batch WHERE d.id=batch.id
+const countCustomizedSystemWakeups = `-- name: CountCustomizedSystemWakeups :one
+SELECT count(*) FROM issue_wakeup w JOIN issue i ON i.id=w.issue_id AND i.workspace_id=w.workspace_id
+WHERE w.workspace_id= $1 AND w.system_rule= $2 AND w.customized_at IS NOT NULL
+ AND i.status NOT IN ('done','cancelled')
+ AND NOT EXISTS(SELECT 1 FROM issue_status s WHERE s.workspace_id=i.workspace_id AND s.key=i.status AND s.category IN ('done','closed'))
 `
 
-func (q *Queries) DeleteProcessedChildDoneEvents(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteProcessedChildDoneEvents, cutoff)
+type CountCustomizedSystemWakeupsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	SystemRule  pgtype.Text `json:"system_rule"`
+}
+
+// Open issues whose rule a person changed, for the workspace settings page.
+func (q *Queries) CountCustomizedSystemWakeups(ctx context.Context, arg CountCustomizedSystemWakeupsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countCustomizedSystemWakeups, arg.WorkspaceID, arg.SystemRule)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const createSystemWakeup = `-- name: CreateSystemWakeup :one
+INSERT INTO issue_wakeup(id,workspace_id,issue_id,instruction,kind,mode,event_types,timezone,condition,condition_state,enabled,system_rule)
+VALUES($1,$2,$3,'','event','continuous',$4,'UTC',$5,$6,$7,$8)
+ON CONFLICT (issue_id,system_rule) WHERE system_rule IS NOT NULL DO NOTHING
+RETURNING id, workspace_id, issue_id, agent_id, created_by, source_task_id, parent_comment_id, instruction, kind, mode, event_types, filter_agent_id, filter_task_id, interval_seconds, cron_expression, timezone, next_fire_at, enabled, disabled_at, revision, last_task_id, last_error, created_at, updated_at, filter_actor_type, filter_actor_id, expires_at, expiry_seconds, on_timeout, timed_out_at, system_rule, customized_at, condition, condition_state, max_fires, fire_count, paused_reason
+`
+
+type CreateSystemWakeupParams struct {
+	ID             pgtype.UUID     `json:"id"`
+	WorkspaceID    pgtype.UUID     `json:"workspace_id"`
+	IssueID        pgtype.UUID     `json:"issue_id"`
+	EventTypes     []string        `json:"event_types"`
+	Condition      json.RawMessage `json:"condition"`
+	ConditionState string          `json:"condition_state"`
+	Enabled        bool            `json:"enabled"`
+	SystemRule     pgtype.Text     `json:"system_rule"`
+}
+
+// A platform rule on one issue. Two writers ensuring it at once keep the first
+// row; the loser reads it back with GetSystemWakeup.
+func (q *Queries) CreateSystemWakeup(ctx context.Context, arg CreateSystemWakeupParams) (IssueWakeup, error) {
+	row := q.db.QueryRow(ctx, createSystemWakeup,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.IssueID,
+		arg.EventTypes,
+		arg.Condition,
+		arg.ConditionState,
+		arg.Enabled,
+		arg.SystemRule,
+	)
+	var i IssueWakeup
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.AgentID,
+		&i.CreatedBy,
+		&i.SourceTaskID,
+		&i.ParentCommentID,
+		&i.Instruction,
+		&i.Kind,
+		&i.Mode,
+		&i.EventTypes,
+		&i.FilterAgentID,
+		&i.FilterTaskID,
+		&i.IntervalSeconds,
+		&i.CronExpression,
+		&i.Timezone,
+		&i.NextFireAt,
+		&i.Enabled,
+		&i.DisabledAt,
+		&i.Revision,
+		&i.LastTaskID,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FilterActorType,
+		&i.FilterActorID,
+		&i.ExpiresAt,
+		&i.ExpirySeconds,
+		&i.OnTimeout,
+		&i.TimedOutAt,
+		&i.SystemRule,
+		&i.CustomizedAt,
+		&i.Condition,
+		&i.ConditionState,
+		&i.MaxFires,
+		&i.FireCount,
+		&i.PausedReason,
+	)
+	return i, err
+}
+
+const customizeSystemWakeup = `-- name: CustomizeSystemWakeup :one
+UPDATE issue_wakeup SET enabled= $1,instruction= $2,customized_at=clock_timestamp(),
+ paused_reason=CASE WHEN $1::bool THEN NULL ELSE paused_reason END,
+ disabled_at=CASE WHEN $1::bool THEN NULL ELSE disabled_at END,
+ updated_at=clock_timestamp()
+WHERE id= $3 RETURNING id, workspace_id, issue_id, agent_id, created_by, source_task_id, parent_comment_id, instruction, kind, mode, event_types, filter_agent_id, filter_task_id, interval_seconds, cron_expression, timezone, next_fire_at, enabled, disabled_at, revision, last_task_id, last_error, created_at, updated_at, filter_actor_type, filter_actor_id, expires_at, expiry_seconds, on_timeout, timed_out_at, system_rule, customized_at, condition, condition_state, max_fires, fire_count, paused_reason
+`
+
+type CustomizeSystemWakeupParams struct {
+	Enabled     bool        `json:"enabled"`
+	Instruction string      `json:"instruction"`
+	ID          pgtype.UUID `json:"id"`
+}
+
+// A person changed the rule on this issue; it stops following the workspace
+// default. Turning it on clears a platform pause.
+func (q *Queries) CustomizeSystemWakeup(ctx context.Context, arg CustomizeSystemWakeupParams) (IssueWakeup, error) {
+	row := q.db.QueryRow(ctx, customizeSystemWakeup, arg.Enabled, arg.Instruction, arg.ID)
+	var i IssueWakeup
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.AgentID,
+		&i.CreatedBy,
+		&i.SourceTaskID,
+		&i.ParentCommentID,
+		&i.Instruction,
+		&i.Kind,
+		&i.Mode,
+		&i.EventTypes,
+		&i.FilterAgentID,
+		&i.FilterTaskID,
+		&i.IntervalSeconds,
+		&i.CronExpression,
+		&i.Timezone,
+		&i.NextFireAt,
+		&i.Enabled,
+		&i.DisabledAt,
+		&i.Revision,
+		&i.LastTaskID,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FilterActorType,
+		&i.FilterActorID,
+		&i.ExpiresAt,
+		&i.ExpirySeconds,
+		&i.OnTimeout,
+		&i.TimedOutAt,
+		&i.SystemRule,
+		&i.CustomizedAt,
+		&i.Condition,
+		&i.ConditionState,
+		&i.MaxFires,
+		&i.FireCount,
+		&i.PausedReason,
+	)
+	return i, err
+}
+
+const deleteProcessedChildEvents = `-- name: DeleteProcessedChildEvents :execrows
+WITH batch AS MATERIALIZED (
+ SELECT e.id FROM issue_child_event e WHERE e.processed_at < $1
+ ORDER BY e.processed_at LIMIT 1000 FOR UPDATE SKIP LOCKED
+)
+DELETE FROM issue_child_event d USING batch WHERE d.id=batch.id
+`
+
+func (q *Queries) DeleteProcessedChildEvents(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteProcessedChildEvents, cutoff)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
 }
 
-const finishChildDoneEvents = `-- name: FinishChildDoneEvents :exec
-UPDATE issue_child_done_event SET processed_at=clock_timestamp() WHERE id=ANY($1::uuid[])
+const finishChildEvents = `-- name: FinishChildEvents :exec
+UPDATE issue_child_event SET processed_at=clock_timestamp() WHERE id=ANY($1::uuid[])
 `
 
-func (q *Queries) FinishChildDoneEvents(ctx context.Context, ids []pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, finishChildDoneEvents, ids)
+func (q *Queries) FinishChildEvents(ctx context.Context, ids []pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, finishChildEvents, ids)
 	return err
 }
 
-const getIssueSystemWakeup = `-- name: GetIssueSystemWakeup :one
-SELECT issue_id, workspace_id, rule, enabled, instruction, updated_by, updated_at FROM issue_system_wakeup WHERE issue_id= $1 AND workspace_id= $2 AND rule= $3
+const getSystemWakeup = `-- name: GetSystemWakeup :one
+SELECT id, workspace_id, issue_id, agent_id, created_by, source_task_id, parent_comment_id, instruction, kind, mode, event_types, filter_agent_id, filter_task_id, interval_seconds, cron_expression, timezone, next_fire_at, enabled, disabled_at, revision, last_task_id, last_error, created_at, updated_at, filter_actor_type, filter_actor_id, expires_at, expiry_seconds, on_timeout, timed_out_at, system_rule, customized_at, condition, condition_state, max_fires, fire_count, paused_reason FROM issue_wakeup WHERE issue_id= $1 AND system_rule= $2
 `
 
-type GetIssueSystemWakeupParams struct {
-	IssueID     pgtype.UUID `json:"issue_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Rule        string      `json:"rule"`
+type GetSystemWakeupParams struct {
+	IssueID    pgtype.UUID `json:"issue_id"`
+	SystemRule pgtype.Text `json:"system_rule"`
 }
 
-func (q *Queries) GetIssueSystemWakeup(ctx context.Context, arg GetIssueSystemWakeupParams) (IssueSystemWakeup, error) {
-	row := q.db.QueryRow(ctx, getIssueSystemWakeup, arg.IssueID, arg.WorkspaceID, arg.Rule)
-	var i IssueSystemWakeup
+func (q *Queries) GetSystemWakeup(ctx context.Context, arg GetSystemWakeupParams) (IssueWakeup, error) {
+	row := q.db.QueryRow(ctx, getSystemWakeup, arg.IssueID, arg.SystemRule)
+	var i IssueWakeup
 	err := row.Scan(
-		&i.IssueID,
+		&i.ID,
 		&i.WorkspaceID,
-		&i.Rule,
-		&i.Enabled,
+		&i.IssueID,
+		&i.AgentID,
+		&i.CreatedBy,
+		&i.SourceTaskID,
+		&i.ParentCommentID,
 		&i.Instruction,
-		&i.UpdatedBy,
+		&i.Kind,
+		&i.Mode,
+		&i.EventTypes,
+		&i.FilterAgentID,
+		&i.FilterTaskID,
+		&i.IntervalSeconds,
+		&i.CronExpression,
+		&i.Timezone,
+		&i.NextFireAt,
+		&i.Enabled,
+		&i.DisabledAt,
+		&i.Revision,
+		&i.LastTaskID,
+		&i.LastError,
+		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FilterActorType,
+		&i.FilterActorID,
+		&i.ExpiresAt,
+		&i.ExpirySeconds,
+		&i.OnTimeout,
+		&i.TimedOutAt,
+		&i.SystemRule,
+		&i.CustomizedAt,
+		&i.Condition,
+		&i.ConditionState,
+		&i.MaxFires,
+		&i.FireCount,
+		&i.PausedReason,
 	)
 	return i, err
 }
 
-const listStaleChildDoneParents = `-- name: ListStaleChildDoneParents :many
-SELECT DISTINCT parent_id FROM issue_child_done_event
+const hasOtherPendingIssueRun = `-- name: HasOtherPendingIssueRun :one
+SELECT EXISTS(SELECT 1 FROM agent_task_queue WHERE issue_id= $1 AND agent_id= $2
+ AND status IN ('queued','dispatched') AND context->>'wakeup_id' IS DISTINCT FROM $3::text
+ AND (context->>'wakeup_id' IS NOT NULL OR COALESCE($4::text,'')='' OR context->>'head_sha'=$4::text))::bool
+`
+
+type HasOtherPendingIssueRunParams struct {
+	IssueID  pgtype.UUID `json:"issue_id"`
+	AgentID  pgtype.UUID `json:"agent_id"`
+	WakeupID string      `json:"wakeup_id"`
+	HeadSha  pgtype.Text `json:"head_sha"`
+}
+
+// A run of this agent on the issue that has not started, from any trigger but
+// the given rule. The child_done rule joins it: the run reads the current
+// sub-issues when it starts.
+func (q *Queries) HasOtherPendingIssueRun(ctx context.Context, arg HasOtherPendingIssueRunParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasOtherPendingIssueRun,
+		arg.IssueID,
+		arg.AgentID,
+		arg.WakeupID,
+		arg.HeadSha,
+	)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const listChildConditionWakeups = `-- name: ListChildConditionWakeups :many
+SELECT id, workspace_id, issue_id, agent_id, created_by, source_task_id, parent_comment_id, instruction, kind, mode, event_types, filter_agent_id, filter_task_id, interval_seconds, cron_expression, timezone, next_fire_at, enabled, disabled_at, revision, last_task_id, last_error, created_at, updated_at, filter_actor_type, filter_actor_id, expires_at, expiry_seconds, on_timeout, timed_out_at, system_rule, customized_at, condition, condition_state, max_fires, fire_count, paused_reason FROM issue_wakeup WHERE issue_id= $1 AND enabled AND condition->>'type'='children_done'
+ORDER BY (system_rule IS NOT NULL),id
+`
+
+// Enabled rules on a parent whose condition reads its sub-issues.
+func (q *Queries) ListChildConditionWakeups(ctx context.Context, issueID pgtype.UUID) ([]IssueWakeup, error) {
+	rows, err := q.db.Query(ctx, listChildConditionWakeups, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []IssueWakeup{}
+	for rows.Next() {
+		var i IssueWakeup
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.AgentID,
+			&i.CreatedBy,
+			&i.SourceTaskID,
+			&i.ParentCommentID,
+			&i.Instruction,
+			&i.Kind,
+			&i.Mode,
+			&i.EventTypes,
+			&i.FilterAgentID,
+			&i.FilterTaskID,
+			&i.IntervalSeconds,
+			&i.CronExpression,
+			&i.Timezone,
+			&i.NextFireAt,
+			&i.Enabled,
+			&i.DisabledAt,
+			&i.Revision,
+			&i.LastTaskID,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FilterActorType,
+			&i.FilterActorID,
+			&i.ExpiresAt,
+			&i.ExpirySeconds,
+			&i.OnTimeout,
+			&i.TimedOutAt,
+			&i.SystemRule,
+			&i.CustomizedAt,
+			&i.Condition,
+			&i.ConditionState,
+			&i.MaxFires,
+			&i.FireCount,
+			&i.PausedReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listParentsWithoutSystemWakeup = `-- name: ListParentsWithoutSystemWakeup :many
+SELECT p.id, p.workspace_id, p.title, p.description, p.status, p.priority, p.assignee_type, p.assignee_id, p.creator_type, p.creator_id, p.parent_issue_id, p.acceptance_criteria, p.context_refs, p.position, p.due_date, p.created_at, p.updated_at, p.number, p.project_id, p.origin_type, p.origin_id, p.first_executed_at, p.start_date, p.metadata, p.stage, p.properties, p.revision, p.last_activity_at, p.triage_state, p.duplicate_of_issue_id FROM (SELECT DISTINCT c.parent_issue_id AS id FROM issue c WHERE c.parent_issue_id IS NOT NULL) parents
+JOIN issue p ON p.id=parents.id
+WHERE NOT EXISTS(SELECT 1 FROM issue_wakeup w WHERE w.issue_id=p.id AND w.system_rule= $1)
+ AND p.status NOT IN ('done','cancelled')
+ AND NOT EXISTS(SELECT 1 FROM issue_status s WHERE s.workspace_id=p.workspace_id AND s.key=p.status AND s.category IN ('done','closed'))
+LIMIT $2
+`
+
+type ListParentsWithoutSystemWakeupParams struct {
+	SystemRule pgtype.Text `json:"system_rule"`
+	PageLimit  int32       `json:"page_limit"`
+}
+
+// Open parents that predate their rule, for the one-time backfill.
+func (q *Queries) ListParentsWithoutSystemWakeup(ctx context.Context, arg ListParentsWithoutSystemWakeupParams) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listParentsWithoutSystemWakeup, arg.SystemRule, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.ProjectID,
+			&i.OriginType,
+			&i.OriginID,
+			&i.FirstExecutedAt,
+			&i.StartDate,
+			&i.Metadata,
+			&i.Stage,
+			&i.Properties,
+			&i.Revision,
+			&i.LastActivityAt,
+			&i.TriageState,
+			&i.DuplicateOfIssueID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStaleChildEventParents = `-- name: ListStaleChildEventParents :many
+SELECT DISTINCT parent_id FROM issue_child_event
 WHERE processed_at IS NULL
  AND ((claimed_at IS NULL AND created_at < clock_timestamp()-interval '30 seconds') OR claimed_at < clock_timestamp()-interval '5 minutes')
 LIMIT 50
 `
 
-// Parents whose transitions were not processed right after their write.
-func (q *Queries) ListStaleChildDoneParents(ctx context.Context) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listStaleChildDoneParents)
+// Parents whose changes were not processed right after their write.
+func (q *Queries) ListStaleChildEventParents(ctx context.Context) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listStaleChildEventParents)
 	if err != nil {
 		return nil, err
 	}
@@ -126,41 +543,16 @@ func (q *Queries) ListStaleChildDoneParents(ctx context.Context) ([]pgtype.UUID,
 	return items, nil
 }
 
-const upsertIssueSystemWakeup = `-- name: UpsertIssueSystemWakeup :one
-INSERT INTO issue_system_wakeup(issue_id,workspace_id,rule,enabled,instruction,updated_by)
-VALUES($1,$2,$3,$4,$5,$6)
-ON CONFLICT (issue_id,rule) DO UPDATE SET enabled=EXCLUDED.enabled,instruction=EXCLUDED.instruction,
- updated_by=EXCLUDED.updated_by,updated_at=clock_timestamp()
-RETURNING issue_id, workspace_id, rule, enabled, instruction, updated_by, updated_at
+const mergeWorkspaceSettings = `-- name: MergeWorkspaceSettings :exec
+UPDATE workspace SET settings=COALESCE(settings,'{}'::jsonb) || $1::jsonb,updated_at=now() WHERE id= $2
 `
 
-type UpsertIssueSystemWakeupParams struct {
-	IssueID     pgtype.UUID `json:"issue_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Rule        string      `json:"rule"`
-	Enabled     bool        `json:"enabled"`
-	Instruction string      `json:"instruction"`
-	UpdatedBy   pgtype.UUID `json:"updated_by"`
+type MergeWorkspaceSettingsParams struct {
+	Patch []byte      `json:"patch"`
+	ID    pgtype.UUID `json:"id"`
 }
 
-func (q *Queries) UpsertIssueSystemWakeup(ctx context.Context, arg UpsertIssueSystemWakeupParams) (IssueSystemWakeup, error) {
-	row := q.db.QueryRow(ctx, upsertIssueSystemWakeup,
-		arg.IssueID,
-		arg.WorkspaceID,
-		arg.Rule,
-		arg.Enabled,
-		arg.Instruction,
-		arg.UpdatedBy,
-	)
-	var i IssueSystemWakeup
-	err := row.Scan(
-		&i.IssueID,
-		&i.WorkspaceID,
-		&i.Rule,
-		&i.Enabled,
-		&i.Instruction,
-		&i.UpdatedBy,
-		&i.UpdatedAt,
-	)
-	return i, err
+func (q *Queries) MergeWorkspaceSettings(ctx context.Context, arg MergeWorkspaceSettingsParams) error {
+	_, err := q.db.Exec(ctx, mergeWorkspaceSettings, arg.Patch, arg.ID)
+	return err
 }

@@ -40,6 +40,10 @@ func lockManagedWakeup(ctx context.Context, tx pgx.Tx, q *db.Queries, issueID, i
 	if w.IssueID != issue.ID || w.WorkspaceID != issue.WorkspaceID {
 		return issue, db.IssueWakeup{}, pgx.ErrNoRows
 	}
+	// System rules are changed on the issue's system rule, not as a person's rule.
+	if w.SystemRule.Valid {
+		return issue, db.IssueWakeup{}, ErrWakeupForbidden
+	}
 	if w.CreatedBy != member && membership.Role != "owner" && membership.Role != "admin" {
 		return issue, db.IssueWakeup{}, ErrWakeupForbidden
 	}

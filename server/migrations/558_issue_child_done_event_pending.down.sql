@@ -1,1 +1,0 @@
-DROP INDEX CONCURRENTLY IF EXISTS issue_child_done_event_pending_idx;

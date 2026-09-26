@@ -2166,32 +2166,12 @@ func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
 		t.Fatalf("expected child status 'done', got %q", updatedChild.Status)
 	}
 
-	// Parent must have received exactly one platform-generated system comment.
-	var sysCount int
-	dbfx.QueryRow(t,
-		`SELECT count(*) FROM comment WHERE issue_id = $1 AND author_type = 'system'`,
-		parent.ID,
-	).Scan(&sysCount)
-	if sysCount != 1 {
-		t.Fatalf("expected 1 system comment on parent after PR-merge auto-done, got %d", sysCount)
+	// The merge closed the child through the PR path; the parent's rule
+	// recorded it once, like a manual status change.
+	if entries := childDoneEntries(t, parent.ID); len(entries) != 1 || entries[0].Outcome != "none" {
+		t.Fatalf("expected 1 child_done entry on the parent after PR-merge auto-done, got %+v", entries)
 	}
-
-	var content string
-	dbfx.QueryRow(t,
-		`SELECT content FROM comment WHERE issue_id = $1 AND author_type = 'system' LIMIT 1`,
-		parent.ID,
-	).Scan(&content)
-	if !strings.Contains(content, child.Identifier) {
-		t.Errorf("system comment should reference child identifier %q, got: %s", child.Identifier, content)
-	}
-	// Parent has no assignee in this fixture, so the routing mentions stay
-	// absent. Behavior for assigned parents is covered in
-	// issue_child_done_test.go (MUL-2538 Option C).
-	for _, banned := range []string{"mention://agent/", "mention://member/", "mention://squad/"} {
-		if strings.Contains(content, banned) {
-			t.Errorf("system comment must not include %q mention (parent unassigned), got: %s", banned, content)
-		}
-	}
+	t.Cleanup(func() { cleanupChildDoneIssue(parent.ID) })
 }
 
 // generateTestRSAKeyPEM returns the shared RSA-2048 test key's PKCS#1 PEM

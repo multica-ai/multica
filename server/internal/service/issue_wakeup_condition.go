@@ -40,6 +40,10 @@ type WakeupCondition struct {
 	PropertyID   string          `json:"property_id,omitempty"`
 	// children_done: a stage number, or every sub-issue when omitted.
 	Stage *int32 `json:"stage,omitempty"`
+	// EachStage is the child_done system rule's reading of children_done:
+	// every stage closing while a later one waits, then every sub-issue
+	// closing. Only the platform sets it.
+	EachStage bool `json:"each_stage,omitempty"`
 	// pull_request: checks_finished | merged
 	Event string `json:"event,omitempty"`
 	// other_issue: the watched issue and done | ended | in_review. The
@@ -159,6 +163,9 @@ func validateCondition(ctx context.Context, tx pgx.Tx, issue db.Issue, raw json.
 			return nil, nil, badCondition("field must be status, assignee, label or property")
 		}
 	case "children_done":
+		if c.EachStage {
+			return nil, nil, badCondition("each_stage is reserved for the platform's sub-issue rule")
+		}
 		if c.Stage != nil && (*c.Stage < 1 || *c.Stage > 1000) {
 			return nil, nil, badCondition("stage must be a positive number")
 		}
@@ -230,58 +237,12 @@ func evaluateCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.Issue
 			return bytes.Equal(value, canonicalWakeupPayload(c.Value)), "property:" + string(value), map[string]any{"property_id": c.PropertyID, "value": json.RawMessage(value)}, nil
 		}
 	case "children_done":
-		rows, err := tx.Query(ctx, "SELECT status,stage FROM issue WHERE parent_issue_id=$1 AND workspace_id=$2", w.IssueID, w.WorkspaceID)
+		children, err := loadSubIssues(ctx, tx, q, w.IssueID, w.WorkspaceID)
 		if err != nil {
 			return false, "", nil, err
 		}
-		type child struct {
-			status string
-			stage  pgtype.Int4
-		}
-		var children []child
-		for rows.Next() {
-			var ch child
-			if err = rows.Scan(&ch.status, &ch.stage); err != nil {
-				rows.Close()
-				return false, "", nil, err
-			}
-			children = append(children, ch)
-		}
-		rows.Close()
-		if err = rows.Err(); err != nil {
-			return false, "", nil, err
-		}
-		terminal := map[string]bool{}
-		finished := func(status string) (bool, error) {
-			if v, ok := terminal[status]; ok {
-				return v, nil
-			}
-			category, err := issuestatus.CategoryWithError(ctx, q, w.WorkspaceID, status)
-			if err != nil {
-				return false, err
-			}
-			terminal[status] = category == "done" || category == "closed"
-			return terminal[status], nil
-		}
-		total, done, inStage := 0, 0, 0
-		for _, ch := range children {
-			if c.Stage != nil && (!ch.stage.Valid || ch.stage.Int32 > *c.Stage) {
-				continue
-			}
-			if c.Stage != nil && ch.stage.Int32 == *c.Stage {
-				inStage++
-			}
-			total++
-			ok, err := finished(ch.status)
-			if err != nil {
-				return false, "", nil, err
-			}
-			if ok {
-				done++
-			}
-		}
-		met := total > 0 && done == total && (c.Stage == nil || inStage > 0)
-		return met, fmt.Sprintf("children:%d", total), map[string]any{"finished": done, "total": total}, nil
+		met, fingerprint, observed := childrenDone(c, children)
+		return met, fingerprint, observed, nil
 	case "pull_request":
 		rows, err := tx.Query(ctx, `SELECT pr.pr_number,pr.state,COALESCE(pr.snapshot_head_sha,''),COALESCE(pr.checks_rollup_state,'')
 			FROM github_pull_request pr JOIN issue_pull_request ipr ON ipr.pull_request_id=pr.id WHERE ipr.issue_id=$1`, w.IssueID)
@@ -405,4 +366,141 @@ func baselineCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.Issue
 		fingerprint = ""
 	}
 	return q.SetWakeupConditionState(ctx, db.SetWakeupConditionStateParams{ID: w.ID, ConditionState: fingerprint, NextFireAt: pgtype.Timestamptz{Time: now.Add(conditionPollInterval), Valid: true}})
+}
+
+// subIssue is one sub-issue as the children_done condition reads it. Closed
+// covers the done and closed status categories; Cancelled is closed without
+// finishing.
+type subIssue struct {
+	ID        pgtype.UUID
+	Stage     pgtype.Int4
+	Closed    bool
+	Cancelled bool
+}
+
+func loadSubIssues(ctx context.Context, tx pgx.Tx, q *db.Queries, parent, workspace pgtype.UUID) ([]subIssue, error) {
+	rows, err := tx.Query(ctx, "SELECT id,status,stage FROM issue WHERE parent_issue_id=$1 AND workspace_id=$2 ORDER BY id", parent, workspace)
+	if err != nil {
+		return nil, err
+	}
+	var children []subIssue
+	var statuses []string
+	for rows.Next() {
+		var ch subIssue
+		var status string
+		if err = rows.Scan(&ch.ID, &status, &ch.Stage); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		children = append(children, ch)
+		statuses = append(statuses, status)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	categories := map[string]string{}
+	for i, status := range statuses {
+		category, ok := categories[status]
+		if !ok {
+			if category, err = issuestatus.CategoryWithError(ctx, q, workspace, status); err != nil {
+				return nil, err
+			}
+			categories[status] = category
+		}
+		children[i].Closed = category == "done" || category == "closed"
+		children[i].Cancelled = category == "closed"
+	}
+	return children, nil
+}
+
+// childrenDone evaluates a children_done condition. A stage condition waits
+// for every staged sub-issue up to that stage; without a stage it waits for
+// every sub-issue, staged or not.
+func childrenDone(c WakeupCondition, children []subIssue) (bool, string, map[string]any) {
+	if c.EachStage {
+		return stageProgress(children)
+	}
+	total, done, inStage := 0, 0, 0
+	for _, ch := range children {
+		if c.Stage != nil && (!ch.Stage.Valid || ch.Stage.Int32 > *c.Stage) {
+			continue
+		}
+		if c.Stage != nil && ch.Stage.Int32 == *c.Stage {
+			inStage++
+		}
+		total++
+		if ch.Closed {
+			done++
+		}
+	}
+	met := total > 0 && done == total && (c.Stage == nil || inStage > 0)
+	return met, fmt.Sprintf("children:%d", total), map[string]any{"finished": done, "total": total}
+}
+
+type stageCount struct {
+	Stage     int32 `json:"stage,omitempty"`
+	Total     int   `json:"total"`
+	Closed    int   `json:"closed"`
+	Cancelled int   `json:"cancelled"`
+}
+
+// stageProgress is the system rule's reading. It holds when a stage and every
+// earlier one are closed while a later stage still waits (fingerprint
+// stage:N), and when every sub-issue, staged or not, is closed (all). The last
+// stage closing on its own does not hold: the wrap-up also waits for unstaged
+// sub-issues. The observation lists every stage for the woken agent.
+func stageProgress(children []subIssue) (bool, string, map[string]any) {
+	counts := map[int32]*stageCount{}
+	var stages []int32
+	unstaged := stageCount{}
+	closed, cancelled := 0, 0
+	for _, ch := range children {
+		sc := &unstaged
+		if ch.Stage.Valid {
+			if counts[ch.Stage.Int32] == nil {
+				counts[ch.Stage.Int32] = &stageCount{Stage: ch.Stage.Int32}
+				stages = append(stages, ch.Stage.Int32)
+			}
+			sc = counts[ch.Stage.Int32]
+		}
+		sc.Total++
+		if ch.Closed {
+			sc.Closed++
+			closed++
+		}
+		if ch.Cancelled {
+			sc.Cancelled++
+			cancelled++
+		}
+	}
+	slices.Sort(stages)
+	list := make([]stageCount, 0, len(stages))
+	var closedStage, nextStage int32
+	frontier, waiting := false, false
+	for _, stage := range stages {
+		sc := *counts[stage]
+		list = append(list, sc)
+		if waiting {
+			continue
+		}
+		if sc.Closed < sc.Total {
+			nextStage, waiting = stage, true
+			continue
+		}
+		closedStage, frontier = stage, true
+	}
+	observed := map[string]any{"total": len(children), "closed": closed, "cancelled": cancelled, "stages": list}
+	if unstaged.Total > 0 {
+		observed["unstaged"] = unstaged
+	}
+	switch {
+	case len(children) > 0 && closed == len(children):
+		observed["all"] = true
+		return true, "all", observed
+	case frontier && waiting:
+		observed["stage"], observed["next_stage"] = closedStage, nextStage
+		return true, fmt.Sprintf("stage:%d", closedStage), observed
+	}
+	return false, "", observed
 }

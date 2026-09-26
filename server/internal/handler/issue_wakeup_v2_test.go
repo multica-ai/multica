@@ -13,84 +13,76 @@ import (
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
-// A status write outside the HTTP handlers still records the child's
-// transition in its own transaction; the sweep turns it into the parent's
-// notification exactly once, with a timeline entry naming the comment.
+// A status write outside the HTTP handlers still records the child's change
+// in its own transaction; the sweep turns it into the parent's wake exactly
+// once.
 func TestChildDoneRecordedByAnyWriterAndSweptOnce(t *testing.T) {
 	fx := newChildDoneFixture(t, "in_progress")
-	dbfx.Cleanup(t, "DELETE FROM issue_child_done_event WHERE parent_id=$1", fx.parent.ID)
-	dbfx.Cleanup(t, "DELETE FROM activity_log WHERE issue_id=$1", fx.parent.ID)
-	dbfx.Exec(t, "UPDATE issue SET status='done' WHERE id=$1", fx.child.ID)
-	if n := dbfx.Count(t, "SELECT count(*) FROM issue_child_done_event WHERE parent_id=$1 AND child_id=$2 AND processed_at IS NULL", fx.parent.ID, fx.child.ID); n != 1 {
-		t.Fatalf("recorded transitions = %d, want 1", n)
-	}
-	// Re-saving a closed child is not a transition.
-	dbfx.Exec(t, "UPDATE issue SET status='cancelled' WHERE id=$1", fx.child.ID)
-	if n := dbfx.Count(t, "SELECT count(*) FROM issue_child_done_event WHERE parent_id=$1", fx.parent.ID); n != 1 {
-		t.Fatalf("closed-to-closed recorded %d transitions, want 1", n)
-	}
-	// Fresh rows belong to the request that wrote them; the sweep waits.
-	if err := testHandler.SweepChildDone(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if got := countSystemCommentsOn(t, fx.parent.ID); got != 0 {
-		t.Fatalf("sweep took a fresh transition: %d comments", got)
-	}
-	dbfx.Exec(t, "UPDATE issue_child_done_event SET created_at=created_at-interval '1 minute' WHERE parent_id=$1", fx.parent.ID)
-	for range 2 {
-		if err := testHandler.SweepChildDone(context.Background()); err != nil {
+	sweep := func() {
+		t.Helper()
+		if err := (&service.IssueWakeupService{Tasks: testHandler.TaskService}).SweepChildEvents(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
-		t.Fatalf("swept transition posted %d comments, want 1", got)
+	dbfx.Exec(t, "UPDATE issue SET status='done' WHERE id=$1", fx.child.ID)
+	if n := dbfx.Count(t, "SELECT count(*) FROM issue_child_event WHERE parent_id=$1 AND child_id=$2 AND kind='closed' AND processed_at IS NULL", fx.parent.ID, fx.child.ID); n != 1 {
+		t.Fatalf("recorded closings = %d, want 1", n)
 	}
-	var commentID, activityComment string
-	dbfx.QueryRow(t, "SELECT id::text FROM comment WHERE issue_id=$1 AND author_type='system'", fx.parent.ID).Scan(&commentID)
-	dbfx.QueryRow(t, "SELECT details->>'comment_id' FROM activity_log WHERE issue_id=$1 AND action='wakeup_triggered' AND details->>'rule'='child_done'", fx.parent.ID).Scan(&activityComment)
-	if activityComment != commentID {
-		t.Fatalf("timeline entry names comment %q, want %q", activityComment, commentID)
+	// Moving between closed statuses is not a change the rule cares about.
+	dbfx.Exec(t, "UPDATE issue SET status='cancelled' WHERE id=$1", fx.child.ID)
+	if n := dbfx.Count(t, "SELECT count(*) FROM issue_child_event WHERE parent_id=$1 AND kind IN ('closed','reopened')", fx.parent.ID); n != 1 {
+		t.Fatalf("closed-to-closed recorded %d changes, want 1", n)
 	}
-	if n := dbfx.Count(t, "SELECT count(*) FROM issue_child_done_event WHERE parent_id=$1 AND processed_at IS NULL", fx.parent.ID); n != 0 {
-		t.Fatalf("%d transitions left pending", n)
+	// Fresh rows belong to the request that wrote them; the sweep waits.
+	sweep()
+	if got := len(childDoneEntries(t, fx.parent.ID)); got != 0 {
+		t.Fatalf("sweep took a fresh change: %d entries", got)
+	}
+	dbfx.Exec(t, "UPDATE issue_child_event SET created_at=created_at-interval '1 minute' WHERE parent_id=$1", fx.parent.ID)
+	sweep()
+	sweep()
+	if got := len(childDoneEntries(t, fx.parent.ID)); got != 1 {
+		t.Fatalf("swept change fired %d entries, want 1", got)
+	}
+	if n := dbfx.Count(t, "SELECT count(*) FROM issue_child_event WHERE parent_id=$1 AND processed_at IS NULL", fx.parent.ID); n != 0 {
+		t.Fatalf("%d changes left pending", n)
 	}
 }
 
-// The request path processes its own transition; a later sweep finds nothing.
+// The request path processes its own change; a later sweep finds nothing.
 func TestChildDoneRequestPathLeavesNothingToSweep(t *testing.T) {
 	fx := newChildDoneFixture(t, "in_progress")
-	dbfx.Cleanup(t, "DELETE FROM issue_child_done_event WHERE parent_id=$1", fx.parent.ID)
-	dbfx.Cleanup(t, "DELETE FROM activity_log WHERE issue_id=$1", fx.parent.ID)
 	updateChildStatus(t, fx.child.ID, "done")
-	dbfx.Exec(t, "UPDATE issue_child_done_event SET created_at=created_at-interval '1 hour',claimed_at=claimed_at-interval '1 hour' WHERE parent_id=$1", fx.parent.ID)
-	if err := testHandler.SweepChildDone(context.Background()); err != nil {
+	dbfx.Exec(t, "UPDATE issue_child_event SET created_at=created_at-interval '1 hour',claimed_at=claimed_at-interval '1 hour' WHERE parent_id=$1", fx.parent.ID)
+	if err := (&service.IssueWakeupService{Tasks: testHandler.TaskService}).SweepChildEvents(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
-		t.Fatalf("request plus sweep posted %d comments, want 1", got)
+	if got := len(childDoneEntries(t, fx.parent.ID)); got != 1 {
+		t.Fatalf("request plus sweep fired %d entries, want 1", got)
 	}
 }
 
+// A rule created while the workspace default is off stays off until the
+// issue sets its own.
 func TestChildDoneWorkspaceDefault(t *testing.T) {
 	var settings []byte
 	dbfx.QueryRow(t, "SELECT settings FROM workspace WHERE id=$1", testWorkspaceID).Scan(&settings)
-	t.Cleanup(func() { testPool.Exec(context.Background(), "UPDATE workspace SET settings=$2 WHERE id=$1", testWorkspaceID, settings) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), "UPDATE workspace SET settings=$2 WHERE id=$1", testWorkspaceID, settings)
+	})
 	dbfx.Exec(t, `UPDATE workspace SET settings=settings||'{"system_wakeup_child_done":false}' WHERE id=$1`, testWorkspaceID)
 
 	off := newChildDoneFixture(t, "in_progress")
-	dbfx.Cleanup(t, "DELETE FROM issue_child_done_event WHERE parent_id=$1", off.parent.ID)
 	if rules := listSystemWakeupsFor(t, off.parent.ID); len(rules) != 1 || rules[0].Enabled || rules[0].WorkspaceDefault {
 		t.Fatalf("workspace default not applied: %+v", rules)
 	}
 	updateChildStatus(t, off.child.ID, "done")
-	if got := countSystemCommentsOn(t, off.parent.ID); got != 0 {
-		t.Fatalf("rule off by default still notified: %d", got)
+	if got := len(childDoneEntries(t, off.parent.ID)); got != 0 {
+		t.Fatalf("rule off by default still fired: %d", got)
 	}
 	// The issue's own setting wins over the default; a partial body keeps
 	// the instruction.
 	on := newChildDoneFixture(t, "in_progress")
-	dbfx.Cleanup(t, "DELETE FROM issue_child_done_event WHERE parent_id=$1", on.parent.ID)
-	dbfx.Cleanup(t, "DELETE FROM activity_log WHERE issue_id=$1", on.parent.ID)
 	if w := putChildDoneRule(t, on.parent.ID, map[string]any{"instruction": "Check the window first."}); w.Code != http.StatusOK {
 		t.Fatalf("save instruction: %d %s", w.Code, w.Body.String())
 	}
@@ -101,8 +93,8 @@ func TestChildDoneWorkspaceDefault(t *testing.T) {
 		t.Fatalf("override: %+v", rules)
 	}
 	updateChildStatus(t, on.child.ID, "done")
-	if got := countSystemCommentsOn(t, on.parent.ID); got != 1 {
-		t.Fatalf("issue override on: %d comments, want 1", got)
+	if got := len(childDoneEntries(t, on.parent.ID)); got != 1 {
+		t.Fatalf("issue override on: %d entries, want 1", got)
 	}
 }
 
@@ -165,14 +157,21 @@ func TestWorkspaceWakeupsListSourcesSystemRulesAndPaused(t *testing.T) {
 		dbfx.Task(t, agent, testutil.Cols{"issue_id": issue, "runtime_id": testRuntimeID, "status": "completed", "context": fmt.Sprintf(`{"wakeup_id":%q}`, paused)})
 	}
 
+	if w := putChildDoneRule(t, fx.parent.ID, map[string]any{"instruction": "Advance the next stage."}); w.Code != http.StatusOK {
+		t.Fatalf("create system rule: %d", w.Code)
+	}
 	rows, counts := listWorkspaceWakeupRows(t, "scope=all&limit=100")
 	byID := map[string]workspaceWakeupRow{}
+	var system workspaceWakeupRow
+	ok := false
 	for _, r := range rows {
 		byID[r.ID] = r
+		if r.IssueID == fx.parent.ID && r.Source == "system" {
+			system, ok = r, true
+		}
 	}
-	system, ok := byID[fx.parent.ID]
-	if !ok || system.Source != "system" || system.Rule == nil || *system.Rule != "child_done" || system.SystemStage == nil || *system.SystemStage != 1 ||
-		system.SystemRemaining == nil || *system.SystemRemaining != 1 || !system.Enabled || !system.CanManage || system.Revision != nil {
+	if !ok || system.Rule == nil || *system.Rule != "child_done" || system.SystemStage == nil || *system.SystemStage != 1 ||
+		system.SystemRemaining == nil || *system.SystemRemaining != 1 || !system.Enabled || !system.CanManage || system.Revision == nil {
 		t.Fatalf("system row: %+v (found %t)", system, ok)
 	}
 	if byID[member].Source != "member" || byID[member].Condition == nil {

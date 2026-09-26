@@ -48,26 +48,25 @@ LEFT JOIN "user" actor_user ON actor_user.id=actor_member.user_id
   WHERE t.context->>'wakeup_id'=w.id::text AND t.issue_id=w.issue_id AND t.agent_id=w.agent_id
    AND t.status IN ('queued','deferred','dispatched','running','waiting_local_directory')
  ) r ON true
- WHERE w.workspace_id= $4
+ WHERE w.workspace_id= $4 AND w.system_rule IS NULL
  UNION ALL
  -- The child-done system rule of each open parent that still waits for a
  -- sub-issue: every child when unstaged, else its lowest unfinished stage.
- -- It follows the per-issue override, then the workspace default.
- SELECT p.id,p.id,p.title,ws.issue_prefix||'-'||p.number,
-  COALESCE(ta.id,leader.id),COALESCE(ta.name,leader.name,''),'event','continuous','{}'::text[],NULL::text,
+ -- Its target is the parent's assignee (a squad's leader) at the moment.
+ SELECT w.id,w.issue_id,p.title,ws.issue_prefix||'-'||p.number,
+  COALESCE(ta.id,leader.id),COALESCE(ta.name,leader.name,''),w.kind,w.mode,w.event_types,NULL::text,
   NULL::uuid,''::text,NULL::uuid,NULL::text,NULL::uuid,
-  NULL::bigint,NULL::text,'UTC',
-  NULL::timestamptz,COALESCE(o.enabled,ws.settings->'system_wakeup_child_done' IS DISTINCT FROM 'false'::jsonb),NULL::bigint,NULL::timestamptz,NULL::uuid,NULL::text,p.created_at,
+  NULL::bigint,NULL::text,w.timezone,
+  NULL::timestamptz,w.enabled,w.revision,w.disabled_at,w.last_task_id,w.last_error,w.created_at,
   NULL::timestamptz,NULL::bigint,NULL::text,NULL::timestamptz,
-  NULL::jsonb,NULL::int,0,NULL::text,
+  w.condition,w.max_fires,w.fire_count,w.paused_reason,
   false,NULL::text,
   NULL::uuid,NULL::text,
-  false,true,0,
-  'system','child_done',ch.stage,p.assignee_type,ch.remaining
- FROM (SELECT DISTINCT ci.parent_issue_id AS id FROM issue ci WHERE ci.workspace_id= $4 AND ci.parent_issue_id IS NOT NULL) parents
- JOIN issue p ON p.id=parents.id
+  false,true,COALESCE(sr.active_runs,0)::int,
+  'system',w.system_rule,ch.stage,p.assignee_type,ch.remaining
+ FROM issue_wakeup w
+ JOIN issue p ON p.id=w.issue_id AND p.workspace_id=w.workspace_id
  JOIN workspace ws ON ws.id=p.workspace_id
- LEFT JOIN issue_system_wakeup o ON o.issue_id=p.id AND o.workspace_id=p.workspace_id AND o.rule='child_done'
  LEFT JOIN agent ta ON p.assignee_type='agent' AND ta.id=p.assignee_id AND ta.workspace_id=p.workspace_id
  LEFT JOIN squad sq ON p.assignee_type='squad' AND sq.id=p.assignee_id AND sq.workspace_id=p.workspace_id
  LEFT JOIN agent leader ON leader.id=sq.leader_id AND leader.workspace_id=p.workspace_id
@@ -79,10 +78,15 @@ LEFT JOIN "user" actor_user ON actor_user.id=actor_member.user_id
  ) agg
  CROSS JOIN LATERAL (
   SELECT (CASE WHEN agg.staged THEN agg.stage END)::int AS stage,
-   (CASE WHEN agg.staged THEN (SELECT count(*) FROM issue ci WHERE ci.parent_issue_id=p.id AND ci.workspace_id=p.workspace_id
+   (CASE WHEN agg.staged AND agg.stage IS NOT NULL THEN (SELECT count(*) FROM issue ci WHERE ci.parent_issue_id=p.id AND ci.workspace_id=p.workspace_id
      AND ci.stage=agg.stage AND NOT (ci.status IN ('done','cancelled') OR EXISTS(SELECT 1 FROM issue_status cs WHERE cs.workspace_id=ci.workspace_id AND cs.key=ci.status AND cs.category IN ('done','closed')))) ELSE agg.open_count END)::int AS remaining
  ) ch
- WHERE p.workspace_id= $4 AND agg.open_count>0 AND (NOT agg.staged OR agg.stage IS NOT NULL)
+ LEFT JOIN LATERAL (
+  SELECT count(*) AS active_runs FROM agent_task_queue t
+  WHERE t.context->>'wakeup_id'=w.id::text AND t.issue_id=w.issue_id
+   AND t.status IN ('queued','deferred','dispatched','running','waiting_local_directory')
+ ) sr ON true
+ WHERE w.workspace_id= $4 AND w.system_rule IS NOT NULL AND agg.open_count>0
   AND p.status NOT IN ('done','cancelled')
   AND NOT EXISTS(SELECT 1 FROM issue_status s WHERE s.workspace_id=p.workspace_id AND s.key=p.status AND s.category IN ('done','closed'))
 ), classified AS (
@@ -100,10 +104,8 @@ LEFT JOIN "user" actor_user ON actor_user.id=actor_member.user_id
  SELECT id, issue_id, issue_title, issue_identifier, agent_id, agent_name, kind, mode, event_types, filter_actor_type, filter_actor_id, filter_actor_name, filter_agent_id, filter_agent_name, filter_task_id, interval_seconds, cron_expression, timezone, next_fire_at, enabled, revision, disabled_at, last_task_id, last_error, created_at, expires_at, expiry_seconds, on_timeout, timed_out_at, condition, max_fires, fire_count, paused_reason, created_by_agent, created_by_name, source_agent_id, source_agent_name, issue_closed, can_manage, active_runs, source, rule, system_stage, target_type, system_remaining, scope FROM filtered ORDER BY created_at DESC,id DESC LIMIT $11::int OFFSET $10::int
 ), details AS (
  SELECT p.id, p.issue_id, p.issue_title, p.issue_identifier, p.agent_id, p.agent_name, p.kind, p.mode, p.event_types, p.filter_actor_type, p.filter_actor_id, p.filter_actor_name, p.filter_agent_id, p.filter_agent_name, p.filter_task_id, p.interval_seconds, p.cron_expression, p.timezone, p.next_fire_at, p.enabled, p.revision, p.disabled_at, p.last_task_id, p.last_error, p.created_at, p.expires_at, p.expiry_seconds, p.on_timeout, p.timed_out_at, p.condition, p.max_fires, p.fire_count, p.paused_reason, p.created_by_agent, p.created_by_name, p.source_agent_id, p.source_agent_name, p.issue_closed, p.can_manage, p.active_runs, p.source, p.rule, p.system_stage, p.target_type, p.system_remaining, p.scope,r.status AS last_task_status,
-  (CASE WHEN p.source='system' THEN (SELECT count(*) FROM agent_task_queue t7 JOIN comment sc ON sc.id=t7.trigger_comment_id AND sc.author_type='system'
-    WHERE t7.issue_id=p.issue_id AND t7.created_at>now()-interval '7 days')
-   ELSE (SELECT count(*) FROM agent_task_queue t7 WHERE t7.context->>'wakeup_id'=p.id::text AND t7.issue_id=p.issue_id
-    AND t7.created_at>now()-interval '7 days') END)::int AS runs_7d,
+  (SELECT count(*) FROM agent_task_queue t7 WHERE t7.context->>'wakeup_id'=p.id::text AND t7.issue_id=p.issue_id
+    AND t7.created_at>now()-interval '7 days')::int AS runs_7d,
   CASE WHEN r.id IS NOT NULL THEN jsonb_build_object(
    'id',r.id,'agent_id',r.agent_id,'runtime_id',r.runtime_id,'issue_id',r.issue_id,'wakeup_id',p.id,
    'status',r.status,'priority',r.priority,'created_at',r.created_at,'started_at',r.started_at,
@@ -113,12 +115,12 @@ LEFT JOIN "user" actor_user ON actor_user.id=actor_member.user_id
  LEFT JOIN LATERAL (
   SELECT candidate.id, candidate.agent_id, candidate.runtime_id, candidate.issue_id, candidate.status, candidate.priority, candidate.created_at, candidate.started_at, candidate.dispatched_at, candidate.completed_at, candidate.active FROM (
    (SELECT t.id,t.agent_id,t.runtime_id,t.issue_id,t.status,t.priority,t.created_at,t.started_at,t.dispatched_at,t.completed_at,1 AS active
-    FROM agent_task_queue t WHERE t.context->>'wakeup_id'=p.id::text AND t.issue_id=p.issue_id AND t.agent_id=p.agent_id
+    FROM agent_task_queue t WHERE t.context->>'wakeup_id'=p.id::text AND t.issue_id=p.issue_id AND (p.source='system' OR t.agent_id=p.agent_id)
      AND t.status IN ('queued','deferred','dispatched','running','waiting_local_directory')
     ORDER BY (t.status IN ('running','waiting_local_directory','dispatched')) DESC,t.created_at DESC,t.id DESC LIMIT 1)
    UNION ALL
    (SELECT t.id,t.agent_id,t.runtime_id,t.issue_id,t.status,t.priority,t.created_at,t.started_at,t.dispatched_at,t.completed_at,0 AS active
-    FROM agent_task_queue t WHERE t.context->>'wakeup_id'=p.id::text AND t.issue_id=p.issue_id AND t.agent_id=p.agent_id
+    FROM agent_task_queue t WHERE t.context->>'wakeup_id'=p.id::text AND t.issue_id=p.issue_id AND (p.source='system' OR t.agent_id=p.agent_id)
      AND t.status NOT IN ('queued','deferred','dispatched','running','waiting_local_directory')
     ORDER BY t.created_at DESC,t.id DESC LIMIT 1)
   ) candidate ORDER BY active DESC LIMIT 1

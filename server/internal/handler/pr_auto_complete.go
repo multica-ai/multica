@@ -202,7 +202,7 @@ func (h *Handler) maybeAutoCompleteIssue(ctx context.Context, workspaceID, issue
 	// A merged PR is the most common way a sub-issue reaches done; the parent
 	// hears about it on the same path as a manual status change.
 	if updated.ParentIssueID.Valid {
-		_ = h.processChildDoneEvents(ctx, updated.ParentIssueID)
+		h.processChildEvents(ctx, updated.ParentIssueID)
 	}
 
 	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)

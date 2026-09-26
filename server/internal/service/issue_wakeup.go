@@ -312,7 +312,7 @@ func (s *IssueWakeupService) EditInstruction(ctx context.Context, issueID, id, m
 	if w.IssueID != issue.ID || w.WorkspaceID != issue.WorkspaceID {
 		return pgx.ErrNoRows
 	}
-	if w.CreatedBy != member && membership.Role != "owner" && membership.Role != "admin" {
+	if w.SystemRule.Valid || (w.CreatedBy != member && membership.Role != "owner" && membership.Role != "admin") {
 		return ErrWakeupForbidden
 	}
 	agent, err := q.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: w.AgentID, WorkspaceID: issue.WorkspaceID})
@@ -378,6 +378,9 @@ func (s *IssueWakeupService) save(ctx context.Context, issueID, member, source, 
 		}
 		if old.IssueID != issueID || old.WorkspaceID != issue.WorkspaceID {
 			return out, pgx.ErrNoRows
+		}
+		if old.SystemRule.Valid {
+			return out, ErrWakeupForbidden
 		}
 		if enable.Revision < 1 {
 			return out, fmt.Errorf("%w: revision is required", ErrWakeupInput)
@@ -521,6 +524,9 @@ func (s *IssueWakeupService) save(ctx context.Context, issueID, member, source, 
 		if old.IssueID != issueID || old.WorkspaceID != issue.WorkspaceID {
 			return out, pgx.ErrNoRows
 		}
+		if old.SystemRule.Valid {
+			return out, ErrWakeupForbidden
+		}
 		membership, e := q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: member, WorkspaceID: issue.WorkspaceID})
 		if e != nil {
 			return out, ErrWakeupForbidden
@@ -654,7 +660,11 @@ func (s *IssueWakeupService) Tick(ctx context.Context) error {
 		}
 		// Outcome writes must not turn a busy rule row into another batch-wide
 		// wait. Use the batch context, not dispatch's expired per-rule context.
-		if err = s.dispatch(ctx, w); err != nil {
+		dispatch := s.dispatch
+		if w.SystemRule.Valid {
+			dispatch = s.dispatchSystem
+		}
+		if err = dispatch(ctx, w); err != nil {
 			errs = append(errs, fmt.Errorf("wakeup %s: %w", util.UUIDToString(w.ID), err))
 			outcomeCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 			_ = s.Tasks.Queries.NoteWakeupFailure(outcomeCtx, db.NoteWakeupFailureParams{ID: w.ID, LastError: pgtype.Text{String: truncateForSummary(err.Error(), 500), Valid: true}})
@@ -1017,7 +1027,7 @@ func (s *IssueWakeupService) Disable(ctx context.Context, issueID, id, member pg
 	if out.IssueID != issue.ID || out.WorkspaceID != issue.WorkspaceID {
 		return db.IssueWakeup{}, pgx.ErrNoRows
 	}
-	if out.CreatedBy != member && membership.Role != "owner" && membership.Role != "admin" {
+	if out.SystemRule.Valid || (out.CreatedBy != member && membership.Role != "owner" && membership.Role != "admin") {
 		return db.IssueWakeup{}, ErrWakeupForbidden
 	}
 	_, err = tx.Exec(ctx, "UPDATE issue_wakeup SET enabled=false,disabled_at=COALESCE(disabled_at,now()),updated_at=now() WHERE id=$1", id)
@@ -1063,6 +1073,18 @@ func (s *IssueWakeupService) CheckClaim(ctx context.Context, task db.AgentTaskQu
 		return ErrWakeupForbidden
 	}
 	if err != nil {
+		return err
+	}
+	if w.SystemRule.Valid {
+		// A system rule's run targets the assignee resolved when it fired; it
+		// is claimable while the rule is on and that agent can still run.
+		if !w.Enabled || w.DisabledAt.Valid || w.Revision != source.Revision || w.IssueID != task.IssueID {
+			return ErrWakeupForbidden
+		}
+		agent, err := s.Tasks.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: task.AgentID, WorkspaceID: w.WorkspaceID})
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && (agent.ArchivedAt.Valid || !agent.RuntimeID.Valid)) {
+			return ErrWakeupForbidden
+		}
 		return err
 	}
 	if w.DisabledAt.Valid || w.Revision != source.Revision || w.IssueID != task.IssueID || w.AgentID != task.AgentID || w.CreatedBy != task.OriginatorUserID {

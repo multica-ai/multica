@@ -750,7 +750,7 @@ func writeWorkflowAutopilot(b *strings.Builder) {
 // the re-trigger (member update / stage barrier) that confirms the overall
 // goal is met. Flipping the parent on the dispatch turn would mark unfinished
 // multi-stage work as ready for review; see the Squad Operating Protocol and
-// child-done system comments.
+// the sub-issue wakeup (service/issue_wakeup_system.go).
 //
 // ctx.IsSquadLeader is a PER-TASK role, not agent configuration: branching on
 // it here does move brief bytes when the same agent runs leader one turn and
