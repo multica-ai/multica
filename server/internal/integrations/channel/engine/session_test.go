@@ -862,6 +862,20 @@ func TestAppendUserMessageClearsLegacyTitleForImplicitMediaFirstTurn(t *testing.
 	}
 }
 
+func TestBindMediaRefs_PreservesUnavailableFileExplanation(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	body := "[File]\n[File unavailable: file exceeds the 10 MB limit]"
+	if err := s.BindMediaRefs(context.Background(), BindMediaInput{
+		MessageID: uid(2), SessionID: uid(1), WorkspaceID: uid(9), Sender: uid(7), Body: body,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if f.updatedMediaContent != body || f.mediaCleared != 1 || len(f.attachments) != 0 {
+		t.Fatalf("body=%q cleared=%d attachments=%d", f.updatedMediaContent, f.mediaCleared, len(f.attachments))
+	}
+}
+
 func TestBindMediaRefs_CreatesAndLinksChatAttachments(t *testing.T) {
 	f := newFake()
 	s := newTestSession(f)

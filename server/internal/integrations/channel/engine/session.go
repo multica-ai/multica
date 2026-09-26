@@ -919,6 +919,19 @@ func (s *ChatSession) BindMediaRefsWithResult(ctx context.Context, in BindMediaI
 			}
 			return BindMediaResult{}, err
 		}
+	} else if in.Body != "" && !in.IssueID.Valid {
+		// A resolver can replace an unavailable file's placeholder with an
+		// explanation even when it could not produce any attachments. Preserve
+		// that body before promoting the waiting chat task.
+		rows, err := qtx.UpdateChatMessageContentForChannelMedia(ctx, db.UpdateChatMessageContentForChannelMediaParams{
+			ID: in.MessageID, ChatSessionID: in.SessionID, Content: in.Body,
+		})
+		if err != nil {
+			return BindMediaResult{}, fmt.Errorf("update unavailable media body: %w", err)
+		}
+		if rows != 1 {
+			return BindMediaResult{}, fmt.Errorf("update unavailable media body: updated %d rows", rows)
+		}
 	}
 	if err := s.clearMediaPending(ctx, qtx, in); err != nil {
 		return BindMediaResult{}, err
