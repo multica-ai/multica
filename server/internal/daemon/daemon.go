@@ -315,8 +315,17 @@ type workspaceState struct {
 	// coAuthorPublishMu serializes publication of the Co-authored-by verdict
 	// for this workspace. Unlike the fields above it is NOT guarded by
 	// Daemon.mu: it exists precisely so the verdict can be read and written as
-	// one step without holding the daemon's central lock across file I/O.
-	coAuthorPublishMu sync.Mutex
+	// one step without holding the daemon's central lock across file I/O. Its
+	// context-aware wait keeps a canceled checkout from sitting behind another
+	// foreground state write.
+	coAuthorPublishMu contextLock
+	// coAuthorReconcileGeneration and coAuthorReconcileQueued are guarded by
+	// coAuthorPublishMu. Legacy hook reconciliation can scan historical
+	// workdirs, so it runs outside the foreground publish lock. A single worker
+	// coalesces updates and repeats with the latest verdict when a newer publish
+	// lands while a sweep is in flight.
+	coAuthorReconcileGeneration uint64
+	coAuthorReconcileQueued     bool
 	// profileSetSig is a content hash of the workspace's custom runtime
 	// profile list (MUL-3332) as last seen from the server. An on-demand
 	// refresh compares the live signature with this cached value; any drift
@@ -3510,7 +3519,9 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 	// installed by earlier checkouts read that file at commit time, so this is
 	// what makes a toggled-off setting apply to checkouts that already exist
 	// instead of only to the next one (MUL-6921).
-	d.persistCoAuthoredByState(workspaceID)
+	if err := d.persistCoAuthoredByStateContext(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 
 	return resp, nil
 }
@@ -3538,7 +3549,11 @@ type coAuthoredByPublisher interface {
 // one that writes last is the one that read last — a publisher that started
 // before a settings update can never overwrite the value that update produced.
 func (d *Daemon) persistCoAuthoredByState(workspaceID string) {
-	d.publishCoAuthoredByState(workspaceID, d.workspaceCoAuthoredByEnabled)
+	_ = d.persistCoAuthoredByStateContext(context.Background(), workspaceID)
+}
+
+func (d *Daemon) persistCoAuthoredByStateContext(ctx context.Context, workspaceID string) error {
+	return d.publishCoAuthoredByStateContext(ctx, workspaceID, d.workspaceCoAuthoredByEnabled)
 }
 
 // publishCoAuthoredByState is persistCoAuthoredByState with the verdict read
@@ -3547,32 +3562,84 @@ func (d *Daemon) persistCoAuthoredByState(workspaceID string) {
 // the one ordering the lock exists to guarantee and cannot be observed
 // otherwise.
 func (d *Daemon) publishCoAuthoredByState(workspaceID string, verdict func(string) bool) {
+	_ = d.publishCoAuthoredByStateContext(context.Background(), workspaceID, verdict)
+}
+
+func (d *Daemon) publishCoAuthoredByStateContext(ctx context.Context, workspaceID string, verdict func(string) bool) error {
 	if d.repoCache == nil || workspaceID == "" {
-		return
+		return nil
 	}
 	cache, ok := d.repoCache.(coAuthoredByPublisher)
 	if !ok {
-		return
+		return nil
 	}
 
 	d.mu.Lock()
 	ws := d.workspaces[workspaceID]
 	d.mu.Unlock()
 	if ws == nil {
-		return
+		return nil
 	}
 
-	ws.coAuthorPublishMu.Lock()
+	if err := ws.coAuthorPublishMu.Lock(ctx); err != nil {
+		return err
+	}
 	defer ws.coAuthorPublishMu.Unlock()
 
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
 	enabled := verdict(workspaceID)
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
 	if err := cache.WriteCoAuthoredByState(workspaceID, enabled); err != nil {
 		d.logger.Warn("record co-authored-by state failed", "workspace_id", workspaceID, "error", err)
 	}
-	if err := cache.ReconcileCoAuthoredByHooks(workspaceID, enabled); err != nil {
-		d.logger.Warn("reconcile co-authored-by hooks failed", "workspace_id", workspaceID, "error", err)
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
 	}
-	d.reconcileIsolatedCoAuthoredByHooks(cache, workspaceID, enabled)
+
+	ws.coAuthorReconcileGeneration++
+	if !ws.coAuthorReconcileQueued {
+		ws.coAuthorReconcileQueued = true
+		d.bgSyncs.Add(1)
+		go d.reconcileCoAuthoredByHooksInBackground(workspaceID, ws, cache)
+	}
+	return nil
+}
+
+// reconcileCoAuthoredByHooksInBackground brings hooks installed by older
+// daemon releases in line with the state file without making checkout
+// readiness wait for a historical workdir scan. A newer publish during a
+// sweep increments the generation; the worker then applies the latest verdict
+// before it exits, so an older sweep cannot leave hooks with stale state.
+func (d *Daemon) reconcileCoAuthoredByHooksInBackground(workspaceID string, ws *workspaceState, cache coAuthoredByPublisher) {
+	defer d.bgSyncs.Done()
+
+	for {
+		if err := ws.coAuthorPublishMu.Lock(context.Background()); err != nil {
+			return
+		}
+		generation := ws.coAuthorReconcileGeneration
+		enabled := d.workspaceCoAuthoredByEnabled(workspaceID)
+		ws.coAuthorPublishMu.Unlock()
+
+		if err := cache.ReconcileCoAuthoredByHooks(workspaceID, enabled); err != nil {
+			d.logger.Warn("reconcile co-authored-by hooks failed", "workspace_id", workspaceID, "error", err)
+		}
+		d.reconcileIsolatedCoAuthoredByHooks(cache, workspaceID, enabled)
+
+		if err := ws.coAuthorPublishMu.Lock(context.Background()); err != nil {
+			return
+		}
+		if ws.coAuthorReconcileGeneration == generation {
+			ws.coAuthorReconcileQueued = false
+			ws.coAuthorPublishMu.Unlock()
+			return
+		}
+		ws.coAuthorPublishMu.Unlock()
+	}
 }
 
 // isolatedCheckoutScanDepth bounds how far below an env root the sweep looks
@@ -3961,6 +4028,9 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return err
 	}
 	defer ws.repoRefreshMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
 
 	if !cacheHitOnEntry && d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
 		return nil
@@ -3969,6 +4039,9 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 	resp, err := d.refreshWorkspaceRepos(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("refresh workspace repos: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
 	}
 
 	if !d.workspaceRepoAllowed(workspaceID, repoURL) {
