@@ -57,6 +57,12 @@ func deliveryInvariantFixtures() map[string]TaskContextForEnv {
 	}
 }
 
+// inlineBlocksRule is the brief's one-line rule for charts and diagrams
+// (MUL-7649). Surfaces the web renders carry it; surfaces that deliver plain
+// text (channel chats, autopilot results, quick-create stdout) must not, since
+// a fenced html/mermaid block does not render there.
+const inlineBlocksRule = "fenced `html` or `mermaid` code block"
+
 func TestBriefDeliveryInvariantIsAlwaysOn(t *testing.T) {
 	t.Parallel()
 
@@ -86,17 +92,17 @@ func TestBriefSurfaceDeliveryPolicy(t *testing.T) {
 	}{
 		// Issue surfaces: files ride the comment.
 		"comment": {
-			mustHave: []string{"`--attachment <path>` to `multica issue comment add`"},
+			mustHave: []string{"`--attachment <path>` to `multica issue comment add`", inlineBlocksRule},
 			mustNot:  []string{"multica attachment upload"},
 		},
 		"assignment": {
-			mustHave: []string{"`--attachment <path>` to `multica issue comment add`"},
+			mustHave: []string{"`--attachment <path>` to `multica issue comment add`", inlineBlocksRule},
 			mustNot:  []string{"multica attachment upload"},
 		},
 		// Direct chat: the upload binds to the reply and the browser renders a
 		// card, so the file can sit inline where the agent puts it.
 		"chat_direct": {
-			mustHave: []string{"`multica attachment upload <local-path>`"},
+			mustHave: []string{"`multica attachment upload <local-path>`", inlineBlocksRule},
 			mustNot:  []string{"text-only", "separate message"},
 		},
 		// A channel-backed chat names its platform, defers the verdict to the
@@ -116,6 +122,7 @@ func TestBriefSurfaceDeliveryPolicy(t *testing.T) {
 				"separate message",
 				"conversation is text-only",
 				"does NOT apply",
+				inlineBlocksRule,
 			},
 		},
 		"chat_wecom_no_store": {
@@ -128,6 +135,7 @@ func TestBriefSurfaceDeliveryPolicy(t *testing.T) {
 				"separate message",
 				"conversation is text-only",
 				"does NOT apply",
+				inlineBlocksRule,
 			},
 		},
 		"chat_wecom_old_server": {
@@ -140,6 +148,7 @@ func TestBriefSurfaceDeliveryPolicy(t *testing.T) {
 				"separate message",
 				"conversation is text-only",
 				"does NOT apply",
+				inlineBlocksRule,
 			},
 		},
 		// No deployment carries files into Slack or Lark today, but the brief
@@ -171,6 +180,7 @@ func TestBriefSurfaceDeliveryPolicy(t *testing.T) {
 				"separate message",
 				"conversation is text-only",
 				"does NOT apply",
+				inlineBlocksRule,
 			},
 		},
 		"chat_feishu": {
@@ -184,15 +194,16 @@ func TestBriefSurfaceDeliveryPolicy(t *testing.T) {
 				"separate message",
 				"conversation is text-only",
 				"does NOT apply",
+				inlineBlocksRule,
 			},
 		},
 		"autopilot": {
 			mustHave: []string{"this surface is text-only"},
-			mustNot:  []string{"multica attachment upload"},
+			mustNot:  []string{"multica attachment upload", inlineBlocksRule},
 		},
 		"quickcreate": {
 			mustHave: []string{"your stdout is text-only", "`multica issue create` call itself via `--attachment <path>`"},
-			mustNot:  []string{"multica attachment upload"},
+			mustNot:  []string{"multica attachment upload", inlineBlocksRule},
 		},
 	}
 
