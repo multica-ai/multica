@@ -22,8 +22,12 @@ const maxPreviewTriggerIssues = 500
 // (canEnqueueSquadLeader), so a write must NOT re-run or sink it — it passes
 // allow-all. The self-loop check needs the request's X-Task-ID header.
 func (h *Handler) issueTriggerWriteProbe(r *http.Request, actorType, actorID string, issue db.Issue) service.IssueTriggerProbe {
+	originatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
 	return service.IssueTriggerProbe{
 		CanAccessAgent: nil, // allow-all; gate lives at the write boundary
+		CanInvokeOnStatus: func(agent db.Agent) bool {
+			return h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, uuidToString(issue.WorkspaceID))
+		},
 		IsSelfLoop: func() bool {
 			return h.isAgentRunningOnIssue(r, actorType, issue)
 		},
@@ -81,16 +85,21 @@ func (h *Handler) shouldSuppressActiveSelfAssignment(ctx context.Context, actorT
 // clients and travels only with a run that actually starts. The squad path
 // still flows through enqueueSquadLeaderTask so the leader access gate and
 // pending dedup stay in one place.
-func (h *Handler) dispatchIssueRun(ctx context.Context, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID, handoffNote string) {
+func (h *Handler) dispatchIssueRun(ctx context.Context, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID, handoffNote string) bool {
 	switch trigger.AssigneeType {
 	case "agent":
 		// The member who performed this assign/promote is the accountable human
 		// for the run (MUL-4302 §4). An agent actor is not a human, so only a
 		// member actor is threaded; otherwise attribution falls back to the chain.
-		_, _ = h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote, memberActorUserID(actorType, actorID))
+		_, err := h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote, memberActorUserID(actorType, actorID))
+		if err != nil {
+			slog.Warn("enqueue issue run failed", "issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.AgentID), "error", err)
+		}
+		return err == nil
 	case "squad":
-		h.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, actorType, actorID, handoffNote)
+		return h.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, actorType, actorID, handoffNote)
 	}
+	return false
 }
 
 // memberActorUserID returns the acting member's user id as a pgtype.UUID when the
@@ -120,6 +129,8 @@ type IssueTriggerPreviewRequest struct {
 	AssigneeType *string `json:"assignee_type"`
 	AssigneeID   *string `json:"assignee_id"`
 	Status       *string `json:"status"`
+	// SuppressRun mirrors the write-time no-start flag for callers that preview it.
+	SuppressRun bool `json:"suppress_run,omitempty"`
 }
 
 // IssueTriggerPreviewItem is one issue that WILL start a run under the
@@ -163,7 +174,6 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "too many issue_ids")
 		return
 	}
-
 	// Resolve the prospective assignee once — a malformed id is a deterministic
 	// 400, never a silent miscount.
 	var (
@@ -179,6 +189,10 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 		newAssigneeType = pgtype.Text{String: *req.AssigneeType, Valid: true}
 		newAssigneeID = id
 		hasNewAssignee = true
+	}
+	if req.SuppressRun {
+		writeJSON(w, http.StatusOK, IssueTriggerPreviewResponse{Triggers: []IssueTriggerPreviewItem{}})
+		return
 	}
 
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)

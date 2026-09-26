@@ -3992,6 +3992,34 @@ func TestRunIssueStatusNoStartSendsSuppressRun(t *testing.T) {
 	}
 }
 
+func TestRunIssueStatusReportsResumeDispatchFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "blocked"})
+		case r.Method == http.MethodPut && r.URL.Path == "/api/issues/issue-1":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id": "issue-1", "identifier": "MUL-1", "status": "todo",
+				"run_dispatch": map[string]any{"status": "not_started", "reason": "Check assignee runtime."},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	capture := captureStderr(t)
+	defer capture.restore()
+	if err := runIssueStatus(newIssueStatusTestCmd(), []string{"MUL-1", "todo"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := capture.read(); !strings.Contains(got, "Run not started: Check assignee runtime.") {
+		t.Fatalf("status command hid dispatch failure: %q", got)
+	}
+}
+
 func TestRunIssueAssignNoStartSendsSuppressRun(t *testing.T) {
 	const agentID = "5fb87ac7-23b5-4a7a-81fa-ed295a54545d"
 	var body map[string]any

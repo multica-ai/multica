@@ -121,6 +121,7 @@ export interface IssueTriggerPreviewParams {
   assigneeType?: IssueAssigneeType | null;
   assigneeId?: string | null;
   status?: IssueStatus;
+  suppressRun?: boolean;
 }
 
 /** One issue that WILL start a run under the prospective write. `agent_id` is

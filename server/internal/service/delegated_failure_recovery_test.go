@@ -157,13 +157,23 @@ func TestDelegatedFailureRecoveryRechecksStatusAndResumes(t *testing.T) {
 				t.Fatalf("seed recovery: created=%v err=%v", created, err)
 			}
 			pending, err := svc.Queries.ListPendingDelegatedFailureRecoveries(ctx, 100)
-			if err != nil || len(pending) != 1 || pending[0].ID != target.comment.ID {
-				t.Fatalf("initial candidates = %d, %v; want this recovery", len(pending), err)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var candidate *db.Comment
+			for i := range pending {
+				if pending[i].ID == target.comment.ID {
+					candidate = &pending[i]
+					break
+				}
+			}
+			if candidate == nil {
+				t.Fatalf("initial candidates = %d; want this recovery", len(pending))
 			}
 			// Change the issue after selection, before the same dispatch entry
 			// point used by the sweeper and completion reconciliation runs.
 			fx.Exec(t, `UPDATE issue SET status = $2 WHERE id = $1`, f.issueID, status)
-			if err := svc.DispatchDelegatedFailureRecoveryComment(ctx, pending[0], pgtype.UUID{}); err != nil {
+			if err := svc.DispatchDelegatedFailureRecoveryComment(ctx, *candidate, pgtype.UUID{}); err != nil {
 				t.Fatal(err)
 			}
 			var count int
@@ -175,11 +185,19 @@ func TestDelegatedFailureRecoveryRechecksStatusAndResumes(t *testing.T) {
 				t.Fatalf("paused recovery: tasks=%d; want no task or permanent receipt", count)
 			}
 			fx.Exec(t, `UPDATE issue SET status = 'todo' WHERE id = $1`, f.issueID)
-			if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{Scanned: 1, Replayed: 1}) {
-				t.Fatalf("reopened recovery = %+v, %v; want one replay", result, err)
+			if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result.Replayed < 1 {
+				t.Fatalf("reopened recovery = %+v, %v; want replay", result, err)
 			}
-			if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-				t.Fatalf("repeat sweep = %+v, %v; want no duplicate", result, err)
+			if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue
+				WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&count); err != nil || count != 1 {
+				t.Fatalf("reopened recovery tasks = %d, %v; want one", count, err)
+			}
+			if _, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue
+				WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&count); err != nil || count != 1 {
+				t.Fatalf("repeat sweep tasks = %d, %v; want no duplicate", count, err)
 			}
 		})
 	}

@@ -1583,6 +1583,7 @@ export class ApiClient {
         ...(params.assigneeType ? { assignee_type: params.assigneeType } : {}),
         ...(params.assigneeId ? { assignee_id: params.assigneeId } : {}),
         ...(params.status ? { status: params.status } : {}),
+        ...(params.suppressRun ? { suppress_run: true } : {}),
       }),
     });
     return parseWithFallback(raw, IssueTriggerPreviewSchema, { triggers: [], total_count: 0 }, {

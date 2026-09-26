@@ -43,6 +43,10 @@ type IssueResponse struct {
 	Title       string  `json:"title"`
 	Description *string `json:"description"`
 	Status      string  `json:"status"`
+	// RunDispatch is returned on an explicit hand-back to todo so the caller
+	// can distinguish a status write from an accepted agent run. It is a
+	// response to this write, not a persisted property of the issue.
+	RunDispatch *IssueRunDispatchResponse `json:"run_dispatch,omitempty"`
 	// StatusCategory encodes lifecycle using the legacy seven-value wire enum. It is
 	// omitted when an endpoint cannot resolve a custom status, so consumers must
 	// fall back to their catalog rather than treat a blank as "no category".
@@ -107,6 +111,11 @@ type IssueResponse struct {
 	SourceContext *sourceContextDetailResponse `json:"source_context,omitempty"`
 	// duplicateOfIssueID is the raw mark, kept off the wire; see DuplicateOf.
 	duplicateOfIssueID pgtype.UUID
+}
+
+type IssueRunDispatchResponse struct {
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // IssueRefResponse names another issue inside a response: enough to render
@@ -4076,6 +4085,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// it stops in-flight agent runs, so that implicit coupling is gone
 	// (MUL-4465). Deleting an issue still cancels its tasks (see DeleteIssue),
 	// because the tasks' owning issue ceases to exist.
+	resumeRequested := h.IssueService.IsResumeTransition(r.Context(), issue, prevIssue.Status, statusChanged)
 	if trigger, ok := h.IssueService.WillEnqueueRun(r.Context(),
 		service.IssueTriggerInput{
 			Issue:           issue,
@@ -4084,8 +4094,19 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			StatusChanged:   statusChanged,
 		},
 		h.issueTriggerWriteProbe(r, actorType, actorID, issue),
-	); ok && !req.SuppressRun {
-		h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.HandoffNote)
+	); resumeRequested && req.SuppressRun {
+		resp.RunDispatch = &IssueRunDispatchResponse{Status: "suppressed", Reason: "Run start suppressed by suppress_run."}
+	} else if !ok && resumeRequested {
+		resp.RunDispatch = &IssueRunDispatchResponse{Status: "not_started", Reason: "Check the assignee's runtime and invocation access, or an existing active issue run; then rerun when ready."}
+	} else if ok && !req.SuppressRun {
+		queued := h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.HandoffNote)
+		if resumeRequested {
+			if queued {
+				resp.RunDispatch = &IssueRunDispatchResponse{Status: "queued"}
+			} else {
+				resp.RunDispatch = &IssueRunDispatchResponse{Status: "not_started", Reason: "The run could not be queued. Check assignee access and the task queue, then rerun."}
+			}
+		}
 	}
 
 	// Platform-driven parent notification: when this issue transitions into
