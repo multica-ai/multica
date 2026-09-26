@@ -1,6 +1,9 @@
 -- name: ListPluginActionIssues :many
 -- Stable number-descending keyset pagination gives a scheduler a deterministic
 -- candidate page even when positions or timestamps change concurrently.
+-- status filtering takes pre-expanded concrete keys (issuestatus.ExpandCategories)
+-- so built-in statuses match in workspaces whose catalog seed has not landed,
+-- and the (workspace_id, status) index stays usable (MUL-6243).
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at,
@@ -17,7 +20,7 @@ LEFT JOIN agent_task_queue t ON t.issue_id = i.id
 WHERE i.workspace_id = sqlc.arg('workspace_id')::uuid
   AND (sqlc.narg('issue_scope')::uuid IS NULL OR i.id = sqlc.narg('issue_scope')::uuid)
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status')::text)
-  AND (sqlc.narg('status_category')::text IS NULL OR s.category = sqlc.narg('status_category')::text)
+  AND (sqlc.narg('status_keys')::text[] IS NULL OR i.status = ANY(sqlc.narg('status_keys')::text[]))
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id')::uuid)
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id')::uuid)
   AND (

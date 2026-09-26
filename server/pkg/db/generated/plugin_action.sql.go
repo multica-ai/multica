@@ -28,7 +28,7 @@ LEFT JOIN agent_task_queue t ON t.issue_id = i.id
 WHERE i.workspace_id = $1::uuid
   AND ($2::uuid IS NULL OR i.id = $2::uuid)
   AND ($3::text IS NULL OR i.status = $3::text)
-  AND ($4::text IS NULL OR s.category = $4::text)
+  AND ($4::text[] IS NULL OR i.status = ANY($4::text[]))
   AND ($5::uuid IS NULL OR i.project_id = $5::uuid)
   AND ($6::uuid IS NULL OR i.assignee_id = $6::uuid)
   AND (
@@ -52,7 +52,7 @@ type ListPluginActionIssuesParams struct {
 	WorkspaceID    pgtype.UUID `json:"workspace_id"`
 	IssueScope     pgtype.UUID `json:"issue_scope"`
 	Status         pgtype.Text `json:"status"`
-	StatusCategory pgtype.Text `json:"status_category"`
+	StatusKeys     []string    `json:"status_keys"`
 	ProjectID      pgtype.UUID `json:"project_id"`
 	AssigneeID     pgtype.UUID `json:"assignee_id"`
 	HasActiveTasks pgtype.Bool `json:"has_active_tasks"`
@@ -90,12 +90,15 @@ type ListPluginActionIssuesRow struct {
 
 // Stable number-descending keyset pagination gives a scheduler a deterministic
 // candidate page even when positions or timestamps change concurrently.
+// status filtering takes pre-expanded concrete keys (issuestatus.ExpandCategories)
+// so built-in statuses match in workspaces whose catalog seed has not landed,
+// and the (workspace_id, status) index stays usable (MUL-6243).
 func (q *Queries) ListPluginActionIssues(ctx context.Context, arg ListPluginActionIssuesParams) ([]ListPluginActionIssuesRow, error) {
 	rows, err := q.db.Query(ctx, listPluginActionIssues,
 		arg.WorkspaceID,
 		arg.IssueScope,
 		arg.Status,
-		arg.StatusCategory,
+		arg.StatusKeys,
 		arg.ProjectID,
 		arg.AssigneeID,
 		arg.HasActiveTasks,

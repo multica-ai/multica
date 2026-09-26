@@ -377,7 +377,17 @@ func (h *Handler) ListPluginIssues(w http.ResponseWriter, r *http.Request) {
 			publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "status_category is invalid")
 			return
 		}
-		params.StatusCategory = pgtype.Text{String: category, Valid: true}
+		// Expand to concrete status keys rather than filtering through the
+		// catalog join: built-in statuses are valid in workspaces whose
+		// catalog seed has not landed, and the key-set predicate keeps the
+		// (workspace_id, status) index usable. Same pattern as the issue
+		// list endpoints. (MUL-6243)
+		keys, err := issuestatus.ExpandCategories(r.Context(), h.Queries, caller.WorkspaceID, []string{category})
+		if err != nil {
+			publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to resolve status categories")
+			return
+		}
+		params.StatusKeys = keys
 	}
 	for _, filter := range []struct {
 		name   string
