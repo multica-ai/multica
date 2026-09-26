@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -57,6 +59,7 @@ func newGCCheckServer(t *testing.T, rec *gcCheckRecorder) *httptest.Server {
 		}
 		var body struct {
 			IssueIDs []string `json:"issue_ids"`
+			TaskIDs  []string `json:"task_ids"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 
@@ -80,8 +83,14 @@ func newGCCheckServer(t *testing.T, rec *gcCheckRecorder) *httptest.Server {
 				"updated_at": time.Now().UTC().Format(time.RFC3339Nano),
 			})
 		}
+		environments := make([]map[string]any, 0, len(body.TaskIDs))
+		for _, id := range body.TaskIDs {
+			environments = append(environments, map[string]any{
+				"task_id": id, "found": true, "resume_candidate": true,
+			})
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"issues": issues})
+		_ = json.NewEncoder(w).Encode(map[string]any{"issues": issues, "task_environments": environments})
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -107,6 +116,7 @@ func writeDiskUsageIssueTask(t *testing.T, root, wsID, taskShort, issueID string
 	meta, err := json.Marshal(map[string]any{
 		"kind":         "issue",
 		"issue_id":     issueID,
+		"task_id":      "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
 		"workspace_id": wsID,
 		"completed_at": time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339Nano),
 	})
@@ -169,6 +179,124 @@ func TestDiskUsageNeedsParentStatus(t *testing.T) {
 	}
 }
 
+func TestDiskUsageGCPolicyUsesRunningDaemonEffectiveConfig(t *testing.T) {
+	clearDaemonTaskEnv(t)
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_GC_TTL", "1s") // Must not leak into the reported policy.
+	workspacesRoot := filepath.Join(t.TempDir(), "daemon-workspaces")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":          "running",
+			"workspaces_root": workspacesRoot,
+			"gc_policy": map[string]any{
+				"enabled":                    true,
+				"ttl_seconds":                259200,
+				"completed_task_ttl_seconds": 1209600,
+				"orphan_ttl_seconds":         604800,
+				"artifact_ttl_seconds":       43200,
+			},
+		})
+	}))
+	defer srv.Close()
+	port := srv.Listener.Addr().(*net.TCPAddr).Port
+	t.Setenv("MULTICA_DAEMON_PORT", strconv.Itoa(port))
+
+	got := diskUsageGCPolicy(newDiskUsageTestCmd(t), "", true, workspacesRoot)
+	if got == nil {
+		t.Fatal("diskUsageGCPolicy returned nil for a running daemon")
+	}
+	if got.TTLSeconds != 259200 || got.CompletedTaskTTLSeconds != 1209600 || got.OrphanTTLSeconds != 604800 || got.ArtifactTTLSeconds != 43200 {
+		t.Fatalf("effective policy = %+v", got)
+	}
+}
+
+func TestDiskUsageGCPolicyRejectsWorkspacesRootDrift(t *testing.T) {
+	pinHumanCLIContext(t)
+	home := t.TempDir()
+	daemonRoot := filepath.Join(t.TempDir(), "daemon-workspaces")
+	t.Setenv("HOME", home)
+
+	var profile string
+	var listener net.Listener
+	for i := 0; i < 1000; i++ {
+		profile = "root-drift-" + strconv.Itoa(i)
+		candidate, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(healthPortForProfile(profile)))
+		if err == nil {
+			listener = candidate
+			break
+		}
+	}
+	if listener == nil {
+		t.Fatal("could not reserve a named-profile health port")
+	}
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":          "running",
+			"profile":         profile,
+			"workspaces_root": daemonRoot,
+			"gc_policy": map[string]any{
+				"enabled":                    true,
+				"ttl_seconds":                86400,
+				"completed_task_ttl_seconds": 1209600,
+				"orphan_ttl_seconds":         259200,
+				"artifact_ttl_seconds":       43200,
+			},
+		})
+	}))
+	srv.Listener = listener
+	srv.Start()
+	defer srv.Close()
+
+	assertUnavailable := func(t *testing.T, scannedRoot string) {
+		t.Helper()
+		if got := diskUsageGCPolicy(newDiskUsageTestCmd(t), profile, false, scannedRoot); got != nil {
+			t.Fatalf("policy = %+v, want unavailable for scanned root %q owned by a different daemon root", got, scannedRoot)
+		}
+	}
+
+	t.Run("process environment overrides the daemon root", func(t *testing.T) {
+		envRoot := filepath.Join(t.TempDir(), "environment-workspaces")
+		t.Setenv("MULTICA_WORKSPACES_ROOT", envRoot)
+		root, err := resolveDiskUsageRoot(false, profile, "")
+		if err != nil {
+			t.Fatalf("resolve environment root: %v", err)
+		}
+		if root != envRoot {
+			t.Fatalf("resolved root = %q, want environment root %q", root, envRoot)
+		}
+		assertUnavailable(t, root)
+	})
+
+	t.Run("profile configuration changes after daemon startup", func(t *testing.T) {
+		t.Setenv("MULTICA_WORKSPACES_ROOT", "")
+		if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{WorkspacesRoot: daemonRoot}, profile); err != nil {
+			t.Fatalf("save daemon startup profile root: %v", err)
+		}
+		changedRoot := filepath.Join(t.TempDir(), "changed-profile-workspaces")
+		if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{WorkspacesRoot: changedRoot}, profile); err != nil {
+			t.Fatalf("save changed profile root: %v", err)
+		}
+		root, err := resolveDiskUsageRoot(false, profile, "")
+		if err != nil {
+			t.Fatalf("resolve changed profile root: %v", err)
+		}
+		if root != changedRoot {
+			t.Fatalf("resolved root = %q, want changed profile root %q", root, changedRoot)
+		}
+		assertUnavailable(t, root)
+	})
+}
+
 // TestRunDaemonDiskUsageByWorkspaceTableMakesNoRequest is the offline-regression
 // guard: with valid credentials on disk, the --by-workspace table must still
 // resolve nothing, so an unreachable server cannot make a local diagnostic hang.
@@ -225,6 +353,12 @@ func TestRunDaemonDiskUsageTaskTableResolvesStatus(t *testing.T) {
 	if !strings.Contains(out, "in_review") {
 		t.Errorf("STATUS column missing the resolved status, got:\n%s", out)
 	}
+	if !strings.Contains(out, "RESUME") || !strings.Contains(out, "yes") {
+		t.Errorf("RESUME column missing the authoritative candidate state, got:\n%s", out)
+	}
+	if !strings.Contains(out, "RETAINED BY") || !strings.Contains(out, diskUsagePolicyDocsURL) {
+		t.Errorf("retention visibility or policy pointer missing, got:\n%s", out)
+	}
 }
 
 // TestRunDaemonDiskUsageJSONSurvivesServerFailure pins the best-effort
@@ -254,8 +388,10 @@ func TestRunDaemonDiskUsageJSONSurvivesServerFailure(t *testing.T) {
 
 	var report struct {
 		Tasks []struct {
-			ParentID     string `json:"parent_id"`
-			ParentStatus string `json:"parent_status"`
+			ParentID        string `json:"parent_id"`
+			ParentStatus    string `json:"parent_status"`
+			RetentionReason string `json:"retention_reason"`
+			ResumeCandidate *bool  `json:"resume_candidate"`
 		} `json:"tasks"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
@@ -269,6 +405,10 @@ func TestRunDaemonDiskUsageJSONSurvivesServerFailure(t *testing.T) {
 	}
 	if report.Tasks[0].ParentID != "issue-1" {
 		t.Errorf("parent_id = %q, want issue-1 (local scan data survives)", report.Tasks[0].ParentID)
+	}
+	if report.Tasks[0].RetentionReason != daemon.RetentionPolicyUnavailable || report.Tasks[0].ResumeCandidate != nil {
+		t.Errorf("degraded lifecycle fields = reason:%q resume:%v, want policy_unavailable and unknown",
+			report.Tasks[0].RetentionReason, report.Tasks[0].ResumeCandidate)
 	}
 }
 
