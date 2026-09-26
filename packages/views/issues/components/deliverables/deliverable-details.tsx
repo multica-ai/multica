@@ -64,6 +64,14 @@ export function useDeliverableDetails({
         origin?.kind === "description"
           ? t(($) => $.deliverables.locate_description)
           : t(($) => $.deliverables.locate_comment);
+      // One action for the top bar and the info panel: the viewer covers the
+      // page, so it closes before the page scrolls to the file's origin.
+      const locate = origin
+        ? () => {
+            controls.close();
+            onLocate(origin);
+          }
+        : undefined;
 
       return {
         titleAccessory:
@@ -82,12 +90,10 @@ export function useDeliverableDetails({
             isDescription={origin?.kind === "description"}
             version={deliverable}
             locateLabel={locateLabel}
-            onLocate={origin ? () => onLocate(origin) : undefined}
+            onLocate={locate}
           />
         ),
-        locate: origin
-          ? { label: locateLabel, onSelect: () => onLocate(origin) }
-          : undefined,
+        locate: locate ? { label: locateLabel, onSelect: locate } : undefined,
       };
     },
     [files, commentById, onLocate, t],

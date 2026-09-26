@@ -90,6 +90,11 @@ export interface PreviewSequenceControls {
   items: ReadonlyArray<ImageSequenceItem>;
   /** Move to `key`; false when it is not part of this session. */
   goTo: (key: string) => boolean;
+  /**
+   * Close the viewer. For controls in the info panel that take the reader
+   * elsewhere on the page, which the viewer would otherwise cover.
+   */
+  close: () => void;
 }
 
 interface PreviewSequenceApi {
@@ -261,7 +266,7 @@ export function PreviewSequenceProvider({
 
   const details =
     session && current && describeItem
-      ? describeItem(current, { items: session.items, goTo })
+      ? describeItem(current, { items: session.items, goTo, close: () => setOpen(false) })
       : undefined;
   const locate = details?.locate;
 

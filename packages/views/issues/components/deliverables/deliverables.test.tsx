@@ -41,6 +41,7 @@ vi.mock("../../../platform", () => ({ useImmersiveMode: () => {} }));
 
 import { DeliverablesSection } from "./deliverables-section";
 import { DeliverablesOverview } from "./deliverables-overview";
+import { useDeliverableDetails, type DeliverableOrigin } from "./deliverable-details";
 
 function attachment(over: Partial<Attachment> & { id: string }): Attachment {
   return {
@@ -234,5 +235,34 @@ describe("DeliverablesOverview", () => {
       fireEvent.keyDown(document, { key: "Escape" });
     });
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("useDeliverableDetails", () => {
+  // The viewer covers the page, so "Show in comments" in the info panel has
+  // to close it first, exactly like the same action in the top bar.
+  it("closes the viewer before locating, from the info panel and the top bar", () => {
+    const calls: string[] = [];
+    const close = vi.fn(() => calls.push("close"));
+    const onLocate = vi.fn((origin: DeliverableOrigin) => calls.push(`locate:${JSON.stringify(origin)}`));
+    let locateFromTopBar: (() => void) | undefined;
+
+    function Harness() {
+      const describe = useDeliverableDetails({
+        files: FILES,
+        commentById: new Map(TIMELINE.map((entry) => [entry.id, entry])),
+        onLocate,
+      });
+      const item = { key: "csv", url: CSV.url, filename: CSV.filename, attachment: CSV, imageByConstruction: false, blockId: "c-2" };
+      const details = describe(item, { items: [item], goTo: () => true, close });
+      locateFromTopBar = details.locate?.onSelect;
+      return <>{details.info}</>;
+    }
+    renderWithI18n(withQuery(<Harness />));
+
+    fireEvent.click(screen.getByRole("button", { name: "Show in comments" }));
+    locateFromTopBar?.();
+    const located = `locate:${JSON.stringify({ kind: "comment", commentId: "c-2" })}`;
+    expect(calls).toEqual(["close", located, "close", located]);
   });
 });
