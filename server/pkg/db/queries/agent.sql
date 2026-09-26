@@ -2045,6 +2045,214 @@ WHERE id = (
 )
 RETURNING *;
 
+-- name: HasTaskCoveringCompletionFallback :one
+-- Durable idempotency check for a synthesized completion fallback (GH #8719).
+-- Shared by the completion path and the sweeper replay so both agree on what
+-- "covered" means: some runnable coordinator task carries the fallback as
+-- trigger/planned input, or a terminal task recorded its delivery receipt.
+-- The completing worker task itself is excluded: the fallback is synthesized
+-- AT this task's completion and was never delivered to it, so without the
+-- exclusion the worker's own row would read as already owning the obligation.
+-- (The delegated-failure variant documents the same exclusion rationale.)
+SELECT count(*) > 0 AS covered
+FROM agent_task_queue
+WHERE issue_id = @issue_id
+  AND agent_id = @agent_id
+  AND (
+      @comment_id::uuid = ANY(delivered_comment_ids)
+      OR (
+          id IS DISTINCT FROM sqlc.narg('exclude_task_id')::uuid
+          AND (
+              status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+              OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
+          )
+          AND (COALESCE(sqlc.narg('head_sha')::text, '') = '' OR context->>'head_sha' = sqlc.narg('head_sha')::text)
+          AND (trigger_comment_id = @comment_id::uuid OR @comment_id::uuid = ANY(coalesced_comment_ids))
+      )
+  );
+
+-- name: MergeCompletionFallbackIntoPendingTask :one
+-- Fold an uncovered completion fallback (GH #8719) into the coordinator's
+-- pre-claim task without replacing that task's attribution snapshot: the
+-- fallback is platform evidence of an already-established delegation, not a
+-- new human instruction. Mirrors MergeDelegatedFailureCommentIntoPendingTask.
+UPDATE agent_task_queue
+SET coalesced_comment_ids = (
+        SELECT COALESCE(array_agg(DISTINCT e), '{}')
+        FROM unnest(array_append(coalesced_comment_ids, trigger_comment_id)) AS e
+        WHERE e IS NOT NULL AND e <> @comment_id::uuid
+    ),
+    trigger_comment_id = @comment_id::uuid,
+    trigger_summary = sqlc.narg('trigger_summary')
+WHERE id = (
+    SELECT t.id FROM agent_task_queue t
+    WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = @issue_id
+      AND t.agent_id = @agent_id
+      AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(@comment_id::uuid)
+      AND (
+          t.status = 'queued'
+          OR (t.status = 'deferred' AND t.context->>'channel_issue_media_pending' = 'true')
+      )
+      AND (COALESCE(sqlc.narg('head_sha')::text, '') = '' OR t.context->>'head_sha' = sqlc.narg('head_sha')::text)
+      AND t.trigger_comment_id IS DISTINCT FROM @comment_id::uuid
+      AND NOT (@comment_id::uuid = ANY(t.coalesced_comment_ids))
+    ORDER BY t.created_at DESC
+    LIMIT 1
+)
+RETURNING *;
+
+-- name: ListPendingCompletionFallbacks :many
+-- Durable outbox scan for synthesized completion fallbacks (GH #8719).
+-- Coverage depends on the current coordinator and review HEAD. This scan
+-- excludes a carrier only when it can prove both; otherwise the shared
+-- dispatcher decides after loading the row. Keep this conservative relative
+-- to ResolveCompletionFallbackTarget and GetIssueReviewHeadSha.
+-- A fallback is identified durably — an agent comment
+-- whose source task is a completed, non-leader worker run — never by body
+-- text or a creation-time window. Ordered oldest-first and bounded so one
+-- sweep tick cannot monopolise the runtime loop.
+-- Exact match on the worker run's recorded fallback id: an explicit worker
+-- reply (possibly suppressed) from the same run must never be reclassified.
+SELECT fallback.id AS fallback_id, worker.id AS worker_task_id
+FROM comment AS fallback
+JOIN agent_task_queue AS worker ON worker.completion_fallback_comment_id = fallback.id
+LEFT JOIN issue AS current_issue ON current_issue.id = worker.issue_id
+  AND current_issue.id = fallback.issue_id AND current_issue.workspace_id = fallback.workspace_id
+LEFT JOIN comment AS parent ON parent.id = fallback.parent_id
+  AND parent.workspace_id = current_issue.workspace_id
+LEFT JOIN agent_task_queue AS parent_task ON parent_task.id = parent.source_task_id
+LEFT JOIN squad AS parent_squad ON parent_squad.id = parent_task.squad_id
+  AND parent_squad.workspace_id = current_issue.workspace_id
+LEFT JOIN agent_task_queue AS source_task ON source_task.id = worker.delegated_from_task_id
+LEFT JOIN squad AS assigned_squad ON assigned_squad.id = current_issue.assignee_id
+  AND assigned_squad.workspace_id = current_issue.workspace_id
+LEFT JOIN agent AS parent_agent ON parent_agent.id = parent_task.agent_id
+  AND parent_agent.workspace_id = current_issue.workspace_id
+LEFT JOIN agent AS assigned_agent ON assigned_agent.id = assigned_squad.leader_id
+  AND assigned_agent.workspace_id = current_issue.workspace_id
+LEFT JOIN LATERAL (
+    SELECT head_sha FROM (
+        SELECT pr.head_sha, pr.state, pr.pr_updated_at
+        FROM github_pull_request pr
+        JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+        WHERE ipr.issue_id = current_issue.id AND pr.head_sha <> ''
+        UNION ALL
+        SELECT pr.head_sha, pr.state, pr.pr_updated_at
+        FROM vcs_pull_request pr
+        JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
+        WHERE ipr.issue_id = current_issue.id AND pr.head_sha <> ''
+    ) heads
+    ORDER BY (state IN ('open', 'draft')) DESC, pr_updated_at DESC
+    LIMIT 1
+) review_head ON true
+WHERE fallback.author_type = 'agent'
+  AND fallback.source_task_id IS NOT NULL
+  AND fallback.deleted_at IS NULL
+  AND worker.status = 'completed'
+  AND NOT worker.is_leader_task
+  AND worker.completion_fallback_state IS DISTINCT FROM 'settled'
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue AS covering
+      WHERE covering.issue_id = current_issue.id
+        AND fallback.source_task_id = worker.id
+        AND fallback.author_id = worker.agent_id
+        AND covering.agent_id = CASE
+            WHEN fallback.parent_id IS NOT NULL AND (
+                parent.id IS NOT NULL AND parent.deleted_at IS NULL
+                AND (worker.trigger_comment_id = parent.id OR parent.id = ANY(worker.coalesced_comment_ids))
+                AND parent_task.is_leader_task AND parent_task.squad_id IS NOT NULL
+                AND parent_task.agent_id = parent.author_id
+            ) IS NOT TRUE THEN NULL
+            WHEN parent.id IS NOT NULL AND (
+                current_issue.assignee_type = 'squad'
+                AND current_issue.assignee_id = parent_task.squad_id
+            ) IS NOT TRUE THEN CASE WHEN parent_squad.archived_at IS NULL
+                AND parent_squad.leader_id = parent_task.agent_id
+                AND parent_agent.archived_at IS NULL AND parent_agent.runtime_id IS NOT NULL
+                AND parent_agent.id IS DISTINCT FROM worker.agent_id
+                THEN parent_agent.id END
+            WHEN current_issue.triage_state IS NULL
+                AND current_issue.assignee_type = 'squad'
+                AND assigned_squad.archived_at IS NULL
+                AND assigned_agent.archived_at IS NULL AND assigned_agent.runtime_id IS NOT NULL
+                AND assigned_agent.id IS DISTINCT FROM worker.agent_id
+                AND (worker.delegated_from_task_id IS NULL AND worker.squad_id = assigned_squad.id
+                     OR source_task.issue_id = worker.issue_id
+                        AND source_task.is_leader_task AND source_task.squad_id = assigned_squad.id
+                        AND source_task.agent_id = assigned_agent.id)
+                THEN assigned_agent.id
+            END
+        AND (fallback.id = ANY(covering.delivered_comment_ids)
+             OR (covering.id IS DISTINCT FROM worker.id
+                 AND (covering.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+                      OR (covering.status = 'deferred' AND covering.context->>'channel_issue_media_pending' = 'true'))
+                 AND (COALESCE(review_head.head_sha, '') = '' OR covering.context->>'head_sha' = review_head.head_sha)
+                 AND (covering.trigger_comment_id = fallback.id OR fallback.id = ANY(covering.coalesced_comment_ids))))
+  )
+ORDER BY fallback.created_at ASC, fallback.id ASC
+LIMIT @max_per_tick::int;
+
+-- name: RecordCompletionFallbackComment :exec
+-- Records the synthesized completion fallback (GH #8719) on its worker run so
+-- completion reconcile and the sweeper replay identify it exactly instead of
+-- shape-matching every agent comment the run authored. The state flips to
+-- 'recorded' in the same statement, so insert + id/state record stay atomic.
+UPDATE agent_task_queue
+SET completion_fallback_comment_id = @fallback_id::uuid,
+    completion_fallback_state = 'recorded'
+WHERE id = @task_id::uuid;
+
+-- name: MarkCompletionFallbackPending :exec
+-- Records an explicit pending fallback obligation (GH #8719) when the new
+-- completion path decided synthesis is needed but has not persisted it yet.
+-- Only fresh rows (no state, no recorded id) transition: historical rows
+-- stay NULL forever and recorded rows are never demoted.
+UPDATE agent_task_queue
+SET completion_fallback_state = 'pending'
+WHERE id = @task_id::uuid
+  AND completion_fallback_state IS NULL
+  AND completion_fallback_comment_id IS NULL;
+
+-- name: SettleCompletionFallback :exec
+-- Terminal state for a worker run that needs no (further) fallback recovery
+-- (GH #8719): trivial output, suppressed or explicit replies, or permanently
+-- invalid lineage. Settled rows leave the bounded sweeper scans. A recorded
+-- fallback id is never cleared; settling a recorded row requires passing its
+-- exact id, so a stray settle cannot orphan a dispatchable obligation.
+UPDATE agent_task_queue
+SET completion_fallback_state = 'settled'
+WHERE id = @task_id::uuid
+  AND (completion_fallback_comment_id IS NULL
+    OR completion_fallback_comment_id = @fallback_id::uuid);
+
+-- name: GetAgentTaskForUpdate :one
+-- FOR UPDATE variant for completion-fallback synthesis (GH #8719). Locks the
+-- worker run row so concurrent synthesizers (completion callback vs sweeper
+-- late synthesis) serialize: exactly one winner inserts the fallback comment
+-- and records its id, while the loser re-reads the recorded id and replays it
+-- instead of inserting a second comment.
+SELECT * FROM agent_task_queue
+WHERE id = @task_id::uuid
+FOR UPDATE;
+
+-- name: ListCompletionFallbackOwedRuns :many
+-- Late-synthesis candidates: completed non-leader runs whose completion path
+-- explicitly recorded a pending fallback obligation (GH #8719). The predicate
+-- is the durable state -- never a NULL record id -- so pre-migration
+-- historical rows (NULL state) and settled rows (delivered, invalid, or
+-- not-needed) can never enter the bounded scan. The service replays the
+-- creation-time suppression/reply/trivial checks before synthesizing and
+-- settles rows that need no fallback, so every listed row resolves to a
+-- terminal state within bounded touches and only transient failures retry.
+SELECT worker.id FROM agent_task_queue AS worker
+WHERE worker.status = 'completed'
+  AND NOT worker.is_leader_task
+  AND worker.issue_id IS NOT NULL
+  AND worker.completion_fallback_state = 'pending'
+  AND NULLIF(worker.result->>'output', '') IS NOT NULL
+ORDER BY worker.completed_at DESC NULLS LAST, worker.id DESC
+LIMIT @max_per_tick::int;
+
 -- name: HasTaskCoveringDelegatedFailureComment :one
 -- Durable idempotency check for a recovery comment. The completion reconciler
 -- excludes its own just-completed task when replaying a planned-but-undelivered

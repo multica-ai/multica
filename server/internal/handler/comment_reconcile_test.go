@@ -826,3 +826,238 @@ func TestCompleteTask_ReconcilesPlannedButUndeliveredComments(t *testing.T) {
 		})
 	}
 }
+
+// TestCompleteTask_ReconcilesExplicitMentionFromCompletedWorker pins Blocker 2
+// (GH #8719 human spec): the completion-reconcile skip for other runs'
+// comments applies ONLY to the exact recorded fallback id. A normal explicit
+// @B mention authored by a completed non-leader worker (same shape, no
+// record) must still be recovered when B completes.
+//
+// Setup mirrors TestCompleteTask_ReconcilesAgentAuthoredMentionToCompletedAgent
+// (B dispatched, so creation-time routing drops the mention), except the
+// mention carries the author's source task id and the author completes first:
+// with the old completed-non-leader shape guard the mention would be skipped
+// and no follow-up would ever appear.
+func TestCompleteTask_ReconcilesExplicitMentionFromCompletedWorker(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID string
+	dbfx.QueryRow(t,
+		`SELECT runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
+		testWorkspaceID).Scan(&runtimeID)
+	workerW := createHandlerTestAgent(t, "Reconcile Completed Worker W", nil)
+	agentB := createHandlerTestAgent(t, "Reconcile Explicit Target B", nil)
+
+	issueID := dbfx.Issue(t, "reconcile-explicit-from-completed-worker fixture", testutil.Cols{
+		"status":        "in_progress",
+		"number":        999013,
+		"assignee_type": "agent",
+		"assignee_id":   agentB,
+	})
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID) })
+
+	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
+	if err != nil {
+		t.Fatalf("setup: load issue: %v", err)
+	}
+
+	bTriggerCommentID := dbfx.Comment(t, issueID, "initial request for B", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '10 minutes'"),
+	})
+	var bTaskID string
+	dbfx.QueryRow(t, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, dispatched_at)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'dispatched', 0, now() - interval '10 minutes', now() - interval '5 minutes')
+		RETURNING id
+	`, agentB, runtimeID, issueID, bTriggerCommentID).Scan(&bTaskID)
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
+
+	wTriggerCommentID := dbfx.Comment(t, issueID, "initial request for W", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '10 minutes'"),
+	})
+	var wTaskID string
+	dbfx.QueryRow(t, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, started_at, originator_user_id, accountable_user_id)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '9 minutes', $5, $5)
+		RETURNING id
+	`, workerW, runtimeID, issueID, wTriggerCommentID, testUserID).Scan(&wTaskID)
+
+	var mentionCommentID string
+	mention := "[@B](mention://agent/" + agentB + ") please also handle this"
+	dbfx.QueryRow(t, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, source_task_id, content, type)
+		VALUES ($1, $2, 'agent', $3, $4, $5, 'comment')
+		RETURNING id
+	`, issueID, testWorkspaceID, workerW, wTaskID, mention).Scan(&mentionCommentID)
+	dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE id=$1`, mentionCommentID, bTriggerCommentID)
+	mentionComment, err := testHandler.Queries.GetComment(ctx, util.MustParseUUID(mentionCommentID))
+	if err != nil {
+		t.Fatalf("setup: load mention comment: %v", err)
+	}
+	testHandler.triggerTasksForComment(ctx, issue, mentionComment, nil, "agent", workerW, "", nil, nil)
+
+	if n := queuedTaskCountForAgentIssue(t, issueID, agentB); n != 0 {
+		t.Fatalf("expected the mention to be dropped at creation (0 queued follow-up), got %d", n)
+	}
+
+	if w := completeTaskViaHandler(t, wTaskID, "done"); w.Code != http.StatusOK {
+		t.Fatalf("CompleteTask W: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var wRecordID *string
+	dbfx.QueryRow(t, `SELECT completion_fallback_comment_id::text FROM agent_task_queue WHERE id = $1`, wTaskID).Scan(&wRecordID)
+	if wRecordID != nil {
+		t.Fatalf("explicit reply was reclassified as a fallback: recorded %s", *wRecordID)
+	}
+
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'running', started_at = now() - interval '1 minute' WHERE id = $1`, bTaskID)
+	if w := completeTaskViaHandler(t, bTaskID, "done"); w.Code != http.StatusOK {
+		t.Fatalf("CompleteTask B: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if n := queuedTaskCountForAgentIssue(t, issueID, agentB); n != 1 {
+		t.Fatalf("expected exactly 1 follow-up for B from the completed worker explicit mention after completion, got %d", n)
+	}
+	if n := pendingTaskCountForAgentIssue(t, issueID, workerW); n != 0 {
+		t.Fatalf("comment author W must not be enqueued, got %d W task(s)", n)
+	}
+}
+
+// TestCompletionReconcileSkipsRecordedFallback pins the other half of Blocker 2
+// (GH #8719 human spec): a recorded fallback whose body carries a mention
+// must never take generic routing in another run's completion reconcile.
+// Removing the guard would wake B here; the exact-ID skip keeps it quiet.
+func TestCompletionReconcileSkipsRecordedFallback(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID string
+	dbfx.QueryRow(t,
+		`SELECT runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
+		testWorkspaceID).Scan(&runtimeID)
+	workerW := createHandlerTestAgent(t, "Reconcile Fallback Author W", nil)
+	agentB := createHandlerTestAgent(t, "Reconcile Fallback Bystander B", nil)
+
+	issueID := dbfx.Issue(t, "reconcile-recorded-fallback fixture", testutil.Cols{
+		"status":        "in_progress",
+		"number":        999014,
+		"assignee_type": "agent",
+		"assignee_id":   agentB,
+	})
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID) })
+
+	// One shared trigger root so the synthesized fallback lands in B's
+	// reconcilable thread; otherwise the test would pass vacuously.
+	rootCommentID := dbfx.Comment(t, issueID, "initial request", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '10 minutes'"),
+	})
+	var wTaskID string
+	dbfx.QueryRow(t, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, started_at, originator_user_id, accountable_user_id)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '9 minutes', $5, $5)
+		RETURNING id
+	`, workerW, runtimeID, issueID, rootCommentID, testUserID).Scan(&wTaskID)
+
+	var bTaskID string
+	dbfx.QueryRow(t, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, started_at)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '9 minutes')
+		RETURNING id
+	`, agentB, runtimeID, issueID, rootCommentID).Scan(&bTaskID)
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
+
+	if w := completeTaskViaHandler(t, wTaskID, "Processed the inputs delivered to this run"); w.Code != http.StatusOK {
+		t.Fatalf("CompleteTask W: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var fallbackID string
+	dbfx.QueryRow(t, `SELECT id FROM comment WHERE source_task_id = $1 AND author_id = $2`, wTaskID, workerW).Scan(&fallbackID)
+	if fallbackID == "" {
+		t.Fatal("W fallback was not synthesized")
+	}
+	dbfx.Exec(t, `UPDATE comment SET content = $2 WHERE id = $1`, fallbackID,
+		"Done. [@B](mention://agent/"+agentB+") please review as well")
+
+	if w := completeTaskViaHandler(t, bTaskID, "done"); w.Code != http.StatusOK {
+		t.Fatalf("CompleteTask B: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if n := queuedTaskCountForAgentIssue(t, issueID, agentB); n != 0 {
+		t.Fatalf("recorded fallback with a mention body woke B: got %d queued follow-up(s), want 0", n)
+	}
+}
+
+// TestCompleteTask_SkipsExplicitMentionWhenSourceGone pins the permanent half
+// of the reconcile lookup contract (GH #8719): an agent comment whose source
+// run is provably gone (no-rows) stays skipped -- its lineage can never be
+// proven, so only the transient path above recovers. Exact recorded fallbacks
+// keep their own skip invariant regardless of this branch.
+func TestCompleteTask_SkipsExplicitMentionWhenSourceGone(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID string
+	dbfx.QueryRow(t,
+		`SELECT runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
+		testWorkspaceID).Scan(&runtimeID)
+	workerW := createHandlerTestAgent(t, "Reconcile SourceGone Worker W", nil)
+	agentB := createHandlerTestAgent(t, "Reconcile SourceGone Target B", nil)
+
+	issueID := dbfx.Issue(t, "reconcile-explicit-source-gone fixture", testutil.Cols{
+		"status":        "in_progress",
+		"number":        999016,
+		"assignee_type": "agent",
+		"assignee_id":   agentB,
+	})
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID) })
+
+	bTriggerCommentID := dbfx.Comment(t, issueID, "initial request for B", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '10 minutes'"),
+	})
+	var bTaskID string
+	dbfx.QueryRow(t, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, dispatched_at)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'dispatched', 0, now() - interval '10 minutes', now() - interval '5 minutes')
+		RETURNING id
+	`, agentB, runtimeID, issueID, bTriggerCommentID).Scan(&bTaskID)
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
+
+	wTriggerCommentID := dbfx.Comment(t, issueID, "initial request for W", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '10 minutes'"),
+	})
+	var wTaskID string
+	dbfx.QueryRow(t, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, started_at, originator_user_id, accountable_user_id)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '9 minutes', $5, $5)
+		RETURNING id
+	`, workerW, runtimeID, issueID, wTriggerCommentID, testUserID).Scan(&wTaskID)
+
+	var mentionCommentID string
+	mention := "[@B](mention://agent/" + agentB + ") please also handle this"
+	dbfx.QueryRow(t, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, source_task_id, content, type)
+		VALUES ($1, $2, 'agent', $3, $4, $5, 'comment')
+		RETURNING id
+	`, issueID, testWorkspaceID, workerW, wTaskID, mention).Scan(&mentionCommentID)
+
+	if w := completeTaskViaHandler(t, wTaskID, "done"); w.Code != http.StatusOK {
+		t.Fatalf("CompleteTask W: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	// The source run is provably gone: point the comment at a random id.
+	dbfx.Exec(t, `UPDATE comment SET source_task_id = gen_random_uuid() WHERE id = $1`, mentionCommentID)
+
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'running', started_at = now() - interval '1 minute' WHERE id = $1`, bTaskID)
+	if w := completeTaskViaHandler(t, bTaskID, "done"); w.Code != http.StatusOK {
+		t.Fatalf("CompleteTask B: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if n := queuedTaskCountForAgentIssue(t, issueID, agentB); n != 0 {
+		t.Fatalf("source-gone comment must stay skipped, got %d queued follow-up(s)", n)
+	}
+}
+
+// TestCompleteTask_SkipsExplicitMentionWhenSourceGone pins the permanent half
