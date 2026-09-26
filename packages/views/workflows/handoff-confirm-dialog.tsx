@@ -121,6 +121,9 @@ export function WorkflowHandoffConfirmDialog({
   const prevId = preview?.previous_assignee_id ?? null;
   const sameHandler = !!prevId && prevId === handlerId && prevType === handlerType;
   const runs = preview?.previous_runs ?? [];
+  // A queued run has not started yet: stopping it cancels rather than
+  // interrupts, and there is no elapsed time to show.
+  const started = runs.some((run) => run.status === "running" || run.status === "dispatched");
   const oldestRun = runs.reduce<string | null>(
     (oldest, run) => (!oldest || (run.started_at && run.started_at < oldest) ? run.started_at : oldest),
     null,
@@ -176,14 +179,20 @@ export function WorkflowHandoffConfirmDialog({
               <div className="rounded-lg border border-warning/30 bg-warning/10 px-3.5 py-3">
                 <p className="flex items-center gap-2 text-body font-medium">
                   <TriangleAlert aria-hidden className="size-3.5 shrink-0" />
-                  {t(($) => $.workflows.confirm.running_title, { name: prevName, duration: duration(oldestRun) })}
+                  {started
+                    ? t(($) => $.workflows.confirm.running_title, { name: prevName, duration: duration(oldestRun) })
+                    : t(($) => $.workflows.confirm.queued_title, { name: prevName })}
                 </p>
                 <label className="mt-2 flex cursor-pointer items-center gap-2 text-body">
                   <Checkbox checked={stop} onCheckedChange={(v) => setStop(v === true)} />
-                  {t(($) => $.workflows.confirm.stop_label, { name: prevName })}
+                  {started
+                    ? t(($) => $.workflows.confirm.stop_label, { name: prevName })
+                    : t(($) => $.workflows.confirm.cancel_queued_label, { name: prevName })}
                 </label>
                 <p className="ml-6 mt-1 text-caption leading-5 text-muted-foreground">
-                  {t(($) => $.workflows.confirm.stop_hint)}
+                  {started
+                    ? t(($) => $.workflows.confirm.stop_hint)
+                    : t(($) => $.workflows.confirm.queued_hint, { name: prevName })}
                 </p>
               </div>
             )}

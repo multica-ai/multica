@@ -86,6 +86,20 @@ describe("WorkflowHandoffConfirmDialog (MUL-7420)", () => {
     expect(onConfirm).toHaveBeenCalledWith({ stopPreviousRuns: false });
   });
 
+  it("words a run that has not started as queued and cancels it", async () => {
+    previewWorkflowHandoff.mockResolvedValue({
+      ...handoff,
+      previous_runs: [{ task_id: "t1", agent_id: "forge", status: "queued", started_at: new Date().toISOString() }],
+    });
+    const { onConfirm } = renderDialog();
+
+    expect(await screen.findByText(/Forge’s run is still queued/)).toBeTruthy();
+    expect(screen.queryByText(/still running/)).toBeNull();
+    expect(screen.getByText(/Cancel Forge’s queued run/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Move to Code review" }));
+    expect(onConfirm).toHaveBeenCalledWith({ stopPreviousRuns: true });
+  });
+
   it("applies without asking when the server finds no handoff", async () => {
     previewWorkflowHandoff.mockResolvedValue({ ...handoff, handoff: false, handler_type: null, handler_id: null });
     const { onConfirm } = renderDialog();
