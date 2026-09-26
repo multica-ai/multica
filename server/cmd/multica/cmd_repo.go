@@ -74,7 +74,7 @@ func init() {
 	repoRemoveCmd.Flags().StringArray("url", nil, "Repository URL to remove (may be repeated)")
 	repoRemoveCmd.Flags().String("output", "json", "Output format: table or json")
 
-	repoCheckoutCmd.Flags().StringVar(&repoCheckoutRef, "ref", "", "branch, tag, or commit to check out instead of the remote default branch")
+	repoCheckoutCmd.Flags().StringVar(&repoCheckoutRef, "ref", "", "branch, tag, commit, or fully-qualified ref such as refs/pull/12/head, to check out instead of the remote default branch")
 	repoCheckoutCmd.Flags().BoolVar(&repoCheckoutFresh, "fresh", false, "discard an existing checkout's uncommitted changes and untracked files and start over on a new branch from the latest default branch (or --ref); commits stay on the old branch")
 
 	repoCmd.AddCommand(repoListCmd)
