@@ -210,12 +210,14 @@ func TestWebhookHandler_DedupeViaGitHubDelivery(t *testing.T) {
 	agentID := createWebhookTestAgent(t, "DeliveryGH Agent")
 	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
 	trig := createWebhookTriggerViaHandler(t, apID)
+	setSigningSecretViaHandler(t, apID, trig.ID, testSigningSecret)
 	setTriggerProvider(t, trig.ID, "github")
 
 	body := map[string]any{"action": "opened"}
 	headers := map[string]string{
-		"X-GitHub-Event":    "pull_request",
-		"X-GitHub-Delivery": "abc-123",
+		"X-Hub-Signature-256": signBody(testSigningSecret, []byte("{\"action\":\"opened\"}\n")),
+		"X-GitHub-Event":      "pull_request",
+		"X-GitHub-Delivery":   "abc-123",
 	}
 
 	w1 := postWebhook(t, *trig.WebhookToken, body, headers)
@@ -337,8 +339,9 @@ func TestSigningSecretNotEchoedInTriggerResponse(t *testing.T) {
 	if !bytes.Contains(w.Body.Bytes(), []byte(`"has_signing_secret":true`)) {
 		t.Fatalf("has_signing_secret should be true: %s", w.Body.String())
 	}
-	if !bytes.Contains(w.Body.Bytes(), []byte(`"signing_secret_hint":"`+testSigningSecret[len(testSigningSecret)-4:]+`"`)) {
-		t.Fatalf("hint should be last 4 chars: %s", w.Body.String())
+	wantHint := `"signing_secret_hint":"` + signingSecretHint(testSigningSecret) + `"`
+	if !bytes.Contains(w.Body.Bytes(), []byte(wantHint)) {
+		t.Fatalf("existing non-sensitive signing secret hint missing: %s", w.Body.String())
 	}
 }
 
@@ -564,8 +567,9 @@ func TestCreateAutopilotTrigger_AcceptsGitHubProvider(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/autopilots/"+apID+"/triggers", map[string]any{
-		"kind":     "webhook",
-		"provider": "github",
+		"kind":           "webhook",
+		"provider":       "github",
+		"signing_secret": testSigningSecret,
 	})
 	req = withURLParam(req, "id", apID)
 	testHandler.CreateAutopilotTrigger(w, req)
@@ -587,11 +591,13 @@ func TestWebhookHandler_RunOnlyDedupeOnGitHubDelivery(t *testing.T) {
 	agentID := createWebhookTestAgent(t, "RunOnlyDedupe Agent")
 	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
 	trig := createWebhookTriggerViaHandler(t, apID)
+	setSigningSecretViaHandler(t, apID, trig.ID, testSigningSecret)
 	setTriggerProvider(t, trig.ID, "github")
 
 	headers := map[string]string{
-		"X-GitHub-Event":    "pull_request",
-		"X-GitHub-Delivery": "pin-redelivery",
+		"X-Hub-Signature-256": signBody(testSigningSecret, []byte("{\"action\":\"opened\"}\n")),
+		"X-GitHub-Event":      "pull_request",
+		"X-GitHub-Delivery":   "pin-redelivery",
 	}
 	body := map[string]any{"action": "opened"}
 

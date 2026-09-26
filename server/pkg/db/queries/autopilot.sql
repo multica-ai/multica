@@ -186,14 +186,14 @@ INSERT INTO autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
     next_run_at, webhook_token, label, provider, event_filters,
     published_by_type, published_by_id,
-    created_by_type, created_by_id
+    created_by_type, created_by_id, signing_secret
 ) VALUES (
     $1, $2, $3, sqlc.narg('cron_expression'), sqlc.narg('timezone'),
     sqlc.narg('next_run_at'), sqlc.narg('webhook_token'), sqlc.narg('label'),
     COALESCE(sqlc.narg('provider')::text, 'generic'),
     sqlc.narg('event_filters'),
     sqlc.narg('published_by_type'), sqlc.narg('published_by_id'),
-    sqlc.narg('created_by_type'), sqlc.narg('created_by_id')
+    sqlc.narg('created_by_type'), sqlc.narg('created_by_id'), sqlc.narg('signing_secret')
 ) RETURNING *;
 
 -- name: SetAutopilotTriggerPublisher :exec
@@ -228,9 +228,15 @@ UPDATE autopilot_trigger SET
     next_run_at = sqlc.narg('next_run_at'),
     label = COALESCE(sqlc.narg('label'), label),
     event_filters = COALESCE(sqlc.narg('event_filters'), event_filters),
+    provider = COALESCE(sqlc.narg('provider')::text, provider),
+    signing_secret = CASE WHEN sqlc.arg('clear_signing_secret')::boolean THEN NULL
+        ELSE COALESCE(sqlc.narg('signing_secret')::text, signing_secret) END,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: LockAutopilotTriggerForUpdate :one
+SELECT * FROM autopilot_trigger WHERE id = $1 AND autopilot_id = $2 FOR UPDATE;
 
 -- name: DeleteAutopilotTrigger :exec
 DELETE FROM autopilot_trigger WHERE id = $1;

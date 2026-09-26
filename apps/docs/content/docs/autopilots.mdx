@@ -82,6 +82,96 @@ When one source sends several event types, add event filters to the trigger. Eac
 
 For example, with `workflow_run` as the event name and `completed, failed` as the actions, only those two kinds of `workflow_run` results are accepted. Multica recognizes the event and action from common request headers and payload fields, including GitHub's `X-GitHub-Event` and the `action` field in the body.
 
+### GitHub signed admission (API and CLI contract)
+
+GitHub triggers require an HMAC signing secret. A bearer URL alone never
+authenticates a GitHub delivery. Configure the endpoint while disabled, verify
+its readback, configure the sender, then enable it:
+
+```bash
+multica autopilot trigger-add <autopilot-id> --kind webhook \
+  --provider github --enabled=false --signing-secret-file ./github-signing-secret
+multica autopilot trigger-list <autopilot-id> --output json
+multica autopilot trigger-update <autopilot-id> <trigger-id> --enabled=true
+```
+
+The secret file must be private and contain the exact UTF-8 key bytes (16–4096
+bytes). There is no trimming: a trailing newline is part of the key. Generate a
+high-entropy key of at least 32 random characters and configure the same bytes
+at GitHub. `--signing-secret-stdin` is an alternative; it is mutually exclusive
+with `--signing-secret-file` and `--clear-signing-secret`. Never put a key in a
+command-line argument, issue, PR, audit body, or log.
+
+`POST /api/autopilots/{id}/triggers` accepts `kind`, `provider` (`generic` or
+`github`), `enabled` (default `true`), and write-only `signing_secret` alongside
+existing fields. A GitHub create requires a key, even when disabled. The token,
+provider, secret, enabled state, and rule-version publication commit in one
+transaction. A failed create exposes no endpoint. Schedule triggers reject
+webhook security fields. Unknown providers and invalid keys return `400`.
+
+`PATCH /api/autopilots/{id}/triggers/{triggerId}` accepts `provider`, write-only
+`signing_secret`, and `clear_signing_secret: true` in addition to existing
+fields. Omitted/null secret leaves the stored key unchanged; an empty replacement
+is invalid. Replacement and clearing are mutually exclusive. Updates lock the
+current row, validate the final configuration, and commit key/configuration,
+publisher attribution and rule version together. Any write/commit failure rolls
+back the entire change. The trigger's immutable creator remains its execution
+authority.
+
+- **Rotation:** send a new key through PATCH or `trigger-update` with a secret
+  input flag. There is never a fallback to unsigned admission. An ingress already
+  reading the old committed configuration may finish using that key; requests
+  reading after the rotation commit require the new key. For a strict sender
+  cutover, disable, rotate both sides, then enable.
+- **Clear:** disable the GitHub trigger first, or combine `enabled:false` and
+  `clear_signing_secret:true` in one PATCH. It cannot be enabled again without a
+  key. Generic triggers may explicitly clear their key and retain bearer-only
+  semantics.
+- **Provider change:** the trigger must already be disabled and remain disabled
+  during the change. Selecting GitHub requires a key in the resulting row.
+  Switching to generic is an explicit authentication-policy change.
+- **Legacy secret endpoint:** `PUT .../signing-secret` remains supported and
+  shares the same locking, validation and rollback path. For compatibility it
+  trims replacement values, and an omitted, null or empty value clears. PATCH
+  leaves an omitted/null secret unchanged and requires
+  `clear_signing_secret:true` to clear. Clearing an enabled GitHub key fails
+  with `400` on either path.
+- **Authorization:** creation and changes use the existing acting-human write
+  gate (creator, workspace owner/admin, or collaborator). Unauthorized callers
+  receive `403` without any mutation.
+
+Readback exposes `id`, `autopilot_id`, `provider`, `enabled`, and
+`has_signing_secret`. The key is never returned; the existing non-sensitive
+`signing_secret_hint` suffix remains available for rotation checks. Normal
+GitHub detail reads redact the bearer token/path/URL
+even for writers; explicit `?show_secrets=true` retains the existing authorized
+credential retrieval flow. CLI create/update/get/list redact credentials by
+default, including responses from older servers. Explicit `get --show-secrets`
+is only for private provisioning, never captured in logs or issue output.
+Workspace broadcasts never contain webhook credentials.
+
+GitHub ingress verifies `X-Hub-Signature-256: sha256=<hex>` with HMAC-SHA256
+over the **received raw body bytes**, using a constant-time digest comparison.
+JSON normalization happens afterward. Missing, malformed, wrong-algorithm,
+wrong-key, or body-modified signatures return `401` **before any delivery, run,
+issue or agent task is created or any dedupe counter/worker is touched**.
+Reusing a valid delivery ID with an invalid signature is still rejected. Disabled
+GitHub endpoints persist nothing and dispatch nothing. Authentic retries reuse
+the existing delivery and run. Signature header values are never persisted;
+delivery metadata records only whether the header was present.
+
+**Compatibility and rollout:** existing generic endpoints retain bearer-only
+authentication unless a key was configured, and keep their rejected-delivery
+history. They are never reclassified as HMAC-authenticated GitHub endpoints.
+Existing GitHub rows without a key now fail closed, so disable/configure them
+before enabling. Older API clients creating GitHub triggers must supply a key;
+old clients' ordinary generic creates remain compatible. CLI create/update no
+longer print webhook URLs by default. This change uses existing database columns
+and requires no migration. Deploy the backend, release/upgrade the CLI, confirm
+redacted readback, test valid and invalid signatures against the deployed
+endpoint, and only then activate downstream automations. A merged PR or an
+enabled flag alone is not evidence of a deployed HMAC gate.
+
 ### Protect the webhook URL
 
 <Callout type="warning">
@@ -101,7 +191,7 @@ When debugging a sender, use this table to interpret Multica's responses:
 | 200 | `ignored` | No run created: the trigger is disabled, the autopilot is paused or archived, or the event was filtered; the `reason` field explains why. |
 | 200 | `duplicate` | The idempotency key hit an existing delivery; returns the original delivery ID and doesn't run again. |
 | 400 | Error message | The body is empty, not valid JSON, or not a JSON object/array. |
-| 401 | `rejected` | The trigger has a signing secret configured, but the request is missing a signature or the signature doesn't match. |
+| 401 | `rejected` | GitHub admission is missing a configured key or a valid signature, or a signed generic request has an invalid signature. A GitHub rejection contains no delivery ID and creates no delivery/run/issue/task record. |
 | 404 | Error message | The token in the URL is invalid or has been rotated. |
 | 413 | Error message | The body exceeds 256 KiB. |
 | 429 | Error message | Too many requests; retry later per the `Retry-After` response header. |
@@ -120,9 +210,9 @@ Event and action inference order:
 
 ## View runs and deliveries
 
-Run history shows the trigger source, time, status, the linked issue or run, and the reason for a failure or skip. Webhook triggers additionally keep separate delivery records, including the parsed event, the response, deduplication info, and the failure reason.
+Run history shows the trigger source, time, status, the linked issue or run, and the reason for a failure or skip. Admitted webhook requests additionally keep separate delivery records, including the parsed event, the response, deduplication info, and the failure reason. GitHub requests rejected during signature admission create no delivery record.
 
-A fully processed webhook delivery can be replayed from its detail view. A replay creates a new delivery and run without rewriting the original record; deliveries that failed signature verification or are still queued can't be replayed, and replays don't participate in deduplication.
+A fully processed webhook delivery can be replayed from its detail view. A replay creates a new delivery and run without rewriting the original record. Persisted generic deliveries that failed signature verification and deliveries that are still queued can't be replayed; GitHub signature failures never reach persistence. Replays don't participate in deduplication.
 
 ## Failures, pausing, and deletion
 

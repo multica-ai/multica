@@ -312,6 +312,8 @@ import {
   IssueTableGroupsResponseSchema,
   IssueTableRowsResponseSchema,
   ListAutopilotsResponseSchema,
+  AutopilotTriggerSchema,
+  FALLBACK_AUTOPILOT_TRIGGER,
   EMPTY_LIST_AUTOPILOTS_RESPONSE,
   AutopilotRunSchema,
   AutopilotQuotaUsageSchema,
@@ -4451,7 +4453,9 @@ export class ApiClient {
   }
 
   async getAutopilot(id: string): Promise<GetAutopilotResponse> {
-    return this.fetch(`/api/autopilots/${id}`);
+    const response = await this.fetch<GetAutopilotResponse>(`/api/autopilots/${id}`);
+    return { ...response, triggers: Array.isArray(response.triggers)
+      ? response.triggers.map((trigger) => this.parseAutopilotTrigger(trigger)) : [] };
   }
 
   async createAutopilot(data: CreateAutopilotRequest): Promise<Autopilot> {
@@ -4537,17 +4541,27 @@ export class ApiClient {
   }
 
   async createAutopilotTrigger(autopilotId: string, data: CreateAutopilotTriggerRequest): Promise<AutopilotTrigger> {
-    return this.fetch(`/api/autopilots/${autopilotId}/triggers`, {
+    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/triggers`, {
       method: "POST",
       body: JSON.stringify(data),
     });
+    return this.parseAutopilotTrigger(raw);
   }
 
   async updateAutopilotTrigger(autopilotId: string, triggerId: string, data: UpdateAutopilotTriggerRequest): Promise<AutopilotTrigger> {
-    return this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, {
+    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
+    return this.parseAutopilotTrigger(raw);
+  }
+
+  private parseAutopilotTrigger(raw: unknown): AutopilotTrigger {
+    // Never pass a malformed credential-bearing response to schema diagnostics.
+    const safe = AutopilotTriggerSchema.safeParse(raw);
+    return parseWithFallback(safe.success ? safe.data : undefined,
+      AutopilotTriggerSchema, FALLBACK_AUTOPILOT_TRIGGER,
+      { endpoint: "autopilot trigger" });
   }
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {

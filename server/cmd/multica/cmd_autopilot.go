@@ -104,6 +104,9 @@ var autopilotTriggerRotateURLCmd = &cobra.Command{
 }
 
 func init() {
+	addWebhookSecurityFlags(autopilotTriggerAddCmd, false)
+	addWebhookSecurityFlags(autopilotTriggerUpdateCmd, true)
+	autopilotTriggerAddCmd.Flags().Bool("enabled", true, "Enable the trigger; use --enabled=false for atomic disabled creation")
 	autopilotCmd.AddCommand(autopilotListCmd)
 	autopilotCmd.AddCommand(autopilotGetCmd)
 	autopilotCmd.AddCommand(autopilotCreateCmd)
@@ -268,7 +271,11 @@ func runAutopilotGet(cmd *cobra.Command, args []string) error {
 	}
 
 	var resp map[string]any
-	if err := client.GetJSON(ctx, "/api/autopilots/"+autopilotRef.ID, &resp); err != nil {
+	path := "/api/autopilots/" + autopilotRef.ID
+	if show, _ := cmd.Flags().GetBool("show-secrets"); show {
+		path += "?show_secrets=true"
+	}
+	if err := client.GetJSON(ctx, path, &resp); err != nil {
 		return fmt.Errorf("get autopilot: %w", err)
 	}
 
@@ -307,6 +314,7 @@ func redactAutopilotWebhookCredentials(resp map[string]any) {
 		if !ok {
 			continue
 		}
+		delete(trigger, "signing_secret")
 		_, hasTokenField := trigger["webhook_token"]
 		_, hasPathField := trigger["webhook_path"]
 		_, hasURLField := trigger["webhook_url"]
@@ -809,6 +817,13 @@ func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{"kind": kind}
+	if cmd.Flags().Changed("enabled") {
+		v, _ := cmd.Flags().GetBool("enabled")
+		body["enabled"] = v
+	}
+	if err := webhookSecurityBody(cmd, body, true); err != nil {
+		return err
+	}
 	if kind == "schedule" {
 		body["cron_expression"] = cron
 		if v, _ := cmd.Flags().GetString("timezone"); v != "" {
@@ -829,17 +844,15 @@ func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
 
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/autopilots/"+autopilotRef.ID+"/triggers", body, &result); err != nil {
-		return autopilotWriteRequestError("create trigger", err)
+		return webhookSecurityWriteError("create trigger", err, body)
 	}
 
+	redactAutopilotTriggerResult(result)
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 	fmt.Printf("Trigger created: %s (kind=%s)\n", strVal(result, "id"), strVal(result, "kind"))
-	if kind == "webhook" {
-		printWebhookURL(client, result)
-	}
 	return nil
 }
 
@@ -913,6 +926,9 @@ func runAutopilotTriggerUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{}
+	if err := webhookSecurityBody(cmd, body, false); err != nil {
+		return err
+	}
 	if cmd.Flags().Changed("enabled") {
 		v, _ := cmd.Flags().GetBool("enabled")
 		body["enabled"] = v
@@ -930,7 +946,7 @@ func runAutopilotTriggerUpdate(cmd *cobra.Command, args []string) error {
 		body["label"] = v
 	}
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --enabled, --cron, --timezone, or --label")
+		return fmt.Errorf("no fields to update; use --enabled, --cron, --timezone, --label, --provider or signing-secret flags")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())
@@ -948,9 +964,10 @@ func runAutopilotTriggerUpdate(cmd *cobra.Command, args []string) error {
 	var result map[string]any
 	path := "/api/autopilots/" + autopilotRef.ID + "/triggers/" + triggerRef.ID
 	if err := client.PatchJSON(ctx, path, body, &result); err != nil {
-		return autopilotWriteRequestError("update trigger", err)
+		return webhookSecurityWriteError("update trigger", err, body)
 	}
 
+	redactAutopilotTriggerResult(result)
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, result)
