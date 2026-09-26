@@ -106,6 +106,8 @@ func registerPluginActionRoutes(r chi.Router, h *handler.Handler) {
 	r.Get(publicapiv1.PathIssueComments, h.ListPluginComments)
 	r.Post(publicapiv1.PathIssueComments, h.CreatePluginComment)
 	r.Get(publicapiv1.PathStorageScope, h.ListPluginStorage)
+	r.Get(publicapiv1.PathTasks, h.ListPluginTasks)
+	r.Get(publicapiv1.PathAgents, h.ListPluginAgents)
 	r.Get(publicapiv1.PathStorageValue, h.GetPluginStorage)
 	r.Put(publicapiv1.PathStorageValue, h.PutPluginStorage)
 	r.Delete(publicapiv1.PathStorageValue, h.DeletePluginStorage)
