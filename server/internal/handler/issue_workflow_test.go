@@ -393,3 +393,137 @@ func TestPreviewIssueWorkflowBriefUsesTheDraft(t *testing.T) {
 		"name": "Draft", "steps": deliveryWorkflowSteps(agentID), "status_key": "blocked",
 	})).Want(http.StatusBadRequest)
 }
+
+// reviewWorkflowSteps: the agent implements, anyone reviews, and the issue can
+// be parked.
+func reviewWorkflowSteps(agentID string) []map[string]any {
+	return []map[string]any{
+		{"status_key": "todo", "handler": map[string]any{"type": "none"}},
+		{"status_key": "in_progress", "handler": map[string]any{"type": "agent", "id": agentID}, "next_status_key": "in_review"},
+		{"status_key": "in_review", "handler": map[string]any{"type": "none"}, "next_status_key": "done", "back_status_key": "in_progress"},
+		{"status_key": "blocked", "handler": map[string]any{"type": "none"}},
+		{"status_key": "done", "handler": map[string]any{"type": "none"}},
+	}
+}
+
+// agentUpdateIssue changes an issue as the agent running taskID, the way a
+// task token reaches the handler.
+func agentUpdateIssue(t *testing.T, issueID, agentID, taskID string, body map[string]any) *testutil.Response {
+	t.Helper()
+	req := withURLParam(newRequest("PUT", "/api/issues/"+issueID, body), "id", issueID)
+	req.Header.Set("X-Actor-Source", "task_token")
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
+	return testutil.Call(t, testHandler.UpdateIssue, req)
+}
+
+func taskWorkflowStep(t *testing.T, taskID string) string {
+	t.Helper()
+	var step *string
+	dbfx.QueryRow(t, `SELECT workflow_step FROM agent_task_queue WHERE id = $1`, taskID).Scan(&step)
+	if step == nil {
+		return ""
+	}
+	return *step
+}
+
+// A run works on the step the issue was at when it was queued. Once someone
+// else moves the issue, the run's status changes are refused — they were
+// decided for a step the issue has left — and the refusal names the move.
+func TestAgentStatusChangeRefusedAfterIssueMoved(t *testing.T) {
+	seedTestCatalog(t)
+	agentID := seededReadyAgentID(t)
+	wf := createTestWorkflow(t, "Stale "+workflowTestSuffix(), "todo", reviewWorkflowSteps(agentID))
+	projectID := createWorkflowTestProject(t, "Workflow stale step project")
+	setProjectWorkflow(t, projectID, map[string]any{"workflow_id": wf.ID}).Want(http.StatusOK)
+	issueID := dbfx.Issue(t, "stale step", testutil.Cols{"project_id": projectID, "status": "todo"})
+
+	updateIssueForTest(t, issueID, map[string]any{"status": "in_progress"}).Want(http.StatusOK)
+	var taskID string
+	dbfx.QueryRow(t, `SELECT id::text FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2`, issueID, agentID).Scan(&taskID)
+	if got := taskWorkflowStep(t, taskID); got != "in_progress" {
+		t.Fatalf("handoff run step = %q, want in_progress", got)
+	}
+
+	// The run's own move is allowed and carries its step along.
+	agentUpdateIssue(t, issueID, agentID, taskID, map[string]any{"status": "in_review"}).Want(http.StatusOK)
+	if got := taskWorkflowStep(t, taskID); got != "in_review" {
+		t.Fatalf("step after the run's own move = %q, want in_review", got)
+	}
+
+	// A member parks the issue while the run is still going. The activity row
+	// is what the server's listener records for that move; handler tests run
+	// without the listeners.
+	updateIssueForTest(t, issueID, map[string]any{"status": "blocked"}).Want(http.StatusOK)
+	dbfx.Exec(t, `INSERT INTO activity_log (workspace_id, issue_id, actor_type, actor_id, action, details)
+		VALUES ($1, $2, 'member', $3, 'status_changed', '{"from":"in_review","to":"blocked"}')`, testWorkspaceID, issueID, testUserID)
+
+	body := agentUpdateIssue(t, issueID, agentID, taskID, map[string]any{"status": "done"}).Want(http.StatusConflict).Map()
+	if body["code"] != "workflow_step_moved" || body["step"] != "in_review" || body["current_status"] != "blocked" {
+		t.Fatalf("refusal = %v", body)
+	}
+	var memberName string
+	dbfx.QueryRow(t, `SELECT name FROM "user" WHERE id = $1`, testUserID).Scan(&memberName)
+	msg, _ := body["error"].(string)
+	for _, want := range []string{memberName + " moved it to", `"blocked"`, "not applied"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("refusal %q is missing %q", msg, want)
+		}
+	}
+	if status, _, _ := issueStatusAndAssignee(t, issueID); status != "blocked" {
+		t.Fatalf("status = %q, the refused change must not apply", status)
+	}
+
+	// Anything but a status change still goes through.
+	agentUpdateIssue(t, issueID, agentID, taskID, map[string]any{"title": "stale step, noted"}).Want(http.StatusOK)
+	agentUpdateIssue(t, issueID, agentID, taskID, map[string]any{"status": "blocked"}).Want(http.StatusOK)
+
+	// A run queued after the move works on the new step.
+	var runtimeID string
+	dbfx.QueryRow(t, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&runtimeID)
+	fresh := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": issueID, "runtime_id": runtimeID, "status": "running", "started_at": time.Now(), "workflow_step": "blocked",
+	})
+	agentUpdateIssue(t, issueID, agentID, fresh, map[string]any{"status": "in_review"}).Want(http.StatusOK)
+}
+
+// A handoff away from a squad offers to stop — and stops — the runs made on
+// the squad's behalf, recording who stopped them.
+func TestHandoffStopsPreviousSquadRuns(t *testing.T) {
+	seedTestCatalog(t)
+	agentID := seededReadyAgentID(t)
+	squadID := dbfx.Squad(t, "Workflow review squad "+workflowTestSuffix(), agentID)
+	wf := createTestWorkflow(t, "Squad stop "+workflowTestSuffix(), "todo", []map[string]any{
+		{"status_key": "todo", "handler": map[string]any{"type": "none"}},
+		{"status_key": "in_progress", "handler": map[string]any{"type": "member", "id": testUserID}},
+		{"status_key": "in_review", "handler": map[string]any{"type": "squad", "id": squadID}},
+		{"status_key": "done", "handler": map[string]any{"type": "none"}},
+	})
+	projectID := createWorkflowTestProject(t, "Workflow squad stop project")
+	setProjectWorkflow(t, projectID, map[string]any{"workflow_id": wf.ID}).Want(http.StatusOK)
+	issueID := dbfx.Issue(t, "squad reviewing", testutil.Cols{
+		"project_id": projectID, "status": "in_review", "assignee_type": "squad", "assignee_id": squadID,
+	})
+	var runtimeID string
+	dbfx.QueryRow(t, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&runtimeID)
+	running := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": issueID, "squad_id": squadID, "runtime_id": runtimeID, "status": "running", "started_at": time.Now(),
+	})
+
+	var preview WorkflowHandoffPreviewResponse
+	req := withURLParam(newRequest("GET", "/api/issues/"+issueID+"/workflow-handoff?status=in_progress", nil), "id", issueID)
+	testutil.Call(t, testHandler.PreviewWorkflowHandoff, req).Want(http.StatusOK).JSON(&preview)
+	if len(preview.PreviousRuns) != 1 || preview.PreviousRuns[0].TaskID != running {
+		t.Fatalf("preview runs = %+v, want the squad's run", preview.PreviousRuns)
+	}
+
+	updateIssueForTest(t, issueID, map[string]any{"status": "in_progress", "stop_previous_assignee_runs": true}).Want(http.StatusOK)
+	var status string
+	var stoppedBy *string
+	dbfx.QueryRow(t, `SELECT status, cancelled_by_name FROM agent_task_queue WHERE id = $1`, running).Scan(&status, &stoppedBy)
+	var memberName string
+	dbfx.QueryRow(t, `SELECT name FROM "user" WHERE id = $1`, testUserID).Scan(&memberName)
+	if status != "cancelled" || stoppedBy == nil || *stoppedBy != memberName {
+		t.Fatalf("squad run = %s stopped by %v, want cancelled by %s", status, stoppedBy, memberName)
+	}
+}

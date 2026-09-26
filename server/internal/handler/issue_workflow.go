@@ -833,8 +833,8 @@ func (h *Handler) PreviewIssueWorkflowBrief(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]any{"brief": brief})
 }
 
-// WorkflowHandoffRun is an active run of the agent a handoff takes the issue
-// from.
+// WorkflowHandoffRun is an active run of the agent or squad a handoff takes
+// the issue from.
 type WorkflowHandoffRun struct {
 	TaskID    string  `json:"task_id"`
 	AgentID   string  `json:"agent_id"`
@@ -882,7 +882,7 @@ func (h *Handler) PreviewWorkflowHandoff(w http.ResponseWriter, r *http.Request)
 		AssigneeType: issue.AssigneeType,
 		AssigneeID:   issue.AssigneeID,
 	}
-	hand, err := h.applyIssueWorkflow(r.Context(), issue, &params, true, false)
+	hand, err := h.applyIssueWorkflow(r.Context(), issue, &params, true, false, nil)
 	if err != nil {
 		if writeIssueWorkflowError(w, err) {
 			return
@@ -905,23 +905,18 @@ func (h *Handler) PreviewWorkflowHandoff(w http.ResponseWriter, r *http.Request)
 	next.AssigneeType = params.AssigneeType
 	next.AssigneeID = params.AssigneeID
 	resp.Brief = h.workflowHandoffNote(r.Context(), next, hand)
-	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid && issue.AssigneeID != params.AssigneeID {
-		if tasks, err := h.Queries.ListActiveTasksByIssue(r.Context(), issue.ID); err == nil {
-			for _, task := range tasks {
-				if task.AgentID != issue.AssigneeID {
-					continue
-				}
-				started := task.StartedAt
-				if !started.Valid {
-					started = task.CreatedAt
-				}
-				resp.PreviousRuns = append(resp.PreviousRuns, WorkflowHandoffRun{
-					TaskID:    uuidToString(task.ID),
-					AgentID:   uuidToString(task.AgentID),
-					Status:    task.Status,
-					StartedAt: timestampToPtr(started),
-				})
+	if issue.AssigneeType != params.AssigneeType || issue.AssigneeID != params.AssigneeID {
+		for _, task := range h.assigneeActiveRuns(r.Context(), issue) {
+			started := task.StartedAt
+			if !started.Valid {
+				started = task.CreatedAt
 			}
+			resp.PreviousRuns = append(resp.PreviousRuns, WorkflowHandoffRun{
+				TaskID:    uuidToString(task.ID),
+				AgentID:   uuidToString(task.AgentID),
+				Status:    task.Status,
+				StartedAt: timestampToPtr(started),
+			})
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)

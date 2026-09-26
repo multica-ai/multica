@@ -339,6 +339,38 @@ func (e *NotInWorkflowError) Error() string {
 		e.StatusKey, e.WorkflowName, strings.Join(e.Allowed, ", "))
 }
 
+// StepMovedError refuses an agent's status change on an issue that has left
+// the step the agent's run works on: someone else moved it while the run
+// worked, so the run's decision no longer applies, and applying it would undo
+// that move.
+type StepMovedError struct {
+	IssueIdentifier string
+	// Step is the status the run works on; Current is where the issue is now.
+	Step, StepName       string
+	Current, CurrentName string
+	// MovedBy names whoever last changed the status; empty when unknown.
+	MovedBy string
+}
+
+func (e *StepMovedError) Error() string {
+	mover := e.MovedBy
+	if mover == "" {
+		mover = "someone else"
+	}
+	return fmt.Sprintf("%s is no longer at %s: %s moved it to %s while this run was working, so this status change was not applied. "+
+		"Do not change the status again in this run; leave a comment if something still needs attention.",
+		e.IssueIdentifier, statusLabel(e.StepName, e.Step), mover, statusLabel(e.CurrentName, e.Current))
+}
+
+// statusLabel names a status for an agent: its display name with the key the
+// CLI takes, or the bare key when the two are the same.
+func statusLabel(name, key string) string {
+	if name == "" || name == key {
+		return fmt.Sprintf("%q", key)
+	}
+	return fmt.Sprintf("%q (%s)", name, key)
+}
+
 // CheckStatus rejects a status the workflow does not list.
 func CheckStatus(def *Definition, key string) error {
 	if def == nil || def.Has(key) {

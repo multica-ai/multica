@@ -3584,8 +3584,9 @@ type UpdateIssueRequest struct {
 	// a run and is never stored on the issue itself.
 	HandoffNote string `json:"handoff_note,omitempty"`
 	// StopPreviousAssigneeRuns, when a status change hands the issue off to a
-	// project workflow step's handler, cancels the active runs of the agent it
-	// was taken from. Ignored when the write does not hand off. (MUL-7420)
+	// project workflow step's handler, cancels the active runs of the agent or
+	// squad it was taken from. Ignored when the write does not hand off.
+	// (MUL-7420)
 	StopPreviousAssigneeRuns bool `json:"stop_previous_assignee_runs,omitempty"`
 	// DuplicateOfIssueID marks this issue as a duplicate of another issue in
 	// the same workspace (MUL-7349). A duplicate is an ordinary cancelled issue
@@ -4007,7 +4008,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Project workflow (MUL-7420): keep the status inside the project's
 	// workflow, and hand the issue off when it enters a step with a handler.
 	// A handoff assignee passes the same gate as a hand-picked one.
-	handoff, err := h.applyIssueWorkflow(r.Context(), prevIssue, &params, req.Status != nil, touchedType || touchedID)
+	// An agent's run may only move the issue from the step it works on.
+	callerType, _ := h.resolveActor(r, userID, workspaceID)
+	callerRun := h.agentRunOnIssue(r, callerType, prevIssue)
+	handoff, err := h.applyIssueWorkflow(r.Context(), prevIssue, &params, req.Status != nil, touchedType || touchedID, callerRun)
 	if err != nil {
 		if writeIssueWorkflowError(w, err) {
 			return
@@ -4070,6 +4074,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	// Determine actor identity: agent (via X-Agent-ID header) or member.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	h.advanceRunStep(r.Context(), callerRun, prevIssue, issue)
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
@@ -4843,7 +4848,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// Project workflow (MUL-7420), per issue: an issue whose workflow does
 		// not list the batch status is skipped like the other per-item guards;
 		// entering a handoff step reassigns this issue to the step's handler.
-		handoff, err := h.applyIssueWorkflow(r.Context(), prevIssue, &params, req.Updates.Status != nil, batchTouchedType || batchTouchedID)
+		callerType, _ := h.resolveActor(r, userID, workspaceID)
+		callerRun := h.agentRunOnIssue(r, callerType, prevIssue)
+		handoff, err := h.applyIssueWorkflow(r.Context(), prevIssue, &params, req.Updates.Status != nil, batchTouchedType || batchTouchedID, callerRun)
 		if err != nil {
 			continue
 		}
@@ -4886,6 +4893,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+		h.advanceRunStep(r.Context(), callerRun, prevIssue, issue)
 
 		fillBatch(&resp)
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil || handoff != nil) &&
