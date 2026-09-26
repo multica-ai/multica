@@ -45,10 +45,9 @@ describe("repairEmptyListItems (real editor)", () => {
     const ed = makeEditor("1. \n\n");
 
     // Failing-first: @tiptap/markdown parses the empty item into a childless
-    // listItem, and the document is left with no real text cursor.
+    // listItem, and the caret lands on the following block, not in the item.
     expect(firstItem(ed).childCount).toBe(0);
-    const before = ed.state.selection;
-    expect(before instanceof TextSelection && before.$cursor != null).toBe(false);
+    expect(ed.state.selection.$from.node(-1)?.type.name).not.toBe("listItem");
 
     repairEmptyListItems(ed);
 
@@ -71,7 +70,7 @@ describe("repairEmptyListItems (real editor)", () => {
     repairEmptyListItems(ed);
     expect(firstItem(ed).childCount).toBe(1);
 
-    // Undo must not restore the childless item / AllSelection.
+    // Undo must not restore the childless item.
     expect(ed.can().undo()).toBe(false);
     ed.commands.undo();
     expect(firstItem(ed).childCount).toBe(1);
