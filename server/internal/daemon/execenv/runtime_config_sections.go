@@ -803,7 +803,7 @@ func writeProjectWorkflow(b *strings.Builder, w *ProjectWorkflowForEnv) {
 		return
 	}
 	fmt.Fprintf(b, "### Project Workflow: %s\n\n", sanitizeNameForBriefMarkdown(w.Name))
-	b.WriteString("Statuses in order. Moving the issue into a step that hands off reassigns it to that step's handler and starts their run; the system never advances the status when a run ends.\n\n")
+	b.WriteString("Statuses in order. Moving the issue into a step that hands off reassigns it to that step's handler and starts their run; the system never advances the status when a run ends. Each step's handler gets a run when the issue enters that step, so do not use `multica issue wakeup` to watch this issue's status, assignee or runs; use wakeups only to wait for a time or for something outside this issue.\n\n")
 	var current *ProjectWorkflowStepForEnv
 	for i := range w.Steps {
 		s := &w.Steps[i]

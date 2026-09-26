@@ -447,5 +447,6 @@ func Brief(in BriefInput) string {
 		fmt.Fprintf(&b, "Can't proceed  → multica issue status %s blocked, then comment why\n", in.IssueIdentifier)
 	}
 	b.WriteString("The system does not advance the status when your run ends. Where your runtime instructions name a status this list does not include, use the commands above instead.\n")
+	b.WriteString("Each step's handler gets a run when the issue enters that step, so do not use `multica issue wakeup` to watch this issue's status, assignee or runs; use wakeups only to wait for a time or for something outside this issue.\n")
 	return b.String()
 }
