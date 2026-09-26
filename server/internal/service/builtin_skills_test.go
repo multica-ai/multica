@@ -471,11 +471,6 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"stop editing the PR blind",
 				"whether the installation is bound to this workspace",
 				"redelivered once the receiving side is fixed",
-				// The workspace setting, not the PR text, decides what a merge
-				// does, so an agent whose PR delivers only part of the work
-				// switches the automation off for that issue (MUL-7726).
-				"The workspace decides what a merge does, not the PR text",
-				"multica issue pr-automation <issue-id> off",
 				"include the PR URL when a PR exists",
 				"Closes MUL-123",
 				"--status backlog",

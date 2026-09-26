@@ -2,7 +2,7 @@
 
 Product contracts the runtime brief does not fully encode.
 
-- [PR linking and the merge status change](#pr-linking-and-the-merge-status-change)
+- [PR linking](#pr-linking)
 - [Reading a linked PR's real state](#reading-a-linked-prs-real-state)
 - [Custom properties: typed workflow state](#custom-properties-typed-workflow-state)
 - [Status changes have server side effects](#status-changes-have-server-side-effects)
@@ -12,7 +12,7 @@ Product contracts the runtime brief does not fully encode.
 
 To attach a local file to an existing issue description, use `multica issue update <id> --attachment <local-path>`. The CLI appends the file's Markdown reference to the end of the description; to replace an image, also use `--description-file` to remove the old reference. Do not put local filesystem paths in the description.
 
-## PR linking and the merge status change
+## PR linking
 
 A PR is linked to an issue when its **title** or **branch name** contains a
 routable issue key (`PREFIX-NUMBER`, e.g. `MUL-123`), or when its title or body
@@ -28,31 +28,8 @@ Closes MUL-123   (body)                       # key after a keyword → links
 Related to MUL-123   (body only)              # no link
 ```
 
-**The workspace decides what a merge does, not the PR text.** When every PR
-linked to an issue is merged, the issue moves to the status the workspace chose
-under Settings → Integrations → GitHub ("After PRs merge, move the issue to"):
-`done` by default, another started or done status (custom ones included), or
-nothing. How a PR was linked does not matter; `Closes` only links. A linked PR
-still open or draft keeps the issue waiting, and so does a PR closed without
-merging until someone removes it from the issue. Nothing moves an issue that is
-already done or cancelled, still in Triage, already in the target status, or
-switched off for that one issue.
-
-The check runs only when a PR event touches the issue: a linked PR merges, a PR
-is linked, or a link is removed. Reopening an issue or changing the setting never
-moves it by itself. While a PR is open, its automatic links follow the live
-title, branch, and body: removing the key drops the link. After merge or close,
-existing links stay.
-
-**When your PR does not finish the issue**, switch the automation off for that
-issue before the merge and say so in your final comment:
-
-```bash
-multica issue pr-automation <issue-id> off   # "on" follows the workspace again
-```
-
-Use it when the PR delivers only part of the issue, or when a release, a
-verification step or another PR must follow the merge.
+While a PR is open, its automatic links follow the live title, branch, and
+body: removing the key drops the link. After merge or close, existing links stay.
 
 ### Default for code-changing issue work
 
@@ -86,14 +63,7 @@ an earlier run.
 multica issue pull-requests <issue-id> --output json
 ```
 
-Returns `{"pull_requests": [...], "auto_complete": {...}}`.
-`auto_complete.state` says what the merge rule will do for this issue:
-`waiting` (some linked PRs are still open or draft), `not_merged` (one was
-closed without merging), `all_merged`, `at_target` (the issue already has the
-target status), `workspace_disabled` (the workspace leaves status alone),
-`issue_disabled`, `terminal`, `triage`, or `none`;
-`auto_complete.target_status` is the status key a merge moves the issue to, or
-`none`; `auto_complete.pull_request_ids` names the PRs the state is about. Each element of `pull_requests` exposes:
+Returns `{"pull_requests": [...], ...}`. Each element of `pull_requests` exposes:
 
 - `number`, `html_url`, `title`
 - `link_source` — why the PR is on the issue: `title`, `branch`, `manual`, or
@@ -264,10 +234,7 @@ archived statuses remain readable via an explicit status filter.
   later re-trigger confirms the overall goal is met.
 - **`in_review`** is an accepted issue status. Some workflows use it while a PR
   is open and awaiting review; moving to it is an explicit mutation.
-- **`done`** on a child issue posts a system comment on its parent. When every
-  PR linked to the issue has merged and one of them carries a closing keyword
-  (`Closes MUL-XXXX`), the server moves it to `done` itself (see PR linking and
-  auto-complete) — you do not also need to flip it manually.
+- **`done`** on a child issue posts a system comment on its parent.
 - **`cancelled`** is a terminal, user-driven decision to close the issue. Like
   `done` it enqueues no new agent work, but it does **not** stop tasks already in
   flight — a run in progress keeps going. To stop a running task, cancel the

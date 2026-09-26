@@ -1370,45 +1370,6 @@ func TestRunIssuePullRequestsListsLinkedPRsAsJSON(t *testing.T) {
 	}
 }
 
-func TestRunIssuePRAutomationSendsTheSwitch(t *testing.T) {
-	var gotBodies []map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/issues/MUL-7726":
-			json.NewEncoder(w).Encode(map[string]any{"id": "issue-uuid", "identifier": "MUL-7726"})
-		case r.URL.Path == "/api/issues/issue-uuid/pr-auto-complete" && r.Method == http.MethodPut:
-			var body map[string]any
-			json.NewDecoder(r.Body).Decode(&body)
-			gotBodies = append(gotBodies, body)
-			json.NewEncoder(w).Encode(map[string]any{"pull_requests": []any{}, "auto_complete": map[string]any{"state": "issue_disabled"}})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer srv.Close()
-
-	t.Setenv("MULTICA_SERVER_URL", srv.URL)
-	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
-	// A task-scoped token keeps the test valid inside an agent's workdir too.
-	t.Setenv("MULTICA_TOKEN", "mat_test-token")
-
-	for _, arg := range []string{"off", "ON"} {
-		cmd := &cobra.Command{Use: "pr-automation"}
-		cmd.Flags().String("output", "table", "")
-		if err := runIssuePRAutomation(cmd, []string{"MUL-7726", arg}); err != nil {
-			t.Fatalf("runIssuePRAutomation(%s): %v", arg, err)
-		}
-	}
-	if want := "[map[disabled:true] map[disabled:false]]"; fmt.Sprint(gotBodies) != want {
-		t.Fatalf("bodies = %v, want %s", gotBodies, want)
-	}
-	cmd := &cobra.Command{Use: "pr-automation"}
-	cmd.Flags().String("output", "table", "")
-	if err := runIssuePRAutomation(cmd, []string{"MUL-7726", "maybe"}); err == nil {
-		t.Fatal("an argument other than on/off must be rejected")
-	}
-}
-
 func newIssueUsageTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "usage"}
 	cmd.Flags().String("output", "table", "")

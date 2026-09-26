@@ -244,17 +244,6 @@ var issuePullRequestsCmd = &cobra.Command{
 	RunE:    runIssuePullRequests,
 }
 
-var issuePRAutomationCmd = &cobra.Command{
-	Use:   "pr-automation <id> <on|off>",
-	Short: "Turn the PR merge status change on or off for one issue",
-	Long: "When every PR linked to an issue merges, the workspace setting moves the issue\n" +
-		"to a chosen status (Done by default). \"off\" keeps this one issue where it is,\n" +
-		"for work that needs review, a release or another PR after the merge. \"on\"\n" +
-		"follows the workspace setting again from the next PR event.",
-	Args: exactArgs(2),
-	RunE: runIssuePRAutomation,
-}
-
 var issueChildrenCmd = &cobra.Command{
 	Use:     "children <id>",
 	Aliases: []string{"subissues"},
@@ -567,7 +556,6 @@ func init() {
 	issueCmd.AddCommand(issueListCmd)
 	issueCmd.AddCommand(issueGetCmd)
 	issueCmd.AddCommand(issuePullRequestsCmd)
-	issueCmd.AddCommand(issuePRAutomationCmd)
 	issueCmd.AddCommand(issueChildrenCmd)
 	issueCmd.AddCommand(issueCreateCmd)
 	issueCmd.AddCommand(issueUpdateCmd)
@@ -617,7 +605,6 @@ func init() {
 
 	// issue pull-requests
 	issuePullRequestsCmd.Flags().String("output", "table", "Output format: table or json")
-	issuePRAutomationCmd.Flags().String("output", "table", "Output format: table or json")
 
 	issueChildrenCmd.Flags().String("output", "table", "Output format: table or json")
 	issueChildrenCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
@@ -1054,47 +1041,6 @@ func runIssuePullRequests(cmd *cobra.Command, args []string) error {
 
 	prs, _ := result["pull_requests"].([]any)
 	printIssuePullRequestsTable(normalizePullRequestList(prs))
-	return nil
-}
-
-func runIssuePRAutomation(cmd *cobra.Command, args []string) error {
-	var disabled bool
-	switch strings.ToLower(strings.TrimSpace(args[1])) {
-	case "on":
-		disabled = false
-	case "off":
-		disabled = true
-	default:
-		return fmt.Errorf("expected \"on\" or \"off\", got %q", args[1])
-	}
-
-	client, err := newAPIClient(cmd)
-	if err != nil {
-		return err
-	}
-
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
-
-	issueRef, err := resolveIssueRef(ctx, client, args[0])
-	if err != nil {
-		return fmt.Errorf("resolve issue: %w", err)
-	}
-
-	var result map[string]any
-	if err := client.PutJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID)+"/pr-auto-complete", map[string]any{"disabled": disabled}, &result); err != nil {
-		return fmt.Errorf("update pr automation: %w", err)
-	}
-	if disabled {
-		fmt.Fprintf(os.Stderr, "Issue %s keeps its status when its PRs merge.\n", issueRef.Display)
-	} else {
-		fmt.Fprintf(os.Stderr, "Issue %s follows the workspace PR merge setting again.\n", issueRef.Display)
-	}
-
-	output, _ := cmd.Flags().GetString("output")
-	if output == "json" {
-		return cli.PrintJSON(os.Stdout, result)
-	}
 	return nil
 }
 

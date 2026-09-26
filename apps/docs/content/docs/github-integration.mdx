@@ -95,7 +95,7 @@ An issue moves to the chosen status when all of the following hold:
 1. every linked PR is `Merged` — an `Open` or `Draft` PR keeps the issue waiting, and so does a PR closed without merging until you remove it from the issue;
 2. the issue isn't `done` or `cancelled`, isn't in Triage, doesn't already have the target status, and hasn't been switched off for this issue (**Pull requests → ⋯ → Keep status when PRs merge**).
 
-How a PR was linked doesn't matter: the title, the branch name and a `Closes MUL-123` in the body all link it, and none of them changes what the merge does. When a PR delivers only part of the issue, or a release or a check has to follow the merge, keep that issue's status; agents do this with `multica issue pr-automation <issue-id> off`.
+How a PR was linked doesn't matter: the title, the branch name and a `Closes MUL-123` in the body all link it, and none of them changes what the merge does. When a PR delivers only part of the issue, or a release or a check has to follow the merge, keep that issue's status from its **Pull requests** menu.
 
 The check runs when a PR event touches the issue: a linked PR merges, a PR is linked, or a link is removed. Reopening an issue doesn't move it back — the next linked PR that merges does. Changing the setting doesn't move issues whose PRs merged earlier.
 
