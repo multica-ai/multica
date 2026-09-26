@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { ApiError } from "@multica/core/api";
+import { configureShortcutPlatform } from "@multica/core/shortcuts";
 import { renderWithI18n } from "../../test/i18n";
 import { WakeupCreate } from "./wakeup-create";
 
@@ -40,7 +41,11 @@ async function chooseCondition(label: string) {
 
 beforeEach(() => {
   create.mockReset().mockResolvedValue(undefined);
+  // The send shortcut is the primary modifier + Enter; pin the platform so
+  // Cmd means primary on every CI runner.
+  configureShortcutPlatform("macos");
 });
+afterEach(() => configureShortcutPlatform(null));
 
 describe("WakeupCreateForm", () => {
   it("asks for a condition before creating anything", async () => {
