@@ -5,6 +5,8 @@ export {
   workflowStep,
   stepHandsOff,
   workflowAllowsStatus,
+  workflowDoneStatus,
+  workflowReopenStatus,
   workflowHandoffPreviewOptions,
   handoffStepCount,
 } from "./queries";

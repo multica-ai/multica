@@ -72,6 +72,28 @@ export function workflowAllowsStatus(
   return workflow.steps.some((s) => s.status_key === statusKey);
 }
 
+/**
+ * Where a one-click "mark done" takes an issue of a project using `workflow`:
+ * `done`, or the workflow's first done-category step when it does not list
+ * `done`; null when the workflow has no done step at all.
+ */
+export function workflowDoneStatus(
+  workflow: IssueWorkflow | null | undefined,
+  categoryOf: (key: string) => string,
+): string | null {
+  if (workflowAllowsStatus(workflow, "done")) return "done";
+  return workflow?.steps.find((s) => categoryOf(s.status_key) === "done")?.status_key ?? null;
+}
+
+/**
+ * Where un-marking a duplicate returns an issue: `todo`, or the workflow's
+ * starting step when the workflow does not list `todo`.
+ */
+export function workflowReopenStatus(workflow: IssueWorkflow | null | undefined): string {
+  if (!workflow || workflowAllowsStatus(workflow, "todo")) return "todo";
+  return workflow.initial_status_key;
+}
+
 /** Steps whose entry reassigns the issue. */
 export function handoffStepCount(workflow: IssueWorkflow): number {
   return workflow.steps.filter((s) => s.handler.type !== "none").length;

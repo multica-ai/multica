@@ -1,7 +1,14 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { IssueWorkflow } from "../types";
-import { resolveProjectWorkflow, stepHandsOff, workflowAllowsStatus, workflowStep } from "./queries";
+import {
+  resolveProjectWorkflow,
+  stepHandsOff,
+  workflowAllowsStatus,
+  workflowDoneStatus,
+  workflowReopenStatus,
+  workflowStep,
+} from "./queries";
 
 const workflow: IssueWorkflow = {
   id: "wf-1",
@@ -38,5 +45,29 @@ describe("workflow helpers (MUL-7420)", () => {
     expect(stepHandsOff(workflowStep(workflow, "in_review"))).toBe(true);
     expect(stepHandsOff(workflowStep(workflow, "todo"))).toBe(false);
     expect(stepHandsOff(workflowStep(workflow, "missing"))).toBe(false);
+  });
+});
+
+describe("one-click status targets (MUL-7420)", () => {
+  const content: IssueWorkflow = {
+    ...workflow,
+    initial_status_key: "topic",
+    steps: [
+      { status_key: "topic", handler: { type: "none" }, instructions: "" },
+      { status_key: "published", handler: { type: "none" }, instructions: "" },
+    ],
+  };
+  const categoryOf = (key: string) => (key === "published" || key === "done" ? "done" : "unstarted");
+
+  it("marks done on the workflow's done step", () => {
+    expect(workflowDoneStatus(null, categoryOf)).toBe("done");
+    expect(workflowDoneStatus(content, categoryOf)).toBe("published");
+    expect(workflowDoneStatus(workflow, categoryOf)).toBeNull();
+  });
+
+  it("reopens a duplicate at todo, or where the workflow starts", () => {
+    expect(workflowReopenStatus(null)).toBe("todo");
+    expect(workflowReopenStatus(workflow)).toBe("todo");
+    expect(workflowReopenStatus(content)).toBe("topic");
   });
 });

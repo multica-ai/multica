@@ -7,11 +7,12 @@ import {
   BUILT_IN_STATUS_ORDER,
 } from "@multica/core/issues/config";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useProjectWithWorkflow } from "@multica/core/issue-workflows";
 import {
   issueStatusColor,
   normalizeIssueStatusCategory,
 } from "@multica/core/issue-statuses/queries";
-import type { IssueStatus, IssueStatusCategory } from "@multica/core/types";
+import type { IssueStatus, IssueStatusCategory, IssueWorkflow, Project } from "@multica/core/types";
 import { useStatusLabel } from "./status-label";
 
 export interface StatusOption {
@@ -82,4 +83,35 @@ export function useStatusOptions(
     },
     [includeArchivedKeys, labelOf, statuses],
   );
+}
+
+/**
+ * The statuses an issue in `projectId` may take: its project workflow's steps
+ * in workflow order, or the whole catalog when the project has none. Every
+ * single-issue status control offers this set, so a status the workflow
+ * refuses is never on offer. (MUL-7420)
+ */
+export function useIssueStatusOptions(
+  wsId: string,
+  projectId: string | null | undefined,
+): { options: StatusOption[]; workflow: IssueWorkflow | null; project: Project | null } {
+  const catalogOptions = useStatusOptions(wsId);
+  const { categoryOf, colorOf, iconOf } = useIssueStatuses(wsId);
+  const labelOf = useStatusLabel(wsId);
+  const { workflow, project } = useProjectWithWorkflow(wsId, projectId);
+  const options = useMemo<StatusOption[]>(() => {
+    if (!workflow) return catalogOptions;
+    const byKey = new Map(catalogOptions.map((o) => [o.key, o]));
+    return workflow.steps.map(
+      (step) =>
+        byKey.get(step.status_key) ?? {
+          key: step.status_key,
+          category: categoryOf(step.status_key),
+          label: labelOf(step.status_key),
+          color: colorOf(step.status_key),
+          icon: iconOf(step.status_key),
+        },
+    );
+  }, [catalogOptions, categoryOf, colorOf, iconOf, labelOf, workflow]);
+  return { options, workflow, project };
 }

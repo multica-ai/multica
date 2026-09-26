@@ -73,6 +73,13 @@ export function BatchActionToolbar({
     [selectedIssues],
   );
 
+  // A selection inside one project offers that project's workflow statuses;
+  // one spanning projects offers the catalog. (MUL-7420)
+  const sharedProjectId = useMemo(() => {
+    const first = selectedIssues[0]?.project_id ?? null;
+    return first && selectedIssues.every((i) => i.project_id === first) ? first : null;
+  }, [selectedIssues]);
+
   const [statusOpen, setStatusOpen] = useState(false);
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
@@ -222,6 +229,7 @@ export function BatchActionToolbar({
         {/* Status */}
         <StatusPicker
           status={common.status}
+          projectId={sharedProjectId}
           onUpdate={handleBatchStatus}
           open={statusOpen}
           onOpenChange={setStatusOpen}

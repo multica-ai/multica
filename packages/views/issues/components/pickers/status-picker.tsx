@@ -7,13 +7,13 @@ import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { stepHandsOff, useProjectWithWorkflow, workflowStep } from "@multica/core/issue-workflows";
+import { stepHandsOff, workflowStep } from "@multica/core/issue-workflows";
 import type { IssueWorkflowStep, Project } from "@multica/core/types";
 import { StatusIcon } from "../status-icon";
 import { PropertyPicker, PickerItem } from "./property-picker";
 import { useT } from "../../../i18n";
 import { useStatusLabel } from "../../utils/status-label";
-import { useStatusOptions, type StatusOption } from "../../utils/status-options";
+import { useIssueStatusOptions } from "../../utils/status-options";
 import { stepHandlerActor, useStepHandlerLabel } from "../../../workflows/step-handler";
 import { WorkflowHandoffConfirmDialog } from "../../../workflows/handoff-confirm-dialog";
 import { ActorAvatar } from "../../../common/actor-avatar";
@@ -58,7 +58,7 @@ export function StatusPicker({
   /**
    * The issue's project. When it uses a workflow, only that workflow's steps
    * are offered, in workflow order, each naming who entering it hands the
-   * issue to. Omit for surfaces spanning projects (batch). (MUL-7420)
+   * issue to. Omit when the surface spans projects. (MUL-7420)
    */
   projectId?: string | null;
   /**
@@ -80,30 +80,9 @@ export function StatusPicker({
   const { categoryOf, colorOf, iconOf } = useIssueStatuses(wsId);
   const labelOf = useStatusLabel(wsId);
 
-  /**
-   * Offerable statuses as one flat list, in canonical category order.
-   *
-   * Archived statuses are excluded: archiving retires a status from future
-   * assignment while leaving the issues already on it untouched. Falls back to
-   * the 7 built-ins until the catalog lands, so a cold render offers exactly
-   * what it always did instead of an empty popover. (MUL-6243)
-   */
-  const catalogOptions = useStatusOptions(wsId);
-  const { workflow, project } = useProjectWithWorkflow(wsId, projectId);
-  const allOptions = useMemo<StatusOption[]>(() => {
-    if (!workflow) return catalogOptions;
-    const byKey = new Map(catalogOptions.map((o) => [o.key, o]));
-    return workflow.steps.map(
-      (step) =>
-        byKey.get(step.status_key) ?? {
-          key: step.status_key,
-          category: categoryOf(step.status_key),
-          label: labelOf(step.status_key),
-          color: colorOf(step.status_key),
-          icon: iconOf(step.status_key),
-        },
-    );
-  }, [catalogOptions, categoryOf, colorOf, iconOf, labelOf, workflow]);
+  // The project workflow's steps, or the catalog in canonical category order
+  // without archived statuses (MUL-6243).
+  const { options: allOptions, workflow, project } = useIssueStatusOptions(wsId, projectId);
 
   const options = useMemo(() => {
     const q = query.trim().toLowerCase();

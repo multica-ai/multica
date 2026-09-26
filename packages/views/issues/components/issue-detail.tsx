@@ -112,7 +112,12 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useProjectWorkflow } from "@multica/core/issue-workflows";
+import {
+  useProjectWorkflow,
+  workflowAllowsStatus,
+  workflowDoneStatus,
+  workflowReopenStatus,
+} from "@multica/core/issue-workflows";
 import { useRecentContextStore } from "@multica/core/chat";
 import { useModalStore } from "@multica/core/modals";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
@@ -2310,6 +2315,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
+  // One-click status actions land on statuses the issue's workflow allows
+  // (MUL-7420): done may be a custom done step, and marking a duplicate
+  // cancels, which a workflow may not list.
+  const issueWorkflow = useProjectWorkflow(wsId, issue?.project_id);
+  const doneStatus = workflowDoneStatus(issueWorkflow, resolveStatusCategory);
+  const canMarkDuplicate = workflowAllowsStatus(issueWorkflow, "cancelled");
 
   // Labels live in their own query (not on the issue body) — fetch the count
   // here so seeding can decide whether the "Labels" optional row should be
@@ -2539,7 +2550,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               align="start"
               projectId={issue.project_id}
               issue={issue}
-              onMarkDuplicate={actions.openMarkDuplicate}
+              onMarkDuplicate={canMarkDuplicate ? actions.openMarkDuplicate : undefined}
               isDuplicate={isDuplicateIssue(issue)}
             />
           </PropRow>
@@ -3017,7 +3028,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 it never overlaps the title (which truncates to make room).
                 It self-hides when no agent is active. */}
             <IssueAgentHeaderChip issueId={id} />
-            {onDone && !issueBehavesAsAny(issue, ["done", "closed"]) && (
+            {onDone && doneStatus && !issueBehavesAsAny(issue, ["done", "closed"]) && (
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -3025,7 +3036,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       variant="ghost"
                       size="icon-sm"
                       className="text-muted-foreground"
-                      onClick={() => { handleUpdateField({ status: "done" }); onDone?.(); }}
+                      onClick={() => { handleUpdateField({ status: doneStatus }); onDone?.(); }}
                     >
                       <CircleCheck />
                     </Button>
@@ -3120,7 +3131,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             issue={issue}
             onUnmark={() =>
               handleUpdateField(
-                { status: "todo" },
+                { status: workflowReopenStatus(issueWorkflow) },
                 { onSuccess: () => toast.success(t(($) => $.duplicates.unmark_toast)) },
               )
             }
