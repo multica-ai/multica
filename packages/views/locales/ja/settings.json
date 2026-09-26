@@ -87,9 +87,24 @@
     "pr_auto_complete_description": "関連する PR がすべてマージされ、そのうち 1 つがクローズキーワードでタスクを指定していると、タスクは「完了」になります。今後マージされる PR にのみ適用されます。",
     "pr_auto_complete_example": "キーワードは PR のタイトルか説明に書きます。例:",
     "pr_auto_complete_example_title": "Closes MUL-123",
-    "pr_auto_complete_badge": "PR のマージで自動設定",
-    "child_done_label": "サブタスクのステージが終わったら親タスクの担当者を起こす",
-    "child_done_description": "サブタスクを持つすべてのタスクの既定値です。各タスクの「起動」セクションで個別に変更できます。"
+    "pr_auto_complete_badge": "PR のマージで自動設定"
+  },
+  "wakeups": {
+    "description": "すべてのタスクに適用されるプラットフォームのルールです。各タスクの「ウェイクアップ」セクションで個別に変更できます。",
+    "child_done_title": "サブタスクが終わったとき",
+    "child_done_description": "あるステージが終わり、後のステージが待っているときに親タスクの担当者を起こし、すべてのサブタスクが終わったときにもう一度起こします。担当者がメンバーの場合は受信トレイに通知します。",
+    "enabled": "既定でオン",
+    "instruction": "既定の指示",
+    "instruction_hint": "起こしたエージェントに送られます。空欄のままなら下の組み込みの指示を使います。",
+    "instruction_placeholder": "空欄なら組み込みの指示を使います",
+    "builtin": "組み込みの指示",
+    "instruction_invalid": "指示は 4,000 バイト以内にしてください。",
+    "save": "保存",
+    "saving": "保存中…",
+    "save_error": "既定値を保存できませんでした。",
+    "customized_other": "進行中の {{count}} 件のタスクが個別の設定を使っており、この既定値に従いません。",
+    "admin_only": "既定値を変更できるのはオーナーと管理者だけです。",
+    "load_error": "ウェイクアップの既定値を読み込めませんでした。"
   },
   "quick_actions": {
     "title": "クイックアクション",
@@ -383,6 +398,7 @@
       "members": "メンバー",
       "labels": "ラベル",
       "issue_statuses": "タスクステータス",
+      "wakeups": "ウェイクアップ",
       "properties": "プロパティ",
       "quick_actions": "クイックアクション",
       "plugins": "Plugins",

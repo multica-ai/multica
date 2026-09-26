@@ -15,8 +15,9 @@ import {
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 import { useT } from "../../i18n";
+import { useWakeupText } from "./wakeup-presentation";
 
-const MAX_SUPPLEMENT_BYTES = 4000;
+const MAX_INSTRUCTION_BYTES = 4000;
 
 /** The platform's child-done wakeup, shown beside the rules people created. */
 export function SystemWakeupRow({
@@ -29,6 +30,7 @@ export function SystemWakeupRow({
   issueId: string;
 }) {
   const { t } = useT("issues");
+  const text = useWakeupText();
   const update = useUpdateIssueSystemWakeup(workspaceId, issueId);
   const title =
     rule.staged && rule.stage !== null
@@ -40,13 +42,22 @@ export function SystemWakeupRow({
     member_assignee: t(($) => $.wakeups.system.blocked_member),
     no_assignee: t(($) => $.wakeups.system.blocked_none),
   }[rule.blocked];
-  const summary = !rule.enabled
-    ? t(($) => $.wakeups.system.turned_off)
-    : (blocked ??
-      [
-        t(($) => $.wakeups.system.wake_assignee, { name: rule.target?.name ?? "" }),
-        t(($) => $.wakeups.system.remaining, { count: rule.remaining }),
-      ].join(" · "));
+  const paused = rule.paused_reason
+    ? t(($) => $.wakeups.system.paused, {
+        reason: text.pausedReason({ paused_reason: rule.paused_reason, max_fires: null, fire_count: 0 }) ?? "",
+      })
+    : null;
+  const target =
+    rule.target?.type === "member"
+      ? t(($) => $.wakeups.system.notify_member, { name: rule.target.name })
+      : t(($) => $.wakeups.system.wake_assignee, { name: rule.target?.name ?? "" });
+  const summary =
+    paused ??
+    (!rule.enabled
+      ? t(($) => $.wakeups.system.turned_off)
+      : rule.blocked && rule.blocked !== "member_assignee"
+        ? blocked
+        : [target, t(($) => $.wakeups.system.remaining, { count: rule.remaining })].join(" · "));
   const save = (input: { enabled: boolean; instruction: string }) =>
     update.mutateAsync({ rule: rule.rule, ...input });
   const toggle = (enabled: boolean) =>
@@ -69,7 +80,7 @@ export function SystemWakeupRow({
             <span className="line-clamp-2 min-w-0 break-words font-medium">{title}</span>
             <SystemBadge />
           </span>
-          <span className="col-span-2 min-w-0 break-words pl-7.5 pr-2 text-muted-foreground">
+          <span className={`col-span-2 min-w-0 break-words pl-7.5 pr-2 ${paused ? "text-warning" : "text-muted-foreground"}`}>
             {summary}
           </span>
         </PopoverTrigger>
@@ -96,7 +107,7 @@ export function SystemWakeupRow({
             <dt className="text-muted-foreground">{t(($) => $.wakeups.source_title)}</dt>
             <dd>{t(($) => $.wakeups.system.source)}</dd>
           </dl>
-          <SupplementEditor rule={rule} pending={update.isPending} onSave={save} />
+          <InstructionEditor rule={rule} pending={update.isPending} onSave={save} />
           <div className="flex items-center gap-2 border-t border-border pt-2.5">
             <span className="flex-1 text-caption">{t(($) => $.wakeups.system.enable)}</span>
             <Switch
@@ -132,7 +143,7 @@ function SystemBadge() {
   );
 }
 
-function SupplementEditor({
+function InstructionEditor({
   rule,
   pending,
   onSave,
@@ -146,7 +157,7 @@ function SupplementEditor({
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(rule.instruction);
   const [error, setError] = useState("");
-  const label = t(($) => $.wakeups.system.supplement);
+  const label = t(($) => $.wakeups.system.instruction);
   if (!editing) {
     return (
       <div>
@@ -156,7 +167,7 @@ function SupplementEditor({
             variant="ghost"
             size="icon-xs"
             className="text-muted-foreground"
-            aria-label={t(($) => $.wakeups.system.supplement_edit)}
+            aria-label={t(($) => $.wakeups.system.instruction_edit)}
             onClick={() => {
               setValue(rule.instruction);
               setError("");
@@ -166,9 +177,16 @@ function SupplementEditor({
             <Pencil aria-hidden="true" />
           </Button>
         </div>
-        <p className={`whitespace-pre-wrap break-words text-caption ${rule.instruction ? "" : "text-muted-foreground"}`}>
-          {rule.instruction || t(($) => $.wakeups.system.supplement_empty)}
-        </p>
+        {rule.instruction ? (
+          <p className="whitespace-pre-wrap break-words text-caption">{rule.instruction}</p>
+        ) : (
+          <div className="text-caption text-muted-foreground">
+            <p>{t(($) => $.wakeups.system.instruction_default)}</p>
+            <p className="mt-1 line-clamp-4 whitespace-pre-wrap break-words" title={rule.default_instruction}>
+              {rule.default_instruction}
+            </p>
+          </div>
+        )}
       </div>
     );
   }
@@ -178,8 +196,8 @@ function SupplementEditor({
       onSubmit={async (event) => {
         event.preventDefault();
         const instruction = value.trim();
-        if (new TextEncoder().encode(instruction).length > MAX_SUPPLEMENT_BYTES) {
-          setError(t(($) => $.wakeups.system.supplement_invalid));
+        if (new TextEncoder().encode(instruction).length > MAX_INSTRUCTION_BYTES) {
+          setError(t(($) => $.wakeups.system.instruction_invalid));
           return;
         }
         try {
@@ -195,9 +213,9 @@ function SupplementEditor({
       </label>
       <Textarea
         id={id}
-        rows={3}
+        rows={5}
         value={value}
-        placeholder={t(($) => $.wakeups.system.supplement_placeholder)}
+        placeholder={rule.default_instruction || t(($) => $.wakeups.system.instruction_placeholder)}
         className="resize-y text-base md:text-caption"
         disabled={pending}
         aria-invalid={!!error}

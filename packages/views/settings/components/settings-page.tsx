@@ -18,6 +18,7 @@ import {
   Blocks,
   CreditCard,
   Server,
+  AlarmClock,
 } from "lucide-react";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureEnabled } from "@multica/core/config";
@@ -40,6 +41,7 @@ import { LabelsTab } from "./labels-tab";
 import { IssueStatusesTab } from "./issue-statuses-tab";
 import { PropertiesTab } from "./properties-tab";
 import { QuickActionsTab } from "./quick-actions-tab";
+import { WakeupsTab } from "./wakeups-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 import { PluginsTab } from "./plugins-tab";
 import { McpTab } from "./mcp-tab";
@@ -155,6 +157,13 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
           t(($) => $.page.tabs.issue_statuses),
           CircleDot,
           <IssueStatusesTab />,
+          true,
+        ),
+        entry(
+          "wakeups",
+          t(($) => $.page.tabs.wakeups),
+          AlarmClock,
+          <WakeupsTab />,
           true,
         ),
         entry(

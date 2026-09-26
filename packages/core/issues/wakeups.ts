@@ -3,7 +3,7 @@ import {
   useMutation,
   useQueryClient,
 } from "@tanstack/react-query";
-import type { IssueWakeupInput, SystemWakeup, WorkspaceWakeupFilters } from "../types";
+import type { IssueWakeupInput, SystemWakeup, WorkspaceSystemWakeup, WorkspaceWakeupFilters } from "../types";
 import { api } from "../api";
 import { issueKeys } from "./queries";
 
@@ -50,6 +50,30 @@ export function useUpdateIssueSystemWakeup(workspaceId: string, issueId: string)
     onSettled: () =>
       Promise.all([
         client.invalidateQueries({ queryKey: issueSystemWakeupsOptions(workspaceId, issueId).queryKey }),
+        client.invalidateQueries({ queryKey: ["workspace-wakeups", workspaceId] }),
+      ]),
+  });
+}
+
+/** Workspace defaults of the platform's rules, for Settings. */
+export function workspaceSystemWakeupsOptions(workspaceId: string) {
+  return queryOptions({
+    queryKey: ["workspace-system-wakeups", workspaceId],
+    queryFn: () => api.listWorkspaceSystemWakeups(),
+    enabled: !!workspaceId,
+  });
+}
+
+/** Changing a default reaches every issue that did not set its own. */
+export function useUpdateWorkspaceSystemWakeup(workspaceId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ rule, ...input }: { rule: WorkspaceSystemWakeup["rule"]; enabled?: boolean; instruction?: string }) =>
+      api.updateWorkspaceSystemWakeup(rule, input),
+    onSettled: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: workspaceSystemWakeupsOptions(workspaceId).queryKey }),
+        client.invalidateQueries({ queryKey: ["issue-system-wakeups", workspaceId] }),
         client.invalidateQueries({ queryKey: ["workspace-wakeups", workspaceId] }),
       ]),
   });

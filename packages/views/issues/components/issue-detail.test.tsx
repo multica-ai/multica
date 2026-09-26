@@ -1954,43 +1954,6 @@ describe("IssueDetail (shared)", () => {
 
   // MUL-7680: the child-done system rule's comment is the woken agent's
   // instruction; people read one timeline line that can reveal it.
-  it("folds the child-done notice into its timeline entry", async () => {
-    mockApiObj.listTimeline.mockResolvedValue([
-      {
-        type: "comment",
-        id: "notice-1",
-        actor_type: "system",
-        actor_id: "00000000-0000-0000-0000-000000000000",
-        content: "Stage 1 of this issue is complete — its last sub-issue just finished.",
-        parent_id: null,
-        created_at: "2026-01-18T00:00:00Z",
-        updated_at: "2026-01-18T00:00:00Z",
-        comment_type: "system",
-        reactions: [],
-        attachments: [],
-      },
-      {
-        type: "activity",
-        id: "act-child-done",
-        actor_type: "system",
-        actor_id: "",
-        action: "wakeup_triggered",
-        details: { rule: "child_done", comment_id: "notice-1", stage: 1, total: 2 },
-        created_at: "2026-01-18T00:00:01Z",
-      },
-    ] as unknown as TimelineEntry[]);
-
-    renderIssueDetail();
-
-    await waitFor(() => {
-      expect(screen.getByText(/Stage 1's 2 sub-issues all finished · woke the assignee/)).toBeInTheDocument();
-    });
-    expect(screen.getByText("System rule")).toBeInTheDocument();
-    expect(screen.queryByText(/its last sub-issue just finished/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Show notice" }));
-    expect(await screen.findByText(/its last sub-issue just finished/)).toBeInTheDocument();
-  });
-
   it("renders activity rows with unknown status values without crashing", async () => {
     mockApiObj.listTimeline.mockResolvedValue([
       {

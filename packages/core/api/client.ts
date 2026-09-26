@@ -1,6 +1,6 @@
-import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun } from "../types/issue-wakeup";
+import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
-import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema } from "./schemas";
+import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema } from "./schemas";
 import type { InboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import { configStore } from "../config";
@@ -1315,6 +1315,17 @@ export class ApiClient {
 
   async updateIssueSystemWakeup(issueId: string, rule: SystemWakeup["rule"], input: { enabled?: boolean; instruction?: string }): Promise<void> {
     await this.fetch(`/api/issues/${encodeURIComponent(issueId)}/system-wakeups/${encodeURIComponent(rule)}`, { method: "PUT", body: JSON.stringify(input) });
+  }
+
+  async listWorkspaceSystemWakeups(): Promise<WorkspaceSystemWakeup[]> {
+    const raw = await this.fetch<unknown>("/api/system-wakeups");
+    const parsed = parseWithFallback<WorkspaceSystemWakeup[] | null>(raw, WorkspaceSystemWakeupSchema.array(), null, { endpoint: "GET /api/system-wakeups" });
+    if (!parsed) throw new Error("Could not load system wakeups");
+    return parsed;
+  }
+
+  async updateWorkspaceSystemWakeup(rule: WorkspaceSystemWakeup["rule"], input: { enabled?: boolean; instruction?: string }): Promise<void> {
+    await this.fetch(`/api/system-wakeups/${encodeURIComponent(rule)}`, { method: "PUT", body: JSON.stringify(input) });
   }
 
   async disableIssueWakeup(issueId: string, wakeupId: string): Promise<void> {

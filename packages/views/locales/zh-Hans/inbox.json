@@ -78,6 +78,7 @@
     "quick_create_failed": "通过智能体创建失败",
     "quick_create_unconfirmed": "通过智能体创建结果未确认",
     "autopilot_paused": "自动化已暂停",
+    "children_done": "子任务已全部结束",
     "autopilot_quota_exceeded": "自动化执行次数已用完"
   },
   "labels": {
@@ -92,7 +93,8 @@
     "reacted_to_comment": "用 {{emoji}} 回应了你的评论",
     "created_with_agent": "通过智能体创建：{{identifier}}",
     "failed_with_detail": "失败：{{detail}}",
-    "autopilot_quota_blocked": "执行已被阻止：额度已用完"
+    "autopilot_quota_blocked": "执行已被阻止：额度已用完",
+    "children_done_stage": "第 {{stage}} 阶段的子任务已全部结束"
   },
   "toasts": {
     "source_context_retry_started": "已使用原始上下文开始重试",

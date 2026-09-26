@@ -87,9 +87,24 @@
     "pr_auto_complete_description": "연결된 PR이 모두 병합되고 그중 하나가 닫기 키워드로 태스크를 지정하면 태스크가 완료로 바뀝니다. 앞으로 병합되는 PR에만 적용됩니다.",
     "pr_auto_complete_example": "키워드는 PR 제목이나 설명에 씁니다. 예:",
     "pr_auto_complete_example_title": "Closes MUL-123",
-    "pr_auto_complete_badge": "PR 병합 시 자동 설정",
-    "child_done_label": "하위 태스크 단계가 끝나면 상위 태스크 담당자 깨우기",
-    "child_done_description": "하위 태스크가 있는 모든 태스크의 기본값입니다. 각 태스크의 깨우기 섹션에서 따로 바꿀 수 있습니다."
+    "pr_auto_complete_badge": "PR 병합 시 자동 설정"
+  },
+  "wakeups": {
+    "description": "모든 태스크에 적용되는 플랫폼 규칙입니다. 각 태스크의 깨우기 섹션에서 따로 바꿀 수 있습니다.",
+    "child_done_title": "하위 태스크가 끝나면",
+    "child_done_description": "한 단계가 끝나고 다음 단계가 기다리고 있으면 상위 태스크 담당자를 깨우고, 모든 하위 태스크가 끝나면 한 번 더 깨웁니다. 담당자가 멤버면 받은편지함으로 알립니다.",
+    "enabled": "기본으로 켜기",
+    "instruction": "기본 지시",
+    "instruction_hint": "깨운 에이전트에게 전달됩니다. 비워 두면 아래 기본 제공 지시를 사용합니다.",
+    "instruction_placeholder": "비워 두면 기본 제공 지시를 사용합니다",
+    "builtin": "기본 제공 지시",
+    "instruction_invalid": "지시는 4,000바이트 이내로 입력하세요.",
+    "save": "저장",
+    "saving": "저장 중…",
+    "save_error": "기본값을 저장하지 못했습니다.",
+    "customized_other": "진행 중인 태스크 {{count}}개가 자체 설정을 사용해 이 기본값을 따르지 않습니다.",
+    "admin_only": "소유자와 관리자만 기본값을 바꿀 수 있습니다.",
+    "load_error": "깨우기 기본값을 불러오지 못했습니다."
   },
   "quick_actions": {
     "title": "퀵 액션",
@@ -383,6 +398,7 @@
       "members": "멤버",
       "labels": "레이블",
       "issue_statuses": "태스크 상태",
+      "wakeups": "깨우기",
       "properties": "속성",
       "quick_actions": "퀵 액션",
       "plugins": "Plugins",

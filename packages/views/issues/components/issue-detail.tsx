@@ -39,11 +39,10 @@ import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload, PreviewSequenceProvider, collectPreviewSequence, ReadonlyContent } from "../../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload, PreviewSequenceProvider, collectPreviewSequence } from "../../editor";
 import {
   WAKEUP_ACTIVITY_ACTIONS,
   WakeupActivityIcon,
-  childDoneNoticeId,
   formatWakeupActivity,
   wakeupActivityChip,
 } from "./wakeup-activity";
@@ -641,7 +640,6 @@ function ActivityBlock({
   t,
   timeAgo,
   locale,
-  notices,
 }: {
   entries: TimelineEntry[];
   expanded: boolean;
@@ -661,11 +659,8 @@ function ActivityBlock({
   t: ActivityT;
   timeAgo: (dateStr: string) => string;
   locale: string;
-  /** System comments that child-done entries stand in for, by comment id. */
-  notices: ReadonlyMap<string, TimelineEntry>;
 }) {
   const wakeupText = useWakeupText();
-  const [openNotices, setOpenNotices] = useState<ReadonlySet<string>>(() => new Set());
   if (!expanded) {
     const count = entries.length;
     return (
@@ -729,10 +724,6 @@ function ActivityBlock({
 
         const isWakeup = WAKEUP_ACTIVITY_ACTIONS.has(entry.action ?? "");
         const chip = isWakeup ? wakeupActivityChip(entry, t, wakeupText, getActorName) : null;
-        const noticeId = childDoneNoticeId(entry);
-        const notice = noticeId ? notices.get(noticeId) : undefined;
-        const noticeOpen = !!notice && openNotices.has(entry.id);
-
         let leadIcon: React.ReactNode;
         if (isWakeup) {
           leadIcon = <WakeupActivityIcon entry={entry} />;
@@ -767,8 +758,7 @@ function ActivityBlock({
         }
 
         return (
-          <Fragment key={entry.id}>
-          <div className="flex items-center text-caption text-muted-foreground">
+          <div key={entry.id} className="flex items-center text-caption text-muted-foreground">
             <div className="mr-2 flex w-4 shrink-0 justify-center">
               {leadIcon}
             </div>
@@ -789,23 +779,6 @@ function ActivityBlock({
                   }
                 />
               </span>
-              {notice && (
-                <button
-                  type="button"
-                  aria-expanded={noticeOpen}
-                  className="shrink-0 rounded-sm px-1 text-caption text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring"
-                  onClick={() =>
-                    setOpenNotices((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(entry.id)) next.delete(entry.id);
-                      else next.add(entry.id);
-                      return next;
-                    })
-                  }
-                >
-                  {noticeOpen ? t(($) => $.activity.wakeup_hide_notice) : t(($) => $.activity.wakeup_show_notice)}
-                </button>
-              )}
               {chip && (
                 <span className="ml-auto inline-flex max-w-48 shrink-0 items-center gap-1 truncate rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                   {chip}
@@ -832,12 +805,6 @@ function ActivityBlock({
               </Tooltip>
             </div>
           </div>
-          {noticeOpen && notice && (
-            <div className="ml-6 rounded-md border border-border px-3 py-2 text-body text-foreground">
-              <ReadonlyContent content={notice.content ?? ""} attachments={notice.attachments} />
-            </div>
-          )}
-          </Fragment>
         );
       })}
     </div>
@@ -1650,6 +1617,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // bucketed under their parent's id and rendered nested inside CommentCard.
     // No orphan rescue needed: the timeline is fetched in full, so every
     // reply's parent is always in the same array.
+    const topLevel = displayTimeline.filter(
+      (e) => e.type === "activity" || !e.parent_id,
+    );
     const repliesByParent = new Map<string, TimelineEntry[]>();
     for (const e of displayTimeline) {
       if (e.type === "comment" && e.parent_id) {
@@ -1658,20 +1628,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         repliesByParent.set(e.parent_id, list);
       }
     }
-    // A child-done timeline entry stands in for the system comment it names:
-    // the comment stays the woken agent's instruction, and people read one
-    // quiet line. A notice someone replied to stays a thread.
-    const noticeIds = new Set(
-      displayTimeline.map(childDoneNoticeId).filter((id): id is string => !!id && !repliesByParent.has(id)),
-    );
-    const notices = new Map<string, TimelineEntry>();
-    const topLevel = displayTimeline.filter((e) => {
-      if (e.type === "comment" && e.actor_type === "system" && noticeIds.has(e.id)) {
-        notices.set(e.id, e);
-        return false;
-      }
-      return e.type === "activity" || !e.parent_id;
-    });
 
     // Pre-flatten each top-level comment's thread subtree (parent + every
     // descendant in render order). Reuse the previous array reference when
@@ -1752,7 +1708,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       }
     }
 
-    return { threadReplies, groups, notices };
+    return { threadReplies, groups };
   }, [displayTimeline, standaloneRuns]);
 
   // Flat array consumed by <Virtuoso>. Recomputed when timelineView.groups
@@ -3019,7 +2975,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         t={t}
         timeAgo={timeAgo}
         locale={locale}
-        notices={timelineView.notices}
       />
     );
   };

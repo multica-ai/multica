@@ -63,18 +63,18 @@ test("members see the child-done system rule and create a wakeup", async ({ page
     await expect(created).toBeVisible();
     await expect(created).toContainText("Wake Wakeup Emacs · Trigger once · 2d 23h left");
     const stored = await db.query<{ expiry_seconds: string; on_timeout: string; created_by: string }>(
-      `SELECT expiry_seconds, on_timeout, created_by FROM issue_wakeup WHERE issue_id = $1`,
+      `SELECT expiry_seconds, on_timeout, created_by FROM issue_wakeup WHERE issue_id = $1 AND system_rule IS NULL`,
       [parent.id],
     );
     expect(stored.rows).toEqual([{ expiry_seconds: "259200", on_timeout: "wake", created_by: userId }]);
 
     await page.getByRole("switch", { name: "Wake the assignee when sub-issues finish" }).first().click();
     await expect(systemRule).toContainText("Turned off for this issue");
-    const override = await db.query<{ enabled: boolean }>(
-      `SELECT enabled FROM issue_system_wakeup WHERE issue_id = $1 AND rule = 'child_done'`,
+    const override = await db.query<{ enabled: boolean; customized: boolean }>(
+      `SELECT enabled, customized_at IS NOT NULL AS customized FROM issue_wakeup WHERE issue_id = $1 AND system_rule = 'child_done'`,
       [parent.id],
     );
-    expect(override.rows).toEqual([{ enabled: false }]);
+    expect(override.rows).toEqual([{ enabled: false, customized: true }]);
   } finally {
     await api.cleanup();
     if (agentId) await db.query(`DELETE FROM agent WHERE id = $1`, [agentId]);

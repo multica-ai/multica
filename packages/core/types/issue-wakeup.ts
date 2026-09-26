@@ -100,21 +100,43 @@ export interface IssueWakeupInput {
 
 /**
  * A platform-defined wakeup on one issue. `child_done` wakes the parent's
- * assignee when a stage of its sub-issues finishes.
+ * assignee when a stage of its sub-issues closes while a later one waits, and
+ * once more when every sub-issue is closed.
  */
 export interface SystemWakeup {
+  /** Empty until the rule exists on the issue (first sub-issue change or edit). */
+  id: string;
+  revision: number;
   rule: "child_done";
   enabled: boolean;
+  /** Set on this issue; runs get `default_instruction` when it is empty. */
   instruction: string;
+  default_instruction: string;
+  /** A person changed the rule on this issue; it no longer follows the default. */
+  customized: boolean;
+  paused_reason: WakeupPausedReason | null;
+  /** True while a stage is open; otherwise the rule waits for every sub-issue. */
   staged: boolean;
   stage: number | null;
   total: number;
   remaining: number;
   waiting: string[];
-  target: { type: "agent" | "squad"; id: string; name: string } | null;
+  target: { type: "agent" | "squad" | "member"; id: string; name: string } | null;
+  /** Why no run would start now; a member assignee gets an inbox notification. */
   blocked: "" | "backlog" | "member_assignee" | "no_assignee";
   /** The workspace-wide setting, which applies until the issue sets its own. */
   workspace_default: boolean;
+}
+
+/** A platform rule's workspace default, edited in Settings. */
+export interface WorkspaceSystemWakeup {
+  rule: "child_done";
+  enabled: boolean;
+  /** The workspace's instruction; empty means runs get `builtin_instruction`. */
+  instruction: string;
+  builtin_instruction: string;
+  /** Open issues whose rule a person changed; they ignore this default. */
+  customized: number;
 }
 
 export type WakeupPreview = Pick<

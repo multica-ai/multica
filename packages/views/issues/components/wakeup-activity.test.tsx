@@ -5,7 +5,7 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import { RESOURCES } from "../../test/i18n";
 import { useT } from "../../i18n";
 import { useWakeupText } from "./wakeup-presentation";
-import { childDoneNoticeId, formatWakeupActivity, wakeupActivityChip } from "./wakeup-activity";
+import { formatWakeupActivity, wakeupActivityChip } from "./wakeup-activity";
 
 vi.mock("./wakeup-condition-names", () => ({
   useConditionNames: () => ({ status: (key: string) => key, label: () => undefined, property: () => undefined, actor: (_type: string, id: string) => id }),
@@ -42,8 +42,17 @@ describe("wakeup timeline entries", () => {
     expect(read(entry("wakeup_triggered", { wakeup: reply, events: ["wakeup.manual"], actor_type: "member", actor_id: "u" }))).toBe(
       "Jiayuan 立即唤醒了 Emacs",
     );
-    expect(read(entry("wakeup_triggered", { rule: "child_done", stage: 1, total: 2, target_type: "agent", target_id: "a", comment_id: "c" }))).toBe(
+    expect(read(entry("wakeup_triggered", { rule: "child_done", stage: 1, total: 2, target_type: "agent", target_id: "a", outcome: "woke" }))).toBe(
       "第 1 阶段的 2 个子任务已全部结束，唤醒了 Emacs",
+    );
+    expect(read(entry("wakeup_triggered", { rule: "child_done", total: 3, target_type: "member", target_id: "u", outcome: "notified" }))).toBe(
+      "3 个子任务已全部结束，已通知 Jiayuan",
+    );
+    expect(read(entry("wakeup_triggered", { rule: "child_done", total: 3, target_type: "agent", target_id: "a", outcome: "merged" }))).toBe(
+      "3 个子任务已全部结束，并入了 Emacs 待开始的运行",
+    );
+    expect(read(entry("wakeup_triggered", { rule: "child_done", stage: 2, total: 1, outcome: "none" }))).toBe(
+      "第 2 阶段的 1 个子任务已全部结束",
     );
     expect(read(entry("wakeup_timed_out", { wakeup: reply, woke: true }))).toContain("唤醒了 Emacs 处理超时");
     expect(read(entry("wakeup_paused", { wakeup: reply, reason: "loop" }))).toBe("已暂停：与其他唤醒规则互相触发");
@@ -61,8 +70,4 @@ describe("wakeup timeline entries", () => {
     expect(chip(entry("wakeup_created", { wakeup: reply }))).toBeNull();
   });
 
-  it("names the system comment a child-done entry stands in for", () => {
-    expect(childDoneNoticeId(entry("wakeup_triggered", { rule: "child_done", comment_id: "c1" }))).toBe("c1");
-    expect(childDoneNoticeId(entry("wakeup_triggered", { wakeup: reply }))).toBeNull();
-  });
 });

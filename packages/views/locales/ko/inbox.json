@@ -78,6 +78,7 @@
     "quick_create_failed": "에이전트 생성 실패",
     "quick_create_unconfirmed": "에이전트 생성 결과 미확인",
     "autopilot_paused": "자동화 일시 중지됨",
+    "children_done": "하위 태스크가 모두 끝났습니다",
     "autopilot_quota_exceeded": "자동화 실행 한도 도달"
   },
   "labels": {
@@ -92,7 +93,8 @@
     "reacted_to_comment": "내 댓글에 {{emoji}} 반응을 남겼습니다",
     "created_with_agent": "에이전트가 생성: {{identifier}}",
     "failed_with_detail": "실패: {{detail}}",
-    "autopilot_quota_blocked": "한도에 도달하여 실행이 차단됨"
+    "autopilot_quota_blocked": "한도에 도달하여 실행이 차단됨",
+    "children_done_stage": "{{stage}}단계 하위 태스크가 모두 끝났습니다"
   },
   "toasts": {
     "source_context_retry_started": "원본 컨텍스트로 재시도를 시작했습니다",

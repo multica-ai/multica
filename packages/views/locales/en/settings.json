@@ -87,9 +87,25 @@
     "pr_auto_complete_description": "An issue moves to Done once every linked PR is merged and one of them closes it with a keyword. Applies to PRs merged from now on.",
     "pr_auto_complete_example": "Write the keyword in the PR title or description, e.g.",
     "pr_auto_complete_example_title": "Closes MUL-123",
-    "pr_auto_complete_badge": "Set when PRs merge",
-    "child_done_label": "Wake the parent's assignee when a stage of sub-issues finishes",
-    "child_done_description": "Default for every issue with sub-issues. Each issue can override it in its Wakeups section."
+    "pr_auto_complete_badge": "Set when PRs merge"
+  },
+  "wakeups": {
+    "description": "Platform rules that apply to every issue. Each issue can change them in its Wakeups section.",
+    "child_done_title": "When sub-issues finish",
+    "child_done_description": "Wakes the parent's assignee when a stage finishes and a later stage is waiting, and once more when every sub-issue is closed. A member assignee gets an inbox notification instead.",
+    "enabled": "On by default",
+    "instruction": "Default instruction",
+    "instruction_hint": "Sent to the woken agent. Leave empty to use the built-in instruction below.",
+    "instruction_placeholder": "Leave empty to use the built-in instruction",
+    "builtin": "Built-in instruction",
+    "instruction_invalid": "Keep the instruction within 4,000 bytes.",
+    "save": "Save",
+    "saving": "Saving…",
+    "save_error": "Could not save the default.",
+    "customized_one": "{{count}} open issue has its own setting and ignores this default.",
+    "customized_other": "{{count}} open issues have their own setting and ignore this default.",
+    "admin_only": "Only owners and admins can change these defaults.",
+    "load_error": "Could not load wakeup defaults."
   },
   "quick_actions": {
     "title": "Quick Actions",
@@ -383,6 +399,7 @@
       "members": "Members",
       "labels": "Labels",
       "issue_statuses": "Issue Statuses",
+      "wakeups": "Wakeups",
       "properties": "Properties",
       "quick_actions": "Quick Actions",
       "plugins": "Plugins",

@@ -44,7 +44,8 @@ interface WakeupDetails {
   total?: number;
   target_type?: string;
   target_id?: string;
-  comment_id?: string;
+  /** child_done: woke (a run), notified (a member), merged (joined a waiting run), none. */
+  outcome?: "woke" | "notified" | "merged" | "none";
   events?: string[];
   actor_type?: string;
   actor_id?: string;
@@ -56,13 +57,6 @@ interface WakeupDetails {
 
 function detailsOf(entry: TimelineEntry): WakeupDetails {
   return (entry.details ?? {}) as WakeupDetails;
-}
-
-/** The comment a child-done entry stands in for, when it has one. */
-export function childDoneNoticeId(entry: TimelineEntry): string | null {
-  if (entry.type !== "activity" || entry.action !== "wakeup_triggered") return null;
-  const details = detailsOf(entry);
-  return details.rule === "child_done" && details.comment_id ? details.comment_id : null;
 }
 
 /**
@@ -106,14 +100,26 @@ export function formatWakeupActivity(
       return t(($) => $.activity.wakeup_created, { condition, agent });
     case "wakeup_triggered": {
       if (details.rule === "child_done") {
-        const target =
+        const count = details.total ?? 1;
+        const closed = details.stage
+          ? t(($) => $.activity.wakeup_child_done_stage, { stage: details.stage, count })
+          : t(($) => $.activity.wakeup_child_done_all, { count });
+        // The squad's leader ran, but the entry names the assignee people see.
+        const name =
           details.target_type && details.target_id
             ? getActorName(details.target_type, details.target_id)
             : t(($) => $.activity.wakeup_assignee);
-        const count = details.total ?? 1;
-        return details.stage
-          ? t(($) => $.activity.wakeup_child_done_stage, { stage: details.stage, count, agent: target })
-          : t(($) => $.activity.wakeup_child_done_all, { count, agent: target });
+        const outcome = details.outcome ?? (details.target_type ? "woke" : "none");
+        switch (outcome) {
+          case "woke":
+            return closed + t(($) => $.activity.wakeup_child_done_woke, { name });
+          case "notified":
+            return closed + t(($) => $.activity.wakeup_child_done_notified, { name });
+          case "merged":
+            return closed + t(($) => $.activity.wakeup_child_done_merged, { name });
+          default:
+            return closed;
+        }
       }
       if (details.events?.length === 1 && details.events[0] === "wakeup.manual" && details.actor_id) {
         return t(($) => $.activity.wakeup_triggered_manual, { name: getActorName("member", details.actor_id), agent });

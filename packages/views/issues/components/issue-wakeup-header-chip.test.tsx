@@ -26,6 +26,7 @@ const rule = (patch: Partial<IssueWakeup>): IssueWakeup => ({
   last_task_id: null, last_error: null, ...patch,
 });
 const childDone: SystemWakeup = {
+  id: "rule", revision: 1, default_instruction: "", customized: false, paused_reason: null,
   rule: "child_done", enabled: true, instruction: "", staged: true, stage: 2, total: 2, remaining: 1,
   waiting: [], target: { type: "agent", id: "a", name: "Grok" }, blocked: "", workspace_default: true,
 };

@@ -87,9 +87,25 @@
     "pr_auto_complete_description": "Une tâche passe à Terminé dès que toutes ses PR liées sont fusionnées et que l’une d’elles la ferme par un mot-clé. S’applique aux PR fusionnées à partir de maintenant.",
     "pr_auto_complete_example": "Écrivez le mot-clé dans le titre ou la description de la PR, par ex.",
     "pr_auto_complete_example_title": "Closes MUL-123",
-    "pr_auto_complete_badge": "Définie à la fusion des PR",
-    "child_done_label": "Réveiller le responsable de la tâche parente à la fin d’une étape de sous-tâches",
-    "child_done_description": "Valeur par défaut pour toute tâche ayant des sous-tâches. Chaque tâche peut la modifier dans sa section Réveils."
+    "pr_auto_complete_badge": "Définie à la fusion des PR"
+  },
+  "wakeups": {
+    "description": "Règles de la plateforme appliquées à chaque tâche. Chaque tâche peut les modifier dans sa section Réveils.",
+    "child_done_title": "À la fin des sous-tâches",
+    "child_done_description": "Réveille le responsable de la tâche parente quand une étape se termine alors qu’une étape suivante attend, puis une fois de plus quand toutes les sous-tâches sont fermées. Un responsable humain reçoit une notification à la place.",
+    "enabled": "Activé par défaut",
+    "instruction": "Instruction par défaut",
+    "instruction_hint": "Envoyée à l’agent réveillé. Laissez vide pour utiliser l’instruction intégrée ci-dessous.",
+    "instruction_placeholder": "Laisser vide pour l’instruction intégrée",
+    "builtin": "Instruction intégrée",
+    "instruction_invalid": "Limitez l’instruction à 4 000 octets.",
+    "save": "Enregistrer",
+    "saving": "Enregistrement…",
+    "save_error": "Impossible d’enregistrer la valeur par défaut.",
+    "customized_one": "{{count}} tâche ouverte a son propre réglage et ignore cette valeur par défaut.",
+    "customized_other": "{{count}} tâches ouvertes ont leur propre réglage et ignorent cette valeur par défaut.",
+    "admin_only": "Seuls les propriétaires et administrateurs peuvent modifier ces valeurs.",
+    "load_error": "Impossible de charger les valeurs par défaut des réveils."
   },
   "quick_actions": {
     "title": "Actions rapides",
@@ -383,6 +399,7 @@
       "members": "Membres",
       "labels": "Étiquettes",
       "issue_statuses": "États des tâches",
+      "wakeups": "Réveils",
       "properties": "Propriétés",
       "quick_actions": "Actions rapides",
       "plugins": "Plugins",

@@ -87,9 +87,24 @@
     "pr_auto_complete_description": "任务关联的 PR 全部合并，且至少一个 PR 写了关闭语句时，状态改为「已完成」。只对之后合并的 PR 生效。",
     "pr_auto_complete_example": "关闭语句写在 PR 标题或正文里，例如",
     "pr_auto_complete_example_title": "Closes MUL-123",
-    "pr_auto_complete_badge": "PR 全部合并时自动进入",
-    "child_done_label": "子任务阶段结束时唤醒父任务负责人",
-    "child_done_description": "所有有子任务的任务都使用这个默认值；可在单个任务的「唤醒」区单独调整。"
+    "pr_auto_complete_badge": "PR 全部合并时自动进入"
+  },
+  "wakeups": {
+    "description": "平台对所有任务生效的规则。每个任务可以在自己的「唤醒」区域单独修改。",
+    "child_done_title": "子任务结束时",
+    "child_done_description": "某个阶段的子任务全部结束、且后面还有阶段在等待时，唤醒父任务的负责人；全部子任务结束时再唤醒一次。负责人是成员时，改为发送收件箱通知。",
+    "enabled": "默认开启",
+    "instruction": "默认指令",
+    "instruction_hint": "发给被唤醒的智能体。留空则使用下方的内置指令。",
+    "instruction_placeholder": "留空则使用内置指令",
+    "builtin": "内置指令",
+    "instruction_invalid": "指令最多 4,000 字节。",
+    "save": "保存",
+    "saving": "保存中…",
+    "save_error": "无法保存默认值。",
+    "customized_other": "{{count}} 个进行中的任务使用了自己的设置，不跟随此默认值。",
+    "admin_only": "只有所有者和管理员可以修改默认值。",
+    "load_error": "无法加载唤醒默认值。"
   },
   "quick_actions": {
     "title": "快捷操作",
@@ -383,6 +398,7 @@
       "members": "成员",
       "labels": "标签",
       "issue_statuses": "任务状态",
+      "wakeups": "唤醒",
       "properties": "属性",
       "quick_actions": "快捷操作",
       "plugins": "Plugins",

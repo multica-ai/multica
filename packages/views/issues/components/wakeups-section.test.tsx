@@ -373,6 +373,7 @@ describe("v2 sidebar", () => {
 
   it("shows the child-done system rule and turns it off for this issue", async () => {
     systemRules = [{
+      id: "rule", revision: 1, default_instruction: "Advance the next stage.", customized: false, paused_reason: null,
       rule: "child_done", workspace_default: true, enabled: true, instruction: "", staged: true, stage: 1, total: 2, remaining: 1,
       waiting: ["MUL-7704"], target: { type: "agent", id: "a", name: "Emacs" }, blocked: "",
     }];
@@ -385,24 +386,28 @@ describe("v2 sidebar", () => {
     await waitFor(() => expect(updateSystem).toHaveBeenCalledWith({ rule: "child_done", enabled: false, instruction: "" }));
   });
 
-  it("explains why the system rule would not wake anyone", () => {
+  it("says a member assignee is notified instead of woken", () => {
     systemRules = [{
+      id: "rule", revision: 1, default_instruction: "Advance the next stage.", customized: false, paused_reason: null,
       rule: "child_done", workspace_default: true, enabled: true, instruction: "", staged: false, stage: null, total: 3, remaining: 2,
-      waiting: [], target: null, blocked: "member_assignee",
+      waiting: [], target: { type: "member", id: "u", name: "Jiayuan" }, blocked: "member_assignee",
     }];
     renderWithI18n(<WakeupsSection issueId="issue" />);
-    expect(screen.getByRole("button", { name: /When all sub-issues finish/ })).toHaveTextContent("Assignee is a member; nobody is woken");
+    expect(screen.getByRole("button", { name: /When all sub-issues finish/ })).toHaveTextContent("Notify Jiayuan in their inbox · 2 to go");
   });
 
-  it("saves a supplementary instruction for the system rule", async () => {
+  it("shows the default instruction and saves one for this issue", async () => {
     systemRules = [{
+      id: "rule", revision: 1, default_instruction: "Advance the next stage.", customized: false, paused_reason: null,
       rule: "child_done", workspace_default: true, enabled: true, instruction: "", staged: false, stage: null, total: 1, remaining: 1,
       waiting: ["MUL-2"], target: { type: "agent", id: "a", name: "Emacs" }, blocked: "",
     }];
     renderWithI18n(<WakeupsSection issueId="issue" />);
     fireEvent.click(screen.getByRole("button", { name: /When all sub-issues finish/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Edit extra instruction" }));
-    const input = screen.getByLabelText("Extra instruction");
+    expect(await screen.findByText("Advance the next stage.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Edit instruction" }));
+    const input = screen.getByLabelText("What to do when woken");
+    expect(input).toHaveAttribute("placeholder", "Advance the next stage.");
     fireEvent.change(input, { target: { value: "Ask Jiayuan first" } });
     fireEvent.submit(input.closest("form")!);
     await waitFor(() => expect(updateSystem).toHaveBeenCalledWith({ rule: "child_done", enabled: true, instruction: "Ask Jiayuan first" }));

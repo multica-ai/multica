@@ -186,8 +186,38 @@ it("rejects malformed system wakeups instead of hiding the rule", async () => {
 it("parses system wakeups and falls back on an unknown blocked reason", async () => {
   const rule = { rule: "child_done", enabled: true, instruction: "", staged: true, stage: 1, total: 2, remaining: 1, waiting: ["MUL-2"], target: { type: "agent", id: "a", name: "Emacs" }, blocked: "paused" };
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([rule]))));
-  // Older servers omit the workspace default; the rule then reads as on.
-  await expect(client.listIssueSystemWakeups("issue")).resolves.toEqual([{ ...rule, blocked: "", workspace_default: true }]);
+  // Fields a server may omit get defaults: the rule reads as on and not yet created.
+  await expect(client.listIssueSystemWakeups("issue")).resolves.toEqual([{
+    ...rule, blocked: "", workspace_default: true, id: "", revision: 0, default_instruction: "", customized: false, paused_reason: null,
+  }]);
+});
+it("reads a member target and a pause, and drops an unknown target", async () => {
+  const base = { id: "r", revision: 3, rule: "child_done", enabled: false, instruction: "", default_instruction: "Advance.", customized: true,
+    staged: false, stage: null, total: 1, remaining: 1, waiting: [], blocked: "member_assignee", workspace_default: true };
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([
+    { ...base, paused_reason: "rate", target: { type: "member", id: "u", name: "Jiayuan" } },
+    { ...base, paused_reason: "someday", target: { type: "robot", id: "x", name: "?" } },
+  ]))));
+  const [member, unknown] = await client.listIssueSystemWakeups("issue");
+  expect(member).toMatchObject({ paused_reason: "rate", target: { type: "member", name: "Jiayuan" }, customized: true });
+  expect(unknown).toMatchObject({ paused_reason: null, target: null });
+});
+it("reads workspace defaults and rejects a malformed list", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([{ rule: "child_done", enabled: false, customized: 2 }]))));
+  await expect(client.listWorkspaceSystemWakeups()).resolves.toEqual([
+    { rule: "child_done", enabled: false, instruction: "", builtin_instruction: "", customized: 2 },
+  ]);
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([{ rule: "other" }]))));
+  await expect(client.listWorkspaceSystemWakeups()).rejects.toThrow("Could not load system wakeups");
+});
+it("sends a workspace default change", async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response("[]"));
+  vi.stubGlobal("fetch", fetcher);
+  await client.updateWorkspaceSystemWakeup("child_done", { enabled: false });
+  const [url, init] = fetcher.mock.calls[0]!;
+  expect(String(url)).toContain("/api/system-wakeups/child_done");
+  expect(init.method).toBe("PUT");
+  expect(JSON.parse(init.body)).toEqual({ enabled: false });
 });
 
 it("reads conditions, caps and pauses, and drops shapes it does not know", async () => {
