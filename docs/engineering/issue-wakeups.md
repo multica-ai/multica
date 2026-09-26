@@ -418,7 +418,7 @@ fire and take no deadline. Rules without either field keep the previous
 open-ended behavior, so existing agent-created rules are unaffected.
 
 The scheduler treats `enabled AND expires_at <= now()` as a candidate (partial
-index 552). Under the usual rule lock, a reached deadline disables the rule and
+index 553). Under the usual rule lock, a reached deadline disables the rule and
 sets `timed_out_at`; `disabled_at` stays NULL because it means "turned off by a
 person" and claim-time checks refuse wakeup runs whose rule has `disabled_at`.
 Inputs captured before the deadline still dispatch. `on_timeout=wake` (event
@@ -433,7 +433,7 @@ redacted `source_agent_*` of the run that created a rule.
 
 The parent-assignee wake on a closed sub-issue stage is the platform's
 `child_done` system rule: an ordinary `issue_wakeup` row with `system_rule`
-set (migration 553), one per parent (unique index 554). It shares the
+set (migration 554), one per parent (unique index 555). It shares the
 condition, receipts, runaway protection, timeline entries, list and run model
 of people's rules; what differs is owned by the platform:
 
@@ -451,7 +451,7 @@ of people's rules; what differs is owned by the platform:
   the wrap-up waits for unstaged sub-issues. A reopened sub-issue clears the
   fingerprint, so closing it again fires again. People's `children_done`
   conditions read the same sub-issue set (`childrenDone`).
-- **Evaluation.** Not polled (`next_fire_at` stays NULL). Migration 556 adds
+- **Evaluation.** Not polled (`next_fire_at` stays NULL). Migration 557 adds
   `issue_child_event` and triggers on `issue` that record, in the writing
   transaction and for every writer, a sub-issue entering or leaving a closed
   status (built-in or custom done/closed category), joining or leaving a parent,
@@ -504,7 +504,7 @@ is recorded in `issue_child_event` but not yet processed count as still open
 in its baseline, so that closing still wakes the assignee. System rows do not count
 toward the per-issue and per-workspace capacity (`guard_issue_wakeup_capacity`).
 
-Migrations 551–558 are additive for existing rows. Deploy them before the
+Migrations 552–559 are additive for existing rows. Deploy them before the
 server and the server before clients; older clients ignore the new fields.
 Issue and workspace deletion remove the rows with the issue's other wakeups
 and `issue_child_event` rows.
@@ -620,7 +620,7 @@ sub-issues (a row once the rule exists; its target is the parent's assignee). Th
 the issue is waiting for and opens the Wakeups section; board cards say it in a
 few words, or that a rule was paused.
 
-Migrations 555–558 are additive (new columns, a table with its trigger, and two
+Migrations 556–559 are additive (new columns, a table with its trigger, and two
 concurrent indexes). Deploy them before the server and the server before the
 clients; older clients ignore the new fields, and older servers read as "no
 condition, not paused" in new clients.

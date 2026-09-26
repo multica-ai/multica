@@ -26,8 +26,8 @@
  *     reports, so a content change followed by an immediate tab switch can
  *     never resurrect the old position.
  *
- * Scope: only the full-page `AttachmentPreviewPage` calls this. The inline
- * 480px card / modal path renders via a separate component
+ * Scope: only the full-page `AttachmentPreviewPage` calls this. The viewer
+ * modal renders via a separate component
  * (`HtmlPreviewBody` → `CodeBlockIframe`) and never touches this hook, so it
  * cannot register an external source against the current tab. On web
  * (no provider / adapter without `registerExternalSource`) `restoreActive`

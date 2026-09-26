@@ -61,7 +61,27 @@
     "remove": "添付ファイルを削除",
     "previous": "前へ",
     "next": "次へ",
-    "sequence_position": "{{index}} / {{total}}"
+    "sequence_position": "{{index}} / {{total}}",
+    "overview": "すべての成果物",
+    "info": "情報",
+    "wrap_lines": "折り返し",
+    "viewport": "ビューポート幅",
+    "viewport_fill": "フィット",
+    "viewport_desktop": "デスクトップ",
+    "viewport_tablet": "タブレット",
+    "viewport_phone": "スマートフォン",
+    "viewport_scale": "{{percent}}% に縮小",
+    "view_source": "ソースを表示",
+    "view_mode": "表示",
+    "view_tree": "ツリー",
+    "view_raw": "原文",
+    "structured_parse_failed": "このファイルを解析できなかったため、テキストとして表示しています。",
+    "tree_show_more": "さらに表示（残り {{count}} 件）",
+    "tree_items_other": "{{count}} 件",
+    "tree_keys_other": "{{count}} 個のキー",
+    "table_empty": "行がありません",
+    "table_rows_other": "{{count}} 行",
+    "table_columns_other": "{{count}} 列"
   },
   "link_hover": {
     "copy_link": "リンクをコピー",
@@ -88,6 +108,19 @@
     "show_preview": "プレビューを表示",
     "show_source": "ソースを表示",
     "fullscreen": "全画面"
+  },
+  "dynamic_block": {
+    "preview": "プレビュー",
+    "source": "ソース",
+    "view": "表示",
+    "copy_source": "ソースをコピー",
+    "show_all": "すべて表示",
+    "rendering": "レンダリング中...",
+    "error_html": "プレビューでスクリプトエラーが発生しました",
+    "error_mermaid": "この図を描画できませんでした",
+    "error_at_line": "{{message}}（{{line}} 行目）",
+    "view_source": "ソースを表示",
+    "copy_error": "エラーをコピー"
   },
   "file_card": {
     "uploading": "{{filename}} をアップロード中"

@@ -97,6 +97,20 @@ An online daemon does not mean the tool itself works. Open the run's detailed re
 
 Run the same tool directly in a terminal on the executing computer first. If the tool cannot start on its own, fix its sign-in or configuration, then retry the run from the execution log.
 
+## Runs hang on macOS after a CLI upgrade
+
+After the Homebrew `multica` CLI is upgraded, by `brew upgrade`, `multica update`, **Update** on the Runtimes page, or the daemon's auto-update, a run that reads `~/Desktop`, `~/Documents`, `~/Downloads`, iCloud Drive, or another protected folder can stop making progress: the agent's process uses no CPU, and the run neither finishes nor fails.
+
+This happens when macOS attributes privacy permissions (TCC) to the daemon itself, as it does for a daemon started by launchd (for example a LaunchAgent): the pending dialog names `multica`, and every tool an agent starts uses the daemon's grants. The Homebrew CLI binary is not signed with a stable identity, so macOS ties those grants to that exact build at its resolved path, such as `/opt/homebrew/Cellar/multica/<version>/bin/multica`. After an upgrade, macOS treats the new binary as a different app and asks again. The file access blocks until someone answers the prompt, and the daemon cannot tell that a prompt is pending.
+
+To restore access:
+
+1. On that Mac, answer the pending "would like to access" dialog with **Allow**. The stuck run continues.
+2. For a Mac that runs unattended, grant Full Disk Access to the new binary. Print its path with `realpath "$(command -v multica)"`, then under **System Settings → Privacy & Security → Full Disk Access** remove the stale `multica` entry and add that path (press ⌘⇧G in the file picker to paste it).
+3. Restart the daemon the same way you started it: `multica daemon restart`, or `launchctl kickstart -k gui/$(id -u)/<label>` for a LaunchAgent.
+
+Repeat this after every CLI upgrade. Auto-update is on by default only for daemons connected to Multica Cloud; start the daemon with `--no-auto-update` so upgrades happen only when you run them. The CLI bundled with [Multica Desktop](/desktop-app) is signed with a Developer ID, so its grants survive upgrades.
+
 ## Realtime updates stop working
 
 If runs still execute but comments and status changes no longer appear live, the WebSocket is usually not connected.

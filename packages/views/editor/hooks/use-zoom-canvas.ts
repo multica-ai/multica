@@ -36,6 +36,7 @@ import {
   distanceBetween,
   midpointOf,
   panBy,
+  resizeTransform,
   wheelZoomFactor,
   zoomByAtCenter,
   zoomToAt,
@@ -154,9 +155,9 @@ export function useZoomCanvas({
   }, [viewportNode]);
 
   // Fit once, on first open — a layout effect, so the first painted frame is
-  // already fitted. Deliberately not re-fitting on later viewport changes: a
-  // theme switch re-renders the content at the same size, and silently
-  // snapping the user's zoom back to fit would lose their place.
+  // already fitted. Later viewport changes never snap a zoom the user chose
+  // back to fit (that would lose their place); only a view still at fit
+  // follows a resize, below.
   useLayoutEffect(() => {
     if (!ready || hasFittedRef.current) return;
     hasFittedRef.current = true;
@@ -179,10 +180,16 @@ export function useZoomCanvas({
     setTransform(computeFitTransform(contentSize, viewport));
   }, [contentKey, ready, contentSize, viewport]);
 
-  // Keep the content in view when the window/pane is resized under it.
+  // Keep the content in view when the window/pane is resized under it — and
+  // keep a still-fitted image fitted (see `resizeTransform`).
+  const previousViewportRef = useRef(viewport);
   useEffect(() => {
+    const previous = previousViewportRef.current;
+    previousViewportRef.current = viewport;
     if (!ready) return;
-    setTransform((current) => clampTransform(current, contentSize, viewport));
+    setTransform((current) =>
+      resizeTransform(current, contentSize, previous, viewport),
+    );
   }, [ready, contentSize, viewport]);
 
   const fit = useCallback(() => {

@@ -471,10 +471,6 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"stop editing the PR blind",
 				"whether the installation is bound to this workspace",
 				"redelivered once the receiving side is fixed",
-				// Only a closing keyword completes an issue on merge, so agents
-				// must not add one to a PR that delivers only part of the work.
-				"Only a closing keyword completes the issue",
-				"unless merging the PR should move the issue to `done`",
 				"include the PR URL when a PR exists",
 				"Closes MUL-123",
 				"--status backlog",

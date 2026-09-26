@@ -44,7 +44,11 @@ import { contentReferencesAttachment } from "@multica/core/types";
 import { isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { commentSupplementReceipts, isSupplementInFlight } from "@multica/core/issues/run-steering";
 import { useConfigStore } from "@multica/core/config";
-import { selectStandaloneAttachments } from "@multica/core/attachments/image-sequence";
+import {
+  orderStandaloneAttachments,
+  selectStandaloneAttachments,
+  standaloneAttachmentGroup,
+} from "@multica/core/attachments/image-sequence";
 import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
 import { CommentsFoldBar } from "./resolved-thread-bar";
@@ -54,6 +58,9 @@ import { InlineCommentRun, PlacedInlineCommentRun, useInlineCommentRunState, typ
 import { EMPTY_COMMENT_RUNS, isRunFailureNotice, orderThreadWithRuns, type CommentRun, type ThreadRunSlot } from "./comment-runs";
 import { descriptionPreview } from "./description-preview";
 import { useCommentAnnotations } from "./use-comment-annotations";
+import { useAttachmentVersions } from "./deliverables/attachment-versions";
+import { VersionBadge } from "./deliverables/version-badge";
+import { JustifiedImageRow } from "./justified-image-row";
 import { useRunCommentMotion } from "./use-run-comment-motion";
 import { WakeupSourceChip } from "./wakeup-source-chip";
 
@@ -212,25 +219,50 @@ export function AttachmentList({
   className?: string;
   onRemove?: (attachmentId: string) => void;
 }) {
+  const versions = useAttachmentVersions();
   if (!attachments?.length) return null;
   // Skip attachments whose URL (stable or legacy) is already referenced in the
   // markdown content, and duplicates of the same file that are referenced.
   // Shared with the image-sequence builder (MUL-5752) so the cards rendered
-  // here and the images the viewer pages through can't disagree.
-  const standalone = selectStandaloneAttachments(content, attachments);
+  // here and the images the viewer pages through can't disagree — as is the
+  // grouping below, so paging follows the screen (MUL-7649).
+  const standalone = orderStandaloneAttachments(
+    selectStandaloneAttachments(content, attachments),
+  );
   if (!standalone.length) return null;
 
+  const images = standalone.filter((a) => standaloneAttachmentGroup(a) === "image");
+  const files = standalone.filter((a) => standaloneAttachmentGroup(a) === "file");
+  const render = (a: Attachment, layout: "block" | "card") => {
+    const version = versions?.get(a.id);
+    return (
+      <AttachmentRenderer
+        key={a.id}
+        attachment={{ kind: "record", attachment: a }}
+        layout={layout}
+        badge={version ? <VersionBadge version={version} /> : undefined}
+        editable={!!onRemove}
+        onDelete={onRemove ? () => onRemove(a.id) : undefined}
+      />
+    );
+  };
+
+  // A lone image keeps its full size; several form justified rows (one
+  // height per row, edge to edge). Every other file — HTML too: an uploaded
+  // file is a deliverable to open, not part of the text — is a card in a
+  // grid, not a full-width row each.
   return (
     <AttachmentDownloadProvider attachments={attachments}>
-      <div className={cn("flex flex-col gap-1", className)}>
-        {standalone.map((a) => (
-          <AttachmentRenderer
-            key={a.id}
-            attachment={{ kind: "record", attachment: a }}
-            editable={!!onRemove}
-            onDelete={onRemove ? () => onRemove(a.id) : undefined}
-          />
-        ))}
+      <div className={cn("flex flex-col gap-2", className)}>
+        {images.length === 1 && render(images[0]!, "block")}
+        {images.length > 1 && (
+          <JustifiedImageRow items={images} renderTile={(a) => render(a, "card")} />
+        )}
+        {files.length > 0 && (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(15rem,100%),1fr))] gap-2">
+            {files.map((a) => render(a, "card"))}
+          </div>
+        )}
       </div>
     </AttachmentDownloadProvider>
   );

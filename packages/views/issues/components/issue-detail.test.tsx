@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useRef, useState, useImperativeHandle } from "re
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { AgentTask, Issue, IssueStatusEntry, Label, TimelineEntry } from "@multica/core/types";
+import type { AgentTask, Attachment, Issue, IssueStatusEntry, Label, TimelineEntry } from "@multica/core/types";
 import { issueKeys } from "@multica/core/issues/queries";
 import { issueStatusKeys } from "@multica/core/issue-statuses";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -171,7 +171,15 @@ vi.mock("../../editor", async () => ({
   // preview-sequence-context.test.tsx against the real provider.
   PreviewSequenceProvider: ({ children }: { children: React.ReactNode }) =>
     children,
+  usePreviewSequence: () => ({ openAt: () => false }),
   collectPreviewSequence: () => [],
+  // Comment attachments render as their filename — the viewer and file cards
+  // have their own suites.
+  AttachmentDownloadProvider: ({ children }: { children: React.ReactNode }) =>
+    children,
+  Attachment: ({ attachment }: { attachment: { filename?: string } }) => (
+    <span data-testid="comment-attachment">{attachment.filename}</span>
+  ),
   isPreviewable: () => false,
   ReadonlyContent: ({ content }: { content: string }) => {
     readonlyContentRenders.push(content);
@@ -728,6 +736,44 @@ describe("IssueDetail (shared)", () => {
     // Reset project mock — individual tests override per case. Default fixture
     // has project_id: null so getProject is not invoked.
     mockApiObj.getProject.mockReset();
+  });
+
+  it("counts comment files as deliverables, a re-upload once as v2, never the description's (MUL-7649)", async () => {
+    const file = (id: string, over: Partial<Attachment>): Attachment => ({
+      id,
+      workspace_id: "ws-1",
+      issue_id: "issue-1",
+      comment_id: null,
+      chat_session_id: null,
+      chat_message_id: null,
+      uploader_type: "agent",
+      uploader_id: "agent-1",
+      filename: "report.md",
+      url: `https://cdn.example.test/${id}`,
+      download_url: `https://cdn.example.test/${id}`,
+      markdown_url: `https://cdn.example.test/${id}`,
+      content_type: "text/markdown",
+      size_bytes: 2048,
+      created_at: "2026-01-16T00:00:00Z",
+      ...over,
+    });
+    const brief = file("brief", { filename: "brief.pdf", content_type: "application/pdf", uploader_type: "member" });
+    const v1 = file("report-v1", { comment_id: "comment-1" });
+    const v2 = file("report-v2", { comment_id: "comment-2", created_at: "2026-01-17T00:00:00Z" });
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, description: "!file[brief.pdf](https://cdn.example.test/brief)" });
+    mockApiObj.listAttachments.mockResolvedValue([brief, v1, v2]);
+    mockApiObj.listTimeline.mockResolvedValue([
+      { ...mockTimeline[0]!, attachments: [v1] },
+      { ...mockTimeline[1]!, attachments: [v2] },
+    ]);
+
+    renderIssueDetail();
+
+    const header = await screen.findByRole("button", { name: /^Deliverables/ });
+    expect(header).toHaveTextContent("1");
+    expect(screen.getByRole("button", { name: "report.md, version 2" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View all 1 deliverable" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "brief.pdf" })).toBeNull();
   });
 
   it("opens source-context creation from both a root comment and a reply", async () => {
@@ -1922,7 +1968,7 @@ describe("IssueDetail (shared)", () => {
 
   // MUL-7429: an automatic status change says why, and the per-issue switch
   // shows on the timeline.
-  it("explains PR auto-complete activity", async () => {
+  it("explains PR merge automation activity", async () => {
     mockApiObj.listTimeline.mockResolvedValue([
       {
         type: "activity",
@@ -1949,7 +1995,7 @@ describe("IssueDetail (shared)", () => {
     await waitFor(() => {
       expect(screen.getByText(/after every linked PR merged \(#12, #19\)/i)).toBeInTheDocument();
     });
-    expect(screen.getByText(/turned off PR auto-complete for this issue/i)).toBeInTheDocument();
+    expect(screen.getByText(/set this issue to keep its status when PRs merge/i)).toBeInTheDocument();
   });
 
   // MUL-7680: the child-done system rule's comment is the woken agent's
@@ -2466,6 +2512,105 @@ describe("IssueDetail (shared)", () => {
         expect(document.getElementById("comment-reply-1")?.className).toContain(highlightTint);
       });
       expect(useResolvedExpandStore.getState().expandedByIssue["issue-1"]?.has("comment-3")).toBe(true);
+    });
+
+    // "Show in comments" for a file shares the rail's path, so a file posted
+    // in a reply is reachable whatever hides that reply (MUL-7649).
+    it("reopens a collapsed thread when a file's reply is located from the overview", async () => {
+      useCommentCollapseStore.setState({ collapsedByIssue: { "issue-1": ["comment-1"] } });
+      const csv: Attachment = {
+        id: "csv",
+        workspace_id: "ws-1",
+        issue_id: "issue-1",
+        comment_id: "reply-2",
+        chat_session_id: null,
+        chat_message_id: null,
+        uploader_type: "agent",
+        uploader_id: "agent-1",
+        filename: "latency.csv",
+        url: "https://cdn.example.test/csv",
+        download_url: "https://cdn.example.test/csv",
+        markdown_url: "https://cdn.example.test/csv",
+        content_type: "text/csv",
+        size_bytes: 2048,
+        created_at: "2026-01-16T01:00:00Z",
+      };
+      mockApiObj.listTimeline.mockResolvedValue([
+        ...mockTimeline,
+        {
+          type: "comment",
+          id: "reply-2",
+          actor_type: "member",
+          actor_id: "user-1",
+          content: "Latency numbers attached",
+          parent_id: "comment-1",
+          created_at: "2026-01-16T01:00:00Z",
+          updated_at: "2026-01-16T01:00:00Z",
+          comment_type: "comment",
+          attachments: [csv],
+        } as TimelineEntry,
+      ]);
+
+      renderIssueDetail();
+
+      fireEvent.click(await screen.findByRole("button", { name: "View all 1 deliverable" }));
+      const overview = await screen.findByRole("dialog", { name: /deliverables$/ });
+      expect(document.getElementById("comment-reply-2")).toBeNull();
+      fireEvent.click(within(overview).getByRole("button", { name: "Show in comments" }));
+
+      await waitFor(() => {
+        expect(document.getElementById("comment-reply-2")?.className).toContain(highlightTint);
+      });
+      expect(useCommentCollapseStore.getState().isCollapsed("issue-1", "comment-1")).toBe(false);
+    });
+
+    it("unfolds a resolved thread when a file on its root is located from the overview", async () => {
+      const pdf: Attachment = {
+        id: "pdf",
+        workspace_id: "ws-1",
+        issue_id: "issue-1",
+        comment_id: "comment-3",
+        chat_session_id: null,
+        chat_message_id: null,
+        uploader_type: "member",
+        uploader_id: "user-1",
+        filename: "spec.pdf",
+        url: "https://cdn.example.test/pdf",
+        download_url: "https://cdn.example.test/pdf",
+        markdown_url: "https://cdn.example.test/pdf",
+        content_type: "application/pdf",
+        size_bytes: 2048,
+        created_at: "2026-01-18T00:00:00Z",
+      };
+      mockApiObj.listTimeline.mockResolvedValue([
+        ...mockTimeline,
+        {
+          type: "comment",
+          id: "comment-3",
+          actor_type: "member",
+          actor_id: "user-1",
+          content: "Spec attached",
+          parent_id: null,
+          created_at: "2026-01-18T00:00:00Z",
+          updated_at: "2026-01-18T00:00:00Z",
+          comment_type: "comment",
+          resolved_at: "2026-01-19T00:00:00Z",
+          attachments: [pdf],
+        } as TimelineEntry,
+      ]);
+
+      renderIssueDetail();
+
+      fireEvent.click(await screen.findByRole("button", { name: "View all 1 deliverable" }));
+      const overview = await screen.findByRole("dialog", { name: /deliverables$/ });
+      fireEvent.click(within(overview).getByRole("button", { name: "Show in comments" }));
+
+      await waitFor(() => {
+        expect(useResolvedExpandStore.getState().expandedByIssue["issue-1"]?.has("comment-3")).toBe(true);
+      });
+      await waitFor(() => {
+        expect(hasHighlightedCommentBackground(document.getElementById("comment-comment-3"))).toBe(true);
+      });
     });
 
     it("reopens a thread the reader collapsed before landing on its reply", async () => {

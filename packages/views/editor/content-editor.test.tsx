@@ -392,6 +392,24 @@ describe("ContentEditor", () => {
   // sessions). Without it the armed debounce fires after the switch and, since
   // onUpdate always resolves to the latest render's closure, files the old
   // document under the new destination (MUL-4864).
+  describe("clearContent", () => {
+    it("parks the caret at the start so a select-all send cannot leave a highlight", () => {
+      const ref = createRef<ContentEditorRef>();
+      render(<ContentEditor ref={ref} defaultValue="sent text" />);
+      const { clearContent } = (
+        editorRef.current as { commands: { clearContent: ReturnType<typeof vi.fn> } }
+      ).commands;
+
+      ref.current?.clearContent();
+
+      expect(clearContent).toHaveBeenCalledTimes(1);
+      expect(mockSetTextSelection).toHaveBeenCalledWith(0);
+      expect(clearContent.mock.invocationCallOrder[0]).toBeLessThan(
+        mockSetTextSelection.mock.invocationCallOrder[0]!,
+      );
+    });
+  });
+
   describe("flushPendingUpdate", () => {
     it("hands back the pending markdown and cancels the debounce so it cannot fire later", () => {
       vi.useFakeTimers();
