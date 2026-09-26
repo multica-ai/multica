@@ -43,6 +43,9 @@ jobs:
       - name: Test CI selection and gates
         run: node --test scripts/ci-scope.test.mjs scripts/check-image-budget.test.mjs
 
+      - name: Test task token verification reference
+        run: python3 scripts/test-task-token-verifier.py
+
       - name: Filter paths
         id: filter
         if: github.event_name == 'pull_request' || github.event_name == 'push'
