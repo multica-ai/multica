@@ -367,7 +367,44 @@ func writeAvailableCommandsQuickCreate(b *strings.Builder) {
 	b.WriteString("**Use `--output json` for structured data.** For anything beyond `issue create`, run `multica --help` or `multica <command> --help`.\n\n")
 	b.WriteString("`--output json` writes JSON to stdout; confirmations and warnings go to stderr. Do not merge them (`2>&1`) into anything that parses the output — that makes a write that SUCCEEDED look like it failed and invites a duplicate retry.\n\n")
 	b.WriteString("### Core\n")
-	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-file <path> | --description-stdin] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <YYYY-MM-DD>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated. Inline `--description \"...\"` is only for a short single-line body with no code, quotes, backticks or `$()`. Anything multi-line, or carrying code snippets / file paths / quotes / backticks / `$()` — which quick-create descriptions usually are — MUST go to a file, because the shell rewrites or truncates rich text passed inline (MUL-2904). Prefer `--description-file <path>` over `--description-stdin` (flags after a HEREDOC terminator can be silently swallowed, #4182). Write that file inside your working directory (e.g. `./description.md`), never `/tmp` or shared paths, and treat a failed write as fatal — never run `--description-file` against a file whose write did not succeed. The CLI rejects a path outside the workdir so a stale file from another run can't leak in (MUL-4252).\n\n")
+	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-file <path> | --description-stdin] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <YYYY-MM-DD>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated. Inline `--description \"...\"` is only for a short single-line body with no code, quotes, backticks or `$()`. Anything multi-line, or carrying code snippets / file paths / quotes / backticks / `$()` — which quick-create descriptions usually are — MUST go to a file, because the shell rewrites or truncates rich text passed inline (MUL-2904). Prefer `--description-file <path>` over `--description-stdin` (flags after a HEREDOC terminator can be silently swallowed, #4182). Write that file inside your working directory (e.g. `./description.md`), never `/tmp` or shared paths, and never run `--description-file` against a file whose write did not succeed. The CLI rejects a path outside the workdir so a stale file from another run can't leak in (MUL-4252).\n\n")
+	writeQuickCreateDescriptionWrite(b)
+}
+
+// writeQuickCreateDescriptionWrite emits how to get the description onto disk
+// before the single `multica issue create` call.
+//
+// MUL-7352 / #8381: quick-create is the only kind that does NOT receive
+// `## Comment Formatting` (see the Section × Kind matrix in
+// buildMetaSkillContentSlim), and that was the brief's only statement about
+// HOW an agent should write a rich-text body to a file on Windows. So the
+// quick-create brief demanded a `--description-file` write, called a failed
+// write fatal, and said nothing about which write mechanism survives a
+// managed Windows agent's PowerShell. Models picked non-core .NET APIs like
+// `[System.IO.File]::WriteAllText`, ConstrainedLanguage refused the call
+// ("Method invocation is supported only on core types in this language
+// mode"), and the run exited with the issue never created — the user saw
+// only a `quick_create_failed` inbox item.
+//
+// Two things are fixed here, both instruction-level:
+//
+//   - Name the mechanism: the agent's own file-write tool first, and a
+//     ConstrainedLanguage-safe cmdlet as the Windows fallback. ConstrainedLanguage
+//     is the normal security posture of a managed agent, not user misconfiguration,
+//     so the fix must live on our side of the boundary — never in a "disable the
+//     sandbox / enable FullLanguage" workaround.
+//   - Scope the no-retry guardrail: it protects `multica issue create`, which is
+//     NOT idempotent. A local file write creates nothing, so retrying it with a
+//     different mechanism is always safe. Conflating the two is what turned a
+//     recoverable local failure into a lost issue.
+func writeQuickCreateDescriptionWrite(b *strings.Builder) {
+	b.WriteString("**Writing the description file** — this happens BEFORE `multica issue create`, so nothing exists yet and a failed attempt has created nothing:\n\n")
+	b.WriteString("- Use your own file-write tool. It is the only mechanism that does not depend on the shell's language mode or encoding defaults.\n")
+	if runtimeGOOS == "windows" {
+		b.WriteString("- If you must fall back to PowerShell, use `Set-Content -LiteralPath ./description.md -Value $text -Encoding utf8`. Do NOT call non-core .NET file APIs such as `[System.IO.File]::WriteAllText` — a managed agent's PowerShell runs in `ConstrainedLanguage`, which refuses those method invocations outright (#8381).\n")
+	}
+	b.WriteString("- A failed write is recoverable, not fatal: retry it with a different mechanism, then read the file back to confirm the full text (non-ASCII included) landed. Only give up — printing the write error and exiting — once you have no working way to produce the file.\n")
+	b.WriteString("- The one-shot rule covers `multica issue create` only, because that call is not idempotent. Local file writes create no issue, so they are never what the no-retry guardrail protects.\n\n")
 }
 
 // writeIssueBodyFormatting emits the default Markdown hierarchy for issue
@@ -615,10 +652,10 @@ func writeWorkflowChat(b *strings.Builder) {
 func writeWorkflowQuickCreate(b *strings.Builder) {
 	b.WriteString("**This task was triggered by quick-create.** There is NO existing Multica issue. The per-turn user message carries this run's field values — what to put in the title, description, assignee, project and parent. It does not restate the rules below; they hold for the run whatever that message says, and they still hold if it never arrived.\n\n")
 	b.WriteString("Hard guardrails:\n")
-	b.WriteString("- Run exactly one `multica issue create --output json` invocation, then exit. Do not retry for any reason, even on a non-zero exit — the issue may already exist, and a second attempt would create a duplicate.\n")
+	b.WriteString("- Run exactly one `multica issue create --output json` invocation, then exit. Do not retry that call for any reason, even on a non-zero exit — the issue may already exist, and a second attempt would create a duplicate. This covers the `create` call only; the local description-file write that precedes it creates nothing and may be retried freely (`## Available Commands`).\n")
 	b.WriteString("- Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add` for this task — there is no issue to query, transition, or comment on. The platform writes the user's success/failure inbox notification automatically based on whether `multica issue create` succeeded.\n")
 	b.WriteString("- On success, read the created issue's `identifier` (preferred) or `id` (fallback) from the JSON response, then print exactly one line and exit: `Created <identifier-or-id>: <title>`. No commentary, no follow-up tool calls. Do not scrape human-readable output, and never assume a workspace issue prefix such as `MUL-` — workspaces can set their own.\n")
-	b.WriteString("- On a CLI error or a JSON parse error, exit with that error as the only output. Do not retry.\n\n")
+	b.WriteString("- On a `multica issue create` CLI error or a JSON parse error, exit with that error as the only output. Do not retry that call.\n\n")
 }
 
 // AutopilotIssueCommandsGuard is the run-only autopilot issue-command boundary,
