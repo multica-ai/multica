@@ -36,6 +36,11 @@ export interface WorkspaceMcpServer {
   name: string;
   transport: string;
   enabled?: boolean;
+  /**
+   * Live agents the entry is assigned to. Only the workspace library listing
+   * carries it, and servers older than this field omit it.
+   */
+  agent_count?: number;
   created_at: string;
   updated_at: string;
 }

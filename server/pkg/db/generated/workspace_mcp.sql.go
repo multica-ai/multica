@@ -27,6 +27,43 @@ func (q *Queries) AddAgentMcpServer(ctx context.Context, arg AddAgentMcpServerPa
 	return err
 }
 
+const countWorkspaceMcpServerAgents = `-- name: CountWorkspaceMcpServerAgents :many
+SELECT ams.server_id, COUNT(*)::bigint AS agent_count
+FROM agent_mcp_server ams
+JOIN workspace_mcp_server s ON s.id = ams.server_id
+JOIN agent a ON a.id = ams.agent_id
+WHERE s.workspace_id = $1 AND a.archived_at IS NULL
+GROUP BY ams.server_id
+`
+
+type CountWorkspaceMcpServerAgentsRow struct {
+	ServerID   pgtype.UUID `json:"server_id"`
+	AgentCount int64       `json:"agent_count"`
+}
+
+// How many live agents each library entry is assigned to, for the workspace
+// settings list. Archived agents never receive the server, so they are not
+// counted; servers with no assignment are simply absent from the result.
+func (q *Queries) CountWorkspaceMcpServerAgents(ctx context.Context, workspaceID pgtype.UUID) ([]CountWorkspaceMcpServerAgentsRow, error) {
+	rows, err := q.db.Query(ctx, countWorkspaceMcpServerAgents, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountWorkspaceMcpServerAgentsRow{}
+	for rows.Next() {
+		var i CountWorkspaceMcpServerAgentsRow
+		if err := rows.Scan(&i.ServerID, &i.AgentCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createWorkspaceMcpServer = `-- name: CreateWorkspaceMcpServer :one
 INSERT INTO workspace_mcp_server (workspace_id, name, config, created_by)
 VALUES ($1, $2, $3, $4)
