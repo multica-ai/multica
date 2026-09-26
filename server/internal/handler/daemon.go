@@ -1709,6 +1709,14 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		DaemonID   string   `json:"daemon_id"`
 		RuntimeIDs []string `json:"runtime_ids"`
 		MaxTasks   int      `json:"max_tasks"`
+		// ForceRecheckRuntimeIDs is an optional, additive signal (#7452): the
+		// daemon lists the runtimes woken by a targeted `task_available` since its
+		// last claim so the server bypasses their cached "empty" verdict and runs
+		// the real candidate SELECT, repairing a stale verdict left by a lost
+		// EmptyClaim.Bump. Absent/unknown on an older daemon → behaves exactly as
+		// before (TTL fallback). Parsed defensively; ids not in the authorized set
+		// are dropped.
+		ForceRecheckRuntimeIDs []string `json:"force_recheck_runtime_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1823,7 +1831,23 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claimed, err := h.TaskService.ClaimTasksForRuntimes(r.Context(), authorized, maxTasks)
+	// Restrict the force-recheck set (#7452) to runtimes this daemon is
+	// authorized for: an unknown or malformed id is skipped (matching this
+	// endpoint's "unknown id skipped" semantics), and an id for another daemon's
+	// runtime cannot force a cross-machine cache bypass.
+	forceRecheck := make([]pgtype.UUID, 0, len(req.ForceRecheckRuntimeIDs))
+	for _, rid := range req.ForceRecheckRuntimeIDs {
+		ruid, err := util.ParseUUID(rid)
+		if err != nil {
+			continue
+		}
+		if _, ok := runtimeByID[util.UUIDToString(ruid)]; !ok {
+			continue
+		}
+		forceRecheck = append(forceRecheck, ruid)
+	}
+
+	claimed, forceRechecked, err := h.TaskService.ClaimTasksForRuntimes(r.Context(), authorized, maxTasks, forceRecheck...)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to claim tasks: "+err.Error())
 		return
@@ -1931,6 +1955,16 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			"total_ms", time.Since(start).Milliseconds())
 	}
 	response := map[string]any{"tasks": out}
+	// force_rechecked_runtime_ids acknowledges the forced runtimes whose scan came
+	// back with zero candidates (#7452): those are confirmed idle and cache-repaired,
+	// so the daemon drops the wakeup hint for them and keeps every other forced
+	// runtime forced. The field is ALWAYS emitted, even when empty, so a daemon can
+	// tell "acknowledged nothing" from an older server that omits it entirely.
+	// Additive/optional: an older daemon ignores it.
+	if forceRechecked == nil {
+		forceRechecked = []string{}
+	}
+	response["force_rechecked_runtime_ids"] = forceRechecked
 	// Only opted-in daemons understand this additive response metadata. Query
 	// after the claim so a future fire_at can shorten the long healthy-WS safety
 	// poll; a task that crossed fire_at during this request yields a bounded
